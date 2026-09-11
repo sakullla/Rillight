@@ -1,7 +1,9 @@
 import 'package:flutter/widgets.dart';
 import 'package:rillight/app/app.dart';
+import 'package:rillight/auth/auth_bootstrap.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(RillightApp());
+  final auth = await createProductionAuth();
+  runApp(RillightApp(auth: auth));
 }

@@ -111,6 +111,120 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'封面不可用'**
   String get posterPlaceholder;
+
+  /// Title of the Emby connection form.
+  ///
+  /// In zh, this message translates to:
+  /// **'连接服务器'**
+  String get connectTitle;
+
+  /// Label for the Emby server address field.
+  ///
+  /// In zh, this message translates to:
+  /// **'服务器地址'**
+  String get serverAddress;
+
+  /// Example Emby server address.
+  ///
+  /// In zh, this message translates to:
+  /// **'http://192.168.1.8:8096'**
+  String get serverAddressHint;
+
+  /// Label for the Emby username field.
+  ///
+  /// In zh, this message translates to:
+  /// **'用户名'**
+  String get username;
+
+  /// Label for the Emby password field.
+  ///
+  /// In zh, this message translates to:
+  /// **'密码'**
+  String get password;
+
+  /// Submit action to connect and sign in.
+  ///
+  /// In zh, this message translates to:
+  /// **'连接'**
+  String get connect;
+
+  /// Busy label while connecting to Emby.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在连接…'**
+  String get connecting;
+
+  /// Sign out of the current Emby session.
+  ///
+  /// In zh, this message translates to:
+  /// **'退出登录'**
+  String get logout;
+
+  /// Heading for the list of saved Emby servers.
+  ///
+  /// In zh, this message translates to:
+  /// **'已保存的服务器'**
+  String get savedServers;
+
+  /// Tooltip for the signed-in server menu.
+  ///
+  /// In zh, this message translates to:
+  /// **'切换服务器'**
+  String get switchServer;
+
+  /// Logged-in status showing the Emby server name.
+  ///
+  /// In zh, this message translates to:
+  /// **'已连接 {serverName}'**
+  String connectedTo(String serverName);
+
+  /// Visible failure when the server address cannot be parsed.
+  ///
+  /// In zh, this message translates to:
+  /// **'请输入有效的服务器地址'**
+  String get errorInvalidAddress;
+
+  /// Visible failure when the server address cannot be reached.
+  ///
+  /// In zh, this message translates to:
+  /// **'无法连接服务器'**
+  String get errorUnreachable;
+
+  /// Visible failure when the Emby probe or login times out.
+  ///
+  /// In zh, this message translates to:
+  /// **'连接超时'**
+  String get errorTimeout;
+
+  /// Visible failure for TLS certificate errors.
+  ///
+  /// In zh, this message translates to:
+  /// **'证书错误，无法建立安全连接'**
+  String get errorCertificate;
+
+  /// Visible failure when Public Info is not an Emby server.
+  ///
+  /// In zh, this message translates to:
+  /// **'该地址不是 Emby 服务器'**
+  String get errorNotEmby;
+
+  /// Visible failure for a rejected Emby login.
+  ///
+  /// In zh, this message translates to:
+  /// **'用户名或密码错误'**
+  String get errorInvalidCredentials;
+
+  /// Visible failure when an Emby token is rejected with 401.
+  ///
+  /// In zh, this message translates to:
+  /// **'会话已失效，请重新登录'**
+  String get errorSessionExpired;
+
+  /// Fallback visible failure for unexpected connection errors.
+  ///
+  /// In zh, this message translates to:
+  /// **'连接失败'**
+  String get errorUnknown;
 }
 
 class _AppLocalizationsDelegate

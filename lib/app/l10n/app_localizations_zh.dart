@@ -16,4 +16,63 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get posterPlaceholder => '封面不可用';
+
+  @override
+  String get connectTitle => '连接服务器';
+
+  @override
+  String get serverAddress => '服务器地址';
+
+  @override
+  String get serverAddressHint => 'http://192.168.1.8:8096';
+
+  @override
+  String get username => '用户名';
+
+  @override
+  String get password => '密码';
+
+  @override
+  String get connect => '连接';
+
+  @override
+  String get connecting => '正在连接…';
+
+  @override
+  String get logout => '退出登录';
+
+  @override
+  String get savedServers => '已保存的服务器';
+
+  @override
+  String get switchServer => '切换服务器';
+
+  @override
+  String connectedTo(String serverName) {
+    return '已连接 $serverName';
+  }
+
+  @override
+  String get errorInvalidAddress => '请输入有效的服务器地址';
+
+  @override
+  String get errorUnreachable => '无法连接服务器';
+
+  @override
+  String get errorTimeout => '连接超时';
+
+  @override
+  String get errorCertificate => '证书错误，无法建立安全连接';
+
+  @override
+  String get errorNotEmby => '该地址不是 Emby 服务器';
+
+  @override
+  String get errorInvalidCredentials => '用户名或密码错误';
+
+  @override
+  String get errorSessionExpired => '会话已失效，请重新登录';
+
+  @override
+  String get errorUnknown => '连接失败';
 }
