@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/routes.dart';
+import 'package:rillight/app/theme/tokens.dart';
+import 'package:rillight/app/widgets/app_hover_card.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/media_shelf.dart';
@@ -18,74 +20,84 @@ class LibraryTiles extends StatelessWidget {
       return const SizedBox.shrink();
     }
     final l10n = AppLocalizations.of(context);
+    final tileWidth = MediaShelf.wideCardWidthFor(
+      MediaQuery.sizeOf(context).width,
+    );
     return MediaShelf(
       rowKey: CatalogKeys.librariesMenu,
       shelfId: 'libraries',
       title: l10n.libraries,
       items: libraries,
       wide: true,
-      extent: 110,
+      extent: tileWidth * 9 / 16 + AppSpacing.xs,
       onTap: (library) => context.push(AppRoutes.library(library.id)),
       itemBuilder: (context, library) {
-        return _LibraryCard(library: library);
+        return _LibraryCard(library: library, width: tileWidth);
       },
     );
   }
 }
 
 class _LibraryCard extends StatelessWidget {
-  const _LibraryCard({required this.library});
+  const _LibraryCard({required this.library, required this.width});
 
   final EmbyItem library;
+  final double width;
 
   @override
   Widget build(BuildContext context) {
-    const width = 196.0;
-    const height = 110.0;
-    return Material(
-      color: const Color(0xFF1A1A1A),
-      borderRadius: BorderRadius.circular(10),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        key: CatalogKeys.library(library.id),
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final height = width * 9 / 16;
+    return SizedBox(
+      width: width,
+      height: height,
+      child: AppHoverCard(
+        inkKey: CatalogKeys.library(library.id),
         onTap: () => context.push(AppRoutes.library(library.id)),
-        child: SizedBox(
-          width: width,
-          height: height,
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              MediaImage(
-                item: library,
-                width: width,
-                height: height,
-                preferBackdrop: true,
-                maxWidth: 400,
-              ),
-              const DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.centerLeft,
-                    end: Alignment.centerRight,
-                    colors: [Color(0x99000000), Color(0x00000000)],
+        borderRadius: BorderRadius.circular(AppRadii.md),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(AppRadii.md),
+          child: ColoredBox(
+            color: colorScheme.surfaceContainerHigh,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                MediaImage(
+                  item: library,
+                  width: width,
+                  height: height,
+                  preferBackdrop: true,
+                  maxWidth: 480,
+                ),
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.centerLeft,
+                      end: Alignment.centerRight,
+                      colors: [
+                        colorScheme.scrim.withValues(alpha: 0.6),
+                        colorScheme.scrim.withValues(alpha: 0),
+                      ],
+                    ),
                   ),
                 ),
-              ),
-              Padding(
-                padding: const EdgeInsets.all(12),
-                child: Align(
-                  alignment: Alignment.bottomLeft,
-                  child: Text(
-                    library.name,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(
-                      context,
-                    ).textTheme.titleSmall?.copyWith(color: Colors.white),
+                Padding(
+                  padding: const EdgeInsets.all(AppSpacing.sm),
+                  child: Align(
+                    alignment: Alignment.bottomLeft,
+                    child: Text(
+                      library.name,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        color: Colors.white,
+                      ),
+                    ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

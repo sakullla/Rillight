@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/routes.dart';
+import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/app_error_view.dart';
 import 'package:rillight/home/catalog_failure.dart';
 import 'package:rillight/home/catalog_keys.dart';
@@ -25,16 +26,23 @@ class HomePage extends StatelessWidget {
       listenable: catalog,
       builder: (context, _) {
         return SingleChildScrollView(
-          padding: const EdgeInsets.only(top: 16, bottom: 32),
+          padding: const EdgeInsets.only(bottom: AppSpacing.xxl),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               if (catalog.librariesError != null)
-                AppErrorView(
-                  message: catalogFailureMessage(l10n, catalog.librariesError!),
-                  onRetry: catalog.reload,
+                Padding(
+                  padding: const EdgeInsets.all(AppSpacing.md),
+                  child: AppErrorView(
+                    message: catalogFailureMessage(
+                      l10n,
+                      catalog.librariesError!,
+                    ),
+                    onRetry: catalog.reload,
+                  ),
                 ),
               HomeHero(catalog: catalog),
+              const SizedBox(height: AppSpacing.xl),
               HomeMediaRow(
                 rowKey: CatalogKeys.resumeRow,
                 shelfId: CatalogKeys.shelfResume,

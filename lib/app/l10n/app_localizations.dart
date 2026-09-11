@@ -466,6 +466,12 @@ abstract class AppLocalizations {
   /// **'播放'**
   String get play;
 
+  /// Opens the detail page for the featured home hero item.
+  ///
+  /// In zh, this message translates to:
+  /// **'详情'**
+  String get details;
+
   /// Pause playback.
   ///
   /// In zh, this message translates to:

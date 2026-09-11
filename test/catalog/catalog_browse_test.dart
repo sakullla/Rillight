@@ -48,15 +48,17 @@ void main() {
     return auth;
   }
 
-  Future<void> openLibrary(WidgetTester tester, String viewId) async {
-    final homeTitle = find.descendant(
-      of: find.byType(AppBar),
-      matching: find.text('灯川 Rillight'),
-    );
-    if (homeTitle.evaluate().isNotEmpty) {
-      await tester.tap(homeTitle);
+  Future<void> goHome(WidgetTester tester) async {
+    // T3 起外壳无 AppBar;未选中首页时侧栏图标为 home_outlined。
+    final homeIcon = find.byIcon(Icons.home_outlined);
+    if (homeIcon.evaluate().isNotEmpty) {
+      await tester.tap(homeIcon);
       await tester.pumpAndSettle();
     }
+  }
+
+  Future<void> openLibrary(WidgetTester tester, String viewId) async {
+    await goHome(tester);
     final tile = find.byKey(CatalogKeys.library(viewId));
     await tester.ensureVisible(tile);
     await tester.tap(tile);
@@ -68,8 +70,8 @@ void main() {
     (tester) async {
       await pumpLoggedIn(tester);
 
-      expect(find.text('灯川测试'), findsOneWidget);
-      expect(find.byType(NavigationRail), findsNothing);
+      expect(find.byTooltip('灯川测试\n切换服务器'), findsOneWidget);
+      expect(find.byType(NavigationRail), findsOneWidget);
       expect(find.byKey(CatalogKeys.resumeRow), findsOneWidget);
       expect(find.text('Inception'), findsWidgets);
       expect(find.byKey(CatalogKeys.resumeProgress), findsWidgets);
@@ -95,7 +97,14 @@ void main() {
         findsOneWidget,
       );
       expect(find.text('更多'), findsNWidgets(4));
-      expect(find.text('片库'), findsOneWidget);
+      // 「片库」同时是侧栏导航标签,需限定在库 shelf 行内断言。
+      expect(
+        find.descendant(
+          of: find.byKey(CatalogKeys.librariesMenu),
+          matching: find.text('片库'),
+        ),
+        findsOneWidget,
+      );
       expect(find.byKey(CatalogKeys.library('view-movies')), findsOneWidget);
       expect(find.byKey(CatalogKeys.library('view-tv')), findsOneWidget);
       expect(find.text('音乐'), findsNothing);
@@ -285,8 +294,7 @@ void main() {
       isTrue,
     );
 
-    await tester.tap(find.text('灯川 Rillight').first);
-    await tester.pumpAndSettle();
+    await goHome(tester);
     await openLibrary(tester, 'view-movies');
     expect(_posterNames(tester).first, '飞屋环游记');
     await tester.tap(find.byKey(CatalogKeys.sortBy));

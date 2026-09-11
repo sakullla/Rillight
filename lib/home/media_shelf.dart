@@ -2,7 +2,9 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/app_error_view.dart';
+import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/emby/emby_errors.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_failure.dart';
@@ -41,6 +43,34 @@ class MediaShelf extends StatefulWidget {
   final double? extent;
   final Widget Function(BuildContext context, EmbyItem item)? itemBuilder;
 
+  /// 竖版海报卡宽,随 [AppBreakpoints] 缩放。
+  static double posterWidthFor(double screenWidth) {
+    if (screenWidth < AppBreakpoints.compact) {
+      return 128;
+    }
+    if (screenWidth < AppBreakpoints.large) {
+      return 148;
+    }
+    return 168;
+  }
+
+  /// 宽版(16:9)卡宽,随 [AppBreakpoints] 缩放;库卡复用同一档宽。
+  static double wideCardWidthFor(double screenWidth) {
+    if (screenWidth < AppBreakpoints.compact) {
+      return 232;
+    }
+    if (screenWidth < AppBreakpoints.large) {
+      return 264;
+    }
+    return 296;
+  }
+
+  // 文字行占位:与 PosterCard 的标题/进度文字行一一对应,
+  // 另加 AppSpacing.xs 吸收 hover 放大溢出。
+  static const double _posterLabelExtent = 30; // xs 间距 + 标题行
+  static const double _progressLabelExtent = 18; // 进度行
+  static const double _wideLabelExtent = 22; // xxs 间距 + 标题行
+
   @override
   State<MediaShelf> createState() => _MediaShelfState();
 }
@@ -55,10 +85,20 @@ class _MediaShelfState extends State<MediaShelf> {
     if (widget.extent != null) {
       return widget.extent!;
     }
+    final screenWidth = MediaQuery.sizeOf(context).width;
     if (widget.wide) {
-      return 148;
+      return MediaShelf.wideCardWidthFor(screenWidth) * 9 / 16 +
+          MediaShelf._wideLabelExtent +
+          AppSpacing.xs;
     }
-    return widget.showProgress ? 250 : 230;
+    var height =
+        MediaShelf.posterWidthFor(screenWidth) * 1.5 +
+        MediaShelf._posterLabelExtent +
+        AppSpacing.xs;
+    if (widget.showProgress) {
+      height += MediaShelf._progressLabelExtent;
+    }
+    return height;
   }
 
   @override
@@ -158,14 +198,15 @@ class _MediaShelfState extends State<MediaShelf> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
+    final screenWidth = MediaQuery.sizeOf(context).width;
     return Padding(
       key: widget.rowKey,
-      padding: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.only(bottom: AppSpacing.lg),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
             child: Row(
               children: [
                 Expanded(
@@ -183,9 +224,17 @@ class _MediaShelfState extends State<MediaShelf> {
               ],
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: AppSpacing.sm),
           if (widget.loading)
-            SizedBox(height: _rowHeight)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+              child: SkeletonShelfRow(
+                posterWidth: widget.wide
+                    ? MediaShelf.wideCardWidthFor(screenWidth)
+                    : MediaShelf.posterWidthFor(screenWidth),
+                posterAspectRatio: widget.wide ? 16 / 9 : 2 / 3,
+              ),
+            )
           else if (widget.error != null)
             AppErrorView(
               message: catalogFailureMessage(l10n, widget.error!),
@@ -203,7 +252,9 @@ class _MediaShelfState extends State<MediaShelf> {
                     },
                     child: ListView.separated(
                       controller: _controller,
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.md,
+                      ),
                       scrollDirection: Axis.horizontal,
                       itemBuilder: (context, index) {
                         final item = widget.items[index];
@@ -213,11 +264,13 @@ class _MediaShelfState extends State<MediaShelf> {
                               item: item,
                               showProgress: widget.showProgress,
                               wide: widget.wide,
-                              width: widget.wide ? 220 : 120,
+                              width: widget.wide
+                                  ? MediaShelf.wideCardWidthFor(screenWidth)
+                                  : MediaShelf.posterWidthFor(screenWidth),
                               onTap: () => widget.onTap(item),
                             );
                         return Align(
-                          alignment: Alignment.topLeft,
+                          alignment: Alignment.center,
                           child: Listener(
                             onPointerSignal: _onVerticalWheelToParent,
                             child: child,
@@ -225,13 +278,13 @@ class _MediaShelfState extends State<MediaShelf> {
                         );
                       },
                       separatorBuilder: (context, index) =>
-                          const SizedBox(width: 12),
+                          const SizedBox(width: AppSpacing.sm),
                       itemCount: widget.items.length,
                     ),
                   ),
                   if (_canScrollLeft)
                     Positioned(
-                      left: 8,
+                      left: AppSpacing.xs,
                       top: 0,
                       bottom: 0,
                       child: Center(
@@ -247,7 +300,7 @@ class _MediaShelfState extends State<MediaShelf> {
                     ),
                   if (_canScrollRight)
                     Positioned(
-                      right: 8,
+                      right: AppSpacing.xs,
                       top: 0,
                       bottom: 0,
                       child: Center(
@@ -286,9 +339,9 @@ class _ScrollButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4),
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xxs),
       child: Material(
-        color: Colors.black.withValues(alpha: 0.55),
+        color: Theme.of(context).colorScheme.scrim.withValues(alpha: 0.55),
         shape: const CircleBorder(),
         child: IconButton(
           key: buttonKey,

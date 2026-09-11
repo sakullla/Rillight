@@ -281,6 +281,10 @@
   "@play": {
     "description": "Start playback from the beginning."
   },
+  "details": "详情",
+  "@details": {
+    "description": "Opens the detail page for the featured home hero item."
+  },
   "pause": "暂停",
   "@pause": {
     "description": "Pause playback."
