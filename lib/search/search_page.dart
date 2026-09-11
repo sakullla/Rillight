@@ -2,16 +2,30 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/routes.dart';
+import 'package:rillight/app/theme/tokens.dart';
+import 'package:rillight/app/widgets/app_empty_view.dart';
 import 'package:rillight/app/widgets/app_error_view.dart';
+import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/emby/emby_errors.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_failure.dart';
 import 'package:rillight/home/catalog_keys.dart';
-import 'package:rillight/library/poster_card.dart';
+import 'package:rillight/library/shelf_grid_page.dart';
 
 class SearchPage extends StatefulWidget {
   const SearchPage({super.key});
+
+  /// 搜索输入区最大宽度,随 [AppBreakpoints] 舒展。
+  static double fieldWidthFor(double screenWidth) {
+    if (screenWidth < AppBreakpoints.compact) {
+      return 560;
+    }
+    if (screenWidth < AppBreakpoints.large) {
+      return 680;
+    }
+    return 800;
+  }
 
   @override
   State<SearchPage> createState() => _SearchPageState();
@@ -70,44 +84,68 @@ class _SearchPageState extends State<SearchPage> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    return Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  key: CatalogKeys.searchField,
-                  controller: _query,
-                  textInputAction: TextInputAction.search,
-                  decoration: InputDecoration(
-                    labelText: l10n.search,
-                    hintText: l10n.searchHint,
-                    border: const OutlineInputBorder(),
-                  ),
-                  onSubmitted: (value) => _submit(value),
-                ),
-              ),
-              const SizedBox(width: 12),
-              FilledButton(
-                key: CatalogKeys.searchSubmit,
-                onPressed: _loading ? null : () => _submit(),
-                child: Text(l10n.search),
-              ),
-            ],
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.md,
+            AppSpacing.xl,
+            AppSpacing.md,
+            AppSpacing.lg,
           ),
-          const SizedBox(height: 16),
-          Expanded(child: _buildBody(l10n)),
-        ],
-      ),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: SearchPage.fieldWidthFor(screenWidth),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      key: CatalogKeys.searchField,
+                      controller: _query,
+                      textInputAction: TextInputAction.search,
+                      style: Theme.of(context).textTheme.titleMedium,
+                      decoration: InputDecoration(
+                        hintText: l10n.searchHint,
+                        prefixIcon: const Icon(Icons.search),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: AppSpacing.lg,
+                          vertical: AppSpacing.md,
+                        ),
+                      ),
+                      onSubmitted: (value) => _submit(value),
+                    ),
+                  ),
+                  const SizedBox(width: AppSpacing.sm),
+                  FilledButton(
+                    key: CatalogKeys.searchSubmit,
+                    onPressed: _loading ? null : () => _submit(),
+                    child: Text(l10n.search),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        Expanded(child: _buildBody(l10n, screenWidth)),
+      ],
     );
   }
 
-  Widget _buildBody(AppLocalizations l10n) {
+  Widget _buildBody(AppLocalizations l10n, double screenWidth) {
     if (_loading) {
-      return const SizedBox.expand();
+      return SkeletonPosterGrid(
+        maxCrossAxisExtent: ShelfGridPage.maxCrossAxisExtentFor(screenWidth),
+        padding: const EdgeInsets.fromLTRB(
+          AppSpacing.md,
+          0,
+          AppSpacing.md,
+          AppSpacing.xxl,
+        ),
+      );
     }
     if (_error != null) {
       return AppErrorView(
@@ -116,27 +154,37 @@ class _SearchPageState extends State<SearchPage> {
       );
     }
     if (!_searched) {
-      return Center(child: Text(l10n.searchEmptyQuery));
+      return AppEmptyView(icon: Icons.search, message: l10n.searchEmptyQuery);
     }
     if (_items.isEmpty) {
-      return Center(
+      return AppEmptyView(
         key: CatalogKeys.searchNoResults,
-        child: Text(l10n.searchNoResults),
+        icon: Icons.search_off,
+        message: l10n.searchNoResults,
       );
     }
-    return GridView.builder(
-      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-        maxCrossAxisExtent: 160,
-        mainAxisSpacing: 16,
-        crossAxisSpacing: 12,
-        childAspectRatio: 0.52,
-      ),
-      itemCount: _items.length,
-      itemBuilder: (context, index) {
-        final item = _items[index];
-        return PosterCard(
-          item: item,
-          onTap: () => context.push(AppRoutes.item(item.id)),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return GridView.builder(
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.md,
+            0,
+            AppSpacing.md,
+            AppSpacing.xxl,
+          ),
+          gridDelegate: ShelfGridPage.gridDelegateFor(
+            screenWidth: screenWidth,
+            availableWidth: constraints.maxWidth - AppSpacing.md * 2,
+          ),
+          itemCount: _items.length,
+          itemBuilder: (context, index) {
+            final item = _items[index];
+            return ShelfGridPage.gridCard(
+              context,
+              item,
+              onTap: () => context.push(AppRoutes.item(item.id)),
+            );
+          },
         );
       },
     );

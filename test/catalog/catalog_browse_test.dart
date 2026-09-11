@@ -322,6 +322,29 @@ void main() {
     },
   );
 
+  testWidgets('poster grid column count grows with the window width', (
+    tester,
+  ) async {
+    int crossAxisCount() {
+      final grid = tester.widget<SliverGrid>(find.byType(SliverGrid));
+      final delegate =
+          grid.gridDelegate as SliverGridDelegateWithFixedCrossAxisCount;
+      return delegate.crossAxisCount;
+    }
+
+    await pumpLoggedIn(tester);
+    await _openLatestMoviesMore(tester);
+    final compactCount = crossAxisCount();
+
+    tester.view.physicalSize = const Size(1920, 1080);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpAndSettle();
+
+    expect(crossAxisCount(), greaterThan(compactCount));
+  });
+
   testWidgets(
     'overflowing shelf reveals hidden posters with the right control',
     (tester) async {
