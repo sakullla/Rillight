@@ -147,9 +147,12 @@ String? _detailFromDio(DioException error) {
   }
   final inner = error.error;
   if (inner is SocketException) {
-    final os = inner.osError?.message?.trim();
-    if (os != null && os.isNotEmpty) {
-      return os;
+    final osError = inner.osError;
+    if (osError != null) {
+      final os = osError.message.trim();
+      if (os.isNotEmpty) {
+        return os;
+      }
     }
     final message = inner.message.trim();
     return message.isEmpty ? inner.toString() : message;

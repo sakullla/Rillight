@@ -2,7 +2,6 @@ import 'package:flutter/widgets.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:rillight/app/product.dart';
-import 'package:rillight/player/player_keys.dart';
 import 'package:rillight/player/video_backend.dart';
 
 class MediaKitVideoBackend implements VideoBackend {
