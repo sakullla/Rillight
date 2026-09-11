@@ -80,7 +80,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(ConnectFormKeys.submit), findsNothing);
-    expect(find.text('灯川测试'), findsOneWidget);
+    expect(find.byKey(SessionActions.serverMenuKey), findsOneWidget);
     expect(auth.isLoggedIn, isTrue);
   });
 
@@ -189,7 +189,7 @@ void main() {
       await tester.tap(find.byKey(ConnectFormKeys.submit));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byTooltip('切换服务器'));
+      await tester.tap(find.byKey(SessionActions.serverMenuKey));
       await tester.pumpAndSettle();
       await tester.tap(find.text('退出登录'));
       await tester.pumpAndSettle();
@@ -230,7 +230,7 @@ void main() {
     );
     await tester.tap(find.byKey(ConnectFormKeys.submit));
     await tester.pumpAndSettle();
-    expect(find.text('灯川测试'), findsOneWidget);
+    expect(find.byKey(SessionActions.serverMenuKey), findsOneWidget);
 
     server.expireAuthenticatedRequests = true;
     await tester.runAsync(() async {
@@ -244,7 +244,7 @@ void main() {
     expect(find.byKey(ConnectFormKeys.submit), findsOneWidget);
     expect(find.byType(AppErrorView), findsOneWidget);
     expect(find.text('会话已失效，请重新登录'), findsOneWidget);
-    expect(find.byType(SessionActions), findsOneWidget);
+    expect(find.byType(SessionActions), findsNothing);
   });
 
   testWidgets('two lines can be selected and a failed line stays on connect', (
@@ -340,7 +340,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(auth.isLoggedIn, isTrue);
-      expect(find.text(kProductName), findsWidgets);
+      expect(find.byKey(SessionActions.serverMenuKey), findsOneWidget);
       expect(find.text('CustomUA/1.0'), findsNothing);
       expect(server.lastUserAgent, 'CustomUA/1.0');
       expect(auth.client.sessionHeaders['User-Agent'], 'CustomUA/1.0');

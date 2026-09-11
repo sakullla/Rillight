@@ -54,6 +54,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get lines => '线路';
 
   @override
+  String get noSavedServers => '暂无已保存的服务器';
+
+  @override
   String get addServer => '添加服务器';
 
   @override

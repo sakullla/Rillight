@@ -60,6 +60,10 @@
   "@lines": {
     "description": "Heading for the list of access lines on a saved server."
   },
+  "noSavedServers": "暂无已保存的服务器",
+  "@noSavedServers": {
+    "description": "Empty state when no Emby server has been saved yet."
+  },
   "addServer": "添加服务器",
   "@addServer": {
     "description": "Action to start adding another Emby server."

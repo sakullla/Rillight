@@ -184,6 +184,12 @@ abstract class AppLocalizations {
   /// **'线路'**
   String get lines;
 
+  /// Empty state when no Emby server has been saved yet.
+  ///
+  /// In zh, this message translates to:
+  /// **'暂无已保存的服务器'**
+  String get noSavedServers;
+
   /// Action to start adding another Emby server.
   ///
   /// In zh, this message translates to:
