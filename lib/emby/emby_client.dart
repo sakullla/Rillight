@@ -515,10 +515,14 @@ class EmbyClient {
         mapped.kind == EmbyFailureKind.unreachable) {
       return mapped;
     }
+    if (mapped.detail != null && mapped.detail!.trim().isNotEmpty) {
+      return mapped;
+    }
     if (error.response != null) {
       return EmbyException(
         EmbyFailureKind.notEmby,
         statusCode: error.response?.statusCode,
+        detail: mapped.detail,
         cause: error,
       );
     }

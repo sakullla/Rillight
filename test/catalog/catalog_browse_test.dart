@@ -96,7 +96,7 @@ void main() {
 
     expect(find.byKey(CatalogKeys.resumeRow), findsOneWidget);
     expect(find.byKey(CatalogKeys.latestMoviesRow), findsOneWidget);
-    expect(find.text('加载失败'), findsOneWidget);
+    expect(find.text('HTTP 500: latest movies failed'), findsOneWidget);
     expect(find.text('飞屋环游记'), findsNothing);
     expect(find.text('Inception'), findsWidgets);
   });
@@ -194,7 +194,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(AppErrorView), findsOneWidget);
-    expect(find.text('搜索失败'), findsOneWidget);
+    expect(find.text('HTTP 500: search failed'), findsOneWidget);
     expect(find.text('没有结果'), findsNothing);
     expect(find.byKey(CatalogKeys.searchNoResults), findsNothing);
   });

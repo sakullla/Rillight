@@ -249,6 +249,7 @@ class FakeEmbyServer {
   bool hangPublicInfo = false;
   bool publicInfoHtml = false;
   int? publicInfoStatus;
+  String? publicInfoRawBody;
   bool expireAuthenticatedRequests = false;
   int? nextUpStatus;
   int? resumeStatus;
@@ -810,6 +811,10 @@ class FakeEmbyServer {
 
   ResponseBody _handlePublicInfo() {
     if (publicInfoStatus != null) {
+      final raw = publicInfoRawBody;
+      if (raw != null) {
+        return ResponseBody.fromString(raw, publicInfoStatus!);
+      }
       return _json(publicInfoStatus!, {'error': 'failed'});
     }
     if (publicInfoHtml) {

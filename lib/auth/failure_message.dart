@@ -1,8 +1,12 @@
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/emby/emby_errors.dart';
 
-String embyFailureMessage(AppLocalizations l10n, EmbyFailureKind kind) {
-  switch (kind) {
+String embyFailureMessage(AppLocalizations l10n, EmbyException error) {
+  final detail = error.detail?.trim();
+  if (detail != null && detail.isNotEmpty) {
+    return detail;
+  }
+  switch (error.kind) {
     case EmbyFailureKind.invalidAddress:
       return l10n.errorInvalidAddress;
     case EmbyFailureKind.unreachable:

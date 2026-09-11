@@ -77,37 +77,51 @@ class _CatalogRail extends StatelessWidget {
         break;
       }
     }
-    return NavigationRail(
-      selectedIndex: selected,
-      labelType: NavigationRailLabelType.all,
-      onDestinationSelected: (index) {
-        if (index == 0) {
-          context.go(AppRoutes.home);
-          return;
-        }
-        context.go(AppRoutes.library(libraries[index - 1].id));
-      },
-      destinations: [
-        NavigationRailDestination(
-          icon: const Icon(Icons.home_outlined),
-          selectedIcon: const Icon(Icons.home),
-          label: Text(l10n.home),
-        ),
-        for (final library in libraries)
-          NavigationRailDestination(
-            icon: Icon(
-              library.collectionTypeNormalized == 'tvshows'
-                  ? Icons.tv_outlined
-                  : Icons.movie_outlined,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return SingleChildScrollView(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: constraints.maxHeight),
+            child: IntrinsicHeight(
+              child: NavigationRail(
+                selectedIndex: selected,
+                labelType: NavigationRailLabelType.all,
+                onDestinationSelected: (index) {
+                  if (index == 0) {
+                    context.go(AppRoutes.home);
+                    return;
+                  }
+                  context.go(AppRoutes.library(libraries[index - 1].id));
+                },
+                destinations: [
+                  NavigationRailDestination(
+                    icon: const Icon(Icons.home_outlined),
+                    selectedIcon: const Icon(Icons.home),
+                    label: Text(l10n.home),
+                  ),
+                  for (final library in libraries)
+                    NavigationRailDestination(
+                      icon: Icon(
+                        library.collectionTypeNormalized == 'tvshows'
+                            ? Icons.tv_outlined
+                            : Icons.movie_outlined,
+                      ),
+                      selectedIcon: Icon(
+                        library.collectionTypeNormalized == 'tvshows'
+                            ? Icons.tv
+                            : Icons.movie,
+                      ),
+                      label: Text(
+                        library.name,
+                        key: CatalogKeys.library(library.id),
+                      ),
+                    ),
+                ],
+              ),
             ),
-            selectedIcon: Icon(
-              library.collectionTypeNormalized == 'tvshows'
-                  ? Icons.tv
-                  : Icons.movie,
-            ),
-            label: Text(library.name, key: CatalogKeys.library(library.id)),
           ),
-      ],
+        );
+      },
     );
   }
 }

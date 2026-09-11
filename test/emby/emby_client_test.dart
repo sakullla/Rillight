@@ -102,6 +102,23 @@ void main() {
     expect(auth.serverId, info.id);
   });
 
+  test('forbidden Public Info keeps the server body', () async {
+    server.publicInfoStatus = 403;
+    server.publicInfoRawBody = '该客户端/设备已被服务端禁用';
+    expect(
+      () => client().getPublicInfo(server.baseUrl),
+      throwsA(
+        isA<EmbyException>()
+            .having((error) => error.statusCode, 'statusCode', 403)
+            .having(
+              (error) => error.detail,
+              'detail',
+              'HTTP 403: 该客户端/设备已被服务端禁用',
+            ),
+      ),
+    );
+  });
+
   test('wrong password does not yield a session', () async {
     expect(
       () => client().authenticateByName(

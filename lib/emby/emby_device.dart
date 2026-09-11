@@ -13,20 +13,29 @@ class EmbyDeviceInfo {
 
   String authorizationHeader({String? userId, String? token}) {
     final parts = <String>[
-      'MediaBrowser Client="${_escape(clientName)}"',
-      'Device="${_escape(deviceName)}"',
-      'DeviceId="${_escape(deviceId)}"',
-      'Version="${_escape(version)}"',
+      'MediaBrowser Client="${_headerValue(clientName)}"',
+      'Device="${_headerValue(deviceName)}"',
+      'DeviceId="${_headerValue(deviceId)}"',
+      'Version="${_headerValue(version)}"',
     ];
     if (userId != null && userId.isNotEmpty) {
-      parts.add('UserId="${_escape(userId)}"');
+      parts.add('UserId="${_headerValue(userId)}"');
     }
     if (token != null && token.isNotEmpty) {
-      parts.add('Token="${_escape(token)}"');
+      parts.add('Token="${_headerValue(token)}"');
     }
     return parts.join(', ');
   }
 }
 
-String _escape(String value) =>
-    value.replaceAll('\\', '\\\\').replaceAll('"', '\\"');
+String _headerValue(String value) {
+  final escaped = value.replaceAll('\\', '\\\\').replaceAll('"', '\\"');
+  final ascii = StringBuffer();
+  for (final unit in escaped.codeUnits) {
+    if (unit >= 0x20 && unit <= 0x7E) {
+      ascii.writeCharCode(unit);
+    }
+  }
+  final trimmed = ascii.toString().trim();
+  return trimmed.isEmpty ? 'Rillight' : trimmed;
+}

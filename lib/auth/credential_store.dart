@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+
 
 class StoredCredentials {
   const StoredCredentials({
@@ -129,16 +129,6 @@ class SecureCredentialStore implements CredentialStore {
   }) : _writeSecure = writeSecure,
        _readSecure = readSecure,
        _deleteSecure = deleteSecure;
-
-  factory SecureCredentialStore.platform({required CredentialStore fallback}) {
-    const storage = FlutterSecureStorage();
-    return SecureCredentialStore(
-      writeSecure: (key, value) => storage.write(key: key, value: value),
-      readSecure: (key) => storage.read(key: key),
-      deleteSecure: (key) => storage.delete(key: key),
-      fallback: fallback,
-    );
-  }
 
   final Future<void> Function(String key, String value)? _writeSecure;
   final Future<String?> Function(String key)? _readSecure;

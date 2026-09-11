@@ -103,7 +103,7 @@ class MediaKitVideoBackend implements VideoBackend {
   @override
   Widget buildView({Key? key}) {
     return Video(
-      key: key ?? PlayerKeys.surface,
+      key: key,
       controller: videoController,
       controls: NoVideoControls,
       onEnterFullscreen: () async {},

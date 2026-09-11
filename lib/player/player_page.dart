@@ -132,84 +132,90 @@ class PlayerPageState extends State<PlayerPage> {
           backgroundColor: Colors.black,
           body: MouseRegion(
             onHover: (_) => current.onUserActivity(),
-            child: GestureDetector(
-              onTap: current.onUserActivity,
-              behavior: HitTestBehavior.opaque,
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  current.backend.buildView(key: PlayerKeys.surface),
-                  if (current.loading)
-                    Center(
-                      child: Text(
-                        l10n.playerLoading,
-                        style: const TextStyle(color: Colors.white),
-                      ),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                IgnorePointer(
+                  child: current.backend.buildView(),
+                ),
+                Positioned.fill(
+                  child: GestureDetector(
+                    key: PlayerKeys.surface,
+                    behavior: HitTestBehavior.opaque,
+                    onTap: current.toggleControls,
+                  ),
+                ),
+                if (current.loading)
+                  Center(
+                    child: Text(
+                      l10n.playerLoading,
+                      style: const TextStyle(color: Colors.white),
                     ),
-                  if (_errorText(l10n, current) != null)
-                    AppErrorView(
-                      message: _errorText(l10n, current)!,
-                      onRetry: current.start,
-                    ),
-                  if (current.showResumePrompt)
-                    _ResumePrompt(controller: current),
-                  if (current.controlsVisible &&
-                      !current.loading &&
-                      current.resolved != null &&
-                      !current.showResumePrompt &&
-                      current.error == null)
-                    _ControlsBar(
-                      controller: current,
-                      dragging: _dragSeeking,
-                      dragValue: _dragValue,
-                      onDragStart: (value) {
-                        setState(() {
-                          _dragSeeking = true;
-                          _dragValue = value;
-                        });
-                      },
-                      onDragUpdate: (value) {
-                        setState(() => _dragValue = value);
-                      },
-                      onDragEnd: (value) {
-                        setState(() => _dragSeeking = false);
-                        final duration = current.duration;
-                        if (duration <= Duration.zero) {
-                          return;
-                        }
-                        unawaited(
-                          current.seekTo(
-                            Duration(
-                              milliseconds: (duration.inMilliseconds * value)
-                                  .round(),
-                            ),
+                  ),
+                if (_errorText(l10n, current) != null)
+                  AppErrorView(
+                    message: _errorText(l10n, current)!,
+                    onRetry: current.start,
+                  ),
+                if (current.showResumePrompt)
+                  _ResumePrompt(controller: current),
+                if (current.controlsVisible &&
+                    !current.loading &&
+                    current.resolved != null &&
+                    !current.showResumePrompt &&
+                    current.error == null)
+                  _ControlsBar(
+                    controller: current,
+                    dragging: _dragSeeking,
+                    dragValue: _dragValue,
+                    onDragStart: (value) {
+                      setState(() {
+                        _dragSeeking = true;
+                        _dragValue = value;
+                      });
+                    },
+                    onDragUpdate: (value) {
+                      setState(() => _dragValue = value);
+                    },
+                    onDragEnd: (value) {
+                      setState(() => _dragSeeking = false);
+                      final duration = current.duration;
+                      if (duration <= Duration.zero) {
+                        return;
+                      }
+                      unawaited(
+                        current.seekTo(
+                          Duration(
+                            milliseconds: (duration.inMilliseconds * value)
+                                .round(),
                           ),
-                        );
-                      },
-                    ),
-                  if (current.nextEpisode != null)
-                    _NextEpisodeBanner(controller: current),
-                  if (current.disconnected)
-                    _Banner(
-                      key: PlayerKeys.disconnect,
-                      text: l10n.playbackDisconnected,
-                    ),
-                  if (current.progressSyncFailed && !current.disconnected)
-                    _Banner(
-                      key: PlayerKeys.progressSyncFailed,
-                      text: l10n.progressSyncFailed,
-                    ),
-                  if (current.subtitleNotice != null)
-                    _Banner(
-                      key: PlayerKeys.subtitleNotice,
-                      text:
-                          current.subtitleNotice ==
-                              SubtitleNoticeKind.bitmapFailed
-                          ? l10n.subtitleBitmapFailed
-                          : l10n.subtitleBitmapBurnIn,
-                    ),
-                ],
-              ),
+                        ),
+                      );
+                    },
+                  ),
+                if (current.nextEpisode != null)
+                  _NextEpisodeBanner(controller: current),
+                if (current.disconnected && !current.isPlaying)
+                  _Banner(
+                    key: PlayerKeys.disconnect,
+                    text: current.disconnectDetail ?? l10n.playbackDisconnected,
+                  ),
+                if (current.progressSyncFailed &&
+                    !(current.disconnected && !current.isPlaying))
+                  _Banner(
+                    key: PlayerKeys.progressSyncFailed,
+                    text: l10n.progressSyncFailed,
+                  ),
+                if (current.subtitleNotice != null)
+                  _Banner(
+                    key: PlayerKeys.subtitleNotice,
+                    text:
+                        current.subtitleNotice ==
+                            SubtitleNoticeKind.bitmapFailed
+                        ? l10n.subtitleBitmapFailed
+                        : l10n.subtitleBitmapBurnIn,
+                  ),
+              ],
             ),
           ),
         ),

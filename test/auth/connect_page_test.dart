@@ -95,7 +95,7 @@ void main() {
 
     expect(find.byKey(ConnectFormKeys.submit), findsOneWidget);
     expect(find.byType(AppErrorView), findsOneWidget);
-    expect(find.text('用户名或密码错误'), findsOneWidget);
+    expect(find.text('HTTP 401: invalid credentials'), findsOneWidget);
     expect(auth.isLoggedIn, isFalse);
   });
 
@@ -117,8 +117,33 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(AppErrorView), findsOneWidget);
-    expect(find.text('证书错误，无法建立安全连接'), findsOneWidget);
+    expect(
+      find.text('HandshakeException: CERTIFICATE_VERIFY_FAILED'),
+      findsOneWidget,
+    );
     expect(find.byKey(ConnectFormKeys.submit), findsOneWidget);
+    expect(auth.isLoggedIn, isFalse);
+  });
+
+  testWidgets('forbidden server body is shown unwrapped', (tester) async {
+    server.publicInfoStatus = 403;
+    server.publicInfoRawBody = '该客户端/设备已被服务端禁用';
+    final auth = controller();
+    await tester.pumpWidget(RillightApp(auth: auth));
+    await tester.pumpAndSettle();
+
+    await _enter(
+      tester,
+      address: server.baseUrl.toString(),
+      username: 'alice',
+      password: 'correct-horse',
+    );
+    await tester.tap(find.byKey(ConnectFormKeys.submit));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(AppErrorView), findsOneWidget);
+    expect(find.text('HTTP 403: 该客户端/设备已被服务端禁用'), findsOneWidget);
+    expect(find.text('连接失败'), findsNothing);
     expect(auth.isLoggedIn, isFalse);
   });
 
@@ -137,7 +162,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(AppErrorView), findsOneWidget);
-    expect(find.text('无法连接服务器'), findsOneWidget);
+    expect(find.text('Connection refused'), findsOneWidget);
     expect(find.byKey(ConnectFormKeys.submit), findsOneWidget);
   });
 

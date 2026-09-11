@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/widgets.dart';
-import 'package:rillight/player/player_keys.dart';
 
 class VideoOpenRequest {
   const VideoOpenRequest({
@@ -39,7 +38,7 @@ abstract class VideoBackend {
 
   Widget buildView({Key? key}) {
     return ColoredBox(
-      key: key ?? PlayerKeys.surface,
+      key: key,
       color: const Color(0xFF000000),
     );
   }
@@ -180,7 +179,7 @@ class FakeVideoBackend implements VideoBackend {
   @override
   Widget buildView({Key? key}) {
     return ColoredBox(
-      key: key ?? PlayerKeys.surface,
+      key: key,
       color: const Color(0xFF000000),
     );
   }

@@ -147,7 +147,7 @@ class _ConnectPageState extends State<ConnectPage> {
                 if (auth.failure != null) ...[
                   const SizedBox(height: 24),
                   AppErrorView(
-                    message: embyFailureMessage(l10n, auth.failure!.kind),
+                    message: embyFailureMessage(l10n, auth.failure!),
                     onRetry: auth.isBusy ? null : _submit,
                   ),
                 ],

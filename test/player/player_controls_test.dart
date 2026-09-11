@@ -221,6 +221,10 @@ void main() {
     await tester.tap(find.byKey(PlayerKeys.surface));
     await tester.pump();
     expect(find.byKey(PlayerKeys.controls), findsOneWidget);
+
+    await tester.tap(find.byKey(PlayerKeys.surface));
+    await tester.pump();
+    expect(find.byKey(PlayerKeys.controls), findsNothing);
   });
 
   testWidgets('transcode is labeled and quality change reopens the stream', (
@@ -286,15 +290,20 @@ void main() {
     );
   });
 
-  testWidgets('disconnect shows a visible message and pauses', (tester) async {
+  testWidgets('mpv errors while playing do not overlay disconnect', (
+    tester,
+  ) async {
     await pumpLoggedIn(tester);
     await openPlayable(tester, 'movie-up');
+    backend.emitError('libass: fontselect warning');
+    await tester.pump();
+    backend.emitError('Cannot open connection');
+    await tester.pump();
     backend.emitError('connection lost');
     await tester.pump();
-    await tester.pump();
-    expect(find.byKey(PlayerKeys.disconnect), findsOneWidget);
-    expect(find.text('播放中断，请检查网络'), findsOneWidget);
-    expect(backend.isPlaying, isFalse);
+    expect(find.byKey(PlayerKeys.disconnect), findsNothing);
+    expect(find.text('播放中断，请检查网络'), findsNothing);
+    expect(backend.isPlaying, isTrue);
   });
 
   testWidgets('progress sync failure is visible without stopping playback', (

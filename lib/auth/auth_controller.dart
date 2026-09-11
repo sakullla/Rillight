@@ -35,7 +35,7 @@ class AuthController extends ChangeNotifier {
           client ??
           EmbyClient(
             device: const EmbyDeviceInfo(
-              clientName: '灯川 Rillight',
+              clientName: 'Rillight',
               deviceName: 'test',
               deviceId: 'rillight-memory-device',
               version: '0.1.0',
@@ -134,7 +134,11 @@ class AuthController extends ChangeNotifier {
       _session = null;
       client.clearSession();
     } catch (error) {
-      _failure = EmbyException(EmbyFailureKind.unknown, cause: error);
+      _failure = EmbyException(
+        EmbyFailureKind.unknown,
+        detail: error.toString(),
+        cause: error,
+      );
       _session = null;
       client.clearSession();
     } finally {

@@ -1,1 +1,10 @@
 * text=auto eol=lf
+pubspec.lock linguist-generated=true sakullla-review=generated
+lib/app/l10n/app_localizations.dart linguist-generated=true sakullla-review=generated
+lib/app/l10n/app_localizations_zh.dart linguist-generated=true sakullla-review=generated
+**/generated_plugin_registrant.cc linguist-generated=true sakullla-review=generated
+**/generated_plugin_registrant.h linguist-generated=true sakullla-review=generated
+**/generated_plugins.cmake linguist-generated=true sakullla-review=generated
+**/GeneratedPluginRegistrant.swift linguist-generated=true sakullla-review=generated
+macos/Runner/Assets.xcassets/AppIcon.appiconset/** linguist-generated=true sakullla-review=generated
+windows/runner/resources/app_icon.ico linguist-generated=true sakullla-review=generated

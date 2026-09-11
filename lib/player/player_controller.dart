@@ -61,6 +61,7 @@ class PlayerController extends ChangeNotifier {
   bool controlsVisible = true;
   bool isPlaying = false;
   bool disconnected = false;
+  String? disconnectDetail;
   bool progressSyncFailed = false;
   bool _disposed = false;
   bool _sessionStarted = false;
@@ -100,6 +101,7 @@ class PlayerController extends ChangeNotifier {
     error = null;
     loadFailure = null;
     disconnected = false;
+    disconnectDetail = null;
     progressSyncFailed = false;
     subtitleNotice = null;
     nextEpisode = null;
@@ -251,6 +253,25 @@ class PlayerController extends ChangeNotifier {
 
   void onUserActivity() {
     controlsVisible = true;
+    _scheduleHide();
+    _emit();
+  }
+
+  void toggleControls() {
+    if (showResumePrompt || nextEpisode != null) {
+      onUserActivity();
+      return;
+    }
+    if (controlsVisible) {
+      _hideTimer?.cancel();
+      controlsVisible = false;
+      _emit();
+      return;
+    }
+    onUserActivity();
+  }
+
+  void _scheduleHide() {
     _hideTimer?.cancel();
     if (isPlaying && !showResumePrompt && nextEpisode == null) {
       _hideTimer = Timer(controlsHideAfter, () {
@@ -258,7 +279,6 @@ class PlayerController extends ChangeNotifier {
         _emit();
       });
     }
-    _emit();
   }
 
   void cancelNextEpisode() {
@@ -322,6 +342,10 @@ class PlayerController extends ChangeNotifier {
   void _bindBackend() {
     _positionSub = backend.positionStream.listen((value) {
       position = value;
+      if (disconnected && isPlaying) {
+        disconnected = false;
+        disconnectDetail = null;
+      }
       _emit();
     });
     _durationSub = backend.durationStream.listen((value) {
@@ -332,11 +356,13 @@ class PlayerController extends ChangeNotifier {
     });
     _playingSub = backend.playingStream.listen((playing) {
       isPlaying = playing;
-      if (!playing) {
+      if (playing) {
+        disconnected = false;
+        disconnectDetail = null;
+        onUserActivity();
+      } else {
         controlsVisible = true;
         _hideTimer?.cancel();
-      } else {
-        onUserActivity();
       }
       _emit();
       if (_sessionStarted && !disconnected) {
@@ -348,9 +374,15 @@ class PlayerController extends ChangeNotifier {
         unawaited(_handleCompleted());
       }
     });
-    _errorSub = backend.errorStream.listen((_) {
+    _errorSub = backend.errorStream.listen((message) {
+      if (_disposed || isPlaying) {
+        return;
+      }
+      if (!isFatalPlaybackError(message, playing: false)) {
+        return;
+      }
       disconnected = true;
-      unawaited(backend.pause());
+      disconnectDetail = message.trim().isEmpty ? null : message.trim();
       controlsVisible = true;
       _hideTimer?.cancel();
       _emit();
@@ -364,6 +396,7 @@ class PlayerController extends ChangeNotifier {
   }) async {
     loading = true;
     disconnected = false;
+    disconnectDetail = null;
     nextEpisode = null;
     _nextTimer?.cancel();
     _emit();
@@ -627,4 +660,26 @@ class PlayerController extends ChangeNotifier {
     unawaited(backend.dispose());
     super.dispose();
   }
+}
+
+bool isFatalPlaybackError(String message, {required bool playing}) {
+  final text = message.toLowerCase();
+  if (text.contains('end of file') ||
+      text.contains('libass') ||
+      text.contains('subtitle')) {
+    return false;
+  }
+  const network = [
+    'connection',
+    'network',
+    'http error',
+    'failed to open',
+    'timed out',
+    'timeout',
+    'connection lost',
+  ];
+  if (network.any(text.contains)) {
+    return true;
+  }
+  return !playing;
 }
