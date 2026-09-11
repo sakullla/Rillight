@@ -3,13 +3,11 @@ import 'package:rillight/app/app_shell.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/connect_page.dart';
-import 'package:rillight/auth/session_actions.dart';
 import 'package:rillight/home/catalog_shell.dart';
 import 'package:rillight/home/home_page.dart';
 import 'package:rillight/library/item_detail_page.dart';
 import 'package:rillight/library/library_page.dart';
 import 'package:rillight/library/shelf_grid_page.dart';
-import 'package:rillight/search/search_action.dart';
 import 'package:rillight/search/search_page.dart';
 
 export 'package:rillight/app/routes.dart';
@@ -34,10 +32,7 @@ GoRouter createAppRouter({required AuthController auth}) {
         builder: (context, state, child) {
           return CatalogShell(
             auth: auth,
-            child: AppShell(
-              actions: const [SearchAction(), SessionActions()],
-              child: child,
-            ),
+            child: AppShell(child: child),
           );
         },
         routes: [

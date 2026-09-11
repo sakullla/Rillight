@@ -30,7 +30,8 @@ class SessionActions extends StatelessWidget {
         final l10n = AppLocalizations.of(context);
         return PopupMenuButton<String>(
           key: serverMenuKey,
-          tooltip: l10n.switchServer,
+          tooltip: '${_chipLabel(auth.session!.server)}\n${l10n.switchServer}',
+          icon: const Icon(Icons.dns_outlined),
           onSelected: (value) {
             if (value == logoutValue) {
               auth.logout();
@@ -71,24 +72,6 @@ class SessionActions extends StatelessWidget {
             ),
             PopupMenuItem(value: logoutValue, child: Text(l10n.logout)),
           ],
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.dns_outlined, size: 18),
-                const SizedBox(width: 8),
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 220),
-                  child: Text(
-                    _chipLabel(auth.session!.server),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                const Icon(Icons.arrow_drop_down),
-              ],
-            ),
-          ),
         );
       },
     );

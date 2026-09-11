@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
-import 'package:rillight/app/product.dart';
 import 'package:rillight/app/widgets/app_error_view.dart';
 import 'package:rillight/app/widgets/poster_placeholder.dart';
 import 'package:rillight/auth/auth_controller.dart';
@@ -12,6 +11,9 @@ import 'package:rillight/auth/session_actions.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/home/catalog_keys.dart';
+import 'package:rillight/home/home_page.dart';
+import 'package:rillight/library/library_page.dart';
+import 'package:rillight/search/search_page.dart';
 
 import 'emby/fake_emby_server.dart';
 
@@ -23,11 +25,13 @@ const _device = EmbyDeviceInfo(
 );
 
 void main() {
-  testWidgets('shell shows product name in Chinese locale', (tester) async {
+  testWidgets('connect page shell hides the navigation rail', (tester) async {
     await tester.pumpWidget(RillightApp());
     await tester.pumpAndSettle();
 
-    expect(find.text(kProductName), findsWidgets);
+    expect(find.byType(NavigationRail), findsNothing);
+    expect(find.byKey(SessionActions.serverMenuKey), findsNothing);
+    expect(find.text('连接服务器'), findsOneWidget);
   });
 
   testWidgets('app forces cinematic dark ThemeMode', (tester) async {
@@ -111,9 +115,8 @@ void main() {
       await tester.pumpWidget(RillightApp(auth: auth));
       await tester.pumpAndSettle();
 
-      expect(find.byType(NavigationRail), findsNothing);
+      expect(find.byType(NavigationRail), findsOneWidget);
       expect(find.byKey(SessionActions.serverMenuKey), findsOneWidget);
-      expect(find.text('第二台'), findsOneWidget);
       expect(find.text('第二台电影'), findsWidgets);
 
       await tester.ensureVisible(
@@ -137,10 +140,9 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(auth.session?.server.name, '灯川测试');
-      expect(find.text('灯川测试'), findsOneWidget);
       expect(find.text('Inception'), findsWidgets);
       expect(find.text('第二台电影'), findsNothing);
-      expect(find.byType(NavigationRail), findsNothing);
+      expect(find.byType(NavigationRail), findsOneWidget);
       expect(
         first.requests.where(isHomeCatalog).length,
         greaterThan(firstHomeBefore),
@@ -190,14 +192,13 @@ void main() {
     await tester.pumpWidget(RillightApp(auth: auth));
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('emby-wan.test'), findsWidgets);
-
     final lanResumeBefore = lan.requests
         .where((request) => request.contains('Items/Resume'))
         .length;
 
     await tester.tap(find.byKey(SessionActions.serverMenuKey));
     await tester.pumpAndSettle();
+    expect(find.text('灯川测试 · emby-wan.test:8096'), findsOneWidget);
     await tester.tap(find.text('灯川测试 · emby.test:8096'));
     await tester.pumpAndSettle();
 
@@ -206,6 +207,59 @@ void main() {
       lan.requests.where((request) => request.contains('Items/Resume')).length,
       greaterThan(lanResumeBefore),
     );
+  });
+  testWidgets('rail switches between home, library and search directly', (
+    tester,
+  ) async {
+    final server = FakeEmbyServer();
+    final adapter = FakeEmbyAdapter([server]);
+    final auth = AuthController(
+      client: EmbyClient(device: _device, dio: dioForFakeEmby(adapter)),
+      credentials: MemoryCredentialStore(),
+      servers: MemoryServerListStore(),
+    );
+    await tester.runAsync(() async {
+      await auth.connect(
+        address: server.baseUrl.toString(),
+        username: 'alice',
+        password: 'correct-horse',
+      );
+    });
+
+    await tester.pumpWidget(RillightApp(auth: auth));
+    await tester.pumpAndSettle();
+
+    final rail = find.byType(NavigationRail);
+    expect(rail, findsOneWidget);
+    expect(find.byType(HomePage), findsOneWidget);
+
+    await tester.tap(
+      find.descendant(
+        of: rail,
+        matching: find.byIcon(Icons.video_library_outlined),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(LibraryPage), findsOneWidget);
+
+    await tester.tap(
+      find.descendant(of: rail, matching: find.byIcon(Icons.search)),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(SearchPage), findsOneWidget);
+
+    // 已在搜索页时再次点击不重复入栈。
+    await tester.tap(
+      find.descendant(of: rail, matching: find.byIcon(Icons.search)),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(SearchPage), findsOneWidget);
+
+    await tester.tap(
+      find.descendant(of: rail, matching: find.byIcon(Icons.home_outlined)),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(HomePage), findsOneWidget);
   });
 }
 
