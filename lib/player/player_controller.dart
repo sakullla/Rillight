@@ -297,6 +297,7 @@ class PlayerController extends ChangeNotifier {
       return;
     }
     if (onOpenItem != null) {
+      await shutdownSession();
       onOpenItem!(next.id);
       return;
     }

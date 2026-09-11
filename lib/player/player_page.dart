@@ -2,9 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
-import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/widgets/app_error_view.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/emby/device_profile.dart';
@@ -14,13 +12,22 @@ import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_controller.dart';
 import 'package:rillight/player/player_keys.dart';
 import 'package:rillight/player/player_window.dart';
+import 'package:rillight/player/player_window_host.dart';
 import 'package:rillight/player/video_backend.dart';
 
 class PlayerPage extends StatefulWidget {
-  const PlayerPage({super.key, required this.itemId, this.autoResume = false});
+  const PlayerPage({
+    super.key,
+    required this.itemId,
+    this.autoResume = false,
+    this.onClosed,
+    this.onOpenItem,
+  });
 
   final String itemId;
   final bool autoResume;
+  final VoidCallback? onClosed;
+  final ValueChanged<String>? onOpenItem;
 
   @override
   State<PlayerPage> createState() => PlayerPageState();
@@ -49,12 +56,7 @@ class PlayerPageState extends State<PlayerPage> {
       nextEpisodeCountdown: bindings.nextEpisodeCountdown,
       seekStep: bindings.seekStep,
       onClose: _leave,
-      onOpenItem: (id) {
-        if (!mounted) {
-          return;
-        }
-        context.pushReplacement(AppRoutes.play(id));
-      },
+      onOpenItem: _openItem,
     );
     controller = created;
     created.addListener(_onController);
@@ -75,14 +77,33 @@ class PlayerPageState extends State<PlayerPage> {
     }
   }
 
+  void _openItem(String itemId) {
+    if (!mounted) {
+      return;
+    }
+    final onOpenItem = widget.onOpenItem;
+    if (onOpenItem != null) {
+      onOpenItem(itemId);
+      return;
+    }
+    final host = PlayerWindowScope.maybeOf(context);
+    if (host != null) {
+      unawaited(host.open(PlayerOpenRequest(itemId: itemId)));
+    }
+  }
+
   void _leave() {
     if (!mounted) {
       return;
     }
-    if (context.canPop()) {
-      context.pop();
-    } else {
-      context.go(AppRoutes.home);
+    final onClosed = widget.onClosed;
+    if (onClosed != null) {
+      onClosed();
+      return;
+    }
+    final host = PlayerWindowScope.maybeOf(context);
+    if (host != null) {
+      unawaited(host.close());
     }
   }
 
@@ -135,9 +156,7 @@ class PlayerPageState extends State<PlayerPage> {
             child: Stack(
               fit: StackFit.expand,
               children: [
-                IgnorePointer(
-                  child: current.backend.buildView(),
-                ),
+                IgnorePointer(child: current.backend.buildView()),
                 Positioned.fill(
                   child: GestureDetector(
                     key: PlayerKeys.surface,

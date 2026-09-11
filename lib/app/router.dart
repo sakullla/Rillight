@@ -9,7 +9,6 @@ import 'package:rillight/home/home_page.dart';
 import 'package:rillight/library/item_detail_page.dart';
 import 'package:rillight/library/library_page.dart';
 import 'package:rillight/library/shelf_grid_page.dart';
-import 'package:rillight/player/player_page.dart';
 import 'package:rillight/search/search_action.dart';
 import 'package:rillight/search/search_page.dart';
 
@@ -73,13 +72,6 @@ GoRouter createAppRouter({required AuthController auth}) {
             builder: (context, state) => const SearchPage(),
           ),
         ],
-      ),
-      GoRoute(
-        path: '/play/:itemId',
-        builder: (context, state) => PlayerPage(
-          itemId: state.pathParameters['itemId'] ?? '',
-          autoResume: state.uri.queryParameters['resume'] == '1',
-        ),
       ),
     ],
   );

@@ -1,11 +1,13 @@
 import 'package:flutter/widgets.dart';
 import 'package:rillight/player/player_window.dart';
+import 'package:rillight/player/player_window_host.dart';
 import 'package:rillight/player/video_backend.dart';
 
 class PlayerBindings {
   const PlayerBindings({
     this.createBackend,
     this.window,
+    this.windowHost,
     this.progressInterval = const Duration(seconds: 10),
     this.controlsHideAfter = const Duration(seconds: 3),
     this.nextEpisodeCountdown = const Duration(seconds: 10),
@@ -14,6 +16,7 @@ class PlayerBindings {
 
   final VideoBackend Function()? createBackend;
   final PlayerWindow? window;
+  final PlayerWindowHost? windowHost;
   final Duration progressInterval;
   final Duration controlsHideAfter;
   final Duration nextEpisodeCountdown;

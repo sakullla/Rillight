@@ -19,4 +19,5 @@ abstract final class PlayerKeys {
   static const disconnect = Key('player-disconnect');
   static const progressSyncFailed = Key('player-progress-sync-failed');
   static const subtitleNotice = Key('player-subtitle-notice');
+  static const windowError = Key('player-window-error');
 }

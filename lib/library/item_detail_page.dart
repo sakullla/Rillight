@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
@@ -14,6 +16,7 @@ import 'package:rillight/library/item_format.dart';
 import 'package:rillight/library/poster_card.dart';
 import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/player/player_keys.dart';
+import 'package:rillight/player/player_window_host.dart';
 
 class ItemDetailPage extends StatefulWidget {
   const ItemDetailPage({super.key, required this.itemId});
@@ -147,6 +150,21 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     }
   }
 
+  Future<void> _openPlayer(String itemId) async {
+    try {
+      await PlayerWindowScope.of(
+        context,
+      ).open(PlayerOpenRequest(itemId: itemId));
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.toString(), key: PlayerKeys.windowError)),
+      );
+    }
+  }
+
   Future<void> _setPlayed(bool played) async {
     final item = _item;
     if (item == null || _busyPlayed) {
@@ -231,9 +249,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
               item: item,
               runtime: runtime,
               busyPlayed: _busyPlayed,
-              onPlay: item.isPlayable
-                  ? () => context.push(AppRoutes.play(item.id))
-                  : null,
+              onPlay: item.isPlayable ? () => _openPlayer(item.id) : null,
               onPlayedChanged: (value) {
                 _setPlayed(value);
               },
