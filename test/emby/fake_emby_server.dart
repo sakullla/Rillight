@@ -262,6 +262,9 @@ class FakeEmbyServer {
   final Set<String> failingImageIds = {'movie-broken'};
 
   final List<String> requests = [];
+  final List<String?> requestUserAgents = [];
+  String? lastUserAgent;
+  String? lastAuthorization;
   final List<FakePlaybackEvent> playbackEvents = [];
   Map<String, dynamic>? lastDeviceProfile;
   Map<String, dynamic>? lastPlaybackInfoBody;
@@ -280,6 +283,11 @@ class FakeEmbyServer {
     final segments = options.uri.pathSegments;
     final query = options.uri.query;
     requests.add(query.isEmpty ? '$method $path' : '$method $path?$query');
+    lastUserAgent = _headerValue(options, 'user-agent');
+    lastAuthorization =
+        _headerValue(options, 'authorization') ??
+        _headerValue(options, 'x-emby-authorization');
+    requestUserAgents.add(lastUserAgent);
 
     if (hangPublicInfo && path.endsWith('/System/Info/Public')) {
       await Future<void>.delayed(const Duration(milliseconds: 400));
@@ -860,6 +868,16 @@ class FakeEmbyServer {
       'ServerId': serverId,
       'User': {'Id': user.userId, 'Name': user.username, 'ServerId': serverId},
     });
+  }
+
+  String? _headerValue(RequestOptions options, String name) {
+    for (final entry in options.headers.entries) {
+      if (entry.key.toString().toLowerCase() == name) {
+        final value = entry.value;
+        return value?.toString();
+      }
+    }
+    return null;
   }
 
   String? _tokenOf(RequestOptions options) {

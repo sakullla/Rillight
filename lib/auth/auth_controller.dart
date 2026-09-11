@@ -72,13 +72,7 @@ class AuthController extends ChangeNotifier {
       notifyListeners();
       return;
     }
-    SavedServer? last;
-    for (final server in snapshot.servers) {
-      if (server.id == lastId) {
-        last = server;
-        break;
-      }
-    }
+    final last = _serverById(lastId);
     if (last == null) {
       notifyListeners();
       return;
@@ -97,6 +91,8 @@ class AuthController extends ChangeNotifier {
     required String address,
     required String username,
     required String password,
+    String? userAgent,
+    String? lineId,
   }) async {
     if (_busy) {
       return;
@@ -105,6 +101,7 @@ class AuthController extends ChangeNotifier {
     _failure = null;
     notifyListeners();
     try {
+      client.setUserAgent(userAgent);
       final baseUrl = normalizeEmbyBaseUrl(address);
       final publicInfo = await client.getPublicInfo(baseUrl);
       final auth = await client.authenticateByName(
@@ -113,11 +110,14 @@ class AuthController extends ChangeNotifier {
         password: password,
         serverId: publicInfo.id,
       );
-      final server = SavedServer(
-        id: publicInfo.id,
+      final server = _serverWithLine(
+        existing: _serverById(publicInfo.id),
+        serverId: publicInfo.id,
         name: publicInfo.serverName,
-        baseUrl: baseUrl.toString(),
         username: username,
+        address: baseUrl.toString(),
+        userAgent: userAgent,
+        lineId: lineId,
       );
       final stored = StoredCredentials(
         accessToken: auth.accessToken,
@@ -170,19 +170,59 @@ class AuthController extends ChangeNotifier {
     }
   }
 
-  Future<void> switchTo(String serverId) async {
-    SavedServer? server;
-    for (final item in _savedServers) {
-      if (item.id == serverId) {
-        server = item;
-        break;
-      }
-    }
-    if (server == null) {
+  Future<void> switchTo(String serverId, {String? lineId}) async {
+    final found = _serverById(serverId);
+    if (found == null) {
       return;
     }
+    final currentLineId = found.activeLine?.id;
+    final requestedLineId = (lineId == null || lineId.isEmpty)
+        ? currentLineId
+        : lineId;
+    if (requestedLineId != null && requestedLineId != found.activeLineId) {
+      var hasLine = false;
+      for (final line in found.lines) {
+        if (line.id == requestedLineId) {
+          hasLine = true;
+          break;
+        }
+      }
+      if (!hasLine) {
+        return;
+      }
+    }
+    final server =
+        (requestedLineId != null && requestedLineId != found.activeLineId)
+        ? found.copyWith(activeLineId: requestedLineId)
+        : found;
     final stored = await credentials.read(serverId);
+    final sameServer = _session?.server.id == serverId;
+    final changingLine = sameServer && requestedLineId != currentLineId;
     if (stored != null && stored.accessToken.isNotEmpty) {
+      if (changingLine) {
+        client.setUserAgent(server.activeLine?.userAgent);
+        try {
+          await client.getPublicInfo(Uri.parse(server.baseUrl));
+        } on EmbyException catch (error) {
+          _failure = error;
+          _session = null;
+          client.clearSession();
+          _prefill = server;
+          notifyListeners();
+          return;
+        } catch (error) {
+          _failure = EmbyException(
+            EmbyFailureKind.unknown,
+            detail: error.toString(),
+            cause: error,
+          );
+          _session = null;
+          client.clearSession();
+          _prefill = server;
+          notifyListeners();
+          return;
+        }
+      }
       _failure = null;
       await _upsertServer(server);
       _activate(server, stored);
@@ -197,18 +237,44 @@ class AuthController extends ChangeNotifier {
   }
 
   Future<void> selectSavedServer(String serverId) async {
-    SavedServer? server;
-    for (final item in _savedServers) {
-      if (item.id == serverId) {
-        server = item;
-        break;
-      }
-    }
+    final server = _serverById(serverId);
     if (server == null) {
       return;
     }
     _prefill = server;
     _failure = null;
+    notifyListeners();
+  }
+
+  Future<void> deleteLine(String serverId, String lineId) async {
+    final server = _serverById(serverId);
+    if (server == null || server.lines.length <= 1) {
+      return;
+    }
+    final nextLines = [
+      for (final line in server.lines)
+        if (line.id != lineId) line,
+    ];
+    if (nextLines.length == server.lines.length) {
+      return;
+    }
+    final nextActive = server.activeLineId == lineId
+        ? nextLines.first.id
+        : server.activeLineId;
+    final next = server.copyWith(lines: nextLines, activeLineId: nextActive);
+    await _upsertServer(next);
+    if (_prefill?.id == serverId) {
+      _prefill = next;
+    }
+    final session = _session;
+    if (session != null && session.server.id == serverId) {
+      _session = AuthSession(
+        server: next,
+        userId: session.userId,
+        username: session.username,
+        accessToken: session.accessToken,
+      );
+    }
     notifyListeners();
   }
 
@@ -224,6 +290,51 @@ class AuthController extends ChangeNotifier {
     notifyListeners();
   }
 
+  SavedServer _serverWithLine({
+    required SavedServer? existing,
+    required String serverId,
+    required String name,
+    required String username,
+    required String address,
+    String? userAgent,
+    String? lineId,
+  }) {
+    final normalizedUa = normalizeUserAgent(userAgent);
+    final lines = existing == null
+        ? <ServerLine>[]
+        : [for (final line in existing.lines) line];
+    var index = -1;
+    if (lineId != null && lineId.isNotEmpty && existing != null) {
+      index = lines.indexWhere((line) => line.id == lineId);
+    }
+    if (index < 0) {
+      index = lines.indexWhere((line) => line.address == address);
+    }
+    late final ServerLine line;
+    if (index >= 0) {
+      line = ServerLine(
+        id: lines[index].id,
+        address: address,
+        userAgent: normalizedUa,
+      );
+      lines[index] = line;
+    } else {
+      line = ServerLine(
+        id: (lineId != null && lineId.isNotEmpty) ? lineId : generateLineId(),
+        address: address,
+        userAgent: normalizedUa,
+      );
+      lines.add(line);
+    }
+    return SavedServer(
+      id: serverId,
+      name: name,
+      username: username,
+      lines: lines,
+      activeLineId: line.id,
+    );
+  }
+
   void _activate(SavedServer server, StoredCredentials stored) {
     _session = AuthSession(
       server: server,
@@ -235,7 +346,17 @@ class AuthController extends ChangeNotifier {
       baseUrl: Uri.parse(server.baseUrl),
       accessToken: stored.accessToken,
       userId: stored.userId,
+      userAgent: server.activeLine?.userAgent,
     );
+  }
+
+  SavedServer? _serverById(String id) {
+    for (final server in _savedServers) {
+      if (server.id == id) {
+        return server;
+      }
+    }
+    return null;
   }
 
   Future<void> _upsertServer(SavedServer server) async {

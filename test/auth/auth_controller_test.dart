@@ -211,4 +211,154 @@ void main() {
       expect((await fallback.read(server.serverId))?.accessToken, isNotEmpty);
     },
   );
+
+  test(
+    'same ServerId keeps two lines and failed line does not switch',
+    () async {
+      final wan = FakeEmbyServer(
+        serverId: server.serverId,
+        serverName: server.serverName,
+        baseUrl: Uri.parse('http://emby-wan.test:8096'),
+      );
+      adapter.add(wan);
+      final auth = controller();
+
+      await auth.connect(
+        address: server.baseUrl.toString(),
+        username: 'alice',
+        password: 'correct-horse',
+      );
+      await auth.connect(
+        address: wan.baseUrl.toString(),
+        username: 'alice',
+        password: 'correct-horse',
+        userAgent: 'LineWan/2',
+      );
+
+      expect(auth.isLoggedIn, isTrue);
+      expect(auth.savedServers, hasLength(1));
+      expect(auth.savedServers.single.lines, hasLength(2));
+      expect(auth.savedServers.single.baseUrl, wan.baseUrl.toString());
+      expect(auth.client.userAgent, 'LineWan/2');
+      expect(auth.client.sessionHeaders['User-Agent'], 'LineWan/2');
+
+      final lanLine = auth.savedServers.single.lines.firstWhere(
+        (line) => line.address == server.baseUrl.toString(),
+      );
+      final wanLineId = auth.savedServers.single.activeLineId;
+      server.publicInfoStatus = 403;
+      server.publicInfoRawBody = '该线路已被禁用';
+
+      await auth.logout();
+      await auth.connect(
+        address: lanLine.address,
+        username: 'alice',
+        password: 'correct-horse',
+        lineId: lanLine.id,
+      );
+
+      expect(auth.isLoggedIn, isFalse);
+      expect(auth.client.baseUrl, isNull);
+      expect(auth.savedServers.single.lines, hasLength(2));
+      expect(auth.savedServers.single.activeLineId, wanLineId);
+      expect(auth.failure?.detail, 'HTTP 403: 该线路已被禁用');
+    },
+  );
+
+  test('line User-Agent is sent on API and cleared back to default', () async {
+    final auth = controller();
+    await auth.connect(
+      address: server.baseUrl.toString(),
+      username: 'alice',
+      password: 'correct-horse',
+      userAgent: 'CustomUA/1.0',
+    );
+
+    expect(server.lastUserAgent, 'CustomUA/1.0');
+    expect(auth.client.sessionHeaders['User-Agent'], 'CustomUA/1.0');
+    expect(
+      auth.client.sessionHeaders['Authorization'],
+      contains('Client="Rillight"'),
+    );
+
+    await auth.connect(
+      address: server.baseUrl.toString(),
+      username: 'alice',
+      password: 'correct-horse',
+      userAgent: '   ',
+    );
+
+    expect(server.lastUserAgent, 'Rillight/0.1.0');
+    expect(auth.client.userAgent, 'Rillight/0.1.0');
+    expect(auth.savedServers.single.lines.single.normalizedUserAgent, isNull);
+  });
+
+  test(
+    'switching a line with a token probes and failure returns to login',
+    () async {
+      final wan = FakeEmbyServer(
+        serverId: server.serverId,
+        serverName: server.serverName,
+        baseUrl: Uri.parse('http://emby-wan.test:8096'),
+      );
+      adapter.add(wan);
+      final auth = controller();
+      await auth.connect(
+        address: server.baseUrl.toString(),
+        username: 'alice',
+        password: 'correct-horse',
+      );
+      await auth.connect(
+        address: wan.baseUrl.toString(),
+        username: 'alice',
+        password: 'correct-horse',
+      );
+      final lanLine = auth.savedServers.single.lines.firstWhere(
+        (line) => line.address == server.baseUrl.toString(),
+      );
+      server.publicInfoStatus = 500;
+      server.publicInfoRawBody = 'upstream timeout';
+
+      await auth.switchTo(server.serverId, lineId: lanLine.id);
+
+      expect(auth.isLoggedIn, isFalse);
+      expect(auth.client.baseUrl, isNull);
+      expect(auth.prefill?.activeLineId, lanLine.id);
+      expect(auth.savedServers.single.baseUrl, wan.baseUrl.toString());
+      expect(auth.failure?.detail, 'HTTP 500: upstream timeout');
+    },
+  );
+
+  test('deleteLine keeps the remaining line', () async {
+    final wan = FakeEmbyServer(
+      serverId: server.serverId,
+      serverName: server.serverName,
+      baseUrl: Uri.parse('http://emby-wan.test:8096'),
+    );
+    adapter.add(wan);
+    final auth = controller();
+    await auth.connect(
+      address: server.baseUrl.toString(),
+      username: 'alice',
+      password: 'correct-horse',
+    );
+    await auth.connect(
+      address: wan.baseUrl.toString(),
+      username: 'alice',
+      password: 'correct-horse',
+    );
+    final lanLine = auth.savedServers.single.lines.firstWhere(
+      (line) => line.address == server.baseUrl.toString(),
+    );
+
+    await auth.deleteLine(server.serverId, lanLine.id);
+
+    expect(auth.savedServers.single.lines, hasLength(1));
+    expect(auth.savedServers.single.baseUrl, wan.baseUrl.toString());
+    await auth.deleteLine(
+      server.serverId,
+      auth.savedServers.single.lines.single.id,
+    );
+    expect(auth.savedServers.single.lines, hasLength(1));
+  });
 }

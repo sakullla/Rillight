@@ -32,29 +32,38 @@ class EmbyClient {
   Uri? _baseUrl;
   String? _accessToken;
   String? _userId;
+  String? _customUserAgent;
 
   Uri? get baseUrl => _baseUrl;
   String? get accessToken => _accessToken;
   String? get userId => _userId;
+  String get userAgent => resolveUserAgent(_customUserAgent, device);
   bool get hasSession =>
       _baseUrl != null && _accessToken != null && _accessToken!.isNotEmpty;
   Map<String, String> get sessionHeaders =>
       _headers(token: _accessToken, userId: _userId);
 
+  void setUserAgent(String? userAgent) {
+    _customUserAgent = normalizeUserAgent(userAgent);
+  }
+
   void attachSession({
     required Uri baseUrl,
     required String accessToken,
     required String userId,
+    String? userAgent,
   }) {
     _baseUrl = baseUrl;
     _accessToken = accessToken;
     _userId = userId;
+    setUserAgent(userAgent);
   }
 
   void clearSession() {
     _baseUrl = null;
     _accessToken = null;
     _userId = null;
+    _customUserAgent = null;
   }
 
   Future<PublicServerInfo> getPublicInfo(Uri baseUrl) async {
@@ -492,6 +501,7 @@ class EmbyClient {
     return {
       'Authorization': authorization,
       'X-Emby-Authorization': authorization,
+      'User-Agent': userAgent,
       if (token != null && token.isNotEmpty) 'X-Emby-Token': token,
     };
   }

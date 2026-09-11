@@ -156,6 +156,40 @@ void main() {
     expect(expired, isTrue);
   });
 
+  test('custom User-Agent is sent on API and stream headers', () async {
+    final emby = client();
+    emby.setUserAgent('LineUA/9');
+    await emby.getPublicInfo(server.baseUrl);
+    expect(server.lastUserAgent, 'LineUA/9');
+    expect(server.lastAuthorization, contains('Client="Rillight"'));
+    expect(server.lastAuthorization, isNot(contains('LineUA/9')));
+
+    final auth = await emby.authenticateByName(
+      baseUrl: server.baseUrl,
+      username: 'alice',
+      password: 'correct-horse',
+      serverId: server.serverId,
+    );
+    emby.attachSession(
+      baseUrl: server.baseUrl,
+      accessToken: auth.accessToken,
+      userId: auth.user.id,
+      userAgent: 'LineUA/9',
+    );
+    expect(emby.sessionHeaders['User-Agent'], 'LineUA/9');
+    expect(emby.sessionHeaders['Authorization'], contains('Client="Rillight"'));
+    await emby.getJson('/System/Info');
+    expect(server.lastUserAgent, 'LineUA/9');
+  });
+
+  test('blank User-Agent falls back to Rillight/version', () async {
+    final emby = client();
+    emby.setUserAgent('  ');
+    await emby.getPublicInfo(server.baseUrl);
+    expect(server.lastUserAgent, 'Rillight/0.1.0');
+    expect(emby.sessionHeaders['User-Agent'], 'Rillight/0.1.0');
+  });
+
   test('logout revokes the current token', () async {
     final emby = client();
     final auth = await emby.authenticateByName(

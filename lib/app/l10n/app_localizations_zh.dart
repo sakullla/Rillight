@@ -33,6 +33,12 @@ class AppLocalizationsZh extends AppLocalizations {
   String get password => '密码';
 
   @override
+  String get userAgent => 'User-Agent';
+
+  @override
+  String get userAgentHint => '可选，留空则使用默认';
+
+  @override
   String get connect => '连接';
 
   @override
@@ -43,6 +49,18 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get savedServers => '已保存的服务器';
+
+  @override
+  String get lines => '线路';
+
+  @override
+  String get addServer => '添加服务器';
+
+  @override
+  String get addLine => '添加线路';
+
+  @override
+  String get deleteLine => '删除线路';
 
   @override
   String get switchServer => '切换服务器';

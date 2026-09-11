@@ -2,32 +2,130 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
+class ServerLine {
+  const ServerLine({required this.id, required this.address, this.userAgent});
+
+  final String id;
+  final String address;
+  final String? userAgent;
+
+  String? get normalizedUserAgent {
+    final value = userAgent?.trim();
+    if (value == null || value.isEmpty) {
+      return null;
+    }
+    return value;
+  }
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'address': address,
+    if (normalizedUserAgent != null) 'userAgent': normalizedUserAgent,
+  };
+
+  factory ServerLine.fromJson(Map<String, dynamic> json) {
+    final id = json['id']?.toString() ?? '';
+    final address =
+        json['address']?.toString() ?? json['baseUrl']?.toString() ?? '';
+    return ServerLine(
+      id: id.isNotEmpty ? id : 'line-$address',
+      address: address,
+      userAgent: json['userAgent']?.toString(),
+    );
+  }
+
+  ServerLine copyWith({String? id, String? address, String? userAgent}) {
+    return ServerLine(
+      id: id ?? this.id,
+      address: address ?? this.address,
+      userAgent: userAgent ?? this.userAgent,
+    );
+  }
+}
+
 class SavedServer {
   const SavedServer({
     required this.id,
     required this.name,
-    required this.baseUrl,
     required this.username,
+    required this.lines,
+    this.activeLineId,
   });
 
   final String id;
   final String name;
-  final String baseUrl;
   final String username;
+  final List<ServerLine> lines;
+  final String? activeLineId;
+
+  ServerLine? get activeLine {
+    if (lines.isEmpty) {
+      return null;
+    }
+    if (activeLineId != null && activeLineId!.isNotEmpty) {
+      for (final line in lines) {
+        if (line.id == activeLineId) {
+          return line;
+        }
+      }
+    }
+    return lines.first;
+  }
+
+  String get baseUrl => activeLine?.address ?? '';
 
   Map<String, dynamic> toJson() => {
     'id': id,
     'name': name,
-    'baseUrl': baseUrl,
     'username': username,
+    'activeLineId': activeLineId,
+    'lines': lines.map((line) => line.toJson()).toList(),
   };
 
   factory SavedServer.fromJson(Map<String, dynamic> json) {
+    final lines = <ServerLine>[];
+    final rawLines = json['lines'];
+    if (rawLines is List) {
+      for (final item in rawLines) {
+        if (item is Map) {
+          final line = ServerLine.fromJson(Map<String, dynamic>.from(item));
+          if (line.address.isNotEmpty) {
+            lines.add(line);
+          }
+        }
+      }
+    }
+    if (lines.isEmpty) {
+      final baseUrl = json['baseUrl']?.toString() ?? '';
+      if (baseUrl.isNotEmpty) {
+        lines.add(ServerLine(id: 'default', address: baseUrl));
+      }
+    }
+    final activeLineId = json['activeLineId']?.toString();
     return SavedServer(
       id: json['id']?.toString() ?? '',
       name: json['name']?.toString() ?? '',
-      baseUrl: json['baseUrl']?.toString() ?? '',
       username: json['username']?.toString() ?? '',
+      lines: lines,
+      activeLineId: (activeLineId != null && activeLineId.isNotEmpty)
+          ? activeLineId
+          : (lines.isNotEmpty ? lines.first.id : null),
+    );
+  }
+
+  SavedServer copyWith({
+    String? id,
+    String? name,
+    String? username,
+    List<ServerLine>? lines,
+    String? activeLineId,
+  }) {
+    return SavedServer(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      username: username ?? this.username,
+      lines: lines ?? this.lines,
+      activeLineId: activeLineId ?? this.activeLineId,
     );
   }
 }
@@ -84,7 +182,8 @@ class FileServerListStore implements ServerListStore {
             final server = SavedServer.fromJson(
               Map<String, dynamic>.from(item),
             );
-            if (server.id.isNotEmpty && server.baseUrl.isNotEmpty) {
+            if (server.id.isNotEmpty &&
+                server.lines.any((line) => line.address.isNotEmpty)) {
               servers.add(server);
             }
           }
@@ -140,4 +239,10 @@ String generateDeviceId() {
       .join();
   return '${hex.substring(0, 8)}-${hex.substring(8, 12)}-'
       '${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20)}';
+}
+
+String generateLineId() {
+  final random = Random.secure();
+  final bytes = List<int>.generate(8, (_) => random.nextInt(256));
+  return bytes.map((byte) => byte.toRadixString(16).padLeft(2, '0')).join();
 }

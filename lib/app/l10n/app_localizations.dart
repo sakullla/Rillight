@@ -142,6 +142,18 @@ abstract class AppLocalizations {
   /// **'密码'**
   String get password;
 
+  /// Optional HTTP User-Agent for a server line.
+  ///
+  /// In zh, this message translates to:
+  /// **'User-Agent'**
+  String get userAgent;
+
+  /// Hint that a line User-Agent is optional.
+  ///
+  /// In zh, this message translates to:
+  /// **'可选，留空则使用默认'**
+  String get userAgentHint;
+
   /// Submit action to connect and sign in.
   ///
   /// In zh, this message translates to:
@@ -165,6 +177,30 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'已保存的服务器'**
   String get savedServers;
+
+  /// Heading for the list of access lines on a saved server.
+  ///
+  /// In zh, this message translates to:
+  /// **'线路'**
+  String get lines;
+
+  /// Action to start adding another Emby server.
+  ///
+  /// In zh, this message translates to:
+  /// **'添加服务器'**
+  String get addServer;
+
+  /// Action to add another access line to the selected server.
+  ///
+  /// In zh, this message translates to:
+  /// **'添加线路'**
+  String get addLine;
+
+  /// Action to delete the selected extra access line.
+  ///
+  /// In zh, this message translates to:
+  /// **'删除线路'**
+  String get deleteLine;
 
   /// Tooltip for the signed-in server menu.
   ///

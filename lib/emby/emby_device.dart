@@ -11,6 +11,8 @@ class EmbyDeviceInfo {
   final String deviceId;
   final String version;
 
+  String get defaultUserAgent => 'Rillight/$version';
+
   String authorizationHeader({String? userId, String? token}) {
     final parts = <String>[
       'MediaBrowser Client="${_headerValue(clientName)}"',
@@ -38,4 +40,16 @@ String _headerValue(String value) {
   }
   final trimmed = ascii.toString().trim();
   return trimmed.isEmpty ? 'Rillight' : trimmed;
+}
+
+String? normalizeUserAgent(String? value) {
+  final trimmed = value?.trim();
+  if (trimmed == null || trimmed.isEmpty) {
+    return null;
+  }
+  return trimmed;
+}
+
+String resolveUserAgent(String? custom, EmbyDeviceInfo device) {
+  return normalizeUserAgent(custom) ?? device.defaultUserAgent;
 }

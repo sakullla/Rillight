@@ -31,6 +31,13 @@ Future<void> _enter(
   await tester.enterText(find.byKey(ConnectFormKeys.password), password);
 }
 
+Future<void> _tapVisible(WidgetTester tester, Finder finder) async {
+  await tester.ensureVisible(finder);
+  await tester.pumpAndSettle();
+  await tester.tap(finder);
+  await tester.pumpAndSettle();
+}
+
 void main() {
   late FakeEmbyServer server;
   late FakeEmbyAdapter adapter;
@@ -191,7 +198,10 @@ void main() {
       expect(find.text('灯川测试'), findsOneWidget);
 
       await tester.enterText(find.byKey(ConnectFormKeys.address), '');
-      await tester.tap(find.byKey(Key('saved-server-${server.serverId}')));
+      await _tapVisible(
+        tester,
+        find.byKey(Key('saved-server-${server.serverId}')),
+      );
       await tester.pumpAndSettle();
 
       expect(
@@ -236,4 +246,104 @@ void main() {
     expect(find.text('会话已失效，请重新登录'), findsOneWidget);
     expect(find.byType(SessionActions), findsOneWidget);
   });
+
+  testWidgets('two lines can be selected and a failed line stays on connect', (
+    tester,
+  ) async {
+    final wan = FakeEmbyServer(
+      serverId: server.serverId,
+      serverName: server.serverName,
+      baseUrl: Uri.parse('http://emby-wan.test:8096'),
+    );
+    adapter.add(wan);
+    final auth = controller();
+    await tester.runAsync(() async {
+      await auth.connect(
+        address: server.baseUrl.toString(),
+        username: 'alice',
+        password: 'correct-horse',
+      );
+      await auth.connect(
+        address: wan.baseUrl.toString(),
+        username: 'alice',
+        password: 'correct-horse',
+      );
+      await auth.logout();
+      await auth.selectSavedServer(server.serverId);
+    });
+    expect(auth.savedServers.single.lines, hasLength(2));
+
+    await tester.pumpWidget(RillightApp(auth: auth));
+    await tester.pumpAndSettle();
+
+    final lanLine = auth.savedServers.single.lines.firstWhere(
+      (line) => line.address == server.baseUrl.toString(),
+    );
+    final wanLine = auth.savedServers.single.lines.firstWhere(
+      (line) => line.address == wan.baseUrl.toString(),
+    );
+    expect(find.byKey(Key('saved-line-${lanLine.id}')), findsOneWidget);
+    expect(find.byKey(Key('saved-line-${wanLine.id}')), findsOneWidget);
+    await _tapVisible(tester, find.byKey(Key('saved-line-${wanLine.id}')));
+    expect(
+      tester
+          .widget<TextField>(find.byKey(ConnectFormKeys.address))
+          .controller
+          ?.text,
+      wan.baseUrl.toString(),
+    );
+
+    await _tapVisible(tester, find.byKey(Key('saved-line-${lanLine.id}')));
+    expect(
+      tester
+          .widget<TextField>(find.byKey(ConnectFormKeys.address))
+          .controller
+          ?.text,
+      server.baseUrl.toString(),
+    );
+
+    server.publicInfoStatus = 403;
+    server.publicInfoRawBody = '该线路已被禁用';
+    await tester.enterText(
+      find.byKey(ConnectFormKeys.password),
+      'correct-horse',
+    );
+    await tester.tap(find.byKey(ConnectFormKeys.submit));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(ConnectFormKeys.submit), findsOneWidget);
+    expect(find.byType(AppErrorView), findsOneWidget);
+    expect(find.text('HTTP 403: 该线路已被禁用'), findsOneWidget);
+    expect(find.text('连接失败'), findsNothing);
+    expect(auth.isLoggedIn, isFalse);
+    expect(auth.client.baseUrl, isNull);
+  });
+
+  testWidgets(
+    'line User-Agent field is sent and does not replace product name',
+    (tester) async {
+      final auth = controller();
+      await tester.pumpWidget(RillightApp(auth: auth));
+      await tester.pumpAndSettle();
+
+      await _enter(
+        tester,
+        address: server.baseUrl.toString(),
+        username: 'alice',
+        password: 'correct-horse',
+      );
+      await tester.enterText(
+        find.byKey(ConnectFormKeys.userAgent),
+        'CustomUA/1.0',
+      );
+      await tester.tap(find.byKey(ConnectFormKeys.submit));
+      await tester.pumpAndSettle();
+
+      expect(auth.isLoggedIn, isTrue);
+      expect(find.text(kProductName), findsWidgets);
+      expect(find.text('CustomUA/1.0'), findsNothing);
+      expect(server.lastUserAgent, 'CustomUA/1.0');
+      expect(auth.client.sessionHeaders['User-Agent'], 'CustomUA/1.0');
+    },
+  );
 }

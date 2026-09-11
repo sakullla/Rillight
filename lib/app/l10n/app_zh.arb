@@ -32,6 +32,14 @@
   "@password": {
     "description": "Label for the Emby password field."
   },
+  "userAgent": "User-Agent",
+  "@userAgent": {
+    "description": "Optional HTTP User-Agent for a server line."
+  },
+  "userAgentHint": "可选，留空则使用默认",
+  "@userAgentHint": {
+    "description": "Hint that a line User-Agent is optional."
+  },
   "connect": "连接",
   "@connect": {
     "description": "Submit action to connect and sign in."
@@ -47,6 +55,22 @@
   "savedServers": "已保存的服务器",
   "@savedServers": {
     "description": "Heading for the list of saved Emby servers."
+  },
+  "lines": "线路",
+  "@lines": {
+    "description": "Heading for the list of access lines on a saved server."
+  },
+  "addServer": "添加服务器",
+  "@addServer": {
+    "description": "Action to start adding another Emby server."
+  },
+  "addLine": "添加线路",
+  "@addLine": {
+    "description": "Action to add another access line to the selected server."
+  },
+  "deleteLine": "删除线路",
+  "@deleteLine": {
+    "description": "Action to delete the selected extra access line."
   },
   "switchServer": "切换服务器",
   "@switchServer": {
