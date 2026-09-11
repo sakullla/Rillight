@@ -1,11 +1,15 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/routes.dart';
+import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/app_error_view.dart';
+import 'package:rillight/app/widgets/app_hover_card.dart';
+import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/emby/emby_errors.dart';
 import 'package:rillight/emby/emby_models.dart';
@@ -270,7 +274,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     if (_loading) {
-      return const SizedBox.expand();
+      return const _DetailSkeleton();
     }
     final error = _error;
     if (error != null && _item == null) {
@@ -291,144 +295,186 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
       for (final episode in _episodes)
         if (episode.canResume) episode,
     ];
-    return SingleChildScrollView(
-      padding: const EdgeInsets.only(bottom: 32),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _Hero(
-            item: item,
-            runtime: runtime,
-            seasonCount: _seasons.length,
-            nextEpisode: playTarget != null && item.isSeries
-                ? playTarget
-                : null,
-            busyPlayed: _busyPlayed,
-            mediaSourceId: _mediaSourceId,
-            audioStreamIndex: _audioStreamIndex,
-            subtitleStreamIndex: _subtitleStreamIndex,
-            onBack: () {
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final wideCardWidth = MediaShelf.wideCardWidthFor(screenWidth);
+    final posterWidth = MediaShelf.posterWidthFor(screenWidth);
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        SingleChildScrollView(
+          padding: const EdgeInsets.only(bottom: AppSpacing.xxl),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _DetailHero(
+                item: item,
+                runtime: runtime,
+                seasonCount: _seasons.length,
+                nextEpisode: playTarget != null && item.isSeries
+                    ? playTarget
+                    : null,
+                busyPlayed: _busyPlayed,
+                mediaSourceId: _mediaSourceId,
+                audioStreamIndex: _audioStreamIndex,
+                subtitleStreamIndex: _subtitleStreamIndex,
+                onMediaSource: (id) {
+                  setState(() {
+                    _mediaSourceId = id;
+                    _audioStreamIndex = _defaultAudio(item, id);
+                    _subtitleStreamIndex = _defaultSubtitle(item, id);
+                  });
+                },
+                onAudio: (index) => setState(() => _audioStreamIndex = index),
+                onSubtitle: (index) =>
+                    setState(() => _subtitleStreamIndex = index),
+                onPlay: playTarget == null
+                    ? null
+                    : () => _openPlayer(playTarget.id),
+                onPlayedChanged: (value) {
+                  _setPlayed(value);
+                },
+              ),
+              if (item.chapters.isNotEmpty)
+                _ChapterRow(
+                  itemId: item.id,
+                  chapters: item.chapters,
+                  onSelect: (chapter) {
+                    final target = playTarget ?? item;
+                    if (target.isPlayable) {
+                      _openPlayer(
+                        target.id,
+                        startTimeTicks: chapter.startPositionTicks,
+                      );
+                    }
+                  },
+                ),
+              if (item.isSeries) ...[
+                if (continueWatching.isNotEmpty)
+                  MediaShelf(
+                    rowKey: CatalogKeys.resumeRow,
+                    shelfId: '${CatalogKeys.shelfEpisodes}-resume',
+                    title: l10n.resumeRow,
+                    items: continueWatching,
+                    wide: true,
+                    onTap: (episode) =>
+                        context.push(AppRoutes.item(episode.id)),
+                    itemBuilder: (context, episode) {
+                      return EpisodeThumbCard(
+                        item: episode,
+                        width: wideCardWidth,
+                        onTap: () => context.push(AppRoutes.item(episode.id)),
+                      );
+                    },
+                  ),
+                if (_episodes.isNotEmpty)
+                  MediaShelf(
+                    rowKey: CatalogKeys.episodesRow,
+                    shelfId: CatalogKeys.shelfEpisodes,
+                    title: l10n.episodesRow,
+                    items: _episodes,
+                    wide: true,
+                    onTap: (episode) =>
+                        context.push(AppRoutes.item(episode.id)),
+                    onMore: _seasonId == null
+                        ? null
+                        : () => context.push(
+                            AppRoutes.shelfItems(
+                              parentId: _seasonId,
+                              includeItemTypes: 'Episode',
+                              title: l10n.episodesRow,
+                            ),
+                          ),
+                    itemBuilder: (context, episode) {
+                      return EpisodeThumbCard(
+                        item: episode,
+                        width: wideCardWidth,
+                        onTap: () => context.push(AppRoutes.item(episode.id)),
+                      );
+                    },
+                  ),
+                if (_seasons.isNotEmpty)
+                  MediaShelf(
+                    shelfId: 'seasons',
+                    title: l10n.seasons,
+                    items: _seasons,
+                    onTap: (season) => _selectSeason(season.id),
+                    itemBuilder: (context, season) {
+                      return SeasonPosterCard(
+                        item: season,
+                        width: posterWidth,
+                        selected: season.id == _seasonId,
+                        onTap: () => _selectSeason(season.id),
+                      );
+                    },
+                  ),
+              ],
+              if (showSimilar)
+                MediaShelf(
+                  rowKey: CatalogKeys.similarRow,
+                  shelfId: CatalogKeys.shelfSimilar,
+                  title: l10n.similarRow,
+                  items: _similar,
+                  error: _similarError,
+                  onRetry: _load,
+                  onTap: (similar) => context.push(AppRoutes.item(similar.id)),
+                  onMore: () => context.push(
+                    AppRoutes.shelfSimilar(item.id, title: l10n.similarRow),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        // 返回按钮悬浮于整页左上,滚动出 hero 后仍可及。
+        Positioned(
+          top: AppSpacing.md,
+          left: AppSpacing.md,
+          child: _FloatingBackButton(
+            onPressed: () {
               if (context.canPop()) {
                 context.pop();
               } else {
                 context.go(AppRoutes.home);
               }
             },
-            onMediaSource: (id) {
-              setState(() {
-                _mediaSourceId = id;
-                _audioStreamIndex = _defaultAudio(item, id);
-                _subtitleStreamIndex = _defaultSubtitle(item, id);
-              });
-            },
-            onAudio: (index) => setState(() => _audioStreamIndex = index),
-            onSubtitle: (index) => setState(() => _subtitleStreamIndex = index),
-            onPlay: playTarget == null
-                ? null
-                : () => _openPlayer(playTarget.id),
-            onPlayedChanged: (value) {
-              _setPlayed(value);
-            },
           ),
-          if (item.chapters.isNotEmpty)
-            _ChapterRow(
-              itemId: item.id,
-              chapters: item.chapters,
-              onSelect: (chapter) {
-                final target = playTarget ?? item;
-                if (target.isPlayable) {
-                  _openPlayer(
-                    target.id,
-                    startTimeTicks: chapter.startPositionTicks,
-                  );
-                }
-              },
-            ),
-          if (item.isSeries) ...[
-            if (continueWatching.isNotEmpty)
-              MediaShelf(
-                rowKey: CatalogKeys.resumeRow,
-                shelfId: '${CatalogKeys.shelfEpisodes}-resume',
-                title: l10n.resumeRow,
-                items: continueWatching,
-                wide: true,
-                extent: 146,
-                onTap: (episode) => context.push(AppRoutes.item(episode.id)),
-                itemBuilder: (context, episode) {
-                  return EpisodeThumbCard(
-                    item: episode,
-                    onTap: () => context.push(AppRoutes.item(episode.id)),
-                  );
-                },
-              ),
-            if (_episodes.isNotEmpty)
-              MediaShelf(
-                rowKey: CatalogKeys.episodesRow,
-                shelfId: CatalogKeys.shelfEpisodes,
-                title: l10n.episodesRow,
-                items: _episodes,
-                wide: true,
-                extent: 146,
-                onTap: (episode) => context.push(AppRoutes.item(episode.id)),
-                onMore: _seasonId == null
-                    ? null
-                    : () => context.push(
-                        AppRoutes.shelfItems(
-                          parentId: _seasonId,
-                          includeItemTypes: 'Episode',
-                          title: l10n.episodesRow,
-                        ),
-                      ),
-                itemBuilder: (context, episode) {
-                  return EpisodeThumbCard(
-                    item: episode,
-                    onTap: () => context.push(AppRoutes.item(episode.id)),
-                  );
-                },
-              ),
-            if (_seasons.isNotEmpty)
-              MediaShelf(
-                shelfId: 'seasons',
-                title: l10n.seasons,
-                items: _seasons,
-                extent: 228,
-                onTap: (season) => _selectSeason(season.id),
-                itemBuilder: (context, season) {
-                  return SeasonPosterCard(
-                    item: season,
-                    selected: season.id == _seasonId,
-                    onTap: () => _selectSeason(season.id),
-                  );
-                },
-              ),
-          ],
-          if (showSimilar)
-            MediaShelf(
-              rowKey: CatalogKeys.similarRow,
-              shelfId: CatalogKeys.shelfSimilar,
-              title: l10n.similarRow,
-              items: _similar,
-              error: _similarError,
-              onRetry: _load,
-              onTap: (similar) => context.push(AppRoutes.item(similar.id)),
-              onMore: () => context.push(
-                AppRoutes.shelfSimilar(item.id, title: l10n.similarRow),
-              ),
-            ),
-        ],
+        ),
+      ],
+    );
+  }
+}
+
+/// 悬浮圆形返回按钮,与 shelf 翻页按钮同款 scrim 圆形风格。
+class _FloatingBackButton extends StatelessWidget {
+  const _FloatingBackButton({required this.onPressed});
+
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Theme.of(context).colorScheme.scrim.withValues(alpha: 0.55),
+      shape: const CircleBorder(),
+      child: IconButton(
+        key: CatalogKeys.back,
+        tooltip: 'Back',
+        color: Colors.white,
+        onPressed: onPressed,
+        icon: const Icon(Icons.arrow_back),
       ),
     );
   }
 }
 
-class _Hero extends StatelessWidget {
-  const _Hero({
+/// 详情页全宽沉浸式 hero:backdrop 顶到内容区边缘,渐变遮罩上叠
+/// 大标题、元信息行与主操作;高度随内容区宽度比例伸缩并按断点封顶。
+/// 高度不足时简介下沉到 hero 下方正文区,避免挤压主操作。
+class _DetailHero extends StatelessWidget {
+  const _DetailHero({
     required this.item,
     required this.runtime,
     required this.busyPlayed,
     required this.onPlay,
     required this.onPlayedChanged,
-    required this.onBack,
     this.seasonCount = 0,
     this.nextEpisode,
     this.mediaSourceId,
@@ -444,9 +490,261 @@ class _Hero extends StatelessWidget {
   final bool busyPlayed;
   final VoidCallback? onPlay;
   final ValueChanged<bool> onPlayedChanged;
-  final VoidCallback onBack;
   final int seasonCount;
   final EmbyItem? nextEpisode;
+  final String? mediaSourceId;
+  final int? audioStreamIndex;
+  final int? subtitleStreamIndex;
+  final ValueChanged<String>? onMediaSource;
+  final ValueChanged<int>? onAudio;
+  final ValueChanged<int?>? onSubtitle;
+
+  /// hero 高度:内容区宽度 × 0.45,按 [AppBreakpoints] 设上下限。
+  static double heightFor(double width) {
+    final base = width * 0.45;
+    if (width < AppBreakpoints.compact) {
+      return base.clamp(320.0, 420.0);
+    }
+    if (width < AppBreakpoints.large) {
+      return base.clamp(400.0, 560.0);
+    }
+    return base.clamp(520.0, 680.0);
+  }
+
+  /// 高度足够时才把简介放进 hero。
+  static bool showsOverview(double width) => heightFor(width) >= 360;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final theme = Theme.of(context);
+    final scrim = theme.colorScheme.scrim;
+    final surface = theme.colorScheme.surface;
+    final hasOverview =
+        item.overview != null && item.overview!.trim().isNotEmpty;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth;
+        final height = heightFor(width);
+        final compact = width < AppBreakpoints.compact;
+        final overviewInHero = hasOverview && showsOverview(width);
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(
+              height: height,
+              width: double.infinity,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  MediaImage(
+                    item: item,
+                    height: height,
+                    preferBackdrop: true,
+                    maxWidth: 1600,
+                  ),
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.bottomCenter,
+                        end: Alignment.topCenter,
+                        colors: [
+                          scrim.withValues(alpha: 0.9),
+                          scrim.withValues(alpha: 0.4),
+                          scrim.withValues(alpha: 0),
+                        ],
+                        stops: const [0, 0.5, 1],
+                      ),
+                    ),
+                  ),
+                  // 底部融入内容区背景的过渡带。
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.bottomCenter,
+                        end: Alignment.center,
+                        colors: [surface, surface.withValues(alpha: 0)],
+                      ),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                      AppSpacing.xxl,
+                      AppSpacing.xl,
+                      AppSpacing.xxl,
+                      AppSpacing.xl,
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Spacer(),
+                        if (item.isEpisode && item.seriesName != null)
+                          Text(
+                            item.seriesName!,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.titleSmall?.copyWith(
+                              color: Colors.white.withValues(alpha: 0.78),
+                            ),
+                          ),
+                        ConstrainedBox(
+                          constraints: BoxConstraints(
+                            maxWidth: math.min(width * 0.75, 760),
+                          ),
+                          child: Text(
+                            itemTitle(item),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style:
+                                (compact
+                                        ? theme.textTheme.headlineLarge
+                                        : theme.textTheme.displayMedium)
+                                    ?.copyWith(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                          ),
+                        ),
+                        const SizedBox(height: AppSpacing.xs),
+                        _MetaRow(
+                          item: item,
+                          runtime: runtime,
+                          seasonCount: seasonCount,
+                          nextEpisode: nextEpisode,
+                        ),
+                        if (overviewInHero) ...[
+                          const SizedBox(height: AppSpacing.sm),
+                          ConstrainedBox(
+                            constraints: BoxConstraints(
+                              maxWidth: math.min(width * 0.6, 560),
+                            ),
+                            child: Text(
+                              item.overview!,
+                              maxLines: compact ? 2 : 3,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                color: Colors.white.withValues(alpha: 0.86),
+                              ),
+                            ),
+                          ),
+                        ],
+                        if (onPlay != null) ...[
+                          const SizedBox(height: AppSpacing.lg),
+                          FilledButton.icon(
+                            key: PlayerKeys.open,
+                            onPressed: onPlay,
+                            style: FilledButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: AppSpacing.xxl,
+                                vertical: AppSpacing.md,
+                              ),
+                            ),
+                            icon: const Icon(Icons.play_arrow),
+                            label: Text(
+                              item.canResume ? l10n.resumePlay : l10n.play,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (hasOverview && !overviewInHero)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.md,
+                  AppSpacing.md,
+                  AppSpacing.md,
+                  0,
+                ),
+                child: Text(
+                  item.overview!,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: theme.colorScheme.onSurface.withValues(alpha: 0.78),
+                  ),
+                ),
+              ),
+            _PlaybackSettings(
+              item: item,
+              busyPlayed: busyPlayed,
+              mediaSourceId: mediaSourceId,
+              audioStreamIndex: audioStreamIndex,
+              subtitleStreamIndex: subtitleStreamIndex,
+              onMediaSource: onMediaSource,
+              onAudio: onAudio,
+              onSubtitle: onSubtitle,
+              onPlayedChanged: onPlayedChanged,
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// hero 内的元信息行:集标/下一集、时长、季集数与观看进度。
+class _MetaRow extends StatelessWidget {
+  const _MetaRow({
+    required this.item,
+    required this.runtime,
+    required this.seasonCount,
+    required this.nextEpisode,
+  });
+
+  final EmbyItem item;
+  final String? runtime;
+  final int seasonCount;
+  final EmbyItem? nextEpisode;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final style = Theme.of(context).textTheme.labelLarge?.copyWith(
+      color: Colors.white.withValues(alpha: 0.78),
+    );
+    return Wrap(
+      spacing: AppSpacing.md,
+      runSpacing: AppSpacing.xs,
+      children: [
+        if (item.isEpisode) Text(episodeLabel(item), style: style),
+        if (nextEpisode != null && item.isSeries)
+          Text(episodeLabel(nextEpisode!), style: style),
+        if (runtime != null) Text(runtime!, style: style),
+        if (item.isSeries && seasonCount > 0)
+          Text(l10n.seasonCount(seasonCount), style: style),
+        if (item.childCount != null && item.isSeries)
+          Text(l10n.episodeCount(item.childCount!), style: style),
+        if (item.canResume)
+          Text(
+            l10n.playbackProgress((item.playbackProgress * 100).round()),
+            key: CatalogKeys.resumeProgress,
+            style: style,
+          ),
+      ],
+    );
+  }
+}
+
+/// 播放设置区:版本/音轨/字幕选择与已看开关,卡片化分组。
+/// 下拉取值与联动回调与旧实现一致。
+class _PlaybackSettings extends StatelessWidget {
+  const _PlaybackSettings({
+    required this.item,
+    required this.busyPlayed,
+    required this.onPlayedChanged,
+    this.mediaSourceId,
+    this.audioStreamIndex,
+    this.subtitleStreamIndex,
+    this.onMediaSource,
+    this.onAudio,
+    this.onSubtitle,
+  });
+
+  final EmbyItem item;
+  final bool busyPlayed;
+  final ValueChanged<bool> onPlayedChanged;
   final String? mediaSourceId;
   final int? audioStreamIndex;
   final int? subtitleStreamIndex;
@@ -457,131 +755,22 @@ class _Hero extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final theme = Theme.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SizedBox(
-          height: 420,
-          width: double.infinity,
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              MediaImage(
-                item: item,
-                height: 420,
-                preferBackdrop: true,
-                maxWidth: 1600,
-              ),
-              const DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.bottomCenter,
-                    end: Alignment.center,
-                    colors: [Color(0xF2000000), Color(0x00000000)],
-                  ),
-                ),
-              ),
-              Positioned(
-                top: 8,
-                left: 8,
-                child: IconButton(
-                  key: CatalogKeys.back,
-                  tooltip: 'Back',
-                  color: Colors.white,
-                  onPressed: onBack,
-                  icon: const Icon(Icons.arrow_back),
-                ),
-              ),
-              Positioned(
-                left: 28,
-                right: 28,
-                bottom: 24,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (onPlay != null) ...[
-                      FilledButton.icon(
-                        key: PlayerKeys.open,
-                        onPressed: onPlay,
-                        icon: const Icon(Icons.play_arrow),
-                        label: Text(
-                          item.canResume ? l10n.resumePlay : l10n.play,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                    ],
-                    if (nextEpisode != null && item.isSeries)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 8),
-                        child: Text(
-                          episodeLabel(nextEpisode!),
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: Colors.white70,
-                          ),
-                        ),
-                      ),
-                    Text(
-                      itemTitle(item),
-                      style: theme.textTheme.headlineMedium?.copyWith(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    if (item.isSeries && seasonCount > 0)
-                      Text(
-                        l10n.seasonCount(seasonCount),
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: Colors.white70,
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.md,
+        AppSpacing.lg,
+        AppSpacing.md,
+        AppSpacing.lg,
+      ),
+      child: Card(
+        child: Padding(
+          padding: const EdgeInsets.all(AppSpacing.md),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (item.isEpisode) ...[
-                Text(episodeLabel(item)),
-                if (item.seriesName != null)
-                  Text(item.seriesName!, style: theme.textTheme.titleMedium),
-                const SizedBox(height: 8),
-              ],
-              Wrap(
-                spacing: 16,
-                runSpacing: 8,
-                children: [
-                  if (runtime != null) Text(runtime!),
-                  if (item.childCount != null && item.isSeries)
-                    Text(l10n.episodeCount(item.childCount!)),
-                  if (item.canResume)
-                    Text(
-                      l10n.playbackProgress(
-                        (item.playbackProgress * 100).round(),
-                      ),
-                      key: CatalogKeys.resumeProgress,
-                    ),
-                ],
-              ),
-              if (item.overview != null &&
-                  item.overview!.trim().isNotEmpty) ...[
-                const SizedBox(height: 12),
-                Text(
-                  item.overview!,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: theme.colorScheme.onSurface.withValues(alpha: 0.78),
-                  ),
-                ),
-              ],
-              const SizedBox(height: 16),
               if (item.mediaSources.length > 1)
                 Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
+                  padding: const EdgeInsets.only(bottom: AppSpacing.xs),
                   child: DropdownButtonFormField<String>(
                     key: ValueKey(
                       'source-${mediaSourceId ?? item.mediaSources.first.id}',
@@ -607,7 +796,7 @@ class _Hero extends StatelessWidget {
                 ),
               if (_audioChoices(item, mediaSourceId).length > 1)
                 Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
+                  padding: const EdgeInsets.only(bottom: AppSpacing.xs),
                   child: DropdownButtonFormField<int>(
                     key: ValueKey('audio-$mediaSourceId-$audioStreamIndex'),
                     decoration: InputDecoration(labelText: l10n.audioTrack),
@@ -628,7 +817,7 @@ class _Hero extends StatelessWidget {
                 ),
               if (_subtitleChoices(item, mediaSourceId).isNotEmpty)
                 Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
+                  padding: const EdgeInsets.only(bottom: AppSpacing.xs),
                   child: DropdownButtonFormField<int?>(
                     decoration: InputDecoration(labelText: l10n.subtitleTrack),
                     initialValue: subtitleStreamIndex,
@@ -661,7 +850,54 @@ class _Hero extends StatelessWidget {
             ],
           ),
         ),
-      ],
+      ),
+    );
+  }
+}
+
+/// 详情页加载骨架:hero 色块 + 文本行 + 一行 shelf 占位。
+class _DetailSkeleton extends StatelessWidget {
+  const _DetailSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth;
+        return SingleChildScrollView(
+          physics: const NeverScrollableScrollPhysics(),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SkeletonBlock(
+                width: double.infinity,
+                height: _DetailHero.heightFor(width),
+                borderRadius: BorderRadius.zero,
+              ),
+              Padding(
+                padding: const EdgeInsets.all(AppSpacing.md),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SkeletonBlock(width: width * 0.35, height: AppSpacing.lg),
+                    const SizedBox(height: AppSpacing.xs),
+                    SkeletonBlock(width: width * 0.6, height: AppSpacing.md),
+                    const SizedBox(height: AppSpacing.xs),
+                    SkeletonBlock(width: width * 0.55, height: AppSpacing.md),
+                  ],
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+                child: SkeletonShelfRow(
+                  posterWidth: MediaShelf.wideCardWidthFor(width),
+                  posterAspectRatio: 16 / 9,
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }
@@ -709,29 +945,37 @@ class _ChapterRow extends StatelessWidget {
   final List<ItemChapter> chapters;
   final ValueChanged<ItemChapter> onSelect;
 
+  static const double _cardWidth = 168;
+  static const double _imageHeight = 94;
+
+  // 行高:缩略图 + 间距 + 两行文字(标题/时间码)。
+  static const double _rowHeight =
+      _imageHeight + AppSpacing.xs + AppSpacing.xxxl;
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     return Padding(
-      padding: const EdgeInsets.only(top: 8, bottom: 8),
+      padding: const EdgeInsets.only(bottom: AppSpacing.lg),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
             child: Text(
               l10n.chapters,
               style: Theme.of(context).textTheme.titleLarge,
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: AppSpacing.sm),
           SizedBox(
-            height: 148,
+            height: _rowHeight,
             child: ListView.separated(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
               scrollDirection: Axis.horizontal,
               itemCount: chapters.length,
-              separatorBuilder: (context, index) => const SizedBox(width: 12),
+              separatorBuilder: (context, index) =>
+                  const SizedBox(width: AppSpacing.sm),
               itemBuilder: (context, index) {
                 final chapter = chapters[index];
                 return _ChapterCard(
@@ -764,24 +1008,25 @@ class _ChapterCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const width = 168.0;
-    const height = 94.0;
+    const width = _ChapterRow._cardWidth;
+    const height = _ChapterRow._imageHeight;
+    final colorScheme = Theme.of(context).colorScheme;
     return SizedBox(
       width: width,
-      child: InkWell(
-        key: CatalogKeys.chapter(index),
+      child: AppHoverCard(
+        inkKey: CatalogKeys.chapter(index),
         onTap: onTap,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(AppRadii.sm),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             ClipRRect(
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(AppRadii.sm),
               child: SizedBox(
                 width: width,
                 height: height,
                 child: ColoredBox(
-                  color: const Color(0xFF2A2A2A),
+                  color: colorScheme.surfaceContainerHigh,
                   child: _ChapterImage(
                     itemId: itemId,
                     index: index,
@@ -790,7 +1035,7 @@ class _ChapterCard extends StatelessWidget {
                 ),
               ),
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: AppSpacing.xs),
             Text(
               chapter.name.isEmpty ? 'Chapter ${index + 1}' : chapter.name,
               maxLines: 1,
@@ -800,9 +1045,7 @@ class _ChapterCard extends StatelessWidget {
             Text(
               chapterClock(chapter.startPositionTicks),
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: Theme.of(
-                  context,
-                ).colorScheme.onSurface.withValues(alpha: 0.6),
+                color: colorScheme.onSurface.withValues(alpha: 0.6),
               ),
             ),
           ],
@@ -812,6 +1055,8 @@ class _ChapterCard extends StatelessWidget {
   }
 }
 
+/// 章节缩略图:数据通道保持 client.getChapterImage + FutureBuilder 不变,
+/// 加载中显示骨架,加载完成淡入,失败/空数据回退占位图标。
 class _ChapterImage extends StatefulWidget {
   const _ChapterImage({required this.itemId, required this.index, this.tag});
 
@@ -854,12 +1099,35 @@ class _ChapterImageState extends State<_ChapterImage> {
       future: _future,
       builder: (context, snapshot) {
         final bytes = snapshot.data;
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const SkeletonBlock(borderRadius: BorderRadius.zero);
+        }
         if (bytes == null || bytes.isEmpty) {
-          return const Center(
-            child: Icon(Icons.menu_book_outlined, color: Colors.white54),
+          return Center(
+            child: Icon(
+              Icons.menu_book_outlined,
+              color: Theme.of(
+                context,
+              ).colorScheme.onSurface.withValues(alpha: 0.6),
+            ),
           );
         }
-        return Image.memory(bytes, fit: BoxFit.cover);
+        return Image.memory(
+          bytes,
+          fit: BoxFit.cover,
+          gaplessPlayback: true,
+          frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+            if (wasSynchronouslyLoaded) {
+              return child;
+            }
+            return AnimatedOpacity(
+              opacity: frame == null ? 0 : 1,
+              duration: AppMotion.normal,
+              curve: AppMotion.standard,
+              child: child,
+            );
+          },
+        );
       },
     );
   }
