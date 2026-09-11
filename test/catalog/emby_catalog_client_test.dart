@@ -103,6 +103,41 @@ void main() {
     expect(item.userData.played, isTrue);
   });
 
+  test('getItems SortBy DateCreated and SortName change order', () async {
+    final byDate = await client.getItems(
+      parentId: 'view-movies',
+      sortBy: 'DateCreated',
+      sortOrder: 'Descending',
+    );
+    expect(byDate.first.id, 'movie-up');
+    final byName = await client.getItems(
+      parentId: 'view-movies',
+      sortBy: 'SortName',
+      sortOrder: 'Ascending',
+    );
+    expect(byName.first.id, 'movie-inception');
+    expect(
+      server.requests.any(
+        (request) =>
+            request.contains('SortBy=DateCreated') &&
+            request.contains('SortOrder=Descending'),
+      ),
+      isTrue,
+    );
+  });
+
+  test('similar items exclude the source and hit Items/Similar', () async {
+    final items = await client.getSimilar('movie-inception');
+    expect(items, isNotEmpty);
+    expect(items.map((item) => item.id), isNot(contains('movie-inception')));
+    expect(
+      server.requests.any(
+        (request) => request.contains('/Items/movie-inception/Similar'),
+      ),
+      isTrue,
+    );
+  });
+
   test('views and library items stay on user paths', () async {
     final views = await client.getViews();
     expect(

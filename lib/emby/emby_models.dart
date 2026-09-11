@@ -151,6 +151,7 @@ class EmbyItem {
     this.indexNumber,
     this.parentIndexNumber,
     this.primaryImageTag,
+    this.communityRating,
     this.userData = const EmbyUserData(),
   });
 
@@ -169,6 +170,7 @@ class EmbyItem {
   final int? indexNumber;
   final int? parentIndexNumber;
   final String? primaryImageTag;
+  final double? communityRating;
   final EmbyUserData userData;
 
   bool get isMovie => type == 'Movie';
@@ -256,6 +258,7 @@ class EmbyItem {
       indexNumber: _asInt(json['IndexNumber']),
       parentIndexNumber: _asInt(json['ParentIndexNumber']),
       primaryImageTag: primaryTag,
+      communityRating: _asDouble(json['CommunityRating']),
       userData: EmbyUserData.fromJson(json['UserData']),
     );
   }
@@ -277,6 +280,7 @@ class EmbyItem {
       indexNumber: indexNumber,
       parentIndexNumber: parentIndexNumber,
       primaryImageTag: primaryImageTag,
+      communityRating: communityRating,
       userData: userData ?? this.userData,
     );
   }

@@ -8,6 +8,7 @@ import 'package:rillight/home/catalog_shell.dart';
 import 'package:rillight/home/home_page.dart';
 import 'package:rillight/library/item_detail_page.dart';
 import 'package:rillight/library/library_page.dart';
+import 'package:rillight/library/shelf_grid_page.dart';
 import 'package:rillight/player/player_page.dart';
 import 'package:rillight/search/search_action.dart';
 import 'package:rillight/search/search_page.dart';
@@ -57,6 +58,10 @@ GoRouter createAppRouter({required AuthController auth}) {
             path: '/library/:viewId',
             builder: (context, state) =>
                 LibraryPage(viewId: state.pathParameters['viewId'] ?? ''),
+          ),
+          GoRoute(
+            path: '/shelf/:source',
+            builder: (context, state) => ShelfGridPage.fromState(state),
           ),
           GoRoute(
             path: '/item/:itemId',

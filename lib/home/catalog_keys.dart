@@ -12,9 +12,25 @@ abstract final class CatalogKeys {
   static const playedToggle = Key('catalog-played-toggle');
   static const resumeProgress = Key('catalog-resume-progress');
   static const back = Key('catalog-back');
+  static const similarRow = Key('catalog-row-similar');
+  static const episodesRow = Key('catalog-row-episodes');
+  static const sortBy = Key('catalog-sort-by');
+
+  static const shelfResume = 'resume';
+  static const shelfNextUp = 'nextup';
+  static const shelfLatestMovies = 'latest-movies';
+  static const shelfLatestSeries = 'latest-series';
+  static const shelfSimilar = 'similar';
+  static const shelfEpisodes = 'episodes';
 
   static Key item(String id) => Key('catalog-item-$id');
   static Key library(String id) => Key('catalog-library-$id');
   static Key season(String id) => Key('catalog-season-$id');
   static Key episode(String id) => Key('catalog-episode-$id');
+  static Key shelfMore(String shelfId) => Key('catalog-more-$shelfId');
+  static Key shelfScrollLeft(String shelfId) =>
+      Key('catalog-scroll-left-$shelfId');
+  static Key shelfScrollRight(String shelfId) =>
+      Key('catalog-scroll-right-$shelfId');
+  static Key sortOption(String sortBy) => Key('catalog-sort-$sortBy');
 }

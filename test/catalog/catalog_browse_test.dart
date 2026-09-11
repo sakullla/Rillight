@@ -9,6 +9,7 @@ import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/home/catalog_keys.dart';
+import 'package:rillight/library/poster_card.dart';
 
 import '../emby/fake_emby_server.dart';
 
@@ -69,6 +70,23 @@ void main() {
       expect(find.text('飞屋环游记'), findsWidgets);
       expect(find.text('最近添加的剧集'), findsOneWidget);
       expect(find.text('老友记'), findsWidgets);
+      expect(
+        find.byKey(CatalogKeys.shelfMore(CatalogKeys.shelfResume)),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(CatalogKeys.shelfMore(CatalogKeys.shelfNextUp)),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(CatalogKeys.shelfMore(CatalogKeys.shelfLatestMovies)),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(CatalogKeys.shelfMore(CatalogKeys.shelfLatestSeries)),
+        findsOneWidget,
+      );
+      expect(find.text('更多'), findsNWidgets(4));
       await tester.tap(find.byKey(CatalogKeys.librariesMenu));
       await tester.pumpAndSettle();
       expect(find.text('音乐'), findsNothing);
@@ -224,4 +242,146 @@ void main() {
       findsOneWidget,
     );
   });
+
+  testWidgets('more page and movie library change order when SortBy changes', (
+    tester,
+  ) async {
+    await pumpLoggedIn(tester);
+    await _openLatestMoviesMore(tester);
+
+    expect(find.text('最近添加的电影'), findsWidgets);
+    expect(_posterNames(tester).first, '飞屋环游记');
+
+    await tester.tap(find.byKey(CatalogKeys.sortBy));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(CatalogKeys.sortOption('SortName')));
+    await tester.pumpAndSettle();
+    expect(_posterNames(tester).first, 'Inception');
+    expect(
+      server.requests.any(
+        (request) =>
+            request.contains('SortBy=SortName') &&
+            request.contains('SortOrder=Ascending'),
+      ),
+      isTrue,
+    );
+
+    await tester.tap(find.text('灯川 Rillight').first);
+    await tester.pumpAndSettle();
+    await openLibrary(tester, 'view-movies');
+    expect(_posterNames(tester).first, '飞屋环游记');
+    await tester.tap(find.byKey(CatalogKeys.sortBy));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(CatalogKeys.sortOption('SortName')));
+    await tester.pumpAndSettle();
+    expect(_posterNames(tester).first, 'Inception');
+  });
+
+  testWidgets(
+    'changing sort shows the server failure instead of the old order',
+    (tester) async {
+      await pumpLoggedIn(tester);
+      await _openLatestMoviesMore(tester);
+      expect(_posterNames(tester).first, '飞屋环游记');
+
+      server.itemsStatus = 500;
+      await tester.tap(find.byKey(CatalogKeys.sortBy));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(CatalogKeys.sortOption('SortName')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('HTTP 500: items failed'), findsOneWidget);
+      expect(find.text('飞屋环游记'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'overflowing shelf reveals hidden posters with the right control',
+    (tester) async {
+      tester.view.physicalSize = const Size(320, 900);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      for (var i = 0; i < 8; i++) {
+        server.items.add(
+          FakeEmbyItem(
+            id: 'movie-extra-$i',
+            name: 'Extra $i',
+            type: 'Movie',
+            parentId: 'view-movies',
+            dateCreated: DateTime.utc(2000, 1, i + 1),
+          ),
+        );
+      }
+      server.items.add(
+        FakeEmbyItem(
+          id: 'movie-shelf-tail',
+          name: 'ShelfTail',
+          type: 'Movie',
+          parentId: 'view-movies',
+          dateCreated: DateTime.utc(1999, 1, 1),
+        ),
+      );
+
+      await pumpLoggedIn(tester);
+      expect(
+        find.byKey(CatalogKeys.shelfScrollRight(CatalogKeys.shelfLatestMovies)),
+        findsOneWidget,
+      );
+      expect(find.text('ShelfTail'), findsNothing);
+
+      var taps = 0;
+      while (find.text('ShelfTail').evaluate().isEmpty && taps < 16) {
+        await tester.tap(
+          find.byKey(
+            CatalogKeys.shelfScrollRight(CatalogKeys.shelfLatestMovies),
+          ),
+        );
+        await tester.pumpAndSettle();
+        taps++;
+      }
+      expect(find.text('ShelfTail'), findsOneWidget);
+    },
+  );
+
+  testWidgets('detail similar row appears only when the API returns items', (
+    tester,
+  ) async {
+    await pumpLoggedIn(tester);
+    await tester.tap(find.byKey(CatalogKeys.item('movie-inception')).first);
+    await tester.pumpAndSettle();
+    expect(find.byKey(CatalogKeys.similarRow), findsOneWidget);
+    expect(find.text('更多类似'), findsOneWidget);
+    expect(find.byKey(CatalogKeys.item('movie-up')), findsWidgets);
+
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    server.similarEmpty = true;
+    final up = find.byKey(CatalogKeys.item('movie-up')).first;
+    await tester.ensureVisible(up);
+    await tester.tap(up);
+    await tester.pumpAndSettle();
+    expect(find.text('飞屋环游记 (2009)'), findsOneWidget);
+    expect(find.byKey(CatalogKeys.similarRow), findsNothing);
+  });
+}
+
+Future<void> _openLatestMoviesMore(WidgetTester tester) async {
+  final more = find.byKey(CatalogKeys.shelfMore(CatalogKeys.shelfLatestMovies));
+  await tester.ensureVisible(more);
+  await tester.tap(more);
+  await tester.pumpAndSettle();
+}
+
+List<String> _posterNames(WidgetTester tester) {
+  return tester
+      .widgetList<PosterCard>(
+        find.descendant(
+          of: find.byType(CustomScrollView),
+          matching: find.byType(PosterCard),
+        ),
+      )
+      .map((card) => card.item.name)
+      .toList();
 }

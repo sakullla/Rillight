@@ -86,12 +86,17 @@ class FakeEmbyItem {
     this.playedPercentage,
     this.nextUp = false,
     DateTime? dateCreated,
+    DateTime? premiereDate,
+    this.communityRating,
     this.container = 'mkv',
     this.forceTranscode = false,
     this.supportsDirectPlay = true,
     this.supportsDirectStream = true,
     this.mediaStreams = const [],
-  }) : dateCreated = dateCreated ?? DateTime.utc(2024, 1, 1);
+  }) : dateCreated = dateCreated ?? DateTime.utc(2024, 1, 1),
+       premiereDate =
+           premiereDate ??
+           (productionYear != null ? DateTime.utc(productionYear, 1, 1) : null);
 
   final String id;
   String name;
@@ -113,6 +118,8 @@ class FakeEmbyItem {
   double? playedPercentage;
   bool nextUp;
   DateTime dateCreated;
+  DateTime? premiereDate;
+  double? communityRating;
   String container;
   bool forceTranscode;
   bool supportsDirectPlay;
@@ -137,6 +144,8 @@ class FakeEmbyItem {
       if (parentIndexNumber != null) 'ParentIndexNumber': parentIndexNumber,
       if (primaryImageTag != null) 'ImageTags': {'Primary': primaryImageTag},
       'DateCreated': dateCreated.toIso8601String(),
+      if (premiereDate != null) 'PremiereDate': premiereDate!.toIso8601String(),
+      if (communityRating != null) 'CommunityRating': communityRating,
       'UserData': {
         'Played': played,
         'PlaybackPositionTicks': playbackPositionTicks,
@@ -259,6 +268,8 @@ class FakeEmbyServer {
   int? itemsStatus;
   int? searchStatus;
   int? itemStatus;
+  int? similarStatus;
+  bool similarEmpty = false;
   final Set<String> failingImageIds = {'movie-broken'};
 
   final List<String> requests = [];
@@ -578,6 +589,12 @@ class FakeEmbyServer {
         method == 'GET') {
       return _handlePrimaryImage(segments[1]);
     }
+    if (segments.length == 3 &&
+        segments[0] == 'Items' &&
+        segments[2] == 'Similar' &&
+        method == 'GET') {
+      return _handleSimilar(options, segments[1]);
+    }
 
     if (segments.length >= 2 &&
         segments[0] == 'Shows' &&
@@ -586,7 +603,9 @@ class FakeEmbyServer {
       if (nextUpStatus != null) {
         return _json(nextUpStatus!, {'error': 'nextup unavailable'});
       }
-      return _queryResult(items.where((item) => item.nextUp).toList());
+      return _queryResult(
+        _sortAndLimit(items.where((item) => item.nextUp).toList(), options),
+      );
     }
 
     if (segments.length < 3 || segments[0] != 'Users') {
@@ -607,14 +626,17 @@ class FakeEmbyServer {
         return _json(resumeStatus!, {'error': 'resume failed'});
       }
       return _queryResult(
-        items
-            .where(
-              (item) =>
-                  (item.type == 'Movie' || item.type == 'Episode') &&
-                  !item.played &&
-                  item.playbackPositionTicks > 0,
-            )
-            .toList(),
+        _sortAndLimit(
+          items
+              .where(
+                (item) =>
+                    (item.type == 'Movie' || item.type == 'Episode') &&
+                    !item.played &&
+                    item.playbackPositionTicks > 0,
+              )
+              .toList(),
+          options,
+        ),
       );
     }
     if (rest.length == 2 &&
@@ -744,8 +766,6 @@ class FakeEmbyServer {
         .map((value) => value.trim())
         .where((value) => value.isNotEmpty)
         .toSet();
-    final limit = int.tryParse(options.uri.queryParameters['Limit'] ?? '');
-    final sortBy = options.uri.queryParameters['SortBy'];
     var matched = items.where((item) {
       if (searchTerm != null &&
           !item.name.toLowerCase().contains(searchTerm.toLowerCase())) {
@@ -761,17 +781,78 @@ class FakeEmbyServer {
       }
       return true;
     }).toList();
-    if (sortBy == 'IndexNumber') {
-      matched.sort(
-        (a, b) => (a.indexNumber ?? 0).compareTo(b.indexNumber ?? 0),
-      );
-    } else if (sortBy == 'SortName') {
-      matched.sort((a, b) => a.name.compareTo(b.name));
+    return _sortAndLimit(matched, options);
+  }
+
+  List<FakeEmbyItem> _sortAndLimit(
+    List<FakeEmbyItem> matched,
+    RequestOptions options,
+  ) {
+    final sortBy = options.uri.queryParameters['SortBy'];
+    final descending =
+        (options.uri.queryParameters['SortOrder'] ?? '').toLowerCase() ==
+        'descending';
+    if (sortBy != null && sortBy.isNotEmpty) {
+      matched.sort((a, b) {
+        final compared = _compareBy(a, b, sortBy);
+        return descending ? -compared : compared;
+      });
     }
+    final limit = int.tryParse(options.uri.queryParameters['Limit'] ?? '');
     if (limit != null && limit >= 0) {
-      matched = matched.take(limit).toList();
+      return matched.take(limit).toList();
     }
     return matched;
+  }
+
+  int _compareBy(FakeEmbyItem a, FakeEmbyItem b, String sortBy) {
+    switch (sortBy) {
+      case 'DateCreated':
+        return a.dateCreated.compareTo(b.dateCreated);
+      case 'PremiereDate':
+        return _premiereOf(a).compareTo(_premiereOf(b));
+      case 'CommunityRating':
+        return (a.communityRating ?? 0).compareTo(b.communityRating ?? 0);
+      case 'IndexNumber':
+        final season = (a.parentIndexNumber ?? 0).compareTo(
+          b.parentIndexNumber ?? 0,
+        );
+        if (season != 0) {
+          return season;
+        }
+        return (a.indexNumber ?? 0).compareTo(b.indexNumber ?? 0);
+      case 'SortName':
+        return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+      default:
+        return 0;
+    }
+  }
+
+  DateTime _premiereOf(FakeEmbyItem item) {
+    return item.premiereDate ??
+        DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
+  }
+
+  ResponseBody _handleSimilar(RequestOptions options, String itemId) {
+    if (similarStatus != null) {
+      return _json(similarStatus!, {'error': 'similar failed'});
+    }
+    if (similarEmpty) {
+      return _queryResult(const []);
+    }
+    final item = _itemById(itemId);
+    if (item == null) {
+      return _json(404, {'error': 'not found'});
+    }
+    final similar = items
+        .where(
+          (other) =>
+              other.id != item.id &&
+              other.type == item.type &&
+              (other.type == 'Movie' || other.type == 'Series'),
+        )
+        .toList();
+    return _queryResult(_sortAndLimit(similar, options));
   }
 
   bool _belongsTo(
@@ -971,6 +1052,7 @@ List<FakeEmbyItem> defaultCatalogItems() {
       playedPercentage: 40,
       primaryImageTag: 'tag-inception',
       dateCreated: DateTime.utc(2024, 1, 1),
+      communityRating: 8.8,
       mediaStreams: const [
         FakeMediaStream(
           index: 0,

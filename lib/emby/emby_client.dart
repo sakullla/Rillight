@@ -125,7 +125,8 @@ class EmbyClient {
   }
 
   static const itemFields =
-      'Overview,ProductionYear,RunTimeTicks,ChildCount,SeriesInfo';
+      'Overview,ProductionYear,RunTimeTicks,ChildCount,SeriesInfo,'
+      'DateCreated,PremiereDate,CommunityRating,SortName';
 
   String _requireUserId() {
     final userId = _userId;
@@ -135,7 +136,11 @@ class EmbyClient {
     return userId;
   }
 
-  Future<List<EmbyItem>> getResumeItems({int limit = 24}) {
+  Future<List<EmbyItem>> getResumeItems({
+    int limit = 24,
+    String? sortBy,
+    String? sortOrder,
+  }) {
     return _getItemList(
       '/Users/${_requireUserId()}/Items/Resume',
       queryParameters: {
@@ -143,11 +148,17 @@ class EmbyClient {
         'MediaTypes': 'Video',
         'Fields': itemFields,
         'EnableImageTypes': 'Primary',
+        'SortBy': ?sortBy,
+        'SortOrder': ?sortOrder,
       },
     );
   }
 
-  Future<List<EmbyItem>> getNextUp({int limit = 24}) {
+  Future<List<EmbyItem>> getNextUp({
+    int limit = 24,
+    String? sortBy,
+    String? sortOrder,
+  }) {
     return _getItemList(
       '/Shows/NextUp',
       queryParameters: {
@@ -155,6 +166,8 @@ class EmbyClient {
         'Limit': '$limit',
         'Fields': itemFields,
         'EnableImageTypes': 'Primary',
+        'SortBy': ?sortBy,
+        'SortOrder': ?sortOrder,
       },
     );
   }
@@ -219,6 +232,25 @@ class EmbyClient {
       limit: 50,
       sortBy: 'SortName',
       sortOrder: 'Ascending',
+    );
+  }
+
+  Future<List<EmbyItem>> getSimilar(
+    String itemId, {
+    int? limit,
+    String? sortBy,
+    String? sortOrder,
+  }) {
+    return _getItemList(
+      '/Items/$itemId/Similar',
+      queryParameters: {
+        'UserId': _requireUserId(),
+        if (limit != null) 'Limit': '$limit',
+        'Fields': itemFields,
+        'EnableImageTypes': 'Primary',
+        'SortBy': ?sortBy,
+        'SortOrder': ?sortOrder,
+      },
     );
   }
 

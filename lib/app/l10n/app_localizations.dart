@@ -322,6 +322,66 @@ abstract class AppLocalizations {
   /// **'最近添加的剧集'**
   String get latestSeriesRow;
 
+  /// Opens the full poster wall for a media shelf.
+  ///
+  /// In zh, this message translates to:
+  /// **'更多'**
+  String get more;
+
+  /// Detail shelf title for similar titles when the server returns items.
+  ///
+  /// In zh, this message translates to:
+  /// **'更多类似'**
+  String get similarRow;
+
+  /// Detail shelf title for episodes in the selected season.
+  ///
+  /// In zh, this message translates to:
+  /// **'集'**
+  String get episodesRow;
+
+  /// Label for the poster-wall sort control.
+  ///
+  /// In zh, this message translates to:
+  /// **'排序'**
+  String get sortBy;
+
+  /// Sort poster walls by SortName.
+  ///
+  /// In zh, this message translates to:
+  /// **'名称'**
+  String get sortByName;
+
+  /// Sort poster walls by DateCreated.
+  ///
+  /// In zh, this message translates to:
+  /// **'添加日期'**
+  String get sortByDateCreated;
+
+  /// Sort poster walls by PremiereDate.
+  ///
+  /// In zh, this message translates to:
+  /// **'首映日期'**
+  String get sortByPremiereDate;
+
+  /// Sort poster walls by CommunityRating when items include it.
+  ///
+  /// In zh, this message translates to:
+  /// **'评分'**
+  String get sortByRating;
+
+  /// Tooltip for the shelf control that reveals posters to the left.
+  ///
+  /// In zh, this message translates to:
+  /// **'向左'**
+  String get scrollLeft;
+
+  /// Tooltip for the shelf control that reveals posters to the right.
+  ///
+  /// In zh, this message translates to:
+  /// **'向右'**
+  String get scrollRight;
+
   /// Action to mark an item as played.
   ///
   /// In zh, this message translates to:

@@ -157,6 +157,46 @@
   "@latestSeriesRow": {
     "description": "Home row title for recently added series."
   },
+  "more": "更多",
+  "@more": {
+    "description": "Opens the full poster wall for a media shelf."
+  },
+  "similarRow": "更多类似",
+  "@similarRow": {
+    "description": "Detail shelf title for similar titles when the server returns items."
+  },
+  "episodesRow": "集",
+  "@episodesRow": {
+    "description": "Detail shelf title for episodes in the selected season."
+  },
+  "sortBy": "排序",
+  "@sortBy": {
+    "description": "Label for the poster-wall sort control."
+  },
+  "sortByName": "名称",
+  "@sortByName": {
+    "description": "Sort poster walls by SortName."
+  },
+  "sortByDateCreated": "添加日期",
+  "@sortByDateCreated": {
+    "description": "Sort poster walls by DateCreated."
+  },
+  "sortByPremiereDate": "首映日期",
+  "@sortByPremiereDate": {
+    "description": "Sort poster walls by PremiereDate."
+  },
+  "sortByRating": "评分",
+  "@sortByRating": {
+    "description": "Sort poster walls by CommunityRating when items include it."
+  },
+  "scrollLeft": "向左",
+  "@scrollLeft": {
+    "description": "Tooltip for the shelf control that reveals posters to the left."
+  },
+  "scrollRight": "向右",
+  "@scrollRight": {
+    "description": "Tooltip for the shelf control that reveals posters to the right."
+  },
   "markPlayed": "标记已看",
   "@markPlayed": {
     "description": "Action to mark an item as played."

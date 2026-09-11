@@ -125,6 +125,36 @@ class AppLocalizationsZh extends AppLocalizations {
   String get latestSeriesRow => '最近添加的剧集';
 
   @override
+  String get more => '更多';
+
+  @override
+  String get similarRow => '更多类似';
+
+  @override
+  String get episodesRow => '集';
+
+  @override
+  String get sortBy => '排序';
+
+  @override
+  String get sortByName => '名称';
+
+  @override
+  String get sortByDateCreated => '添加日期';
+
+  @override
+  String get sortByPremiereDate => '首映日期';
+
+  @override
+  String get sortByRating => '评分';
+
+  @override
+  String get scrollLeft => '向左';
+
+  @override
+  String get scrollRight => '向右';
+
+  @override
   String get markPlayed => '标记已看';
 
   @override
