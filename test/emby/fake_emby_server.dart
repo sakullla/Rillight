@@ -17,6 +17,148 @@ class FakeEmbyUser {
   final String userId;
 }
 
+class FakeEmbyItem {
+  FakeEmbyItem({
+    required this.id,
+    required this.name,
+    required this.type,
+    this.collectionType,
+    this.overview,
+    this.productionYear,
+    this.runTimeTicks,
+    this.childCount,
+    this.seriesName,
+    this.seriesId,
+    this.seasonId,
+    this.parentId,
+    this.indexNumber,
+    this.parentIndexNumber,
+    this.primaryImageTag,
+    this.played = false,
+    this.playbackPositionTicks = 0,
+    this.playedPercentage,
+    this.nextUp = false,
+    DateTime? dateCreated,
+  }) : dateCreated = dateCreated ?? DateTime.utc(2024, 1, 1);
+
+  final String id;
+  String name;
+  String type;
+  String? collectionType;
+  String? overview;
+  int? productionYear;
+  int? runTimeTicks;
+  int? childCount;
+  String? seriesName;
+  String? seriesId;
+  String? seasonId;
+  String? parentId;
+  int? indexNumber;
+  int? parentIndexNumber;
+  String? primaryImageTag;
+  bool played;
+  int playbackPositionTicks;
+  double? playedPercentage;
+  bool nextUp;
+  DateTime dateCreated;
+
+  Map<String, dynamic> toJson() {
+    return {
+      'Id': id,
+      'Name': name,
+      'Type': type,
+      if (collectionType != null) 'CollectionType': collectionType,
+      if (overview != null) 'Overview': overview,
+      if (productionYear != null) 'ProductionYear': productionYear,
+      if (runTimeTicks != null) 'RunTimeTicks': runTimeTicks,
+      if (childCount != null) 'ChildCount': childCount,
+      if (seriesName != null) 'SeriesName': seriesName,
+      if (seriesId != null) 'SeriesId': seriesId,
+      if (seasonId != null) 'SeasonId': seasonId,
+      if (parentId != null) 'ParentId': parentId,
+      if (indexNumber != null) 'IndexNumber': indexNumber,
+      if (parentIndexNumber != null) 'ParentIndexNumber': parentIndexNumber,
+      if (primaryImageTag != null) 'ImageTags': {'Primary': primaryImageTag},
+      'DateCreated': dateCreated.toIso8601String(),
+      'UserData': {
+        'Played': played,
+        'PlaybackPositionTicks': playbackPositionTicks,
+        if (playedPercentage != null) 'PlayedPercentage': playedPercentage,
+      },
+    };
+  }
+}
+
+final Uint8List kTinyPng = Uint8List.fromList(const [
+  0x89,
+  0x50,
+  0x4E,
+  0x47,
+  0x0D,
+  0x0A,
+  0x1A,
+  0x0A,
+  0x00,
+  0x00,
+  0x00,
+  0x0D,
+  0x49,
+  0x48,
+  0x44,
+  0x52,
+  0x00,
+  0x00,
+  0x00,
+  0x01,
+  0x00,
+  0x00,
+  0x00,
+  0x01,
+  0x08,
+  0x06,
+  0x00,
+  0x00,
+  0x00,
+  0x1F,
+  0x15,
+  0xC4,
+  0x89,
+  0x00,
+  0x00,
+  0x00,
+  0x0A,
+  0x49,
+  0x44,
+  0x41,
+  0x54,
+  0x78,
+  0x9C,
+  0x63,
+  0x00,
+  0x01,
+  0x00,
+  0x00,
+  0x05,
+  0x00,
+  0x01,
+  0x0D,
+  0x0A,
+  0x2D,
+  0xB4,
+  0x00,
+  0x00,
+  0x00,
+  0x00,
+  0x49,
+  0x45,
+  0x4E,
+  0x44,
+  0xAE,
+  0x42,
+  0x60,
+  0x82,
+]);
+
 class FakeEmbyServer {
   FakeEmbyServer({
     this.serverId = 'server-id-1',
@@ -24,6 +166,8 @@ class FakeEmbyServer {
     this.version = '4.8.0.0',
     Uri? baseUrl,
     List<FakeEmbyUser>? users,
+    List<FakeEmbyItem>? views,
+    List<FakeEmbyItem>? items,
   }) : baseUrl = baseUrl ?? Uri.parse('http://emby.test:8096'),
        users =
            users ??
@@ -33,18 +177,31 @@ class FakeEmbyServer {
                password: 'correct-horse',
                userId: 'user-alice',
              ),
-           ];
+           ],
+       views = views ?? defaultCatalogViews(),
+       items = items ?? defaultCatalogItems();
 
   final List<FakeEmbyUser> users;
   final Uri baseUrl;
   String serverId;
   String serverName;
   String version;
+  List<FakeEmbyItem> views;
+  List<FakeEmbyItem> items;
 
   bool hangPublicInfo = false;
   bool publicInfoHtml = false;
   int? publicInfoStatus;
   bool expireAuthenticatedRequests = false;
+  int? nextUpStatus;
+  int? resumeStatus;
+  int? viewsStatus;
+  int? latestMovieStatus;
+  int? latestEpisodeStatus;
+  int? itemsStatus;
+  int? searchStatus;
+  int? itemStatus;
+  final Set<String> failingImageIds = {'movie-broken'};
 
   final List<String> requests = [];
   final Set<String> issuedTokens = {};
@@ -56,18 +213,19 @@ class FakeEmbyServer {
     Stream<Uint8List>? requestStream,
   ) async {
     final path = options.uri.path;
-    requests.add('${options.method.toUpperCase()} $path');
+    final method = options.method.toUpperCase();
+    final segments = options.uri.pathSegments;
+    final query = options.uri.query;
+    requests.add(query.isEmpty ? '$method $path' : '$method $path?$query');
 
     if (hangPublicInfo && path.endsWith('/System/Info/Public')) {
       await Future<void>.delayed(const Duration(milliseconds: 400));
     }
 
-    if (path.endsWith('/System/Info/Public') &&
-        options.method.toUpperCase() == 'GET') {
+    if (path.endsWith('/System/Info/Public') && method == 'GET') {
       return _handlePublicInfo();
     }
-    if (path.endsWith('/Users/AuthenticateByName') &&
-        options.method.toUpperCase() == 'POST') {
+    if (path.endsWith('/Users/AuthenticateByName') && method == 'POST') {
       return _handleAuthenticate(await _readBody(options, requestStream));
     }
 
@@ -79,15 +237,13 @@ class FakeEmbyServer {
       return _json(401, {'error': 'unauthorized'});
     }
 
-    if (path.endsWith('/Sessions/Logout') &&
-        options.method.toUpperCase() == 'POST') {
+    if (path.endsWith('/Sessions/Logout') && method == 'POST') {
       loggedOutTokens.add(token);
       issuedTokens.remove(token);
       return _json(200, {});
     }
 
-    if (path.endsWith('/System/Info') &&
-        options.method.toUpperCase() == 'GET') {
+    if (path.endsWith('/System/Info') && method == 'GET') {
       return _json(200, {
         'Id': serverId,
         'ServerName': serverName,
@@ -95,7 +251,264 @@ class FakeEmbyServer {
       });
     }
 
+    final catalog = _handleCatalog(options, method, segments);
+    if (catalog != null) {
+      return catalog;
+    }
+
     return _json(404, {'error': 'not found'});
+  }
+
+  ResponseBody? _handleCatalog(
+    RequestOptions options,
+    String method,
+    List<String> segments,
+  ) {
+    if (segments.length >= 3 &&
+        segments[0] == 'Items' &&
+        segments[2] == 'Images' &&
+        segments.length >= 4 &&
+        segments[3] == 'Primary' &&
+        method == 'GET') {
+      return _handlePrimaryImage(segments[1]);
+    }
+
+    if (segments.length >= 2 &&
+        segments[0] == 'Shows' &&
+        segments[1] == 'NextUp' &&
+        method == 'GET') {
+      if (nextUpStatus != null) {
+        return _json(nextUpStatus!, {'error': 'nextup unavailable'});
+      }
+      return _queryResult(items.where((item) => item.nextUp).toList());
+    }
+
+    if (segments.length < 3 || segments[0] != 'Users') {
+      return null;
+    }
+    final rest = segments.sublist(2);
+    if (rest.length == 1 && rest[0] == 'Views' && method == 'GET') {
+      if (viewsStatus != null) {
+        return _json(viewsStatus!, {'error': 'views failed'});
+      }
+      return _queryResult(views);
+    }
+    if (rest.length == 2 &&
+        rest[0] == 'Items' &&
+        rest[1] == 'Resume' &&
+        method == 'GET') {
+      if (resumeStatus != null) {
+        return _json(resumeStatus!, {'error': 'resume failed'});
+      }
+      return _queryResult(
+        items
+            .where(
+              (item) =>
+                  (item.type == 'Movie' || item.type == 'Episode') &&
+                  !item.played &&
+                  item.playbackPositionTicks > 0,
+            )
+            .toList(),
+      );
+    }
+    if (rest.length == 2 &&
+        rest[0] == 'Items' &&
+        rest[1] == 'Latest' &&
+        method == 'GET') {
+      return _handleLatest(options);
+    }
+    if (rest.length == 1 && rest[0] == 'Items' && method == 'GET') {
+      return _handleItems(options);
+    }
+    if (rest.length == 2 && rest[0] == 'Items' && method == 'GET') {
+      if (itemStatus != null) {
+        return _json(itemStatus!, {'error': 'item failed'});
+      }
+      final item = _itemById(rest[1]);
+      if (item == null) {
+        return _json(404, {'error': 'not found'});
+      }
+      return _json(200, item.toJson());
+    }
+    if (rest.length == 2 && rest[0] == 'PlayedItems') {
+      final item = _itemById(rest[1]);
+      if (item == null) {
+        return _json(404, {'error': 'not found'});
+      }
+      if (method == 'POST') {
+        item.played = true;
+        item.playbackPositionTicks = 0;
+        item.playedPercentage = 100;
+        item.nextUp = false;
+        return _json(200, item.toJson()['UserData'] as Map<String, dynamic>);
+      }
+      if (method == 'DELETE') {
+        item.played = false;
+        item.playedPercentage = 0;
+        return _json(200, item.toJson()['UserData'] as Map<String, dynamic>);
+      }
+    }
+    return null;
+  }
+
+  ResponseBody _handlePrimaryImage(String itemId) {
+    if (failingImageIds.contains(itemId)) {
+      return _json(404, {'error': 'image missing'});
+    }
+    final item = _itemById(itemId);
+    if (item == null || item.primaryImageTag == null) {
+      return _json(404, {'error': 'image missing'});
+    }
+    return ResponseBody.fromBytes(
+      kTinyPng,
+      200,
+      headers: {
+        Headers.contentTypeHeader: ['image/png'],
+      },
+    );
+  }
+
+  ResponseBody _handleLatest(RequestOptions options) {
+    final types = options.uri.queryParameters['IncludeItemTypes'] ?? '';
+    final groupItems =
+        (options.uri.queryParameters['GroupItems'] ?? 'true').toLowerCase() !=
+        'false';
+    if (types.contains('Movie') && latestMovieStatus != null) {
+      return _json(latestMovieStatus!, {'error': 'latest movies failed'});
+    }
+    if (types.contains('Episode') && latestEpisodeStatus != null) {
+      return _json(latestEpisodeStatus!, {'error': 'latest series failed'});
+    }
+    final limit =
+        int.tryParse(options.uri.queryParameters['Limit'] ?? '') ?? 24;
+    if (types.contains('Movie')) {
+      final movies = items.where((item) => item.type == 'Movie').toList()
+        ..sort((a, b) => b.dateCreated.compareTo(a.dateCreated));
+      return _json(200, [for (final item in movies.take(limit)) item.toJson()]);
+    }
+    if (types.contains('Episode')) {
+      final episodes = items.where((item) => item.type == 'Episode').toList()
+        ..sort((a, b) => b.dateCreated.compareTo(a.dateCreated));
+      if (!groupItems) {
+        return _json(200, [
+          for (final item in episodes.take(limit)) item.toJson(),
+        ]);
+      }
+      final seen = <String>{};
+      final grouped = <FakeEmbyItem>[];
+      for (final episode in episodes) {
+        final seriesId = episode.seriesId;
+        if (seriesId == null || !seen.add(seriesId)) {
+          continue;
+        }
+        grouped.add(_itemById(seriesId) ?? episode);
+        if (grouped.length >= limit) {
+          break;
+        }
+      }
+      return _json(200, [for (final item in grouped) item.toJson()]);
+    }
+    return _json(200, <Map<String, dynamic>>[]);
+  }
+
+  ResponseBody _handleItems(RequestOptions options) {
+    final search = options.uri.queryParameters['SearchTerm'];
+    if (search != null) {
+      if (searchStatus != null) {
+        return _json(searchStatus!, {'error': 'search failed'});
+      }
+      return _queryResult(_filterItems(options, searchTerm: search));
+    }
+    if (itemsStatus != null) {
+      return _json(itemsStatus!, {'error': 'items failed'});
+    }
+    return _queryResult(_filterItems(options));
+  }
+
+  List<FakeEmbyItem> _filterItems(
+    RequestOptions options, {
+    String? searchTerm,
+  }) {
+    final parentId = options.uri.queryParameters['ParentId'];
+    final recursive =
+        (options.uri.queryParameters['Recursive'] ?? 'false').toLowerCase() ==
+        'true';
+    final typeFilter = (options.uri.queryParameters['IncludeItemTypes'] ?? '')
+        .split(',')
+        .map((value) => value.trim())
+        .where((value) => value.isNotEmpty)
+        .toSet();
+    final limit = int.tryParse(options.uri.queryParameters['Limit'] ?? '');
+    final sortBy = options.uri.queryParameters['SortBy'];
+    var matched = items.where((item) {
+      if (searchTerm != null &&
+          !item.name.toLowerCase().contains(searchTerm.toLowerCase())) {
+        return false;
+      }
+      if (typeFilter.isNotEmpty && !typeFilter.contains(item.type)) {
+        return false;
+      }
+      if (parentId != null && parentId.isNotEmpty) {
+        if (!_belongsTo(item, parentId, recursive: recursive)) {
+          return false;
+        }
+      }
+      return true;
+    }).toList();
+    if (sortBy == 'IndexNumber') {
+      matched.sort(
+        (a, b) => (a.indexNumber ?? 0).compareTo(b.indexNumber ?? 0),
+      );
+    } else if (sortBy == 'SortName') {
+      matched.sort((a, b) => a.name.compareTo(b.name));
+    }
+    if (limit != null && limit >= 0) {
+      matched = matched.take(limit).toList();
+    }
+    return matched;
+  }
+
+  bool _belongsTo(
+    FakeEmbyItem item,
+    String parentId, {
+    required bool recursive,
+  }) {
+    if (item.parentId == parentId) {
+      return true;
+    }
+    if (!recursive) {
+      return false;
+    }
+    var current = item.parentId;
+    final seen = <String>{};
+    while (current != null && seen.add(current)) {
+      if (current == parentId) {
+        return true;
+      }
+      current = _itemById(current)?.parentId;
+    }
+    return false;
+  }
+
+  FakeEmbyItem? _itemById(String id) {
+    for (final item in items) {
+      if (item.id == id) {
+        return item;
+      }
+    }
+    for (final view in views) {
+      if (view.id == id) {
+        return view;
+      }
+    }
+    return null;
+  }
+
+  ResponseBody _queryResult(List<FakeEmbyItem> matched) {
+    return _json(200, {
+      'Items': [for (final item in matched) item.toJson()],
+      'TotalRecordCount': matched.length,
+    });
   }
 
   ResponseBody _handlePublicInfo() {
@@ -189,6 +602,158 @@ class FakeEmbyServer {
       },
     );
   }
+}
+
+List<FakeEmbyItem> defaultCatalogViews() {
+  return [
+    FakeEmbyItem(
+      id: 'view-movies',
+      name: '电影',
+      type: 'CollectionFolder',
+      collectionType: 'movies',
+    ),
+    FakeEmbyItem(
+      id: 'view-tv',
+      name: '剧集',
+      type: 'CollectionFolder',
+      collectionType: 'tvshows',
+    ),
+    FakeEmbyItem(
+      id: 'view-music',
+      name: '音乐',
+      type: 'CollectionFolder',
+      collectionType: 'music',
+    ),
+    FakeEmbyItem(
+      id: 'view-photos',
+      name: '相册',
+      type: 'CollectionFolder',
+      collectionType: 'photos',
+    ),
+    FakeEmbyItem(id: 'view-untyped', name: '未分类影视', type: 'CollectionFolder'),
+    FakeEmbyItem(id: 'view-mixed', name: '混合媒体', type: 'CollectionFolder'),
+  ];
+}
+
+List<FakeEmbyItem> defaultCatalogItems() {
+  const hour = 10000000 * 60 * 60;
+  const minute = 10000000 * 60;
+  return [
+    FakeEmbyItem(
+      id: 'movie-inception',
+      name: 'Inception',
+      type: 'Movie',
+      parentId: 'view-movies',
+      overview: 'A thief who steals corporate secrets through dream-sharing.',
+      productionYear: 2010,
+      runTimeTicks: hour * 2 + minute * 28,
+      playbackPositionTicks: minute * 59,
+      playedPercentage: 40,
+      primaryImageTag: 'tag-inception',
+      dateCreated: DateTime.utc(2024, 1, 1),
+    ),
+    FakeEmbyItem(
+      id: 'movie-up',
+      name: '飞屋环游记',
+      type: 'Movie',
+      parentId: 'view-movies',
+      overview: 'An old man flies his house to Paradise Falls.',
+      productionYear: 2009,
+      runTimeTicks: minute * 96,
+      primaryImageTag: 'tag-up',
+      dateCreated: DateTime.utc(2026, 1, 1),
+    ),
+    FakeEmbyItem(
+      id: 'movie-broken',
+      name: '封面失败片',
+      type: 'Movie',
+      parentId: 'view-movies',
+      productionYear: 2021,
+      primaryImageTag: 'tag-broken',
+      dateCreated: DateTime.utc(2025, 6, 1),
+    ),
+    FakeEmbyItem(
+      id: 'series-friends',
+      name: '老友记',
+      type: 'Series',
+      parentId: 'view-tv',
+      overview: 'Six friends living in New York.',
+      productionYear: 1994,
+      childCount: 2,
+      primaryImageTag: 'tag-friends',
+      dateCreated: DateTime.utc(2024, 5, 1),
+    ),
+    FakeEmbyItem(
+      id: 'season-friends-1',
+      name: '第 1 季',
+      type: 'Season',
+      parentId: 'series-friends',
+      seriesId: 'series-friends',
+      seriesName: '老友记',
+      indexNumber: 1,
+    ),
+    FakeEmbyItem(
+      id: 'episode-friends-s1e1',
+      name: 'The Pilot',
+      type: 'Episode',
+      parentId: 'season-friends-1',
+      seriesId: 'series-friends',
+      seriesName: '老友记',
+      seasonId: 'season-friends-1',
+      indexNumber: 1,
+      parentIndexNumber: 1,
+      played: true,
+      playedPercentage: 100,
+      runTimeTicks: minute * 22,
+      dateCreated: DateTime.utc(2024, 5, 2),
+    ),
+    FakeEmbyItem(
+      id: 'episode-friends-s1e2',
+      name: 'The One with the Sonogram',
+      type: 'Episode',
+      parentId: 'season-friends-1',
+      seriesId: 'series-friends',
+      seriesName: '老友记',
+      seasonId: 'season-friends-1',
+      indexNumber: 2,
+      parentIndexNumber: 1,
+      nextUp: true,
+      runTimeTicks: minute * 22,
+      primaryImageTag: 'tag-e2',
+      dateCreated: DateTime.utc(2026, 2, 1),
+    ),
+    FakeEmbyItem(
+      id: 'album-noise',
+      name: '噪音专辑',
+      type: 'MusicAlbum',
+      parentId: 'view-music',
+    ),
+    FakeEmbyItem(
+      id: 'photo-sunset',
+      name: '日落',
+      type: 'Photo',
+      parentId: 'view-photos',
+    ),
+    FakeEmbyItem(
+      id: 'movie-untyped',
+      name: '未分类型电影',
+      type: 'Movie',
+      parentId: 'view-untyped',
+      productionYear: 2020,
+    ),
+    FakeEmbyItem(
+      id: 'movie-mixed',
+      name: '混合库电影',
+      type: 'Movie',
+      parentId: 'view-mixed',
+    ),
+    FakeEmbyItem(
+      id: 'album-mixed',
+      name: '混合库专辑',
+      type: 'MusicAlbum',
+      parentId: 'view-mixed',
+    ),
+  ];
 }
 
 class FakeEmbyAdapter implements HttpClientAdapter {

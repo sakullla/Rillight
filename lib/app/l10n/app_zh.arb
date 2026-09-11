@@ -92,5 +92,108 @@
   "errorUnknown": "连接失败",
   "@errorUnknown": {
     "description": "Fallback visible failure for unexpected connection errors."
+  },
+  "home": "首页",
+  "@home": {
+    "description": "Navigation label for the signed-in home catalog."
+  },
+  "search": "搜索",
+  "@search": {
+    "description": "Navigation and action label for name search."
+  },
+  "searchHint": "搜索电影或剧集",
+  "@searchHint": {
+    "description": "Placeholder in the catalog search field."
+  },
+  "searchEmptyQuery": "输入片名后搜索",
+  "@searchEmptyQuery": {
+    "description": "Hint shown when search has not been submitted."
+  },
+  "searchNoResults": "没有结果",
+  "@searchNoResults": {
+    "description": "Empty-success copy after a completed search with no hits."
+  },
+  "resumeRow": "继续观看",
+  "@resumeRow": {
+    "description": "Home row title for resumable movies and episodes."
+  },
+  "nextUpRow": "即将播放",
+  "@nextUpRow": {
+    "description": "Home row title for next-up TV episodes."
+  },
+  "latestMoviesRow": "最近添加的电影",
+  "@latestMoviesRow": {
+    "description": "Home row title for recently added movies."
+  },
+  "latestSeriesRow": "最近添加的剧集",
+  "@latestSeriesRow": {
+    "description": "Home row title for recently added series."
+  },
+  "markPlayed": "标记已看",
+  "@markPlayed": {
+    "description": "Action to mark an item as played."
+  },
+  "markUnplayed": "标记未看",
+  "@markUnplayed": {
+    "description": "Action to mark an item as unplayed."
+  },
+  "overview": "简介",
+  "@overview": {
+    "description": "Heading for an item overview."
+  },
+  "seasons": "季",
+  "@seasons": {
+    "description": "Heading for a series season list."
+  },
+  "errorLoadFailed": "加载失败",
+  "@errorLoadFailed": {
+    "description": "Visible failure when a catalog request fails."
+  },
+  "errorSearchFailed": "搜索失败",
+  "@errorSearchFailed": {
+    "description": "Visible failure when search HTTP or parsing fails."
+  },
+  "itemUnavailable": "条目不可用",
+  "@itemUnavailable": {
+    "description": "Visible failure when an item cannot be opened."
+  },
+  "episodeCount": "{count} 集",
+  "@episodeCount": {
+    "description": "Series episode count shown on detail.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "runtimeHoursMinutes": "{hours}小时{minutes}分钟",
+  "@runtimeHoursMinutes": {
+    "description": "Runtime formatted with hours and minutes.",
+    "placeholders": {
+      "hours": {
+        "type": "int"
+      },
+      "minutes": {
+        "type": "int"
+      }
+    }
+  },
+  "runtimeMinutes": "{minutes}分钟",
+  "@runtimeMinutes": {
+    "description": "Runtime formatted in minutes only.",
+    "placeholders": {
+      "minutes": {
+        "type": "int"
+      }
+    }
+  },
+  "playbackProgress": "已看 {percent}%",
+  "@playbackProgress": {
+    "description": "Resume progress label on a catalog item.",
+    "placeholders": {
+      "percent": {
+        "type": "int"
+      }
+    }
   }
 }

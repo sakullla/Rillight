@@ -225,6 +225,126 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'连接失败'**
   String get errorUnknown;
+
+  /// Navigation label for the signed-in home catalog.
+  ///
+  /// In zh, this message translates to:
+  /// **'首页'**
+  String get home;
+
+  /// Navigation and action label for name search.
+  ///
+  /// In zh, this message translates to:
+  /// **'搜索'**
+  String get search;
+
+  /// Placeholder in the catalog search field.
+  ///
+  /// In zh, this message translates to:
+  /// **'搜索电影或剧集'**
+  String get searchHint;
+
+  /// Hint shown when search has not been submitted.
+  ///
+  /// In zh, this message translates to:
+  /// **'输入片名后搜索'**
+  String get searchEmptyQuery;
+
+  /// Empty-success copy after a completed search with no hits.
+  ///
+  /// In zh, this message translates to:
+  /// **'没有结果'**
+  String get searchNoResults;
+
+  /// Home row title for resumable movies and episodes.
+  ///
+  /// In zh, this message translates to:
+  /// **'继续观看'**
+  String get resumeRow;
+
+  /// Home row title for next-up TV episodes.
+  ///
+  /// In zh, this message translates to:
+  /// **'即将播放'**
+  String get nextUpRow;
+
+  /// Home row title for recently added movies.
+  ///
+  /// In zh, this message translates to:
+  /// **'最近添加的电影'**
+  String get latestMoviesRow;
+
+  /// Home row title for recently added series.
+  ///
+  /// In zh, this message translates to:
+  /// **'最近添加的剧集'**
+  String get latestSeriesRow;
+
+  /// Action to mark an item as played.
+  ///
+  /// In zh, this message translates to:
+  /// **'标记已看'**
+  String get markPlayed;
+
+  /// Action to mark an item as unplayed.
+  ///
+  /// In zh, this message translates to:
+  /// **'标记未看'**
+  String get markUnplayed;
+
+  /// Heading for an item overview.
+  ///
+  /// In zh, this message translates to:
+  /// **'简介'**
+  String get overview;
+
+  /// Heading for a series season list.
+  ///
+  /// In zh, this message translates to:
+  /// **'季'**
+  String get seasons;
+
+  /// Visible failure when a catalog request fails.
+  ///
+  /// In zh, this message translates to:
+  /// **'加载失败'**
+  String get errorLoadFailed;
+
+  /// Visible failure when search HTTP or parsing fails.
+  ///
+  /// In zh, this message translates to:
+  /// **'搜索失败'**
+  String get errorSearchFailed;
+
+  /// Visible failure when an item cannot be opened.
+  ///
+  /// In zh, this message translates to:
+  /// **'条目不可用'**
+  String get itemUnavailable;
+
+  /// Series episode count shown on detail.
+  ///
+  /// In zh, this message translates to:
+  /// **'{count} 集'**
+  String episodeCount(int count);
+
+  /// Runtime formatted with hours and minutes.
+  ///
+  /// In zh, this message translates to:
+  /// **'{hours}小时{minutes}分钟'**
+  String runtimeHoursMinutes(int hours, int minutes);
+
+  /// Runtime formatted in minutes only.
+  ///
+  /// In zh, this message translates to:
+  /// **'{minutes}分钟'**
+  String runtimeMinutes(int minutes);
+
+  /// Resume progress label on a catalog item.
+  ///
+  /// In zh, this message translates to:
+  /// **'已看 {percent}%'**
+  String playbackProgress(int percent);
 }
 
 class _AppLocalizationsDelegate

@@ -1,0 +1,218 @@
+import 'package:flutter_test/flutter_test.dart';
+import 'package:rillight/app/app.dart';
+import 'package:rillight/app/widgets/app_error_view.dart';
+import 'package:rillight/app/widgets/poster_placeholder.dart';
+import 'package:rillight/auth/auth_controller.dart';
+import 'package:rillight/auth/credential_store.dart';
+import 'package:rillight/auth/server_list_store.dart';
+import 'package:rillight/emby/emby_client.dart';
+import 'package:rillight/emby/emby_device.dart';
+import 'package:rillight/home/catalog_keys.dart';
+
+import '../emby/fake_emby_server.dart';
+
+const _device = EmbyDeviceInfo(
+  clientName: '灯川 Rillight',
+  deviceName: 'test',
+  deviceId: 'device-catalog-ui',
+  version: '0.1.0',
+);
+
+void main() {
+  late FakeEmbyServer server;
+  late FakeEmbyAdapter adapter;
+
+  setUp(() {
+    server = FakeEmbyServer();
+    adapter = FakeEmbyAdapter([server]);
+  });
+
+  Future<AuthController> pumpLoggedIn(WidgetTester tester) async {
+    final auth = AuthController(
+      client: EmbyClient(device: _device, dio: dioForFakeEmby(adapter)),
+      credentials: MemoryCredentialStore(),
+      servers: MemoryServerListStore(),
+    );
+    await tester.runAsync(() {
+      return auth.connect(
+        address: server.baseUrl.toString(),
+        username: 'alice',
+        password: 'correct-horse',
+      );
+    });
+    expect(auth.isLoggedIn, isTrue);
+    await tester.pumpWidget(RillightApp(auth: auth));
+    await tester.pumpAndSettle();
+    return auth;
+  }
+
+  testWidgets(
+    'home rows show resume progress and hide empty or missing NextUp',
+    (tester) async {
+      await pumpLoggedIn(tester);
+
+      expect(find.text('已连接 灯川测试'), findsOneWidget);
+      expect(find.byKey(CatalogKeys.resumeRow), findsOneWidget);
+      expect(find.text('Inception'), findsWidgets);
+      expect(find.byKey(CatalogKeys.resumeProgress), findsWidgets);
+      expect(find.byKey(CatalogKeys.nextUpRow), findsOneWidget);
+      expect(find.text('最近添加的电影'), findsOneWidget);
+      expect(find.text('飞屋环游记'), findsWidgets);
+      expect(find.text('最近添加的剧集'), findsOneWidget);
+      expect(find.text('老友记'), findsWidgets);
+      expect(find.text('音乐'), findsNothing);
+      expect(find.text('相册'), findsNothing);
+      expect(find.text('混合媒体'), findsNothing);
+      expect(find.text('未分类影视'), findsOneWidget);
+    },
+  );
+
+  testWidgets('empty catalog rows are hidden and NextUp 404 is not faked', (
+    tester,
+  ) async {
+    for (final item in server.items) {
+      item.playbackPositionTicks = 0;
+      item.playedPercentage = null;
+      item.nextUp = false;
+    }
+    server.items.removeWhere(
+      (item) => item.type == 'Movie' || item.type == 'Episode',
+    );
+    server.nextUpStatus = 404;
+    await pumpLoggedIn(tester);
+
+    expect(find.byKey(CatalogKeys.resumeRow), findsNothing);
+    expect(find.byKey(CatalogKeys.nextUpRow), findsNothing);
+    expect(find.byKey(CatalogKeys.latestMoviesRow), findsNothing);
+    expect(find.byKey(CatalogKeys.latestSeriesRow), findsNothing);
+    expect(find.text('The One with the Sonogram'), findsNothing);
+  });
+
+  testWidgets('a failed home row stays visible without hiding the others', (
+    tester,
+  ) async {
+    server.latestMovieStatus = 500;
+    await pumpLoggedIn(tester);
+
+    expect(find.byKey(CatalogKeys.resumeRow), findsOneWidget);
+    expect(find.byKey(CatalogKeys.latestMoviesRow), findsOneWidget);
+    expect(find.text('加载失败'), findsOneWidget);
+    expect(find.text('飞屋环游记'), findsNothing);
+    expect(find.text('Inception'), findsWidgets);
+  });
+
+  testWidgets('library poster wall opens movie and series episode details', (
+    tester,
+  ) async {
+    await pumpLoggedIn(tester);
+
+    await tester.tap(find.byKey(CatalogKeys.library('view-movies')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(CatalogKeys.item('movie-inception')), findsOneWidget);
+    expect(find.byKey(CatalogKeys.item('movie-up')), findsOneWidget);
+
+    await tester.tap(find.byKey(CatalogKeys.item('movie-inception')));
+    await tester.pumpAndSettle();
+    expect(find.text('Inception (2010)'), findsOneWidget);
+    expect(
+      find.text('A thief who steals corporate secrets through dream-sharing.'),
+      findsOneWidget,
+    );
+    expect(find.text('已看 40%'), findsOneWidget);
+
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(CatalogKeys.library('view-tv')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(CatalogKeys.item('series-friends')));
+    await tester.pumpAndSettle();
+    expect(find.text('老友记 (1994)'), findsOneWidget);
+    final episode = find.byKey(CatalogKeys.episode('episode-friends-s1e2'));
+    await tester.ensureVisible(episode);
+    await tester.tap(episode);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('The One with the Sonogram'), findsWidgets);
+  });
+
+  testWidgets('marking played updates continue watching from the server', (
+    tester,
+  ) async {
+    await pumpLoggedIn(tester);
+    expect(find.byKey(CatalogKeys.resumeRow), findsOneWidget);
+
+    await tester.tap(find.byKey(CatalogKeys.item('movie-inception')).first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(CatalogKeys.playedToggle));
+    await tester.pumpAndSettle();
+
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(find.byKey(CatalogKeys.resumeRow), findsNothing);
+    expect(find.byKey(CatalogKeys.item('movie-inception')), findsWidgets);
+  });
+
+  testWidgets('search hits open detail; empty query does not request', (
+    tester,
+  ) async {
+    await pumpLoggedIn(tester);
+    final beforeSearch = server.requests
+        .where((request) => request.contains('SearchTerm='))
+        .length;
+
+    await tester.tap(find.byTooltip('搜索'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(CatalogKeys.searchSubmit));
+    await tester.pumpAndSettle();
+    expect(find.text('输入片名后搜索'), findsOneWidget);
+    expect(find.text('没有结果'), findsNothing);
+    expect(
+      server.requests
+          .where((request) => request.contains('SearchTerm='))
+          .length,
+      beforeSearch,
+    );
+
+    await tester.enterText(find.byKey(CatalogKeys.searchField), 'Inception');
+    await tester.tap(find.byKey(CatalogKeys.searchSubmit));
+    await tester.pumpAndSettle();
+    expect(find.byKey(CatalogKeys.item('movie-inception')), findsOneWidget);
+
+    await tester.tap(find.byKey(CatalogKeys.item('movie-inception')));
+    await tester.pumpAndSettle();
+    expect(find.text('Inception (2010)'), findsOneWidget);
+  });
+
+  testWidgets('search HTTP failure is an error, not empty success', (
+    tester,
+  ) async {
+    server.searchStatus = 500;
+    await pumpLoggedIn(tester);
+    await tester.tap(find.byTooltip('搜索'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(CatalogKeys.searchField), 'Inception');
+    await tester.tap(find.byKey(CatalogKeys.searchSubmit));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(AppErrorView), findsOneWidget);
+    expect(find.text('搜索失败'), findsOneWidget);
+    expect(find.text('没有结果'), findsNothing);
+    expect(find.byKey(CatalogKeys.searchNoResults), findsNothing);
+  });
+
+  testWidgets('a failed cover uses a placeholder and other items still open', (
+    tester,
+  ) async {
+    await pumpLoggedIn(tester);
+
+    expect(find.byType(PosterPlaceholder), findsWidgets);
+    final upCard = find.byKey(CatalogKeys.item('movie-up'));
+    await tester.ensureVisible(upCard);
+    await tester.tap(upCard);
+    await tester.pumpAndSettle();
+    expect(find.text('飞屋环游记 (2009)'), findsOneWidget);
+    expect(
+      find.text('An old man flies his house to Paradise Falls.'),
+      findsOneWidget,
+    );
+  });
+}

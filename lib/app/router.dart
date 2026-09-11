@@ -1,14 +1,17 @@
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/app_shell.dart';
-import 'package:rillight/app/home_page.dart';
+import 'package:rillight/app/routes.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/connect_page.dart';
 import 'package:rillight/auth/session_actions.dart';
+import 'package:rillight/home/catalog_shell.dart';
+import 'package:rillight/home/home_page.dart';
+import 'package:rillight/library/item_detail_page.dart';
+import 'package:rillight/library/library_page.dart';
+import 'package:rillight/search/search_action.dart';
+import 'package:rillight/search/search_page.dart';
 
-abstract final class AppRoutes {
-  static const home = '/';
-  static const connect = '/connect';
-}
+export 'package:rillight/app/routes.dart';
 
 GoRouter createAppRouter({required AuthController auth}) {
   return GoRouter(
@@ -27,8 +30,12 @@ GoRouter createAppRouter({required AuthController auth}) {
     },
     routes: [
       ShellRoute(
-        builder: (context, state, child) =>
-            AppShell(actions: const [SessionActions()], child: child),
+        builder: (context, state, child) {
+          return AppShell(
+            actions: const [SearchAction(), SessionActions()],
+            child: CatalogShell(auth: auth, child: child),
+          );
+        },
         routes: [
           GoRoute(
             path: AppRoutes.connect,
@@ -36,7 +43,21 @@ GoRouter createAppRouter({required AuthController auth}) {
           ),
           GoRoute(
             path: AppRoutes.home,
-            builder: (context, state) => const AppHomePage(),
+            builder: (context, state) => const HomePage(),
+          ),
+          GoRoute(
+            path: '/library/:viewId',
+            builder: (context, state) =>
+                LibraryPage(viewId: state.pathParameters['viewId'] ?? ''),
+          ),
+          GoRoute(
+            path: '/item/:itemId',
+            builder: (context, state) =>
+                ItemDetailPage(itemId: state.pathParameters['itemId'] ?? ''),
+          ),
+          GoRoute(
+            path: AppRoutes.search,
+            builder: (context, state) => const SearchPage(),
           ),
         ],
       ),

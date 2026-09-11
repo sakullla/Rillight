@@ -75,4 +75,72 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get errorUnknown => '连接失败';
+
+  @override
+  String get home => '首页';
+
+  @override
+  String get search => '搜索';
+
+  @override
+  String get searchHint => '搜索电影或剧集';
+
+  @override
+  String get searchEmptyQuery => '输入片名后搜索';
+
+  @override
+  String get searchNoResults => '没有结果';
+
+  @override
+  String get resumeRow => '继续观看';
+
+  @override
+  String get nextUpRow => '即将播放';
+
+  @override
+  String get latestMoviesRow => '最近添加的电影';
+
+  @override
+  String get latestSeriesRow => '最近添加的剧集';
+
+  @override
+  String get markPlayed => '标记已看';
+
+  @override
+  String get markUnplayed => '标记未看';
+
+  @override
+  String get overview => '简介';
+
+  @override
+  String get seasons => '季';
+
+  @override
+  String get errorLoadFailed => '加载失败';
+
+  @override
+  String get errorSearchFailed => '搜索失败';
+
+  @override
+  String get itemUnavailable => '条目不可用';
+
+  @override
+  String episodeCount(int count) {
+    return '$count 集';
+  }
+
+  @override
+  String runtimeHoursMinutes(int hours, int minutes) {
+    return '$hours小时$minutes分钟';
+  }
+
+  @override
+  String runtimeMinutes(int minutes) {
+    return '$minutes分钟';
+  }
+
+  @override
+  String playbackProgress(int percent) {
+    return '已看 $percent%';
+  }
 }
