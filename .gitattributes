@@ -1,5 +1,1 @@
 * text=auto eol=lf
-package-lock.json linguist-generated=true sakullla-review=generated
-src-tauri/Cargo.lock linguist-generated=true sakullla-review=generated
-src-tauri/icons/** linguist-generated=true sakullla-review=generated
-src-tauri/gen/android/** linguist-generated=true sakullla-review=generated
