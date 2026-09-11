@@ -80,6 +80,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get home => '首页';
 
   @override
+  String get libraries => '片库';
+
+  @override
   String get search => '搜索';
 
   @override

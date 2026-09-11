@@ -73,7 +73,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(ConnectFormKeys.submit), findsNothing);
-    expect(find.text('已连接 灯川测试'), findsOneWidget);
+    expect(find.text('灯川测试'), findsOneWidget);
     expect(auth.isLoggedIn, isTrue);
   });
 
@@ -220,7 +220,7 @@ void main() {
     );
     await tester.tap(find.byKey(ConnectFormKeys.submit));
     await tester.pumpAndSettle();
-    expect(find.text('已连接 灯川测试'), findsOneWidget);
+    expect(find.text('灯川测试'), findsOneWidget);
 
     server.expireAuthenticatedRequests = true;
     await tester.runAsync(() async {

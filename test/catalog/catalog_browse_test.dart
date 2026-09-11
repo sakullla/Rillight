@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
 import 'package:rillight/app/widgets/app_error_view.dart';
@@ -46,12 +47,20 @@ void main() {
     return auth;
   }
 
+  Future<void> openLibrary(WidgetTester tester, String viewId) async {
+    await tester.tap(find.byKey(CatalogKeys.librariesMenu));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(CatalogKeys.library(viewId)));
+    await tester.pumpAndSettle();
+  }
+
   testWidgets(
     'home rows show resume progress and hide empty or missing NextUp',
     (tester) async {
       await pumpLoggedIn(tester);
 
-      expect(find.text('已连接 灯川测试'), findsOneWidget);
+      expect(find.text('灯川测试'), findsOneWidget);
+      expect(find.byType(NavigationRail), findsNothing);
       expect(find.byKey(CatalogKeys.resumeRow), findsOneWidget);
       expect(find.text('Inception'), findsWidgets);
       expect(find.byKey(CatalogKeys.resumeProgress), findsWidgets);
@@ -60,6 +69,8 @@ void main() {
       expect(find.text('飞屋环游记'), findsWidgets);
       expect(find.text('最近添加的剧集'), findsOneWidget);
       expect(find.text('老友记'), findsWidgets);
+      await tester.tap(find.byKey(CatalogKeys.librariesMenu));
+      await tester.pumpAndSettle();
       expect(find.text('音乐'), findsNothing);
       expect(find.text('相册'), findsNothing);
       expect(find.text('混合媒体'), findsNothing);
@@ -106,8 +117,7 @@ void main() {
   ) async {
     await pumpLoggedIn(tester);
 
-    await tester.tap(find.byKey(CatalogKeys.library('view-movies')));
-    await tester.pumpAndSettle();
+    await openLibrary(tester, 'view-movies');
     expect(find.byKey(CatalogKeys.item('movie-inception')), findsOneWidget);
     expect(find.byKey(CatalogKeys.item('movie-up')), findsOneWidget);
 
@@ -122,8 +132,7 @@ void main() {
 
     await tester.pageBack();
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(CatalogKeys.library('view-tv')));
-    await tester.pumpAndSettle();
+    await openLibrary(tester, 'view-tv');
     await tester.tap(find.byKey(CatalogKeys.item('series-friends')));
     await tester.pumpAndSettle();
     expect(find.text('老友记 (1994)'), findsOneWidget);

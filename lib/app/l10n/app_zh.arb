@@ -97,6 +97,10 @@
   "@home": {
     "description": "Navigation label for the signed-in home catalog."
   },
+  "libraries": "片库",
+  "@libraries": {
+    "description": "Short app bar menu for movie and TV libraries."
+  },
   "search": "搜索",
   "@search": {
     "description": "Navigation and action label for name search."

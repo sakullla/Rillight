@@ -232,6 +232,12 @@ abstract class AppLocalizations {
   /// **'首页'**
   String get home;
 
+  /// Short app bar menu for movie and TV libraries.
+  ///
+  /// In zh, this message translates to:
+  /// **'片库'**
+  String get libraries;
+
   /// Navigation and action label for name search.
   ///
   /// In zh, this message translates to:

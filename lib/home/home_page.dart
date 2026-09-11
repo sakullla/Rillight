@@ -3,7 +3,6 @@ import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/widgets/app_error_view.dart';
-import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/home/catalog_failure.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/catalog_scope.dart';
@@ -15,12 +14,10 @@ class HomePage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final auth = AuthScope.of(context);
     final catalog = CatalogScope.maybeOf(context);
     if (catalog == null) {
       return const SizedBox.shrink();
     }
-    final session = auth.session;
 
     return ListenableBuilder(
       listenable: catalog,
@@ -30,14 +27,6 @@ class HomePage extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (session != null)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                  child: Text(
-                    l10n.connectedTo(session.server.name),
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                ),
               if (catalog.librariesError != null)
                 AppErrorView(
                   message: catalogFailureMessage(l10n, catalog.librariesError!),

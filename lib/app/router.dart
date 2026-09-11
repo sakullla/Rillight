@@ -32,9 +32,16 @@ GoRouter createAppRouter({required AuthController auth}) {
     routes: [
       ShellRoute(
         builder: (context, state, child) {
-          return AppShell(
-            actions: const [SearchAction(), SessionActions()],
-            child: CatalogShell(auth: auth, child: child),
+          return CatalogShell(
+            auth: auth,
+            child: AppShell(
+              actions: const [
+                SearchAction(),
+                LibrariesAction(),
+                SessionActions(),
+              ],
+              child: child,
+            ),
           );
         },
         routes: [

@@ -99,6 +99,13 @@ void main() {
     fail('still found $finder');
   }
 
+  Future<void> openLibrary(WidgetTester tester, String viewId) async {
+    await tester.tap(find.byKey(CatalogKeys.librariesMenu));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(CatalogKeys.library(viewId)));
+    await tester.pumpAndSettle();
+  }
+
   Future<void> openPlayable(WidgetTester tester, String itemId) async {
     final item = find.byKey(CatalogKeys.item(itemId)).first;
     await tester.ensureVisible(item);
@@ -231,8 +238,7 @@ void main() {
     tester,
   ) async {
     await pumpLoggedIn(tester);
-    await tester.tap(find.byKey(CatalogKeys.library('view-movies')));
-    await tester.pumpAndSettle();
+    await openLibrary(tester, 'view-movies');
     await tester.ensureVisible(find.byKey(CatalogKeys.item('movie-transcode')));
     await tester.tap(find.byKey(CatalogKeys.item('movie-transcode')));
     await tester.pumpAndSettle();
@@ -257,8 +263,7 @@ void main() {
 
   testWidgets('next episode countdown can be cancelled', (tester) async {
     await pumpLoggedIn(tester);
-    await tester.tap(find.byKey(CatalogKeys.library('view-tv')));
-    await tester.pumpAndSettle();
+    await openLibrary(tester, 'view-tv');
     await tester.tap(find.byKey(CatalogKeys.item('series-friends')));
     await tester.pumpAndSettle();
     await tester.ensureVisible(

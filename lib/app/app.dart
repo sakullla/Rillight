@@ -34,8 +34,9 @@ class RillightApp extends StatelessWidget {
           locale: const Locale('zh', 'CN'),
           supportedLocales: AppLocalizations.supportedLocales,
           localizationsDelegates: AppLocalizations.localizationsDelegates,
-          theme: AppTheme.light(),
+          theme: AppTheme.dark(),
           darkTheme: AppTheme.dark(),
+          themeMode: ThemeMode.dark,
           routerConfig: router,
           builder: (context, child) {
             return PlayerScope(

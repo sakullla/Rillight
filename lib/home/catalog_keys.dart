@@ -1,6 +1,7 @@
 import 'package:flutter/widgets.dart';
 
 abstract final class CatalogKeys {
+  static const librariesMenu = Key('catalog-libraries-menu');
   static const resumeRow = Key('catalog-row-resume');
   static const nextUpRow = Key('catalog-row-nextup');
   static const latestMoviesRow = Key('catalog-row-latest-movies');
