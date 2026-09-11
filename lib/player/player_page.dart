@@ -165,7 +165,8 @@ class PlayerPageState extends State<PlayerPage> {
           backgroundColor: Colors.black,
           body: MouseRegion(
             onHover: (_) => current.onUserActivity(),
-            cursor: (!current.controlsVisible &&
+            cursor:
+                (!current.controlsVisible &&
                     !current.showResumePrompt &&
                     current.nextEpisode == null)
                 ? SystemMouseCursors.none

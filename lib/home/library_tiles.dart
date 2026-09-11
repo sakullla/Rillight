@@ -79,9 +79,9 @@ class _LibraryCard extends StatelessWidget {
                     library.name,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      color: Colors.white,
-                    ),
+                    style: Theme.of(
+                      context,
+                    ).textTheme.titleSmall?.copyWith(color: Colors.white),
                   ),
                 ),
               ),

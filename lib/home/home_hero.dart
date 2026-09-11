@@ -111,9 +111,9 @@ class HomeHero extends StatelessWidget {
                             onPressed: () {
                               if (item.isPlayable) {
                                 unawaited(
-                                  PlayerWindowScope.of(context).open(
-                                    PlayerOpenRequest(itemId: item.id),
-                                  ),
+                                  PlayerWindowScope.of(
+                                    context,
+                                  ).open(PlayerOpenRequest(itemId: item.id)),
                                 );
                                 return;
                               }

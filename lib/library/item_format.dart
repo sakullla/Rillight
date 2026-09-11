@@ -22,9 +22,7 @@ String? runtimeLabel(AppLocalizations l10n, EmbyItem item) {
 }
 
 String chapterClock(int startPositionTicks) {
-  final seconds = startPositionTicks <= 0
-      ? 0
-      : startPositionTicks ~/ 10000000;
+  final seconds = startPositionTicks <= 0 ? 0 : startPositionTicks ~/ 10000000;
   final hours = seconds ~/ 3600;
   final minutes = (seconds % 3600) ~/ 60;
   final remain = seconds % 60;

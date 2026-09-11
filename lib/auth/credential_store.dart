@@ -3,7 +3,6 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
-
 class StoredCredentials {
   const StoredCredentials({
     required this.accessToken,

@@ -1,7 +1,9 @@
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/poster_placeholder.dart';
+import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/emby/emby_models.dart';
 
@@ -97,6 +99,17 @@ class _MediaImageState extends State<MediaImage> {
           height: height,
           fit: BoxFit.cover,
           gaplessPlayback: true,
+          frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+            if (wasSynchronouslyLoaded) {
+              return child;
+            }
+            return AnimatedOpacity(
+              opacity: frame == null ? 0 : 1,
+              duration: AppMotion.normal,
+              curve: AppMotion.standard,
+              child: child,
+            );
+          },
           errorBuilder: (context, error, stackTrace) {
             return PosterPlaceholder(width: width, height: height);
           },
@@ -106,15 +119,10 @@ class _MediaImageState extends State<MediaImage> {
   }
 
   Widget _loadingBox(BuildContext context, double? width, double? height) {
-    return SizedBox(
+    return SkeletonBlock(
       width: width,
       height: height,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surfaceContainerHighest,
-          borderRadius: BorderRadius.circular(8),
-        ),
-      ),
+      borderRadius: BorderRadius.circular(AppRadii.sm),
     );
   }
 }

@@ -97,7 +97,8 @@ class SessionActions extends StatelessWidget {
 
 const _menuSep = '\u001f';
 
-String _menuValue(String serverId, String lineId) => '$serverId$_menuSep$lineId';
+String _menuValue(String serverId, String lineId) =>
+    '$serverId$_menuSep$lineId';
 
 ({String serverId, String lineId})? _parseMenuValue(String value) {
   final index = value.indexOf(_menuSep);

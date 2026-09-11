@@ -116,7 +116,9 @@ void main() {
       expect(find.text('第二台'), findsOneWidget);
       expect(find.text('第二台电影'), findsWidgets);
 
-      await tester.ensureVisible(find.byKey(CatalogKeys.library('view-movies')));
+      await tester.ensureVisible(
+        find.byKey(CatalogKeys.library('view-movies')),
+      );
       await tester.tap(find.byKey(CatalogKeys.library('view-movies')));
       await tester.pumpAndSettle();
 

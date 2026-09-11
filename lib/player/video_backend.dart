@@ -37,10 +37,7 @@ abstract class VideoBackend {
   Future<void> dispose();
 
   Widget buildView({Key? key}) {
-    return ColoredBox(
-      key: key,
-      color: const Color(0xFF000000),
-    );
+    return ColoredBox(key: key, color: const Color(0xFF000000));
   }
 }
 
@@ -178,9 +175,6 @@ class FakeVideoBackend implements VideoBackend {
 
   @override
   Widget buildView({Key? key}) {
-    return ColoredBox(
-      key: key,
-      color: const Color(0xFF000000),
-    );
+    return ColoredBox(key: key, color: const Color(0xFF000000));
   }
 }

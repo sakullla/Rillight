@@ -190,7 +190,9 @@ void main() {
       await waitForGone(tester, find.byType(PlayerPage));
       await tester.pump();
       expect(
-        server.requests.where((request) => request.contains('Items/Resume')).length,
+        server.requests
+            .where((request) => request.contains('Items/Resume'))
+            .length,
         greaterThan(resumeBefore),
       );
 

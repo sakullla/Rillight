@@ -46,7 +46,9 @@ void main() {
     await Future<void>.delayed(const Duration(milliseconds: 100));
 
     expect(
-      server.requests.where((request) => request.contains('Items/Resume')).length,
+      server.requests
+          .where((request) => request.contains('Items/Resume'))
+          .length,
       greaterThan(resumeBefore),
     );
   });

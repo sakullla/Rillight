@@ -259,10 +259,7 @@ class EmbyClient {
     final data = await _request(
       'GET',
       '/Users/${_requireUserId()}/Items/$itemId',
-      queryParameters: {
-        'Fields': itemFields,
-        'EnableImageTypes': imageTypes,
-      },
+      queryParameters: {'Fields': itemFields, 'EnableImageTypes': imageTypes},
     );
     if (data is Map) {
       return EmbyItem.fromJson(Map<String, dynamic>.from(data));
@@ -371,12 +368,7 @@ class EmbyClient {
     String? tag,
     int maxWidth = 280,
   }) {
-    return getItemImage(
-      itemId,
-      type: 'Primary',
-      tag: tag,
-      maxWidth: maxWidth,
-    );
+    return getItemImage(itemId, type: 'Primary', tag: tag, maxWidth: maxWidth);
   }
 
   Future<List<int>> getChapterImage(

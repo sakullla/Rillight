@@ -11,15 +11,14 @@ import 'package:window_manager/window_manager.dart';
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
   MediaKit.ensureInitialized();
-  if (args.isNotEmpty && (args.first == 'player' || args.first == 'multi_window')) {
+  if (args.isNotEmpty &&
+      (args.first == 'player' || args.first == 'multi_window')) {
     try {
       await windowManager.ensureInitialized();
       await windowManager.hide();
     } catch (_) {}
     if (args.first == 'player') {
-      await runPlayerWindow(
-        argumentFallback: args.length > 1 ? args[1] : '',
-      );
+      await runPlayerWindow(argumentFallback: args.length > 1 ? args[1] : '');
       return;
     }
     final controller = await WindowController.fromCurrentEngine();

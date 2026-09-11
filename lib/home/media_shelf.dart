@@ -206,26 +206,27 @@ class _MediaShelfState extends State<MediaShelf> {
                       padding: const EdgeInsets.symmetric(horizontal: 16),
                       scrollDirection: Axis.horizontal,
                       itemBuilder: (context, index) {
-                          final item = widget.items[index];
-                          final child = widget.itemBuilder?.call(context, item) ??
-                              PosterCard(
-                                item: item,
-                                showProgress: widget.showProgress,
-                                wide: widget.wide,
-                                width: widget.wide ? 220 : 120,
-                                onTap: () => widget.onTap(item),
-                              );
-                          return Align(
-                            alignment: Alignment.topLeft,
-                            child: Listener(
-                              onPointerSignal: _onVerticalWheelToParent,
-                              child: child,
-                            ),
-                          );
-                        },
-                        separatorBuilder: (context, index) =>
-                            const SizedBox(width: 12),
-                        itemCount: widget.items.length,
+                        final item = widget.items[index];
+                        final child =
+                            widget.itemBuilder?.call(context, item) ??
+                            PosterCard(
+                              item: item,
+                              showProgress: widget.showProgress,
+                              wide: widget.wide,
+                              width: widget.wide ? 220 : 120,
+                              onTap: () => widget.onTap(item),
+                            );
+                        return Align(
+                          alignment: Alignment.topLeft,
+                          child: Listener(
+                            onPointerSignal: _onVerticalWheelToParent,
+                            child: child,
+                          ),
+                        );
+                      },
+                      separatorBuilder: (context, index) =>
+                          const SizedBox(width: 12),
+                      itemCount: widget.items.length,
                     ),
                   ),
                   if (_canScrollLeft)
@@ -235,7 +236,9 @@ class _MediaShelfState extends State<MediaShelf> {
                       bottom: 0,
                       child: Center(
                         child: _ScrollButton(
-                          buttonKey: CatalogKeys.shelfScrollLeft(widget.shelfId),
+                          buttonKey: CatalogKeys.shelfScrollLeft(
+                            widget.shelfId,
+                          ),
                           tooltip: l10n.scrollLeft,
                           icon: Icons.chevron_left,
                           onPressed: () => _page(-1),
@@ -249,8 +252,9 @@ class _MediaShelfState extends State<MediaShelf> {
                       bottom: 0,
                       child: Center(
                         child: _ScrollButton(
-                          buttonKey:
-                              CatalogKeys.shelfScrollRight(widget.shelfId),
+                          buttonKey: CatalogKeys.shelfScrollRight(
+                            widget.shelfId,
+                          ),
                           tooltip: l10n.scrollRight,
                           icon: Icons.chevron_right,
                           onPressed: () => _page(1),

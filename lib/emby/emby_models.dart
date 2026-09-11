@@ -155,11 +155,7 @@ class ItemChapter {
 }
 
 class ItemMediaStream {
-  const ItemMediaStream({
-    required this.index,
-    required this.type,
-    this.label,
-  });
+  const ItemMediaStream({required this.index, required this.type, this.label});
 
   final int index;
   final String type;
@@ -185,11 +181,7 @@ class ItemMediaStream {
 }
 
 class ItemMediaSource {
-  const ItemMediaSource({
-    required this.id,
-    this.name,
-    this.streams = const [],
-  });
+  const ItemMediaSource({required this.id, this.name, this.streams = const []});
 
   final String id;
   final String? name;
@@ -203,11 +195,15 @@ class ItemMediaSource {
     return id;
   }
 
-  List<ItemMediaStream> get audioStreams =>
-      [for (final stream in streams) if (stream.isAudio) stream];
+  List<ItemMediaStream> get audioStreams => [
+    for (final stream in streams)
+      if (stream.isAudio) stream,
+  ];
 
-  List<ItemMediaStream> get subtitleStreams =>
-      [for (final stream in streams) if (stream.isSubtitle) stream];
+  List<ItemMediaStream> get subtitleStreams => [
+    for (final stream in streams)
+      if (stream.isSubtitle) stream,
+  ];
 
   factory ItemMediaSource.fromJson(Map<String, dynamic> json) {
     final raw = json['MediaStreams'];

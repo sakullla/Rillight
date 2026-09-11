@@ -45,9 +45,7 @@ class _CatalogShellState extends State<CatalogShell> {
 
   void _onPlayerWindow() {
     final current = _playerHost?.current;
-    if (_playerRequest != null &&
-        current == null &&
-        widget.auth.isLoggedIn) {
+    if (_playerRequest != null && current == null && widget.auth.isLoggedIn) {
       unawaited(_catalog.reloadHomeRows());
     }
     _playerRequest = current;
@@ -72,5 +70,3 @@ class _CatalogShellState extends State<CatalogShell> {
     return CatalogScope(controller: _catalog, child: widget.child);
   }
 }
-
-

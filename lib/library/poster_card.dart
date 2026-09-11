@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/app/theme/tokens.dart';
+import 'package:rillight/app/widgets/app_hover_card.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/media_image/media_image.dart';
@@ -30,16 +32,16 @@ class PosterCard extends StatelessWidget {
         : item.name;
     return SizedBox(
       width: width,
-      child: InkWell(
-        key: CatalogKeys.item(item.id),
+      child: AppHoverCard(
+        inkKey: CatalogKeys.item(item.id),
         onTap: onTap,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(AppRadii.sm),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             ClipRRect(
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(AppRadii.sm),
               child: SizedBox(
                 width: width,
                 height: height,
@@ -65,7 +67,7 @@ class PosterCard extends StatelessWidget {
                 ),
               ),
             ),
-            SizedBox(height: wide ? 4 : 8),
+            SizedBox(height: wide ? AppSpacing.xxs : AppSpacing.xs),
             Text(
               title,
               maxLines: 1,
@@ -106,16 +108,16 @@ class EpisodeThumbCard extends StatelessWidget {
     final title = number == null ? item.name : '$number. ${item.name}';
     return SizedBox(
       width: width,
-      child: InkWell(
-        key: CatalogKeys.episode(item.id),
+      child: AppHoverCard(
+        inkKey: CatalogKeys.episode(item.id),
         onTap: onTap,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(AppRadii.sm),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             ClipRRect(
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(AppRadii.sm),
               child: SizedBox(
                 width: width,
                 height: height,
@@ -137,7 +139,7 @@ class EpisodeThumbCard extends StatelessWidget {
                 ),
               ),
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: AppSpacing.xs),
             Text(
               title,
               maxLines: 1,
@@ -168,28 +170,27 @@ class SeasonPosterCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final height = width * 3 / 2;
+    final colorScheme = Theme.of(context).colorScheme;
     return SizedBox(
       width: width,
-      child: InkWell(
-        key: CatalogKeys.season(item.id),
+      child: AppHoverCard(
+        inkKey: CatalogKeys.season(item.id),
         onTap: onTap,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(AppRadii.sm),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             DecoratedBox(
               decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.circular(AppRadii.sm),
                 border: Border.all(
-                  color: selected
-                      ? Theme.of(context).colorScheme.primary
-                      : Colors.transparent,
+                  color: selected ? colorScheme.primary : Colors.transparent,
                   width: 2,
                 ),
               ),
               child: ClipRRect(
-                borderRadius: BorderRadius.circular(6),
+                borderRadius: BorderRadius.circular(AppRadii.sm),
                 child: SizedBox(
                   width: width,
                   height: height,
@@ -204,24 +205,22 @@ class SeasonPosterCard extends StatelessWidget {
                       ),
                       if (item.childCount != null && item.childCount! > 0)
                         Positioned(
-                          top: 6,
-                          right: 6,
+                          top: AppSpacing.xs,
+                          right: AppSpacing.xs,
                           child: DecoratedBox(
                             decoration: BoxDecoration(
-                              color: Colors.black.withValues(alpha: 0.72),
-                              borderRadius: BorderRadius.circular(12),
+                              color: colorScheme.scrim.withValues(alpha: 0.72),
+                              borderRadius: BorderRadius.circular(AppRadii.md),
                             ),
                             child: Padding(
                               padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 2,
+                                horizontal: AppSpacing.xs,
+                                vertical: AppSpacing.xxs,
                               ),
                               child: Text(
                                 '${item.childCount}',
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 12,
-                                ),
+                                style: Theme.of(context).textTheme.labelMedium
+                                    ?.copyWith(color: colorScheme.onSurface),
                               ),
                             ),
                           ),
@@ -231,7 +230,7 @@ class SeasonPosterCard extends StatelessWidget {
                 ),
               ),
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: AppSpacing.xs),
             Text(
               item.name,
               maxLines: 1,
@@ -253,7 +252,7 @@ class _ResumeProgressBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: 4,
+      height: AppSpacing.xxs,
       child: ColoredBox(
         color: Theme.of(context).colorScheme.surfaceContainerHighest,
         child: Align(

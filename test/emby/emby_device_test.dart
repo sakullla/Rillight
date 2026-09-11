@@ -13,6 +13,9 @@ void main() {
     final header = device.authorizationHeader();
     expect(header, isNot(contains('灯川')));
     expect(header, contains('Client="Rillight"'));
-    expect(header.codeUnits.every((unit) => unit >= 0x20 && unit <= 0x7E), isTrue);
+    expect(
+      header.codeUnits.every((unit) => unit >= 0x20 && unit <= 0x7E),
+      isTrue,
+    );
   });
 }

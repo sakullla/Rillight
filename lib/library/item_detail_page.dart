@@ -322,8 +322,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
               });
             },
             onAudio: (index) => setState(() => _audioStreamIndex = index),
-            onSubtitle: (index) =>
-                setState(() => _subtitleStreamIndex = index),
+            onSubtitle: (index) => setState(() => _subtitleStreamIndex = index),
             onPlay: playTarget == null
                 ? null
                 : () => _openPlayer(playTarget.id),
@@ -547,107 +546,118 @@ class _Hero extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-        if (item.isEpisode) ...[
-          Text(episodeLabel(item)),
-          if (item.seriesName != null)
-            Text(item.seriesName!, style: theme.textTheme.titleMedium),
-          const SizedBox(height: 8),
-        ],
-        Wrap(
-          spacing: 16,
-          runSpacing: 8,
-          children: [
-            if (runtime != null) Text(runtime!),
-            if (item.childCount != null && item.isSeries)
-              Text(l10n.episodeCount(item.childCount!)),
-            if (item.canResume)
-              Text(
-                l10n.playbackProgress((item.playbackProgress * 100).round()),
-                key: CatalogKeys.resumeProgress,
+              if (item.isEpisode) ...[
+                Text(episodeLabel(item)),
+                if (item.seriesName != null)
+                  Text(item.seriesName!, style: theme.textTheme.titleMedium),
+                const SizedBox(height: 8),
+              ],
+              Wrap(
+                spacing: 16,
+                runSpacing: 8,
+                children: [
+                  if (runtime != null) Text(runtime!),
+                  if (item.childCount != null && item.isSeries)
+                    Text(l10n.episodeCount(item.childCount!)),
+                  if (item.canResume)
+                    Text(
+                      l10n.playbackProgress(
+                        (item.playbackProgress * 100).round(),
+                      ),
+                      key: CatalogKeys.resumeProgress,
+                    ),
+                ],
               ),
-          ],
-        ),
-        if (item.overview != null && item.overview!.trim().isNotEmpty) ...[
-          const SizedBox(height: 12),
-          Text(
-            item.overview!,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: theme.colorScheme.onSurface.withValues(alpha: 0.78),
-            ),
-          ),
-        ],
-        const SizedBox(height: 16),
-        if (item.mediaSources.length > 1)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: DropdownButtonFormField<String>(
-              key: ValueKey('source-${mediaSourceId ?? item.mediaSources.first.id}'),
-              decoration: InputDecoration(labelText: l10n.mediaSource),
-              initialValue: mediaSourceId ?? item.mediaSources.first.id,
-              items: [
-                for (final source in item.mediaSources)
-                  DropdownMenuItem(
-                    value: source.id,
-                    child: Text(source.label, overflow: TextOverflow.ellipsis),
+              if (item.overview != null &&
+                  item.overview!.trim().isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Text(
+                  item.overview!,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: theme.colorScheme.onSurface.withValues(alpha: 0.78),
                   ),
-              ],
-              onChanged: (value) {
-                if (value != null) {
-                  onMediaSource?.call(value);
-                }
-              },
-            ),
-          ),
-        if (_audioChoices(item, mediaSourceId).length > 1)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: DropdownButtonFormField<int>(
-              key: ValueKey('audio-$mediaSourceId-$audioStreamIndex'),
-              decoration: InputDecoration(labelText: l10n.audioTrack),
-              initialValue: audioStreamIndex,
-              items: [
-                for (final stream in _audioChoices(item, mediaSourceId))
-                  DropdownMenuItem(
-                    value: stream.index,
-                    child: Text(stream.label ?? '#${stream.index}'),
-                  ),
-              ],
-              onChanged: (value) {
-                if (value != null) {
-                  onAudio?.call(value);
-                }
-              },
-            ),
-          ),
-        if (_subtitleChoices(item, mediaSourceId).isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: DropdownButtonFormField<int?>(
-              decoration: InputDecoration(labelText: l10n.subtitleTrack),
-              initialValue: subtitleStreamIndex,
-              items: [
-                DropdownMenuItem<int?>(
-                  value: null,
-                  child: Text(l10n.subtitleOff),
                 ),
-                for (final stream in _subtitleChoices(item, mediaSourceId))
-                  DropdownMenuItem<int?>(
-                    value: stream.index,
-                    child: Text(stream.label ?? '#${stream.index}'),
-                  ),
               ],
-              onChanged: onSubtitle,
-            ),
-          ),
-        SwitchListTile(
-          key: CatalogKeys.playedToggle,
-          contentPadding: EdgeInsets.zero,
-          title: Text(
-            item.userData.played ? l10n.markUnplayed : l10n.markPlayed,
-          ),
-          value: item.userData.played,
-          onChanged: busyPlayed ? null : onPlayedChanged,
-        ),
+              const SizedBox(height: 16),
+              if (item.mediaSources.length > 1)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: DropdownButtonFormField<String>(
+                    key: ValueKey(
+                      'source-${mediaSourceId ?? item.mediaSources.first.id}',
+                    ),
+                    decoration: InputDecoration(labelText: l10n.mediaSource),
+                    initialValue: mediaSourceId ?? item.mediaSources.first.id,
+                    items: [
+                      for (final source in item.mediaSources)
+                        DropdownMenuItem(
+                          value: source.id,
+                          child: Text(
+                            source.label,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                    ],
+                    onChanged: (value) {
+                      if (value != null) {
+                        onMediaSource?.call(value);
+                      }
+                    },
+                  ),
+                ),
+              if (_audioChoices(item, mediaSourceId).length > 1)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: DropdownButtonFormField<int>(
+                    key: ValueKey('audio-$mediaSourceId-$audioStreamIndex'),
+                    decoration: InputDecoration(labelText: l10n.audioTrack),
+                    initialValue: audioStreamIndex,
+                    items: [
+                      for (final stream in _audioChoices(item, mediaSourceId))
+                        DropdownMenuItem(
+                          value: stream.index,
+                          child: Text(stream.label ?? '#${stream.index}'),
+                        ),
+                    ],
+                    onChanged: (value) {
+                      if (value != null) {
+                        onAudio?.call(value);
+                      }
+                    },
+                  ),
+                ),
+              if (_subtitleChoices(item, mediaSourceId).isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: DropdownButtonFormField<int?>(
+                    decoration: InputDecoration(labelText: l10n.subtitleTrack),
+                    initialValue: subtitleStreamIndex,
+                    items: [
+                      DropdownMenuItem<int?>(
+                        value: null,
+                        child: Text(l10n.subtitleOff),
+                      ),
+                      for (final stream in _subtitleChoices(
+                        item,
+                        mediaSourceId,
+                      ))
+                        DropdownMenuItem<int?>(
+                          value: stream.index,
+                          child: Text(stream.label ?? '#${stream.index}'),
+                        ),
+                    ],
+                    onChanged: onSubtitle,
+                  ),
+                ),
+              SwitchListTile(
+                key: CatalogKeys.playedToggle,
+                contentPadding: EdgeInsets.zero,
+                title: Text(
+                  item.userData.played ? l10n.markUnplayed : l10n.markPlayed,
+                ),
+                value: item.userData.played,
+                onChanged: busyPlayed ? null : onPlayedChanged,
+              ),
             ],
           ),
         ),
@@ -790,9 +800,9 @@ class _ChapterCard extends StatelessWidget {
             Text(
               chapterClock(chapter.startPositionTicks),
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: Theme.of(context).colorScheme.onSurface.withValues(
-                  alpha: 0.6,
-                ),
+                color: Theme.of(
+                  context,
+                ).colorScheme.onSurface.withValues(alpha: 0.6),
               ),
             ),
           ],
@@ -803,11 +813,7 @@ class _ChapterCard extends StatelessWidget {
 }
 
 class _ChapterImage extends StatefulWidget {
-  const _ChapterImage({
-    required this.itemId,
-    required this.index,
-    this.tag,
-  });
+  const _ChapterImage({required this.itemId, required this.index, this.tag});
 
   final String itemId;
   final int index;

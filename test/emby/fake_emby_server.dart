@@ -173,7 +173,9 @@ class FakeEmbyItem {
           {
             'Id': id,
             'Name': name,
-            'MediaStreams': [for (final stream in mediaStreams) stream.toJson()],
+            'MediaStreams': [
+              for (final stream in mediaStreams) stream.toJson(),
+            ],
           },
         ],
       if (chapters.isNotEmpty)
@@ -626,9 +628,13 @@ class FakeEmbyServer {
         segments[2] == 'Images' &&
         segments[3] == 'Chapter' &&
         method == 'GET') {
-      return ResponseBody.fromBytes(kTinyPng, 200, headers: {
-        Headers.contentTypeHeader: ['image/png'],
-      });
+      return ResponseBody.fromBytes(
+        kTinyPng,
+        200,
+        headers: {
+          Headers.contentTypeHeader: ['image/png'],
+        },
+      );
     }
     if (segments.length == 3 &&
         segments[0] == 'Items' &&
@@ -1096,10 +1102,7 @@ List<FakeEmbyItem> defaultCatalogItems() {
       communityRating: 8.8,
       chapters: const [
         FakeChapter(name: 'Chapter 1', startPositionTicks: 0),
-        FakeChapter(
-          name: 'Chapter 2',
-          startPositionTicks: 7 * 60 * 10000000,
-        ),
+        FakeChapter(name: 'Chapter 2', startPositionTicks: 7 * 60 * 10000000),
       ],
       mediaStreams: const [
         FakeMediaStream(

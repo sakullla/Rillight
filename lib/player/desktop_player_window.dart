@@ -246,11 +246,7 @@ Future<void> runPlayerWindow({
 }
 
 class PlayerWindowApp extends StatefulWidget {
-  const PlayerWindowApp({
-    super.key,
-    this.controller,
-    required this.launch,
-  });
+  const PlayerWindowApp({super.key, this.controller, required this.launch});
 
   final WindowController? controller;
   final PlayerWindowLaunch launch;

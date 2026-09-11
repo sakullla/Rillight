@@ -17,7 +17,10 @@ Map<String, String> playerProcessEnvironment() {
   return env;
 }
 
-int spawnStandalonePlayer({required String executable, required String payloadPath}) {
+int spawnStandalonePlayer({
+  required String executable,
+  required String payloadPath,
+}) {
   if (!Platform.isWindows) {
     throw UnsupportedError('standalone player spawn is Windows-only');
   }
@@ -27,7 +30,9 @@ int spawnStandalonePlayer({required String executable, required String payloadPa
   final commandPtr = command.toNativeUtf16();
   startup.ref.cb = sizeOf<STARTUPINFO>();
   var flags =
-      CREATE_UNICODE_ENVIRONMENT | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB;
+      CREATE_UNICODE_ENVIRONMENT |
+      CREATE_NEW_PROCESS_GROUP |
+      CREATE_BREAKAWAY_FROM_JOB;
   var ok = CreateProcess(
     nullptr,
     commandPtr,
