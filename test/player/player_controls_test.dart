@@ -137,6 +137,17 @@ void main() {
     return tester.state<PlayerPageState>(find.byType(PlayerPage)).controller!;
   }
 
+  double controlsOpacity(WidgetTester tester) {
+    return tester
+        .widget<AnimatedOpacity>(
+          find.ancestor(
+            of: find.byKey(PlayerKeys.controls),
+            matching: find.byType(AnimatedOpacity),
+          ),
+        )
+        .opacity;
+  }
+
   testWidgets('resume prompt continues from saved progress', (tester) async {
     await pumpLoggedIn(tester);
     await openPlayable(tester, 'movie-inception');
@@ -232,15 +243,16 @@ void main() {
     await pumpLoggedIn(tester, hideAfter: const Duration(milliseconds: 40));
     await openPlayable(tester, 'movie-up');
     await tester.pump(const Duration(milliseconds: 50));
-    expect(find.byKey(PlayerKeys.controls), findsNothing);
-
-    await tester.tap(find.byKey(PlayerKeys.surface));
-    await tester.pump();
     expect(find.byKey(PlayerKeys.controls), findsOneWidget);
+    expect(controlsOpacity(tester), 0.0);
 
     await tester.tap(find.byKey(PlayerKeys.surface));
     await tester.pump();
-    expect(find.byKey(PlayerKeys.controls), findsNothing);
+    expect(controlsOpacity(tester), 1.0);
+
+    await tester.tap(find.byKey(PlayerKeys.surface));
+    await tester.pump();
+    expect(controlsOpacity(tester), 0.0);
   });
 
   testWidgets('transcode is labeled and quality change reopens the stream', (

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/app_error_view.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/emby/device_profile.dart';
@@ -184,9 +185,21 @@ class PlayerPageState extends State<PlayerPage> {
                 ),
                 if (current.loading)
                   Center(
-                    child: Text(
-                      l10n.playerLoading,
-                      style: const TextStyle(color: Colors.white),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const SizedBox(
+                          width: 44,
+                          height: 44,
+                          child: CircularProgressIndicator(strokeWidth: 3),
+                        ),
+                        const SizedBox(height: AppSpacing.md),
+                        Text(
+                          l10n.playerLoading,
+                          style: Theme.of(context).textTheme.bodyMedium
+                              ?.copyWith(color: Colors.white70),
+                        ),
+                      ],
                     ),
                   ),
                 if (_errorText(l10n, current) != null)
@@ -196,13 +209,13 @@ class PlayerPageState extends State<PlayerPage> {
                   ),
                 if (current.showResumePrompt)
                   _ResumePrompt(controller: current),
-                if (current.controlsVisible &&
-                    !current.loading &&
+                if (!current.loading &&
                     current.resolved != null &&
                     !current.showResumePrompt &&
                     current.error == null)
                   _ControlsBar(
                     controller: current,
+                    visible: current.controlsVisible,
                     dragging: _dragSeeking,
                     dragValue: _dragValue,
                     onDragStart: (value) {
@@ -284,37 +297,55 @@ class _ResumePrompt extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     return Center(
-      child: Card(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                l10n.resumePrompt,
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              const SizedBox(height: 16),
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  FilledButton(
-                    key: PlayerKeys.resumeContinue,
-                    onPressed: () =>
-                        controller.chooseResume(fromBeginning: false),
-                    child: Text(l10n.resumePlay),
-                  ),
-                  const SizedBox(width: 12),
-                  OutlinedButton(
-                    key: PlayerKeys.resumeFromStart,
-                    onPressed: () =>
-                        controller.chooseResume(fromBeginning: true),
-                    child: Text(l10n.playFromStart),
-                  ),
-                ],
-              ),
-            ],
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 400),
+        child: Material(
+          color: scheme.surfaceContainerHigh.withValues(alpha: 0.96),
+          borderRadius: BorderRadius.circular(AppRadii.xl),
+          elevation: 12,
+          shadowColor: Colors.black.withValues(alpha: 0.5),
+          child: Padding(
+            padding: const EdgeInsets.all(AppSpacing.xxl),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.play_circle_outline_rounded,
+                  size: 40,
+                  color: scheme.primary,
+                ),
+                const SizedBox(height: AppSpacing.md),
+                Text(
+                  l10n.resumePrompt,
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.titleLarge,
+                ),
+                const SizedBox(height: AppSpacing.xl),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    FilledButton.icon(
+                      key: PlayerKeys.resumeContinue,
+                      onPressed: () =>
+                          controller.chooseResume(fromBeginning: false),
+                      icon: const Icon(Icons.play_arrow_rounded),
+                      label: Text(l10n.resumePlay),
+                    ),
+                    const SizedBox(width: AppSpacing.sm),
+                    OutlinedButton(
+                      key: PlayerKeys.resumeFromStart,
+                      onPressed: () =>
+                          controller.chooseResume(fromBeginning: true),
+                      child: Text(l10n.playFromStart),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -330,33 +361,57 @@ class _NextEpisodeBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     final offer = controller.nextEpisode!;
     final seconds = offer.remaining?.inSeconds;
     return Positioned(
-      right: 24,
-      bottom: 96,
+      right: AppSpacing.xl,
+      bottom: 112,
       child: Material(
         key: PlayerKeys.nextEpisode,
-        color: Colors.black.withValues(alpha: 0.82),
-        borderRadius: BorderRadius.circular(8),
+        color: scheme.surfaceContainerHigh.withValues(alpha: 0.95),
+        borderRadius: BorderRadius.circular(AppRadii.lg),
+        elevation: 12,
+        shadowColor: Colors.black.withValues(alpha: 0.5),
         child: Padding(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(AppSpacing.lg),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(
-                seconds == null
-                    ? l10n.playNextEpisode
-                    : l10n.nextEpisodeIn(seconds),
-                style: const TextStyle(color: Colors.white),
-              ),
-              Text(
-                offer.item.displayName,
-                style: const TextStyle(color: Colors.white70),
-              ),
-              const SizedBox(height: 8),
               Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.skip_next_rounded,
+                    size: 20,
+                    color: scheme.primary,
+                  ),
+                  const SizedBox(width: AppSpacing.xs),
+                  Text(
+                    seconds == null
+                        ? l10n.playNextEpisode
+                        : l10n.nextEpisodeIn(seconds),
+                    style: theme.textTheme.titleMedium,
+                  ),
+                ],
+              ),
+              const SizedBox(height: AppSpacing.xxs),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 280),
+                child: Text(
+                  offer.item.displayName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+              const SizedBox(height: AppSpacing.sm),
+              Row(
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   if (seconds != null)
                     TextButton(
@@ -364,7 +419,7 @@ class _NextEpisodeBanner extends StatelessWidget {
                       onPressed: controller.cancelNextEpisode,
                       child: Text(l10n.cancelNextEpisode),
                     ),
-                  TextButton(
+                  FilledButton(
                     key: PlayerKeys.nextEpisodePlay,
                     onPressed: controller.playNextEpisode,
                     child: Text(l10n.playNextEpisode),
@@ -386,16 +441,41 @@ class _Banner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     return Positioned(
-      left: 24,
-      right: 24,
-      top: 24,
-      child: Material(
-        color: Colors.black.withValues(alpha: 0.82),
-        borderRadius: BorderRadius.circular(8),
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Text(text, style: const TextStyle(color: Colors.white)),
+      left: 0,
+      right: 0,
+      top: AppSpacing.xl,
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 560),
+          child: Material(
+            color: scheme.surfaceContainerHighest.withValues(alpha: 0.92),
+            borderRadius: BorderRadius.circular(AppRadii.md),
+            elevation: 8,
+            shadowColor: Colors.black.withValues(alpha: 0.45),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.md,
+                vertical: AppSpacing.sm,
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.info_outline_rounded,
+                    size: 18,
+                    color: scheme.primary,
+                  ),
+                  const SizedBox(width: AppSpacing.xs),
+                  Flexible(
+                    child: Text(text, style: theme.textTheme.bodyMedium),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ),
       ),
     );
@@ -405,6 +485,7 @@ class _Banner extends StatelessWidget {
 class _ControlsBar extends StatelessWidget {
   const _ControlsBar({
     required this.controller,
+    required this.visible,
     required this.dragging,
     required this.dragValue,
     required this.onDragStart,
@@ -413,6 +494,7 @@ class _ControlsBar extends StatelessWidget {
   });
 
   final PlayerController controller;
+  final bool visible;
   final bool dragging;
   final double dragValue;
   final ValueChanged<double> onDragStart;
@@ -422,7 +504,10 @@ class _ControlsBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     final durationMs = controller.duration.inMilliseconds;
+    final seekEnabled = durationMs > 0;
     final value = dragging
         ? dragValue
         : (durationMs <= 0
@@ -431,181 +516,297 @@ class _ControlsBar extends StatelessWidget {
                   0.0,
                   1.0,
                 ));
+    final methodColor = controller.isTranscode
+        ? Colors.orangeAccent
+        : Colors.lightGreenAccent;
     return Positioned(
       left: 0,
       right: 0,
       bottom: 0,
-      child: Material(
-        key: PlayerKeys.controls,
-        color: Colors.black.withValues(alpha: 0.72),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Slider(
-                key: PlayerKeys.seekBar,
-                value: value,
-                onChanged: durationMs <= 0
-                    ? null
-                    : (next) {
-                        if (!dragging) {
-                          onDragStart(next);
-                        } else {
-                          onDragUpdate(next);
-                        }
-                      },
-                onChangeEnd: durationMs <= 0 ? null : onDragEnd,
+      child: AnimatedOpacity(
+        opacity: visible ? 1.0 : 0.0,
+        duration: AppMotion.normal,
+        curve: AppMotion.standard,
+        child: IgnorePointer(
+          ignoring: !visible,
+          child: DecoratedBox(
+            key: PlayerKeys.controls,
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Colors.transparent,
+                  Color(0x8A000000),
+                  Color(0xD9000000),
+                ],
               ),
-              Row(
+            ),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.xl,
+                AppSpacing.huge,
+                AppSpacing.xl,
+                AppSpacing.lg,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  IconButton(
-                    key: PlayerKeys.playPause,
-                    tooltip: controller.isPlaying ? l10n.pause : l10n.play,
-                    color: Colors.white,
-                    onPressed: controller.togglePlay,
-                    icon: Icon(
-                      controller.isPlaying ? Icons.pause : Icons.play_arrow,
-                    ),
-                  ),
-                  Text(
-                    '${_clock(controller.position)} / ${_clock(controller.duration)}',
-                    style: const TextStyle(color: Colors.white),
-                  ),
-                  const SizedBox(width: 12),
-                  Text(
-                    key: PlayerKeys.playMethod,
-                    controller.isTranscode ? l10n.transcode : l10n.directPlay,
-                    style: TextStyle(
-                      color: controller.isTranscode
-                          ? Colors.orangeAccent
-                          : Colors.lightGreenAccent,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Icon(
-                    Icons.volume_up,
-                    color: Colors.white,
-                    size: 18,
-                    semanticLabel: l10n.volume,
-                  ),
-                  SizedBox(
-                    width: 96,
-                    child: Slider(
-                      key: PlayerKeys.volume,
-                      value: controller.volume.clamp(0, 100).toDouble(),
-                      min: 0,
-                      max: 100,
-                      onChanged: (value) {
-                        controller.setVolume(value.round());
-                      },
-                    ),
-                  ),
-                  if (controller.isTranscode) ...[
-                    const SizedBox(width: 12),
-                    DropdownButton<int>(
-                      key: PlayerKeys.quality,
-                      dropdownColor: Colors.black87,
-                      value:
-                          kTranscodeBitrates.contains(
-                            controller.maxStreamingBitrate,
-                          )
-                          ? controller.maxStreamingBitrate
-                          : kTranscodeBitrates.first,
-                      items: [
-                        DropdownMenuItem(
-                          value: kTranscodeBitrates.first,
-                          child: Text(
-                            l10n.qualityAuto,
-                            style: const TextStyle(color: Colors.white),
+                  Row(
+                    children: [
+                      Text(
+                        _clock(controller.position),
+                        style: theme.textTheme.labelMedium,
+                      ),
+                      const SizedBox(width: AppSpacing.sm),
+                      Expanded(
+                        child: SliderTheme(
+                          data: theme.sliderTheme.copyWith(
+                            trackHeight: 4,
+                            thumbShape: const RoundSliderThumbShape(
+                              enabledThumbRadius: 7,
+                            ),
+                            overlayShape: const RoundSliderOverlayShape(
+                              overlayRadius: 16,
+                            ),
+                          ),
+                          child: Slider(
+                            key: PlayerKeys.seekBar,
+                            value: value,
+                            onChanged: !seekEnabled
+                                ? null
+                                : (next) {
+                                    if (!dragging) {
+                                      onDragStart(next);
+                                    } else {
+                                      onDragUpdate(next);
+                                    }
+                                  },
+                            onChangeEnd: !seekEnabled ? null : onDragEnd,
                           ),
                         ),
-                        for (final bitrate in kTranscodeBitrates.skip(1))
-                          DropdownMenuItem(
-                            value: bitrate,
-                            child: Text(
-                              l10n.qualityMbps(bitrate ~/ 1000000),
-                              style: const TextStyle(color: Colors.white),
-                            ),
-                          ),
-                      ],
-                      onChanged: (value) {
-                        if (value != null) {
-                          controller.setMaxBitrate(value);
-                        }
-                      },
-                    ),
-                  ],
-                  const Spacer(),
-                  if (controller.audioTracks.length > 1)
-                    DropdownButton<int>(
-                      key: PlayerKeys.audio,
-                      dropdownColor: Colors.black87,
-                      value: controller.audioStreamIndex,
-                      hint: Text(
-                        l10n.audioTrack,
-                        style: const TextStyle(color: Colors.white),
                       ),
-                      items: [
-                        for (final track in controller.audioTracks)
-                          DropdownMenuItem(
-                            value: track.index,
-                            child: Text(
-                              track.label,
-                              style: const TextStyle(color: Colors.white),
-                            ),
-                          ),
-                      ],
-                      onChanged: (value) {
-                        if (value != null) {
-                          controller.setAudio(value);
-                        }
-                      },
-                    ),
-                  if (controller.subtitleTracks.isNotEmpty)
-                    DropdownButton<int?>(
-                      key: PlayerKeys.subtitle,
-                      dropdownColor: Colors.black87,
-                      value: controller.subtitleStreamIndex,
-                      hint: Text(
-                        l10n.subtitleTrack,
-                        style: const TextStyle(color: Colors.white),
+                      const SizedBox(width: AppSpacing.sm),
+                      Text(
+                        _clock(controller.duration),
+                        style: theme.textTheme.labelMedium,
                       ),
-                      items: [
-                        DropdownMenuItem(
-                          value: null,
-                          child: Text(
-                            l10n.subtitleOff,
-                            style: const TextStyle(color: Colors.white),
+                    ],
+                  ),
+                  const SizedBox(height: AppSpacing.xs),
+                  Row(
+                    children: [
+                      SizedBox(
+                        width: 56,
+                        height: 56,
+                        child: IconButton(
+                          key: PlayerKeys.playPause,
+                          tooltip: controller.isPlaying
+                              ? l10n.pause
+                              : l10n.play,
+                          onPressed: controller.togglePlay,
+                          iconSize: 32,
+                          style: IconButton.styleFrom(
+                            backgroundColor: scheme.primary,
+                            foregroundColor: scheme.onPrimary,
+                            shape: const CircleBorder(),
+                          ),
+                          icon: Icon(
+                            controller.isPlaying
+                                ? Icons.pause_rounded
+                                : Icons.play_arrow_rounded,
                           ),
                         ),
-                        for (final track in controller.subtitleTracks)
-                          DropdownMenuItem(
-                            value: track.index,
-                            child: Text(
-                              track.label,
-                              style: const TextStyle(color: Colors.white),
-                            ),
+                      ),
+                      const SizedBox(width: AppSpacing.md),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: AppSpacing.sm,
+                          vertical: AppSpacing.xxs,
+                        ),
+                        decoration: BoxDecoration(
+                          color: methodColor.withValues(alpha: 0.16),
+                          borderRadius: BorderRadius.circular(AppRadii.sm),
+                          border: Border.all(
+                            color: methodColor.withValues(alpha: 0.5),
                           ),
+                        ),
+                        child: Text(
+                          key: PlayerKeys.playMethod,
+                          controller.isTranscode
+                              ? l10n.transcode
+                              : l10n.directPlay,
+                          style: theme.textTheme.labelMedium?.copyWith(
+                            color: methodColor,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: AppSpacing.lg),
+                      Icon(
+                        Icons.volume_up_rounded,
+                        color: scheme.onSurface,
+                        size: 20,
+                        semanticLabel: l10n.volume,
+                      ),
+                      SizedBox(
+                        width: 104,
+                        child: Slider(
+                          key: PlayerKeys.volume,
+                          value: controller.volume.clamp(0, 100).toDouble(),
+                          min: 0,
+                          max: 100,
+                          onChanged: (value) {
+                            controller.setVolume(value.round());
+                          },
+                        ),
+                      ),
+                      const Spacer(),
+                      if (controller.isTranscode) ...[
+                        _ControlDropdown<int>(
+                          key: PlayerKeys.quality,
+                          tooltip: l10n.qualityAuto,
+                          value:
+                              kTranscodeBitrates.contains(
+                                controller.maxStreamingBitrate,
+                              )
+                              ? controller.maxStreamingBitrate
+                              : kTranscodeBitrates.first,
+                          items: [
+                            DropdownMenuItem(
+                              value: kTranscodeBitrates.first,
+                              child: Text(l10n.qualityAuto),
+                            ),
+                            for (final bitrate in kTranscodeBitrates.skip(1))
+                              DropdownMenuItem(
+                                value: bitrate,
+                                child: Text(
+                                  l10n.qualityMbps(bitrate ~/ 1000000),
+                                ),
+                              ),
+                          ],
+                          onChanged: (value) {
+                            if (value != null) {
+                              controller.setMaxBitrate(value);
+                            }
+                          },
+                        ),
+                        const SizedBox(width: AppSpacing.xs),
                       ],
-                      onChanged: controller.setSubtitle,
-                    ),
-                  IconButton(
-                    key: PlayerKeys.fullscreen,
-                    tooltip: controller.isFullScreen
-                        ? l10n.exitFullscreen
-                        : l10n.fullscreen,
-                    color: Colors.white,
-                    onPressed: controller.toggleFullScreen,
-                    icon: Icon(
-                      controller.isFullScreen
-                          ? Icons.fullscreen_exit
-                          : Icons.fullscreen,
-                    ),
+                      if (controller.audioTracks.length > 1) ...[
+                        _ControlDropdown<int>(
+                          key: PlayerKeys.audio,
+                          tooltip: l10n.audioTrack,
+                          value: controller.audioStreamIndex,
+                          hint: l10n.audioTrack,
+                          items: [
+                            for (final track in controller.audioTracks)
+                              DropdownMenuItem(
+                                value: track.index,
+                                child: Text(track.label),
+                              ),
+                          ],
+                          onChanged: (value) {
+                            if (value != null) {
+                              controller.setAudio(value);
+                            }
+                          },
+                        ),
+                        const SizedBox(width: AppSpacing.xs),
+                      ],
+                      if (controller.subtitleTracks.isNotEmpty) ...[
+                        _ControlDropdown<int?>(
+                          key: PlayerKeys.subtitle,
+                          tooltip: l10n.subtitleTrack,
+                          value: controller.subtitleStreamIndex,
+                          hint: l10n.subtitleTrack,
+                          items: [
+                            DropdownMenuItem(
+                              value: null,
+                              child: Text(l10n.subtitleOff),
+                            ),
+                            for (final track in controller.subtitleTracks)
+                              DropdownMenuItem(
+                                value: track.index,
+                                child: Text(track.label),
+                              ),
+                          ],
+                          onChanged: controller.setSubtitle,
+                        ),
+                        const SizedBox(width: AppSpacing.xs),
+                      ],
+                      IconButton(
+                        key: PlayerKeys.fullscreen,
+                        tooltip: controller.isFullScreen
+                            ? l10n.exitFullscreen
+                            : l10n.fullscreen,
+                        color: scheme.onSurface,
+                        onPressed: controller.toggleFullScreen,
+                        icon: Icon(
+                          controller.isFullScreen
+                              ? Icons.fullscreen_exit_rounded
+                              : Icons.fullscreen_rounded,
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
-            ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 控制条右侧分组用的统一样式下拉(码率/音轨/字幕)。
+class _ControlDropdown<T> extends StatelessWidget {
+  const _ControlDropdown({
+    super.key,
+    required this.tooltip,
+    required this.value,
+    required this.items,
+    required this.onChanged,
+    this.hint,
+  });
+
+  final String tooltip;
+  final T? value;
+  final String? hint;
+  final List<DropdownMenuItem<T>> items;
+  final ValueChanged<T?>? onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Tooltip(
+      message: tooltip,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
+        decoration: BoxDecoration(
+          color: scheme.onSurface.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(AppRadii.sm),
+        ),
+        child: DropdownButton<T>(
+          value: value,
+          hint: hint == null
+              ? null
+              : Text(
+                  hint!,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: scheme.onSurface,
+                  ),
+                ),
+          items: items,
+          onChanged: onChanged,
+          underline: const SizedBox.shrink(),
+          dropdownColor: scheme.surfaceContainerHigh,
+          borderRadius: BorderRadius.circular(AppRadii.md),
+          style: theme.textTheme.bodyMedium?.copyWith(color: scheme.onSurface),
+          icon: Icon(
+            Icons.keyboard_arrow_down_rounded,
+            color: scheme.onSurfaceVariant,
           ),
         ),
       ),

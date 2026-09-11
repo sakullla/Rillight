@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
-import 'package:rillight/app/routes.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/server_list_store.dart';
@@ -162,7 +161,7 @@ void main() {
       await waitFor(tester, find.byKey(PlayerKeys.playMethod));
 
       expect(app.router.state.uri.path, '/item/movie-up');
-      expect(app.router.state.uri.path, isNot(AppRoutes.play('movie-up')));
+      expect(app.router.state.uri.path.contains('/play'), isFalse);
       expect(find.byType(ItemDetailPage), findsOneWidget);
       expect(find.byType(PlayerPage), findsOneWidget);
       expect(auth.disposed, isFalse);
