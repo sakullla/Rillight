@@ -11,6 +11,7 @@ import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/library/item_format.dart';
 import 'package:rillight/media_image/media_image.dart';
+import 'package:rillight/player/player_keys.dart';
 
 class ItemDetailPage extends StatefulWidget {
   const ItemDetailPage({super.key, required this.itemId});
@@ -239,6 +240,16 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                       ),
                     ],
                     const SizedBox(height: 16),
+                    if (item.isPlayable)
+                      FilledButton.icon(
+                        key: PlayerKeys.open,
+                        onPressed: () => context.push(AppRoutes.play(item.id)),
+                        icon: const Icon(Icons.play_arrow),
+                        label: Text(
+                          item.canResume ? l10n.resumePlay : l10n.play,
+                        ),
+                      ),
+                    if (item.isPlayable) const SizedBox(height: 8),
                     SwitchListTile(
                       key: CatalogKeys.playedToggle,
                       contentPadding: EdgeInsets.zero,

@@ -1,8 +1,11 @@
 import 'package:dio/dio.dart';
+import 'package:rillight/emby/device_profile.dart';
 import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/emby/emby_errors.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/emby/emby_url.dart';
+import 'package:rillight/player/playback_models.dart';
+import 'package:rillight/player/playback_resolver.dart';
 
 class EmbyClient {
   EmbyClient({
@@ -35,6 +38,8 @@ class EmbyClient {
   String? get userId => _userId;
   bool get hasSession =>
       _baseUrl != null && _accessToken != null && _accessToken!.isNotEmpty;
+  Map<String, String> get sessionHeaders =>
+      _headers(token: _accessToken, userId: _userId);
 
   void attachSession({
     required Uri baseUrl,
@@ -228,6 +233,94 @@ class EmbyClient {
     await deleteJson('/Users/${_requireUserId()}/PlayedItems/$itemId');
   }
 
+  Future<EmbyUser> getUser() async {
+    final data = await getJson('/Users/${_requireUserId()}');
+    return EmbyUser.fromJson(data);
+  }
+
+  Future<PlaybackInfo> getPlaybackInfo({
+    required String itemId,
+    int? maxStreamingBitrate,
+    int? startTimeTicks,
+    int? audioStreamIndex,
+    int? subtitleStreamIndex,
+    String? mediaSourceId,
+  }) async {
+    final bitrate = maxStreamingBitrate ?? kMpvMaxStreamingBitrate;
+    final data = await postJson(
+      '/Items/$itemId/PlaybackInfo',
+      queryParameters: {'UserId': _requireUserId()},
+      body: {
+        'UserId': _requireUserId(),
+        'DeviceProfile': mpvDeviceProfile(maxStreamingBitrate: bitrate),
+        'MaxStreamingBitrate': bitrate,
+        'StartTimeTicks': ?startTimeTicks,
+        'AutoOpenLiveStream': true,
+        'EnableDirectPlay': true,
+        'EnableDirectStream': true,
+        'EnableTranscoding': true,
+        'AudioStreamIndex': ?audioStreamIndex,
+        'SubtitleStreamIndex': ?subtitleStreamIndex,
+        'MediaSourceId': ?mediaSourceId,
+      },
+    );
+    return PlaybackInfo.fromJson(data);
+  }
+
+  Future<void> reportPlaying(PlaybackReport report) {
+    return postJson('/Sessions/Playing', body: report.toJson());
+  }
+
+  Future<void> reportProgress(PlaybackReport report) {
+    return postJson('/Sessions/Playing/Progress', body: report.toJson());
+  }
+
+  Future<void> reportStopped(PlaybackReport report) {
+    return postJson('/Sessions/Playing/Stopped', body: report.toJson());
+  }
+
+  Future<EmbyItem?> getNextEpisode(EmbyItem episode) async {
+    if (!episode.isEpisode) {
+      return null;
+    }
+    final seriesId = episode.seriesId;
+    if (seriesId == null || seriesId.isEmpty) {
+      return null;
+    }
+    final episodes = await getItems(
+      parentId: seriesId,
+      includeItemTypes: 'Episode',
+      recursive: true,
+    );
+    episodes.sort((a, b) {
+      final season = (a.parentIndexNumber ?? 0).compareTo(
+        b.parentIndexNumber ?? 0,
+      );
+      if (season != 0) {
+        return season;
+      }
+      return (a.indexNumber ?? 0).compareTo(b.indexNumber ?? 0);
+    });
+    final index = episodes.indexWhere((item) => item.id == episode.id);
+    if (index < 0 || index + 1 >= episodes.length) {
+      return null;
+    }
+    return episodes[index + 1];
+  }
+
+  Uri subtitleStreamUrl({
+    required String itemId,
+    required String mediaSourceId,
+    required int index,
+    String format = 'srt',
+  }) {
+    return embyResourceUri(
+      _baseUrl!,
+      '/Videos/$itemId/$mediaSourceId/Subtitles/$index/Stream.$format',
+      _accessToken ?? '',
+    );
+  }
+
   Future<List<int>> getPrimaryImage(
     String itemId, {
     String? tag,
@@ -249,8 +342,17 @@ class EmbyClient {
     return _requestJson('GET', path, queryParameters: queryParameters);
   }
 
-  Future<Map<String, dynamic>> postJson(String path, {Object? body}) {
-    return _requestJson('POST', path, body: body);
+  Future<Map<String, dynamic>> postJson(
+    String path, {
+    Object? body,
+    Map<String, dynamic>? queryParameters,
+  }) {
+    return _requestJson(
+      'POST',
+      path,
+      body: body,
+      queryParameters: queryParameters,
+    );
   }
 
   Future<Map<String, dynamic>> deleteJson(String path) {

@@ -195,5 +195,111 @@
         "type": "int"
       }
     }
+  },
+  "play": "播放",
+  "@play": {
+    "description": "Start playback from the beginning."
+  },
+  "pause": "暂停",
+  "@pause": {
+    "description": "Pause playback."
+  },
+  "resumePlay": "继续播放",
+  "@resumePlay": {
+    "description": "Resume playback from the saved position."
+  },
+  "playFromStart": "从头播放",
+  "@playFromStart": {
+    "description": "Start playback from the beginning despite saved progress."
+  },
+  "resumePrompt": "要从上次的位置继续播放吗？",
+  "@resumePrompt": {
+    "description": "Prompt shown when opening an item with saved progress."
+  },
+  "fullscreen": "全屏",
+  "@fullscreen": {
+    "description": "Enter fullscreen playback."
+  },
+  "exitFullscreen": "退出全屏",
+  "@exitFullscreen": {
+    "description": "Leave fullscreen playback without quitting the app."
+  },
+  "directPlay": "直连",
+  "@directPlay": {
+    "description": "Label when the session is Direct Play or Direct Stream."
+  },
+  "transcode": "转码",
+  "@transcode": {
+    "description": "Label when the server is transcoding."
+  },
+  "qualityAuto": "自动",
+  "@qualityAuto": {
+    "description": "Automatic transcode quality preset."
+  },
+  "qualityMbps": "{mbps} Mbps",
+  "@qualityMbps": {
+    "description": "Named transcode bitrate preset.",
+    "placeholders": {
+      "mbps": {
+        "type": "int"
+      }
+    }
+  },
+  "audioTrack": "音轨",
+  "@audioTrack": {
+    "description": "Audio track selector label."
+  },
+  "subtitleTrack": "字幕",
+  "@subtitleTrack": {
+    "description": "Subtitle track selector label."
+  },
+  "subtitleOff": "关闭字幕",
+  "@subtitleOff": {
+    "description": "Disable subtitles."
+  },
+  "subtitleBitmapBurnIn": "该字幕为位图，将请求服务器烧录",
+  "@subtitleBitmapBurnIn": {
+    "description": "Notice when PGS/bitmap subtitles are burned in by the server."
+  },
+  "subtitleBitmapFailed": "直连无法渲染该字幕，请改用转码",
+  "@subtitleBitmapFailed": {
+    "description": "Notice when bitmap subtitles cannot be rendered on Direct Play."
+  },
+  "nextEpisodeIn": "{seconds} 秒后播放下一集",
+  "@nextEpisodeIn": {
+    "description": "Cancelable countdown before autoplaying the next episode.",
+    "placeholders": {
+      "seconds": {
+        "type": "int"
+      }
+    }
+  },
+  "cancelNextEpisode": "取消",
+  "@cancelNextEpisode": {
+    "description": "Cancel next-episode autoplay."
+  },
+  "playNextEpisode": "播放下一集",
+  "@playNextEpisode": {
+    "description": "Play the next episode now."
+  },
+  "playbackDisconnected": "播放中断，请检查网络",
+  "@playbackDisconnected": {
+    "description": "Visible failure when playback disconnects."
+  },
+  "progressSyncFailed": "进度同步失败",
+  "@progressSyncFailed": {
+    "description": "Visible failure when Playing/Progress/Stopped reporting fails."
+  },
+  "playbackFailed": "无法播放",
+  "@playbackFailed": {
+    "description": "Visible failure when playback cannot start."
+  },
+  "noPlayableStream": "没有可播放的流",
+  "@noPlayableStream": {
+    "description": "Visible failure when PlaybackInfo has no stream."
+  },
+  "playerLoading": "正在打开播放…",
+  "@playerLoading": {
+    "description": "Status shown while PlaybackInfo and the stream are loading."
   }
 }

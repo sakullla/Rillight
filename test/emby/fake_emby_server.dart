@@ -10,11 +10,58 @@ class FakeEmbyUser {
     required this.username,
     required this.password,
     required this.userId,
+    this.enableNextEpisodeAutoPlay = true,
+    this.resumeRewindSeconds = 0,
   });
 
   final String username;
   final String password;
   final String userId;
+  final bool enableNextEpisodeAutoPlay;
+  final int resumeRewindSeconds;
+}
+
+class FakeMediaStream {
+  const FakeMediaStream({
+    required this.index,
+    required this.type,
+    this.codec,
+    this.language,
+    this.displayTitle,
+    this.isDefault = false,
+    this.isTextSubtitleStream,
+    this.channels,
+  });
+
+  final int index;
+  final String type;
+  final String? codec;
+  final String? language;
+  final String? displayTitle;
+  final bool isDefault;
+  final bool? isTextSubtitleStream;
+  final int? channels;
+
+  Map<String, dynamic> toJson() {
+    return {
+      'Index': index,
+      'Type': type,
+      if (codec != null) 'Codec': codec,
+      if (language != null) 'Language': language,
+      if (displayTitle != null) 'DisplayTitle': displayTitle,
+      'IsDefault': isDefault,
+      if (isTextSubtitleStream != null)
+        'IsTextSubtitleStream': isTextSubtitleStream,
+      if (channels != null) 'Channels': channels,
+    };
+  }
+}
+
+class FakePlaybackEvent {
+  FakePlaybackEvent({required this.kind, required this.body});
+
+  final String kind;
+  final Map<String, dynamic> body;
 }
 
 class FakeEmbyItem {
@@ -39,6 +86,11 @@ class FakeEmbyItem {
     this.playedPercentage,
     this.nextUp = false,
     DateTime? dateCreated,
+    this.container = 'mkv',
+    this.forceTranscode = false,
+    this.supportsDirectPlay = true,
+    this.supportsDirectStream = true,
+    this.mediaStreams = const [],
   }) : dateCreated = dateCreated ?? DateTime.utc(2024, 1, 1);
 
   final String id;
@@ -61,6 +113,11 @@ class FakeEmbyItem {
   double? playedPercentage;
   bool nextUp;
   DateTime dateCreated;
+  String container;
+  bool forceTranscode;
+  bool supportsDirectPlay;
+  bool supportsDirectStream;
+  List<FakeMediaStream> mediaStreams;
 
   Map<String, dynamic> toJson() {
     return {
@@ -204,9 +261,14 @@ class FakeEmbyServer {
   final Set<String> failingImageIds = {'movie-broken'};
 
   final List<String> requests = [];
+  final List<FakePlaybackEvent> playbackEvents = [];
+  Map<String, dynamic>? lastDeviceProfile;
+  Map<String, dynamic>? lastPlaybackInfoBody;
+  int? progressStatus;
   final Set<String> issuedTokens = {};
   final Set<String> loggedOutTokens = {};
   int _tokenSeq = 0;
+  int _playSeq = 0;
 
   Future<ResponseBody> handle(
     RequestOptions options,
@@ -251,12 +313,247 @@ class FakeEmbyServer {
       });
     }
 
+    final playback = await _handlePlayback(
+      options,
+      method,
+      segments,
+      requestStream,
+    );
+    if (playback != null) {
+      return playback;
+    }
+
     final catalog = _handleCatalog(options, method, segments);
     if (catalog != null) {
       return catalog;
     }
 
     return _json(404, {'error': 'not found'});
+  }
+
+  Future<ResponseBody?> _handlePlayback(
+    RequestOptions options,
+    String method,
+    List<String> segments,
+    Stream<Uint8List>? requestStream,
+  ) async {
+    if (segments.length == 2 && segments[0] == 'Users' && method == 'GET') {
+      return _handleUser(segments[1]);
+    }
+    if (segments.length == 3 &&
+        segments[0] == 'Items' &&
+        segments[2] == 'PlaybackInfo' &&
+        method == 'POST') {
+      return _handlePlaybackInfo(
+        segments[1],
+        await _readBody(options, requestStream),
+      );
+    }
+    if (segments.isNotEmpty && segments[0] == 'Sessions' && method == 'POST') {
+      return _handlePlaybackReport(
+        segments,
+        await _readBody(options, requestStream),
+      );
+    }
+    if (segments.length >= 3 &&
+        (segments[0] == 'Videos' || segments[0] == 'videos')) {
+      return _handleVideoResource(segments);
+    }
+    return null;
+  }
+
+  ResponseBody _handleUser(String userId) {
+    FakeEmbyUser? user;
+    for (final item in users) {
+      if (item.userId == userId) {
+        user = item;
+        break;
+      }
+    }
+    if (user == null) {
+      return _json(404, {'error': 'not found'});
+    }
+    return _json(200, {
+      'Id': user.userId,
+      'Name': user.username,
+      'Configuration': {
+        'EnableNextEpisodeAutoPlay': user.enableNextEpisodeAutoPlay,
+        'ResumeRewindSeconds': user.resumeRewindSeconds,
+      },
+    });
+  }
+
+  ResponseBody _handlePlaybackInfo(String itemId, String raw) {
+    final item = _itemById(itemId);
+    if (item == null || (item.type != 'Movie' && item.type != 'Episode')) {
+      return _json(404, {'error': 'not found'});
+    }
+    Map<String, dynamic> body = const {};
+    if (raw.isNotEmpty) {
+      final decoded = jsonDecode(raw);
+      if (decoded is Map) {
+        body = Map<String, dynamic>.from(decoded);
+      }
+    }
+    lastPlaybackInfoBody = body;
+    final profile = body['DeviceProfile'];
+    lastDeviceProfile = profile is Map
+        ? Map<String, dynamic>.from(profile)
+        : null;
+
+    final maxBitrate = body['MaxStreamingBitrate'] is num
+        ? (body['MaxStreamingBitrate'] as num).toInt()
+        : null;
+    final subtitleIndex = body['SubtitleStreamIndex'] is num
+        ? (body['SubtitleStreamIndex'] as num).toInt()
+        : null;
+    final startTicks = body['StartTimeTicks'] is num
+        ? (body['StartTimeTicks'] as num).toInt()
+        : 0;
+    final playSessionId = 'play-${++_playSeq}';
+    final streams = item.mediaStreams.isNotEmpty
+        ? item.mediaStreams
+        : _defaultStreams();
+
+    var burnIn = false;
+    if (subtitleIndex != null) {
+      for (final stream in streams) {
+        if (stream.index == subtitleIndex &&
+            stream.type == 'Subtitle' &&
+            stream.isTextSubtitleStream != true) {
+          burnIn = true;
+        }
+      }
+    }
+    final transcode =
+        item.forceTranscode ||
+        burnIn ||
+        (maxBitrate != null && maxBitrate <= 8000000);
+
+    int? defaultAudio;
+    int? defaultSubtitle;
+    for (final stream in streams) {
+      if (stream.type == 'Audio' && defaultAudio == null) {
+        defaultAudio = stream.index;
+      }
+      if (stream.type == 'Subtitle' && stream.isDefault) {
+        defaultSubtitle = stream.index;
+      }
+    }
+
+    final source = <String, dynamic>{
+      'Id': item.id,
+      'Container': transcode ? 'ts' : item.container,
+      'SupportsDirectPlay': !transcode && item.supportsDirectPlay,
+      'SupportsDirectStream': !transcode && item.supportsDirectStream,
+      'SupportsTranscoding': true,
+      'RunTimeTicks': item.runTimeTicks ?? 0,
+      'DefaultAudioStreamIndex': ?defaultAudio,
+      'DefaultSubtitleStreamIndex': ?defaultSubtitle,
+      'MediaStreams': [for (final stream in streams) stream.toJson()],
+    };
+    if (transcode) {
+      var transcoding =
+          '/videos/${item.id}/master.m3u8?MediaSourceId=${item.id}'
+          '&PlaySessionId=$playSessionId'
+          '&MaxStreamingBitrate=${maxBitrate ?? 8000000}';
+      if (startTicks > 0) {
+        transcoding += '&StartTimeTicks=$startTicks';
+      }
+      if (subtitleIndex != null) {
+        transcoding += '&SubtitleStreamIndex=$subtitleIndex';
+      }
+      source['TranscodingUrl'] = transcoding;
+      source['TranscodingSubProtocol'] = 'hls';
+      source['TranscodingContainer'] = 'ts';
+    } else {
+      source['DirectStreamUrl'] =
+          '/Videos/${item.id}/stream.${item.container}?static=true'
+          '&MediaSourceId=${item.id}&PlaySessionId=$playSessionId';
+    }
+    return _json(200, {
+      'MediaSources': [source],
+      'PlaySessionId': playSessionId,
+    });
+  }
+
+  ResponseBody _handlePlaybackReport(List<String> segments, String raw) {
+    Map<String, dynamic> body = const {};
+    if (raw.isNotEmpty) {
+      final decoded = jsonDecode(raw);
+      if (decoded is Map) {
+        body = Map<String, dynamic>.from(decoded);
+      }
+    }
+    var kind = 'Playing';
+    if (segments.length >= 3 && segments[2] == 'Progress') {
+      kind = 'Progress';
+    } else if (segments.length >= 3 && segments[2] == 'Stopped') {
+      kind = 'Stopped';
+    }
+    playbackEvents.add(FakePlaybackEvent(kind: kind, body: body));
+    if (kind == 'Progress' && progressStatus != null) {
+      return _json(progressStatus!, {'error': 'progress failed'});
+    }
+    final itemId = body['ItemId']?.toString();
+    final ticks = body['PositionTicks'];
+    if (itemId != null && ticks is num) {
+      final item = _itemById(itemId);
+      if (item != null) {
+        item.playbackPositionTicks = ticks.toInt();
+      }
+    }
+    return _json(200, {});
+  }
+
+  ResponseBody _handleVideoResource(List<String> segments) {
+    if (segments.length >= 6 &&
+        segments[2] != 'Subtitles' &&
+        segments[3] == 'Subtitles') {
+      return ResponseBody.fromString(
+        '1\n00:00:00,000 --> 00:00:02,000\nhello\n',
+        200,
+        headers: {
+          Headers.contentTypeHeader: ['text/plain'],
+        },
+      );
+    }
+    if (segments.last.startsWith('master.m3u8')) {
+      return ResponseBody.fromString(
+        '#EXTM3U\n',
+        200,
+        headers: {
+          Headers.contentTypeHeader: ['application/vnd.apple.mpegurl'],
+        },
+      );
+    }
+    return ResponseBody.fromBytes(
+      Uint8List(32),
+      200,
+      headers: {
+        Headers.contentTypeHeader: ['video/x-matroska'],
+      },
+    );
+  }
+
+  List<FakeMediaStream> _defaultStreams() {
+    return const [
+      FakeMediaStream(
+        index: 0,
+        type: 'Video',
+        codec: 'h264',
+        displayTitle: '1080p',
+      ),
+      FakeMediaStream(
+        index: 1,
+        type: 'Audio',
+        codec: 'ac3',
+        language: 'eng',
+        displayTitle: 'English',
+        isDefault: true,
+        channels: 6,
+      ),
+    ];
   }
 
   ResponseBody? _handleCatalog(
@@ -651,6 +948,32 @@ List<FakeEmbyItem> defaultCatalogItems() {
       playedPercentage: 40,
       primaryImageTag: 'tag-inception',
       dateCreated: DateTime.utc(2024, 1, 1),
+      mediaStreams: const [
+        FakeMediaStream(
+          index: 0,
+          type: 'Video',
+          codec: 'h264',
+          displayTitle: '1080p',
+        ),
+        FakeMediaStream(
+          index: 1,
+          type: 'Audio',
+          codec: 'ac3',
+          language: 'eng',
+          displayTitle: 'English',
+          isDefault: true,
+          channels: 6,
+        ),
+        FakeMediaStream(
+          index: 2,
+          type: 'Subtitle',
+          codec: 'subrip',
+          language: 'chi',
+          displayTitle: '中文',
+          isDefault: true,
+          isTextSubtitleStream: true,
+        ),
+      ],
     ),
     FakeEmbyItem(
       id: 'movie-up',
@@ -671,6 +994,52 @@ List<FakeEmbyItem> defaultCatalogItems() {
       productionYear: 2021,
       primaryImageTag: 'tag-broken',
       dateCreated: DateTime.utc(2025, 6, 1),
+    ),
+    FakeEmbyItem(
+      id: 'movie-transcode',
+      name: '需转码片',
+      type: 'Movie',
+      parentId: 'view-movies',
+      productionYear: 2012,
+      runTimeTicks: minute * 90,
+      forceTranscode: true,
+      supportsDirectPlay: false,
+      supportsDirectStream: false,
+      dateCreated: DateTime.utc(2023, 1, 1),
+    ),
+    FakeEmbyItem(
+      id: 'movie-pgs',
+      name: '位图字幕片',
+      type: 'Movie',
+      parentId: 'view-movies',
+      productionYear: 2015,
+      runTimeTicks: minute * 80,
+      dateCreated: DateTime.utc(2023, 6, 1),
+      mediaStreams: const [
+        FakeMediaStream(
+          index: 0,
+          type: 'Video',
+          codec: 'hevc',
+          displayTitle: '1080p',
+        ),
+        FakeMediaStream(
+          index: 1,
+          type: 'Audio',
+          codec: 'aac',
+          language: 'eng',
+          displayTitle: 'English',
+          isDefault: true,
+        ),
+        FakeMediaStream(
+          index: 2,
+          type: 'Subtitle',
+          codec: 'pgssub',
+          language: 'chi',
+          displayTitle: 'PGS',
+          isDefault: true,
+          isTextSubtitleStream: false,
+        ),
+      ],
     ),
     FakeEmbyItem(
       id: 'series-friends',

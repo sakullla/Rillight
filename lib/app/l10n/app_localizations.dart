@@ -345,6 +345,150 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'已看 {percent}%'**
   String playbackProgress(int percent);
+
+  /// Start playback from the beginning.
+  ///
+  /// In zh, this message translates to:
+  /// **'播放'**
+  String get play;
+
+  /// Pause playback.
+  ///
+  /// In zh, this message translates to:
+  /// **'暂停'**
+  String get pause;
+
+  /// Resume playback from the saved position.
+  ///
+  /// In zh, this message translates to:
+  /// **'继续播放'**
+  String get resumePlay;
+
+  /// Start playback from the beginning despite saved progress.
+  ///
+  /// In zh, this message translates to:
+  /// **'从头播放'**
+  String get playFromStart;
+
+  /// Prompt shown when opening an item with saved progress.
+  ///
+  /// In zh, this message translates to:
+  /// **'要从上次的位置继续播放吗？'**
+  String get resumePrompt;
+
+  /// Enter fullscreen playback.
+  ///
+  /// In zh, this message translates to:
+  /// **'全屏'**
+  String get fullscreen;
+
+  /// Leave fullscreen playback without quitting the app.
+  ///
+  /// In zh, this message translates to:
+  /// **'退出全屏'**
+  String get exitFullscreen;
+
+  /// Label when the session is Direct Play or Direct Stream.
+  ///
+  /// In zh, this message translates to:
+  /// **'直连'**
+  String get directPlay;
+
+  /// Label when the server is transcoding.
+  ///
+  /// In zh, this message translates to:
+  /// **'转码'**
+  String get transcode;
+
+  /// Automatic transcode quality preset.
+  ///
+  /// In zh, this message translates to:
+  /// **'自动'**
+  String get qualityAuto;
+
+  /// Named transcode bitrate preset.
+  ///
+  /// In zh, this message translates to:
+  /// **'{mbps} Mbps'**
+  String qualityMbps(int mbps);
+
+  /// Audio track selector label.
+  ///
+  /// In zh, this message translates to:
+  /// **'音轨'**
+  String get audioTrack;
+
+  /// Subtitle track selector label.
+  ///
+  /// In zh, this message translates to:
+  /// **'字幕'**
+  String get subtitleTrack;
+
+  /// Disable subtitles.
+  ///
+  /// In zh, this message translates to:
+  /// **'关闭字幕'**
+  String get subtitleOff;
+
+  /// Notice when PGS/bitmap subtitles are burned in by the server.
+  ///
+  /// In zh, this message translates to:
+  /// **'该字幕为位图，将请求服务器烧录'**
+  String get subtitleBitmapBurnIn;
+
+  /// Notice when bitmap subtitles cannot be rendered on Direct Play.
+  ///
+  /// In zh, this message translates to:
+  /// **'直连无法渲染该字幕，请改用转码'**
+  String get subtitleBitmapFailed;
+
+  /// Cancelable countdown before autoplaying the next episode.
+  ///
+  /// In zh, this message translates to:
+  /// **'{seconds} 秒后播放下一集'**
+  String nextEpisodeIn(int seconds);
+
+  /// Cancel next-episode autoplay.
+  ///
+  /// In zh, this message translates to:
+  /// **'取消'**
+  String get cancelNextEpisode;
+
+  /// Play the next episode now.
+  ///
+  /// In zh, this message translates to:
+  /// **'播放下一集'**
+  String get playNextEpisode;
+
+  /// Visible failure when playback disconnects.
+  ///
+  /// In zh, this message translates to:
+  /// **'播放中断，请检查网络'**
+  String get playbackDisconnected;
+
+  /// Visible failure when Playing/Progress/Stopped reporting fails.
+  ///
+  /// In zh, this message translates to:
+  /// **'进度同步失败'**
+  String get progressSyncFailed;
+
+  /// Visible failure when playback cannot start.
+  ///
+  /// In zh, this message translates to:
+  /// **'无法播放'**
+  String get playbackFailed;
+
+  /// Visible failure when PlaybackInfo has no stream.
+  ///
+  /// In zh, this message translates to:
+  /// **'没有可播放的流'**
+  String get noPlayableStream;
+
+  /// Status shown while PlaybackInfo and the stream are loading.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在打开播放…'**
+  String get playerLoading;
 }
 
 class _AppLocalizationsDelegate

@@ -1,0 +1,313 @@
+enum PlayMethod {
+  directPlay('DirectPlay'),
+  directStream('DirectStream'),
+  transcode('Transcode');
+
+  const PlayMethod(this.wireName);
+  final String wireName;
+
+  bool get isDirect => this != PlayMethod.transcode;
+}
+
+const int kEmbyTicksPerSecond = 10000000;
+
+Duration durationFromTicks(int ticks) {
+  if (ticks <= 0) {
+    return Duration.zero;
+  }
+  return Duration(microseconds: ticks ~/ 10);
+}
+
+int ticksFromDuration(Duration duration) {
+  if (duration <= Duration.zero) {
+    return 0;
+  }
+  return duration.inMicroseconds * 10;
+}
+
+enum SubtitleRenderKind { text, bitmap }
+
+class MediaStreamInfo {
+  const MediaStreamInfo({
+    required this.index,
+    required this.type,
+    this.codec,
+    this.language,
+    this.displayTitle,
+    this.isDefault = false,
+    this.isTextSubtitleStream,
+    this.channels,
+  });
+
+  final int index;
+  final String type;
+  final String? codec;
+  final String? language;
+  final String? displayTitle;
+  final bool isDefault;
+  final bool? isTextSubtitleStream;
+  final int? channels;
+
+  bool get isAudio => type == 'Audio';
+  bool get isSubtitle => type == 'Subtitle';
+  bool get isVideo => type == 'Video';
+
+  String get label {
+    final title = displayTitle?.trim();
+    if (title != null && title.isNotEmpty) {
+      return title;
+    }
+    final lang = language?.trim();
+    if (lang != null && lang.isNotEmpty) {
+      return lang;
+    }
+    return codec ?? '#$index';
+  }
+
+  SubtitleRenderKind get subtitleKind {
+    if (!isSubtitle) {
+      return SubtitleRenderKind.text;
+    }
+    if (isTextSubtitleStream == true) {
+      return SubtitleRenderKind.text;
+    }
+    if (isTextSubtitleStream == false) {
+      return SubtitleRenderKind.bitmap;
+    }
+    final codecName = (codec ?? '').toLowerCase();
+    const textCodecs = {
+      'srt',
+      'subrip',
+      'vtt',
+      'webvtt',
+      'ass',
+      'ssa',
+      'sub',
+      'microdvd',
+      'smi',
+      'sami',
+      'txt',
+    };
+    if (textCodecs.contains(codecName)) {
+      return SubtitleRenderKind.text;
+    }
+    return SubtitleRenderKind.bitmap;
+  }
+
+  bool get isTextSubtitle =>
+      isSubtitle && subtitleKind == SubtitleRenderKind.text;
+
+  bool get isBitmapSubtitle =>
+      isSubtitle && subtitleKind == SubtitleRenderKind.bitmap;
+
+  String get externalSubtitleFormat {
+    final codecName = (codec ?? '').toLowerCase();
+    if (codecName == 'ass' || codecName == 'ssa') {
+      return 'ass';
+    }
+    if (codecName == 'vtt' || codecName == 'webvtt') {
+      return 'vtt';
+    }
+    return 'srt';
+  }
+
+  factory MediaStreamInfo.fromJson(Map<String, dynamic> json) {
+    return MediaStreamInfo(
+      index: _asInt(json['Index']) ?? 0,
+      type: json['Type']?.toString() ?? '',
+      codec: json['Codec']?.toString(),
+      language: json['Language']?.toString(),
+      displayTitle: json['DisplayTitle']?.toString(),
+      isDefault: json['IsDefault'] == true,
+      isTextSubtitleStream: json['IsTextSubtitleStream'] is bool
+          ? json['IsTextSubtitleStream'] as bool
+          : null,
+      channels: _asInt(json['Channels']),
+    );
+  }
+}
+
+class PlaybackMediaSource {
+  const PlaybackMediaSource({
+    required this.id,
+    this.container,
+    this.supportsDirectPlay = false,
+    this.supportsDirectStream = false,
+    this.supportsTranscoding = false,
+    this.directStreamUrl,
+    this.transcodingUrl,
+    this.runTimeTicks,
+    this.defaultAudioStreamIndex,
+    this.defaultSubtitleStreamIndex,
+    this.mediaStreams = const [],
+  });
+
+  final String id;
+  final String? container;
+  final bool supportsDirectPlay;
+  final bool supportsDirectStream;
+  final bool supportsTranscoding;
+  final String? directStreamUrl;
+  final String? transcodingUrl;
+  final int? runTimeTicks;
+  final int? defaultAudioStreamIndex;
+  final int? defaultSubtitleStreamIndex;
+  final List<MediaStreamInfo> mediaStreams;
+
+  List<MediaStreamInfo> get audioStreams =>
+      mediaStreams.where((stream) => stream.isAudio).toList();
+
+  List<MediaStreamInfo> get subtitleStreams =>
+      mediaStreams.where((stream) => stream.isSubtitle).toList();
+
+  MediaStreamInfo? streamByIndex(int index) {
+    for (final stream in mediaStreams) {
+      if (stream.index == index) {
+        return stream;
+      }
+    }
+    return null;
+  }
+
+  factory PlaybackMediaSource.fromJson(Map<String, dynamic> json) {
+    final streams = <MediaStreamInfo>[];
+    final raw = json['MediaStreams'];
+    if (raw is List) {
+      for (final item in raw) {
+        if (item is Map) {
+          streams.add(
+            MediaStreamInfo.fromJson(Map<String, dynamic>.from(item)),
+          );
+        }
+      }
+    }
+    return PlaybackMediaSource(
+      id: json['Id']?.toString() ?? '',
+      container: json['Container']?.toString(),
+      supportsDirectPlay: json['SupportsDirectPlay'] == true,
+      supportsDirectStream: json['SupportsDirectStream'] == true,
+      supportsTranscoding: json['SupportsTranscoding'] == true,
+      directStreamUrl: json['DirectStreamUrl']?.toString(),
+      transcodingUrl: json['TranscodingUrl']?.toString(),
+      runTimeTicks: _asInt(json['RunTimeTicks']),
+      defaultAudioStreamIndex: _asInt(json['DefaultAudioStreamIndex']),
+      defaultSubtitleStreamIndex: _asInt(json['DefaultSubtitleStreamIndex']),
+      mediaStreams: streams,
+    );
+  }
+}
+
+class PlaybackInfo {
+  const PlaybackInfo({required this.playSessionId, required this.mediaSources});
+
+  final String playSessionId;
+  final List<PlaybackMediaSource> mediaSources;
+
+  PlaybackMediaSource? get primarySource =>
+      mediaSources.isEmpty ? null : mediaSources.first;
+
+  factory PlaybackInfo.fromJson(Map<String, dynamic> json) {
+    final sources = <PlaybackMediaSource>[];
+    final raw = json['MediaSources'];
+    if (raw is List) {
+      for (final item in raw) {
+        if (item is Map) {
+          sources.add(
+            PlaybackMediaSource.fromJson(Map<String, dynamic>.from(item)),
+          );
+        }
+      }
+    }
+    return PlaybackInfo(
+      playSessionId: json['PlaySessionId']?.toString() ?? '',
+      mediaSources: sources,
+    );
+  }
+}
+
+class PlaybackReport {
+  const PlaybackReport({
+    required this.itemId,
+    required this.mediaSourceId,
+    required this.playSessionId,
+    required this.playMethod,
+    required this.positionTicks,
+    this.isPaused = false,
+    this.volumeLevel = 100,
+    this.audioStreamIndex,
+    this.subtitleStreamIndex,
+    this.eventName,
+    this.canSeek = true,
+  });
+
+  final String itemId;
+  final String mediaSourceId;
+  final String playSessionId;
+  final PlayMethod playMethod;
+  final int positionTicks;
+  final bool isPaused;
+  final int volumeLevel;
+  final int? audioStreamIndex;
+  final int? subtitleStreamIndex;
+  final String? eventName;
+  final bool canSeek;
+
+  PlaybackReport copyWith({
+    int? positionTicks,
+    bool? isPaused,
+    int? volumeLevel,
+    int? audioStreamIndex,
+    int? subtitleStreamIndex,
+    String? eventName,
+    bool clearEventName = false,
+    bool clearSubtitle = false,
+  }) {
+    return PlaybackReport(
+      itemId: itemId,
+      mediaSourceId: mediaSourceId,
+      playSessionId: playSessionId,
+      playMethod: playMethod,
+      positionTicks: positionTicks ?? this.positionTicks,
+      isPaused: isPaused ?? this.isPaused,
+      volumeLevel: volumeLevel ?? this.volumeLevel,
+      audioStreamIndex: audioStreamIndex ?? this.audioStreamIndex,
+      subtitleStreamIndex: clearSubtitle
+          ? null
+          : (subtitleStreamIndex ?? this.subtitleStreamIndex),
+      eventName: clearEventName ? null : (eventName ?? this.eventName),
+      canSeek: canSeek,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'ItemId': itemId,
+      'MediaSourceId': mediaSourceId,
+      'PlaySessionId': playSessionId,
+      'PlayMethod': playMethod.wireName,
+      'PositionTicks': positionTicks,
+      'IsPaused': isPaused,
+      'IsMuted': volumeLevel <= 0,
+      'VolumeLevel': volumeLevel,
+      'CanSeek': canSeek,
+      'RepeatMode': 'RepeatNone',
+      if (audioStreamIndex != null) 'AudioStreamIndex': audioStreamIndex,
+      if (subtitleStreamIndex != null)
+        'SubtitleStreamIndex': subtitleStreamIndex,
+      if (eventName != null) 'EventName': eventName,
+    };
+  }
+}
+
+int? _asInt(dynamic value) {
+  if (value is int) {
+    return value;
+  }
+  if (value is num) {
+    return value.toInt();
+  }
+  if (value is String) {
+    return int.tryParse(value);
+  }
+  return null;
+}

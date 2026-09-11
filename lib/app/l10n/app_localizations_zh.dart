@@ -143,4 +143,80 @@ class AppLocalizationsZh extends AppLocalizations {
   String playbackProgress(int percent) {
     return '已看 $percent%';
   }
+
+  @override
+  String get play => '播放';
+
+  @override
+  String get pause => '暂停';
+
+  @override
+  String get resumePlay => '继续播放';
+
+  @override
+  String get playFromStart => '从头播放';
+
+  @override
+  String get resumePrompt => '要从上次的位置继续播放吗？';
+
+  @override
+  String get fullscreen => '全屏';
+
+  @override
+  String get exitFullscreen => '退出全屏';
+
+  @override
+  String get directPlay => '直连';
+
+  @override
+  String get transcode => '转码';
+
+  @override
+  String get qualityAuto => '自动';
+
+  @override
+  String qualityMbps(int mbps) {
+    return '$mbps Mbps';
+  }
+
+  @override
+  String get audioTrack => '音轨';
+
+  @override
+  String get subtitleTrack => '字幕';
+
+  @override
+  String get subtitleOff => '关闭字幕';
+
+  @override
+  String get subtitleBitmapBurnIn => '该字幕为位图，将请求服务器烧录';
+
+  @override
+  String get subtitleBitmapFailed => '直连无法渲染该字幕，请改用转码';
+
+  @override
+  String nextEpisodeIn(int seconds) {
+    return '$seconds 秒后播放下一集';
+  }
+
+  @override
+  String get cancelNextEpisode => '取消';
+
+  @override
+  String get playNextEpisode => '播放下一集';
+
+  @override
+  String get playbackDisconnected => '播放中断，请检查网络';
+
+  @override
+  String get progressSyncFailed => '进度同步失败';
+
+  @override
+  String get playbackFailed => '无法播放';
+
+  @override
+  String get noPlayableStream => '没有可播放的流';
+
+  @override
+  String get playerLoading => '正在打开播放…';
 }

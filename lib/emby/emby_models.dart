@@ -29,10 +29,38 @@ class PublicServerInfo {
 }
 
 class EmbyUser {
-  const EmbyUser({required this.id, required this.name});
+  const EmbyUser({
+    required this.id,
+    required this.name,
+    this.enableNextEpisodeAutoPlay = true,
+    this.resumeRewindSeconds = 0,
+  });
 
   final String id;
   final String name;
+  final bool enableNextEpisodeAutoPlay;
+  final int resumeRewindSeconds;
+
+  factory EmbyUser.fromJson(Map<String, dynamic> json) {
+    final id = json['Id']?.toString() ?? '';
+    if (id.isEmpty) {
+      throw const EmbyException(EmbyFailureKind.unknown);
+    }
+    var autoPlay = true;
+    var rewind = 0;
+    final configuration = json['Configuration'];
+    if (configuration is Map) {
+      final map = Map<String, dynamic>.from(configuration);
+      autoPlay = map['EnableNextEpisodeAutoPlay'] != false;
+      rewind = _asInt(map['ResumeRewindSeconds']) ?? 0;
+    }
+    return EmbyUser(
+      id: id,
+      name: json['Name']?.toString() ?? '',
+      enableNextEpisodeAutoPlay: autoPlay,
+      resumeRewindSeconds: rewind,
+    );
+  }
 }
 
 class AuthenticationResult {
@@ -58,18 +86,13 @@ class AuthenticationResult {
     if (userJson is! Map) {
       throw const EmbyException(EmbyFailureKind.unknown);
     }
-    final userMap = Map<String, dynamic>.from(userJson);
-    final userId = userMap['Id']?.toString() ?? '';
-    if (userId.isEmpty) {
-      throw const EmbyException(EmbyFailureKind.unknown);
-    }
     final serverId = json['ServerId']?.toString().trim();
     return AuthenticationResult(
       accessToken: token,
       serverId: (serverId == null || serverId.isEmpty)
           ? fallbackServerId
           : serverId,
-      user: EmbyUser(id: userId, name: userMap['Name']?.toString() ?? ''),
+      user: EmbyUser.fromJson(Map<String, dynamic>.from(userJson)),
     );
   }
 }
