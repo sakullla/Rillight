@@ -17,6 +17,14 @@ class ServerLine {
     return value;
   }
 
+  String get hostLabel {
+    final uri = Uri.tryParse(address);
+    if (uri == null || uri.host.isEmpty) {
+      return address;
+    }
+    return uri.hasPort ? '${uri.host}:${uri.port}' : uri.host;
+  }
+
   Map<String, dynamic> toJson() => {
     'id': id,
     'address': address,

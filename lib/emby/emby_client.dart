@@ -126,7 +126,8 @@ class EmbyClient {
 
   static const itemFields =
       'Overview,ProductionYear,RunTimeTicks,ChildCount,SeriesInfo,'
-      'DateCreated,PremiereDate,CommunityRating,SortName';
+      'DateCreated,PremiereDate,CommunityRating,SortName,MediaSources,Chapters';
+  static const imageTypes = 'Primary,Backdrop,Thumb';
 
   String _requireUserId() {
     final userId = _userId;
@@ -147,7 +148,7 @@ class EmbyClient {
         'Limit': '$limit',
         'MediaTypes': 'Video',
         'Fields': itemFields,
-        'EnableImageTypes': 'Primary',
+        'EnableImageTypes': imageTypes,
         'SortBy': ?sortBy,
         'SortOrder': ?sortOrder,
       },
@@ -165,7 +166,7 @@ class EmbyClient {
         'UserId': _requireUserId(),
         'Limit': '$limit',
         'Fields': itemFields,
-        'EnableImageTypes': 'Primary',
+        'EnableImageTypes': imageTypes,
         'SortBy': ?sortBy,
         'SortOrder': ?sortOrder,
       },
@@ -184,7 +185,7 @@ class EmbyClient {
         'GroupItems': '$groupItems',
         'Limit': '$limit',
         'Fields': itemFields,
-        'EnableImageTypes': 'Primary',
+        'EnableImageTypes': imageTypes,
       },
     );
   }
@@ -215,7 +216,7 @@ class EmbyClient {
         'Fields': fields,
         'SortBy': ?sortBy,
         'SortOrder': ?sortOrder,
-        'EnableImageTypes': 'Primary',
+        'EnableImageTypes': imageTypes,
       },
     );
   }
@@ -247,7 +248,7 @@ class EmbyClient {
         'UserId': _requireUserId(),
         if (limit != null) 'Limit': '$limit',
         'Fields': itemFields,
-        'EnableImageTypes': 'Primary',
+        'EnableImageTypes': imageTypes,
         'SortBy': ?sortBy,
         'SortOrder': ?sortOrder,
       },
@@ -258,7 +259,10 @@ class EmbyClient {
     final data = await _request(
       'GET',
       '/Users/${_requireUserId()}/Items/$itemId',
-      queryParameters: {'Fields': itemFields, 'EnableImageTypes': 'Primary'},
+      queryParameters: {
+        'Fields': itemFields,
+        'EnableImageTypes': imageTypes,
+      },
     );
     if (data is Map) {
       return EmbyItem.fromJson(Map<String, dynamic>.from(data));
@@ -367,8 +371,37 @@ class EmbyClient {
     String? tag,
     int maxWidth = 280,
   }) {
+    return getItemImage(
+      itemId,
+      type: 'Primary',
+      tag: tag,
+      maxWidth: maxWidth,
+    );
+  }
+
+  Future<List<int>> getChapterImage(
+    String itemId, {
+    required int index,
+    String? tag,
+    int maxWidth = 320,
+  }) {
     return _requestBytes(
-      '/Items/$itemId/Images/Primary',
+      '/Items/$itemId/Images/Chapter/$index',
+      queryParameters: {
+        'maxWidth': '$maxWidth',
+        if (tag != null && tag.isNotEmpty) 'tag': tag,
+      },
+    );
+  }
+
+  Future<List<int>> getItemImage(
+    String itemId, {
+    String type = 'Primary',
+    String? tag,
+    int maxWidth = 280,
+  }) {
+    return _requestBytes(
+      '/Items/$itemId/Images/$type',
       queryParameters: {
         'maxWidth': '$maxWidth',
         if (tag != null && tag.isNotEmpty) 'tag': tag,

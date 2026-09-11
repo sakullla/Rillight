@@ -72,6 +72,10 @@
   "@deleteLine": {
     "description": "Action to delete the selected extra access line."
   },
+  "volume": "音量",
+  "@volume": {
+    "description": "Volume slider on the player controls."
+  },
   "switchServer": "切换服务器",
   "@switchServer": {
     "description": "Tooltip for the signed-in server menu."
@@ -123,7 +127,7 @@
   },
   "libraries": "片库",
   "@libraries": {
-    "description": "Short app bar menu for movie and TV libraries."
+    "description": "Home section of movie and TV library tiles."
   },
   "search": "搜索",
   "@search": {
@@ -212,6 +216,15 @@
   "seasons": "季",
   "@seasons": {
     "description": "Heading for a series season list."
+  },
+  "seasonCount": "共{count}季",
+  "@seasonCount": {
+    "description": "How many seasons a series has.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
   },
   "errorLoadFailed": "加载失败",
   "@errorLoadFailed": {
@@ -312,6 +325,14 @@
         "type": "int"
       }
     }
+  },
+  "chapters": "章节",
+  "@chapters": {
+    "description": "Detail shelf of movie or episode chapters."
+  },
+  "mediaSource": "片源",
+  "@mediaSource": {
+    "description": "Label for choosing a media version on the detail page."
   },
   "audioTrack": "音轨",
   "@audioTrack": {

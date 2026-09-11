@@ -14,6 +14,7 @@ class HomeMediaRow extends StatelessWidget {
     required this.onRetry,
     required this.onMore,
     this.showProgress = false,
+    this.wide = false,
   });
 
   final Key rowKey;
@@ -24,6 +25,7 @@ class HomeMediaRow extends StatelessWidget {
   final VoidCallback onRetry;
   final VoidCallback onMore;
   final bool showProgress;
+  final bool wide;
 
   @override
   Widget build(BuildContext context) {
@@ -41,6 +43,7 @@ class HomeMediaRow extends StatelessWidget {
       onMore: onMore,
       onTap: onTap,
       showProgress: showProgress,
+      wide: wide,
     );
   }
 }

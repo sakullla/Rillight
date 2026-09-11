@@ -8,6 +8,7 @@ abstract final class PlayerKeys {
   static const seekBar = Key('player-seek-bar');
   static const fullscreen = Key('player-fullscreen');
   static const playMethod = Key('player-play-method');
+  static const volume = Key('player-volume');
   static const quality = Key('player-quality');
   static const audio = Key('player-audio');
   static const subtitle = Key('player-subtitle');

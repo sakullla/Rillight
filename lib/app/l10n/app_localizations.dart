@@ -202,6 +202,12 @@ abstract class AppLocalizations {
   /// **'删除线路'**
   String get deleteLine;
 
+  /// Volume slider on the player controls.
+  ///
+  /// In zh, this message translates to:
+  /// **'音量'**
+  String get volume;
+
   /// Tooltip for the signed-in server menu.
   ///
   /// In zh, this message translates to:
@@ -268,7 +274,7 @@ abstract class AppLocalizations {
   /// **'首页'**
   String get home;
 
-  /// Short app bar menu for movie and TV libraries.
+  /// Home section of movie and TV library tiles.
   ///
   /// In zh, this message translates to:
   /// **'片库'**
@@ -406,6 +412,12 @@ abstract class AppLocalizations {
   /// **'季'**
   String get seasons;
 
+  /// How many seasons a series has.
+  ///
+  /// In zh, this message translates to:
+  /// **'共{count}季'**
+  String seasonCount(int count);
+
   /// Visible failure when a catalog request fails.
   ///
   /// In zh, this message translates to:
@@ -513,6 +525,18 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'{mbps} Mbps'**
   String qualityMbps(int mbps);
+
+  /// Detail shelf of movie or episode chapters.
+  ///
+  /// In zh, this message translates to:
+  /// **'章节'**
+  String get chapters;
+
+  /// Label for choosing a media version on the detail page.
+  ///
+  /// In zh, this message translates to:
+  /// **'片源'**
+  String get mediaSource;
 
   /// Audio track selector label.
   ///

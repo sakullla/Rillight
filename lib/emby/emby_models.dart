@@ -134,6 +134,96 @@ class EmbyUserData {
   }
 }
 
+class ItemChapter {
+  const ItemChapter({
+    required this.name,
+    required this.startPositionTicks,
+    this.imageTag,
+  });
+
+  final String name;
+  final int startPositionTicks;
+  final String? imageTag;
+
+  factory ItemChapter.fromJson(Map<String, dynamic> json) {
+    return ItemChapter(
+      name: json['Name']?.toString() ?? '',
+      startPositionTicks: _asInt(json['StartPositionTicks']) ?? 0,
+      imageTag: json['ImageTag']?.toString(),
+    );
+  }
+}
+
+class ItemMediaStream {
+  const ItemMediaStream({
+    required this.index,
+    required this.type,
+    this.label,
+  });
+
+  final int index;
+  final String type;
+  final String? label;
+
+  bool get isAudio => type == 'Audio';
+  bool get isSubtitle => type == 'Subtitle';
+
+  factory ItemMediaStream.fromJson(Map<String, dynamic> json) {
+    final title = json['DisplayTitle']?.toString().trim();
+    final language = json['Language']?.toString().trim();
+    final codec = json['Codec']?.toString().trim();
+    return ItemMediaStream(
+      index: _asInt(json['Index']) ?? 0,
+      type: json['Type']?.toString() ?? '',
+      label: (title != null && title.isNotEmpty)
+          ? title
+          : (language != null && language.isNotEmpty)
+          ? language
+          : codec,
+    );
+  }
+}
+
+class ItemMediaSource {
+  const ItemMediaSource({
+    required this.id,
+    this.name,
+    this.streams = const [],
+  });
+
+  final String id;
+  final String? name;
+  final List<ItemMediaStream> streams;
+
+  String get label {
+    final title = name?.trim();
+    if (title != null && title.isNotEmpty) {
+      return title;
+    }
+    return id;
+  }
+
+  List<ItemMediaStream> get audioStreams =>
+      [for (final stream in streams) if (stream.isAudio) stream];
+
+  List<ItemMediaStream> get subtitleStreams =>
+      [for (final stream in streams) if (stream.isSubtitle) stream];
+
+  factory ItemMediaSource.fromJson(Map<String, dynamic> json) {
+    final raw = json['MediaStreams'];
+    return ItemMediaSource(
+      id: json['Id']?.toString() ?? '',
+      name: json['Name']?.toString() ?? json['Path']?.toString(),
+      streams: [
+        if (raw is List)
+          for (final stream in raw)
+            if (stream is Map)
+              ItemMediaStream.fromJson(Map<String, dynamic>.from(stream)),
+      ],
+    );
+  }
+}
+
 class EmbyItem {
   const EmbyItem({
     required this.id,
@@ -151,7 +241,10 @@ class EmbyItem {
     this.indexNumber,
     this.parentIndexNumber,
     this.primaryImageTag,
+    this.backdropImageTag,
     this.communityRating,
+    this.mediaSources = const [],
+    this.chapters = const [],
     this.userData = const EmbyUserData(),
   });
 
@@ -170,7 +263,10 @@ class EmbyItem {
   final int? indexNumber;
   final int? parentIndexNumber;
   final String? primaryImageTag;
+  final String? backdropImageTag;
   final double? communityRating;
+  final List<ItemMediaSource> mediaSources;
+  final List<ItemChapter> chapters;
   final EmbyUserData userData;
 
   bool get isMovie => type == 'Movie';
@@ -242,6 +338,16 @@ class EmbyItem {
         primaryTag = tag;
       }
     }
+    String? backdropTag;
+    final backdrops = json['BackdropImageTags'];
+    if (backdrops is List && backdrops.isNotEmpty) {
+      final tag = backdrops.first.toString().trim();
+      if (tag.isNotEmpty) {
+        backdropTag = tag;
+      }
+    }
+    final rawSources = json['MediaSources'];
+    final rawChapters = json['Chapters'];
     return EmbyItem(
       id: id,
       name: json['Name']?.toString() ?? '',
@@ -258,7 +364,20 @@ class EmbyItem {
       indexNumber: _asInt(json['IndexNumber']),
       parentIndexNumber: _asInt(json['ParentIndexNumber']),
       primaryImageTag: primaryTag,
+      backdropImageTag: backdropTag,
       communityRating: _asDouble(json['CommunityRating']),
+      mediaSources: [
+        if (rawSources is List)
+          for (final source in rawSources)
+            if (source is Map)
+              ItemMediaSource.fromJson(Map<String, dynamic>.from(source)),
+      ],
+      chapters: [
+        if (rawChapters is List)
+          for (final chapter in rawChapters)
+            if (chapter is Map)
+              ItemChapter.fromJson(Map<String, dynamic>.from(chapter)),
+      ],
       userData: EmbyUserData.fromJson(json['UserData']),
     );
   }
@@ -280,7 +399,10 @@ class EmbyItem {
       indexNumber: indexNumber,
       parentIndexNumber: parentIndexNumber,
       primaryImageTag: primaryImageTag,
+      backdropImageTag: backdropImageTag,
       communityRating: communityRating,
+      mediaSources: mediaSources,
+      chapters: chapters,
       userData: userData ?? this.userData,
     );
   }

@@ -47,9 +47,12 @@ class RillightApp extends StatelessWidget {
             builder: (context, child) {
               return PlayerScope(
                 bindings: playerBindings,
-                child: _PlayerWindowLayer(
+                child: PlayerWindowScope(
                   host: windowHost,
-                  child: child ?? const SizedBox.shrink(),
+                  child: _PlayerWindowLayer(
+                    host: windowHost,
+                    child: child ?? const SizedBox.shrink(),
+                  ),
                 ),
               );
             },
@@ -91,6 +94,10 @@ class _PlayerWindowLayer extends StatelessWidget {
                         return PlayerPage(
                           itemId: request.itemId,
                           autoResume: request.autoResume,
+                          mediaSourceId: request.mediaSourceId,
+                          audioStreamIndex: request.audioStreamIndex,
+                          subtitleStreamIndex: request.subtitleStreamIndex,
+                          startTimeTicks: request.startTimeTicks,
                         );
                       },
                     );

@@ -70,14 +70,24 @@ class CatalogController extends ChangeNotifier {
   Future<void> reloadHomeRows() => reload(includeLibraries: false);
 
   void _onAuthChanged() {
+    if (!auth.isLoggedIn) {
+      _sessionKey = null;
+      return;
+    }
     final key = _currentSessionKey;
     if (key != _sessionKey) {
       reload();
     }
   }
 
-  String get _currentSessionKey =>
-      '${auth.session?.server.id}|${auth.session?.userId}';
+  String get _currentSessionKey {
+    final session = auth.session;
+    if (session == null) {
+      return '';
+    }
+    final line = session.server.activeLine;
+    return '${session.server.id}|${session.userId}|${line?.id ?? ''}|${line?.address ?? session.server.baseUrl}';
+  }
 
   Future<void> _loadResume(int gen) async {
     try {

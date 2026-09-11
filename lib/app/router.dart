@@ -24,7 +24,9 @@ GoRouter createAppRouter({required AuthController auth}) {
       if (!loggedIn && !onConnect) {
         return AppRoutes.connect;
       }
-      if (loggedIn && onConnect) {
+      if (loggedIn &&
+          onConnect &&
+          state.uri.queryParameters['add'] != '1') {
         return AppRoutes.home;
       }
       return null;
@@ -37,7 +39,6 @@ GoRouter createAppRouter({required AuthController auth}) {
             child: AppShell(
               actions: const [
                 SearchAction(),
-                LibrariesAction(),
                 SessionActions(),
               ],
               child: child,

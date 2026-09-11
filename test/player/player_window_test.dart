@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
 import 'package:rillight/app/routes.dart';
@@ -131,9 +132,17 @@ void main() {
   }
 
   Future<void> openPlayable(WidgetTester tester, String itemId) async {
-    await tester.tap(find.byKey(CatalogKeys.librariesMenu));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(CatalogKeys.library('view-movies')));
+    final homeTitle = find.descendant(
+      of: find.byType(AppBar),
+      matching: find.text('灯川 Rillight'),
+    );
+    if (homeTitle.evaluate().isNotEmpty) {
+      await tester.tap(homeTitle);
+      await tester.pumpAndSettle();
+    }
+    final movies = find.byKey(CatalogKeys.library('view-movies'));
+    await tester.ensureVisible(movies);
+    await tester.tap(movies);
     await tester.pumpAndSettle();
     final item = find.byKey(CatalogKeys.item(itemId)).first;
     await tester.ensureVisible(item);
@@ -170,9 +179,20 @@ void main() {
       await waitFor(tester, find.byType(PlayerPage));
       await waitFor(tester, find.byKey(PlayerKeys.playMethod));
 
-      await tester.runAsync(() => app.windowHost.close());
+      final resumeBefore = server.requests
+          .where((request) => request.contains('Items/Resume'))
+          .length;
+      await tester.runAsync(() async {
+        await app.windowHost.close();
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      });
       await tester.pump();
       await waitForGone(tester, find.byType(PlayerPage));
+      await tester.pump();
+      expect(
+        server.requests.where((request) => request.contains('Items/Resume')).length,
+        greaterThan(resumeBefore),
+      );
 
       expect(auth.disposed, isFalse);
       expect(auth.isLoggedIn, isTrue);

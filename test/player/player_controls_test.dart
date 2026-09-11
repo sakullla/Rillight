@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
@@ -100,9 +101,17 @@ void main() {
   }
 
   Future<void> openLibrary(WidgetTester tester, String viewId) async {
-    await tester.tap(find.byKey(CatalogKeys.librariesMenu));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(CatalogKeys.library(viewId)));
+    final homeTitle = find.descendant(
+      of: find.byType(AppBar),
+      matching: find.text('灯川 Rillight'),
+    );
+    if (homeTitle.evaluate().isNotEmpty) {
+      await tester.tap(homeTitle);
+      await tester.pumpAndSettle();
+    }
+    final tile = find.byKey(CatalogKeys.library(viewId));
+    await tester.ensureVisible(tile);
+    await tester.tap(tile);
     await tester.pumpAndSettle();
   }
 
@@ -247,13 +256,20 @@ void main() {
     await waitFor(tester, find.text('转码'));
 
     expect(find.byKey(PlayerKeys.quality), findsOneWidget);
+    expect(find.byKey(PlayerKeys.volume), findsOneWidget);
     expect(backend.openedUrl!.path, contains('master.m3u8'));
     final firstOpen = backend.openCount;
+
+    await tester.runAsync(() => controllerOf(tester).setAudio(1));
+    await tester.pump();
+    await waitFor(tester, find.text('转码'));
+    expect(backend.openCount, firstOpen + 1);
+    expect(server.lastPlaybackInfoBody?['AudioStreamIndex'], 1);
 
     await tester.runAsync(() => controllerOf(tester).setMaxBitrate(4000000));
     await tester.pump();
     await waitFor(tester, find.text('转码'));
-    expect(backend.openCount, firstOpen + 1);
+    expect(backend.openCount, firstOpen + 2);
     expect(server.lastPlaybackInfoBody?['MaxStreamingBitrate'], 4000000);
     expect(
       server.playbackEvents.where((event) => event.kind == 'Stopped'),

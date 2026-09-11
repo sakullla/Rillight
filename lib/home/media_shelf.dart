@@ -22,6 +22,8 @@ class MediaShelf extends StatefulWidget {
     this.onRetry,
     this.onMore,
     this.showProgress = false,
+    this.wide = false,
+    this.extent,
     this.itemBuilder,
   });
 
@@ -35,6 +37,8 @@ class MediaShelf extends StatefulWidget {
   final VoidCallback? onRetry;
   final VoidCallback? onMore;
   final bool showProgress;
+  final bool wide;
+  final double? extent;
   final Widget Function(BuildContext context, EmbyItem item)? itemBuilder;
 
   @override
@@ -46,6 +50,16 @@ class _MediaShelfState extends State<MediaShelf> {
   bool _overflowing = false;
   bool _canScrollLeft = false;
   bool _canScrollRight = false;
+
+  double get _rowHeight {
+    if (widget.extent != null) {
+      return widget.extent!;
+    }
+    if (widget.wide) {
+      return 148;
+    }
+    return widget.showProgress ? 250 : 230;
+  }
 
   @override
   void initState() {
@@ -105,6 +119,29 @@ class _MediaShelfState extends State<MediaShelf> {
     }
   }
 
+  void _onVerticalWheelToParent(PointerSignalEvent event) {
+    if (event is! PointerScrollEvent) {
+      return;
+    }
+    if (event.scrollDelta.dy.abs() <= event.scrollDelta.dx.abs()) {
+      return;
+    }
+    final vertical = Scrollable.maybeOf(context, axis: Axis.vertical);
+    if (vertical == null) {
+      return;
+    }
+    GestureBinding.instance.pointerSignalResolver.register(event, (resolved) {
+      final dy = (resolved as PointerScrollEvent).scrollDelta.dy;
+      final position = vertical.position;
+      position.jumpTo(
+        (position.pixels + dy).clamp(
+          position.minScrollExtent,
+          position.maxScrollExtent,
+        ),
+      );
+    });
+  }
+
   void _page(int direction) {
     if (!_controller.hasClients) {
       return;
@@ -118,31 +155,12 @@ class _MediaShelfState extends State<MediaShelf> {
     );
   }
 
-  void _onPointerSignal(PointerSignalEvent event) {
-    if (event is! PointerScrollEvent || !_controller.hasClients) {
-      return;
-    }
-    GestureBinding.instance.pointerSignalResolver.register(event, (resolved) {
-      final scroll = resolved as PointerScrollEvent;
-      final position = _controller.position;
-      final delta = scroll.scrollDelta.dy != 0
-          ? scroll.scrollDelta.dy
-          : scroll.scrollDelta.dx;
-      _controller.jumpTo(
-        (position.pixels + delta).clamp(
-          position.minScrollExtent,
-          position.maxScrollExtent,
-        ),
-      );
-    });
-  }
-
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     return Padding(
       key: widget.rowKey,
-      padding: const EdgeInsets.only(bottom: 24),
+      padding: const EdgeInsets.only(bottom: 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -167,7 +185,7 @@ class _MediaShelfState extends State<MediaShelf> {
           ),
           const SizedBox(height: 12),
           if (widget.loading)
-            SizedBox(height: widget.showProgress ? 250 : 230)
+            SizedBox(height: _rowHeight)
           else if (widget.error != null)
             AppErrorView(
               message: catalogFailureMessage(l10n, widget.error!),
@@ -175,55 +193,70 @@ class _MediaShelfState extends State<MediaShelf> {
             )
           else
             SizedBox(
-              height: widget.showProgress ? 250 : 230,
+              height: _rowHeight,
               child: Stack(
                 children: [
-                  Listener(
-                    onPointerSignal: _onPointerSignal,
-                    child: NotificationListener<ScrollMetricsNotification>(
-                      onNotification: (notification) {
-                        _updateScrollButtons();
-                        return false;
-                      },
-                      child: ListView.separated(
-                        controller: _controller,
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        scrollDirection: Axis.horizontal,
-                        itemBuilder: (context, index) {
+                  NotificationListener<ScrollMetricsNotification>(
+                    onNotification: (notification) {
+                      _updateScrollButtons();
+                      return false;
+                    },
+                    child: ListView.separated(
+                      controller: _controller,
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      scrollDirection: Axis.horizontal,
+                      itemBuilder: (context, index) {
                           final item = widget.items[index];
-                          return widget.itemBuilder?.call(context, item) ??
+                          final child = widget.itemBuilder?.call(context, item) ??
                               PosterCard(
                                 item: item,
                                 showProgress: widget.showProgress,
+                                wide: widget.wide,
+                                width: widget.wide ? 220 : 120,
                                 onTap: () => widget.onTap(item),
                               );
+                          return Align(
+                            alignment: Alignment.topLeft,
+                            child: Listener(
+                              onPointerSignal: _onVerticalWheelToParent,
+                              child: child,
+                            ),
+                          );
                         },
                         separatorBuilder: (context, index) =>
                             const SizedBox(width: 12),
                         itemCount: widget.items.length,
-                      ),
                     ),
                   ),
-                  if (_overflowing) ...[
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: _ScrollButton(
-                        buttonKey: CatalogKeys.shelfScrollLeft(widget.shelfId),
-                        tooltip: l10n.scrollLeft,
-                        icon: Icons.chevron_left,
-                        onPressed: _canScrollLeft ? () => _page(-1) : null,
+                  if (_canScrollLeft)
+                    Positioned(
+                      left: 8,
+                      top: 0,
+                      bottom: 0,
+                      child: Center(
+                        child: _ScrollButton(
+                          buttonKey: CatalogKeys.shelfScrollLeft(widget.shelfId),
+                          tooltip: l10n.scrollLeft,
+                          icon: Icons.chevron_left,
+                          onPressed: () => _page(-1),
+                        ),
                       ),
                     ),
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: _ScrollButton(
-                        buttonKey: CatalogKeys.shelfScrollRight(widget.shelfId),
-                        tooltip: l10n.scrollRight,
-                        icon: Icons.chevron_right,
-                        onPressed: _canScrollRight ? () => _page(1) : null,
+                  if (_canScrollRight)
+                    Positioned(
+                      right: 8,
+                      top: 0,
+                      bottom: 0,
+                      child: Center(
+                        child: _ScrollButton(
+                          buttonKey:
+                              CatalogKeys.shelfScrollRight(widget.shelfId),
+                          tooltip: l10n.scrollRight,
+                          icon: Icons.chevron_right,
+                          onPressed: () => _page(1),
+                        ),
                       ),
                     ),
-                  ],
                 ],
               ),
             ),

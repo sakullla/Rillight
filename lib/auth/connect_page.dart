@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/widgets/app_error_view.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/auth/failure_message.dart';
@@ -35,6 +37,9 @@ class _ConnectPageState extends State<ConnectPage> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    if (GoRouterState.of(context).uri.queryParameters['add'] == '1') {
+      return;
+    }
     final prefill = AuthScope.of(context).prefill;
     if (prefill != null && prefill.id != _appliedPrefillId) {
       _appliedPrefillId = prefill.id;
@@ -68,15 +73,25 @@ class _ConnectPageState extends State<ConnectPage> {
     super.dispose();
   }
 
+  bool get _addingAnother =>
+      GoRouterState.of(context).uri.queryParameters['add'] == '1';
+
   Future<void> _submit() async {
     final auth = AuthScope.of(context);
+    final adding = _addingAnother;
     await auth.connect(
       address: _address.text,
       username: _username.text.trim(),
       password: _password.text,
       userAgent: _userAgent.text,
-      lineId: _selectedLineId,
+      lineId: adding ? null : _selectedLineId,
     );
+    if (!mounted || !auth.isLoggedIn) {
+      return;
+    }
+    if (adding) {
+      context.go(AppRoutes.home);
+    }
   }
 
   Future<void> _selectSaved(SavedServer server) async {

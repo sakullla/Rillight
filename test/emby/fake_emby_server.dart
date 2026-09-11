@@ -64,6 +64,26 @@ class FakePlaybackEvent {
   final Map<String, dynamic> body;
 }
 
+class FakeChapter {
+  const FakeChapter({
+    required this.name,
+    required this.startPositionTicks,
+    this.imageTag,
+  });
+
+  final String name;
+  final int startPositionTicks;
+  final String? imageTag;
+
+  Map<String, dynamic> toJson() {
+    return {
+      'Name': name,
+      'StartPositionTicks': startPositionTicks,
+      if (imageTag != null) 'ImageTag': imageTag,
+    };
+  }
+}
+
 class FakeEmbyItem {
   FakeEmbyItem({
     required this.id,
@@ -93,6 +113,7 @@ class FakeEmbyItem {
     this.supportsDirectPlay = true,
     this.supportsDirectStream = true,
     this.mediaStreams = const [],
+    this.chapters = const [],
   }) : dateCreated = dateCreated ?? DateTime.utc(2024, 1, 1),
        premiereDate =
            premiereDate ??
@@ -125,6 +146,7 @@ class FakeEmbyItem {
   bool supportsDirectPlay;
   bool supportsDirectStream;
   List<FakeMediaStream> mediaStreams;
+  List<FakeChapter> chapters;
 
   Map<String, dynamic> toJson() {
     return {
@@ -146,6 +168,16 @@ class FakeEmbyItem {
       'DateCreated': dateCreated.toIso8601String(),
       if (premiereDate != null) 'PremiereDate': premiereDate!.toIso8601String(),
       if (communityRating != null) 'CommunityRating': communityRating,
+      if (mediaStreams.isNotEmpty)
+        'MediaSources': [
+          {
+            'Id': id,
+            'Name': name,
+            'MediaStreams': [for (final stream in mediaStreams) stream.toJson()],
+          },
+        ],
+      if (chapters.isNotEmpty)
+        'Chapters': [for (final chapter in chapters) chapter.toJson()],
       'UserData': {
         'Played': played,
         'PlaybackPositionTicks': playbackPositionTicks,
@@ -588,6 +620,15 @@ class FakeEmbyServer {
         segments[3] == 'Primary' &&
         method == 'GET') {
       return _handlePrimaryImage(segments[1]);
+    }
+    if (segments.length >= 5 &&
+        segments[0] == 'Items' &&
+        segments[2] == 'Images' &&
+        segments[3] == 'Chapter' &&
+        method == 'GET') {
+      return ResponseBody.fromBytes(kTinyPng, 200, headers: {
+        Headers.contentTypeHeader: ['image/png'],
+      });
     }
     if (segments.length == 3 &&
         segments[0] == 'Items' &&
@@ -1053,6 +1094,13 @@ List<FakeEmbyItem> defaultCatalogItems() {
       primaryImageTag: 'tag-inception',
       dateCreated: DateTime.utc(2024, 1, 1),
       communityRating: 8.8,
+      chapters: const [
+        FakeChapter(name: 'Chapter 1', startPositionTicks: 0),
+        FakeChapter(
+          name: 'Chapter 2',
+          startPositionTicks: 7 * 60 * 10000000,
+        ),
+      ],
       mediaStreams: const [
         FakeMediaStream(
           index: 0,

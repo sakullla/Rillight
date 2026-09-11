@@ -49,9 +49,17 @@ void main() {
   }
 
   Future<void> openLibrary(WidgetTester tester, String viewId) async {
-    await tester.tap(find.byKey(CatalogKeys.librariesMenu));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(CatalogKeys.library(viewId)));
+    final homeTitle = find.descendant(
+      of: find.byType(AppBar),
+      matching: find.text('灯川 Rillight'),
+    );
+    if (homeTitle.evaluate().isNotEmpty) {
+      await tester.tap(homeTitle);
+      await tester.pumpAndSettle();
+    }
+    final tile = find.byKey(CatalogKeys.library(viewId));
+    await tester.ensureVisible(tile);
+    await tester.tap(tile);
     await tester.pumpAndSettle();
   }
 
@@ -87,8 +95,9 @@ void main() {
         findsOneWidget,
       );
       expect(find.text('更多'), findsNWidgets(4));
-      await tester.tap(find.byKey(CatalogKeys.librariesMenu));
-      await tester.pumpAndSettle();
+      expect(find.text('片库'), findsOneWidget);
+      expect(find.byKey(CatalogKeys.library('view-movies')), findsOneWidget);
+      expect(find.byKey(CatalogKeys.library('view-tv')), findsOneWidget);
       expect(find.text('音乐'), findsNothing);
       expect(find.text('相册'), findsNothing);
       expect(find.text('混合媒体'), findsNothing);
@@ -147,6 +156,11 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('已看 40%'), findsOneWidget);
+    await tester.ensureVisible(find.text('章节'));
+    expect(find.text('章节'), findsOneWidget);
+    expect(find.text('Chapter 1'), findsOneWidget);
+    expect(find.text('00:00'), findsOneWidget);
+    expect(find.byKey(CatalogKeys.chapter(0)), findsOneWidget);
 
     await tester.pageBack();
     await tester.pumpAndSettle();
@@ -167,14 +181,19 @@ void main() {
     await pumpLoggedIn(tester);
     expect(find.byKey(CatalogKeys.resumeRow), findsOneWidget);
 
-    await tester.tap(find.byKey(CatalogKeys.item('movie-inception')).first);
+    final resumeItem = find.byKey(CatalogKeys.item('movie-inception')).first;
+    await tester.ensureVisible(resumeItem);
+    await tester.tap(resumeItem);
     await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(CatalogKeys.playedToggle));
     await tester.tap(find.byKey(CatalogKeys.playedToggle));
     await tester.pumpAndSettle();
 
-    await tester.pageBack();
+    await tester.ensureVisible(find.byKey(CatalogKeys.back));
+    await tester.tap(find.byKey(CatalogKeys.back));
     await tester.pumpAndSettle();
     expect(find.byKey(CatalogKeys.resumeRow), findsNothing);
+    await tester.ensureVisible(find.byKey(CatalogKeys.item('movie-inception')));
     expect(find.byKey(CatalogKeys.item('movie-inception')), findsWidgets);
   });
 
@@ -325,6 +344,7 @@ void main() {
       );
 
       await pumpLoggedIn(tester);
+      await tester.ensureVisible(find.byKey(CatalogKeys.latestMoviesRow));
       expect(
         find.byKey(CatalogKeys.shelfScrollRight(CatalogKeys.shelfLatestMovies)),
         findsOneWidget,
@@ -349,7 +369,9 @@ void main() {
     tester,
   ) async {
     await pumpLoggedIn(tester);
-    await tester.tap(find.byKey(CatalogKeys.item('movie-inception')).first);
+    final inception = find.byKey(CatalogKeys.item('movie-inception')).first;
+    await tester.ensureVisible(inception);
+    await tester.tap(inception);
     await tester.pumpAndSettle();
     expect(find.byKey(CatalogKeys.similarRow), findsOneWidget);
     expect(find.text('更多类似'), findsOneWidget);

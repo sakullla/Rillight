@@ -1,10 +1,21 @@
 import 'package:flutter/widgets.dart';
 
 class PlayerOpenRequest {
-  const PlayerOpenRequest({required this.itemId, this.autoResume = false});
+  const PlayerOpenRequest({
+    required this.itemId,
+    this.autoResume = false,
+    this.mediaSourceId,
+    this.audioStreamIndex,
+    this.subtitleStreamIndex,
+    this.startTimeTicks,
+  });
 
   final String itemId;
   final bool autoResume;
+  final String? mediaSourceId;
+  final int? audioStreamIndex;
+  final int? subtitleStreamIndex;
+  final int? startTimeTicks;
 }
 
 abstract class PlayerWindowHost extends ChangeNotifier {

@@ -20,12 +20,20 @@ class PlayerPage extends StatefulWidget {
     super.key,
     required this.itemId,
     this.autoResume = false,
+    this.mediaSourceId,
+    this.audioStreamIndex,
+    this.subtitleStreamIndex,
+    this.startTimeTicks,
     this.onClosed,
     this.onOpenItem,
   });
 
   final String itemId;
   final bool autoResume;
+  final String? mediaSourceId;
+  final int? audioStreamIndex;
+  final int? subtitleStreamIndex;
+  final int? startTimeTicks;
   final VoidCallback? onClosed;
   final ValueChanged<String>? onOpenItem;
 
@@ -51,6 +59,10 @@ class PlayerPageState extends State<PlayerPage> {
       backend: _createBackend(bindings),
       window: bindings.window ?? WindowManagerPlayerWindow(),
       autoResume: widget.autoResume,
+      preferredMediaSourceId: widget.mediaSourceId,
+      preferredAudioStreamIndex: widget.audioStreamIndex,
+      preferredSubtitleStreamIndex: widget.subtitleStreamIndex,
+      startTimeTicks: widget.startTimeTicks,
       progressInterval: bindings.progressInterval,
       controlsHideAfter: bindings.controlsHideAfter,
       nextEpisodeCountdown: bindings.nextEpisodeCountdown,
@@ -153,6 +165,11 @@ class PlayerPageState extends State<PlayerPage> {
           backgroundColor: Colors.black,
           body: MouseRegion(
             onHover: (_) => current.onUserActivity(),
+            cursor: (!current.controlsVisible &&
+                    !current.showResumePrompt &&
+                    current.nextEpisode == null)
+                ? SystemMouseCursors.none
+                : MouseCursor.defer,
             child: Stack(
               fit: StackFit.expand,
               children: [
@@ -462,6 +479,25 @@ class _ControlsBar extends StatelessWidget {
                       color: controller.isTranscode
                           ? Colors.orangeAccent
                           : Colors.lightGreenAccent,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Icon(
+                    Icons.volume_up,
+                    color: Colors.white,
+                    size: 18,
+                    semanticLabel: l10n.volume,
+                  ),
+                  SizedBox(
+                    width: 96,
+                    child: Slider(
+                      key: PlayerKeys.volume,
+                      value: controller.volume.clamp(0, 100).toDouble(),
+                      min: 0,
+                      max: 100,
+                      onChanged: (value) {
+                        controller.setVolume(value.round());
+                      },
                     ),
                   ),
                   if (controller.isTranscode) ...[

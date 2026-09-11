@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter/material.dart';
@@ -16,6 +17,7 @@ import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_page.dart';
 import 'package:rillight/player/player_window_host.dart';
+import 'package:rillight/player/spawn_player_process.dart';
 import 'package:window_manager/window_manager.dart';
 
 const _hostChannel = WindowMethodChannel(
@@ -77,6 +79,16 @@ class PlayerWindowLaunch {
       request: PlayerOpenRequest(
         itemId: json['itemId'] as String? ?? '',
         autoResume: json['autoResume'] == true,
+        mediaSourceId: json['mediaSourceId'] as String?,
+        audioStreamIndex: json['audioStreamIndex'] is int
+            ? json['audioStreamIndex'] as int
+            : int.tryParse('${json['audioStreamIndex'] ?? ''}'),
+        subtitleStreamIndex: json['subtitleStreamIndex'] is int
+            ? json['subtitleStreamIndex'] as int
+            : int.tryParse('${json['subtitleStreamIndex'] ?? ''}'),
+        startTimeTicks: json['startTimeTicks'] is int
+            ? json['startTimeTicks'] as int
+            : int.tryParse('${json['startTimeTicks'] ?? ''}'),
       ),
       baseUrl: json['baseUrl'] as String? ?? '',
       accessToken: json['accessToken'] as String? ?? '',
@@ -96,6 +108,13 @@ class PlayerWindowLaunch {
       'businessId': businessId,
       'itemId': request.itemId,
       'autoResume': request.autoResume,
+      if (request.mediaSourceId != null) 'mediaSourceId': request.mediaSourceId,
+      if (request.audioStreamIndex != null)
+        'audioStreamIndex': request.audioStreamIndex,
+      if (request.subtitleStreamIndex != null)
+        'subtitleStreamIndex': request.subtitleStreamIndex,
+      if (request.startTimeTicks != null)
+        'startTimeTicks': request.startTimeTicks,
       'baseUrl': baseUrl,
       'accessToken': accessToken,
       'userId': userId,
@@ -112,23 +131,13 @@ class PlayerWindowLaunch {
 
 class DesktopPlayerWindowHost extends PlayerWindowHost {
   DesktopPlayerWindowHost({required this.auth}) {
-    unawaited(
-      _hostChannel.setMethodCallHandler((call) async {
-        if (call.method == 'closed') {
-          _clearWindow();
-        }
-      }),
-    );
-    _windowsChanged = onWindowsChanged.listen((_) {
-      unawaited(_syncFromSystem());
-    });
     auth.addListener(_onAuth);
   }
 
   final AuthController auth;
-  WindowController? _window;
+  int _pid = 0;
+  Timer? _watch;
   PlayerOpenRequest? _current;
-  StreamSubscription<dynamic>? _windowsChanged;
 
   @override
   PlayerOpenRequest? get current => _current;
@@ -139,31 +148,30 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
   @override
   Future<void> open(PlayerOpenRequest request) async {
     final launch = PlayerWindowLaunch.fromAuth(auth: auth, request: request);
-    final existing = _window;
-    if (existing != null) {
-      try {
-        await existing.invokeMethod('open', launch.toJson());
-        await existing.show();
-        _current = request;
-        notifyListeners();
-        return;
-      } catch (_) {
-        _window = null;
-      }
-    }
+    await _stopProcess();
     try {
-      final window = await WindowController.create(
-        WindowConfiguration(
-          hiddenAtLaunch: true,
-          arguments: launch.toArguments(),
-        ),
+      final file = File(
+        '${Directory.systemTemp.path}${Platform.pathSeparator}rillight-player-launch.json',
       );
-      await window.show();
-      _window = window;
+      await file.writeAsString(launch.toArguments());
+      final pid = spawnStandalonePlayer(
+        executable: Platform.resolvedExecutable,
+        payloadPath: file.path,
+      );
+      _pid = pid;
       _current = request;
       notifyListeners();
+      _watch?.cancel();
+      _watch = Timer.periodic(const Duration(milliseconds: 400), (timer) {
+        if (!isPidAlive(pid)) {
+          timer.cancel();
+          if (_pid == pid) {
+            _clearWindow();
+          }
+        }
+      });
     } catch (error) {
-      _window = null;
+      _pid = 0;
       _current = null;
       notifyListeners();
       rethrow;
@@ -172,14 +180,8 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
 
   @override
   Future<void> close() async {
-    final window = _window;
+    await _stopProcess();
     _clearWindow();
-    if (window == null) {
-      return;
-    }
-    try {
-      await window.invokeMethod('window_close');
-    } catch (_) {}
   }
 
   void _onAuth() {
@@ -188,27 +190,23 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
     }
   }
 
-  Future<void> _syncFromSystem() async {
-    final window = _window;
-    if (window == null) {
-      return;
+  Future<void> _stopProcess() async {
+    _watch?.cancel();
+    _watch = null;
+    final pid = _pid;
+    _pid = 0;
+    if (pid != 0) {
+      killPid(pid);
     }
-    try {
-      final all = await WindowController.getAll();
-      for (final item in all) {
-        if (item.windowId == window.windowId) {
-          return;
-        }
-      }
-    } catch (_) {}
-    _clearWindow();
   }
 
   void _clearWindow() {
-    if (_window == null && _current == null) {
+    if (_pid == 0 && _current == null) {
       return;
     }
-    _window = null;
+    _watch?.cancel();
+    _watch = null;
+    _pid = 0;
     _current = null;
     notifyListeners();
   }
@@ -216,22 +214,26 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
   @override
   void dispose() {
     auth.removeListener(_onAuth);
-    unawaited(_windowsChanged?.cancel());
-    unawaited(_hostChannel.setMethodCallHandler(null));
+    unawaited(_stopProcess());
     super.dispose();
   }
 }
 
 Future<void> runPlayerWindow({
-  required WindowController controller,
+  WindowController? controller,
   String? argumentFallback,
 }) async {
   PlayerWindowLaunch launch;
   try {
-    final arguments = controller.arguments.trim().isEmpty
-        ? (argumentFallback ?? '')
-        : controller.arguments;
-    launch = PlayerWindowLaunch.fromArguments(arguments);
+    var raw = controller?.arguments.trim() ?? '';
+    if (raw.isEmpty) {
+      raw = argumentFallback ?? '';
+    }
+    final file = File(raw);
+    if (raw.isNotEmpty && file.existsSync()) {
+      raw = file.readAsStringSync();
+    }
+    launch = PlayerWindowLaunch.fromArguments(raw);
   } catch (error) {
     runApp(
       MaterialApp(
@@ -246,11 +248,11 @@ Future<void> runPlayerWindow({
 class PlayerWindowApp extends StatefulWidget {
   const PlayerWindowApp({
     super.key,
-    required this.controller,
+    this.controller,
     required this.launch,
   });
 
-  final WindowController controller;
+  final WindowController? controller;
   final PlayerWindowLaunch launch;
 
   @override
@@ -270,20 +272,23 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
     _auth = _authFor(_launch);
     windowManager.addListener(this);
     unawaited(_configureWindow());
-    unawaited(
-      widget.controller.setWindowMethodHandler((call) async {
-        switch (call.method) {
-          case 'open':
-            _applyLaunch(_asLaunch(call.arguments));
-            return null;
-          case 'window_close':
-            await _closeWindow();
-            return null;
-          default:
-            throw MissingPluginException('Not implemented: ${call.method}');
-        }
-      }),
-    );
+    final controller = widget.controller;
+    if (controller != null) {
+      unawaited(
+        controller.setWindowMethodHandler((call) async {
+          switch (call.method) {
+            case 'open':
+              _applyLaunch(_asLaunch(call.arguments));
+              return null;
+            case 'window_close':
+              await _closeWindow();
+              return null;
+            default:
+              throw MissingPluginException('Not implemented: ${call.method}');
+          }
+        }),
+      );
+    }
   }
 
   @override
@@ -343,11 +348,24 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
   Future<void> _configureWindow() async {
     try {
       await windowManager.setPreventClose(true);
+      await windowManager.waitUntilReadyToShow(
+        const WindowOptions(
+          size: Size(1600, 900),
+          minimumSize: Size(960, 540),
+          center: true,
+        ),
+      );
       await windowManager.setTitle(_playerWindowTitle);
-      await windowManager.setMinimumSize(const Size(640, 360));
       await windowManager.show();
       await windowManager.focus();
-    } catch (_) {}
+    } catch (_) {
+      try {
+        await windowManager.setMinimumSize(const Size(960, 540));
+        await windowManager.setSize(const Size(1600, 900));
+        await windowManager.center();
+        await windowManager.show();
+      } catch (_) {}
+    }
   }
 
   Future<void> _closeWindow() async {
@@ -357,6 +375,9 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
     _closing = true;
     await _playerKey.currentState?.controller?.shutdownSession();
     await _notifyHostClosed();
+    if (widget.controller == null) {
+      exit(0);
+    }
     try {
       await windowManager.setPreventClose(false);
       await windowManager.destroy();
@@ -393,6 +414,10 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
             key: _playerKey,
             itemId: request.itemId,
             autoResume: request.autoResume,
+            mediaSourceId: request.mediaSourceId,
+            audioStreamIndex: request.audioStreamIndex,
+            subtitleStreamIndex: request.subtitleStreamIndex,
+            startTimeTicks: request.startTimeTicks,
             onClosed: () {
               unawaited(_closeWindow());
             },

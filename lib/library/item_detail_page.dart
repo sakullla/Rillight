@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -37,6 +38,9 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
   bool _busyPlayed = false;
   EmbyException? _error;
   EmbyException? _similarError;
+  String? _mediaSourceId;
+  int? _audioStreamIndex;
+  int? _subtitleStreamIndex;
 
   @override
   void initState() {
@@ -65,6 +69,9 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
       _episodes = const [];
       _similar = const [];
       _seasonId = null;
+      _mediaSourceId = null;
+      _audioStreamIndex = null;
+      _subtitleStreamIndex = null;
     });
     final client = AuthScope.of(context).client;
     try {
@@ -114,6 +121,11 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
         _similar = similar;
         _similarError = similarError;
         _loading = false;
+        _mediaSourceId = item.mediaSources.isEmpty
+            ? null
+            : item.mediaSources.first.id;
+        _audioStreamIndex = _defaultAudio(item, _mediaSourceId);
+        _subtitleStreamIndex = _defaultSubtitle(item, _mediaSourceId);
       });
     } on EmbyException catch (error) {
       if (!mounted) {
@@ -150,11 +162,17 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     }
   }
 
-  Future<void> _openPlayer(String itemId) async {
+  Future<void> _openPlayer(String itemId, {int? startTimeTicks}) async {
     try {
-      await PlayerWindowScope.of(
-        context,
-      ).open(PlayerOpenRequest(itemId: itemId));
+      await PlayerWindowScope.of(context).open(
+        PlayerOpenRequest(
+          itemId: itemId,
+          mediaSourceId: _mediaSourceId,
+          audioStreamIndex: _audioStreamIndex,
+          subtitleStreamIndex: _subtitleStreamIndex,
+          startTimeTicks: startTimeTicks,
+        ),
+      );
     } catch (error) {
       if (!mounted) {
         return;
@@ -198,6 +216,51 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     }
   }
 
+  EmbyItem? _playTarget(EmbyItem item) {
+    if (item.isPlayable) {
+      return item;
+    }
+    if (!item.isSeries) {
+      return null;
+    }
+    for (final episode in _episodes) {
+      if (episode.canResume) {
+        return episode;
+      }
+    }
+    if (_episodes.isNotEmpty) {
+      return _episodes.first;
+    }
+    return null;
+  }
+
+  int? _defaultAudio(EmbyItem item, String? sourceId) {
+    final source = _sourceById(item, sourceId);
+    final audios = source?.audioStreams ?? const [];
+    return audios.isEmpty ? null : audios.first.index;
+  }
+
+  int? _defaultSubtitle(EmbyItem item, String? sourceId) {
+    final source = _sourceById(item, sourceId);
+    final subs = source?.subtitleStreams ?? const [];
+    return subs.isEmpty ? null : subs.first.index;
+  }
+
+  ItemMediaSource? _sourceById(EmbyItem item, String? sourceId) {
+    if (item.mediaSources.isEmpty) {
+      return null;
+    }
+    if (sourceId == null || sourceId.isEmpty) {
+      return item.mediaSources.first;
+    }
+    for (final source in item.mediaSources) {
+      if (source.id == sourceId) {
+        return source;
+      }
+    }
+    return item.mediaSources.first;
+  }
+
   bool _hideSimilar(EmbyException error) {
     final code = error.statusCode;
     return code == 404 || code == 400 || code == 501;
@@ -223,71 +286,90 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
 
     final runtime = runtimeLabel(l10n, item);
     final showSimilar = _similar.isNotEmpty || _similarError != null;
+    final playTarget = _playTarget(item);
+    final continueWatching = [
+      for (final episode in _episodes)
+        if (episode.canResume) episode,
+    ];
     return SingleChildScrollView(
       padding: const EdgeInsets.only(bottom: 32),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Align(
-            alignment: Alignment.centerLeft,
-            child: IconButton(
-              key: CatalogKeys.back,
-              tooltip: 'Back',
-              onPressed: () {
-                if (context.canPop()) {
-                  context.pop();
-                } else {
-                  context.go(AppRoutes.home);
+          _Hero(
+            item: item,
+            runtime: runtime,
+            seasonCount: _seasons.length,
+            nextEpisode: playTarget != null && item.isSeries
+                ? playTarget
+                : null,
+            busyPlayed: _busyPlayed,
+            mediaSourceId: _mediaSourceId,
+            audioStreamIndex: _audioStreamIndex,
+            subtitleStreamIndex: _subtitleStreamIndex,
+            onBack: () {
+              if (context.canPop()) {
+                context.pop();
+              } else {
+                context.go(AppRoutes.home);
+              }
+            },
+            onMediaSource: (id) {
+              setState(() {
+                _mediaSourceId = id;
+                _audioStreamIndex = _defaultAudio(item, id);
+                _subtitleStreamIndex = _defaultSubtitle(item, id);
+              });
+            },
+            onAudio: (index) => setState(() => _audioStreamIndex = index),
+            onSubtitle: (index) =>
+                setState(() => _subtitleStreamIndex = index),
+            onPlay: playTarget == null
+                ? null
+                : () => _openPlayer(playTarget.id),
+            onPlayedChanged: (value) {
+              _setPlayed(value);
+            },
+          ),
+          if (item.chapters.isNotEmpty)
+            _ChapterRow(
+              itemId: item.id,
+              chapters: item.chapters,
+              onSelect: (chapter) {
+                final target = playTarget ?? item;
+                if (target.isPlayable) {
+                  _openPlayer(
+                    target.id,
+                    startTimeTicks: chapter.startPositionTicks,
+                  );
                 }
               },
-              icon: const Icon(Icons.arrow_back),
             ),
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24),
-            child: _Hero(
-              item: item,
-              runtime: runtime,
-              busyPlayed: _busyPlayed,
-              onPlay: item.isPlayable ? () => _openPlayer(item.id) : null,
-              onPlayedChanged: (value) {
-                _setPlayed(value);
-              },
-            ),
-          ),
           if (item.isSeries) ...[
-            const SizedBox(height: 24),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24),
-              child: Text(
-                l10n.seasons,
-                style: Theme.of(context).textTheme.titleMedium,
+            if (continueWatching.isNotEmpty)
+              MediaShelf(
+                rowKey: CatalogKeys.resumeRow,
+                shelfId: '${CatalogKeys.shelfEpisodes}-resume',
+                title: l10n.resumeRow,
+                items: continueWatching,
+                wide: true,
+                extent: 146,
+                onTap: (episode) => context.push(AppRoutes.item(episode.id)),
+                itemBuilder: (context, episode) {
+                  return EpisodeThumbCard(
+                    item: episode,
+                    onTap: () => context.push(AppRoutes.item(episode.id)),
+                  );
+                },
               ),
-            ),
-            const SizedBox(height: 8),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24),
-              child: Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  for (final season in _seasons)
-                    ChoiceChip(
-                      key: CatalogKeys.season(season.id),
-                      label: Text(season.name),
-                      selected: season.id == _seasonId,
-                      onSelected: (_) => _selectSeason(season.id),
-                    ),
-                ],
-              ),
-            ),
-            if (_episodes.isNotEmpty) ...[
-              const SizedBox(height: 16),
+            if (_episodes.isNotEmpty)
               MediaShelf(
                 rowKey: CatalogKeys.episodesRow,
                 shelfId: CatalogKeys.shelfEpisodes,
                 title: l10n.episodesRow,
                 items: _episodes,
+                wide: true,
+                extent: 146,
                 onTap: (episode) => context.push(AppRoutes.item(episode.id)),
                 onMore: _seasonId == null
                     ? null
@@ -299,16 +381,27 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                         ),
                       ),
                 itemBuilder: (context, episode) {
-                  return KeyedSubtree(
-                    key: CatalogKeys.episode(episode.id),
-                    child: PosterCard(
-                      item: episode,
-                      onTap: () => context.push(AppRoutes.item(episode.id)),
-                    ),
+                  return EpisodeThumbCard(
+                    item: episode,
+                    onTap: () => context.push(AppRoutes.item(episode.id)),
                   );
                 },
               ),
-            ],
+            if (_seasons.isNotEmpty)
+              MediaShelf(
+                shelfId: 'seasons',
+                title: l10n.seasons,
+                items: _seasons,
+                extent: 228,
+                onTap: (season) => _selectSeason(season.id),
+                itemBuilder: (context, season) {
+                  return SeasonPosterCard(
+                    item: season,
+                    selected: season.id == _seasonId,
+                    onTap: () => _selectSeason(season.id),
+                  );
+                },
+              ),
           ],
           if (showSimilar)
             MediaShelf(
@@ -336,6 +429,15 @@ class _Hero extends StatelessWidget {
     required this.busyPlayed,
     required this.onPlay,
     required this.onPlayedChanged,
+    required this.onBack,
+    this.seasonCount = 0,
+    this.nextEpisode,
+    this.mediaSourceId,
+    this.audioStreamIndex,
+    this.subtitleStreamIndex,
+    this.onMediaSource,
+    this.onAudio,
+    this.onSubtitle,
   });
 
   final EmbyItem item;
@@ -343,6 +445,15 @@ class _Hero extends StatelessWidget {
   final bool busyPlayed;
   final VoidCallback? onPlay;
   final ValueChanged<bool> onPlayedChanged;
+  final VoidCallback onBack;
+  final int seasonCount;
+  final EmbyItem? nextEpisode;
+  final String? mediaSourceId;
+  final int? audioStreamIndex;
+  final int? subtitleStreamIndex;
+  final ValueChanged<String>? onMediaSource;
+  final ValueChanged<int>? onAudio;
+  final ValueChanged<int?>? onSubtitle;
 
   @override
   Widget build(BuildContext context) {
@@ -351,40 +462,91 @@ class _Hero extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        ClipRRect(
-          borderRadius: BorderRadius.circular(12),
-          child: SizedBox(
-            height: 280,
-            width: double.infinity,
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                MediaImage(item: item, height: 280),
-                const DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [Color(0x00000000), Color(0xCC000000)],
-                    ),
+        SizedBox(
+          height: 420,
+          width: double.infinity,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              MediaImage(
+                item: item,
+                height: 420,
+                preferBackdrop: true,
+                maxWidth: 1600,
+              ),
+              const DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.bottomCenter,
+                    end: Alignment.center,
+                    colors: [Color(0xF2000000), Color(0x00000000)],
                   ),
                 ),
-                Positioned(
-                  left: 20,
-                  right: 20,
-                  bottom: 20,
-                  child: Text(
-                    itemTitle(item),
-                    style: theme.textTheme.headlineSmall?.copyWith(
-                      color: Colors.white,
-                    ),
-                  ),
+              ),
+              Positioned(
+                top: 8,
+                left: 8,
+                child: IconButton(
+                  key: CatalogKeys.back,
+                  tooltip: 'Back',
+                  color: Colors.white,
+                  onPressed: onBack,
+                  icon: const Icon(Icons.arrow_back),
                 ),
-              ],
-            ),
+              ),
+              Positioned(
+                left: 28,
+                right: 28,
+                bottom: 24,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (onPlay != null) ...[
+                      FilledButton.icon(
+                        key: PlayerKeys.open,
+                        onPressed: onPlay,
+                        icon: const Icon(Icons.play_arrow),
+                        label: Text(
+                          item.canResume ? l10n.resumePlay : l10n.play,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                    ],
+                    if (nextEpisode != null && item.isSeries)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Text(
+                          episodeLabel(nextEpisode!),
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: Colors.white70,
+                          ),
+                        ),
+                      ),
+                    Text(
+                      itemTitle(item),
+                      style: theme.textTheme.headlineMedium?.copyWith(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    if (item.isSeries && seasonCount > 0)
+                      Text(
+                        l10n.seasonCount(seasonCount),
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: Colors.white70,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
           ),
         ),
-        const SizedBox(height: 16),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
         if (item.isEpisode) ...[
           Text(episodeLabel(item)),
           if (item.seriesName != null)
@@ -415,14 +577,68 @@ class _Hero extends StatelessWidget {
           ),
         ],
         const SizedBox(height: 16),
-        if (onPlay != null)
-          FilledButton.icon(
-            key: PlayerKeys.open,
-            onPressed: onPlay,
-            icon: const Icon(Icons.play_arrow),
-            label: Text(item.canResume ? l10n.resumePlay : l10n.play),
+        if (item.mediaSources.length > 1)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: DropdownButtonFormField<String>(
+              key: ValueKey('source-${mediaSourceId ?? item.mediaSources.first.id}'),
+              decoration: InputDecoration(labelText: l10n.mediaSource),
+              initialValue: mediaSourceId ?? item.mediaSources.first.id,
+              items: [
+                for (final source in item.mediaSources)
+                  DropdownMenuItem(
+                    value: source.id,
+                    child: Text(source.label, overflow: TextOverflow.ellipsis),
+                  ),
+              ],
+              onChanged: (value) {
+                if (value != null) {
+                  onMediaSource?.call(value);
+                }
+              },
+            ),
           ),
-        if (item.isPlayable) const SizedBox(height: 8),
+        if (_audioChoices(item, mediaSourceId).length > 1)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: DropdownButtonFormField<int>(
+              key: ValueKey('audio-$mediaSourceId-$audioStreamIndex'),
+              decoration: InputDecoration(labelText: l10n.audioTrack),
+              initialValue: audioStreamIndex,
+              items: [
+                for (final stream in _audioChoices(item, mediaSourceId))
+                  DropdownMenuItem(
+                    value: stream.index,
+                    child: Text(stream.label ?? '#${stream.index}'),
+                  ),
+              ],
+              onChanged: (value) {
+                if (value != null) {
+                  onAudio?.call(value);
+                }
+              },
+            ),
+          ),
+        if (_subtitleChoices(item, mediaSourceId).isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: DropdownButtonFormField<int?>(
+              decoration: InputDecoration(labelText: l10n.subtitleTrack),
+              initialValue: subtitleStreamIndex,
+              items: [
+                DropdownMenuItem<int?>(
+                  value: null,
+                  child: Text(l10n.subtitleOff),
+                ),
+                for (final stream in _subtitleChoices(item, mediaSourceId))
+                  DropdownMenuItem<int?>(
+                    value: stream.index,
+                    child: Text(stream.label ?? '#${stream.index}'),
+                  ),
+              ],
+              onChanged: onSubtitle,
+            ),
+          ),
         SwitchListTile(
           key: CatalogKeys.playedToggle,
           contentPadding: EdgeInsets.zero,
@@ -432,7 +648,213 @@ class _Hero extends StatelessWidget {
           value: item.userData.played,
           onChanged: busyPlayed ? null : onPlayedChanged,
         ),
+            ],
+          ),
+        ),
       ],
+    );
+  }
+}
+
+List<ItemMediaStream> _audioChoices(EmbyItem item, String? sourceId) {
+  if (item.mediaSources.isEmpty) {
+    return const [];
+  }
+  var source = item.mediaSources.first;
+  if (sourceId != null) {
+    for (final candidate in item.mediaSources) {
+      if (candidate.id == sourceId) {
+        source = candidate;
+        break;
+      }
+    }
+  }
+  return source.audioStreams;
+}
+
+List<ItemMediaStream> _subtitleChoices(EmbyItem item, String? sourceId) {
+  if (item.mediaSources.isEmpty) {
+    return const [];
+  }
+  var source = item.mediaSources.first;
+  if (sourceId != null) {
+    for (final candidate in item.mediaSources) {
+      if (candidate.id == sourceId) {
+        source = candidate;
+        break;
+      }
+    }
+  }
+  return source.subtitleStreams;
+}
+
+class _ChapterRow extends StatelessWidget {
+  const _ChapterRow({
+    required this.itemId,
+    required this.chapters,
+    required this.onSelect,
+  });
+
+  final String itemId;
+  final List<ItemChapter> chapters;
+  final ValueChanged<ItemChapter> onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(top: 8, bottom: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Text(
+              l10n.chapters,
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            height: 148,
+            child: ListView.separated(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              scrollDirection: Axis.horizontal,
+              itemCount: chapters.length,
+              separatorBuilder: (context, index) => const SizedBox(width: 12),
+              itemBuilder: (context, index) {
+                final chapter = chapters[index];
+                return _ChapterCard(
+                  itemId: itemId,
+                  index: index,
+                  chapter: chapter,
+                  onTap: () => onSelect(chapter),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ChapterCard extends StatelessWidget {
+  const _ChapterCard({
+    required this.itemId,
+    required this.index,
+    required this.chapter,
+    required this.onTap,
+  });
+
+  final String itemId;
+  final int index;
+  final ItemChapter chapter;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    const width = 168.0;
+    const height = 94.0;
+    return SizedBox(
+      width: width,
+      child: InkWell(
+        key: CatalogKeys.chapter(index),
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: SizedBox(
+                width: width,
+                height: height,
+                child: ColoredBox(
+                  color: const Color(0xFF2A2A2A),
+                  child: _ChapterImage(
+                    itemId: itemId,
+                    index: index,
+                    tag: chapter.imageTag,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              chapter.name.isEmpty ? 'Chapter ${index + 1}' : chapter.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            Text(
+              chapterClock(chapter.startPositionTicks),
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(context).colorScheme.onSurface.withValues(
+                  alpha: 0.6,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ChapterImage extends StatefulWidget {
+  const _ChapterImage({
+    required this.itemId,
+    required this.index,
+    this.tag,
+  });
+
+  final String itemId;
+  final int index;
+  final String? tag;
+
+  @override
+  State<_ChapterImage> createState() => _ChapterImageState();
+}
+
+class _ChapterImageState extends State<_ChapterImage> {
+  Future<Uint8List?>? _future;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _future ??= _load();
+  }
+
+  Future<Uint8List?> _load() async {
+    try {
+      final bytes = await AuthScope.of(context).client.getChapterImage(
+        widget.itemId,
+        index: widget.index,
+        tag: widget.tag,
+      );
+      if (bytes.isEmpty) {
+        return null;
+      }
+      return Uint8List.fromList(bytes);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<Uint8List?>(
+      future: _future,
+      builder: (context, snapshot) {
+        final bytes = snapshot.data;
+        if (bytes == null || bytes.isEmpty) {
+          return const Center(
+            child: Icon(Icons.menu_book_outlined, color: Colors.white54),
+          );
+        }
+        return Image.memory(bytes, fit: BoxFit.cover);
+      },
     );
   }
 }

@@ -3,13 +3,16 @@ import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/auth/auth_scope.dart';
+import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/home/catalog_scope.dart';
 
 class SessionActions extends StatelessWidget {
   const SessionActions({super.key});
 
   static const logoutValue = '__logout__';
+  static const addServerValue = '__add_server__';
   static const serverMenuKey = Key('session-current-server');
+  static const addServerKey = Key('session-add-server');
 
   @override
   Widget build(BuildContext context) {
@@ -25,7 +28,6 @@ class SessionActions extends StatelessWidget {
           return const SizedBox.shrink();
         }
         final l10n = AppLocalizations.of(context);
-        final serverName = auth.session!.server.name;
         return PopupMenuButton<String>(
           key: serverMenuKey,
           tooltip: l10n.switchServer,
@@ -34,20 +36,39 @@ class SessionActions extends StatelessWidget {
               auth.logout();
               return;
             }
-            if (value == auth.session?.server.id) {
+            if (value == addServerValue) {
+              GoRouter.of(context).push('${AppRoutes.connect}?add=1');
+              return;
+            }
+            final parsed = _parseMenuValue(value);
+            if (parsed == null) {
+              return;
+            }
+            final current = auth.session?.server;
+            if (parsed.serverId == current?.id &&
+                parsed.lineId == current?.activeLineId) {
               return;
             }
             final catalog = CatalogScope.maybeOf(context);
             final router = GoRouter.of(context);
-            auth.switchTo(value).then((_) {
+            auth.switchTo(parsed.serverId, lineId: parsed.lineId).then((_) {
               catalog?.reload();
               router.go(AppRoutes.home);
             });
           },
           itemBuilder: (context) => [
             for (final server in auth.savedServers)
-              PopupMenuItem(value: server.id, child: Text(server.name)),
+              for (final line in server.lines)
+                PopupMenuItem(
+                  value: _menuValue(server.id, line.id),
+                  child: Text(_lineMenuLabel(server, line)),
+                ),
             const PopupMenuDivider(),
+            PopupMenuItem(
+              key: addServerKey,
+              value: addServerValue,
+              child: Text(l10n.addServer),
+            ),
             PopupMenuItem(value: logoutValue, child: Text(l10n.logout)),
           ],
           child: Padding(
@@ -58,8 +79,11 @@ class SessionActions extends StatelessWidget {
                 const Icon(Icons.dns_outlined, size: 18),
                 const SizedBox(width: 8),
                 ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 200),
-                  child: Text(serverName, overflow: TextOverflow.ellipsis),
+                  constraints: const BoxConstraints(maxWidth: 220),
+                  child: Text(
+                    _chipLabel(auth.session!.server),
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
                 const Icon(Icons.arrow_drop_down),
               ],
@@ -69,4 +93,31 @@ class SessionActions extends StatelessWidget {
       },
     );
   }
+}
+
+const _menuSep = '\u001f';
+
+String _menuValue(String serverId, String lineId) => '$serverId$_menuSep$lineId';
+
+({String serverId, String lineId})? _parseMenuValue(String value) {
+  final index = value.indexOf(_menuSep);
+  if (index <= 0 || index == value.length - 1) {
+    return null;
+  }
+  return (
+    serverId: value.substring(0, index),
+    lineId: value.substring(index + 1),
+  );
+}
+
+String _chipLabel(SavedServer server) {
+  final line = server.activeLine;
+  if (line == null || server.lines.length < 2) {
+    return server.name;
+  }
+  return '${server.name} · ${line.hostLabel}';
+}
+
+String _lineMenuLabel(SavedServer server, ServerLine line) {
+  return '${server.name} · ${line.hostLabel}';
 }

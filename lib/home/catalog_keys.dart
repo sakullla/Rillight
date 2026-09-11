@@ -15,6 +15,8 @@ abstract final class CatalogKeys {
   static const similarRow = Key('catalog-row-similar');
   static const episodesRow = Key('catalog-row-episodes');
   static const sortBy = Key('catalog-sort-by');
+  static const mediaSource = Key('catalog-media-source');
+  static const detailAudio = Key('catalog-detail-audio');
 
   static const shelfResume = 'resume';
   static const shelfNextUp = 'nextup';
@@ -33,4 +35,5 @@ abstract final class CatalogKeys {
   static Key shelfScrollRight(String shelfId) =>
       Key('catalog-scroll-right-$shelfId');
   static Key sortOption(String sortBy) => Key('catalog-sort-$sortBy');
+  static Key chapter(int index) => Key('catalog-chapter-$index');
 }

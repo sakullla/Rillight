@@ -116,8 +116,7 @@ void main() {
       expect(find.text('第二台'), findsOneWidget);
       expect(find.text('第二台电影'), findsWidgets);
 
-      await tester.tap(find.byKey(CatalogKeys.librariesMenu));
-      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byKey(CatalogKeys.library('view-movies')));
       await tester.tap(find.byKey(CatalogKeys.library('view-movies')));
       await tester.pumpAndSettle();
 
@@ -132,7 +131,7 @@ void main() {
 
       await tester.tap(find.byKey(SessionActions.serverMenuKey));
       await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(PopupMenuItem<String>, '灯川测试'));
+      await tester.tap(find.textContaining('灯川测试').last);
       await tester.pumpAndSettle();
 
       expect(auth.session?.server.name, '灯川测试');
@@ -146,6 +145,66 @@ void main() {
       );
     },
   );
+
+  testWidgets('server menu lists lines and switching a line reloads home', (
+    tester,
+  ) async {
+    final lan = FakeEmbyServer();
+    final wan = FakeEmbyServer(
+      serverId: lan.serverId,
+      serverName: lan.serverName,
+      baseUrl: Uri.parse('http://emby-wan.test:8096'),
+      items: [
+        FakeEmbyItem(
+          id: 'movie-wan',
+          name: '外网电影',
+          type: 'Movie',
+          parentId: 'view-movies',
+          primaryImageTag: 'tag-wan',
+        ),
+      ],
+    );
+    final adapter = FakeEmbyAdapter([lan, wan]);
+    final auth = AuthController(
+      client: EmbyClient(device: _device, dio: dioForFakeEmby(adapter)),
+      credentials: MemoryCredentialStore(),
+      servers: MemoryServerListStore(),
+    );
+    await tester.runAsync(() async {
+      await auth.connect(
+        address: lan.baseUrl.toString(),
+        username: 'alice',
+        password: 'correct-horse',
+      );
+      await auth.connect(
+        address: wan.baseUrl.toString(),
+        username: 'alice',
+        password: 'correct-horse',
+      );
+    });
+    expect(auth.savedServers.single.lines, hasLength(2));
+    expect(auth.session?.server.activeLine?.address, wan.baseUrl.toString());
+
+    await tester.pumpWidget(RillightApp(auth: auth));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('emby-wan.test'), findsWidgets);
+
+    final lanResumeBefore = lan.requests
+        .where((request) => request.contains('Items/Resume'))
+        .length;
+
+    await tester.tap(find.byKey(SessionActions.serverMenuKey));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('灯川测试 · emby.test:8096'));
+    await tester.pumpAndSettle();
+
+    expect(auth.session?.server.activeLine?.address, lan.baseUrl.toString());
+    expect(
+      lan.requests.where((request) => request.contains('Items/Resume')).length,
+      greaterThan(lanResumeBefore),
+    );
+  });
 }
 
 Widget _l10nApp(Widget home) {

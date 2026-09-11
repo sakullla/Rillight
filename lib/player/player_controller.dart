@@ -37,6 +37,10 @@ class PlayerController extends ChangeNotifier {
     this.seekStep = const Duration(seconds: 10),
     this.onClose,
     this.onOpenItem,
+    this.preferredMediaSourceId,
+    this.preferredAudioStreamIndex,
+    this.preferredSubtitleStreamIndex,
+    this.startTimeTicks,
   }) {
     _bindBackend();
     window.addListener(_emit);
@@ -53,6 +57,10 @@ class PlayerController extends ChangeNotifier {
   final Duration seekStep;
   final VoidCallback? onClose;
   final ValueChanged<String>? onOpenItem;
+  final String? preferredMediaSourceId;
+  final int? preferredAudioStreamIndex;
+  final int? preferredSubtitleStreamIndex;
+  final int? startTimeTicks;
 
   final PlaybackCheckInMachine checkIn = PlaybackCheckInMachine();
 
@@ -125,6 +133,13 @@ class PlayerController extends ChangeNotifier {
         user = null;
       }
       duration = durationFromTicks(item!.runTimeTicks ?? 0);
+      subtitleStreamIndex = preferredSubtitleStreamIndex;
+      audioStreamIndex = preferredAudioStreamIndex ?? audioStreamIndex;
+      final chapterTicks = startTimeTicks;
+      if (chapterTicks != null && chapterTicks > 0) {
+        await _open(startTicks: chapterTicks);
+        return;
+      }
       final resumeTicks = item!.canResume
           ? item!.userData.playbackPositionTicks
           : 0;
@@ -196,6 +211,10 @@ class PlayerController extends ChangeNotifier {
 
   Future<void> setAudio(int index) async {
     audioStreamIndex = index;
+    if (isTranscode) {
+      await _reopen(startTicks: ticksFromDuration(position));
+      return;
+    }
     await backend.setAudioIndex(index);
     _emit();
     await _reportProgress(eventName: 'AudioTrackChange');
@@ -407,8 +426,9 @@ class PlayerController extends ChangeNotifier {
         itemId: itemId,
         maxStreamingBitrate: maxStreamingBitrate,
         startTimeTicks: startTicks > 0 ? startTicks : null,
-        audioStreamIndex: audio,
-        subtitleStreamIndex: subtitle,
+        audioStreamIndex: audio ?? preferredAudioStreamIndex,
+        subtitleStreamIndex: subtitle ?? preferredSubtitleStreamIndex,
+        mediaSourceId: preferredMediaSourceId,
       );
       if (_disposed) {
         return;

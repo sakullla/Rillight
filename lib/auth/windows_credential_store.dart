@@ -55,7 +55,7 @@ Future<String?> _read(String key) async {
   try {
     if (CredRead(target, CRED_TYPE_GENERIC, 0, cred) == FALSE) {
       final error = GetLastError();
-      if (error == ERROR_NOT_FOUND) {
+      if (error == ERROR_NOT_FOUND || error == 0) {
         return null;
       }
       throw WindowsException(HRESULT_FROM_WIN32(error));

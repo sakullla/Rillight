@@ -63,6 +63,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get deleteLine => '删除线路';
 
   @override
+  String get volume => '音量';
+
+  @override
   String get switchServer => '切换服务器';
 
   @override
@@ -167,6 +170,11 @@ class AppLocalizationsZh extends AppLocalizations {
   String get seasons => '季';
 
   @override
+  String seasonCount(int count) {
+    return '共$count季';
+  }
+
+  @override
   String get errorLoadFailed => '加载失败';
 
   @override
@@ -229,6 +237,12 @@ class AppLocalizationsZh extends AppLocalizations {
   String qualityMbps(int mbps) {
     return '$mbps Mbps';
   }
+
+  @override
+  String get chapters => '章节';
+
+  @override
+  String get mediaSource => '片源';
 
   @override
   String get audioTrack => '音轨';

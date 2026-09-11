@@ -6,7 +6,9 @@ import 'package:rillight/app/widgets/app_error_view.dart';
 import 'package:rillight/home/catalog_failure.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/catalog_scope.dart';
+import 'package:rillight/home/home_hero.dart';
 import 'package:rillight/home/home_row.dart';
+import 'package:rillight/home/library_tiles.dart';
 
 class HomePage extends StatelessWidget {
   const HomePage({super.key});
@@ -32,16 +34,19 @@ class HomePage extends StatelessWidget {
                   message: catalogFailureMessage(l10n, catalog.librariesError!),
                   onRetry: catalog.reload,
                 ),
+              HomeHero(catalog: catalog),
               HomeMediaRow(
                 rowKey: CatalogKeys.resumeRow,
                 shelfId: CatalogKeys.shelfResume,
                 title: l10n.resumeRow,
                 state: catalog.resume,
                 showProgress: true,
+                wide: true,
                 onTap: (item) => context.push(AppRoutes.item(item.id)),
                 onRetry: catalog.reloadHomeRows,
                 onMore: () => context.push(AppRoutes.shelfResume),
               ),
+              LibraryTiles(libraries: catalog.libraries),
               HomeMediaRow(
                 rowKey: CatalogKeys.nextUpRow,
                 shelfId: CatalogKeys.shelfNextUp,
