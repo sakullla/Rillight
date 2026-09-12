@@ -25,6 +25,14 @@ const _hostChannel = WindowMethodChannel(
   mode: ChannelMode.unidirectional,
 );
 
+/// 播放进程窗口:隐藏系统标题栏,最小 960×540。
+const WindowOptions kPlayerWindowOptions = WindowOptions(
+  size: Size(1600, 900),
+  minimumSize: Size(960, 540),
+  center: true,
+  titleBarStyle: TitleBarStyle.hidden,
+);
+
 class PlayerWindowLaunch {
   static const businessId = 'player';
 
@@ -344,18 +352,13 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
   Future<void> _configureWindow() async {
     try {
       await windowManager.setPreventClose(true);
-      await windowManager.waitUntilReadyToShow(
-        const WindowOptions(
-          size: Size(1600, 900),
-          minimumSize: Size(960, 540),
-          center: true,
-        ),
-      );
+      await windowManager.waitUntilReadyToShow(kPlayerWindowOptions);
       await windowManager.setTitle(_playerWindowTitle);
       await windowManager.show();
       await windowManager.focus();
     } catch (_) {
       try {
+        await windowManager.setTitleBarStyle(TitleBarStyle.hidden);
         await windowManager.setMinimumSize(const Size(960, 540));
         await windowManager.setSize(const Size(1600, 900));
         await windowManager.center();

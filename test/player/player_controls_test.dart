@@ -8,6 +8,7 @@ import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/home/catalog_keys.dart';
+import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_controller.dart';
 import 'package:rillight/player/player_keys.dart';
@@ -362,5 +363,36 @@ void main() {
     await waitFor(tester, find.byKey(PlayerKeys.playMethod));
     expect(backend.subtitleUri, isNotNull);
     expect(backend.subtitleUri!.path, contains('/Subtitles/2/Stream.srt'));
+  });
+
+  testWidgets('overlay chrome can drag and close through the player path', (
+    tester,
+  ) async {
+    await pumpLoggedIn(tester);
+    await openPlayable(tester, 'movie-up');
+    expect(find.byType(PlayerPage), findsOneWidget);
+    expect(find.byType(WindowDragArea), findsOneWidget);
+    expect(find.byKey(const Key('player-window-drag')), findsOneWidget);
+    expect(find.text('直连'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('player-window-close')));
+    await waitForGone(tester, find.byType(PlayerPage));
+    expect(find.text('飞屋环游记 (2009)'), findsOneWidget);
+  });
+
+  testWidgets('close button closes the player even from fullscreen', (
+    tester,
+  ) async {
+    await pumpLoggedIn(tester);
+    await openPlayable(tester, 'movie-up');
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyF);
+    await tester.pump();
+    expect(window.isFullScreen, isTrue);
+    expect(find.byType(PlayerPage), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('player-window-close')));
+    await waitForGone(tester, find.byType(PlayerPage));
+    expect(window.isFullScreen, isFalse);
+    expect(find.text('飞屋环游记 (2009)'), findsOneWidget);
   });
 }

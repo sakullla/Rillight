@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/app_error_view.dart';
+import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/emby/device_profile.dart';
 import 'package:rillight/home/catalog_failure.dart';
@@ -265,6 +266,10 @@ class PlayerPageState extends State<PlayerPage> {
                         ? l10n.subtitleBitmapFailed
                         : l10n.subtitleBitmapBurnIn,
                   ),
+                _PlayerChromeBar(
+                  controller: current,
+                  visible: current.controlsVisible,
+                ),
               ],
             ),
           ),
@@ -286,6 +291,87 @@ class PlayerPageState extends State<PlayerPage> {
       case null:
         return null;
     }
+  }
+}
+
+class _PlayerChromeBar extends StatelessWidget {
+  const _PlayerChromeBar({required this.controller, required this.visible});
+
+  final PlayerController controller;
+  final bool visible;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final title = controller.item?.displayName ?? '';
+    return Positioned(
+      left: 0,
+      right: 0,
+      top: 0,
+      child: AnimatedOpacity(
+        opacity: visible ? 1.0 : 0.0,
+        duration: AppMotion.normal,
+        curve: AppMotion.standard,
+        child: IgnorePointer(
+          ignoring: !visible,
+          child: DecoratedBox(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.bottomCenter,
+                end: Alignment.topCenter,
+                colors: [
+                  Colors.transparent,
+                  Color(0x8A000000),
+                  Color(0xD9000000),
+                ],
+              ),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.md,
+                AppSpacing.sm,
+                AppSpacing.sm,
+                AppSpacing.lg,
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: WindowDragArea(
+                      key: const Key('player-window-drag'),
+                      child: SizedBox(
+                        height: kWindowChromeHeight,
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: title.isEmpty
+                              ? const SizedBox.expand()
+                              : Text(
+                                  title,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.titleMedium,
+                                ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    key: const Key('player-window-close'),
+                    tooltip: MaterialLocalizations.of(
+                      context,
+                    ).closeButtonTooltip,
+                    color: theme.colorScheme.onSurface,
+                    onPressed: () {
+                      unawaited(controller.close());
+                    },
+                    icon: const Icon(Icons.close_rounded),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -446,7 +532,7 @@ class _Banner extends StatelessWidget {
     return Positioned(
       left: 0,
       right: 0,
-      top: AppSpacing.xl,
+      top: kWindowChromeHeight + AppSpacing.xxl,
       child: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 560),
