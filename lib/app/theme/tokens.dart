@@ -1,4 +1,4 @@
-import 'package:flutter/animation.dart';
+import 'package:flutter/widgets.dart';
 
 /// 4pt 栅格间距 token。统一全应用留白节奏。
 abstract final class AppSpacing {
@@ -35,6 +35,16 @@ abstract final class AppMotion {
 
   /// 退场曲线,保持轻快收敛。
   static const Curve exit = Curves.easeInCubic;
+
+  /// 将 [duration] 对 [MediaQuery.disableAnimationsOf] 求值。
+  ///
+  /// 系统要求减少动态效果时返回 [Duration.zero],循环动效应停止。
+  static Duration durationOf(
+    BuildContext context, [
+    Duration duration = normal,
+  ]) {
+    return MediaQuery.disableAnimationsOf(context) ? Duration.zero : duration;
+  }
 }
 
 /// 响应式断点(逻辑像素宽度)。

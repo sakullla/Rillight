@@ -4,14 +4,14 @@ import 'theme/tokens.dart';
 
 export 'theme/tokens.dart';
 
-/// 应用唯一视觉权威:现代流媒体风格的暗色电影感主题。
+/// 应用唯一视觉权威:近黑表面、暖白文字,克制高光仅用于播放/焦点/进度。
 ///
 /// 所有页面与组件应从 [AppTheme.dark] 与 token 类
 /// ([AppSpacing] / [AppRadii] / [AppMotion] / [AppBreakpoints]) 取视觉值,
 /// 不得散落硬编码颜色。
 abstract final class AppTheme {
-  // ---- 基础色板(近黑分层 + 暖白 + 精修琥珀强调) ----
-  static const Color _base = Color(0xFF0A0A0C); // 最深背景
+  // ---- 基础色板(近黑分层 + 暖白文字) ----
+  static const Color _base = Color(0xFF0A0A0C);
   static const Color _surfaceLowest = Color(0xFF0F0F12);
   static const Color _surfaceLow = Color(0xFF141418);
   static const Color _surface = Color(0xFF1A1A1F);
@@ -19,18 +19,19 @@ abstract final class AppTheme {
   static const Color _surfaceHighest = Color(0xFF292931);
   static const Color _surfaceBright = Color(0xFF33333C);
 
-  static const Color _onSurface = Color(0xFFF5F2EC); // 暖白主文字
-  static const Color _onSurfaceVariant = Color(0xFFB3AFA6); // 次级文字
+  static const Color _onSurface = Color(0xFFF5F2EC);
+  static const Color _onSurfaceVariant = Color(0xFFB3AFA6);
   static const Color _outline = Color(0xFF3D3D45);
   static const Color _outlineVariant = Color(0xFF26262C);
 
-  static const Color _accent = Color(0xFFE5A45C); // 精修琥珀
-  static const Color _onAccent = Color(0xFF221303);
-  static const Color _accentContainer = Color(0xFF5C3D1B);
-  static const Color _onAccentContainer = Color(0xFFFFDCB0);
+  /// 克制高光,只用于播放/焦点/进度,不涂导航与主按钮。
+  static const Color _accent = Color(0xFFD8CFC4);
+  static const Color _onAccent = Color(0xFF161410);
+  static const Color _accentContainer = Color(0xFF2E2B27);
+  static const Color _onAccentContainer = Color(0xFFE8E2D8);
 
-  static const Color _secondary = Color(0xFFC9A274); // 暖沙色
-  static const Color _tertiary = Color(0xFF8FA3BF); // 冷石板蓝,信息点缀
+  static const Color _secondary = Color(0xFFA8A29A);
+  static const Color _tertiary = Color(0xFF8FA3BF);
   static const Color _error = Color(0xFFE8786F);
 
   static ThemeData dark() {
@@ -42,8 +43,8 @@ abstract final class AppTheme {
       onPrimaryContainer: _onAccentContainer,
       secondary: _secondary,
       onSecondary: _onAccent,
-      secondaryContainer: Color(0xFF46351F),
-      onSecondaryContainer: Color(0xFFEBD3AF),
+      secondaryContainer: Color(0xFF2C2A27),
+      onSecondaryContainer: Color(0xFFD8D2C8),
       tertiary: _tertiary,
       onTertiary: Color(0xFF121A26),
       tertiaryContainer: Color(0xFF2C3A4E),
@@ -68,7 +69,7 @@ abstract final class AppTheme {
       scrim: Colors.black,
       inverseSurface: _onSurface,
       onInverseSurface: _surfaceLow,
-      inversePrimary: Color(0xFF8A5B1E),
+      inversePrimary: Color(0xFF6F675C),
       surfaceTint: Colors.transparent,
     );
 
@@ -179,10 +180,25 @@ abstract final class AppTheme {
       ),
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
-          backgroundColor: scheme.primary,
-          foregroundColor: scheme.onPrimary,
+          backgroundColor: _onSurface,
+          foregroundColor: _base,
           disabledBackgroundColor: _surfaceHigh,
           disabledForegroundColor: _onSurfaceVariant,
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.xl,
+            vertical: AppSpacing.sm,
+          ),
+          textStyle: textTheme.labelLarge,
+          shape: buttonShape,
+        ),
+      ),
+      elevatedButtonTheme: ElevatedButtonThemeData(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: _onSurface,
+          foregroundColor: _base,
+          disabledBackgroundColor: _surfaceHigh,
+          disabledForegroundColor: _onSurfaceVariant,
+          elevation: 0,
           padding: const EdgeInsets.symmetric(
             horizontal: AppSpacing.xl,
             vertical: AppSpacing.sm,
@@ -205,7 +221,7 @@ abstract final class AppTheme {
       ),
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
-          foregroundColor: scheme.primary,
+          foregroundColor: _onSurface,
           padding: const EdgeInsets.symmetric(
             horizontal: AppSpacing.md,
             vertical: AppSpacing.xs,
@@ -247,7 +263,7 @@ abstract final class AppTheme {
         activeTrackColor: _accent,
         inactiveTrackColor: _surfaceHighest,
         thumbColor: _accent,
-        overlayColor: Color(0x29E5A45C),
+        overlayColor: Color(0x29D8CFC4),
         trackHeight: 3,
       ),
       dialogTheme: DialogThemeData(
@@ -263,7 +279,7 @@ abstract final class AppTheme {
       snackBarTheme: SnackBarThemeData(
         backgroundColor: _surfaceHighest,
         contentTextStyle: textTheme.bodyMedium,
-        actionTextColor: scheme.primary,
+        actionTextColor: _onSurface,
         behavior: SnackBarBehavior.floating,
         elevation: 0,
         shape: RoundedRectangleBorder(
@@ -290,10 +306,10 @@ abstract final class AppTheme {
       ),
       navigationRailTheme: NavigationRailThemeData(
         backgroundColor: _base,
-        indicatorColor: _accentContainer,
-        selectedIconTheme: const IconThemeData(color: _onAccentContainer),
+        indicatorColor: _surfaceHigh,
+        selectedIconTheme: const IconThemeData(color: _onSurface),
         unselectedIconTheme: const IconThemeData(color: _onSurfaceVariant),
-        selectedLabelTextStyle: labelMedium.copyWith(color: _onAccentContainer),
+        selectedLabelTextStyle: labelMedium.copyWith(color: _onSurface),
         unselectedLabelTextStyle: labelMedium.copyWith(
           color: _onSurfaceVariant,
         ),
