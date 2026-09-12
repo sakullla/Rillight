@@ -38,6 +38,14 @@ Future<void> _tapVisible(WidgetTester tester, Finder finder) async {
   await tester.pumpAndSettle();
 }
 
+Future<void> _expandMore(WidgetTester tester) async {
+  expect(find.byKey(ConnectFormKeys.userAgent), findsNothing);
+  expect(find.byKey(ConnectFormKeys.path), findsNothing);
+  await _tapVisible(tester, find.byKey(ConnectFormKeys.more));
+  expect(find.byKey(ConnectFormKeys.userAgent), findsOneWidget);
+  expect(find.byKey(ConnectFormKeys.path), findsOneWidget);
+}
+
 void main() {
   late FakeEmbyServer server;
   late FakeEmbyAdapter adapter;
@@ -69,6 +77,9 @@ void main() {
 
     expect(find.text(kProductName), findsWidgets);
     expect(find.byKey(ConnectFormKeys.submit), findsOneWidget);
+    expect(find.byKey(ConnectFormKeys.userAgent), findsNothing);
+    expect(find.byKey(ConnectFormKeys.path), findsNothing);
+    expect(find.text('User-Agent'), findsNothing);
 
     await _enter(
       tester,
@@ -332,12 +343,12 @@ void main() {
         username: 'alice',
         password: 'correct-horse',
       );
+      await _expandMore(tester);
       await tester.enterText(
         find.byKey(ConnectFormKeys.userAgent),
         'CustomUA/1.0',
       );
-      await tester.tap(find.byKey(ConnectFormKeys.submit));
-      await tester.pumpAndSettle();
+      await _tapVisible(tester, find.byKey(ConnectFormKeys.submit));
 
       expect(auth.isLoggedIn, isTrue);
       expect(find.byKey(SessionActions.serverMenuKey), findsOneWidget);
@@ -346,4 +357,75 @@ void main() {
       expect(auth.client.sessionHeaders['User-Agent'], 'CustomUA/1.0');
     },
   );
+
+  testWidgets('path under 更多 is composed into the saved line address', (
+    tester,
+  ) async {
+    final auth = controller();
+    await tester.pumpWidget(RillightApp(auth: auth));
+    await tester.pumpAndSettle();
+
+    await _enter(
+      tester,
+      address: 'http://emby.test:8096',
+      username: 'alice',
+      password: 'correct-horse',
+    );
+    await _expandMore(tester);
+    await tester.enterText(find.byKey(ConnectFormKeys.path), '/emby');
+    await _tapVisible(tester, find.byKey(ConnectFormKeys.submit));
+
+    expect(auth.isLoggedIn, isTrue);
+    expect(auth.savedServers.single.baseUrl, 'http://emby.test:8096/emby');
+  });
+
+  testWidgets('addLine under 更多 adds a second line for the saved server', (
+    tester,
+  ) async {
+    final wan = FakeEmbyServer(
+      serverId: server.serverId,
+      serverName: server.serverName,
+      baseUrl: Uri.parse('http://emby-wan.test:8096'),
+    );
+    adapter.add(wan);
+    final auth = controller();
+    await tester.pumpWidget(RillightApp(auth: auth));
+    await tester.pumpAndSettle();
+
+    await _enter(
+      tester,
+      address: server.baseUrl.toString(),
+      username: 'alice',
+      password: 'correct-horse',
+    );
+    await tester.tap(find.byKey(ConnectFormKeys.submit));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(SessionActions.serverMenuKey));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('退出登录'));
+    await tester.pumpAndSettle();
+
+    await _tapVisible(
+      tester,
+      find.byKey(Key('saved-server-${server.serverId}')),
+    );
+    await _expandMore(tester);
+    await _tapVisible(tester, find.byKey(ConnectFormKeys.addLine));
+    await tester.enterText(
+      find.byKey(ConnectFormKeys.address),
+      wan.baseUrl.toString(),
+    );
+    await tester.enterText(
+      find.byKey(ConnectFormKeys.password),
+      'correct-horse',
+    );
+    await _tapVisible(tester, find.byKey(ConnectFormKeys.submit));
+
+    expect(auth.isLoggedIn, isTrue);
+    expect(auth.savedServers.single.lines, hasLength(2));
+    expect(
+      auth.savedServers.single.lines.map((line) => line.address),
+      containsAll(<String>[server.baseUrl.toString(), wan.baseUrl.toString()]),
+    );
+  });
 }

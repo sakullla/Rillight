@@ -9,9 +9,13 @@ import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/auth/failure_message.dart';
 import 'package:rillight/auth/server_list_store.dart';
+import 'package:rillight/emby/emby_errors.dart';
+import 'package:rillight/emby/emby_url.dart';
 
 abstract final class ConnectFormKeys {
   static const address = Key('connect-address');
+  static const path = Key('connect-path');
+  static const more = Key('connect-more');
   static const userAgent = Key('connect-user-agent');
   static const username = Key('connect-username');
   static const password = Key('connect-password');
@@ -30,12 +34,14 @@ class ConnectPage extends StatefulWidget {
 
 class _ConnectPageState extends State<ConnectPage> {
   final _address = TextEditingController();
+  final _path = TextEditingController();
   final _userAgent = TextEditingController();
   final _username = TextEditingController();
   final _password = TextEditingController();
   String? _appliedPrefillId;
   String? _selectedServerId;
   String? _selectedLineId;
+  bool _moreExpanded = false;
 
   @override
   void didChangeDependencies() {
@@ -55,6 +61,7 @@ class _ConnectPageState extends State<ConnectPage> {
     _selectedServerId = server.id;
     _selectedLineId = server.activeLine?.id;
     _address.text = server.baseUrl;
+    _path.clear();
     _userAgent.text = server.activeLine?.normalizedUserAgent ?? '';
     _username.text = server.username;
   }
@@ -70,6 +77,7 @@ class _ConnectPageState extends State<ConnectPage> {
   @override
   void dispose() {
     _address.dispose();
+    _path.dispose();
     _userAgent.dispose();
     _username.dispose();
     _password.dispose();
@@ -79,11 +87,25 @@ class _ConnectPageState extends State<ConnectPage> {
   bool get _addingAnother =>
       GoRouterState.of(context).uri.queryParameters['add'] == '1';
 
+  String _composedAddress() {
+    final extraPath = _path.text.trim();
+    if (extraPath.isEmpty) {
+      return _address.text;
+    }
+    try {
+      return normalizeEmbyBaseUrl(
+        joinEmbyPath(normalizeEmbyBaseUrl(_address.text), extraPath).toString(),
+      ).toString();
+    } on EmbyException {
+      return _address.text;
+    }
+  }
+
   Future<void> _submit() async {
     final auth = AuthScope.of(context);
     final adding = _addingAnother;
     await auth.connect(
-      address: _address.text,
+      address: _composedAddress(),
       username: _username.text.trim(),
       password: _password.text,
       userAgent: _userAgent.text,
@@ -113,6 +135,7 @@ class _ConnectPageState extends State<ConnectPage> {
       _selectedServerId = server.id;
       _selectedLineId = line.id;
       _address.text = line.address;
+      _path.clear();
       _userAgent.text = line.normalizedUserAgent ?? '';
       _username.text = server.username;
     });
@@ -125,6 +148,7 @@ class _ConnectPageState extends State<ConnectPage> {
       _selectedServerId = server.id;
       _selectedLineId = null;
       _address.clear();
+      _path.clear();
       _userAgent.clear();
       _username.text = server.username;
     });
@@ -137,6 +161,7 @@ class _ConnectPageState extends State<ConnectPage> {
       _selectedServerId = null;
       _selectedLineId = null;
       _address.clear();
+      _path.clear();
       _userAgent.clear();
       _username.clear();
       _password.clear();
@@ -260,17 +285,6 @@ class _ConnectPageState extends State<ConnectPage> {
                   ),
                   const SizedBox(height: AppSpacing.md),
                   TextField(
-                    key: ConnectFormKeys.userAgent,
-                    controller: _userAgent,
-                    enabled: !auth.isBusy,
-                    textInputAction: TextInputAction.next,
-                    decoration: InputDecoration(
-                      labelText: l10n.userAgent,
-                      hintText: l10n.userAgentHint,
-                    ),
-                  ),
-                  const SizedBox(height: AppSpacing.md),
-                  TextField(
                     key: ConnectFormKeys.username,
                     controller: _username,
                     enabled: !auth.isBusy,
@@ -311,10 +325,105 @@ class _ConnectPageState extends State<ConnectPage> {
                     )
                   : Text(l10n.connect),
             ),
+            const SizedBox(height: AppSpacing.sm),
+            _buildMoreSection(context, l10n, auth),
           ],
         ),
       ),
     );
+  }
+
+  Widget _buildMoreSection(
+    BuildContext context,
+    AppLocalizations l10n,
+    AuthController auth,
+  ) {
+    final selectedServer = _selectedServer(auth);
+    return ExpansionTile(
+      key: ConnectFormKeys.more,
+      title: Text(l10n.more),
+      tilePadding: EdgeInsets.zero,
+      childrenPadding: const EdgeInsets.only(bottom: AppSpacing.sm),
+      shape: const Border(),
+      collapsedShape: const Border(),
+      onExpansionChanged: (expanded) {
+        setState(() => _moreExpanded = expanded);
+      },
+      children: [
+        if (_moreExpanded) ...[
+          TextField(
+            key: ConnectFormKeys.path,
+            controller: _path,
+            enabled: !auth.isBusy,
+            keyboardType: TextInputType.url,
+            textInputAction: TextInputAction.next,
+            decoration: const InputDecoration(hintText: '/emby'),
+          ),
+          const SizedBox(height: AppSpacing.md),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              l10n.lines,
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+          Row(
+            children: [
+              TextButton.icon(
+                key: ConnectFormKeys.addLine,
+                onPressed: auth.isBusy || selectedServer == null
+                    ? null
+                    : () => _startNewLineFor(selectedServer),
+                icon: const Icon(Icons.add, size: 18),
+                label: Text(l10n.addLine),
+              ),
+              const SizedBox(width: AppSpacing.xs),
+              TextButton.icon(
+                key: ConnectFormKeys.deleteLine,
+                onPressed:
+                    auth.isBusy ||
+                        selectedServer == null ||
+                        selectedServer.lines.length <= 1 ||
+                        _selectedLineId == null
+                    ? null
+                    : _deleteSelectedLine,
+                icon: const Icon(Icons.link_off, size: 18),
+                label: Text(l10n.deleteLine),
+                style: TextButton.styleFrom(
+                  foregroundColor: Theme.of(context).colorScheme.error,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.md),
+          TextField(
+            key: ConnectFormKeys.userAgent,
+            controller: _userAgent,
+            enabled: !auth.isBusy,
+            textInputAction: TextInputAction.next,
+            decoration: InputDecoration(
+              labelText: l10n.userAgent,
+              hintText: l10n.userAgentHint,
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  SavedServer? _selectedServer(AuthController auth) {
+    final id = _selectedServerId;
+    if (id == null) {
+      return null;
+    }
+    for (final server in auth.savedServers) {
+      if (server.id == id) {
+        return server;
+      }
+    }
+    return null;
   }
 
   Widget _buildSavedServers(
@@ -434,38 +543,6 @@ class _ConnectPageState extends State<ConnectPage> {
                 const SizedBox(height: AppSpacing.xs),
                 for (final line in server.lines)
                   _buildLineTile(context, auth, server, line, selected),
-                Row(
-                  children: [
-                    TextButton.icon(
-                      key: selected
-                          ? ConnectFormKeys.addLine
-                          : Key('connect-add-line-${server.id}'),
-                      onPressed: auth.isBusy
-                          ? null
-                          : () => _startNewLineFor(server),
-                      icon: const Icon(Icons.add, size: 18),
-                      label: Text(l10n.addLine),
-                    ),
-                    const SizedBox(width: AppSpacing.xs),
-                    TextButton.icon(
-                      key: selected
-                          ? ConnectFormKeys.deleteLine
-                          : Key('connect-delete-line-${server.id}'),
-                      onPressed:
-                          auth.isBusy ||
-                              server.lines.length <= 1 ||
-                              !selected ||
-                              _selectedLineId == null
-                          ? null
-                          : _deleteSelectedLine,
-                      icon: const Icon(Icons.link_off, size: 18),
-                      label: Text(l10n.deleteLine),
-                      style: TextButton.styleFrom(
-                        foregroundColor: colorScheme.error,
-                      ),
-                    ),
-                  ],
-                ),
               ],
             ),
           ),
