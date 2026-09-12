@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/routes.dart';
@@ -15,6 +16,21 @@ import 'package:rillight/home/catalog_failure.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/library/poster_card.dart';
 import 'package:rillight/library/shelf_sort.dart';
+
+const Map<ShortcutActivator, Intent> _kGridArrowShortcuts = {
+  SingleActivator(LogicalKeyboardKey.arrowLeft): DirectionalFocusIntent(
+    TraversalDirection.left,
+  ),
+  SingleActivator(LogicalKeyboardKey.arrowRight): DirectionalFocusIntent(
+    TraversalDirection.right,
+  ),
+  SingleActivator(LogicalKeyboardKey.arrowUp): DirectionalFocusIntent(
+    TraversalDirection.up,
+  ),
+  SingleActivator(LogicalKeyboardKey.arrowDown): DirectionalFocusIntent(
+    TraversalDirection.down,
+  ),
+};
 
 class ShelfGridPage extends StatefulWidget {
   const ShelfGridPage({
@@ -39,6 +55,12 @@ class ShelfGridPage extends StatefulWidget {
   final Widget? titleOverride;
   final bool recursive;
   final bool moviesOrSeriesOnly;
+
+  /// 每页条数:分页加载,避免一次拉全库导致卡顿。similar 只取这一页。
+  static const int pageSize = 60;
+
+  /// 滚动距底部不足该像素时预取下一页。
+  static const double loadMoreThreshold = 600;
 
   /// 海报网格列宽上限,随 [AppBreakpoints] 缩放:紧凑 180、中等 200、宽松 220。
   static double maxCrossAxisExtentFor(double screenWidth) {
@@ -112,12 +134,6 @@ class ShelfGridPage extends StatefulWidget {
 }
 
 class _ShelfGridPageState extends State<ShelfGridPage> {
-  /// 每页条数:分页加载,避免一次拉全库导致卡顿。
-  static const _pageSize = 60;
-
-  /// 滚动距底部不足该像素时预取下一页。
-  static const _loadMoreThreshold = 600.0;
-
   List<EmbyItem> _items = const [];
   bool _loading = true;
   bool _loadingMore = false;
@@ -172,7 +188,8 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
       return;
     }
     final position = _scrollController.position;
-    if (position.pixels >= position.maxScrollExtent - _loadMoreThreshold) {
+    if (position.pixels >=
+        position.maxScrollExtent - ShelfGridPage.loadMoreThreshold) {
       _loadMore();
     }
   }
@@ -193,14 +210,18 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
       _fetched = 0;
     });
     try {
-      final items = await _fetch(AuthScope.of(context).client, 0, _pageSize);
+      final items = await _fetch(
+        AuthScope.of(context).client,
+        0,
+        ShelfGridPage.pageSize,
+      );
       if (!mounted) {
         return;
       }
       setState(() {
         _items = _applyFilter(items);
         _fetched = items.length;
-        _hasMore = _paged && items.length >= _pageSize;
+        _hasMore = _paged && items.length >= ShelfGridPage.pageSize;
         _loading = false;
       });
     } on EmbyException catch (error) {
@@ -220,7 +241,7 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
       final items = await _fetch(
         AuthScope.of(context).client,
         _fetched,
-        _pageSize,
+        ShelfGridPage.pageSize,
       );
       if (!mounted) {
         return;
@@ -228,7 +249,7 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
       setState(() {
         _items = [..._items, ..._applyFilter(items)];
         _fetched += items.length;
-        _hasMore = items.length >= _pageSize;
+        _hasMore = items.length >= ShelfGridPage.pageSize;
         _loadingMore = false;
       });
     } on EmbyException {
@@ -378,53 +399,61 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
     }
 
     final options = CatalogSort.optionsFor(_items);
-    return CustomScrollView(
-      controller: _scrollController,
-      slivers: [
-        SliverToBoxAdapter(
-          child: _Header(
-            title: _title(l10n),
-            titleOverride: widget.titleOverride,
-            sort: _sort,
-            options: options,
-            onSort: _selectSort,
-            showSort: _items.isNotEmpty,
-          ),
-        ),
-        SliverPadding(
-          padding: const EdgeInsets.fromLTRB(
-            AppSpacing.md,
-            AppSpacing.xs,
-            AppSpacing.md,
-            AppSpacing.xxl,
-          ),
-          sliver: SliverLayoutBuilder(
-            builder: (context, constraints) {
-              return SliverGrid(
-                gridDelegate: ShelfGridPage.gridDelegateFor(
-                  screenWidth: screenWidth,
-                  availableWidth: constraints.crossAxisExtent,
-                ),
-                delegate: SliverChildBuilderDelegate((context, index) {
-                  final item = _items[index];
-                  return ShelfGridPage.gridCard(
-                    context,
-                    item,
-                    onTap: () => context.push(AppRoutes.item(item.id)),
-                  );
-                }, childCount: _items.length),
-              );
-            },
-          ),
-        ),
-        if (_loadingMore)
-          const SliverToBoxAdapter(
-            child: Padding(
-              padding: EdgeInsets.only(bottom: AppSpacing.xxl),
-              child: Center(child: CircularProgressIndicator()),
+    return FocusTraversalGroup(
+      policy: ReadingOrderTraversalPolicy(),
+      child: CustomScrollView(
+        controller: _scrollController,
+        slivers: [
+          SliverToBoxAdapter(
+            child: _Header(
+              title: _title(l10n),
+              titleOverride: widget.titleOverride,
+              sort: _sort,
+              options: options,
+              onSort: _selectSort,
+              showSort: _items.isNotEmpty,
             ),
           ),
-      ],
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(
+              AppSpacing.md,
+              AppSpacing.xs,
+              AppSpacing.md,
+              AppSpacing.xxl,
+            ),
+            sliver: SliverLayoutBuilder(
+              builder: (context, constraints) {
+                return SliverGrid(
+                  gridDelegate: ShelfGridPage.gridDelegateFor(
+                    screenWidth: screenWidth,
+                    availableWidth: constraints.crossAxisExtent,
+                  ),
+                  delegate: SliverChildBuilderDelegate((context, index) {
+                    final item = _items[index];
+                    return Shortcuts(
+                      shortcuts: _kGridArrowShortcuts,
+                      child: _EnsureVisibleOnFocus(
+                        child: ShelfGridPage.gridCard(
+                          context,
+                          item,
+                          onTap: () => context.push(AppRoutes.item(item.id)),
+                        ),
+                      ),
+                    );
+                  }, childCount: _items.length),
+                );
+              },
+            ),
+          ),
+          if (_loadingMore)
+            const SliverToBoxAdapter(
+              child: Padding(
+                padding: EdgeInsets.only(bottom: AppSpacing.xxl),
+                child: Center(child: CircularProgressIndicator()),
+              ),
+            ),
+        ],
+      ),
     );
   }
 }
@@ -513,6 +542,39 @@ class _Header extends StatelessWidget {
             ),
         ],
       ),
+    );
+  }
+}
+
+class _EnsureVisibleOnFocus extends StatelessWidget {
+  const _EnsureVisibleOnFocus({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Focus(
+      canRequestFocus: false,
+      skipTraversal: true,
+      onFocusChange: (focused) {
+        if (!focused) {
+          return;
+        }
+        final target = context;
+        final duration = AppMotion.durationOf(target, AppMotion.fast);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!target.mounted) {
+            return;
+          }
+          Scrollable.ensureVisible(
+            target,
+            alignment: 0.5,
+            duration: duration,
+            curve: AppMotion.standard,
+          );
+        });
+      },
+      child: child,
     );
   }
 }

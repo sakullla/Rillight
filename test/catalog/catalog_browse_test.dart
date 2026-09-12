@@ -11,9 +11,11 @@ import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
+import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/home_hero.dart';
 import 'package:rillight/library/poster_card.dart';
+import 'package:rillight/library/shelf_grid_page.dart';
 import 'package:rillight/search/search_overlay.dart';
 import 'package:rillight/search/search_page.dart';
 
@@ -420,6 +422,25 @@ void main() {
     },
   );
 
+  test('grid column max extent is at least 180/200/220', () {
+    expect(
+      ShelfGridPage.maxCrossAxisExtentFor(AppBreakpoints.compact - 1),
+      greaterThanOrEqualTo(180),
+    );
+    expect(
+      ShelfGridPage.maxCrossAxisExtentFor(AppBreakpoints.compact),
+      greaterThanOrEqualTo(200),
+    );
+    expect(
+      ShelfGridPage.maxCrossAxisExtentFor(AppBreakpoints.large),
+      greaterThanOrEqualTo(200),
+    );
+    expect(
+      ShelfGridPage.maxCrossAxisExtentFor(AppBreakpoints.large + 1),
+      greaterThanOrEqualTo(220),
+    );
+  });
+
   testWidgets('poster grid column count grows with the window width', (
     tester,
   ) async {
@@ -517,31 +538,34 @@ void main() {
     expect(find.byKey(CatalogKeys.similarRow), findsNothing);
   });
 
-  testWidgets('library page header switches between media libraries', (
+  testWidgets('top bar switches libraries without returning home', (
     tester,
   ) async {
     await pumpLoggedIn(tester);
-    await openLibrary(tester, 'view-movies');
-    final switcher = find.byKey(CatalogKeys.librarySwitcher);
-    expect(switcher, findsOneWidget);
-    expect(
-      find.descendant(of: switcher, matching: find.text('电影')),
-      findsOneWidget,
-    );
+    await tester.tap(find.byKey(AppShell.libraryNavKey('view-movies')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(CatalogKeys.librarySwitcher), findsNothing);
+    expect(find.byKey(CatalogKeys.item('movie-inception')), findsOneWidget);
     expect(find.byKey(CatalogKeys.item('series-friends')), findsNothing);
+    expect(_posterNames(tester).first, '飞屋环游记');
 
-    await tester.tap(switcher);
+    await tester.tap(find.byKey(CatalogKeys.sortBy));
     await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(PopupMenuItem<String>, '剧集'));
+    await tester.tap(find.byKey(CatalogKeys.sortOption('SortName')));
     await tester.pumpAndSettle();
+    expect(_posterNames(tester).first, 'Inception');
 
-    expect(
-      find.descendant(of: switcher, matching: find.text('剧集')),
-      findsOneWidget,
-    );
+    await tester.tap(find.byKey(AppShell.libraryNavKey('view-tv')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(AppShell.homeNavKey), findsOneWidget);
     expect(find.byKey(CatalogKeys.item('movie-inception')), findsNothing);
     await tester.ensureVisible(find.byKey(CatalogKeys.item('series-friends')));
     expect(find.byKey(CatalogKeys.item('series-friends')), findsOneWidget);
+
+    await tester.tap(find.byKey(AppShell.libraryNavKey('view-movies')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(CatalogKeys.item('series-friends')), findsNothing);
+    expect(_posterNames(tester).first, '飞屋环游记');
   });
 
   testWidgets('home hero rotates featured items via arrows', (tester) async {
@@ -703,31 +727,121 @@ void main() {
   testWidgets('library poster wall loads more pages at the bottom', (
     tester,
   ) async {
-    server.items = [
-      ...server.items,
-      for (var i = 0; i < 70; i++)
-        FakeEmbyItem(
-          id: 'bulk-$i',
-          name: 'Bulk $i',
-          type: 'Movie',
-          parentId: 'view-movies',
-          primaryImageTag: 'tag-bulk-$i',
-        ),
-    ];
+    _addPagedMovies(server, 70);
     await pumpLoggedIn(tester);
     await openLibrary(tester, 'view-movies');
+    expect(find.byKey(CatalogKeys.item('bulk-0')), findsOneWidget);
     expect(find.byKey(CatalogKeys.item('bulk-69')), findsNothing);
 
-    // 持续向下滚动:接近底部触发分页预取,直至第 2 页内容构建出来。
-    final grid = find.byType(CustomScrollView);
-    for (var i = 0; i < 20; i++) {
-      await tester.drag(grid, const Offset(0, -400));
-      await tester.pumpAndSettle();
-      if (find.byKey(CatalogKeys.item('bulk-69')).evaluate().isNotEmpty) {
-        break;
-      }
-    }
+    await _scrollGridUntil(tester, find.byKey(CatalogKeys.item('bulk-69')));
     expect(find.byKey(CatalogKeys.item('bulk-69')), findsOneWidget);
+    expect(
+      server.requests.any(
+        (request) =>
+            request.contains('ParentId=view-movies') &&
+            request.contains('Limit=${ShelfGridPage.pageSize}') &&
+            request.contains('StartIndex=${ShelfGridPage.pageSize}'),
+      ),
+      isTrue,
+    );
+  });
+
+  testWidgets('append failure keeps the first page and retries later', (
+    tester,
+  ) async {
+    _addPagedMovies(server, 70);
+    await pumpLoggedIn(tester);
+    await openLibrary(tester, 'view-movies');
+    expect(find.byKey(CatalogKeys.item('bulk-0')), findsOneWidget);
+    expect(find.byKey(CatalogKeys.item('bulk-69')), findsNothing);
+    expect(_posterNames(tester), contains('飞屋环游记'));
+
+    bool requestedSecondPage() {
+      return server.requests.any(
+        (request) =>
+            request.contains('ParentId=view-movies') &&
+            request.contains('StartIndex=${ShelfGridPage.pageSize}'),
+      );
+    }
+
+    expect(requestedSecondPage(), isFalse);
+
+    server.itemsStatus = 500;
+    await _prefetchNextGridPage(tester);
+    expect(requestedSecondPage(), isTrue);
+    expect(find.byType(AppErrorView), findsNothing);
+    expect(find.byType(PosterCard), findsWidgets);
+    expect(find.byKey(CatalogKeys.item('bulk-69')), findsNothing);
+
+    await _jumpGridToTop(tester);
+    expect(find.byKey(CatalogKeys.item('bulk-0')), findsOneWidget);
+    expect(_posterNames(tester).first, '飞屋环游记');
+    expect(find.byKey(CatalogKeys.sortBy), findsOneWidget);
+
+    server.itemsStatus = null;
+    await _scrollGridUntil(tester, find.byKey(CatalogKeys.item('bulk-69')));
+    expect(find.byKey(CatalogKeys.item('bulk-69')), findsOneWidget);
+  });
+
+  testWidgets('similar shelf more stays on a single page', (tester) async {
+    _addPagedMovies(server, 70);
+    await pumpLoggedIn(tester);
+    final inception = find.byKey(CatalogKeys.item('movie-inception')).first;
+    await tester.ensureVisible(inception);
+    await tester.tap(inception);
+    await tester.pumpAndSettle();
+
+    final more = find.byKey(CatalogKeys.shelfMore(CatalogKeys.shelfSimilar));
+    await tester.ensureVisible(more);
+    await tester.tap(more);
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(CatalogKeys.item('bulk-0')), findsOneWidget);
+    expect(find.byKey(CatalogKeys.item('bulk-69')), findsNothing);
+
+    await _scrollGridUntil(
+      tester,
+      find.byKey(CatalogKeys.item('bulk-69')),
+      maxDrags: 12,
+    );
+    expect(find.byKey(CatalogKeys.item('bulk-69')), findsNothing);
+    final similarRequests = server.requests.where(
+      (request) => request.contains('/Similar'),
+    );
+    expect(similarRequests, isNotEmpty);
+    expect(similarRequests, everyElement(isNot(contains('StartIndex='))));
+  });
+
+  testWidgets('grid arrow keys move focus by row and column', (tester) async {
+    server.items.add(
+      FakeEmbyItem(
+        id: 'movie-grid-tail',
+        name: 'GridTail',
+        type: 'Movie',
+        parentId: 'view-movies',
+        dateCreated: DateTime.utc(1990, 1, 1),
+      ),
+    );
+    await pumpLoggedIn(tester);
+    await openLibrary(tester, 'view-movies');
+
+    final first = find.byKey(CatalogKeys.item('movie-up'));
+    final nextColumn = find.byKey(CatalogKeys.item('movie-broken'));
+    final nextRow = find.byKey(CatalogKeys.item('movie-grid-tail'));
+    await tester.ensureVisible(first);
+    _focusOf(tester, first)?.requestFocus();
+    await tester.pump();
+    expect(_focusOf(tester, first)?.hasPrimaryFocus, isTrue);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pumpAndSettle();
+    expect(_focusOf(tester, nextColumn)?.hasPrimaryFocus, isTrue);
+
+    _focusOf(tester, first)?.requestFocus();
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+    expect(_focusOf(tester, nextRow)?.hasPrimaryFocus, isTrue);
   });
 }
 
@@ -746,6 +860,67 @@ Future<void> _openLatestMoviesMore(WidgetTester tester) async {
   await tester.ensureVisible(more);
   await tester.tap(more);
   await tester.pumpAndSettle();
+}
+
+void _addPagedMovies(FakeEmbyServer server, int count) {
+  for (var i = 0; i < count; i++) {
+    server.items.add(
+      FakeEmbyItem(
+        id: 'bulk-$i',
+        name: 'Bulk $i',
+        type: 'Movie',
+        parentId: 'view-movies',
+        primaryImageTag: 'tag-bulk-$i',
+        dateCreated: DateTime.utc(
+          1990,
+          1,
+          1,
+        ).add(Duration(days: count - 1 - i)),
+      ),
+    );
+  }
+}
+
+ScrollableState _gridScrollable(WidgetTester tester) {
+  return tester.state<ScrollableState>(
+    find.descendant(
+      of: find.byType(CustomScrollView),
+      matching: find.byType(Scrollable),
+    ),
+  );
+}
+
+Future<void> _jumpGridToTop(WidgetTester tester) async {
+  FocusManager.instance.primaryFocus?.unfocus();
+  await tester.pump();
+  _gridScrollable(tester).position.jumpTo(0);
+  await tester.pump();
+}
+
+Future<void> _prefetchNextGridPage(WidgetTester tester) async {
+  final position = _gridScrollable(tester).position;
+  var target = position.maxScrollExtent - ShelfGridPage.loadMoreThreshold + 1;
+  if (target < 0) {
+    target = 0;
+  }
+  position.jumpTo(target);
+  await tester.pump();
+  await tester.pumpAndSettle();
+}
+
+Future<void> _scrollGridUntil(
+  WidgetTester tester,
+  Finder target, {
+  int maxDrags = 24,
+}) async {
+  final grid = find.byType(CustomScrollView);
+  for (var i = 0; i < maxDrags; i++) {
+    if (target.evaluate().isNotEmpty) {
+      return;
+    }
+    await tester.drag(grid, const Offset(0, -400));
+    await tester.pumpAndSettle();
+  }
 }
 
 List<String> _posterNames(WidgetTester tester) {
