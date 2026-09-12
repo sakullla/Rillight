@@ -204,12 +204,11 @@ void main() {
       expect(find.byType(ItemDetailPage), findsOneWidget);
       expect(find.text('飞屋环游记 (2009)'), findsOneWidget);
 
-      await tester.tap(find.byKey(CatalogKeys.back));
+      await tester.tap(find.text('首页'));
       await tester.pumpAndSettle();
-      await tester.ensureVisible(
-        find.byKey(CatalogKeys.item('movie-inception')),
-      );
-      await tester.tap(find.byKey(CatalogKeys.item('movie-inception')));
+      final inception = find.byKey(CatalogKeys.item('movie-inception'));
+      await tester.ensureVisible(inception.first);
+      await tester.tap(inception.first);
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(PlayerKeys.open));
       await tester.pump();
