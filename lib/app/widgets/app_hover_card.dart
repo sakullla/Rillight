@@ -10,6 +10,7 @@ class AppHoverCard extends StatefulWidget {
     super.key,
     required this.child,
     this.onTap,
+    this.onHighlighted,
     this.inkKey,
     this.borderRadius,
     this.hoverScale = 1.04,
@@ -21,6 +22,9 @@ class AppHoverCard extends StatefulWidget {
 
   final Widget child;
   final VoidCallback? onTap;
+
+  /// 悬停或键盘焦点高亮变化时回调,供卡片揭示层使用。
+  final ValueChanged<bool>? onHighlighted;
 
   /// 透传给内部 InkWell 的语义化 Key,供测试定位可点击区域。
   final Key? inkKey;
@@ -47,6 +51,34 @@ class AppHoverCard extends StatefulWidget {
 class _AppHoverCardState extends State<AppHoverCard> {
   bool _hovering = false;
   bool _focused = false;
+
+  bool get _highlighted => _hovering || _focused;
+
+  void _setHovering(bool value) {
+    if (_hovering == value) {
+      return;
+    }
+    final was = _highlighted;
+    setState(() => _hovering = value);
+    _notifyHighlight(was);
+  }
+
+  void _setFocused(bool value) {
+    if (_focused == value) {
+      return;
+    }
+    final was = _highlighted;
+    setState(() => _focused = value);
+    _notifyHighlight(was);
+  }
+
+  void _notifyHighlight(bool wasHighlighted) {
+    final now = _highlighted;
+    if (wasHighlighted == now) {
+      return;
+    }
+    widget.onHighlighted?.call(now);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -86,8 +118,8 @@ class _AppHoverCardState extends State<AppHoverCard> {
           child: InkWell(
             key: widget.inkKey,
             onTap: widget.onTap,
-            onHover: (value) => setState(() => _hovering = value),
-            onFocusChange: (value) => setState(() => _focused = value),
+            onHover: _setHovering,
+            onFocusChange: _setFocused,
             focusNode: widget.focusNode,
             autofocus: widget.autofocus,
             canRequestFocus: widget.onTap != null,

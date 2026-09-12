@@ -74,6 +74,46 @@ void main() {
     expect(border.top.color, theme.colorScheme.primary);
   });
 
+  testWidgets('hover and focus notify onHighlighted', (tester) async {
+    final highlights = <bool>[];
+    await tester.pumpWidget(
+      _wrap(
+        AppHoverCard(
+          onTap: () {},
+          onHighlighted: highlights.add,
+          child: const SizedBox(width: 120, height: 180),
+        ),
+      ),
+    );
+
+    final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await gesture.addPointer(location: Offset.zero);
+    addTearDown(gesture.removePointer);
+    await gesture.moveTo(tester.getCenter(find.byType(AppHoverCard)));
+    await tester.pump();
+    expect(highlights, [true]);
+
+    await gesture.moveTo(Offset.zero);
+    await tester.pump();
+    expect(highlights, [true, false]);
+  });
+
+  testWidgets('autofocus notifies onHighlighted', (tester) async {
+    final highlights = <bool>[];
+    await tester.pumpWidget(
+      _wrap(
+        AppHoverCard(
+          onTap: () {},
+          autofocus: true,
+          onHighlighted: highlights.add,
+          child: const SizedBox(width: 120, height: 180),
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(highlights, [true]);
+  });
+
   testWidgets('tap forwards to onTap', (tester) async {
     var taps = 0;
     await tester.pumpWidget(
