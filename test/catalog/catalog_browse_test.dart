@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
+import 'package:rillight/app/app_shell.dart';
 import 'package:rillight/app/widgets/app_error_view.dart';
 import 'package:rillight/app/widgets/poster_placeholder.dart';
 import 'package:rillight/auth/auth_controller.dart';
@@ -11,6 +12,8 @@ import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/home_hero.dart';
 import 'package:rillight/library/poster_card.dart';
+import 'package:rillight/search/search_overlay.dart';
+import 'package:rillight/search/search_page.dart';
 
 import '../emby/fake_emby_server.dart';
 
@@ -55,10 +58,9 @@ void main() {
   }
 
   Future<void> goHome(WidgetTester tester) async {
-    // T3 起外壳无 AppBar;未选中首页时侧栏图标为 home_outlined。
-    final homeIcon = find.byIcon(Icons.home_outlined);
-    if (homeIcon.evaluate().isNotEmpty) {
-      await tester.tap(homeIcon);
+    final home = find.byKey(AppShell.homeNavKey);
+    if (home.evaluate().isNotEmpty) {
+      await tester.tap(home);
       await tester.pumpAndSettle();
     }
   }
@@ -77,7 +79,10 @@ void main() {
       await pumpLoggedIn(tester);
 
       expect(find.byTooltip('灯川测试\n切换服务器'), findsOneWidget);
-      expect(find.byType(NavigationRail), findsOneWidget);
+      expect(find.byType(NavigationRail), findsNothing);
+      expect(find.byKey(AppShell.topBarKey), findsOneWidget);
+      expect(find.byKey(AppShell.homeNavKey), findsOneWidget);
+      expect(find.byKey(AppShell.libraryNavKey('view-movies')), findsOneWidget);
       expect(find.byKey(CatalogKeys.resumeRow), findsOneWidget);
       expect(find.text('Inception'), findsWidgets);
       expect(find.byKey(CatalogKeys.resumeProgress), findsWidgets);
@@ -103,7 +108,6 @@ void main() {
         findsOneWidget,
       );
       expect(find.text('更多'), findsNWidgets(4));
-      // 「片库」同时是侧栏导航标签,需限定在库 shelf 行内断言。
       expect(
         find.descendant(
           of: find.byKey(CatalogKeys.librariesMenu),
@@ -116,7 +120,17 @@ void main() {
       expect(find.text('音乐'), findsNothing);
       expect(find.text('相册'), findsNothing);
       expect(find.text('混合媒体'), findsNothing);
-      expect(find.text('未分类影视'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(CatalogKeys.librariesMenu),
+          matching: find.text('未分类影视'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(AppShell.libraryNavKey('view-untyped')),
+        findsOneWidget,
+      );
     },
   );
 
@@ -236,10 +250,15 @@ void main() {
     await tester.enterText(find.byKey(CatalogKeys.searchField), 'Inception');
     await tester.tap(find.byKey(CatalogKeys.searchSubmit));
     await tester.pumpAndSettle();
-    expect(find.byKey(CatalogKeys.item('movie-inception')), findsOneWidget);
+    final overlayHit = find.descendant(
+      of: find.byType(SearchOverlay),
+      matching: find.byKey(CatalogKeys.item('movie-inception')),
+    );
+    expect(overlayHit, findsOneWidget);
 
-    await tester.tap(find.byKey(CatalogKeys.item('movie-inception')));
+    await tester.tap(overlayHit);
     await tester.pumpAndSettle();
+    expect(find.byType(SearchOverlay), findsNothing);
     expect(find.text('Inception (2010)'), findsOneWidget);
   });
 
@@ -258,6 +277,65 @@ void main() {
     expect(find.text('HTTP 500: search failed'), findsOneWidget);
     expect(find.text('没有结果'), findsNothing);
     expect(find.byKey(CatalogKeys.searchNoResults), findsNothing);
+  });
+
+  testWidgets('search overlay paginates 50 items with 600px prefetch', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    for (var i = 0; i < 70; i++) {
+      server.items.add(
+        FakeEmbyItem(
+          id: 'search-hit-$i',
+          name: 'PagedHit $i',
+          type: 'Movie',
+          parentId: 'view-movies',
+        ),
+      );
+    }
+    await pumpLoggedIn(tester);
+    await tester.tap(find.byTooltip('搜索'));
+    await tester.pumpAndSettle();
+    expect(find.byType(SearchOverlay), findsOneWidget);
+    expect(find.byType(SearchPage), findsOneWidget);
+
+    await tester.enterText(find.byKey(CatalogKeys.searchField), 'PagedHit');
+    await tester.tap(find.byKey(CatalogKeys.searchSubmit));
+    await tester.pumpAndSettle();
+    Finder overlayItem(String id) {
+      return find.descendant(
+        of: find.byType(SearchOverlay),
+        matching: find.byKey(CatalogKeys.item(id)),
+      );
+    }
+
+    expect(overlayItem('search-hit-0'), findsOneWidget);
+    expect(overlayItem('search-hit-69'), findsNothing);
+
+    final grid = find.descendant(
+      of: find.byType(SearchOverlay),
+      matching: find.byType(GridView),
+    );
+    for (var i = 0; i < 30; i++) {
+      await tester.drag(grid, const Offset(0, -400));
+      await tester.pumpAndSettle();
+      if (overlayItem('search-hit-69').evaluate().isNotEmpty) {
+        break;
+      }
+    }
+    expect(overlayItem('search-hit-69'), findsOneWidget);
+    expect(
+      server.requests.any(
+        (request) =>
+            request.contains('SearchTerm=PagedHit') &&
+            request.contains('StartIndex=50'),
+      ),
+      isTrue,
+    );
   });
 
   testWidgets('a failed cover uses a placeholder and other items still open', (
@@ -440,7 +518,7 @@ void main() {
 
     await tester.tap(switcher);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('剧集'));
+    await tester.tap(find.widgetWithText(PopupMenuItem<String>, '剧集'));
     await tester.pumpAndSettle();
 
     expect(

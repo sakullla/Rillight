@@ -1,34 +1,68 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme/tokens.dart';
+import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/auth/session_actions.dart';
+import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/search/search_action.dart';
+import 'package:rillight/search/search_overlay.dart';
 
-/// 全局外壳:侧边导航 + 内容区,无全局 AppBar。
+/// 全局外壳:半透明顶栏 + 内容区,无常驻左栏。
 ///
-/// 侧栏承载 首页/媒体库/搜索 导航,会话菜单([SessionActions])与收起按钮
-/// 固定在侧栏底部;收起后侧栏隐藏,内容区左上角悬浮展开按钮。
-/// 内容区直接渲染 [child],页面自管滚动与顶部。
-/// 登录前的 /connect 页没有导航意义,不显示侧栏。
+/// 顶栏左侧为首页与 [CatalogScope.libraries] 各库名,放不下的库进入溢出;
+/// 右侧为搜索与 [SessionActions]。搜索打开覆盖层,不 push `/search` 页壳。
+/// 登录前的 /connect 页没有导航意义,不显示顶栏。
 class AppShell extends StatefulWidget {
   const AppShell({super.key, required this.child});
 
   final Widget child;
 
-  /// 收起/展开导航按钮的测试 Key。
-  static const railToggle = Key('app-shell-rail-toggle');
+  static const topBarKey = Key('app-shell-top-bar');
+  static const homeNavKey = Key('app-shell-home');
+  static const overflowNavKey = Key('app-shell-libraries-overflow');
 
-  static const _libraryPrefix = '/library';
+  static Key libraryNavKey(String id) => Key('app-shell-library-$id');
+
+  /// 顶栏内容行高;有窗口铬时不低于标题按钮带。
+  static const topBarHeight = 48.0;
 
   @override
   State<AppShell> createState() => _AppShellState();
 }
 
 class _AppShellState extends State<AppShell> {
-  bool _collapsed = false;
+  bool _searchOpen = false;
+  final FocusNode _searchQueryFocus = FocusNode();
+
+  @override
+  void dispose() {
+    _searchQueryFocus.dispose();
+    super.dispose();
+  }
+
+  void _openSearch() {
+    if (_searchOpen) {
+      _searchQueryFocus.requestFocus();
+      return;
+    }
+    setState(() => _searchOpen = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _searchQueryFocus.requestFocus();
+      }
+    });
+  }
+
+  void _closeSearch() {
+    if (!_searchOpen) {
+      return;
+    }
+    setState(() => _searchOpen = false);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -39,113 +73,246 @@ class _AppShellState extends State<AppShell> {
       return Scaffold(body: widget.child);
     }
 
-    final l10n = AppLocalizations.of(context);
-    final extended = MediaQuery.sizeOf(context).width >= AppBreakpoints.large;
-
-    return Scaffold(
-      body: Stack(
-        fit: StackFit.expand,
-        children: [
-          Row(
-            children: [
-              if (!_collapsed) ...[
-                NavigationRail(
-                  extended: extended,
-                  labelType: NavigationRailLabelType.none,
-                  selectedIndex: _selectedIndex(location),
-                  onDestinationSelected: (index) =>
-                      _onDestination(context, index),
-                  destinations: [
-                    NavigationRailDestination(
-                      icon: const Icon(Icons.home_outlined),
-                      selectedIcon: const Icon(Icons.home),
-                      label: Text(l10n.home),
-                    ),
-                    NavigationRailDestination(
-                      icon: const Icon(Icons.video_library_outlined),
-                      selectedIcon: const Icon(Icons.video_library),
-                      label: Text(l10n.libraries),
-                    ),
-                    NavigationRailDestination(
-                      icon: const SearchAction(),
-                      label: Text(l10n.search),
-                    ),
+    return SearchOverlayController(
+      isOpen: _searchOpen,
+      open: _openSearch,
+      close: _closeSearch,
+      child: CallbackShortcuts(
+        bindings: {
+          const SingleActivator(LogicalKeyboardKey.keyF, control: true):
+              _openSearch,
+          const SingleActivator(LogicalKeyboardKey.keyF, meta: true):
+              _openSearch,
+        },
+        child: Focus(
+          autofocus: true,
+          skipTraversal: true,
+          child: Scaffold(
+            body: Stack(
+              fit: StackFit.expand,
+              children: [
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _TopBar(location: location),
+                    Expanded(child: widget.child),
                   ],
-                  trailing: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(
-                        key: AppShell.railToggle,
-                        tooltip: l10n.collapseNav,
-                        onPressed: () => setState(() => _collapsed = true),
-                        icon: const Icon(Icons.chevron_left),
-                      ),
-                      const SessionActions(),
-                    ],
+                ),
+                if (_searchOpen)
+                  SearchOverlay(
+                    queryFocusNode: _searchQueryFocus,
+                    onClose: _closeSearch,
                   ),
-                ),
-                const VerticalDivider(width: 1),
               ],
-              Expanded(child: widget.child),
-            ],
-          ),
-          if (_collapsed)
-            Positioned(
-              left: AppSpacing.sm,
-              top: AppSpacing.sm,
-              child: Material(
-                color: Theme.of(
-                  context,
-                ).colorScheme.scrim.withValues(alpha: 0.55),
-                shape: const CircleBorder(),
-                child: IconButton(
-                  key: AppShell.railToggle,
-                  tooltip: l10n.expandNav,
-                  onPressed: () => setState(() => _collapsed = false),
-                  icon: const Icon(Icons.menu),
-                ),
-              ),
             ),
-        ],
+          ),
+        ),
       ),
     );
   }
+}
 
-  int? _selectedIndex(String location) {
-    if (location == AppRoutes.home) {
-      return 0;
+class _TopBar extends StatelessWidget {
+  const _TopBar({required this.location});
+
+  final String location;
+
+  @override
+  Widget build(BuildContext context) {
+    final catalog = CatalogScope.maybeOf(context);
+    if (catalog == null) {
+      return _bar(context, const []);
     }
-    if (location.startsWith(AppShell._libraryPrefix)) {
-      return 1;
-    }
-    if (location == AppRoutes.search) {
-      return 2;
-    }
-    return null;
+    return ListenableBuilder(
+      listenable: catalog,
+      builder: (context, _) => _bar(context, catalog.libraries),
+    );
   }
 
-  void _onDestination(BuildContext context, int index) {
-    switch (index) {
-      case 0:
-        context.go(AppRoutes.home);
-      case 1:
-        _openLibrary(context);
-      case 2:
-        openSearch(context);
-    }
-  }
+  Widget _bar(BuildContext context, List<EmbyItem> libraries) {
+    final hasChrome =
+        context.findAncestorWidgetOfExactType<WindowChromeHost>() != null;
+    final leading = hasChrome ? windowChromeLeadingInset() : 0.0;
+    final trailing = hasChrome ? windowChromeTrailingInset() : 0.0;
+    final height = hasChrome
+        ? (kWindowChromeHeight > AppShell.topBarHeight
+              ? kWindowChromeHeight
+              : AppShell.topBarHeight)
+        : AppShell.topBarHeight;
+    final colorScheme = Theme.of(context).colorScheme;
 
-  void _openLibrary(BuildContext context) {
-    if (GoRouterState.of(
-      context,
-    ).uri.path.startsWith(AppShell._libraryPrefix)) {
-      return;
-    }
-    final libraries = CatalogScope.maybeOf(context)?.libraries;
-    if (libraries == null || libraries.isEmpty) {
-      context.go(AppRoutes.home);
-      return;
-    }
-    context.push(AppRoutes.library(libraries.first.id));
+    return Material(
+      key: AppShell.topBarKey,
+      color: colorScheme.surface.withValues(alpha: 0.72),
+      child: SizedBox(
+        height: height,
+        child: Padding(
+          padding: EdgeInsets.only(left: leading, right: trailing),
+          child: Row(
+            children: [
+              _HomeNav(selected: location == AppRoutes.home),
+              Expanded(
+                child: _LibraryNav(libraries: libraries, location: location),
+              ),
+              const SearchAction(),
+              const SessionActions(),
+            ],
+          ),
+        ),
+      ),
+    );
   }
+}
+
+class _HomeNav extends StatelessWidget {
+  const _HomeNav({required this.selected});
+
+  final bool selected;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    return _NavTextButton(
+      buttonKey: AppShell.homeNavKey,
+      label: l10n.home,
+      selected: selected,
+      onPressed: () {
+        if (GoRouterState.of(context).uri.path != AppRoutes.home) {
+          context.go(AppRoutes.home);
+        }
+      },
+    );
+  }
+}
+
+class _LibraryNav extends StatelessWidget {
+  const _LibraryNav({required this.libraries, required this.location});
+
+  final List<EmbyItem> libraries;
+  final String location;
+
+  static const _overflowWidth = 48.0;
+
+  @override
+  Widget build(BuildContext context) {
+    if (libraries.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final style = Theme.of(context).textTheme.titleSmall;
+        final maxWidth = constraints.maxWidth.isFinite
+            ? constraints.maxWidth
+            : double.infinity;
+        final widths = [
+          for (final library in libraries)
+            _navLabelWidth(context, library.name, style),
+        ];
+        var visibleCount = libraries.length;
+        while (visibleCount > 0) {
+          var total = 0.0;
+          for (var i = 0; i < visibleCount; i++) {
+            total += widths[i];
+          }
+          if (visibleCount < libraries.length) {
+            total += _overflowWidth;
+          }
+          if (total <= maxWidth) {
+            break;
+          }
+          visibleCount--;
+        }
+        final visible = libraries.take(visibleCount).toList();
+        final overflow = libraries.skip(visibleCount).toList();
+        return Row(
+          children: [
+            Expanded(
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      for (final library in visible)
+                        _NavTextButton(
+                          buttonKey: AppShell.libraryNavKey(library.id),
+                          label: library.name,
+                          selected: location == AppRoutes.library(library.id),
+                          onPressed: () {
+                            if (GoRouterState.of(context).uri.path !=
+                                AppRoutes.library(library.id)) {
+                              context.go(AppRoutes.library(library.id));
+                            }
+                          },
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            if (overflow.isNotEmpty)
+              PopupMenuButton<String>(
+                key: AppShell.overflowNavKey,
+                tooltip: AppLocalizations.of(context).libraries,
+                onSelected: (id) {
+                  if (GoRouterState.of(context).uri.path !=
+                      AppRoutes.library(id)) {
+                    context.go(AppRoutes.library(id));
+                  }
+                },
+                itemBuilder: (context) => [
+                  for (final library in overflow)
+                    PopupMenuItem(value: library.id, child: Text(library.name)),
+                ],
+                icon: const Icon(Icons.more_horiz),
+              ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _NavTextButton extends StatelessWidget {
+  const _NavTextButton({
+    required this.buttonKey,
+    required this.label,
+    required this.selected,
+    required this.onPressed,
+  });
+
+  final Key buttonKey;
+  final String label;
+  final bool selected;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    return TextButton(
+      key: buttonKey,
+      onPressed: onPressed,
+      style: TextButton.styleFrom(
+        foregroundColor: selected
+            ? colorScheme.onSurface
+            : colorScheme.onSurfaceVariant,
+        textStyle: theme.textTheme.titleSmall?.copyWith(
+          fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+        ),
+        visualDensity: VisualDensity.compact,
+      ),
+      child: Text(label),
+    );
+  }
+}
+
+double _navLabelWidth(BuildContext context, String label, TextStyle? style) {
+  final painter = TextPainter(
+    text: TextSpan(text: label, style: style),
+    textDirection: Directionality.of(context),
+    maxLines: 1,
+  )..layout();
+  return painter.width + AppSpacing.xl + AppSpacing.md;
 }

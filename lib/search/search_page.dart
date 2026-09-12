@@ -12,9 +12,22 @@ import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_failure.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/library/shelf_grid_page.dart';
+import 'package:rillight/search/search_action.dart';
 
 class SearchPage extends StatefulWidget {
-  const SearchPage({super.key});
+  const SearchPage({super.key, this.autofocus = false, this.focusNode});
+
+  /// 覆盖层打开时自动聚焦输入框。
+  final bool autofocus;
+
+  /// 由覆盖层持有时传入,便于再次呼出时聚焦且不重复入栈。
+  final FocusNode? focusNode;
+
+  /// 每页条数,与 searchByName 的 Limit 一致。
+  static const int pageSize = 50;
+
+  /// 滚动距底部不足该像素时预取下一页。
+  static const double loadMoreThreshold = 600;
 
   /// 搜索输入区最大宽度,随 [AppBreakpoints] 舒展。
   static double fieldWidthFor(double screenWidth) {
@@ -43,9 +56,6 @@ class _SearchPageState extends State<SearchPage> {
   int _fetched = 0;
   final ScrollController _scrollController = ScrollController();
 
-  /// 滚动距底部不足该像素时预取下一页。
-  static const _loadMoreThreshold = 600.0;
-
   @override
   void initState() {
     super.initState();
@@ -68,7 +78,8 @@ class _SearchPageState extends State<SearchPage> {
       return;
     }
     final position = _scrollController.position;
-    if (position.pixels >= position.maxScrollExtent - _loadMoreThreshold) {
+    if (position.pixels >=
+        position.maxScrollExtent - SearchPage.loadMoreThreshold) {
       _loadMore();
     }
   }
@@ -103,7 +114,7 @@ class _SearchPageState extends State<SearchPage> {
       setState(() {
         _items = items.where((item) => item.isMovieOrSeries).toList();
         _fetched = items.length;
-        _hasMore = items.length >= 50;
+        _hasMore = items.length >= SearchPage.pageSize;
         _loading = false;
       });
     } on EmbyException catch (error) {
@@ -130,7 +141,7 @@ class _SearchPageState extends State<SearchPage> {
       setState(() {
         _items = [..._items, ...items.where((item) => item.isMovieOrSeries)];
         _fetched += items.length;
-        _hasMore = items.length >= 50;
+        _hasMore = items.length >= SearchPage.pageSize;
         _loadingMore = false;
       });
     } on EmbyException {
@@ -167,6 +178,8 @@ class _SearchPageState extends State<SearchPage> {
                     child: TextField(
                       key: CatalogKeys.searchField,
                       controller: _query,
+                      focusNode: widget.focusNode,
+                      autofocus: widget.autofocus,
                       textInputAction: TextInputAction.search,
                       style: Theme.of(context).textTheme.titleMedium,
                       decoration: InputDecoration(
@@ -247,7 +260,10 @@ class _SearchPageState extends State<SearchPage> {
             return ShelfGridPage.gridCard(
               context,
               item,
-              onTap: () => context.push(AppRoutes.item(item.id)),
+              onTap: () {
+                closeSearch(context);
+                context.push(AppRoutes.item(item.id));
+              },
             );
           },
         );

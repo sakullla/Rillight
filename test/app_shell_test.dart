@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:rillight/app/app.dart';
 import 'package:rillight/app/app_shell.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/widgets/app_error_view.dart';
 import 'package:rillight/app/widgets/poster_placeholder.dart';
 import 'package:rillight/auth/auth_controller.dart';
@@ -14,6 +17,7 @@ import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/home_page.dart';
 import 'package:rillight/library/library_page.dart';
+import 'package:rillight/search/search_overlay.dart';
 import 'package:rillight/search/search_page.dart';
 
 import 'emby/fake_emby_server.dart';
@@ -26,13 +30,29 @@ const _device = EmbyDeviceInfo(
 );
 
 void main() {
-  testWidgets('connect page shell hides the navigation rail', (tester) async {
+  testWidgets('connect page shell hides the top bar', (tester) async {
     await tester.pumpWidget(RillightApp());
     await tester.pumpAndSettle();
 
     expect(find.byType(NavigationRail), findsNothing);
+    expect(find.byKey(AppShell.topBarKey), findsNothing);
     expect(find.byKey(SessionActions.serverMenuKey), findsNothing);
     expect(find.text('连接服务器'), findsOneWidget);
+  });
+
+  testWidgets('unsigned deep link to a library redirects to connect', (
+    tester,
+  ) async {
+    final app = RillightApp();
+    await tester.pumpWidget(app);
+    await tester.pumpAndSettle();
+
+    app.router.go('/library/view-movies');
+    await tester.pumpAndSettle();
+
+    expect(find.text('连接服务器'), findsOneWidget);
+    expect(find.byKey(AppShell.topBarKey), findsNothing);
+    expect(find.byType(LibraryPage), findsNothing);
   });
 
   testWidgets('app forces cinematic dark ThemeMode', (tester) async {
@@ -116,7 +136,9 @@ void main() {
       await tester.pumpWidget(RillightApp(auth: auth));
       await tester.pumpAndSettle();
 
-      expect(find.byType(NavigationRail), findsOneWidget);
+      expect(find.byType(NavigationRail), findsNothing);
+      expect(find.byKey(AppShell.topBarKey), findsOneWidget);
+      expect(find.byKey(AppShell.homeNavKey), findsOneWidget);
       expect(find.byKey(SessionActions.serverMenuKey), findsOneWidget);
       expect(find.text('第二台电影'), findsWidgets);
 
@@ -143,7 +165,8 @@ void main() {
       expect(auth.session?.server.name, '灯川测试');
       expect(find.text('Inception'), findsWidgets);
       expect(find.text('第二台电影'), findsNothing);
-      expect(find.byType(NavigationRail), findsOneWidget);
+      expect(find.byType(NavigationRail), findsNothing);
+      expect(find.byKey(AppShell.topBarKey), findsOneWidget);
       expect(
         first.requests.where(isHomeCatalog).length,
         greaterThan(firstHomeBefore),
@@ -209,91 +232,130 @@ void main() {
       greaterThan(lanResumeBefore),
     );
   });
-  testWidgets('rail switches between home, library and search directly', (
+
+  testWidgets('logged-in add=1 stays on connect without the top bar', (
     tester,
   ) async {
-    final server = FakeEmbyServer();
-    final adapter = FakeEmbyAdapter([server]);
-    final auth = AuthController(
-      client: EmbyClient(device: _device, dio: dioForFakeEmby(adapter)),
-      credentials: MemoryCredentialStore(),
-      servers: MemoryServerListStore(),
-    );
-    await tester.runAsync(() async {
-      await auth.connect(
-        address: server.baseUrl.toString(),
-        username: 'alice',
-        password: 'correct-horse',
-      );
-    });
-
+    final auth = await _connect(tester);
     await tester.pumpWidget(RillightApp(auth: auth));
     await tester.pumpAndSettle();
 
-    final rail = find.byType(NavigationRail);
-    expect(rail, findsOneWidget);
-    expect(find.byType(HomePage), findsOneWidget);
+    await tester.tap(find.byKey(SessionActions.serverMenuKey));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(SessionActions.addServerKey));
+    await tester.pumpAndSettle();
 
-    await tester.tap(
-      find.descendant(
-        of: rail,
-        matching: find.byIcon(Icons.video_library_outlined),
-      ),
+    expect(find.text('连接服务器'), findsOneWidget);
+    expect(find.byKey(AppShell.topBarKey), findsNothing);
+    expect(find.byType(HomePage), findsNothing);
+    expect(
+      GoRouter.of(tester.element(find.text('连接服务器'))).state.uri.toString(),
+      '${AppRoutes.connect}?add=1',
     );
+  });
+
+  testWidgets('top bar switches home and a library; search is an overlay', (
+    tester,
+  ) async {
+    final auth = await _connect(tester);
+    await tester.pumpWidget(RillightApp(auth: auth));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(NavigationRail), findsNothing);
+    expect(find.byKey(AppShell.topBarKey), findsOneWidget);
+    expect(find.byType(HomePage), findsOneWidget);
+    expect(find.byKey(AppShell.libraryNavKey('view-movies')), findsOneWidget);
+
+    await tester.tap(find.byKey(AppShell.libraryNavKey('view-movies')));
     await tester.pumpAndSettle();
     expect(find.byType(LibraryPage), findsOneWidget);
-
-    await tester.tap(
-      find.descendant(of: rail, matching: find.byIcon(Icons.search)),
+    expect(
+      GoRouter.of(tester.element(find.byType(LibraryPage))).state.uri.path,
+      AppRoutes.library('view-movies'),
     );
+
+    await tester.tap(find.byTooltip('搜索'));
     await tester.pumpAndSettle();
+    expect(find.byType(SearchOverlay), findsOneWidget);
     expect(find.byType(SearchPage), findsOneWidget);
-
-    // 已在搜索页时再次点击不重复入栈。
-    await tester.tap(
-      find.descendant(of: rail, matching: find.byIcon(Icons.search)),
+    expect(find.byType(LibraryPage), findsOneWidget);
+    expect(
+      GoRouter.of(tester.element(find.byType(SearchOverlay))).state.uri.path,
+      AppRoutes.library('view-movies'),
     );
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
-    expect(find.byType(SearchPage), findsOneWidget);
+    expect(find.byType(SearchOverlay), findsNothing);
+    expect(find.byType(LibraryPage), findsOneWidget);
 
-    await tester.tap(
-      find.descendant(of: rail, matching: find.byIcon(Icons.home_outlined)),
-    );
+    await tester.tap(find.byTooltip('搜索'));
+    await tester.pumpAndSettle();
+    expect(find.byType(SearchOverlay), findsOneWidget);
+
+    await tester.tap(find.byKey(SearchOverlay.closeKey));
+    await tester.pumpAndSettle();
+    expect(find.byType(SearchOverlay), findsNothing);
+
+    await tester.tap(find.byKey(AppShell.homeNavKey));
     await tester.pumpAndSettle();
     expect(find.byType(HomePage), findsOneWidget);
   });
 
-  testWidgets('navigation rail collapses and expands via toggle', (
+  testWidgets('search shortcut opens overlay without pushing /search', (
     tester,
   ) async {
-    final server = FakeEmbyServer();
-    final adapter = FakeEmbyAdapter([server]);
-    final auth = AuthController(
-      client: EmbyClient(device: _device, dio: dioForFakeEmby(adapter)),
-      credentials: MemoryCredentialStore(),
-      servers: MemoryServerListStore(),
-    );
-    await tester.runAsync(() {
-      return auth.connect(
-        address: server.baseUrl.toString(),
-        username: 'alice',
-        password: 'correct-horse',
-      );
-    });
+    final auth = await _connect(tester);
     await tester.pumpWidget(RillightApp(auth: auth));
     await tester.pumpAndSettle();
-    expect(find.byType(NavigationRail), findsOneWidget);
 
-    await tester.tap(find.byKey(AppShell.railToggle));
+    await tester.tap(find.byType(HomePage));
+    await tester.pump();
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyF);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
     await tester.pumpAndSettle();
-    expect(find.byType(NavigationRail), findsNothing);
-    expect(find.byKey(AppShell.railToggle), findsOneWidget);
-    expect(find.byIcon(Icons.menu), findsOneWidget);
 
-    await tester.tap(find.byKey(AppShell.railToggle));
-    await tester.pumpAndSettle();
-    expect(find.byType(NavigationRail), findsOneWidget);
+    expect(find.byType(SearchOverlay), findsOneWidget);
+    expect(find.byType(HomePage), findsOneWidget);
+    expect(
+      GoRouter.of(tester.element(find.byType(SearchOverlay))).state.uri.path,
+      AppRoutes.home,
+    );
   });
+
+  testWidgets('deep link /search has no left rail', (tester) async {
+    final auth = await _connect(tester);
+    final app = RillightApp(auth: auth);
+    await tester.pumpWidget(app);
+    await tester.pumpAndSettle();
+
+    app.router.go(AppRoutes.search);
+    await tester.pumpAndSettle();
+
+    expect(find.byType(NavigationRail), findsNothing);
+    expect(find.byKey(AppShell.topBarKey), findsOneWidget);
+    expect(find.byType(SearchPage), findsOneWidget);
+    expect(find.byType(SearchOverlay), findsNothing);
+  });
+}
+
+Future<AuthController> _connect(WidgetTester tester) async {
+  final server = FakeEmbyServer();
+  final adapter = FakeEmbyAdapter([server]);
+  final auth = AuthController(
+    client: EmbyClient(device: _device, dio: dioForFakeEmby(adapter)),
+    credentials: MemoryCredentialStore(),
+    servers: MemoryServerListStore(),
+  );
+  await tester.runAsync(() {
+    return auth.connect(
+      address: server.baseUrl.toString(),
+      username: 'alice',
+      password: 'correct-horse',
+    );
+  });
+  return auth;
 }
 
 Widget _l10nApp(Widget home) {
