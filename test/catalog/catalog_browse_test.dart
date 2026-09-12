@@ -16,6 +16,8 @@ import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/home_hero.dart';
 import 'package:rillight/library/poster_card.dart';
 import 'package:rillight/library/shelf_grid_page.dart';
+import 'package:rillight/media_image/media_image.dart';
+import 'package:rillight/player/player_keys.dart';
 import 'package:rillight/search/search_overlay.dart';
 import 'package:rillight/search/search_page.dart';
 
@@ -724,6 +726,111 @@ void main() {
     expect(left, findsOneWidget);
   });
 
+  testWidgets(
+    'detail hero is full-width with readable title and poster fallback',
+    (tester) async {
+      tester.view.physicalSize = const Size(1200, 900);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      MediaImage.debugClearCache();
+      addTearDown(MediaImage.debugClearCache);
+
+      await pumpLoggedIn(tester);
+      final inception = find.byKey(CatalogKeys.item('movie-inception')).first;
+      await tester.ensureVisible(inception);
+      await tester.tap(inception);
+      await tester.pumpAndSettle();
+
+      final hero = _detailHero();
+      expect(hero, findsOneWidget);
+      expect(tester.getTopLeft(hero).dx, 0);
+      expect(tester.getTopLeft(hero).dy, closeTo(AppShell.topBarHeight, 1));
+      expect(tester.getSize(hero).width, 1200);
+
+      final title = find.text('Inception (2010)');
+      expect(title, findsOneWidget);
+      expect(tester.getRect(hero).overlaps(tester.getRect(title)), isTrue);
+      expect(find.byKey(PlayerKeys.open), findsOneWidget);
+      expect(
+        tester
+            .getRect(hero)
+            .overlaps(tester.getRect(find.byKey(PlayerKeys.open))),
+        isTrue,
+      );
+      expect(find.byKey(CatalogKeys.back), findsOneWidget);
+      expect(find.byKey(CatalogKeys.playedToggle), findsOneWidget);
+      await tester.ensureVisible(find.text('章节'));
+      expect(find.byKey(CatalogKeys.chapter(0)), findsOneWidget);
+      expect(find.byKey(CatalogKeys.similarRow), findsOneWidget);
+
+      await _pumpUntilHeroImage(tester);
+      final image = tester.widget<Image>(
+        find.descendant(of: hero, matching: find.byType(Image)),
+      );
+      expect(image.fit, BoxFit.contain);
+      expect(image.alignment, Alignment.centerLeft);
+      expect(
+        server.requests.where(
+          (request) => request.contains('/Images/Backdrop'),
+        ),
+        isEmpty,
+      );
+    },
+  );
+
+  testWidgets('switching versions restores the new source default audio', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    server.items.add(_VersionedMovie());
+
+    await pumpLoggedIn(tester);
+    await openLibrary(tester, 'view-movies');
+    final item = find.byKey(CatalogKeys.item('movie-versions'));
+    await tester.ensureVisible(item);
+    await tester.tap(item);
+    await tester.pumpAndSettle();
+
+    await tester.ensureVisible(find.byKey(CatalogKeys.mediaSource));
+    expect(find.byKey(CatalogKeys.mediaSource), findsOneWidget);
+    expect(find.byKey(CatalogKeys.detailAudio), findsOneWidget);
+    expect(
+      tester
+          .widget<DropdownButtonFormField<int>>(
+            find.byKey(CatalogKeys.detailAudio),
+          )
+          .initialValue,
+      1,
+    );
+
+    await tester.tap(find.byKey(CatalogKeys.mediaSource));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('剧场版').last);
+    await tester.pumpAndSettle();
+
+    expect(
+      tester
+          .widget<DropdownButtonFormField<String>>(
+            find.byKey(CatalogKeys.mediaSource),
+          )
+          .initialValue,
+      'source-b',
+    );
+    expect(
+      tester
+          .widget<DropdownButtonFormField<int>>(
+            find.byKey(CatalogKeys.detailAudio),
+          )
+          .initialValue,
+      3,
+    );
+    expect(find.byKey(PlayerKeys.open), findsOneWidget);
+  });
+
   testWidgets('library poster wall loads more pages at the bottom', (
     tester,
   ) async {
@@ -933,4 +1040,90 @@ List<String> _posterNames(WidgetTester tester) {
       )
       .map((card) => card.item.name)
       .toList();
+}
+
+Finder _detailHero() {
+  return find.byWidgetPredicate(
+    (widget) => widget is MediaImage && widget.preferBackdrop,
+  );
+}
+
+Future<void> _pumpUntilHeroImage(WidgetTester tester) async {
+  final image = find.descendant(
+    of: _detailHero(),
+    matching: find.byType(Image),
+  );
+  for (var i = 0; i < 12; i++) {
+    if (image.evaluate().isNotEmpty) {
+      return;
+    }
+    await tester.runAsync(() async {
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    });
+    await tester.pump();
+  }
+  fail('detail hero image did not load');
+}
+
+class _VersionedMovie extends FakeEmbyItem {
+  _VersionedMovie()
+    : super(
+        id: 'movie-versions',
+        name: '双版本片',
+        type: 'Movie',
+        parentId: 'view-movies',
+        overview: 'Two cuts of the same film.',
+        productionYear: 2022,
+        primaryImageTag: 'tag-versions',
+      );
+
+  @override
+  Map<String, dynamic> toJson() {
+    final json = super.toJson();
+    json['MediaSources'] = [
+      {
+        'Id': 'source-a',
+        'Name': '导演剪辑',
+        'MediaStreams': [
+          const FakeMediaStream(
+            index: 0,
+            type: 'Video',
+            displayTitle: '1080p',
+          ).toJson(),
+          const FakeMediaStream(
+            index: 1,
+            type: 'Audio',
+            displayTitle: 'English',
+          ).toJson(),
+          const FakeMediaStream(
+            index: 2,
+            type: 'Audio',
+            displayTitle: '日本語',
+          ).toJson(),
+        ],
+      },
+      {
+        'Id': 'source-b',
+        'Name': '剧场版',
+        'MediaStreams': [
+          const FakeMediaStream(
+            index: 0,
+            type: 'Video',
+            displayTitle: '1080p',
+          ).toJson(),
+          const FakeMediaStream(
+            index: 3,
+            type: 'Audio',
+            displayTitle: '普通话',
+          ).toJson(),
+          const FakeMediaStream(
+            index: 4,
+            type: 'Audio',
+            displayTitle: '粤语',
+          ).toJson(),
+        ],
+      },
+    ];
+    return json;
+  }
 }

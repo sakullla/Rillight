@@ -5,12 +5,14 @@ import 'dart:typed_data';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:rillight/app/app_shell.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/app_error_view.dart';
 import 'package:rillight/app/widgets/app_hover_card.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
+import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/emby/emby_errors.dart';
 import 'package:rillight/emby/emby_models.dart';
@@ -28,6 +30,21 @@ class ItemDetailPage extends StatefulWidget {
   const ItemDetailPage({super.key, required this.itemId});
 
   final String itemId;
+
+  /// 与 [AppShell] 顶栏同高;外壳仍是 Column 时只加到 hero 高度,不能真正叠到窗口上缘.
+  static double heroTopOverlap(BuildContext context) {
+    if (context.findAncestorWidgetOfExactType<AppShell>() == null) {
+      return 0;
+    }
+    final hasChrome =
+        context.findAncestorWidgetOfExactType<WindowChromeHost>() != null;
+    if (!hasChrome) {
+      return AppShell.topBarHeight;
+    }
+    return kWindowChromeHeight > AppShell.topBarHeight
+        ? kWindowChromeHeight
+        : AppShell.topBarHeight;
+  }
 
   @override
   State<ItemDetailPage> createState() => _ItemDetailPageState();
@@ -274,8 +291,9 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
+    final topOverlap = ItemDetailPage.heroTopOverlap(context);
     if (_loading) {
-      return const _DetailSkeleton();
+      return _DetailSkeleton(topOverlap: topOverlap);
     }
     final error = _error;
     if (error != null && _item == null) {
@@ -310,6 +328,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
               _DetailHero(
                 item: item,
                 runtime: runtime,
+                topOverlap: topOverlap,
                 seasonCount: _seasons.length,
                 nextEpisode: playTarget != null && item.isSeries
                     ? playTarget
@@ -466,8 +485,9 @@ class _FloatingBackButton extends StatelessWidget {
   }
 }
 
-/// 详情页全宽沉浸式 hero:backdrop 顶到内容区边缘,渐变遮罩上叠
-/// 大标题、元信息行与主操作;高度随内容区宽度比例伸缩并按断点封顶。
+/// 详情页全宽沉浸式 hero:backdrop 顶到内容区边缘,左右/底部 scrim 上叠
+/// 大标题、元信息行与主操作;无 backdrop 时走 [MediaImage] contain/左侧竖图。
+/// 高度随内容区宽度比例伸缩并按断点封顶。
 /// 高度不足时简介下沉到 hero 下方正文区,避免挤压主操作。
 class _DetailHero extends StatelessWidget {
   const _DetailHero({
@@ -476,6 +496,7 @@ class _DetailHero extends StatelessWidget {
     required this.busyPlayed,
     required this.onPlay,
     required this.onPlayedChanged,
+    this.topOverlap = 0,
     this.seasonCount = 0,
     this.nextEpisode,
     this.mediaSourceId,
@@ -491,6 +512,7 @@ class _DetailHero extends StatelessWidget {
   final bool busyPlayed;
   final VoidCallback? onPlay;
   final ValueChanged<bool> onPlayedChanged;
+  final double topOverlap;
   final int seasonCount;
   final EmbyItem? nextEpisode;
   final String? mediaSourceId;
@@ -526,7 +548,7 @@ class _DetailHero extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final width = constraints.maxWidth;
-        final height = heightFor(width);
+        final height = heightFor(width) + topOverlap;
         final compact = width < AppBreakpoints.compact;
         final overviewInHero = hasOverview && showsOverview(width);
         return Column(
@@ -547,18 +569,27 @@ class _DetailHero extends StatelessWidget {
                   DecoratedBox(
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
+                        begin: Alignment.centerLeft,
+                        end: Alignment.centerRight,
+                        colors: [
+                          scrim.withValues(alpha: 0.8),
+                          scrim.withValues(alpha: 0),
+                        ],
+                      ),
+                    ),
+                  ),
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
                         begin: Alignment.bottomCenter,
                         end: Alignment.topCenter,
                         colors: [
                           scrim.withValues(alpha: 0.9),
-                          scrim.withValues(alpha: 0.4),
                           scrim.withValues(alpha: 0),
                         ],
-                        stops: const [0, 0.5, 1],
                       ),
                     ),
                   ),
-                  // 底部融入内容区背景的过渡带。
                   DecoratedBox(
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
@@ -772,48 +803,54 @@ class _PlaybackSettings extends StatelessWidget {
               if (item.mediaSources.length > 1)
                 Padding(
                   padding: const EdgeInsets.only(bottom: AppSpacing.xs),
-                  child: DropdownButtonFormField<String>(
+                  child: KeyedSubtree(
                     key: ValueKey(
                       'source-${mediaSourceId ?? item.mediaSources.first.id}',
                     ),
-                    decoration: InputDecoration(labelText: l10n.mediaSource),
-                    initialValue: mediaSourceId ?? item.mediaSources.first.id,
-                    items: [
-                      for (final source in item.mediaSources)
-                        DropdownMenuItem(
-                          value: source.id,
-                          child: Text(
-                            source.label,
-                            overflow: TextOverflow.ellipsis,
+                    child: DropdownButtonFormField<String>(
+                      key: CatalogKeys.mediaSource,
+                      decoration: InputDecoration(labelText: l10n.mediaSource),
+                      initialValue: mediaSourceId ?? item.mediaSources.first.id,
+                      items: [
+                        for (final source in item.mediaSources)
+                          DropdownMenuItem(
+                            value: source.id,
+                            child: Text(
+                              source.label,
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
-                        ),
-                    ],
-                    onChanged: (value) {
-                      if (value != null) {
-                        onMediaSource?.call(value);
-                      }
-                    },
+                      ],
+                      onChanged: (value) {
+                        if (value != null) {
+                          onMediaSource?.call(value);
+                        }
+                      },
+                    ),
                   ),
                 ),
               if (_audioChoices(item, mediaSourceId).length > 1)
                 Padding(
                   padding: const EdgeInsets.only(bottom: AppSpacing.xs),
-                  child: DropdownButtonFormField<int>(
+                  child: KeyedSubtree(
                     key: ValueKey('audio-$mediaSourceId-$audioStreamIndex'),
-                    decoration: InputDecoration(labelText: l10n.audioTrack),
-                    initialValue: audioStreamIndex,
-                    items: [
-                      for (final stream in _audioChoices(item, mediaSourceId))
-                        DropdownMenuItem(
-                          value: stream.index,
-                          child: Text(stream.label ?? '#${stream.index}'),
-                        ),
-                    ],
-                    onChanged: (value) {
-                      if (value != null) {
-                        onAudio?.call(value);
-                      }
-                    },
+                    child: DropdownButtonFormField<int>(
+                      key: CatalogKeys.detailAudio,
+                      decoration: InputDecoration(labelText: l10n.audioTrack),
+                      initialValue: audioStreamIndex,
+                      items: [
+                        for (final stream in _audioChoices(item, mediaSourceId))
+                          DropdownMenuItem(
+                            value: stream.index,
+                            child: Text(stream.label ?? '#${stream.index}'),
+                          ),
+                      ],
+                      onChanged: (value) {
+                        if (value != null) {
+                          onAudio?.call(value);
+                        }
+                      },
+                    ),
                   ),
                 ),
               if (_subtitleChoices(item, mediaSourceId).isNotEmpty)
@@ -858,7 +895,9 @@ class _PlaybackSettings extends StatelessWidget {
 
 /// 详情页加载骨架:hero 色块 + 文本行 + 一行 shelf 占位。
 class _DetailSkeleton extends StatelessWidget {
-  const _DetailSkeleton();
+  const _DetailSkeleton({this.topOverlap = 0});
+
+  final double topOverlap;
 
   @override
   Widget build(BuildContext context) {
@@ -872,7 +911,7 @@ class _DetailSkeleton extends StatelessWidget {
             children: [
               SkeletonBlock(
                 width: double.infinity,
-                height: _DetailHero.heightFor(width),
+                height: _DetailHero.heightFor(width) + topOverlap,
                 borderRadius: BorderRadius.zero,
               ),
               Padding(
