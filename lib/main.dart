@@ -2,7 +2,7 @@ import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter/widgets.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:rillight/app/app.dart';
-import 'package:rillight/app/product.dart';
+import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/auth/auth_bootstrap.dart';
 import 'package:rillight/player/desktop_player_window.dart';
 import 'package:rillight/player/player_bindings.dart';
@@ -28,20 +28,15 @@ Future<void> main(List<String> args) async {
     );
     return;
   }
-  await windowManager.ensureInitialized();
-  await windowManager.waitUntilReadyToShow(
-    const WindowOptions(title: kProductName, minimumSize: Size(960, 540)),
-    () async {
-      await windowManager.show();
-      await windowManager.focus();
-    },
-  );
+  await configureMainWindow();
   final auth = await createProductionAuth();
   runApp(
-    RillightApp(
-      auth: auth,
-      playerBindings: PlayerBindings(
-        windowHost: DesktopPlayerWindowHost(auth: auth),
+    WindowChromeHost(
+      child: RillightApp(
+        auth: auth,
+        playerBindings: PlayerBindings(
+          windowHost: DesktopPlayerWindowHost(auth: auth),
+        ),
       ),
     ),
   );
