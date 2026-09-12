@@ -11,8 +11,9 @@ import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/search/search_action.dart';
 import 'package:rillight/search/search_overlay.dart';
 
-/// 全局外壳:半透明顶栏 + 内容区,无常驻左栏。
+/// 全局外壳:半透明顶栏叠在全幅内容上,无常驻左栏。
 ///
+/// 已登录时 [child] 铺满窗口,顶栏 Positioned 叠在上缘,hero/backdrop 可贴到窗口顶。
 /// 顶栏左侧为首页与 [CatalogScope.libraries] 各库名,放不下的库进入溢出;
 /// 右侧为搜索与 [SessionActions]。搜索打开覆盖层,不 push `/search` 页壳。
 /// 登录前的 /connect 页没有导航意义,不显示顶栏。
@@ -91,12 +92,12 @@ class _AppShellState extends State<AppShell> {
             body: Stack(
               fit: StackFit.expand,
               children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    _TopBar(location: location),
-                    Expanded(child: widget.child),
-                  ],
+                widget.child,
+                Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  child: _TopBar(location: location),
                 ),
                 if (_searchOpen)
                   SearchOverlay(

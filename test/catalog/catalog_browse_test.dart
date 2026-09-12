@@ -209,7 +209,7 @@ void main() {
     expect(find.text('00:00'), findsOneWidget);
     expect(find.byKey(CatalogKeys.chapter(0)), findsOneWidget);
 
-    await tester.pageBack();
+    await _tapBelowTopBar(tester, find.byKey(CatalogKeys.back));
     await tester.pumpAndSettle();
     await openLibrary(tester, 'view-tv');
     await tester.tap(find.byKey(CatalogKeys.item('series-friends')));
@@ -232,12 +232,10 @@ void main() {
     await tester.ensureVisible(resumeItem);
     await tester.tap(resumeItem);
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.byKey(CatalogKeys.playedToggle));
-    await tester.tap(find.byKey(CatalogKeys.playedToggle));
+    await _tapBelowTopBar(tester, find.byKey(CatalogKeys.playedToggle));
     await tester.pumpAndSettle();
 
-    await tester.ensureVisible(find.byKey(CatalogKeys.back));
-    await tester.tap(find.byKey(CatalogKeys.back));
+    await _tapBelowTopBar(tester, find.byKey(CatalogKeys.back));
     await tester.pumpAndSettle();
     expect(find.byKey(CatalogKeys.resumeRow), findsNothing);
     await tester.ensureVisible(find.byKey(CatalogKeys.item('movie-inception')));
@@ -382,7 +380,7 @@ void main() {
     expect(find.text('最近添加的电影'), findsWidgets);
     expect(_posterNames(tester).first, '飞屋环游记');
 
-    await tester.tap(find.byKey(CatalogKeys.sortBy));
+    await _tapBelowTopBar(tester, find.byKey(CatalogKeys.sortBy));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(CatalogKeys.sortOption('SortName')));
     await tester.pumpAndSettle();
@@ -399,7 +397,7 @@ void main() {
     await goHome(tester);
     await openLibrary(tester, 'view-movies');
     expect(_posterNames(tester).first, '飞屋环游记');
-    await tester.tap(find.byKey(CatalogKeys.sortBy));
+    await _tapBelowTopBar(tester, find.byKey(CatalogKeys.sortBy));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(CatalogKeys.sortOption('SortName')));
     await tester.pumpAndSettle();
@@ -414,7 +412,7 @@ void main() {
       expect(_posterNames(tester).first, '飞屋环游记');
 
       server.itemsStatus = 500;
-      await tester.tap(find.byKey(CatalogKeys.sortBy));
+      await _tapBelowTopBar(tester, find.byKey(CatalogKeys.sortBy));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(CatalogKeys.sortOption('SortName')));
       await tester.pumpAndSettle();
@@ -529,7 +527,7 @@ void main() {
     expect(find.text('更多类似'), findsOneWidget);
     expect(find.byKey(CatalogKeys.item('movie-up')), findsWidgets);
 
-    await tester.pageBack();
+    await _tapBelowTopBar(tester, find.byKey(CatalogKeys.back));
     await tester.pumpAndSettle();
     server.similarEmpty = true;
     final up = find.byKey(CatalogKeys.item('movie-up')).first;
@@ -551,7 +549,7 @@ void main() {
     expect(find.byKey(CatalogKeys.item('series-friends')), findsNothing);
     expect(_posterNames(tester).first, '飞屋环游记');
 
-    await tester.tap(find.byKey(CatalogKeys.sortBy));
+    await _tapBelowTopBar(tester, find.byKey(CatalogKeys.sortBy));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(CatalogKeys.sortOption('SortName')));
     await tester.pumpAndSettle();
@@ -572,6 +570,8 @@ void main() {
 
   testWidgets('home hero rotates featured items via arrows', (tester) async {
     await pumpLoggedIn(tester);
+    expect(find.byType(HomeHero), findsOneWidget);
+    expect(tester.getTopLeft(find.byType(HomeHero)).dy, 0);
     expect(find.byKey(CatalogKeys.heroNext), findsOneWidget);
     expect(find.byKey(const Key('catalog-hero-index-0')), findsOneWidget);
 
@@ -745,7 +745,7 @@ void main() {
       final hero = _detailHero();
       expect(hero, findsOneWidget);
       expect(tester.getTopLeft(hero).dx, 0);
-      expect(tester.getTopLeft(hero).dy, closeTo(AppShell.topBarHeight, 1));
+      expect(tester.getTopLeft(hero).dy, 0);
       expect(tester.getSize(hero).width, 1200);
 
       final title = find.text('Inception (2010)');
@@ -952,6 +952,43 @@ void main() {
   });
 }
 
+/// 顶栏叠在内容上时,控件中心可能落在栏内;点到栏下方仍落在同一控件上的位置.
+Future<void> _tapBelowTopBar(WidgetTester tester, Finder finder) async {
+  final bar = find.byKey(AppShell.topBarKey);
+  final rect = tester.getRect(finder);
+  var dy = rect.center.dy;
+  if (bar.evaluate().isNotEmpty) {
+    final barBottom = tester.getRect(bar).bottom;
+    if (dy <= barBottom) {
+      dy = (barBottom + 1).clamp(rect.top + 1, rect.bottom - 1).toDouble();
+    }
+  }
+  await tester.tapAt(Offset(rect.center.dx, dy));
+}
+
+Future<void> _ensureVisibleBelowTopBar(
+  WidgetTester tester,
+  Finder finder,
+) async {
+  final context = tester.element(finder);
+  final scrollable = Scrollable.maybeOf(context);
+  if (scrollable == null) {
+    await tester.ensureVisible(finder);
+    await tester.pumpAndSettle();
+    return;
+  }
+  final viewport = scrollable.position.viewportDimension;
+  final bar = find.byKey(AppShell.topBarKey);
+  final barBottom = bar.evaluate().isEmpty ? 0.0 : tester.getRect(bar).bottom;
+  final alignment = viewport <= 0 ? 0.0 : ((barBottom + 8) / viewport);
+  await Scrollable.ensureVisible(
+    context,
+    alignment: alignment.clamp(0.0, 1.0).toDouble(),
+    duration: Duration.zero,
+  );
+  await tester.pumpAndSettle();
+}
+
 FocusNode? _focusOf(WidgetTester tester, Finder host) {
   final inner = find.descendant(of: host, matching: find.byType(ClipRRect));
   final context = inner.evaluate().isNotEmpty
@@ -964,8 +1001,8 @@ FocusNode? _focusOf(WidgetTester tester, Finder host) {
 
 Future<void> _openLatestMoviesMore(WidgetTester tester) async {
   final more = find.byKey(CatalogKeys.shelfMore(CatalogKeys.shelfLatestMovies));
-  await tester.ensureVisible(more);
-  await tester.tap(more);
+  await _ensureVisibleBelowTopBar(tester, more);
+  await _tapBelowTopBar(tester, more);
   await tester.pumpAndSettle();
 }
 

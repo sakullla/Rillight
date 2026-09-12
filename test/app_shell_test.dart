@@ -264,6 +264,8 @@ void main() {
     expect(find.byType(NavigationRail), findsNothing);
     expect(find.byKey(AppShell.topBarKey), findsOneWidget);
     expect(find.byType(HomePage), findsOneWidget);
+    expect(tester.getTopLeft(find.byType(HomePage)).dy, 0);
+    expect(tester.getTopLeft(find.byKey(AppShell.topBarKey)).dy, 0);
     expect(find.byKey(AppShell.libraryNavKey('view-movies')), findsOneWidget);
 
     await tester.tap(find.byKey(AppShell.libraryNavKey('view-movies')));
