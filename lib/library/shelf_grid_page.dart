@@ -3,11 +3,13 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
+import 'package:rillight/app/app_shell.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/app_error_view.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
+import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_errors.dart';
@@ -458,6 +460,23 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
   }
 }
 
+/// 叠层顶栏高度 + 页头原有上边距,让标题/排序中心落在栏外可点。
+double _headerTopInset(BuildContext context) {
+  var inset = AppSpacing.xl;
+  if (context.findAncestorWidgetOfExactType<AppShell>() == null) {
+    return inset;
+  }
+  final hasChrome =
+      context.findAncestorWidgetOfExactType<WindowChromeHost>() != null;
+  if (!hasChrome) {
+    return inset + AppShell.topBarHeight;
+  }
+  final barHeight = kWindowChromeHeight > AppShell.topBarHeight
+      ? kWindowChromeHeight
+      : AppShell.topBarHeight;
+  return inset + barHeight;
+}
+
 class _Header extends StatelessWidget {
   const _Header({
     required this.title,
@@ -481,9 +500,9 @@ class _Header extends StatelessWidget {
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(
+      padding: EdgeInsets.fromLTRB(
         AppSpacing.md,
-        AppSpacing.xl,
+        _headerTopInset(context),
         AppSpacing.md,
         AppSpacing.sm,
       ),

@@ -380,8 +380,7 @@ void main() {
     expect(find.text('最近添加的电影'), findsWidgets);
     expect(_posterNames(tester).first, '飞屋环游记');
 
-    await _tapBelowTopBar(tester, find.byKey(CatalogKeys.sortBy));
-    await tester.pumpAndSettle();
+    await _tapGridSort(tester);
     await tester.tap(find.byKey(CatalogKeys.sortOption('SortName')));
     await tester.pumpAndSettle();
     expect(_posterNames(tester).first, 'Inception');
@@ -397,8 +396,7 @@ void main() {
     await goHome(tester);
     await openLibrary(tester, 'view-movies');
     expect(_posterNames(tester).first, '飞屋环游记');
-    await _tapBelowTopBar(tester, find.byKey(CatalogKeys.sortBy));
-    await tester.pumpAndSettle();
+    await _tapGridSort(tester);
     await tester.tap(find.byKey(CatalogKeys.sortOption('SortName')));
     await tester.pumpAndSettle();
     expect(_posterNames(tester).first, 'Inception');
@@ -412,8 +410,7 @@ void main() {
       expect(_posterNames(tester).first, '飞屋环游记');
 
       server.itemsStatus = 500;
-      await _tapBelowTopBar(tester, find.byKey(CatalogKeys.sortBy));
-      await tester.pumpAndSettle();
+      await _tapGridSort(tester);
       await tester.tap(find.byKey(CatalogKeys.sortOption('SortName')));
       await tester.pumpAndSettle();
 
@@ -549,8 +546,7 @@ void main() {
     expect(find.byKey(CatalogKeys.item('series-friends')), findsNothing);
     expect(_posterNames(tester).first, '飞屋环游记');
 
-    await _tapBelowTopBar(tester, find.byKey(CatalogKeys.sortBy));
-    await tester.pumpAndSettle();
+    await _tapGridSort(tester);
     await tester.tap(find.byKey(CatalogKeys.sortOption('SortName')));
     await tester.pumpAndSettle();
     expect(_posterNames(tester).first, 'Inception');
@@ -950,6 +946,16 @@ void main() {
     await tester.pumpAndSettle();
     expect(_focusOf(tester, nextRow)?.hasPrimaryFocus, isTrue);
   });
+}
+
+/// 网格页头排序必须落在叠层顶栏下方,普通 center tap 即可命中,不能点到搜索/会话.
+Future<void> _tapGridSort(WidgetTester tester) async {
+  final sortBy = find.byKey(CatalogKeys.sortBy);
+  expect(sortBy, findsOneWidget);
+  final barBottom = tester.getRect(find.byKey(AppShell.topBarKey)).bottom;
+  expect(tester.getCenter(sortBy).dy, greaterThan(barBottom));
+  await tester.tap(sortBy);
+  await tester.pumpAndSettle();
 }
 
 /// 顶栏叠在内容上时,控件中心可能落在栏内;点到栏下方仍落在同一控件上的位置.
