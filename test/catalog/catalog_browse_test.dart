@@ -1,4 +1,6 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
 import 'package:rillight/app/app_shell.dart';
@@ -84,6 +86,18 @@ void main() {
       expect(find.byKey(AppShell.homeNavKey), findsOneWidget);
       expect(find.byKey(AppShell.libraryNavKey('view-movies')), findsOneWidget);
       expect(find.byKey(CatalogKeys.resumeRow), findsOneWidget);
+      expect(
+        tester.getTopLeft(find.byKey(CatalogKeys.resumeRow)).dy,
+        lessThan(tester.getTopLeft(find.byKey(CatalogKeys.nextUpRow)).dy),
+      );
+      expect(
+        tester.getTopLeft(find.byKey(CatalogKeys.resumeRow)).dy,
+        lessThan(tester.getTopLeft(find.byKey(CatalogKeys.latestMoviesRow)).dy),
+      );
+      expect(
+        tester.getTopLeft(find.byKey(CatalogKeys.resumeRow)).dy,
+        lessThan(tester.getTopLeft(find.byKey(CatalogKeys.latestSeriesRow)).dy),
+      );
       expect(find.text('Inception'), findsWidgets);
       expect(find.byKey(CatalogKeys.resumeProgress), findsWidgets);
       expect(find.byKey(CatalogKeys.nextUpRow), findsOneWidget);
@@ -545,6 +559,118 @@ void main() {
     expect(find.byKey(const Key('catalog-hero-index-0')), findsOneWidget);
   });
 
+  testWidgets('home hero auto-advance pauses on hover and focus', (
+    tester,
+  ) async {
+    final auth = await pumpLoggedIn(tester);
+    HomeHero.autoAdvanceEnabled = true;
+    await tester.pumpWidget(RillightApp(auth: auth));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(find.byKey(const Key('catalog-hero-index-0')), findsOneWidget);
+
+    await tester.pump(
+      HomeHero.autoAdvanceInterval + const Duration(milliseconds: 1),
+    );
+    expect(find.byKey(const Key('catalog-hero-index-1')), findsOneWidget);
+
+    final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await gesture.addPointer(location: Offset.zero);
+    addTearDown(gesture.removePointer);
+    await gesture.moveTo(tester.getCenter(find.byType(HomeHero)));
+    await tester.pump();
+    await tester.pump(HomeHero.autoAdvanceInterval);
+    expect(find.byKey(const Key('catalog-hero-index-1')), findsOneWidget);
+
+    await gesture.moveTo(Offset.zero);
+    await tester.pump();
+    final details = find.descendant(
+      of: find.byType(HomeHero),
+      matching: find.widgetWithText(OutlinedButton, '详情'),
+    );
+    _focusOf(tester, details)?.requestFocus();
+    await tester.pump();
+    await tester.pump(HomeHero.autoAdvanceInterval);
+    expect(find.byKey(const Key('catalog-hero-index-1')), findsOneWidget);
+  });
+
+  testWidgets('home hero does not auto-advance when animations are disabled', (
+    tester,
+  ) async {
+    await pumpLoggedIn(tester);
+    tester.platformDispatcher.accessibilityFeaturesTestValue =
+        const FakeAccessibilityFeatures(reduceMotion: true);
+    addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
+    HomeHero.autoAdvanceEnabled = true;
+    await tester.pump();
+    expect(find.byKey(const Key('catalog-hero-index-0')), findsOneWidget);
+    await tester.pump(HomeHero.autoAdvanceInterval);
+    expect(find.byKey(const Key('catalog-hero-index-0')), findsOneWidget);
+    expect(find.byKey(const Key('catalog-hero-index-1')), findsNothing);
+  });
+
+  testWidgets('shelf arrow keys move focus between adjacent posters', (
+    tester,
+  ) async {
+    await pumpLoggedIn(tester);
+    final movies = find.byKey(CatalogKeys.latestMoviesRow);
+    final first = find.descendant(
+      of: movies,
+      matching: find.byKey(CatalogKeys.item('movie-up')),
+    );
+    final second = find.descendant(
+      of: movies,
+      matching: find.byKey(CatalogKeys.item('movie-broken')),
+    );
+    await tester.ensureVisible(first);
+    _focusOf(tester, first)?.requestFocus();
+    await tester.pump();
+    expect(_focusOf(tester, first)?.hasPrimaryFocus, isTrue);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pumpAndSettle();
+    expect(_focusOf(tester, second)?.hasPrimaryFocus, isTrue);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    await tester.pumpAndSettle();
+    expect(_focusOf(tester, first)?.hasPrimaryFocus, isTrue);
+  });
+
+  testWidgets('vertical wheel on a shelf still scrolls the home page', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(800, 500);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await pumpLoggedIn(tester);
+    final poster = find.descendant(
+      of: find.byKey(CatalogKeys.latestMoviesRow),
+      matching: find.byKey(CatalogKeys.item('movie-up')),
+    );
+    await tester.ensureVisible(poster);
+    final scrollable = tester.state<ScrollableState>(
+      find
+          .descendant(
+            of: find.byType(SingleChildScrollView),
+            matching: find.byWidgetPredicate(
+              (widget) => widget is Scrollable && widget.axis == Axis.vertical,
+            ),
+          )
+          .first,
+    );
+    final before = scrollable.position.pixels;
+    await tester.sendEventToBinding(
+      PointerScrollEvent(
+        position: tester.getCenter(poster),
+        scrollDelta: const Offset(0, 180),
+      ),
+    );
+    await tester.pump();
+    expect(scrollable.position.pixels, greaterThan(before));
+  });
+
   testWidgets('detail chapter row scrolls horizontally with buttons', (
     tester,
   ) async {
@@ -603,6 +729,16 @@ void main() {
     }
     expect(find.byKey(CatalogKeys.item('bulk-69')), findsOneWidget);
   });
+}
+
+FocusNode? _focusOf(WidgetTester tester, Finder host) {
+  final inner = find.descendant(of: host, matching: find.byType(ClipRRect));
+  final context = inner.evaluate().isNotEmpty
+      ? tester.element(inner.first)
+      : tester.element(
+          find.descendant(of: host, matching: find.byType(Text)).first,
+        );
+  return Focus.maybeOf(context);
 }
 
 Future<void> _openLatestMoviesMore(WidgetTester tester) async {

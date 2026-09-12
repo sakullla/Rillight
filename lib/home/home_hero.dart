@@ -16,12 +16,17 @@ import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/player/player_window_host.dart';
 
 /// 首页全宽沉浸式 hero 轮播:多条 featured 内容(继续观看优先,其次最新
-/// 电影/剧集),支持左右箭头与指示点手动切换,并每 10 秒自动轮换(悬停暂停)。
+/// 电影/剧集),支持左右箭头与指示点手动切换,并每 10 秒自动轮换。
+/// 悬停、焦点在 hero 内、或 [MediaQuery.disableAnimations] /
+/// [AppMotion.durationOf] 为零时停止自动轮换(WCAG 2.2.2)。
 /// backdrop 顶到内容区边缘,渐变遮罩上叠大标题、元信息与主操作。
 class HomeHero extends StatefulWidget {
-  const HomeHero({super.key, required this.catalog});
+  const HomeHero({super.key, required this.catalog, this.topOverlap = 0});
 
   final CatalogController catalog;
+
+  /// 向上叠过 [AppShell] 顶栏的高度;由首页传入,本组件只增加画面高度。
+  final double topOverlap;
 
   /// hero 高度:内容区宽度 × 0.42,按 [AppBreakpoints] 设上下限。
   /// compact 下限 320 保证标题+元信息+主操作在极窄窗口不溢出。
@@ -57,6 +62,7 @@ class HomeHero extends StatefulWidget {
 class _HomeHeroState extends State<HomeHero> {
   int _index = 0;
   bool _hovering = false;
+  bool _focused = false;
   Timer? _autoAdvance;
 
   /// featured 候选:继续观看(可播/剧集)优先,其次最新电影、最新剧集,
@@ -90,13 +96,9 @@ class _HomeHeroState extends State<HomeHero> {
       widget.catalog.latestSeries.loading;
 
   @override
-  void initState() {
-    super.initState();
-    if (HomeHero.autoAdvanceEnabled) {
-      _autoAdvance = Timer.periodic(HomeHero.autoAdvanceInterval, (_) {
-        _tick();
-      });
-    }
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _syncAutoAdvanceTimer();
   }
 
   @override
@@ -105,8 +107,32 @@ class _HomeHeroState extends State<HomeHero> {
     super.dispose();
   }
 
+  bool get _reduceMotion {
+    return MediaQuery.disableAnimationsOf(context) ||
+        AppMotion.durationOf(context) == Duration.zero;
+  }
+
+  bool get _canAutoAdvance {
+    return HomeHero.autoAdvanceEnabled &&
+        !_hovering &&
+        !_focused &&
+        !_reduceMotion;
+  }
+
+  void _syncAutoAdvanceTimer() {
+    final wantTimer = HomeHero.autoAdvanceEnabled && !_reduceMotion;
+    if (wantTimer) {
+      _autoAdvance ??= Timer.periodic(HomeHero.autoAdvanceInterval, (_) {
+        _tick();
+      });
+    } else {
+      _autoAdvance?.cancel();
+      _autoAdvance = null;
+    }
+  }
+
   void _tick() {
-    if (!mounted || _hovering) {
+    if (!mounted || !_canAutoAdvance) {
       return;
     }
     final count = _featuredItems.length;
@@ -126,10 +152,12 @@ class _HomeHeroState extends State<HomeHero> {
 
   @override
   Widget build(BuildContext context) {
+    _syncAutoAdvanceTimer();
     final items = _featuredItems;
     return LayoutBuilder(
       builder: (context, constraints) {
-        final height = HomeHero.heightFor(constraints.maxWidth);
+        final height =
+            HomeHero.heightFor(constraints.maxWidth) + widget.topOverlap;
         if (items.isEmpty) {
           if (!_loading) {
             return const SizedBox.shrink();
@@ -145,111 +173,129 @@ class _HomeHeroState extends State<HomeHero> {
         return SizedBox(
           height: height,
           width: double.infinity,
-          child: MouseRegion(
-            onEnter: (_) => setState(() => _hovering = true),
-            onExit: (_) => setState(() => _hovering = false),
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                AnimatedSwitcher(
-                  duration: AppMotion.slow,
-                  child: KeyedSubtree(
-                    key: ValueKey(item.id),
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        MediaImage(
-                          item: item,
-                          height: height,
-                          preferBackdrop: true,
-                          maxWidth: 1600,
-                        ),
-                        DecoratedBox(
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              begin: Alignment.centerLeft,
-                              end: Alignment.centerRight,
-                              colors: [
-                                Theme.of(
-                                  context,
-                                ).colorScheme.scrim.withValues(alpha: 0.8),
-                                Theme.of(
-                                  context,
-                                ).colorScheme.scrim.withValues(alpha: 0),
-                              ],
-                            ),
-                          ),
-                        ),
-                        DecoratedBox(
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              begin: Alignment.bottomCenter,
-                              end: Alignment.topCenter,
-                              colors: [
-                                Theme.of(
-                                  context,
-                                ).colorScheme.scrim.withValues(alpha: 0.9),
-                                Theme.of(
-                                  context,
-                                ).colorScheme.scrim.withValues(alpha: 0),
-                              ],
-                            ),
-                          ),
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(
-                            AppSpacing.xxl,
-                            AppSpacing.xl,
-                            AppSpacing.xxl,
-                            AppSpacing.xl,
-                          ),
-                          child: _HeroContent(
+          child: Focus(
+            canRequestFocus: false,
+            skipTraversal: true,
+            onFocusChange: (focused) {
+              if (_focused == focused) {
+                return;
+              }
+              setState(() => _focused = focused);
+            },
+            child: MouseRegion(
+              onEnter: (_) {
+                if (!_hovering) {
+                  setState(() => _hovering = true);
+                }
+              },
+              onExit: (_) {
+                if (_hovering) {
+                  setState(() => _hovering = false);
+                }
+              },
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  AnimatedSwitcher(
+                    duration: AppMotion.durationOf(context, AppMotion.slow),
+                    child: KeyedSubtree(
+                      key: ValueKey(item.id),
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          MediaImage(
                             item: item,
-                            width: constraints.maxWidth,
+                            height: height,
+                            preferBackdrop: true,
+                            maxWidth: 1600,
                           ),
+                          DecoratedBox(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.centerLeft,
+                                end: Alignment.centerRight,
+                                colors: [
+                                  Theme.of(
+                                    context,
+                                  ).colorScheme.scrim.withValues(alpha: 0.8),
+                                  Theme.of(
+                                    context,
+                                  ).colorScheme.scrim.withValues(alpha: 0),
+                                ],
+                              ),
+                            ),
+                          ),
+                          DecoratedBox(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.bottomCenter,
+                                end: Alignment.topCenter,
+                                colors: [
+                                  Theme.of(
+                                    context,
+                                  ).colorScheme.scrim.withValues(alpha: 0.9),
+                                  Theme.of(
+                                    context,
+                                  ).colorScheme.scrim.withValues(alpha: 0),
+                                ],
+                              ),
+                            ),
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(
+                              AppSpacing.xxl,
+                              AppSpacing.xl,
+                              AppSpacing.xxl,
+                              AppSpacing.xl,
+                            ),
+                            child: _HeroContent(
+                              item: item,
+                              width: constraints.maxWidth,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  if (items.length > 1) ...[
+                    Positioned(
+                      left: AppSpacing.sm,
+                      top: 0,
+                      bottom: 0,
+                      child: Center(
+                        child: _HeroNavButton(
+                          buttonKey: CatalogKeys.heroPrev,
+                          tooltip: AppLocalizations.of(context).scrollLeft,
+                          icon: Icons.chevron_left,
+                          onPressed: () => _go(-1),
                         ),
-                      ],
-                    ),
-                  ),
-                ),
-                if (items.length > 1) ...[
-                  Positioned(
-                    left: AppSpacing.sm,
-                    top: 0,
-                    bottom: 0,
-                    child: Center(
-                      child: _HeroNavButton(
-                        buttonKey: CatalogKeys.heroPrev,
-                        tooltip: AppLocalizations.of(context).scrollLeft,
-                        icon: Icons.chevron_left,
-                        onPressed: () => _go(-1),
                       ),
                     ),
-                  ),
-                  Positioned(
-                    right: AppSpacing.sm,
-                    top: 0,
-                    bottom: 0,
-                    child: Center(
-                      child: _HeroNavButton(
-                        buttonKey: CatalogKeys.heroNext,
-                        tooltip: AppLocalizations.of(context).scrollRight,
-                        icon: Icons.chevron_right,
-                        onPressed: () => _go(1),
+                    Positioned(
+                      right: AppSpacing.sm,
+                      top: 0,
+                      bottom: 0,
+                      child: Center(
+                        child: _HeroNavButton(
+                          buttonKey: CatalogKeys.heroNext,
+                          tooltip: AppLocalizations.of(context).scrollRight,
+                          icon: Icons.chevron_right,
+                          onPressed: () => _go(1),
+                        ),
                       ),
                     ),
-                  ),
-                  Positioned(
-                    right: AppSpacing.xl,
-                    bottom: AppSpacing.md,
-                    child: _HeroIndicators(
-                      key: Key('catalog-hero-index-$index'),
-                      count: items.length,
-                      index: index,
+                    Positioned(
+                      right: AppSpacing.xl,
+                      bottom: AppSpacing.md,
+                      child: _HeroIndicators(
+                        key: Key('catalog-hero-index-$index'),
+                        count: items.length,
+                        index: index,
+                      ),
                     ),
-                  ),
+                  ],
                 ],
-              ],
+              ),
             ),
           ),
         );
@@ -303,7 +349,7 @@ class _HeroIndicators extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xxs / 2),
             child: AnimatedContainer(
-              duration: AppMotion.fast,
+              duration: AppMotion.durationOf(context, AppMotion.fast),
               curve: AppMotion.standard,
               width: i == index ? 18 : 6,
               height: 6,

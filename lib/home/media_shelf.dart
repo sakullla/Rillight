@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/app_error_view.dart';
@@ -10,6 +12,21 @@ import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_failure.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/library/poster_card.dart';
+
+const Map<ShortcutActivator, Intent> _kShelfArrowShortcuts = {
+  SingleActivator(LogicalKeyboardKey.arrowLeft): DirectionalFocusIntent(
+    TraversalDirection.left,
+  ),
+  SingleActivator(LogicalKeyboardKey.arrowRight): DirectionalFocusIntent(
+    TraversalDirection.right,
+  ),
+  SingleActivator(LogicalKeyboardKey.arrowUp): DirectionalFocusIntent(
+    TraversalDirection.up,
+  ),
+  SingleActivator(LogicalKeyboardKey.arrowDown): DirectionalFocusIntent(
+    TraversalDirection.down,
+  ),
+};
 
 class MediaShelf extends StatefulWidget {
   const MediaShelf({
@@ -250,36 +267,48 @@ class _MediaShelfState extends State<MediaShelf> {
                       _updateScrollButtons();
                       return false;
                     },
-                    child: ListView.separated(
-                      controller: _controller,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: AppSpacing.md,
-                      ),
-                      scrollDirection: Axis.horizontal,
-                      itemBuilder: (context, index) {
-                        final item = widget.items[index];
-                        final child =
-                            widget.itemBuilder?.call(context, item) ??
-                            PosterCard(
-                              item: item,
-                              showProgress: widget.showProgress,
-                              wide: widget.wide,
-                              width: widget.wide
-                                  ? MediaShelf.wideCardWidthFor(screenWidth)
-                                  : MediaShelf.posterWidthFor(screenWidth),
-                              onTap: () => widget.onTap(item),
-                            );
-                        return Align(
-                          alignment: Alignment.center,
-                          child: Listener(
-                            onPointerSignal: _onVerticalWheelToParent,
-                            child: child,
+                    child: FocusTraversalGroup(
+                      policy: ReadingOrderTraversalPolicy(),
+                      child: Listener(
+                        onPointerSignal: _onVerticalWheelToParent,
+                        child: ListView.separated(
+                          controller: _controller,
+                          scrollCacheExtent: const ScrollCacheExtent.viewport(
+                            1,
                           ),
-                        );
-                      },
-                      separatorBuilder: (context, index) =>
-                          const SizedBox(width: AppSpacing.sm),
-                      itemCount: widget.items.length,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: AppSpacing.md,
+                          ),
+                          scrollDirection: Axis.horizontal,
+                          itemBuilder: (context, index) {
+                            final item = widget.items[index];
+                            final child =
+                                widget.itemBuilder?.call(context, item) ??
+                                PosterCard(
+                                  item: item,
+                                  showProgress: widget.showProgress,
+                                  wide: widget.wide,
+                                  width: widget.wide
+                                      ? MediaShelf.wideCardWidthFor(screenWidth)
+                                      : MediaShelf.posterWidthFor(screenWidth),
+                                  onTap: () => widget.onTap(item),
+                                );
+                            return Align(
+                              alignment: Alignment.center,
+                              child: Listener(
+                                onPointerSignal: _onVerticalWheelToParent,
+                                child: Shortcuts(
+                                  shortcuts: _kShelfArrowShortcuts,
+                                  child: _EnsureVisibleOnFocus(child: child),
+                                ),
+                              ),
+                            );
+                          },
+                          separatorBuilder: (context, index) =>
+                              const SizedBox(width: AppSpacing.sm),
+                          itemCount: widget.items.length,
+                        ),
+                      ),
                     ),
                   ),
                   if (_canScrollLeft)
@@ -288,13 +317,15 @@ class _MediaShelfState extends State<MediaShelf> {
                       top: 0,
                       bottom: 0,
                       child: Center(
-                        child: _ScrollButton(
-                          buttonKey: CatalogKeys.shelfScrollLeft(
-                            widget.shelfId,
+                        child: ExcludeFocus(
+                          child: _ScrollButton(
+                            buttonKey: CatalogKeys.shelfScrollLeft(
+                              widget.shelfId,
+                            ),
+                            tooltip: l10n.scrollLeft,
+                            icon: Icons.chevron_left,
+                            onPressed: () => _page(-1),
                           ),
-                          tooltip: l10n.scrollLeft,
-                          icon: Icons.chevron_left,
-                          onPressed: () => _page(-1),
                         ),
                       ),
                     ),
@@ -304,13 +335,15 @@ class _MediaShelfState extends State<MediaShelf> {
                       top: 0,
                       bottom: 0,
                       child: Center(
-                        child: _ScrollButton(
-                          buttonKey: CatalogKeys.shelfScrollRight(
-                            widget.shelfId,
+                        child: ExcludeFocus(
+                          child: _ScrollButton(
+                            buttonKey: CatalogKeys.shelfScrollRight(
+                              widget.shelfId,
+                            ),
+                            tooltip: l10n.scrollRight,
+                            icon: Icons.chevron_right,
+                            onPressed: () => _page(1),
                           ),
-                          tooltip: l10n.scrollRight,
-                          icon: Icons.chevron_right,
-                          onPressed: () => _page(1),
                         ),
                       ),
                     ),
@@ -319,6 +352,39 @@ class _MediaShelfState extends State<MediaShelf> {
             ),
         ],
       ),
+    );
+  }
+}
+
+class _EnsureVisibleOnFocus extends StatelessWidget {
+  const _EnsureVisibleOnFocus({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Focus(
+      canRequestFocus: false,
+      skipTraversal: true,
+      onFocusChange: (focused) {
+        if (!focused) {
+          return;
+        }
+        final target = context;
+        final duration = AppMotion.durationOf(target, AppMotion.fast);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!target.mounted) {
+            return;
+          }
+          Scrollable.ensureVisible(
+            target,
+            alignment: 0.5,
+            duration: duration,
+            curve: AppMotion.standard,
+          );
+        });
+      },
+      child: child,
     );
   }
 }

@@ -9,6 +9,7 @@ import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/media_shelf.dart';
 import 'package:rillight/media_image/media_image.dart';
 
+/// 首页片库入口,只作内容行;进库主路径是顶栏库名.
 class LibraryTiles extends StatelessWidget {
   const LibraryTiles({super.key, required this.libraries});
 
