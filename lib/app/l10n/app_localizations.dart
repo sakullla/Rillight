@@ -394,6 +394,24 @@ abstract class AppLocalizations {
   /// **'向右'**
   String get scrollRight;
 
+  /// Tooltip for the library page header control that switches between media libraries.
+  ///
+  /// In zh, this message translates to:
+  /// **'切换媒体库'**
+  String get switchLibrary;
+
+  /// Tooltip for the control that collapses the side navigation.
+  ///
+  /// In zh, this message translates to:
+  /// **'收起导航'**
+  String get collapseNav;
+
+  /// Tooltip for the floating control that expands the side navigation.
+  ///
+  /// In zh, this message translates to:
+  /// **'展开导航'**
+  String get expandNav;
+
   /// Action to mark an item as played.
   ///
   /// In zh, this message translates to:

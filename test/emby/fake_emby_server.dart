@@ -845,6 +845,11 @@ class FakeEmbyServer {
         return descending ? -compared : compared;
       });
     }
+    final startIndex =
+        int.tryParse(options.uri.queryParameters['StartIndex'] ?? '') ?? 0;
+    if (startIndex > 0) {
+      matched = matched.skip(startIndex).toList();
+    }
     final limit = int.tryParse(options.uri.queryParameters['Limit'] ?? '');
     if (limit != null && limit >= 0) {
       return matched.take(limit).toList();

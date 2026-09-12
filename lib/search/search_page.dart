@@ -35,13 +35,42 @@ class _SearchPageState extends State<SearchPage> {
   final _query = TextEditingController();
   List<EmbyItem> _items = const [];
   bool _loading = false;
+  bool _loadingMore = false;
+  bool _hasMore = false;
   bool _searched = false;
   EmbyException? _error;
+  String _term = '';
+  int _fetched = 0;
+  final ScrollController _scrollController = ScrollController();
+
+  /// 滚动距底部不足该像素时预取下一页。
+  static const _loadMoreThreshold = 600.0;
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController.addListener(_maybeLoadMore);
+  }
 
   @override
   void dispose() {
+    _scrollController.removeListener(_maybeLoadMore);
+    _scrollController.dispose();
     _query.dispose();
     super.dispose();
+  }
+
+  void _maybeLoadMore() {
+    if (!_hasMore || _loading || _loadingMore || _term.isEmpty) {
+      return;
+    }
+    if (!_scrollController.hasClients) {
+      return;
+    }
+    final position = _scrollController.position;
+    if (position.pixels >= position.maxScrollExtent - _loadMoreThreshold) {
+      _loadMore();
+    }
   }
 
   Future<void> _submit([String? raw]) async {
@@ -52,6 +81,9 @@ class _SearchPageState extends State<SearchPage> {
         _items = const [];
         _error = null;
         _loading = false;
+        _hasMore = false;
+        _term = '';
+        _fetched = 0;
       });
       return;
     }
@@ -59,14 +91,19 @@ class _SearchPageState extends State<SearchPage> {
       _loading = true;
       _error = null;
       _searched = true;
+      _term = term;
     });
     try {
-      final items = await AuthScope.of(context).client.searchByName(term);
+      final items = await AuthScope.of(
+        context,
+      ).client.searchByName(term, startIndex: 0);
       if (!mounted) {
         return;
       }
       setState(() {
         _items = items.where((item) => item.isMovieOrSeries).toList();
+        _fetched = items.length;
+        _hasMore = items.length >= 50;
         _loading = false;
       });
     } on EmbyException catch (error) {
@@ -78,6 +115,30 @@ class _SearchPageState extends State<SearchPage> {
         _items = const [];
         _loading = false;
       });
+    }
+  }
+
+  Future<void> _loadMore() async {
+    setState(() => _loadingMore = true);
+    try {
+      final items = await AuthScope.of(
+        context,
+      ).client.searchByName(_term, startIndex: _fetched);
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _items = [..._items, ...items.where((item) => item.isMovieOrSeries)];
+        _fetched += items.length;
+        _hasMore = items.length >= 50;
+        _loadingMore = false;
+      });
+    } on EmbyException {
+      if (!mounted) {
+        return;
+      }
+      // 追加失败保留已有结果,滚动到底部可重试。
+      setState(() => _loadingMore = false);
     }
   }
 
@@ -166,6 +227,7 @@ class _SearchPageState extends State<SearchPage> {
     return LayoutBuilder(
       builder: (context, constraints) {
         return GridView.builder(
+          controller: _scrollController,
           padding: const EdgeInsets.fromLTRB(
             AppSpacing.md,
             0,
@@ -176,8 +238,11 @@ class _SearchPageState extends State<SearchPage> {
             screenWidth: screenWidth,
             availableWidth: constraints.maxWidth - AppSpacing.md * 2,
           ),
-          itemCount: _items.length,
+          itemCount: _items.length + (_loadingMore ? 1 : 0),
           itemBuilder: (context, index) {
+            if (index >= _items.length) {
+              return const Center(child: CircularProgressIndicator());
+            }
             final item = _items[index];
             return ShelfGridPage.gridCard(
               context,

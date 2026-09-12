@@ -161,6 +161,15 @@ class AppLocalizationsZh extends AppLocalizations {
   String get scrollRight => '向右';
 
   @override
+  String get switchLibrary => '切换媒体库';
+
+  @override
+  String get collapseNav => '收起导航';
+
+  @override
+  String get expandNav => '展开导航';
+
+  @override
   String get markPlayed => '标记已看';
 
   @override

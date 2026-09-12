@@ -17,6 +17,9 @@ abstract final class CatalogKeys {
   static const sortBy = Key('catalog-sort-by');
   static const mediaSource = Key('catalog-media-source');
   static const detailAudio = Key('catalog-detail-audio');
+  static const librarySwitcher = Key('catalog-library-switcher');
+  static const heroPrev = Key('catalog-hero-prev');
+  static const heroNext = Key('catalog-hero-next');
 
   static const shelfResume = 'resume';
   static const shelfNextUp = 'nextup';

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
+import 'package:rillight/app/app_shell.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/widgets/app_error_view.dart';
 import 'package:rillight/app/widgets/poster_placeholder.dart';
@@ -260,6 +261,38 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.byType(HomePage), findsOneWidget);
+  });
+
+  testWidgets('navigation rail collapses and expands via toggle', (
+    tester,
+  ) async {
+    final server = FakeEmbyServer();
+    final adapter = FakeEmbyAdapter([server]);
+    final auth = AuthController(
+      client: EmbyClient(device: _device, dio: dioForFakeEmby(adapter)),
+      credentials: MemoryCredentialStore(),
+      servers: MemoryServerListStore(),
+    );
+    await tester.runAsync(() {
+      return auth.connect(
+        address: server.baseUrl.toString(),
+        username: 'alice',
+        password: 'correct-horse',
+      );
+    });
+    await tester.pumpWidget(RillightApp(auth: auth));
+    await tester.pumpAndSettle();
+    expect(find.byType(NavigationRail), findsOneWidget);
+
+    await tester.tap(find.byKey(AppShell.railToggle));
+    await tester.pumpAndSettle();
+    expect(find.byType(NavigationRail), findsNothing);
+    expect(find.byKey(AppShell.railToggle), findsOneWidget);
+    expect(find.byIcon(Icons.menu), findsOneWidget);
+
+    await tester.tap(find.byKey(AppShell.railToggle));
+    await tester.pumpAndSettle();
+    expect(find.byType(NavigationRail), findsOneWidget);
   });
 }
 

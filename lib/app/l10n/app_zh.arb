@@ -205,6 +205,18 @@
   "@scrollRight": {
     "description": "Tooltip for the shelf control that reveals posters to the right."
   },
+  "switchLibrary": "切换媒体库",
+  "@switchLibrary": {
+    "description": "Tooltip for the library page header control that switches between media libraries."
+  },
+  "collapseNav": "收起导航",
+  "@collapseNav": {
+    "description": "Tooltip for the control that collapses the side navigation."
+  },
+  "expandNav": "展开导航",
+  "@expandNav": {
+    "description": "Tooltip for the floating control that expands the side navigation."
+  },
   "markPlayed": "标记已看",
   "@markPlayed": {
     "description": "Action to mark an item as played."

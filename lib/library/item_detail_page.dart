@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
@@ -934,7 +935,7 @@ List<ItemMediaStream> _subtitleChoices(EmbyItem item, String? sourceId) {
   return source.subtitleStreams;
 }
 
-class _ChapterRow extends StatelessWidget {
+class _ChapterRow extends StatefulWidget {
   const _ChapterRow({
     required this.itemId,
     required this.chapters,
@@ -953,6 +954,98 @@ class _ChapterRow extends StatelessWidget {
       _imageHeight + AppSpacing.xs + AppSpacing.xxxl;
 
   @override
+  State<_ChapterRow> createState() => _ChapterRowState();
+}
+
+class _ChapterRowState extends State<_ChapterRow> {
+  final ScrollController _controller = ScrollController();
+  bool _overflowing = false;
+  bool _canScrollLeft = false;
+  bool _canScrollRight = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller.addListener(_updateScrollButtons);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _updateScrollButtons();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _controller.removeListener(_updateScrollButtons);
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _updateScrollButtons() {
+    if (!_controller.hasClients) {
+      if (_overflowing || _canScrollLeft || _canScrollRight) {
+        setState(() {
+          _overflowing = false;
+          _canScrollLeft = false;
+          _canScrollRight = false;
+        });
+      }
+      return;
+    }
+    final position = _controller.position;
+    final overflowing = position.maxScrollExtent > 0.5;
+    final canLeft = overflowing && position.pixels > 0.5;
+    final canRight =
+        overflowing && position.pixels < position.maxScrollExtent - 0.5;
+    if (overflowing != _overflowing ||
+        canLeft != _canScrollLeft ||
+        canRight != _canScrollRight) {
+      setState(() {
+        _overflowing = overflowing;
+        _canScrollLeft = canLeft;
+        _canScrollRight = canRight;
+      });
+    }
+  }
+
+  // 垂直滚轮转发给父级滚动(与 MediaShelf 同策略),避免在行上死锁滚轮。
+  void _onVerticalWheelToParent(PointerSignalEvent event) {
+    if (event is! PointerScrollEvent) {
+      return;
+    }
+    if (event.scrollDelta.dy.abs() <= event.scrollDelta.dx.abs()) {
+      return;
+    }
+    final vertical = Scrollable.maybeOf(context, axis: Axis.vertical);
+    if (vertical == null) {
+      return;
+    }
+    GestureBinding.instance.pointerSignalResolver.register(event, (resolved) {
+      final dy = (resolved as PointerScrollEvent).scrollDelta.dy;
+      final position = vertical.position;
+      position.jumpTo(
+        (position.pixels + dy).clamp(
+          position.minScrollExtent,
+          position.maxScrollExtent,
+        ),
+      );
+    });
+  }
+
+  void _page(int direction) {
+    if (!_controller.hasClients) {
+      return;
+    }
+    final position = _controller.position;
+    final delta = position.viewportDimension * 0.9 * direction;
+    _controller.animateTo(
+      (position.pixels + delta).clamp(0.0, position.maxScrollExtent),
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOut,
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     return Padding(
@@ -969,25 +1062,103 @@ class _ChapterRow extends StatelessWidget {
           ),
           const SizedBox(height: AppSpacing.sm),
           SizedBox(
-            height: _rowHeight,
-            child: ListView.separated(
-              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
-              scrollDirection: Axis.horizontal,
-              itemCount: chapters.length,
-              separatorBuilder: (context, index) =>
-                  const SizedBox(width: AppSpacing.sm),
-              itemBuilder: (context, index) {
-                final chapter = chapters[index];
-                return _ChapterCard(
-                  itemId: itemId,
-                  index: index,
-                  chapter: chapter,
-                  onTap: () => onSelect(chapter),
-                );
-              },
+            height: _ChapterRow._rowHeight,
+            child: Stack(
+              children: [
+                NotificationListener<ScrollMetricsNotification>(
+                  onNotification: (notification) {
+                    _updateScrollButtons();
+                    return false;
+                  },
+                  child: ListView.separated(
+                    controller: _controller,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.md,
+                    ),
+                    scrollDirection: Axis.horizontal,
+                    itemCount: widget.chapters.length,
+                    separatorBuilder: (context, index) =>
+                        const SizedBox(width: AppSpacing.sm),
+                    itemBuilder: (context, index) {
+                      final chapter = widget.chapters[index];
+                      return Align(
+                        alignment: Alignment.center,
+                        child: Listener(
+                          onPointerSignal: _onVerticalWheelToParent,
+                          child: _ChapterCard(
+                            itemId: widget.itemId,
+                            index: index,
+                            chapter: chapter,
+                            onTap: () => widget.onSelect(chapter),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                if (_canScrollLeft)
+                  Positioned(
+                    left: AppSpacing.xs,
+                    top: 0,
+                    bottom: 0,
+                    child: Center(
+                      child: _ChapterScrollButton(
+                        buttonKey: CatalogKeys.shelfScrollLeft('chapters'),
+                        tooltip: l10n.scrollLeft,
+                        icon: Icons.chevron_left,
+                        onPressed: () => _page(-1),
+                      ),
+                    ),
+                  ),
+                if (_canScrollRight)
+                  Positioned(
+                    right: AppSpacing.xs,
+                    top: 0,
+                    bottom: 0,
+                    child: Center(
+                      child: _ChapterScrollButton(
+                        buttonKey: CatalogKeys.shelfScrollRight('chapters'),
+                        tooltip: l10n.scrollRight,
+                        icon: Icons.chevron_right,
+                        onPressed: () => _page(1),
+                      ),
+                    ),
+                  ),
+              ],
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _ChapterScrollButton extends StatelessWidget {
+  const _ChapterScrollButton({
+    required this.buttonKey,
+    required this.tooltip,
+    required this.icon,
+    required this.onPressed,
+  });
+
+  final Key buttonKey;
+  final String tooltip;
+  final IconData icon;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xxs),
+      child: Material(
+        color: Theme.of(context).colorScheme.scrim.withValues(alpha: 0.55),
+        shape: const CircleBorder(),
+        child: IconButton(
+          key: buttonKey,
+          tooltip: tooltip,
+          onPressed: onPressed,
+          icon: Icon(icon),
+        ),
       ),
     );
   }

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -9,13 +10,15 @@ import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_controller.dart';
+import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/library/item_format.dart';
 import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/player/player_window_host.dart';
 
-/// 首页全宽沉浸式 hero:backdrop 顶到内容区边缘,渐变遮罩上叠
-/// 大标题、元信息与主操作。高度随内容区宽度按比例伸缩并按断点封顶。
-class HomeHero extends StatelessWidget {
+/// 首页全宽沉浸式 hero 轮播:多条 featured 内容(继续观看优先,其次最新
+/// 电影/剧集),支持左右箭头与指示点手动切换,并每 10 秒自动轮换(悬停暂停)。
+/// backdrop 顶到内容区边缘,渐变遮罩上叠大标题、元信息与主操作。
+class HomeHero extends StatefulWidget {
   const HomeHero({super.key, required this.catalog});
 
   final CatalogController catalog;
@@ -36,33 +39,98 @@ class HomeHero extends StatelessWidget {
   /// 高度足够时才放得下简介。
   static bool showsOverview(double width) => heightFor(width) >= 360;
 
-  EmbyItem? get _featured {
-    for (final item in catalog.resume.items) {
-      if (item.isPlayable || item.isSeries) {
-        return item;
+  /// 轮播候选上限,避免指示点过多。
+  static const maxFeatured = 10;
+
+  /// 自动轮换间隔。
+  static const autoAdvanceInterval = Duration(seconds: 10);
+
+  /// 自动轮换开关;flutter test 环境默认关闭,保证 pumpAndSettle 期间内容确定
+  /// (本应用仅桌面平台,Platform 可用)。
+  static bool autoAdvanceEnabled =
+      Platform.environment['FLUTTER_TEST'] != 'true';
+
+  @override
+  State<HomeHero> createState() => _HomeHeroState();
+}
+
+class _HomeHeroState extends State<HomeHero> {
+  int _index = 0;
+  bool _hovering = false;
+  Timer? _autoAdvance;
+
+  /// featured 候选:继续观看(可播/剧集)优先,其次最新电影、最新剧集,
+  /// 按 id 去重并截断到 [HomeHero.maxFeatured]。
+  List<EmbyItem> get _featuredItems {
+    final seen = <String>{};
+    final items = <EmbyItem>[];
+    void addAll(Iterable<EmbyItem> source, {bool playableOnly = false}) {
+      for (final item in source) {
+        if (playableOnly && !item.isPlayable && !item.isSeries) {
+          continue;
+        }
+        if (seen.add(item.id)) {
+          items.add(item);
+        }
+        if (items.length >= HomeHero.maxFeatured) {
+          return;
+        }
       }
     }
-    for (final item in catalog.latestMovies.items) {
-      return item;
-    }
-    for (final item in catalog.latestSeries.items) {
-      return item;
-    }
-    return null;
+
+    addAll(widget.catalog.resume.items, playableOnly: true);
+    addAll(widget.catalog.latestMovies.items);
+    addAll(widget.catalog.latestSeries.items);
+    return items;
   }
 
   bool get _loading =>
-      catalog.resume.loading ||
-      catalog.latestMovies.loading ||
-      catalog.latestSeries.loading;
+      widget.catalog.resume.loading ||
+      widget.catalog.latestMovies.loading ||
+      widget.catalog.latestSeries.loading;
+
+  @override
+  void initState() {
+    super.initState();
+    if (HomeHero.autoAdvanceEnabled) {
+      _autoAdvance = Timer.periodic(HomeHero.autoAdvanceInterval, (_) {
+        _tick();
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _autoAdvance?.cancel();
+    super.dispose();
+  }
+
+  void _tick() {
+    if (!mounted || _hovering) {
+      return;
+    }
+    final count = _featuredItems.length;
+    if (count < 2) {
+      return;
+    }
+    setState(() => _index = (_index + 1) % count);
+  }
+
+  void _go(int delta) {
+    final count = _featuredItems.length;
+    if (count < 2) {
+      return;
+    }
+    setState(() => _index = (_index + delta + count) % count);
+  }
 
   @override
   Widget build(BuildContext context) {
-    final item = _featured;
+    final items = _featuredItems;
     return LayoutBuilder(
       builder: (context, constraints) {
-        final height = heightFor(constraints.maxWidth);
-        if (item == null) {
+        final height = HomeHero.heightFor(constraints.maxWidth);
+        if (items.isEmpty) {
           if (!_loading) {
             return const SizedBox.shrink();
           }
@@ -72,59 +140,180 @@ class HomeHero extends StatelessWidget {
             borderRadius: BorderRadius.zero,
           );
         }
+        final index = _index % items.length;
+        final item = items[index];
         return SizedBox(
           height: height,
           width: double.infinity,
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              MediaImage(
-                item: item,
-                height: height,
-                preferBackdrop: true,
-                maxWidth: 1600,
-              ),
-              DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.centerLeft,
-                    end: Alignment.centerRight,
-                    colors: [
-                      Theme.of(
-                        context,
-                      ).colorScheme.scrim.withValues(alpha: 0.8),
-                      Theme.of(context).colorScheme.scrim.withValues(alpha: 0),
-                    ],
+          child: MouseRegion(
+            onEnter: (_) => setState(() => _hovering = true),
+            onExit: (_) => setState(() => _hovering = false),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                AnimatedSwitcher(
+                  duration: AppMotion.slow,
+                  child: KeyedSubtree(
+                    key: ValueKey(item.id),
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        MediaImage(
+                          item: item,
+                          height: height,
+                          preferBackdrop: true,
+                          maxWidth: 1600,
+                        ),
+                        DecoratedBox(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.centerLeft,
+                              end: Alignment.centerRight,
+                              colors: [
+                                Theme.of(
+                                  context,
+                                ).colorScheme.scrim.withValues(alpha: 0.8),
+                                Theme.of(
+                                  context,
+                                ).colorScheme.scrim.withValues(alpha: 0),
+                              ],
+                            ),
+                          ),
+                        ),
+                        DecoratedBox(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.bottomCenter,
+                              end: Alignment.topCenter,
+                              colors: [
+                                Theme.of(
+                                  context,
+                                ).colorScheme.scrim.withValues(alpha: 0.9),
+                                Theme.of(
+                                  context,
+                                ).colorScheme.scrim.withValues(alpha: 0),
+                              ],
+                            ),
+                          ),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(
+                            AppSpacing.xxl,
+                            AppSpacing.xl,
+                            AppSpacing.xxl,
+                            AppSpacing.xl,
+                          ),
+                          child: _HeroContent(
+                            item: item,
+                            width: constraints.maxWidth,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-              ),
-              DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.bottomCenter,
-                    end: Alignment.topCenter,
-                    colors: [
-                      Theme.of(
-                        context,
-                      ).colorScheme.scrim.withValues(alpha: 0.9),
-                      Theme.of(context).colorScheme.scrim.withValues(alpha: 0),
-                    ],
+                if (items.length > 1) ...[
+                  Positioned(
+                    left: AppSpacing.sm,
+                    top: 0,
+                    bottom: 0,
+                    child: Center(
+                      child: _HeroNavButton(
+                        buttonKey: CatalogKeys.heroPrev,
+                        tooltip: AppLocalizations.of(context).scrollLeft,
+                        icon: Icons.chevron_left,
+                        onPressed: () => _go(-1),
+                      ),
+                    ),
                   ),
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(
-                  AppSpacing.xxl,
-                  AppSpacing.xl,
-                  AppSpacing.xxl,
-                  AppSpacing.xl,
-                ),
-                child: _HeroContent(item: item, width: constraints.maxWidth),
-              ),
-            ],
+                  Positioned(
+                    right: AppSpacing.sm,
+                    top: 0,
+                    bottom: 0,
+                    child: Center(
+                      child: _HeroNavButton(
+                        buttonKey: CatalogKeys.heroNext,
+                        tooltip: AppLocalizations.of(context).scrollRight,
+                        icon: Icons.chevron_right,
+                        onPressed: () => _go(1),
+                      ),
+                    ),
+                  ),
+                  Positioned(
+                    right: AppSpacing.xl,
+                    bottom: AppSpacing.md,
+                    child: _HeroIndicators(
+                      key: Key('catalog-hero-index-$index'),
+                      count: items.length,
+                      index: index,
+                    ),
+                  ),
+                ],
+              ],
+            ),
           ),
         );
       },
+    );
+  }
+}
+
+class _HeroNavButton extends StatelessWidget {
+  const _HeroNavButton({
+    required this.buttonKey,
+    required this.tooltip,
+    required this.icon,
+    required this.onPressed,
+  });
+
+  final Key buttonKey;
+  final String tooltip;
+  final IconData icon;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Theme.of(context).colorScheme.scrim.withValues(alpha: 0.55),
+      shape: const CircleBorder(),
+      child: IconButton(
+        key: buttonKey,
+        tooltip: tooltip,
+        onPressed: onPressed,
+        icon: Icon(icon),
+      ),
+    );
+  }
+}
+
+class _HeroIndicators extends StatelessWidget {
+  const _HeroIndicators({super.key, required this.count, required this.index});
+
+  final int count;
+  final int index;
+
+  @override
+  Widget build(BuildContext context) {
+    final active = Theme.of(context).colorScheme.primary;
+    final inactive = Colors.white.withValues(alpha: 0.45);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (var i = 0; i < count; i++)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xxs / 2),
+            child: AnimatedContainer(
+              duration: AppMotion.fast,
+              curve: AppMotion.standard,
+              width: i == index ? 18 : 6,
+              height: 6,
+              decoration: BoxDecoration(
+                color: i == index ? active : inactive,
+                borderRadius: BorderRadius.circular(AppRadii.sm / 2),
+              ),
+            ),
+          ),
+      ],
     );
   }
 }

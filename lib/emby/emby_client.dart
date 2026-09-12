@@ -139,6 +139,7 @@ class EmbyClient {
 
   Future<List<EmbyItem>> getResumeItems({
     int limit = 24,
+    int? startIndex,
     String? sortBy,
     String? sortOrder,
   }) {
@@ -149,6 +150,7 @@ class EmbyClient {
         'MediaTypes': 'Video',
         'Fields': itemFields,
         'EnableImageTypes': imageTypes,
+        if (startIndex != null) 'StartIndex': '$startIndex',
         'SortBy': ?sortBy,
         'SortOrder': ?sortOrder,
       },
@@ -157,6 +159,7 @@ class EmbyClient {
 
   Future<List<EmbyItem>> getNextUp({
     int limit = 24,
+    int? startIndex,
     String? sortBy,
     String? sortOrder,
   }) {
@@ -167,6 +170,7 @@ class EmbyClient {
         'Limit': '$limit',
         'Fields': itemFields,
         'EnableImageTypes': imageTypes,
+        if (startIndex != null) 'StartIndex': '$startIndex',
         'SortBy': ?sortBy,
         'SortOrder': ?sortOrder,
       },
@@ -200,6 +204,7 @@ class EmbyClient {
     String? includeItemTypes,
     bool recursive = false,
     int? limit,
+    int? startIndex,
     String? sortBy,
     String? sortOrder,
     String fields = itemFields,
@@ -213,6 +218,7 @@ class EmbyClient {
           'IncludeItemTypes': includeItemTypes,
         'Recursive': '$recursive',
         if (limit != null) 'Limit': '$limit',
+        if (startIndex != null) 'StartIndex': '$startIndex',
         'Fields': fields,
         'SortBy': ?sortBy,
         'SortOrder': ?sortOrder,
@@ -221,7 +227,7 @@ class EmbyClient {
     );
   }
 
-  Future<List<EmbyItem>> searchByName(String searchTerm) {
+  Future<List<EmbyItem>> searchByName(String searchTerm, {int? startIndex}) {
     final term = searchTerm.trim();
     if (term.isEmpty) {
       throw ArgumentError.value(searchTerm, 'searchTerm');
@@ -231,6 +237,7 @@ class EmbyClient {
       recursive: true,
       includeItemTypes: 'Movie,Series',
       limit: 50,
+      startIndex: startIndex,
       sortBy: 'SortName',
       sortOrder: 'Ascending',
     );

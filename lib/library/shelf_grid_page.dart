@@ -24,6 +24,7 @@ class ShelfGridPage extends StatefulWidget {
     this.includeItemTypes,
     this.itemId,
     this.title = '',
+    this.titleOverride,
     this.recursive = false,
     this.moviesOrSeriesOnly = false,
   });
@@ -33,6 +34,9 @@ class ShelfGridPage extends StatefulWidget {
   final String? includeItemTypes;
   final String? itemId;
   final String title;
+
+  /// 非空时替换头部标题文本(如库页的媒体库切换器)。
+  final Widget? titleOverride;
   final bool recursive;
   final bool moviesOrSeriesOnly;
 
@@ -108,19 +112,42 @@ class ShelfGridPage extends StatefulWidget {
 }
 
 class _ShelfGridPageState extends State<ShelfGridPage> {
+  /// 每页条数:分页加载,避免一次拉全库导致卡顿。
+  static const _pageSize = 60;
+
+  /// 滚动距底部不足该像素时预取下一页。
+  static const _loadMoreThreshold = 600.0;
+
   List<EmbyItem> _items = const [];
   bool _loading = true;
+  bool _loadingMore = false;
+  bool _hasMore = false;
   EmbyException? _error;
   CatalogSort _sort = CatalogSort.initial;
+  final ScrollController _scrollController = ScrollController();
+
+  /// 已拉取的原始条数(过滤前),作为下一页的 StartIndex。
+  int _fetched = 0;
+
+  /// similar 接口不支持 StartIndex,只取单页。
+  bool get _paged => widget.source != 'similar';
 
   @override
   void initState() {
     super.initState();
+    _scrollController.addListener(_maybeLoadMore);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         _load();
       }
     });
+  }
+
+  @override
+  void dispose() {
+    _scrollController.removeListener(_maybeLoadMore);
+    _scrollController.dispose();
+    super.dispose();
   }
 
   @override
@@ -137,22 +164,43 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
     }
   }
 
+  void _maybeLoadMore() {
+    if (!_paged || !_hasMore || _loading || _loadingMore) {
+      return;
+    }
+    if (!_scrollController.hasClients) {
+      return;
+    }
+    final position = _scrollController.position;
+    if (position.pixels >= position.maxScrollExtent - _loadMoreThreshold) {
+      _loadMore();
+    }
+  }
+
+  List<EmbyItem> _applyFilter(List<EmbyItem> items) {
+    if (!widget.moviesOrSeriesOnly) {
+      return items;
+    }
+    return items.where((item) => item.isMovieOrSeries).toList();
+  }
+
   Future<void> _load() async {
     setState(() {
       _loading = true;
       _error = null;
+      _items = const [];
+      _hasMore = false;
+      _fetched = 0;
     });
     try {
-      final items = await _fetch(AuthScope.of(context).client);
+      final items = await _fetch(AuthScope.of(context).client, 0, _pageSize);
       if (!mounted) {
         return;
       }
-      var visible = items;
-      if (widget.moviesOrSeriesOnly) {
-        visible = items.where((item) => item.isMovieOrSeries).toList();
-      }
       setState(() {
-        _items = visible;
+        _items = _applyFilter(items);
+        _fetched = items.length;
+        _hasMore = _paged && items.length >= _pageSize;
         _loading = false;
       });
     } on EmbyException catch (error) {
@@ -166,17 +214,45 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
     }
   }
 
-  Future<List<EmbyItem>> _fetch(EmbyClient client) {
+  Future<void> _loadMore() async {
+    setState(() => _loadingMore = true);
+    try {
+      final items = await _fetch(
+        AuthScope.of(context).client,
+        _fetched,
+        _pageSize,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _items = [..._items, ..._applyFilter(items)];
+        _fetched += items.length;
+        _hasMore = items.length >= _pageSize;
+        _loadingMore = false;
+      });
+    } on EmbyException {
+      if (!mounted) {
+        return;
+      }
+      // 分页追加失败不打断已有内容,保留重试机会(再次滚动到底部重试)。
+      setState(() => _loadingMore = false);
+    }
+  }
+
+  Future<List<EmbyItem>> _fetch(EmbyClient client, int startIndex, int limit) {
     switch (widget.source) {
       case 'resume':
         return client.getResumeItems(
-          limit: 200,
+          limit: limit,
+          startIndex: startIndex,
           sortBy: _sort.sortBy,
           sortOrder: _sort.sortOrder,
         );
       case 'nextup':
         return client.getNextUp(
-          limit: 200,
+          limit: limit,
+          startIndex: startIndex,
           sortBy: _sort.sortBy,
           sortOrder: _sort.sortOrder,
         );
@@ -184,6 +260,8 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
         return client.getItems(
           includeItemTypes: 'Movie',
           recursive: true,
+          limit: limit,
+          startIndex: startIndex,
           sortBy: _sort.sortBy,
           sortOrder: _sort.sortOrder,
         );
@@ -191,6 +269,8 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
         return client.getItems(
           includeItemTypes: 'Series',
           recursive: true,
+          limit: limit,
+          startIndex: startIndex,
           sortBy: _sort.sortBy,
           sortOrder: _sort.sortOrder,
         );
@@ -198,6 +278,7 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
         final itemId = widget.itemId ?? '';
         return client.getSimilar(
           itemId,
+          limit: limit,
           sortBy: _sort.sortBy,
           sortOrder: _sort.sortOrder,
         );
@@ -206,6 +287,8 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
           parentId: widget.parentId,
           includeItemTypes: widget.includeItemTypes,
           recursive: widget.recursive,
+          limit: limit,
+          startIndex: startIndex,
           sortBy: _sort.sortBy,
           sortOrder: _sort.sortOrder,
         );
@@ -250,6 +333,7 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
         children: [
           _Header(
             title: _title(l10n),
+            titleOverride: widget.titleOverride,
             sort: _sort,
             options: const [],
             onSort: _selectSort,
@@ -277,6 +361,7 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
         children: [
           _Header(
             title: _title(l10n),
+            titleOverride: widget.titleOverride,
             sort: _sort,
             options: CatalogSort.optionsFor(_items),
             onSort: _selectSort,
@@ -294,10 +379,12 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
 
     final options = CatalogSort.optionsFor(_items);
     return CustomScrollView(
+      controller: _scrollController,
       slivers: [
         SliverToBoxAdapter(
           child: _Header(
             title: _title(l10n),
+            titleOverride: widget.titleOverride,
             sort: _sort,
             options: options,
             onSort: _selectSort,
@@ -330,6 +417,13 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
             },
           ),
         ),
+        if (_loadingMore)
+          const SliverToBoxAdapter(
+            child: Padding(
+              padding: EdgeInsets.only(bottom: AppSpacing.xxl),
+              child: Center(child: CircularProgressIndicator()),
+            ),
+          ),
       ],
     );
   }
@@ -338,6 +432,7 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
 class _Header extends StatelessWidget {
   const _Header({
     required this.title,
+    this.titleOverride,
     required this.sort,
     required this.options,
     required this.onSort,
@@ -345,6 +440,7 @@ class _Header extends StatelessWidget {
   });
 
   final String title;
+  final Widget? titleOverride;
   final CatalogSort sort;
   final List<CatalogSort> options;
   final ValueChanged<CatalogSort> onSort;
@@ -364,7 +460,10 @@ class _Header extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Expanded(child: Text(title, style: textTheme.headlineMedium)),
+          Expanded(
+            child:
+                titleOverride ?? Text(title, style: textTheme.headlineMedium),
+          ),
           if (showSort)
             PopupMenuButton<CatalogSort>(
               key: CatalogKeys.sortBy,

@@ -9,6 +9,7 @@ import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/home/catalog_keys.dart';
+import 'package:rillight/home/home_hero.dart';
 import 'package:rillight/library/poster_card.dart';
 
 import '../emby/fake_emby_server.dart';
@@ -27,6 +28,11 @@ void main() {
   setUp(() {
     server = FakeEmbyServer();
     adapter = FakeEmbyAdapter([server]);
+    HomeHero.autoAdvanceEnabled = false;
+  });
+
+  tearDown(() {
+    HomeHero.autoAdvanceEnabled = true;
   });
 
   Future<AuthController> pumpLoggedIn(WidgetTester tester) async {
@@ -417,6 +423,107 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('飞屋环游记 (2009)'), findsOneWidget);
     expect(find.byKey(CatalogKeys.similarRow), findsNothing);
+  });
+
+  testWidgets('library page header switches between media libraries', (
+    tester,
+  ) async {
+    await pumpLoggedIn(tester);
+    await openLibrary(tester, 'view-movies');
+    final switcher = find.byKey(CatalogKeys.librarySwitcher);
+    expect(switcher, findsOneWidget);
+    expect(
+      find.descendant(of: switcher, matching: find.text('电影')),
+      findsOneWidget,
+    );
+    expect(find.byKey(CatalogKeys.item('series-friends')), findsNothing);
+
+    await tester.tap(switcher);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('剧集'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.descendant(of: switcher, matching: find.text('剧集')),
+      findsOneWidget,
+    );
+    expect(find.byKey(CatalogKeys.item('movie-inception')), findsNothing);
+    await tester.ensureVisible(find.byKey(CatalogKeys.item('series-friends')));
+    expect(find.byKey(CatalogKeys.item('series-friends')), findsOneWidget);
+  });
+
+  testWidgets('home hero rotates featured items via arrows', (tester) async {
+    await pumpLoggedIn(tester);
+    expect(find.byKey(CatalogKeys.heroNext), findsOneWidget);
+    expect(find.byKey(const Key('catalog-hero-index-0')), findsOneWidget);
+
+    await tester.tap(find.byKey(CatalogKeys.heroNext));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('catalog-hero-index-0')), findsNothing);
+    expect(find.byKey(const Key('catalog-hero-index-1')), findsOneWidget);
+
+    await tester.tap(find.byKey(CatalogKeys.heroPrev));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('catalog-hero-index-0')), findsOneWidget);
+  });
+
+  testWidgets('detail chapter row scrolls horizontally with buttons', (
+    tester,
+  ) async {
+    final movie = server.items.firstWhere((i) => i.id == 'movie-inception');
+    movie.chapters = [
+      for (var i = 0; i < 12; i++)
+        FakeChapter(
+          name: 'Chapter ${i + 1}',
+          startPositionTicks: i * 5 * 60 * 10000000,
+        ),
+    ];
+    await pumpLoggedIn(tester);
+    final inception = find.byKey(CatalogKeys.item('movie-inception')).first;
+    await tester.ensureVisible(inception);
+    await tester.tap(inception);
+    await tester.pumpAndSettle();
+
+    await tester.ensureVisible(find.text('章节'));
+    await tester.pumpAndSettle();
+    final right = find.byKey(CatalogKeys.shelfScrollRight('chapters'));
+    final left = find.byKey(CatalogKeys.shelfScrollLeft('chapters'));
+    expect(right, findsOneWidget);
+    expect(left, findsNothing);
+
+    await tester.tap(right);
+    await tester.pumpAndSettle();
+    expect(left, findsOneWidget);
+  });
+
+  testWidgets('library poster wall loads more pages at the bottom', (
+    tester,
+  ) async {
+    server.items = [
+      ...server.items,
+      for (var i = 0; i < 70; i++)
+        FakeEmbyItem(
+          id: 'bulk-$i',
+          name: 'Bulk $i',
+          type: 'Movie',
+          parentId: 'view-movies',
+          primaryImageTag: 'tag-bulk-$i',
+        ),
+    ];
+    await pumpLoggedIn(tester);
+    await openLibrary(tester, 'view-movies');
+    expect(find.byKey(CatalogKeys.item('bulk-69')), findsNothing);
+
+    // 持续向下滚动:接近底部触发分页预取,直至第 2 页内容构建出来。
+    final grid = find.byType(CustomScrollView);
+    for (var i = 0; i < 20; i++) {
+      await tester.drag(grid, const Offset(0, -400));
+      await tester.pumpAndSettle();
+      if (find.byKey(CatalogKeys.item('bulk-69')).evaluate().isNotEmpty) {
+        break;
+      }
+    }
+    expect(find.byKey(CatalogKeys.item('bulk-69')), findsOneWidget);
   });
 }
 
