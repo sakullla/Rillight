@@ -28,6 +28,10 @@ class FlutterWindow : public Win32Window {
 
   // The Flutter instance hosted by this window.
   std::unique_ptr<flutter::FlutterViewController> flutter_controller_;
+
+  // Flutter view HWND whose WndProc is subclassed so caption-button
+  // WM_NCHITTEST can fall through to the top-level window (HTMAXBUTTON).
+  HWND flutter_view_hwnd_ = nullptr;
 };
 
 #endif  // RUNNER_FLUTTER_WINDOW_H_

@@ -17,7 +17,10 @@ const double kWindowChromeMacosLeadingInset = 78;
 /// 顶栏拖拽的最小位移,避免单击导航被当成拖窗。
 const double _kWindowChromeDragSlop = 4;
 
-/// 主窗口:隐藏系统标题栏,macOS 保留交通灯,最小尺寸 960×540。
+/// 主窗口:扩展客户区贴上缘,macOS 保留交通灯,最小尺寸 960×540。
+///
+/// Windows 不走 [TitleBarStyle.normal] 实心标题栏;最大化等由 runner
+/// WM_NCHITTEST 返回 HTMAXBUTTON/HTCLOSE/HTCAPTION 等价命中。
 const WindowOptions kMainWindowOptions = WindowOptions(
   title: kProductName,
   minimumSize: Size(960, 540),
@@ -25,7 +28,7 @@ const WindowOptions kMainWindowOptions = WindowOptions(
   windowButtonVisibility: true,
 );
 
-/// Windows/Linux 叠包内 [WindowCaption];macOS 只留交通灯。
+/// 是否叠一层标题按钮外观。Linux 可点;Windows 只绘制,命中在 runner。
 bool get windowChromeShowsCaptionButtons {
   switch (defaultTargetPlatform) {
     case TargetPlatform.windows:
@@ -88,7 +91,7 @@ class WindowDragArea extends StatelessWidget {
   }
 }
 
-/// Windows/Linux 标题按钮:包内 [WindowCaption],透明底,不挡住贴边内容。
+/// Linux:包内 [WindowCaption] 可点。Windows:只画外观,交互走 HTMAXBUTTON。
 class WindowChromeButtons extends StatelessWidget {
   const WindowChromeButtons({super.key, this.brightness = Brightness.dark});
 
@@ -96,16 +99,23 @@ class WindowChromeButtons extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return WindowCaption(
+    final caption = WindowCaption(
       brightness: brightness,
       backgroundColor: const Color(0x00000000),
     );
+    if (defaultTargetPlatform == TargetPlatform.windows) {
+      return IgnorePointer(child: caption);
+    }
+    return caption;
   }
 }
 
-/// 主窗口铬宿主:内容铺满上缘,顶带可拖,Windows/Linux 叠 [WindowCaption]。
+/// 主窗口铬宿主:内容铺满上缘,顶带可拖。
 ///
-/// 标题按钮只命中右侧条,其余顶带把单击交给下层,位移超过 slop 再拖窗。
+/// Linux 叠可点 [WindowCaption]。Windows 叠无指针标题按钮外观,系统按钮
+/// 由 runner WM_NCHITTEST 的 HTMINBUTTON/HTMAXBUTTON/HTCLOSE 处理,顶带
+/// 拖拽等价 HTCAPTION(slop 后再 [windowManager.startDragging])。
+/// 标题按钮只占右侧条,其余顶带把单击交给下层。
 class WindowChromeHost extends StatefulWidget {
   const WindowChromeHost({super.key, required this.child});
 
