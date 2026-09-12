@@ -444,9 +444,9 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
             ],
           ),
         ),
-        // 返回按钮悬浮于整页左上,滚动出 hero 后仍可及。
+        // 叠层顶栏占满 y=0..bar;返回钮下移以免点到「首页」。hero 仍用 topOverlap 贴上缘。
         Positioned(
-          top: AppSpacing.md,
+          top: topOverlap + AppSpacing.md,
           left: AppSpacing.md,
           child: _FloatingBackButton(
             onPressed: () {

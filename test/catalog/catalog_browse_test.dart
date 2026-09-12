@@ -209,7 +209,7 @@ void main() {
     expect(find.text('00:00'), findsOneWidget);
     expect(find.byKey(CatalogKeys.chapter(0)), findsOneWidget);
 
-    await _tapBelowTopBar(tester, find.byKey(CatalogKeys.back));
+    await _tapDetailBack(tester);
     await tester.pumpAndSettle();
     await openLibrary(tester, 'view-tv');
     await tester.tap(find.byKey(CatalogKeys.item('series-friends')));
@@ -235,7 +235,7 @@ void main() {
     await _tapBelowTopBar(tester, find.byKey(CatalogKeys.playedToggle));
     await tester.pumpAndSettle();
 
-    await _tapBelowTopBar(tester, find.byKey(CatalogKeys.back));
+    await _tapDetailBack(tester);
     await tester.pumpAndSettle();
     expect(find.byKey(CatalogKeys.resumeRow), findsNothing);
     await tester.ensureVisible(find.byKey(CatalogKeys.item('movie-inception')));
@@ -524,7 +524,7 @@ void main() {
     expect(find.text('更多类似'), findsOneWidget);
     expect(find.byKey(CatalogKeys.item('movie-up')), findsWidgets);
 
-    await _tapBelowTopBar(tester, find.byKey(CatalogKeys.back));
+    await _tapDetailBack(tester);
     await tester.pumpAndSettle();
     server.similarEmpty = true;
     final up = find.byKey(CatalogKeys.item('movie-up')).first;
@@ -755,6 +755,10 @@ void main() {
         isTrue,
       );
       expect(find.byKey(CatalogKeys.back), findsOneWidget);
+      expect(
+        tester.getCenter(find.byKey(CatalogKeys.back)).dy,
+        greaterThan(tester.getRect(find.byKey(AppShell.topBarKey)).bottom),
+      );
       expect(find.byKey(CatalogKeys.playedToggle), findsOneWidget);
       await tester.ensureVisible(find.text('章节'));
       expect(find.byKey(CatalogKeys.chapter(0)), findsOneWidget);
@@ -956,6 +960,15 @@ Future<void> _tapGridSort(WidgetTester tester) async {
   expect(tester.getCenter(sortBy).dy, greaterThan(barBottom));
   await tester.tap(sortBy);
   await tester.pumpAndSettle();
+}
+
+/// 详情返回钮必须整颗落在叠层顶栏下方,普通 center tap 命中返回而不是「首页」。
+Future<void> _tapDetailBack(WidgetTester tester) async {
+  final back = find.byKey(CatalogKeys.back);
+  expect(back, findsOneWidget);
+  final barBottom = tester.getRect(find.byKey(AppShell.topBarKey)).bottom;
+  expect(tester.getCenter(back).dy, greaterThan(barBottom));
+  await tester.tap(back);
 }
 
 /// 顶栏叠在内容上时,控件中心可能落在栏内;点到栏下方仍落在同一控件上的位置.

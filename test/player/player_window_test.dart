@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
+import 'package:rillight/app/app_shell.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/server_list_store.dart';
@@ -204,7 +205,13 @@ void main() {
       expect(find.byType(ItemDetailPage), findsOneWidget);
       expect(find.text('飞屋环游记 (2009)'), findsOneWidget);
 
-      await tester.tap(find.text('首页'));
+      final back = find.byKey(CatalogKeys.back);
+      expect(back, findsOneWidget);
+      expect(
+        tester.getCenter(back).dy,
+        greaterThan(tester.getRect(find.byKey(AppShell.topBarKey)).bottom),
+      );
+      await tester.tap(back);
       await tester.pumpAndSettle();
       final inception = find.byKey(CatalogKeys.item('movie-inception'));
       await tester.ensureVisible(inception.first);
