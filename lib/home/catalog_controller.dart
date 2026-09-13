@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:rillight/auth/auth_controller.dart';
+import 'package:rillight/emby/catalog_cache.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_errors.dart';
 import 'package:rillight/emby/emby_models.dart';
@@ -21,12 +22,17 @@ class CatalogRowState {
 }
 
 class CatalogController extends ChangeNotifier {
-  CatalogController({required this.auth}) {
+  CatalogController({required this.auth, CatalogCache? cache})
+    : cache = cache ?? CatalogCache() {
     _sessionKey = _currentSessionKey;
+    _syncCacheSession();
     auth.addListener(_onAuthChanged);
   }
 
   final AuthController auth;
+
+  /// 目录数据缓存层:先显后刷、TTL 兜底、磁盘持久化。
+  final CatalogCache cache;
 
   CatalogRowState resume = const CatalogRowState(loading: true);
   CatalogRowState nextUp = const CatalogRowState(loading: true);
@@ -44,13 +50,22 @@ class CatalogController extends ChangeNotifier {
 
   EmbyClient get client => auth.client;
 
-  Future<void> reload({bool includeLibraries = true}) async {
+  /// 重拉全部/首页行数据。
+  ///
+  /// [showCachedFirst] 为「先显后刷」:先显命中缓存立即渲染,同时后台重拉,
+  /// 完成后无感更新;手动刷新入口传 false 绕过缓存先显直接重拉。
+  /// 无论如何 [CatalogCache.fetch] 总是走网络并写穿缓存。
+  Future<void> reload({
+    bool includeLibraries = true,
+    bool showCachedFirst = true,
+  }) async {
     if (_disposed || !auth.isLoggedIn) {
       return;
     }
     final gen = ++_loadGen;
     _clearRetries();
     _sessionKey = _currentSessionKey;
+    _syncCacheSession();
     resume = const CatalogRowState(loading: true);
     nextUp = const CatalogRowState(loading: true);
     latestMovies = const CatalogRowState(loading: true);
@@ -62,18 +77,21 @@ class CatalogController extends ChangeNotifier {
     _notify();
 
     final tasks = <Future<void>>[
-      _loadResume(gen),
-      _loadNextUp(gen),
-      _loadLatestMovies(gen),
-      _loadLatestSeries(gen),
+      _loadResume(gen, showCachedFirst),
+      _loadNextUp(gen, showCachedFirst),
+      _loadLatestMovies(gen, showCachedFirst),
+      _loadLatestSeries(gen, showCachedFirst),
     ];
     if (includeLibraries) {
-      tasks.add(_loadLibraries(gen));
+      tasks.add(_loadLibraries(gen, showCachedFirst));
     }
     await Future.wait(tasks);
   }
 
-  Future<void> reloadHomeRows() => reload(includeLibraries: false);
+  /// 刷新首页行(不含片库列表)。播放器关闭/标记已看等事件走此路径,
+  /// 属刷新事件:直接重拉,不做缓存先显。
+  Future<void> reloadHomeRows() =>
+      reload(includeLibraries: false, showCachedFirst: false);
 
   Future<void> hideFromResume(EmbyItem item) async {
     await client.hideFromResume(item.id);
@@ -90,12 +108,22 @@ class CatalogController extends ChangeNotifier {
   void _onAuthChanged() {
     if (!auth.isLoggedIn) {
       _sessionKey = null;
+      _syncCacheSession();
       return;
     }
     final key = _currentSessionKey;
     if (key != _sessionKey) {
       reload();
     }
+  }
+
+  void _syncCacheSession() {
+    final session = auth.session;
+    if (session == null) {
+      cache.detachSession();
+      return;
+    }
+    cache.attachSession(serverId: session.server.id, userId: session.userId);
   }
 
   String get _currentSessionKey {
@@ -107,11 +135,50 @@ class CatalogController extends ChangeNotifier {
     return '${session.server.id}|${session.userId}|${line?.id ?? ''}|${line?.address ?? session.server.baseUrl}';
   }
 
-  Future<void> _loadResume(int gen) async {
+  bool _rowHasContent(CatalogRowState state) => state.items.isNotEmpty;
+
+  /// 先显:命中缓存且当前行没有可显示内容时立即渲染,后台重拉随后无感更新。
+  Future<void> _showCachedRow(
+    String key,
+    CatalogRequest request,
+    bool Function(EmbyItem item) filter,
+    int gen,
+    CatalogRowState Function() current,
+    void Function(CatalogRowState) assign,
+  ) async {
+    if (gen != _loadGen || _rowHasContent(current())) {
+      return;
+    }
+    final hit = await cache.lookup(request);
+    if (gen != _loadGen || hit == null || _rowHasContent(current())) {
+      return;
+    }
+    final items = parseCatalogPage(hit.json).items.where(filter).toList();
+    assign(
+      items.isEmpty
+          ? const CatalogRowState(hidden: true)
+          : CatalogRowState(items: items),
+    );
+    _clearRetry(key);
+    _notify();
+  }
+
+  Future<void> _loadResume(int gen, bool showCachedFirst) async {
+    final request = catalogResumeRequest(userId: client.userId ?? '');
+    if (showCachedFirst) {
+      await _showCachedRow(
+        'resume',
+        request,
+        (item) => item.isResumeMedia,
+        gen,
+        () => resume,
+        (state) => resume = state,
+      );
+    }
     try {
-      final items = (await client.getResumeItems())
-          .where((item) => item.isResumeMedia)
-          .toList();
+      final items = parseCatalogPage(
+        await cache.fetch(client, request),
+      ).items.where((item) => item.isResumeMedia).toList();
       if (gen != _loadGen) {
         return;
       }
@@ -123,17 +190,31 @@ class CatalogController extends ChangeNotifier {
       if (gen != _loadGen) {
         return;
       }
-      resume = const CatalogRowState(loading: true);
-      _scheduleRetry('resume', _loadResume);
+      // 已有缓存内容时保留显示;否则骨架屏 + 静默重试。
+      if (!_rowHasContent(resume)) {
+        resume = const CatalogRowState(loading: true);
+      }
+      _scheduleRetry('resume', (gen) => _loadResume(gen, false));
     }
     _notify();
   }
 
-  Future<void> _loadNextUp(int gen) async {
+  Future<void> _loadNextUp(int gen, bool showCachedFirst) async {
+    final request = catalogNextUpRequest(userId: client.userId ?? '');
+    if (showCachedFirst) {
+      await _showCachedRow(
+        'nextUp',
+        request,
+        (item) => item.isEpisode,
+        gen,
+        () => nextUp,
+        (state) => nextUp = state,
+      );
+    }
     try {
-      final items = (await client.getNextUp())
-          .where((item) => item.isEpisode)
-          .toList();
+      final items = parseCatalogPage(
+        await cache.fetch(client, request),
+      ).items.where((item) => item.isEpisode).toList();
       if (gen != _loadGen) {
         return;
       }
@@ -150,23 +231,39 @@ class CatalogController extends ChangeNotifier {
         nextUp = const CatalogRowState(hidden: true);
         _clearRetry('nextUp');
       } else {
-        nextUp = const CatalogRowState(loading: true);
-        _scheduleRetry('nextUp', _loadNextUp);
+        if (!_rowHasContent(nextUp)) {
+          nextUp = const CatalogRowState(loading: true);
+        }
+        _scheduleRetry('nextUp', (gen) => _loadNextUp(gen, false));
       }
     }
     _notify();
   }
 
-  Future<void> _loadLatestMovies(int gen) async {
+  Future<void> _loadLatestMovies(int gen, bool showCachedFirst) async {
+    final request = catalogItemsRequest(
+      userId: client.userId ?? '',
+      includeItemTypes: 'Movie',
+      recursive: true,
+      limit: 24,
+      sortBy: 'DateLastContentAdded',
+      sortOrder: 'Descending',
+      fields: EmbyClient.gridFields,
+    );
+    if (showCachedFirst) {
+      await _showCachedRow(
+        'latestMovies',
+        request,
+        (item) => item.isMovie,
+        gen,
+        () => latestMovies,
+        (state) => latestMovies = state,
+      );
+    }
     try {
-      final items = (await client.getItems(
-        includeItemTypes: 'Movie',
-        recursive: true,
-        limit: 24,
-        sortBy: 'DateLastContentAdded',
-        sortOrder: 'Descending',
-        fields: EmbyClient.gridFields,
-      )).where((item) => item.isMovie).toList();
+      final items = parseCatalogPage(
+        await cache.fetch(client, request),
+      ).items.where((item) => item.isMovie).toList();
       if (gen != _loadGen) {
         return;
       }
@@ -178,22 +275,38 @@ class CatalogController extends ChangeNotifier {
       if (gen != _loadGen) {
         return;
       }
-      latestMovies = const CatalogRowState(loading: true);
-      _scheduleRetry('latestMovies', _loadLatestMovies);
+      if (!_rowHasContent(latestMovies)) {
+        latestMovies = const CatalogRowState(loading: true);
+      }
+      _scheduleRetry('latestMovies', (gen) => _loadLatestMovies(gen, false));
     }
     _notify();
   }
 
-  Future<void> _loadLatestSeries(int gen) async {
+  Future<void> _loadLatestSeries(int gen, bool showCachedFirst) async {
+    final request = catalogItemsRequest(
+      userId: client.userId ?? '',
+      includeItemTypes: 'Series',
+      recursive: true,
+      limit: 24,
+      sortBy: 'DateLastContentAdded',
+      sortOrder: 'Descending',
+      fields: EmbyClient.gridFields,
+    );
+    if (showCachedFirst) {
+      await _showCachedRow(
+        'latestSeries',
+        request,
+        (item) => item.isSeries,
+        gen,
+        () => latestSeries,
+        (state) => latestSeries = state,
+      );
+    }
     try {
-      final items = (await client.getItems(
-        includeItemTypes: 'Series',
-        recursive: true,
-        limit: 24,
-        sortBy: 'DateLastContentAdded',
-        sortOrder: 'Descending',
-        fields: EmbyClient.gridFields,
-      )).where((item) => item.isSeries).toList();
+      final items = parseCatalogPage(
+        await cache.fetch(client, request),
+      ).items.where((item) => item.isSeries).toList();
       if (gen != _loadGen) {
         return;
       }
@@ -205,15 +318,40 @@ class CatalogController extends ChangeNotifier {
       if (gen != _loadGen) {
         return;
       }
-      latestSeries = const CatalogRowState(loading: true);
-      _scheduleRetry('latestSeries', _loadLatestSeries);
+      if (!_rowHasContent(latestSeries)) {
+        latestSeries = const CatalogRowState(loading: true);
+      }
+      _scheduleRetry('latestSeries', (gen) => _loadLatestSeries(gen, false));
     }
     _notify();
   }
 
-  Future<void> _loadLibraries(int gen) async {
+  Future<void> _loadLibraries(int gen, bool showCachedFirst) async {
+    final request = catalogViewsRequest(userId: client.userId ?? '');
+    if (showCachedFirst) {
+      final hit = await cache.lookup(request);
+      if (gen == _loadGen &&
+          hit != null &&
+          librariesLoading &&
+          libraries.isEmpty) {
+        final views = parseCatalogPage(hit.json).items;
+        final cached = <EmbyItem>[];
+        for (final view in views) {
+          if (view.isMovieOrTvCollection) {
+            cached.add(view);
+          }
+        }
+        // 缓存的 Views 只能恢复可判定的媒体库;探测类结果留给网络刷新。
+        if (cached.isNotEmpty || views.every(_isDeterministicView)) {
+          libraries = cached;
+          librariesError = null;
+          librariesLoading = false;
+          _notify();
+        }
+      }
+    }
     try {
-      final views = await client.getViews();
+      final views = parseCatalogPage(await cache.fetch(client, request)).items;
       final libraries = <EmbyItem>[];
       for (final view in views) {
         if (await _isMovieOrTvLibrary(view)) {
@@ -230,11 +368,21 @@ class CatalogController extends ChangeNotifier {
       if (gen != _loadGen) {
         return;
       }
-      libraries = const [];
-      librariesError = _asEmby(error);
-      librariesLoading = false;
+      if (libraries.isEmpty) {
+        librariesError = _asEmby(error);
+        librariesLoading = false;
+      }
+      // 已有缓存内容时保留显示,不打断导航。
     }
     _notify();
+  }
+
+  /// Views 缓存恢复用:类型可本地判定的视图(媒体库/排除集合),
+  /// 无需依赖 _isMovieOrTvLibrary 的网络探测。
+  bool _isDeterministicView(EmbyItem view) {
+    return view.isMovieOrTvCollection ||
+        view.isExcludedCollection ||
+        !view.isUntypedCollection;
   }
 
   EmbyException _asEmby(Object error) {

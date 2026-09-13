@@ -7,10 +7,12 @@ import 'package:rillight/app/widgets/app_empty_view.dart';
 import 'package:rillight/app/widgets/app_error_view.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/auth/auth_scope.dart';
+import 'package:rillight/emby/catalog_cache.dart';
 import 'package:rillight/emby/emby_errors.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_failure.dart';
 import 'package:rillight/home/catalog_keys.dart';
+import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/library/shelf_grid_page.dart';
 import 'package:rillight/search/search_action.dart';
 
@@ -55,6 +57,12 @@ class _SearchPageState extends State<SearchPage> {
   String _term = '';
   int _fetched = 0;
   final ScrollController _scrollController = ScrollController();
+
+  CatalogCache? _scopeCache;
+
+  /// 目录缓存:无 CatalogScope 时用无会话实例降级直连。
+  CatalogCache get _cache =>
+      _scopeCache ??= CatalogScope.maybeOf(context)?.cache ?? CatalogCache();
 
   @override
   void initState() {
@@ -104,17 +112,35 @@ class _SearchPageState extends State<SearchPage> {
       _searched = true;
       _term = term;
     });
+    final client = AuthScope.of(context).client;
+    final request = catalogSearchRequest(
+      userId: client.userId ?? '',
+      searchTerm: term,
+      startIndex: 0,
+    );
+    // 先显:命中缓存立即渲染上一轮结果,后台重拉完成后无感更新。
+    final hit = await _cache.lookup(request);
+    if (!mounted) {
+      return;
+    }
+    if (hit != null) {
+      final raw = parseCatalogPage(hit.json).items;
+      setState(() {
+        _items = raw.where((item) => item.isMovieOrSeries).toList();
+        _fetched = raw.length;
+        _hasMore = raw.length >= SearchPage.pageSize;
+        _loading = false;
+      });
+    }
     try {
-      final items = await AuthScope.of(
-        context,
-      ).client.searchByName(term, startIndex: 0);
+      final raw = parseCatalogPage(await _cache.fetch(client, request)).items;
       if (!mounted) {
         return;
       }
       setState(() {
-        _items = items.where((item) => item.isMovieOrSeries).toList();
-        _fetched = items.length;
-        _hasMore = items.length >= SearchPage.pageSize;
+        _items = raw.where((item) => item.isMovieOrSeries).toList();
+        _fetched = raw.length;
+        _hasMore = raw.length >= SearchPage.pageSize;
         _loading = false;
       });
     } on EmbyException catch (error) {
@@ -132,16 +158,28 @@ class _SearchPageState extends State<SearchPage> {
   Future<void> _loadMore() async {
     setState(() => _loadingMore = true);
     try {
-      final items = await AuthScope.of(
-        context,
-      ).client.searchByName(_term, startIndex: _fetched);
+      final client = AuthScope.of(context).client;
+      final raw = parseCatalogPage(
+        await _cache.fetch(
+          client,
+          catalogSearchRequest(
+            userId: client.userId ?? '',
+            searchTerm: _term,
+            startIndex: _fetched,
+          ),
+        ),
+      ).items;
       if (!mounted) {
         return;
       }
       setState(() {
-        _items = [..._items, ...items.where((item) => item.isMovieOrSeries)];
-        _fetched += items.length;
-        _hasMore = items.length >= SearchPage.pageSize;
+        // 分页追加按 itemId 去重,排序窗口重叠不产生重复条目。
+        _items = ShelfGridPage.mergeItemsById(
+          _items,
+          raw.where((item) => item.isMovieOrSeries),
+        );
+        _fetched += raw.length;
+        _hasMore = raw.length >= SearchPage.pageSize;
         _loadingMore = false;
       });
     } on EmbyException {

@@ -12,8 +12,10 @@ import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/app/theme/tokens.dart';
+import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/home_hero.dart';
+import 'package:rillight/home/home_page.dart';
 import 'package:rillight/library/poster_card.dart';
 import 'package:rillight/library/shelf_grid_page.dart';
 import 'package:rillight/media_image/media_image.dart';
@@ -1087,6 +1089,130 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     await tester.pumpAndSettle();
     expect(_focusOf(tester, nextRow)?.hasPrimaryFocus, isTrue);
+  });
+
+  testWidgets('home refresh entry re-pulls rows from the network', (
+    tester,
+  ) async {
+    await pumpLoggedIn(tester);
+    final resumeBefore = server.requests
+        .where((request) => request.contains('Items/Resume'))
+        .length;
+    for (final item in server.items) {
+      if (item.id == 'movie-up') {
+        item.name = '手动刷新后的电影';
+      }
+    }
+
+    final refresh = find.byKey(homeRefreshKey);
+    await _ensureVisibleBelowTopBar(tester, refresh);
+    await tester.pumpAndSettle();
+    await tester.tap(refresh);
+    await tester.pumpAndSettle();
+
+    expect(
+      server.requests
+          .where((request) => request.contains('Items/Resume'))
+          .length,
+      greaterThan(resumeBefore),
+      reason: '手动刷新绕过缓存立即重拉',
+    );
+    expect(find.text('手动刷新后的电影'), findsWidgets);
+  });
+
+  testWidgets('grid refresh entry bypasses the cache and re-pulls', (
+    tester,
+  ) async {
+    await pumpLoggedIn(tester);
+    await openLibrary(tester, 'view-movies');
+    expect(find.text('飞屋环游记'), findsOneWidget);
+    for (final item in server.items) {
+      if (item.id == 'movie-up') {
+        item.name = '手动刷新后的电影';
+      }
+    }
+
+    await tester.tap(find.byKey(gridRefreshKey));
+    await tester.pumpAndSettle();
+
+    expect(find.text('手动刷新后的电影'), findsOneWidget);
+    expect(find.text('飞屋环游记'), findsNothing);
+    expect(find.byType(PosterCard), findsWidgets);
+  });
+
+  testWidgets('re-entering a grid offline keeps the cached first page', (
+    tester,
+  ) async {
+    await pumpLoggedIn(tester);
+    await openLibrary(tester, 'view-movies');
+    expect(find.byKey(CatalogKeys.item('movie-inception')), findsOneWidget);
+
+    await goHome(tester);
+    server.itemsStatus = 500;
+    await openLibrary(tester, 'view-movies');
+
+    // 先显:命中缓存立即渲染,后台重拉失败也保留已有内容。
+    expect(find.byKey(CatalogKeys.item('movie-inception')), findsOneWidget);
+    expect(find.byKey(CatalogKeys.item('movie-up')), findsOneWidget);
+    expect(find.byType(AppErrorView), findsNothing);
+    expect(find.byType(SkeletonPosterGrid), findsNothing);
+  });
+
+  testWidgets('changing sort refreshes incrementally without a full skeleton', (
+    tester,
+  ) async {
+    await pumpLoggedIn(tester);
+    await _openLatestMoviesMore(tester);
+    expect(_posterNames(tester).first, '飞屋环游记');
+
+    await _tapGridSort(tester);
+    await tester.tap(find.byKey(CatalogKeys.sortOption('SortName')));
+    // 切排序不清空整页:刷新期间旧内容仍在,不出现整页骨架屏。
+    var sawSkeleton = false;
+    for (var i = 0; i < 6; i++) {
+      await tester.pump(const Duration(milliseconds: 16));
+      if (find.byType(SkeletonPosterGrid).evaluate().isNotEmpty) {
+        sawSkeleton = true;
+      }
+    }
+    expect(sawSkeleton, isFalse);
+    expect(find.byType(PosterCard), findsWidgets);
+    await tester.pumpAndSettle();
+    expect(_posterNames(tester).first, 'Inception');
+  });
+
+  testWidgets('scrolling five pages keeps items unique by id', (tester) async {
+    _addPagedMovies(server, 300);
+    await pumpLoggedIn(tester);
+    await openLibrary(tester, 'view-movies');
+
+    await _scrollGridUntil(
+      tester,
+      find.byKey(CatalogKeys.item('bulk-299')),
+      maxDrags: 120,
+    );
+    expect(find.byKey(CatalogKeys.item('bulk-299')), findsOneWidget);
+    expect(
+      server.requests.any(
+        (request) =>
+            request.contains('ParentId=view-movies') &&
+            request.contains('StartIndex=${ShelfGridPage.pageSize * 4}'),
+      ),
+      isTrue,
+      reason: '至少翻过 5 页',
+    );
+    // 网格 delegate 的 childCount 即已加载条目数:无重复无缺失时应等于总数。
+    final grid = tester.widget<SliverGrid>(
+      find.descendant(
+        of: find.byType(CustomScrollView),
+        matching: find.byType(SliverGrid),
+      ),
+    );
+    final childCount = grid.delegate.estimatedChildCount;
+    expect(childCount, 305, reason: '305 条全部加载,无重复无缺失');
+    // 可见卡片各自 id 唯一。
+    final visibleIds = _posterNames(tester);
+    expect(visibleIds.toSet().length, visibleIds.length);
   });
 }
 

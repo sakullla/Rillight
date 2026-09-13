@@ -14,6 +14,7 @@ import 'package:rillight/app/widgets/liquid_glass.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/auth/auth_scope.dart';
+import 'package:rillight/emby/catalog_cache.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_errors.dart';
 import 'package:rillight/emby/emby_models.dart';
@@ -37,6 +38,9 @@ const Map<ShortcutActivator, Intent> _kGridArrowShortcuts = {
     TraversalDirection.down,
   ),
 };
+
+/// 网格头部手动刷新按钮(绕过缓存立即重拉)的 key。
+const Key gridRefreshKey = Key('catalog-grid-refresh');
 
 class ShelfGridPage extends StatefulWidget {
   const ShelfGridPage({
@@ -155,6 +159,21 @@ class ShelfGridPage extends StatefulWidget {
     );
   }
 
+  /// 分页追加按 itemId 去重:服务器排序窗口重叠时不会出现重复条目。
+  static List<EmbyItem> mergeItemsById(
+    Iterable<EmbyItem> existing,
+    Iterable<EmbyItem> incoming,
+  ) {
+    final merged = List<EmbyItem>.of(existing);
+    final seen = <String>{for (final item in merged) item.id};
+    for (final item in incoming) {
+      if (seen.add(item.id)) {
+        merged.add(item);
+      }
+    }
+    return merged;
+  }
+
   factory ShelfGridPage.fromState(GoRouterState state) {
     final query = state.uri.queryParameters;
     return ShelfGridPage(
@@ -176,9 +195,16 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
   List<EmbyItem> _items = const [];
   bool _loading = true;
   bool _loadingMore = false;
+  bool _refreshing = false;
   bool _hasMore = false;
   EmbyException? _error;
   late CatalogSort _sort = _defaultSort;
+
+  CatalogCache? _scopeCache;
+
+  /// 目录缓存:无 CatalogScope 时用无会话实例降级直连。
+  CatalogCache get _cache =>
+      _scopeCache ??= CatalogScope.maybeOf(context)?.cache ?? CatalogCache();
 
   CatalogSort get _defaultSort => widget.includeItemTypes == 'Episode'
       ? CatalogSort.indexNumber
@@ -236,7 +262,7 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
   }
 
   void _maybeLoadMore() {
-    if (!_paged || !_hasMore || _loading || _loadingMore) {
+    if (!_paged || !_hasMore || _loading || _loadingMore || _refreshing) {
       return;
     }
     if (!_scrollController.hasClients) {
@@ -250,7 +276,7 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
   }
 
   void _fillViewportIfNeeded() {
-    if (!_paged || !_hasMore || _loading || _loadingMore) {
+    if (!_paged || !_hasMore || _loading || _loadingMore || _refreshing) {
       return;
     }
     if (_autoFills >= _maxAutoFills) {
@@ -279,23 +305,49 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
     return items.where((item) => item.isMovieOrSeries).toList();
   }
 
-  Future<void> _load() async {
+  Future<void> _load({bool preserveContent = false}) async {
     final gen = ++_loadGen;
+    // 切排序/手动刷新保留已有内容增量刷新,不清空整页骨架屏重来。
     setState(() {
-      _loading = true;
-      _loadingMore = false;
-      _error = null;
-      _items = const [];
-      _hasMore = false;
-      _fetched = 0;
-      _autoFills = 0;
+      if (preserveContent) {
+        _refreshing = true;
+        _error = null;
+      } else {
+        _loading = true;
+        _loadingMore = false;
+        _error = null;
+        _items = const [];
+        _hasMore = false;
+        _fetched = 0;
+        _autoFills = 0;
+      }
     });
-    try {
-      final page = await _fetch(
-        AuthScope.of(context).client,
-        0,
-        ShelfGridPage.pageSize,
+    final client = AuthScope.of(context).client;
+    if (!preserveContent) {
+      // 先显:命中缓存立即渲染,后台重拉完成后无感更新。
+      final hit = await _cache.lookup(
+        _requestFor(client, 0, ShelfGridPage.pageSize),
       );
+      if (!mounted || gen != _loadGen) {
+        return;
+      }
+      if (hit != null) {
+        final page = parseCatalogPage(hit.json);
+        setState(() {
+          _items = ShelfGridPage.mergeItemsById(
+            const [],
+            _applyFilter(page.items),
+          );
+          _fetched = page.items.length;
+          _hasMore =
+              _paged &&
+              page.hasMore(fetched: _fetched, pageSize: ShelfGridPage.pageSize);
+          _loading = false;
+        });
+      }
+    }
+    try {
+      final page = await _fetch(client, 0, ShelfGridPage.pageSize);
       if (!mounted || gen != _loadGen) {
         return;
       }
@@ -306,6 +358,8 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
             _paged &&
             page.hasMore(fetched: _fetched, pageSize: ShelfGridPage.pageSize);
         _loading = false;
+        _refreshing = false;
+        _autoFills = 0;
       });
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted && gen == _loadGen) {
@@ -317,10 +371,22 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
         return;
       }
       setState(() {
-        _error = error;
         _loading = false;
+        _refreshing = false;
+        // 先显缓存内容时保留显示,可经手动刷新重试;否则展示错误。
+        if (preserveContent || _items.isEmpty) {
+          _error = error;
+        }
       });
     }
+  }
+
+  /// 手动刷新入口:绕过缓存先显,立即重拉并写穿缓存。
+  Future<void> _manualRefresh() async {
+    if (_loading || _refreshing) {
+      return;
+    }
+    await _load(preserveContent: true);
   }
 
   Future<void> _loadMore() async {
@@ -337,7 +403,7 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
         return;
       }
       setState(() {
-        _items = [..._items, ..._applyFilter(page.items)];
+        _items = ShelfGridPage.mergeItemsById(_items, _applyFilter(page.items));
         _fetched = start + page.items.length;
         _hasMore =
             _paged &&
@@ -358,24 +424,28 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
     }
   }
 
-  Future<EmbyItemPage> _fetch(EmbyClient client, int startIndex, int limit) {
+  CatalogRequest _requestFor(EmbyClient client, int startIndex, int limit) {
+    final userId = client.userId ?? '';
     switch (widget.source) {
       case 'resume':
-        return client.queryResumeItems(
+        return catalogResumeRequest(
+          userId: userId,
           limit: limit,
           startIndex: startIndex,
           sortBy: _sort.sortBy,
           sortOrder: _sort.sortOrder,
         );
       case 'nextup':
-        return client.queryNextUp(
+        return catalogNextUpRequest(
+          userId: userId,
           limit: limit,
           startIndex: startIndex,
           sortBy: _sort.sortBy,
           sortOrder: _sort.sortOrder,
         );
       case 'latest-movies':
-        return client.queryItems(
+        return catalogItemsRequest(
+          userId: userId,
           includeItemTypes: 'Movie',
           recursive: true,
           limit: limit,
@@ -384,7 +454,8 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
           sortOrder: _sort.sortOrder,
         );
       case 'latest-series':
-        return client.queryItems(
+        return catalogItemsRequest(
+          userId: userId,
           includeItemTypes: 'Series',
           recursive: true,
           limit: limit,
@@ -393,15 +464,16 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
           sortOrder: _sort.sortOrder,
         );
       case 'similar':
-        final itemId = widget.itemId ?? '';
-        return client.querySimilar(
-          itemId,
+        return catalogSimilarRequest(
+          userId: userId,
+          itemId: widget.itemId ?? '',
           limit: limit,
           sortBy: _sort.sortBy,
           sortOrder: _sort.sortOrder,
         );
       default:
-        return client.queryItems(
+        return catalogItemsRequest(
+          userId: userId,
           parentId: widget.parentId,
           includeItemTypes: widget.includeItemTypes,
           recursive: widget.recursive,
@@ -411,6 +483,19 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
           sortOrder: _sort.sortOrder,
         );
     }
+  }
+
+  /// 经缓存层拉取:总是走网络并写穿缓存(分页追加不读缓存)。
+  Future<EmbyItemPage> _fetch(
+    EmbyClient client,
+    int startIndex,
+    int limit,
+  ) async {
+    final json = await _cache.fetch(
+      client,
+      _requestFor(client, startIndex, limit),
+    );
+    return parseCatalogPage(json);
   }
 
   String _title(AppLocalizations l10n) {
@@ -438,7 +523,8 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
       return;
     }
     setState(() => _sort = sort);
-    _load();
+    // 在已有内容上增量刷新,不出现整页骨架屏重来。
+    _load(preserveContent: true);
   }
 
   @override
@@ -457,6 +543,8 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
             options: const [],
             onSort: _selectSort,
             showSort: false,
+            onRefresh: _manualRefresh,
+            refreshing: true,
           ),
           Expanded(
             child: SkeletonPosterGrid(
@@ -486,6 +574,8 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
             options: CatalogSort.optionsFor(_items),
             onSort: _selectSort,
             showSort: false,
+            onRefresh: _manualRefresh,
+            refreshing: false,
           ),
           Expanded(
             child: AppErrorView(
@@ -515,6 +605,8 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
                 options: options,
                 onSort: _selectSort,
                 showSort: _items.isNotEmpty,
+                onRefresh: _manualRefresh,
+                refreshing: _refreshing,
               ),
             ),
             SliverPadding(
@@ -607,6 +699,8 @@ class _Header extends StatelessWidget {
     required this.options,
     required this.onSort,
     required this.showSort,
+    this.onRefresh,
+    this.refreshing = false,
   });
 
   final String title;
@@ -616,6 +710,10 @@ class _Header extends StatelessWidget {
   final List<CatalogSort> options;
   final ValueChanged<CatalogSort> onSort;
   final bool showSort;
+
+  /// 手动刷新入口:绕过缓存立即重拉。null 时不显示刷新按钮。
+  final VoidCallback? onRefresh;
+  final bool refreshing;
 
   @override
   Widget build(BuildContext context) {
@@ -636,6 +734,29 @@ class _Header extends StatelessWidget {
       ),
       child: Row(
         children: [
+          if (onRefresh != null) ...[
+            LiquidGlass(
+              kind: LiquidGlassKind.pill,
+              borderRadius: BorderRadius.circular(AppRadii.md),
+              child: Material(
+                type: MaterialType.transparency,
+                shape: const CircleBorder(),
+                child: IconButton(
+                  key: gridRefreshKey,
+                  tooltip: l10n.retry,
+                  onPressed: refreshing ? null : onRefresh,
+                  icon: refreshing
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.refresh),
+                ),
+              ),
+            ),
+            const SizedBox(width: AppSpacing.sm),
+          ],
           if (showSort) ...[
             PopupMenuButton<CatalogSort>(
               key: CatalogKeys.sortBy,

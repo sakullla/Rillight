@@ -4,6 +4,7 @@ import 'package:rillight/app/app_shell.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme/tokens.dart';
+import 'package:rillight/app/widgets/liquid_glass.dart';
 import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/catalog_scope.dart';
@@ -11,12 +12,18 @@ import 'package:rillight/home/home_hero.dart';
 import 'package:rillight/home/home_row.dart';
 import 'package:rillight/home/library_tiles.dart';
 
+/// 首页手动刷新按钮(绕过缓存立即重拉)的 key。
+const Key homeRefreshKey = Key('catalog-home-refresh');
+
 /// 首页:全宽 hero,有继续观看数据时排在发现 shelf 之前.
 ///
 /// [AppShell] 把半透明顶栏放在 Column 里,本页无法把 hero 画到顶栏下方
 /// (后绘制会盖住顶栏按钮).贴窗口上缘需要外壳改为 Stack(内容铺满,顶栏叠上).
-class HomePage extends StatelessWidget {
+class HomePage extends StatefulWidget {
   const HomePage({super.key});
+
+  @override
+  State<HomePage> createState() => _HomePageState();
 
   /// 与 [AppShell] 顶栏同高;外壳仍是 Column 时只加到 hero 高度,不能真正叠到窗口上缘.
   static double heroTopOverlap(BuildContext context) {
@@ -32,6 +39,26 @@ class HomePage extends StatelessWidget {
         ? kWindowChromeHeight
         : AppShell.topBarHeight;
   }
+}
+
+class _HomePageState extends State<HomePage> {
+  bool _refreshing = false;
+
+  /// 手动刷新入口:绕过缓存先显,直接重拉首页行并写穿缓存。
+  Future<void> _refresh() async {
+    final catalog = CatalogScope.maybeOf(context);
+    if (catalog == null || _refreshing) {
+      return;
+    }
+    setState(() => _refreshing = true);
+    try {
+      await catalog.reloadHomeRows();
+    } finally {
+      if (mounted) {
+        setState(() => _refreshing = false);
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -44,7 +71,7 @@ class HomePage extends StatelessWidget {
     return ListenableBuilder(
       listenable: catalog,
       builder: (context, _) {
-        final overlap = heroTopOverlap(context);
+        final overlap = HomePage.heroTopOverlap(context);
         return SingleChildScrollView(
           padding: const EdgeInsets.only(bottom: AppSpacing.xxl),
           child: Column(
@@ -52,6 +79,39 @@ class HomePage extends StatelessWidget {
             children: [
               RepaintBoundary(
                 child: HomeHero(catalog: catalog, topOverlap: overlap),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.page,
+                  0,
+                  AppSpacing.page,
+                  AppSpacing.sm,
+                ),
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: LiquidGlass(
+                    kind: LiquidGlassKind.pill,
+                    borderRadius: BorderRadius.circular(AppRadii.md),
+                    child: Material(
+                      type: MaterialType.transparency,
+                      shape: const CircleBorder(),
+                      child: IconButton(
+                        key: homeRefreshKey,
+                        tooltip: l10n.retry,
+                        onPressed: _refreshing ? null : _refresh,
+                        icon: _refreshing
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.refresh),
+                      ),
+                    ),
+                  ),
+                ),
               ),
               RepaintBoundary(
                 child: HomeMediaRow(

@@ -14,6 +14,7 @@ import 'package:rillight/app/widgets/liquid_glass.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/auth/auth_scope.dart';
+import 'package:rillight/emby/catalog_cache.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_errors.dart';
 import 'package:rillight/emby/emby_models.dart';
@@ -142,8 +143,28 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     }
     final requestedId = _itemId;
     final client = AuthScope.of(context).client;
+    // 先显:详情条目命中缓存时先渲染主体,后台继续拉完整数据后无感更新。
+    if (!keep && _item == null) {
+      final hit = await _cache.lookup(
+        catalogItemRequest(userId: client.userId ?? '', itemId: requestedId),
+      );
+      if (!mounted || gen != _loadGen) {
+        return;
+      }
+      if (hit != null) {
+        try {
+          final cachedItem = parseCatalogItem(hit.json);
+          setState(() {
+            _item = cachedItem;
+            _loading = false;
+          });
+        } on EmbyException {
+          // 损坏缓存忽略,继续走网络加载。
+        }
+      }
+    }
     try {
-      final item = await client.getItem(requestedId);
+      final item = await _fetchItem(client, requestedId);
       if (!mounted || gen != _loadGen) {
         return;
       }
@@ -285,6 +306,22 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
         _loading = false;
       });
     }
+  }
+
+  CatalogCache? _scopeCache;
+
+  /// 目录缓存:无 CatalogScope 时用无会话实例降级直连。
+  CatalogCache get _cache =>
+      _scopeCache ??= CatalogScope.maybeOf(context)?.cache ?? CatalogCache();
+
+  /// 经缓存层拉取单条详情(总是走网络并写穿缓存)。
+  Future<EmbyItem> _fetchItem(EmbyClient client, String itemId) async {
+    return parseCatalogItem(
+      await _cache.fetch(
+        client,
+        catalogItemRequest(userId: client.userId ?? '', itemId: itemId),
+      ),
+    );
   }
 
   Future<({List<EmbyItem> items, int total})> _loadEpisodeWindow(
@@ -498,7 +535,8 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
       } else {
         await client.markUnplayed(item.id);
       }
-      final updated = await client.getItem(item.id);
+      // 写穿缓存:详情缓存与服务器保持一致。
+      final updated = await _fetchItem(client, item.id);
       if (!mounted) {
         return;
       }
