@@ -18,6 +18,8 @@ import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_page.dart';
+import 'package:rillight/player/player_runtime_options.dart';
+import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/player_window_host.dart';
 import 'package:rillight/player/spawn_player_process.dart';
 import 'package:window_manager/window_manager.dart';
@@ -385,6 +387,7 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
     }
     _closing = true;
     await _playerKey.currentState?.controller?.shutdownSession();
+    await _reclaimDiskCache();
     await _notifyHostClosed();
     if (widget.controller == null) {
       exit(0);
@@ -402,6 +405,18 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
   Future<void> _notifyHostClosed() async {
     try {
       await _hostChannel.invokeMethod('closed');
+    } catch (_) {}
+  }
+
+  /// 关窗时按设置的上限回收 mpv 磁盘缓冲目录,避免长期占用增长。
+  Future<void> _reclaimDiskCache() async {
+    try {
+      final store = await openPlayerSettingsStore();
+      final settings = await store.read();
+      await PlayerDiskCache.reclaim(
+        PlayerDiskCache.defaultDirectory(),
+        PlayerRuntimeOptions.effectiveDiskCacheLimitBytes(settings),
+      );
     } catch (_) {}
   }
 

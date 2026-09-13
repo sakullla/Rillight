@@ -1,6 +1,7 @@
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/app_shell.dart';
 import 'package:rillight/app/routes.dart';
+import 'package:rillight/app/settings/settings_page.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/connect_page.dart';
 import 'package:rillight/home/catalog_shell.dart';
@@ -61,6 +62,10 @@ GoRouter createAppRouter({required AuthController auth}) {
           GoRoute(
             path: AppRoutes.search,
             builder: (context, state) => const SearchPage(),
+          ),
+          GoRoute(
+            path: AppRoutes.settings,
+            builder: (context, state) => const SettingsPage(),
           ),
         ],
       ),

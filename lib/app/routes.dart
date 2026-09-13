@@ -2,6 +2,7 @@ abstract final class AppRoutes {
   static const home = '/';
   static const connect = '/connect';
   static const search = '/search';
+  static const settings = '/settings';
   static const shelfResume = '/shelf/resume';
   static const shelfNextUp = '/shelf/nextup';
   static const shelfLatestMovies = '/shelf/latest-movies';

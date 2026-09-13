@@ -1,11 +1,16 @@
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:rillight/app/product.dart';
+import 'package:rillight/player/player_runtime_options.dart';
+import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/video_backend.dart';
 
 class MediaKitVideoBackend implements VideoBackend {
-  MediaKitVideoBackend() {
+  MediaKitVideoBackend({PlayerSettingsStore? settingsStore}) {
     MediaKit.ensureInitialized();
     _player = Player(
       configuration: const PlayerConfiguration(
@@ -14,10 +19,12 @@ class MediaKitVideoBackend implements VideoBackend {
       ),
     );
     videoController = VideoController(_player);
+    _settingsStore = settingsStore;
   }
 
   late final Player _player;
   late final VideoController videoController;
+  PlayerSettingsStore? _settingsStore;
 
   @override
   Stream<Duration> get positionStream => _player.stream.position;
@@ -39,6 +46,7 @@ class MediaKitVideoBackend implements VideoBackend {
 
   @override
   Future<void> open(VideoOpenRequest request) async {
+    await _applyRuntimeOptions(request.url);
     await _player.open(
       Media(
         request.url.toString(),
@@ -46,6 +54,39 @@ class MediaKitVideoBackend implements VideoBackend {
         start: request.start > Duration.zero ? request.start : null,
       ),
     );
+  }
+
+  /// open 前集中注入 mpv 运行时属性(网络缓冲/硬件解码/音质)。
+  ///
+  /// 每次起播重新读设置文件:设置对新起播生效,文件是唯一权威。
+  /// 属性注入尽力而为,单条失败或整体失败都不阻塞播放,
+  /// 不兼容组合可经「恢复默认」回到受支持的基线。
+  Future<void> _applyRuntimeOptions(Uri url) async {
+    final platform = _player.platform;
+    if (platform is! NativePlayer) {
+      return;
+    }
+    try {
+      final store = _settingsStore ??= await openPlayerSettingsStore();
+      final settings = await store.read();
+      final cacheDir = PlayerDiskCache.defaultDirectory();
+      await PlayerDiskCache.ensure(cacheDir);
+      await PlayerDiskCache.reclaim(
+        cacheDir,
+        PlayerRuntimeOptions.effectiveDiskCacheLimitBytes(settings),
+      );
+      final properties = PlayerRuntimeOptions.build(
+        settings: settings,
+        cacheDir: cacheDir.path,
+        platform: _hostPlatform,
+        liveOrHlsStream: PlayerRuntimeOptions.isLiveOrHlsStream(url),
+      );
+      for (final entry in properties.entries) {
+        try {
+          await platform.setProperty(entry.key, entry.value);
+        } catch (_) {}
+      }
+    } catch (_) {}
   }
 
   @override
@@ -109,4 +150,17 @@ class MediaKitVideoBackend implements VideoBackend {
       onExitFullscreen: () async {},
     );
   }
+}
+
+TargetPlatform get _hostPlatform {
+  if (Platform.isWindows) {
+    return TargetPlatform.windows;
+  }
+  if (Platform.isMacOS) {
+    return TargetPlatform.macOS;
+  }
+  if (Platform.isLinux) {
+    return TargetPlatform.linux;
+  }
+  return defaultTargetPlatform;
 }
