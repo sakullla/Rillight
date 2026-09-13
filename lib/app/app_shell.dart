@@ -20,7 +20,8 @@ import 'package:rillight/search/search_overlay.dart';
 ///
 /// 已登录时 [child] 铺满窗口,顶栏 Positioned 叠在上缘,hero/backdrop 可贴到窗口顶。
 /// 顶栏左侧为首页与 [CatalogScope.libraries] 各库名,放不下的库进入溢出;
-/// 右侧为搜索与 [SessionActions]。搜索打开覆盖层,不 push `/search` 页壳。
+/// 右侧为搜索与 [SessionActions]。搜索打开覆盖层,不 push `/search` 页壳;
+/// 覆盖层之下叠 [SearchOverlayBarrier] 压暗背景,点击遮罩等同关闭。
 /// 登录前的 /connect 页没有导航意义,不显示顶栏。
 class AppShell extends StatefulWidget {
   const AppShell({super.key, required this.child});
@@ -119,6 +120,12 @@ class _AppShellState extends State<AppShell> {
                   left: 0,
                   right: 0,
                   child: _TopBar(location: location),
+                ),
+                // 遮罩在顶栏之上、覆盖层之下:压暗整个背景并拦截穿透
+                // 覆盖层非交互区域的点击,点击等同关闭;关闭后立即恢复。
+                SearchOverlayBarrier(
+                  visible: _searchOpen,
+                  onDismiss: _closeSearch,
                 ),
                 if (_searchOpen)
                   SearchOverlay(

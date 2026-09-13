@@ -304,6 +304,58 @@ void main() {
     expect(find.byType(HomePage), findsOneWidget);
   });
 
+  testWidgets('search overlay dims the backdrop; barrier tap closes', (
+    tester,
+  ) async {
+    final auth = await _connect(tester);
+    await tester.pumpWidget(RillightApp(auth: auth));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('搜索'));
+    await tester.pumpAndSettle();
+
+    // 打开时遮罩存在并完全压暗,覆盖层正常叠在遮罩之上。
+    expect(find.byType(SearchOverlay), findsOneWidget);
+    expect(find.byKey(SearchOverlayBarrier.barrierKey), findsOneWidget);
+    expect(_barrierOpacity(tester), 1.0);
+    expect(_barrierIgnoringPointer(tester), isFalse);
+
+    // Esc 不受遮罩影响;关闭后遮罩收敛为透明且不参与命中,背景恢复。
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(find.byType(SearchOverlay), findsNothing);
+    expect(_barrierOpacity(tester), 0.0);
+    expect(_barrierIgnoringPointer(tester), isTrue);
+
+    // 点击遮罩等同关闭:覆盖层玻璃面板吸收指针事件,点击其非交互
+    // 区域(顶栏条带在覆盖层 top padding 内)由覆盖层根部手势关闭。
+    await tester.tap(find.byTooltip('搜索'));
+    await tester.pumpAndSettle();
+    await tester.tapAt(const Offset(400, 20));
+    await tester.pumpAndSettle();
+    expect(find.byType(SearchOverlay), findsNothing);
+    expect(_barrierOpacity(tester), 0.0);
+
+    // 遮罩不拦截覆盖层自身交互:输入、关闭按钮仍可用。
+    await tester.tap(find.byTooltip('搜索'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(CatalogKeys.searchField));
+    await tester.pumpAndSettle();
+    expect(find.byType(SearchOverlay), findsOneWidget);
+    await tester.enterText(find.byKey(CatalogKeys.searchField), 'Inception');
+    expect(
+      tester
+          .widget<TextField>(find.byKey(CatalogKeys.searchField))
+          .controller
+          ?.text,
+      'Inception',
+    );
+    await tester.tap(find.byKey(SearchOverlay.closeKey));
+    await tester.pumpAndSettle();
+    expect(find.byType(SearchOverlay), findsNothing);
+    expect(_barrierOpacity(tester), 0.0);
+  });
+
   testWidgets('search shortcut opens overlay without pushing /search', (
     tester,
   ) async {
@@ -436,6 +488,28 @@ void main() {
     expect(find.byType(Dialog), findsOneWidget);
     expect(find.byType(ListTile), findsWidgets);
   });
+}
+
+double _barrierOpacity(WidgetTester tester) {
+  return tester
+      .widget<AnimatedOpacity>(
+        find.descendant(
+          of: find.byType(SearchOverlayBarrier),
+          matching: find.byType(AnimatedOpacity),
+        ),
+      )
+      .opacity;
+}
+
+bool _barrierIgnoringPointer(WidgetTester tester) {
+  return tester
+      .widget<IgnorePointer>(
+        find.descendant(
+          of: find.byType(SearchOverlayBarrier),
+          matching: find.byType(IgnorePointer),
+        ),
+      )
+      .ignoring;
 }
 
 Future<AuthController> _connect(
