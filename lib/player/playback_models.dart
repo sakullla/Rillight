@@ -130,7 +130,10 @@ class MediaStreamInfo {
 class PlaybackMediaSource {
   const PlaybackMediaSource({
     required this.id,
+    this.name,
     this.container,
+    this.protocol,
+    this.path,
     this.supportsDirectPlay = false,
     this.supportsDirectStream = false,
     this.supportsTranscoding = false,
@@ -143,7 +146,14 @@ class PlaybackMediaSource {
   });
 
   final String id;
+  final String? name;
   final String? container;
+
+  /// 传输协议(如 File/Http);strm 指向远端时为 Http。
+  final String? protocol;
+
+  /// 媒体路径;strm 条目直连时可能直接是远端 http(s) URL。
+  final String? path;
   final bool supportsDirectPlay;
   final bool supportsDirectStream;
   final bool supportsTranscoding;
@@ -153,6 +163,20 @@ class PlaybackMediaSource {
   final int? defaultAudioStreamIndex;
   final int? defaultSubtitleStreamIndex;
   final List<MediaStreamInfo> mediaStreams;
+
+  String get label {
+    final title = name?.trim();
+    if (title != null && title.isNotEmpty) {
+      return title;
+    }
+    return id;
+  }
+
+  /// 直连时可直接打开的远端地址(strm 等场景,服务端不提供 DirectStreamUrl)。
+  bool get isRemoteHttpPath {
+    final value = path?.trim() ?? '';
+    return value.startsWith('http://') || value.startsWith('https://');
+  }
 
   List<MediaStreamInfo> get audioStreams =>
       mediaStreams.where((stream) => stream.isAudio).toList();
@@ -183,7 +207,10 @@ class PlaybackMediaSource {
     }
     return PlaybackMediaSource(
       id: json['Id']?.toString() ?? '',
+      name: json['Name']?.toString(),
       container: json['Container']?.toString(),
+      protocol: json['Protocol']?.toString(),
+      path: json['Path']?.toString(),
       supportsDirectPlay: json['SupportsDirectPlay'] == true,
       supportsDirectStream: json['SupportsDirectStream'] == true,
       supportsTranscoding: json['SupportsTranscoding'] == true,
@@ -205,6 +232,16 @@ class PlaybackInfo {
 
   PlaybackMediaSource? get primarySource =>
       mediaSources.isEmpty ? null : mediaSources.first;
+
+  /// 按 id 查找媒体源(播放中换源时使用);不存在时返回 null。
+  PlaybackMediaSource? sourceById(String id) {
+    for (final source in mediaSources) {
+      if (source.id == id) {
+        return source;
+      }
+    }
+    return null;
+  }
 
   factory PlaybackInfo.fromJson(Map<String, dynamic> json) {
     final sources = <PlaybackMediaSource>[];

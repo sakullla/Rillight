@@ -14,7 +14,26 @@ import 'package:rillight/player/video_backend.dart';
 
 enum PlayerErrorKind { load, notPlayable, noStream }
 
-enum SubtitleNoticeKind { bitmapFailed }
+enum SubtitleNoticeKind { bitmapFailed, bitmapBurnIn }
+
+/// 跳过区间类别:片头/片尾。
+enum PlayerSkipKind { intro, outro }
+
+/// 一个可跳过的区间(服务器章节标记或手动时长换算)。
+class PlayerSkipSegment {
+  const PlayerSkipSegment({
+    required this.kind,
+    required this.start,
+    required this.end,
+  });
+
+  final PlayerSkipKind kind;
+  final Duration start;
+  final Duration end;
+}
+
+/// 手动片头/片尾时长的可选档位(秒)。
+const List<int> kManualSkipChoices = [30, 60, 90, 120];
 
 /// 倍速固定阶梯(快捷键降/升档与控制层菜单共用)。
 const List<double> kPlaybackRateLadder = [
@@ -57,6 +76,7 @@ class PlayerController extends ChangeNotifier {
     this.startTimeTicks,
     this.settingsStore,
   }) {
+    activeMediaSourceId = preferredMediaSourceId;
     _bindBackend();
     window.addListener(_emit);
   }
@@ -108,6 +128,24 @@ class PlayerController extends ChangeNotifier {
   PlayerSeriesPreference? _rememberedPreference;
   Map<String, PlayerSeriesPreference> _seriesPreferences = const {};
 
+  // --- 剧集列表与切集(R7) ---
+  bool episodeListLoading = false;
+  bool episodeListFailed = false;
+  List<EmbyItem> seasons = const [];
+  List<EmbyItem> episodes = const [];
+  String? episodeSeasonId;
+
+  // --- 片头片尾跳过(R8) ---
+  List<PlayerSkipSegment> _skipSegments = const [];
+  bool _hasServerSkipMarkers = false;
+  PlayerSkipSegment? activeSkipSegment;
+  int? manualIntroSkipSeconds;
+  int? manualOutroSkipSeconds;
+
+  // --- 媒体源切换(R9) ---
+  List<PlaybackMediaSource> mediaSources = const [];
+  String? activeMediaSourceId;
+
   PlayMethod? get playMethod => resolved?.playMethod;
   bool get isTranscode => playMethod == PlayMethod.transcode;
   bool get isFullScreen => window.isFullScreen;
@@ -115,6 +153,22 @@ class PlayerController extends ChangeNotifier {
       resolved?.mediaSource.audioStreams ?? const [];
   List<MediaStreamInfo> get subtitleTracks =>
       resolved?.mediaSource.subtitleStreams ?? const [];
+
+  /// 播放剧集时才提供剧集列表入口;电影不显示。
+  bool get canBrowseEpisodes {
+    final current = item;
+    final seriesId = current?.seriesId;
+    return current != null &&
+        current.isEpisode &&
+        seriesId != null &&
+        seriesId.isNotEmpty;
+  }
+
+  /// 无服务器章节标记的剧集才提供手动片头/片尾设置。
+  bool get canSetManualSkip => canBrowseEpisodes && !_hasServerSkipMarkers;
+
+  /// 多个媒体源时才提供换源入口。
+  bool get canSwitchMediaSource => mediaSources.length > 1;
 
   Timer? _progressTimer;
   Timer? _progressFailBannerTimer;
@@ -139,6 +193,12 @@ class PlayerController extends ChangeNotifier {
     nextEpisode = null;
     playbackEnded = false;
     loading = true;
+    mediaSources = const [];
+    _skipSegments = const [];
+    _hasServerSkipMarkers = false;
+    activeSkipSegment = null;
+    manualIntroSkipSeconds = null;
+    manualOutroSkipSeconds = null;
     _emit();
     try {
       await _restoreSettings();
@@ -151,6 +211,13 @@ class PlayerController extends ChangeNotifier {
         loading = false;
         _emit();
         return;
+      }
+      // 换条目后,另一剧的剧集列表不再复用。
+      if (_episodeSeriesId != null && _episodeSeriesId != item!.seriesId) {
+        _episodeSeriesId = null;
+        seasons = const [];
+        episodes = const [];
+        episodeSeasonId = null;
       }
       try {
         user = await client.getUser();
@@ -272,7 +339,7 @@ class PlayerController extends ChangeNotifier {
       return;
     }
     await backend.seek(target);
-    position = target;
+    _setPosition(target);
     _emit();
     await _reportProgress(eventName: 'Seek');
   }
@@ -381,9 +448,19 @@ class PlayerController extends ChangeNotifier {
       return;
     }
     if (stream.isBitmapSubtitle) {
-      // 先记录选择意图(供按剧记忆),位图渲染失败与否由重开结果决定。
+      // 先记录选择意图(供按剧记忆)。
       subtitleStreamIndex = index;
       await _persistSeriesPreference();
+      if (!isTranscode) {
+        // 直连:mpv 直接渲染容器内嵌位图轨道,无需烧录重开。
+        _clearSubtitleNotice();
+        await backend.setSubtitleIndex(index);
+        _emit();
+        await _reportProgress(eventName: 'SubtitleTrackChange');
+        return;
+      }
+      // 转码:请求服务器烧录进流。
+      _showSubtitleNotice(SubtitleNoticeKind.bitmapBurnIn);
       await _reopen(startTicks: ticksFromDuration(position), subtitle: index);
       return;
     }
@@ -479,15 +556,294 @@ class PlayerController extends ChangeNotifier {
     if (next == null) {
       return;
     }
-    if (onOpenItem != null) {
+    await _playItem(next.id, fromStart: true);
+  }
+
+  /// 切到任意集(剧集列表入口):换集后重置为默认媒体源,
+  /// 续播语义由 start() 按新集的进度决定。
+  Future<void> playEpisode(EmbyItem episode) async {
+    if (episode.id == itemId) {
+      return;
+    }
+    await _playItem(episode.id, fromStart: false);
+  }
+
+  Future<void> _playItem(String targetId, {required bool fromStart}) async {
+    final host = onOpenItem;
+    if (host != null) {
       await shutdownSession();
-      onOpenItem!(next.id);
+      host(targetId);
       return;
     }
     await shutdownSession();
-    itemId = next.id;
-    autoResume = false;
+    itemId = targetId;
+    activeMediaSourceId = null;
+    autoResume = !fromStart;
     await start();
+  }
+
+  // ---------------------------------------------------------------------
+  // 剧集列表与切集(R7)
+  // ---------------------------------------------------------------------
+
+  /// 拉取当前剧的季列表与当前季的分集列表。
+  /// 失败仅置失败状态(入口隐藏/可重试),不阻塞播放。
+  Future<void> loadEpisodeList() async {
+    if (!canBrowseEpisodes) {
+      return;
+    }
+    final seriesId = item!.seriesId!;
+    if (_episodeSeriesId == seriesId) {
+      // 同剧已加载:仅刷新当前集高亮,不重复拉取。
+      return;
+    }
+    await _loadSeasons(seriesId);
+  }
+
+  /// 已加载剧集列表归属的 seriesId;start() 换条目时重置。
+  String? _episodeSeriesId;
+
+  Future<void> _loadSeasons(String seriesId) async {
+    episodeListLoading = true;
+    episodeListFailed = false;
+    _emit();
+    try {
+      final loaded = await client.getItems(
+        parentId: seriesId,
+        includeItemTypes: 'Season',
+        recursive: true,
+        sortBy: 'IndexNumber',
+        sortOrder: 'Ascending',
+        fields: EmbyClient.gridFields,
+      );
+      if (_disposed) {
+        return;
+      }
+      seasons = loaded;
+      _episodeSeriesId = seriesId;
+      var seasonId = item?.seasonId;
+      final hasSeason =
+          seasonId != null && loaded.any((season) => season.id == seasonId);
+      if (!hasSeason) {
+        // 回退:按季号匹配,否则取第一季。
+        final parentIndex = item?.parentIndexNumber;
+        var matched = parentIndex == null
+            ? null
+            : loaded
+                  .where((season) => season.indexNumber == parentIndex)
+                  .toList();
+        if (matched != null && matched.isNotEmpty) {
+          seasonId = matched.first.id;
+        } else {
+          seasonId = loaded.isEmpty ? null : loaded.first.id;
+        }
+      }
+      await _loadSeasonEpisodes(seasonId);
+      episodeListLoading = false;
+      _emit();
+    } on EmbyException {
+      if (_disposed) {
+        return;
+      }
+      episodeListLoading = false;
+      episodeListFailed = true;
+      _emit();
+    }
+  }
+
+  /// 切换剧集列表显示的季(不切集,仅换列表内容)。
+  Future<void> selectSeason(String seasonId) async {
+    if (episodeListLoading || episodeSeasonId == seasonId) {
+      return;
+    }
+    episodeListLoading = true;
+    episodeListFailed = false;
+    _emit();
+    try {
+      await _loadSeasonEpisodes(seasonId);
+    } on EmbyException {
+      if (_disposed) {
+        return;
+      }
+      episodeListFailed = true;
+    }
+    episodeListLoading = false;
+    _emit();
+  }
+
+  Future<void> _loadSeasonEpisodes(String? seasonId) async {
+    if (seasonId == null || seasonId.isEmpty) {
+      episodes = const [];
+      episodeSeasonId = null;
+      return;
+    }
+    final loaded = await client.getItems(
+      parentId: seasonId,
+      includeItemTypes: 'Episode',
+      recursive: true,
+      sortBy: 'IndexNumber',
+      sortOrder: 'Ascending',
+      fields: EmbyClient.gridFields,
+    );
+    if (_disposed) {
+      return;
+    }
+    episodes = loaded;
+    episodeSeasonId = seasonId;
+  }
+
+  // ---------------------------------------------------------------------
+  // 片头片尾跳过(R8)
+  // ---------------------------------------------------------------------
+
+  /// 跳过当前所在区间(跳到区间终点)。
+  Future<void> skipCurrentSegment() async {
+    final segment = activeSkipSegment;
+    if (segment == null) {
+      return;
+    }
+    onUserActivity();
+    await seekTo(segment.end);
+  }
+
+  /// 手动设置片头时长(秒);null/非正数表示关闭。按剧记忆并立即生效。
+  Future<void> setManualIntroSkip(int? seconds) async {
+    manualIntroSkipSeconds = _normalizeManualSkip(seconds);
+    await _persistSeriesPreference();
+    _rebuildSkipSegments();
+    _emit();
+  }
+
+  /// 手动设置片尾时长(秒);null/非正数表示关闭。按剧记忆并立即生效。
+  Future<void> setManualOutroSkip(int? seconds) async {
+    manualOutroSkipSeconds = _normalizeManualSkip(seconds);
+    await _persistSeriesPreference();
+    _rebuildSkipSegments();
+    _emit();
+  }
+
+  /// 关闭手动片头/片尾(不影响服务器章节标记)。
+  Future<void> clearManualSkip() async {
+    manualIntroSkipSeconds = null;
+    manualOutroSkipSeconds = null;
+    await _persistSeriesPreference();
+    _rebuildSkipSegments();
+    _emit();
+  }
+
+  static int? _normalizeManualSkip(int? seconds) =>
+      (seconds != null && seconds > 0) ? seconds : null;
+
+  void _rebuildSkipSegments() {
+    final current = item;
+    final segments = <PlayerSkipSegment>[];
+    _hasServerSkipMarkers = false;
+    if (current != null) {
+      final chapterSegments = _chapterSkipSegments(current.chapters);
+      if (chapterSegments.isNotEmpty) {
+        // 优先服务器章节标记。
+        _hasServerSkipMarkers = true;
+        segments.addAll(chapterSegments);
+      } else {
+        final intro = manualIntroSkipSeconds;
+        final outro = manualOutroSkipSeconds;
+        if (intro != null && intro > 0) {
+          segments.add(
+            PlayerSkipSegment(
+              kind: PlayerSkipKind.intro,
+              start: Duration.zero,
+              end: Duration(seconds: intro),
+            ),
+          );
+        }
+        if (outro != null && outro > 0 && duration > Duration.zero) {
+          final end = duration;
+          var start = end - Duration(seconds: outro);
+          if (start < Duration.zero) {
+            start = Duration.zero;
+          }
+          if (start < end) {
+            segments.add(
+              PlayerSkipSegment(
+                kind: PlayerSkipKind.outro,
+                start: start,
+                end: end,
+              ),
+            );
+          }
+        }
+      }
+    }
+    _skipSegments = segments;
+    _updateActiveSkip();
+  }
+
+  /// 服务器章节标记:Name 含 Intro/Outro/片头/片尾 的章节区间。
+  /// 区间终点为下一章节起点;末章取片长(不可得时退 30 秒)。
+  List<PlayerSkipSegment> _chapterSkipSegments(List<ItemChapter> chapters) {
+    if (chapters.isEmpty) {
+      return const [];
+    }
+    final result = <PlayerSkipSegment>[];
+    for (var i = 0; i < chapters.length; i++) {
+      final name = chapters[i].name.toLowerCase();
+      final isOutro = name.contains('outro') || name.contains('片尾');
+      final isIntro =
+          !isOutro && (name.contains('intro') || name.contains('片头'));
+      if (!isIntro && !isOutro) {
+        continue;
+      }
+      final start = durationFromTicks(chapters[i].startPositionTicks);
+      var end = i + 1 < chapters.length
+          ? durationFromTicks(chapters[i + 1].startPositionTicks)
+          : (duration > start ? duration : start + const Duration(seconds: 30));
+      if (end <= start) {
+        continue;
+      }
+      result.add(
+        PlayerSkipSegment(
+          kind: isOutro ? PlayerSkipKind.outro : PlayerSkipKind.intro,
+          start: start,
+          end: end,
+        ),
+      );
+    }
+    return result;
+  }
+
+  void _updateActiveSkip() {
+    PlayerSkipSegment? next;
+    for (final segment in _skipSegments) {
+      if (position >= segment.start && position < segment.end) {
+        next = segment;
+        break;
+      }
+    }
+    activeSkipSegment = next;
+  }
+
+  void _setPosition(Duration value) {
+    position = value;
+    _updateActiveSkip();
+  }
+
+  // ---------------------------------------------------------------------
+  // 媒体源切换(R9)
+  // ---------------------------------------------------------------------
+
+  /// 播放中切换媒体源:从当前进度继续,字幕/音轨选择尽量迁移
+  /// (新源缺失所选轨道时回退默认,见 [_open])。
+  Future<void> switchMediaSource(String sourceId) async {
+    final current = resolved;
+    if (current == null ||
+        sourceId == current.mediaSource.id ||
+        mediaSources.every((source) => source.id != sourceId)) {
+      return;
+    }
+    final startTicks = ticksFromDuration(position);
+    activeMediaSourceId = sourceId;
+    onUserActivity();
+    await _reopen(startTicks: startTicks);
   }
 
   Future<void> close() async {
@@ -525,7 +881,7 @@ class PlayerController extends ChangeNotifier {
 
   void _bindBackend() {
     _positionSub = backend.positionStream.listen((value) {
-      position = value;
+      _setPosition(value);
       if (disconnected && isPlaying) {
         disconnected = false;
         disconnectDetail = null;
@@ -535,6 +891,8 @@ class PlayerController extends ChangeNotifier {
     _durationSub = backend.durationStream.listen((value) {
       if (value > Duration.zero) {
         duration = value;
+        // 片长更新后手动片尾区间终点随之变化。
+        _rebuildSkipSegments();
         _emit();
       }
     });
@@ -596,16 +954,18 @@ class PlayerController extends ChangeNotifier {
         subtitleStreamIndex: subtitleOff
             ? null
             : (subtitle ?? preferredSubtitleStreamIndex),
-        mediaSourceId: preferredMediaSourceId,
+        mediaSourceId: activeMediaSourceId ?? preferredMediaSourceId,
       );
       if (_disposed) {
         return;
       }
+      mediaSources = info.mediaSources;
       final next = resolvePlayback(
         info: info,
         baseUrl: client.baseUrl!,
         accessToken: client.accessToken!,
         itemId: itemId,
+        mediaSourceId: activeMediaSourceId ?? preferredMediaSourceId,
       );
       if (next == null) {
         error = PlayerErrorKind.noStream;
@@ -637,9 +997,12 @@ class PlayerController extends ChangeNotifier {
 
       if (subtitle != null) {
         final stream = next.mediaSource.streamByIndex(subtitle);
-        if (stream != null && stream.isBitmapSubtitle && !next.isTranscode) {
-          subtitleStreamIndex = null;
-          _showSubtitleNotice(SubtitleNoticeKind.bitmapFailed);
+        if (stream != null && stream.isBitmapSubtitle) {
+          if (next.isTranscode) {
+            // 转码:服务器烧录进流。
+            _showSubtitleNotice(SubtitleNoticeKind.bitmapBurnIn);
+          }
+          // 直连:保留选择,_applyTracks 直接选内嵌轨道本地渲染。
         }
       }
 
@@ -653,11 +1016,12 @@ class PlayerController extends ChangeNotifier {
       await backend.setVolume(mpvVolumeForPercent(volume));
       // 换集/重开不重置倍速:mpv 重新起流后显式恢复当前倍速。
       await backend.setRate(playbackRate);
-      position = durationFromTicks(startTicks);
       final runtime = next.mediaSource.runTimeTicks ?? item?.runTimeTicks ?? 0;
       if (runtime > 0) {
         duration = durationFromTicks(runtime);
       }
+      _setPosition(durationFromTicks(startTicks));
+      _rebuildSkipSegments();
       isPlaying = backend.isPlaying;
 
       await _applyTracks(next);
@@ -685,11 +1049,17 @@ class PlayerController extends ChangeNotifier {
       await backend.setSubtitleOff();
       return;
     }
-    if (next.isTranscode) {
+    final stream = next.mediaSource.streamByIndex(subtitleStreamIndex!);
+    if (stream == null || !stream.isSubtitle) {
       return;
     }
-    final stream = next.mediaSource.streamByIndex(subtitleStreamIndex!);
-    if (stream == null || !stream.isTextSubtitle) {
+    if (next.isTranscode) {
+      // 转码:字幕由服务器烧录进流,不另选择轨道。
+      return;
+    }
+    if (stream.isBitmapSubtitle) {
+      // 直连:mpv 直接渲染容器内嵌位图轨道(PGS 等)。
+      await backend.setSubtitleIndex(subtitleStreamIndex!);
       return;
     }
     await backend.setSubtitleUri(
@@ -945,7 +1315,7 @@ class PlayerController extends ChangeNotifier {
     } catch (_) {}
   }
 
-  /// start() 时按 item.seriesId 解析记忆的音轨/字幕/码率。
+  /// start() 时按 item.seriesId 解析记忆的音轨/字幕/码率与手动片头片尾。
   void _applyRememberedPreference() {
     _rememberedPreference = null;
     final seriesId = item?.seriesId;
@@ -960,9 +1330,11 @@ class PlayerController extends ChangeNotifier {
     if (preference.maxStreamingBitrate != null) {
       maxStreamingBitrate = preference.maxStreamingBitrate!;
     }
+    manualIntroSkipSeconds = preference.introSkipSeconds;
+    manualOutroSkipSeconds = preference.outroSkipSeconds;
   }
 
-  /// 播放中选择音轨/字幕(含关闭)/码率后写入按剧记忆。
+  /// 播放中选择音轨/字幕(含关闭)/码率/手动片头片尾后写入按剧记忆。
   Future<void> _persistSeriesPreference() async {
     final seriesId = item?.seriesId;
     if (seriesId == null || seriesId.isEmpty) {
@@ -973,6 +1345,8 @@ class PlayerController extends ChangeNotifier {
       audioStreamIndex: audioStreamIndex,
       subtitleStreamIndex: subtitleStreamIndex,
       maxStreamingBitrate: maxStreamingBitrate,
+      introSkipSeconds: manualIntroSkipSeconds,
+      outroSkipSeconds: manualOutroSkipSeconds,
     );
     await _writeSettings();
   }

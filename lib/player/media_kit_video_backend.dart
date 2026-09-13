@@ -135,6 +135,22 @@ class MediaKitVideoBackend implements VideoBackend {
     );
   }
 
+  /// 直连场景选择容器内嵌字幕轨道(如 PGS 位图),由 mpv 直接渲染,
+  /// 不经外挂 URI 也不请求服务端烧录重开。
+  @override
+  Future<void> setSubtitleIndex(int index) async {
+    final tracks = _player.state.tracks.subtitle
+        .where((track) => track.id != 'auto' && track.id != 'no')
+        .toList();
+    for (final track in tracks) {
+      if (track.id == index.toString() || track.id == '${index + 1}') {
+        await _player.setSubtitleTrack(track);
+        return;
+      }
+    }
+    await _player.setSubtitleTrack(SubtitleTrack(index.toString(), null, null));
+  }
+
   @override
   Future<void> setSubtitleOff() {
     return _player.setSubtitleTrack(SubtitleTrack.no());

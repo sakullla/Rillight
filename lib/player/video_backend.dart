@@ -34,6 +34,10 @@ abstract class VideoBackend {
   Future<void> setRate(double rate);
   Future<void> setAudioIndex(int index);
   Future<void> setSubtitleUri(Uri uri, {String? title});
+
+  /// 选择容器内嵌字幕轨道(按 MediaStream 索引,如直连时的 PGS 位图轨)。
+  Future<void> setSubtitleIndex(int index);
+
   Future<void> setSubtitleOff();
   Future<void> dispose();
 
@@ -60,6 +64,7 @@ class FakeVideoBackend implements VideoBackend {
   int openCount = 0;
   int? audioIndex;
   Uri? subtitleUri;
+  int? subtitleIndex;
   bool subtitleOff = false;
   double volume = 100;
   double rate = 1.0;
@@ -90,6 +95,8 @@ class FakeVideoBackend implements VideoBackend {
     position = request.start;
     isPlaying = true;
     subtitleOff = false;
+    subtitleUri = null;
+    subtitleIndex = null;
     _duration.add(duration);
     _position.add(position);
     _playing.add(true);
@@ -144,6 +151,13 @@ class FakeVideoBackend implements VideoBackend {
   @override
   Future<void> setSubtitleUri(Uri uri, {String? title}) async {
     subtitleUri = uri;
+    subtitleOff = false;
+  }
+
+  @override
+  Future<void> setSubtitleIndex(int index) async {
+    subtitleIndex = index;
+    subtitleUri = null;
     subtitleOff = false;
   }
 

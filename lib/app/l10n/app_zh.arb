@@ -634,5 +634,43 @@
   "alwaysOnTopOff": "取消置顶",
   "@alwaysOnTopOff": {
     "description": "Stop keeping the player window above other windows."
+  },
+  "playerEpisodes": "剧集",
+  "@playerEpisodes": {
+    "description": "Player control to open the in-player episode list panel."
+  },
+  "skipIntro": "跳过片头",
+  "@skipIntro": {
+    "description": "Skip forward past the current intro segment."
+  },
+  "skipOutro": "跳过片尾",
+  "@skipOutro": {
+    "description": "Skip forward past the current outro segment."
+  },
+  "skipSettings": "片头片尾",
+  "@skipSettings": {
+    "description": "Manual intro/outro skip duration selector label."
+  },
+  "skipManualOff": "关闭手动跳过",
+  "@skipManualOff": {
+    "description": "Clear manually set intro/outro skip durations."
+  },
+  "skipIntroSeconds": "片头 {seconds} 秒",
+  "@skipIntroSeconds": {
+    "description": "Manual intro skip duration option.",
+    "placeholders": {
+      "seconds": {
+        "type": "int"
+      }
+    }
+  },
+  "skipOutroSeconds": "片尾 {seconds} 秒",
+  "@skipOutroSeconds": {
+    "description": "Manual outro skip duration option.",
+    "placeholders": {
+      "seconds": {
+        "type": "int"
+      }
+    }
   }
 }

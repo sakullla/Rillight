@@ -9,25 +9,33 @@ enum HardwareDecodingMode { auto, on, off }
 /// 硬件解码后端:auto 走平台默认,其余为 mpv hwdec 值。
 enum HardwareDecoderBackend { auto, d3d11va, nvdec, videotoolbox }
 
-/// 按剧(seriesId)记忆的播放偏好:音轨/字幕(含关闭)/码率。
+/// 按剧(seriesId)记忆的播放偏好:音轨/字幕(含关闭)/码率/手动片头片尾。
 ///
 /// [subtitleStreamIndex] 为 null 表示该剧字幕处于关闭状态;
+/// [introSkipSeconds]/[outroSkipSeconds] 为无服务器章节标记时的
+/// 手动跳过时长(秒),null 表示未设置。
 /// 记录存在即视为有效快照,不存在记录时运行时沿用默认逻辑。
 class PlayerSeriesPreference {
   const PlayerSeriesPreference({
     this.audioStreamIndex,
     this.subtitleStreamIndex,
     this.maxStreamingBitrate,
+    this.introSkipSeconds,
+    this.outroSkipSeconds,
   });
 
   final int? audioStreamIndex;
   final int? subtitleStreamIndex;
   final int? maxStreamingBitrate;
+  final int? introSkipSeconds;
+  final int? outroSkipSeconds;
 
   Map<String, dynamic> toJson() => {
     if (audioStreamIndex != null) 'audioStreamIndex': audioStreamIndex,
     if (subtitleStreamIndex != null) 'subtitleStreamIndex': subtitleStreamIndex,
     if (maxStreamingBitrate != null) 'maxStreamingBitrate': maxStreamingBitrate,
+    if (introSkipSeconds != null) 'introSkipSeconds': introSkipSeconds,
+    if (outroSkipSeconds != null) 'outroSkipSeconds': outroSkipSeconds,
   };
 
   factory PlayerSeriesPreference.fromJson(Map<String, dynamic> json) {
@@ -35,6 +43,8 @@ class PlayerSeriesPreference {
       audioStreamIndex: _readInt(json['audioStreamIndex']),
       subtitleStreamIndex: _readInt(json['subtitleStreamIndex']),
       maxStreamingBitrate: _readInt(json['maxStreamingBitrate']),
+      introSkipSeconds: _readInt(json['introSkipSeconds']),
+      outroSkipSeconds: _readInt(json['outroSkipSeconds']),
     );
   }
 }

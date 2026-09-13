@@ -17,7 +17,7 @@ void main() {
     expect(direct.toString(), isNot(contains('html5')));
   });
 
-  test('text subtitles are External and PGS is Encode', () {
+  test('text subtitles are External and PGS is locally renderable', () {
     final profile = mpvDeviceProfile();
     final subs = (profile['SubtitleProfiles'] as List)
         .map((item) => Map<String, dynamic>.from(item as Map))
@@ -28,15 +28,31 @@ void main() {
       ),
       isTrue,
     );
+    // pgs/pgssub 声明 Embedded:直连场景服务端不强制烧录,mpv 本地渲染内嵌轨道。
     expect(
-      subs.any((item) => item['Format'] == 'pgs' && item['Method'] == 'Encode'),
+      subs.any(
+        (item) => item['Format'] == 'pgs' && item['Method'] == 'Embedded',
+      ),
       isTrue,
     );
     expect(
       subs.any(
-        (item) => item['Format'] == 'pgs' && item['Method'] == 'External',
+        (item) => item['Format'] == 'pgssub' && item['Method'] == 'Embedded',
       ),
-      isFalse,
+      isTrue,
+    );
+    // dvdsub/dvbsub 仍为 Encode(转码烧录)。
+    expect(
+      subs.any(
+        (item) => item['Format'] == 'dvdsub' && item['Method'] == 'Encode',
+      ),
+      isTrue,
+    );
+    expect(
+      subs.any(
+        (item) => item['Format'] == 'dvbsub' && item['Method'] == 'Encode',
+      ),
+      isTrue,
     );
   });
 

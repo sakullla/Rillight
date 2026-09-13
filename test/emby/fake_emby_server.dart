@@ -84,6 +84,26 @@ class FakeChapter {
   }
 }
 
+class FakeMediaSource {
+  const FakeMediaSource({
+    required this.id,
+    this.name,
+    this.container = 'mkv',
+    this.supportsDirectPlay = true,
+    this.supportsDirectStream = true,
+    this.forceTranscode = false,
+    this.mediaStreams = const [],
+  });
+
+  final String id;
+  final String? name;
+  final String container;
+  final bool supportsDirectPlay;
+  final bool supportsDirectStream;
+  final bool forceTranscode;
+  final List<FakeMediaStream> mediaStreams;
+}
+
 class FakeEmbyItem {
   FakeEmbyItem({
     required this.id,
@@ -125,6 +145,7 @@ class FakeEmbyItem {
     this.supportsDirectStream = true,
     this.mediaStreams = const [],
     this.chapters = const [],
+    this.extraSources = const [],
   }) : dateCreated = dateCreated ?? DateTime.utc(2024, 1, 1),
        dateLastContentAdded =
            dateLastContentAdded ?? dateCreated ?? DateTime.utc(2024, 1, 1),
@@ -171,6 +192,9 @@ class FakeEmbyItem {
   bool supportsDirectStream;
   List<FakeMediaStream> mediaStreams;
   List<FakeChapter> chapters;
+
+  /// 额外媒体源(多版本场景,如同片 1080p/4K 两版)。
+  List<FakeMediaSource> extraSources;
 
   Map<String, dynamic> toJson() {
     return {
@@ -517,7 +541,8 @@ class FakeEmbyServer {
       for (final stream in streams) {
         if (stream.index == subtitleIndex &&
             stream.type == 'Subtitle' &&
-            stream.isTextSubtitleStream != true) {
+            stream.isTextSubtitleStream != true &&
+            !_subtitleRenderedLocally(profile, stream.codec)) {
           burnIn = true;
         }
       }
@@ -538,11 +563,100 @@ class FakeEmbyServer {
       }
     }
 
+    return _json(200, {
+      'MediaSources': [
+        _buildSource(
+          item: item,
+          id: item.id,
+          name: item.name,
+          container: transcode ? 'ts' : item.container,
+          direct:
+              !transcode &&
+              item.supportsDirectPlay &&
+              item.supportsDirectStream,
+          transcode: transcode,
+          streams: streams,
+          defaultAudio: defaultAudio,
+          defaultSubtitle: defaultSubtitle,
+          playSessionId: playSessionId,
+          startTicks: startTicks,
+          subtitleIndex: subtitleIndex,
+          maxBitrate: maxBitrate,
+        ),
+        for (final extra in item.extraSources)
+          _buildSource(
+            item: item,
+            id: extra.id,
+            name: extra.name,
+            container: transcode ? 'ts' : extra.container,
+            direct:
+                !transcode &&
+                extra.supportsDirectPlay &&
+                extra.supportsDirectStream,
+            transcode: transcode || extra.forceTranscode,
+            streams: extra.mediaStreams.isNotEmpty
+                ? extra.mediaStreams
+                : streams,
+            defaultAudio: defaultAudio,
+            defaultSubtitle: defaultSubtitle,
+            playSessionId: playSessionId,
+            startTicks: startTicks,
+            subtitleIndex: subtitleIndex,
+            maxBitrate: maxBitrate,
+          ),
+      ],
+      'PlaySessionId': playSessionId,
+    });
+  }
+
+  /// 设备声明为可本地渲染(Embedded/External)的字幕格式不烧录,
+  /// 仅 Encode/Drop 的位图格式(如 dvdsub)转码烧录。
+  bool _subtitleRenderedLocally(Map<String, dynamic>? profile, String? codec) {
+    if (profile == null || codec == null) {
+      return false;
+    }
+    final profiles = profile['SubtitleProfiles'];
+    if (profiles is! List) {
+      return false;
+    }
+    for (final entry in profiles) {
+      if (entry is! Map) {
+        continue;
+      }
+      final format = entry['Format']?.toString().toLowerCase();
+      final method = entry['Method']?.toString().toLowerCase();
+      if (format != null &&
+          format == codec.toLowerCase() &&
+          method != null &&
+          method != 'encode' &&
+          method != 'drop') {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  Map<String, dynamic> _buildSource({
+    required FakeEmbyItem item,
+    required String id,
+    required String? name,
+    required String container,
+    required bool direct,
+    required bool transcode,
+    required List<FakeMediaStream> streams,
+    required int? defaultAudio,
+    required int? defaultSubtitle,
+    required String playSessionId,
+    required int startTicks,
+    required int? subtitleIndex,
+    required int? maxBitrate,
+  }) {
     final source = <String, dynamic>{
-      'Id': item.id,
-      'Container': transcode ? 'ts' : item.container,
-      'SupportsDirectPlay': !transcode && item.supportsDirectPlay,
-      'SupportsDirectStream': !transcode && item.supportsDirectStream,
+      'Id': id,
+      'Name': ?name,
+      'Container': container,
+      'SupportsDirectPlay': direct,
+      'SupportsDirectStream': direct,
       'SupportsTranscoding': true,
       'RunTimeTicks': item.runTimeTicks ?? 0,
       'DefaultAudioStreamIndex': ?defaultAudio,
@@ -551,7 +665,7 @@ class FakeEmbyServer {
     };
     if (transcode) {
       var transcoding =
-          '/videos/${item.id}/master.m3u8?MediaSourceId=${item.id}'
+          '/videos/${item.id}/master.m3u8?MediaSourceId=$id'
           '&PlaySessionId=$playSessionId'
           '&MaxStreamingBitrate=${maxBitrate ?? 8000000}';
       if (startTicks > 0) {
@@ -565,13 +679,10 @@ class FakeEmbyServer {
       source['TranscodingContainer'] = 'ts';
     } else {
       source['DirectStreamUrl'] =
-          '/Videos/${item.id}/stream.${item.container}?static=true'
-          '&MediaSourceId=${item.id}&PlaySessionId=$playSessionId';
+          '/Videos/${item.id}/stream.$container?static=true'
+          '&MediaSourceId=$id&PlaySessionId=$playSessionId';
     }
-    return _json(200, {
-      'MediaSources': [source],
-      'PlaySessionId': playSessionId,
-    });
+    return source;
   }
 
   ResponseBody _handlePlaybackReport(List<String> segments, String raw) {

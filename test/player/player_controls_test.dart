@@ -922,6 +922,367 @@ void main() {
     expect(window.isAlwaysOnTop, isTrue);
     expect(find.byIcon(Icons.push_pin_rounded), findsOneWidget);
   });
+
+  testWidgets('movies do not show the episode list entry', (tester) async {
+    await pumpLoggedIn(tester);
+    await openPlayable(tester, 'movie-up');
+    await waitFor(tester, find.byKey(PlayerKeys.playPause));
+    expect(find.byKey(const Key('player-episodes')), findsNothing);
+    expect(find.byKey(const Key('player-media-source')), findsNothing);
+  });
+
+  testWidgets(
+    'episode panel lists and switches episodes with correct reports',
+    (tester) async {
+      await pumpLoggedIn(tester);
+      await openLibrary(tester, 'view-tv');
+      await tester.tap(find.byKey(CatalogKeys.item('series-friends')));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(
+        find.byKey(CatalogKeys.episode('episode-friends-s1e1')),
+      );
+      await tester.tap(find.byKey(CatalogKeys.episode('episode-friends-s1e1')));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byKey(PlayerKeys.open));
+      await tester.tap(find.byKey(PlayerKeys.open));
+      await tester.pump();
+      await waitFor(tester, find.byKey(PlayerKeys.playPause));
+
+      // 剧集入口仅播放剧集时显示。
+      await tester.tap(find.byKey(const Key('player-episodes')));
+      await waitFor(
+        tester,
+        find.byKey(const Key('player-episode-episode-friends-s1e2')),
+      );
+
+      // 当前集高亮,季默认取当前集所在季。
+      final currentRow = tester.widget<ListTile>(
+        find.byKey(const Key('player-episode-episode-friends-s1e1')),
+      );
+      expect(currentRow.selected, isTrue);
+      expect(controllerOf(tester).episodeSeasonId, 'season-friends-1');
+      expect(find.byKey(const Key('player-season-picker')), findsNothing);
+
+      // 点击任意集立即切集:旧集 Stopped、新集 Playing,从零起播。
+      final playingBefore = server.playbackEvents
+          .where((event) => event.kind == 'Playing')
+          .length;
+      await tester.tap(
+        find.byKey(const Key('player-episode-episode-friends-s1e2')),
+      );
+      for (var i = 0; i < 80; i++) {
+        if (controllerOf(tester).itemId == 'episode-friends-s1e2' &&
+            !controllerOf(tester).loading) {
+          break;
+        }
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+      expect(controllerOf(tester).itemId, 'episode-friends-s1e2');
+      expect(backend.openedUrl!.path, contains('episode-friends-s1e2'));
+      expect(backend.openedStart, Duration.zero);
+      final kinds = server.playbackEvents.map((event) => event.kind).toList();
+      expect(kinds.contains('Stopped'), isTrue);
+      expect(
+        server.playbackEvents.where((event) => event.kind == 'Playing').length,
+        playingBefore + 1,
+      );
+      final lastPlaying = server.playbackEvents
+          .where((event) => event.kind == 'Playing')
+          .last;
+      expect(lastPlaying.body['ItemId'], 'episode-friends-s1e2');
+
+      // 切集后新页面接管播放(面板随旧页关闭)。
+      await waitFor(tester, find.byKey(PlayerKeys.playPause));
+      expect(find.byKey(const Key('player-episodes-panel')), findsNothing);
+      expect(controllerOf(tester).itemId, 'episode-friends-s1e2');
+    },
+  );
+
+  testWidgets('episode panel switches seasons and plays another season', (
+    tester,
+  ) async {
+    server = multiSeasonSeriesServer();
+    adapter = FakeEmbyAdapter([server]);
+    await pumpLoggedIn(tester);
+    await openEpisode(tester, 'episode-anim-1');
+    await waitFor(tester, find.byKey(PlayerKeys.playPause));
+
+    await tester.tap(find.byKey(const Key('player-episodes')));
+    await waitFor(
+      tester,
+      find.byKey(const Key('player-episode-episode-anim-1')),
+    );
+    expect(
+      find.byKey(const Key('player-episode-episode-anim-s2e1')),
+      findsNothing,
+    );
+
+    // 换季:仅切换列表内容,不切集。
+    await tester.tap(find.byKey(const Key('player-season-picker')));
+    await tester.pumpAndSettle();
+    await tester.tap(popupItem('第 2 季'));
+    await waitFor(
+      tester,
+      find.byKey(const Key('player-episode-episode-anim-s2e1')),
+    );
+    expect(
+      find.byKey(const Key('player-episode-episode-anim-1')),
+      findsNothing,
+    );
+    expect(controllerOf(tester).itemId, 'episode-anim-1');
+
+    // 点击另一季的集立即切换。
+    await tester.tap(find.byKey(const Key('player-episode-episode-anim-s2e1')));
+    for (var i = 0; i < 80; i++) {
+      if (controllerOf(tester).itemId == 'episode-anim-s2e1' &&
+          !controllerOf(tester).loading) {
+        break;
+      }
+      await tester.pump(const Duration(milliseconds: 20));
+    }
+    expect(controllerOf(tester).itemId, 'episode-anim-s2e1');
+    expect(backend.openedUrl!.path, contains('episode-anim-s2e1'));
+  });
+
+  testWidgets('long season lists scroll lazily with ListView.builder', (
+    tester,
+  ) async {
+    server = longSeasonSeriesServer();
+    adapter = FakeEmbyAdapter([server]);
+    await pumpLoggedIn(tester);
+    await openEpisode(tester, 'episode-anim-1');
+    await waitFor(tester, find.byKey(PlayerKeys.playPause));
+
+    await tester.tap(find.byKey(const Key('player-episodes')));
+    await waitFor(
+      tester,
+      find.byKey(const Key('player-episode-episode-anim-1')),
+    );
+    final list = find.byKey(const Key('player-episodes-list'));
+    expect(controllerOf(tester).episodes.length, 120);
+    // 惰性构建:首屏远少于全集数。
+    final builtRows = find
+        .byWidgetPredicate(
+          (widget) =>
+              widget is ListTile &&
+              widget.key != null &&
+              widget.key.toString().contains('player-episode-'),
+        )
+        .evaluate()
+        .length;
+    expect(builtRows, lessThan(120));
+    // 滚动到末尾的第 120 集仍可命中。
+    await tester.dragUntilVisible(
+      find.byKey(const Key('player-episode-episode-anim-120')),
+      list,
+      const Offset(0, -300),
+    );
+    expect(
+      find.byKey(const Key('player-episode-episode-anim-120')),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('chapter markers surface skip intro and outro buttons', (
+    tester,
+  ) async {
+    server = chapteredSeriesServer();
+    adapter = FakeEmbyAdapter([server]);
+    await pumpLoggedIn(tester);
+    await openEpisode(tester, 'episode-anim-1');
+    await waitFor(tester, find.byKey(PlayerKeys.playPause));
+
+    // 有服务器章节标记时不显示手动设置入口。
+    expect(find.byKey(const Key('player-skip-settings')), findsNothing);
+
+    // 起播即在片头区间,跳过片头立即可见,点击跳到区间终点。
+    await waitFor(tester, find.byKey(const Key('player-skip-segment')));
+    expect(find.text('跳过片头'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('player-skip-segment')));
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.pump();
+    expect(controllerOf(tester).position, const Duration(seconds: 90));
+    expect(find.byKey(const Key('player-skip-segment')), findsNothing);
+
+    // 回到片头区间按钮再次出现。
+    await tester.runAsync(
+      () => controllerOf(tester).seekTo(const Duration(seconds: 30)),
+    );
+    await tester.pump();
+    await waitFor(tester, find.byKey(const Key('player-skip-segment')));
+    expect(find.text('跳过片头'), findsOneWidget);
+
+    // 进入片尾区间显示跳过片尾。
+    await tester.runAsync(
+      () => controllerOf(tester).seekTo(const Duration(minutes: 21)),
+    );
+    await tester.pump();
+    await waitFor(tester, find.byKey(const Key('player-skip-segment')));
+    expect(find.text('跳过片尾'), findsOneWidget);
+    // 收尾排空未等待的上报链。
+    await tester.pump(const Duration(milliseconds: 50));
+  });
+
+  testWidgets('manual intro skip is remembered per series and auto-applied', (
+    tester,
+  ) async {
+    server = multiTrackSeriesServer();
+    adapter = FakeEmbyAdapter([server]);
+    final store = MemoryPlayerSettingsStore();
+    await pumpLoggedIn(tester, settingsStore: store);
+    await openEpisode(tester, 'episode-anim-1');
+    await waitFor(tester, find.byKey(PlayerKeys.playPause));
+
+    // 无章节标记的剧集显示手动设置入口。
+    await waitFor(tester, find.byKey(const Key('player-skip-settings')));
+    await tester.tap(find.byKey(const Key('player-skip-settings')));
+    await tester.pumpAndSettle();
+    await tester.tap(popupItem('片头 60 秒'));
+    await tester.pumpAndSettle();
+
+    final preference = (await store.read()).seriesPreferences['series-anim'];
+    expect(preference, isNotNull);
+    expect(preference!.introSkipSeconds, 60);
+
+    // 设置立即生效:片头区间内显示跳过按钮。
+    await waitFor(tester, find.byKey(const Key('player-skip-segment')));
+    expect(find.text('跳过片头'), findsOneWidget);
+    await tester.runAsync(
+      () => controllerOf(tester).seekTo(const Duration(seconds: 70)),
+    );
+    await tester.pump();
+    expect(find.byKey(const Key('player-skip-segment')), findsNothing);
+
+    // 同剧下一集自动应用记忆的手动片头时长。
+    backend.completePlayback();
+    await tester.pump();
+    await waitFor(tester, find.byKey(PlayerKeys.nextEpisodePlay));
+    await tester.tap(find.byKey(PlayerKeys.nextEpisodePlay));
+    await waitFor(tester, find.byKey(PlayerKeys.playPause));
+    await waitFor(tester, find.byKey(const Key('player-skip-segment')));
+    expect(find.text('跳过片头'), findsOneWidget);
+    expect(
+      controllerOf(tester).activeSkipSegment?.end,
+      const Duration(seconds: 60),
+    );
+  });
+
+  testWidgets('media source menu switches source from the current position', (
+    tester,
+  ) async {
+    server = multiSourceMovieServer();
+    adapter = FakeEmbyAdapter([server]);
+    await pumpLoggedIn(tester);
+    await openLibrary(tester, 'view-movies');
+    await tester.ensureVisible(
+      find.byKey(CatalogKeys.item('movie-multisource')),
+    );
+    await tester.tap(find.byKey(CatalogKeys.item('movie-multisource')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(PlayerKeys.open));
+    await tester.pump();
+    await waitFor(tester, find.byKey(PlayerKeys.playPause));
+
+    await waitFor(tester, find.byKey(const Key('player-media-source')));
+    await tester.runAsync(
+      () => controllerOf(tester).seekTo(const Duration(seconds: 60)),
+    );
+    await tester.pump();
+
+    await tester.tap(find.byKey(const Key('player-media-source')));
+    await tester.pumpAndSettle();
+    await tester.tap(popupItem('4K 版本'));
+    for (var i = 0; i < 80; i++) {
+      if (controllerOf(tester).resolved?.mediaSource.id == 'src-4k' &&
+          !controllerOf(tester).loading) {
+        break;
+      }
+      await tester.pump(const Duration(milliseconds: 20));
+    }
+
+    // 新源重新解析,从当前进度继续。
+    expect(controllerOf(tester).resolved?.mediaSource.id, 'src-4k');
+    expect(backend.openedUrl!.queryParameters['MediaSourceId'], 'src-4k');
+    expect(backend.openedStart, const Duration(seconds: 60));
+    expect(server.lastPlaybackInfoBody?['MediaSourceId'], 'src-4k');
+
+    // 进度上报对新源正确(MediaSourceId 为新源)。
+    final lastPlaying = server.playbackEvents
+        .where((event) => event.kind == 'Playing')
+        .last;
+    expect(lastPlaying.body['MediaSourceId'], 'src-4k');
+  });
+
+  testWidgets('single media source hides the switch entry', (tester) async {
+    await pumpLoggedIn(tester);
+    await openPlayable(tester, 'movie-inception');
+    await waitFor(tester, find.byKey(PlayerKeys.playPause));
+    expect(find.byKey(const Key('player-media-source')), findsNothing);
+  });
+
+  testWidgets('PGS subtitle renders locally on direct play without reopen', (
+    tester,
+  ) async {
+    await pumpLoggedIn(tester);
+    await openLibrary(tester, 'view-movies');
+    await tester.ensureVisible(find.byKey(CatalogKeys.item('movie-pgs')));
+    await tester.tap(find.byKey(CatalogKeys.item('movie-pgs')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(PlayerKeys.open));
+    await tester.pump();
+    await waitFor(tester, find.byKey(PlayerKeys.playPause));
+
+    // 直连流,选择 PGS 轨道本地渲染。
+    expect(controllerOf(tester).isTranscode, isFalse);
+    expect(backend.openedUrl!.queryParameters['static'], 'true');
+    final opens = backend.openCount;
+
+    await tester.tap(find.byKey(PlayerKeys.subtitle));
+    await tester.pumpAndSettle();
+    await tester.tap(popupItem('PGS'));
+    await tester.pumpAndSettle();
+
+    expect(controllerOf(tester).subtitleStreamIndex, 2);
+    expect(backend.subtitleIndex, 2);
+    expect(backend.subtitleUri, isNull);
+    expect(backend.openCount, opens);
+    expect(find.byKey(PlayerKeys.subtitleNotice), findsNothing);
+    final lastProgress = server.playbackEvents.last;
+    expect(lastProgress.body['SubtitleStreamIndex'], 2);
+  });
+
+  testWidgets('PGS subtitle burns in via reopen when transcoding', (
+    tester,
+  ) async {
+    server = transcodePgsMovieServer();
+    adapter = FakeEmbyAdapter([server]);
+    await pumpLoggedIn(tester);
+    await openLibrary(tester, 'view-movies');
+    await tester.ensureVisible(
+      find.byKey(CatalogKeys.item('movie-pgs-transcode')),
+    );
+    await tester.tap(find.byKey(CatalogKeys.item('movie-pgs-transcode')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(PlayerKeys.open));
+    await tester.pump();
+    await waitFor(tester, find.byKey(PlayerKeys.playPause));
+
+    expect(controllerOf(tester).isTranscode, isTrue);
+    final opens = backend.openCount;
+
+    await tester.tap(find.byKey(PlayerKeys.subtitle));
+    await tester.pumpAndSettle();
+    await tester.tap(popupItem('PGS'));
+    await tester.pumpAndSettle();
+    await waitFor(tester, find.byKey(PlayerKeys.playPause));
+
+    // 转码维持烧录:重开新流并明确提示。
+    expect(backend.openCount, greaterThan(opens));
+    expect(backend.openedUrl!.path, contains('master.m3u8'));
+    expect(backend.openedUrl!.queryParameters['SubtitleStreamIndex'], '2');
+    expect(find.byKey(PlayerKeys.subtitleNotice), findsOneWidget);
+    expect(find.text('该字幕为位图，将请求服务器烧录'), findsOneWidget);
+  });
 }
 
 /// 双音轨+双文本字幕的剧集夹具,供按剧记忆测试使用。
@@ -1022,6 +1383,269 @@ FakeEmbyServer multiTrackSeriesServer() {
         runTimeTicks: minute * 22,
         primaryImageTag: 'tag-anim-e2',
         mediaStreams: tracks,
+      ),
+    ],
+  );
+}
+
+/// 双季剧集夹具:第 1 季两集、第 2 季一集,供剧集列表换季测试使用。
+FakeEmbyServer multiSeasonSeriesServer() {
+  const minute = 10000000 * 60;
+  return FakeEmbyServer(
+    items: [
+      ...defaultCatalogItems().where(
+        (item) =>
+            item.id != 'series-friends' &&
+            item.id != 'season-friends-1' &&
+            item.id != 'episode-friends-s1e1' &&
+            item.id != 'episode-friends-s1e2',
+      ),
+      FakeEmbyItem(
+        id: 'series-anim',
+        name: '测试动画',
+        type: 'Series',
+        parentId: 'view-tv',
+        productionYear: 2024,
+        childCount: 3,
+        primaryImageTag: 'tag-anim',
+      ),
+      FakeEmbyItem(
+        id: 'season-anim-1',
+        name: '第 1 季',
+        type: 'Season',
+        parentId: 'series-anim',
+        seriesId: 'series-anim',
+        seriesName: '测试动画',
+        indexNumber: 1,
+      ),
+      FakeEmbyItem(
+        id: 'season-anim-2',
+        name: '第 2 季',
+        type: 'Season',
+        parentId: 'series-anim',
+        seriesId: 'series-anim',
+        seriesName: '测试动画',
+        indexNumber: 2,
+      ),
+      FakeEmbyItem(
+        id: 'episode-anim-1',
+        name: '第一集',
+        type: 'Episode',
+        parentId: 'season-anim-1',
+        seriesId: 'series-anim',
+        seriesName: '测试动画',
+        seasonId: 'season-anim-1',
+        indexNumber: 1,
+        parentIndexNumber: 1,
+        nextUp: true,
+        runTimeTicks: minute * 22,
+        primaryImageTag: 'tag-anim-e1',
+      ),
+      FakeEmbyItem(
+        id: 'episode-anim-2',
+        name: '第二集',
+        type: 'Episode',
+        parentId: 'season-anim-1',
+        seriesId: 'series-anim',
+        seriesName: '测试动画',
+        seasonId: 'season-anim-1',
+        indexNumber: 2,
+        parentIndexNumber: 1,
+        runTimeTicks: minute * 22,
+        primaryImageTag: 'tag-anim-e2',
+      ),
+      FakeEmbyItem(
+        id: 'episode-anim-s2e1',
+        name: '第二季第一集',
+        type: 'Episode',
+        parentId: 'season-anim-2',
+        seriesId: 'series-anim',
+        seriesName: '测试动画',
+        seasonId: 'season-anim-2',
+        indexNumber: 1,
+        parentIndexNumber: 2,
+        runTimeTicks: minute * 22,
+        primaryImageTag: 'tag-anim-s2e1',
+      ),
+    ],
+  );
+}
+
+/// 120 集长季夹具,验证剧集列表面板 ListView.builder 惰性构建与滚动。
+FakeEmbyServer longSeasonSeriesServer() {
+  const minute = 10000000 * 60;
+  return FakeEmbyServer(
+    items: [
+      ...defaultCatalogItems().where(
+        (item) =>
+            item.id != 'series-friends' &&
+            item.id != 'season-friends-1' &&
+            item.id != 'episode-friends-s1e1' &&
+            item.id != 'episode-friends-s1e2',
+      ),
+      FakeEmbyItem(
+        id: 'series-anim',
+        name: '测试动画',
+        type: 'Series',
+        parentId: 'view-tv',
+        productionYear: 2024,
+        childCount: 120,
+        primaryImageTag: 'tag-anim',
+      ),
+      FakeEmbyItem(
+        id: 'season-anim-1',
+        name: '第 1 季',
+        type: 'Season',
+        parentId: 'series-anim',
+        seriesId: 'series-anim',
+        seriesName: '测试动画',
+        indexNumber: 1,
+      ),
+      for (var i = 1; i <= 120; i++)
+        FakeEmbyItem(
+          id: 'episode-anim-$i',
+          name: '第 $i 集',
+          type: 'Episode',
+          parentId: 'season-anim-1',
+          seriesId: 'series-anim',
+          seriesName: '测试动画',
+          seasonId: 'season-anim-1',
+          indexNumber: i,
+          parentIndexNumber: 1,
+          runTimeTicks: minute * 22,
+        ),
+    ],
+  );
+}
+
+/// 带服务器章节标记(Intro/Outro)的剧集夹具,供片头片尾跳过测试使用。
+FakeEmbyServer chapteredSeriesServer() {
+  const minute = 10000000 * 60;
+  const chapters = [
+    FakeChapter(name: 'Intro', startPositionTicks: 0),
+    FakeChapter(name: '正文', startPositionTicks: 90 * 10000000),
+    FakeChapter(name: 'Outro', startPositionTicks: 20 * minute),
+  ];
+  return FakeEmbyServer(
+    items: [
+      ...defaultCatalogItems().where(
+        (item) =>
+            item.id != 'series-friends' &&
+            item.id != 'season-friends-1' &&
+            item.id != 'episode-friends-s1e1' &&
+            item.id != 'episode-friends-s1e2',
+      ),
+      FakeEmbyItem(
+        id: 'series-anim',
+        name: '测试动画',
+        type: 'Series',
+        parentId: 'view-tv',
+        productionYear: 2024,
+        childCount: 2,
+        primaryImageTag: 'tag-anim',
+      ),
+      FakeEmbyItem(
+        id: 'season-anim-1',
+        name: '第 1 季',
+        type: 'Season',
+        parentId: 'series-anim',
+        seriesId: 'series-anim',
+        seriesName: '测试动画',
+        indexNumber: 1,
+      ),
+      FakeEmbyItem(
+        id: 'episode-anim-1',
+        name: '第一集',
+        type: 'Episode',
+        parentId: 'season-anim-1',
+        seriesId: 'series-anim',
+        seriesName: '测试动画',
+        seasonId: 'season-anim-1',
+        indexNumber: 1,
+        parentIndexNumber: 1,
+        runTimeTicks: minute * 22,
+        primaryImageTag: 'tag-anim-e1',
+        chapters: chapters,
+      ),
+      FakeEmbyItem(
+        id: 'episode-anim-2',
+        name: '第二集',
+        type: 'Episode',
+        parentId: 'season-anim-1',
+        seriesId: 'series-anim',
+        seriesName: '测试动画',
+        seasonId: 'season-anim-1',
+        indexNumber: 2,
+        parentIndexNumber: 1,
+        nextUp: true,
+        runTimeTicks: minute * 22,
+        primaryImageTag: 'tag-anim-e2',
+        chapters: chapters,
+      ),
+    ],
+  );
+}
+
+/// 双媒体源电影夹具(默认源 + 4K 额外源),供换源测试使用。
+FakeEmbyServer multiSourceMovieServer() {
+  const minute = 10000000 * 60;
+  return FakeEmbyServer(
+    items: [
+      ...defaultCatalogItems(),
+      FakeEmbyItem(
+        id: 'movie-multisource',
+        name: '多版本片',
+        type: 'Movie',
+        parentId: 'view-movies',
+        productionYear: 2018,
+        runTimeTicks: minute * 90,
+        primaryImageTag: 'tag-multisource',
+        extraSources: const [FakeMediaSource(id: 'src-4k', name: '4K 版本')],
+      ),
+    ],
+  );
+}
+
+/// 强制转码 + PGS 位图字幕的电影夹具,验证转码维持烧录现状。
+FakeEmbyServer transcodePgsMovieServer() {
+  const minute = 10000000 * 60;
+  return FakeEmbyServer(
+    items: [
+      ...defaultCatalogItems(),
+      FakeEmbyItem(
+        id: 'movie-pgs-transcode',
+        name: '需转码位图字幕片',
+        type: 'Movie',
+        parentId: 'view-movies',
+        productionYear: 2017,
+        runTimeTicks: minute * 80,
+        primaryImageTag: 'tag-pgs-transcode',
+        forceTranscode: true,
+        mediaStreams: const [
+          FakeMediaStream(
+            index: 0,
+            type: 'Video',
+            codec: 'hevc',
+            displayTitle: '1080p',
+          ),
+          FakeMediaStream(
+            index: 1,
+            type: 'Audio',
+            codec: 'aac',
+            language: 'eng',
+            displayTitle: 'English',
+            isDefault: true,
+          ),
+          FakeMediaStream(
+            index: 2,
+            type: 'Subtitle',
+            codec: 'pgssub',
+            language: 'chi',
+            displayTitle: 'PGS',
+            isDefault: true,
+            isTextSubtitleStream: false,
+          ),
+        ],
       ),
     ],
   );

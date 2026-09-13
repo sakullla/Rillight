@@ -19,32 +19,58 @@ class ResolvedPlayback {
   bool get isTranscode => playMethod == PlayMethod.transcode;
 }
 
+/// 解析起播流:直连优先(服务端 DirectStreamUrl,否则 strm 远端 Path,
+/// 否则静态流地址),不可直连且有 TranscodingUrl 时转码。
+///
+/// [mediaSourceId] 指定选择的媒体源(播放中换源);缺省取第一个。
 ResolvedPlayback? resolvePlayback({
   required PlaybackInfo info,
   required Uri baseUrl,
   required String accessToken,
   required String itemId,
+  String? mediaSourceId,
 }) {
-  final source = info.primarySource;
+  PlaybackMediaSource? source = info.primarySource;
+  if (mediaSourceId != null && mediaSourceId.isNotEmpty) {
+    final requested = info.sourceById(mediaSourceId);
+    if (requested != null) {
+      source = requested;
+    }
+  }
   if (source == null || source.id.isEmpty) {
     return null;
   }
 
   final canDirect = source.supportsDirectPlay || source.supportsDirectStream;
   if (canDirect) {
-    final path =
-        (source.directStreamUrl != null && source.directStreamUrl!.isNotEmpty)
-        ? source.directStreamUrl!
-        : _staticStreamPath(itemId, source, info.playSessionId);
-    final method = source.supportsDirectStream || !source.supportsDirectPlay
-        ? PlayMethod.directStream
-        : PlayMethod.directPlay;
-    return ResolvedPlayback(
-      playMethod: method,
-      streamUrl: embyResourceUri(baseUrl, path, accessToken),
-      playSessionId: info.playSessionId,
-      mediaSource: source,
-      itemId: itemId,
+    final directStreamUrl = source.directStreamUrl;
+    if (directStreamUrl != null && directStreamUrl.isNotEmpty) {
+      return _direct(
+        source,
+        info.playSessionId,
+        itemId,
+        embyResourceUri(baseUrl, directStreamUrl, accessToken),
+      );
+    }
+    if (source.isRemoteHttpPath) {
+      // strm 等场景:服务端已把条目解析为远端地址,直连打开原始 URL,
+      // 不附带 api_key(避免向第三方地址泄漏令牌)。
+      return _direct(
+        source,
+        info.playSessionId,
+        itemId,
+        Uri.parse(source.path!),
+      );
+    }
+    return _direct(
+      source,
+      info.playSessionId,
+      itemId,
+      embyResourceUri(
+        baseUrl,
+        _staticStreamPath(itemId, source, info.playSessionId),
+        accessToken,
+      ),
     );
   }
 
@@ -59,6 +85,24 @@ ResolvedPlayback? resolvePlayback({
     );
   }
   return null;
+}
+
+ResolvedPlayback _direct(
+  PlaybackMediaSource source,
+  String playSessionId,
+  String itemId,
+  Uri streamUrl,
+) {
+  final method = source.supportsDirectStream || !source.supportsDirectPlay
+      ? PlayMethod.directStream
+      : PlayMethod.directPlay;
+  return ResolvedPlayback(
+    playMethod: method,
+    streamUrl: streamUrl,
+    playSessionId: playSessionId,
+    mediaSource: source,
+    itemId: itemId,
+  );
 }
 
 String _staticStreamPath(

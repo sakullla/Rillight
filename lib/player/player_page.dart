@@ -10,6 +10,7 @@ import 'package:rillight/app/widgets/liquid_glass.dart';
 import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/emby/device_profile.dart';
+import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_failure.dart';
 import 'package:rillight/player/media_kit_video_backend.dart';
 import 'package:rillight/player/player_bindings.dart';
@@ -49,6 +50,7 @@ class PlayerPageState extends State<PlayerPage> {
   PlayerController? controller;
   bool _dragSeeking = false;
   double _dragValue = 0;
+  bool _episodesOpen = false;
 
   bool _pointerNearWindowEdge(Offset local) {
     final size = MediaQuery.sizeOf(context);
@@ -133,6 +135,19 @@ class PlayerPageState extends State<PlayerPage> {
     if (host != null) {
       unawaited(host.close());
     }
+  }
+
+  void _openEpisodeList() {
+    final current = controller;
+    if (current == null || !current.canBrowseEpisodes) {
+      return;
+    }
+    unawaited(current.loadEpisodeList());
+    setState(() => _episodesOpen = true);
+  }
+
+  void _closeEpisodeList() {
+    setState(() => _episodesOpen = false);
   }
 
   @override
@@ -267,6 +282,7 @@ class PlayerPageState extends State<PlayerPage> {
                       visible: current.controlsVisible,
                       dragging: _dragSeeking,
                       dragValue: _dragValue,
+                      onOpenEpisodes: _openEpisodeList,
                       onDragStart: (value) {
                         current.onUserActivity();
                         setState(() {
@@ -296,6 +312,15 @@ class PlayerPageState extends State<PlayerPage> {
                     ),
                   if (current.nextEpisode != null)
                     _NextEpisodeBanner(controller: current),
+                  if (_episodesOpen && current.canBrowseEpisodes)
+                    _EpisodeListPanel(
+                      controller: current,
+                      onClose: _closeEpisodeList,
+                    ),
+                  if (current.activeSkipSegment != null &&
+                      !current.loading &&
+                      !current.playbackEnded)
+                    _SkipSegmentButton(controller: current),
                   if (current.playbackEnded && current.nextEpisode == null)
                     _PlaybackEndedOverlay(controller: current),
                   if (current.disconnected && !current.isPlaying)
@@ -313,7 +338,7 @@ class PlayerPageState extends State<PlayerPage> {
                   if (current.subtitleNotice != null)
                     _Banner(
                       key: PlayerKeys.subtitleNotice,
-                      text: l10n.subtitleBitmapFailed,
+                      text: _subtitleNoticeText(l10n, current.subtitleNotice!),
                     ),
                   _PlayerChromeBar(
                     controller: current,
@@ -340,6 +365,15 @@ class PlayerPageState extends State<PlayerPage> {
             : catalogFailureMessage(l10n, current.loadFailure!);
       case null:
         return null;
+    }
+  }
+
+  String _subtitleNoticeText(AppLocalizations l10n, SubtitleNoticeKind kind) {
+    switch (kind) {
+      case SubtitleNoticeKind.bitmapBurnIn:
+        return l10n.subtitleBitmapBurnIn;
+      case SubtitleNoticeKind.bitmapFailed:
+        return l10n.subtitleBitmapFailed;
     }
   }
 }
@@ -602,11 +636,270 @@ class _NextEpisodeBanner extends StatelessWidget {
   }
 }
 
+/// 播放到片头/片尾区间时右下角的跳过按钮:点击跳到区间终点。
+class _SkipSegmentButton extends StatelessWidget {
+  const _SkipSegmentButton({required this.controller});
+
+  final PlayerController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final segment = controller.activeSkipSegment!;
+    return Positioned(
+      right: AppSpacing.xl,
+      bottom: 112,
+      child: LiquidGlass(
+        kind: LiquidGlassKind.control,
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
+        child: Material(
+          key: const Key('player-skip-segment'),
+          type: MaterialType.transparency,
+          child: FilledButton.icon(
+            onPressed: () => unawaited(controller.skipCurrentSegment()),
+            icon: const Icon(Icons.fast_forward_rounded, size: 18),
+            label: Text(
+              segment.kind == PlayerSkipKind.outro
+                  ? l10n.skipOutro
+                  : l10n.skipIntro,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 播放中的剧集列表面板:当前季分集 ListView.builder 惰性构建,
+/// 可切换季,点击任意集立即切集。
+class _EpisodeListPanel extends StatelessWidget {
+  const _EpisodeListPanel({required this.controller, required this.onClose});
+
+  final PlayerController controller;
+  final VoidCallback onClose;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final seasons = controller.seasons;
+    final currentSeason = seasons
+        .where((season) => season.id == controller.episodeSeasonId)
+        .toList();
+    return Positioned(
+      top: 0,
+      bottom: 0,
+      right: 0,
+      width: 340,
+      child: LiquidGlass(
+        kind: LiquidGlassKind.panel,
+        // 顶部让位给窗口标题栏(拖拽/关闭),底部让位给控制条。
+        padding: EdgeInsets.fromLTRB(
+          AppSpacing.lg,
+          kWindowChromeHeight + AppSpacing.xl,
+          AppSpacing.lg,
+          AppSpacing.huge,
+        ),
+        child: Material(
+          key: const Key('player-episodes-panel'),
+          type: MaterialType.transparency,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      l10n.playerEpisodes,
+                      style: theme.textTheme.titleMedium,
+                    ),
+                  ),
+                  if (seasons.length > 1) _SeasonPicker(controller: controller),
+                  IconButton(
+                    key: const Key('player-episodes-close'),
+                    tooltip: MaterialLocalizations.of(
+                      context,
+                    ).closeButtonTooltip,
+                    onPressed: onClose,
+                    icon: const Icon(Icons.close_rounded),
+                  ),
+                ],
+              ),
+              const SizedBox(height: AppSpacing.sm),
+              Expanded(
+                child:
+                    controller.episodeListLoading && controller.episodes.isEmpty
+                    ? const Center(
+                        child: CircularProgressIndicator(strokeWidth: 3),
+                      )
+                    : controller.episodeListFailed &&
+                          controller.episodes.isEmpty
+                    ? Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            l10n.playbackFailed,
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: scheme.onSurfaceVariant,
+                            ),
+                          ),
+                          const SizedBox(height: AppSpacing.sm),
+                          OutlinedButton(
+                            onPressed: () {
+                              unawaited(controller.loadEpisodeList());
+                            },
+                            child: Text(l10n.retry),
+                          ),
+                        ],
+                      )
+                    : ListView.builder(
+                        key: const Key('player-episodes-list'),
+                        itemCount: controller.episodes.length,
+                        itemBuilder: (context, index) {
+                          final episode = controller.episodes[index];
+                          final isCurrent = episode.id == controller.itemId;
+                          return _EpisodeRow(
+                            episode: episode,
+                            isCurrent: isCurrent,
+                            onTap: () {
+                              unawaited(controller.playEpisode(episode));
+                            },
+                          );
+                        },
+                      ),
+              ),
+              if (currentSeason.length == 1)
+                Padding(
+                  padding: const EdgeInsets.only(top: AppSpacing.sm),
+                  child: Text(
+                    currentSeason.first.name,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 季选择菜单(仅多季时显示)。
+class _SeasonPicker extends StatelessWidget {
+  const _SeasonPicker({required this.controller});
+
+  final PlayerController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final seasons = controller.seasons;
+    var current = seasons.first;
+    for (final season in seasons) {
+      if (season.id == controller.episodeSeasonId) {
+        current = season;
+        break;
+      }
+    }
+    return PopupMenuButton<String>(
+      key: const Key('player-season-picker'),
+      tooltip: AppLocalizations.of(context).seasons,
+      onSelected: (seasonId) {
+        unawaited(controller.selectSeason(seasonId));
+      },
+      initialValue: current.id,
+      color: theme.colorScheme.surface.withValues(alpha: 0.96),
+      surfaceTintColor: Colors.transparent,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadii.md),
+        side: BorderSide(
+          color: Colors.white.withValues(alpha: AppGlass.edgeLight),
+        ),
+      ),
+      constraints: const BoxConstraints(minWidth: 160, maxWidth: 280),
+      padding: EdgeInsets.zero,
+      splashRadius: 20,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 120),
+              child: Text(
+                current.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.labelMedium,
+              ),
+            ),
+            const Icon(Icons.arrow_drop_down_rounded, size: 20),
+          ],
+        ),
+      ),
+      itemBuilder: (context) => [
+        for (final season in seasons)
+          PopupMenuItem(value: season.id, child: Text(season.name)),
+      ],
+    );
+  }
+}
+
+/// 单集行:集号+名称+已看勾选,当前集高亮。
+class _EpisodeRow extends StatelessWidget {
+  const _EpisodeRow({
+    required this.episode,
+    required this.isCurrent,
+    required this.onTap,
+  });
+
+  final EmbyItem episode;
+  final bool isCurrent;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final number = episode.indexNumber;
+    return ListTile(
+      key: Key('player-episode-${episode.id}'),
+      dense: true,
+      selected: isCurrent,
+      selectedColor: scheme.primary,
+      leading: number == null
+          ? null
+          : SizedBox(
+              width: 28,
+              child: Text(
+                '$number',
+                textAlign: TextAlign.end,
+                style: theme.textTheme.labelMedium,
+              ),
+            ),
+      title: Text(
+        episode.name,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: isCurrent
+            ? theme.textTheme.bodyMedium?.copyWith(color: scheme.primary)
+            : theme.textTheme.bodyMedium,
+      ),
+      trailing: episode.userData.played
+          ? Icon(Icons.check_rounded, size: 18, color: scheme.onSurfaceVariant)
+          : null,
+      onTap: onTap,
+    );
+  }
+}
+
 class _Banner extends StatelessWidget {
   const _Banner({super.key, required this.text});
 
   final String text;
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -658,6 +951,7 @@ class _ControlsBar extends StatelessWidget {
     required this.onDragStart,
     required this.onDragUpdate,
     required this.onDragEnd,
+    this.onOpenEpisodes,
   });
 
   final PlayerController controller;
@@ -667,6 +961,7 @@ class _ControlsBar extends StatelessWidget {
   final ValueChanged<double> onDragStart;
   final ValueChanged<double> onDragUpdate;
   final ValueChanged<double> onDragEnd;
+  final VoidCallback? onOpenEpisodes;
 
   @override
   Widget build(BuildContext context) {
@@ -704,7 +999,10 @@ class _ControlsBar extends StatelessWidget {
                   onDragEnd: onDragEnd,
                 ),
                 const SizedBox(height: AppSpacing.xs),
-                _ControlsRow(controller: controller),
+                _ControlsRow(
+                  controller: controller,
+                  onOpenEpisodes: onOpenEpisodes,
+                ),
               ],
             ),
           ),
@@ -777,9 +1075,10 @@ class _SeekTimeline extends StatelessWidget {
 
 /// 主按钮行:播放/暂停、音量组、轨道菜单与全屏。
 class _ControlsRow extends StatelessWidget {
-  const _ControlsRow({required this.controller});
+  const _ControlsRow({required this.controller, this.onOpenEpisodes});
 
   final PlayerController controller;
+  final VoidCallback? onOpenEpisodes;
 
   @override
   Widget build(BuildContext context) {
@@ -825,6 +1124,8 @@ class _ControlsRow extends StatelessWidget {
             ],
           ),
         _SpeedControl(controller: controller),
+        if (controller.canSetManualSkip)
+          _SkipSettingsControl(controller: controller),
         if (controller.audioTracks.length > 1)
           _ControlMenu<int>(
             key: PlayerKeys.audio,
@@ -861,6 +1162,29 @@ class _ControlsRow extends StatelessWidget {
                   value: track.index,
                   checked: track.index == controller.subtitleStreamIndex,
                   child: Text(track.label),
+                ),
+            ],
+          ),
+        if (controller.canBrowseEpisodes)
+          _PlayerIconButton(
+            key: const Key('player-episodes'),
+            tooltip: l10n.playerEpisodes,
+            onPressed: onOpenEpisodes,
+            iconSize: 22,
+            icon: Icons.playlist_play_rounded,
+          ),
+        if (controller.canSwitchMediaSource)
+          _ControlMenu<String>(
+            key: const Key('player-media-source'),
+            tooltip: l10n.mediaSource,
+            icon: Icons.layers_outlined,
+            onSelected: controller.switchMediaSource,
+            items: [
+              for (final source in controller.mediaSources)
+                CheckedPopupMenuItem(
+                  value: source.id,
+                  checked: source.id == controller.resolved?.mediaSource.id,
+                  child: Text(source.label),
                 ),
             ],
           ),
@@ -938,6 +1262,61 @@ String _rateLabel(double rate) {
       ? rate.round().toString()
       : rate.toString();
   return '${trimmed}x';
+}
+
+/// 手动片头/片尾设置(仅无服务器章节标记的剧集显示):
+/// 固定档位菜单,选择即按剧记忆并立即生效。
+class _SkipSettingsControl extends StatelessWidget {
+  const _SkipSettingsControl({required this.controller});
+
+  final PlayerController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    return _ControlMenu<String>(
+      key: const Key('player-skip-settings'),
+      tooltip: l10n.skipSettings,
+      icon: Icons.skip_next_rounded,
+      onSelected: (value) {
+        if (value == 'off') {
+          unawaited(controller.clearManualSkip());
+          return;
+        }
+        final parts = value.split(':');
+        final seconds = int.tryParse(parts.length > 1 ? parts[1] : '');
+        if (seconds == null) {
+          return;
+        }
+        if (value.startsWith('intro:')) {
+          unawaited(controller.setManualIntroSkip(seconds));
+        } else if (value.startsWith('outro:')) {
+          unawaited(controller.setManualOutroSkip(seconds));
+        }
+      },
+      items: [
+        CheckedPopupMenuItem(
+          value: 'off',
+          checked:
+              controller.manualIntroSkipSeconds == null &&
+              controller.manualOutroSkipSeconds == null,
+          child: Text(l10n.skipManualOff),
+        ),
+        for (final seconds in kManualSkipChoices)
+          CheckedPopupMenuItem(
+            value: 'intro:$seconds',
+            checked: controller.manualIntroSkipSeconds == seconds,
+            child: Text(l10n.skipIntroSeconds(seconds)),
+          ),
+        for (final seconds in kManualSkipChoices)
+          CheckedPopupMenuItem(
+            value: 'outro:$seconds',
+            checked: controller.manualOutroSkipSeconds == seconds,
+            child: Text(l10n.skipOutroSeconds(seconds)),
+          ),
+      ],
+    );
+  }
 }
 
 /// 音量组:静音按钮 + 音量滑条 + 百分比回显。
