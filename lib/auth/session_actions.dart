@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/routes.dart';
-import 'package:rillight/app/settings/settings_action.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/auth/server_list_store.dart';
@@ -30,19 +29,13 @@ class SessionActions extends StatelessWidget {
         }
         final l10n = AppLocalizations.of(context);
         final server = auth.session!.server;
-        return Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SettingsAction(),
-            IconButton(
-              key: serverMenuKey,
-              tooltip: '${_chipLabel(server)}\n${l10n.switchServer}',
-              padding: EdgeInsets.zero,
-              iconSize: 18,
-              icon: const Icon(Icons.person_outline),
-              onPressed: () => _openSwitcher(context, auth),
-            ),
-          ],
+        return IconButton(
+          key: serverMenuKey,
+          tooltip: '${_chipLabel(server)}\n${l10n.switchServer}',
+          padding: EdgeInsets.zero,
+          iconSize: 18,
+          icon: const Icon(Icons.person_outline),
+          onPressed: () => _openSwitcher(context, auth),
         );
       },
     );
