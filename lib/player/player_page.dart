@@ -49,8 +49,6 @@ class PlayerPageState extends State<PlayerPage> {
   PlayerController? controller;
   bool _dragSeeking = false;
   double _dragValue = 0;
-  Offset? _lastHover;
-  bool _ignoreHoverUntilMove = false;
 
   bool _pointerNearWindowEdge(Offset local) {
     final size = MediaQuery.sizeOf(context);
@@ -200,19 +198,9 @@ class PlayerPageState extends State<PlayerPage> {
                 if (_pointerNearWindowEdge(event.localPosition)) {
                   return;
                 }
-                final previous = _lastHover;
-                _lastHover = event.position;
-                if (_ignoreHoverUntilMove) {
-                  if (previous != null &&
-                      (event.position - previous).distance < 4) {
-                    return;
-                  }
-                  _ignoreHoverUntilMove = false;
-                }
                 current.onUserActivity();
               },
               onExit: (_) {
-                _lastHover = null;
                 current.hideControlsOnPointerExit();
               },
               cursor:
@@ -229,12 +217,8 @@ class PlayerPageState extends State<PlayerPage> {
                     child: GestureDetector(
                       key: PlayerKeys.surface,
                       behavior: HitTestBehavior.opaque,
-                      onTapUp: (details) {
-                        _lastHover = details.globalPosition;
+                      onTapUp: (_) {
                         current.toggleControls();
-                        if (!current.controlsVisible) {
-                          _ignoreHoverUntilMove = true;
-                        }
                       },
                     ),
                   ),
@@ -348,6 +332,24 @@ class PlayerPageState extends State<PlayerPage> {
   }
 }
 
+/// 控制层共享的显隐包装:统一淡入淡出节奏与隐藏期命中忽略。
+class _FadeThrough extends StatelessWidget {
+  const _FadeThrough({required this.visible, required this.child});
+
+  final bool visible;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedOpacity(
+      opacity: visible ? 1.0 : 0.0,
+      duration: AppMotion.normal,
+      curve: AppMotion.standard,
+      child: IgnorePointer(ignoring: !visible, child: child),
+    );
+  }
+}
+
 class _PlayerChromeBar extends StatelessWidget {
   const _PlayerChromeBar({required this.controller, required this.visible});
 
@@ -362,66 +364,61 @@ class _PlayerChromeBar extends StatelessWidget {
       left: 0,
       right: 0,
       top: 0,
-      child: AnimatedOpacity(
-        opacity: visible ? 1.0 : 0.0,
-        duration: AppMotion.normal,
-        curve: AppMotion.standard,
-        child: IgnorePointer(
-          ignoring: !visible,
-          child: DecoratedBox(
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.bottomCenter,
-                end: Alignment.topCenter,
-                colors: [
-                  Colors.transparent,
-                  Color(0x8A000000),
-                  Color(0xD9000000),
-                ],
-              ),
+      child: _FadeThrough(
+        visible: visible,
+        child: DecoratedBox(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.bottomCenter,
+              end: Alignment.topCenter,
+              colors: [
+                Colors.transparent,
+                Color(0x8A000000),
+                Color(0xD9000000),
+              ],
             ),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpacing.md,
-                AppSpacing.sm,
-                AppSpacing.sm,
-                AppSpacing.lg,
-              ),
-              child: SizedBox(
-                height: kWindowChromeHeight + AppSpacing.sm,
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: WindowDragArea(
-                        key: const Key('player-window-drag'),
-                        child: SizedBox.expand(
-                          child: Align(
-                            alignment: Alignment.centerLeft,
-                            child: title.isEmpty
-                                ? const SizedBox.expand()
-                                : Text(
-                                    title,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: theme.textTheme.titleMedium,
-                                  ),
-                          ),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(
+              AppSpacing.md,
+              AppSpacing.sm,
+              AppSpacing.sm,
+              AppSpacing.lg,
+            ),
+            child: SizedBox(
+              height: kWindowChromeHeight + AppSpacing.sm,
+              child: Row(
+                children: [
+                  Expanded(
+                    child: WindowDragArea(
+                      key: const Key('player-window-drag'),
+                      child: SizedBox.expand(
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: title.isEmpty
+                              ? const SizedBox.expand()
+                              : Text(
+                                  title,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.titleMedium,
+                                ),
                         ),
                       ),
                     ),
-                    IconButton(
-                      key: const Key('player-window-close'),
-                      tooltip: MaterialLocalizations.of(
-                        context,
-                      ).closeButtonTooltip,
-                      color: theme.colorScheme.onSurface,
-                      onPressed: () {
-                        unawaited(controller.close());
-                      },
-                      icon: const Icon(Icons.close_rounded),
-                    ),
-                  ],
-                ),
+                  ),
+                  IconButton(
+                    key: const Key('player-window-close'),
+                    tooltip: MaterialLocalizations.of(
+                      context,
+                    ).closeButtonTooltip,
+                    color: theme.colorScheme.onSurface,
+                    onPressed: () {
+                      unawaited(controller.close());
+                    },
+                    icon: const Icon(Icons.close_rounded),
+                  ),
+                ],
               ),
             ),
           ),
@@ -639,6 +636,7 @@ class _Banner extends StatelessWidget {
   }
 }
 
+/// 底部控制条:渐变承托层内组合时间轴与按钮行,只负责布局与显隐。
 class _ControlsBar extends StatelessWidget {
   const _ControlsBar({
     required this.controller,
@@ -660,7 +658,70 @@ class _ControlsBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context);
+    return Positioned(
+      left: 0,
+      right: 0,
+      bottom: 0,
+      child: _FadeThrough(
+        visible: visible,
+        child: DecoratedBox(
+          key: PlayerKeys.controls,
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [Colors.transparent, Color(0xCC000000)],
+            ),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(
+              AppSpacing.lg,
+              AppSpacing.huge,
+              AppSpacing.lg,
+              AppSpacing.md,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _SeekTimeline(
+                  controller: controller,
+                  dragging: dragging,
+                  dragValue: dragValue,
+                  onDragStart: onDragStart,
+                  onDragUpdate: onDragUpdate,
+                  onDragEnd: onDragEnd,
+                ),
+                const SizedBox(height: AppSpacing.xs),
+                _ControlsRow(controller: controller),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 时间轴行:当前时间 + 进度滑条 + 总时长。
+class _SeekTimeline extends StatelessWidget {
+  const _SeekTimeline({
+    required this.controller,
+    required this.dragging,
+    required this.dragValue,
+    required this.onDragStart,
+    required this.onDragUpdate,
+    required this.onDragEnd,
+  });
+
+  final PlayerController controller;
+  final bool dragging;
+  final double dragValue;
+  final ValueChanged<double> onDragStart;
+  final ValueChanged<double> onDragUpdate;
+  final ValueChanged<double> onDragEnd;
+
+  @override
+  Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final durationMs = controller.duration.inMilliseconds;
     final seekEnabled = durationMs > 0;
@@ -672,215 +733,216 @@ class _ControlsBar extends StatelessWidget {
                   0.0,
                   1.0,
                 ));
-    return Positioned(
-      left: 0,
-      right: 0,
-      bottom: 0,
-      child: AnimatedOpacity(
-        opacity: visible ? 1.0 : 0.0,
-        duration: AppMotion.normal,
-        curve: AppMotion.standard,
-        child: IgnorePointer(
-          ignoring: !visible,
-          child: DecoratedBox(
-            key: PlayerKeys.controls,
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [Colors.transparent, Color(0xCC000000)],
-              ),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpacing.lg,
-                AppSpacing.huge,
-                AppSpacing.lg,
-                AppSpacing.md,
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Row(
-                    children: [
-                      Text(
-                        _clock(controller.position),
-                        style: _overlayTimeStyle(theme),
-                      ),
-                      const SizedBox(width: AppSpacing.sm),
-                      Expanded(
-                        child: SliderTheme(
-                          data: _overlaySliderTheme(theme, thumbRadius: 6),
-                          child: Slider(
-                            key: PlayerKeys.seekBar,
-                            value: value,
-                            onChanged: !seekEnabled
-                                ? null
-                                : (next) {
-                                    if (!dragging) {
-                                      onDragStart(next);
-                                    } else {
-                                      onDragUpdate(next);
-                                    }
-                                  },
-                            onChangeEnd: !seekEnabled ? null : onDragEnd,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: AppSpacing.sm),
-                      Text(
-                        _clock(controller.duration),
-                        style: _overlayTimeStyle(theme),
-                      ),
-                    ],
-                  ),
-                  Row(
-                    children: [
-                      IconButton(
-                        key: PlayerKeys.playPause,
-                        tooltip: controller.isPlaying ? l10n.pause : l10n.play,
-                        onPressed: controller.togglePlay,
-                        color: Colors.white,
-                        iconSize: 28,
-                        icon: Icon(
-                          controller.isPlaying
-                              ? Icons.pause_rounded
-                              : Icons.play_arrow_rounded,
-                        ),
-                      ),
-                      IconButton(
-                        key: PlayerKeys.mute,
-                        tooltip: controller.volume <= 0
-                            ? l10n.unmute
-                            : l10n.mute,
-                        onPressed: controller.toggleMute,
-                        color: Colors.white,
-                        iconSize: 20,
-                        icon: Icon(
-                          controller.volume <= 0
-                              ? Icons.volume_off_rounded
-                              : Icons.volume_up_rounded,
-                        ),
-                      ),
-                      SizedBox(
-                        width: 110,
-                        child: SliderTheme(
-                          data: _overlaySliderTheme(theme, thumbRadius: 5),
-                          child: Slider(
-                            key: PlayerKeys.volume,
-                            value: controller.volume.clamp(0, 100).toDouble(),
-                            min: 0,
-                            max: 100,
-                            label: l10n.volumePercent(controller.volume),
-                            onChanged: (value) {
-                              controller.setVolume(value.round());
-                            },
-                          ),
-                        ),
-                      ),
-                      SizedBox(
-                        width: 40,
-                        child: Text(
-                          key: PlayerKeys.volumePercent,
-                          l10n.volumePercent(controller.volume),
-                          textAlign: TextAlign.end,
-                          style: _overlayTimeStyle(theme),
-                        ),
-                      ),
-                      const Spacer(),
-                      if (controller.isTranscode)
-                        _ControlMenu<int>(
-                          key: PlayerKeys.quality,
-                          tooltip: l10n.qualityAuto,
-                          icon: Icons.high_quality_outlined,
-                          onSelected: controller.setMaxBitrate,
-                          items: [
-                            CheckedPopupMenuItem(
-                              value: kTranscodeBitrates.first,
-                              checked:
-                                  controller.maxStreamingBitrate ==
-                                      kTranscodeBitrates.first ||
-                                  !kTranscodeBitrates.contains(
-                                    controller.maxStreamingBitrate,
-                                  ),
-                              child: Text(l10n.qualityAuto),
-                            ),
-                            for (final bitrate in kTranscodeBitrates.skip(1))
-                              CheckedPopupMenuItem(
-                                value: bitrate,
-                                checked:
-                                    controller.maxStreamingBitrate == bitrate,
-                                child: Text(
-                                  l10n.qualityMbps(bitrate ~/ 1000000),
-                                ),
-                              ),
-                          ],
-                        ),
-                      if (controller.audioTracks.length > 1)
-                        _ControlMenu<int>(
-                          key: PlayerKeys.audio,
-                          tooltip: l10n.audioTrack,
-                          icon: Icons.audiotrack_rounded,
-                          onSelected: controller.setAudio,
-                          items: [
-                            for (final track in controller.audioTracks)
-                              CheckedPopupMenuItem(
-                                value: track.index,
-                                checked:
-                                    track.index == controller.audioStreamIndex,
-                                child: Text(track.label),
-                              ),
-                          ],
-                        ),
-                      if (controller.subtitleTracks.isNotEmpty)
-                        _ControlMenu<int>(
-                          key: PlayerKeys.subtitle,
-                          tooltip: l10n.subtitleTrack,
-                          icon: controller.subtitleStreamIndex == null
-                              ? Icons.closed_caption_off_rounded
-                              : Icons.closed_caption_rounded,
-                          onSelected: (value) {
-                            controller.setSubtitle(
-                              value == _subtitleOffToken ? null : value,
-                            );
-                          },
-                          items: [
-                            CheckedPopupMenuItem(
-                              value: _subtitleOffToken,
-                              checked: controller.subtitleStreamIndex == null,
-                              child: Text(l10n.subtitleOff),
-                            ),
-                            for (final track in controller.subtitleTracks)
-                              CheckedPopupMenuItem(
-                                value: track.index,
-                                checked:
-                                    track.index ==
-                                    controller.subtitleStreamIndex,
-                                child: Text(track.label),
-                              ),
-                          ],
-                        ),
-                      IconButton(
-                        key: PlayerKeys.fullscreen,
-                        tooltip: controller.isFullScreen
-                            ? l10n.exitFullscreen
-                            : l10n.fullscreen,
-                        color: Colors.white,
-                        onPressed: controller.toggleFullScreen,
-                        icon: Icon(
-                          controller.isFullScreen
-                              ? Icons.fullscreen_exit_rounded
-                              : Icons.fullscreen_rounded,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
+    return Row(
+      children: [
+        Text(_clock(controller.position), style: _overlayTimeStyle(theme)),
+        const SizedBox(width: AppSpacing.sm),
+        Expanded(
+          child: SliderTheme(
+            data: _overlaySliderTheme(theme, thumbRadius: 6),
+            child: Slider(
+              key: PlayerKeys.seekBar,
+              value: value,
+              onChanged: !seekEnabled
+                  ? null
+                  : (next) {
+                      if (!dragging) {
+                        onDragStart(next);
+                      } else {
+                        onDragUpdate(next);
+                      }
+                    },
+              onChangeEnd: !seekEnabled ? null : onDragEnd,
             ),
           ),
         ),
-      ),
+        const SizedBox(width: AppSpacing.sm),
+        Text(_clock(controller.duration), style: _overlayTimeStyle(theme)),
+      ],
+    );
+  }
+}
+
+/// 主按钮行:播放/暂停、音量组、轨道菜单与全屏。
+class _ControlsRow extends StatelessWidget {
+  const _ControlsRow({required this.controller});
+
+  final PlayerController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    return Row(
+      children: [
+        _PlayerIconButton(
+          key: PlayerKeys.playPause,
+          tooltip: controller.isPlaying ? l10n.pause : l10n.play,
+          onPressed: controller.togglePlay,
+          iconSize: 28,
+          icon: controller.isPlaying
+              ? Icons.pause_rounded
+              : Icons.play_arrow_rounded,
+        ),
+        _VolumeControl(controller: controller),
+        const Spacer(),
+        if (controller.isTranscode)
+          _ControlMenu<int>(
+            key: PlayerKeys.quality,
+            tooltip: l10n.qualityAuto,
+            icon: Icons.high_quality_outlined,
+            onSelected: controller.setMaxBitrate,
+            items: [
+              CheckedPopupMenuItem(
+                value: kTranscodeBitrates.first,
+                checked:
+                    controller.maxStreamingBitrate ==
+                        kTranscodeBitrates.first ||
+                    !kTranscodeBitrates.contains(
+                      controller.maxStreamingBitrate,
+                    ),
+                child: Text(l10n.qualityAuto),
+              ),
+              for (final bitrate in kTranscodeBitrates.skip(1))
+                CheckedPopupMenuItem(
+                  value: bitrate,
+                  checked: controller.maxStreamingBitrate == bitrate,
+                  child: Text(l10n.qualityMbps(bitrate ~/ 1000000)),
+                ),
+            ],
+          ),
+        if (controller.audioTracks.length > 1)
+          _ControlMenu<int>(
+            key: PlayerKeys.audio,
+            tooltip: l10n.audioTrack,
+            icon: Icons.audiotrack_rounded,
+            onSelected: controller.setAudio,
+            items: [
+              for (final track in controller.audioTracks)
+                CheckedPopupMenuItem(
+                  value: track.index,
+                  checked: track.index == controller.audioStreamIndex,
+                  child: Text(track.label),
+                ),
+            ],
+          ),
+        if (controller.subtitleTracks.isNotEmpty)
+          _ControlMenu<int>(
+            key: PlayerKeys.subtitle,
+            tooltip: l10n.subtitleTrack,
+            icon: controller.subtitleStreamIndex == null
+                ? Icons.closed_caption_off_rounded
+                : Icons.closed_caption_rounded,
+            onSelected: (value) {
+              controller.setSubtitle(value == _subtitleOffToken ? null : value);
+            },
+            items: [
+              CheckedPopupMenuItem(
+                value: _subtitleOffToken,
+                checked: controller.subtitleStreamIndex == null,
+                child: Text(l10n.subtitleOff),
+              ),
+              for (final track in controller.subtitleTracks)
+                CheckedPopupMenuItem(
+                  value: track.index,
+                  checked: track.index == controller.subtitleStreamIndex,
+                  child: Text(track.label),
+                ),
+            ],
+          ),
+        _PlayerIconButton(
+          key: PlayerKeys.fullscreen,
+          tooltip: controller.isFullScreen
+              ? l10n.exitFullscreen
+              : l10n.fullscreen,
+          onPressed: controller.toggleFullScreen,
+          icon: controller.isFullScreen
+              ? Icons.fullscreen_exit_rounded
+              : Icons.fullscreen_rounded,
+        ),
+      ],
+    );
+  }
+}
+
+/// 音量组:静音按钮 + 音量滑条 + 百分比回显。
+///
+/// 滑条、显示与持久化均使用 [PlayerController.volume] 的用户百分比,
+/// mpv 换算统一在 [PlayerController.setVolume] 内经 [mpvVolumeForPercent] 完成。
+class _VolumeControl extends StatelessWidget {
+  const _VolumeControl({required this.controller});
+
+  final PlayerController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final theme = Theme.of(context);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _PlayerIconButton(
+          key: PlayerKeys.mute,
+          tooltip: controller.volume <= 0 ? l10n.unmute : l10n.mute,
+          onPressed: controller.toggleMute,
+          iconSize: 20,
+          icon: controller.volume <= 0
+              ? Icons.volume_off_rounded
+              : Icons.volume_up_rounded,
+        ),
+        SizedBox(
+          width: 110,
+          child: SliderTheme(
+            data: _overlaySliderTheme(theme, thumbRadius: 5),
+            child: Slider(
+              key: PlayerKeys.volume,
+              value: controller.volume.clamp(0, 100).toDouble(),
+              min: 0,
+              max: 100,
+              label: l10n.volumePercent(controller.volume),
+              onChanged: (value) {
+                controller.setVolume(value.round());
+              },
+            ),
+          ),
+        ),
+        SizedBox(
+          width: 40,
+          child: Text(
+            key: PlayerKeys.volumePercent,
+            l10n.volumePercent(controller.volume),
+            textAlign: TextAlign.end,
+            style: _overlayTimeStyle(theme),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// 控制层图标按钮:统一的暖白前景,供按钮行各处复用。
+class _PlayerIconButton extends StatelessWidget {
+  const _PlayerIconButton({
+    super.key,
+    required this.icon,
+    required this.onPressed,
+    this.tooltip,
+    this.iconSize = 24,
+  });
+
+  final String? tooltip;
+  final double iconSize;
+  final IconData icon;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return IconButton(
+      tooltip: tooltip,
+      onPressed: onPressed,
+      color: scheme.onSurface,
+      iconSize: iconSize,
+      icon: Icon(icon),
     );
   }
 }
@@ -888,6 +950,8 @@ class _ControlsBar extends StatelessWidget {
 const _subtitleOffToken = -1;
 
 /// 控制条右侧用图标打开菜单,长轨名只出现在弹出层。
+///
+/// 音轨/字幕/画质共用同一视觉:近黑面板、token 圆角与高光描边。
 class _ControlMenu<T> extends StatelessWidget {
   const _ControlMenu({
     super.key,
@@ -904,11 +968,18 @@ class _ControlMenu<T> extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return PopupMenuButton<T>(
       tooltip: tooltip,
       onSelected: onSelected,
-      color: const Color(0xE6121212),
+      color: scheme.surface.withValues(alpha: 0.96),
       surfaceTintColor: Colors.transparent,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadii.md),
+        side: BorderSide(
+          color: Colors.white.withValues(alpha: AppGlass.edgeLight),
+        ),
+      ),
       constraints: const BoxConstraints(
         minWidth: 200,
         maxWidth: 360,
@@ -916,7 +987,7 @@ class _ControlMenu<T> extends StatelessWidget {
       ),
       padding: EdgeInsets.zero,
       splashRadius: 20,
-      icon: Icon(icon, color: Colors.white),
+      icon: Icon(icon, color: scheme.onSurface),
       itemBuilder: (context) => items,
     );
   }
@@ -924,7 +995,7 @@ class _ControlMenu<T> extends StatelessWidget {
 
 TextStyle? _overlayTimeStyle(ThemeData theme) {
   return theme.textTheme.labelMedium?.copyWith(
-    color: Colors.white,
+    color: theme.colorScheme.onSurface,
     fontFeatures: const [FontFeature.tabularFigures()],
   );
 }
@@ -933,12 +1004,13 @@ SliderThemeData _overlaySliderTheme(
   ThemeData theme, {
   required double thumbRadius,
 }) {
+  final onSurface = theme.colorScheme.onSurface;
   return theme.sliderTheme.copyWith(
     trackHeight: 3,
-    activeTrackColor: Colors.white,
-    inactiveTrackColor: Colors.white.withValues(alpha: 0.28),
-    thumbColor: Colors.white,
-    overlayColor: Colors.white.withValues(alpha: 0.18),
+    activeTrackColor: onSurface,
+    inactiveTrackColor: onSurface.withValues(alpha: 0.28),
+    thumbColor: onSurface,
+    overlayColor: onSurface.withValues(alpha: 0.18),
     thumbShape: RoundSliderThumbShape(enabledThumbRadius: thumbRadius),
     overlayShape: RoundSliderOverlayShape(overlayRadius: thumbRadius * 2.2),
   );

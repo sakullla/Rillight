@@ -505,7 +505,7 @@ void main() {
     );
     await tester.pump();
     expect(find.text('95%'), findsOneWidget);
-    expect(backend.volume, 95);
+    expect(backend.volume, closeTo(mpvVolumeForPercent(95), 1e-6));
 
     await tester.sendEventToBinding(
       PointerScrollEvent(
@@ -517,6 +517,64 @@ void main() {
     expect(find.text('100%'), findsOneWidget);
   });
 
+  test('volume percent maps to mpv volume through the cube curve', () {
+    expect(mpvVolumeForPercent(0), 0.0);
+    expect(mpvVolumeForPercent(10), closeTo(0.1, 1e-6));
+    expect(mpvVolumeForPercent(50), closeTo(12.5, 1e-6));
+    expect(mpvVolumeForPercent(90), closeTo(72.9, 1e-6));
+    expect(mpvVolumeForPercent(100), 100.0);
+    expect(mpvVolumeForPercent(120), 100.0);
+    expect(mpvVolumeForPercent(-5), 0.0);
+  });
+
+  testWidgets('volume tiers map to mpv and persist the user percent', (
+    tester,
+  ) async {
+    final store = MemoryPlayerSettingsStore();
+    await pumpLoggedIn(tester, settingsStore: store);
+    await openPlayable(tester, 'movie-up');
+    await waitFor(tester, find.text('100%'));
+
+    for (final percent in const [10, 50, 90]) {
+      await tester.runAsync(() async {
+        await controllerOf(tester).setVolume(percent);
+      });
+      await tester.pump();
+      expect(find.text('$percent%'), findsOneWidget);
+      expect(backend.volume, closeTo(mpvVolumeForPercent(percent), 1e-6));
+    }
+
+    await tester.tap(find.byKey(PlayerKeys.mute));
+    await tester.pump();
+    expect(find.text('0%'), findsOneWidget);
+    expect(backend.volume, 0.0);
+
+    await tester.tap(find.byKey(PlayerKeys.mute));
+    await tester.pump();
+    expect(find.text('90%'), findsOneWidget);
+    expect(backend.volume, closeTo(mpvVolumeForPercent(90), 1e-6));
+
+    // 防抖持久化在 fake 时钟推进后写入用户百分比。
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pump();
+    expect((await store.read()).volume, 90);
+  });
+
+  testWidgets('volume slider drag keeps display and backend on one mapping', (
+    tester,
+  ) async {
+    await pumpLoggedIn(tester);
+    await openPlayable(tester, 'movie-up');
+    await waitFor(tester, find.text('100%'));
+
+    await tester.drag(find.byKey(PlayerKeys.volume), const Offset(-55, 0));
+    await tester.pump();
+    final percent = controllerOf(tester).volume;
+    expect(percent, lessThan(100));
+    expect(find.text('$percent%'), findsOneWidget);
+    expect(backend.volume, closeTo(mpvVolumeForPercent(percent), 1e-6));
+  });
+
   testWidgets('volume is restored from settings and saved after change', (
     tester,
   ) async {
@@ -524,7 +582,7 @@ void main() {
     await pumpLoggedIn(tester, settingsStore: store);
     await openPlayable(tester, 'movie-up');
     await waitFor(tester, find.text('35%'));
-    expect(backend.volume, 35);
+    expect(backend.volume, closeTo(mpvVolumeForPercent(35), 1e-6));
 
     await tester.runAsync(() async {
       await controllerOf(tester).setVolume(20);
@@ -550,13 +608,39 @@ void main() {
     await tester.tap(find.byKey(PlayerKeys.mute));
     await tester.pump();
     expect(find.text('0%'), findsOneWidget);
-    expect(backend.volume, 0);
+    expect(backend.volume, 0.0);
 
     await tester.tap(find.byKey(PlayerKeys.mute));
     await tester.pump();
     expect(find.text('78%'), findsOneWidget);
-    expect(backend.volume, 78);
+    expect(backend.volume, closeTo(mpvVolumeForPercent(78), 1e-6));
   });
+
+  testWidgets(
+    'slow pointer movement wakes hidden controls without a threshold',
+    (tester) async {
+      await pumpLoggedIn(tester);
+      await openPlayable(tester, 'movie-up');
+      final player = controllerOf(tester);
+      for (var i = 0; i < 40 && !player.isPlaying; i++) {
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+      expect(player.isPlaying, isTrue);
+      expect(controlsOpacity(tester), 1.0);
+
+      // 单击隐藏后,无位移阈值:1–2px 的极慢移动立即唤出。
+      await tester.tap(find.byKey(PlayerKeys.surface));
+      await tester.pump();
+      expect(controlsOpacity(tester), 0.0);
+
+      final center = tester.getCenter(find.byKey(PlayerKeys.surface));
+      await tester.sendEventToBinding(
+        PointerHoverEvent(position: center + const Offset(1.5, 0)),
+      );
+      await tester.pump();
+      expect(controlsOpacity(tester), 1.0);
+    },
+  );
 
   testWidgets('overlay chrome can drag and close through the player path', (
     tester,

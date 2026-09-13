@@ -238,7 +238,7 @@ class PlayerController extends ChangeNotifier {
     if (volume > 0) {
       _unmutedVolume = volume;
     }
-    await backend.setVolume(volume.toDouble());
+    await backend.setVolume(mpvVolumeForPercent(volume));
     onUserActivity();
     _scheduleVolumeSave();
   }
@@ -527,7 +527,7 @@ class PlayerController extends ChangeNotifier {
           headers: client.sessionHeaders,
         ),
       );
-      await backend.setVolume(volume.toDouble());
+      await backend.setVolume(mpvVolumeForPercent(volume));
       position = durationFromTicks(startTicks);
       final runtime = next.mediaSource.runTimeTicks ?? item?.runTimeTicks ?? 0;
       if (runtime > 0) {
@@ -785,7 +785,7 @@ class PlayerController extends ChangeNotifier {
       if (volume > 0) {
         _unmutedVolume = volume;
       }
-      await backend.setVolume(volume.toDouble());
+      await backend.setVolume(mpvVolumeForPercent(volume));
     } catch (_) {}
   }
 
@@ -838,6 +838,16 @@ class PlayerController extends ChangeNotifier {
     unawaited(backend.dispose());
     super.dispose();
   }
+}
+
+/// UI 音量百分比(0–100)到 mpv volume 的感知幂映射:f(x) = x³。
+///
+/// mpv 的音量刻度近似线性作用于信号幅度,而人耳响度感知近似幂律;
+/// 以立方曲线换算,使等量百分比变化对应等量听感变化,与主流播放器一致。
+/// 持久化与 UI 显示均保存用户百分比,所有 backend 音量调用统一经此换算。
+double mpvVolumeForPercent(int percent) {
+  final x = (percent.clamp(0, 100)) / 100;
+  return 100 * x * x * x;
 }
 
 bool isFatalPlaybackError(String message, {required bool playing}) {
