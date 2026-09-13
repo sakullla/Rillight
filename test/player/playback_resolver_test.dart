@@ -186,6 +186,49 @@ void main() {
     expect(resolved.streamUrl.queryParameters.containsKey('api_key'), isFalse);
   });
 
+  test('stream headers attach the session only for same-origin URLs', () {
+    const sessionHeaders = {
+      'X-Emby-Token': 'token-1',
+      'Authorization': 'MediaBrowser Token="token-1"',
+      'User-Agent': 'test-agent',
+    };
+    // Emby 自有流(与 baseUrl 同源)仍携带会话头。
+    expect(
+      playbackStreamHeaders(
+        streamUrl: Uri.parse('$base/Videos/movie/stream.mkv?api_key=$token'),
+        baseUrl: Uri.parse(base),
+        sessionHeaders: sessionHeaders,
+      ),
+      sessionHeaders,
+    );
+    // strm 等远端直连地址不带令牌头(空 headers)。
+    expect(
+      playbackStreamHeaders(
+        streamUrl: Uri.parse('https://cdn.example.com/episode-01.mkv'),
+        baseUrl: Uri.parse(base),
+        sessionHeaders: sessionHeaders,
+      ),
+      isEmpty,
+    );
+    // 同主机但协议或端口不同也视为不同源,保守不附加。
+    expect(
+      playbackStreamHeaders(
+        streamUrl: Uri.parse('https://emby.test:8096/Videos/movie/stream.mkv'),
+        baseUrl: Uri.parse(base),
+        sessionHeaders: sessionHeaders,
+      ),
+      isEmpty,
+    );
+    expect(
+      playbackStreamHeaders(
+        streamUrl: Uri.parse('http://emby.test/Videos/movie/stream.mkv'),
+        baseUrl: Uri.parse(base),
+        sessionHeaders: sessionHeaders,
+      ),
+      isEmpty,
+    );
+  });
+
   test('strm source without remote path falls back to the static stream', () {
     final resolved = resolvePlayback(
       info: PlaybackInfo.fromJson({

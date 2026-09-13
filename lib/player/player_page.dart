@@ -746,6 +746,7 @@ class _EpisodeListPanel extends StatelessWidget {
                           ),
                           const SizedBox(height: AppSpacing.sm),
                           OutlinedButton(
+                            key: const Key('player-episodes-retry'),
                             onPressed: () {
                               unawaited(controller.loadEpisodeList());
                             },

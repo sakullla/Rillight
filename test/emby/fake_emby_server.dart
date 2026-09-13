@@ -146,6 +146,7 @@ class FakeEmbyItem {
     this.mediaStreams = const [],
     this.chapters = const [],
     this.extraSources = const [],
+    this.remotePath,
   }) : dateCreated = dateCreated ?? DateTime.utc(2024, 1, 1),
        dateLastContentAdded =
            dateLastContentAdded ?? dateCreated ?? DateTime.utc(2024, 1, 1),
@@ -195,6 +196,10 @@ class FakeEmbyItem {
 
   /// 额外媒体源(多版本场景,如同片 1080p/4K 两版)。
   List<FakeMediaSource> extraSources;
+
+  /// strm 等场景:服务端已把条目解析为远端 http(s) 地址,
+  /// PlaybackInfo 返回 Protocol=Http + Path(远端 URL),不提供 DirectStreamUrl。
+  String? remotePath;
 
   Map<String, dynamic> toJson() {
     return {
@@ -609,7 +614,7 @@ class FakeEmbyServer {
     });
   }
 
-  /// 设备声明为可本地渲染(Embedded/External)的字幕格式不烧录,
+  /// 设备声明为可本地渲染(Embed/External)的字幕格式不烧录,
   /// 仅 Encode/Drop 的位图格式(如 dvdsub)转码烧录。
   bool _subtitleRenderedLocally(Map<String, dynamic>? profile, String? codec) {
     if (profile == null || codec == null) {
@@ -677,6 +682,10 @@ class FakeEmbyServer {
       source['TranscodingUrl'] = transcoding;
       source['TranscodingSubProtocol'] = 'hls';
       source['TranscodingContainer'] = 'ts';
+    } else if (item.remotePath != null && item.remotePath!.startsWith('http')) {
+      // strm 等远端直连:不提供 DirectStreamUrl,客户端直接打开远端地址。
+      source['Protocol'] = 'Http';
+      source['Path'] = item.remotePath;
     } else {
       source['DirectStreamUrl'] =
           '/Videos/${item.id}/stream.$container?static=true'

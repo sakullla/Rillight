@@ -934,6 +934,29 @@ void main() {
   testWidgets(
     'episode panel lists and switches episodes with correct reports',
     (tester) async {
+      tester.view.physicalSize = const Size(1200, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      // 目标集为部分观看状态,服务器配置续播回退 5 秒。
+      const minute = 10000000 * 60;
+      server = FakeEmbyServer(
+        users: const [
+          FakeEmbyUser(
+            username: 'alice',
+            password: 'correct-horse',
+            userId: 'user-alice',
+            resumeRewindSeconds: 5,
+          ),
+        ],
+        items: defaultCatalogItems(),
+      );
+      final target = server.items.firstWhere(
+        (item) => item.id == 'episode-friends-s1e2',
+      );
+      target.playbackPositionTicks = minute * 10;
+      target.playedPercentage = 45;
+      adapter = FakeEmbyAdapter([server]);
       await pumpLoggedIn(tester);
       await openLibrary(tester, 'view-tv');
       await tester.tap(find.byKey(CatalogKeys.item('series-friends')));
@@ -963,7 +986,8 @@ void main() {
       expect(controllerOf(tester).episodeSeasonId, 'season-friends-1');
       expect(find.byKey(const Key('player-season-picker')), findsNothing);
 
-      // 点击任意集立即切集:旧集 Stopped、新集 Playing,从零起播。
+      // 点击部分观看的集:进程内切集,从续播位置(回退 5 秒)起播,
+      // 旧集 Stopped、新集 Playing 上报正确。
       final playingBefore = server.playbackEvents
           .where((event) => event.kind == 'Playing')
           .length;
@@ -979,7 +1003,12 @@ void main() {
       }
       expect(controllerOf(tester).itemId, 'episode-friends-s1e2');
       expect(backend.openedUrl!.path, contains('episode-friends-s1e2'));
-      expect(backend.openedStart, Duration.zero);
+      expect(
+        backend.openedStart,
+        const Duration(minutes: 10) - const Duration(seconds: 5),
+      );
+      // Emby 自有流仍携带会话头。
+      expect(backend.openedHeaders.containsKey('X-Emby-Token'), isTrue);
       final kinds = server.playbackEvents.map((event) => event.kind).toList();
       expect(kinds.contains('Stopped'), isTrue);
       expect(
@@ -990,13 +1019,55 @@ void main() {
           .where((event) => event.kind == 'Playing')
           .last;
       expect(lastPlaying.body['ItemId'], 'episode-friends-s1e2');
+      expect(lastPlaying.body['PositionTicks'], minute * 10 - 10000000 * 5);
 
-      // 切集后新页面接管播放(面板随旧页关闭)。
+      // 切集在播放进程内完成:面板保留,新集行高亮。
       await waitFor(tester, find.byKey(PlayerKeys.playPause));
-      expect(find.byKey(const Key('player-episodes-panel')), findsNothing);
+      expect(find.byKey(const Key('player-episodes-panel')), findsOneWidget);
+      final switchedRow = tester.widget<ListTile>(
+        find.byKey(const Key('player-episode-episode-friends-s1e2')),
+      );
+      expect(switchedRow.selected, isTrue);
       expect(controllerOf(tester).itemId, 'episode-friends-s1e2');
     },
   );
+
+  testWidgets('episode list retry works after a failed fetch', (tester) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await pumpLoggedIn(tester);
+    await openLibrary(tester, 'view-tv');
+    await tester.tap(find.byKey(CatalogKeys.item('series-friends')));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(
+      find.byKey(CatalogKeys.episode('episode-friends-s1e1')),
+    );
+    await tester.tap(find.byKey(CatalogKeys.episode('episode-friends-s1e1')));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(PlayerKeys.open));
+    await tester.tap(find.byKey(PlayerKeys.open));
+    await tester.pump();
+    await waitFor(tester, find.byKey(PlayerKeys.playPause));
+
+    // 分集拉取失败:面板显示失败态与重试入口,不影响播放。
+    server.itemsStatus = 500;
+    await tester.tap(find.byKey(const Key('player-episodes')));
+    await waitFor(tester, find.byKey(const Key('player-episodes-retry')));
+    expect(backend.isPlaying, isTrue);
+    expect(controllerOf(tester).episodes, isEmpty);
+
+    // 恢复后重试生效:同剧重新拉取并列出分集。
+    server.itemsStatus = null;
+    await tester.tap(find.byKey(const Key('player-episodes-retry')));
+    await waitFor(
+      tester,
+      find.byKey(const Key('player-episode-episode-friends-s1e2')),
+    );
+    expect(controllerOf(tester).episodeListFailed, isFalse);
+    expect(controllerOf(tester).episodes.length, 2);
+  });
 
   testWidgets('episode panel switches seasons and plays another season', (
     tester,
@@ -1218,6 +1289,24 @@ void main() {
     await openPlayable(tester, 'movie-inception');
     await waitFor(tester, find.byKey(PlayerKeys.playPause));
     expect(find.byKey(const Key('player-media-source')), findsNothing);
+  });
+
+  testWidgets('strm remote direct stream opens without session headers', (
+    tester,
+  ) async {
+    server = strmMovieServer();
+    adapter = FakeEmbyAdapter([server]);
+    await pumpLoggedIn(tester);
+    await openPlayable(tester, 'movie-strm');
+    await waitFor(tester, find.byKey(PlayerKeys.playPause));
+
+    // 远端直连:打开原始 URL,不附带 Emby 会话头(令牌不泄漏给第三方)。
+    expect(controllerOf(tester).isTranscode, isFalse);
+    expect(
+      backend.openedUrl.toString(),
+      'https://cdn.example.com/strm-movie.mkv',
+    );
+    expect(backend.openedHeaders, isEmpty);
   });
 
   testWidgets('PGS subtitle renders locally on direct play without reopen', (
@@ -1601,6 +1690,27 @@ FakeEmbyServer multiSourceMovieServer() {
         runTimeTicks: minute * 90,
         primaryImageTag: 'tag-multisource',
         extraSources: const [FakeMediaSource(id: 'src-4k', name: '4K 版本')],
+      ),
+    ],
+  );
+}
+
+/// strm 远端直连电影夹具:服务端把条目解析为远端 http 地址,
+/// PlaybackInfo 返回 Protocol=Http + Path,不提供 DirectStreamUrl。
+FakeEmbyServer strmMovieServer() {
+  const minute = 10000000 * 60;
+  return FakeEmbyServer(
+    items: [
+      ...defaultCatalogItems(),
+      FakeEmbyItem(
+        id: 'movie-strm',
+        name: 'strm 远端片',
+        type: 'Movie',
+        parentId: 'view-movies',
+        productionYear: 2023,
+        runTimeTicks: minute * 90,
+        primaryImageTag: 'tag-strm',
+        remotePath: 'https://cdn.example.com/strm-movie.mkv',
       ),
     ],
   );

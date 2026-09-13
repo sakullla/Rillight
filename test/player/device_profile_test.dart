@@ -28,19 +28,20 @@ void main() {
       ),
       isTrue,
     );
-    // pgs/pgssub 声明 Embedded:直连场景服务端不强制烧录,mpv 本地渲染内嵌轨道。
+    // pgs/pgssub 使用文档枚举值 Embed:直连场景服务端不强制烧录,
+    // mpv 本地渲染内嵌轨道(SubtitleDeliveryMethod: External/Embed/Encode)。
     expect(
-      subs.any(
-        (item) => item['Format'] == 'pgs' && item['Method'] == 'Embedded',
-      ),
+      subs.any((item) => item['Format'] == 'pgs' && item['Method'] == 'Embed'),
       isTrue,
     );
     expect(
       subs.any(
-        (item) => item['Format'] == 'pgssub' && item['Method'] == 'Embedded',
+        (item) => item['Format'] == 'pgssub' && item['Method'] == 'Embed',
       ),
       isTrue,
     );
+    // 不出现自造值 Embedded(严格服务端会拒绝整个 PlaybackInfo 请求)。
+    expect(subs.any((item) => item['Method'] == 'Embedded'), isFalse);
     // dvdsub/dvbsub 仍为 Encode(转码烧录)。
     expect(
       subs.any(

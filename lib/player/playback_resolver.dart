@@ -134,3 +134,18 @@ Uri embyResourceUri(Uri baseUrl, String pathOrUrl, String accessToken) {
   }
   return resolved.replace(queryParameters: params);
 }
+
+/// 播放流请求头:仅当流地址与 Emby 服务器同源(协议/主机/端口一致)时
+/// 附加会话头(X-Emby-Token/Authorization 等);strm 等远端直连地址
+/// 返回空 headers,避免服务器访问令牌被送达第三方主机。
+Map<String, String> playbackStreamHeaders({
+  required Uri streamUrl,
+  required Uri baseUrl,
+  required Map<String, String> sessionHeaders,
+}) {
+  final sameOrigin =
+      streamUrl.scheme == baseUrl.scheme &&
+      streamUrl.host == baseUrl.host &&
+      streamUrl.port == baseUrl.port;
+  return sameOrigin ? sessionHeaders : const {};
+}

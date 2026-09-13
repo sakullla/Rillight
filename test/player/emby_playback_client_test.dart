@@ -57,8 +57,8 @@ void main() {
     expect(info.primarySource?.transcodingUrl, contains('master.m3u8'));
   });
 
-  test('PGS subtitle request stays direct with Embedded declaration', () async {
-    // 设备声明 pgs/pgssub 为 Embedded 后,直连场景服务端不强制烧录,
+  test('PGS subtitle request stays direct with Embed declaration', () async {
+    // 设备声明 pgs/pgssub 为文档值 Embed 后,直连场景服务端不强制烧录,
     // 仍返回 DirectStream,由 mpv 本地渲染内嵌位图轨道。
     final info = await client.getPlaybackInfo(
       itemId: 'movie-pgs',
@@ -72,10 +72,11 @@ void main() {
     );
     expect(
       subs.any(
-        (item) => item['Format'] == 'pgssub' && item['Method'] == 'Embedded',
+        (item) => item['Format'] == 'pgssub' && item['Method'] == 'Embed',
       ),
       isTrue,
     );
+    expect(subs.any((item) => item['Method'] == 'Embedded'), isFalse);
   });
 
   test('dvdsub bitmap subtitle still burns in via transcode', () async {

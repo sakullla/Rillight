@@ -40,10 +40,11 @@ Map<String, dynamic> mpvDeviceProfile({
       {'Format': 'webvtt', 'Method': 'External'},
       {'Format': 'ass', 'Method': 'External'},
       {'Format': 'ssa', 'Method': 'External'},
-      // mpv 可直接渲染容器内嵌 PGS 位图轨道:声明 Embedded,
-      // 直连场景服务端不强制烧录;转码时服务端仍按能力烧录。
-      {'Format': 'pgs', 'Method': 'Embedded'},
-      {'Format': 'pgssub', 'Method': 'Embedded'},
+      // mpv 可直接渲染容器内嵌 PGS 位图轨道:按文档枚举值声明 Embed
+      // (SubtitleDeliveryMethod: External/Embed/Encode),直连场景服务端
+      // 不强制烧录;转码时服务端仍按能力烧录。
+      {'Format': 'pgs', 'Method': 'Embed'},
+      {'Format': 'pgssub', 'Method': 'Embed'},
       {'Format': 'dvdsub', 'Method': 'Encode'},
       {'Format': 'dvbsub', 'Method': 'Encode'},
     ],

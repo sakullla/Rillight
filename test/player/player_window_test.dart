@@ -192,7 +192,17 @@ void main() {
           .length;
       await tester.runAsync(() async {
         await app.windowHost.close();
-        await Future<void>.delayed(const Duration(milliseconds: 50));
+        // 关闭后的首页行重拉是真实异步链:轮询等待其请求发出,
+        // 避免固定 50ms 墙钟等待在并行测试负载下偶发超时。
+        for (var i = 0; i < 250; i++) {
+          if (server.requests
+                  .where((request) => request.contains('Items/Resume'))
+                  .length >
+              resumeBefore) {
+            break;
+          }
+          await Future<void>.delayed(const Duration(milliseconds: 20));
+        }
       });
       await tester.pump();
       await waitForGone(tester, find.byType(PlayerPage));

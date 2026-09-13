@@ -94,10 +94,13 @@ class PlayerController extends ChangeNotifier {
   final VoidCallback? onClose;
   final ValueChanged<String>? onOpenItem;
   PlayerSettingsStore? settingsStore;
-  final String? preferredMediaSourceId;
-  final int? preferredAudioStreamIndex;
-  final int? preferredSubtitleStreamIndex;
-  final int? startTimeTicks;
+
+  /// 首次起播请求携带的源/轨道/章节起点;进程内切集([_playItem])时清除,
+  /// 这些偏好只对最初打开的条目有效。
+  String? preferredMediaSourceId;
+  int? preferredAudioStreamIndex;
+  int? preferredSubtitleStreamIndex;
+  int? startTimeTicks;
 
   final PlaybackCheckInMachine checkIn = PlaybackCheckInMachine();
 
@@ -568,16 +571,18 @@ class PlayerController extends ChangeNotifier {
     await _playItem(episode.id, fromStart: false);
   }
 
+  /// 进程内切到另一集(ADR-4):不经 host 重启通道,直接以新 itemId
+  /// 重走 start(),autoResume 由 [fromStart] 决定——剧集列表切集
+  /// (fromStart=false)时部分观看的集从续播位置起播。
+  /// 首次起播请求携带的源/轨道/章节起点只对首个条目有效,换集后清除。
   Future<void> _playItem(String targetId, {required bool fromStart}) async {
-    final host = onOpenItem;
-    if (host != null) {
-      await shutdownSession();
-      host(targetId);
-      return;
-    }
     await shutdownSession();
     itemId = targetId;
     activeMediaSourceId = null;
+    preferredMediaSourceId = null;
+    preferredAudioStreamIndex = null;
+    preferredSubtitleStreamIndex = null;
+    startTimeTicks = null;
     autoResume = !fromStart;
     await start();
   }
@@ -620,7 +625,6 @@ class PlayerController extends ChangeNotifier {
         return;
       }
       seasons = loaded;
-      _episodeSeriesId = seriesId;
       var seasonId = item?.seasonId;
       final hasSeason =
           seasonId != null && loaded.any((season) => season.id == seasonId);
@@ -639,6 +643,9 @@ class PlayerController extends ChangeNotifier {
         }
       }
       await _loadSeasonEpisodes(seasonId);
+      // 分集列表拉取成功后才标记归属;失败时保持未加载,
+      // 保证同剧重试(loadEpisodeList)不会因早退而失效。
+      _episodeSeriesId = seriesId;
       episodeListLoading = false;
       _emit();
     } on EmbyException {
@@ -1010,7 +1017,13 @@ class PlayerController extends ChangeNotifier {
         VideoOpenRequest(
           url: next.streamUrl,
           start: durationFromTicks(startTicks),
-          headers: client.sessionHeaders,
+          // 仅当流地址与 Emby 服务器同源时附加会话头;strm 等远端
+          // 直连地址传空 headers,避免令牌泄漏给第三方主机。
+          headers: playbackStreamHeaders(
+            streamUrl: next.streamUrl,
+            baseUrl: client.baseUrl!,
+            sessionHeaders: client.sessionHeaders,
+          ),
         ),
       );
       await backend.setVolume(mpvVolumeForPercent(volume));
