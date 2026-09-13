@@ -12,6 +12,14 @@ abstract final class CatalogKeys {
   static const playedToggle = Key('catalog-played-toggle');
   static const resumeProgress = Key('catalog-resume-progress');
   static const back = Key('catalog-back');
+  static const seriesLink = Key('catalog-series-link');
+  static const viewSeries = Key('catalog-view-series');
+  static const viewEpisode = Key('catalog-view-episode');
+  static const nextEpisode = Key('catalog-next-episode');
+  static const seasonPicker = Key('catalog-season-picker');
+  static const locateEpisode = Key('catalog-locate-episode');
+  static const episodeRange = Key('catalog-episode-range');
+  static const overview = Key('catalog-overview');
   static const similarRow = Key('catalog-row-similar');
   static const episodesRow = Key('catalog-row-episodes');
   static const sortBy = Key('catalog-sort-by');
@@ -20,6 +28,7 @@ abstract final class CatalogKeys {
   static const librarySwitcher = Key('catalog-library-switcher');
   static const heroPrev = Key('catalog-hero-prev');
   static const heroNext = Key('catalog-hero-next');
+  static Key heroDot(int index) => Key('catalog-hero-dot-$index');
 
   static const shelfResume = 'resume';
   static const shelfNextUp = 'nextup';
@@ -27,8 +36,10 @@ abstract final class CatalogKeys {
   static const shelfLatestSeries = 'latest-series';
   static const shelfSimilar = 'similar';
   static const shelfEpisodes = 'episodes';
+  static const shelfChapters = 'chapters';
 
   static Key item(String id) => Key('catalog-item-$id');
+  static Key removeFromResume(String id) => Key('catalog-remove-resume-$id');
   static Key library(String id) => Key('catalog-library-$id');
   static Key season(String id) => Key('catalog-season-$id');
   static Key episode(String id) => Key('catalog-episode-$id');

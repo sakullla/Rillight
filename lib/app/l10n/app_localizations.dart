@@ -112,6 +112,12 @@ abstract class AppLocalizations {
   /// **'封面不可用'**
   String get posterPlaceholder;
 
+  /// Shown when a capability such as chapter thumbnails is unavailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'不支持'**
+  String get unsupported;
+
   /// Title of the Emby connection form.
   ///
   /// In zh, this message translates to:
@@ -208,11 +214,41 @@ abstract class AppLocalizations {
   /// **'删除线路'**
   String get deleteLine;
 
+  /// Address field for an extra access line on the connect form.
+  ///
+  /// In zh, this message translates to:
+  /// **'线路地址'**
+  String get extraLineAddress;
+
+  /// Filter field for a long list of saved Emby servers.
+  ///
+  /// In zh, this message translates to:
+  /// **'搜索服务器'**
+  String get searchServers;
+
+  /// How many access lines a saved server has.
+  ///
+  /// In zh, this message translates to:
+  /// **'{count} 条线路'**
+  String lineCount(int count);
+
   /// Volume slider on the player controls.
   ///
   /// In zh, this message translates to:
   /// **'音量'**
   String get volume;
+
+  /// Mute playback from the volume icon.
+  ///
+  /// In zh, this message translates to:
+  /// **'静音'**
+  String get mute;
+
+  /// Restore volume from the muted volume icon.
+  ///
+  /// In zh, this message translates to:
+  /// **'取消静音'**
+  String get unmute;
 
   /// Tooltip for the signed-in server menu.
   ///
@@ -286,6 +322,42 @@ abstract class AppLocalizations {
   /// **'片库'**
   String get libraries;
 
+  /// Action to choose which libraries appear in the top bar and their order.
+  ///
+  /// In zh, this message translates to:
+  /// **'自定义导航'**
+  String get customizeNav;
+
+  /// Explains the pin limit in the customize-nav dialog.
+  ///
+  /// In zh, this message translates to:
+  /// **'最多勾选 {count} 个。顶栏放不下的会进「更多」。未勾选的不出现在导航、更多和首页片库。'**
+  String customizeNavHint(int count);
+
+  /// Save customized library navigation.
+  ///
+  /// In zh, this message translates to:
+  /// **'保存'**
+  String get saveNav;
+
+  /// Move a pinned library up in the top-bar order.
+  ///
+  /// In zh, this message translates to:
+  /// **'上移'**
+  String get moveNavUp;
+
+  /// Move a pinned library down in the top-bar order.
+  ///
+  /// In zh, this message translates to:
+  /// **'下移'**
+  String get moveNavDown;
+
+  /// Volume level as a percentage next to the player slider.
+  ///
+  /// In zh, this message translates to:
+  /// **'{percent}%'**
+  String volumePercent(int percent);
+
   /// Navigation and action label for name search.
   ///
   /// In zh, this message translates to:
@@ -310,6 +382,12 @@ abstract class AppLocalizations {
   /// **'没有结果'**
   String get searchNoResults;
 
+  /// Hover action to hide an item from Continue Watching.
+  ///
+  /// In zh, this message translates to:
+  /// **'从继续观看移除'**
+  String get removeFromResume;
+
   /// Home row title for resumable movies and episodes.
   ///
   /// In zh, this message translates to:
@@ -322,16 +400,16 @@ abstract class AppLocalizations {
   /// **'即将播放'**
   String get nextUpRow;
 
-  /// Home row title for recently added movies.
+  /// Home row title for recently updated movies.
   ///
   /// In zh, this message translates to:
-  /// **'最近添加的电影'**
+  /// **'最近更新的电影'**
   String get latestMoviesRow;
 
-  /// Home row title for recently added series.
+  /// Home row title for recently updated series.
   ///
   /// In zh, this message translates to:
-  /// **'最近添加的剧集'**
+  /// **'最近更新的剧集'**
   String get latestSeriesRow;
 
   /// Opens the full poster wall for a media shelf.
@@ -358,29 +436,83 @@ abstract class AppLocalizations {
   /// **'排序'**
   String get sortBy;
 
-  /// Sort poster walls by SortName.
+  /// Sort poster walls by SortName A to Z.
   ///
   /// In zh, this message translates to:
-  /// **'名称'**
+  /// **'标题'**
   String get sortByName;
 
-  /// Sort poster walls by DateCreated.
+  /// Default library sort by DateLastContentAdded, newest first.
   ///
   /// In zh, this message translates to:
-  /// **'添加日期'**
+  /// **'更新日期'**
+  String get sortByDateUpdated;
+
+  /// Sort poster walls by DateCreated, newest first.
+  ///
+  /// In zh, this message translates to:
+  /// **'加入日期'**
   String get sortByDateCreated;
 
-  /// Sort poster walls by PremiereDate.
+  /// Sort poster walls by PremiereDate, newest first.
   ///
   /// In zh, this message translates to:
   /// **'首映日期'**
   String get sortByPremiereDate;
 
-  /// Sort poster walls by CommunityRating when items include it.
+  /// Sort poster walls by CommunityRating.
   ///
   /// In zh, this message translates to:
-  /// **'评分'**
+  /// **'IMDb评分'**
+  String get sortByCommunityRating;
+
+  /// Sort poster walls by CriticRating.
+  ///
+  /// In zh, this message translates to:
+  /// **'影评人评分'**
+  String get sortByCriticRating;
+
+  /// Sort poster walls by ProductionYear.
+  ///
+  /// In zh, this message translates to:
+  /// **'出品年份'**
+  String get sortByProductionYear;
+
+  /// Sort poster walls by OfficialRating.
+  ///
+  /// In zh, this message translates to:
+  /// **'官方评级'**
+  String get sortByOfficialRating;
+
+  /// Sort poster walls by DatePlayed.
+  ///
+  /// In zh, this message translates to:
+  /// **'播放日期'**
+  String get sortByDatePlayed;
+
+  /// Sort poster walls by Runtime.
+  ///
+  /// In zh, this message translates to:
+  /// **'播放时长'**
+  String get sortByRuntime;
+
+  /// Shuffle poster walls with SortBy=Random.
+  ///
+  /// In zh, this message translates to:
+  /// **'随机'**
+  String get sortByRandom;
+
+  /// Legacy alias for community rating sort.
+  ///
+  /// In zh, this message translates to:
+  /// **'IMDb评分'**
   String get sortByRating;
+
+  /// Sort episode walls by IndexNumber.
+  ///
+  /// In zh, this message translates to:
+  /// **'集数'**
+  String get sortByIndexNumber;
 
   /// Tooltip for the shelf control that reveals posters to the left.
   ///
@@ -508,11 +640,71 @@ abstract class AppLocalizations {
   /// **'继续播放'**
   String get resumePlay;
 
+  /// Open the parent series from an episode detail page.
+  ///
+  /// In zh, this message translates to:
+  /// **'查看剧集'**
+  String get viewSeries;
+
+  /// Open the current or resume episode from a series detail page.
+  ///
+  /// In zh, this message translates to:
+  /// **'查看本集'**
+  String get viewThisEpisode;
+
+  /// Open the next episode from an episode detail page.
+  ///
+  /// In zh, this message translates to:
+  /// **'下一集'**
+  String get nextEpisode;
+
+  /// Scroll the episode shelf so the current episode is visible.
+  ///
+  /// In zh, this message translates to:
+  /// **'跳转到此集'**
+  String get locateEpisode;
+
+  /// Open a picker to jump to a specific episode number.
+  ///
+  /// In zh, this message translates to:
+  /// **'选集'**
+  String get pickEpisode;
+
+  /// Hint for typing an episode number in the picker.
+  ///
+  /// In zh, this message translates to:
+  /// **'输入集数，回车跳转'**
+  String get jumpToEpisodeHint;
+
+  /// Reserved label for an episode that is actually playing.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在观看'**
+  String get nowPlayingEpisode;
+
   /// Start playback from the beginning despite saved progress.
   ///
   /// In zh, this message translates to:
   /// **'从头播放'**
   String get playFromStart;
+
+  /// Title shown when a movie or last episode finishes.
+  ///
+  /// In zh, this message translates to:
+  /// **'播放结束'**
+  String get playbackEnded;
+
+  /// Restart the current item from the beginning after it ends.
+  ///
+  /// In zh, this message translates to:
+  /// **'重播'**
+  String get replay;
+
+  /// Leave the player after playback ends.
+  ///
+  /// In zh, this message translates to:
+  /// **'关闭'**
+  String get closePlayer;
 
   /// Prompt shown when opening an item with saved progress.
   ///

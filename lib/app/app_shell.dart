@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
@@ -5,9 +7,12 @@ import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/window_chrome.dart';
+import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/auth/session_actions.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_scope.dart';
+import 'package:rillight/home/library_nav_dialog.dart';
+import 'package:rillight/home/library_nav_prefs.dart';
 import 'package:rillight/search/search_action.dart';
 import 'package:rillight/search/search_overlay.dart';
 
@@ -25,11 +30,27 @@ class AppShell extends StatefulWidget {
   static const topBarKey = Key('app-shell-top-bar');
   static const homeNavKey = Key('app-shell-home');
   static const overflowNavKey = Key('app-shell-libraries-overflow');
+  static const customizeNavKey = Key('app-shell-customize-nav');
+  static const customizeNavValue = '__customize_nav__';
+  static const moreLibrariesKey = Key('app-shell-more-libraries');
+  static const moreLibrariesValue = '__more_libraries__';
+
+  /// 未自定义时顶栏默认展示的库名数,多出的进溢出。
+  static const maxVisibleLibraries = 5;
+
+  /// 自定义导航最多勾选的库数;顶栏放不下的仍进 ⋯。
+  static const maxPinnedLibraries = 20;
+
+  /// ⋯ 菜单一次列出的库名数,多出的进「更多」。
+  static const maxOverflowMenuLibraries = 5;
 
   static Key libraryNavKey(String id) => Key('app-shell-library-$id');
 
   /// 顶栏内容行高;有窗口铬时不低于标题按钮带。
-  static const topBarHeight = 48.0;
+  static const topBarHeight = 56.0;
+
+  /// 顶栏下沿溶进画面的渐变高度,避免硬分割线切开海报。
+  static const topFadeHeight = 36.0;
 
   @override
   State<AppShell> createState() => _AppShellState();
@@ -140,26 +161,85 @@ class _TopBar extends StatelessWidget {
               ? kWindowChromeHeight
               : AppShell.topBarHeight)
         : AppShell.topBarHeight;
-    final colorScheme = Theme.of(context).colorScheme;
 
-    return Material(
-      key: AppShell.topBarKey,
-      color: colorScheme.surface.withValues(alpha: 0.72),
-      child: SizedBox(
-        height: height,
-        child: Padding(
-          padding: EdgeInsets.only(left: leading, right: trailing),
-          child: Row(
-            children: [
-              _HomeNav(selected: location == AppRoutes.home),
-              Expanded(
-                child: _LibraryNav(libraries: libraries, location: location),
+    final canPop = GoRouter.of(context).canPop();
+    final reduce = MediaQuery.disableAnimationsOf(context);
+    final overlayHeight = height + AppShell.topFadeHeight;
+    return SizedBox(
+      height: height,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Positioned(
+            left: 0,
+            right: 0,
+            top: 0,
+            height: overlayHeight,
+            child: IgnorePointer(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    stops: const [0, 0.55, 1],
+                    colors: [
+                      Colors.black.withValues(alpha: reduce ? 0.7 : 0.38),
+                      Colors.black.withValues(alpha: 0.1),
+                      Colors.transparent,
+                    ],
+                  ),
+                ),
+                child: const SizedBox.expand(),
               ),
-              const SearchAction(),
-              const SessionActions(),
-            ],
+            ),
           ),
-        ),
+          Material(
+            key: AppShell.topBarKey,
+            type: MaterialType.transparency,
+            child: Padding(
+              padding: EdgeInsets.only(left: leading, right: trailing),
+              child: Row(
+                children: [
+                  if (canPop)
+                    IconButton(
+                      key: CatalogKeys.back,
+                      tooltip: MaterialLocalizations.of(
+                        context,
+                      ).backButtonTooltip,
+                      visualDensity: VisualDensity.compact,
+                      iconSize: 20,
+                      onPressed: () => context.pop(),
+                      icon: const Icon(Icons.arrow_back_rounded),
+                    ),
+                  if (AppRoutes.showsBrowseNav(location)) ...[
+                    _HomeNav(selected: location == AppRoutes.home),
+                    Expanded(
+                      child: _LibraryNav(
+                        libraries: libraries,
+                        location: location,
+                      ),
+                    ),
+                  ] else
+                    const Spacer(),
+                  SizedBox(
+                    height: kWindowChromeHeight,
+                    child: IconTheme(
+                      data: IconTheme.of(context).copyWith(size: 18),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          SearchAction(),
+                          SessionActions(),
+                          SizedBox(width: kWindowChromeActionGap),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -199,76 +279,146 @@ class _LibraryNav extends StatelessWidget {
     if (libraries.isEmpty) {
       return const SizedBox.shrink();
     }
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final style = Theme.of(context).textTheme.titleSmall;
-        final maxWidth = constraints.maxWidth.isFinite
-            ? constraints.maxWidth
-            : double.infinity;
-        final widths = [
-          for (final library in libraries)
-            _navLabelWidth(context, library.name, style),
-        ];
-        var visibleCount = libraries.length;
-        while (visibleCount > 0) {
-          var total = 0.0;
-          for (var i = 0; i < visibleCount; i++) {
-            total += widths[i];
-          }
-          if (visibleCount < libraries.length) {
-            total += _overflowWidth;
-          }
-          if (total <= maxWidth) {
-            break;
-          }
-          visibleCount--;
-        }
-        final visible = libraries.take(visibleCount).toList();
-        final overflow = libraries.skip(visibleCount).toList();
-        return Row(
-          children: [
-            Expanded(
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      for (final library in visible)
-                        _NavTextButton(
-                          buttonKey: AppShell.libraryNavKey(library.id),
-                          label: library.name,
-                          selected: location == AppRoutes.library(library.id),
-                          onPressed: () {
-                            if (GoRouterState.of(context).uri.path !=
-                                AppRoutes.library(library.id)) {
-                              context.go(AppRoutes.library(library.id));
-                            }
-                          },
-                        ),
-                    ],
+    final nav = LibraryNavScope.maybeOf(context);
+    return ListenableBuilder(
+      listenable: nav ?? _IgnoredListenable(),
+      builder: (context, _) {
+        return LayoutBuilder(
+          builder: (context, constraints) {
+            final arranged = (nav ?? LibraryNavController()).layout(
+              libraries,
+              maxPinned: (nav?.customized ?? false)
+                  ? AppShell.maxPinnedLibraries
+                  : AppShell.maxVisibleLibraries,
+            );
+            var visible = arranged.pinned;
+            var overflow = arranged.overflow;
+            final style = Theme.of(context).textTheme.titleMedium;
+            final maxWidth = constraints.maxWidth.isFinite
+                ? constraints.maxWidth
+                : double.infinity;
+            while (visible.isNotEmpty) {
+              var total = _overflowWidth;
+              for (final library in visible) {
+                total += _navLabelWidth(context, library.name, style);
+              }
+              if (total <= maxWidth) {
+                break;
+              }
+              overflow = [visible.last, ...overflow];
+              visible = visible.sublist(0, visible.length - 1);
+            }
+            // ⋯ 只列顶栏放不下的库,一次最多 5 条,避免和已显示的重复、菜单过长。
+            final menuShown =
+                overflow.length <= AppShell.maxOverflowMenuLibraries
+                ? overflow
+                : overflow.take(AppShell.maxOverflowMenuLibraries).toList();
+            final menuRest =
+                overflow.length <= AppShell.maxOverflowMenuLibraries
+                ? const <EmbyItem>[]
+                : overflow.sublist(AppShell.maxOverflowMenuLibraries);
+            return Row(
+              children: [
+                Expanded(
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        for (final library in visible)
+                          _NavTextButton(
+                            buttonKey: AppShell.libraryNavKey(library.id),
+                            label: library.name,
+                            selected: location == AppRoutes.library(library.id),
+                            onPressed: () {
+                              if (GoRouterState.of(context).uri.path !=
+                                  AppRoutes.library(library.id)) {
+                                context.go(AppRoutes.library(library.id));
+                              }
+                            },
+                          ),
+                      ],
+                    ),
                   ),
                 ),
-              ),
-            ),
-            if (overflow.isNotEmpty)
-              PopupMenuButton<String>(
-                key: AppShell.overflowNavKey,
-                tooltip: AppLocalizations.of(context).libraries,
-                onSelected: (id) {
-                  if (GoRouterState.of(context).uri.path !=
-                      AppRoutes.library(id)) {
-                    context.go(AppRoutes.library(id));
-                  }
-                },
-                itemBuilder: (context) => [
-                  for (final library in overflow)
-                    PopupMenuItem(value: library.id, child: Text(library.name)),
-                ],
-                icon: const Icon(Icons.more_horiz),
-              ),
-          ],
+                PopupMenuButton<String>(
+                  key: AppShell.overflowNavKey,
+                  tooltip: AppLocalizations.of(context).libraries,
+                  constraints: const BoxConstraints(
+                    minWidth: 168,
+                    maxWidth: 280,
+                    maxHeight: 360,
+                  ),
+                  padding: EdgeInsets.zero,
+                  splashRadius: 18,
+                  iconSize: 18,
+                  iconColor: Theme.of(context).colorScheme.onSurface,
+                  style: IconButton.styleFrom(
+                    foregroundColor: Theme.of(context).colorScheme.onSurface,
+                    padding: EdgeInsets.zero,
+                    visualDensity: VisualDensity.compact,
+                    minimumSize: const Size(40, kWindowChromeHeight),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  icon: const Icon(Icons.more_horiz),
+                  onSelected: (id) {
+                    if (id == AppShell.customizeNavValue) {
+                      if (nav != null) {
+                        unawaited(
+                          showLibraryNavDialog(
+                            context: context,
+                            libraries: libraries,
+                            nav: nav,
+                            maxPinned: AppShell.maxPinnedLibraries,
+                          ),
+                        );
+                      }
+                      return;
+                    }
+                    if (id == AppShell.moreLibrariesValue) {
+                      unawaited(() async {
+                        final picked = await showMoreLibrariesDialog(
+                          context: context,
+                          libraries: menuRest,
+                        );
+                        if (picked == null || !context.mounted) {
+                          return;
+                        }
+                        if (GoRouterState.of(context).uri.path !=
+                            AppRoutes.library(picked)) {
+                          context.go(AppRoutes.library(picked));
+                        }
+                      }());
+                      return;
+                    }
+                    if (GoRouterState.of(context).uri.path !=
+                        AppRoutes.library(id)) {
+                      context.go(AppRoutes.library(id));
+                    }
+                  },
+                  itemBuilder: (context) => [
+                    for (final library in menuShown)
+                      PopupMenuItem(
+                        value: library.id,
+                        child: Text(library.name),
+                      ),
+                    if (menuRest.isNotEmpty)
+                      PopupMenuItem(
+                        key: AppShell.moreLibrariesKey,
+                        value: AppShell.moreLibrariesValue,
+                        child: Text(AppLocalizations.of(context).more),
+                      ),
+                    if (menuShown.isNotEmpty) const PopupMenuDivider(),
+                    PopupMenuItem(
+                      key: AppShell.customizeNavKey,
+                      value: AppShell.customizeNavValue,
+                      child: Text(AppLocalizations.of(context).customizeNav),
+                    ),
+                  ],
+                ),
+              ],
+            );
+          },
         );
       },
     );
@@ -299,12 +449,29 @@ class _NavTextButton extends StatelessWidget {
         foregroundColor: selected
             ? colorScheme.onSurface
             : colorScheme.onSurfaceVariant,
-        textStyle: theme.textTheme.titleSmall?.copyWith(
+        textStyle: theme.textTheme.titleMedium?.copyWith(
           fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
         ),
         visualDensity: VisualDensity.compact,
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
       ),
-      child: Text(label),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(label),
+          const SizedBox(height: 4),
+          AnimatedContainer(
+            duration: AppMotion.fast,
+            curve: AppMotion.standard,
+            height: 2,
+            width: selected ? 18 : 0,
+            decoration: BoxDecoration(
+              color: selected ? colorScheme.onSurface : Colors.transparent,
+              borderRadius: BorderRadius.circular(1),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -317,3 +484,5 @@ double _navLabelWidth(BuildContext context, String label, TextStyle? style) {
   )..layout();
   return painter.width + AppSpacing.xl + AppSpacing.md;
 }
+
+class _IgnoredListenable extends ChangeNotifier {}

@@ -36,7 +36,8 @@ const _episode = EmbyItem(
   name: '试播集',
   type: 'Episode',
   seriesName: '剧集系列',
-  indexNumber: 1,
+  indexNumber: 2,
+  parentIndexNumber: 1,
 );
 
 Widget _wrap({required OverlayPlayerWindowHost host, required Widget child}) {
@@ -87,6 +88,8 @@ void main() {
     expect(find.byKey(PosterCard.playButtonKey(_movie.id)), findsOneWidget);
     expect(find.textContaining('2020'), findsOneWidget);
     expect(find.textContaining('45分钟'), findsOneWidget);
+    expect(find.text('可播电影'), findsWidgets);
+    expect(find.byTooltip('可播电影'), findsOneWidget);
     expect(taps, 0);
     expect(host.current, isNull);
   });
@@ -196,6 +199,20 @@ void main() {
     expect(taps, 0);
   });
 
+  testWidgets('selected episode uses a frame, not a now-watching badge', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _wrap(
+        host: host,
+        child: EpisodeThumbCard(item: _episode, selected: true, onTap: () {}),
+      ),
+    );
+
+    expect(find.text('正在观看'), findsNothing);
+    expect(find.text('2. 试播集'), findsOneWidget);
+  });
+
   testWidgets('keyboard focus reveals the playable overlay', (tester) async {
     await tester.pumpWidget(
       _wrap(
@@ -208,5 +225,41 @@ void main() {
     await tester.pump();
 
     expect(find.byKey(PosterCard.playButtonKey(_movie.id)), findsOneWidget);
+  });
+
+  testWidgets('continue watching episode shows series name and S1E2', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _wrap(
+        host: host,
+        child: PosterCard(item: _episode, wide: true, onTap: () {}),
+      ),
+    );
+
+    expect(find.text('剧集系列'), findsOneWidget);
+    expect(find.text('S1E2 · 试播集'), findsOneWidget);
+    expect(find.byTooltip('剧集系列'), findsOneWidget);
+    expect(find.byTooltip('S1E2 · 试播集'), findsOneWidget);
+  });
+
+  testWidgets('continue watching hover can remove from resume', (tester) async {
+    EmbyItem? removed;
+    await tester.pumpWidget(
+      _wrap(
+        host: host,
+        child: PosterCard(
+          item: _episode,
+          wide: true,
+          showProgress: true,
+          onTap: () {},
+          onRemoveFromResume: (item) => removed = item,
+        ),
+      ),
+    );
+    await _hover(tester, find.byType(PosterCard));
+    await tester.tap(find.byKey(CatalogKeys.removeFromResume(_episode.id)));
+    await tester.pump();
+    expect(removed?.id, _episode.id);
   });
 }

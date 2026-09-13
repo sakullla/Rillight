@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/app/theme/tokens.dart';
+import 'package:rillight/app/widgets/liquid_glass.dart';
 import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/search/search_page.dart';
 
@@ -17,7 +20,6 @@ class SearchOverlay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
     final hasChrome =
         context.findAncestorWidgetOfExactType<WindowChromeHost>() != null;
     final leading = hasChrome ? windowChromeLeadingInset() : 0.0;
@@ -27,29 +29,46 @@ class SearchOverlay extends StatelessWidget {
       bindings: {const SingleActivator(LogicalKeyboardKey.escape): onClose},
       child: Focus(
         autofocus: true,
-        child: Material(
+        child: LiquidGlass(
           key: overlayKey,
-          color: colorScheme.surface.withValues(alpha: 0.96),
-          child: Padding(
-            padding: EdgeInsets.only(left: leading, right: trailing),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: IconButton(
-                    key: closeKey,
-                    tooltip: MaterialLocalizations.of(
-                      context,
-                    ).closeButtonTooltip,
-                    onPressed: onClose,
-                    icon: const Icon(Icons.close),
+          kind: LiquidGlassKind.panel,
+          borderRadius: BorderRadius.zero,
+          child: Material(
+            type: MaterialType.transparency,
+            child: Padding(
+              padding: EdgeInsets.only(
+                left: leading + AppSpacing.md,
+                right: trailing + AppSpacing.md,
+                top: 56,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      Text(
+                        AppLocalizations.of(context).search,
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      const Spacer(),
+                      IconButton(
+                        key: closeKey,
+                        tooltip: MaterialLocalizations.of(
+                          context,
+                        ).closeButtonTooltip,
+                        onPressed: onClose,
+                        icon: const Icon(Icons.close_rounded),
+                      ),
+                    ],
                   ),
-                ),
-                Expanded(
-                  child: SearchPage(autofocus: true, focusNode: queryFocusNode),
-                ),
-              ],
+                  Expanded(
+                    child: SearchPage(
+                      autofocus: true,
+                      focusNode: queryFocusNode,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),

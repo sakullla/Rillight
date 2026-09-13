@@ -5,11 +5,10 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/theme/tokens.dart';
-import 'package:rillight/app/widgets/app_error_view.dart';
+import 'package:rillight/app/widgets/liquid_glass.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/emby/emby_errors.dart';
 import 'package:rillight/emby/emby_models.dart';
-import 'package:rillight/home/catalog_failure.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/library/poster_card.dart';
 
@@ -44,6 +43,10 @@ class MediaShelf extends StatefulWidget {
     this.wide = false,
     this.extent,
     this.itemBuilder,
+    this.onRemoveFromResume,
+    this.headerAction,
+    this.focusedId,
+    this.focusNonce = 0,
   });
 
   final String shelfId;
@@ -59,6 +62,10 @@ class MediaShelf extends StatefulWidget {
   final bool wide;
   final double? extent;
   final Widget Function(BuildContext context, EmbyItem item)? itemBuilder;
+  final ValueChanged<EmbyItem>? onRemoveFromResume;
+  final Widget? headerAction;
+  final String? focusedId;
+  final int focusNonce;
 
   /// 竖版海报卡宽,随 [AppBreakpoints] 缩放。
   static double posterWidthFor(double screenWidth) {
@@ -84,9 +91,9 @@ class MediaShelf extends StatefulWidget {
 
   // 文字行占位:与 PosterCard 的标题/进度文字行一一对应,
   // 另加 AppSpacing.xs 吸收 hover 放大溢出。
-  static const double _posterLabelExtent = 30; // xs 间距 + 标题行
-  static const double _progressLabelExtent = 18; // 进度行
-  static const double _wideLabelExtent = 22; // xxs 间距 + 标题行
+  static const double _posterLabelExtent = 38; // xs 间距 + 标题行
+  static const double _progressLabelExtent = 22; // 进度行
+  static const double _wideLabelExtent = 54; // xxs + 剧名 + S1E2 副标题
 
   @override
   State<MediaShelf> createState() => _MediaShelfState();
@@ -125,6 +132,7 @@ class _MediaShelfState extends State<MediaShelf> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         _updateScrollButtons();
+        _scrollToFocused();
       }
     });
   }
@@ -132,11 +140,19 @@ class _MediaShelfState extends State<MediaShelf> {
   @override
   void didUpdateWidget(MediaShelf oldWidget) {
     super.didUpdateWidget(oldWidget);
+    final focusChanged =
+        oldWidget.focusedId != widget.focusedId ||
+        oldWidget.focusNonce != widget.focusNonce ||
+        oldWidget.items != widget.items;
     if (!listEquals(oldWidget.items, widget.items) ||
-        oldWidget.loading != widget.loading) {
+        oldWidget.loading != widget.loading ||
+        focusChanged) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
           _updateScrollButtons();
+          if (focusChanged) {
+            _scrollToFocused();
+          }
         }
       });
     }
@@ -199,6 +215,37 @@ class _MediaShelfState extends State<MediaShelf> {
     });
   }
 
+  void _scrollToFocused() {
+    final id = widget.focusedId;
+    if (id == null || id.isEmpty || !_controller.hasClients) {
+      return;
+    }
+    final index = widget.items.indexWhere((item) => item.id == id);
+    if (index < 0) {
+      return;
+    }
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final cardWidth = widget.wide
+        ? MediaShelf.wideCardWidthFor(screenWidth)
+        : MediaShelf.posterWidthFor(screenWidth);
+    const gap = AppSpacing.sm;
+    const pad = AppSpacing.md;
+    final position = _controller.position;
+    if (position.maxScrollExtent <= 0 && index > 0) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _scrollToFocused();
+        }
+      });
+      return;
+    }
+    final itemStart = pad + index * (cardWidth + gap);
+    final target = (itemStart - (position.viewportDimension - cardWidth) / 2)
+        .clamp(position.minScrollExtent, position.maxScrollExtent);
+    _controller.jumpTo(target);
+    _updateScrollButtons();
+  }
+
   void _page(int direction) {
     if (!_controller.hasClients) {
       return;
@@ -232,10 +279,17 @@ class _MediaShelfState extends State<MediaShelf> {
                     style: Theme.of(context).textTheme.titleLarge,
                   ),
                 ),
-                if (widget.onMore != null)
+                if (widget.headerAction != null) widget.headerAction!,
+                if (widget.onMore != null && widget.error == null)
                   TextButton(
                     key: CatalogKeys.shelfMore(widget.shelfId),
                     onPressed: widget.onMore,
+                    style: TextButton.styleFrom(
+                      foregroundColor: Theme.of(
+                        context,
+                      ).colorScheme.onSurfaceVariant,
+                      textStyle: Theme.of(context).textTheme.labelLarge,
+                    ),
                     child: Text(l10n.more),
                   ),
               ],
@@ -253,9 +307,23 @@ class _MediaShelfState extends State<MediaShelf> {
               ),
             )
           else if (widget.error != null)
-            AppErrorView(
-              message: catalogFailureMessage(l10n, widget.error!),
-              onRetry: widget.onRetry,
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+              child: widget.onRetry == null
+                  ? SkeletonShelfRow(
+                      posterWidth: widget.wide
+                          ? MediaShelf.wideCardWidthFor(screenWidth)
+                          : MediaShelf.posterWidthFor(screenWidth),
+                      posterAspectRatio: widget.wide ? 16 / 9 : 2 / 3,
+                    )
+                  : Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton.icon(
+                        onPressed: widget.onRetry,
+                        icon: const Icon(Icons.refresh_rounded),
+                        label: Text(l10n.retry),
+                      ),
+                    ),
             )
           else
             SizedBox(
@@ -292,6 +360,7 @@ class _MediaShelfState extends State<MediaShelf> {
                                       ? MediaShelf.wideCardWidthFor(screenWidth)
                                       : MediaShelf.posterWidthFor(screenWidth),
                                   onTap: () => widget.onTap(item),
+                                  onRemoveFromResume: widget.onRemoveFromResume,
                                 );
                             return Align(
                               alignment: Alignment.center,
@@ -406,14 +475,17 @@ class _ScrollButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xxs),
-      child: Material(
-        color: Theme.of(context).colorScheme.scrim.withValues(alpha: 0.55),
-        shape: const CircleBorder(),
-        child: IconButton(
-          key: buttonKey,
-          tooltip: tooltip,
-          onPressed: onPressed,
-          icon: Icon(icon),
+      child: LiquidGlass(
+        kind: LiquidGlassKind.pill,
+        child: Material(
+          type: MaterialType.transparency,
+          shape: const CircleBorder(),
+          child: IconButton(
+            key: buttonKey,
+            tooltip: tooltip,
+            onPressed: onPressed,
+            icon: Icon(icon),
+          ),
         ),
       ),
     );

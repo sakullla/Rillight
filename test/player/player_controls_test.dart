@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -10,6 +11,7 @@ import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/player/player_bindings.dart';
+import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/player_controller.dart';
 import 'package:rillight/player/player_keys.dart';
 import 'package:rillight/player/player_page.dart';
@@ -41,6 +43,7 @@ void main() {
   PlayerBindings bindings({
     Duration hideAfter = const Duration(days: 1),
     Duration progressInterval = const Duration(seconds: 10),
+    PlayerSettingsStore? settingsStore,
   }) {
     return PlayerBindings(
       createBackend: () => backend,
@@ -48,6 +51,7 @@ void main() {
       progressInterval: progressInterval,
       controlsHideAfter: hideAfter,
       nextEpisodeCountdown: const Duration(seconds: 3),
+      settingsStore: settingsStore,
     );
   }
 
@@ -55,6 +59,7 @@ void main() {
     WidgetTester tester, {
     Duration hideAfter = const Duration(days: 1),
     Duration progressInterval = const Duration(seconds: 10),
+    PlayerSettingsStore? settingsStore,
   }) async {
     final auth = AuthController(
       client: EmbyClient(device: _device, dio: dioForFakeEmby(adapter)),
@@ -75,6 +80,7 @@ void main() {
         playerBindings: bindings(
           hideAfter: hideAfter,
           progressInterval: progressInterval,
+          settingsStore: settingsStore ?? MemoryPlayerSettingsStore(),
         ),
       ),
     );
@@ -125,7 +131,7 @@ void main() {
     await tester.pump();
     await waitFor(tester, find.byType(PlayerPage));
     for (var i = 0; i < 40; i++) {
-      if (find.byKey(PlayerKeys.playMethod).evaluate().isNotEmpty ||
+      if (find.byKey(PlayerKeys.playPause).evaluate().isNotEmpty ||
           find.byKey(PlayerKeys.resumeContinue).evaluate().isNotEmpty) {
         return;
       }
@@ -149,16 +155,18 @@ void main() {
         .opacity;
   }
 
-  testWidgets('resume prompt continues from saved progress', (tester) async {
+  testWidgets('saved progress resumes without a continue-or-restart prompt', (
+    tester,
+  ) async {
     await pumpLoggedIn(tester);
     await openPlayable(tester, 'movie-inception');
 
-    expect(find.text('要从上次的位置继续播放吗？'), findsOneWidget);
-    await tester.tap(find.byKey(PlayerKeys.resumeContinue));
-    await tester.pump();
-    await waitFor(tester, find.byKey(PlayerKeys.playMethod));
+    expect(find.text('要从上次的位置继续播放吗？'), findsNothing);
+    expect(find.byKey(PlayerKeys.resumeContinue), findsNothing);
+    await waitFor(tester, find.byKey(PlayerKeys.playPause));
 
-    expect(find.text('直连'), findsOneWidget);
+    expect(find.byKey(PlayerKeys.volumePercent), findsOneWidget);
+    expect(find.text('100%'), findsOneWidget);
     expect(backend.openedUrl, isNotNull);
     expect(backend.openedUrl!.queryParameters['static'], 'true');
     expect(backend.openedStart, greaterThan(Duration.zero));
@@ -168,10 +176,44 @@ void main() {
     );
   });
 
+  testWidgets('detail play from start opens at zero instead of resume', (
+    tester,
+  ) async {
+    await pumpLoggedIn(tester);
+    final item = find.byKey(CatalogKeys.item('movie-inception')).first;
+    await tester.ensureVisible(item);
+    await tester.tap(item);
+    await tester.pumpAndSettle();
+    expect(find.byKey(PlayerKeys.resumeFromStart), findsOneWidget);
+    await tester.tap(find.byKey(PlayerKeys.resumeFromStart));
+    await tester.pump();
+    await waitFor(tester, find.byType(PlayerPage));
+    await waitFor(tester, find.byKey(PlayerKeys.playPause));
+    expect(backend.openedStart, Duration.zero);
+    expect(find.text('要从上次的位置继续播放吗？'), findsNothing);
+  });
+
+  testWidgets('pointer leaving the player hides the control bar', (
+    tester,
+  ) async {
+    await pumpLoggedIn(tester);
+    await openPlayable(tester, 'movie-inception');
+    await tester.pump();
+    final player = controllerOf(tester);
+    for (var i = 0; i < 40 && !player.isPlaying; i++) {
+      await tester.pump(const Duration(milliseconds: 20));
+    }
+    expect(player.isPlaying, isTrue);
+    player.onUserActivity();
+    expect(player.controlsVisible, isTrue);
+    player.hideControlsOnPointerExit();
+    expect(player.controlsVisible, isFalse);
+  });
+
   testWidgets('progress reports every 10s and not after stop', (tester) async {
     await pumpLoggedIn(tester, progressInterval: const Duration(seconds: 10));
     await openPlayable(tester, 'movie-up');
-    expect(find.text('直连'), findsOneWidget);
+    expect(find.byKey(PlayerKeys.playPause), findsOneWidget);
 
     final before = server.playbackEvents
         .where((event) => event.kind == 'Progress')
@@ -256,6 +298,27 @@ void main() {
     expect(controlsOpacity(tester), 0.0);
   });
 
+  testWidgets('volume changes keep controls until the hide timeout', (
+    tester,
+  ) async {
+    await pumpLoggedIn(tester, hideAfter: const Duration(milliseconds: 80));
+    await openPlayable(tester, 'movie-up');
+    await tester.pump(const Duration(milliseconds: 90));
+    expect(controlsOpacity(tester), 0.0);
+
+    await tester.tap(find.byKey(PlayerKeys.surface));
+    await tester.pump();
+    expect(controlsOpacity(tester), 1.0);
+
+    await controllerOf(tester).setVolume(56);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 40));
+    expect(controlsOpacity(tester), 1.0);
+
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(controlsOpacity(tester), 0.0);
+  });
+
   testWidgets('transcode is labeled and quality change reopens the stream', (
     tester,
   ) async {
@@ -266,22 +329,23 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(PlayerKeys.open));
     await tester.pump();
-    await waitFor(tester, find.text('转码'));
+    await waitFor(tester, find.byKey(PlayerKeys.quality));
 
     expect(find.byKey(PlayerKeys.quality), findsOneWidget);
+    expect(find.text('自动'), findsNothing);
     expect(find.byKey(PlayerKeys.volume), findsOneWidget);
     expect(backend.openedUrl!.path, contains('master.m3u8'));
     final firstOpen = backend.openCount;
 
     await tester.runAsync(() => controllerOf(tester).setAudio(1));
     await tester.pump();
-    await waitFor(tester, find.text('转码'));
+    await waitFor(tester, find.byKey(PlayerKeys.quality));
     expect(backend.openCount, firstOpen + 1);
     expect(server.lastPlaybackInfoBody?['AudioStreamIndex'], 1);
 
     await tester.runAsync(() => controllerOf(tester).setMaxBitrate(4000000));
     await tester.pump();
-    await waitFor(tester, find.text('转码'));
+    await waitFor(tester, find.byKey(PlayerKeys.quality));
     expect(backend.openCount, firstOpen + 2);
     expect(server.lastPlaybackInfoBody?['MaxStreamingBitrate'], 4000000);
     expect(
@@ -291,6 +355,10 @@ void main() {
   });
 
   testWidgets('next episode countdown can be cancelled', (tester) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
     await pumpLoggedIn(tester);
     await openLibrary(tester, 'view-tv');
     await tester.tap(find.byKey(CatalogKeys.item('series-friends')));
@@ -300,9 +368,10 @@ void main() {
     );
     await tester.tap(find.byKey(CatalogKeys.episode('episode-friends-s1e1')));
     await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(PlayerKeys.open));
     await tester.tap(find.byKey(PlayerKeys.open));
     await tester.pump();
-    await waitFor(tester, find.byKey(PlayerKeys.playMethod));
+    await waitFor(tester, find.byKey(PlayerKeys.playPause));
 
     backend.completePlayback();
     await tester.pump();
@@ -322,6 +391,59 @@ void main() {
       ),
       isEmpty,
     );
+  });
+
+  testWidgets('movie end shows replay card instead of a blank frame', (
+    tester,
+  ) async {
+    await pumpLoggedIn(tester);
+    await openPlayable(tester, 'movie-up');
+    await waitFor(tester, find.byKey(PlayerKeys.playPause));
+
+    backend.completePlayback();
+    await tester.pump();
+    await waitFor(tester, find.byKey(PlayerKeys.playbackEnded));
+    expect(find.text('播放结束'), findsOneWidget);
+    expect(find.byKey(PlayerKeys.replay), findsOneWidget);
+    expect(find.byKey(PlayerKeys.nextEpisode), findsNothing);
+    expect(find.byKey(PlayerKeys.playPause), findsNothing);
+
+    final opens = backend.openCount;
+    await tester.tap(find.byKey(PlayerKeys.replay));
+    await tester.pump();
+    await waitForGone(tester, find.byKey(PlayerKeys.playbackEnded));
+    await waitFor(tester, find.byKey(PlayerKeys.playPause));
+    expect(backend.openCount, opens + 1);
+    expect(controllerOf(tester).playbackEnded, isFalse);
+  });
+
+  testWidgets('last episode end offers series instead of next episode', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await pumpLoggedIn(tester);
+    await openLibrary(tester, 'view-tv');
+    await tester.tap(find.byKey(CatalogKeys.item('series-friends')));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(
+      find.byKey(CatalogKeys.episode('episode-friends-s1e2')),
+    );
+    await tester.tap(find.byKey(CatalogKeys.episode('episode-friends-s1e2')));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(PlayerKeys.open));
+    await tester.tap(find.byKey(PlayerKeys.open));
+    await tester.pump();
+    await waitFor(tester, find.byKey(PlayerKeys.playPause));
+
+    backend.completePlayback();
+    await tester.pump();
+    await waitFor(tester, find.byKey(PlayerKeys.playbackEnded));
+    expect(find.text('播放结束'), findsOneWidget);
+    expect(find.byKey(PlayerKeys.endedViewSeries), findsOneWidget);
+    expect(find.byKey(PlayerKeys.nextEpisode), findsNothing);
   });
 
   testWidgets('mpv errors while playing do not overlay disconnect', (
@@ -351,6 +473,11 @@ void main() {
     expect(find.byKey(PlayerKeys.progressSyncFailed), findsOneWidget);
     expect(find.text('进度同步失败'), findsOneWidget);
     expect(backend.isPlaying, isTrue);
+
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pump();
+    expect(find.byKey(PlayerKeys.progressSyncFailed), findsNothing);
+    expect(backend.isPlaying, isTrue);
   });
 
   testWidgets('text subtitle is handed to the backend as an external URL', (
@@ -358,11 +485,77 @@ void main() {
   ) async {
     await pumpLoggedIn(tester);
     await openPlayable(tester, 'movie-inception');
-    await tester.tap(find.byKey(PlayerKeys.resumeFromStart));
-    await tester.pump();
-    await waitFor(tester, find.byKey(PlayerKeys.playMethod));
+    await waitFor(tester, find.byKey(PlayerKeys.playPause));
     expect(backend.subtitleUri, isNotNull);
     expect(backend.subtitleUri!.path, contains('/Subtitles/2/Stream.srt'));
+  });
+
+  testWidgets('mouse wheel over the player nudges volume by five percent', (
+    tester,
+  ) async {
+    await pumpLoggedIn(tester);
+    await openPlayable(tester, 'movie-up');
+    await waitFor(tester, find.text('100%'));
+
+    await tester.sendEventToBinding(
+      PointerScrollEvent(
+        position: tester.getCenter(find.byKey(PlayerKeys.surface)),
+        scrollDelta: const Offset(0, 120),
+      ),
+    );
+    await tester.pump();
+    expect(find.text('95%'), findsOneWidget);
+    expect(backend.volume, 95);
+
+    await tester.sendEventToBinding(
+      PointerScrollEvent(
+        position: tester.getCenter(find.byKey(PlayerKeys.surface)),
+        scrollDelta: const Offset(0, -120),
+      ),
+    );
+    await tester.pump();
+    expect(find.text('100%'), findsOneWidget);
+  });
+
+  testWidgets('volume is restored from settings and saved after change', (
+    tester,
+  ) async {
+    final store = MemoryPlayerSettingsStore(const PlayerSettings(volume: 35));
+    await pumpLoggedIn(tester, settingsStore: store);
+    await openPlayable(tester, 'movie-up');
+    await waitFor(tester, find.text('35%'));
+    expect(backend.volume, 35);
+
+    await tester.runAsync(() async {
+      await controllerOf(tester).setVolume(20);
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+    });
+    await tester.pump();
+    expect(find.text('20%'), findsOneWidget);
+    expect((await store.read()).volume, 20);
+  });
+
+  testWidgets('volume icon mutes and restores the previous level', (
+    tester,
+  ) async {
+    await pumpLoggedIn(tester);
+    await openPlayable(tester, 'movie-up');
+    await waitFor(tester, find.text('100%'));
+    await tester.runAsync(() async {
+      await controllerOf(tester).setVolume(78);
+    });
+    await tester.pump();
+    expect(find.text('78%'), findsOneWidget);
+
+    await tester.tap(find.byKey(PlayerKeys.mute));
+    await tester.pump();
+    expect(find.text('0%'), findsOneWidget);
+    expect(backend.volume, 0);
+
+    await tester.tap(find.byKey(PlayerKeys.mute));
+    await tester.pump();
+    expect(find.text('78%'), findsOneWidget);
+    expect(backend.volume, 78);
   });
 
   testWidgets('overlay chrome can drag and close through the player path', (
@@ -373,7 +566,7 @@ void main() {
     expect(find.byType(PlayerPage), findsOneWidget);
     expect(find.byType(WindowDragArea), findsOneWidget);
     expect(find.byKey(const Key('player-window-drag')), findsOneWidget);
-    expect(find.text('直连'), findsOneWidget);
+    expect(find.byKey(PlayerKeys.playPause), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('player-window-close')));
     await waitForGone(tester, find.byType(PlayerPage));

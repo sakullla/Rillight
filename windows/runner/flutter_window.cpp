@@ -15,6 +15,7 @@ constexpr int kCaptionButtonWidthDip = 46;
 constexpr int kCaptionButtonCount = 3;
 
 WNDPROC g_original_flutter_view_proc = nullptr;
+bool g_intercept_caption_clicks = true;
 
 int ScaleDip(HWND hwnd, int dip) {
   const int dpi = static_cast<int>(GetDpiForWindow(hwnd));
@@ -23,6 +24,17 @@ int ScaleDip(HWND hwnd, int dip) {
 
 bool IsCaptionButtonHit(LRESULT hit) {
   return hit == HTMINBUTTON || hit == HTMAXBUTTON || hit == HTCLOSE;
+}
+
+void PostCaptionCommand(HWND hwnd, LRESULT hit) {
+  if (hit == HTMINBUTTON) {
+    PostMessage(hwnd, WM_SYSCOMMAND, SC_MINIMIZE, 0);
+  } else if (hit == HTMAXBUTTON) {
+    PostMessage(hwnd, WM_SYSCOMMAND,
+                IsZoomed(hwnd) ? SC_RESTORE : SC_MAXIMIZE, 0);
+  } else if (hit == HTCLOSE) {
+    PostMessage(hwnd, WM_SYSCOMMAND, SC_CLOSE, 0);
+  }
 }
 
 // Native caption buttons in the extended client area. Returning HTMAXBUTTON
@@ -60,11 +72,28 @@ LRESULT CALLBACK FlutterViewWndProc(HWND hwnd,
                                     UINT message,
                                     WPARAM wparam,
                                     LPARAM lparam) {
+  if (!g_intercept_caption_clicks) {
+    return CallWindowProc(g_original_flutter_view_proc, hwnd, message, wparam,
+                          lparam);
+  }
+  HWND root = GetAncestor(hwnd, GA_ROOT);
   if (message == WM_NCHITTEST) {
-    HWND parent = GetParent(hwnd);
-    if (parent && CaptionButtonHitTest(parent, lparam) != 0) {
+    if (root && CaptionButtonHitTest(root, lparam) != 0) {
       // Let the top-level window report HTMAXBUTTON/HTCLOSE/HTMINBUTTON.
       return HTTRANSPARENT;
+    }
+  }
+  // Hidden title bar: the Flutter child often sees these as client clicks.
+  // Run the caption command here if NCLBUTTONDOWN never reaches the parent.
+  if (root && (message == WM_LBUTTONDOWN || message == WM_LBUTTONDBLCLK)) {
+    POINT pt{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
+    if (ClientToScreen(hwnd, &pt)) {
+      const LRESULT hit =
+          CaptionButtonHitTest(root, MAKELPARAM(pt.x, pt.y));
+      if (IsCaptionButtonHit(hit)) {
+        PostCaptionCommand(root, hit);
+        return 0;
+      }
     }
   }
   return CallWindowProc(g_original_flutter_view_proc, hwnd, message, wparam,
@@ -73,8 +102,9 @@ LRESULT CALLBACK FlutterViewWndProc(HWND hwnd,
 
 }  // namespace
 
-FlutterWindow::FlutterWindow(const flutter::DartProject& project)
-    : project_(project) {}
+FlutterWindow::FlutterWindow(const flutter::DartProject& project,
+                             bool native_caption_buttons)
+    : project_(project), native_caption_buttons_(native_caption_buttons) {}
 
 FlutterWindow::~FlutterWindow() {}
 
@@ -82,6 +112,7 @@ bool FlutterWindow::OnCreate() {
   if (!Win32Window::OnCreate()) {
     return false;
   }
+  g_intercept_caption_clicks = native_caption_buttons_;
 
   RECT frame = GetClientArea();
 
@@ -107,13 +138,10 @@ bool FlutterWindow::OnCreate() {
   g_original_flutter_view_proc = reinterpret_cast<WNDPROC>(SetWindowLongPtr(
       flutter_view, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(FlutterViewWndProc)));
 
-  flutter_controller_->engine()->SetNextFrameCallback([&]() {
-    this->Show();
-  });
-
-  // Flutter can complete the first frame before the "show window" callback is
-  // registered. The following call ensures a frame is pending to ensure the
-  // window is shown. It is a no-op if the first frame hasn't completed yet.
+  // Do not Show on first frame. Dart applies TitleBarStyle.hidden and the
+  // intended size while the HWND is still hidden; showing 1280x720 with a
+  // caption here, then hiding the bar and resizing, is the shrink-then-grow
+  // flash. configureMainWindow / player _configureWindow call Show.
   flutter_controller_->ForceRedraw();
 
   return true;
@@ -142,25 +170,27 @@ LRESULT
 FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                               WPARAM const wparam,
                               LPARAM const lparam) noexcept {
-  if (message == WM_NCHITTEST) {
-    LRESULT dwm_hit = 0;
-    if (DwmDefWindowProc(hwnd, message, wparam, lparam, &dwm_hit) &&
-        IsCaptionButtonHit(dwm_hit)) {
-      return dwm_hit;
-    }
-    LRESULT caption_hit = CaptionButtonHitTest(hwnd, lparam);
-    if (caption_hit != 0) {
-      return caption_hit;
-    }
-  } else if (message == WM_NCMOUSEMOVE || message == WM_NCMOUSELEAVE ||
-             message == WM_NCLBUTTONDOWN || message == WM_NCLBUTTONUP ||
-             message == WM_NCLBUTTONDBLCLK) {
-    LRESULT dwm_hit = 0;
-    if (DwmDefWindowProc(hwnd, message, wparam, lparam, &dwm_hit)) {
-      return dwm_hit;
-    }
-    if (IsCaptionButtonHit(static_cast<LRESULT>(wparam))) {
-      return DefWindowProc(hwnd, message, wparam, lparam);
+  if (native_caption_buttons_) {
+    if (message == WM_NCHITTEST) {
+      LRESULT dwm_hit = 0;
+      if (DwmDefWindowProc(hwnd, message, wparam, lparam, &dwm_hit) &&
+          IsCaptionButtonHit(dwm_hit)) {
+        return dwm_hit;
+      }
+      LRESULT caption_hit = CaptionButtonHitTest(hwnd, lparam);
+      if (caption_hit != 0) {
+        return caption_hit;
+      }
+    } else if (message == WM_NCMOUSEMOVE || message == WM_NCMOUSELEAVE) {
+      LRESULT dwm_hit = 0;
+      if (DwmDefWindowProc(hwnd, message, wparam, lparam, &dwm_hit)) {
+        return dwm_hit;
+      }
+    } else if (message == WM_NCLBUTTONDOWN || message == WM_NCLBUTTONDBLCLK) {
+      if (IsCaptionButtonHit(static_cast<LRESULT>(wparam))) {
+        PostCaptionCommand(hwnd, static_cast<LRESULT>(wparam));
+        return 0;
+      }
     }
   }
 

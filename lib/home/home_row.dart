@@ -15,6 +15,7 @@ class HomeMediaRow extends StatelessWidget {
     required this.onMore,
     this.showProgress = false,
     this.wide = false,
+    this.onRemoveFromResume,
   });
 
   final Key rowKey;
@@ -26,6 +27,7 @@ class HomeMediaRow extends StatelessWidget {
   final VoidCallback onMore;
   final bool showProgress;
   final bool wide;
+  final ValueChanged<EmbyItem>? onRemoveFromResume;
 
   @override
   Widget build(BuildContext context) {
@@ -44,6 +46,7 @@ class HomeMediaRow extends StatelessWidget {
       onTap: onTap,
       showProgress: showProgress,
       wide: wide,
+      onRemoveFromResume: onRemoveFromResume,
     );
   }
 }

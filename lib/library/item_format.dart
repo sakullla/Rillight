@@ -34,13 +34,33 @@ String chapterClock(int startPositionTicks) {
   return '${minutes.toString().padLeft(2, '0')}:${remain.toString().padLeft(2, '0')}';
 }
 
-String episodeLabel(EmbyItem item) {
+String? seasonEpisodeCode(EmbyItem item) {
   final season = item.parentIndexNumber;
   final episode = item.indexNumber;
-  if (season != null && episode != null) {
-    final seasonText = season.toString().padLeft(2, '0');
-    final episodeText = episode.toString().padLeft(2, '0');
-    return 'S${seasonText}E$episodeText ${item.name}';
+  if (season == null || episode == null) {
+    return null;
   }
-  return item.name;
+  return 'S${season}E$episode';
+}
+
+String episodeLabel(EmbyItem item) {
+  final code = seasonEpisodeCode(item);
+  if (code == null) {
+    return item.name;
+  }
+  final name = item.name.trim();
+  return name.isEmpty ? code : '$code $name';
+}
+
+/// 继续观看副标题:S1E2 · 集名。
+String continueWatchingSubtitle(EmbyItem item) {
+  if (!item.isEpisode) {
+    return '';
+  }
+  final code = seasonEpisodeCode(item);
+  final name = item.name.trim();
+  if (code != null && name.isNotEmpty) {
+    return '$code · $name';
+  }
+  return code ?? name;
 }

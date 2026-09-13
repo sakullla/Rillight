@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/emby/emby_client.dart';
@@ -36,6 +38,8 @@ class CatalogController extends ChangeNotifier {
 
   int _loadGen = 0;
   String? _sessionKey;
+  final Map<String, Timer> _retryTimers = {};
+  final Map<String, int> _retryCounts = {};
 
   EmbyClient get client => auth.client;
 
@@ -44,6 +48,7 @@ class CatalogController extends ChangeNotifier {
       return;
     }
     final gen = ++_loadGen;
+    _clearRetries();
     _sessionKey = _currentSessionKey;
     resume = const CatalogRowState(loading: true);
     nextUp = const CatalogRowState(loading: true);
@@ -68,6 +73,18 @@ class CatalogController extends ChangeNotifier {
   }
 
   Future<void> reloadHomeRows() => reload(includeLibraries: false);
+
+  Future<void> hideFromResume(EmbyItem item) async {
+    await client.hideFromResume(item.id);
+    final remaining = [
+      for (final entry in resume.items)
+        if (entry.id != item.id) entry,
+    ];
+    resume = remaining.isEmpty
+        ? const CatalogRowState(hidden: true)
+        : CatalogRowState(items: remaining);
+    notifyListeners();
+  }
 
   void _onAuthChanged() {
     if (!auth.isLoggedIn) {
@@ -100,11 +117,13 @@ class CatalogController extends ChangeNotifier {
       resume = items.isEmpty
           ? const CatalogRowState(hidden: true)
           : CatalogRowState(items: items);
+      _clearRetry('resume');
     } catch (error) {
       if (gen != _loadGen) {
         return;
       }
-      resume = CatalogRowState(error: _asEmby(error));
+      resume = const CatalogRowState(loading: true);
+      _scheduleRetry('resume', _loadResume);
     }
     notifyListeners();
   }
@@ -120,6 +139,7 @@ class CatalogController extends ChangeNotifier {
       nextUp = items.isEmpty
           ? const CatalogRowState(hidden: true)
           : CatalogRowState(items: items);
+      _clearRetry('nextUp');
     } catch (error) {
       if (gen != _loadGen) {
         return;
@@ -127,8 +147,10 @@ class CatalogController extends ChangeNotifier {
       final mapped = _asEmby(error);
       if (_isNextUpUnsupported(mapped)) {
         nextUp = const CatalogRowState(hidden: true);
+        _clearRetry('nextUp');
       } else {
-        nextUp = CatalogRowState(error: mapped);
+        nextUp = const CatalogRowState(loading: true);
+        _scheduleRetry('nextUp', _loadNextUp);
       }
     }
     notifyListeners();
@@ -136,8 +158,13 @@ class CatalogController extends ChangeNotifier {
 
   Future<void> _loadLatestMovies(int gen) async {
     try {
-      final items = (await client.getLatestItems(
+      final items = (await client.getItems(
         includeItemTypes: 'Movie',
+        recursive: true,
+        limit: 24,
+        sortBy: 'DateLastContentAdded',
+        sortOrder: 'Descending',
+        fields: EmbyClient.gridFields,
       )).where((item) => item.isMovie).toList();
       if (gen != _loadGen) {
         return;
@@ -145,32 +172,40 @@ class CatalogController extends ChangeNotifier {
       latestMovies = items.isEmpty
           ? const CatalogRowState(hidden: true)
           : CatalogRowState(items: items);
+      _clearRetry('latestMovies');
     } catch (error) {
       if (gen != _loadGen) {
         return;
       }
-      latestMovies = CatalogRowState(error: _asEmby(error));
+      latestMovies = const CatalogRowState(loading: true);
+      _scheduleRetry('latestMovies', _loadLatestMovies);
     }
     notifyListeners();
   }
 
   Future<void> _loadLatestSeries(int gen) async {
     try {
-      final items = (await client.getLatestItems(
-        includeItemTypes: 'Episode',
-        groupItems: true,
-      )).where((item) => item.isSeries || item.isEpisode).toList();
+      final items = (await client.getItems(
+        includeItemTypes: 'Series',
+        recursive: true,
+        limit: 24,
+        sortBy: 'DateLastContentAdded',
+        sortOrder: 'Descending',
+        fields: EmbyClient.gridFields,
+      )).where((item) => item.isSeries).toList();
       if (gen != _loadGen) {
         return;
       }
       latestSeries = items.isEmpty
           ? const CatalogRowState(hidden: true)
           : CatalogRowState(items: items);
+      _clearRetry('latestSeries');
     } catch (error) {
       if (gen != _loadGen) {
         return;
       }
-      latestSeries = CatalogRowState(error: _asEmby(error));
+      latestSeries = const CatalogRowState(loading: true);
+      _scheduleRetry('latestSeries', _loadLatestSeries);
     }
     notifyListeners();
   }
@@ -241,6 +276,36 @@ class CatalogController extends ChangeNotifier {
     }
   }
 
+  void _scheduleRetry(String key, Future<void> Function(int gen) load) {
+    _retryTimers[key]?.cancel();
+    final attempt = (_retryCounts[key] ?? 0) + 1;
+    _retryCounts[key] = attempt;
+    final seconds = attempt == 1
+        ? 2
+        : attempt == 2
+        ? 6
+        : 20;
+    _retryTimers[key] = Timer(Duration(seconds: seconds), () {
+      if (!auth.isLoggedIn) {
+        return;
+      }
+      unawaited(load(_loadGen));
+    });
+  }
+
+  void _clearRetry(String key) {
+    _retryTimers.remove(key)?.cancel();
+    _retryCounts.remove(key);
+  }
+
+  void _clearRetries() {
+    for (final timer in _retryTimers.values) {
+      timer.cancel();
+    }
+    _retryTimers.clear();
+    _retryCounts.clear();
+  }
+
   bool _isNextUpUnsupported(EmbyException error) {
     final code = error.statusCode;
     return code == 404 || code == 400 || code == 501;
@@ -248,6 +313,7 @@ class CatalogController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _clearRetries();
     auth.removeListener(_onAuthChanged);
     super.dispose();
   }

@@ -12,6 +12,10 @@
   "@posterPlaceholder": {
     "description": "Accessible label for a missing or failed cover image."
   },
+  "unsupported": "不支持",
+  "@unsupported": {
+    "description": "Shown when a capability such as chapter thumbnails is unavailable."
+  },
   "connectTitle": "连接服务器",
   "@connectTitle": {
     "description": "Title of the Emby connection form."
@@ -76,9 +80,34 @@
   "@deleteLine": {
     "description": "Action to delete the selected extra access line."
   },
+  "extraLineAddress": "线路地址",
+  "@extraLineAddress": {
+    "description": "Address field for an extra access line on the connect form."
+  },
+  "searchServers": "搜索服务器",
+  "@searchServers": {
+    "description": "Filter field for a long list of saved Emby servers."
+  },
+  "lineCount": "{count} 条线路",
+  "@lineCount": {
+    "description": "How many access lines a saved server has.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "volume": "音量",
   "@volume": {
     "description": "Volume slider on the player controls."
+  },
+  "mute": "静音",
+  "@mute": {
+    "description": "Mute playback from the volume icon."
+  },
+  "unmute": "取消静音",
+  "@unmute": {
+    "description": "Restore volume from the muted volume icon."
   },
   "switchServer": "切换服务器",
   "@switchServer": {
@@ -133,6 +162,40 @@
   "@libraries": {
     "description": "Home section of movie and TV library tiles."
   },
+  "customizeNav": "自定义导航",
+  "@customizeNav": {
+    "description": "Action to choose which libraries appear in the top bar and their order."
+  },
+  "customizeNavHint": "最多勾选 {count} 个。顶栏放不下的会进「更多」。未勾选的不出现在导航、更多和首页片库。",
+  "@customizeNavHint": {
+    "description": "Explains the pin limit in the customize-nav dialog.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "saveNav": "保存",
+  "@saveNav": {
+    "description": "Save customized library navigation."
+  },
+  "moveNavUp": "上移",
+  "@moveNavUp": {
+    "description": "Move a pinned library up in the top-bar order."
+  },
+  "moveNavDown": "下移",
+  "@moveNavDown": {
+    "description": "Move a pinned library down in the top-bar order."
+  },
+  "volumePercent": "{percent}%",
+  "@volumePercent": {
+    "description": "Volume level as a percentage next to the player slider.",
+    "placeholders": {
+      "percent": {
+        "type": "int"
+      }
+    }
+  },
   "search": "搜索",
   "@search": {
     "description": "Navigation and action label for name search."
@@ -149,6 +212,14 @@
   "@searchNoResults": {
     "description": "Empty-success copy after a completed search with no hits."
   },
+  "removeFromResume": "从继续观看移除",
+  "@removeFromResume": {
+    "description": "Hover action to hide an item from Continue Watching."
+  },
+  "removeFromResume": "从继续观看移除",
+  "@removeFromResume": {
+    "description": "Hover action to hide an item from Continue Watching."
+  },
   "resumeRow": "继续观看",
   "@resumeRow": {
     "description": "Home row title for resumable movies and episodes."
@@ -157,13 +228,13 @@
   "@nextUpRow": {
     "description": "Home row title for next-up TV episodes."
   },
-  "latestMoviesRow": "最近添加的电影",
+  "latestMoviesRow": "最近更新的电影",
   "@latestMoviesRow": {
-    "description": "Home row title for recently added movies."
+    "description": "Home row title for recently updated movies."
   },
-  "latestSeriesRow": "最近添加的剧集",
+  "latestSeriesRow": "最近更新的剧集",
   "@latestSeriesRow": {
-    "description": "Home row title for recently added series."
+    "description": "Home row title for recently updated series."
   },
   "more": "更多",
   "@more": {
@@ -181,21 +252,57 @@
   "@sortBy": {
     "description": "Label for the poster-wall sort control."
   },
-  "sortByName": "名称",
+  "sortByName": "标题",
   "@sortByName": {
-    "description": "Sort poster walls by SortName."
+    "description": "Sort poster walls by SortName A to Z."
   },
-  "sortByDateCreated": "添加日期",
+  "sortByDateUpdated": "更新日期",
+  "@sortByDateUpdated": {
+    "description": "Default library sort by DateLastContentAdded, newest first."
+  },
+  "sortByDateCreated": "加入日期",
   "@sortByDateCreated": {
-    "description": "Sort poster walls by DateCreated."
+    "description": "Sort poster walls by DateCreated, newest first."
   },
   "sortByPremiereDate": "首映日期",
   "@sortByPremiereDate": {
-    "description": "Sort poster walls by PremiereDate."
+    "description": "Sort poster walls by PremiereDate, newest first."
   },
-  "sortByRating": "评分",
+  "sortByCommunityRating": "IMDb评分",
+  "@sortByCommunityRating": {
+    "description": "Sort poster walls by CommunityRating."
+  },
+  "sortByCriticRating": "影评人评分",
+  "@sortByCriticRating": {
+    "description": "Sort poster walls by CriticRating."
+  },
+  "sortByProductionYear": "出品年份",
+  "@sortByProductionYear": {
+    "description": "Sort poster walls by ProductionYear."
+  },
+  "sortByOfficialRating": "官方评级",
+  "@sortByOfficialRating": {
+    "description": "Sort poster walls by OfficialRating."
+  },
+  "sortByDatePlayed": "播放日期",
+  "@sortByDatePlayed": {
+    "description": "Sort poster walls by DatePlayed."
+  },
+  "sortByRuntime": "播放时长",
+  "@sortByRuntime": {
+    "description": "Sort poster walls by Runtime."
+  },
+  "sortByRandom": "随机",
+  "@sortByRandom": {
+    "description": "Shuffle poster walls with SortBy=Random."
+  },
+  "sortByRating": "IMDb评分",
   "@sortByRating": {
-    "description": "Sort poster walls by CommunityRating when items include it."
+    "description": "Legacy alias for community rating sort."
+  },
+  "sortByIndexNumber": "集数",
+  "@sortByIndexNumber": {
+    "description": "Sort episode walls by IndexNumber."
   },
   "scrollLeft": "向左",
   "@scrollLeft": {
@@ -309,9 +416,49 @@
   "@resumePlay": {
     "description": "Resume playback from the saved position."
   },
+  "viewSeries": "查看剧集",
+  "@viewSeries": {
+    "description": "Open the parent series from an episode detail page."
+  },
+  "viewThisEpisode": "查看本集",
+  "@viewThisEpisode": {
+    "description": "Open the current or resume episode from a series detail page."
+  },
+  "nextEpisode": "下一集",
+  "@nextEpisode": {
+    "description": "Open the next episode from an episode detail page."
+  },
+  "locateEpisode": "跳转到此集",
+  "@locateEpisode": {
+    "description": "Scroll the episode shelf so the current episode is visible."
+  },
+  "pickEpisode": "选集",
+  "@pickEpisode": {
+    "description": "Open a picker to jump to a specific episode number."
+  },
+  "jumpToEpisodeHint": "输入集数，回车跳转",
+  "@jumpToEpisodeHint": {
+    "description": "Hint for typing an episode number in the picker."
+  },
+  "nowPlayingEpisode": "正在观看",
+  "@nowPlayingEpisode": {
+    "description": "Reserved label for an episode that is actually playing."
+  },
   "playFromStart": "从头播放",
   "@playFromStart": {
     "description": "Start playback from the beginning despite saved progress."
+  },
+  "playbackEnded": "播放结束",
+  "@playbackEnded": {
+    "description": "Title shown when a movie or last episode finishes."
+  },
+  "replay": "重播",
+  "@replay": {
+    "description": "Restart the current item from the beginning after it ends."
+  },
+  "closePlayer": "关闭",
+  "@closePlayer": {
+    "description": "Leave the player after playback ends."
   },
   "resumePrompt": "要从上次的位置继续播放吗？",
   "@resumePrompt": {

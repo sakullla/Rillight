@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -14,6 +16,7 @@ class MediaImage extends StatefulWidget {
     this.width,
     this.height,
     this.preferBackdrop = false,
+    this.preferThumb = false,
     this.maxWidth,
   });
 
@@ -21,6 +24,7 @@ class MediaImage extends StatefulWidget {
   final double? width;
   final double? height;
   final bool preferBackdrop;
+  final bool preferThumb;
   final int? maxWidth;
 
   /// 清空同 [itemId]+type+maxWidth 字节复用表,仅测试使用。
@@ -43,12 +47,14 @@ class _LoadedImage {
 class _MediaImageState extends State<MediaImage> {
   Future<_LoadedImage?>? _future;
 
-  bool get _hasImageSource {
-    if (widget.item.primaryImageTag != null) {
-      return true;
-    }
-    return widget.preferBackdrop && widget.item.backdropImageTag != null;
+  List<ItemImageRef> get _candidates {
+    return widget.item.imageCandidates(
+      preferBackdrop: widget.preferBackdrop,
+      preferThumb: widget.preferThumb,
+    );
   }
+
+  bool get _hasImageSource => _candidates.isNotEmpty;
 
   int get _requestMaxWidth => widget.maxWidth ?? widget.width?.round() ?? 280;
 
@@ -63,59 +69,76 @@ class _MediaImageState extends State<MediaImage> {
   @override
   void didUpdateWidget(MediaImage oldWidget) {
     super.didUpdateWidget(oldWidget);
-    final maxWidthChanged =
-        oldWidget.maxWidth != widget.maxWidth ||
-        oldWidget.width != widget.width;
+    // 网格滚动时 LayoutBuilder 宽度会抖 1px;已指定 maxWidth 则不重拉。
+    final maxWidthChanged = oldWidget.maxWidth != widget.maxWidth;
+    final widthChanged =
+        widget.maxWidth == null && oldWidget.width != widget.width;
     if (oldWidget.item.id != widget.item.id ||
         oldWidget.item.primaryImageTag != widget.item.primaryImageTag ||
+        oldWidget.item.thumbImageTag != widget.item.thumbImageTag ||
         oldWidget.item.backdropImageTag != widget.item.backdropImageTag ||
+        oldWidget.item.parentBackdropItemId !=
+            widget.item.parentBackdropItemId ||
+        oldWidget.item.parentBackdropImageTag !=
+            widget.item.parentBackdropImageTag ||
+        oldWidget.item.seriesPrimaryImageTag !=
+            widget.item.seriesPrimaryImageTag ||
         oldWidget.preferBackdrop != widget.preferBackdrop ||
-        maxWidthChanged) {
+        oldWidget.preferThumb != widget.preferThumb ||
+        maxWidthChanged ||
+        widthChanged) {
       _future = _hasImageSource ? _load() : null;
     }
+  }
+
+  _LoadedImage? _peekLoaded() {
+    // 只看首选候选。后面的剧 Backdrop 往往已经在缓存里,跳过去会让换集时
+    // 背景永远停在同一张剧图,连本集 Thumb 都不拉。
+    if (_candidates.isEmpty) {
+      return null;
+    }
+    final candidate = _candidates.first;
+    final bytes = _MediaImageCache.instance.peek(
+      itemId: candidate.itemId,
+      type: candidate.type,
+      maxWidth: _requestMaxWidth,
+    );
+    if (bytes != null && bytes.isNotEmpty) {
+      return _LoadedImage(bytes: bytes, type: candidate.type);
+    }
+    return null;
   }
 
   Future<_LoadedImage?> _load() async {
     final client = AuthScope.of(context).client;
     final maxWidth = _requestMaxWidth;
-    Future<Uint8List?> fetch(String type, String? tag) {
-      return _MediaImageCache.instance.load(
-        itemId: widget.item.id,
-        type: type,
+    for (final candidate in _candidates) {
+      final bytes = await _MediaImageCache.instance.load(
+        itemId: candidate.itemId,
+        type: candidate.type,
         maxWidth: maxWidth,
         fetch: () async {
           try {
-            final bytes = await client.getItemImage(
-              widget.item.id,
-              type: type,
-              tag: tag,
+            final data = await client.getItemImage(
+              candidate.itemId,
+              type: candidate.type,
+              tag: candidate.tag,
               maxWidth: maxWidth,
             );
-            if (bytes.isEmpty) {
+            if (data.isEmpty) {
               return null;
             }
-            return Uint8List.fromList(bytes);
+            return Uint8List.fromList(data);
           } catch (_) {
             return null;
           }
         },
       );
-    }
-
-    if (widget.preferBackdrop) {
-      final backdropTag = widget.item.backdropImageTag;
-      if (backdropTag != null) {
-        final backdrop = await fetch('Backdrop', backdropTag);
-        if (backdrop != null) {
-          return _LoadedImage(bytes: backdrop, type: 'Backdrop');
-        }
+      if (bytes != null && bytes.isNotEmpty) {
+        return _LoadedImage(bytes: bytes, type: candidate.type);
       }
     }
-    final primary = await fetch('Primary', widget.item.primaryImageTag);
-    if (primary == null) {
-      return null;
-    }
-    return _LoadedImage(bytes: primary, type: 'Primary');
+    return null;
   }
 
   @override
@@ -124,6 +147,10 @@ class _MediaImageState extends State<MediaImage> {
     final height = widget.height;
     if (!_hasImageSource) {
       return PosterPlaceholder(width: width, height: height);
+    }
+    final cached = _peekLoaded();
+    if (cached != null) {
+      return _paint(context, cached, width, height);
     }
     return FutureBuilder<_LoadedImage?>(
       future: _future,
@@ -135,32 +162,35 @@ class _MediaImageState extends State<MediaImage> {
         if (loaded == null || loaded.bytes.isEmpty) {
           return PosterPlaceholder(width: width, height: height);
         }
-        final billboardFallback =
-            widget.preferBackdrop && loaded.type != 'Backdrop';
-        return Image.memory(
-          loaded.bytes,
-          width: width,
-          height: height,
-          fit: billboardFallback ? BoxFit.contain : BoxFit.cover,
-          alignment: billboardFallback
-              ? Alignment.centerLeft
-              : Alignment.center,
-          gaplessPlayback: true,
-          frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
-            if (wasSynchronouslyLoaded) {
-              return child;
-            }
-            return AnimatedOpacity(
-              opacity: frame == null ? 0 : 1,
-              duration: AppMotion.normal,
-              curve: AppMotion.standard,
-              child: child,
-            );
-          },
-          errorBuilder: (context, error, stackTrace) {
-            return PosterPlaceholder(width: width, height: height);
-          },
-        );
+        return _paint(context, loaded, width, height);
+      },
+    );
+  }
+
+  Widget _paint(
+    BuildContext context,
+    _LoadedImage loaded,
+    double? width,
+    double? height,
+  ) {
+    final dpr = MediaQuery.maybeDevicePixelRatioOf(context) ?? 1;
+    final displayWidth = width == null || width <= 0
+        ? null
+        : math.max(1, (width * dpr).round());
+    final cacheWidth = displayWidth == null
+        ? null
+        : math.min(displayWidth, _requestMaxWidth);
+    return Image.memory(
+      loaded.bytes,
+      width: width,
+      height: height,
+      cacheWidth: cacheWidth,
+      fit: BoxFit.cover,
+      alignment: Alignment.center,
+      filterQuality: FilterQuality.low,
+      gaplessPlayback: true,
+      errorBuilder: (context, error, stackTrace) {
+        return PosterPlaceholder(width: width, height: height);
       },
     );
   }
@@ -175,16 +205,30 @@ class _MediaImageState extends State<MediaImage> {
 }
 
 /// 按 itemId+type+maxWidth 复用已取字节,避免同尺寸重复打图。
+/// 同时限制并发拉取,网格快滑时不会一次打几十张把 UI 打卡。
 class _MediaImageCache {
   _MediaImageCache();
 
   static final _MediaImageCache instance = _MediaImageCache();
 
+  static const int _maxConcurrentFetches = 12;
+
   final Map<String, Uint8List> _bytes = {};
+  final Set<String> _misses = {};
   final Map<String, Future<Uint8List?>> _inflight = {};
+  int _activeFetches = 0;
+  final List<Completer<void>> _waiters = [];
 
   static String key(String itemId, String type, int maxWidth) =>
       '$itemId|$type|$maxWidth';
+
+  Uint8List? peek({
+    required String itemId,
+    required String type,
+    required int maxWidth,
+  }) {
+    return _bytes[key(itemId, type, maxWidth)];
+  }
 
   Future<Uint8List?> load({
     required String itemId,
@@ -197,21 +241,55 @@ class _MediaImageCache {
     if (cached != null) {
       return Future<Uint8List?>.value(cached);
     }
+    if (_misses.contains(cacheKey)) {
+      return Future<Uint8List?>.value(null);
+    }
     return _inflight.putIfAbsent(cacheKey, () async {
+      await _acquire();
       try {
         final bytes = await fetch();
         if (bytes != null && bytes.isNotEmpty) {
           _bytes[cacheKey] = bytes;
+          return bytes;
         }
-        return bytes;
+        _misses.add(cacheKey);
+        return null;
       } finally {
+        _release();
         _inflight.remove(cacheKey);
       }
     });
   }
 
+  Future<void> _acquire() async {
+    if (_activeFetches < _maxConcurrentFetches) {
+      _activeFetches++;
+      return;
+    }
+    final gate = Completer<void>();
+    _waiters.add(gate);
+    await gate.future;
+  }
+
+  void _release() {
+    if (_waiters.isNotEmpty) {
+      _waiters.removeAt(0).complete();
+    } else {
+      _activeFetches--;
+    }
+  }
+
   void clear() {
     _bytes.clear();
+    _misses.clear();
     _inflight.clear();
+    final pending = List<Completer<void>>.from(_waiters);
+    _waiters.clear();
+    _activeFetches = 0;
+    for (final waiter in pending) {
+      if (!waiter.isCompleted) {
+        waiter.complete();
+      }
+    }
   }
 }

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/auth/auth_scope.dart';
 
 /// 顶栏中的搜索入口(图标按钮)。
@@ -24,6 +25,10 @@ class SearchAction extends StatelessWidget {
         return IconButton(
           tooltip: l10n.search,
           onPressed: () => openSearch(context),
+          padding: EdgeInsets.zero,
+          constraints: kTitleBarIconConstraints,
+          visualDensity: VisualDensity.compact,
+          iconSize: 18,
           icon: const Icon(Icons.search),
         );
       },

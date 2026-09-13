@@ -91,7 +91,7 @@ void main() {
     );
 
     expect(find.byType(PosterPlaceholder), findsOneWidget);
-    expect(find.byIcon(Icons.movie_outlined), findsOneWidget);
+    expect(find.byIcon(Icons.movie_outlined), findsNothing);
     expect(find.bySemanticsLabel('封面不可用'), findsOneWidget);
   });
 
@@ -222,8 +222,8 @@ void main() {
 
     await tester.tap(find.byKey(SessionActions.serverMenuKey));
     await tester.pumpAndSettle();
-    expect(find.text('灯川测试 · emby-wan.test:8096'), findsOneWidget);
-    await tester.tap(find.text('灯川测试 · emby.test:8096'));
+    expect(find.textContaining('emby-wan.test'), findsOneWidget);
+    await tester.tap(find.textContaining('emby.test:8096'));
     await tester.pumpAndSettle();
 
     expect(auth.session?.server.activeLine?.address, lan.baseUrl.toString());
@@ -340,11 +340,110 @@ void main() {
     expect(find.byType(SearchPage), findsOneWidget);
     expect(find.byType(SearchOverlay), findsNothing);
   });
+
+  testWidgets('top bar keeps five libraries and puts the rest in overflow', (
+    tester,
+  ) async {
+    final auth = await _connect(
+      tester,
+      server: FakeEmbyServer(
+        views: [
+          for (var i = 0; i < 8; i++)
+            FakeEmbyItem(
+              id: 'view-lib-$i',
+              name: '电视-$i',
+              type: 'CollectionFolder',
+              collectionType: 'tvshows',
+            ),
+        ],
+      ),
+    );
+    await tester.pumpWidget(RillightApp(auth: auth));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(AppShell.libraryNavKey('view-lib-0')), findsOneWidget);
+    expect(find.byKey(AppShell.overflowNavKey), findsOneWidget);
+    expect(find.byKey(AppShell.libraryNavKey('view-lib-7')), findsNothing);
+
+    await tester.tap(find.byKey(AppShell.overflowNavKey));
+    await tester.pumpAndSettle();
+    expect(find.text('电视-7'), findsOneWidget);
+    expect(find.text('自定义导航'), findsOneWidget);
+
+    await tester.tap(find.text('自定义导航'));
+    await tester.pumpAndSettle();
+    expect(find.text('自定义导航'), findsWidgets);
+    expect(find.text('保存'), findsOneWidget);
+
+    Finder dialogText(String label) {
+      return find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.text(label),
+      );
+    }
+
+    expect(dialogText('电视-5'), findsOneWidget);
+    expect(
+      tester.getTopLeft(dialogText('电视-0')).dy,
+      lessThan(tester.getTopLeft(dialogText('电视-5')).dy),
+    );
+    expect(
+      tester.getTopLeft(dialogText('电视-4')).dy,
+      lessThan(tester.getTopLeft(dialogText('电视-5')).dy),
+    );
+
+    await tester.tap(find.byKey(const Key('nav-pin-down-view-lib-0')));
+    await tester.pump();
+    expect(
+      tester.getTopLeft(dialogText('电视-1')).dy,
+      lessThan(tester.getTopLeft(dialogText('电视-0')).dy),
+    );
+  });
+
+  testWidgets('overflow menu shows five libraries then more', (tester) async {
+    tester.view.physicalSize = const Size(1600, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final auth = await _connect(
+      tester,
+      server: FakeEmbyServer(
+        views: [
+          for (var i = 0; i < 16; i++)
+            FakeEmbyItem(
+              id: 'view-lib-$i',
+              name: '电视-$i',
+              type: 'CollectionFolder',
+              collectionType: 'tvshows',
+            ),
+        ],
+      ),
+    );
+    await tester.pumpWidget(RillightApp(auth: auth));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(AppShell.libraryNavKey('view-lib-0')), findsOneWidget);
+    expect(find.byKey(AppShell.libraryNavKey('view-lib-10')), findsNothing);
+
+    await tester.tap(find.byKey(AppShell.overflowNavKey));
+    await tester.pumpAndSettle();
+    expect(find.byKey(AppShell.moreLibrariesKey), findsOneWidget);
+    expect(find.byKey(AppShell.customizeNavKey), findsOneWidget);
+    expect(find.byType(PopupMenuItem<String>), findsNWidgets(7));
+
+    await tester.tap(find.byKey(AppShell.moreLibrariesKey));
+    await tester.pumpAndSettle();
+    expect(find.byType(Dialog), findsOneWidget);
+    expect(find.byType(ListTile), findsWidgets);
+  });
 }
 
-Future<AuthController> _connect(WidgetTester tester) async {
-  final server = FakeEmbyServer();
-  final adapter = FakeEmbyAdapter([server]);
+Future<AuthController> _connect(
+  WidgetTester tester, {
+  FakeEmbyServer? server,
+}) async {
+  final emby = server ?? FakeEmbyServer();
+  final adapter = FakeEmbyAdapter([emby]);
   final auth = AuthController(
     client: EmbyClient(device: _device, dio: dioForFakeEmby(adapter)),
     credentials: MemoryCredentialStore(),
@@ -352,7 +451,7 @@ Future<AuthController> _connect(WidgetTester tester) async {
   );
   await tester.runAsync(() {
     return auth.connect(
-      address: server.baseUrl.toString(),
+      address: emby.baseUrl.toString(),
       username: 'alice',
       password: 'correct-horse',
     );

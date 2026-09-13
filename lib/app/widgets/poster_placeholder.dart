@@ -28,13 +28,6 @@ class PosterPlaceholder extends StatelessWidget {
             color: colorScheme.surfaceContainerHighest,
             borderRadius: BorderRadius.circular(8),
           ),
-          child: Center(
-            child: Icon(
-              Icons.movie_outlined,
-              color: colorScheme.onSurfaceVariant,
-              size: 36,
-            ),
-          ),
         ),
       ),
     );

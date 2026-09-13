@@ -31,11 +31,23 @@ Future<void> _enter(
   await tester.enterText(find.byKey(ConnectFormKeys.password), password);
 }
 
+Future<void> _settle(WidgetTester tester) async {
+  try {
+    await tester.pumpAndSettle(
+      const Duration(milliseconds: 100),
+      EnginePhase.sendSemanticsUpdate,
+      const Duration(seconds: 2),
+    );
+  } on FlutterError {
+    // Logged-in home rows schedule retry timers that never go idle.
+  }
+}
+
 Future<void> _tapVisible(WidgetTester tester, Finder finder) async {
   await tester.ensureVisible(finder);
-  await tester.pumpAndSettle();
+  await _settle(tester);
   await tester.tap(finder);
-  await tester.pumpAndSettle();
+  await _settle(tester);
 }
 
 Future<void> _expandMore(WidgetTester tester) async {
@@ -73,7 +85,7 @@ void main() {
   testWidgets('successful login leaves the connect page', (tester) async {
     final auth = controller();
     await tester.pumpWidget(RillightApp(auth: auth));
-    await tester.pumpAndSettle();
+    await _settle(tester);
 
     expect(find.text(kProductName), findsWidgets);
     expect(find.byKey(ConnectFormKeys.submit), findsOneWidget);
@@ -88,7 +100,7 @@ void main() {
       password: 'correct-horse',
     );
     await tester.tap(find.byKey(ConnectFormKeys.submit));
-    await tester.pumpAndSettle();
+    await _settle(tester);
 
     expect(find.byKey(ConnectFormKeys.submit), findsNothing);
     expect(find.byKey(SessionActions.serverMenuKey), findsOneWidget);
@@ -100,7 +112,7 @@ void main() {
   ) async {
     final auth = controller();
     await tester.pumpWidget(RillightApp(auth: auth));
-    await tester.pumpAndSettle();
+    await _settle(tester);
 
     await _enter(
       tester,
@@ -109,7 +121,7 @@ void main() {
       password: 'wrong',
     );
     await tester.tap(find.byKey(ConnectFormKeys.submit));
-    await tester.pumpAndSettle();
+    await _settle(tester);
 
     expect(find.byKey(ConnectFormKeys.submit), findsOneWidget);
     expect(find.byType(AppErrorView), findsOneWidget);
@@ -123,7 +135,7 @@ void main() {
     adapter.certificateError = true;
     final auth = controller();
     await tester.pumpWidget(RillightApp(auth: auth));
-    await tester.pumpAndSettle();
+    await _settle(tester);
 
     await _enter(
       tester,
@@ -132,7 +144,7 @@ void main() {
       password: 'correct-horse',
     );
     await tester.tap(find.byKey(ConnectFormKeys.submit));
-    await tester.pumpAndSettle();
+    await _settle(tester);
 
     expect(find.byType(AppErrorView), findsOneWidget);
     expect(
@@ -148,7 +160,7 @@ void main() {
     server.publicInfoRawBody = '该客户端/设备已被服务端禁用';
     final auth = controller();
     await tester.pumpWidget(RillightApp(auth: auth));
-    await tester.pumpAndSettle();
+    await _settle(tester);
 
     await _enter(
       tester,
@@ -157,7 +169,7 @@ void main() {
       password: 'correct-horse',
     );
     await tester.tap(find.byKey(ConnectFormKeys.submit));
-    await tester.pumpAndSettle();
+    await _settle(tester);
 
     expect(find.byType(AppErrorView), findsOneWidget);
     expect(find.text('HTTP 403: 该客户端/设备已被服务端禁用'), findsOneWidget);
@@ -168,7 +180,7 @@ void main() {
   testWidgets('unreachable address shows a visible reason', (tester) async {
     final auth = controller();
     await tester.pumpWidget(RillightApp(auth: auth));
-    await tester.pumpAndSettle();
+    await _settle(tester);
 
     await _enter(
       tester,
@@ -177,7 +189,7 @@ void main() {
       password: 'correct-horse',
     );
     await tester.tap(find.byKey(ConnectFormKeys.submit));
-    await tester.pumpAndSettle();
+    await _settle(tester);
 
     expect(find.byType(AppErrorView), findsOneWidget);
     expect(find.text('Connection refused'), findsOneWidget);
@@ -189,7 +201,7 @@ void main() {
     (tester) async {
       final auth = controller();
       await tester.pumpWidget(RillightApp(auth: auth));
-      await tester.pumpAndSettle();
+      await _settle(tester);
 
       await _enter(
         tester,
@@ -198,12 +210,12 @@ void main() {
         password: 'correct-horse',
       );
       await tester.tap(find.byKey(ConnectFormKeys.submit));
-      await tester.pumpAndSettle();
+      await _settle(tester);
 
       await tester.tap(find.byKey(SessionActions.serverMenuKey));
-      await tester.pumpAndSettle();
+      await _settle(tester);
       await tester.tap(find.text('退出登录'));
-      await tester.pumpAndSettle();
+      await _settle(tester);
 
       expect(find.byKey(ConnectFormKeys.submit), findsOneWidget);
       expect(find.text('灯川测试'), findsOneWidget);
@@ -213,7 +225,7 @@ void main() {
         tester,
         find.byKey(Key('saved-server-${server.serverId}')),
       );
-      await tester.pumpAndSettle();
+      await _settle(tester);
 
       expect(
         tester
@@ -231,7 +243,7 @@ void main() {
   ) async {
     final auth = controller();
     await tester.pumpWidget(RillightApp(auth: auth));
-    await tester.pumpAndSettle();
+    await _settle(tester);
 
     await _enter(
       tester,
@@ -240,7 +252,7 @@ void main() {
       password: 'correct-horse',
     );
     await tester.tap(find.byKey(ConnectFormKeys.submit));
-    await tester.pumpAndSettle();
+    await _settle(tester);
     expect(find.byKey(SessionActions.serverMenuKey), findsOneWidget);
 
     server.expireAuthenticatedRequests = true;
@@ -250,7 +262,7 @@ void main() {
         throwsA(isA<Object>()),
       );
     });
-    await tester.pumpAndSettle();
+    await _settle(tester);
 
     expect(find.byKey(ConnectFormKeys.submit), findsOneWidget);
     expect(find.byType(AppErrorView), findsOneWidget);
@@ -285,7 +297,7 @@ void main() {
     expect(auth.savedServers.single.lines, hasLength(2));
 
     await tester.pumpWidget(RillightApp(auth: auth));
-    await tester.pumpAndSettle();
+    await _settle(tester);
 
     final lanLine = auth.savedServers.single.lines.firstWhere(
       (line) => line.address == server.baseUrl.toString(),
@@ -320,7 +332,7 @@ void main() {
       'correct-horse',
     );
     await tester.tap(find.byKey(ConnectFormKeys.submit));
-    await tester.pumpAndSettle();
+    await _settle(tester);
 
     expect(find.byKey(ConnectFormKeys.submit), findsOneWidget);
     expect(find.byType(AppErrorView), findsOneWidget);
@@ -335,7 +347,7 @@ void main() {
     (tester) async {
       final auth = controller();
       await tester.pumpWidget(RillightApp(auth: auth));
-      await tester.pumpAndSettle();
+      await _settle(tester);
 
       await _enter(
         tester,
@@ -363,7 +375,7 @@ void main() {
   ) async {
     final auth = controller();
     await tester.pumpWidget(RillightApp(auth: auth));
-    await tester.pumpAndSettle();
+    await _settle(tester);
 
     await _enter(
       tester,
@@ -379,6 +391,18 @@ void main() {
     expect(auth.savedServers.single.baseUrl, 'http://emby.test:8096/emby');
   });
 
+  testWidgets('addLine is enabled on a new server form', (tester) async {
+    final auth = controller();
+    await tester.pumpWidget(RillightApp(auth: auth));
+    await _settle(tester);
+    await _expandMore(tester);
+    final add = tester.widget<TextButton>(find.byKey(ConnectFormKeys.addLine));
+    expect(add.onPressed, isNotNull);
+    await tester.tap(find.byKey(ConnectFormKeys.addLine));
+    await tester.pump();
+    expect(find.byKey(ConnectFormKeys.extraLine(0)), findsOneWidget);
+  });
+
   testWidgets('addLine under 更多 adds a second line for the saved server', (
     tester,
   ) async {
@@ -390,7 +414,7 @@ void main() {
     adapter.add(wan);
     final auth = controller();
     await tester.pumpWidget(RillightApp(auth: auth));
-    await tester.pumpAndSettle();
+    await _settle(tester);
 
     await _enter(
       tester,
@@ -399,11 +423,11 @@ void main() {
       password: 'correct-horse',
     );
     await tester.tap(find.byKey(ConnectFormKeys.submit));
-    await tester.pumpAndSettle();
+    await _settle(tester);
     await tester.tap(find.byKey(SessionActions.serverMenuKey));
-    await tester.pumpAndSettle();
+    await _settle(tester);
     await tester.tap(find.text('退出登录'));
-    await tester.pumpAndSettle();
+    await _settle(tester);
 
     await _tapVisible(
       tester,
@@ -411,14 +435,16 @@ void main() {
     );
     await _expandMore(tester);
     await _tapVisible(tester, find.byKey(ConnectFormKeys.addLine));
+    await _settle(tester);
     await tester.enterText(
-      find.byKey(ConnectFormKeys.address),
+      find.byKey(ConnectFormKeys.extraLine(0)),
       wan.baseUrl.toString(),
     );
     await tester.enterText(
       find.byKey(ConnectFormKeys.password),
       'correct-horse',
     );
+    await tester.pump();
     await _tapVisible(tester, find.byKey(ConnectFormKeys.submit));
 
     expect(auth.isLoggedIn, isTrue);

@@ -8,6 +8,8 @@ import 'package:flutter/services.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/product.dart';
 import 'package:rillight/app/theme.dart';
+import 'package:rillight/app/window_chrome.dart';
+import 'package:rillight/app/window_geometry.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/auth/credential_store.dart';
@@ -25,10 +27,9 @@ const _hostChannel = WindowMethodChannel(
   mode: ChannelMode.unidirectional,
 );
 
-/// 播放进程窗口:隐藏系统标题栏,最小 960×540。
+/// 播放进程窗口:隐藏系统标题栏。开窗尺寸按工作区自适应,不写死分辨率。
 const WindowOptions kPlayerWindowOptions = WindowOptions(
-  size: Size(1600, 900),
-  minimumSize: Size(960, 540),
+  minimumSize: kMinPlayerWindowSize,
   center: true,
   titleBarStyle: TitleBarStyle.hidden,
 );
@@ -86,7 +87,7 @@ class PlayerWindowLaunch {
     return PlayerWindowLaunch(
       request: PlayerOpenRequest(
         itemId: json['itemId'] as String? ?? '',
-        autoResume: json['autoResume'] == true,
+        autoResume: json['autoResume'] != false,
         mediaSourceId: json['mediaSourceId'] as String?,
         audioStreamIndex: json['audioStreamIndex'] is int
             ? json['audioStreamIndex'] as int
@@ -352,16 +353,27 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
   Future<void> _configureWindow() async {
     try {
       await windowManager.setPreventClose(true);
-      await windowManager.waitUntilReadyToShow(kPlayerWindowOptions);
+      await windowManager.waitUntilReadyToShow();
+      await windowManager.hide();
+      await windowManager.setTitleBarStyle(
+        TitleBarStyle.hidden,
+        windowButtonVisibility: false,
+      );
+      await applyAdaptiveWindowSize(
+        minimumSize: kMinPlayerWindowSize,
+        maximumSize: kMaxPlayerWindowSize,
+      );
       await windowManager.setTitle(_playerWindowTitle);
       await windowManager.show();
       await windowManager.focus();
     } catch (_) {
       try {
+        await windowManager.hide();
+        await applyAdaptiveWindowSize(
+          minimumSize: kMinPlayerWindowSize,
+          maximumSize: kMaxPlayerWindowSize,
+        );
         await windowManager.setTitleBarStyle(TitleBarStyle.hidden);
-        await windowManager.setMinimumSize(const Size(960, 540));
-        await windowManager.setSize(const Size(1600, 900));
-        await windowManager.center();
         await windowManager.show();
       } catch (_) {}
     }
@@ -423,7 +435,7 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
             onOpenItem: (itemId) {
               _applyLaunch(
                 PlayerWindowLaunch(
-                  request: PlayerOpenRequest(itemId: itemId),
+                  request: PlayerOpenRequest(itemId: itemId, autoResume: false),
                   baseUrl: _launch.baseUrl,
                   accessToken: _launch.accessToken,
                   userId: _launch.userId,

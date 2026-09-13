@@ -146,7 +146,7 @@ void main() {
       accessToken: auth.accessToken,
       userId: auth.user.id,
     );
-    server.expireAuthenticatedRequests = true;
+    server.issuedTokens.remove(auth.accessToken);
 
     expect(
       emby.getJson('/System/Info'),
@@ -154,6 +154,40 @@ void main() {
     );
     await pumpEventQueue();
     expect(expired, isTrue);
+  });
+
+  test('401 retries once after onRefreshSession issues a new token', () async {
+    final emby = client();
+    final first = await emby.authenticateByName(
+      baseUrl: server.baseUrl,
+      username: 'alice',
+      password: 'correct-horse',
+      serverId: server.serverId,
+    );
+    emby.attachSession(
+      baseUrl: server.baseUrl,
+      accessToken: first.accessToken,
+      userId: first.user.id,
+    );
+    server.issuedTokens.remove(first.accessToken);
+    emby.onRefreshSession = () async {
+      final next = await emby.authenticateByName(
+        baseUrl: server.baseUrl,
+        username: 'alice',
+        password: 'correct-horse',
+        serverId: server.serverId,
+      );
+      emby.attachSession(
+        baseUrl: server.baseUrl,
+        accessToken: next.accessToken,
+        userId: next.user.id,
+      );
+      return true;
+    };
+
+    final info = await emby.getJson('/System/Info');
+    expect(info['ServerName'], server.serverName);
+    expect(emby.accessToken, isNot(first.accessToken));
   });
 
   test('custom User-Agent is sent on API and stream headers', () async {

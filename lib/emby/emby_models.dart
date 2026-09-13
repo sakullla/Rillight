@@ -139,17 +139,21 @@ class ItemChapter {
     required this.name,
     required this.startPositionTicks,
     this.imageTag,
+    this.imageIndex,
   });
 
   final String name;
   final int startPositionTicks;
   final String? imageTag;
+  final int? imageIndex;
 
   factory ItemChapter.fromJson(Map<String, dynamic> json) {
+    final tag = json['ImageTag']?.toString().trim();
     return ItemChapter(
       name: json['Name']?.toString() ?? '',
       startPositionTicks: _asInt(json['StartPositionTicks']) ?? 0,
-      imageTag: json['ImageTag']?.toString(),
+      imageTag: (tag == null || tag.isEmpty) ? null : tag,
+      imageIndex: _asInt(json['ImageIndex']),
     );
   }
 }
@@ -237,7 +241,13 @@ class EmbyItem {
     this.indexNumber,
     this.parentIndexNumber,
     this.primaryImageTag,
+    this.thumbImageTag,
     this.backdropImageTag,
+    this.seriesPrimaryImageTag,
+    this.parentThumbItemId,
+    this.parentThumbImageTag,
+    this.parentBackdropItemId,
+    this.parentBackdropImageTag,
     this.communityRating,
     this.mediaSources = const [],
     this.chapters = const [],
@@ -259,7 +269,13 @@ class EmbyItem {
   final int? indexNumber;
   final int? parentIndexNumber;
   final String? primaryImageTag;
+  final String? thumbImageTag;
   final String? backdropImageTag;
+  final String? seriesPrimaryImageTag;
+  final String? parentThumbItemId;
+  final String? parentThumbImageTag;
+  final String? parentBackdropItemId;
+  final String? parentBackdropImageTag;
   final double? communityRating;
   final List<ItemMediaSource> mediaSources;
   final List<ItemChapter> chapters;
@@ -309,6 +325,79 @@ class EmbyItem {
 
   bool get canResume => !userData.played && userData.playbackPositionTicks > 0;
 
+  /// 海报/剧照候选:横图优先本集 Thumb;剧海报与本集 Primary 相同时跳过,避免一排同一张剧图。
+  List<ItemImageRef> imageCandidates({
+    bool preferBackdrop = false,
+    bool preferThumb = false,
+  }) {
+    final landscape = preferBackdrop || preferThumb || isEpisode;
+    final refs = <ItemImageRef>[];
+    void add(
+      String itemId,
+      String type,
+      String? tag, {
+      bool requireTag = true,
+    }) {
+      if (requireTag && (tag == null || tag.isEmpty)) {
+        return;
+      }
+      final exists = refs.any(
+        (ref) => ref.itemId == itemId && ref.type == type,
+      );
+      if (exists) {
+        return;
+      }
+      refs.add(ItemImageRef(itemId: itemId, type: type, tag: tag));
+    }
+
+    if (preferBackdrop) {
+      add(id, 'Backdrop', backdropImageTag);
+      if (!isEpisode) {
+        final parentBackdrop = parentBackdropItemId;
+        if (parentBackdrop != null) {
+          add(parentBackdrop, 'Backdrop', parentBackdropImageTag);
+        }
+      }
+    }
+    if (landscape) {
+      add(id, 'Thumb', thumbImageTag);
+    }
+    final seriesPoster =
+        isEpisode &&
+        primaryImageTag != null &&
+        seriesPrimaryImageTag != null &&
+        primaryImageTag == seriesPrimaryImageTag;
+    if (!seriesPoster) {
+      add(id, 'Primary', primaryImageTag);
+    }
+    if (landscape && !isEpisode) {
+      add(id, 'Thumb', thumbImageTag);
+      final parentThumb = parentThumbItemId;
+      if (parentThumb != null) {
+        add(parentThumb, 'Thumb', parentThumbImageTag);
+      }
+      final parentBackdrop = parentBackdropItemId;
+      if (parentBackdrop != null) {
+        add(parentBackdrop, 'Backdrop', parentBackdropImageTag);
+      }
+      final series = seriesId;
+      if (series != null) {
+        add(series, 'Primary', seriesPrimaryImageTag);
+      }
+    }
+    if (isEpisode) {
+      final parentThumb = parentThumbItemId;
+      if (parentThumb != null) {
+        add(parentThumb, 'Thumb', parentThumbImageTag);
+      }
+      final parentBackdrop = parentBackdropItemId;
+      if (parentBackdrop != null) {
+        add(parentBackdrop, 'Backdrop', parentBackdropImageTag);
+      }
+    }
+    return refs;
+  }
+
   double get playbackProgress {
     final percent = userData.playedPercentage;
     if (percent != null) {
@@ -326,22 +415,14 @@ class EmbyItem {
     if (id.isEmpty) {
       throw const EmbyException(EmbyFailureKind.unknown);
     }
-    String? primaryTag;
     final tags = json['ImageTags'];
-    if (tags is Map && tags['Primary'] != null) {
-      final tag = tags['Primary'].toString().trim();
-      if (tag.isNotEmpty) {
-        primaryTag = tag;
-      }
-    }
-    String? backdropTag;
-    final backdrops = json['BackdropImageTags'];
-    if (backdrops is List && backdrops.isNotEmpty) {
-      final tag = backdrops.first.toString().trim();
-      if (tag.isNotEmpty) {
-        backdropTag = tag;
-      }
-    }
+    final tagMap = tags is Map ? Map<dynamic, dynamic>.from(tags) : const {};
+    final primaryTag = _mapImageTag(tagMap, 'Primary');
+    final thumbTag = _mapImageTag(tagMap, 'Thumb');
+    final backdropTag =
+        _firstListTag(json['BackdropImageTags']) ??
+        _mapImageTag(tagMap, 'Backdrop');
+    final parentBackdropTag = _firstListTag(json['ParentBackdropImageTags']);
     final rawSources = json['MediaSources'];
     final rawChapters = json['Chapters'];
     return EmbyItem(
@@ -360,7 +441,13 @@ class EmbyItem {
       indexNumber: _asInt(json['IndexNumber']),
       parentIndexNumber: _asInt(json['ParentIndexNumber']),
       primaryImageTag: primaryTag,
+      thumbImageTag: thumbTag,
       backdropImageTag: backdropTag,
+      seriesPrimaryImageTag: _stringTag(json['SeriesPrimaryImageTag']),
+      parentThumbItemId: _stringTag(json['ParentThumbItemId']),
+      parentThumbImageTag: _stringTag(json['ParentThumbImageTag']),
+      parentBackdropItemId: _stringTag(json['ParentBackdropItemId']),
+      parentBackdropImageTag: parentBackdropTag,
       communityRating: _asDouble(json['CommunityRating']),
       mediaSources: [
         if (rawSources is List)
@@ -395,13 +482,54 @@ class EmbyItem {
       indexNumber: indexNumber,
       parentIndexNumber: parentIndexNumber,
       primaryImageTag: primaryImageTag,
+      thumbImageTag: thumbImageTag,
       backdropImageTag: backdropImageTag,
+      seriesPrimaryImageTag: seriesPrimaryImageTag,
+      parentThumbItemId: parentThumbItemId,
+      parentThumbImageTag: parentThumbImageTag,
+      parentBackdropItemId: parentBackdropItemId,
+      parentBackdropImageTag: parentBackdropImageTag,
       communityRating: communityRating,
       mediaSources: mediaSources,
       chapters: chapters,
       userData: userData ?? this.userData,
     );
   }
+}
+
+class EmbyItemPage {
+  const EmbyItemPage({required this.items, this.totalRecordCount});
+
+  final List<EmbyItem> items;
+  final int? totalRecordCount;
+
+  bool hasMore({required int fetched, required int pageSize}) {
+    if (items.isEmpty) {
+      return false;
+    }
+    final total = totalRecordCount;
+    if (total != null) {
+      return fetched < total;
+    }
+    return items.length >= pageSize;
+  }
+}
+
+int? parseEmbyTotalCount(dynamic data) {
+  if (data is! Map) {
+    return null;
+  }
+  final raw = data['TotalRecordCount'];
+  if (raw is int) {
+    return raw;
+  }
+  if (raw is num) {
+    return raw.toInt();
+  }
+  if (raw is String) {
+    return int.tryParse(raw);
+  }
+  return null;
 }
 
 List<EmbyItem> parseEmbyItemList(dynamic data) {
@@ -427,6 +555,33 @@ List<EmbyItem> parseEmbyItemList(dynamic data) {
     }
   }
   throw const EmbyException(EmbyFailureKind.unknown);
+}
+
+class ItemImageRef {
+  const ItemImageRef({required this.itemId, required this.type, this.tag});
+
+  final String itemId;
+  final String type;
+  final String? tag;
+}
+
+String? _stringTag(dynamic value) {
+  final tag = value?.toString().trim();
+  if (tag == null || tag.isEmpty) {
+    return null;
+  }
+  return tag;
+}
+
+String? _mapImageTag(Map<dynamic, dynamic> tags, String key) {
+  return _stringTag(tags[key]);
+}
+
+String? _firstListTag(dynamic value) {
+  if (value is! List || value.isEmpty) {
+    return null;
+  }
+  return _stringTag(value.first);
 }
 
 int? _asInt(dynamic value) {

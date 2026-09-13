@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -122,14 +123,46 @@ void main() {
     },
   );
 
-  test('401 clears the session and reports expiry', () async {
-    final auth = controller();
+  test('401 with a stored password re-authenticates and retries', () async {
+    final credentials = MemoryCredentialStore();
+    final auth = controller(credentials: credentials);
     await auth.connect(
       address: server.baseUrl.toString(),
       username: 'alice',
       password: 'correct-horse',
     );
-    server.expireAuthenticatedRequests = true;
+    final expired = auth.session!.accessToken;
+    server.issuedTokens.remove(expired);
+
+    final info = await auth.client.getJson('/System/Info');
+    expect(info['ServerName'], server.serverName);
+    expect(auth.isLoggedIn, isTrue);
+    expect(auth.session!.accessToken, isNot(expired));
+    expect(
+      (await credentials.read(server.serverId))?.accessToken,
+      auth.session!.accessToken,
+    );
+    expect(auth.failure, isNull);
+  });
+
+  test('401 without a stored password signs out to the connect form', () async {
+    final credentials = MemoryCredentialStore();
+    final auth = controller(credentials: credentials);
+    await auth.connect(
+      address: server.baseUrl.toString(),
+      username: 'alice',
+      password: 'correct-horse',
+    );
+    final stored = await credentials.read(server.serverId);
+    await credentials.write(
+      server.serverId,
+      StoredCredentials(
+        accessToken: stored!.accessToken,
+        userId: stored.userId,
+        username: stored.username,
+      ),
+    );
+    server.issuedTokens.remove(stored.accessToken);
 
     await expectLater(
       auth.client.getJson('/System/Info'),
@@ -145,7 +178,8 @@ void main() {
 
     expect(auth.isLoggedIn, isFalse);
     expect(auth.failure?.kind, EmbyFailureKind.sessionExpired);
-    expect(await auth.credentials.read(server.serverId), isNull);
+    expect(auth.prefill?.id, server.serverId);
+    expect((await credentials.read(server.serverId))?.username, 'alice');
   });
 
   test('tokens stay bound to server id when switching', () async {
@@ -361,4 +395,50 @@ void main() {
     );
     expect(auth.savedServers.single.lines, hasLength(1));
   });
+
+  test('session refresh does not reactivate after logout', () async {
+    final gated = _GatedCredentialStore(MemoryCredentialStore());
+    final auth = controller(credentials: gated);
+    await auth.connect(
+      address: server.baseUrl.toString(),
+      username: 'alice',
+      password: 'correct-horse',
+    );
+    expect(auth.isLoggedIn, isTrue);
+
+    gated.holdWrite = Completer<void>();
+    final refresh = auth.client.onRefreshSession!();
+    await auth.logout();
+    expect(auth.isLoggedIn, isFalse);
+    gated.holdWrite!.complete();
+    expect(await refresh, isFalse);
+    expect(auth.isLoggedIn, isFalse);
+    expect(await gated.read(server.serverId), isNull);
+  });
+}
+
+class _GatedCredentialStore implements CredentialStore {
+  _GatedCredentialStore(this.inner);
+
+  final CredentialStore inner;
+  Completer<void>? holdWrite;
+
+  @override
+  Future<StoredCredentials?> read(String serverId) {
+    return inner.read(serverId);
+  }
+
+  @override
+  Future<void> write(String serverId, StoredCredentials credentials) async {
+    final pending = holdWrite;
+    if (pending != null) {
+      await pending.future;
+    }
+    return inner.write(serverId, credentials);
+  }
+
+  @override
+  Future<void> delete(String serverId) {
+    return inner.delete(serverId);
+  }
 }

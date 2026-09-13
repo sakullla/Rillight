@@ -55,3 +55,20 @@ abstract final class AppBreakpoints {
   static const double compact = 960;
   static const double large = 1440;
 }
+
+/// Liquid Glass 浮层材质:只用于顶栏/面板/控件,不铺在海报内容上。
+abstract final class AppGlass {
+  static const double barBlur = 26;
+  static const double panelBlur = 32;
+  static const double controlBlur = 22;
+  static const double pillBlur = 18;
+
+  static const double barTint = 0.40;
+  static const double panelTint = 0.48;
+  static const double controlTint = 0.36;
+  static const double pillTint = 0.30;
+
+  static const double reducedTint = 0.92;
+  static const double edgeLight = 0.16;
+  static const double specular = 0.14;
+}

@@ -3,7 +3,7 @@ import 'package:flutter/widgets.dart';
 class PlayerOpenRequest {
   const PlayerOpenRequest({
     required this.itemId,
-    this.autoResume = false,
+    this.autoResume = true,
     this.mediaSourceId,
     this.audioStreamIndex,
     this.subtitleStreamIndex,

@@ -7,6 +7,14 @@ abstract final class AppRoutes {
   static const shelfLatestMovies = '/shelf/latest-movies';
   static const shelfLatestSeries = '/shelf/latest-series';
 
+  /// 首页和片库浏览保留库名导航;详情/更多/搜索只留返回与窗口控件。
+  static bool showsBrowseNav(String path) {
+    if (path == home) {
+      return true;
+    }
+    return path.startsWith('/library/');
+  }
+
   static String library(String viewId) => '/library/$viewId';
   static String item(String itemId) => '/item/$itemId';
 

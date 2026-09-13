@@ -27,6 +27,7 @@ class AuthController extends ChangeNotifier {
     required this.servers,
   }) {
     client.onSessionExpired = _onSessionExpired;
+    client.onRefreshSession = _refreshSession;
   }
 
   factory AuthController.memory({EmbyClient? client}) {
@@ -246,6 +247,56 @@ class AuthController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 给当前已登录服务器追加备用线路,不切换正在使用的地址。
+  Future<void> appendLines(
+    Iterable<String> addresses, {
+    String? userAgent,
+  }) async {
+    final current = _session?.server;
+    if (current == null) {
+      return;
+    }
+    var server = current;
+    var changed = false;
+    for (final raw in addresses) {
+      final trimmed = raw.trim();
+      if (trimmed.isEmpty) {
+        continue;
+      }
+      try {
+        final url = normalizeEmbyBaseUrl(trimmed).toString();
+        if (server.lines.any((line) => line.address == url)) {
+          continue;
+        }
+        server = _serverWithLine(
+          existing: server,
+          serverId: server.id,
+          name: server.name,
+          username: server.username,
+          address: url,
+          userAgent: userAgent,
+        ).copyWith(activeLineId: current.activeLineId);
+        changed = true;
+      } on EmbyException {
+        continue;
+      }
+    }
+    if (!changed) {
+      return;
+    }
+    await _upsertServer(server);
+    final session = _session;
+    if (session != null && session.server.id == server.id) {
+      _session = AuthSession(
+        server: server,
+        userId: session.userId,
+        username: session.username,
+        accessToken: session.accessToken,
+      );
+    }
+    notifyListeners();
+  }
+
   Future<void> deleteLine(String serverId, String lineId) async {
     final server = _serverById(serverId);
     if (server == null || server.lines.length <= 1) {
@@ -371,18 +422,66 @@ class AuthController extends ChangeNotifier {
     );
   }
 
+  Future<bool> _refreshSession() async {
+    final session = _session;
+    if (session == null) {
+      return false;
+    }
+    final stored = await credentials.read(session.server.id);
+    final password = stored?.password;
+    if (stored == null || password == null || password.isEmpty) {
+      return false;
+    }
+    try {
+      client.setUserAgent(session.server.activeLine?.userAgent);
+      final auth = await client.authenticateByName(
+        baseUrl: Uri.parse(session.server.baseUrl),
+        username: stored.username,
+        password: password,
+        serverId: session.server.id,
+      );
+      final next = StoredCredentials(
+        accessToken: auth.accessToken,
+        userId: auth.user.id,
+        username: stored.username,
+        password: password,
+      );
+      if (!_isSameSession(session)) {
+        return false;
+      }
+      await credentials.write(session.server.id, next);
+      if (!_isSameSession(session)) {
+        await credentials.delete(session.server.id);
+        return false;
+      }
+      _activate(session.server, next);
+      _failure = null;
+      notifyListeners();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  bool _isSameSession(AuthSession captured) {
+    final current = _session;
+    return current != null &&
+        current.server.id == captured.server.id &&
+        current.userId == captured.userId &&
+        current.accessToken == captured.accessToken;
+  }
+
   void _onSessionExpired() {
     if (_handlingExpiry || _session == null) {
       return;
     }
     _handlingExpiry = true;
-    final serverId = _session!.server.id;
+    final current = _session!;
     _session = null;
     client.clearSession();
+    _prefill = current.server;
     _failure = const EmbyException(EmbyFailureKind.sessionExpired);
     notifyListeners();
-    credentials.delete(serverId).whenComplete(() {
-      _handlingExpiry = false;
-    });
+    _handlingExpiry = false;
   }
 }

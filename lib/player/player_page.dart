@@ -1,10 +1,12 @@
 import 'dart:async';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/app_error_view.dart';
+import 'package:rillight/app/widgets/liquid_glass.dart';
 import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/emby/device_profile.dart';
@@ -21,7 +23,7 @@ class PlayerPage extends StatefulWidget {
   const PlayerPage({
     super.key,
     required this.itemId,
-    this.autoResume = false,
+    this.autoResume = true,
     this.mediaSourceId,
     this.audioStreamIndex,
     this.subtitleStreamIndex,
@@ -47,6 +49,17 @@ class PlayerPageState extends State<PlayerPage> {
   PlayerController? controller;
   bool _dragSeeking = false;
   double _dragValue = 0;
+  Offset? _lastHover;
+  bool _ignoreHoverUntilMove = false;
+
+  bool _pointerNearWindowEdge(Offset local) {
+    final size = MediaQuery.sizeOf(context);
+    const margin = 12.0;
+    return local.dx < margin ||
+        local.dy < margin ||
+        local.dx > size.width - margin ||
+        local.dy > size.height - margin;
+  }
 
   @override
   void didChangeDependencies() {
@@ -69,6 +82,7 @@ class PlayerPageState extends State<PlayerPage> {
       controlsHideAfter: bindings.controlsHideAfter,
       nextEpisodeCountdown: bindings.nextEpisodeCountdown,
       seekStep: bindings.seekStep,
+      settingsStore: bindings.settingsStore,
       onClose: _leave,
       onOpenItem: _openItem,
     );
@@ -102,7 +116,9 @@ class PlayerPageState extends State<PlayerPage> {
     }
     final host = PlayerWindowScope.maybeOf(context);
     if (host != null) {
-      unawaited(host.open(PlayerOpenRequest(itemId: itemId)));
+      unawaited(
+        host.open(PlayerOpenRequest(itemId: itemId, autoResume: false)),
+      );
     }
   }
 
@@ -165,112 +181,150 @@ class PlayerPageState extends State<PlayerPage> {
         },
         child: Scaffold(
           backgroundColor: Colors.black,
-          body: MouseRegion(
-            onHover: (_) => current.onUserActivity(),
-            cursor:
-                (!current.controlsVisible &&
-                    !current.showResumePrompt &&
-                    current.nextEpisode == null)
-                ? SystemMouseCursors.none
-                : MouseCursor.defer,
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                IgnorePointer(child: current.backend.buildView()),
-                Positioned.fill(
-                  child: GestureDetector(
-                    key: PlayerKeys.surface,
-                    behavior: HitTestBehavior.opaque,
-                    onTap: current.toggleControls,
-                  ),
-                ),
-                if (current.loading)
-                  Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const SizedBox(
-                          width: 44,
-                          height: 44,
-                          child: CircularProgressIndicator(strokeWidth: 3),
-                        ),
-                        const SizedBox(height: AppSpacing.md),
-                        Text(
-                          l10n.playerLoading,
-                          style: Theme.of(context).textTheme.bodyMedium
-                              ?.copyWith(color: Colors.white70),
-                        ),
-                      ],
+          body: Listener(
+            behavior: HitTestBehavior.translucent,
+            onPointerSignal: (event) {
+              if (event is! PointerScrollEvent) {
+                return;
+              }
+              if (event.scrollDelta.dy == 0) {
+                return;
+              }
+              final delta = event.scrollDelta.dy < 0
+                  ? PlayerController.volumeWheelStep
+                  : -PlayerController.volumeWheelStep;
+              unawaited(current.nudgeVolume(delta));
+            },
+            child: MouseRegion(
+              onHover: (event) {
+                if (_pointerNearWindowEdge(event.localPosition)) {
+                  return;
+                }
+                final previous = _lastHover;
+                _lastHover = event.position;
+                if (_ignoreHoverUntilMove) {
+                  if (previous != null &&
+                      (event.position - previous).distance < 4) {
+                    return;
+                  }
+                  _ignoreHoverUntilMove = false;
+                }
+                current.onUserActivity();
+              },
+              onExit: (_) {
+                _lastHover = null;
+                current.hideControlsOnPointerExit();
+              },
+              cursor:
+                  (!current.controlsVisible &&
+                      current.nextEpisode == null &&
+                      !current.playbackEnded)
+                  ? SystemMouseCursors.none
+                  : MouseCursor.defer,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  IgnorePointer(child: current.backend.buildView()),
+                  Positioned.fill(
+                    child: GestureDetector(
+                      key: PlayerKeys.surface,
+                      behavior: HitTestBehavior.opaque,
+                      onTapUp: (details) {
+                        _lastHover = details.globalPosition;
+                        current.toggleControls();
+                        if (!current.controlsVisible) {
+                          _ignoreHoverUntilMove = true;
+                        }
+                      },
                     ),
                   ),
-                if (_errorText(l10n, current) != null)
-                  AppErrorView(
-                    message: _errorText(l10n, current)!,
-                    onRetry: current.start,
-                  ),
-                if (current.showResumePrompt)
-                  _ResumePrompt(controller: current),
-                if (!current.loading &&
-                    current.resolved != null &&
-                    !current.showResumePrompt &&
-                    current.error == null)
-                  _ControlsBar(
+                  if (current.loading)
+                    Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const SizedBox(
+                            width: 44,
+                            height: 44,
+                            child: CircularProgressIndicator(strokeWidth: 3),
+                          ),
+                          const SizedBox(height: AppSpacing.md),
+                          Text(
+                            l10n.playerLoading,
+                            style: Theme.of(context).textTheme.bodyMedium
+                                ?.copyWith(color: Colors.white70),
+                          ),
+                        ],
+                      ),
+                    ),
+                  if (_errorText(l10n, current) != null)
+                    AppErrorView(
+                      message: _errorText(l10n, current)!,
+                      onRetry: current.start,
+                    ),
+                  if (!current.loading &&
+                      current.resolved != null &&
+                      !current.playbackEnded &&
+                      current.error == null)
+                    _ControlsBar(
+                      controller: current,
+                      visible: current.controlsVisible,
+                      dragging: _dragSeeking,
+                      dragValue: _dragValue,
+                      onDragStart: (value) {
+                        current.onUserActivity();
+                        setState(() {
+                          _dragSeeking = true;
+                          _dragValue = value;
+                        });
+                      },
+                      onDragUpdate: (value) {
+                        current.onUserActivity();
+                        setState(() => _dragValue = value);
+                      },
+                      onDragEnd: (value) {
+                        setState(() => _dragSeeking = false);
+                        final duration = current.duration;
+                        if (duration <= Duration.zero) {
+                          return;
+                        }
+                        unawaited(
+                          current.seekTo(
+                            Duration(
+                              milliseconds: (duration.inMilliseconds * value)
+                                  .round(),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  if (current.nextEpisode != null)
+                    _NextEpisodeBanner(controller: current),
+                  if (current.playbackEnded && current.nextEpisode == null)
+                    _PlaybackEndedOverlay(controller: current),
+                  if (current.disconnected && !current.isPlaying)
+                    _Banner(
+                      key: PlayerKeys.disconnect,
+                      text:
+                          current.disconnectDetail ?? l10n.playbackDisconnected,
+                    ),
+                  if (current.progressSyncFailed &&
+                      !(current.disconnected && !current.isPlaying))
+                    _Banner(
+                      key: PlayerKeys.progressSyncFailed,
+                      text: l10n.progressSyncFailed,
+                    ),
+                  if (current.subtitleNotice != null)
+                    _Banner(
+                      key: PlayerKeys.subtitleNotice,
+                      text: l10n.subtitleBitmapFailed,
+                    ),
+                  _PlayerChromeBar(
                     controller: current,
                     visible: current.controlsVisible,
-                    dragging: _dragSeeking,
-                    dragValue: _dragValue,
-                    onDragStart: (value) {
-                      setState(() {
-                        _dragSeeking = true;
-                        _dragValue = value;
-                      });
-                    },
-                    onDragUpdate: (value) {
-                      setState(() => _dragValue = value);
-                    },
-                    onDragEnd: (value) {
-                      setState(() => _dragSeeking = false);
-                      final duration = current.duration;
-                      if (duration <= Duration.zero) {
-                        return;
-                      }
-                      unawaited(
-                        current.seekTo(
-                          Duration(
-                            milliseconds: (duration.inMilliseconds * value)
-                                .round(),
-                          ),
-                        ),
-                      );
-                    },
                   ),
-                if (current.nextEpisode != null)
-                  _NextEpisodeBanner(controller: current),
-                if (current.disconnected && !current.isPlaying)
-                  _Banner(
-                    key: PlayerKeys.disconnect,
-                    text: current.disconnectDetail ?? l10n.playbackDisconnected,
-                  ),
-                if (current.progressSyncFailed &&
-                    !(current.disconnected && !current.isPlaying))
-                  _Banner(
-                    key: PlayerKeys.progressSyncFailed,
-                    text: l10n.progressSyncFailed,
-                  ),
-                if (current.subtitleNotice != null)
-                  _Banner(
-                    key: PlayerKeys.subtitleNotice,
-                    text:
-                        current.subtitleNotice ==
-                            SubtitleNoticeKind.bitmapFailed
-                        ? l10n.subtitleBitmapFailed
-                        : l10n.subtitleBitmapBurnIn,
-                  ),
-                _PlayerChromeBar(
-                  controller: current,
-                  visible: current.controlsVisible,
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -333,39 +387,41 @@ class _PlayerChromeBar extends StatelessWidget {
                 AppSpacing.sm,
                 AppSpacing.lg,
               ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: WindowDragArea(
-                      key: const Key('player-window-drag'),
-                      child: SizedBox(
-                        height: kWindowChromeHeight,
-                        child: Align(
-                          alignment: Alignment.centerLeft,
-                          child: title.isEmpty
-                              ? const SizedBox.expand()
-                              : Text(
-                                  title,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: theme.textTheme.titleMedium,
-                                ),
+              child: SizedBox(
+                height: kWindowChromeHeight + AppSpacing.sm,
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: WindowDragArea(
+                        key: const Key('player-window-drag'),
+                        child: SizedBox.expand(
+                          child: Align(
+                            alignment: Alignment.centerLeft,
+                            child: title.isEmpty
+                                ? const SizedBox.expand()
+                                : Text(
+                                    title,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: theme.textTheme.titleMedium,
+                                  ),
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                  IconButton(
-                    key: const Key('player-window-close'),
-                    tooltip: MaterialLocalizations.of(
-                      context,
-                    ).closeButtonTooltip,
-                    color: theme.colorScheme.onSurface,
-                    onPressed: () {
-                      unawaited(controller.close());
-                    },
-                    icon: const Icon(Icons.close_rounded),
-                  ),
-                ],
+                    IconButton(
+                      key: const Key('player-window-close'),
+                      tooltip: MaterialLocalizations.of(
+                        context,
+                      ).closeButtonTooltip,
+                      color: theme.colorScheme.onSurface,
+                      onPressed: () {
+                        unawaited(controller.close());
+                      },
+                      icon: const Icon(Icons.close_rounded),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -375,8 +431,8 @@ class _PlayerChromeBar extends StatelessWidget {
   }
 }
 
-class _ResumePrompt extends StatelessWidget {
-  const _ResumePrompt({required this.controller});
+class _PlaybackEndedOverlay extends StatelessWidget {
+  const _PlaybackEndedOverlay({required this.controller});
 
   final PlayerController controller;
 
@@ -385,52 +441,71 @@ class _ResumePrompt extends StatelessWidget {
     final l10n = AppLocalizations.of(context);
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    return Center(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 400),
-        child: Material(
-          color: scheme.surfaceContainerHigh.withValues(alpha: 0.96),
-          borderRadius: BorderRadius.circular(AppRadii.xl),
-          elevation: 12,
-          shadowColor: Colors.black.withValues(alpha: 0.5),
-          child: Padding(
-            padding: const EdgeInsets.all(AppSpacing.xxl),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  Icons.play_circle_outline_rounded,
-                  size: 40,
-                  color: scheme.primary,
-                ),
-                const SizedBox(height: AppSpacing.md),
-                Text(
-                  l10n.resumePrompt,
-                  textAlign: TextAlign.center,
-                  style: theme.textTheme.titleLarge,
-                ),
-                const SizedBox(height: AppSpacing.xl),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
+    final title = controller.item?.displayName ?? '';
+    final seriesId = controller.item?.seriesId;
+    final hasSeries = seriesId != null && seriesId.isNotEmpty;
+    return Positioned.fill(
+      child: ColoredBox(
+        color: const Color(0x99000000),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: LiquidGlass(
+              kind: LiquidGlassKind.panel,
+              padding: const EdgeInsets.all(AppSpacing.xxl),
+              child: Material(
+                key: PlayerKeys.playbackEnded,
+                type: MaterialType.transparency,
+                child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    FilledButton.icon(
-                      key: PlayerKeys.resumeContinue,
-                      onPressed: () =>
-                          controller.chooseResume(fromBeginning: false),
-                      icon: const Icon(Icons.play_arrow_rounded),
-                      label: Text(l10n.resumePlay),
+                    Icon(Icons.replay_rounded, size: 40, color: scheme.primary),
+                    const SizedBox(height: AppSpacing.md),
+                    Text(
+                      l10n.playbackEnded,
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.titleLarge,
                     ),
-                    const SizedBox(width: AppSpacing.sm),
-                    OutlinedButton(
-                      key: PlayerKeys.resumeFromStart,
-                      onPressed: () =>
-                          controller.chooseResume(fromBeginning: true),
-                      child: Text(l10n.playFromStart),
+                    if (title.isNotEmpty) ...[
+                      const SizedBox(height: AppSpacing.xs),
+                      Text(
+                        title,
+                        textAlign: TextAlign.center,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: AppSpacing.xl),
+                    Wrap(
+                      alignment: WrapAlignment.center,
+                      spacing: AppSpacing.sm,
+                      runSpacing: AppSpacing.sm,
+                      children: [
+                        FilledButton.icon(
+                          key: PlayerKeys.replay,
+                          onPressed: () => unawaited(controller.replay()),
+                          icon: const Icon(Icons.replay_rounded),
+                          label: Text(l10n.replay),
+                        ),
+                        if (hasSeries)
+                          OutlinedButton(
+                            key: PlayerKeys.endedViewSeries,
+                            onPressed: controller.openEndedSeries,
+                            child: Text(l10n.viewSeries),
+                          ),
+                        OutlinedButton(
+                          key: PlayerKeys.endedClose,
+                          onPressed: () => unawaited(controller.close()),
+                          child: Text(l10n.closePlayer),
+                        ),
+                      ],
                     ),
                   ],
                 ),
-              ],
+              ),
             ),
           ),
         ),
@@ -454,14 +529,12 @@ class _NextEpisodeBanner extends StatelessWidget {
     return Positioned(
       right: AppSpacing.xl,
       bottom: 112,
-      child: Material(
-        key: PlayerKeys.nextEpisode,
-        color: scheme.surfaceContainerHigh.withValues(alpha: 0.95),
-        borderRadius: BorderRadius.circular(AppRadii.lg),
-        elevation: 12,
-        shadowColor: Colors.black.withValues(alpha: 0.5),
-        child: Padding(
-          padding: const EdgeInsets.all(AppSpacing.lg),
+      child: LiquidGlass(
+        kind: LiquidGlassKind.control,
+        padding: const EdgeInsets.all(AppSpacing.lg),
+        child: Material(
+          key: PlayerKeys.nextEpisode,
+          type: MaterialType.transparency,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
@@ -536,16 +609,14 @@ class _Banner extends StatelessWidget {
       child: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 560),
-          child: Material(
-            color: scheme.surfaceContainerHighest.withValues(alpha: 0.92),
-            borderRadius: BorderRadius.circular(AppRadii.md),
-            elevation: 8,
-            shadowColor: Colors.black.withValues(alpha: 0.45),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: AppSpacing.md,
-                vertical: AppSpacing.sm,
-              ),
+          child: LiquidGlass(
+            kind: LiquidGlassKind.control,
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.md,
+              vertical: AppSpacing.sm,
+            ),
+            child: Material(
+              type: MaterialType.transparency,
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -591,7 +662,6 @@ class _ControlsBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
     final durationMs = controller.duration.inMilliseconds;
     final seekEnabled = durationMs > 0;
     final value = dragging
@@ -602,9 +672,6 @@ class _ControlsBar extends StatelessWidget {
                   0.0,
                   1.0,
                 ));
-    final methodColor = controller.isTranscode
-        ? Colors.orangeAccent
-        : Colors.lightGreenAccent;
     return Positioned(
       left: 0,
       right: 0,
@@ -621,19 +688,15 @@ class _ControlsBar extends StatelessWidget {
               gradient: LinearGradient(
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
-                colors: [
-                  Colors.transparent,
-                  Color(0x8A000000),
-                  Color(0xD9000000),
-                ],
+                colors: [Colors.transparent, Color(0xCC000000)],
               ),
             ),
             child: Padding(
               padding: const EdgeInsets.fromLTRB(
-                AppSpacing.xl,
-                AppSpacing.huge,
-                AppSpacing.xl,
                 AppSpacing.lg,
+                AppSpacing.huge,
+                AppSpacing.lg,
+                AppSpacing.md,
               ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -642,20 +705,12 @@ class _ControlsBar extends StatelessWidget {
                     children: [
                       Text(
                         _clock(controller.position),
-                        style: theme.textTheme.labelMedium,
+                        style: _overlayTimeStyle(theme),
                       ),
                       const SizedBox(width: AppSpacing.sm),
                       Expanded(
                         child: SliderTheme(
-                          data: theme.sliderTheme.copyWith(
-                            trackHeight: 4,
-                            thumbShape: const RoundSliderThumbShape(
-                              enabledThumbRadius: 7,
-                            ),
-                            overlayShape: const RoundSliderOverlayShape(
-                              overlayRadius: 16,
-                            ),
-                          ),
+                          data: _overlaySliderTheme(theme, thumbRadius: 6),
                           child: Slider(
                             key: PlayerKeys.seekBar,
                             value: value,
@@ -675,157 +730,142 @@ class _ControlsBar extends StatelessWidget {
                       const SizedBox(width: AppSpacing.sm),
                       Text(
                         _clock(controller.duration),
-                        style: theme.textTheme.labelMedium,
+                        style: _overlayTimeStyle(theme),
                       ),
                     ],
                   ),
-                  const SizedBox(height: AppSpacing.xs),
                   Row(
                     children: [
+                      IconButton(
+                        key: PlayerKeys.playPause,
+                        tooltip: controller.isPlaying ? l10n.pause : l10n.play,
+                        onPressed: controller.togglePlay,
+                        color: Colors.white,
+                        iconSize: 28,
+                        icon: Icon(
+                          controller.isPlaying
+                              ? Icons.pause_rounded
+                              : Icons.play_arrow_rounded,
+                        ),
+                      ),
+                      IconButton(
+                        key: PlayerKeys.mute,
+                        tooltip: controller.volume <= 0
+                            ? l10n.unmute
+                            : l10n.mute,
+                        onPressed: controller.toggleMute,
+                        color: Colors.white,
+                        iconSize: 20,
+                        icon: Icon(
+                          controller.volume <= 0
+                              ? Icons.volume_off_rounded
+                              : Icons.volume_up_rounded,
+                        ),
+                      ),
                       SizedBox(
-                        width: 56,
-                        height: 56,
-                        child: IconButton(
-                          key: PlayerKeys.playPause,
-                          tooltip: controller.isPlaying
-                              ? l10n.pause
-                              : l10n.play,
-                          onPressed: controller.togglePlay,
-                          iconSize: 32,
-                          style: IconButton.styleFrom(
-                            backgroundColor: scheme.primary,
-                            foregroundColor: scheme.onPrimary,
-                            shape: const CircleBorder(),
-                          ),
-                          icon: Icon(
-                            controller.isPlaying
-                                ? Icons.pause_rounded
-                                : Icons.play_arrow_rounded,
+                        width: 110,
+                        child: SliderTheme(
+                          data: _overlaySliderTheme(theme, thumbRadius: 5),
+                          child: Slider(
+                            key: PlayerKeys.volume,
+                            value: controller.volume.clamp(0, 100).toDouble(),
+                            min: 0,
+                            max: 100,
+                            label: l10n.volumePercent(controller.volume),
+                            onChanged: (value) {
+                              controller.setVolume(value.round());
+                            },
                           ),
                         ),
                       ),
-                      const SizedBox(width: AppSpacing.md),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: AppSpacing.sm,
-                          vertical: AppSpacing.xxs,
-                        ),
-                        decoration: BoxDecoration(
-                          color: methodColor.withValues(alpha: 0.16),
-                          borderRadius: BorderRadius.circular(AppRadii.sm),
-                          border: Border.all(
-                            color: methodColor.withValues(alpha: 0.5),
-                          ),
-                        ),
+                      SizedBox(
+                        width: 40,
                         child: Text(
-                          key: PlayerKeys.playMethod,
-                          controller.isTranscode
-                              ? l10n.transcode
-                              : l10n.directPlay,
-                          style: theme.textTheme.labelMedium?.copyWith(
-                            color: methodColor,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: AppSpacing.lg),
-                      Icon(
-                        Icons.volume_up_rounded,
-                        color: scheme.onSurface,
-                        size: 20,
-                        semanticLabel: l10n.volume,
-                      ),
-                      SizedBox(
-                        width: 104,
-                        child: Slider(
-                          key: PlayerKeys.volume,
-                          value: controller.volume.clamp(0, 100).toDouble(),
-                          min: 0,
-                          max: 100,
-                          onChanged: (value) {
-                            controller.setVolume(value.round());
-                          },
+                          key: PlayerKeys.volumePercent,
+                          l10n.volumePercent(controller.volume),
+                          textAlign: TextAlign.end,
+                          style: _overlayTimeStyle(theme),
                         ),
                       ),
                       const Spacer(),
-                      if (controller.isTranscode) ...[
-                        _ControlDropdown<int>(
+                      if (controller.isTranscode)
+                        _ControlMenu<int>(
                           key: PlayerKeys.quality,
                           tooltip: l10n.qualityAuto,
-                          value:
-                              kTranscodeBitrates.contains(
-                                controller.maxStreamingBitrate,
-                              )
-                              ? controller.maxStreamingBitrate
-                              : kTranscodeBitrates.first,
+                          icon: Icons.high_quality_outlined,
+                          onSelected: controller.setMaxBitrate,
                           items: [
-                            DropdownMenuItem(
+                            CheckedPopupMenuItem(
                               value: kTranscodeBitrates.first,
+                              checked:
+                                  controller.maxStreamingBitrate ==
+                                      kTranscodeBitrates.first ||
+                                  !kTranscodeBitrates.contains(
+                                    controller.maxStreamingBitrate,
+                                  ),
                               child: Text(l10n.qualityAuto),
                             ),
                             for (final bitrate in kTranscodeBitrates.skip(1))
-                              DropdownMenuItem(
+                              CheckedPopupMenuItem(
                                 value: bitrate,
+                                checked:
+                                    controller.maxStreamingBitrate == bitrate,
                                 child: Text(
                                   l10n.qualityMbps(bitrate ~/ 1000000),
                                 ),
                               ),
                           ],
-                          onChanged: (value) {
-                            if (value != null) {
-                              controller.setMaxBitrate(value);
-                            }
-                          },
                         ),
-                        const SizedBox(width: AppSpacing.xs),
-                      ],
-                      if (controller.audioTracks.length > 1) ...[
-                        _ControlDropdown<int>(
+                      if (controller.audioTracks.length > 1)
+                        _ControlMenu<int>(
                           key: PlayerKeys.audio,
                           tooltip: l10n.audioTrack,
-                          value: controller.audioStreamIndex,
-                          hint: l10n.audioTrack,
+                          icon: Icons.audiotrack_rounded,
+                          onSelected: controller.setAudio,
                           items: [
                             for (final track in controller.audioTracks)
-                              DropdownMenuItem(
+                              CheckedPopupMenuItem(
                                 value: track.index,
+                                checked:
+                                    track.index == controller.audioStreamIndex,
                                 child: Text(track.label),
                               ),
                           ],
-                          onChanged: (value) {
-                            if (value != null) {
-                              controller.setAudio(value);
-                            }
-                          },
                         ),
-                        const SizedBox(width: AppSpacing.xs),
-                      ],
-                      if (controller.subtitleTracks.isNotEmpty) ...[
-                        _ControlDropdown<int?>(
+                      if (controller.subtitleTracks.isNotEmpty)
+                        _ControlMenu<int>(
                           key: PlayerKeys.subtitle,
                           tooltip: l10n.subtitleTrack,
-                          value: controller.subtitleStreamIndex,
-                          hint: l10n.subtitleTrack,
+                          icon: controller.subtitleStreamIndex == null
+                              ? Icons.closed_caption_off_rounded
+                              : Icons.closed_caption_rounded,
+                          onSelected: (value) {
+                            controller.setSubtitle(
+                              value == _subtitleOffToken ? null : value,
+                            );
+                          },
                           items: [
-                            DropdownMenuItem(
-                              value: null,
+                            CheckedPopupMenuItem(
+                              value: _subtitleOffToken,
+                              checked: controller.subtitleStreamIndex == null,
                               child: Text(l10n.subtitleOff),
                             ),
                             for (final track in controller.subtitleTracks)
-                              DropdownMenuItem(
+                              CheckedPopupMenuItem(
                                 value: track.index,
+                                checked:
+                                    track.index ==
+                                    controller.subtitleStreamIndex,
                                 child: Text(track.label),
                               ),
                           ],
-                          onChanged: controller.setSubtitle,
                         ),
-                        const SizedBox(width: AppSpacing.xs),
-                      ],
                       IconButton(
                         key: PlayerKeys.fullscreen,
                         tooltip: controller.isFullScreen
                             ? l10n.exitFullscreen
                             : l10n.fullscreen,
-                        color: scheme.onSurface,
+                        color: Colors.white,
                         onPressed: controller.toggleFullScreen,
                         icon: Icon(
                           controller.isFullScreen
@@ -845,59 +885,63 @@ class _ControlsBar extends StatelessWidget {
   }
 }
 
-/// 控制条右侧分组用的统一样式下拉(码率/音轨/字幕)。
-class _ControlDropdown<T> extends StatelessWidget {
-  const _ControlDropdown({
+const _subtitleOffToken = -1;
+
+/// 控制条右侧用图标打开菜单,长轨名只出现在弹出层。
+class _ControlMenu<T> extends StatelessWidget {
+  const _ControlMenu({
     super.key,
     required this.tooltip,
-    required this.value,
+    required this.icon,
     required this.items,
-    required this.onChanged,
-    this.hint,
+    required this.onSelected,
   });
 
   final String tooltip;
-  final T? value;
-  final String? hint;
-  final List<DropdownMenuItem<T>> items;
-  final ValueChanged<T?>? onChanged;
+  final IconData icon;
+  final List<PopupMenuEntry<T>> items;
+  final ValueChanged<T> onSelected;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    return Tooltip(
-      message: tooltip,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
-        decoration: BoxDecoration(
-          color: scheme.onSurface.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(AppRadii.sm),
-        ),
-        child: DropdownButton<T>(
-          value: value,
-          hint: hint == null
-              ? null
-              : Text(
-                  hint!,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: scheme.onSurface,
-                  ),
-                ),
-          items: items,
-          onChanged: onChanged,
-          underline: const SizedBox.shrink(),
-          dropdownColor: scheme.surfaceContainerHigh,
-          borderRadius: BorderRadius.circular(AppRadii.md),
-          style: theme.textTheme.bodyMedium?.copyWith(color: scheme.onSurface),
-          icon: Icon(
-            Icons.keyboard_arrow_down_rounded,
-            color: scheme.onSurfaceVariant,
-          ),
-        ),
+    return PopupMenuButton<T>(
+      tooltip: tooltip,
+      onSelected: onSelected,
+      color: const Color(0xE6121212),
+      surfaceTintColor: Colors.transparent,
+      constraints: const BoxConstraints(
+        minWidth: 200,
+        maxWidth: 360,
+        maxHeight: 360,
       ),
+      padding: EdgeInsets.zero,
+      splashRadius: 20,
+      icon: Icon(icon, color: Colors.white),
+      itemBuilder: (context) => items,
     );
   }
+}
+
+TextStyle? _overlayTimeStyle(ThemeData theme) {
+  return theme.textTheme.labelMedium?.copyWith(
+    color: Colors.white,
+    fontFeatures: const [FontFeature.tabularFigures()],
+  );
+}
+
+SliderThemeData _overlaySliderTheme(
+  ThemeData theme, {
+  required double thumbRadius,
+}) {
+  return theme.sliderTheme.copyWith(
+    trackHeight: 3,
+    activeTrackColor: Colors.white,
+    inactiveTrackColor: Colors.white.withValues(alpha: 0.28),
+    thumbColor: Colors.white,
+    overlayColor: Colors.white.withValues(alpha: 0.18),
+    thumbShape: RoundSliderThumbShape(enabledThumbRadius: thumbRadius),
+    overlayShape: RoundSliderOverlayShape(overlayRadius: thumbRadius * 2.2),
+  );
 }
 
 VideoBackend _createBackend(PlayerBindings bindings) {

@@ -5,6 +5,8 @@ import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/app_empty_view.dart';
 import 'package:rillight/app/widgets/app_error_view.dart';
+import 'package:rillight/app/widgets/emby_mark.dart';
+import 'package:rillight/app/widgets/liquid_glass.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/auth/failure_message.dart';
@@ -23,6 +25,8 @@ abstract final class ConnectFormKeys {
   static const addServer = Key('connect-add-server');
   static const addLine = Key('connect-add-line');
   static const deleteLine = Key('connect-delete-line');
+  static const serverSearch = Key('connect-server-search');
+  static Key extraLine(int index) => Key('connect-extra-line-$index');
 }
 
 class ConnectPage extends StatefulWidget {
@@ -42,6 +46,8 @@ class _ConnectPageState extends State<ConnectPage> {
   String? _selectedServerId;
   String? _selectedLineId;
   bool _moreExpanded = false;
+  String _serverQuery = '';
+  final List<TextEditingController> _extraLines = [];
 
   @override
   void didChangeDependencies() {
@@ -81,6 +87,9 @@ class _ConnectPageState extends State<ConnectPage> {
     _userAgent.dispose();
     _username.dispose();
     _password.dispose();
+    for (final extra in _extraLines) {
+      extra.dispose();
+    }
     super.dispose();
   }
 
@@ -114,6 +123,16 @@ class _ConnectPageState extends State<ConnectPage> {
     if (!mounted || !auth.isLoggedIn) {
       return;
     }
+    final extras = [
+      for (final extra in _extraLines)
+        if (extra.text.trim().isNotEmpty) extra.text,
+    ];
+    if (extras.isNotEmpty) {
+      await auth.appendLines(extras, userAgent: _userAgent.text);
+    }
+    if (!mounted || !auth.isLoggedIn) {
+      return;
+    }
     if (adding) {
       context.go(AppRoutes.home);
     }
@@ -129,31 +148,20 @@ class _ConnectPageState extends State<ConnectPage> {
     await _loadPassword(server.id);
   }
 
-  void _selectSavedLine(SavedServer server, ServerLine line) {
-    _appliedPrefillId = server.id;
+  void _addExtraLine() {
     setState(() {
-      _selectedServerId = server.id;
-      _selectedLineId = line.id;
-      _address.text = line.address;
-      _path.clear();
-      _userAgent.text = line.normalizedUserAgent ?? '';
-      _username.text = server.username;
+      _extraLines.add(TextEditingController());
+      _moreExpanded = true;
     });
-    _loadPassword(server.id);
   }
 
-  void _startNewLineFor(SavedServer server) {
-    _appliedPrefillId = server.id;
+  void _removeLastExtraLine() {
+    if (_extraLines.isEmpty) {
+      return;
+    }
     setState(() {
-      _selectedServerId = server.id;
-      _selectedLineId = null;
-      _address.clear();
-      _path.clear();
-      _userAgent.clear();
-      _username.text = server.username;
+      _extraLines.removeLast().dispose();
     });
-    AuthScope.of(context).clearFailure();
-    _loadPassword(server.id);
   }
 
   void _startNewServer() {
@@ -165,6 +173,10 @@ class _ConnectPageState extends State<ConnectPage> {
       _userAgent.clear();
       _username.clear();
       _password.clear();
+      for (final extra in _extraLines) {
+        extra.dispose();
+      }
+      _extraLines.clear();
     });
     AuthScope.of(context).clearFailure();
   }
@@ -255,9 +267,11 @@ class _ConnectPageState extends State<ConnectPage> {
     AppLocalizations l10n,
     AuthController auth,
   ) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(AppSpacing.xl),
+    return LiquidGlass(
+      kind: LiquidGlassKind.panel,
+      padding: const EdgeInsets.all(AppSpacing.xl),
+      child: Material(
+        type: MaterialType.transparency,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -373,20 +387,20 @@ class _ConnectPageState extends State<ConnectPage> {
             children: [
               TextButton.icon(
                 key: ConnectFormKeys.addLine,
-                onPressed: auth.isBusy || selectedServer == null
-                    ? null
-                    : () => _startNewLineFor(selectedServer),
+                onPressed: auth.isBusy ? null : _addExtraLine,
                 icon: const Icon(Icons.add, size: 18),
                 label: Text(l10n.addLine),
               ),
               const SizedBox(width: AppSpacing.xs),
               TextButton.icon(
                 key: ConnectFormKeys.deleteLine,
-                onPressed:
-                    auth.isBusy ||
-                        selectedServer == null ||
-                        selectedServer.lines.length <= 1 ||
-                        _selectedLineId == null
+                onPressed: auth.isBusy
+                    ? null
+                    : _extraLines.isNotEmpty
+                    ? _removeLastExtraLine
+                    : (selectedServer == null ||
+                          selectedServer.lines.length <= 1 ||
+                          _selectedLineId == null)
                     ? null
                     : _deleteSelectedLine,
                 icon: const Icon(Icons.link_off, size: 18),
@@ -397,6 +411,19 @@ class _ConnectPageState extends State<ConnectPage> {
               ),
             ],
           ),
+          for (var i = 0; i < _extraLines.length; i++) ...[
+            const SizedBox(height: AppSpacing.sm),
+            TextField(
+              key: ConnectFormKeys.extraLine(i),
+              controller: _extraLines[i],
+              enabled: !auth.isBusy,
+              keyboardType: TextInputType.url,
+              decoration: InputDecoration(
+                labelText: l10n.extraLineAddress,
+                hintText: l10n.serverAddressHint,
+              ),
+            ),
+          ],
           const SizedBox(height: AppSpacing.md),
           TextField(
             key: ConnectFormKeys.userAgent,
@@ -453,13 +480,56 @@ class _ConnectPageState extends State<ConnectPage> {
         const SizedBox(height: AppSpacing.sm),
         if (auth.savedServers.isEmpty)
           AppEmptyView(message: l10n.noSavedServers, icon: Icons.dns_outlined)
-        else
-          for (final server in auth.savedServers) ...[
-            _buildServerCard(context, l10n, auth, server),
-            const SizedBox(height: AppSpacing.md),
-          ],
+        else ...[
+          if (auth.savedServers.length > 6)
+            Padding(
+              padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+              child: TextField(
+                key: ConnectFormKeys.serverSearch,
+                onChanged: (value) => setState(() => _serverQuery = value),
+                decoration: InputDecoration(
+                  hintText: l10n.searchServers,
+                  prefixIcon: const Icon(Icons.search, size: 20),
+                  isDense: true,
+                ),
+              ),
+            ),
+          SizedBox(
+            height: auth.savedServers.length > 4 ? 320 : null,
+            child: ListView.separated(
+              shrinkWrap: auth.savedServers.length <= 4,
+              physics: auth.savedServers.length <= 4
+                  ? const NeverScrollableScrollPhysics()
+                  : null,
+              itemCount: _filteredServers(auth).length,
+              separatorBuilder: (context, index) =>
+                  const SizedBox(height: AppSpacing.sm),
+              itemBuilder: (context, index) {
+                return _buildServerCard(
+                  context,
+                  l10n,
+                  auth,
+                  _filteredServers(auth)[index],
+                );
+              },
+            ),
+          ),
+        ],
       ],
     );
+  }
+
+  List<SavedServer> _filteredServers(AuthController auth) {
+    final needle = _serverQuery.trim().toLowerCase();
+    if (needle.isEmpty) {
+      return auth.savedServers;
+    }
+    return [
+      for (final server in auth.savedServers)
+        if (server.name.toLowerCase().contains(needle) ||
+            server.baseUrl.toLowerCase().contains(needle))
+          server,
+    ];
   }
 
   Widget _buildServerCard(
@@ -485,19 +555,12 @@ class _ConnectPageState extends State<ConnectPage> {
           InkWell(
             key: Key('saved-server-${server.id}'),
             onTap: auth.isBusy ? null : () => _selectSaved(server),
-            borderRadius: const BorderRadius.vertical(
-              top: Radius.circular(AppRadii.lg),
-            ),
+            borderRadius: BorderRadius.circular(AppRadii.lg),
             child: Padding(
               padding: const EdgeInsets.all(AppSpacing.md),
               child: Row(
                 children: [
-                  Icon(
-                    Icons.dns_outlined,
-                    color: selected
-                        ? colorScheme.primary
-                        : colorScheme.onSurfaceVariant,
-                  ),
+                  const EmbyMark(size: 28),
                   const SizedBox(width: AppSpacing.sm),
                   Expanded(
                     child: Column(
@@ -524,28 +587,21 @@ class _ConnectPageState extends State<ConnectPage> {
               ),
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(
-              AppSpacing.md,
-              0,
-              AppSpacing.md,
-              AppSpacing.sm,
+          if (server.lines.length > 1)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.md,
+                0,
+                AppSpacing.md,
+                AppSpacing.sm,
+              ),
+              child: Column(
+                children: [
+                  for (final line in server.lines)
+                    _buildLineTile(context, auth, server, line, selected),
+                ],
+              ),
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  l10n.lines,
-                  style: theme.textTheme.labelMedium?.copyWith(
-                    color: colorScheme.onSurfaceVariant,
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.xs),
-                for (final line in server.lines)
-                  _buildLineTile(context, auth, server, line, selected),
-              ],
-            ),
-          ),
         ],
       ),
     );
@@ -561,7 +617,6 @@ class _ConnectPageState extends State<ConnectPage> {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     final selected = serverSelected && line.id == _selectedLineId;
-
     return Padding(
       padding: const EdgeInsets.only(bottom: AppSpacing.xxs),
       child: Material(
@@ -589,18 +644,11 @@ class _ConnectPageState extends State<ConnectPage> {
                 ),
                 const SizedBox(width: AppSpacing.sm),
                 Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(line.address, style: theme.textTheme.bodyMedium),
-                      if (line.normalizedUserAgent != null)
-                        Text(
-                          line.normalizedUserAgent!,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: colorScheme.onSurfaceVariant,
-                          ),
-                        ),
-                    ],
+                  child: Text(
+                    line.hostLabel,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodyMedium,
                   ),
                 ),
                 if (selected)
@@ -611,6 +659,19 @@ class _ConnectPageState extends State<ConnectPage> {
         ),
       ),
     );
+  }
+
+  void _selectSavedLine(SavedServer server, ServerLine line) {
+    _appliedPrefillId = server.id;
+    setState(() {
+      _selectedServerId = server.id;
+      _selectedLineId = line.id;
+      _address.text = line.address;
+      _path.clear();
+      _userAgent.text = line.normalizedUserAgent ?? '';
+      _username.text = server.username;
+    });
+    _loadPassword(server.id);
   }
 }
 

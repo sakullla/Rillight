@@ -14,6 +14,7 @@ class EmbyClient {
     Duration connectTimeout = const Duration(seconds: 15),
     Duration receiveTimeout = const Duration(seconds: 15),
     this.onSessionExpired,
+    this.onRefreshSession,
   }) : _dio =
            dio ??
            Dio(
@@ -28,6 +29,8 @@ class EmbyClient {
   final EmbyDeviceInfo device;
   final Dio _dio;
   void Function()? onSessionExpired;
+  Future<bool> Function()? onRefreshSession;
+  Future<bool>? _refreshing;
 
   Uri? _baseUrl;
   String? _accessToken;
@@ -127,7 +130,13 @@ class EmbyClient {
   static const itemFields =
       'Overview,ProductionYear,RunTimeTicks,ChildCount,SeriesInfo,'
       'DateCreated,PremiereDate,CommunityRating,SortName,MediaSources,Chapters';
+
+  /// 海报网格不需要 MediaSources/Chapters,大库带上这两项会把 /Items 拖死。
+  static const gridFields =
+      'Overview,ProductionYear,RunTimeTicks,ChildCount,SeriesInfo,'
+      'DateCreated,PremiereDate,CommunityRating,SortName';
   static const imageTypes = 'Primary,Backdrop,Thumb';
+  static const detailImageTypes = 'Primary,Backdrop,Thumb,Chapter';
 
   String _requireUserId() {
     final userId = _userId;
@@ -142,13 +151,28 @@ class EmbyClient {
     int? startIndex,
     String? sortBy,
     String? sortOrder,
+  }) async {
+    return (await queryResumeItems(
+      limit: limit,
+      startIndex: startIndex,
+      sortBy: sortBy,
+      sortOrder: sortOrder,
+    )).items;
+  }
+
+  Future<EmbyItemPage> queryResumeItems({
+    int limit = 24,
+    int? startIndex,
+    String? sortBy,
+    String? sortOrder,
+    String fields = gridFields,
   }) {
-    return _getItemList(
+    return _getItemPage(
       '/Users/${_requireUserId()}/Items/Resume',
       queryParameters: {
         'Limit': '$limit',
         'MediaTypes': 'Video',
-        'Fields': itemFields,
+        'Fields': fields,
         'EnableImageTypes': imageTypes,
         if (startIndex != null) 'StartIndex': '$startIndex',
         'SortBy': ?sortBy,
@@ -162,13 +186,28 @@ class EmbyClient {
     int? startIndex,
     String? sortBy,
     String? sortOrder,
+  }) async {
+    return (await queryNextUp(
+      limit: limit,
+      startIndex: startIndex,
+      sortBy: sortBy,
+      sortOrder: sortOrder,
+    )).items;
+  }
+
+  Future<EmbyItemPage> queryNextUp({
+    int limit = 24,
+    int? startIndex,
+    String? sortBy,
+    String? sortOrder,
+    String fields = gridFields,
   }) {
-    return _getItemList(
+    return _getItemPage(
       '/Shows/NextUp',
       queryParameters: {
         'UserId': _requireUserId(),
         'Limit': '$limit',
-        'Fields': itemFields,
+        'Fields': fields,
         'EnableImageTypes': imageTypes,
         if (startIndex != null) 'StartIndex': '$startIndex',
         'SortBy': ?sortBy,
@@ -188,7 +227,7 @@ class EmbyClient {
         'IncludeItemTypes': includeItemTypes,
         'GroupItems': '$groupItems',
         'Limit': '$limit',
-        'Fields': itemFields,
+        'Fields': gridFields,
         'EnableImageTypes': imageTypes,
       },
     );
@@ -208,8 +247,32 @@ class EmbyClient {
     String? sortBy,
     String? sortOrder,
     String fields = itemFields,
+  }) async {
+    return (await queryItems(
+      parentId: parentId,
+      searchTerm: searchTerm,
+      includeItemTypes: includeItemTypes,
+      recursive: recursive,
+      limit: limit,
+      startIndex: startIndex,
+      sortBy: sortBy,
+      sortOrder: sortOrder,
+      fields: fields,
+    )).items;
+  }
+
+  Future<EmbyItemPage> queryItems({
+    String? parentId,
+    String? searchTerm,
+    String? includeItemTypes,
+    bool recursive = false,
+    int? limit,
+    int? startIndex,
+    String? sortBy,
+    String? sortOrder,
+    String fields = gridFields,
   }) {
-    return _getItemList(
+    return _getItemPage(
       '/Users/${_requireUserId()}/Items',
       queryParameters: {
         if (parentId != null && parentId.isNotEmpty) 'ParentId': parentId,
@@ -248,13 +311,28 @@ class EmbyClient {
     int? limit,
     String? sortBy,
     String? sortOrder,
+  }) async {
+    return (await querySimilar(
+      itemId,
+      limit: limit,
+      sortBy: sortBy,
+      sortOrder: sortOrder,
+    )).items;
+  }
+
+  Future<EmbyItemPage> querySimilar(
+    String itemId, {
+    int? limit,
+    String? sortBy,
+    String? sortOrder,
+    String fields = gridFields,
   }) {
-    return _getItemList(
+    return _getItemPage(
       '/Items/$itemId/Similar',
       queryParameters: {
         'UserId': _requireUserId(),
         if (limit != null) 'Limit': '$limit',
-        'Fields': itemFields,
+        'Fields': fields,
         'EnableImageTypes': imageTypes,
         'SortBy': ?sortBy,
         'SortOrder': ?sortOrder,
@@ -266,7 +344,10 @@ class EmbyClient {
     final data = await _request(
       'GET',
       '/Users/${_requireUserId()}/Items/$itemId',
-      queryParameters: {'Fields': itemFields, 'EnableImageTypes': imageTypes},
+      queryParameters: {
+        'Fields': itemFields,
+        'EnableImageTypes': detailImageTypes,
+      },
     );
     if (data is Map) {
       return EmbyItem.fromJson(Map<String, dynamic>.from(data));
@@ -280,6 +361,22 @@ class EmbyClient {
 
   Future<void> markUnplayed(String itemId) async {
     await deleteJson('/Users/${_requireUserId()}/PlayedItems/$itemId');
+  }
+
+  /// 从继续观看移除:优先 HideFromResume,旧版 Emby 则清零播放进度。
+  Future<void> hideFromResume(String itemId) async {
+    try {
+      await postJson('/Users/${_requireUserId()}/Items/$itemId/HideFromResume');
+    } on EmbyException {
+      await postJson(
+        '/Users/${_requireUserId()}/Items/$itemId/UserData',
+        body: {
+          'PlaybackPositionTicks': 0,
+          'PlayedPercentage': 0,
+          'Played': false,
+        },
+      );
+    }
   }
 
   Future<EmbyUser> getUser() async {
@@ -382,15 +479,25 @@ class EmbyClient {
     String itemId, {
     required int index,
     String? tag,
-    int maxWidth = 320,
-  }) {
-    return _requestBytes(
-      '/Items/$itemId/Images/Chapter/$index',
-      queryParameters: {
-        'maxWidth': '$maxWidth',
-        if (tag != null && tag.isNotEmpty) 'tag': tag,
-      },
-    );
+    int maxWidth = 400,
+  }) async {
+    try {
+      return await _requestBytes(
+        '/Items/$itemId/Images/Chapter/$index',
+        queryParameters: {
+          'maxWidth': '$maxWidth',
+          if (tag != null && tag.isNotEmpty) 'tag': tag,
+        },
+      );
+    } catch (_) {
+      if (tag == null || tag.isEmpty) {
+        rethrow;
+      }
+      return _requestBytes(
+        '/Items/$itemId/Images/Chapter/$index',
+        queryParameters: {'maxWidth': '$maxWidth'},
+      );
+    }
   }
 
   Future<List<int>> getItemImage(
@@ -436,8 +543,18 @@ class EmbyClient {
     String path, {
     Map<String, dynamic>? queryParameters,
   }) async {
+    return (await _getItemPage(path, queryParameters: queryParameters)).items;
+  }
+
+  Future<EmbyItemPage> _getItemPage(
+    String path, {
+    Map<String, dynamic>? queryParameters,
+  }) async {
     final data = await _request('GET', path, queryParameters: queryParameters);
-    return parseEmbyItemList(data);
+    return EmbyItemPage(
+      items: parseEmbyItemList(data),
+      totalRecordCount: parseEmbyTotalCount(data),
+    );
   }
 
   Future<Map<String, dynamic>> _requestJson(
@@ -477,7 +594,7 @@ class EmbyClient {
       _baseUrl!,
       path,
     ).replace(queryParameters: _stringifyQuery(queryParameters));
-    try {
+    return _withAuthRetry(() async {
       final response = await _dio.requestUri<dynamic>(
         uri,
         data: body,
@@ -487,11 +604,7 @@ class EmbyClient {
         ),
       );
       return _decodeBody(response.data);
-    } on EmbyException {
-      rethrow;
-    } on DioException catch (error) {
-      throw _mapAuthenticatedFailure(error);
-    }
+    });
   }
 
   Future<List<int>> _requestBytes(
@@ -505,7 +618,7 @@ class EmbyClient {
       _baseUrl!,
       path,
     ).replace(queryParameters: _stringifyQuery(queryParameters));
-    try {
+    return _withAuthRetry(() async {
       final response = await _dio.requestUri<dynamic>(
         uri,
         options: Options(
@@ -519,19 +632,55 @@ class EmbyClient {
         return data;
       }
       throw const EmbyException(EmbyFailureKind.unknown);
+    });
+  }
+
+  Future<T> _withAuthRetry<T>(Future<T> Function() send) async {
+    try {
+      return await send();
     } on EmbyException {
       rethrow;
     } on DioException catch (error) {
-      throw _mapAuthenticatedFailure(error);
+      final mapped = EmbyException.fromDio(error);
+      if (mapped.kind != EmbyFailureKind.sessionExpired) {
+        throw mapped;
+      }
+      if (!await _refreshIfExpired()) {
+        onSessionExpired?.call();
+        throw mapped;
+      }
+      try {
+        return await send();
+      } on EmbyException {
+        rethrow;
+      } on DioException catch (retryError) {
+        final retryMapped = EmbyException.fromDio(retryError);
+        if (retryMapped.kind == EmbyFailureKind.sessionExpired) {
+          onSessionExpired?.call();
+        }
+        throw retryMapped;
+      }
     }
   }
 
-  EmbyException _mapAuthenticatedFailure(DioException error) {
-    final mapped = EmbyException.fromDio(error);
-    if (mapped.kind == EmbyFailureKind.sessionExpired) {
-      onSessionExpired?.call();
+  Future<bool> _refreshIfExpired() async {
+    final inflight = _refreshing;
+    if (inflight != null) {
+      return inflight;
     }
-    return mapped;
+    final hook = onRefreshSession;
+    if (hook == null) {
+      return false;
+    }
+    final pending = hook();
+    _refreshing = pending;
+    try {
+      return await pending;
+    } finally {
+      if (identical(_refreshing, pending)) {
+        _refreshing = null;
+      }
+    }
   }
 
   Map<String, String>? _stringifyQuery(Map<String, dynamic>? query) {

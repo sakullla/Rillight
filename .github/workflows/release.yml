@@ -1,0 +1,208 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: Build Windows
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build Windows
+        run: flutter build windows --release
+
+      - name: Package Windows
+        shell: pwsh
+        run: |
+          $archive = "Rillight-windows-x64-${env:GITHUB_REF_NAME}.zip"
+          Compress-Archive -Path "build/windows/x64/runner/Release/*" -DestinationPath $archive
+
+      - name: Upload Windows package
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-windows
+          path: Rillight-windows-x64-${{ github.ref_name }}.zip
+          if-no-files-found: error
+
+  macos:
+    name: Build macOS (ad-hoc signed)
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build macOS without Xcode distribution signing
+        run: flutter build macos --release --no-codesign
+
+      - name: Ad-hoc sign and package macOS
+        shell: bash
+        run: |
+          set -euo pipefail
+          app_path="build/macos/Build/Products/Release/rillight.app"
+          test -d "$app_path"
+
+          # '-' is Apple's ad-hoc pseudo-identity. It needs no certificate,
+          # developer team, or provisioning profile, and is not notarized.
+          codesign --deep --force --verbose --sign - --timestamp=none "$app_path"
+
+          signature_info="$(codesign --display --verbose=4 "$app_path" 2>&1)"
+          echo "$signature_info"
+          grep -q '^Signature=adhoc$' <<< "$signature_info"
+          codesign --verify --deep --strict --verbose=2 "$app_path"
+
+          mac_arch="$(uname -m)"
+          archive="Rillight-macos-${GITHUB_REF_NAME}-${mac_arch}-adhoc.zip"
+          ditto -c -k --sequesterRsrc --keepParent "$app_path" "$archive"
+
+      - name: Upload macOS package
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-macos
+          path: Rillight-macos-${{ github.ref_name }}-*-adhoc.zip
+          if-no-files-found: error
+
+  linux:
+    name: Build Linux
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libmpv-dev
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build Linux
+        run: flutter build linux --release
+
+      - name: Package Linux
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="Rillight-linux-x64-${GITHUB_REF_NAME}.tar.gz"
+          tar -C build/linux/x64/release -czf "$archive" bundle
+
+      - name: Upload Linux package
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-linux
+          path: Rillight-linux-x64-${{ github.ref_name }}.tar.gz
+          if-no-files-found: error
+
+  release:
+    name: Create draft release
+    needs: [windows, macos, linux]
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Download packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+
+      - name: Create checksums
+        shell: bash
+        run: sha256sum dist/* > dist/SHA256SUMS
+
+      - name: Create draft GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" dist/* \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "Rillight ${GITHUB_REF_NAME}" \
+            --draft \
+            --generate-notes
+
+  verify-release:
+    name: Verify and publish release
+    needs: release
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - name: Require all platform packages
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          release_json="$(gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate \
+            | jq --arg tag "${GITHUB_REF_NAME}" '[.[] | select(.tag_name == $tag)] | first')"
+
+          if [ -z "$release_json" ] || [ "$release_json" = "null" ]; then
+            echo "::error::Release ${GITHUB_REF_NAME} was not found"
+            exit 1
+          fi
+
+          if [ "$(jq -r '.draft' <<< "$release_json")" != "true" ]; then
+            echo "::error::Release ${GITHUB_REF_NAME} was published before verification"
+            exit 1
+          fi
+
+          assets="$(jq -r '.assets[].name' <<< "$release_json")"
+          echo "$assets"
+
+          grep -Fqx "Rillight-windows-x64-${GITHUB_REF_NAME}.zip" <<< "$assets"
+          grep -Fqx "Rillight-linux-x64-${GITHUB_REF_NAME}.tar.gz" <<< "$assets"
+          grep -Fqx "SHA256SUMS" <<< "$assets"
+          grep -Eq "^Rillight-macos-.*-adhoc\.zip$" <<< "$assets"
+
+          echo "RELEASE_ID=$(jq -r '.id' <<< "$release_json")" >> "$GITHUB_ENV"
+
+      - name: Publish verified release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
+            -F draft=false
+          echo "Published release ${GITHUB_REF_NAME} (id=${RELEASE_ID})"

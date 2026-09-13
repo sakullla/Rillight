@@ -18,6 +18,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get posterPlaceholder => '封面不可用';
 
   @override
+  String get unsupported => '不支持';
+
+  @override
   String get connectTitle => '连接服务器';
 
   @override
@@ -66,7 +69,24 @@ class AppLocalizationsZh extends AppLocalizations {
   String get deleteLine => '删除线路';
 
   @override
+  String get extraLineAddress => '线路地址';
+
+  @override
+  String get searchServers => '搜索服务器';
+
+  @override
+  String lineCount(int count) {
+    return '$count 条线路';
+  }
+
+  @override
   String get volume => '音量';
+
+  @override
+  String get mute => '静音';
+
+  @override
+  String get unmute => '取消静音';
 
   @override
   String get switchServer => '切换服务器';
@@ -107,6 +127,28 @@ class AppLocalizationsZh extends AppLocalizations {
   String get libraries => '片库';
 
   @override
+  String get customizeNav => '自定义导航';
+
+  @override
+  String customizeNavHint(int count) {
+    return '最多勾选 $count 个。顶栏放不下的会进「更多」。未勾选的不出现在导航、更多和首页片库。';
+  }
+
+  @override
+  String get saveNav => '保存';
+
+  @override
+  String get moveNavUp => '上移';
+
+  @override
+  String get moveNavDown => '下移';
+
+  @override
+  String volumePercent(int percent) {
+    return '$percent%';
+  }
+
+  @override
   String get search => '搜索';
 
   @override
@@ -119,16 +161,19 @@ class AppLocalizationsZh extends AppLocalizations {
   String get searchNoResults => '没有结果';
 
   @override
+  String get removeFromResume => '从继续观看移除';
+
+  @override
   String get resumeRow => '继续观看';
 
   @override
   String get nextUpRow => '即将播放';
 
   @override
-  String get latestMoviesRow => '最近添加的电影';
+  String get latestMoviesRow => '最近更新的电影';
 
   @override
-  String get latestSeriesRow => '最近添加的剧集';
+  String get latestSeriesRow => '最近更新的剧集';
 
   @override
   String get more => '更多';
@@ -143,16 +188,43 @@ class AppLocalizationsZh extends AppLocalizations {
   String get sortBy => '排序';
 
   @override
-  String get sortByName => '名称';
+  String get sortByName => '标题';
 
   @override
-  String get sortByDateCreated => '添加日期';
+  String get sortByDateUpdated => '更新日期';
+
+  @override
+  String get sortByDateCreated => '加入日期';
 
   @override
   String get sortByPremiereDate => '首映日期';
 
   @override
-  String get sortByRating => '评分';
+  String get sortByCommunityRating => 'IMDb评分';
+
+  @override
+  String get sortByCriticRating => '影评人评分';
+
+  @override
+  String get sortByProductionYear => '出品年份';
+
+  @override
+  String get sortByOfficialRating => '官方评级';
+
+  @override
+  String get sortByDatePlayed => '播放日期';
+
+  @override
+  String get sortByRuntime => '播放时长';
+
+  @override
+  String get sortByRandom => '随机';
+
+  @override
+  String get sortByRating => 'IMDb评分';
+
+  @override
+  String get sortByIndexNumber => '集数';
 
   @override
   String get scrollLeft => '向左';
@@ -228,7 +300,37 @@ class AppLocalizationsZh extends AppLocalizations {
   String get resumePlay => '继续播放';
 
   @override
+  String get viewSeries => '查看剧集';
+
+  @override
+  String get viewThisEpisode => '查看本集';
+
+  @override
+  String get nextEpisode => '下一集';
+
+  @override
+  String get locateEpisode => '跳转到此集';
+
+  @override
+  String get pickEpisode => '选集';
+
+  @override
+  String get jumpToEpisodeHint => '输入集数，回车跳转';
+
+  @override
+  String get nowPlayingEpisode => '正在观看';
+
+  @override
   String get playFromStart => '从头播放';
+
+  @override
+  String get playbackEnded => '播放结束';
+
+  @override
+  String get replay => '重播';
+
+  @override
+  String get closePlayer => '关闭';
 
   @override
   String get resumePrompt => '要从上次的位置继续播放吗？';

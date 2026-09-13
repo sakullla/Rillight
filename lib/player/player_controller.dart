@@ -8,12 +8,13 @@ import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/player/playback_check_in.dart';
 import 'package:rillight/player/playback_models.dart';
 import 'package:rillight/player/playback_resolver.dart';
+import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/player_window.dart';
 import 'package:rillight/player/video_backend.dart';
 
 enum PlayerErrorKind { load, notPlayable, noStream }
 
-enum SubtitleNoticeKind { bitmapBurnIn, bitmapFailed }
+enum SubtitleNoticeKind { bitmapFailed }
 
 class NextEpisodeOffer {
   const NextEpisodeOffer({required this.item, this.remaining});
@@ -30,9 +31,10 @@ class PlayerController extends ChangeNotifier {
     required this.itemId,
     required this.backend,
     required this.window,
-    this.autoResume = false,
+    this.autoResume = true,
     this.progressInterval = const Duration(seconds: 10),
-    this.controlsHideAfter = const Duration(seconds: 3),
+    this.progressFailBannerFor = const Duration(seconds: 4),
+    this.controlsHideAfter = const Duration(seconds: 5),
     this.nextEpisodeCountdown = const Duration(seconds: 10),
     this.seekStep = const Duration(seconds: 10),
     this.onClose,
@@ -41,6 +43,7 @@ class PlayerController extends ChangeNotifier {
     this.preferredAudioStreamIndex,
     this.preferredSubtitleStreamIndex,
     this.startTimeTicks,
+    this.settingsStore,
   }) {
     _bindBackend();
     window.addListener(_emit);
@@ -52,11 +55,13 @@ class PlayerController extends ChangeNotifier {
   final PlayerWindow window;
   bool autoResume;
   final Duration progressInterval;
+  final Duration progressFailBannerFor;
   final Duration controlsHideAfter;
   final Duration nextEpisodeCountdown;
   final Duration seekStep;
   final VoidCallback? onClose;
   final ValueChanged<String>? onOpenItem;
+  PlayerSettingsStore? settingsStore;
   final String? preferredMediaSourceId;
   final int? preferredAudioStreamIndex;
   final int? preferredSubtitleStreamIndex;
@@ -65,7 +70,6 @@ class PlayerController extends ChangeNotifier {
   final PlaybackCheckInMachine checkIn = PlaybackCheckInMachine();
 
   bool loading = true;
-  bool showResumePrompt = false;
   bool controlsVisible = true;
   bool isPlaying = false;
   bool disconnected = false;
@@ -74,16 +78,17 @@ class PlayerController extends ChangeNotifier {
   bool _disposed = false;
   bool _sessionStarted = false;
   int volume = 100;
+  int _unmutedVolume = 100;
   int maxStreamingBitrate = kMpvMaxStreamingBitrate;
   int? audioStreamIndex;
   int? subtitleStreamIndex;
-  int? _resumeTicks;
   Duration position = Duration.zero;
   Duration duration = Duration.zero;
   PlayerErrorKind? error;
   EmbyException? loadFailure;
   SubtitleNoticeKind? subtitleNotice;
   NextEpisodeOffer? nextEpisode;
+  bool playbackEnded = false;
   EmbyItem? item;
   EmbyUser? user;
   ResolvedPlayback? resolved;
@@ -97,8 +102,12 @@ class PlayerController extends ChangeNotifier {
       resolved?.mediaSource.subtitleStreams ?? const [];
 
   Timer? _progressTimer;
+  Timer? _progressFailBannerTimer;
+  DateTime? _progressFailBannerAt;
+  Timer? _subtitleNoticeTimer;
   Timer? _hideTimer;
   Timer? _nextTimer;
+  Timer? _volumeSaveTimer;
   StreamSubscription<Duration>? _positionSub;
   StreamSubscription<Duration>? _durationSub;
   StreamSubscription<bool>? _playingSub;
@@ -113,10 +122,11 @@ class PlayerController extends ChangeNotifier {
     progressSyncFailed = false;
     subtitleNotice = null;
     nextEpisode = null;
-    showResumePrompt = false;
+    playbackEnded = false;
     loading = true;
     _emit();
     try {
+      await _restoreVolume();
       item = await client.getItem(itemId);
       if (_disposed) {
         return;
@@ -143,15 +153,11 @@ class PlayerController extends ChangeNotifier {
       final resumeTicks = item!.canResume
           ? item!.userData.playbackPositionTicks
           : 0;
-      if (!autoResume && resumeTicks > 0) {
-        _resumeTicks = _rewound(resumeTicks);
-        position = durationFromTicks(_resumeTicks!);
-        showResumePrompt = true;
-        loading = false;
-        _emit();
+      if (!autoResume) {
+        await _open(startTicks: 0);
         return;
       }
-      await _open(startTicks: autoResume ? _rewound(resumeTicks) : 0);
+      await _open(startTicks: resumeTicks > 0 ? _rewound(resumeTicks) : 0);
     } on EmbyException catch (failure) {
       if (_disposed) {
         return;
@@ -163,18 +169,35 @@ class PlayerController extends ChangeNotifier {
     }
   }
 
-  Future<void> chooseResume({required bool fromBeginning}) async {
-    showResumePrompt = false;
-    loading = true;
-    _emit();
-    await _open(startTicks: fromBeginning ? 0 : (_resumeTicks ?? 0));
-  }
-
   Future<void> togglePlay() async {
-    if (showResumePrompt || loading || error != null) {
+    if (loading || error != null) {
+      return;
+    }
+    if (playbackEnded) {
+      await replay();
       return;
     }
     await backend.playOrPause();
+  }
+
+  Future<void> replay() async {
+    if (_disposed) {
+      return;
+    }
+    playbackEnded = false;
+    nextEpisode = null;
+    _nextTimer?.cancel();
+    _nextTimer = null;
+    await _open(startTicks: 0);
+  }
+
+  void openEndedSeries() {
+    final seriesId = item?.seriesId;
+    if (seriesId != null && seriesId.isNotEmpty) {
+      onOpenItem?.call(seriesId);
+      return;
+    }
+    unawaited(close());
   }
 
   Future<void> seekRelative(Duration delta) {
@@ -189,10 +212,15 @@ class PlayerController extends ChangeNotifier {
   }
 
   Future<void> seekTo(Duration target) async {
-    if (resolved == null || showResumePrompt) {
+    if (resolved == null) {
       return;
     }
     onUserActivity();
+    if (playbackEnded) {
+      playbackEnded = false;
+      await _open(startTicks: ticksFromDuration(target));
+      return;
+    }
     if (isTranscode) {
       await _reopen(startTicks: ticksFromDuration(target));
       return;
@@ -203,10 +231,28 @@ class PlayerController extends ChangeNotifier {
     await _reportProgress(eventName: 'Seek');
   }
 
+  static const volumeWheelStep = 5;
+
   Future<void> setVolume(int value) async {
     volume = value.clamp(0, 100);
+    if (volume > 0) {
+      _unmutedVolume = volume;
+    }
     await backend.setVolume(volume.toDouble());
-    _emit();
+    onUserActivity();
+    _scheduleVolumeSave();
+  }
+
+  Future<void> toggleMute() {
+    if (volume > 0) {
+      return setVolume(0);
+    }
+    return setVolume(_unmutedVolume <= 0 ? 100 : _unmutedVolume);
+  }
+
+  Future<void> nudgeVolume(int delta) {
+    onUserActivity();
+    return setVolume(volume + delta);
   }
 
   Future<void> setAudio(int index) async {
@@ -223,7 +269,7 @@ class PlayerController extends ChangeNotifier {
   Future<void> setSubtitle(int? index) async {
     if (index == null) {
       subtitleStreamIndex = null;
-      subtitleNotice = null;
+      _clearSubtitleNotice();
       await backend.setSubtitleOff();
       _emit();
       await _reportProgress(eventName: 'SubtitleTrackChange');
@@ -238,7 +284,7 @@ class PlayerController extends ChangeNotifier {
       return;
     }
     subtitleStreamIndex = index;
-    subtitleNotice = null;
+    _clearSubtitleNotice();
     final source = resolved!.mediaSource;
     await backend.setSubtitleUri(
       client.subtitleStreamUrl(
@@ -276,8 +322,20 @@ class PlayerController extends ChangeNotifier {
     _emit();
   }
 
+  void hideControlsOnPointerExit() {
+    if (!isPlaying || nextEpisode != null || playbackEnded) {
+      return;
+    }
+    _hideTimer?.cancel();
+    if (!controlsVisible) {
+      return;
+    }
+    controlsVisible = false;
+    _emit();
+  }
+
   void toggleControls() {
-    if (showResumePrompt || nextEpisode != null) {
+    if (nextEpisode != null || playbackEnded) {
       onUserActivity();
       return;
     }
@@ -292,7 +350,7 @@ class PlayerController extends ChangeNotifier {
 
   void _scheduleHide() {
     _hideTimer?.cancel();
-    if (isPlaying && !showResumePrompt && nextEpisode == null) {
+    if (isPlaying && nextEpisode == null && !playbackEnded) {
       _hideTimer = Timer(controlsHideAfter, () {
         controlsVisible = false;
         _emit();
@@ -342,8 +400,7 @@ class PlayerController extends ChangeNotifier {
     try {
       await client.reportStopped(_currentReport());
     } on EmbyException {
-      progressSyncFailed = true;
-      _emit();
+      _markProgressSyncFailed();
     }
   }
 
@@ -353,6 +410,7 @@ class PlayerController extends ChangeNotifier {
     }
     _hideTimer?.cancel();
     _nextTimer?.cancel();
+    await _persistVolume();
     await _stopSession();
     if (window.isFullScreen) {
       await window.setFullScreen(false);
@@ -418,6 +476,7 @@ class PlayerController extends ChangeNotifier {
     disconnected = false;
     disconnectDetail = null;
     nextEpisode = null;
+    playbackEnded = false;
     _nextTimer?.cancel();
     _emit();
 
@@ -455,13 +514,9 @@ class PlayerController extends ChangeNotifier {
 
       if (subtitle != null) {
         final stream = next.mediaSource.streamByIndex(subtitle);
-        if (stream != null && stream.isBitmapSubtitle) {
-          subtitleNotice = next.isTranscode
-              ? SubtitleNoticeKind.bitmapBurnIn
-              : SubtitleNoticeKind.bitmapFailed;
-          if (!next.isTranscode) {
-            subtitleStreamIndex = null;
-          }
+        if (stream != null && stream.isBitmapSubtitle && !next.isTranscode) {
+          subtitleStreamIndex = null;
+          _showSubtitleNotice(SubtitleNoticeKind.bitmapFailed);
         }
       }
 
@@ -472,6 +527,7 @@ class PlayerController extends ChangeNotifier {
           headers: client.sessionHeaders,
         ),
       );
+      await backend.setVolume(volume.toDouble());
       position = durationFromTicks(startTicks);
       final runtime = next.mediaSource.runTimeTicks ?? item?.runTimeTicks ?? 0;
       if (runtime > 0) {
@@ -548,8 +604,9 @@ class PlayerController extends ChangeNotifier {
     _sessionStarted = true;
     try {
       await client.reportPlaying(_currentReport(positionTicks: startTicks));
+      _clearProgressSyncFailed();
     } on EmbyException {
-      progressSyncFailed = true;
+      _markProgressSyncFailed();
     }
     _progressTimer?.cancel();
     _progressTimer = Timer.periodic(progressInterval, (_) {
@@ -563,9 +620,9 @@ class PlayerController extends ChangeNotifier {
     }
     try {
       await client.reportProgress(_currentReport(eventName: eventName));
+      _clearProgressSyncFailed();
     } on EmbyException {
-      progressSyncFailed = true;
-      _emit();
+      _markProgressSyncFailed();
     }
   }
 
@@ -579,10 +636,63 @@ class PlayerController extends ChangeNotifier {
     _sessionStarted = false;
     try {
       await client.reportStopped(_currentReport());
+      _clearProgressSyncFailed();
     } on EmbyException {
-      progressSyncFailed = true;
-      _emit();
+      _markProgressSyncFailed();
     }
+  }
+
+  void _markProgressSyncFailed() {
+    final now = DateTime.now();
+    final last = _progressFailBannerAt;
+    if (last != null && now.difference(last) < const Duration(seconds: 60)) {
+      return;
+    }
+    _progressFailBannerAt = now;
+    progressSyncFailed = true;
+    _emit();
+    _progressFailBannerTimer?.cancel();
+    _progressFailBannerTimer = Timer(progressFailBannerFor, () {
+      if (_disposed) {
+        return;
+      }
+      progressSyncFailed = false;
+      _emit();
+    });
+  }
+
+  void _showSubtitleNotice(SubtitleNoticeKind kind) {
+    _subtitleNoticeTimer?.cancel();
+    subtitleNotice = kind;
+    _emit();
+    _subtitleNoticeTimer = Timer(progressFailBannerFor, () {
+      if (_disposed) {
+        return;
+      }
+      subtitleNotice = null;
+      _emit();
+    });
+  }
+
+  void _clearSubtitleNotice() {
+    _subtitleNoticeTimer?.cancel();
+    _subtitleNoticeTimer = null;
+    if (subtitleNotice == null) {
+      return;
+    }
+    subtitleNotice = null;
+    _emit();
+  }
+
+  void _clearProgressSyncFailed() {
+    _progressFailBannerTimer?.cancel();
+    _progressFailBannerTimer = null;
+    _progressFailBannerAt = null;
+    if (!progressSyncFailed) {
+      return;
+    }
+    progressSyncFailed = false;
+    _emit();
   }
 
   PlaybackReport _currentReport({int? positionTicks, String? eventName}) {
@@ -608,13 +718,16 @@ class PlayerController extends ChangeNotifier {
     isPlaying = false;
     unawaited(_stopSession());
     if (item == null || !item!.isEpisode) {
-      _emit();
+      _showPlaybackEnded();
       return;
     }
     try {
       final next = await client.getNextEpisode(item!);
-      if (_disposed || next == null) {
-        _emit();
+      if (_disposed) {
+        return;
+      }
+      if (next == null) {
+        _showPlaybackEnded();
         return;
       }
       final autoplay = user?.enableNextEpisodeAutoPlay ?? true;
@@ -647,8 +760,48 @@ class PlayerController extends ChangeNotifier {
         }
       });
     } on EmbyException {
-      _emit();
+      _showPlaybackEnded();
     }
+  }
+
+  void _showPlaybackEnded() {
+    if (_disposed) {
+      return;
+    }
+    playbackEnded = true;
+    nextEpisode = null;
+    controlsVisible = true;
+    _hideTimer?.cancel();
+    _emit();
+  }
+
+  Future<PlayerSettingsStore> _settings() async {
+    return settingsStore ??= await openPlayerSettingsStore();
+  }
+
+  Future<void> _restoreVolume() async {
+    try {
+      volume = (await (await _settings()).read()).clampedVolume;
+      if (volume > 0) {
+        _unmutedVolume = volume;
+      }
+      await backend.setVolume(volume.toDouble());
+    } catch (_) {}
+  }
+
+  void _scheduleVolumeSave() {
+    _volumeSaveTimer?.cancel();
+    _volumeSaveTimer = Timer(const Duration(milliseconds: 250), () {
+      unawaited(_persistVolume());
+    });
+  }
+
+  Future<void> _persistVolume() async {
+    _volumeSaveTimer?.cancel();
+    _volumeSaveTimer = null;
+    try {
+      await (await _settings()).write(PlayerSettings(volume: volume));
+    } catch (_) {}
   }
 
   int _rewound(int ticks) {
@@ -671,7 +824,11 @@ class PlayerController extends ChangeNotifier {
     _disposed = true;
     _hideTimer?.cancel();
     _progressTimer?.cancel();
+    _progressFailBannerTimer?.cancel();
+    _subtitleNoticeTimer?.cancel();
     _nextTimer?.cancel();
+    _volumeSaveTimer?.cancel();
+    unawaited(_persistVolume());
     unawaited(_positionSub?.cancel());
     unawaited(_durationSub?.cancel());
     unawaited(_playingSub?.cancel());

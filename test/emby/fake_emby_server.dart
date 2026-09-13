@@ -101,6 +101,13 @@ class FakeEmbyItem {
     this.indexNumber,
     this.parentIndexNumber,
     this.primaryImageTag,
+    this.thumbImageTag,
+    this.backdropImageTag,
+    this.seriesPrimaryImageTag,
+    this.parentThumbItemId,
+    this.parentThumbImageTag,
+    this.parentBackdropItemId,
+    this.parentBackdropImageTag,
     this.played = false,
     this.playbackPositionTicks = 0,
     this.playedPercentage,
@@ -108,6 +115,10 @@ class FakeEmbyItem {
     DateTime? dateCreated,
     DateTime? premiereDate,
     this.communityRating,
+    this.criticRating,
+    this.officialRating,
+    DateTime? dateLastContentAdded,
+    this.lastPlayedDate,
     this.container = 'mkv',
     this.forceTranscode = false,
     this.supportsDirectPlay = true,
@@ -115,6 +126,8 @@ class FakeEmbyItem {
     this.mediaStreams = const [],
     this.chapters = const [],
   }) : dateCreated = dateCreated ?? DateTime.utc(2024, 1, 1),
+       dateLastContentAdded =
+           dateLastContentAdded ?? dateCreated ?? DateTime.utc(2024, 1, 1),
        premiereDate =
            premiereDate ??
            (productionYear != null ? DateTime.utc(productionYear, 1, 1) : null);
@@ -134,13 +147,24 @@ class FakeEmbyItem {
   int? indexNumber;
   int? parentIndexNumber;
   String? primaryImageTag;
+  String? thumbImageTag;
+  String? backdropImageTag;
+  String? seriesPrimaryImageTag;
+  String? parentThumbItemId;
+  String? parentThumbImageTag;
+  String? parentBackdropItemId;
+  String? parentBackdropImageTag;
   bool played;
   int playbackPositionTicks;
   double? playedPercentage;
   bool nextUp;
   DateTime dateCreated;
+  DateTime dateLastContentAdded;
   DateTime? premiereDate;
+  DateTime? lastPlayedDate;
   double? communityRating;
+  double? criticRating;
+  String? officialRating;
   String container;
   bool forceTranscode;
   bool supportsDirectPlay;
@@ -164,10 +188,27 @@ class FakeEmbyItem {
       if (parentId != null) 'ParentId': parentId,
       if (indexNumber != null) 'IndexNumber': indexNumber,
       if (parentIndexNumber != null) 'ParentIndexNumber': parentIndexNumber,
-      if (primaryImageTag != null) 'ImageTags': {'Primary': primaryImageTag},
+      if (primaryImageTag != null || thumbImageTag != null)
+        'ImageTags': {
+          if (primaryImageTag != null) 'Primary': primaryImageTag,
+          if (thumbImageTag != null) 'Thumb': thumbImageTag,
+        },
+      if (backdropImageTag != null) 'BackdropImageTags': [backdropImageTag],
+      if (seriesPrimaryImageTag != null)
+        'SeriesPrimaryImageTag': seriesPrimaryImageTag,
+      if (parentThumbItemId != null) 'ParentThumbItemId': parentThumbItemId,
+      if (parentThumbImageTag != null)
+        'ParentThumbImageTag': parentThumbImageTag,
+      if (parentBackdropItemId != null)
+        'ParentBackdropItemId': parentBackdropItemId,
+      if (parentBackdropImageTag != null)
+        'ParentBackdropImageTags': [parentBackdropImageTag],
       'DateCreated': dateCreated.toIso8601String(),
+      'DateLastContentAdded': dateLastContentAdded.toIso8601String(),
       if (premiereDate != null) 'PremiereDate': premiereDate!.toIso8601String(),
       if (communityRating != null) 'CommunityRating': communityRating,
+      if (criticRating != null) 'CriticRating': criticRating,
+      if (officialRating != null) 'OfficialRating': officialRating,
       if (mediaStreams.isNotEmpty)
         'MediaSources': [
           {
@@ -184,6 +225,8 @@ class FakeEmbyItem {
         'Played': played,
         'PlaybackPositionTicks': playbackPositionTicks,
         if (playedPercentage != null) 'PlayedPercentage': playedPercentage,
+        if (lastPlayedDate != null)
+          'LastPlayedDate': lastPlayedDate!.toIso8601String(),
       },
     };
   }
@@ -615,14 +658,6 @@ class FakeEmbyServer {
     String method,
     List<String> segments,
   ) {
-    if (segments.length >= 3 &&
-        segments[0] == 'Items' &&
-        segments[2] == 'Images' &&
-        segments.length >= 4 &&
-        segments[3] == 'Primary' &&
-        method == 'GET') {
-      return _handlePrimaryImage(segments[1]);
-    }
     if (segments.length >= 5 &&
         segments[0] == 'Items' &&
         segments[2] == 'Images' &&
@@ -635,6 +670,12 @@ class FakeEmbyServer {
           Headers.contentTypeHeader: ['image/png'],
         },
       );
+    }
+    if (segments.length >= 4 &&
+        segments[0] == 'Items' &&
+        segments[2] == 'Images' &&
+        method == 'GET') {
+      return _handleItemImage(segments[1], segments[3]);
     }
     if (segments.length == 3 &&
         segments[0] == 'Items' &&
@@ -650,9 +691,7 @@ class FakeEmbyServer {
       if (nextUpStatus != null) {
         return _json(nextUpStatus!, {'error': 'nextup unavailable'});
       }
-      return _queryResult(
-        _sortAndLimit(items.where((item) => item.nextUp).toList(), options),
-      );
+      return _queryPage(items.where((item) => item.nextUp).toList(), options);
     }
 
     if (segments.length < 3 || segments[0] != 'Users') {
@@ -672,18 +711,16 @@ class FakeEmbyServer {
       if (resumeStatus != null) {
         return _json(resumeStatus!, {'error': 'resume failed'});
       }
-      return _queryResult(
-        _sortAndLimit(
-          items
-              .where(
-                (item) =>
-                    (item.type == 'Movie' || item.type == 'Episode') &&
-                    !item.played &&
-                    item.playbackPositionTicks > 0,
-              )
-              .toList(),
-          options,
-        ),
+      return _queryPage(
+        items
+            .where(
+              (item) =>
+                  (item.type == 'Movie' || item.type == 'Episode') &&
+                  !item.played &&
+                  item.playbackPositionTicks > 0,
+            )
+            .toList(),
+        options,
       );
     }
     if (rest.length == 2 &&
@@ -694,6 +731,31 @@ class FakeEmbyServer {
     }
     if (rest.length == 1 && rest[0] == 'Items' && method == 'GET') {
       return _handleItems(options);
+    }
+    if (rest.length == 3 &&
+        rest[0] == 'Items' &&
+        rest[2] == 'HideFromResume' &&
+        method == 'POST') {
+      final item = _itemById(rest[1]);
+      if (item == null) {
+        return _json(404, {'error': 'not found'});
+      }
+      item.playbackPositionTicks = 0;
+      item.playedPercentage = 0;
+      return _json(200, {'ok': true});
+    }
+    if (rest.length == 3 &&
+        rest[0] == 'Items' &&
+        rest[2] == 'UserData' &&
+        method == 'POST') {
+      final item = _itemById(rest[1]);
+      if (item == null) {
+        return _json(404, {'error': 'not found'});
+      }
+      item.playbackPositionTicks = 0;
+      item.playedPercentage = 0;
+      item.played = false;
+      return _json(200, item.toJson()['UserData'] as Map<String, dynamic>);
     }
     if (rest.length == 2 && rest[0] == 'Items' && method == 'GET') {
       if (itemStatus != null) {
@@ -726,12 +788,12 @@ class FakeEmbyServer {
     return null;
   }
 
-  ResponseBody _handlePrimaryImage(String itemId) {
+  ResponseBody _handleItemImage(String itemId, String type) {
     if (failingImageIds.contains(itemId)) {
       return _json(404, {'error': 'image missing'});
     }
     final item = _itemById(itemId);
-    if (item == null || item.primaryImageTag == null) {
+    if (item == null || !_itemHasImage(item, type)) {
       return _json(404, {'error': 'image missing'});
     }
     return ResponseBody.fromBytes(
@@ -741,6 +803,19 @@ class FakeEmbyServer {
         Headers.contentTypeHeader: ['image/png'],
       },
     );
+  }
+
+  bool _itemHasImage(FakeEmbyItem item, String type) {
+    switch (type) {
+      case 'Primary':
+        return item.primaryImageTag != null;
+      case 'Thumb':
+        return item.thumbImageTag != null;
+      case 'Backdrop':
+        return item.backdropImageTag != null;
+      default:
+        return false;
+    }
   }
 
   ResponseBody _handleLatest(RequestOptions options) {
@@ -792,12 +867,24 @@ class FakeEmbyServer {
       if (searchStatus != null) {
         return _json(searchStatus!, {'error': 'search failed'});
       }
-      return _queryResult(_filterItems(options, searchTerm: search));
+      return _queryPage(_filterItems(options, searchTerm: search), options);
     }
     if (itemsStatus != null) {
       return _json(itemsStatus!, {'error': 'items failed'});
     }
-    return _queryResult(_filterItems(options));
+    final types = options.uri.queryParameters['IncludeItemTypes'] ?? '';
+    final sortBy = options.uri.queryParameters['SortBy'] ?? '';
+    if (types == 'Movie' &&
+        sortBy.contains('DateLastContentAdded') &&
+        latestMovieStatus != null) {
+      return _json(latestMovieStatus!, {'error': 'latest movies failed'});
+    }
+    if (types == 'Series' &&
+        sortBy.contains('DateLastContentAdded') &&
+        latestEpisodeStatus != null) {
+      return _json(latestEpisodeStatus!, {'error': 'latest series failed'});
+    }
+    return _queryPage(_filterItems(options), options);
   }
 
   List<FakeEmbyItem> _filterItems(
@@ -828,7 +915,7 @@ class FakeEmbyServer {
       }
       return true;
     }).toList();
-    return _sortAndLimit(matched, options);
+    return matched;
   }
 
   List<FakeEmbyItem> _sortAndLimit(
@@ -858,13 +945,42 @@ class FakeEmbyServer {
   }
 
   int _compareBy(FakeEmbyItem a, FakeEmbyItem b, String sortBy) {
+    final fields = sortBy.split(',');
+    for (final field in fields) {
+      final compared = _compareField(a, b, field.trim());
+      if (compared != 0) {
+        return compared;
+      }
+    }
+    return 0;
+  }
+
+  int _compareField(FakeEmbyItem a, FakeEmbyItem b, String sortBy) {
     switch (sortBy) {
       case 'DateCreated':
         return a.dateCreated.compareTo(b.dateCreated);
+      case 'DateLastContentAdded':
+      case 'DateModified':
+        return a.dateLastContentAdded.compareTo(b.dateLastContentAdded);
       case 'PremiereDate':
         return _premiereOf(a).compareTo(_premiereOf(b));
+      case 'ProductionYear':
+        return (a.productionYear ?? 0).compareTo(b.productionYear ?? 0);
       case 'CommunityRating':
         return (a.communityRating ?? 0).compareTo(b.communityRating ?? 0);
+      case 'CriticRating':
+        return (a.criticRating ?? 0).compareTo(b.criticRating ?? 0);
+      case 'OfficialRating':
+        return (a.officialRating ?? '').compareTo(b.officialRating ?? '');
+      case 'DatePlayed':
+        return (a.lastPlayedDate ?? DateTime.fromMillisecondsSinceEpoch(0))
+            .compareTo(
+              b.lastPlayedDate ?? DateTime.fromMillisecondsSinceEpoch(0),
+            );
+      case 'Runtime':
+        return (a.runTimeTicks ?? 0).compareTo(b.runTimeTicks ?? 0);
+      case 'Random':
+        return a.id.compareTo(b.id);
       case 'IndexNumber':
         final season = (a.parentIndexNumber ?? 0).compareTo(
           b.parentIndexNumber ?? 0,
@@ -904,7 +1020,7 @@ class FakeEmbyServer {
               (other.type == 'Movie' || other.type == 'Series'),
         )
         .toList();
-    return _queryResult(_sortAndLimit(similar, options));
+    return _queryPage(similar, options);
   }
 
   bool _belongsTo(
@@ -943,11 +1059,27 @@ class FakeEmbyServer {
     return null;
   }
 
+  ResponseBody _queryPage(List<FakeEmbyItem> matched, RequestOptions options) {
+    final paged = _paginate(matched, options);
+    return _json(200, {
+      'Items': [for (final item in paged.items) item.toJson()],
+      'TotalRecordCount': paged.total,
+    });
+  }
+
   ResponseBody _queryResult(List<FakeEmbyItem> matched) {
     return _json(200, {
       'Items': [for (final item in matched) item.toJson()],
       'TotalRecordCount': matched.length,
     });
+  }
+
+  ({List<FakeEmbyItem> items, int total}) _paginate(
+    List<FakeEmbyItem> matched,
+    RequestOptions options,
+  ) {
+    final page = _sortAndLimit(matched, options);
+    return (items: page, total: matched.length);
   }
 
   ResponseBody _handlePublicInfo() {
@@ -1232,6 +1364,7 @@ List<FakeEmbyItem> defaultCatalogItems() {
       seasonId: 'season-friends-1',
       indexNumber: 1,
       parentIndexNumber: 1,
+      overview: 'Monica gets a new apartment.',
       played: true,
       playedPercentage: 100,
       runTimeTicks: minute * 22,

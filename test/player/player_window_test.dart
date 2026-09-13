@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
 import 'package:rillight/app/app_shell.dart';
+import 'package:rillight/app/window_geometry.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/server_list_store.dart';
@@ -12,6 +13,7 @@ import 'package:rillight/library/item_detail_page.dart';
 import 'package:rillight/player/desktop_player_window.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_keys.dart';
+import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/player_page.dart';
 import 'package:rillight/player/player_window.dart';
 import 'package:rillight/player/player_window_host.dart';
@@ -78,11 +80,15 @@ void main() {
 
   PlayerBindings bindings({PlayerWindowHost? windowHost}) {
     return PlayerBindings(
-      createBackend: () => backend,
+      createBackend: () {
+        backend = FakeVideoBackend();
+        return backend;
+      },
       window: window,
       windowHost: windowHost,
       progressInterval: const Duration(days: 1),
       controlsHideAfter: const Duration(days: 1),
+      settingsStore: MemoryPlayerSettingsStore(),
     );
   }
 
@@ -161,7 +167,7 @@ void main() {
       final app = tester.widget<RillightApp>(find.byType(RillightApp));
       await openPlayable(tester, 'movie-up');
       await waitFor(tester, find.byType(PlayerPage));
-      await waitFor(tester, find.byKey(PlayerKeys.playMethod));
+      await waitFor(tester, find.byKey(PlayerKeys.playPause));
 
       expect(app.router.state.uri.path, '/item/movie-up');
       expect(app.router.state.uri.path.contains('/play'), isFalse);
@@ -179,7 +185,7 @@ void main() {
       final app = tester.widget<RillightApp>(find.byType(RillightApp));
       await openPlayable(tester, 'movie-up');
       await waitFor(tester, find.byType(PlayerPage));
-      await waitFor(tester, find.byKey(PlayerKeys.playMethod));
+      await waitFor(tester, find.byKey(PlayerKeys.playPause));
 
       final resumeBefore = server.requests
           .where((request) => request.contains('Items/Resume'))
@@ -207,10 +213,10 @@ void main() {
 
       final back = find.byKey(CatalogKeys.back);
       expect(back, findsOneWidget);
-      expect(
-        tester.getCenter(back).dy,
-        greaterThan(tester.getRect(find.byKey(AppShell.topBarKey)).bottom),
-      );
+      final bar = tester.getRect(find.byKey(AppShell.topBarKey));
+      final backCenter = tester.getCenter(back);
+      expect(backCenter.dy, greaterThan(bar.top));
+      expect(backCenter.dy, lessThan(bar.bottom));
       await tester.tap(back);
       await tester.pumpAndSettle();
       final inception = find.byKey(CatalogKeys.item('movie-inception'));
@@ -220,7 +226,7 @@ void main() {
       await tester.tap(find.byKey(PlayerKeys.open));
       await tester.pump();
       await waitFor(tester, find.byType(PlayerPage));
-      await waitFor(tester, find.byKey(PlayerKeys.resumeContinue));
+      await waitFor(tester, find.byKey(PlayerKeys.playPause));
 
       expect(auth.disposed, isFalse);
       expect(auth.isLoggedIn, isTrue);
@@ -234,7 +240,8 @@ void main() {
     'player window options hide the title bar without embedding playback',
     () {
       expect(kPlayerWindowOptions.titleBarStyle, TitleBarStyle.hidden);
-      expect(kPlayerWindowOptions.minimumSize, const Size(960, 540));
+      expect(kPlayerWindowOptions.size, isNull);
+      expect(kPlayerWindowOptions.minimumSize, kMinPlayerWindowSize);
       final auth = AuthController(
         client: EmbyClient(device: _device),
         credentials: MemoryCredentialStore(),

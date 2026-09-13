@@ -6,6 +6,7 @@ import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/app_hover_card.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_keys.dart';
+import 'package:rillight/home/library_nav_prefs.dart';
 import 'package:rillight/home/media_shelf.dart';
 import 'package:rillight/media_image/media_image.dart';
 
@@ -17,27 +18,46 @@ class LibraryTiles extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (libraries.isEmpty) {
-      return const SizedBox.shrink();
-    }
-    final l10n = AppLocalizations.of(context);
-    final tileWidth = MediaShelf.wideCardWidthFor(
-      MediaQuery.sizeOf(context).width,
-    );
-    return MediaShelf(
-      rowKey: CatalogKeys.librariesMenu,
-      shelfId: 'libraries',
-      title: l10n.libraries,
-      items: libraries,
-      wide: true,
-      extent: tileWidth * 9 / 16 + AppSpacing.xs,
-      onTap: (library) => context.push(AppRoutes.library(library.id)),
-      itemBuilder: (context, library) {
-        return _LibraryCard(library: library, width: tileWidth);
+    final nav = LibraryNavScope.maybeOf(context);
+    return ListenableBuilder(
+      listenable: nav ?? _SilentListenable(),
+      builder: (context, _) {
+        final items = _visibleLibraries(libraries, nav);
+        if (items.isEmpty) {
+          return const SizedBox.shrink();
+        }
+        final l10n = AppLocalizations.of(context);
+        final tileWidth = MediaShelf.wideCardWidthFor(
+          MediaQuery.sizeOf(context).width,
+        );
+        return MediaShelf(
+          rowKey: CatalogKeys.librariesMenu,
+          shelfId: 'libraries',
+          title: l10n.libraries,
+          items: items,
+          wide: true,
+          extent: tileWidth * 9 / 16 + AppSpacing.xs,
+          onTap: (library) => context.push(AppRoutes.library(library.id)),
+          itemBuilder: (context, library) {
+            return _LibraryCard(library: library, width: tileWidth);
+          },
+        );
       },
     );
   }
 }
+
+List<EmbyItem> _visibleLibraries(
+  List<EmbyItem> libraries,
+  LibraryNavController? nav,
+) {
+  if (nav == null || !nav.customized) {
+    return libraries;
+  }
+  return nav.layout(libraries, maxPinned: 1 << 20).pinned;
+}
+
+class _SilentListenable extends ChangeNotifier {}
 
 class _LibraryCard extends StatelessWidget {
   const _LibraryCard({required this.library, required this.width});
@@ -74,11 +94,12 @@ class _LibraryCard extends StatelessWidget {
                 DecoratedBox(
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
-                      begin: Alignment.centerLeft,
-                      end: Alignment.centerRight,
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      stops: const [0.4, 1],
                       colors: [
-                        colorScheme.scrim.withValues(alpha: 0.6),
-                        colorScheme.scrim.withValues(alpha: 0),
+                        Colors.transparent,
+                        colorScheme.scrim.withValues(alpha: 0.78),
                       ],
                     ),
                   ),
@@ -86,11 +107,12 @@ class _LibraryCard extends StatelessWidget {
                 Padding(
                   padding: const EdgeInsets.all(AppSpacing.sm),
                   child: Align(
-                    alignment: Alignment.bottomLeft,
+                    alignment: Alignment.bottomCenter,
                     child: Text(
                       library.name,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
                       style: theme.textTheme.titleSmall?.copyWith(
                         color: Colors.white,
                       ),

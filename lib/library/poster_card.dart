@@ -18,6 +18,8 @@ class PosterCard extends StatelessWidget {
     this.showProgress = false,
     this.width = 120,
     this.wide = false,
+    this.hoverScale = 1.04,
+    this.onRemoveFromResume,
   });
 
   final EmbyItem item;
@@ -25,6 +27,8 @@ class PosterCard extends StatelessWidget {
   final bool showProgress;
   final double width;
   final bool wide;
+  final double hoverScale;
+  final ValueChanged<EmbyItem>? onRemoveFromResume;
 
   /// 悬停播放入口,供测试定位;仅 [EmbyItem.isPlayable] 条目会挂上。
   static Key playButtonKey(String itemId) => Key('poster-play-$itemId');
@@ -37,37 +41,44 @@ class PosterCard extends StatelessWidget {
     final title = item.isEpisode && (item.seriesName?.isNotEmpty ?? false)
         ? item.seriesName!
         : item.name;
+    final subtitle = wide ? continueWatchingSubtitle(item) : '';
     return SizedBox(
       width: width,
       child: _HoverHighlight(
         inkKey: CatalogKeys.item(item.id),
         onTap: onTap,
-        borderRadius: BorderRadius.circular(AppRadii.sm),
+        hoverScale: hoverScale,
+        borderRadius: BorderRadius.circular(AppRadii.md),
         builder: (context, highlighted) {
           return Column(
             mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               ClipRRect(
-                borderRadius: BorderRadius.circular(AppRadii.sm),
+                borderRadius: BorderRadius.circular(AppRadii.md),
                 child: SizedBox(
                   width: width,
                   height: height,
                   child: Stack(
                     fit: StackFit.expand,
                     children: [
-                      MediaImage(
-                        item: item,
-                        width: width,
-                        height: height,
-                        preferBackdrop: wide,
-                        maxWidth: wide ? 480 : 280,
+                      RepaintBoundary(
+                        child: MediaImage(
+                          key: ValueKey(item.id),
+                          item: item,
+                          width: width,
+                          height: height,
+                          preferBackdrop: wide,
+                          maxWidth: wide ? 360 : 280,
+                        ),
                       ),
                       _PosterRevealOverlay(
                         item: item,
                         title: title,
                         revealed: highlighted,
+                        showMeta: !wide,
                         playKey: PosterCard.playButtonKey(item.id),
+                        onRemoveFromResume: onRemoveFromResume,
                       ),
                       if (showProgress && progress > 0)
                         Align(
@@ -82,18 +93,29 @@ class PosterCard extends StatelessWidget {
                 ),
               ),
               SizedBox(height: wide ? AppSpacing.xxs : AppSpacing.xs),
-              Text(
-                title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: wide
-                    ? Theme.of(context).textTheme.bodySmall
-                    : Theme.of(context).textTheme.bodyMedium,
+              _Caption(
+                text: title,
+                width: width,
+                style: Theme.of(context).textTheme.titleSmall,
               ),
+              if (subtitle.isNotEmpty)
+                _Caption(
+                  text: subtitle,
+                  width: width,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.onSurface.withValues(alpha: 0.72),
+                  ),
+                ),
               if (!wide && showProgress && progress > 0)
-                Text(
-                  l10n.playbackProgress((progress * 100).round()),
-                  style: Theme.of(context).textTheme.bodySmall,
+                SizedBox(
+                  width: width,
+                  child: Text(
+                    l10n.playbackProgress((progress * 100).round()),
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
                 ),
             ],
           );
@@ -109,11 +131,13 @@ class EpisodeThumbCard extends StatelessWidget {
     required this.item,
     required this.onTap,
     this.width = 210,
+    this.selected = false,
   });
 
   final EmbyItem item;
   final VoidCallback onTap;
   final double width;
+  final bool selected;
 
   @override
   Widget build(BuildContext context) {
@@ -126,11 +150,12 @@ class EpisodeThumbCard extends StatelessWidget {
       child: _HoverHighlight(
         inkKey: CatalogKeys.episode(item.id),
         onTap: onTap,
+        hoverScale: 1,
         borderRadius: BorderRadius.circular(AppRadii.sm),
         builder: (context, highlighted) {
           return Column(
             mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               ClipRRect(
                 borderRadius: BorderRadius.circular(AppRadii.sm),
@@ -140,16 +165,21 @@ class EpisodeThumbCard extends StatelessWidget {
                   child: Stack(
                     fit: StackFit.expand,
                     children: [
-                      MediaImage(
-                        item: item,
-                        width: width,
-                        height: height,
-                        maxWidth: 480,
+                      RepaintBoundary(
+                        child: MediaImage(
+                          key: ValueKey(item.id),
+                          item: item,
+                          width: width,
+                          height: height,
+                          preferThumb: true,
+                          maxWidth: 360,
+                        ),
                       ),
                       _PosterRevealOverlay(
                         item: item,
                         title: title,
                         revealed: highlighted,
+                        showMeta: false,
                         playKey: PosterCard.playButtonKey(item.id),
                       ),
                       if (progress > 0)
@@ -157,16 +187,34 @@ class EpisodeThumbCard extends StatelessWidget {
                           alignment: Alignment.bottomCenter,
                           child: _ResumeProgressBar(value: progress),
                         ),
+                      if (selected)
+                        Positioned.fill(
+                          child: IgnorePointer(
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(
+                                  AppRadii.sm,
+                                ),
+                                border: Border.all(
+                                  color: Colors.white,
+                                  width: 3,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
                     ],
                   ),
                 ),
               ),
               const SizedBox(height: AppSpacing.xs),
-              Text(
-                title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.bodySmall,
+              _Caption(
+                text: title,
+                width: width,
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                  fontWeight: selected ? FontWeight.w700 : null,
+                  color: selected ? Colors.white : null,
+                ),
               ),
             ],
           );
@@ -203,7 +251,7 @@ class SeasonPosterCard extends StatelessWidget {
         builder: (context, highlighted) {
           return Column(
             mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               DecoratedBox(
                 decoration: BoxDecoration(
@@ -264,15 +312,44 @@ class SeasonPosterCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: AppSpacing.xs),
-              Text(
-                item.name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+              _Caption(
+                text: item.name,
+                width: width,
                 style: Theme.of(context).textTheme.bodySmall,
               ),
             ],
           );
         },
+      ),
+    );
+  }
+}
+
+class _Caption extends StatelessWidget {
+  const _Caption({
+    required this.text,
+    required this.width,
+    required this.style,
+  });
+
+  final String text;
+  final double width;
+  final TextStyle? style;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: width,
+      child: Tooltip(
+        message: text,
+        waitDuration: const Duration(milliseconds: 400),
+        child: Text(
+          text,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          textAlign: TextAlign.center,
+          style: style,
+        ),
       ),
     );
   }
@@ -284,12 +361,14 @@ class _HoverHighlight extends StatefulWidget {
     required this.onTap,
     this.inkKey,
     this.borderRadius,
+    this.hoverScale = 1.04,
   });
 
   final Widget Function(BuildContext context, bool highlighted) builder;
   final VoidCallback onTap;
   final Key? inkKey;
   final BorderRadius? borderRadius;
+  final double hoverScale;
 
   @override
   State<_HoverHighlight> createState() => _HoverHighlightState();
@@ -303,6 +382,7 @@ class _HoverHighlightState extends State<_HoverHighlight> {
     return AppHoverCard(
       inkKey: widget.inkKey,
       onTap: widget.onTap,
+      hoverScale: widget.hoverScale,
       borderRadius: widget.borderRadius,
       onHighlighted: (value) {
         if (_highlighted == value) {
@@ -320,20 +400,24 @@ class _PosterRevealOverlay extends StatelessWidget {
     required this.item,
     required this.title,
     required this.revealed,
+    this.showMeta = true,
     this.playKey,
+    this.onRemoveFromResume,
   });
 
   final EmbyItem item;
   final String title;
   final bool revealed;
+  final bool showMeta;
   final Key? playKey;
+  final ValueChanged<EmbyItem>? onRemoveFromResume;
 
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
     final meta = <String>[
+      ?seasonEpisodeCode(item),
       if (item.productionYear != null && item.productionYear! > 0)
         '${item.productionYear}',
       ?runtimeLabel(l10n, item),
@@ -344,80 +428,100 @@ class _PosterRevealOverlay extends StatelessWidget {
         opacity: revealed ? 1 : 0,
         duration: AppMotion.durationOf(context, AppMotion.fast),
         curve: AppMotion.standard,
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [
-                colorScheme.scrim.withValues(alpha: revealed ? 0.12 : 0),
-                colorScheme.scrim.withValues(alpha: revealed ? 0.78 : 0),
-              ],
-            ),
-          ),
+        child: ColoredBox(
+          color: Colors.black.withValues(alpha: revealed ? 0.42 : 0),
           child: revealed
-              ? Padding(
-                  padding: const EdgeInsets.all(AppSpacing.xs),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (item.isPlayable)
-                        Align(
-                          alignment: Alignment.topRight,
-                          child: ExcludeFocus(
-                            child: IconButton(
-                              key: playKey,
-                              tooltip: l10n.play,
-                              onPressed: () {
-                                unawaited(
-                                  PlayerWindowScope.of(
-                                    context,
-                                  ).open(PlayerOpenRequest(itemId: item.id)),
-                                );
-                              },
-                              style: IconButton.styleFrom(
-                                backgroundColor: colorScheme.primary,
-                                foregroundColor: colorScheme.onPrimary,
-                                visualDensity: VisualDensity.compact,
-                                padding: const EdgeInsets.all(AppSpacing.xxs),
-                                minimumSize: const Size(32, 32),
-                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ? Stack(
+                  children: [
+                    if (onRemoveFromResume != null)
+                      Align(
+                        alignment: Alignment.topRight,
+                        child: Padding(
+                          padding: const EdgeInsets.all(AppSpacing.xs),
+                          child: IconButton(
+                            key: CatalogKeys.removeFromResume(item.id),
+                            tooltip: l10n.removeFromResume,
+                            onPressed: () => onRemoveFromResume!(item),
+                            style: IconButton.styleFrom(
+                              backgroundColor: Colors.black.withValues(
+                                alpha: 0.55,
                               ),
-                              icon: const Icon(Icons.play_arrow, size: 20),
+                              foregroundColor: Colors.white,
+                              minimumSize: const Size(32, 32),
+                              padding: const EdgeInsets.all(AppSpacing.xxs),
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
+                            icon: const Icon(Icons.close_rounded, size: 18),
+                          ),
+                        ),
+                      ),
+                    if (item.isPlayable)
+                      Center(
+                        child: ExcludeFocus(
+                          child: IconButton(
+                            key: playKey,
+                            tooltip: l10n.play,
+                            onPressed: () {
+                              unawaited(
+                                PlayerWindowScope.of(
+                                  context,
+                                ).open(PlayerOpenRequest(itemId: item.id)),
+                              );
+                            },
+                            style: IconButton.styleFrom(
+                              backgroundColor: Colors.white,
+                              foregroundColor: Colors.black,
+                              padding: const EdgeInsets.all(AppSpacing.sm),
+                              minimumSize: const Size(52, 52),
+                              elevation: 4,
+                            ),
+                            icon: const Icon(
+                              Icons.play_arrow_rounded,
+                              size: 32,
                             ),
                           ),
                         ),
-                      Expanded(
-                        child: Align(
-                          alignment: Alignment.bottomLeft,
+                      ),
+                    if (showMeta)
+                      Align(
+                        alignment: Alignment.bottomCenter,
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(
+                            AppSpacing.sm,
+                            0,
+                            AppSpacing.sm,
+                            AppSpacing.sm,
+                          ),
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
-                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
                                 title,
-                                maxLines: 2,
+                                maxLines: 3,
                                 overflow: TextOverflow.ellipsis,
-                                style: theme.textTheme.bodyMedium?.copyWith(
+                                textAlign: TextAlign.center,
+                                style: theme.textTheme.labelLarge?.copyWith(
                                   color: Colors.white,
                                   fontWeight: FontWeight.w600,
                                 ),
                               ),
-                              if (meta.isNotEmpty)
+                              if (meta.isNotEmpty) ...[
+                                const SizedBox(height: 2),
                                 Text(
                                   meta.join(' · '),
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
-                                  style: theme.textTheme.bodySmall?.copyWith(
-                                    color: Colors.white.withValues(alpha: 0.78),
+                                  textAlign: TextAlign.center,
+                                  style: theme.textTheme.labelMedium?.copyWith(
+                                    color: Colors.white.withValues(alpha: 0.88),
                                   ),
                                 ),
+                              ],
                             ],
                           ),
                         ),
                       ),
-                    ],
-                  ),
+                  ],
                 )
               : const SizedBox.expand(),
         ),
@@ -434,9 +538,9 @@ class _ResumeProgressBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: AppSpacing.xxs,
+      height: 3,
       child: ColoredBox(
-        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+        color: Colors.black.withValues(alpha: 0.45),
         child: Align(
           alignment: Alignment.centerLeft,
           child: FractionallySizedBox(

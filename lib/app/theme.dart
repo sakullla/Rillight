@@ -74,73 +74,81 @@ abstract final class AppTheme {
     );
 
     const titleLarge = TextStyle(
-      fontSize: 18,
+      fontSize: 20,
       fontWeight: FontWeight.w600,
-      height: 1.35,
+      height: 1.3,
+      letterSpacing: 0,
     );
-    const bodyMedium = TextStyle(fontSize: 14, height: 1.5);
+    const bodyMedium = TextStyle(fontSize: 14, height: 1.45, letterSpacing: 0);
     const labelMedium = TextStyle(
-      fontSize: 12,
+      fontSize: 13,
       fontWeight: FontWeight.w500,
-      letterSpacing: 0.2,
+      letterSpacing: 0,
     );
 
     const textTheme = TextTheme(
       displayLarge: TextStyle(
         fontSize: 44,
         fontWeight: FontWeight.w700,
-        height: 1.15,
+        height: 1.12,
+        letterSpacing: 0,
       ),
       displayMedium: TextStyle(
         fontSize: 36,
         fontWeight: FontWeight.w700,
-        height: 1.2,
+        height: 1.18,
+        letterSpacing: 0,
       ),
       displaySmall: TextStyle(
         fontSize: 28,
-        fontWeight: FontWeight.w700,
-        height: 1.25,
+        fontWeight: FontWeight.w600,
+        height: 1.22,
+        letterSpacing: 0,
       ),
       headlineLarge: TextStyle(
         fontSize: 28,
-        fontWeight: FontWeight.w700,
-        height: 1.25,
+        fontWeight: FontWeight.w600,
+        height: 1.22,
+        letterSpacing: 0,
       ),
       headlineMedium: TextStyle(
-        fontSize: 24,
+        fontSize: 22,
         fontWeight: FontWeight.w600,
-        height: 1.3,
+        height: 1.28,
+        letterSpacing: 0,
       ),
       headlineSmall: TextStyle(
         fontSize: 20,
         fontWeight: FontWeight.w600,
         height: 1.3,
+        letterSpacing: 0,
       ),
       titleLarge: titleLarge,
       titleMedium: TextStyle(
         fontSize: 16,
         fontWeight: FontWeight.w600,
-        height: 1.4,
+        height: 1.35,
+        letterSpacing: 0,
       ),
       titleSmall: TextStyle(
         fontSize: 14,
         fontWeight: FontWeight.w600,
-        height: 1.4,
-        letterSpacing: 0.1,
+        height: 1.35,
+        letterSpacing: 0,
       ),
-      bodyLarge: TextStyle(fontSize: 16, height: 1.55),
+      bodyLarge: TextStyle(fontSize: 16, height: 1.5, letterSpacing: 0),
       bodyMedium: bodyMedium,
-      bodySmall: TextStyle(fontSize: 12, height: 1.45),
+      bodySmall: TextStyle(fontSize: 13, height: 1.4, letterSpacing: 0),
       labelLarge: TextStyle(
         fontSize: 14,
         fontWeight: FontWeight.w600,
-        letterSpacing: 0.1,
+        letterSpacing: 0,
       ),
       labelMedium: labelMedium,
       labelSmall: TextStyle(
-        fontSize: 11,
+        fontSize: 12,
         fontWeight: FontWeight.w500,
-        letterSpacing: 0.2,
+        letterSpacing: 0,
       ),
     );
 
@@ -155,6 +163,13 @@ abstract final class AppTheme {
       textTheme: textTheme.apply(
         bodyColor: _onSurface,
         displayColor: _onSurface,
+        fontFamily: 'Segoe UI',
+        fontFamilyFallback: const [
+          'Microsoft YaHei UI',
+          'PingFang SC',
+          'Noto Sans SC',
+          'Noto Sans CJK SC',
+        ],
       ),
       scaffoldBackgroundColor: _base,
       canvasColor: _base,
@@ -265,9 +280,12 @@ abstract final class AppTheme {
         thumbColor: _accent,
         overlayColor: Color(0x29D8CFC4),
         trackHeight: 3,
+        thumbShape: RoundSliderThumbShape(enabledThumbRadius: 6),
+        overlayShape: RoundSliderOverlayShape(overlayRadius: 12),
+        showValueIndicator: ShowValueIndicator.never,
       ),
       dialogTheme: DialogThemeData(
-        backgroundColor: _surfaceHigh,
+        backgroundColor: Colors.transparent,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         shape: RoundedRectangleBorder(
@@ -295,12 +313,12 @@ abstract final class AppTheme {
         waitDuration: const Duration(milliseconds: 400),
       ),
       popupMenuTheme: PopupMenuThemeData(
-        color: _surfaceHigh,
+        color: _surfaceHigh.withValues(alpha: 0.88),
         surfaceTintColor: Colors.transparent,
-        elevation: 8,
-        shadowColor: Colors.black54,
+        elevation: 12,
+        shadowColor: Colors.black.withValues(alpha: 0.45),
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(AppRadii.md),
+          borderRadius: BorderRadius.circular(AppRadii.lg),
         ),
         labelTextStyle: WidgetStatePropertyAll(textTheme.bodyMedium),
       ),

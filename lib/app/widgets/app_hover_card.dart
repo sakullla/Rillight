@@ -51,10 +51,40 @@ class AppHoverCard extends StatefulWidget {
 class _AppHoverCardState extends State<AppHoverCard> {
   bool _hovering = false;
   bool _focused = false;
+  ScrollPosition? _position;
 
   bool get _highlighted => _hovering || _focused;
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final next = Scrollable.maybeOf(context)?.position;
+    if (identical(_position, next)) {
+      return;
+    }
+    _position?.isScrollingNotifier.removeListener(_onScrollChanged);
+    _position = next;
+    _position?.isScrollingNotifier.addListener(_onScrollChanged);
+  }
+
+  @override
+  void dispose() {
+    _position?.isScrollingNotifier.removeListener(_onScrollChanged);
+    super.dispose();
+  }
+
+  void _onScrollChanged() {
+    if (_position?.isScrollingNotifier.value == true && _hovering) {
+      _setHovering(false);
+    }
+  }
+
   void _setHovering(bool value) {
+    if (value &&
+        (Scrollable.maybeOf(context)?.position.isScrollingNotifier.value ??
+            false)) {
+      value = false;
+    }
     if (_hovering == value) {
       return;
     }
@@ -84,50 +114,55 @@ class _AppHoverCardState extends State<AppHoverCard> {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final radius = widget.borderRadius ?? BorderRadius.circular(AppRadii.md);
-    final highlighted = _hovering || _focused;
+    final scrolling =
+        Scrollable.maybeOf(context)?.position.isScrollingNotifier.value ??
+        false;
+    final highlighted = (_hovering && !scrolling) || _focused;
 
-    return AnimatedScale(
-      scale: _hovering ? widget.hoverScale : 1,
+    final card = AnimatedContainer(
       duration: AppMotion.fast,
       curve: AppMotion.standard,
-      child: AnimatedContainer(
-        duration: AppMotion.fast,
-        curve: AppMotion.standard,
-        decoration: BoxDecoration(
-          borderRadius: radius,
-          boxShadow: [
-            BoxShadow(
-              color: colorScheme.shadow.withValues(
-                alpha: highlighted ? 0.5 : 0,
-              ),
-              blurRadius: highlighted ? widget.shadowBlurRadius : 0,
-            ),
-          ],
-        ),
-        // 焦点环走 foregroundDecoration:decoration 的 border 会被
-        // Container 当作 padding 内缩子树,破坏外部固定行高。
-        foregroundDecoration: BoxDecoration(
-          borderRadius: radius,
-          border: Border.all(
-            color: _focused ? colorScheme.primary : Colors.transparent,
-            width: widget.focusRingWidth,
+      decoration: BoxDecoration(
+        borderRadius: radius,
+        boxShadow: [
+          BoxShadow(
+            color: colorScheme.shadow.withValues(alpha: highlighted ? 0.5 : 0),
+            blurRadius: highlighted ? widget.shadowBlurRadius : 0,
           ),
-        ),
-        child: Material(
-          type: MaterialType.transparency,
-          child: InkWell(
-            key: widget.inkKey,
-            onTap: widget.onTap,
-            onHover: _setHovering,
-            onFocusChange: _setFocused,
-            focusNode: widget.focusNode,
-            autofocus: widget.autofocus,
-            canRequestFocus: widget.onTap != null,
-            borderRadius: radius,
-            child: widget.child,
-          ),
+        ],
+      ),
+      // 焦点环走 foregroundDecoration:decoration 的 border 会被
+      // Container 当作 padding 内缩子树,破坏外部固定行高。
+      foregroundDecoration: BoxDecoration(
+        borderRadius: radius,
+        border: Border.all(
+          color: _focused ? colorScheme.primary : Colors.transparent,
+          width: widget.focusRingWidth,
         ),
       ),
+      child: Material(
+        type: MaterialType.transparency,
+        child: InkWell(
+          key: widget.inkKey,
+          onTap: widget.onTap,
+          onHover: _setHovering,
+          onFocusChange: _setFocused,
+          focusNode: widget.focusNode,
+          autofocus: widget.autofocus,
+          canRequestFocus: widget.onTap != null,
+          borderRadius: radius,
+          child: widget.child,
+        ),
+      ),
+    );
+    if (widget.hoverScale == 1) {
+      return card;
+    }
+    return AnimatedScale(
+      scale: highlighted && _hovering ? widget.hoverScale : 1,
+      duration: AppMotion.fast,
+      curve: AppMotion.standard,
+      child: card,
     );
   }
 }

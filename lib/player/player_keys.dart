@@ -9,6 +9,8 @@ abstract final class PlayerKeys {
   static const fullscreen = Key('player-fullscreen');
   static const playMethod = Key('player-play-method');
   static const volume = Key('player-volume');
+  static const mute = Key('player-mute');
+  static const volumePercent = Key('player-volume-percent');
   static const quality = Key('player-quality');
   static const audio = Key('player-audio');
   static const subtitle = Key('player-subtitle');
@@ -17,6 +19,10 @@ abstract final class PlayerKeys {
   static const nextEpisode = Key('player-next-episode');
   static const nextEpisodeCancel = Key('player-next-episode-cancel');
   static const nextEpisodePlay = Key('player-next-episode-play');
+  static const playbackEnded = Key('player-playback-ended');
+  static const replay = Key('player-replay');
+  static const endedViewSeries = Key('player-ended-view-series');
+  static const endedClose = Key('player-ended-close');
   static const disconnect = Key('player-disconnect');
   static const progressSyncFailed = Key('player-progress-sync-failed');
   static const subtitleNotice = Key('player-subtitle-notice');

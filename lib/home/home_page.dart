@@ -4,9 +4,7 @@ import 'package:rillight/app/app_shell.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme/tokens.dart';
-import 'package:rillight/app/widgets/app_error_view.dart';
 import 'package:rillight/app/window_chrome.dart';
-import 'package:rillight/home/catalog_failure.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/home/home_hero.dart';
@@ -52,57 +50,59 @@ class HomePage extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (catalog.librariesError != null)
-                Padding(
-                  padding: const EdgeInsets.all(AppSpacing.md),
-                  child: AppErrorView(
-                    message: catalogFailureMessage(
-                      l10n,
-                      catalog.librariesError!,
-                    ),
-                    onRetry: catalog.reload,
-                  ),
-                ),
-              HomeHero(catalog: catalog, topOverlap: overlap),
+              RepaintBoundary(
+                child: HomeHero(catalog: catalog, topOverlap: overlap),
+              ),
               const SizedBox(height: AppSpacing.xl),
-              HomeMediaRow(
-                rowKey: CatalogKeys.resumeRow,
-                shelfId: CatalogKeys.shelfResume,
-                title: l10n.resumeRow,
-                state: catalog.resume,
-                showProgress: true,
-                wide: true,
-                onTap: (item) => context.push(AppRoutes.item(item.id)),
-                onRetry: catalog.reloadHomeRows,
-                onMore: () => context.push(AppRoutes.shelfResume),
+              RepaintBoundary(
+                child: HomeMediaRow(
+                  rowKey: CatalogKeys.resumeRow,
+                  shelfId: CatalogKeys.shelfResume,
+                  title: l10n.resumeRow,
+                  state: catalog.resume,
+                  showProgress: true,
+                  wide: true,
+                  onTap: (item) => context.push(AppRoutes.item(item.id)),
+                  onRetry: catalog.reloadHomeRows,
+                  onMore: () => context.push(AppRoutes.shelfResume),
+                  onRemoveFromResume: catalog.hideFromResume,
+                ),
               ),
-              LibraryTiles(libraries: catalog.libraries),
-              HomeMediaRow(
-                rowKey: CatalogKeys.nextUpRow,
-                shelfId: CatalogKeys.shelfNextUp,
-                title: l10n.nextUpRow,
-                state: catalog.nextUp,
-                onTap: (item) => context.push(AppRoutes.item(item.id)),
-                onRetry: catalog.reloadHomeRows,
-                onMore: () => context.push(AppRoutes.shelfNextUp),
+              RepaintBoundary(
+                child: LibraryTiles(libraries: catalog.libraries),
               ),
-              HomeMediaRow(
-                rowKey: CatalogKeys.latestMoviesRow,
-                shelfId: CatalogKeys.shelfLatestMovies,
-                title: l10n.latestMoviesRow,
-                state: catalog.latestMovies,
-                onTap: (item) => context.push(AppRoutes.item(item.id)),
-                onRetry: catalog.reloadHomeRows,
-                onMore: () => context.push(AppRoutes.shelfLatestMovies),
+              RepaintBoundary(
+                child: HomeMediaRow(
+                  rowKey: CatalogKeys.nextUpRow,
+                  shelfId: CatalogKeys.shelfNextUp,
+                  title: l10n.nextUpRow,
+                  state: catalog.nextUp,
+                  onTap: (item) => context.push(AppRoutes.item(item.id)),
+                  onRetry: catalog.reloadHomeRows,
+                  onMore: () => context.push(AppRoutes.shelfNextUp),
+                ),
               ),
-              HomeMediaRow(
-                rowKey: CatalogKeys.latestSeriesRow,
-                shelfId: CatalogKeys.shelfLatestSeries,
-                title: l10n.latestSeriesRow,
-                state: catalog.latestSeries,
-                onTap: (item) => context.push(AppRoutes.item(item.id)),
-                onRetry: catalog.reloadHomeRows,
-                onMore: () => context.push(AppRoutes.shelfLatestSeries),
+              RepaintBoundary(
+                child: HomeMediaRow(
+                  rowKey: CatalogKeys.latestMoviesRow,
+                  shelfId: CatalogKeys.shelfLatestMovies,
+                  title: l10n.latestMoviesRow,
+                  state: catalog.latestMovies,
+                  onTap: (item) => context.push(AppRoutes.item(item.id)),
+                  onRetry: catalog.reloadHomeRows,
+                  onMore: () => context.push(AppRoutes.shelfLatestMovies),
+                ),
+              ),
+              RepaintBoundary(
+                child: HomeMediaRow(
+                  rowKey: CatalogKeys.latestSeriesRow,
+                  shelfId: CatalogKeys.shelfLatestSeries,
+                  title: l10n.latestSeriesRow,
+                  state: catalog.latestSeries,
+                  onTap: (item) => context.push(AppRoutes.item(item.id)),
+                  onRetry: catalog.reloadHomeRows,
+                  onMore: () => context.push(AppRoutes.shelfLatestSeries),
+                ),
               ),
             ],
           ),

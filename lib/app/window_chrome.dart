@@ -3,6 +3,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:rillight/app/product.dart';
+import 'package:rillight/app/window_geometry.dart';
 import 'package:window_manager/window_manager.dart';
 
 /// 顶栏铬高度,与 window_manager [kWindowCaptionHeight] 对齐。
@@ -10,6 +11,15 @@ const double kWindowChromeHeight = kWindowCaptionHeight;
 
 /// Windows/Linux 三个标题按钮的总宽度(每个 46)。
 const double kWindowChromeTrailingInset = 46 * 3;
+
+/// 应用按钮与系统 min/max/close 之间的空隙,避免和标题按钮挤成一坨。
+const double kWindowChromeActionGap = 8;
+
+/// 顶栏右侧图标与 Windows 标题按钮同高,避免 56px 栏里图标垂下错位。
+const BoxConstraints kTitleBarIconConstraints = BoxConstraints.tightFor(
+  width: 40,
+  height: kWindowCaptionHeight,
+);
 
 /// macOS 交通灯占用的左侧留白,供顶栏内容避让。
 const double kWindowChromeMacosLeadingInset = 78;
@@ -23,7 +33,7 @@ const double _kWindowChromeDragSlop = 4;
 /// WM_NCHITTEST 返回 HTMAXBUTTON/HTCLOSE/HTCAPTION 等价命中。
 const WindowOptions kMainWindowOptions = WindowOptions(
   title: kProductName,
-  minimumSize: Size(960, 540),
+  minimumSize: kMinWindowSize,
   titleBarStyle: TitleBarStyle.hidden,
   windowButtonVisibility: true,
 );
@@ -57,36 +67,95 @@ double windowChromeTrailingInset([TargetPlatform? platform]) {
   }
 }
 
+/// 按工作区设最小尺寸、自适应客户区尺寸并居中。须在窗口仍隐藏时调用。
+Future<void> applyAdaptiveWindowSize({
+  Size minimumSize = kMinWindowSize,
+  Size maximumSize = kMaxDefaultWindowSize,
+}) async {
+  await windowManager.setMinimumSize(minimumSize);
+  await windowManager.setSize(
+    await resolveAdaptiveWindowSize(minSize: minimumSize, maxSize: maximumSize),
+  );
+  await windowManager.center();
+}
+
 /// 初始化并显示主窗口。播放进程窗口不要走这条路径。
 Future<void> configureMainWindow() async {
   await windowManager.ensureInitialized();
-  await windowManager.waitUntilReadyToShow(kMainWindowOptions, () async {
-    await windowManager.show();
-    await windowManager.focus();
-  });
+  await windowManager.waitUntilReadyToShow();
+  await windowManager.hide();
+  await windowManager.setTitleBarStyle(
+    TitleBarStyle.hidden,
+    windowButtonVisibility: true,
+  );
+  await applyAdaptiveWindowSize(
+    minimumSize: kMainWindowOptions.minimumSize ?? kMinWindowSize,
+  );
+  await windowManager.setTitle(kProductName);
+  await windowManager.show();
+  await windowManager.focus();
 }
 
-/// 可复用拖拽区:拖动调用 [windowManager.startDragging],双击切换最大化。
-class WindowDragArea extends StatelessWidget {
+/// 可复用拖拽区:左键移动超过 slop 后 [windowManager.startDragging],双击切换最大化。
+class WindowDragArea extends StatefulWidget {
   const WindowDragArea({super.key, required this.child});
 
   final Widget child;
 
   @override
+  State<WindowDragArea> createState() => _WindowDragAreaState();
+}
+
+class _WindowDragAreaState extends State<WindowDragArea> {
+  Offset? _pointerDown;
+  bool _dragging = false;
+
+  void _onPointerDown(PointerDownEvent event) {
+    if (event.buttons != kPrimaryMouseButton) {
+      return;
+    }
+    _pointerDown = event.position;
+    _dragging = false;
+  }
+
+  void _onPointerMove(PointerMoveEvent event) {
+    if (_dragging || _pointerDown == null) {
+      return;
+    }
+    if (event.buttons != kPrimaryMouseButton) {
+      return;
+    }
+    if ((event.position - _pointerDown!).distance < _kWindowChromeDragSlop) {
+      return;
+    }
+    _dragging = true;
+    windowManager.startDragging();
+  }
+
+  void _onPointerEnd(PointerEvent event) {
+    _pointerDown = null;
+    _dragging = false;
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return Listener(
       behavior: HitTestBehavior.translucent,
-      onPanStart: (_) {
-        windowManager.startDragging();
-      },
-      onDoubleTap: () async {
-        if (await windowManager.isMaximized()) {
-          await windowManager.unmaximize();
-        } else {
-          await windowManager.maximize();
-        }
-      },
-      child: child,
+      onPointerDown: _onPointerDown,
+      onPointerMove: _onPointerMove,
+      onPointerUp: _onPointerEnd,
+      onPointerCancel: _onPointerEnd,
+      child: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onDoubleTap: () async {
+          if (await windowManager.isMaximized()) {
+            await windowManager.unmaximize();
+          } else {
+            await windowManager.maximize();
+          }
+        },
+        child: widget.child,
+      ),
     );
   }
 }
