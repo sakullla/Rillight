@@ -1129,21 +1129,15 @@ class _ChapterThumbState extends State<_ChapterThumb> {
     }
   }
 
-  Future<Uint8List?> _load() async {
-    try {
-      final bytes = await AuthScope.of(context).client.getChapterImage(
-        widget.itemId,
-        index: widget.index,
-        tag: widget.tag,
-        maxWidth: 160,
-      );
-      if (bytes.isEmpty) {
-        return null;
-      }
-      return Uint8List.fromList(bytes);
-    } catch (_) {
-      return null;
-    }
+  Future<Uint8List?> _load() {
+    // 章节图经 MediaImageCache 统一管道加载,与海报/剧照共用
+    // 内存 LRU + 磁盘两级缓存,重复进入详情页不再重复请求。
+    return loadChapterImage(
+      context,
+      itemId: widget.itemId,
+      index: widget.index,
+      tag: widget.tag,
+    );
   }
 
   @override

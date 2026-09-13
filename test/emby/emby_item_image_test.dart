@@ -102,4 +102,58 @@ void main() {
       containsAllInOrder(['ep-3:Thumb', 'series-1:Backdrop']),
     );
   });
+
+  test('image candidates always carry tags for cache keys', () {
+    final item = EmbyItem.fromJson({
+      'Id': 'ep-4',
+      'Name': '多图',
+      'Type': 'Episode',
+      'SeriesId': 'series-1',
+      'ImageTags': {'Thumb': 'thumb-4'},
+      'SeriesPrimaryImageTag': 'series-primary',
+      'ParentThumbItemId': 'series-1',
+      'ParentThumbImageTag': 'series-thumb',
+      'ParentBackdropItemId': 'series-1',
+      'ParentBackdropImageTags': ['back-4'],
+    });
+    for (final refs in [
+      item.imageCandidates(),
+      item.imageCandidates(preferThumb: true),
+      item.imageCandidates(preferBackdrop: true),
+    ]) {
+      expect(refs, isNotEmpty);
+      for (final ref in refs) {
+        // 缓存 key 纳入 tag:候选必须携带非空 tag,否则 key 不稳定。
+        expect(ref.tag, isNotNull);
+        expect(ref.tag, isNotEmpty);
+      }
+    }
+  });
+
+  test('parses chapters with image tags for the unified pipeline', () {
+    final item = EmbyItem.fromJson({
+      'Id': 'movie-chapters',
+      'Name': '章节片',
+      'Type': 'Movie',
+      'Chapters': [
+        {
+          'Name': '开场',
+          'StartPositionTicks': 0,
+          'ImageTag': 'tag-c0',
+          'ImageIndex': 0,
+        },
+        {
+          'Name': '转场',
+          'StartPositionTicks': 50000000,
+          'ImageTag': 'tag-c1',
+          'ImageIndex': 1,
+        },
+      ],
+    });
+    expect(item.chapters, hasLength(2));
+    expect(item.chapters[0].imageTag, 'tag-c0');
+    expect(item.chapters[0].imageIndex, 0);
+    expect(item.chapters[1].imageTag, 'tag-c1');
+    expect(item.chapters[1].imageIndex, 1);
+  });
 }

@@ -30,6 +30,7 @@ void main() {
   late FakeEmbyAdapter adapter;
 
   setUp(() {
+    MediaImage.debugResetCacheConfiguration();
     MediaImage.debugClearCache();
     server = FakeEmbyServer();
     adapter = FakeEmbyAdapter([server]);
@@ -43,7 +44,10 @@ void main() {
     );
   });
 
-  tearDown(MediaImage.debugClearCache);
+  tearDown(() {
+    MediaImage.debugClearCache();
+    MediaImage.debugResetCacheConfiguration();
+  });
 
   Future<AuthController> connect(WidgetTester tester) async {
     final auth = AuthController(
@@ -503,6 +507,286 @@ void main() {
       isNotEmpty,
     );
   });
+
+  testWidgets('chapter images load through the shared cache pipeline', (
+    tester,
+  ) async {
+    final auth = await connect(tester);
+    late BuildContext captured;
+    await tester.runAsync(() async {
+      await tester.pumpWidget(
+        wrap(
+          auth,
+          Builder(
+            builder: (context) {
+              captured = context;
+              return const SizedBox.shrink();
+            },
+          ),
+        ),
+      );
+      final first = await loadChapterImage(
+        captured,
+        itemId: 'img-movie',
+        index: 2,
+        tag: 'tag-chapter',
+      );
+      final second = await loadChapterImage(
+        captured,
+        itemId: 'img-movie',
+        index: 2,
+        tag: 'tag-chapter',
+      );
+      expect(first, isNotNull);
+      expect(second, isNotNull);
+      expect(identical(first, second), isTrue);
+    });
+    expect(
+      server.requests.where((request) => request.contains('/Images/Chapter/2')),
+      hasLength(1),
+    );
+  });
+
+  testWidgets('reloading after a restart hits the disk cache', (tester) async {
+    final disk = _FakeDiskStore();
+    MediaImageCache.instance.debugSetDiskStore(disk);
+    final auth = await connect(tester);
+    await tester.runAsync(() async {
+      await tester.pumpWidget(
+        wrap(
+          auth,
+          const MediaImage(
+            key: ValueKey('first'),
+            item: withTag,
+            width: 120,
+            height: 180,
+          ),
+        ),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    });
+    await tester.pump();
+    await tester.pump();
+    expect(find.byType(Image), findsOneWidget);
+    expect(disk.files, hasLength(1));
+    final requestsBefore = imageRequests().length;
+
+    // 模拟应用重启:内存层清空,磁盘层保留。
+    MediaImage.debugClearMemory();
+    await tester.runAsync(() async {
+      await tester.pumpWidget(
+        wrap(
+          auth,
+          const MediaImage(
+            key: ValueKey('second'),
+            item: withTag,
+            width: 120,
+            height: 180,
+          ),
+        ),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    });
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.byType(Image), findsOneWidget);
+    expect(imageRequests().length, requestsBefore);
+  });
+
+  test(
+    'memory cache evicts least recently used above the byte limit',
+    () async {
+      MediaImageCache.instance.memoryLimitBytes = kTinyPng.length * 2;
+      var fetches = 0;
+      Future<Uint8List?> fetch() async {
+        fetches++;
+        return kTinyPng;
+      }
+
+      Future<Uint8List?> load(String itemId) {
+        return MediaImageCache.instance.load(
+          serverId: 'server-1',
+          itemId: itemId,
+          type: 'Primary',
+          tag: 'tag-x',
+          maxWidth: 280,
+          fetch: fetch,
+        );
+      }
+
+      await load('a');
+      await load('b');
+      // 最近使用 a 后,再装 c 会淘汰最久未用的 b。
+      await load('a');
+      expect(fetches, 2);
+      await load('c');
+      expect(fetches, 3);
+      await load('a');
+      expect(fetches, 3);
+      await load('b');
+      expect(fetches, 4);
+    },
+  );
+
+  test('disk cache survives a memory clear like an app restart', () async {
+    final disk = _FakeDiskStore();
+    MediaImageCache.instance.debugSetDiskStore(disk);
+    var fetches = 0;
+    Future<Uint8List?> fetch() async {
+      fetches++;
+      return kTinyPng;
+    }
+
+    final bytes = await MediaImageCache.instance.load(
+      serverId: 'server-1',
+      itemId: 'a',
+      type: 'Primary',
+      tag: 'tag-x',
+      maxWidth: 280,
+      fetch: fetch,
+    );
+    expect(bytes, isNotNull);
+    expect(disk.files, hasLength(1));
+
+    MediaImage.debugClearMemory();
+    final again = await MediaImageCache.instance.load(
+      serverId: 'server-1',
+      itemId: 'a',
+      type: 'Primary',
+      tag: 'tag-x',
+      maxWidth: 280,
+      fetch: fetch,
+    );
+    expect(again, isNotNull);
+    expect(fetches, 1);
+  });
+
+  test('disk write failure degrades to memory-only caching', () async {
+    final disk = _FakeDiskStore()..failWrites = true;
+    MediaImageCache.instance.debugSetDiskStore(disk);
+    var fetches = 0;
+    Future<Uint8List?> fetch() async {
+      fetches++;
+      return kTinyPng;
+    }
+
+    final bytes = await MediaImageCache.instance.load(
+      serverId: 'server-1',
+      itemId: 'a',
+      type: 'Primary',
+      tag: 'tag-x',
+      maxWidth: 280,
+      fetch: fetch,
+    );
+    // 磁盘写入失败不影响本次取回与显示。
+    expect(bytes, isNotNull);
+    expect(fetches, 1);
+
+    MediaImage.debugClearMemory();
+    final again = await MediaImageCache.instance.load(
+      serverId: 'server-1',
+      itemId: 'a',
+      type: 'Primary',
+      tag: 'tag-x',
+      maxWidth: 280,
+      fetch: fetch,
+    );
+    expect(again, isNotNull);
+    expect(fetches, 2);
+  });
+
+  test('negative cache expires after its TTL', () async {
+    var now = DateTime(2026, 1, 1, 12);
+    MediaImageCache.instance.clock = () => now;
+    var fetches = 0;
+    Future<Uint8List?> fetch() async {
+      fetches++;
+      return null;
+    }
+
+    Future<Uint8List?> load() {
+      return MediaImageCache.instance.load(
+        serverId: 'server-1',
+        itemId: 'a',
+        type: 'Primary',
+        tag: 'tag-x',
+        maxWidth: 280,
+        fetch: fetch,
+      );
+    }
+
+    await load();
+    expect(fetches, 1);
+    // TTL 内不再重试。
+    await load();
+    expect(fetches, 1);
+    now = now.add(const Duration(seconds: 31));
+    await load();
+    expect(fetches, 2);
+  });
+
+  test('tag change invalidates the cached entry and miss', () async {
+    var fetches = 0;
+    Future<Uint8List?> fetch() async {
+      fetches++;
+      return fetches == 1 ? kTinyPng : null;
+    }
+
+    Future<Uint8List?> load(String tag) {
+      return MediaImageCache.instance.load(
+        serverId: 'server-1',
+        itemId: 'a',
+        type: 'Primary',
+        tag: tag,
+        maxWidth: 280,
+        fetch: fetch,
+      );
+    }
+
+    final first = await load('tag-1');
+    expect(first, isNotNull);
+    final cached = await load('tag-1');
+    expect(fetches, 1);
+    expect(identical(cached, first), isTrue);
+
+    // tag 变化即换 key:命中缓存不再生效,重新拉取并按新结果处理。
+    final second = await load('tag-2');
+    expect(fetches, 2);
+    expect(second, isNull);
+
+    // tag-1 的负缓存不阻塞 tag-2,tag-2 自身的负缓存也不阻塞 tag-1 的旧命中。
+    await load('tag-1');
+    expect(fetches, 2);
+    await load('tag-2');
+    expect(fetches, 2);
+  });
+}
+
+class _FakeDiskStore implements MediaImageDiskStore {
+  final Map<String, Uint8List> files = {};
+  bool failWrites = false;
+
+  @override
+  Future<Uint8List?> read(String key) async => files[key];
+
+  @override
+  Future<void> write(String key, Uint8List bytes) async {
+    if (failWrites) {
+      throw Exception('disk full');
+    }
+    files[key] = bytes;
+  }
+
+  @override
+  Future<void> remove(String key) async {
+    files.remove(key);
+  }
+
+  @override
+  Future<void> clear() async {
+    files.clear();
+  }
 }
 
 class _BackdropServingAdapter implements HttpClientAdapter {
