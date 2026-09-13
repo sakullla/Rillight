@@ -9,6 +9,36 @@ enum HardwareDecodingMode { auto, on, off }
 /// 硬件解码后端:auto 走平台默认,其余为 mpv hwdec 值。
 enum HardwareDecoderBackend { auto, d3d11va, nvdec, videotoolbox }
 
+/// 按剧(seriesId)记忆的播放偏好:音轨/字幕(含关闭)/码率。
+///
+/// [subtitleStreamIndex] 为 null 表示该剧字幕处于关闭状态;
+/// 记录存在即视为有效快照,不存在记录时运行时沿用默认逻辑。
+class PlayerSeriesPreference {
+  const PlayerSeriesPreference({
+    this.audioStreamIndex,
+    this.subtitleStreamIndex,
+    this.maxStreamingBitrate,
+  });
+
+  final int? audioStreamIndex;
+  final int? subtitleStreamIndex;
+  final int? maxStreamingBitrate;
+
+  Map<String, dynamic> toJson() => {
+    if (audioStreamIndex != null) 'audioStreamIndex': audioStreamIndex,
+    if (subtitleStreamIndex != null) 'subtitleStreamIndex': subtitleStreamIndex,
+    if (maxStreamingBitrate != null) 'maxStreamingBitrate': maxStreamingBitrate,
+  };
+
+  factory PlayerSeriesPreference.fromJson(Map<String, dynamic> json) {
+    return PlayerSeriesPreference(
+      audioStreamIndex: _readInt(json['audioStreamIndex']),
+      subtitleStreamIndex: _readInt(json['subtitleStreamIndex']),
+      maxStreamingBitrate: _readInt(json['maxStreamingBitrate']),
+    );
+  }
+}
+
 /// 统一播放器设置(主进程与播放进程共享同一 JSON 文件)。
 ///
 /// 除 volume 外的字段为可空:null 表示「未配置」,运行时按默认值解析;
@@ -20,6 +50,8 @@ class PlayerSettings {
     this.diskCacheLimitMiB,
     this.hardwareDecoding,
     this.hardwareDecoder,
+    this.playbackRate,
+    this.seriesPreferences = const {},
   });
 
   final int volume;
@@ -29,13 +61,39 @@ class PlayerSettings {
   final HardwareDecodingMode? hardwareDecoding;
   final HardwareDecoderBackend? hardwareDecoder;
 
+  /// 倍速(0.5–3.0 阶梯内取值);null 表示未配置,恢复默认 1.0。
+  final double? playbackRate;
+
+  /// 按剧记忆的音轨/字幕/码率,key 为 seriesId。
+  final Map<String, PlayerSeriesPreference> seriesPreferences;
+
   int get clampedVolume => volume.clamp(0, 100);
+
+  double get effectivePlaybackRate {
+    final value = playbackRate;
+    if (value == null) {
+      return 1.0;
+    }
+    if (value < 0.25) {
+      return 0.25;
+    }
+    if (value > 4.0) {
+      return 4.0;
+    }
+    return value;
+  }
 
   Map<String, dynamic> toJson() => {
     'volume': clampedVolume,
     if (diskCacheLimitMiB != null) 'diskCacheLimitMiB': diskCacheLimitMiB,
     if (hardwareDecoding != null) 'hardwareDecoding': hardwareDecoding!.name,
     if (hardwareDecoder != null) 'hardwareDecoder': hardwareDecoder!.name,
+    if (playbackRate != null) 'playbackRate': playbackRate,
+    if (seriesPreferences.isNotEmpty)
+      'seriesPreferences': {
+        for (final entry in seriesPreferences.entries)
+          entry.key: entry.value.toJson(),
+      },
   };
 
   factory PlayerSettings.fromJson(Map<String, dynamic> json) {
@@ -56,6 +114,8 @@ class PlayerSettings {
         HardwareDecoderBackend.values,
         json['hardwareDecoder'],
       ),
+      playbackRate: _readDouble(json['playbackRate']),
+      seriesPreferences: _readSeriesPreferences(json['seriesPreferences']),
     );
   }
 }
@@ -68,6 +128,29 @@ int? _readInt(dynamic raw) {
     return raw.round();
   }
   return int.tryParse(raw?.toString() ?? '');
+}
+
+double? _readDouble(dynamic raw) {
+  if (raw is num) {
+    return raw.toDouble();
+  }
+  return double.tryParse(raw?.toString() ?? '');
+}
+
+Map<String, PlayerSeriesPreference> _readSeriesPreferences(dynamic raw) {
+  if (raw is! Map) {
+    return const {};
+  }
+  final result = <String, PlayerSeriesPreference>{};
+  for (final entry in raw.entries) {
+    if (entry.value is! Map) {
+      continue;
+    }
+    result[entry.key.toString()] = PlayerSeriesPreference.fromJson(
+      Map<String, dynamic>.from(entry.value as Map),
+    );
+  }
+  return result;
 }
 
 T? _readEnum<T extends Enum>(List<T> values, dynamic raw) {

@@ -927,6 +927,24 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'{gb} GB'**
   String settingsCacheSize(double gb);
+
+  /// Playback speed selector label on the player controls.
+  ///
+  /// In zh, this message translates to:
+  /// **'倍速'**
+  String get playbackRate;
+
+  /// Keep the player window above other windows.
+  ///
+  /// In zh, this message translates to:
+  /// **'窗口置顶'**
+  String get alwaysOnTop;
+
+  /// Stop keeping the player window above other windows.
+  ///
+  /// In zh, this message translates to:
+  /// **'取消置顶'**
+  String get alwaysOnTopOff;
 }
 
 class _AppLocalizationsDelegate

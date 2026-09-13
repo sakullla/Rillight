@@ -622,5 +622,17 @@
         "type": "double"
       }
     }
+  },
+  "playbackRate": "倍速",
+  "@playbackRate": {
+    "description": "Playback speed selector label on the player controls."
+  },
+  "alwaysOnTop": "窗口置顶",
+  "@alwaysOnTop": {
+    "description": "Keep the player window above other windows."
+  },
+  "alwaysOnTopOff": "取消置顶",
+  "@alwaysOnTopOff": {
+    "description": "Stop keeping the player window above other windows."
   }
 }

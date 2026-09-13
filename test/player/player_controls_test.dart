@@ -144,6 +144,27 @@ void main() {
     return tester.state<PlayerPageState>(find.byType(PlayerPage)).controller!;
   }
 
+  Future<void> openEpisode(WidgetTester tester, String episodeId) async {
+    await openLibrary(tester, 'view-tv');
+    await tester.tap(find.byKey(CatalogKeys.item('series-anim')));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(CatalogKeys.episode(episodeId)));
+    await tester.tap(find.byKey(CatalogKeys.episode(episodeId)));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(PlayerKeys.open));
+    await tester.tap(find.byKey(PlayerKeys.open));
+    await tester.pump();
+    await waitFor(tester, find.byKey(PlayerKeys.playPause));
+  }
+
+  /// 弹出菜单项:点击整行(而非 Text 本身,后者不参与命中测试)。
+  Finder popupItem(String label) => find
+      .ancestor(
+        of: find.text(label).last,
+        matching: find.byWidgetPredicate((widget) => widget is PopupMenuItem),
+      )
+      .last;
+
   double controlsOpacity(WidgetTester tester) {
     return tester
         .widget<AnimatedOpacity>(
@@ -672,4 +693,336 @@ void main() {
     expect(window.isFullScreen, isFalse);
     expect(find.text('飞屋环游记 (2009)'), findsOneWidget);
   });
+
+  testWidgets(
+    'speed menu switches rate instantly and echoes the current rate',
+    (tester) async {
+      await pumpLoggedIn(tester);
+      await openPlayable(tester, 'movie-up');
+      await waitFor(tester, find.byKey(PlayerKeys.playPause));
+
+      expect(controllerOf(tester).playbackRate, 1.0);
+      expect(backend.rate, 1.0);
+      expect(find.text('1x'), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('player-speed')));
+      await tester.pumpAndSettle();
+      await tester.tap(popupItem('2x'));
+      await tester.pumpAndSettle();
+
+      expect(controllerOf(tester).playbackRate, 2.0);
+      expect(backend.rate, 2.0);
+      expect(find.text('2x'), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('player-speed')));
+      await tester.pumpAndSettle();
+      await tester.tap(popupItem('1x'));
+      await tester.pumpAndSettle();
+
+      expect(controllerOf(tester).playbackRate, 1.0);
+      expect(backend.rate, 1.0);
+      expect(find.text('1x'), findsOneWidget);
+    },
+  );
+
+  testWidgets('bracket shortcuts step playback rate through the ladder', (
+    tester,
+  ) async {
+    await pumpLoggedIn(tester);
+    await openPlayable(tester, 'movie-up');
+    await tester.tap(find.byKey(PlayerKeys.surface));
+    await tester.pump();
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.bracketRight);
+    await tester.pump();
+    expect(controllerOf(tester).playbackRate, 1.25);
+    expect(backend.rate, 1.25);
+    expect(find.text('1.25x'), findsOneWidget);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.bracketRight);
+    await tester.pump();
+    expect(controllerOf(tester).playbackRate, 1.5);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.bracketLeft);
+    await tester.pump();
+    expect(controllerOf(tester).playbackRate, 1.25);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.bracketLeft);
+    await tester.pump();
+    expect(controllerOf(tester).playbackRate, 1.0);
+    await tester.sendKeyEvent(LogicalKeyboardKey.bracketLeft);
+    await tester.pump();
+    expect(controllerOf(tester).playbackRate, 0.75);
+    expect(backend.rate, 0.75);
+    expect(find.text('0.75x'), findsOneWidget);
+  });
+
+  testWidgets('playback rate carries over to the next episode', (tester) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await pumpLoggedIn(tester);
+    await openLibrary(tester, 'view-tv');
+    await tester.tap(find.byKey(CatalogKeys.item('series-friends')));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(
+      find.byKey(CatalogKeys.episode('episode-friends-s1e1')),
+    );
+    await tester.tap(find.byKey(CatalogKeys.episode('episode-friends-s1e1')));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(PlayerKeys.open));
+    await tester.tap(find.byKey(PlayerKeys.open));
+    await tester.pump();
+    await waitFor(tester, find.byKey(PlayerKeys.playPause));
+
+    for (var i = 0; i < 3; i++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.bracketRight);
+      await tester.pump();
+    }
+    expect(controllerOf(tester).playbackRate, 2.0);
+    expect(backend.rate, 2.0);
+
+    backend.completePlayback();
+    await tester.pump();
+    await waitFor(tester, find.byKey(PlayerKeys.nextEpisodePlay));
+    await tester.tap(find.byKey(PlayerKeys.nextEpisodePlay));
+    await tester.pump();
+    await waitFor(tester, find.byKey(PlayerKeys.playPause));
+
+    expect(controllerOf(tester).playbackRate, 2.0);
+    expect(backend.rate, 2.0);
+    expect(find.text('2x'), findsOneWidget);
+  });
+
+  testWidgets('audio subtitle and bitrate are remembered for the series', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    server = multiTrackSeriesServer();
+    adapter = FakeEmbyAdapter([server]);
+    final store = MemoryPlayerSettingsStore();
+    await pumpLoggedIn(tester, settingsStore: store);
+    await openEpisode(tester, 'episode-anim-1');
+
+    await tester.tap(find.byKey(PlayerKeys.audio));
+    await tester.pumpAndSettle();
+    await tester.tap(popupItem('日语'));
+    await tester.pumpAndSettle();
+    expect(backend.audioIndex, 2);
+
+    await tester.tap(find.byKey(PlayerKeys.subtitle));
+    await tester.pumpAndSettle();
+    await tester.tap(popupItem('英文字幕'));
+    await tester.pumpAndSettle();
+    expect(backend.subtitleUri, isNotNull);
+    expect(backend.subtitleUri!.path, contains('/Subtitles/4/Stream.srt'));
+
+    await tester.runAsync(() => controllerOf(tester).setMaxBitrate(20000000));
+    await tester.pump();
+    await waitFor(tester, find.byKey(PlayerKeys.playPause));
+
+    final preference = (await store.read()).seriesPreferences['series-anim'];
+    expect(preference, isNotNull);
+    expect(preference!.audioStreamIndex, 2);
+    expect(preference.subtitleStreamIndex, 4);
+    expect(preference.maxStreamingBitrate, 20000000);
+
+    // 同剧下一集自动应用记忆的音轨/字幕/码率。
+    backend.completePlayback();
+    await tester.pump();
+    await waitFor(tester, find.byKey(PlayerKeys.nextEpisodePlay));
+    await tester.tap(find.byKey(PlayerKeys.nextEpisodePlay));
+    await tester.pump();
+    await waitFor(tester, find.byKey(PlayerKeys.playPause));
+
+    final player = controllerOf(tester);
+    expect(player.audioStreamIndex, 2);
+    expect(player.subtitleStreamIndex, 4);
+    expect(player.maxStreamingBitrate, 20000000);
+    expect(backend.audioIndex, 2);
+    expect(backend.subtitleUri!.path, contains('/Subtitles/4/Stream.srt'));
+    expect(server.lastPlaybackInfoBody?['AudioStreamIndex'], 2);
+    expect(server.lastPlaybackInfoBody?['SubtitleStreamIndex'], 4);
+    expect(server.lastPlaybackInfoBody?['MaxStreamingBitrate'], 20000000);
+  });
+
+  testWidgets(
+    'subtitle-off preference survives a restart through a fresh store',
+    (tester) async {
+      tester.view.physicalSize = const Size(1200, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      server = multiTrackSeriesServer();
+      adapter = FakeEmbyAdapter([server]);
+      final store = MemoryPlayerSettingsStore();
+      await pumpLoggedIn(tester, settingsStore: store);
+      await openEpisode(tester, 'episode-anim-1');
+
+      await tester.tap(find.byKey(PlayerKeys.subtitle));
+      await tester.pumpAndSettle();
+      await tester.tap(popupItem('关闭字幕'));
+      await tester.pumpAndSettle();
+      expect(controllerOf(tester).subtitleStreamIndex, isNull);
+      expect(backend.subtitleOff, isTrue);
+      final preference = (await store.read()).seriesPreferences['series-anim'];
+      expect(preference, isNotNull);
+      expect(preference!.subtitleStreamIndex, isNull);
+
+      // 模拟重启:新的 store 实例从持久化内容初始化后打开同剧另一集。
+      final restarted = MemoryPlayerSettingsStore(await store.read());
+      server = multiTrackSeriesServer();
+      adapter = FakeEmbyAdapter([server]);
+      await pumpLoggedIn(tester, settingsStore: restarted);
+      await openEpisode(tester, 'episode-anim-2');
+
+      final player = controllerOf(tester);
+      expect(player.subtitleStreamIndex, isNull);
+      expect(backend.subtitleOff, isTrue);
+      // 音轨无记忆,沿用现有默认逻辑。
+      expect(player.audioStreamIndex, 1);
+      expect(server.lastPlaybackInfoBody?['SubtitleStreamIndex'], isNull);
+    },
+  );
+
+  testWidgets('always-on-top toggles by button and keyboard with state shown', (
+    tester,
+  ) async {
+    await pumpLoggedIn(tester);
+    await openPlayable(tester, 'movie-up');
+    await waitFor(tester, find.byKey(PlayerKeys.playPause));
+
+    expect(window.isAlwaysOnTop, isFalse);
+    expect(find.byIcon(Icons.push_pin_outlined), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('player-always-on-top')));
+    await tester.pump();
+    expect(window.isAlwaysOnTop, isTrue);
+    expect(find.byIcon(Icons.push_pin_rounded), findsOneWidget);
+    expect(find.byIcon(Icons.push_pin_outlined), findsNothing);
+
+    // T 快捷键切换置顶。
+    await tester.tap(find.byKey(PlayerKeys.surface));
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyT);
+    await tester.pump();
+    expect(window.isAlwaysOnTop, isFalse);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyT);
+    await tester.pump();
+    expect(window.isAlwaysOnTop, isTrue);
+
+    // 全屏与置顶并存,互不冲突。
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyF);
+    await tester.pump();
+    expect(window.isFullScreen, isTrue);
+    expect(window.isAlwaysOnTop, isTrue);
+    expect(find.byIcon(Icons.push_pin_rounded), findsOneWidget);
+  });
+}
+
+/// 双音轨+双文本字幕的剧集夹具,供按剧记忆测试使用。
+FakeEmbyServer multiTrackSeriesServer() {
+  const minute = 10000000 * 60;
+  const tracks = [
+    FakeMediaStream(
+      index: 0,
+      type: 'Video',
+      codec: 'h264',
+      displayTitle: '1080p',
+    ),
+    FakeMediaStream(
+      index: 1,
+      type: 'Audio',
+      codec: 'aac',
+      language: 'eng',
+      displayTitle: '英语',
+      isDefault: true,
+    ),
+    FakeMediaStream(
+      index: 2,
+      type: 'Audio',
+      codec: 'aac',
+      language: 'jpn',
+      displayTitle: '日语',
+    ),
+    FakeMediaStream(
+      index: 3,
+      type: 'Subtitle',
+      codec: 'subrip',
+      language: 'chi',
+      displayTitle: '中文字幕',
+      isDefault: true,
+      isTextSubtitleStream: true,
+    ),
+    FakeMediaStream(
+      index: 4,
+      type: 'Subtitle',
+      codec: 'subrip',
+      language: 'eng',
+      displayTitle: '英文字幕',
+      isTextSubtitleStream: true,
+    ),
+  ];
+  return FakeEmbyServer(
+    items: [
+      ...defaultCatalogItems().where(
+        (item) =>
+            item.id != 'series-friends' &&
+            item.id != 'season-friends-1' &&
+            item.id != 'episode-friends-s1e1' &&
+            item.id != 'episode-friends-s1e2',
+      ),
+      FakeEmbyItem(
+        id: 'series-anim',
+        name: '测试动画',
+        type: 'Series',
+        parentId: 'view-tv',
+        productionYear: 2024,
+        childCount: 2,
+        primaryImageTag: 'tag-anim',
+      ),
+      FakeEmbyItem(
+        id: 'season-anim-1',
+        name: '第 1 季',
+        type: 'Season',
+        parentId: 'series-anim',
+        seriesId: 'series-anim',
+        seriesName: '测试动画',
+        indexNumber: 1,
+      ),
+      FakeEmbyItem(
+        id: 'episode-anim-1',
+        name: '第一集',
+        type: 'Episode',
+        parentId: 'season-anim-1',
+        seriesId: 'series-anim',
+        seriesName: '测试动画',
+        seasonId: 'season-anim-1',
+        indexNumber: 1,
+        parentIndexNumber: 1,
+        runTimeTicks: minute * 22,
+        primaryImageTag: 'tag-anim-e1',
+        mediaStreams: tracks,
+      ),
+      FakeEmbyItem(
+        id: 'episode-anim-2',
+        name: '第二集',
+        type: 'Episode',
+        parentId: 'season-anim-1',
+        seriesId: 'series-anim',
+        seriesName: '测试动画',
+        seasonId: 'season-anim-1',
+        indexNumber: 2,
+        parentIndexNumber: 1,
+        nextUp: true,
+        runTimeTicks: minute * 22,
+        primaryImageTag: 'tag-anim-e2',
+        mediaStreams: tracks,
+      ),
+    ],
+  );
 }

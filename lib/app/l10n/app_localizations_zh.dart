@@ -448,4 +448,13 @@ class AppLocalizationsZh extends AppLocalizations {
   String settingsCacheSize(double gb) {
     return '$gb GB';
   }
+
+  @override
+  String get playbackRate => '倍速';
+
+  @override
+  String get alwaysOnTop => '窗口置顶';
+
+  @override
+  String get alwaysOnTopOff => '取消置顶';
 }

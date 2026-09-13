@@ -165,6 +165,18 @@ class PlayerPageState extends State<PlayerPage> {
           current.toggleFullScreen();
           return KeyEventResult.handled;
         }
+        if (event.logicalKey == LogicalKeyboardKey.bracketLeft) {
+          current.nudgeRateDown();
+          return KeyEventResult.handled;
+        }
+        if (event.logicalKey == LogicalKeyboardKey.bracketRight) {
+          current.nudgeRateUp();
+          return KeyEventResult.handled;
+        }
+        if (event.logicalKey == LogicalKeyboardKey.keyT) {
+          unawaited(current.toggleAlwaysOnTop());
+          return KeyEventResult.handled;
+        }
         if (event.logicalKey == LogicalKeyboardKey.escape) {
           current.onEscape();
           return KeyEventResult.handled;
@@ -772,6 +784,8 @@ class _ControlsRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     return Row(
       children: [
         _PlayerIconButton(
@@ -810,6 +824,7 @@ class _ControlsRow extends StatelessWidget {
                 ),
             ],
           ),
+        _SpeedControl(controller: controller),
         if (controller.audioTracks.length > 1)
           _ControlMenu<int>(
             key: PlayerKeys.audio,
@@ -850,6 +865,18 @@ class _ControlsRow extends StatelessWidget {
             ],
           ),
         _PlayerIconButton(
+          key: const Key('player-always-on-top'),
+          tooltip: controller.isAlwaysOnTop
+              ? l10n.alwaysOnTopOff
+              : l10n.alwaysOnTop,
+          color: controller.isAlwaysOnTop ? scheme.primary : null,
+          onPressed: controller.toggleAlwaysOnTop,
+          iconSize: 20,
+          icon: controller.isAlwaysOnTop
+              ? Icons.push_pin_rounded
+              : Icons.push_pin_outlined,
+        ),
+        _PlayerIconButton(
           key: PlayerKeys.fullscreen,
           tooltip: controller.isFullScreen
               ? l10n.exitFullscreen
@@ -862,6 +889,55 @@ class _ControlsRow extends StatelessWidget {
       ],
     );
   }
+}
+
+/// 倍速组:固定阶梯菜单 + 当前倍速回显。
+class _SpeedControl extends StatelessWidget {
+  const _SpeedControl({required this.controller});
+
+  final PlayerController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final theme = Theme.of(context);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _ControlMenu<double>(
+          key: const Key('player-speed'),
+          tooltip: l10n.playbackRate,
+          icon: Icons.speed,
+          onSelected: controller.setRate,
+          items: [
+            for (final rate in kPlaybackRateLadder)
+              CheckedPopupMenuItem(
+                value: rate,
+                checked: rate == controller.playbackRate,
+                child: Text(_rateLabel(rate)),
+              ),
+          ],
+        ),
+        SizedBox(
+          width: 38,
+          child: Text(
+            key: const Key('player-speed-label'),
+            _rateLabel(controller.playbackRate),
+            textAlign: TextAlign.end,
+            style: _overlayTimeStyle(theme),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// 阶梯倍速的显示文案,如 0.5x / 0.75x / 1x / 2x。
+String _rateLabel(double rate) {
+  final trimmed = rate == rate.roundToDouble()
+      ? rate.round().toString()
+      : rate.toString();
+  return '${trimmed}x';
 }
 
 /// 音量组:静音按钮 + 音量滑条 + 百分比回显。
@@ -919,7 +995,8 @@ class _VolumeControl extends StatelessWidget {
   }
 }
 
-/// 控制层图标按钮:统一的暖白前景,供按钮行各处复用。
+/// 控制层图标按钮:统一的暖白前景,供按钮行各处复用;
+/// [color] 非空时(如置顶开启)以高亮色标识激活状态。
 class _PlayerIconButton extends StatelessWidget {
   const _PlayerIconButton({
     super.key,
@@ -927,11 +1004,13 @@ class _PlayerIconButton extends StatelessWidget {
     required this.onPressed,
     this.tooltip,
     this.iconSize = 24,
+    this.color,
   });
 
   final String? tooltip;
   final double iconSize;
   final IconData icon;
+  final Color? color;
   final VoidCallback? onPressed;
 
   @override
@@ -940,7 +1019,7 @@ class _PlayerIconButton extends StatelessWidget {
     return IconButton(
       tooltip: tooltip,
       onPressed: onPressed,
-      color: scheme.onSurface,
+      color: color ?? scheme.onSurface,
       iconSize: iconSize,
       icon: Icon(icon),
     );
@@ -983,7 +1062,8 @@ class _ControlMenu<T> extends StatelessWidget {
       constraints: const BoxConstraints(
         minWidth: 200,
         maxWidth: 360,
-        maxHeight: 360,
+        // 倍速阶梯 8 项(约 384px)需完整显示,避免菜单内滚动。
+        maxHeight: 416,
       ),
       padding: EdgeInsets.zero,
       splashRadius: 20,

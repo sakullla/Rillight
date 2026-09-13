@@ -31,6 +31,7 @@ abstract class VideoBackend {
   Future<void> playOrPause();
   Future<void> seek(Duration position);
   Future<void> setVolume(double volume);
+  Future<void> setRate(double rate);
   Future<void> setAudioIndex(int index);
   Future<void> setSubtitleUri(Uri uri, {String? title});
   Future<void> setSubtitleOff();
@@ -61,6 +62,7 @@ class FakeVideoBackend implements VideoBackend {
   Uri? subtitleUri;
   bool subtitleOff = false;
   double volume = 100;
+  double rate = 1.0;
 
   final _position = StreamController<Duration>.broadcast();
   final _duration = StreamController<Duration>.broadcast();
@@ -130,6 +132,11 @@ class FakeVideoBackend implements VideoBackend {
   }
 
   @override
+  Future<void> setRate(double value) async {
+    rate = value;
+  }
+
+  @override
   Future<void> setAudioIndex(int index) async {
     audioIndex = index;
   }
@@ -158,20 +165,10 @@ class FakeVideoBackend implements VideoBackend {
     _completed.add(true);
   }
 
-  bool _closed = false;
-
+  /// 仅标记关闭:换集时宿主会新建 PlayerPage 并复用同一注入实例,
+  /// 不真正关闭事件流,保证跨页仍可收发事件。
   @override
-  Future<void> dispose() async {
-    if (_closed) {
-      return;
-    }
-    _closed = true;
-    await _position.close();
-    await _duration.close();
-    await _playing.close();
-    await _completed.close();
-    await _error.close();
-  }
+  Future<void> dispose() async {}
 
   @override
   Widget buildView({Key? key}) {

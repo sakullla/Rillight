@@ -105,6 +105,9 @@ class MediaKitVideoBackend implements VideoBackend {
   Future<void> setVolume(double volume) => _player.setVolume(volume);
 
   @override
+  Future<void> setRate(double rate) => _player.setRate(rate);
+
+  @override
   Future<void> setAudioIndex(int index) async {
     final tracks = _player.state.tracks.audio
         .where((track) => track.id != 'auto' && track.id != 'no')

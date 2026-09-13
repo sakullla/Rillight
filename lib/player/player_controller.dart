@@ -16,6 +16,18 @@ enum PlayerErrorKind { load, notPlayable, noStream }
 
 enum SubtitleNoticeKind { bitmapFailed }
 
+/// 倍速固定阶梯(快捷键降/升档与控制层菜单共用)。
+const List<double> kPlaybackRateLadder = [
+  0.5,
+  0.75,
+  1.0,
+  1.25,
+  1.5,
+  2.0,
+  2.5,
+  3.0,
+];
+
 class NextEpisodeOffer {
   const NextEpisodeOffer({required this.item, this.remaining});
 
@@ -79,6 +91,7 @@ class PlayerController extends ChangeNotifier {
   bool _sessionStarted = false;
   int volume = 100;
   int _unmutedVolume = 100;
+  double playbackRate = 1.0;
   int maxStreamingBitrate = kMpvMaxStreamingBitrate;
   int? audioStreamIndex;
   int? subtitleStreamIndex;
@@ -92,6 +105,8 @@ class PlayerController extends ChangeNotifier {
   EmbyItem? item;
   EmbyUser? user;
   ResolvedPlayback? resolved;
+  PlayerSeriesPreference? _rememberedPreference;
+  Map<String, PlayerSeriesPreference> _seriesPreferences = const {};
 
   PlayMethod? get playMethod => resolved?.playMethod;
   bool get isTranscode => playMethod == PlayMethod.transcode;
@@ -107,7 +122,7 @@ class PlayerController extends ChangeNotifier {
   Timer? _subtitleNoticeTimer;
   Timer? _hideTimer;
   Timer? _nextTimer;
-  Timer? _volumeSaveTimer;
+  Timer? _settingsSaveTimer;
   StreamSubscription<Duration>? _positionSub;
   StreamSubscription<Duration>? _durationSub;
   StreamSubscription<bool>? _playingSub;
@@ -126,7 +141,7 @@ class PlayerController extends ChangeNotifier {
     loading = true;
     _emit();
     try {
-      await _restoreVolume();
+      await _restoreSettings();
       item = await client.getItem(itemId);
       if (_disposed) {
         return;
@@ -143,21 +158,42 @@ class PlayerController extends ChangeNotifier {
         user = null;
       }
       duration = durationFromTicks(item!.runTimeTicks ?? 0);
+      _applyRememberedPreference();
       subtitleStreamIndex = preferredSubtitleStreamIndex;
       audioStreamIndex = preferredAudioStreamIndex ?? audioStreamIndex;
+      final memory = _rememberedPreference;
+      final memoryAudio = memory?.audioStreamIndex;
+      final memorySubtitle = memory?.subtitleStreamIndex;
+      final memorySubtitleOff =
+          memory != null && memory.subtitleStreamIndex == null;
       final chapterTicks = startTimeTicks;
       if (chapterTicks != null && chapterTicks > 0) {
-        await _open(startTicks: chapterTicks);
+        await _open(
+          startTicks: chapterTicks,
+          audio: memoryAudio,
+          subtitle: memorySubtitle,
+          subtitleOff: memorySubtitleOff,
+        );
         return;
       }
       final resumeTicks = item!.canResume
           ? item!.userData.playbackPositionTicks
           : 0;
       if (!autoResume) {
-        await _open(startTicks: 0);
+        await _open(
+          startTicks: 0,
+          audio: memoryAudio,
+          subtitle: memorySubtitle,
+          subtitleOff: memorySubtitleOff,
+        );
         return;
       }
-      await _open(startTicks: resumeTicks > 0 ? _rewound(resumeTicks) : 0);
+      await _open(
+        startTicks: resumeTicks > 0 ? _rewound(resumeTicks) : 0,
+        audio: memoryAudio,
+        subtitle: memorySubtitle,
+        subtitleOff: memorySubtitleOff,
+      );
     } on EmbyException catch (failure) {
       if (_disposed) {
         return;
@@ -188,7 +224,12 @@ class PlayerController extends ChangeNotifier {
     nextEpisode = null;
     _nextTimer?.cancel();
     _nextTimer = null;
-    await _open(startTicks: 0);
+    await _open(
+      startTicks: 0,
+      audio: audioStreamIndex,
+      subtitle: subtitleStreamIndex,
+      subtitleOff: subtitleStreamIndex == null,
+    );
   }
 
   void openEndedSeries() {
@@ -218,7 +259,12 @@ class PlayerController extends ChangeNotifier {
     onUserActivity();
     if (playbackEnded) {
       playbackEnded = false;
-      await _open(startTicks: ticksFromDuration(target));
+      await _open(
+        startTicks: ticksFromDuration(target),
+        audio: audioStreamIndex,
+        subtitle: subtitleStreamIndex,
+        subtitleOff: subtitleStreamIndex == null,
+      );
       return;
     }
     if (isTranscode) {
@@ -240,7 +286,7 @@ class PlayerController extends ChangeNotifier {
     }
     await backend.setVolume(mpvVolumeForPercent(volume));
     onUserActivity();
-    _scheduleVolumeSave();
+    _scheduleSettingsSave();
   }
 
   Future<void> toggleMute() {
@@ -255,8 +301,62 @@ class PlayerController extends ChangeNotifier {
     return setVolume(volume + delta);
   }
 
+  /// 设置倍速:阶梯内取值,立即下发 backend 并持久化(跨集/重启沿用)。
+  Future<void> setRate(double rate) async {
+    final value = rate
+        .clamp(kPlaybackRateLadder.first, kPlaybackRateLadder.last)
+        .toDouble();
+    if (playbackRate == value) {
+      onUserActivity();
+      return;
+    }
+    playbackRate = value;
+    await backend.setRate(playbackRate);
+    onUserActivity();
+    _scheduleSettingsSave();
+  }
+
+  /// 快捷键降档([ )与升档( ] ):沿固定阶梯移动。
+  void nudgeRateDown() {
+    unawaited(_stepRate(-1));
+  }
+
+  void nudgeRateUp() {
+    unawaited(_stepRate(1));
+  }
+
+  Future<void> _stepRate(int direction) async {
+    double next;
+    if (direction > 0) {
+      next = kPlaybackRateLadder.last;
+      for (final value in kPlaybackRateLadder) {
+        if (value > playbackRate) {
+          next = value;
+          break;
+        }
+      }
+    } else {
+      next = kPlaybackRateLadder.first;
+      for (final value in kPlaybackRateLadder.reversed) {
+        if (value < playbackRate) {
+          next = value;
+          break;
+        }
+      }
+    }
+    await setRate(next);
+  }
+
+  bool get isAlwaysOnTop => window.isAlwaysOnTop;
+
+  Future<void> toggleAlwaysOnTop() {
+    onUserActivity();
+    return window.setAlwaysOnTop(!window.isAlwaysOnTop);
+  }
+
   Future<void> setAudio(int index) async {
     audioStreamIndex = index;
+    await _persistSeriesPreference();
     if (isTranscode) {
       await _reopen(startTicks: ticksFromDuration(position));
       return;
@@ -272,6 +372,7 @@ class PlayerController extends ChangeNotifier {
       _clearSubtitleNotice();
       await backend.setSubtitleOff();
       _emit();
+      await _persistSeriesPreference();
       await _reportProgress(eventName: 'SubtitleTrackChange');
       return;
     }
@@ -280,6 +381,9 @@ class PlayerController extends ChangeNotifier {
       return;
     }
     if (stream.isBitmapSubtitle) {
+      // 先记录选择意图(供按剧记忆),位图渲染失败与否由重开结果决定。
+      subtitleStreamIndex = index;
+      await _persistSeriesPreference();
       await _reopen(startTicks: ticksFromDuration(position), subtitle: index);
       return;
     }
@@ -296,11 +400,13 @@ class PlayerController extends ChangeNotifier {
       title: stream.label,
     );
     _emit();
+    await _persistSeriesPreference();
     await _reportProgress(eventName: 'SubtitleTrackChange');
   }
 
   Future<void> setMaxBitrate(int bitrate) async {
     maxStreamingBitrate = bitrate;
+    await _persistSeriesPreference();
     await _reopen(startTicks: ticksFromDuration(position));
   }
 
@@ -410,7 +516,7 @@ class PlayerController extends ChangeNotifier {
     }
     _hideTimer?.cancel();
     _nextTimer?.cancel();
-    await _persistVolume();
+    await _persistSettings();
     await _stopSession();
     if (window.isFullScreen) {
       await window.setFullScreen(false);
@@ -471,6 +577,7 @@ class PlayerController extends ChangeNotifier {
     required int startTicks,
     int? audio,
     int? subtitle,
+    bool subtitleOff = false,
   }) async {
     loading = true;
     disconnected = false;
@@ -486,7 +593,9 @@ class PlayerController extends ChangeNotifier {
         maxStreamingBitrate: maxStreamingBitrate,
         startTimeTicks: startTicks > 0 ? startTicks : null,
         audioStreamIndex: audio ?? preferredAudioStreamIndex,
-        subtitleStreamIndex: subtitle ?? preferredSubtitleStreamIndex,
+        subtitleStreamIndex: subtitleOff
+            ? null
+            : (subtitle ?? preferredSubtitleStreamIndex),
         mediaSourceId: preferredMediaSourceId,
       );
       if (_disposed) {
@@ -506,8 +615,22 @@ class PlayerController extends ChangeNotifier {
       }
       resolved = next;
       audioStreamIndex = audio ?? next.mediaSource.defaultAudioStreamIndex;
+      // 记忆的音轨在新一集不存在时回退默认,避免下发无效轨道。
+      if (audioStreamIndex != null &&
+          !next.mediaSource.audioStreams.any(
+            (stream) => stream.index == audioStreamIndex,
+          )) {
+        audioStreamIndex = next.mediaSource.defaultAudioStreamIndex;
+      }
       if (subtitle != null) {
-        subtitleStreamIndex = subtitle;
+        final stream = next.mediaSource.streamByIndex(subtitle);
+        if (stream != null && stream.isSubtitle) {
+          subtitleStreamIndex = subtitle;
+        } else {
+          subtitleStreamIndex = _defaultTextSubtitle(next.mediaSource);
+        }
+      } else if (subtitleOff) {
+        subtitleStreamIndex = null;
       } else {
         subtitleStreamIndex = _defaultTextSubtitle(next.mediaSource);
       }
@@ -528,6 +651,8 @@ class PlayerController extends ChangeNotifier {
         ),
       );
       await backend.setVolume(mpvVolumeForPercent(volume));
+      // 换集/重开不重置倍速:mpv 重新起流后显式恢复当前倍速。
+      await backend.setRate(playbackRate);
       position = durationFromTicks(startTicks);
       final runtime = next.mediaSource.runTimeTicks ?? item?.runTimeTicks ?? 0;
       if (runtime > 0) {
@@ -779,9 +904,13 @@ class PlayerController extends ChangeNotifier {
     return settingsStore ??= await openPlayerSettingsStore();
   }
 
-  Future<void> _restoreVolume() async {
+  /// 读取音量/倍速与按剧记忆,起播与换集前恢复。
+  Future<void> _restoreSettings() async {
     try {
-      volume = (await (await _settings()).read()).clampedVolume;
+      final settings = await (await _settings()).read();
+      volume = settings.clampedVolume;
+      playbackRate = settings.effectivePlaybackRate;
+      _seriesPreferences = Map.of(settings.seriesPreferences);
       if (volume > 0) {
         _unmutedVolume = volume;
       }
@@ -789,19 +918,63 @@ class PlayerController extends ChangeNotifier {
     } catch (_) {}
   }
 
-  void _scheduleVolumeSave() {
-    _volumeSaveTimer?.cancel();
-    _volumeSaveTimer = Timer(const Duration(milliseconds: 250), () {
-      unawaited(_persistVolume());
+  void _scheduleSettingsSave() {
+    _settingsSaveTimer?.cancel();
+    _settingsSaveTimer = Timer(const Duration(milliseconds: 250), () {
+      unawaited(_writeSettings());
     });
   }
 
-  Future<void> _persistVolume() async {
-    _volumeSaveTimer?.cancel();
-    _volumeSaveTimer = null;
+  Future<void> _persistSettings() async {
+    _settingsSaveTimer?.cancel();
+    _settingsSaveTimer = null;
+    await _writeSettings();
+  }
+
+  /// 写入播放进程持有的全部设置(音量/倍速/按剧记忆);
+  /// 文件存储为合并写,不会清掉主进程写入的其他字段。
+  Future<void> _writeSettings() async {
     try {
-      await (await _settings()).write(PlayerSettings(volume: volume));
+      await (await _settings()).write(
+        PlayerSettings(
+          volume: volume,
+          playbackRate: playbackRate,
+          seriesPreferences: _seriesPreferences,
+        ),
+      );
     } catch (_) {}
+  }
+
+  /// start() 时按 item.seriesId 解析记忆的音轨/字幕/码率。
+  void _applyRememberedPreference() {
+    _rememberedPreference = null;
+    final seriesId = item?.seriesId;
+    if (seriesId == null || seriesId.isEmpty) {
+      return;
+    }
+    final preference = _seriesPreferences[seriesId];
+    if (preference == null) {
+      return;
+    }
+    _rememberedPreference = preference;
+    if (preference.maxStreamingBitrate != null) {
+      maxStreamingBitrate = preference.maxStreamingBitrate!;
+    }
+  }
+
+  /// 播放中选择音轨/字幕(含关闭)/码率后写入按剧记忆。
+  Future<void> _persistSeriesPreference() async {
+    final seriesId = item?.seriesId;
+    if (seriesId == null || seriesId.isEmpty) {
+      return;
+    }
+    _seriesPreferences = Map.of(_seriesPreferences);
+    _seriesPreferences[seriesId] = PlayerSeriesPreference(
+      audioStreamIndex: audioStreamIndex,
+      subtitleStreamIndex: subtitleStreamIndex,
+      maxStreamingBitrate: maxStreamingBitrate,
+    );
+    await _writeSettings();
   }
 
   int _rewound(int ticks) {
@@ -827,8 +1000,8 @@ class PlayerController extends ChangeNotifier {
     _progressFailBannerTimer?.cancel();
     _subtitleNoticeTimer?.cancel();
     _nextTimer?.cancel();
-    _volumeSaveTimer?.cancel();
-    unawaited(_persistVolume());
+    _settingsSaveTimer?.cancel();
+    unawaited(_persistSettings());
     unawaited(_positionSub?.cancel());
     unawaited(_durationSub?.cancel());
     unawaited(_playingSub?.cancel());
