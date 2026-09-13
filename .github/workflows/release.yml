@@ -34,17 +34,25 @@ jobs:
       - name: Build Windows
         run: flutter build windows --release
 
-      - name: Package Windows
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --yes --no-progress
+
+      - name: Package Windows installer
         shell: pwsh
         run: |
-          $archive = "Rillight-windows-x64-${env:GITHUB_REF_NAME}.zip"
-          Compress-Archive -Path "build/windows/x64/runner/Release/*" -DestinationPath $archive
+          $version = $env:GITHUB_REF_NAME.TrimStart('v')
+          $output = Join-Path $env:GITHUB_WORKSPACE "dist\windows"
+          New-Item -ItemType Directory -Force -Path $output | Out-Null
+          $iscc = Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { throw "Inno Setup compiler not found: $iscc" }
+          & $iscc "/DAppVersion=$version" "/O$output" "windows\installer\rillight.iss"
 
       - name: Upload Windows package
         uses: actions/upload-artifact@v6
         with:
           name: release-windows
-          path: Rillight-windows-x64-${{ github.ref_name }}.zip
+          path: dist/windows/Rillight-windows-x64-${{ github.ref_name }}-setup.exe
           if-no-files-found: error
 
   macos:
@@ -85,14 +93,22 @@ jobs:
           codesign --verify --deep --strict --verbose=2 "$app_path"
 
           mac_arch="$(uname -m)"
-          archive="Rillight-macos-${GITHUB_REF_NAME}-${mac_arch}-adhoc.zip"
-          ditto -c -k --sequesterRsrc --keepParent "$app_path" "$archive"
+          archive="Rillight-macos-${GITHUB_REF_NAME}-${mac_arch}-adhoc.dmg"
+          staging="$RUNNER_TEMP/rillight-dmg"
+          mkdir -p "$staging"
+          ditto "$app_path" "$staging/rillight.app"
+          hdiutil create \
+            -volname "Rillight" \
+            -srcfolder "$staging" \
+            -ov \
+            -format UDZO \
+            "$archive"
 
       - name: Upload macOS package
         uses: actions/upload-artifact@v6
         with:
           name: release-macos
-          path: Rillight-macos-${{ github.ref_name }}-*-adhoc.zip
+          path: Rillight-macos-${{ github.ref_name }}-*-adhoc.dmg
           if-no-files-found: error
 
   linux:
@@ -128,18 +144,56 @@ jobs:
       - name: Build Linux
         run: flutter build linux --release
 
-      - name: Package Linux
+      - name: Package Linux installer
         shell: bash
         run: |
           set -euo pipefail
-          archive="Rillight-linux-x64-${GITHUB_REF_NAME}.tar.gz"
-          tar -C build/linux/x64/release -czf "$archive" bundle
+          version="${GITHUB_REF_NAME#v}"
+          package_root="$RUNNER_TEMP/rillight-deb"
+          mkdir -p \
+            "$package_root/DEBIAN" \
+            "$package_root/opt/rillight" \
+            "$package_root/usr/share/applications" \
+            "$package_root/usr/share/icons/hicolor/256x256/apps" \
+            dist/linux
+
+          cp -a build/linux/x64/release/bundle/. "$package_root/opt/rillight/"
+          cp macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_256.png \
+            "$package_root/usr/share/icons/hicolor/256x256/apps/rillight.png"
+
+          cat > "$package_root/usr/share/applications/rillight.desktop" <<EOF
+          [Desktop Entry]
+          Name=灯川 Rillight
+          Comment=Emby desktop client
+          Exec=/opt/rillight/rillight
+          Icon=rillight
+          Terminal=false
+          Type=Application
+          Categories=AudioVideo;Video;Player;
+          EOF
+
+          installed_size="$(du -sk "$package_root/opt/rillight" | cut -f1)"
+          cat > "$package_root/DEBIAN/control" <<EOF
+          Package: rillight
+          Version: $version
+          Section: video
+          Priority: optional
+          Architecture: amd64
+          Depends: libgtk-3-0, mpv
+          Maintainer: com.sakullla
+          Installed-Size: $installed_size
+          Description: 灯川 Rillight desktop Emby client
+          EOF
+
+          dpkg-deb --build --root-owner-group \
+            "$package_root" \
+            "dist/linux/Rillight-linux-x64-${GITHUB_REF_NAME}.deb"
 
       - name: Upload Linux package
         uses: actions/upload-artifact@v6
         with:
           name: release-linux
-          path: Rillight-linux-x64-${{ github.ref_name }}.tar.gz
+          path: dist/linux/Rillight-linux-x64-${{ github.ref_name }}.deb
           if-no-files-found: error
 
   release:
@@ -197,10 +251,10 @@ jobs:
           assets="$(jq -r '.assets[].name' <<< "$release_json")"
           echo "$assets"
 
-          grep -Fqx "Rillight-windows-x64-${GITHUB_REF_NAME}.zip" <<< "$assets"
-          grep -Fqx "Rillight-linux-x64-${GITHUB_REF_NAME}.tar.gz" <<< "$assets"
+          grep -Fqx "Rillight-windows-x64-${GITHUB_REF_NAME}-setup.exe" <<< "$assets"
+          grep -Fqx "Rillight-linux-x64-${GITHUB_REF_NAME}.deb" <<< "$assets"
           grep -Fqx "SHA256SUMS" <<< "$assets"
-          grep -Eq "^Rillight-macos-.*-adhoc\.zip$" <<< "$assets"
+          grep -Eq "^Rillight-macos-.*-adhoc\.dmg$" <<< "$assets"
 
           echo "RELEASE_ID=$(jq -r '.id' <<< "$release_json")" >> "$GITHUB_ENV"
 
