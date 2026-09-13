@@ -42,6 +42,16 @@ const Map<ShortcutActivator, Intent> _kGridArrowShortcuts = {
 /// 网格头部手动刷新按钮(绕过缓存立即重拉)的 key。
 const Key gridRefreshKey = Key('catalog-grid-refresh');
 
+/// 网格头部筛选按钮 key(按维度:type/watch/year/genre)。
+Key gridFilterKey(String dimension) => Key('catalog-grid-filter-$dimension');
+
+/// 网格头部筛选选项 key(维度+值)。
+Key gridFilterOption(String dimension, String value) =>
+    Key('catalog-grid-filter-$dimension-$value');
+
+/// 网格头部清除全部筛选按钮 key。
+const Key gridFilterClearKey = Key('catalog-grid-filter-clear');
+
 class ShelfGridPage extends StatefulWidget {
   const ShelfGridPage({
     super.key,
@@ -200,6 +210,13 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
   EmbyException? _error;
   late CatalogSort _sort = _defaultSort;
 
+  /// 片库组合筛选:类型/年份/流派/已看,与排序叠加生效。
+  ShelfFilters _filters = const ShelfFilters();
+
+  /// 筛选取值维度:从已加载条目聚合,只增不减,翻页/筛选后取值稳定。
+  final Set<int> _knownYears = {};
+  final Set<String> _knownGenres = {};
+
   CatalogCache? _scopeCache;
 
   /// 目录缓存:无 CatalogScope 时用无会话实例降级直连。
@@ -225,6 +242,40 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
 
   /// similar 接口不支持 StartIndex,只取单页。
   bool get _paged => widget.source != 'similar';
+
+  /// 片库页才提供服务端筛选:其余来源(resume/nextup/similar/latest)的
+  /// 接口不支持 Filters/Genres/Years 参数。
+  bool get _filterable => widget.source == 'items';
+
+  /// 类型筛选仅在电影+剧集混合的网格上有意义。
+  bool get _typeFilterable {
+    final types = widget.includeItemTypes?.split(',') ?? const <String>[];
+    return types.contains('Movie') && types.contains('Series');
+  }
+
+  /// 类型筛选收窄后的 IncludeItemTypes。
+  String? get _effectiveIncludeItemTypes {
+    final narrowed = _filters.type.itemType;
+    if (narrowed != null && _typeFilterable) {
+      return narrowed;
+    }
+    return widget.includeItemTypes;
+  }
+
+  List<int> get _yearOptions =>
+      [..._knownYears]..sort((a, b) => b.compareTo(a));
+
+  List<String> get _genreOptions => [..._knownGenres]..sort();
+
+  void _collectFilterDimensions(List<EmbyItem> items) {
+    for (final item in items) {
+      final year = item.productionYear;
+      if (year != null) {
+        _knownYears.add(year);
+      }
+      _knownGenres.addAll(item.genres);
+    }
+  }
 
   @override
   void initState() {
@@ -254,6 +305,9 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
         oldWidget.recursive != widget.recursive ||
         oldWidget.moviesOrSeriesOnly != widget.moviesOrSeriesOnly) {
       _sort = _defaultSort;
+      _filters = const ShelfFilters();
+      _knownYears.clear();
+      _knownGenres.clear();
       if (_scrollController.hasClients) {
         _scrollController.jumpTo(0);
       }
@@ -333,6 +387,7 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
       }
       if (hit != null) {
         final page = parseCatalogPage(hit.json);
+        _collectFilterDimensions(page.items);
         setState(() {
           _items = ShelfGridPage.mergeItemsById(
             const [],
@@ -351,6 +406,7 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
       if (!mounted || gen != _loadGen) {
         return;
       }
+      _collectFilterDimensions(page.items);
       setState(() {
         _items = _applyFilter(page.items);
         _fetched = page.items.length;
@@ -402,6 +458,7 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
       if (!mounted || gen != _loadGen) {
         return;
       }
+      _collectFilterDimensions(page.items);
       setState(() {
         _items = ShelfGridPage.mergeItemsById(_items, _applyFilter(page.items));
         _fetched = start + page.items.length;
@@ -475,12 +532,17 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
         return catalogItemsRequest(
           userId: userId,
           parentId: widget.parentId,
-          includeItemTypes: widget.includeItemTypes,
+          includeItemTypes: _effectiveIncludeItemTypes,
           recursive: widget.recursive,
           limit: limit,
           startIndex: startIndex,
           sortBy: _sort.sortBy,
           sortOrder: _sort.sortOrder,
+          filters: _filters.watch.param == null
+              ? null
+              : [_filters.watch.param!],
+          genres: _filters.genres.isEmpty ? null : _filters.genres,
+          years: _filters.years.isEmpty ? null : _filters.years,
         );
     }
   }
@@ -527,6 +589,15 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
     _load(preserveContent: true);
   }
 
+  void _selectFilters(ShelfFilters filters) {
+    if (filters == _filters) {
+      return;
+    }
+    setState(() => _filters = filters);
+    // 与切排序一致:保留已有内容增量刷新,不整页骨架屏重来。
+    _load(preserveContent: true);
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
@@ -545,6 +616,11 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
             showSort: false,
             onRefresh: _manualRefresh,
             refreshing: true,
+            filters: _filterable ? _filters : null,
+            typeFilterable: _typeFilterable,
+            yearOptions: _yearOptions,
+            genreOptions: _genreOptions,
+            onFiltersChanged: _filterable ? _selectFilters : null,
           ),
           Expanded(
             child: SkeletonPosterGrid(
@@ -576,6 +652,11 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
             showSort: false,
             onRefresh: _manualRefresh,
             refreshing: false,
+            filters: _filterable ? _filters : null,
+            typeFilterable: _typeFilterable,
+            yearOptions: _yearOptions,
+            genreOptions: _genreOptions,
+            onFiltersChanged: _filterable ? _selectFilters : null,
           ),
           Expanded(
             child: AppErrorView(
@@ -607,6 +688,11 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
                 showSort: _items.isNotEmpty,
                 onRefresh: _manualRefresh,
                 refreshing: _refreshing,
+                filters: _filterable ? _filters : null,
+                typeFilterable: _typeFilterable,
+                yearOptions: _yearOptions,
+                genreOptions: _genreOptions,
+                onFiltersChanged: _filterable ? _selectFilters : null,
               ),
             ),
             SliverPadding(
@@ -701,6 +787,11 @@ class _Header extends StatelessWidget {
     required this.showSort,
     this.onRefresh,
     this.refreshing = false,
+    this.filters,
+    this.typeFilterable = false,
+    this.yearOptions = const [],
+    this.genreOptions = const [],
+    this.onFiltersChanged,
   });
 
   final String title;
@@ -714,6 +805,17 @@ class _Header extends StatelessWidget {
   /// 手动刷新入口:绕过缓存立即重拉。null 时不显示刷新按钮。
   final VoidCallback? onRefresh;
   final bool refreshing;
+
+  /// 当前筛选状态;null 时不显示筛选控件(非片库来源)。
+  final ShelfFilters? filters;
+
+  /// 电影+剧集混合网格才提供类型筛选。
+  final bool typeFilterable;
+
+  /// 年份/流派可选值(从已加载条目聚合)。
+  final List<int> yearOptions;
+  final List<String> genreOptions;
+  final ValueChanged<ShelfFilters>? onFiltersChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -753,6 +855,18 @@ class _Header extends StatelessWidget {
                         )
                       : const Icon(Icons.refresh),
                 ),
+              ),
+            ),
+            const SizedBox(width: AppSpacing.sm),
+          ],
+          if (filters != null && onFiltersChanged != null) ...[
+            Flexible(
+              child: _FilterBar(
+                filters: filters!,
+                typeFilterable: typeFilterable,
+                yearOptions: yearOptions,
+                genreOptions: genreOptions,
+                onChanged: onFiltersChanged!,
               ),
             ),
             const SizedBox(width: AppSpacing.sm),
@@ -804,6 +918,185 @@ class _Header extends StatelessWidget {
           ],
           if (heading != null) Expanded(child: heading),
         ],
+      ),
+    );
+  }
+}
+
+/// 片库头部筛选胶囊组:类型/已看/年份/流派可组合,可整体清除。
+///
+/// 文案为硬编码中文:app_zh.arb 不在本任务 scope,复用条目缺失(见任务 concerns)。
+class _FilterBar extends StatelessWidget {
+  const _FilterBar({
+    required this.filters,
+    required this.typeFilterable,
+    required this.yearOptions,
+    required this.genreOptions,
+    required this.onChanged,
+  });
+
+  static const _all = 'all';
+
+  final ShelfFilters filters;
+  final bool typeFilterable;
+  final List<int> yearOptions;
+  final List<String> genreOptions;
+  final ValueChanged<ShelfFilters> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final children = <Widget>[
+      if (typeFilterable)
+        _pill(
+          context,
+          dimension: 'type',
+          dimensionLabel: '类型',
+          icon: Icons.category_outlined,
+          options: const [(_all, '全部'), ('Movie', '电影'), ('Series', '剧集')],
+          selected: filters.type == CatalogTypeFilter.all
+              ? _all
+              : filters.type.itemType!,
+          selectedLabel: filters.type.label,
+          onSelected: (value) => onChanged(
+            filters.copyWith(
+              type: value == 'Movie'
+                  ? CatalogTypeFilter.movie
+                  : value == 'Series'
+                  ? CatalogTypeFilter.series
+                  : CatalogTypeFilter.all,
+            ),
+          ),
+        ),
+      _pill(
+        context,
+        dimension: 'watch',
+        dimensionLabel: '已看',
+        icon: Icons.visibility_outlined,
+        options: const [(_all, '全部'), ('IsUnplayed', '未看'), ('IsPlayed', '已看')],
+        selected: filters.watch.param ?? _all,
+        selectedLabel: filters.watch.label,
+        onSelected: (value) => onChanged(
+          filters.copyWith(
+            watch: value == 'IsUnplayed'
+                ? CatalogWatchFilter.unplayed
+                : value == 'IsPlayed'
+                ? CatalogWatchFilter.played
+                : CatalogWatchFilter.all,
+          ),
+        ),
+      ),
+      _pill(
+        context,
+        dimension: 'year',
+        dimensionLabel: '年份',
+        icon: Icons.calendar_today_outlined,
+        options: [
+          const (_all, '全部'),
+          for (final year in yearOptions) ('$year', '$year'),
+        ],
+        selected: filters.years.isEmpty ? _all : '${filters.years.first}',
+        selectedLabel: filters.years.isEmpty ? '全部' : '${filters.years.first}',
+        onSelected: (value) => onChanged(
+          filters.copyWith(
+            years: value == _all ? const [] : [int.parse(value)],
+          ),
+        ),
+      ),
+      _pill(
+        context,
+        dimension: 'genre',
+        dimensionLabel: '流派',
+        icon: Icons.style_outlined,
+        options: [
+          const (_all, '全部'),
+          for (final genre in genreOptions) (genre, genre),
+        ],
+        selected: filters.genres.isEmpty ? _all : filters.genres.first,
+        selectedLabel: filters.genres.isEmpty ? '全部' : filters.genres.first,
+        onSelected: (value) => onChanged(
+          filters.copyWith(genres: value == _all ? const [] : [value]),
+        ),
+      ),
+      if (filters.isNotEmpty)
+        LiquidGlass(
+          kind: LiquidGlassKind.pill,
+          borderRadius: BorderRadius.circular(AppRadii.md),
+          child: Material(
+            type: MaterialType.transparency,
+            shape: const CircleBorder(),
+            child: IconButton(
+              key: gridFilterClearKey,
+              tooltip: '清除筛选',
+              onPressed: () => onChanged(const ShelfFilters()),
+              icon: const Icon(Icons.filter_alt_off_outlined, size: 18),
+            ),
+          ),
+        ),
+    ];
+    // Wrap 而非内嵌横向滚动:不引入第二个 Scrollable,
+    // 窄窗口下换行展示全部筛选维度。
+    return Wrap(
+      spacing: AppSpacing.xs,
+      runSpacing: AppSpacing.xs,
+      children: children,
+    );
+  }
+
+  Widget _pill(
+    BuildContext context, {
+    required String dimension,
+    required String dimensionLabel,
+    required IconData icon,
+    required List<(String, String)> options,
+    required String selected,
+    required String selectedLabel,
+    required ValueChanged<String> onSelected,
+  }) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    final active = selected != _all;
+    return PopupMenuButton<String>(
+      key: gridFilterKey(dimension),
+      tooltip: dimensionLabel,
+      color: colorScheme.surface.withValues(alpha: 0.96),
+      surfaceTintColor: Colors.transparent,
+      initialValue: selected,
+      onSelected: onSelected,
+      itemBuilder: (context) => [
+        for (final (value, label) in options)
+          CheckedPopupMenuItem<String>(
+            key: gridFilterOption(dimension, value),
+            value: value,
+            checked: value == selected,
+            child: Text(label),
+          ),
+      ],
+      child: LiquidGlass(
+        kind: LiquidGlassKind.pill,
+        borderRadius: BorderRadius.circular(AppRadii.md),
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.sm,
+          vertical: AppSpacing.xs,
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              size: 18,
+              color: active
+                  ? colorScheme.primary
+                  : colorScheme.onSurfaceVariant,
+            ),
+            const SizedBox(width: AppSpacing.xs),
+            Text(
+              active ? selectedLabel : dimensionLabel,
+              style: textTheme.labelLarge,
+            ),
+            const SizedBox(width: AppSpacing.xxs),
+            Icon(Icons.arrow_drop_down, color: colorScheme.onSurfaceVariant),
+          ],
+        ),
       ),
     );
   }

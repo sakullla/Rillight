@@ -241,4 +241,50 @@ void main() {
     expect(server.loggedOutTokens, contains(auth.accessToken));
     expect(server.requests, contains('POST /Sessions/Logout'));
   });
+
+  test('queryItems sends Filters, Genres and Years when provided', () async {
+    final emby = client();
+    final auth = await emby.authenticateByName(
+      baseUrl: server.baseUrl,
+      username: 'alice',
+      password: 'correct-horse',
+      serverId: server.serverId,
+    );
+    emby.attachSession(
+      baseUrl: server.baseUrl,
+      accessToken: auth.accessToken,
+      userId: auth.user.id,
+    );
+
+    await emby.queryItems(
+      parentId: 'view-movies',
+      recursive: true,
+      limit: 60,
+      filters: const ['IsPlayed'],
+      genres: const ['SciFi', 'Action'],
+      years: const [2025, 2024],
+    );
+    final request = server.requests.last;
+    expect(request, contains('Filters=IsPlayed'));
+    expect(request, contains('Genres=SciFi%2CAction'));
+    expect(request, contains('Years=2025%2C2024'));
+
+    // 不传筛选时不携带对应参数。
+    await emby.queryItems(parentId: 'view-movies', recursive: true);
+    expect(server.requests.last, isNot(contains('Filters=')));
+    expect(server.requests.last, isNot(contains('Genres=')));
+    expect(server.requests.last, isNot(contains('Years=')));
+
+    // getItems 透传筛选参数。
+    await emby.getItems(
+      parentId: 'view-movies',
+      recursive: true,
+      filters: const ['IsUnplayed'],
+      genres: const ['Drama'],
+      years: const [1994],
+    );
+    expect(server.requests.last, contains('Filters=IsUnplayed'));
+    expect(server.requests.last, contains('Genres=Drama'));
+    expect(server.requests.last, contains('Years=1994'));
+  });
 }

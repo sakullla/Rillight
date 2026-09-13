@@ -75,6 +75,8 @@ CatalogRequest catalogViewsRequest({required String userId}) {
   return CatalogRequest('/Users/$userId/Views');
 }
 
+/// 筛选参数与 [EmbyClient.queryItems] 完全镜像(含插入顺序),
+/// 由 request-parity 测试锁定。
 CatalogRequest catalogItemsRequest({
   required String userId,
   String? parentId,
@@ -85,6 +87,9 @@ CatalogRequest catalogItemsRequest({
   int? startIndex,
   String? sortBy,
   String? sortOrder,
+  List<String>? filters,
+  List<String>? genres,
+  List<int>? years,
   String fields = EmbyClient.gridFields,
 }) {
   return CatalogRequest('/Users/$userId/Items', {
@@ -98,6 +103,9 @@ CatalogRequest catalogItemsRequest({
     'Fields': fields,
     'SortBy': ?sortBy,
     'SortOrder': ?sortOrder,
+    if (filters != null && filters.isNotEmpty) 'Filters': filters.join(','),
+    if (genres != null && genres.isNotEmpty) 'Genres': genres.join(','),
+    if (years != null && years.isNotEmpty) 'Years': years.join(','),
     'EnableImageTypes': EmbyClient.imageTypes,
   });
 }

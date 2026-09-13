@@ -250,8 +250,99 @@ void main() {
         ),
       );
       expect(server.requests[searchBefore + 1], searchViaClient);
+
+      final filterBefore = server.requests.length;
+      await client.queryItems(
+        parentId: 'view-movies',
+        recursive: true,
+        limit: 60,
+        startIndex: 0,
+        sortBy: 'SortName',
+        sortOrder: 'Ascending',
+        filters: ['IsUnplayed'],
+        genres: ['SciFi'],
+        years: [2025, 2024],
+      );
+      final filterViaClient = server.requests[filterBefore];
+      await cache.fetch(
+        client,
+        catalogItemsRequest(
+          userId: 'user-alice',
+          parentId: 'view-movies',
+          recursive: true,
+          limit: 60,
+          startIndex: 0,
+          sortBy: 'SortName',
+          sortOrder: 'Ascending',
+          filters: ['IsUnplayed'],
+          genres: ['SciFi'],
+          years: [2025, 2024],
+        ),
+      );
+      expect(server.requests[filterBefore + 1], filterViaClient);
+      expect(filterViaClient, contains('Filters=IsUnplayed'));
+      expect(filterViaClient, contains('Genres=SciFi'));
+      expect(filterViaClient, contains('Years=2025%2C2024'));
     },
   );
+
+  test('filter parameters participate in the cache key', () async {
+    final disk = _FakeDiskStore();
+    final cache = newCache(disk);
+
+    final plain = catalogItemsRequest(
+      userId: 'user-alice',
+      parentId: 'view-movies',
+      limit: 24,
+    );
+    final unplayed = catalogItemsRequest(
+      userId: 'user-alice',
+      parentId: 'view-movies',
+      limit: 24,
+      filters: ['IsUnplayed'],
+    );
+    final byYear = catalogItemsRequest(
+      userId: 'user-alice',
+      parentId: 'view-movies',
+      limit: 24,
+      years: [2025],
+    );
+    final byGenre = catalogItemsRequest(
+      userId: 'user-alice',
+      parentId: 'view-movies',
+      limit: 24,
+      genres: ['SciFi'],
+    );
+    final combined = catalogItemsRequest(
+      userId: 'user-alice',
+      parentId: 'view-movies',
+      limit: 24,
+      filters: ['IsPlayed'],
+      years: [2025],
+      genres: ['SciFi'],
+    );
+
+    await cache.fetch(client, plain);
+    await cache.fetch(client, unplayed);
+    await cache.fetch(client, byYear);
+    await cache.fetch(client, byGenre);
+    await cache.fetch(client, combined);
+
+    // 同 parentId 不同筛选各自独立缓存,互不串数据。
+    expect(disk.files, hasLength(5));
+    expect(disk.files.keys, everyElement(contains('view-movies')));
+    expect(
+      disk.files.keys.where((key) => key.contains('Filters=IsUnplayed')),
+      hasLength(1),
+    );
+    expect(
+      disk.files.keys.where(
+        (key) => key.contains('Years=2025') && key.contains('Genres=SciFi'),
+      ),
+      hasLength(1),
+      reason: '组合筛选的 key 同时纳入全部筛选参数',
+    );
+  });
 
   test('mergeItemsById dedupes pagination overlaps by item id', () {
     EmbyItem item(String id) =>

@@ -249,6 +249,7 @@ class EmbyItem {
     this.parentBackdropItemId,
     this.parentBackdropImageTag,
     this.communityRating,
+    this.genres = const [],
     this.mediaSources = const [],
     this.chapters = const [],
     this.userData = const EmbyUserData(),
@@ -277,6 +278,9 @@ class EmbyItem {
   final String? parentBackdropItemId;
   final String? parentBackdropImageTag;
   final double? communityRating;
+
+  /// 条目流派(服务端 /Items 默认返回的 Genres 数组),供片库流派筛选聚合取值。
+  final List<String> genres;
   final List<ItemMediaSource> mediaSources;
   final List<ItemChapter> chapters;
   final EmbyUserData userData;
@@ -425,6 +429,7 @@ class EmbyItem {
     final parentBackdropTag = _firstListTag(json['ParentBackdropImageTags']);
     final rawSources = json['MediaSources'];
     final rawChapters = json['Chapters'];
+    final rawGenres = json['Genres'];
     return EmbyItem(
       id: id,
       name: json['Name']?.toString() ?? '',
@@ -449,6 +454,11 @@ class EmbyItem {
       parentBackdropItemId: _stringTag(json['ParentBackdropItemId']),
       parentBackdropImageTag: parentBackdropTag,
       communityRating: _asDouble(json['CommunityRating']),
+      genres: [
+        if (rawGenres is List)
+          for (final genre in rawGenres)
+            if (genre != null) genre.toString(),
+      ],
       mediaSources: [
         if (rawSources is List)
           for (final source in rawSources)
@@ -490,6 +500,7 @@ class EmbyItem {
       parentBackdropItemId: parentBackdropItemId,
       parentBackdropImageTag: parentBackdropImageTag,
       communityRating: communityRating,
+      genres: genres,
       mediaSources: mediaSources,
       chapters: chapters,
       userData: userData ?? this.userData,

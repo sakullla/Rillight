@@ -246,6 +246,9 @@ class EmbyClient {
     int? startIndex,
     String? sortBy,
     String? sortOrder,
+    List<String>? filters,
+    List<String>? genres,
+    List<int>? years,
     String fields = itemFields,
   }) async {
     return (await queryItems(
@@ -257,10 +260,15 @@ class EmbyClient {
       startIndex: startIndex,
       sortBy: sortBy,
       sortOrder: sortOrder,
+      filters: filters,
+      genres: genres,
+      years: years,
       fields: fields,
     )).items;
   }
 
+  /// 官方筛选参数:[filters] 对应 `Filters`(IsPlayed/IsUnplayed 等已看状态),
+  /// [genres] 对应 `Genres`,[years] 对应 `Years`,均支持逗号分隔多值。
   Future<EmbyItemPage> queryItems({
     String? parentId,
     String? searchTerm,
@@ -270,6 +278,9 @@ class EmbyClient {
     int? startIndex,
     String? sortBy,
     String? sortOrder,
+    List<String>? filters,
+    List<String>? genres,
+    List<int>? years,
     String fields = gridFields,
   }) {
     return _getItemPage(
@@ -285,6 +296,9 @@ class EmbyClient {
         'Fields': fields,
         'SortBy': ?sortBy,
         'SortOrder': ?sortOrder,
+        if (filters != null && filters.isNotEmpty) 'Filters': filters.join(','),
+        if (genres != null && genres.isNotEmpty) 'Genres': genres.join(','),
+        if (years != null && years.isNotEmpty) 'Years': years.join(','),
         'EnableImageTypes': imageTypes,
       },
     );
