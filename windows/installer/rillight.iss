@@ -1,5 +1,5 @@
 #ifndef AppVersion
-#define AppVersion "0.1.3"
+#define AppVersion "0.1.4"
 #endif
 
 #define MyAppName "Rillight"
@@ -13,7 +13,7 @@ AppVersion={#AppVersion}
 AppPublisher={#MyAppPublisher}
 DefaultDirName={autopf}\Rillight
 DefaultGroupName={autoprograms}\Rillight
-OutputBaseFilename=Rillight-windows-x64-{#AppVersion}-setup
+OutputBaseFilename=Rillight-windows-x64-v{#AppVersion}-setup
 SetupIconFile=..\runner\resources\app_icon.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 ArchitecturesAllowed=x64compatible
