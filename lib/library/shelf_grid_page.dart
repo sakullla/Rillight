@@ -464,9 +464,9 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
                 screenWidth,
               ),
               padding: const EdgeInsets.fromLTRB(
-                AppSpacing.md,
+                AppSpacing.page,
                 AppSpacing.xs,
-                AppSpacing.md,
+                AppSpacing.page,
                 AppSpacing.xxl,
               ),
             ),
@@ -519,9 +519,9 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
             ),
             SliverPadding(
               padding: const EdgeInsets.fromLTRB(
-                AppSpacing.md,
+                AppSpacing.page,
                 AppSpacing.xs,
-                AppSpacing.md,
+                AppSpacing.page,
                 AppSpacing.xxl,
               ),
               sliver: SliverLayoutBuilder(
@@ -629,9 +629,9 @@ class _Header extends StatelessWidget {
             : null);
     return Padding(
       padding: EdgeInsets.fromLTRB(
-        AppSpacing.md,
+        AppSpacing.page,
         _headerTopInset(context),
-        AppSpacing.md,
+        AppSpacing.page,
         AppSpacing.sm,
       ),
       child: Row(

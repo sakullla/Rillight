@@ -229,7 +229,7 @@ class _MediaShelfState extends State<MediaShelf> {
         ? MediaShelf.wideCardWidthFor(screenWidth)
         : MediaShelf.posterWidthFor(screenWidth);
     const gap = AppSpacing.sm;
-    const pad = AppSpacing.md;
+    const pad = AppSpacing.page;
     final position = _controller.position;
     if (position.maxScrollExtent <= 0 && index > 0) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -265,18 +265,18 @@ class _MediaShelfState extends State<MediaShelf> {
     final screenWidth = MediaQuery.sizeOf(context).width;
     return Padding(
       key: widget.rowKey,
-      padding: const EdgeInsets.only(bottom: AppSpacing.lg),
+      padding: const EdgeInsets.only(bottom: AppSpacing.md),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.page),
             child: Row(
               children: [
                 Expanded(
                   child: Text(
                     widget.title,
-                    style: Theme.of(context).textTheme.titleLarge,
+                    style: Theme.of(context).textTheme.titleMedium,
                   ),
                 ),
                 if (widget.headerAction != null) widget.headerAction!,
@@ -298,7 +298,7 @@ class _MediaShelfState extends State<MediaShelf> {
           const SizedBox(height: AppSpacing.sm),
           if (widget.loading)
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.page),
               child: SkeletonShelfRow(
                 posterWidth: widget.wide
                     ? MediaShelf.wideCardWidthFor(screenWidth)
@@ -308,7 +308,7 @@ class _MediaShelfState extends State<MediaShelf> {
             )
           else if (widget.error != null)
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.page),
               child: widget.onRetry == null
                   ? SkeletonShelfRow(
                       posterWidth: widget.wide
@@ -345,7 +345,7 @@ class _MediaShelfState extends State<MediaShelf> {
                             1,
                           ),
                           padding: const EdgeInsets.symmetric(
-                            horizontal: AppSpacing.md,
+                            horizontal: AppSpacing.page,
                           ),
                           scrollDirection: Axis.horizontal,
                           itemBuilder: (context, index) {

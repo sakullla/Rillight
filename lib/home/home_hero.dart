@@ -267,9 +267,9 @@ class _HomeHeroState extends State<HomeHero> {
                           ),
                           Padding(
                             padding: EdgeInsets.fromLTRB(
-                              AppSpacing.xxl,
+                              AppSpacing.page,
                               math.max(AppSpacing.xl, widget.topOverlap),
-                              AppSpacing.xxl,
+                              AppSpacing.page,
                               AppSpacing.xl,
                             ),
                             child: _HeroContent(
@@ -309,7 +309,7 @@ class _HomeHeroState extends State<HomeHero> {
                       ),
                     ),
                     Positioned(
-                      right: AppSpacing.xl,
+                      right: AppSpacing.page,
                       bottom: AppSpacing.md,
                       child: _HeroIndicators(
                         key: Key('catalog-hero-index-$index'),
@@ -496,9 +496,10 @@ class _HeroContent extends StatelessWidget {
                   context.push(AppRoutes.item(item.id));
                 },
                 style: FilledButton.styleFrom(
+                  minimumSize: const Size(0, 48),
                   padding: const EdgeInsets.symmetric(
-                    horizontal: AppSpacing.xxl,
-                    vertical: AppSpacing.md,
+                    horizontal: AppSpacing.xl,
+                    vertical: AppSpacing.sm,
                   ),
                 ),
                 icon: const Icon(Icons.play_arrow),
@@ -508,10 +509,11 @@ class _HeroContent extends StatelessWidget {
               onPressed: () => context.push(AppRoutes.item(item.id)),
               style: OutlinedButton.styleFrom(
                 foregroundColor: Colors.white,
-                side: BorderSide(color: Colors.white.withValues(alpha: 0.6)),
+                side: BorderSide(color: Colors.white.withValues(alpha: 0.42)),
+                minimumSize: const Size(0, 48),
                 padding: const EdgeInsets.symmetric(
-                  horizontal: AppSpacing.xl,
-                  vertical: AppSpacing.md,
+                  horizontal: AppSpacing.lg,
+                  vertical: AppSpacing.sm,
                 ),
               ),
               child: Text(l10n.details),

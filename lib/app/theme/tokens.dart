@@ -11,6 +11,9 @@ abstract final class AppSpacing {
   static const double xxl = 32;
   static const double xxxl = 40;
   static const double huge = 48;
+
+  /// 页面左右边距:首页分栏、片库网格、详情章节对齐同一条竖线。
+  static const double page = xl;
 }
 
 /// 圆角 token。

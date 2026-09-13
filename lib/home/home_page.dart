@@ -53,7 +53,6 @@ class HomePage extends StatelessWidget {
               RepaintBoundary(
                 child: HomeHero(catalog: catalog, topOverlap: overlap),
               ),
-              const SizedBox(height: AppSpacing.xl),
               RepaintBoundary(
                 child: HomeMediaRow(
                   rowKey: CatalogKeys.resumeRow,

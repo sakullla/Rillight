@@ -931,9 +931,9 @@ class _ChapterStripState extends State<_ChapterStrip> {
     final theme = Theme.of(context);
     return Padding(
       padding: const EdgeInsets.fromLTRB(
-        AppSpacing.xxl,
+        AppSpacing.page,
         AppSpacing.md,
-        AppSpacing.xxl,
+        AppSpacing.page,
         AppSpacing.sm,
       ),
       child: Column(
@@ -1353,7 +1353,7 @@ class _EpisodeNumberPickerState extends State<_EpisodeNumberPicker> {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Text(
-                          '${_rangeStart}-${math.min(_rangeStart + _pageSize - 1, widget.total)}',
+                          '$_rangeStart-${math.min(_rangeStart + _pageSize - 1, widget.total)}',
                           style: theme.textTheme.labelLarge,
                         ),
                         const Icon(Icons.arrow_drop_down, size: 20),
@@ -1504,15 +1504,15 @@ class _OverviewSection extends StatelessWidget {
     return Padding(
       key: CatalogKeys.overview,
       padding: const EdgeInsets.fromLTRB(
-        AppSpacing.xxl,
+        AppSpacing.page,
         AppSpacing.md,
-        AppSpacing.xxl,
+        AppSpacing.page,
         AppSpacing.sm,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(l10n.overview, style: theme.textTheme.titleLarge),
+          Text(l10n.overview, style: theme.textTheme.titleMedium),
           const SizedBox(height: AppSpacing.sm),
           SelectableText(
             body,
@@ -1663,9 +1663,9 @@ class _DetailHero extends StatelessWidget {
                   ),
                   Padding(
                     padding: EdgeInsets.fromLTRB(
-                      AppSpacing.xxl,
+                      AppSpacing.page,
                       math.max(AppSpacing.xl, topOverlap),
-                      AppSpacing.xxl,
+                      AppSpacing.page,
                       AppSpacing.xl,
                     ),
                     child: Column(
@@ -1745,9 +1745,9 @@ class _DetailHero extends StatelessWidget {
             if (hasOverview && !overviewInHero)
               Padding(
                 padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.page,
                   AppSpacing.md,
-                  AppSpacing.md,
-                  AppSpacing.md,
+                  AppSpacing.page,
                   0,
                 ),
                 child: SelectableText(
