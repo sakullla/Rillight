@@ -41,7 +41,7 @@ jobs:
           Compress-Archive -Path "build/windows/x64/runner/Release/*" -DestinationPath $archive
 
       - name: Upload Windows package
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: release-windows
           path: Rillight-windows-x64-${{ github.ref_name }}.zip
@@ -89,7 +89,7 @@ jobs:
           ditto -c -k --sequesterRsrc --keepParent "$app_path" "$archive"
 
       - name: Upload macOS package
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: release-macos
           path: Rillight-macos-${{ github.ref_name }}-*-adhoc.zip
@@ -136,7 +136,7 @@ jobs:
           tar -C build/linux/x64/release -czf "$archive" bundle
 
       - name: Upload Linux package
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: release-linux
           path: Rillight-linux-x64-${{ github.ref_name }}.tar.gz
@@ -148,7 +148,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Download packages
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           pattern: release-*
           path: dist

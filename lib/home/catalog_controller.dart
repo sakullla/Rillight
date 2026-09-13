@@ -37,6 +37,7 @@ class CatalogController extends ChangeNotifier {
   bool librariesLoading = true;
 
   int _loadGen = 0;
+  bool _disposed = false;
   String? _sessionKey;
   final Map<String, Timer> _retryTimers = {};
   final Map<String, int> _retryCounts = {};
@@ -44,7 +45,7 @@ class CatalogController extends ChangeNotifier {
   EmbyClient get client => auth.client;
 
   Future<void> reload({bool includeLibraries = true}) async {
-    if (!auth.isLoggedIn) {
+    if (_disposed || !auth.isLoggedIn) {
       return;
     }
     final gen = ++_loadGen;
@@ -58,7 +59,7 @@ class CatalogController extends ChangeNotifier {
       librariesLoading = true;
       librariesError = null;
     }
-    notifyListeners();
+    _notify();
 
     final tasks = <Future<void>>[
       _loadResume(gen),
@@ -83,7 +84,7 @@ class CatalogController extends ChangeNotifier {
     resume = remaining.isEmpty
         ? const CatalogRowState(hidden: true)
         : CatalogRowState(items: remaining);
-    notifyListeners();
+    _notify();
   }
 
   void _onAuthChanged() {
@@ -125,7 +126,7 @@ class CatalogController extends ChangeNotifier {
       resume = const CatalogRowState(loading: true);
       _scheduleRetry('resume', _loadResume);
     }
-    notifyListeners();
+    _notify();
   }
 
   Future<void> _loadNextUp(int gen) async {
@@ -153,7 +154,7 @@ class CatalogController extends ChangeNotifier {
         _scheduleRetry('nextUp', _loadNextUp);
       }
     }
-    notifyListeners();
+    _notify();
   }
 
   Future<void> _loadLatestMovies(int gen) async {
@@ -180,7 +181,7 @@ class CatalogController extends ChangeNotifier {
       latestMovies = const CatalogRowState(loading: true);
       _scheduleRetry('latestMovies', _loadLatestMovies);
     }
-    notifyListeners();
+    _notify();
   }
 
   Future<void> _loadLatestSeries(int gen) async {
@@ -207,7 +208,7 @@ class CatalogController extends ChangeNotifier {
       latestSeries = const CatalogRowState(loading: true);
       _scheduleRetry('latestSeries', _loadLatestSeries);
     }
-    notifyListeners();
+    _notify();
   }
 
   Future<void> _loadLibraries(int gen) async {
@@ -233,7 +234,7 @@ class CatalogController extends ChangeNotifier {
       librariesError = _asEmby(error);
       librariesLoading = false;
     }
-    notifyListeners();
+    _notify();
   }
 
   EmbyException _asEmby(Object error) {
@@ -286,7 +287,7 @@ class CatalogController extends ChangeNotifier {
         ? 6
         : 20;
     _retryTimers[key] = Timer(Duration(seconds: seconds), () {
-      if (!auth.isLoggedIn) {
+      if (_disposed || !auth.isLoggedIn) {
         return;
       }
       unawaited(load(_loadGen));
@@ -311,8 +312,17 @@ class CatalogController extends ChangeNotifier {
     return code == 404 || code == 400 || code == 501;
   }
 
+  void _notify() {
+    if (_disposed) {
+      return;
+    }
+    notifyListeners();
+  }
+
   @override
   void dispose() {
+    _disposed = true;
+    _loadGen++;
     _clearRetries();
     auth.removeListener(_onAuthChanged);
     super.dispose();
