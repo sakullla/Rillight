@@ -37,19 +37,20 @@ CI only runs formatting, analysis, and tests. Desktop release builds are created
 
 Before tagging a release:
 
-1. Update `pubspec.yaml` and `lib/app/product.dart` to the same application version. For example, use `version: 0.2.0+2` in `pubspec.yaml` and `kAppVersion = '0.2.0'` in `lib/app/product.dart`. Increment the build number after the `+` when appropriate.
+1. Update the synchronized application version in `pubspec.yaml`, `lib/app/product.dart`, and `windows/installer/rillight.iss`.
 2. Run `flutter pub get`, `dart format lib test`, `flutter analyze`, and `flutter test`.
 3. Commit the release change, push `main`, then create and push an annotated tag:
 
    ```sh
-   git add pubspec.yaml lib/app/product.dart
-   git commit -m "chore: release v0.2.0"
+   git add pubspec.yaml lib/app/product.dart windows/installer/rillight.iss
+   git commit -m "chore: release v${VERSION}"
    git push origin main
-   git tag -a v0.2.0 -m "Release v0.2.0"
-   git push origin v0.2.0
+   git tag -a "v${VERSION}" -m "Release v${VERSION}"
+   git push origin "v${VERSION}"
    ```
 
 The tag workflow builds and packages Windows, macOS, and Linux, creates `SHA256SUMS`, verifies all assets, and publishes the GitHub Release.
+
 
 ## Commit & Pull Request Guidelines
 
