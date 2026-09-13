@@ -190,6 +190,13 @@ abstract class CatalogDiskStore {
   Future<void> clear();
 }
 
+/// 支持按前缀删除的磁盘存储能力(可选):WebSocket 通知等外部变更
+/// 信号失效缓存前缀时,已有磁盘条目同步删除,避免残留过期数据。
+/// 不实现该接口的存储静默跳过磁盘前缀删除,仍有 TTL 兜底。
+abstract class PrefixCatalogDiskStore implements CatalogDiskStore {
+  Future<void> removePrefix(String prefix);
+}
+
 Future<CatalogDiskStore> openDefaultCatalogDiskStore() async {
   final support = await getApplicationSupportDirectory();
   final directory = Directory('${support.path}/rillight/catalog_cache');
@@ -199,7 +206,7 @@ Future<CatalogDiskStore> openDefaultCatalogDiskStore() async {
 
 /// 默认磁盘存储:文件名由缓存 key base64Url 编码而来,以文件修改时间近似
 /// LRU,总占用超过上限时淘汰最久未写的条目。
-class FileCatalogDiskStore implements CatalogDiskStore {
+class FileCatalogDiskStore implements PrefixCatalogDiskStore {
   FileCatalogDiskStore(
     this.directory, {
     this.limitBytes = CatalogCache.defaultDiskLimitBytes,
@@ -249,6 +256,43 @@ class FileCatalogDiskStore implements CatalogDiskStore {
       await directory.delete(recursive: true);
     }
     await directory.create(recursive: true);
+  }
+
+  @override
+  Future<void> removePrefix(String prefix) async {
+    if (!await directory.exists()) {
+      return;
+    }
+    try {
+      await for (final entity in directory.list()) {
+        if (entity is! File || !entity.path.endsWith(_fileSuffix)) {
+          continue;
+        }
+        final name = entity.uri.pathSegments.last;
+        final key = _decodeKey(
+          name.substring(0, name.length - _fileSuffix.length),
+        );
+        if (key != null && key.startsWith(prefix)) {
+          try {
+            await entity.delete();
+          } catch (_) {
+            // 单条删除失败留给下次再试。
+          }
+        }
+      }
+    } catch (_) {
+      // 目录列举失败无碍,条目仍有 TTL 兜底。
+    }
+  }
+
+  /// 文件名(去后缀)反解缓存 key;损坏文件名跳过。
+  String? _decodeKey(String encoded) {
+    try {
+      final padded = encoded.padRight((encoded.length + 3) ~/ 4 * 4, '=');
+      return utf8.decode(base64Url.decode(padded));
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<void> _trimToLimit() async {
@@ -498,6 +542,48 @@ class CatalogCache {
       return CatalogCacheHit(json: data, storedAt: storedAt);
     } catch (_) {
       return null;
+    }
+  }
+
+  /// 失效当前会话(key 前缀 `serverId|userId|`)的全部缓存。
+  ///
+  /// 供 WebSocket 通知等外部变更信号使用:通知不含变更细节,
+  /// 失效后以重新拉取结果为准。未绑定会话时为无操作。
+  Future<void> invalidateSession() async {
+    if (!hasSession) {
+      return;
+    }
+    await invalidatePrefix('$_serverId|$_userId|');
+  }
+
+  /// 失效 key 以 [prefix] 开头的条目:内存层同步移除,磁盘层尽力删除
+  /// (存储不支持前缀删除或删除失败时静默,仍有 TTL 兜底)。
+  Future<void> invalidatePrefix(String prefix) async {
+    _memory.removeWhere((key, _) => key.startsWith(prefix));
+    if (!_diskResolved) {
+      // 磁盘层尚未解析:解析完成后补删,不阻塞调用方。
+      unawaited(
+        _ensureDiskStore().then((store) async {
+          if (store is! PrefixCatalogDiskStore) {
+            return;
+          }
+          try {
+            await store.removePrefix(prefix);
+          } catch (_) {
+            // 静默降级。
+          }
+        }),
+      );
+      return;
+    }
+    final store = _diskStore;
+    if (store is! PrefixCatalogDiskStore) {
+      return;
+    }
+    try {
+      await store.removePrefix(prefix);
+    } catch (_) {
+      // 静默降级。
     }
   }
 

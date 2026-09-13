@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:rillight/auth/auth_controller.dart';
+import 'package:rillight/emby/emby_socket.dart';
 import 'package:rillight/home/catalog_controller.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/home/library_nav_prefs.dart';
@@ -23,16 +24,64 @@ class _CatalogShellState extends State<CatalogShell> {
   PlayerWindowHost? _playerHost;
   PlayerOpenRequest? _playerRequest;
 
+  // WebSocket 增强通道:登录会话(服务器/线路/令牌)变化时重连,
+  // 登出/销毁时断开。仅为可选通知推送,失败静默降级。
+  EmbySocket? _socket;
+  Uri? _socketBase;
+  String? _socketToken;
+
   @override
   void initState() {
     super.initState();
     widget.auth.addListener(_syncNavServer);
+    widget.auth.addListener(_syncSocket);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && widget.auth.isLoggedIn) {
         _catalog.reload();
         _syncNavServer();
+        _syncSocket();
       }
     });
+  }
+
+  void _syncSocket() {
+    final base = widget.auth.client.baseUrl;
+    final token = widget.auth.client.accessToken;
+    if (!widget.auth.isLoggedIn ||
+        base == null ||
+        token == null ||
+        token.isEmpty) {
+      _teardownSocket();
+      return;
+    }
+    if (base == _socketBase && token == _socketToken) {
+      return;
+    }
+    _teardownSocket();
+    _socketBase = base;
+    _socketToken = token;
+    _socket = EmbySocket(
+      baseUrl: base,
+      apiKey: token,
+      cache: _catalog.cache,
+      onUserDataChanged: () async {
+        if (widget.auth.isLoggedIn) {
+          await _catalog.reloadHomeRows();
+        }
+      },
+      onLibraryChanged: () async {
+        if (widget.auth.isLoggedIn) {
+          await _catalog.reload();
+        }
+      },
+    )..start();
+  }
+
+  void _teardownSocket() {
+    unawaited(_socket?.stop());
+    _socket = null;
+    _socketBase = null;
+    _socketToken = null;
   }
 
   void _syncNavServer() {
@@ -66,6 +115,8 @@ class _CatalogShellState extends State<CatalogShell> {
   @override
   void dispose() {
     widget.auth.removeListener(_syncNavServer);
+    widget.auth.removeListener(_syncSocket);
+    _teardownSocket();
     _playerHost?.removeListener(_onPlayerWindow);
     _catalog.dispose();
     _nav.dispose();
