@@ -121,9 +121,35 @@ void main() {
     );
     await store.write(const PlayerSettings(danmakuEnabled: false));
     final loaded = await store.read();
-    // volume 由 PlayerSettings.toJson 恒写,不属于合并保留字段;
-    // 未写入的可选字段(如磁盘缓冲)必须保留。
+    // 弹幕部分写未携带音量:既有 volume 不被默认值覆盖;
+    // 未写入的可选字段(如磁盘缓冲)同样保留。
+    expect(loaded.volume, 42);
     expect(loaded.diskCacheLimitMiB, 4096);
     expect(loaded.danmakuEnabled, isFalse);
+  });
+
+  test('danmaku-only write keeps a previously stored volume of 42', () async {
+    final file = tempFile('merge-danmaku-volume');
+    final store = FilePlayerSettingsStore(file);
+    // 播放器控制器先写音量 42。
+    await store.write(const PlayerSettings(volume: 42));
+    // 弹幕控制器的纯弹幕字段写(开关/显示参数/记忆/来源)不携带音量。
+    await store.write(
+      const PlayerSettings(
+        danmakuEnabled: true,
+        danmakuDisplay: DanmakuDisplaySettings(opacity: 0.6),
+        danmakuSeriesMemories: {
+          'series-1': DanmakuSeriesMemory(
+            animeId: 7,
+            animeTitle: 'Show',
+            episodeId: 100,
+          ),
+        },
+      ),
+    );
+    final loaded = await store.read();
+    expect(loaded.volume, 42);
+    expect(loaded.danmakuDisplay!.opacity, 0.6);
+    expect(loaded.danmakuSeriesMemories['series-1']!.episodeId, 100);
   });
 }

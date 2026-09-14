@@ -55,12 +55,13 @@ class PlayerSeriesPreference {
 
 /// 统一播放器设置(主进程与播放进程共享同一 JSON 文件)。
 ///
-/// 除 volume 外的字段为可空:null 表示「未配置」,运行时按默认值解析;
-/// [FilePlayerSettingsStore.write] 采用合并写,未配置字段不会覆盖文件中
-/// 已有值,因此播放进程只持久化音量时不会清掉主进程写入的其他设置。
+/// 全部字段(含 volume)为可空:null 表示「未配置」,读取时按默认值
+/// 解析(volume 100、playbackRate 1.0 等);[toJson] 对未配置字段不输出,
+/// [FilePlayerSettingsStore.write] 采用合并写,因此部分写者构造的
+/// [PlayerSettings] 只携带自己设置的字段,不会覆盖文件中已有值。
 class PlayerSettings {
   const PlayerSettings({
-    this.volume = 100,
+    this.volume,
     this.diskCacheLimitMiB,
     this.hardwareDecoding,
     this.hardwareDecoder,
@@ -73,7 +74,8 @@ class PlayerSettings {
     this.danmakuSeriesMemories = const {},
   });
 
-  final int volume;
+  /// 音量(0–100);null 表示「未配置」,读取回落默认 100。
+  final int? volume;
 
   /// 磁盘缓冲容量上限(MiB)。
   final int? diskCacheLimitMiB;
@@ -103,7 +105,7 @@ class PlayerSettings {
   /// 弹幕按剧匹配记忆，key 为 seriesId。
   final Map<String, DanmakuSeriesMemory> danmakuSeriesMemories;
 
-  int get clampedVolume => volume.clamp(0, 100);
+  int get clampedVolume => (volume ?? 100).clamp(0, 100);
 
   double get effectivePlaybackRate {
     final value = playbackRate;
@@ -120,7 +122,7 @@ class PlayerSettings {
   }
 
   Map<String, dynamic> toJson() => {
-    'volume': clampedVolume,
+    if (volume != null) 'volume': clampedVolume,
     if (diskCacheLimitMiB != null) 'diskCacheLimitMiB': diskCacheLimitMiB,
     if (hardwareDecoding != null) 'hardwareDecoding': hardwareDecoding!.name,
     if (hardwareDecoder != null) 'hardwareDecoder': hardwareDecoder!.name,
@@ -142,14 +144,16 @@ class PlayerSettings {
   };
 
   factory PlayerSettings.fromJson(Map<String, dynamic> json) {
+    // 磁盘上已有 volume 值读取后视为已设置(保留);键缺失/不可解析
+    // 视为未设置,回落默认且不参与合并写覆盖。
     final raw = json['volume'];
     final value = raw is int
         ? raw
         : raw is num
         ? raw.round()
-        : int.tryParse(raw?.toString() ?? '') ?? 100;
+        : int.tryParse(raw?.toString() ?? '');
     return PlayerSettings(
-      volume: value.clamp(0, 100),
+      volume: value?.clamp(0, 100),
       diskCacheLimitMiB: _readInt(json['diskCacheLimitMiB']),
       hardwareDecoding: _readEnum(
         HardwareDecodingMode.values,

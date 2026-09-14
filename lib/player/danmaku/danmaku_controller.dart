@@ -111,6 +111,11 @@ class DanmakuController extends ChangeNotifier {
 
   DanmakuEpisodeContext? _context;
   String? _sessionKey;
+
+  /// 会话代际:每次 [startSession] 递增;旧会话的异步结果
+  /// (弹幕落地/按剧记忆写入/状态落地)前校验未变,快速换集时丢弃。
+  int _sessionGeneration = 0;
+
   Future<void>? _restoreFuture;
   PlayerSettingsStore? _store;
 
@@ -180,6 +185,7 @@ class DanmakuController extends ChangeNotifier {
 
   /// 开启新会话:重置布局并按 记忆→哈希匹配→标题搜索 降级解析。
   Future<void> startSession(DanmakuEpisodeContext context) async {
+    _sessionGeneration++;
     _context = context;
     _sessionKey = '${context.itemId}|${context.mediaSourceId}';
     layout.reset();
@@ -251,10 +257,15 @@ class DanmakuController extends ChangeNotifier {
     if (context == null) {
       return;
     }
+    final generation = _sessionGeneration;
     status = DanmakuStatus.loading;
     notifyListeners();
     try {
       final loaded = await _client.fetchComments(_source, episode.episodeId);
+      if (generation != _sessionGeneration) {
+        // 与 _resolveAndLoad 同族保护:会话已切换,选择结果不落地。
+        return;
+      }
       await _remember(
         context,
         anime.animeId,
@@ -266,6 +277,9 @@ class DanmakuController extends ChangeNotifier {
       status = DanmakuStatus.active;
       notifyListeners();
     } on DanmakuApiException catch (failure) {
+      if (generation != _sessionGeneration) {
+        return;
+      }
       _handleLoadFailure(failure);
     }
   }
@@ -288,6 +302,7 @@ class DanmakuController extends ChangeNotifier {
   // -------------------------------------------------------------------
 
   Future<void> _resolveAndLoad(DanmakuEpisodeContext context) async {
+    final generation = _sessionGeneration;
     final source = _source;
     try {
       var animeId = 0;
@@ -367,18 +382,28 @@ class DanmakuController extends ChangeNotifier {
       }
 
       if (!resolved) {
+        if (generation != _sessionGeneration) {
+          return;
+        }
         status = DanmakuStatus.noMatch;
         notifyListeners();
         return;
       }
 
       final loaded = await _client.fetchComments(source, episodeId);
+      if (generation != _sessionGeneration) {
+        // 新会话已开启:旧会话结果不落地、不写记忆。
+        return;
+      }
       await _remember(context, animeId, animeTitle, episodeId);
       layout.comments = loaded;
       matchedTitle = animeTitle;
       status = DanmakuStatus.active;
       notifyListeners();
     } on DanmakuApiException catch (failure) {
+      if (generation != _sessionGeneration) {
+        return;
+      }
       _handleLoadFailure(failure);
     }
   }
@@ -489,6 +514,7 @@ class DanmakuController extends ChangeNotifier {
 
   Future<void> _writeSettings() async {
     try {
+      // 部分写:只携带弹幕字段,音量等未设置字段不参与合并写覆盖。
       await (await _settings()).write(
         PlayerSettings(
           danmakuEnabled: danmakuOn,

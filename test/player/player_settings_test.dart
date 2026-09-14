@@ -86,8 +86,66 @@ void main() {
     });
     await file.writeAsString('not json');
     final settings = await FilePlayerSettingsStore(file).read();
-    expect(settings.volume, 100);
+    // 未设置音量:读取回落默认 100,且字段保持未设置。
+    expect(settings.volume, isNull);
+    expect(settings.clampedVolume, 100);
     expect(settings.diskCacheLimitMiB, isNull);
+  });
+
+  test('unset volume is omitted from toJson and defaults to 100 on read', () {
+    const settings = PlayerSettings(danmakuEnabled: true);
+    expect(settings.volume, isNull);
+    expect(settings.clampedVolume, 100);
+    expect(settings.toJson().containsKey('volume'), isFalse);
+    expect(PlayerSettings.fromJson(const <String, dynamic>{}).volume, isNull);
+  });
+
+  test('danmaku partial write does not clear stored volume', () async {
+    final file = File(
+      '${Directory.systemTemp.path}/rillight-player-settings-danmaku.json',
+    );
+    addTearDown(() {
+      if (file.existsSync()) {
+        file.deleteSync();
+      }
+    });
+    final store = FilePlayerSettingsStore(file);
+    await store.write(const PlayerSettings(volume: 42));
+    // 弹幕控制器的部分写:只携带弹幕字段,音量不清。
+    await store.write(
+      const PlayerSettings(danmakuEnabled: false, danmakuToken: 'secret'),
+    );
+    final settings = await store.read();
+    expect(settings.volume, 42);
+    expect(settings.danmakuEnabled, isFalse);
+    expect(settings.danmakuToken, 'secret');
+  });
+
+  test('volume write does not clear stored danmaku config', () async {
+    final file = File(
+      '${Directory.systemTemp.path}/rillight-player-settings-volume.json',
+    );
+    addTearDown(() {
+      if (file.existsSync()) {
+        file.deleteSync();
+      }
+    });
+    final store = FilePlayerSettingsStore(file);
+    await store.write(
+      const PlayerSettings(
+        danmakuEnabled: true,
+        danmakuServer: 'https://dan.example.com',
+        danmakuToken: 'secret',
+      ),
+    );
+    // 播放器控制器只写音量/倍速:弹幕配置不清。
+    await store.write(const PlayerSettings(volume: 61, playbackRate: 1.5));
+    final settings = await store.read();
+    expect(settings.volume, 61);
+    expect(settings.playbackRate, 1.5);
+    expect(settings.danmakuEnabled, isTrue);
+    expect(settings.danmakuServer, 'https://dan.example.com');
+    expect(settings.danmakuToken, 'secret');
   });
 
   test('volume-only write keeps other stored fields (merged write)', () async {

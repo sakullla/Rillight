@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/player/danmaku/danmaku_controller.dart';
@@ -24,6 +26,10 @@ class FakeDandanplayClient extends DandanplayClient {
   Object? matchError;
   Object? searchError;
   Object? commentError;
+
+  /// 可控时序门闩:按 episodeId 阻塞 fetchComments,测试快速换集时旧会话
+  /// 慢完成的丢弃行为。
+  final Map<int, Completer<void>> commentGates = {};
 
   @override
   Future<DanmakuMatchResponse> match(
@@ -67,6 +73,10 @@ class FakeDandanplayClient extends DandanplayClient {
     int? serverTimestamp,
   }) async {
     commentCalls.add((source, episodeId));
+    final gate = commentGates[episodeId];
+    if (gate != null) {
+      await gate.future;
+    }
     if (commentError != null) {
       throw commentError!;
     }
@@ -496,5 +506,97 @@ void main() {
     expect(parseEpisodeNumber('ep.11'), 11);
     expect(parseEpisodeNumber('05.5 总集篇'), 5);
     expect(parseEpisodeNumber('最终话'), isNull);
+  });
+
+  test('stale slow session does not overwrite the new session', () async {
+    DanmakuMatchResponse matched(int episodeId) => DanmakuMatchResponse(
+      isMatched: true,
+      matches: [
+        DanmakuMatchCandidate(
+          animeId: 7,
+          animeTitle: 'Show',
+          episodeId: episodeId,
+          episodeTitle: '第01话',
+        ),
+      ],
+    );
+
+    // 旧会话:命中第 100 集,拉取被门闩挂起。
+    client.matchResponse = matched(100);
+    client.commentGates[100] = Completer<void>();
+    final controller = makeController();
+    final stale = controller.startSession(context());
+    while (client.commentCalls.isEmpty) {
+      await Future<void>.delayed(Duration.zero);
+    }
+    expect(client.commentCalls.single.$2, 100);
+
+    // 快速换集:新会话命中第 200 集,不受门闩阻礁,正常落地。
+    client.matchResponse = matched(200);
+    client.commentResponse = [comment(2, 10)];
+    await controller.startSession(context(itemId: 'item-2', index: 2));
+    expect(controller.status, DanmakuStatus.active);
+    expect(controller.hasComments, isTrue);
+    final memory = (await store.read()).danmakuSeriesMemories['series-1'];
+    expect(memory!.episodeId, 200);
+    expect(memory.episodeNumber, 2);
+
+    // 旧会话慢完成:结果丢弃,不覆盖新会话的弹幕/状态/记忆。
+    client.commentGates[100]!.complete();
+    await stale;
+    expect(controller.status, DanmakuStatus.active);
+    expect(controller.matchedTitle, 'Show');
+    expect(controller.comments.single.cid, 2);
+    final memoryAfter = (await store.read()).danmakuSeriesMemories['series-1'];
+    expect(memoryAfter!.episodeId, 200);
+    expect(client.commentCalls, hasLength(2));
+  });
+
+  test('stale manual selection does not land after a session switch', () async {
+    final controller = makeController();
+    await controller.startSession(context());
+    expect(controller.status, DanmakuStatus.noMatch);
+
+    // 用户手动选择第 201 集,拉取被门闩挂起。
+    client.commentGates[201] = Completer<void>();
+    client.commentResponse = [comment(9, 3)];
+    const anime = DanmakuAnime(
+      animeId: 9,
+      animeTitle: 'Show',
+      type: 'tvseries',
+      episodes: [
+        DanmakuEpisode(episodeId: 200, episodeTitle: '第01话'),
+        DanmakuEpisode(episodeId: 201, episodeTitle: '第02话'),
+      ],
+    );
+    final stale = controller.selectEpisode(anime, anime.episodes.last);
+    while (client.commentCalls.isEmpty) {
+      await Future<void>.delayed(Duration.zero);
+    }
+    expect(client.commentCalls.single.$2, 201);
+
+    // 拉取挂起期间快速换集:新会话走完并落地自己的弹幕与记忆。
+    client.commentResponse = [comment(2, 10)];
+    client.matchResponse = const DanmakuMatchResponse(
+      isMatched: true,
+      matches: [
+        DanmakuMatchCandidate(
+          animeId: 7,
+          animeTitle: 'Show',
+          episodeId: 200,
+          episodeTitle: '第01话',
+        ),
+      ],
+    );
+    await controller.startSession(context(itemId: 'item-2', index: 2));
+    final memory = (await store.read()).danmakuSeriesMemories['series-1'];
+    expect(memory!.episodeId, 200);
+
+    // 旧选择慢完成:丢弃,不把旧选集写进新会话记忆/画面。
+    client.commentGates[201]!.complete();
+    await stale;
+    final memoryAfter = (await store.read()).danmakuSeriesMemories['series-1'];
+    expect(memoryAfter!.episodeId, 200);
+    expect(controller.comments.single.cid, 2);
   });
 }
