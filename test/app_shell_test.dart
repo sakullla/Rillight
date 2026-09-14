@@ -8,6 +8,7 @@ import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/widgets/app_error_view.dart';
 import 'package:rillight/app/widgets/poster_placeholder.dart';
+import 'package:rillight/app/widgets/scrim_icon_button.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/server_list_store.dart';
@@ -16,6 +17,7 @@ import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/home_page.dart';
+import 'package:rillight/library/item_detail_page.dart';
 import 'package:rillight/library/library_page.dart';
 import 'package:rillight/search/search_overlay.dart';
 import 'package:rillight/search/search_page.dart';
@@ -393,6 +395,98 @@ void main() {
     expect(find.byType(SearchOverlay), findsNothing);
   });
 
+  testWidgets('home launched at / renders no back button', (tester) async {
+    final auth = await _connect(tester);
+    await tester.pumpWidget(RillightApp(auth: auth));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(HomePage), findsOneWidget);
+    expect(find.byKey(AppShell.topBarKey), findsOneWidget);
+    expect(find.byKey(CatalogKeys.back), findsNothing);
+    expect(
+      find.descendant(
+        of: find.byKey(AppShell.topBarKey),
+        matching: find.byType(ScrimIconButton),
+      ),
+      findsNothing,
+    );
+  });
+
+  testWidgets('detail top bar back is a ScrimIconButton that pops', (
+    tester,
+  ) async {
+    final auth = await _connect(tester);
+    final app = RillightApp(auth: auth);
+    await tester.pumpWidget(app);
+    await tester.pumpAndSettle();
+
+    app.router.push(AppRoutes.item('movie-inception'));
+    await tester.pumpAndSettle();
+    expect(find.byType(ItemDetailPage), findsOneWidget);
+
+    final back = find.byKey(CatalogKeys.back);
+    expect(back, findsOneWidget);
+    final button = tester.widget<ScrimIconButton>(back);
+    final expectedTooltip = MaterialLocalizations.of(
+      tester.element(back),
+    ).backButtonTooltip;
+    expect(button.tooltip, expectedTooltip);
+    expect(find.byTooltip(expectedTooltip), findsOneWidget);
+    expect(
+      find.descendant(of: back, matching: find.byType(IconButton)),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(AppShell.topBarKey),
+        matching: find.byType(ScrimIconButton),
+      ),
+      findsOneWidget,
+    );
+    expect(tester.getSize(back), const Size(40, 40));
+
+    await tester.tap(back);
+    await tester.pumpAndSettle();
+    expect(find.byType(ItemDetailPage), findsNothing);
+    expect(find.byType(HomePage), findsOneWidget);
+    expect(find.byKey(CatalogKeys.back), findsNothing);
+  });
+
+  testWidgets('back button survives in-place episode switch on detail', (
+    tester,
+  ) async {
+    final auth = await _connect(tester);
+    final app = RillightApp(auth: auth);
+    await tester.pumpWidget(app);
+    await tester.pumpAndSettle();
+
+    app.router.push(AppRoutes.item('series-friends'));
+    await tester.pumpAndSettle();
+    expect(find.byType(ItemDetailPage), findsOneWidget);
+    expect(find.byKey(CatalogKeys.back), findsOneWidget);
+
+    final episode = find.byKey(CatalogKeys.episode('episode-friends-s1e2'));
+    await _ensureVisibleBelowTopBar(tester, episode);
+    await _tapBelowTopBar(tester, episode);
+    await tester.pumpAndSettle();
+
+    // 页内切集不 push 新路由,详情页保持同一实例,返回钮仍在顶栏。
+    expect(
+      GoRouter.of(tester.element(find.byType(ItemDetailPage))).state.uri.path,
+      AppRoutes.item('series-friends'),
+    );
+    expect(find.textContaining('The One with the Sonogram'), findsWidgets);
+    final back = find.byKey(CatalogKeys.back);
+    expect(back, findsOneWidget);
+    expect(tester.widget<ScrimIconButton>(back), isA<ScrimIconButton>());
+
+    await tester.tap(back);
+    await tester.pumpAndSettle();
+    expect(find.byType(ItemDetailPage), findsNothing);
+    expect(find.byType(HomePage), findsOneWidget);
+    expect(find.byKey(CatalogKeys.back), findsNothing);
+  });
+
   testWidgets('top bar keeps five libraries and puts the rest in overflow', (
     tester,
   ) async {
@@ -510,6 +604,43 @@ bool _barrierIgnoringPointer(WidgetTester tester) {
         ),
       )
       .ignoring;
+}
+
+/// 顶栏叠在内容上时,控件中心可能落在栏内;点到栏下方仍落在同一控件上的位置。
+Future<void> _tapBelowTopBar(WidgetTester tester, Finder finder) async {
+  final bar = find.byKey(AppShell.topBarKey);
+  final rect = tester.getRect(finder);
+  var dy = rect.center.dy;
+  if (bar.evaluate().isNotEmpty) {
+    final barBottom = tester.getRect(bar).bottom;
+    if (dy <= barBottom) {
+      dy = (barBottom + 1).clamp(rect.top + 1, rect.bottom - 1).toDouble();
+    }
+  }
+  await tester.tapAt(Offset(rect.center.dx, dy));
+}
+
+Future<void> _ensureVisibleBelowTopBar(
+  WidgetTester tester,
+  Finder finder,
+) async {
+  final context = tester.element(finder);
+  final scrollable = Scrollable.maybeOf(context);
+  if (scrollable == null) {
+    await tester.ensureVisible(finder);
+    await tester.pumpAndSettle();
+    return;
+  }
+  final viewport = scrollable.position.viewportDimension;
+  final bar = find.byKey(AppShell.topBarKey);
+  final barBottom = bar.evaluate().isEmpty ? 0.0 : tester.getRect(bar).bottom;
+  final alignment = viewport <= 0 ? 0.0 : ((barBottom + 8) / viewport);
+  await Scrollable.ensureVisible(
+    context,
+    alignment: alignment.clamp(0.0, 1.0).toDouble(),
+    duration: Duration.zero,
+  );
+  await tester.pumpAndSettle();
 }
 
 Future<AuthController> _connect(

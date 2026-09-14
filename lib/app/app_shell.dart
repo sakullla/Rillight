@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme/tokens.dart';
+import 'package:rillight/app/widgets/scrim_icon_button.dart';
 import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/auth/session_actions.dart';
@@ -170,7 +171,7 @@ class _TopBar extends StatelessWidget {
         : AppShell.topBarHeight;
 
     final canPop = GoRouter.of(context).canPop();
-    final reduce = MediaQuery.disableAnimationsOf(context);
+    final scrim = Theme.of(context).colorScheme.scrim;
     final overlayHeight = height + AppShell.topFadeHeight;
     return SizedBox(
       height: height,
@@ -188,11 +189,15 @@ class _TopBar extends StatelessWidget {
                   gradient: LinearGradient(
                     begin: Alignment.topCenter,
                     end: Alignment.bottomCenter,
-                    stops: const [0, 0.55, 1],
+                    stops: AppScrim.topBarStops,
                     colors: [
-                      Colors.black.withValues(alpha: reduce ? 0.7 : 0.38),
-                      Colors.black.withValues(alpha: 0.1),
-                      Colors.transparent,
+                      scrim.withValues(
+                        alpha: AppScrim.of(context, AppScrim.topBar),
+                      ),
+                      scrim.withValues(
+                        alpha: AppScrim.of(context, AppScrim.topBarMid),
+                      ),
+                      scrim.withValues(alpha: 0),
                     ],
                   ),
                 ),
@@ -208,15 +213,18 @@ class _TopBar extends StatelessWidget {
               child: Row(
                 children: [
                   if (canPop)
-                    IconButton(
-                      key: CatalogKeys.back,
-                      tooltip: MaterialLocalizations.of(
-                        context,
-                      ).backButtonTooltip,
-                      visualDensity: VisualDensity.compact,
-                      iconSize: 20,
-                      onPressed: () => context.pop(),
-                      icon: const Icon(Icons.arrow_back_rounded),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.xs,
+                      ),
+                      child: ScrimIconButton(
+                        key: CatalogKeys.back,
+                        tooltip: MaterialLocalizations.of(
+                          context,
+                        ).backButtonTooltip,
+                        onPressed: () => context.pop(),
+                        icon: const Icon(Icons.arrow_back_rounded),
+                      ),
                     ),
                   if (AppRoutes.showsBrowseNav(location)) ...[
                     _HomeNav(selected: location == AppRoutes.home),
