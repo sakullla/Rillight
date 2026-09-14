@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/app/theme/tokens.dart';
 
 class AppErrorView extends StatelessWidget {
   const AppErrorView({super.key, required this.message, this.onRetry});
@@ -14,19 +15,23 @@ class AppErrorView extends StatelessWidget {
 
     return Center(
       child: Padding(
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.all(AppSpacing.xl),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.error_outline, size: 48, color: colorScheme.error),
-            const SizedBox(height: 12),
+            Icon(
+              Icons.error_outline,
+              size: AppSpacing.huge,
+              color: colorScheme.error,
+            ),
+            const SizedBox(height: AppSpacing.sm),
             Text(
               message,
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.bodyLarge,
             ),
             if (onRetry != null) ...[
-              const SizedBox(height: 16),
+              const SizedBox(height: AppSpacing.md),
               FilledButton(onPressed: onRetry, child: Text(l10n.retry)),
             ],
           ],

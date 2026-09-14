@@ -875,8 +875,6 @@ class _Header extends StatelessWidget {
             PopupMenuButton<CatalogSort>(
               key: CatalogKeys.sortBy,
               tooltip: l10n.sortBy,
-              color: colorScheme.surface.withValues(alpha: 0.96),
-              surfaceTintColor: Colors.transparent,
               initialValue: sort,
               onSelected: onSort,
               itemBuilder: (context) => [
@@ -1058,8 +1056,6 @@ class _FilterBar extends StatelessWidget {
     return PopupMenuButton<String>(
       key: gridFilterKey(dimension),
       tooltip: dimensionLabel,
-      color: colorScheme.surface.withValues(alpha: 0.96),
-      surfaceTintColor: Colors.transparent,
       initialValue: selected,
       onSelected: onSelected,
       itemBuilder: (context) => [

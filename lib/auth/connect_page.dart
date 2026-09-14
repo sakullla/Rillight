@@ -620,9 +620,7 @@ class _ConnectPageState extends State<ConnectPage> {
     return Padding(
       padding: const EdgeInsets.only(bottom: AppSpacing.xxs),
       child: Material(
-        color: selected
-            ? colorScheme.primaryContainer.withValues(alpha: 0.35)
-            : Colors.transparent,
+        color: selected ? colorScheme.secondaryContainer : Colors.transparent,
         borderRadius: BorderRadius.circular(AppRadii.md),
         child: InkWell(
           key: Key('saved-line-${line.id}'),

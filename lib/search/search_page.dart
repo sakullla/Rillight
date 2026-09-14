@@ -252,9 +252,9 @@ class _SearchPageState extends State<SearchPage> {
       return SkeletonPosterGrid(
         maxCrossAxisExtent: ShelfGridPage.maxCrossAxisExtentFor(screenWidth),
         padding: const EdgeInsets.fromLTRB(
-          AppSpacing.md,
+          AppSpacing.page,
           0,
-          AppSpacing.md,
+          AppSpacing.page,
           AppSpacing.xxl,
         ),
       );
@@ -280,14 +280,14 @@ class _SearchPageState extends State<SearchPage> {
         return GridView.builder(
           controller: _scrollController,
           padding: const EdgeInsets.fromLTRB(
-            AppSpacing.md,
+            AppSpacing.page,
             0,
-            AppSpacing.md,
+            AppSpacing.page,
             AppSpacing.xxl,
           ),
           gridDelegate: ShelfGridPage.gridDelegateFor(
             screenWidth: screenWidth,
-            availableWidth: constraints.maxWidth - AppSpacing.md * 2,
+            availableWidth: constraints.maxWidth - AppSpacing.page * 2,
           ),
           itemCount: _items.length + (_loadingMore ? 1 : 0),
           itemBuilder: (context, index) {

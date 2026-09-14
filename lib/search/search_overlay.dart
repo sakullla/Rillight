@@ -33,10 +33,12 @@ class SearchOverlayBarrier extends StatelessWidget {
   static const barrierKey = Key('search-overlay-barrier');
 
   /// 压暗不透明度:与近黑主题协调,亮色 backdrop 下明显压暗。
-  static const double dimOpacity = 0.55;
+  /// 减少动态效果时由 [AppScrim.of] 抬到不低于 [AppScrim.reduced]。
+  static const double dimOpacity = AppScrim.barrier;
 
   @override
   Widget build(BuildContext context) {
+    final dim = AppScrim.of(context, dimOpacity);
     return IgnorePointer(
       ignoring: !visible,
       child: GestureDetector(
@@ -48,9 +50,7 @@ class SearchOverlayBarrier extends StatelessWidget {
           duration: AppMotion.durationOf(context, AppMotion.fast),
           curve: AppMotion.standard,
           child: SizedBox.expand(
-            child: ColoredBox(
-              color: Colors.black.withValues(alpha: dimOpacity),
-            ),
+            child: ColoredBox(color: Colors.black.withValues(alpha: dim)),
           ),
         ),
       ),
