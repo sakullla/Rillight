@@ -91,6 +91,7 @@ class _LibraryCard extends StatelessWidget {
                   preferBackdrop: true,
                   maxWidth: 480,
                 ),
+                // 底部压暗托住库名;alpha 取 AppScrim 文字带起点并尊重减少动效。
                 DecoratedBox(
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
@@ -98,8 +99,10 @@ class _LibraryCard extends StatelessWidget {
                       end: Alignment.bottomCenter,
                       stops: const [0.4, 1],
                       colors: [
-                        Colors.transparent,
-                        colorScheme.scrim.withValues(alpha: 0.78),
+                        colorScheme.scrim.withValues(alpha: 0),
+                        colorScheme.scrim.withValues(
+                          alpha: AppScrim.of(context, AppScrim.textStart),
+                        ),
                       ],
                     ),
                   ),

@@ -16,6 +16,7 @@ class HomeMediaRow extends StatelessWidget {
     this.showProgress = false,
     this.wide = false,
     this.onRemoveFromResume,
+    this.headerAction,
   });
 
   final Key rowKey;
@@ -29,11 +30,16 @@ class HomeMediaRow extends StatelessWidget {
   final bool wide;
   final ValueChanged<EmbyItem>? onRemoveFromResume;
 
+  /// 货架标题右侧的附加控件(首页把手动刷新钮挂在这里)。
+  final Widget? headerAction;
+
   @override
   Widget build(BuildContext context) {
     if (state.hidden) {
       return const SizedBox.shrink();
     }
+    // 静默重试耗尽后 [CatalogRowState.error] 非空:MediaShelf 走错误分支,
+    // 渲染「重试」入口并经 [onRetry] 重拉整组首页行。
     return MediaShelf(
       rowKey: rowKey,
       shelfId: shelfId,
@@ -47,6 +53,7 @@ class HomeMediaRow extends StatelessWidget {
       showProgress: showProgress,
       wide: wide,
       onRemoveFromResume: onRemoveFromResume,
+      headerAction: headerAction,
     );
   }
 }

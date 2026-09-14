@@ -5,7 +5,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/theme/tokens.dart';
-import 'package:rillight/app/widgets/liquid_glass.dart';
+import 'package:rillight/app/widgets/scrim_icon_button.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/emby/emby_errors.dart';
 import 'package:rillight/emby/emby_models.dart';
@@ -89,11 +89,56 @@ class MediaShelf extends StatefulWidget {
     return 296;
   }
 
-  // 文字行占位:与 PosterCard 的标题/进度文字行一一对应,
-  // 另加 AppSpacing.xs 吸收 hover 放大溢出。
-  static const double _posterLabelExtent = 38; // xs 间距 + 标题行
-  static const double _progressLabelExtent = 22; // 进度行
-  static const double _wideLabelExtent = 54; // xxs + 剧名 + S1E2 副标题
+  /// 卡片间视觉间距;子项两侧各留 [hoverGutter] 吸收 hover 放大,
+  /// 分隔条只补剩余部分,卡片节距仍为卡宽 + [cardGap]。
+  static const double cardGap = AppSpacing.sm;
+  static const double hoverGutter = AppSpacing.xxs;
+
+  /// `PosterCard` 默认 hover 放大倍数;行高按卡片实际高度乘此倍数,
+  /// 只为放大溢出留余量,不再为标签多留空白。
+  static const double hoverScale = 1.04;
+
+  /// 单行文字的实际排版高度(随字体与文字缩放变化)。
+  static double lineHeightOf(BuildContext context, TextStyle? style) {
+    final painter = TextPainter(
+      text: TextSpan(text: 'Ag', style: style),
+      textDirection: Directionality.of(context),
+      textScaler: MediaQuery.textScalerOf(context),
+      maxLines: 1,
+    )..layout();
+    final height = painter.height;
+    painter.dispose();
+    return height;
+  }
+
+  /// 宽卡(16:9)行的标签高度:自定义 [itemBuilder] 视为 `EpisodeThumbCard`
+  /// (xs 间距 + 一行 titleSmall);默认 `PosterCard(wide)` 为
+  /// xxs 间距 + 剧名 titleSmall + S1E2 副标题 bodySmall。
+  static double wideLabelExtentFor(
+    BuildContext context, {
+    required bool customCard,
+  }) {
+    final textTheme = Theme.of(context).textTheme;
+    final title = lineHeightOf(context, textTheme.titleSmall);
+    if (customCard) {
+      return AppSpacing.xs + title;
+    }
+    return AppSpacing.xxs + title + lineHeightOf(context, textTheme.bodySmall);
+  }
+
+  /// 竖版海报行的标签高度:xs 间距 + 标题 titleSmall,
+  /// [showProgress] 时再加一行进度 bodySmall。
+  static double posterLabelExtentFor(
+    BuildContext context, {
+    required bool showProgress,
+  }) {
+    final textTheme = Theme.of(context).textTheme;
+    var extent = AppSpacing.xs + lineHeightOf(context, textTheme.titleSmall);
+    if (showProgress) {
+      extent += lineHeightOf(context, textTheme.bodySmall);
+    }
+    return extent;
+  }
 
   @override
   State<MediaShelf> createState() => _MediaShelfState();
@@ -110,19 +155,18 @@ class _MediaShelfState extends State<MediaShelf> {
       return widget.extent!;
     }
     final screenWidth = MediaQuery.sizeOf(context).width;
-    if (widget.wide) {
-      return MediaShelf.wideCardWidthFor(screenWidth) * 9 / 16 +
-          MediaShelf._wideLabelExtent +
-          AppSpacing.xs;
-    }
-    var height =
-        MediaShelf.posterWidthFor(screenWidth) * 1.5 +
-        MediaShelf._posterLabelExtent +
-        AppSpacing.xs;
-    if (widget.showProgress) {
-      height += MediaShelf._progressLabelExtent;
-    }
-    return height;
+    final cardHeight = widget.wide
+        ? MediaShelf.wideCardWidthFor(screenWidth) * 9 / 16 +
+              MediaShelf.wideLabelExtentFor(
+                context,
+                customCard: widget.itemBuilder != null,
+              )
+        : MediaShelf.posterWidthFor(screenWidth) * 1.5 +
+              MediaShelf.posterLabelExtentFor(
+                context,
+                showProgress: widget.showProgress,
+              );
+    return (cardHeight * MediaShelf.hoverScale).ceilToDouble();
   }
 
   @override
@@ -228,7 +272,7 @@ class _MediaShelfState extends State<MediaShelf> {
     final cardWidth = widget.wide
         ? MediaShelf.wideCardWidthFor(screenWidth)
         : MediaShelf.posterWidthFor(screenWidth);
-    const gap = AppSpacing.sm;
+    const gap = MediaShelf.cardGap;
     const pad = AppSpacing.page;
     final position = _controller.position;
     if (position.maxScrollExtent <= 0 && index > 0) {
@@ -344,8 +388,10 @@ class _MediaShelfState extends State<MediaShelf> {
                           scrollCacheExtent: const ScrollCacheExtent.viewport(
                             1,
                           ),
+                          // 首张卡片外缘仍落在 AppSpacing.page 竖线上。
                           padding: const EdgeInsets.symmetric(
-                            horizontal: AppSpacing.page,
+                            horizontal:
+                                AppSpacing.page - MediaShelf.hoverGutter,
                           ),
                           scrollDirection: Axis.horizontal,
                           itemBuilder: (context, index) {
@@ -362,19 +408,26 @@ class _MediaShelfState extends State<MediaShelf> {
                                   onTap: () => widget.onTap(item),
                                   onRemoveFromResume: widget.onRemoveFromResume,
                                 );
-                            return Align(
-                              alignment: Alignment.center,
-                              child: Listener(
-                                onPointerSignal: _onVerticalWheelToParent,
-                                child: Shortcuts(
-                                  shortcuts: _kShelfArrowShortcuts,
-                                  child: _EnsureVisibleOnFocus(child: child),
+                            return Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: MediaShelf.hoverGutter,
+                              ),
+                              child: Align(
+                                alignment: Alignment.center,
+                                child: Listener(
+                                  onPointerSignal: _onVerticalWheelToParent,
+                                  child: Shortcuts(
+                                    shortcuts: _kShelfArrowShortcuts,
+                                    child: _EnsureVisibleOnFocus(child: child),
+                                  ),
                                 ),
                               ),
                             );
                           },
-                          separatorBuilder: (context, index) =>
-                              const SizedBox(width: AppSpacing.sm),
+                          separatorBuilder: (context, index) => const SizedBox(
+                            width:
+                                MediaShelf.cardGap - 2 * MediaShelf.hoverGutter,
+                          ),
                           itemCount: widget.items.length,
                         ),
                       ),
@@ -475,18 +528,11 @@ class _ScrollButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xxs),
-      child: LiquidGlass(
-        kind: LiquidGlassKind.pill,
-        child: Material(
-          type: MaterialType.transparency,
-          shape: const CircleBorder(),
-          child: IconButton(
-            key: buttonKey,
-            tooltip: tooltip,
-            onPressed: onPressed,
-            icon: Icon(icon),
-          ),
-        ),
+      child: ScrimIconButton(
+        key: buttonKey,
+        tooltip: tooltip,
+        onPressed: onPressed,
+        icon: Icon(icon),
       ),
     );
   }

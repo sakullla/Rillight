@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/credential_store.dart';
@@ -173,5 +176,137 @@ void main() {
       catalog.latestMovies.items.map((item) => item.name),
       contains('改名后的电影'),
     );
+  });
+
+  testWidgets('a failing home row turns into error after quiet retries', (
+    tester,
+  ) async {
+    final server = FakeEmbyServer();
+    final adapter = FakeEmbyAdapter([server]);
+    final auth = AuthController(
+      client: EmbyClient(device: _device, dio: dioForFakeEmby(adapter)),
+      credentials: MemoryCredentialStore(),
+      servers: MemoryServerListStore(),
+    );
+    await tester.runAsync(() {
+      return auth.connect(
+        address: server.baseUrl.toString(),
+        username: 'alice',
+        password: 'correct-horse',
+      );
+    });
+    await tester.pumpWidget(const SizedBox.shrink());
+
+    server.latestMovieStatus = 500;
+    final catalog = CatalogController(
+      auth: auth,
+      cache: CatalogCache()..debugSetDiskStore(_FakeCatalogDisk()),
+    );
+    addTearDown(catalog.dispose);
+    var notifications = 0;
+    catalog.addListener(() => notifications++);
+
+    int movieRequests() => server.requests
+        .where((request) => request.contains('IncludeItemTypes=Movie'))
+        .length;
+
+    // 首次失败:骨架屏 + 静默重试,不暴露 error。
+    unawaited(catalog.reload());
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(movieRequests(), 1);
+    expect(catalog.latestMovies.loading, isTrue);
+    expect(catalog.latestMovies.error, isNull);
+    expect(catalog.latestMovies.hidden, isFalse);
+    expect(catalog.latestSeries.items, isNotEmpty, reason: '其它行不受影响');
+
+    // 2s / 6s:第一、二次静默重试仍失败,继续骨架屏。
+    for (final delay in CatalogController.quietRetryDelays.take(2)) {
+      await tester.pump(delay);
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(catalog.latestMovies.loading, isTrue);
+      expect(catalog.latestMovies.error, isNull);
+    }
+    expect(movieRequests(), 3);
+
+    // 20s:第三次重试失败,计划耗尽 → error,且不再安排自动重试。
+    await tester.pump(CatalogController.quietRetryDelays.last);
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(movieRequests(), 4);
+    expect(catalog.latestMovies.loading, isFalse);
+    expect(catalog.latestMovies.hidden, isFalse);
+    expect(catalog.latestMovies.error, isNotNull);
+    expect(catalog.latestMovies.error!.statusCode, 500);
+    final notifiedAtError = notifications;
+
+    await tester.pump(const Duration(minutes: 1));
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(movieRequests(), 4, reason: '耗尽后不再自动重试');
+    expect(notifications, notifiedAtError);
+
+    // 手动重试从头开始节拍并恢复。
+    server.latestMovieStatus = null;
+    unawaited(catalog.reloadHomeRows());
+    await tester.pump();
+    expect(catalog.latestMovies.loading, isTrue);
+    expect(catalog.latestMovies.error, isNull);
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(catalog.latestMovies.loading, isFalse);
+    expect(catalog.latestMovies.error, isNull);
+    expect(
+      catalog.latestMovies.items.map((item) => item.name),
+      contains('飞屋环游记'),
+    );
+  });
+
+  testWidgets('a row with cached content keeps it while retries fail', (
+    tester,
+  ) async {
+    final server = FakeEmbyServer();
+    final adapter = FakeEmbyAdapter([server]);
+    final auth = AuthController(
+      client: EmbyClient(device: _device, dio: dioForFakeEmby(adapter)),
+      credentials: MemoryCredentialStore(),
+      servers: MemoryServerListStore(),
+    );
+    await tester.runAsync(() {
+      return auth.connect(
+        address: server.baseUrl.toString(),
+        username: 'alice',
+        password: 'correct-horse',
+      );
+    });
+    await tester.pumpWidget(const SizedBox.shrink());
+
+    final disk = _FakeCatalogDisk();
+    final warm = CatalogController(
+      auth: auth,
+      cache: CatalogCache()..debugSetDiskStore(disk),
+    );
+    addTearDown(warm.dispose);
+    unawaited(warm.reload());
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(warm.latestMovies.items, isNotEmpty);
+
+    server.latestMovieStatus = 500;
+    final catalog = CatalogController(
+      auth: auth,
+      cache: CatalogCache()..debugSetDiskStore(disk),
+    );
+    addTearDown(catalog.dispose);
+    unawaited(catalog.reload());
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    for (final delay in CatalogController.quietRetryDelays) {
+      await tester.pump(delay);
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+    await tester.pump(const Duration(minutes: 1));
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(catalog.latestMovies.items, isNotEmpty, reason: '缓存内容保留');
+    expect(catalog.latestMovies.error, isNull, reason: '有内容时不切换为错误态');
+    expect(catalog.latestMovies.loading, isFalse);
   });
 }

@@ -7,7 +7,8 @@ import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme/tokens.dart';
-import 'package:rillight/app/widgets/liquid_glass.dart';
+import 'package:rillight/app/widgets/backdrop_scrim.dart';
+import 'package:rillight/app/widgets/scrim_icon_button.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_controller.dart';
@@ -20,7 +21,7 @@ import 'package:rillight/player/player_window_host.dart';
 /// 电影/剧集),支持左右箭头与指示点手动切换,并每 10 秒自动轮换。
 /// 悬停、焦点在 hero 内、或 [MediaQuery.disableAnimations] /
 /// [AppMotion.durationOf] 为零时停止自动轮换(WCAG 2.2.2)。
-/// backdrop 顶到内容区边缘,渐变遮罩上叠大标题、元信息与主操作。
+/// backdrop 顶到内容区边缘,[BackdropScrim] 三段遮罩上叠大标题、元信息与主操作。
 class HomeHero extends StatefulWidget {
   const HomeHero({super.key, required this.catalog, this.topOverlap = 0});
 
@@ -54,6 +55,14 @@ class HomeHero extends StatefulWidget {
 
   /// 自动轮换间隔。
   static const autoAdvanceInterval = Duration(seconds: 10);
+
+  /// 顶带在顶栏下方继续溶入的高度;与 [AppScrim.topBandHeight] 的默认
+  /// 构成(顶栏 56 + 溶入 36)一致。
+  static const double topBandFade = 36;
+
+  /// 文字块最大宽度:不超过 60% 视口且 ≤ 640,与 [AppScrim.textBandWidthFactor]
+  /// 的文字带对齐。
+  static double textBlockWidthFor(double width) => math.min(width * 0.6, 640);
 
   /// 自动轮换开关;flutter test 环境默认关闭,保证 pumpAndSettle 期间内容确定
   /// (本应用仅桌面平台,Platform 可用)。
@@ -222,47 +231,16 @@ class _HomeHeroState extends State<HomeHero> {
                       child: Stack(
                         fit: StackFit.expand,
                         children: [
-                          MediaImage(
-                            item: item,
-                            height: height,
-                            preferBackdrop: true,
-                            maxWidth: 1920,
-                          ),
-                          DecoratedBox(
-                            decoration: BoxDecoration(
-                              gradient: LinearGradient(
-                                begin: Alignment.centerLeft,
-                                end: Alignment.centerRight,
-                                stops: const [0, 0.45, 1],
-                                colors: [
-                                  Theme.of(
-                                    context,
-                                  ).colorScheme.scrim.withValues(alpha: 0.62),
-                                  Theme.of(
-                                    context,
-                                  ).colorScheme.scrim.withValues(alpha: 0.16),
-                                  Colors.transparent,
-                                ],
-                              ),
+                          BackdropScrim(
+                            topBandHeight: math.max(
+                              AppScrim.topBandHeight,
+                              widget.topOverlap + HomeHero.topBandFade,
                             ),
-                          ),
-                          DecoratedBox(
-                            decoration: BoxDecoration(
-                              gradient: LinearGradient(
-                                begin: Alignment.topCenter,
-                                end: Alignment.bottomCenter,
-                                stops: const [0, 0.18, 0.52, 0.8, 1],
-                                colors: [
-                                  Theme.of(
-                                    context,
-                                  ).colorScheme.scrim.withValues(alpha: 0.18),
-                                  Colors.transparent,
-                                  Colors.transparent,
-                                  Theme.of(context).scaffoldBackgroundColor
-                                      .withValues(alpha: 0.55),
-                                  Theme.of(context).scaffoldBackgroundColor,
-                                ],
-                              ),
+                            backdrop: MediaImage(
+                              item: item,
+                              height: height,
+                              preferBackdrop: true,
+                              maxWidth: 1920,
                             ),
                           ),
                           Padding(
@@ -287,10 +265,11 @@ class _HomeHeroState extends State<HomeHero> {
                       top: 0,
                       bottom: 0,
                       child: Center(
-                        child: _HeroNavButton(
-                          buttonKey: CatalogKeys.heroPrev,
+                        child: ScrimIconButton(
+                          key: CatalogKeys.heroPrev,
                           tooltip: AppLocalizations.of(context).scrollLeft,
-                          icon: Icons.chevron_left,
+                          icon: const Icon(Icons.chevron_left),
+                          size: ScrimIconButtonSize.large,
                           onPressed: () => _go(-1),
                         ),
                       ),
@@ -300,10 +279,11 @@ class _HomeHeroState extends State<HomeHero> {
                       top: 0,
                       bottom: 0,
                       child: Center(
-                        child: _HeroNavButton(
-                          buttonKey: CatalogKeys.heroNext,
+                        child: ScrimIconButton(
+                          key: CatalogKeys.heroNext,
                           tooltip: AppLocalizations.of(context).scrollRight,
-                          icon: Icons.chevron_right,
+                          icon: const Icon(Icons.chevron_right),
+                          size: ScrimIconButtonSize.large,
                           onPressed: () => _go(1),
                         ),
                       ),
@@ -325,38 +305,6 @@ class _HomeHeroState extends State<HomeHero> {
           ),
         );
       },
-    );
-  }
-}
-
-class _HeroNavButton extends StatelessWidget {
-  const _HeroNavButton({
-    required this.buttonKey,
-    required this.tooltip,
-    required this.icon,
-    required this.onPressed,
-  });
-
-  final Key buttonKey;
-  final String tooltip;
-  final IconData icon;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    return LiquidGlass(
-      kind: LiquidGlassKind.pill,
-      child: Material(
-        type: MaterialType.transparency,
-        shape: const CircleBorder(),
-        child: IconButton(
-          key: buttonKey,
-          tooltip: tooltip,
-          color: Colors.white,
-          onPressed: onPressed,
-          icon: Icon(icon),
-        ),
-      ),
     );
   }
 }
@@ -431,12 +379,13 @@ class _HeroContent extends StatelessWidget {
       if (item.playbackProgress > 0)
         l10n.playbackProgress((item.playbackProgress * 100).round()),
     ];
+    final textBlockWidth = HomeHero.textBlockWidthFor(width);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Spacer(),
         ConstrainedBox(
-          constraints: BoxConstraints(maxWidth: math.min(width * 0.7, 720)),
+          constraints: BoxConstraints(maxWidth: textBlockWidth),
           child: Text(
             itemTitle(item),
             maxLines: 2,
@@ -466,7 +415,7 @@ class _HeroContent extends StatelessWidget {
             )) ...[
           const SizedBox(height: AppSpacing.sm),
           ConstrainedBox(
-            constraints: BoxConstraints(maxWidth: math.min(width * 0.6, 560)),
+            constraints: BoxConstraints(maxWidth: textBlockWidth),
             child: Text(
               item.overview!,
               maxLines: compact ? 2 : 3,

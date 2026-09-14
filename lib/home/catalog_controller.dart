@@ -190,11 +190,12 @@ class CatalogController extends ChangeNotifier {
       if (gen != _loadGen) {
         return;
       }
-      // 已有缓存内容时保留显示;否则骨架屏 + 静默重试。
-      if (!_rowHasContent(resume)) {
-        resume = const CatalogRowState(loading: true);
-      }
-      _scheduleRetry('resume', (gen) => _loadResume(gen, false));
+      resume = _failRow(
+        'resume',
+        error,
+        resume,
+        (gen) => _loadResume(gen, false),
+      );
     }
     _notify();
   }
@@ -231,10 +232,12 @@ class CatalogController extends ChangeNotifier {
         nextUp = const CatalogRowState(hidden: true);
         _clearRetry('nextUp');
       } else {
-        if (!_rowHasContent(nextUp)) {
-          nextUp = const CatalogRowState(loading: true);
-        }
-        _scheduleRetry('nextUp', (gen) => _loadNextUp(gen, false));
+        nextUp = _failRow(
+          'nextUp',
+          mapped,
+          nextUp,
+          (gen) => _loadNextUp(gen, false),
+        );
       }
     }
     _notify();
@@ -275,10 +278,12 @@ class CatalogController extends ChangeNotifier {
       if (gen != _loadGen) {
         return;
       }
-      if (!_rowHasContent(latestMovies)) {
-        latestMovies = const CatalogRowState(loading: true);
-      }
-      _scheduleRetry('latestMovies', (gen) => _loadLatestMovies(gen, false));
+      latestMovies = _failRow(
+        'latestMovies',
+        error,
+        latestMovies,
+        (gen) => _loadLatestMovies(gen, false),
+      );
     }
     _notify();
   }
@@ -318,10 +323,12 @@ class CatalogController extends ChangeNotifier {
       if (gen != _loadGen) {
         return;
       }
-      if (!_rowHasContent(latestSeries)) {
-        latestSeries = const CatalogRowState(loading: true);
-      }
-      _scheduleRetry('latestSeries', (gen) => _loadLatestSeries(gen, false));
+      latestSeries = _failRow(
+        'latestSeries',
+        error,
+        latestSeries,
+        (gen) => _loadLatestSeries(gen, false),
+      );
     }
     _notify();
   }
@@ -425,21 +432,49 @@ class CatalogController extends ChangeNotifier {
     }
   }
 
-  void _scheduleRetry(String key, Future<void> Function(int gen) load) {
-    _retryTimers[key]?.cancel();
+  /// 首页行请求失败后的状态:已有可显示内容时原样保留并静默重试;
+  /// 否则在 [quietRetryDelays] 未耗尽前保持骨架屏,耗尽后转为 `error`,
+  /// 由货架渲染错误与「重试」入口(重试走 [reloadHomeRows])。
+  CatalogRowState _failRow(
+    String key,
+    Object error,
+    CatalogRowState current,
+    Future<void> Function(int gen) load,
+  ) {
+    final scheduled = _scheduleRetry(key, load);
+    if (_rowHasContent(current)) {
+      return current;
+    }
+    if (scheduled) {
+      return const CatalogRowState(loading: true);
+    }
+    return CatalogRowState(error: _asEmby(error));
+  }
+
+  /// 静默重试节拍:三次后耗尽,不再自动重试。
+  static const List<Duration> quietRetryDelays = [
+    Duration(seconds: 2),
+    Duration(seconds: 6),
+    Duration(seconds: 20),
+  ];
+
+  /// 为 [key] 安排下一次静默重试;计划已耗尽时返回 false 并清除计数,
+  /// 下一次 [reload] 从头开始节拍。
+  bool _scheduleRetry(String key, Future<void> Function(int gen) load) {
+    _retryTimers.remove(key)?.cancel();
     final attempt = (_retryCounts[key] ?? 0) + 1;
+    if (attempt > quietRetryDelays.length) {
+      _retryCounts.remove(key);
+      return false;
+    }
     _retryCounts[key] = attempt;
-    final seconds = attempt == 1
-        ? 2
-        : attempt == 2
-        ? 6
-        : 20;
-    _retryTimers[key] = Timer(Duration(seconds: seconds), () {
+    _retryTimers[key] = Timer(quietRetryDelays[attempt - 1], () {
       if (_disposed || !auth.isLoggedIn) {
         return;
       }
       unawaited(load(_loadGen));
     });
+    return true;
   }
 
   void _clearRetry(String key) {
