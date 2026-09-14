@@ -450,6 +450,21 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
+  String get settingsDanmakuService => '弹幕服务';
+
+  @override
+  String get settingsDanmakuServer => '自定义服务地址';
+
+  @override
+  String get settingsDanmakuServerHint => '留空使用官方源';
+
+  @override
+  String get settingsDanmakuToken => '访问令牌';
+
+  @override
+  String get settingsDanmakuTokenHint => '可选，自建服务时填写';
+
+  @override
   String get playbackRate => '倍速';
 
   @override

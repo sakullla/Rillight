@@ -623,6 +623,26 @@
       }
     }
   },
+  "settingsDanmakuService": "弹幕服务",
+  "@settingsDanmakuService": {
+    "description": "Settings section title for the danmaku service source."
+  },
+  "settingsDanmakuServer": "自定义服务地址",
+  "@settingsDanmakuServer": {
+    "description": "Setting row label for the custom danmaku server address."
+  },
+  "settingsDanmakuServerHint": "留空使用官方源",
+  "@settingsDanmakuServerHint": {
+    "description": "Hint that an empty custom danmaku server falls back to the official source."
+  },
+  "settingsDanmakuToken": "访问令牌",
+  "@settingsDanmakuToken": {
+    "description": "Setting row label for the custom danmaku service access token."
+  },
+  "settingsDanmakuTokenHint": "可选，自建服务时填写",
+  "@settingsDanmakuTokenHint": {
+    "description": "Hint that the danmaku service access token is optional."
+  },
   "playbackRate": "倍速",
   "@playbackRate": {
     "description": "Playback speed selector label on the player controls."

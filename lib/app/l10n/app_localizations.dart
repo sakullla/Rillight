@@ -928,6 +928,36 @@ abstract class AppLocalizations {
   /// **'{gb} GB'**
   String settingsCacheSize(double gb);
 
+  /// Settings section title for the danmaku service source.
+  ///
+  /// In zh, this message translates to:
+  /// **'弹幕服务'**
+  String get settingsDanmakuService;
+
+  /// Setting row label for the custom danmaku server address.
+  ///
+  /// In zh, this message translates to:
+  /// **'自定义服务地址'**
+  String get settingsDanmakuServer;
+
+  /// Hint that an empty custom danmaku server falls back to the official source.
+  ///
+  /// In zh, this message translates to:
+  /// **'留空使用官方源'**
+  String get settingsDanmakuServerHint;
+
+  /// Setting row label for the custom danmaku service access token.
+  ///
+  /// In zh, this message translates to:
+  /// **'访问令牌'**
+  String get settingsDanmakuToken;
+
+  /// Hint that the danmaku service access token is optional.
+  ///
+  /// In zh, this message translates to:
+  /// **'可选，自建服务时填写'**
+  String get settingsDanmakuTokenHint;
+
   /// Playback speed selector label on the player controls.
   ///
   /// In zh, this message translates to:
