@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
@@ -273,6 +275,111 @@ void main() {
       },
     );
 
+    test('overlapping close then open keeps the new pid watched', () async {
+      final auth = await loggedInAuth();
+      final host = newHost(auth);
+      addTearDown(() {
+        host.dispose();
+        auth.dispose();
+      });
+
+      await host.open(const PlayerOpenRequest(itemId: 'movie-up'));
+      final firstPid = control.lastPid;
+      control.requestCloseHold = Completer<void>();
+
+      final closeFuture = host.close();
+      for (
+        var i = 0;
+        i < 100 && !calls.contains('requestClose:$firstPid');
+        i++
+      ) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      expect(calls, contains('requestClose:$firstPid'));
+
+      final openFuture = host.open(
+        const PlayerOpenRequest(itemId: 'movie-inception'),
+      );
+      control.requestCloseHold!.complete();
+      await closeFuture;
+      await openFuture;
+
+      final secondPid = control.lastPid;
+      expect(secondPid, firstPid + 1);
+      expect(host.current?.itemId, 'movie-inception');
+      expect(control.isAlive(secondPid), isTrue);
+      expect(control.isAlive(firstPid), isFalse);
+      expect(calls, [
+        'spawn:$firstPid',
+        'requestClose:$firstPid',
+        'kill:$firstPid',
+        'spawn:$secondPid',
+      ]);
+
+      control.exit(secondPid);
+      for (var i = 0; i < 100 && host.current != null; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      expect(host.current, isNull);
+    });
+
+    test('close joins watcher reconcile before logout', () async {
+      final auth = await loggedInAuth();
+      final releaseRead = Completer<void>();
+      final host = DesktopPlayerWindowHost(
+        auth: auth,
+        processControl: control,
+        snapshotStoreForPid: (pid) => _GatedReadSnapshotStore(
+          storeFor(pid),
+          calls: calls,
+          pid: pid,
+          gate: releaseRead,
+        ),
+        closeTimeout: const Duration(milliseconds: 50),
+        reportTimeout: const Duration(seconds: 2),
+        watchInterval: const Duration(milliseconds: 10),
+      );
+      addTearDown(() {
+        if (!releaseRead.isCompleted) {
+          releaseRead.complete();
+        }
+        host.dispose();
+        auth.dispose();
+      });
+
+      await host.open(const PlayerOpenRequest(itemId: 'movie-up'));
+      final pid = control.lastPid;
+      await storeFor(pid).write(snapshotFor(auth));
+
+      control.exit(pid);
+      for (var i = 0; i < 100 && !calls.contains('reconcile:$pid'); i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      expect(calls, contains('reconcile:$pid'));
+      expect(host.current, isNull);
+      expect(stoppedEvents(), isEmpty);
+      expect(auth.isLoggedIn, isTrue);
+
+      var closed = false;
+      final closeFuture = host.close().whenComplete(() => closed = true);
+      await Future<void>.delayed(Duration.zero);
+      expect(closed, isFalse);
+      expect(stoppedEvents(), isEmpty);
+
+      releaseRead.complete();
+      await closeFuture;
+      expect(closed, isTrue);
+      expect(stoppedEvents(), hasLength(1));
+      expect(storeFor(pid).snapshot, isNull);
+      expect(auth.isLoggedIn, isTrue);
+
+      await auth.logout();
+      expect(
+        calls,
+        containsAllInOrder(['spawn:$pid', 'reconcile:$pid', 'logout']),
+      );
+    });
+
     test('logout without a prior close cannot resend (session gone)', () async {
       final auth = await loggedInAuth();
       final host = newHost(auth);
@@ -481,4 +588,32 @@ void main() {
       expect(host.current, isNull);
     });
   });
+}
+
+/// 把 [read] 挂起,让测试在 watcher 已进入 reconcile 后再调用 close/logout。
+class _GatedReadSnapshotStore implements PlaybackSessionSnapshotStore {
+  _GatedReadSnapshotStore(
+    this.inner, {
+    required this.calls,
+    required this.pid,
+    required this.gate,
+  });
+
+  final MemoryPlaybackSessionSnapshotStore inner;
+  final List<String> calls;
+  final int pid;
+  final Completer<void> gate;
+
+  @override
+  Future<void> write(PlaybackSessionSnapshot snapshot) => inner.write(snapshot);
+
+  @override
+  Future<PlaybackSessionSnapshot?> read() async {
+    calls.add('reconcile:$pid');
+    await gate.future;
+    return inner.read();
+  }
+
+  @override
+  Future<void> delete() => inner.delete();
 }

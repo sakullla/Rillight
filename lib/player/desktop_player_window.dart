@@ -185,6 +185,11 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
   Timer? _watch;
   PlayerOpenRequest? _current;
   var _disposed = false;
+  var _epoch = 0;
+
+  /// 串行化 open/close 与 watcher 代发,避免 close 清掉后开的 pid,
+  /// 并让 close() 等到在途 reconcile 结束后再回到登出。
+  Future<void> _inFlight = Future<void>.value();
 
   @override
   PlayerOpenRequest? get current => _current;
@@ -196,30 +201,44 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
   Stream<PlayerHostNotice> get notices => _notices.stream;
 
   @override
-  Future<void> open(PlayerOpenRequest request) async {
-    final launch = PlayerWindowLaunch.fromAuth(auth: auth, request: request);
-    await _stopProcess();
-    try {
-      final pid = await _control.spawn(
-        executable: Platform.resolvedExecutable,
-        arguments: launch.toArguments(),
-      );
-      _pid = pid;
-      _current = request;
-      notifyListeners();
-      _startWatch(pid);
-    } catch (error) {
-      _pid = 0;
-      _current = null;
-      notifyListeners();
-      rethrow;
-    }
+  Future<void> open(PlayerOpenRequest request) {
+    return _runInFlight(() async {
+      final launch = PlayerWindowLaunch.fromAuth(auth: auth, request: request);
+      await _stopProcess();
+      try {
+        final pid = await _control.spawn(
+          executable: Platform.resolvedExecutable,
+          arguments: launch.toArguments(),
+        );
+        _pid = pid;
+        _epoch++;
+        _current = request;
+        notifyListeners();
+        _startWatch(pid);
+      } catch (error) {
+        _pid = 0;
+        _current = null;
+        notifyListeners();
+        rethrow;
+      }
+    });
   }
 
   @override
-  Future<void> close() async {
-    await _stopProcess();
-    _clearWindow();
+  Future<void> close() {
+    return _runInFlight(() async {
+      final epoch = _epoch;
+      await _stopProcess();
+      if (_epoch == epoch) {
+        _clearWindow();
+      }
+    });
+  }
+
+  Future<void> _runInFlight(Future<void> Function() action) {
+    final run = _inFlight.then((_) => action());
+    _inFlight = run.then((_) {}, onError: (_, _) {});
+    return run;
   }
 
   void _onAuth() {
@@ -235,11 +254,18 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
         return;
       }
       timer.cancel();
-      if (_pid != pid) {
-        return;
+      if (_watch == timer) {
+        _watch = null;
       }
-      _clearWindow();
-      unawaited(_reconcileSnapshot(pid));
+      unawaited(
+        _runInFlight(() async {
+          if (_pid != pid) {
+            return;
+          }
+          _clearWindow();
+          await _reconcileSnapshot(pid);
+        }),
+      );
     });
   }
 
@@ -306,7 +332,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
   void dispose() {
     _disposed = true;
     auth.removeListener(_onAuth);
-    unawaited(_stopProcess().whenComplete(_notices.close));
+    unawaited(_runInFlight(_stopProcess).whenComplete(_notices.close));
     super.dispose();
   }
 }

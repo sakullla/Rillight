@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:rillight/player/player_process_control.dart';
 
 /// 记录 spawn/requestClose/kill 调用序列的进程控制假实现。
@@ -17,6 +19,12 @@ class FakePlayerProcessControl implements PlayerProcessControl {
 
   /// `requestClose` 的返回值;为 true 时同时把进程标记为已退出。
   bool requestCloseResult;
+
+  /// 若设置,`requestClose` 先等到该 Completer 完成(用于模拟关闭挂起)。
+  Completer<void>? requestCloseHold;
+
+  /// 在 [requestCloseHold] 之后额外等待的时长。
+  Duration requestCloseDelay = Duration.zero;
 
   /// 每次 spawn 收到的 JSON 启动载荷。
   final List<String> spawnedArguments = [];
@@ -46,6 +54,13 @@ class FakePlayerProcessControl implements PlayerProcessControl {
   @override
   Future<bool> requestClose(int pid, Duration wait) async {
     calls.add('requestClose:$pid');
+    final hold = requestCloseHold;
+    if (hold != null) {
+      await hold.future;
+    }
+    if (requestCloseDelay > Duration.zero) {
+      await Future<void>.delayed(requestCloseDelay);
+    }
     if (requestCloseResult) {
       alive.remove(pid);
     }
