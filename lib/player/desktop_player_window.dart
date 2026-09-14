@@ -16,12 +16,14 @@ import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
+import 'package:rillight/player/playback_models.dart';
+import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_page.dart';
+import 'package:rillight/player/player_process_control.dart';
 import 'package:rillight/player/player_runtime_options.dart';
 import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/player_window_host.dart';
-import 'package:rillight/player/spawn_player_process.dart';
 import 'package:window_manager/window_manager.dart';
 
 const _hostChannel = WindowMethodChannel(
@@ -72,7 +74,7 @@ class PlayerWindowLaunch {
       accessToken: token,
       userId: userId,
       device: client.device,
-      userAgent: auth.session?.server.activeLine?.userAgent,
+      userAgent: client.customUserAgent,
     );
   }
 
@@ -140,15 +142,49 @@ class PlayerWindowLaunch {
   String toArguments() => jsonEncode(toJson());
 }
 
+/// 按播放进程 pid 定位其会话快照存储。
+typedef PlaybackSnapshotStoreLocator =
+    PlaybackSessionSnapshotStore Function(int pid);
+
+/// 独立播放进程宿主。
+///
+/// 关闭顺序:先 [PlayerProcessControl.requestClose](WM_CLOSE,播放进程
+/// 自行发 Stopped),超时再 [PlayerProcessControl.kill];进程终止或意外
+/// 退出后读取其会话快照,快照仍在(播放进程未能成功发出 Stopped)且归属
+/// 当前会话时由主进程代发 Stopped,成功后删除快照,失败则保留并通过
+/// [notices] 提示主窗口。
 class DesktopPlayerWindowHost extends PlayerWindowHost {
-  DesktopPlayerWindowHost({required this.auth}) {
+  DesktopPlayerWindowHost({
+    required this.auth,
+    PlayerProcessControl? processControl,
+    PlaybackSnapshotStoreLocator? snapshotStoreForPid,
+    this.closeTimeout = const Duration(seconds: 4),
+    this.reportTimeout = const Duration(seconds: 3),
+    this.watchInterval = const Duration(milliseconds: 400),
+  }) : _control = processControl ?? const WindowsPlayerProcessControl(),
+       _snapshotStoreForPid =
+           snapshotStoreForPid ?? FilePlaybackSessionSnapshotStore.forPid {
     auth.addListener(_onAuth);
   }
 
   final AuthController auth;
+
+  /// 等待播放进程响应 WM_CLOSE 自行退出的上限。
+  final Duration closeTimeout;
+
+  /// 主进程代发 Stopped 的上限。
+  final Duration reportTimeout;
+
+  /// 探测播放进程是否仍存活的轮询间隔。
+  final Duration watchInterval;
+
+  final PlayerProcessControl _control;
+  final PlaybackSnapshotStoreLocator _snapshotStoreForPid;
+  final _notices = StreamController<PlayerHostNotice>.broadcast();
   int _pid = 0;
   Timer? _watch;
   PlayerOpenRequest? _current;
+  var _disposed = false;
 
   @override
   PlayerOpenRequest? get current => _current;
@@ -157,30 +193,21 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
   bool get embedsPlayerInCaller => false;
 
   @override
+  Stream<PlayerHostNotice> get notices => _notices.stream;
+
+  @override
   Future<void> open(PlayerOpenRequest request) async {
     final launch = PlayerWindowLaunch.fromAuth(auth: auth, request: request);
     await _stopProcess();
     try {
-      final file = File(
-        '${Directory.systemTemp.path}${Platform.pathSeparator}rillight-player-launch.json',
-      );
-      await file.writeAsString(launch.toArguments());
-      final pid = spawnStandalonePlayer(
+      final pid = await _control.spawn(
         executable: Platform.resolvedExecutable,
-        payloadPath: file.path,
+        arguments: launch.toArguments(),
       );
       _pid = pid;
       _current = request;
       notifyListeners();
-      _watch?.cancel();
-      _watch = Timer.periodic(const Duration(milliseconds: 400), (timer) {
-        if (!isPidAlive(pid)) {
-          timer.cancel();
-          if (_pid == pid) {
-            _clearWindow();
-          }
-        }
-      });
+      _startWatch(pid);
     } catch (error) {
       _pid = 0;
       _current = null;
@@ -201,14 +228,67 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
     }
   }
 
+  void _startWatch(int pid) {
+    _watch?.cancel();
+    _watch = Timer.periodic(watchInterval, (timer) {
+      if (_control.isAlive(pid)) {
+        return;
+      }
+      timer.cancel();
+      if (_pid != pid) {
+        return;
+      }
+      _clearWindow();
+      unawaited(_reconcileSnapshot(pid));
+    });
+  }
+
   Future<void> _stopProcess() async {
     _watch?.cancel();
     _watch = null;
     final pid = _pid;
     _pid = 0;
-    if (pid != 0) {
-      killPid(pid);
+    if (pid == 0) {
+      return;
     }
+    final closed = await _control.requestClose(pid, closeTimeout);
+    if (!closed) {
+      _control.kill(pid);
+    }
+    await _reconcileSnapshot(pid);
+  }
+
+  /// 播放进程已终止:快照仍在时用主进程会话代发 Stopped。
+  ///
+  /// 播放进程成功发出 Stopped 后删除快照可能仍在途,此处重复代发是
+  /// 幂等的,不视为错误。快照归属其他服务器/用户时不代发。
+  Future<void> _reconcileSnapshot(int pid) async {
+    final store = _snapshotStoreForPid(pid);
+    final snapshot = await store.read();
+    if (snapshot == null) {
+      return;
+    }
+    final client = auth.client;
+    if (snapshot.baseUrl != client.baseUrl?.toString() ||
+        snapshot.userId != client.userId) {
+      return;
+    }
+    try {
+      await client
+          .reportStopped(PlaybackReport.fromSnapshot(snapshot))
+          .timeout(reportTimeout);
+    } catch (_) {
+      _notify(PlayerHostNotice.progressSyncFailed);
+      return;
+    }
+    await store.delete();
+  }
+
+  void _notify(PlayerHostNotice notice) {
+    if (_disposed || _notices.isClosed) {
+      return;
+    }
+    _notices.add(notice);
   }
 
   void _clearWindow() {
@@ -224,8 +304,9 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
 
   @override
   void dispose() {
+    _disposed = true;
     auth.removeListener(_onAuth);
-    unawaited(_stopProcess());
+    unawaited(_stopProcess().whenComplete(_notices.close));
     super.dispose();
   }
 }

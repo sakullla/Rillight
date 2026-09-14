@@ -18,9 +18,18 @@ class PlayerOpenRequest {
   final int? startTimeTicks;
 }
 
+/// 宿主需要主窗口向用户展示的提示。
+enum PlayerHostNotice {
+  /// 播放进程终止后宿主代发 Stopped 失败,进度未能同步到服务器。
+  progressSyncFailed,
+}
+
 abstract class PlayerWindowHost extends ChangeNotifier {
   PlayerOpenRequest? get current;
   bool get embedsPlayerInCaller;
+
+  /// 宿主产生的、需在主窗口展示的提示;缺省没有。
+  Stream<PlayerHostNotice> get notices => const Stream.empty();
 
   Future<void> open(PlayerOpenRequest request);
   Future<void> close();

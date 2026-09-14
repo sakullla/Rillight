@@ -11,6 +11,7 @@ import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/library/item_detail_page.dart';
 import 'package:rillight/player/desktop_player_window.dart';
+import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_keys.dart';
 import 'package:rillight/player/player_settings.dart';
@@ -89,6 +90,8 @@ void main() {
       progressInterval: const Duration(days: 1),
       controlsHideAfter: const Duration(days: 1),
       settingsStore: MemoryPlayerSettingsStore(),
+      // 不注入时 PlayerController 会以当前 pid 在 %TEMP% 落盘会话快照。
+      snapshotStore: MemoryPlaybackSessionSnapshotStore(),
     );
   }
 

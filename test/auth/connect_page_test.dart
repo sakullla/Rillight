@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
 import 'package:rillight/app/product.dart';
+import 'package:rillight/app/settings/settings_action.dart';
 import 'package:rillight/app/widgets/app_error_view.dart';
+import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/connect_page.dart';
 import 'package:rillight/auth/credential_store.dart';
@@ -105,6 +107,38 @@ void main() {
     expect(find.byKey(ConnectFormKeys.submit), findsNothing);
     expect(find.byKey(SessionActions.serverMenuKey), findsOneWidget);
     expect(auth.isLoggedIn, isTrue);
+  });
+
+  testWidgets('session icon button matches the title bar icon constraints', (
+    tester,
+  ) async {
+    final auth = controller();
+    await tester.pumpWidget(RillightApp(auth: auth));
+    await _settle(tester);
+    await _enter(
+      tester,
+      address: server.baseUrl.toString(),
+      username: 'alice',
+      password: 'correct-horse',
+    );
+    await tester.tap(find.byKey(ConnectFormKeys.submit));
+    await _settle(tester);
+
+    final session = tester.widget<IconButton>(
+      find.byKey(SessionActions.serverMenuKey),
+    );
+    expect(session.constraints, kTitleBarIconConstraints);
+    expect(session.visualDensity, VisualDensity.compact);
+    final settings = tester.widget<IconButton>(
+      find.byKey(SettingsAction.actionKey),
+    );
+    expect(session.constraints, settings.constraints);
+    expect(session.visualDensity, settings.visualDensity);
+    expect(session.iconSize, settings.iconSize);
+    expect(
+      tester.getSize(find.byKey(SessionActions.serverMenuKey)),
+      tester.getSize(find.byKey(SettingsAction.actionKey)),
+    );
   });
 
   testWidgets('wrong password stays on connect and shows AppErrorView', (

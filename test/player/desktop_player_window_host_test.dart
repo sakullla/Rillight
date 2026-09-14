@@ -1,0 +1,484 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:rillight/app/app.dart';
+import 'package:rillight/auth/auth_controller.dart';
+import 'package:rillight/auth/credential_store.dart';
+import 'package:rillight/auth/server_list_store.dart';
+import 'package:rillight/auth/session_actions.dart';
+import 'package:rillight/emby/emby_client.dart';
+import 'package:rillight/emby/emby_device.dart';
+import 'package:rillight/player/desktop_player_window.dart';
+import 'package:rillight/player/playback_session_snapshot.dart';
+import 'package:rillight/player/player_bindings.dart';
+import 'package:rillight/player/player_window_host.dart';
+import 'package:window_manager/window_manager.dart';
+
+import '../emby/fake_emby_server.dart';
+import 'fake_player_process_control.dart';
+
+const _device = EmbyDeviceInfo(
+  clientName: '灯川 Rillight',
+  deviceName: 'test',
+  deviceId: 'device-host',
+  version: '0.1.0',
+);
+
+/// 把 logout/switchTo 记入与进程控制假实现共享的调用序列。
+class _TrackingAuth extends AuthController {
+  _TrackingAuth({
+    required super.client,
+    required super.credentials,
+    required super.servers,
+    required this.calls,
+  });
+
+  final List<String> calls;
+
+  @override
+  Future<void> logout() {
+    calls.add('logout');
+    return super.logout();
+  }
+
+  @override
+  Future<void> switchTo(String serverId, {String? lineId}) {
+    calls.add('switchTo:$serverId');
+    return super.switchTo(serverId, lineId: lineId);
+  }
+}
+
+void main() {
+  late FakeEmbyServer server;
+  late FakeEmbyAdapter adapter;
+  late List<String> calls;
+  late FakePlayerProcessControl control;
+  late Map<int, MemoryPlaybackSessionSnapshotStore> stores;
+
+  setUp(() {
+    server = FakeEmbyServer();
+    adapter = FakeEmbyAdapter([server]);
+    calls = <String>[];
+    control = FakePlayerProcessControl(calls: calls);
+    stores = <int, MemoryPlaybackSessionSnapshotStore>{};
+  });
+
+  MemoryPlaybackSessionSnapshotStore storeFor(int pid) {
+    return stores.putIfAbsent(pid, MemoryPlaybackSessionSnapshotStore.new);
+  }
+
+  _TrackingAuth newAuth() {
+    return _TrackingAuth(
+      client: EmbyClient(device: _device, dio: dioForFakeEmby(adapter)),
+      credentials: MemoryCredentialStore(),
+      servers: MemoryServerListStore(),
+      calls: calls,
+    );
+  }
+
+  Future<_TrackingAuth> loggedInAuth() async {
+    final auth = newAuth();
+    await auth.connect(
+      address: server.baseUrl.toString(),
+      username: 'alice',
+      password: 'correct-horse',
+    );
+    expect(auth.isLoggedIn, isTrue);
+    return auth;
+  }
+
+  DesktopPlayerWindowHost newHost(AuthController auth) {
+    return DesktopPlayerWindowHost(
+      auth: auth,
+      processControl: control,
+      snapshotStoreForPid: storeFor,
+      closeTimeout: const Duration(milliseconds: 50),
+      reportTimeout: const Duration(seconds: 2),
+      watchInterval: const Duration(milliseconds: 10),
+    );
+  }
+
+  PlaybackSessionSnapshot snapshotFor(
+    AuthController auth, {
+    String? baseUrl,
+    String? userId,
+    int positionTicks = 4200000000,
+  }) {
+    return PlaybackSessionSnapshot(
+      itemId: 'movie-up',
+      mediaSourceId: 'source-up',
+      playSessionId: 'play-host-1',
+      positionTicks: positionTicks,
+      baseUrl: baseUrl ?? auth.client.baseUrl!.toString(),
+      userId: userId ?? auth.client.userId!,
+      timestamp: DateTime.utc(2026, 9, 14),
+    );
+  }
+
+  List<FakePlaybackEvent> stoppedEvents() {
+    return [
+      for (final event in server.playbackEvents)
+        if (event.kind == 'Stopped') event,
+    ];
+  }
+
+  group('DesktopPlayerWindowHost', () {
+    test('opening a second item requests close, kills on timeout, and resends '
+        'Stopped once from the snapshot before deleting it', () async {
+      final auth = await loggedInAuth();
+      final host = newHost(auth);
+      addTearDown(() {
+        host.dispose();
+        auth.dispose();
+      });
+
+      await host.open(const PlayerOpenRequest(itemId: 'movie-up'));
+      final firstPid = control.lastPid;
+      expect(host.current?.itemId, 'movie-up');
+      await storeFor(firstPid).write(snapshotFor(auth));
+
+      await host.open(const PlayerOpenRequest(itemId: 'movie-inception'));
+
+      expect(calls, [
+        'spawn:$firstPid',
+        'requestClose:$firstPid',
+        'kill:$firstPid',
+        'spawn:${firstPid + 1}',
+      ]);
+      expect(host.current?.itemId, 'movie-inception');
+      final stopped = stoppedEvents();
+      expect(stopped, hasLength(1));
+      expect(stopped.single.body['ItemId'], 'movie-up');
+      expect(stopped.single.body['PlaySessionId'], 'play-host-1');
+      expect(stopped.single.body['PositionTicks'], 4200000000);
+      expect(storeFor(firstPid).snapshot, isNull);
+      expect(storeFor(firstPid).deleteCount, 1);
+    });
+
+    test('graceful close skips kill and tolerates a stale snapshot', () async {
+      final auth = await loggedInAuth();
+      control.requestCloseResult = true;
+      final host = newHost(auth);
+      final notices = <PlayerHostNotice>[];
+      host.notices.listen(notices.add);
+      addTearDown(() {
+        host.dispose();
+        auth.dispose();
+      });
+
+      await host.open(const PlayerOpenRequest(itemId: 'movie-up'));
+      final pid = control.lastPid;
+      await storeFor(pid).write(snapshotFor(auth));
+      await host.close();
+
+      expect(calls, ['spawn:$pid', 'requestClose:$pid']);
+      expect(host.current, isNull);
+      expect(stoppedEvents(), hasLength(1));
+      expect(storeFor(pid).snapshot, isNull);
+      expect(notices, isEmpty);
+    });
+
+    test('no snapshot means nothing is resent', () async {
+      final auth = await loggedInAuth();
+      final host = newHost(auth);
+      addTearDown(() {
+        host.dispose();
+        auth.dispose();
+      });
+
+      await host.open(const PlayerOpenRequest(itemId: 'movie-up'));
+      await host.close();
+
+      expect(stoppedEvents(), isEmpty);
+      expect(host.current, isNull);
+    });
+
+    test('snapshot from another server or user is not resent', () async {
+      final auth = await loggedInAuth();
+      final host = newHost(auth);
+      addTearDown(() {
+        host.dispose();
+        auth.dispose();
+      });
+
+      await host.open(const PlayerOpenRequest(itemId: 'movie-up'));
+      final otherServerPid = control.lastPid;
+      await storeFor(
+        otherServerPid,
+      ).write(snapshotFor(auth, baseUrl: 'http://other.test:8096/'));
+      await host.close();
+      expect(stoppedEvents(), isEmpty);
+      expect(storeFor(otherServerPid).snapshot, isNotNull);
+      expect(storeFor(otherServerPid).deleteCount, 0);
+
+      await host.open(const PlayerOpenRequest(itemId: 'movie-up'));
+      final otherUserPid = control.lastPid;
+      await storeFor(otherUserPid).write(snapshotFor(auth, userId: 'user-bob'));
+      await host.close();
+      expect(stoppedEvents(), isEmpty);
+      expect(storeFor(otherUserPid).snapshot, isNotNull);
+    });
+
+    test('an unexpectedly exited process is detected, cleared and its Stopped '
+        'is resent', () async {
+      final auth = await loggedInAuth();
+      final host = newHost(auth);
+      addTearDown(() {
+        host.dispose();
+        auth.dispose();
+      });
+
+      await host.open(const PlayerOpenRequest(itemId: 'movie-up'));
+      final pid = control.lastPid;
+      await storeFor(pid).write(snapshotFor(auth, positionTicks: 777));
+
+      control.exit(pid);
+      for (var i = 0; i < 100 && stoppedEvents().isEmpty; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+
+      expect(host.current, isNull);
+      expect(stoppedEvents(), hasLength(1));
+      expect(stoppedEvents().single.body['PositionTicks'], 777);
+      expect(calls, ['spawn:$pid']);
+      for (var i = 0; i < 100 && storeFor(pid).snapshot != null; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      expect(storeFor(pid).snapshot, isNull);
+    });
+
+    test(
+      'a failed resend keeps the snapshot and emits progressSyncFailed',
+      () async {
+        final auth = await loggedInAuth();
+        final host = newHost(auth);
+        final notices = <PlayerHostNotice>[];
+        host.notices.listen(notices.add);
+        addTearDown(() {
+          host.dispose();
+          auth.dispose();
+        });
+        server.stoppedStatus = 500;
+
+        await host.open(const PlayerOpenRequest(itemId: 'movie-up'));
+        final pid = control.lastPid;
+        await storeFor(pid).write(snapshotFor(auth));
+        await host.close();
+        // 广播流异步投递,让出一个事件循环再断言。
+        await Future<void>.delayed(Duration.zero);
+
+        expect(stoppedEvents(), hasLength(1));
+        expect(storeFor(pid).snapshot, isNotNull);
+        expect(storeFor(pid).deleteCount, 0);
+        expect(notices, [PlayerHostNotice.progressSyncFailed]);
+      },
+    );
+
+    test('logout without a prior close cannot resend (session gone)', () async {
+      final auth = await loggedInAuth();
+      final host = newHost(auth);
+      addTearDown(() {
+        host.dispose();
+        auth.dispose();
+      });
+
+      await host.open(const PlayerOpenRequest(itemId: 'movie-up'));
+      final pid = control.lastPid;
+      await storeFor(pid).write(snapshotFor(auth));
+      await auth.logout();
+      for (var i = 0; i < 20 && host.current != null; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+
+      expect(host.current, isNull);
+      expect(calls, containsAllInOrder(['requestClose:$pid', 'kill:$pid']));
+      expect(stoppedEvents(), isEmpty);
+      expect(storeFor(pid).snapshot, isNotNull);
+    });
+  });
+
+  group('main window integration', () {
+    Future<_TrackingAuth> pumpLoggedIn(
+      WidgetTester tester, {
+      required DesktopPlayerWindowHost Function(AuthController auth) hostFor,
+      Future<_TrackingAuth> Function()? authFor,
+    }) async {
+      final auth = await tester.runAsync(authFor ?? loggedInAuth);
+      await tester.pumpWidget(
+        RillightApp(
+          auth: auth!,
+          playerBindings: PlayerBindings(
+            windowHost: hostFor(auth),
+            snapshotStore: MemoryPlaybackSessionSnapshotStore(),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      return auth;
+    }
+
+    Future<void> pumpUntil(
+      WidgetTester tester,
+      bool Function() done, {
+      Duration step = const Duration(milliseconds: 20),
+      int maxSteps = 100,
+    }) async {
+      for (var i = 0; i < maxSteps && !done(); i++) {
+        await tester.pump(step);
+      }
+    }
+
+    testWidgets(
+      'a failed resend after the process vanished shows progressSyncFailedMain',
+      (tester) async {
+        late DesktopPlayerWindowHost host;
+        final auth = await pumpLoggedIn(
+          tester,
+          hostFor: (auth) => host = newHost(auth),
+        );
+        addTearDown(() {
+          host.dispose();
+          auth.dispose();
+        });
+        server.stoppedStatus = 500;
+
+        await host.open(const PlayerOpenRequest(itemId: 'movie-up'));
+        final pid = control.lastPid;
+        await storeFor(pid).write(snapshotFor(auth));
+        await tester.pump();
+
+        control.exit(pid);
+        await pumpUntil(
+          tester,
+          () => find.text('播放进度未能同步').evaluate().isNotEmpty,
+        );
+
+        expect(find.text('播放进度未能同步'), findsOneWidget);
+        expect(host.current, isNull);
+        expect(storeFor(pid).snapshot, isNotNull);
+      },
+    );
+
+    testWidgets('logout closes the player window before auth.logout', (
+      tester,
+    ) async {
+      late DesktopPlayerWindowHost host;
+      final auth = await pumpLoggedIn(
+        tester,
+        hostFor: (auth) => host = newHost(auth),
+      );
+      addTearDown(() {
+        host.dispose();
+        auth.dispose();
+      });
+
+      await host.open(const PlayerOpenRequest(itemId: 'movie-up'));
+      final pid = control.lastPid;
+      await tester.pump();
+
+      await tester.tap(find.byKey(SessionActions.serverMenuKey));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('退出登录'));
+      await pumpUntil(tester, () => !auth.isLoggedIn);
+      await tester.pumpAndSettle();
+
+      expect(auth.isLoggedIn, isFalse);
+      expect(
+        calls,
+        containsAllInOrder(['requestClose:$pid', 'kill:$pid', 'logout']),
+      );
+      expect(host.current, isNull);
+    });
+
+    testWidgets('switching servers closes the player window before switchTo', (
+      tester,
+    ) async {
+      final other = FakeEmbyServer(
+        serverId: 'server-id-2',
+        serverName: '另一台',
+        baseUrl: Uri.parse('http://emby-other.test:8096'),
+      );
+      adapter.add(other);
+      late DesktopPlayerWindowHost host;
+      final auth = await pumpLoggedIn(
+        tester,
+        hostFor: (auth) => host = newHost(auth),
+        authFor: () async {
+          final auth = newAuth();
+          await auth.connect(
+            address: other.baseUrl.toString(),
+            username: 'alice',
+            password: 'correct-horse',
+          );
+          await auth.connect(
+            address: server.baseUrl.toString(),
+            username: 'alice',
+            password: 'correct-horse',
+          );
+          expect(auth.savedServers, hasLength(2));
+          expect(auth.session?.server.id, server.serverId);
+          return auth;
+        },
+      );
+      addTearDown(() {
+        host.dispose();
+        auth.dispose();
+      });
+
+      await host.open(const PlayerOpenRequest(itemId: 'movie-up'));
+      final pid = control.lastPid;
+      await tester.pump();
+
+      await tester.tap(find.byKey(SessionActions.serverMenuKey));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('另一台'));
+      await pumpUntil(tester, () => auth.session?.server.id == other.serverId);
+      await tester.pumpAndSettle();
+
+      expect(auth.session?.server.id, other.serverId);
+      expect(
+        calls,
+        containsAllInOrder([
+          'requestClose:$pid',
+          'kill:$pid',
+          'switchTo:${other.serverId}',
+        ]),
+      );
+      expect(host.current, isNull);
+    });
+
+    testWidgets('MainWindowCloseGuard closes the player before destroying', (
+      tester,
+    ) async {
+      final auth = await tester.runAsync(loggedInAuth);
+      final host = newHost(auth!);
+      addTearDown(() {
+        host.dispose();
+        auth.dispose();
+      });
+      await host.open(const PlayerOpenRequest(itemId: 'movie-up'));
+      final pid = control.lastPid;
+
+      await tester.pumpWidget(
+        MainWindowCloseGuard(
+          host: host,
+          destroyWindow: () async => calls.add('destroy'),
+          child: const SizedBox(),
+        ),
+      );
+      final listener =
+          tester.state(find.byType(MainWindowCloseGuard)) as WindowListener;
+      listener.onWindowClose();
+      listener.onWindowClose();
+      await tester.pump();
+      await pumpUntil(tester, () => calls.contains('destroy'));
+
+      expect(calls, [
+        'spawn:$pid',
+        'requestClose:$pid',
+        'kill:$pid',
+        'destroy',
+      ]);
+      expect(host.current, isNull);
+    });
+  });
+}

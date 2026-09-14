@@ -1,13 +1,17 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/settings/settings_action.dart';
+import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/auth/server_switcher_dialog.dart';
 import 'package:rillight/home/catalog_scope.dart';
+import 'package:rillight/player/player_window_host.dart';
 
 class SessionActions extends StatelessWidget {
   const SessionActions({super.key});
@@ -38,6 +42,8 @@ class SessionActions extends StatelessWidget {
               key: serverMenuKey,
               tooltip: '${_chipLabel(server)}\n${l10n.switchServer}',
               padding: EdgeInsets.zero,
+              constraints: kTitleBarIconConstraints,
+              visualDensity: VisualDensity.compact,
               iconSize: 18,
               icon: const Icon(Icons.person_outline),
               onPressed: () => _openSwitcher(context, auth),
@@ -49,6 +55,7 @@ class SessionActions extends StatelessWidget {
   }
 
   Future<void> _openSwitcher(BuildContext context, AuthController auth) async {
+    final playerHost = PlayerWindowScope.maybeOf(context);
     await showDialog<void>(
       context: context,
       builder: (dialogContext) {
@@ -61,7 +68,9 @@ class SessionActions extends StatelessWidget {
               activeLineId: auth.session?.server.activeLineId,
               onSelect: (serverId, lineId) {
                 Navigator.of(dialogContext).pop();
-                _switchTo(context, auth, serverId, lineId);
+                unawaited(
+                  _switchTo(context, auth, playerHost, serverId, lineId),
+                );
               },
               onAddServer: () {
                 Navigator.of(dialogContext).pop();
@@ -69,7 +78,7 @@ class SessionActions extends StatelessWidget {
               },
               onLogout: () {
                 Navigator.of(dialogContext).pop();
-                auth.logout();
+                unawaited(_logout(auth, playerHost));
               },
             );
           },
@@ -78,22 +87,43 @@ class SessionActions extends StatelessWidget {
     );
   }
 
-  void _switchTo(
+  /// 登出前先关闭播放窗口:此时主进程会话仍有效,宿主才能代发 Stopped。
+  Future<void> _logout(
+    AuthController auth,
+    PlayerWindowHost? playerHost,
+  ) async {
+    await _closePlayer(playerHost);
+    await auth.logout();
+  }
+
+  Future<void> _switchTo(
     BuildContext context,
     AuthController auth,
+    PlayerWindowHost? playerHost,
     String serverId,
     String lineId,
-  ) {
+  ) async {
     final current = auth.session?.server;
     if (serverId == current?.id && lineId == current?.activeLineId) {
       return;
     }
     final catalog = CatalogScope.maybeOf(context);
     final router = GoRouter.of(context);
-    auth.switchTo(serverId, lineId: lineId).then((_) {
-      catalog?.reload();
-      router.go(AppRoutes.home);
-    });
+    await _closePlayer(playerHost);
+    await auth.switchTo(serverId, lineId: lineId);
+    catalog?.reload();
+    router.go(AppRoutes.home);
+  }
+
+  Future<void> _closePlayer(PlayerWindowHost? playerHost) async {
+    if (playerHost == null) {
+      return;
+    }
+    try {
+      await playerHost.close();
+    } catch (_) {
+      // 播放窗口关闭失败不应阻断登出/切换。
+    }
   }
 }
 

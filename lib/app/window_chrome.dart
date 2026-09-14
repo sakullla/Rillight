@@ -80,8 +80,12 @@ Future<void> applyAdaptiveWindowSize({
 }
 
 /// 初始化并显示主窗口。播放进程窗口不要走这条路径。
+///
+/// 接管关闭:系统关窗只触发 `onWindowClose`,由 `MainWindowCloseGuard`
+/// 先关闭播放窗口再销毁主窗口。
 Future<void> configureMainWindow() async {
   await windowManager.ensureInitialized();
+  await windowManager.setPreventClose(true);
   await windowManager.waitUntilReadyToShow();
   await windowManager.hide();
   await windowManager.setTitleBarStyle(
