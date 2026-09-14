@@ -8,6 +8,7 @@ import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/player/playback_check_in.dart';
 import 'package:rillight/player/playback_models.dart';
 import 'package:rillight/player/playback_resolver.dart';
+import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/player_window.dart';
 import 'package:rillight/player/video_backend.dart';
@@ -75,11 +76,17 @@ class PlayerController extends ChangeNotifier {
     this.preferredSubtitleStreamIndex,
     this.startTimeTicks,
     this.settingsStore,
-  }) {
+    PlaybackSessionSnapshotStore? snapshotStore,
+  }) : snapshotStore =
+           snapshotStore ??
+           FilePlaybackSessionSnapshotStore.forCurrentProcess() {
     activeMediaSourceId = preferredMediaSourceId;
     _bindBackend();
     window.addListener(_emit);
   }
+
+  /// 关窗/换集时等待 Stopped 送达的上限;超时视为失败,不再阻塞。
+  static const Duration stoppedDeadline = Duration(seconds: 3);
 
   final EmbyClient client;
   String itemId;
@@ -95,6 +102,10 @@ class PlayerController extends ChangeNotifier {
   final ValueChanged<String>? onOpenItem;
   PlayerSettingsStore? settingsStore;
 
+  /// 会话快照:Playing/Progress 成功后写入,Stopped 成功后删除,
+  /// 供宿主在播放进程被终止后代发 Stopped。
+  final PlaybackSessionSnapshotStore snapshotStore;
+
   /// 首次起播请求携带的源/轨道/章节起点;进程内切集([_playItem])时清除,
   /// 这些偏好只对最初打开的条目有效。
   String? preferredMediaSourceId;
@@ -109,7 +120,17 @@ class PlayerController extends ChangeNotifier {
   bool isPlaying = false;
   bool disconnected = false;
   String? disconnectDetail;
+
+  /// 进度同步失败横幅是否显示。单次失败 [progressFailBannerFor] 后自动隐藏;
+  /// 连续两次及以上失败([progressSyncPersistent])持续显示直到任一上报成功
+  /// 或用户手动关闭([dismissProgressSyncBanner])。
   bool progressSyncFailed = false;
+  bool progressSyncPersistent = false;
+
+  /// 服务器返回 401:进度轮询已停止,横幅改为「会话已过期」文案;
+  /// 快照保留,交由宿主用主进程会话代发 Stopped。
+  bool sessionExpired = false;
+  int _reportFailureStreak = 0;
   bool _disposed = false;
   bool _sessionStarted = false;
   int volume = 100;
@@ -175,8 +196,16 @@ class PlayerController extends ChangeNotifier {
 
   Timer? _progressTimer;
   Timer? _progressFailBannerTimer;
-  DateTime? _progressFailBannerAt;
   Timer? _subtitleNoticeTimer;
+
+  /// 播放完成路径发出但未等待的 Stopped;close()/shutdownSession() 先等它,
+  /// 保证倒计时期间关窗不会与之竞争。
+  Future<void>? _pendingStopped;
+
+  /// 快照 IO 串行化:写与删按发起顺序执行,避免 Stopped 删除后被迟到的
+  /// Progress 写入复活;失败一律吞掉。
+  final List<Future<void> Function()> _snapshotOps = [];
+  bool _snapshotDraining = false;
   Timer? _hideTimer;
   Timer? _nextTimer;
   Timer? _settingsSaveTimer;
@@ -192,6 +221,11 @@ class PlayerController extends ChangeNotifier {
     disconnected = false;
     disconnectDetail = null;
     progressSyncFailed = false;
+    progressSyncPersistent = false;
+    sessionExpired = false;
+    _reportFailureStreak = 0;
+    _progressFailBannerTimer?.cancel();
+    _progressFailBannerTimer = null;
     subtitleNotice = null;
     nextEpisode = null;
     playbackEnded = false;
@@ -853,24 +887,24 @@ class PlayerController extends ChangeNotifier {
     await _reopen(startTicks: startTicks);
   }
 
+  /// 关闭播放器:取消定时器 → 在 [stoppedDeadline] 内等待 Stopped 送达
+  /// (或失败/超时)→ 再回调 [onClose]。宿主据此在 onClose 后安全退出进程。
   Future<void> close() async {
     _hideTimer?.cancel();
     _nextTimer?.cancel();
+    _nextTimer = null;
     _progressTimer?.cancel();
+    _progressTimer = null;
+    await _awaitPendingStopped();
     final shouldReport = checkIn.stop();
     _sessionStarted = false;
     if (window.isFullScreen) {
       await window.setFullScreen(false);
     }
+    if (shouldReport) {
+      await _sendStopped();
+    }
     onClose?.call();
-    if (!shouldReport) {
-      return;
-    }
-    try {
-      await client.reportStopped(_currentReport());
-    } on EmbyException {
-      _markProgressSyncFailed();
-    }
   }
 
   Future<void> shutdownSession() async {
@@ -879,11 +913,24 @@ class PlayerController extends ChangeNotifier {
     }
     _hideTimer?.cancel();
     _nextTimer?.cancel();
+    _nextTimer = null;
     await _persistSettings();
     await _stopSession();
     if (window.isFullScreen) {
       await window.setFullScreen(false);
     }
+  }
+
+  /// 手动关闭进度同步失败横幅(持续显示态可关闭;失败计数保留,
+  /// 再次失败仍按持续态显示)。
+  void dismissProgressSyncBanner() {
+    _progressFailBannerTimer?.cancel();
+    _progressFailBannerTimer = null;
+    if (!progressSyncFailed) {
+      return;
+    }
+    progressSyncFailed = false;
+    _emit();
   }
 
   void _bindBackend() {
@@ -1110,56 +1157,105 @@ class PlayerController extends ChangeNotifier {
   Future<void> _beginSession({required int startTicks}) async {
     checkIn.start();
     _sessionStarted = true;
+    sessionExpired = false;
     try {
       await client.reportPlaying(_currentReport(positionTicks: startTicks));
-      _clearProgressSyncFailed();
-    } on EmbyException {
-      _markProgressSyncFailed();
+      _onReportSucceeded();
+      _writeSnapshot(positionTicks: startTicks);
+    } on EmbyException catch (failure) {
+      _onReportFailed(failure);
     }
     _progressTimer?.cancel();
+    _progressTimer = null;
+    if (sessionExpired) {
+      return;
+    }
     _progressTimer = Timer.periodic(progressInterval, (_) {
       unawaited(_reportProgress(eventName: 'TimeUpdate'));
     });
   }
 
   Future<void> _reportProgress({String? eventName}) async {
-    if (!checkIn.canProgress) {
+    if (!checkIn.canProgress || sessionExpired) {
       return;
     }
     try {
       await client.reportProgress(_currentReport(eventName: eventName));
-      _clearProgressSyncFailed();
-    } on EmbyException {
-      _markProgressSyncFailed();
+      _onReportSucceeded();
+      // 请求期间会话已停止(Stopped 已删快照)时不再写入,避免复活快照。
+      if (checkIn.canProgress) {
+        _writeSnapshot();
+      }
+    } on EmbyException catch (failure) {
+      _onReportFailed(failure);
     }
   }
 
   Future<void> _stopSession() async {
     _progressTimer?.cancel();
     _progressTimer = null;
-    if (!checkIn.stop()) {
-      _sessionStarted = false;
+    await _awaitPendingStopped();
+    final shouldReport = checkIn.stop();
+    _sessionStarted = false;
+    if (!shouldReport) {
       return;
     }
-    _sessionStarted = false;
-    try {
-      await client.reportStopped(_currentReport());
-      _clearProgressSyncFailed();
-    } on EmbyException {
-      _markProgressSyncFailed();
+    await _sendStopped();
+  }
+
+  Future<void> _awaitPendingStopped() async {
+    final pending = _pendingStopped;
+    if (pending != null) {
+      await pending;
     }
   }
 
-  void _markProgressSyncFailed() {
-    final now = DateTime.now();
-    final last = _progressFailBannerAt;
-    if (last != null && now.difference(last) < const Duration(seconds: 60)) {
+  /// 发送 Stopped,以 [stoppedDeadline] 为上限;成功后删除会话快照,
+  /// 超时/异常按上报失败处理(快照保留供宿主代发)。
+  Future<void> _sendStopped() async {
+    try {
+      await client.reportStopped(_currentReport()).timeout(stoppedDeadline);
+      _onReportSucceeded();
+      _enqueueSnapshot(snapshotStore.delete);
+    } on EmbyException catch (failure) {
+      _onReportFailed(failure);
+    } on TimeoutException {
+      _onReportFailed(null);
+    }
+  }
+
+  void _onReportSucceeded() {
+    _reportFailureStreak = 0;
+    sessionExpired = false;
+    _clearProgressSyncFailed();
+  }
+
+  /// [failure] 为 null 表示超时。
+  void _onReportFailed(EmbyException? failure) {
+    if (failure?.kind == EmbyFailureKind.sessionExpired) {
+      _progressTimer?.cancel();
+      _progressTimer = null;
+      _progressFailBannerTimer?.cancel();
+      _progressFailBannerTimer = null;
+      sessionExpired = true;
+      progressSyncFailed = true;
+      progressSyncPersistent = true;
+      _emit();
       return;
     }
-    _progressFailBannerAt = now;
+    _reportFailureStreak += 1;
+    _markProgressSyncFailed(persistent: _reportFailureStreak >= 2);
+  }
+
+  void _markProgressSyncFailed({required bool persistent}) {
     progressSyncFailed = true;
+    progressSyncPersistent = persistent;
     _emit();
     _progressFailBannerTimer?.cancel();
+    _progressFailBannerTimer = null;
+    if (persistent) {
+      return;
+    }
     _progressFailBannerTimer = Timer(progressFailBannerFor, () {
       if (_disposed) {
         return;
@@ -1167,6 +1263,48 @@ class PlayerController extends ChangeNotifier {
       progressSyncFailed = false;
       _emit();
     });
+  }
+
+  void _writeSnapshot({int? positionTicks}) {
+    final baseUrl = client.baseUrl;
+    final userId = client.userId;
+    if (baseUrl == null || userId == null || userId.isEmpty) {
+      return;
+    }
+    final report = _currentReport(positionTicks: positionTicks);
+    final snapshot = PlaybackSessionSnapshot(
+      itemId: report.itemId,
+      mediaSourceId: report.mediaSourceId,
+      playSessionId: report.playSessionId,
+      playMethod: report.playMethod,
+      positionTicks: report.positionTicks,
+      baseUrl: baseUrl.toString(),
+      userId: userId,
+      timestamp: DateTime.now(),
+    );
+    _enqueueSnapshot(() => snapshotStore.write(snapshot));
+  }
+
+  /// 空闲时立刻执行(内存实现即时生效),忙时按序排队;任何失败吞掉。
+  void _enqueueSnapshot(Future<void> Function() operation) {
+    _snapshotOps.add(operation);
+    if (!_snapshotDraining) {
+      unawaited(_drainSnapshotOps());
+    }
+  }
+
+  Future<void> _drainSnapshotOps() async {
+    _snapshotDraining = true;
+    try {
+      while (_snapshotOps.isNotEmpty) {
+        final operation = _snapshotOps.removeAt(0);
+        try {
+          await operation();
+        } catch (_) {}
+      }
+    } finally {
+      _snapshotDraining = false;
+    }
   }
 
   void _showSubtitleNotice(SubtitleNoticeKind kind) {
@@ -1195,11 +1333,11 @@ class PlayerController extends ChangeNotifier {
   void _clearProgressSyncFailed() {
     _progressFailBannerTimer?.cancel();
     _progressFailBannerTimer = null;
-    _progressFailBannerAt = null;
-    if (!progressSyncFailed) {
+    if (!progressSyncFailed && !progressSyncPersistent) {
       return;
     }
     progressSyncFailed = false;
+    progressSyncPersistent = false;
     _emit();
   }
 
@@ -1224,7 +1362,15 @@ class PlayerController extends ChangeNotifier {
       return;
     }
     isPlaying = false;
-    unawaited(_stopSession());
+    final pending = _stopSession();
+    _pendingStopped = pending;
+    unawaited(
+      pending.whenComplete(() {
+        if (identical(_pendingStopped, pending)) {
+          _pendingStopped = null;
+        }
+      }),
+    );
     if (item == null || !item!.isEpisode) {
       _showPlaybackEnded();
       return;

@@ -316,6 +316,21 @@ class PlaybackReport {
     );
   }
 
+  /// 由播放进程留下的会话快照构造宿主代发的 Stopped 载荷。
+  ///
+  /// 进程已终止,只保留会话标识与最后位置;暂停态记为已暂停,
+  /// 音量/轨道等仅播放进程知道的字段取默认值。
+  factory PlaybackReport.fromSnapshot(PlaybackSessionSnapshot snapshot) {
+    return PlaybackReport(
+      itemId: snapshot.itemId,
+      mediaSourceId: snapshot.mediaSourceId,
+      playSessionId: snapshot.playSessionId,
+      playMethod: snapshot.playMethod,
+      positionTicks: snapshot.positionTicks,
+      isPaused: true,
+    );
+  }
+
   Map<String, dynamic> toJson() {
     return {
       'ItemId': itemId,
@@ -333,6 +348,86 @@ class PlaybackReport {
         'SubtitleStreamIndex': subtitleStreamIndex,
       if (eventName != null) 'EventName': eventName,
     };
+  }
+}
+
+/// 播放进程持续落盘的会话快照:宿主在播放进程被终止或意外退出后,
+/// 据此用主进程会话代发 Stopped(见 `PlaybackSessionSnapshotStore`)。
+///
+/// 字段与 [PlaybackReport.toJson] 的会话标识一致;[baseUrl]/[userId]
+/// 供宿主校验快照归属,避免串服务器代发。
+class PlaybackSessionSnapshot {
+  const PlaybackSessionSnapshot({
+    required this.itemId,
+    required this.mediaSourceId,
+    required this.playSessionId,
+    required this.positionTicks,
+    required this.baseUrl,
+    required this.userId,
+    required this.timestamp,
+    this.playMethod = PlayMethod.directStream,
+  });
+
+  final String itemId;
+  final String mediaSourceId;
+  final String playSessionId;
+  final int positionTicks;
+  final String baseUrl;
+  final String userId;
+  final DateTime timestamp;
+  final PlayMethod playMethod;
+
+  Map<String, dynamic> toJson() {
+    return {
+      'itemId': itemId,
+      'mediaSourceId': mediaSourceId,
+      'playSessionId': playSessionId,
+      'playMethod': playMethod.wireName,
+      'positionTicks': positionTicks,
+      'baseUrl': baseUrl,
+      'userId': userId,
+      'timestamp': timestamp.toUtc().toIso8601String(),
+    };
+  }
+
+  /// 缺少任一会话标识字段时返回 null(视为无效快照)。
+  static PlaybackSessionSnapshot? fromJson(Map<String, dynamic> json) {
+    final itemId = json['itemId']?.toString();
+    final mediaSourceId = json['mediaSourceId']?.toString();
+    final playSessionId = json['playSessionId']?.toString();
+    final baseUrl = json['baseUrl']?.toString();
+    final userId = json['userId']?.toString();
+    if (itemId == null ||
+        itemId.isEmpty ||
+        mediaSourceId == null ||
+        playSessionId == null ||
+        baseUrl == null ||
+        baseUrl.isEmpty ||
+        userId == null ||
+        userId.isEmpty) {
+      return null;
+    }
+    final wire = json['playMethod']?.toString();
+    var playMethod = PlayMethod.directStream;
+    for (final value in PlayMethod.values) {
+      if (value.wireName == wire) {
+        playMethod = value;
+        break;
+      }
+    }
+    final timestamp =
+        DateTime.tryParse(json['timestamp']?.toString() ?? '') ??
+        DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
+    return PlaybackSessionSnapshot(
+      itemId: itemId,
+      mediaSourceId: mediaSourceId,
+      playSessionId: playSessionId,
+      playMethod: playMethod,
+      positionTicks: _asInt(json['positionTicks']) ?? 0,
+      baseUrl: baseUrl,
+      userId: userId,
+      timestamp: timestamp,
+    );
   }
 }
 

@@ -87,6 +87,7 @@ class PlayerPageState extends State<PlayerPage> {
       nextEpisodeCountdown: bindings.nextEpisodeCountdown,
       seekStep: bindings.seekStep,
       settingsStore: bindings.settingsStore,
+      snapshotStore: bindings.snapshotStore,
       onClose: _leave,
       onOpenItem: _openItem,
     );
@@ -327,7 +328,10 @@ class PlayerPageState extends State<PlayerPage> {
                           Text(
                             l10n.playerLoading,
                             style: Theme.of(context).textTheme.bodyMedium
-                                ?.copyWith(color: Colors.white70),
+                                ?.copyWith(
+                                  color: Theme.of(context).colorScheme.onSurface
+                                      .withValues(alpha: 0.7),
+                                ),
                           ),
                         ],
                       ),
@@ -399,7 +403,12 @@ class PlayerPageState extends State<PlayerPage> {
                       !(current.disconnected && !current.isPlaying))
                     _Banner(
                       key: PlayerKeys.progressSyncFailed,
-                      text: l10n.progressSyncFailed,
+                      text: current.sessionExpired
+                          ? l10n.playbackSessionExpired
+                          : l10n.progressSyncFailed,
+                      onDismiss: current.progressSyncPersistent
+                          ? current.dismissProgressSyncBanner
+                          : null,
                     ),
                   if (current.subtitleNotice != null)
                     _Banner(
@@ -519,7 +528,7 @@ class _FadeThrough extends StatelessWidget {
   Widget build(BuildContext context) {
     return AnimatedOpacity(
       opacity: visible ? 1.0 : 0.0,
-      duration: AppMotion.normal,
+      duration: AppMotion.durationOf(context),
       curve: AppMotion.standard,
       child: IgnorePointer(ignoring: !visible, child: child),
     );
@@ -535,6 +544,7 @@ class _PlayerChromeBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final scrim = theme.colorScheme.scrim;
     final title = controller.item?.displayName ?? '';
     return Positioned(
       left: 0,
@@ -543,14 +553,18 @@ class _PlayerChromeBar extends StatelessWidget {
       child: _FadeThrough(
         visible: visible,
         child: DecoratedBox(
-          decoration: const BoxDecoration(
+          decoration: BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment.bottomCenter,
               end: Alignment.topCenter,
               colors: [
                 Colors.transparent,
-                Color(0x8A000000),
-                Color(0xD9000000),
+                scrim.withValues(
+                  alpha: AppScrim.of(context, AppScrim.playerBarSoft),
+                ),
+                scrim.withValues(
+                  alpha: AppScrim.of(context, AppScrim.playerPanel),
+                ),
               ],
             ),
           ),
@@ -619,7 +633,9 @@ class _PlaybackEndedOverlay extends StatelessWidget {
     final hasSeries = seriesId != null && seriesId.isNotEmpty;
     return Positioned.fill(
       child: ColoredBox(
-        color: const Color(0x99000000),
+        color: scheme.scrim.withValues(
+          alpha: AppScrim.of(context, AppScrim.playerBarrier),
+        ),
         child: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 420),
@@ -942,14 +958,6 @@ class _SeasonPicker extends StatelessWidget {
         unawaited(controller.selectSeason(seasonId));
       },
       initialValue: current.id,
-      color: theme.colorScheme.surface.withValues(alpha: 0.96),
-      surfaceTintColor: Colors.transparent,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(AppRadii.md),
-        side: BorderSide(
-          color: Colors.white.withValues(alpha: AppGlass.edgeLight),
-        ),
-      ),
       constraints: const BoxConstraints(minWidth: 160, maxWidth: 280),
       padding: EdgeInsets.zero,
       splashRadius: 20,
@@ -1027,14 +1035,18 @@ class _EpisodeRow extends StatelessWidget {
   }
 }
 
+/// 顶部提示横幅;[onDismiss] 非空时(持续显示态)附带关闭钮。
 class _Banner extends StatelessWidget {
-  const _Banner({super.key, required this.text});
+  const _Banner({super.key, required this.text, this.onDismiss});
 
   final String text;
+  final VoidCallback? onDismiss;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final dismiss = onDismiss;
     return Positioned(
       left: 0,
       right: 0,
@@ -1062,6 +1074,19 @@ class _Banner extends StatelessWidget {
                   Flexible(
                     child: Text(text, style: theme.textTheme.bodyMedium),
                   ),
+                  if (dismiss != null) ...[
+                    const SizedBox(width: AppSpacing.xs),
+                    IconButton(
+                      key: const Key('player-progress-sync-dismiss'),
+                      tooltip: MaterialLocalizations.of(
+                        context,
+                      ).closeButtonTooltip,
+                      onPressed: dismiss,
+                      iconSize: 18,
+                      visualDensity: VisualDensity.compact,
+                      icon: const Icon(Icons.close_rounded),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -1100,6 +1125,7 @@ class _ControlsBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scrim = Theme.of(context).colorScheme.scrim;
     return Positioned(
       left: 0,
       right: 0,
@@ -1108,11 +1134,16 @@ class _ControlsBar extends StatelessWidget {
         visible: visible,
         child: DecoratedBox(
           key: PlayerKeys.controls,
-          decoration: const BoxDecoration(
+          decoration: BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
-              colors: [Colors.transparent, Color(0xCC000000)],
+              colors: [
+                Colors.transparent,
+                scrim.withValues(
+                  alpha: AppScrim.of(context, AppScrim.playerBar),
+                ),
+              ],
             ),
           ),
           child: Padding(
@@ -1556,35 +1587,35 @@ class _DanmakuSettingsMenu extends StatelessWidget {
             ),
           ),
         ),
-        _section(l10n.danmakuOpacity),
+        _section(theme, l10n.danmakuOpacity),
         for (final choice in _opacityChoices)
           CheckedPopupMenuItem(
             value: 'opacity:$choice',
             checked: _near(danmaku.display.opacity, choice),
             child: Text(_percentLabel(choice)),
           ),
-        _section(l10n.danmakuFontSize),
+        _section(theme, l10n.danmakuFontSize),
         for (final choice in _fontChoices)
           CheckedPopupMenuItem(
             value: 'font:$choice',
             checked: _near(danmaku.display.fontScale, choice),
             child: Text(_percentLabel(choice)),
           ),
-        _section(l10n.danmakuSpeed),
+        _section(theme, l10n.danmakuSpeed),
         for (final choice in _speedChoices)
           CheckedPopupMenuItem(
             value: 'speed:$choice',
             checked: _near(danmaku.display.speed, choice),
             child: Text(_percentLabel(choice)),
           ),
-        _section(l10n.danmakuDisplayArea),
+        _section(theme, l10n.danmakuDisplayArea),
         for (final choice in _areaChoices)
           CheckedPopupMenuItem(
             value: 'area:$choice',
             checked: _near(danmaku.display.areaFraction, choice),
             child: Text(_percentLabel(choice)),
           ),
-        _section(l10n.danmakuDensity),
+        _section(theme, l10n.danmakuDensity),
         CheckedPopupMenuItem(
           value: 'density:unlimited',
           checked: danmaku.display.maxVisibleCount == null,
@@ -1638,13 +1669,15 @@ class _DanmakuSettingsMenu extends StatelessWidget {
     return state.isEmpty ? source : '$source · $state';
   }
 
-  static PopupMenuItem<String> _section(String label) {
+  static PopupMenuItem<String> _section(ThemeData theme, String label) {
     return PopupMenuItem<String>(
       enabled: false,
       height: AppSpacing.xl,
       child: Text(
         label,
-        style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
+        style: theme.textTheme.labelMedium?.copyWith(
+          color: theme.colorScheme.onSurfaceVariant,
+        ),
       ),
     );
   }
@@ -1851,7 +1884,7 @@ const _subtitleOffToken = -1;
 
 /// 控制条右侧用图标打开菜单,长轨名只出现在弹出层。
 ///
-/// 音轨/字幕/画质共用同一视觉:近黑面板、token 圆角与高光描边。
+/// 音轨/字幕/画质共用主题级 popupMenuTheme 外观,不做局部覆盖。
 class _ControlMenu<T> extends StatelessWidget {
   const _ControlMenu({
     super.key,
@@ -1872,14 +1905,6 @@ class _ControlMenu<T> extends StatelessWidget {
     return PopupMenuButton<T>(
       tooltip: tooltip,
       onSelected: onSelected,
-      color: scheme.surface.withValues(alpha: 0.96),
-      surfaceTintColor: Colors.transparent,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(AppRadii.md),
-        side: BorderSide(
-          color: Colors.white.withValues(alpha: AppGlass.edgeLight),
-        ),
-      ),
       constraints: const BoxConstraints(
         minWidth: 200,
         maxWidth: 360,

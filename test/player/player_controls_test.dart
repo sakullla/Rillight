@@ -10,6 +10,8 @@ import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/app/window_chrome.dart';
+import 'package:rillight/player/playback_models.dart';
+import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/player_controller.dart';
@@ -32,12 +34,14 @@ void main() {
   late FakeEmbyAdapter adapter;
   late FakeVideoBackend backend;
   late PlayerWindow window;
+  late MemoryPlaybackSessionSnapshotStore snapshots;
 
   setUp(() {
     server = FakeEmbyServer();
     adapter = FakeEmbyAdapter([server]);
     backend = FakeVideoBackend();
     window = PlayerWindow();
+    snapshots = MemoryPlaybackSessionSnapshotStore();
   });
 
   PlayerBindings bindings({
@@ -52,10 +56,11 @@ void main() {
       controlsHideAfter: hideAfter,
       nextEpisodeCountdown: const Duration(seconds: 3),
       settingsStore: settingsStore,
+      snapshotStore: snapshots,
     );
   }
 
-  Future<void> pumpLoggedIn(
+  Future<AuthController> pumpLoggedIn(
     WidgetTester tester, {
     Duration hideAfter = const Duration(days: 1),
     Duration progressInterval = const Duration(seconds: 10),
@@ -85,7 +90,48 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    return auth;
   }
+
+  /// 不经 widget 树直接驱动的控制器(真实异步),用于断言 close() 的
+  /// Stopped→onClose 顺序与 3 秒上限。
+  Future<PlayerController> startStandaloneController({
+    VoidCallback? onClose,
+    Duration progressInterval = const Duration(seconds: 10),
+  }) async {
+    final client = EmbyClient(device: _device, dio: dioForFakeEmby(adapter));
+    final auth = AuthController(
+      client: client,
+      credentials: MemoryCredentialStore(),
+      servers: MemoryServerListStore(),
+    );
+    await auth.connect(
+      address: server.baseUrl.toString(),
+      username: 'alice',
+      password: 'correct-horse',
+    );
+    expect(auth.isLoggedIn, isTrue);
+    final controller = PlayerController(
+      client: client,
+      itemId: 'movie-up',
+      backend: backend,
+      window: window,
+      progressInterval: progressInterval,
+      settingsStore: MemoryPlayerSettingsStore(),
+      snapshotStore: snapshots,
+      onClose: onClose,
+    );
+    await controller.start();
+    expect(controller.loading, isFalse);
+    expect(controller.resolved, isNotNull);
+    return controller;
+  }
+
+  List<FakePlaybackEvent> stoppedEvents() =>
+      server.playbackEvents.where((event) => event.kind == 'Stopped').toList();
+
+  int progressCount() =>
+      server.playbackEvents.where((event) => event.kind == 'Progress').length;
 
   Future<void> waitFor(WidgetTester tester, Finder finder) async {
     for (var i = 0; i < 40; i++) {
@@ -500,6 +546,239 @@ void main() {
     expect(find.byKey(PlayerKeys.progressSyncFailed), findsNothing);
     expect(backend.isPlaying, isTrue);
   });
+
+  testWidgets(
+    'repeated progress failures keep the banner until a report succeeds',
+    (tester) async {
+      server.progressStatus = 500;
+      await pumpLoggedIn(tester);
+      await openPlayable(tester, 'movie-up');
+
+      // 首次失败:4 秒后自动隐藏,无关闭钮。
+      await tester.pump(const Duration(seconds: 10));
+      await tester.pump();
+      expect(find.byKey(PlayerKeys.progressSyncFailed), findsOneWidget);
+      expect(controllerOf(tester).progressSyncPersistent, isFalse);
+      expect(
+        find.byKey(const Key('player-progress-sync-dismiss')),
+        findsNothing,
+      );
+      await tester.pump(const Duration(seconds: 4));
+      await tester.pump();
+      expect(find.byKey(PlayerKeys.progressSyncFailed), findsNothing);
+
+      // 连续第二次失败:持续显示,4 秒后仍在,带关闭钮。
+      await tester.pump(const Duration(seconds: 6));
+      await tester.pump();
+      expect(find.byKey(PlayerKeys.progressSyncFailed), findsOneWidget);
+      expect(find.text('进度同步失败'), findsOneWidget);
+      expect(controllerOf(tester).progressSyncPersistent, isTrue);
+      expect(
+        find.byKey(const Key('player-progress-sync-dismiss')),
+        findsOneWidget,
+      );
+      await tester.pump(const Duration(seconds: 5));
+      await tester.pump();
+      expect(find.byKey(PlayerKeys.progressSyncFailed), findsOneWidget);
+      expect(backend.isPlaying, isTrue);
+
+      // 下一次上报成功后消失。
+      server.progressStatus = null;
+      await tester.pump(const Duration(seconds: 5));
+      await tester.pump();
+      expect(find.byKey(PlayerKeys.progressSyncFailed), findsNothing);
+      expect(controllerOf(tester).progressSyncPersistent, isFalse);
+    },
+  );
+
+  testWidgets('persistent progress banner can be dismissed by hand', (
+    tester,
+  ) async {
+    server.progressStatus = 500;
+    await pumpLoggedIn(tester);
+    await openPlayable(tester, 'movie-up');
+    await tester.pump(const Duration(seconds: 10));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 10));
+    await tester.pump();
+    expect(controllerOf(tester).progressSyncPersistent, isTrue);
+    expect(find.byKey(PlayerKeys.progressSyncFailed), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('player-progress-sync-dismiss')));
+    await tester.pump();
+    expect(find.byKey(PlayerKeys.progressSyncFailed), findsNothing);
+
+    // 再次失败仍按持续态重新显示。
+    await tester.pump(const Duration(seconds: 10));
+    await tester.pump();
+    expect(find.byKey(PlayerKeys.progressSyncFailed), findsOneWidget);
+    expect(
+      find.byKey(const Key('player-progress-sync-dismiss')),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets(
+    'expired session stops progress reports and shows the expiry banner',
+    (tester) async {
+      final auth = await pumpLoggedIn(tester);
+      await openPlayable(tester, 'movie-up');
+      await waitFor(tester, find.byKey(PlayerKeys.playPause));
+
+      // 播放进程内没有可刷新的会话:401 直接落到播放器。
+      auth.client.onRefreshSession = null;
+      auth.client.onSessionExpired = null;
+      server.expireAuthenticatedRequests = true;
+
+      await tester.pump(const Duration(seconds: 10));
+      await tester.pump();
+      final player = controllerOf(tester);
+      expect(player.sessionExpired, isTrue);
+      expect(find.byKey(PlayerKeys.progressSyncFailed), findsOneWidget);
+      expect(find.text('会话已过期，进度无法保存'), findsOneWidget);
+      expect(find.text('进度同步失败'), findsNothing);
+      expect(backend.isPlaying, isTrue);
+
+      final progressAfterExpiry = progressCount();
+      await tester.pump(const Duration(seconds: 10));
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 10));
+      await tester.pump();
+      expect(progressCount(), progressAfterExpiry);
+      // 横幅持续显示,快照保留供宿主代发。
+      expect(find.text('会话已过期，进度无法保存'), findsOneWidget);
+      expect(snapshots.snapshot, isNotNull);
+      expect(find.byType(PlayerPage), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'Esc reports Stopped once at the last position and clears the snapshot',
+    (tester) async {
+      await pumpLoggedIn(tester);
+      await openPlayable(tester, 'movie-up');
+      await waitFor(tester, find.byKey(PlayerKeys.playPause));
+
+      // Playing 成功后即有快照,字段完整。
+      final initial = snapshots.snapshot;
+      expect(initial, isNotNull);
+      expect(initial!.itemId, 'movie-up');
+      expect(initial.mediaSourceId, isNotEmpty);
+      expect(initial.playSessionId, isNotEmpty);
+      expect(initial.baseUrl, server.baseUrl.toString());
+      expect(initial.userId, 'user-alice');
+
+      await tester.runAsync(
+        () => controllerOf(tester).seekTo(const Duration(seconds: 65)),
+      );
+      await tester.pump();
+      expect(
+        snapshots.snapshot!.positionTicks,
+        ticksFromDuration(const Duration(seconds: 65)),
+      );
+
+      await tester.tap(find.byKey(PlayerKeys.surface));
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await waitForGone(tester, find.byType(PlayerPage));
+
+      final stopped = stoppedEvents();
+      expect(stopped, hasLength(1));
+      expect(
+        stopped.single.body['PositionTicks'],
+        ticksFromDuration(const Duration(seconds: 65)),
+      );
+      expect(snapshots.snapshot, isNull);
+      expect(snapshots.deleteCount, 1);
+      // 回到详情页后排空图片请求,避免遗留零时长定时器。
+      await tester.pumpAndSettle();
+    },
+  );
+
+  testWidgets(
+    'closing during the next-episode countdown reports Stopped once',
+    (tester) async {
+      tester.view.physicalSize = const Size(1200, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await pumpLoggedIn(tester);
+      await openLibrary(tester, 'view-tv');
+      await tester.tap(find.byKey(CatalogKeys.item('series-friends')));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(
+        find.byKey(CatalogKeys.episode('episode-friends-s1e1')),
+      );
+      await tester.tap(find.byKey(CatalogKeys.episode('episode-friends-s1e1')));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byKey(PlayerKeys.open));
+      await tester.tap(find.byKey(PlayerKeys.open));
+      await tester.pump();
+      await waitFor(tester, find.byKey(PlayerKeys.playPause));
+
+      backend.completePlayback();
+      await tester.pump();
+      await waitFor(tester, find.byKey(PlayerKeys.nextEpisode));
+      expect(stoppedEvents(), hasLength(1));
+
+      await tester.tap(find.byKey(const Key('player-window-close')));
+      await waitForGone(tester, find.byType(PlayerPage));
+      expect(stoppedEvents(), hasLength(1));
+      expect(
+        server.requests.where(
+          (request) =>
+              request.contains('PlaybackInfo') && request.contains('s1e2'),
+        ),
+        isEmpty,
+      );
+    },
+  );
+
+  test(
+    'close waits for Stopped before onClose and reports the last position',
+    () async {
+      var stoppedAtClose = -1;
+      final controller = await startStandaloneController(
+        onClose: () => stoppedAtClose = stoppedEvents().length,
+      );
+      addTearDown(controller.dispose);
+
+      await controller.seekTo(const Duration(seconds: 65));
+      await controller.close();
+
+      expect(stoppedAtClose, 1);
+      final stopped = stoppedEvents();
+      expect(stopped, hasLength(1));
+      expect(
+        stopped.single.body['PositionTicks'],
+        ticksFromDuration(const Duration(seconds: 65)),
+      );
+      expect(snapshots.snapshot, isNull);
+    },
+  );
+
+  test(
+    'close gives up on a hanging Stopped within 3s and keeps the snapshot',
+    () async {
+      var closed = false;
+      final controller = await startStandaloneController(
+        onClose: () => closed = true,
+      );
+      addTearDown(controller.dispose);
+      expect(snapshots.snapshot, isNotNull);
+
+      server.sessionsDelay = const Duration(seconds: 10);
+      final watch = Stopwatch()..start();
+      await controller.close();
+      watch.stop();
+
+      expect(closed, isTrue);
+      expect(watch.elapsed, lessThan(const Duration(seconds: 4)));
+      // 假服务器在延迟前已记录事件:恰一次 Stopped;超时按失败处理,快照保留。
+      expect(stoppedEvents(), hasLength(1));
+      expect(snapshots.snapshot, isNotNull);
+      expect(controller.progressSyncFailed, isTrue);
+    },
+  );
 
   testWidgets('text subtitle is handed to the backend as an external URL', (
     tester,
