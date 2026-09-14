@@ -672,5 +672,94 @@
         "type": "int"
       }
     }
+  },
+  "danmaku": "弹幕",
+  "@danmaku": {
+    "description": "Danmaku (bullet comments) toggle in the player controls."
+  },
+  "danmakuSettings": "弹幕设置",
+  "@danmakuSettings": {
+    "description": "Danmaku display settings menu tooltip."
+  },
+  "danmakuOpacity": "不透明度",
+  "@danmakuOpacity": {
+    "description": "Danmaku opacity setting section."
+  },
+  "danmakuFontSize": "字号",
+  "@danmakuFontSize": {
+    "description": "Danmaku font size setting section."
+  },
+  "danmakuSpeed": "弹幕速度",
+  "@danmakuSpeed": {
+    "description": "Danmaku scroll speed setting section."
+  },
+  "danmakuDisplayArea": "显示区域",
+  "@danmakuDisplayArea": {
+    "description": "Danmaku display area (top fraction of screen) setting section."
+  },
+  "danmakuDensity": "同屏数量",
+  "@danmakuDensity": {
+    "description": "Danmaku on-screen density limit setting section."
+  },
+  "danmakuUnlimited": "不限",
+  "@danmakuUnlimited": {
+    "description": "Option for unlimited danmaku density."
+  },
+  "danmakuSearch": "手动搜索",
+  "@danmakuSearch": {
+    "description": "Open manual danmaku match search."
+  },
+  "danmakuSearchTitle": "搜索弹幕",
+  "@danmakuSearchTitle": {
+    "description": "Title of the danmaku search dialogs."
+  },
+  "danmakuSearchHint": "输入动画或电影名称",
+  "@danmakuSearchHint": {
+    "description": "Hint text of the danmaku search keyword field."
+  },
+  "danmakuNoMatch": "未匹配到弹幕",
+  "@danmakuNoMatch": {
+    "description": "Danmaku match status when nothing matched."
+  },
+  "danmakuMatching": "弹幕匹配中…",
+  "@danmakuMatching": {
+    "description": "Danmaku match status while resolving."
+  },
+  "danmakuMatchedTo": "已匹配：{title}",
+  "@danmakuMatchedTo": {
+    "description": "Danmaku status showing the matched anime title.",
+    "placeholders": {
+      "title": {
+        "type": "String"
+      }
+    }
+  },
+  "danmakuCustomUnreachable": "自定义弹幕服务不可用",
+  "@danmakuCustomUnreachable": {
+    "description": "Banner shown when the custom danmaku service is unreachable."
+  },
+  "danmakuUseOfficial": "使用官方源",
+  "@danmakuUseOfficial": {
+    "description": "Action to fall back to the official danmaku source."
+  },
+  "danmakuOfficial": "官方源",
+  "@danmakuOfficial": {
+    "description": "Danmaku source label for the official API."
+  },
+  "danmakuCustom": "自定义源",
+  "@danmakuCustom": {
+    "description": "Danmaku source label for a custom compatible service."
+  },
+  "danmakuOfficialUnreachable": "弹幕服务不可达",
+  "@danmakuOfficialUnreachable": {
+    "description": "Danmaku status when the official source is unreachable."
+  },
+  "danmakuNoComments": "本集无弹幕",
+  "@danmakuNoComments": {
+    "description": "Danmaku status when the matched episode has no comments."
+  },
+  "danmakuEpisodes": "分集",
+  "@danmakuEpisodes": {
+    "description": "Section header listing episodes of a searched anime."
   }
 }

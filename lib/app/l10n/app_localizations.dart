@@ -987,6 +987,132 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'片尾 {seconds} 秒'**
   String skipOutroSeconds(int seconds);
+
+  /// Danmaku (bullet comments) toggle in the player controls.
+  ///
+  /// In zh, this message translates to:
+  /// **'弹幕'**
+  String get danmaku;
+
+  /// Danmaku display settings menu tooltip.
+  ///
+  /// In zh, this message translates to:
+  /// **'弹幕设置'**
+  String get danmakuSettings;
+
+  /// Danmaku opacity setting section.
+  ///
+  /// In zh, this message translates to:
+  /// **'不透明度'**
+  String get danmakuOpacity;
+
+  /// Danmaku font size setting section.
+  ///
+  /// In zh, this message translates to:
+  /// **'字号'**
+  String get danmakuFontSize;
+
+  /// Danmaku scroll speed setting section.
+  ///
+  /// In zh, this message translates to:
+  /// **'弹幕速度'**
+  String get danmakuSpeed;
+
+  /// Danmaku display area (top fraction of screen) setting section.
+  ///
+  /// In zh, this message translates to:
+  /// **'显示区域'**
+  String get danmakuDisplayArea;
+
+  /// Danmaku on-screen density limit setting section.
+  ///
+  /// In zh, this message translates to:
+  /// **'同屏数量'**
+  String get danmakuDensity;
+
+  /// Option for unlimited danmaku density.
+  ///
+  /// In zh, this message translates to:
+  /// **'不限'**
+  String get danmakuUnlimited;
+
+  /// Open manual danmaku match search.
+  ///
+  /// In zh, this message translates to:
+  /// **'手动搜索'**
+  String get danmakuSearch;
+
+  /// Title of the danmaku search dialogs.
+  ///
+  /// In zh, this message translates to:
+  /// **'搜索弹幕'**
+  String get danmakuSearchTitle;
+
+  /// Hint text of the danmaku search keyword field.
+  ///
+  /// In zh, this message translates to:
+  /// **'输入动画或电影名称'**
+  String get danmakuSearchHint;
+
+  /// Danmaku match status when nothing matched.
+  ///
+  /// In zh, this message translates to:
+  /// **'未匹配到弹幕'**
+  String get danmakuNoMatch;
+
+  /// Danmaku match status while resolving.
+  ///
+  /// In zh, this message translates to:
+  /// **'弹幕匹配中…'**
+  String get danmakuMatching;
+
+  /// Danmaku status showing the matched anime title.
+  ///
+  /// In zh, this message translates to:
+  /// **'已匹配：{title}'**
+  String danmakuMatchedTo(String title);
+
+  /// Banner shown when the custom danmaku service is unreachable.
+  ///
+  /// In zh, this message translates to:
+  /// **'自定义弹幕服务不可用'**
+  String get danmakuCustomUnreachable;
+
+  /// Action to fall back to the official danmaku source.
+  ///
+  /// In zh, this message translates to:
+  /// **'使用官方源'**
+  String get danmakuUseOfficial;
+
+  /// Danmaku source label for the official API.
+  ///
+  /// In zh, this message translates to:
+  /// **'官方源'**
+  String get danmakuOfficial;
+
+  /// Danmaku source label for a custom compatible service.
+  ///
+  /// In zh, this message translates to:
+  /// **'自定义源'**
+  String get danmakuCustom;
+
+  /// Danmaku status when the official source is unreachable.
+  ///
+  /// In zh, this message translates to:
+  /// **'弹幕服务不可达'**
+  String get danmakuOfficialUnreachable;
+
+  /// Danmaku status when the matched episode has no comments.
+  ///
+  /// In zh, this message translates to:
+  /// **'本集无弹幕'**
+  String get danmakuNoComments;
+
+  /// Section header listing episodes of a searched anime.
+  ///
+  /// In zh, this message translates to:
+  /// **'分集'**
+  String get danmakuEpisodes;
 }
 
 class _AppLocalizationsDelegate

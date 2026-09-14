@@ -482,4 +482,69 @@ class AppLocalizationsZh extends AppLocalizations {
   String skipOutroSeconds(int seconds) {
     return '片尾 $seconds 秒';
   }
+
+  @override
+  String get danmaku => '弹幕';
+
+  @override
+  String get danmakuSettings => '弹幕设置';
+
+  @override
+  String get danmakuOpacity => '不透明度';
+
+  @override
+  String get danmakuFontSize => '字号';
+
+  @override
+  String get danmakuSpeed => '弹幕速度';
+
+  @override
+  String get danmakuDisplayArea => '显示区域';
+
+  @override
+  String get danmakuDensity => '同屏数量';
+
+  @override
+  String get danmakuUnlimited => '不限';
+
+  @override
+  String get danmakuSearch => '手动搜索';
+
+  @override
+  String get danmakuSearchTitle => '搜索弹幕';
+
+  @override
+  String get danmakuSearchHint => '输入动画或电影名称';
+
+  @override
+  String get danmakuNoMatch => '未匹配到弹幕';
+
+  @override
+  String get danmakuMatching => '弹幕匹配中…';
+
+  @override
+  String danmakuMatchedTo(String title) {
+    return '已匹配：$title';
+  }
+
+  @override
+  String get danmakuCustomUnreachable => '自定义弹幕服务不可用';
+
+  @override
+  String get danmakuUseOfficial => '使用官方源';
+
+  @override
+  String get danmakuOfficial => '官方源';
+
+  @override
+  String get danmakuCustom => '自定义源';
+
+  @override
+  String get danmakuOfficialUnreachable => '弹幕服务不可达';
+
+  @override
+  String get danmakuNoComments => '本集无弹幕';
+
+  @override
+  String get danmakuEpisodes => '分集';
 }

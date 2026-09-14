@@ -2,6 +2,10 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:path_provider/path_provider.dart';
+import 'package:rillight/player/danmaku/danmaku_layout.dart'
+    show DanmakuDisplaySettings;
+import 'package:rillight/player/danmaku/dandanplay_models.dart'
+    show DanmakuSeriesMemory;
 
 /// 硬件解码开关:自动沿用平台默认,开启/关闭为显式指定。
 enum HardwareDecodingMode { auto, on, off }
@@ -62,6 +66,11 @@ class PlayerSettings {
     this.hardwareDecoder,
     this.playbackRate,
     this.seriesPreferences = const {},
+    this.danmakuEnabled,
+    this.danmakuDisplay,
+    this.danmakuServer,
+    this.danmakuToken,
+    this.danmakuSeriesMemories = const {},
   });
 
   final int volume;
@@ -74,8 +83,25 @@ class PlayerSettings {
   /// 倍速(0.5–3.0 阶梯内取值);null 表示未配置,恢复默认 1.0。
   final double? playbackRate;
 
-  /// 按剧记忆的音轨/字幕/码率,key 为 seriesId。
+  /// 按剧记忆的音轨/字幕/码率，key 为 seriesId。
   final Map<String, PlayerSeriesPreference> seriesPreferences;
+
+  /// 弹幕开关；null 表示未配置，默认开启。
+  final bool? danmakuEnabled;
+
+  bool get isDanmakuEnabled => danmakuEnabled ?? true;
+
+  /// 弹幕显示参数（不透明度/字号/速度/区域/密度/屏蔽词）。
+  final DanmakuDisplaySettings? danmakuDisplay;
+
+  /// 自定义 dandanplay 兼容服务基地址（空表示官方直连）。
+  final String? danmakuServer;
+
+  /// 自定义服务的访问令牌。
+  final String? danmakuToken;
+
+  /// 弹幕按剧匹配记忆，key 为 seriesId。
+  final Map<String, DanmakuSeriesMemory> danmakuSeriesMemories;
 
   int get clampedVolume => volume.clamp(0, 100);
 
@@ -104,6 +130,15 @@ class PlayerSettings {
         for (final entry in seriesPreferences.entries)
           entry.key: entry.value.toJson(),
       },
+    if (danmakuEnabled != null) 'danmakuEnabled': danmakuEnabled,
+    if (danmakuDisplay != null) 'danmakuDisplay': danmakuDisplay!.toJson(),
+    if (danmakuServer != null) 'danmakuServer': danmakuServer,
+    if (danmakuToken != null) 'danmakuToken': danmakuToken,
+    if (danmakuSeriesMemories.isNotEmpty)
+      'danmakuSeriesMemories': {
+        for (final entry in danmakuSeriesMemories.entries)
+          entry.key: entry.value.toJson(),
+      },
   };
 
   factory PlayerSettings.fromJson(Map<String, dynamic> json) {
@@ -126,6 +161,23 @@ class PlayerSettings {
       ),
       playbackRate: _readDouble(json['playbackRate']),
       seriesPreferences: _readSeriesPreferences(json['seriesPreferences']),
+      danmakuEnabled: json['danmakuEnabled'] is bool
+          ? json['danmakuEnabled'] as bool
+          : null,
+      danmakuDisplay: json['danmakuDisplay'] is Map
+          ? DanmakuDisplaySettings.fromJson(
+              Map<String, dynamic>.from(json['danmakuDisplay'] as Map),
+            )
+          : null,
+      danmakuServer: json['danmakuServer'] is String
+          ? json['danmakuServer'] as String
+          : null,
+      danmakuToken: json['danmakuToken'] is String
+          ? json['danmakuToken'] as String
+          : null,
+      danmakuSeriesMemories: _readDanmakuMemories(
+        json['danmakuSeriesMemories'],
+      ),
     );
   }
 }
@@ -157,6 +209,22 @@ Map<String, PlayerSeriesPreference> _readSeriesPreferences(dynamic raw) {
       continue;
     }
     result[entry.key.toString()] = PlayerSeriesPreference.fromJson(
+      Map<String, dynamic>.from(entry.value as Map),
+    );
+  }
+  return result;
+}
+
+Map<String, DanmakuSeriesMemory> _readDanmakuMemories(dynamic raw) {
+  if (raw is! Map) {
+    return const {};
+  }
+  final result = <String, DanmakuSeriesMemory>{};
+  for (final entry in raw.entries) {
+    if (entry.value is! Map) {
+      continue;
+    }
+    result[entry.key.toString()] = DanmakuSeriesMemory.fromJson(
       Map<String, dynamic>.from(entry.value as Map),
     );
   }

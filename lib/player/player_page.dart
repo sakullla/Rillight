@@ -12,6 +12,9 @@ import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/emby/device_profile.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_failure.dart';
+import 'package:rillight/player/danmaku/danmaku_controller.dart';
+import 'package:rillight/player/danmaku/danmaku_renderer.dart';
+import 'package:rillight/player/danmaku/dandanplay_models.dart';
 import 'package:rillight/player/media_kit_video_backend.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_controller.dart';
@@ -48,6 +51,7 @@ class PlayerPage extends StatefulWidget {
 
 class PlayerPageState extends State<PlayerPage> {
   PlayerController? controller;
+  DanmakuController? _danmaku;
   bool _dragSeeking = false;
   double _dragValue = 0;
   bool _episodesOpen = false;
@@ -88,11 +92,16 @@ class PlayerPageState extends State<PlayerPage> {
     );
     controller = created;
     created.addListener(_onController);
+    final danmaku = DanmakuController(settingsStore: bindings.settingsStore);
+    _danmaku = danmaku;
+    danmaku.addListener(_onDanmakuChanged);
     unawaited(created.start());
   }
 
   @override
   void dispose() {
+    _danmaku?.removeListener(_onDanmakuChanged);
+    _danmaku?.dispose();
     final current = controller;
     current?.removeListener(_onController);
     current?.dispose();
@@ -100,9 +109,58 @@ class PlayerPageState extends State<PlayerPage> {
   }
 
   void _onController() {
+    final current = controller;
+    final danmaku = _danmaku;
+    if (current != null && danmaku != null) {
+      danmaku.syncFromPlayback(
+        _danmakuContext(current),
+        position: current.position,
+        playing: current.isPlaying,
+        rate: current.playbackRate,
+      );
+    }
     if (mounted) {
       setState(() {});
     }
+  }
+
+  void _onDanmakuChanged() {
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  /// 从当前播放状态构建弹幕会话上下文（未解析完成时为 null）。
+  DanmakuEpisodeContext? _danmakuContext(PlayerController current) {
+    final item = current.item;
+    final resolved = current.resolved;
+    if (item == null || resolved == null) {
+      return null;
+    }
+    final path = resolved.mediaSource.path;
+    final fileName = _baseName(path).isNotEmpty ? _baseName(path) : item.name;
+    return DanmakuEpisodeContext(
+      itemId: current.itemId,
+      mediaSourceId: resolved.mediaSource.id,
+      seriesId: item.seriesId,
+      seriesTitle: item.seriesName,
+      title: item.name,
+      fileName: fileName,
+      episodeIndex: item.indexNumber,
+      streamUrl: resolved.isTranscode ? null : resolved.streamUrl,
+      duration: current.duration,
+      isMovie: !item.isEpisode,
+    );
+  }
+
+  static String _baseName(String? path) {
+    final value = path?.trim() ?? '';
+    if (value.isEmpty) {
+      return '';
+    }
+    final normalized = value.replaceAll('\\', '/');
+    final slash = normalized.lastIndexOf('/');
+    return slash < 0 ? normalized : normalized.substring(slash + 1);
   }
 
   void _openItem(String itemId) {
@@ -249,6 +307,12 @@ class PlayerPageState extends State<PlayerPage> {
                       },
                     ),
                   ),
+                  if (_danmakuOverlayVisible(current))
+                    Positioned.fill(
+                      child: IgnorePointer(
+                        child: DanmakuView(controller: _danmaku!),
+                      ),
+                    ),
                   if (current.loading)
                     Center(
                       child: Column(
@@ -282,7 +346,9 @@ class PlayerPageState extends State<PlayerPage> {
                       visible: current.controlsVisible,
                       dragging: _dragSeeking,
                       dragValue: _dragValue,
+                      danmaku: _danmaku,
                       onOpenEpisodes: _openEpisodeList,
+                      onDanmakuSearch: _openDanmakuSearch,
                       onDragStart: (value) {
                         current.onUserActivity();
                         setState(() {
@@ -340,6 +406,9 @@ class PlayerPageState extends State<PlayerPage> {
                       key: PlayerKeys.subtitleNotice,
                       text: _subtitleNoticeText(l10n, current.subtitleNotice!),
                     ),
+                  if (_danmaku?.status == DanmakuStatus.customUnreachable &&
+                      !current.loading)
+                    _DanmakuSourceBanner(controller: _danmaku!),
                   _PlayerChromeBar(
                     controller: current,
                     visible: current.controlsVisible,
@@ -350,6 +419,67 @@ class PlayerPageState extends State<PlayerPage> {
           ),
         ),
       ),
+    );
+  }
+
+  /// 弹幕渲染层仅在「开启且有弹幕」时挂载，其余情况零渲染开销。
+  bool _danmakuOverlayVisible(PlayerController current) {
+    final danmaku = _danmaku;
+    return danmaku != null &&
+        danmaku.danmakuOn &&
+        danmaku.hasComments &&
+        !current.loading &&
+        current.error == null &&
+        !current.playbackEnded;
+  }
+
+  Future<void> _openDanmakuSearch() async {
+    final danmaku = _danmaku;
+    if (danmaku == null || !mounted) {
+      return;
+    }
+    final l10n = AppLocalizations.of(context);
+    final keyword = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) {
+        final field = TextEditingController();
+        return AlertDialog(
+          title: Text(l10n.danmakuSearchTitle),
+          content: TextField(
+            key: const Key('player-danmaku-search-field'),
+            controller: field,
+            autofocus: true,
+            decoration: InputDecoration(hintText: l10n.danmakuSearchHint),
+            onSubmitted: (value) => Navigator.pop(dialogContext, value),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: Text(
+                MaterialLocalizations.of(dialogContext).cancelButtonLabel,
+              ),
+            ),
+            FilledButton(
+              key: const Key('player-danmaku-search-submit'),
+              onPressed: () => Navigator.pop(dialogContext, field.text),
+              child: Text(l10n.danmakuSearch),
+            ),
+          ],
+        );
+      },
+    );
+    final term = keyword?.trim() ?? '';
+    if (term.isEmpty) {
+      return;
+    }
+    final animes = await danmaku.search(term);
+    if (!mounted) {
+      return;
+    }
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) =>
+          _DanmakuSearchResults(danmaku: danmaku, animes: animes),
     );
   }
 
@@ -952,10 +1082,13 @@ class _ControlsBar extends StatelessWidget {
     required this.onDragStart,
     required this.onDragUpdate,
     required this.onDragEnd,
+    this.danmaku,
     this.onOpenEpisodes,
+    this.onDanmakuSearch,
   });
 
   final PlayerController controller;
+  final DanmakuController? danmaku;
   final bool visible;
   final bool dragging;
   final double dragValue;
@@ -963,6 +1096,7 @@ class _ControlsBar extends StatelessWidget {
   final ValueChanged<double> onDragUpdate;
   final ValueChanged<double> onDragEnd;
   final VoidCallback? onOpenEpisodes;
+  final VoidCallback? onDanmakuSearch;
 
   @override
   Widget build(BuildContext context) {
@@ -1002,7 +1136,9 @@ class _ControlsBar extends StatelessWidget {
                 const SizedBox(height: AppSpacing.xs),
                 _ControlsRow(
                   controller: controller,
+                  danmaku: danmaku,
                   onOpenEpisodes: onOpenEpisodes,
+                  onDanmakuSearch: onDanmakuSearch,
                 ),
               ],
             ),
@@ -1076,10 +1212,17 @@ class _SeekTimeline extends StatelessWidget {
 
 /// 主按钮行:播放/暂停、音量组、轨道菜单与全屏。
 class _ControlsRow extends StatelessWidget {
-  const _ControlsRow({required this.controller, this.onOpenEpisodes});
+  const _ControlsRow({
+    required this.controller,
+    this.danmaku,
+    this.onOpenEpisodes,
+    this.onDanmakuSearch,
+  });
 
   final PlayerController controller;
+  final DanmakuController? danmaku;
   final VoidCallback? onOpenEpisodes;
+  final VoidCallback? onDanmakuSearch;
 
   @override
   Widget build(BuildContext context) {
@@ -1125,6 +1268,19 @@ class _ControlsRow extends StatelessWidget {
             ],
           ),
         _SpeedControl(controller: controller),
+        if (danmaku != null) ...[
+          _PlayerIconButton(
+            key: const Key('player-danmaku-toggle'),
+            tooltip: l10n.danmaku,
+            onPressed: () => unawaited(danmaku!.toggleDanmaku()),
+            iconSize: 22,
+            color: danmaku!.danmakuOn ? scheme.primary : null,
+            icon: danmaku!.danmakuOn
+                ? Icons.forum_rounded
+                : Icons.forum_outlined,
+          ),
+          _DanmakuSettingsMenu(danmaku: danmaku!, onSearch: onDanmakuSearch),
+        ],
         if (controller.canSetManualSkip)
           _SkipSettingsControl(controller: controller),
         if (controller.audioTracks.length > 1)
@@ -1315,6 +1471,291 @@ class _SkipSettingsControl extends StatelessWidget {
             checked: controller.manualOutroSkipSeconds == seconds,
             child: Text(l10n.skipOutroSeconds(seconds)),
           ),
+      ],
+    );
+  }
+}
+
+/// 弹幕设置菜单:状态回显 + 显示参数(不透明度/字号/速度/区域/密度)
+/// + 手动搜索 + 自定义服务不可用时的回退入口。
+class _DanmakuSettingsMenu extends StatelessWidget {
+  const _DanmakuSettingsMenu({required this.danmaku, this.onSearch});
+
+  static const List<double> _opacityChoices = [0.25, 0.5, 0.75, 1];
+  static const List<double> _fontChoices = [0.5, 0.75, 1, 1.25, 1.5, 2];
+  static const List<double> _speedChoices = [0.5, 1, 1.5, 2];
+  static const List<double> _areaChoices = [0.25, 0.5, 0.75, 1];
+  static const List<int> _densityChoices = [10, 20, 40];
+
+  final DanmakuController danmaku;
+  final VoidCallback? onSearch;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final theme = Theme.of(context);
+    return _ControlMenu<String>(
+      key: const Key('player-danmaku-menu'),
+      tooltip: l10n.danmakuSettings,
+      icon: Icons.tune_rounded,
+      onSelected: (value) {
+        if (value == 'search') {
+          onSearch?.call();
+          return;
+        }
+        if (value == 'fallback') {
+          unawaited(danmaku.useOfficialSource());
+          return;
+        }
+        final parts = value.split(':');
+        if (parts.length < 2) {
+          return;
+        }
+        if (parts[0] == 'density') {
+          final unlimited = parts[1] == 'unlimited';
+          final cap = int.tryParse(parts[1]);
+          if (!unlimited && cap == null) {
+            return;
+          }
+          unawaited(
+            danmaku.setDisplay(
+              danmaku.display.copyWith(
+                maxVisibleCount: cap,
+                unlimitedDensity: unlimited,
+              ),
+            ),
+          );
+          return;
+        }
+        final parsed = double.tryParse(parts[1]);
+        if (parsed == null) {
+          return;
+        }
+        unawaited(
+          danmaku.setDisplay(
+            danmaku.display.copyWith(
+              opacity: parts[0] == 'opacity' ? parsed : null,
+              fontScale: parts[0] == 'font' ? parsed : null,
+              speed: parts[0] == 'speed' ? parsed : null,
+              areaFraction: parts[0] == 'area' ? parsed : null,
+            ),
+          ),
+        );
+      },
+      items: [
+        PopupMenuItem<String>(
+          enabled: false,
+          height: AppSpacing.lg,
+          child: Text(
+            _statusText(l10n),
+            key: const Key('player-danmaku-status'),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.labelMedium?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ),
+        _section(l10n.danmakuOpacity),
+        for (final choice in _opacityChoices)
+          CheckedPopupMenuItem(
+            value: 'opacity:$choice',
+            checked: _near(danmaku.display.opacity, choice),
+            child: Text(_percentLabel(choice)),
+          ),
+        _section(l10n.danmakuFontSize),
+        for (final choice in _fontChoices)
+          CheckedPopupMenuItem(
+            value: 'font:$choice',
+            checked: _near(danmaku.display.fontScale, choice),
+            child: Text(_percentLabel(choice)),
+          ),
+        _section(l10n.danmakuSpeed),
+        for (final choice in _speedChoices)
+          CheckedPopupMenuItem(
+            value: 'speed:$choice',
+            checked: _near(danmaku.display.speed, choice),
+            child: Text(_percentLabel(choice)),
+          ),
+        _section(l10n.danmakuDisplayArea),
+        for (final choice in _areaChoices)
+          CheckedPopupMenuItem(
+            value: 'area:$choice',
+            checked: _near(danmaku.display.areaFraction, choice),
+            child: Text(_percentLabel(choice)),
+          ),
+        _section(l10n.danmakuDensity),
+        CheckedPopupMenuItem(
+          value: 'density:unlimited',
+          checked: danmaku.display.maxVisibleCount == null,
+          child: Text(l10n.danmakuUnlimited),
+        ),
+        for (final choice in _densityChoices)
+          CheckedPopupMenuItem(
+            value: 'density:$choice',
+            checked: danmaku.display.maxVisibleCount == choice,
+            child: Text('$choice'),
+          ),
+        const PopupMenuDivider(),
+        PopupMenuItem<String>(
+          value: 'search',
+          height: 40,
+          child: Text(l10n.danmakuSearch),
+        ),
+        if (danmaku.status == DanmakuStatus.customUnreachable)
+          PopupMenuItem<String>(
+            value: 'fallback',
+            height: 40,
+            child: Text(l10n.danmakuUseOfficial),
+          ),
+      ],
+    );
+  }
+
+  /// 菜单顶部状态行:来源 + 匹配状态回显。
+  String _statusText(AppLocalizations l10n) {
+    final source = danmaku.usesCustomSource
+        ? l10n.danmakuCustom
+        : l10n.danmakuOfficial;
+    final String state;
+    switch (danmaku.status) {
+      case DanmakuStatus.active:
+        state = danmaku.matchedTitle == null || danmaku.matchedTitle!.isEmpty
+            ? (danmaku.hasComments ? '' : l10n.danmakuNoComments)
+            : l10n.danmakuMatchedTo(danmaku.matchedTitle!);
+      case DanmakuStatus.loading:
+        state = l10n.danmakuMatching;
+      case DanmakuStatus.noMatch:
+        state = l10n.danmakuNoMatch;
+      case DanmakuStatus.customUnreachable:
+        state = l10n.danmakuCustomUnreachable;
+      case DanmakuStatus.unreachable:
+        state = l10n.danmakuOfficialUnreachable;
+      case DanmakuStatus.off:
+      case DanmakuStatus.idle:
+        state = '';
+    }
+    return state.isEmpty ? source : '$source · $state';
+  }
+
+  static PopupMenuItem<String> _section(String label) {
+    return PopupMenuItem<String>(
+      enabled: false,
+      height: AppSpacing.xl,
+      child: Text(
+        label,
+        style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
+      ),
+    );
+  }
+
+  static String _percentLabel(double value) => '${(value * 100).round()}%';
+
+  static bool _near(double a, double b) => (a - b).abs() < 0.01;
+}
+
+/// 自定义弹幕服务不可用提示:明确提示并可一键回退官方源。
+class _DanmakuSourceBanner extends StatelessWidget {
+  const _DanmakuSourceBanner({required this.controller});
+
+  final DanmakuController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Positioned(
+      left: 0,
+      right: 0,
+      top: kWindowChromeHeight + AppSpacing.xxl,
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 560),
+          child: LiquidGlass(
+            kind: LiquidGlassKind.control,
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.md,
+              vertical: AppSpacing.sm,
+            ),
+            child: Material(
+              key: const Key('player-danmaku-source-banner'),
+              type: MaterialType.transparency,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.wifi_off_rounded, size: 18, color: scheme.primary),
+                  const SizedBox(width: AppSpacing.xs),
+                  Flexible(child: Text(l10n.danmakuCustomUnreachable)),
+                  const SizedBox(width: AppSpacing.sm),
+                  FilledButton.tonal(
+                    key: const Key('player-danmaku-use-official'),
+                    onPressed: () => unawaited(controller.useOfficialSource()),
+                    child: Text(l10n.danmakuUseOfficial),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 弹幕手动搜索结果:动画展开为分集,选择后加载该集弹幕并写入按剧记忆。
+class _DanmakuSearchResults extends StatelessWidget {
+  const _DanmakuSearchResults({required this.danmaku, required this.animes});
+
+  final DanmakuController danmaku;
+  final List<DanmakuAnime> animes;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    return AlertDialog(
+      title: Text(l10n.danmakuSearchTitle),
+      content: SizedBox(
+        width: 460,
+        height: 380,
+        child: animes.isEmpty
+            ? Center(child: Text(l10n.danmakuNoMatch))
+            : ListView.builder(
+                itemCount: animes.length,
+                itemBuilder: (context, index) {
+                  final anime = animes[index];
+                  return ExpansionTile(
+                    key: Key('player-danmaku-anime-${anime.animeId}'),
+                    dense: true,
+                    title: Text(
+                      anime.animeTitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    subtitle: anime.type == null ? null : Text(anime.type!),
+                    children: [
+                      for (final episode in anime.episodes)
+                        ListTile(
+                          dense: true,
+                          key: Key(
+                            'player-danmaku-episode-${episode.episodeId}',
+                          ),
+                          title: Text(episode.episodeTitle),
+                          onTap: () {
+                            unawaited(danmaku.selectEpisode(anime, episode));
+                            Navigator.pop(context);
+                          },
+                        ),
+                    ],
+                  );
+                },
+              ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: Text(MaterialLocalizations.of(context).closeButtonLabel),
+        ),
       ],
     );
   }
