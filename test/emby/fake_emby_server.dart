@@ -58,10 +58,68 @@ class FakeMediaStream {
 }
 
 class FakePlaybackEvent {
-  FakePlaybackEvent({required this.kind, required this.body});
+  FakePlaybackEvent({required this.kind, required this.body, this.userAgent});
 
   final String kind;
   final Map<String, dynamic> body;
+
+  /// 该次上报请求携带的 `User-Agent` 头,无则为 null。
+  final String? userAgent;
+}
+
+/// 注入用的季描述,经 [FakeEmbyServer.setSeasons] 转成 Season 条目。
+class FakeSeason {
+  const FakeSeason({
+    required this.id,
+    required this.name,
+    this.indexNumber,
+    this.primaryImageTag,
+  });
+
+  final String id;
+  final String name;
+  final int? indexNumber;
+  final String? primaryImageTag;
+}
+
+/// 注入用的分集描述,经 [FakeEmbyServer.setEpisodes] 转成 Episode 条目。
+///
+/// 允许多条分集共用同一 [indexNumber](多版本),[seasonId] 也不必出现在
+/// 已注入的季列表中(服务端季数据缺失/错位的场景)。
+class FakeEpisode {
+  const FakeEpisode({
+    required this.id,
+    required this.name,
+    required this.seasonId,
+    this.indexNumber,
+    this.parentIndexNumber,
+    this.runTimeTicks,
+    this.overview,
+    this.primaryImageTag,
+    this.played = false,
+    this.playbackPositionTicks = 0,
+    this.playedPercentage,
+    this.nextUp = false,
+    this.dateCreated,
+    this.premiereDate,
+    this.mediaStreams = const [],
+  });
+
+  final String id;
+  final String name;
+  final String seasonId;
+  final int? indexNumber;
+  final int? parentIndexNumber;
+  final int? runTimeTicks;
+  final String? overview;
+  final String? primaryImageTag;
+  final bool played;
+  final int playbackPositionTicks;
+  final double? playedPercentage;
+  final bool nextUp;
+  final DateTime? dateCreated;
+  final DateTime? premiereDate;
+  final List<FakeMediaStream> mediaStreams;
 }
 
 class FakeChapter {
@@ -386,10 +444,85 @@ class FakeEmbyServer {
   Map<String, dynamic>? lastDeviceProfile;
   Map<String, dynamic>? lastPlaybackInfoBody;
   int? progressStatus;
+
+  /// /Sessions/Playing/Stopped 的响应状态码;为 null 时返回 200。
+  int? stoppedStatus;
+
+  /// /Sessions/Playing、/Progress、/Stopped 三类上报在响应前等待的时长。
+  Duration? sessionsDelay;
   final Set<String> issuedTokens = {};
   final Set<String> loggedOutTokens = {};
   int _tokenSeq = 0;
   int _playSeq = 0;
+
+  /// 替换 [seriesId] 下的全部季:先移除该剧现有 Season 条目,再按给定顺序写入。
+  ///
+  /// 生成的 Season 条目 `ParentId`/`SeriesId` 均指向 [seriesId],
+  /// 因而 `/Users/{uid}/Items?ParentId={seriesId}&IncludeItemTypes=Season`
+  /// 与 `/Users/{uid}/Items/{seasonId}` 都能命中。
+  List<FakeEmbyItem> setSeasons(String seriesId, List<FakeSeason> seasons) {
+    final series = _itemById(seriesId);
+    items.removeWhere(
+      (item) =>
+          item.type == 'Season' &&
+          (item.seriesId == seriesId || item.parentId == seriesId),
+    );
+    final created = [
+      for (final season in seasons)
+        FakeEmbyItem(
+          id: season.id,
+          name: season.name,
+          type: 'Season',
+          parentId: seriesId,
+          seriesId: seriesId,
+          seriesName: series?.name,
+          indexNumber: season.indexNumber,
+          primaryImageTag: season.primaryImageTag,
+        ),
+    ];
+    items.addAll(created);
+    return created;
+  }
+
+  /// 替换 [seriesId] 下的全部分集:先移除该剧现有 Episode 条目,再写入。
+  ///
+  /// 每条分集的 `ParentId` 取其 [FakeEpisode.seasonId],即使该季未经
+  /// [setSeasons] 注入也能被 `ParentId={seasonId}` 窗口查询命中;
+  /// `ParentId={seriesId}&Recursive=true` 则通过 `SeriesId` 归属命中。
+  List<FakeEmbyItem> setEpisodes(String seriesId, List<FakeEpisode> episodes) {
+    final series = _itemById(seriesId);
+    items.removeWhere(
+      (item) => item.type == 'Episode' && item.seriesId == seriesId,
+    );
+    final created = [
+      for (final episode in episodes)
+        FakeEmbyItem(
+          id: episode.id,
+          name: episode.name,
+          type: 'Episode',
+          parentId: episode.seasonId,
+          seasonId: episode.seasonId,
+          seriesId: seriesId,
+          seriesName: series?.name,
+          indexNumber: episode.indexNumber,
+          parentIndexNumber:
+              episode.parentIndexNumber ??
+              _itemById(episode.seasonId)?.indexNumber,
+          runTimeTicks: episode.runTimeTicks,
+          overview: episode.overview,
+          primaryImageTag: episode.primaryImageTag,
+          played: episode.played,
+          playbackPositionTicks: episode.playbackPositionTicks,
+          playedPercentage: episode.playedPercentage,
+          nextUp: episode.nextUp,
+          dateCreated: episode.dateCreated,
+          premiereDate: episode.premiereDate,
+          mediaStreams: episode.mediaStreams,
+        ),
+    ];
+    items.addAll(created);
+    return created;
+  }
 
   Future<ResponseBody> handle(
     RequestOptions options,
@@ -479,6 +612,7 @@ class FakeEmbyServer {
       return _handlePlaybackReport(
         segments,
         await _readBody(options, requestStream),
+        userAgent: _headerValue(options, 'user-agent'),
       );
     }
     if (segments.length >= 3 &&
@@ -694,7 +828,13 @@ class FakeEmbyServer {
     return source;
   }
 
-  ResponseBody _handlePlaybackReport(List<String> segments, String raw) {
+  /// 事件在收到请求时立刻记录;[sessionsDelay] 只推迟响应,
+  /// 以模拟"服务端已收到但迟迟不回"的慢网络。
+  Future<ResponseBody> _handlePlaybackReport(
+    List<String> segments,
+    String raw, {
+    String? userAgent,
+  }) async {
     Map<String, dynamic> body = const {};
     if (raw.isNotEmpty) {
       final decoded = jsonDecode(raw);
@@ -708,9 +848,18 @@ class FakeEmbyServer {
     } else if (segments.length >= 3 && segments[2] == 'Stopped') {
       kind = 'Stopped';
     }
-    playbackEvents.add(FakePlaybackEvent(kind: kind, body: body));
+    playbackEvents.add(
+      FakePlaybackEvent(kind: kind, body: body, userAgent: userAgent),
+    );
+    final delay = sessionsDelay;
+    if (delay != null && segments.length >= 2 && segments[1] == 'Playing') {
+      await Future<void>.delayed(delay);
+    }
     if (kind == 'Progress' && progressStatus != null) {
       return _json(progressStatus!, {'error': 'progress failed'});
+    }
+    if (kind == 'Stopped' && stoppedStatus != null) {
+      return _json(stoppedStatus!, {'error': 'stopped failed'});
     }
     final itemId = body['ItemId']?.toString();
     final ticks = body['PositionTicks'];
@@ -1047,9 +1196,17 @@ class FakeEmbyServer {
         (options.uri.queryParameters['SortOrder'] ?? '').toLowerCase() ==
         'descending';
     if (sortBy != null && sortBy.isNotEmpty) {
+      // 稳定排序:同 IndexNumber 的多版本分集保持注入顺序,
+      // 保证 StartIndex/Limit 分窗结果一致、不重不漏。
+      final order = <FakeEmbyItem, int>{
+        for (var i = 0; i < matched.length; i++) matched[i]: i,
+      };
       matched.sort((a, b) {
         final compared = _compareBy(a, b, sortBy);
-        return descending ? -compared : compared;
+        if (compared != 0) {
+          return descending ? -compared : compared;
+        }
+        return order[a]!.compareTo(order[b]!);
       });
     }
     final startIndex =
@@ -1148,19 +1305,23 @@ class FakeEmbyServer {
     String parentId, {
     required bool recursive,
   }) {
-    if (item.parentId == parentId) {
+    if (item.parentId == parentId || item.seasonId == parentId) {
       return true;
     }
     if (!recursive) {
       return false;
     }
-    var current = item.parentId;
+    // 分集的季条目可能不存在(季数据缺失),此时仍按 SeriesId 归属到剧,
+    // 再沿剧的父链向上归属到片库。
     final seen = <String>{};
-    while (current != null && seen.add(current)) {
-      if (current == parentId) {
-        return true;
+    for (final start in [item.parentId, item.seasonId, item.seriesId]) {
+      var current = start;
+      while (current != null && seen.add(current)) {
+        if (current == parentId) {
+          return true;
+        }
+        current = _itemById(current)?.parentId;
       }
-      current = _itemById(current)?.parentId;
     }
     return false;
   }
