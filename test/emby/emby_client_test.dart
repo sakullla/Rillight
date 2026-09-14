@@ -190,9 +190,32 @@ void main() {
     expect(emby.accessToken, isNot(first.accessToken));
   });
 
+  test('customUserAgent returns the normalized custom value or null', () {
+    final emby = client();
+    expect(emby.customUserAgent, isNull);
+
+    emby.setUserAgent('  LineUA/9  ');
+    expect(emby.customUserAgent, 'LineUA/9');
+    expect(emby.userAgent, 'LineUA/9');
+
+    emby.setUserAgent('  ');
+    expect(emby.customUserAgent, isNull);
+    expect(emby.userAgent, 'Rillight/0.1.0');
+
+    emby.setUserAgent('Keep/1');
+    emby.attachSession(
+      baseUrl: server.baseUrl,
+      accessToken: 'tok',
+      userId: 'u',
+    );
+    expect(emby.customUserAgent, isNull);
+    expect(emby.userAgent, 'Rillight/0.1.0');
+  });
+
   test('custom User-Agent is sent on API and stream headers', () async {
     final emby = client();
     emby.setUserAgent('LineUA/9');
+    expect(emby.customUserAgent, 'LineUA/9');
     await emby.getPublicInfo(server.baseUrl);
     expect(server.lastUserAgent, 'LineUA/9');
     expect(server.lastAuthorization, contains('Client="Rillight"'));
@@ -219,6 +242,7 @@ void main() {
   test('blank User-Agent falls back to Rillight/version', () async {
     final emby = client();
     emby.setUserAgent('  ');
+    expect(emby.customUserAgent, isNull);
     await emby.getPublicInfo(server.baseUrl);
     expect(server.lastUserAgent, 'Rillight/0.1.0');
     expect(emby.sessionHeaders['User-Agent'], 'Rillight/0.1.0');

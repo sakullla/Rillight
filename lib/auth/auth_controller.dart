@@ -309,9 +309,8 @@ class AuthController extends ChangeNotifier {
     if (nextLines.length == server.lines.length) {
       return;
     }
-    final nextActive = server.activeLineId == lineId
-        ? nextLines.first.id
-        : server.activeLineId;
+    final activeChanged = server.activeLineId == lineId;
+    final nextActive = activeChanged ? nextLines.first.id : server.activeLineId;
     final next = server.copyWith(lines: nextLines, activeLineId: nextActive);
     await _upsertServer(next);
     if (_prefill?.id == serverId) {
@@ -319,12 +318,26 @@ class AuthController extends ChangeNotifier {
     }
     final session = _session;
     if (session != null && session.server.id == serverId) {
-      _session = AuthSession(
-        server: next,
-        userId: session.userId,
-        username: session.username,
-        accessToken: session.accessToken,
-      );
+      if (activeChanged) {
+        final stored = await credentials.read(serverId);
+        if (stored != null && stored.accessToken.isNotEmpty) {
+          _activate(next, stored);
+        } else {
+          _session = AuthSession(
+            server: next,
+            userId: session.userId,
+            username: session.username,
+            accessToken: session.accessToken,
+          );
+        }
+      } else {
+        _session = AuthSession(
+          server: next,
+          userId: session.userId,
+          username: session.username,
+          accessToken: session.accessToken,
+        );
+      }
     }
     notifyListeners();
   }

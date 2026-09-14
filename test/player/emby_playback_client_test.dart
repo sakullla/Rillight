@@ -152,5 +152,33 @@ void main() {
       'Stopped',
     ]);
     expect(server.playbackEvents.first.body['PlayMethod'], 'DirectStream');
+    expect(server.playbackEvents.map((event) => event.userAgent).toList(), [
+      'Rillight/0.1.0',
+      'Rillight/0.1.0',
+      'Rillight/0.1.0',
+    ]);
   });
+
+  test(
+    'Playing Progress Stopped events carry the configured User-Agent',
+    () async {
+      client.setUserAgent('PlaybackUA/3');
+      expect(client.customUserAgent, 'PlaybackUA/3');
+      const report = PlaybackReport(
+        itemId: 'movie-inception',
+        mediaSourceId: 'movie-inception',
+        playSessionId: 'play-1',
+        playMethod: PlayMethod.directStream,
+        positionTicks: 10000000,
+      );
+      await client.reportPlaying(report);
+      await client.reportProgress(report.copyWith(eventName: 'TimeUpdate'));
+      await client.reportStopped(report);
+      expect(server.playbackEvents.map((event) => event.userAgent).toList(), [
+        'PlaybackUA/3',
+        'PlaybackUA/3',
+        'PlaybackUA/3',
+      ]);
+    },
+  );
 }

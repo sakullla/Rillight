@@ -363,6 +363,112 @@ void main() {
     },
   );
 
+  test(
+    'switchTo a line with a different UA sends that UA on later requests',
+    () async {
+      final wan = FakeEmbyServer(
+        serverId: server.serverId,
+        serverName: server.serverName,
+        baseUrl: Uri.parse('http://emby-wan.test:8096'),
+      );
+      adapter.add(wan);
+      final auth = controller();
+      await auth.connect(
+        address: server.baseUrl.toString(),
+        username: 'alice',
+        password: 'correct-horse',
+        userAgent: 'LanUA/1',
+      );
+      await auth.connect(
+        address: wan.baseUrl.toString(),
+        username: 'alice',
+        password: 'correct-horse',
+        userAgent: 'WanUA/2',
+      );
+      expect(auth.client.userAgent, 'WanUA/2');
+
+      final lanLine = auth.savedServers.single.lines.firstWhere(
+        (line) => line.address == server.baseUrl.toString(),
+      );
+      await auth.switchTo(server.serverId, lineId: lanLine.id);
+
+      expect(auth.isLoggedIn, isTrue);
+      expect(auth.client.baseUrl, server.baseUrl);
+      expect(auth.client.userAgent, 'LanUA/1');
+      await auth.client.getJson('/System/Info');
+      expect(server.lastUserAgent, 'LanUA/1');
+    },
+  );
+
+  test('switchTo an empty-UA line uses Rillight/version', () async {
+    final wan = FakeEmbyServer(
+      serverId: server.serverId,
+      serverName: server.serverName,
+      baseUrl: Uri.parse('http://emby-wan.test:8096'),
+    );
+    adapter.add(wan);
+    final auth = controller();
+    await auth.connect(
+      address: server.baseUrl.toString(),
+      username: 'alice',
+      password: 'correct-horse',
+    );
+    await auth.connect(
+      address: wan.baseUrl.toString(),
+      username: 'alice',
+      password: 'correct-horse',
+      userAgent: 'WanUA/2',
+    );
+
+    final lanLine = auth.savedServers.single.lines.firstWhere(
+      (line) => line.address == server.baseUrl.toString(),
+    );
+    await auth.switchTo(server.serverId, lineId: lanLine.id);
+
+    expect(auth.client.userAgent, 'Rillight/0.1.0');
+    await auth.client.getJson('/System/Info');
+    expect(server.lastUserAgent, 'Rillight/0.1.0');
+  });
+
+  test(
+    'deleteLine of the active line remounts client onto the remaining line',
+    () async {
+      final wan = FakeEmbyServer(
+        serverId: server.serverId,
+        serverName: server.serverName,
+        baseUrl: Uri.parse('http://emby-wan.test:8096'),
+      );
+      adapter.add(wan);
+      final auth = controller();
+      await auth.connect(
+        address: server.baseUrl.toString(),
+        username: 'alice',
+        password: 'correct-horse',
+        userAgent: 'LanUA/1',
+      );
+      await auth.connect(
+        address: wan.baseUrl.toString(),
+        username: 'alice',
+        password: 'correct-horse',
+        userAgent: 'WanUA/2',
+      );
+      expect(auth.client.baseUrl, wan.baseUrl);
+      expect(auth.client.userAgent, 'WanUA/2');
+      final wanLine = auth.savedServers.single.lines.firstWhere(
+        (line) => line.address == wan.baseUrl.toString(),
+      );
+
+      await auth.deleteLine(server.serverId, wanLine.id);
+
+      expect(auth.isLoggedIn, isTrue);
+      expect(auth.savedServers.single.lines, hasLength(1));
+      expect(auth.client.baseUrl, server.baseUrl);
+      expect(auth.client.userAgent, 'LanUA/1');
+      await auth.client.getJson('/System/Info');
+      expect(server.lastUserAgent, 'LanUA/1');
+    },
+  );
+
   test('deleteLine keeps the remaining line', () async {
     final wan = FakeEmbyServer(
       serverId: server.serverId,

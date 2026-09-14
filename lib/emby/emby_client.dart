@@ -41,6 +41,7 @@ class EmbyClient {
   String? get accessToken => _accessToken;
   String? get userId => _userId;
   String get userAgent => resolveUserAgent(_customUserAgent, device);
+  String? get customUserAgent => _customUserAgent;
   bool get hasSession =>
       _baseUrl != null && _accessToken != null && _accessToken!.isNotEmpty;
   Map<String, String> get sessionHeaders =>
