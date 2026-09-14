@@ -59,6 +59,68 @@ abstract final class AppBreakpoints {
   static const double large = 1440;
 }
 
+/// 海报/剧照之上的实色遮罩 token:渐变与底衬的 alpha、stop 与高度。
+///
+/// 由 `BackdropScrim`、`ScrimIconButton`、顶栏保护渐变、播放控制层渐变与
+/// 搜索遮罩共同引用,不在页面内散落十六进制黑。系统要求减少动态效果时,
+/// 非透明段的 alpha 经 [resolve] 抬到不低于 [reduced],透明端保持透明。
+abstract final class AppScrim {
+  /// 顶带起点:保护顶栏与返回钮,向下溶到透明。
+  static const double top = 0.55;
+
+  /// 顶栏自身渐变起点与中段(`_TopBar`),比顶带更轻。
+  static const double topBar = 0.38;
+  static const double topBarMid = 0.10;
+  static const List<double> topBarStops = [0, 0.55, 1];
+
+  /// 顶带默认高度 = 顶栏 56 + 溶入 36;有窗口铬时由调用方传入实际值。
+  static const double topBandHeight = 92;
+
+  /// 左侧文字带:三段横向渐变,自左向右溶到透明。
+  static const double textStart = 0.72;
+  static const double textMid = 0.30;
+  static const List<double> textStops = [0, 0.45, 1];
+
+  /// 文字带占宽比例,与 hero 文字块最大宽度(≤ 60% 视口)对齐。
+  static const double textBandWidthFactor = 0.7;
+
+  /// 底带:透明 → 页面底色 α[bottomMid] → 页面底色。
+  static const double bottomMid = 0.6;
+  static const List<double> bottomStops = [0.5, 0.8, 1];
+
+  /// 圆形控件底衬(`ScrimIconButton`)。
+  static const double control = 0.55;
+
+  /// 控件禁用态图标 alpha。
+  static const double controlDisabledIcon = 0.38;
+
+  /// 播放控制层:底栏渐变终点(原 0xCC)、软段(原 0x8A)、
+  /// 面板遮罩(原 0xD9)、结束卡遮罩(原 0x99)。
+  static const double playerBar = 0.80;
+  static const double playerBarSoft = 0.54;
+  static const double playerPanel = 0.85;
+  static const double playerBarrier = 0.60;
+
+  /// 搜索覆盖层压暗遮罩。
+  static const double barrier = 0.55;
+
+  /// 减少动态效果时非透明段的最低 alpha。
+  static const double reduced = 0.85;
+
+  /// 按 [reduce] 解析 [alpha]:减少动效时不低于 [reduced],透明(0)保持透明。
+  static double resolve(double alpha, {required bool reduce}) {
+    if (!reduce || alpha <= 0) {
+      return alpha;
+    }
+    return alpha < reduced ? reduced : alpha;
+  }
+
+  /// [resolve] 的 [BuildContext] 便捷形式。
+  static double of(BuildContext context, double alpha) {
+    return resolve(alpha, reduce: MediaQuery.disableAnimationsOf(context));
+  }
+}
+
 /// Liquid Glass 浮层材质:只用于顶栏/面板/控件,不铺在海报内容上。
 abstract final class AppGlass {
   static const double barBlur = 26;

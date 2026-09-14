@@ -216,10 +216,6 @@
   "@removeFromResume": {
     "description": "Hover action to hide an item from Continue Watching."
   },
-  "removeFromResume": "从继续观看移除",
-  "@removeFromResume": {
-    "description": "Hover action to hide an item from Continue Watching."
-  },
   "resumeRow": "继续观看",
   "@resumeRow": {
     "description": "Home row title for resumable movies and episodes."
@@ -545,6 +541,14 @@
   "progressSyncFailed": "进度同步失败",
   "@progressSyncFailed": {
     "description": "Visible failure when Playing/Progress/Stopped reporting fails."
+  },
+  "progressSyncFailedMain": "播放进度未能同步",
+  "@progressSyncFailedMain": {
+    "description": "Main-window snackbar when the host fails to relay a Stopped report for a closed player."
+  },
+  "playbackSessionExpired": "会话已过期，进度无法保存",
+  "@playbackSessionExpired": {
+    "description": "Player banner when the Emby token is rejected with 401 and progress reporting stops."
   },
   "playbackFailed": "无法播放",
   "@playbackFailed": {

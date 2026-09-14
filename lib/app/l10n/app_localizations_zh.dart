@@ -394,6 +394,12 @@ class AppLocalizationsZh extends AppLocalizations {
   String get progressSyncFailed => '进度同步失败';
 
   @override
+  String get progressSyncFailedMain => '播放进度未能同步';
+
+  @override
+  String get playbackSessionExpired => '会话已过期，进度无法保存';
+
+  @override
   String get playbackFailed => '无法播放';
 
   @override

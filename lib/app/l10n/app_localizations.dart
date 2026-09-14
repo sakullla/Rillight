@@ -820,6 +820,18 @@ abstract class AppLocalizations {
   /// **'进度同步失败'**
   String get progressSyncFailed;
 
+  /// Main-window snackbar when the host fails to relay a Stopped report for a closed player.
+  ///
+  /// In zh, this message translates to:
+  /// **'播放进度未能同步'**
+  String get progressSyncFailedMain;
+
+  /// Player banner when the Emby token is rejected with 401 and progress reporting stops.
+  ///
+  /// In zh, this message translates to:
+  /// **'会话已过期，进度无法保存'**
+  String get playbackSessionExpired;
+
   /// Visible failure when playback cannot start.
   ///
   /// In zh, this message translates to:

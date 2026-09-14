@@ -312,13 +312,24 @@ abstract final class AppTheme {
         textStyle: labelMedium.copyWith(color: _onSurface),
         waitDuration: const Duration(milliseconds: 400),
       ),
+      iconButtonTheme: IconButtonThemeData(
+        style: IconButton.styleFrom(
+          foregroundColor: _onSurface,
+          disabledForegroundColor: _onSurfaceVariant,
+        ),
+      ),
+      // 弹出菜单的唯一样式来源;页面内 PopupMenuButton 不再覆盖
+      // color/shape/surfaceTintColor。
       popupMenuTheme: PopupMenuThemeData(
-        color: _surfaceHigh.withValues(alpha: 0.88),
+        color: _surfaceHigh.withValues(alpha: 0.94),
         surfaceTintColor: Colors.transparent,
         elevation: 12,
         shadowColor: Colors.black.withValues(alpha: 0.45),
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(AppRadii.lg),
+          borderRadius: BorderRadius.circular(AppRadii.md),
+          side: BorderSide(
+            color: Colors.white.withValues(alpha: AppGlass.edgeLight),
+          ),
         ),
         labelTextStyle: WidgetStatePropertyAll(textTheme.bodyMedium),
       ),
