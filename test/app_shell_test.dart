@@ -9,6 +9,7 @@ import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/widgets/app_error_view.dart';
 import 'package:rillight/app/widgets/poster_placeholder.dart';
 import 'package:rillight/app/widgets/scrim_icon_button.dart';
+import 'package:rillight/app/widgets/liquid_glass.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/server_list_store.dart';
@@ -23,6 +24,7 @@ import 'package:rillight/search/search_overlay.dart';
 import 'package:rillight/search/search_page.dart';
 
 import 'emby/fake_emby_server.dart';
+import 'helpers/top_bar_hit.dart';
 
 const _device = EmbyDeviceInfo(
   clientName: 'Rillight',
@@ -316,11 +318,22 @@ void main() {
     await tester.tap(find.byTooltip('搜索'));
     await tester.pumpAndSettle();
 
-    // 打开时遮罩存在并完全压暗,覆盖层正常叠在遮罩之上。
+    // 打开时遮罩存在并完全压暗,覆盖层是不透明阅读面,不透出首页 hero。
     expect(find.byType(SearchOverlay), findsOneWidget);
     expect(find.byKey(SearchOverlayBarrier.barrierKey), findsOneWidget);
     expect(_barrierOpacity(tester), 1.0);
     expect(_barrierIgnoringPointer(tester), isFalse);
+    expect(
+      find.descendant(
+        of: find.byType(SearchOverlay),
+        matching: find.byType(LiquidGlass),
+      ),
+      findsNothing,
+    );
+    expect(
+      tester.widget<Material>(find.byKey(SearchOverlay.overlayKey)).color?.a,
+      1.0,
+    );
 
     // Esc 不受遮罩影响;关闭后遮罩收敛为透明且不参与命中,背景恢复。
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
@@ -329,8 +342,7 @@ void main() {
     expect(_barrierOpacity(tester), 0.0);
     expect(_barrierIgnoringPointer(tester), isTrue);
 
-    // 点击遮罩等同关闭:覆盖层玻璃面板吸收指针事件,点击其非交互
-    // 区域(顶栏条带在覆盖层 top padding 内)由覆盖层根部手势关闭。
+    // 点击非交互区域关闭:顶栏条带在覆盖层 top padding 内,由覆盖层根部手势关闭。
     await tester.tap(find.byTooltip('搜索'));
     await tester.pumpAndSettle();
     await tester.tapAt(const Offset(400, 20));
@@ -465,20 +477,25 @@ void main() {
     expect(find.byType(ItemDetailPage), findsOneWidget);
     expect(find.byKey(CatalogKeys.back), findsOneWidget);
 
-    final episode = find.byKey(CatalogKeys.episode('episode-friends-s1e2'));
-    await _ensureVisibleBelowTopBar(tester, episode);
-    await _tapBelowTopBar(tester, episode);
+    await ensureVisibleBelowTopBar(tester, find.byKey(CatalogKeys.viewEpisode));
+    await tapBelowTopBar(tester, find.byKey(CatalogKeys.viewEpisode));
     await tester.pumpAndSettle();
 
-    // 页内切集不 push 新路由,详情页保持同一实例,返回钮仍在顶栏。
+    // 查看本集是页内切换,不 push 新路由,返回钮仍在顶栏。
     expect(
       GoRouter.of(tester.element(find.byType(ItemDetailPage))).state.uri.path,
       AppRoutes.item('series-friends'),
     );
-    expect(find.textContaining('The One with the Sonogram'), findsWidgets);
+    expect(find.textContaining('The Pilot'), findsWidgets);
     final back = find.byKey(CatalogKeys.back);
     expect(back, findsOneWidget);
-    expect(tester.widget<ScrimIconButton>(back), isA<ScrimIconButton>());
+    expect(
+      find.descendant(
+        of: find.byKey(AppShell.topBarKey),
+        matching: find.byKey(CatalogKeys.back),
+      ),
+      findsOneWidget,
+    );
 
     await tester.tap(back);
     await tester.pumpAndSettle();
@@ -604,43 +621,6 @@ bool _barrierIgnoringPointer(WidgetTester tester) {
         ),
       )
       .ignoring;
-}
-
-/// 顶栏叠在内容上时,控件中心可能落在栏内;点到栏下方仍落在同一控件上的位置。
-Future<void> _tapBelowTopBar(WidgetTester tester, Finder finder) async {
-  final bar = find.byKey(AppShell.topBarKey);
-  final rect = tester.getRect(finder);
-  var dy = rect.center.dy;
-  if (bar.evaluate().isNotEmpty) {
-    final barBottom = tester.getRect(bar).bottom;
-    if (dy <= barBottom) {
-      dy = (barBottom + 1).clamp(rect.top + 1, rect.bottom - 1).toDouble();
-    }
-  }
-  await tester.tapAt(Offset(rect.center.dx, dy));
-}
-
-Future<void> _ensureVisibleBelowTopBar(
-  WidgetTester tester,
-  Finder finder,
-) async {
-  final context = tester.element(finder);
-  final scrollable = Scrollable.maybeOf(context);
-  if (scrollable == null) {
-    await tester.ensureVisible(finder);
-    await tester.pumpAndSettle();
-    return;
-  }
-  final viewport = scrollable.position.viewportDimension;
-  final bar = find.byKey(AppShell.topBarKey);
-  final barBottom = bar.evaluate().isEmpty ? 0.0 : tester.getRect(bar).bottom;
-  final alignment = viewport <= 0 ? 0.0 : ((barBottom + 8) / viewport);
-  await Scrollable.ensureVisible(
-    context,
-    alignment: alignment.clamp(0.0, 1.0).toDouble(),
-    duration: Duration.zero,
-  );
-  await tester.pumpAndSettle();
 }
 
 Future<AuthController> _connect(

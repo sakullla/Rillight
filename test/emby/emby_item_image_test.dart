@@ -156,4 +156,30 @@ void main() {
     expect(item.chapters[1].imageTag, 'tag-c1');
     expect(item.chapters[1].imageIndex, 1);
   });
+
+  test('parses Emby chapter MarkerType for intro and credits', () {
+    final item = EmbyItem.fromJson({
+      'Id': 'episode-markers',
+      'Name': '标记集',
+      'Type': 'Episode',
+      'Chapters': [
+        {'Name': '开场', 'StartPositionTicks': 0, 'MarkerType': 'IntroStart'},
+        {
+          'Name': '正片',
+          'StartPositionTicks': 900000000,
+          'MarkerType': 'IntroEnd',
+        },
+        {
+          'Name': '职员表',
+          'StartPositionTicks': 12000000000,
+          'MarkerType': 'CreditsStart',
+        },
+      ],
+    });
+    expect(item.chapters.map((chapter) => chapter.markerType).toList(), [
+      'IntroStart',
+      'IntroEnd',
+      'CreditsStart',
+    ]);
+  });
 }

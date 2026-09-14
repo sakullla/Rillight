@@ -185,7 +185,31 @@ class AppLocalizationsZh extends AppLocalizations {
   String get episodesRow => '集';
 
   @override
+  String get episodesLoadMore => '加载更多';
+
+  @override
   String get sortBy => '排序';
+
+  @override
+  String get libraryFilter => '筛选';
+
+  @override
+  String get libraryFilterClear => '清除筛选';
+
+  @override
+  String get libraryFilterType => '类型';
+
+  @override
+  String get libraryFilterWatch => '观看状态';
+
+  @override
+  String get libraryFilterYear => '年份';
+
+  @override
+  String get libraryFilterGenre => '流派';
+
+  @override
+  String get libraryFilterAll => '全部';
 
   @override
   String get sortByName => '标题';
@@ -348,6 +372,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get transcode => '转码';
 
   @override
+  String get quality => '画质';
+
+  @override
   String get qualityAuto => '自动';
 
   @override
@@ -418,7 +445,13 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsDiskCacheLimit => '磁盘缓冲上限';
 
   @override
+  String get settingsDiskCacheLimitHint => '限制本地缓冲占用';
+
+  @override
   String get settingsHardwareDecoding => '硬件解码';
+
+  @override
+  String get settingsHardwareDecodingHint => '用显卡解码，降低 CPU 占用';
 
   @override
   String get settingsHardwareDecodingAuto => '自动';
@@ -431,6 +464,9 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get settingsDecoderBackend => '解码后端';
+
+  @override
+  String get settingsDecoderBackendHint => '不确定时保持自动即可';
 
   @override
   String get settingsBackendAuto => '自动';
@@ -459,6 +495,15 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsDanmakuService => '弹幕服务';
 
   @override
+  String get settingsDanmakuServiceHint => '默认使用官方源；自建服务时再填写';
+
+  @override
+  String get settingsShowToken => '显示令牌';
+
+  @override
+  String get settingsHideToken => '隐藏令牌';
+
+  @override
   String get settingsDanmakuServer => '自定义服务地址';
 
   @override
@@ -472,6 +517,9 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get playbackRate => '倍速';
+
+  @override
+  String get playerPlaybackSettings => '播放设置';
 
   @override
   String get alwaysOnTop => '窗口置顶';

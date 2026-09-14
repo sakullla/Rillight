@@ -146,6 +146,26 @@ void main() {
     expect(unknown!.mediaSource.id, 'src-1080');
   });
 
+  test('preferredPlaybackSourceId matches id then name then first', () {
+    const sources = [
+      PlaybackMediaSource(id: 'e1-1080', name: '1080p'),
+      PlaybackMediaSource(id: 'e1-4k', name: '4K 版本'),
+    ];
+    expect(
+      preferredPlaybackSourceId(sources: sources, requestedId: 'e1-4k'),
+      'e1-4k',
+    );
+    expect(
+      preferredPlaybackSourceId(
+        sources: sources,
+        requestedId: 'stale-id',
+        requestedName: '4K 版本',
+      ),
+      'e1-4k',
+    );
+    expect(preferredPlaybackSourceId(sources: sources), 'e1-1080');
+  });
+
   test('PlaybackInfo looks up sources by id', () {
     final info = PlaybackInfo.fromJson({
       'PlaySessionId': 'play-multi',

@@ -25,6 +25,16 @@ void main() {
     expect((await FilePlayerSettingsStore(file).read()).volume, 7);
   });
 
+  test('series preference round-trips mediaSourceName', () {
+    final preference = PlayerSeriesPreference.fromJson(const {
+      'mediaSourceName': '4K 版本',
+      'audioStreamIndex': 2,
+    });
+    expect(preference.mediaSourceName, '4K 版本');
+    expect(preference.audioStreamIndex, 2);
+    expect(preference.toJson()['mediaSourceName'], '4K 版本');
+  });
+
   test('fromJson clamps out of range values', () {
     expect(PlayerSettings.fromJson({'volume': 140}).volume, 100);
     expect(PlayerSettings.fromJson({'volume': -3}).volume, 0);

@@ -76,14 +76,17 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
   String? _seasonId;
   String? _seriesId;
   String? _seriesOverview;
+  String? _focusedEpisodeId;
   EmbyItem? _nextEpisode;
   bool _loading = true;
   bool _busyPlayed = false;
+  final _busyPlayedIds = <String>{};
   EmbyException? _error;
   EmbyException? _similarError;
 
   /// 季切换/重试失败时分集分区内联显示的错误;成功后清空。
   EmbyException? _episodeError;
+  int _episodeReveal = 0;
   bool _episodesLoading = false;
   bool _loadingMore = false;
   String? _mediaSourceId;
@@ -116,7 +119,11 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
   }
 
   void _showItem(String itemId) {
-    if (itemId.isEmpty || itemId == _itemId) {
+    if (itemId.isEmpty) {
+      return;
+    }
+    if (itemId == _itemId) {
+      setState(() => _episodeReveal++);
       return;
     }
     _itemId = itemId;
@@ -131,6 +138,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     if (shown != null && mounted) {
       setState(() {
         _item = shown;
+        _episodeReveal++;
         _nextEpisode = _siblingAfter(shown, _episodes);
         _mediaSourceId = shown.mediaSources.isEmpty
             ? null
@@ -159,6 +167,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
         _seasonId = null;
         _seriesId = null;
         _seriesOverview = null;
+        _focusedEpisodeId = null;
         _nextEpisode = null;
         _mediaSourceId = null;
         _audioStreamIndex = null;
@@ -311,6 +320,9 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
         _seasonId = seasonId;
         _seriesId = seriesId;
         _seriesOverview = seriesOverview;
+        if (item.isSeries) {
+          _focusedEpisodeId ??= _playTarget(item)?.id;
+        }
         _nextEpisode = nextEpisode;
         _similar = similar;
         _similarError = similarError;
@@ -514,7 +526,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     }
     for (final episode in _episodes) {
       if (episode.indexNumber == number) {
-        _showItem(episode.id);
+        _openOrRevealEpisode(episode.id);
         return;
       }
     }
@@ -539,19 +551,38 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
         return;
       }
       setState(() => _applyWindow(window));
-      _showItem(target.id);
+      _openOrRevealEpisode(target.id);
     } on EmbyException catch (error) {
       if (!mounted) {
         return;
       }
-      setState(() => _error = error);
+      setState(() => _episodeError = error);
     }
+  }
+
+  void _revealEpisode(String id) {
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _focusedEpisodeId = id;
+      _episodeReveal++;
+    });
+  }
+
+  void _openOrRevealEpisode(String id) {
+    if (_item?.isSeries ?? false) {
+      _revealEpisode(id);
+      return;
+    }
+    _showItem(id);
   }
 
   /// 切季:失败时分区内联显示错误与重试,而不是静默留下空列表。
   Future<void> _selectSeason(String seasonId) async {
     setState(() {
       _seasonId = seasonId;
+      _focusedEpisodeId = null;
       _episodes = const [];
       _episodeError = null;
       _episodesLoading = true;
@@ -603,9 +634,11 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
         PlayerOpenRequest(
           itemId: itemId,
           autoResume: !fromBeginning && startTimeTicks == null,
-          mediaSourceId: _mediaSourceId,
-          audioStreamIndex: _audioStreamIndex,
-          subtitleStreamIndex: _subtitleStreamIndex,
+          mediaSourceId: _item?.id == itemId ? _mediaSourceId : null,
+          audioStreamIndex: _item?.id == itemId ? _audioStreamIndex : null,
+          subtitleStreamIndex: _item?.id == itemId
+              ? _subtitleStreamIndex
+              : null,
           startTimeTicks: startTimeTicks,
         ),
       );
@@ -621,25 +654,62 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
 
   Future<void> _setPlayed(bool played) async {
     final item = _item;
-    if (item == null || _busyPlayed) {
+    if (item == null) {
       return;
     }
-    setState(() => _busyPlayed = true);
+    await _setItemPlayed(item, played);
+  }
+
+  EmbyUserData _optimisticPlayed(EmbyUserData current, {required bool played}) {
+    return current.copyWith(
+      played: played,
+      playbackPositionTicks: 0,
+      playedPercentage: played ? 100 : 0,
+    );
+  }
+
+  void _patchPlayed(String id, EmbyUserData userData) {
+    _episodes = [
+      for (final episode in _episodes)
+        if (episode.id == id) episode.copyWith(userData: userData) else episode,
+    ];
+    final item = _item;
+    if (item != null && item.id == id) {
+      _item = item.copyWith(userData: userData);
+    }
+  }
+
+  /// 标记已看/未看:先改列表与当前条目,再写 Emby PlayedItems,最后回读详情。
+  Future<void> _setItemPlayed(EmbyItem target, bool played) async {
+    if (_busyPlayedIds.contains(target.id)) {
+      return;
+    }
+    final previous = target.userData;
+    setState(() {
+      _busyPlayedIds.add(target.id);
+      if (_item?.id == target.id) {
+        _busyPlayed = true;
+      }
+      _patchPlayed(target.id, _optimisticPlayed(previous, played: played));
+    });
     final client = AuthScope.of(context).client;
     try {
       if (played) {
-        await client.markPlayed(item.id);
+        await client.markPlayed(target.id);
       } else {
-        await client.markUnplayed(item.id);
+        await client.markUnplayed(target.id);
       }
       // 写穿缓存:详情缓存与服务器保持一致。
-      final updated = await _fetchItem(client, item.id);
+      final updated = await _fetchItem(client, target.id);
       if (!mounted) {
         return;
       }
       setState(() {
-        _item = updated;
-        _busyPlayed = false;
+        _busyPlayedIds.remove(target.id);
+        if (_item?.id == target.id) {
+          _busyPlayed = false;
+        }
+        _patchPlayed(target.id, updated.userData);
       });
       await CatalogScope.maybeOf(context)?.reloadHomeRows();
     } on EmbyException catch (error) {
@@ -647,9 +717,20 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
         return;
       }
       setState(() {
-        _error = error;
-        _busyPlayed = false;
+        _busyPlayedIds.remove(target.id);
+        _patchPlayed(target.id, previous);
+        if (_item?.id == target.id) {
+          _busyPlayed = false;
+          _error = error;
+        }
       });
+      if (_item?.id != target.id) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(error.toString(), key: PlayerKeys.windowError),
+          ),
+        );
+      }
     }
   }
 
@@ -825,6 +906,16 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                         playTarget.id != item.id
                     ? () => _showItem(playTarget.id)
                     : null,
+                onViewSeries:
+                    item.isEpisode && (_seriesId ?? item.seriesId) != null
+                    ? () {
+                        final seriesId = _seriesId ?? item.seriesId;
+                        if (seriesId == null || seriesId.isEmpty) {
+                          return;
+                        }
+                        context.push(AppRoutes.item(seriesId));
+                      }
+                    : null,
                 busyPlayed: _busyPlayed,
                 mediaSourceId: _mediaSourceId,
                 audioStreamIndex: _audioStreamIndex,
@@ -849,9 +940,9 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                 onPlayedChanged: (value) {
                   _setPlayed(value);
                 },
-                showOverview: !item.isEpisode,
+                overview: _displayOverview(item),
               ),
-              if (item.isEpisode)
+              if (item.isSeries || item.isEpisode)
                 _OverviewSection(text: _displayOverview(item)),
               if (item.chapters.isNotEmpty)
                 _ChapterStrip(
@@ -868,25 +959,25 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                     );
                   },
                 ),
-              if (item.isSeries || item.isEpisode) ...[
-                if (item.isSeries && continueWatching.isNotEmpty)
+              if (item.isSeries) ...[
+                if (continueWatching.isNotEmpty)
                   MediaShelf(
                     rowKey: CatalogKeys.resumeRow,
                     shelfId: '${CatalogKeys.shelfEpisodes}-resume',
                     title: l10n.resumeRow,
                     items: continueWatching,
                     wide: true,
-                    onTap: (episode) => _showItem(episode.id),
+                    onTap: (episode) => unawaited(_openPlayer(episode.id)),
                     itemBuilder: (context, episode) {
                       return EpisodeThumbCard(
                         item: episode,
                         width: wideCardWidth,
-                        selected: episode.id == item.id,
-                        onTap: () => _showItem(episode.id),
+                        selected: episode.id == playTarget?.id,
+                        onTap: () => unawaited(_openPlayer(episode.id)),
                       );
                     },
                   ),
-                if (item.isSeries && _seasons.length > 1)
+                if (_seasons.length > 1)
                   MediaShelf(
                     shelfId: 'seasons',
                     title: l10n.seasons,
@@ -901,37 +992,42 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                       );
                     },
                   ),
-                if (_episodes.isNotEmpty ||
-                    _episodeError != null ||
-                    _episodesLoading)
-                  _EpisodeList(
-                    episodes: _episodes,
-                    currentId: item.isEpisode ? item.id : null,
-                    loading: _episodesLoading,
-                    error: _episodeError,
-                    onRetry: _seasonId == null
-                        ? null
-                        : () => unawaited(_selectSeason(_seasonId!)),
-                    hasMore: _episodeWindowEnd < _episodeTotal,
-                    loadingMore: _loadingMore,
-                    onLoadMore: () => unawaited(_loadMoreEpisodes()),
-                    headerAction: _EpisodeShelfActions(
-                      seasons: _seasons,
-                      seasonId: _seasonId,
-                      onSelectSeason: _selectSeason,
-                      onLocate: _seasonId == null ? null : _openEpisodePicker,
-                    ),
-                    onTap: (episode) => _showItem(episode.id),
-                    onMore: _seasonId == null
-                        ? null
-                        : () => context.push(
-                            AppRoutes.shelfItems(
-                              parentId: _seasonId,
-                              includeItemTypes: 'Episode',
-                              title: l10n.episodesRow,
-                            ),
-                          ),
+                _EpisodeList(
+                  episodes: _episodes,
+                  currentId: _focusedEpisodeId ?? playTarget?.id,
+                  revealToken: _episodeReveal,
+                  loading: _episodesLoading,
+                  error: _episodeError,
+                  onRetry: _seasonId == null
+                      ? null
+                      : () => unawaited(_selectSeason(_seasonId!)),
+                  hasMore: _episodeWindowEnd < _episodeTotal,
+                  loadingMore: _loadingMore,
+                  onLoadMore: () => unawaited(_loadMoreEpisodes()),
+                  headerAction: _EpisodeShelfActions(
+                    seasons: _seasons,
+                    seasonId: _seasonId,
+                    onSelectSeason: _selectSeason,
+                    onLocate: _seasonId == null ? null : _openEpisodePicker,
                   ),
+                  onTap: (episode) => unawaited(_openPlayer(episode.id)),
+                  onPlay: (episode) => unawaited(_openPlayer(episode.id)),
+                  onTogglePlayed: (episode) {
+                    unawaited(
+                      _setItemPlayed(episode, !episode.userData.played),
+                    );
+                  },
+                  busyPlayedIds: _busyPlayedIds,
+                  onMore: _seasonId == null
+                      ? null
+                      : () => context.push(
+                          AppRoutes.shelfItems(
+                            parentId: _seasonId,
+                            includeItemTypes: 'Episode',
+                            title: l10n.episodesRow,
+                          ),
+                        ),
+                ),
               ],
               if (showSimilar)
                 MediaShelf(
@@ -1683,6 +1779,7 @@ class _DetailHeader extends StatelessWidget {
     this.nextEpisode,
     this.onViewEpisode,
     this.onOpenNextEpisode,
+    this.onViewSeries,
     this.mediaSourceId,
     this.audioStreamIndex,
     this.subtitleStreamIndex,
@@ -1690,7 +1787,7 @@ class _DetailHeader extends StatelessWidget {
     this.onAudio,
     this.onSubtitle,
     this.onLocateEpisode,
-    this.showOverview = true,
+    this.overview,
   });
 
   final EmbyItem item;
@@ -1705,6 +1802,7 @@ class _DetailHeader extends StatelessWidget {
   final EmbyItem? nextEpisode;
   final VoidCallback? onViewEpisode;
   final VoidCallback? onOpenNextEpisode;
+  final VoidCallback? onViewSeries;
   final String? mediaSourceId;
   final int? audioStreamIndex;
   final int? subtitleStreamIndex;
@@ -1712,7 +1810,9 @@ class _DetailHeader extends StatelessWidget {
   final ValueChanged<int>? onAudio;
   final ValueChanged<int?>? onSubtitle;
   final VoidCallback? onLocateEpisode;
-  final bool showOverview;
+
+  /// 头部摘要:电影/剧集用自身简介,单集优先本集、否则回退剧集简介。
+  final String? overview;
 
   /// 顶带在顶栏之下继续溶入的高度。
   static const double _topBandFade = 36;
@@ -1772,7 +1872,7 @@ class _DetailHeader extends StatelessWidget {
                           seriesId: seriesId,
                           nextEpisode: nextEpisode,
                           onLocateEpisode: onLocateEpisode,
-                          showOverview: showOverview,
+                          overview: overview,
                           actions: _DetailActions(
                             item: item,
                             busyPlayed: busyPlayed,
@@ -1780,6 +1880,7 @@ class _DetailHeader extends StatelessWidget {
                             onPlayFromStart: onPlayFromStart,
                             onOpenNextEpisode: onOpenNextEpisode,
                             onViewEpisode: onViewEpisode,
+                            onViewSeries: onViewSeries,
                             onPlayedChanged: onPlayedChanged,
                             mediaSourceId: mediaSourceId,
                             audioStreamIndex: audioStreamIndex,
@@ -1869,7 +1970,7 @@ class _DetailPoster extends StatelessWidget {
   }
 }
 
-/// 头部右栏:剧名链接(单集)、标题、元信息胶囊、简介(电影/剧集)与操作区。
+/// 头部右栏:剧名链接(单集)、标题、元信息胶囊、简介摘要与操作区。
 class _DetailInfo extends StatelessWidget {
   const _DetailInfo({
     required this.item,
@@ -1879,7 +1980,7 @@ class _DetailInfo extends StatelessWidget {
     required this.seriesId,
     required this.nextEpisode,
     required this.onLocateEpisode,
-    required this.showOverview,
+    required this.overview,
     required this.actions,
   });
 
@@ -1890,14 +1991,14 @@ class _DetailInfo extends StatelessWidget {
   final String? seriesId;
   final EmbyItem? nextEpisode;
   final VoidCallback? onLocateEpisode;
-  final bool showOverview;
+  final String? overview;
   final Widget actions;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final overview = item.overview?.trim();
-    final hasOverview = showOverview && overview != null && overview.isNotEmpty;
+    final overview = this.overview?.trim();
+    final hasOverview = overview != null && overview.isNotEmpty;
     final seriesName = item.seriesName;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1989,6 +2090,7 @@ class _MetaRow extends StatelessWidget {
       return Tooltip(
         message: l10n.pickEpisode,
         child: InkWell(
+          key: CatalogKeys.locateEpisode,
           onTap: onTap,
           borderRadius: BorderRadius.circular(999),
           child: body,
@@ -2048,6 +2150,7 @@ class _DetailActions extends StatelessWidget {
     this.onPlayFromStart,
     this.onOpenNextEpisode,
     this.onViewEpisode,
+    this.onViewSeries,
     this.mediaSourceId,
     this.audioStreamIndex,
     this.subtitleStreamIndex,
@@ -2063,6 +2166,7 @@ class _DetailActions extends StatelessWidget {
   final VoidCallback? onPlayFromStart;
   final VoidCallback? onOpenNextEpisode;
   final VoidCallback? onViewEpisode;
+  final VoidCallback? onViewSeries;
   final String? mediaSourceId;
   final int? audioStreamIndex;
   final int? subtitleStreamIndex;
@@ -2145,6 +2249,14 @@ class _DetailActions extends StatelessWidget {
           style: ghost,
           icon: const Icon(Icons.slideshow_outlined),
           label: Text(l10n.viewThisEpisode),
+        ),
+      if (onViewSeries != null)
+        OutlinedButton.icon(
+          key: CatalogKeys.viewSeries,
+          onPressed: onViewSeries,
+          style: ghost,
+          icon: const Icon(Icons.video_library_outlined),
+          label: Text(l10n.viewSeries),
         ),
     ];
     final tools = <Widget>[
@@ -2295,6 +2407,7 @@ class _EpisodeList extends StatelessWidget {
   const _EpisodeList({
     required this.episodes,
     required this.currentId,
+    required this.revealToken,
     required this.loading,
     required this.error,
     required this.onRetry,
@@ -2303,11 +2416,15 @@ class _EpisodeList extends StatelessWidget {
     required this.onLoadMore,
     required this.headerAction,
     required this.onTap,
+    required this.onPlay,
+    required this.onTogglePlayed,
+    required this.busyPlayedIds,
     required this.onMore,
   });
 
   final List<EmbyItem> episodes;
   final String? currentId;
+  final int revealToken;
   final bool loading;
   final EmbyException? error;
   final VoidCallback? onRetry;
@@ -2316,6 +2433,9 @@ class _EpisodeList extends StatelessWidget {
   final VoidCallback onLoadMore;
   final Widget headerAction;
   final ValueChanged<EmbyItem> onTap;
+  final ValueChanged<EmbyItem> onPlay;
+  final ValueChanged<EmbyItem> onTogglePlayed;
+  final Set<String> busyPlayedIds;
   final VoidCallback? onMore;
 
   @override
@@ -2384,11 +2504,18 @@ class _EpisodeList extends StatelessWidget {
                     Padding(
                       key: ValueKey('episode-row-${episode.id}'),
                       padding: const EdgeInsets.only(bottom: AppSpacing.xxs),
-                      child: _EpisodeRow(
-                        item: episode,
-                        thumbWidth: thumbWidth,
+                      child: _EnsureVisibleWhenSelected(
                         selected: episode.id == currentId,
-                        onTap: () => onTap(episode),
+                        token: revealToken,
+                        child: _EpisodeRow(
+                          item: episode,
+                          thumbWidth: thumbWidth,
+                          selected: episode.id == currentId,
+                          busyPlayed: busyPlayedIds.contains(episode.id),
+                          onTap: () => onTap(episode),
+                          onPlay: () => onPlay(episode),
+                          onTogglePlayed: () => onTogglePlayed(episode),
+                        ),
                       ),
                     ),
                 ],
@@ -2407,7 +2534,7 @@ class _EpisodeList extends StatelessWidget {
                             height: 18,
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
-                        : Text(l10n.more),
+                        : Text(l10n.episodesLoadMore),
                   ),
                 ),
               ),
@@ -2418,20 +2545,81 @@ class _EpisodeList extends StatelessWidget {
   }
 }
 
-/// 分集行:16:9 缩略图 + 「N. 标题」+ 时长/进度 + 已看勾;
+/// 当前集变化后滚入可视区(含选集跳到已在列表中的集)。
+class _EnsureVisibleWhenSelected extends StatefulWidget {
+  const _EnsureVisibleWhenSelected({
+    required this.selected,
+    required this.token,
+    required this.child,
+  });
+
+  final bool selected;
+  final int token;
+  final Widget child;
+
+  @override
+  State<_EnsureVisibleWhenSelected> createState() =>
+      _EnsureVisibleWhenSelectedState();
+}
+
+class _EnsureVisibleWhenSelectedState
+    extends State<_EnsureVisibleWhenSelected> {
+  @override
+  void initState() {
+    super.initState();
+    if (widget.selected) {
+      _schedule();
+    }
+  }
+
+  @override
+  void didUpdateWidget(_EnsureVisibleWhenSelected oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.selected &&
+        (!oldWidget.selected || oldWidget.token != widget.token)) {
+      _schedule();
+    }
+  }
+
+  void _schedule() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      Scrollable.ensureVisible(
+        context,
+        alignment: 0.25,
+        duration: AppMotion.durationOf(context, AppMotion.fast),
+        curve: AppMotion.standard,
+      );
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
+}
+
+/// 分集行:16:9 缩略图 + 「N. 标题」+ 时长/进度 + 本集简介;
+/// 右侧为已看开关与播放,右键菜单提供同样的操作。
 /// 当前集以 surfaceContainerHigh 底色与 primary 左边条标示。
 class _EpisodeRow extends StatelessWidget {
   const _EpisodeRow({
     required this.item,
     required this.thumbWidth,
     required this.selected,
+    required this.busyPlayed,
     required this.onTap,
+    required this.onPlay,
+    required this.onTogglePlayed,
   });
 
   final EmbyItem item;
   final double thumbWidth;
   final bool selected;
+  final bool busyPlayed;
   final VoidCallback onTap;
+  final VoidCallback onPlay;
+  final VoidCallback onTogglePlayed;
 
   static double thumbWidthFor(double screenWidth) {
     if (screenWidth < AppBreakpoints.compact) {
@@ -2443,6 +2631,43 @@ class _EpisodeRow extends StatelessWidget {
     return 248;
   }
 
+  Future<void> _openMenu(BuildContext context, Offset globalPosition) async {
+    final l10n = AppLocalizations.of(context);
+    final overlay = Navigator.of(context).overlay;
+    if (overlay == null) {
+      return;
+    }
+    final overlayBox = overlay.context.findRenderObject()! as RenderBox;
+    final played = item.userData.played;
+    final playLabel = item.canResume ? l10n.resumePlay : l10n.play;
+    final action = await showMenu<_EpisodeRowMenuAction>(
+      context: context,
+      position: RelativeRect.fromRect(
+        Rect.fromLTWH(globalPosition.dx, globalPosition.dy, 0, 0),
+        Offset.zero & overlayBox.size,
+      ),
+      items: [
+        PopupMenuItem(
+          value: _EpisodeRowMenuAction.play,
+          child: Text(playLabel),
+        ),
+        PopupMenuItem(
+          value: _EpisodeRowMenuAction.togglePlayed,
+          child: Text(played ? l10n.markUnplayed : l10n.markPlayed),
+        ),
+      ],
+    );
+    if (action == null) {
+      return;
+    }
+    switch (action) {
+      case _EpisodeRowMenuAction.play:
+        onPlay();
+      case _EpisodeRowMenuAction.togglePlayed:
+        onTogglePlayed();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
@@ -2451,11 +2676,15 @@ class _EpisodeRow extends StatelessWidget {
     final number = item.indexNumber;
     final title = number == null ? item.name : '$number. ${item.name}';
     final progress = item.playbackProgress;
+    final playLabel = item.canResume ? l10n.resumePlay : l10n.play;
+    final played = item.userData.played;
     final meta = <String>[
       ?runtimeLabel(l10n, item),
       if (item.canResume) l10n.playbackProgress((progress * 100).round()),
     ];
+    final overview = item.overview?.trim();
     final thumbHeight = thumbWidth * 9 / 16;
+    final compact = MediaQuery.sizeOf(context).width < AppBreakpoints.compact;
     return ClipRRect(
       borderRadius: BorderRadius.circular(AppRadii.md),
       child: Material(
@@ -2463,6 +2692,9 @@ class _EpisodeRow extends StatelessWidget {
         child: InkWell(
           key: CatalogKeys.episode(item.id),
           onTap: onTap,
+          onSecondaryTapDown: (details) {
+            unawaited(_openMenu(context, details.globalPosition));
+          },
           child: DecoratedBox(
             decoration: BoxDecoration(
               border: Border(
@@ -2506,51 +2738,86 @@ class _EpisodeRow extends StatelessWidget {
                   ),
                   const SizedBox(width: AppSpacing.md),
                   Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.only(top: AppSpacing.xxs),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  title,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: theme.textTheme.titleSmall?.copyWith(
-                                    fontWeight: selected
-                                        ? FontWeight.w700
-                                        : null,
-                                  ),
-                                ),
-                              ),
-                              if (item.userData.played)
-                                Padding(
-                                  padding: const EdgeInsets.only(
-                                    left: AppSpacing.xs,
-                                  ),
-                                  child: Icon(
-                                    Icons.check_circle_rounded,
-                                    size: 18,
-                                    color: scheme.primary,
-                                  ),
-                                ),
-                            ],
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          title,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontWeight: selected ? FontWeight.w700 : null,
                           ),
-                          if (meta.isNotEmpty) ...[
-                            const SizedBox(height: AppSpacing.xxs),
-                            Text(
-                              meta.join(' · '),
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: scheme.onSurfaceVariant,
-                              ),
+                        ),
+                        if (meta.isNotEmpty) ...[
+                          const SizedBox(height: AppSpacing.xxs),
+                          Text(
+                            meta.join(' · '),
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: scheme.onSurfaceVariant,
                             ),
-                          ],
+                          ),
                         ],
-                      ),
+                        if (overview != null && overview.isNotEmpty) ...[
+                          const SizedBox(height: AppSpacing.xs),
+                          Text(
+                            overview,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: scheme.onSurface.withValues(alpha: 0.78),
+                              height: 1.4,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  SizedBox(
+                    height: thumbHeight,
+                    child: Row(
+                      children: [
+                        IconButton(
+                          key: CatalogKeys.episodePlayed(item.id),
+                          tooltip: played ? l10n.markUnplayed : l10n.markPlayed,
+                          onPressed: busyPlayed ? null : onTogglePlayed,
+                          icon: Icon(
+                            played
+                                ? Icons.check_circle_rounded
+                                : Icons.check_circle_outline_rounded,
+                            color: played
+                                ? scheme.primary
+                                : scheme.onSurfaceVariant,
+                          ),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.only(left: AppSpacing.xxs),
+                          child: selected && !compact
+                              ? FilledButton.icon(
+                                  key: CatalogKeys.episodePlay(item.id),
+                                  onPressed: onPlay,
+                                  style: FilledButton.styleFrom(
+                                    minimumSize: const Size(0, 40),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: AppSpacing.lg,
+                                      vertical: AppSpacing.xs,
+                                    ),
+                                  ),
+                                  icon: const Icon(
+                                    Icons.play_arrow_rounded,
+                                    size: 22,
+                                  ),
+                                  label: Text(playLabel),
+                                )
+                              : IconButton.filled(
+                                  key: CatalogKeys.episodePlay(item.id),
+                                  tooltip: playLabel,
+                                  onPressed: onPlay,
+                                  icon: const Icon(Icons.play_arrow_rounded),
+                                ),
+                        ),
+                      ],
                     ),
                   ),
                 ],
@@ -2562,6 +2829,8 @@ class _EpisodeRow extends StatelessWidget {
     );
   }
 }
+
+enum _EpisodeRowMenuAction { play, togglePlayed }
 
 class _EpisodeRowSkeleton extends StatelessWidget {
   const _EpisodeRowSkeleton({required this.thumbWidth});

@@ -249,4 +249,56 @@ void main() {
       '',
     );
   });
+
+  testWidgets('token field can reveal the stored value', (tester) async {
+    final store = MemoryPlayerSettingsStore(
+      const PlayerSettings(volume: 40, danmakuToken: 'secret'),
+    );
+    await pumpPage(tester, store: store);
+
+    expect(
+      tester
+          .widget<TextField>(find.byKey(SettingsPage.danmakuTokenFieldKey))
+          .obscureText,
+      isTrue,
+    );
+    await tester.ensureVisible(find.byKey(SettingsPage.tokenVisibilityKey));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(SettingsPage.tokenVisibilityKey));
+    await tester.pump();
+    expect(
+      tester
+          .widget<TextField>(find.byKey(SettingsPage.danmakuTokenFieldKey))
+          .obscureText,
+      isFalse,
+    );
+  });
+
+  testWidgets(
+    'keeps settings in a centered column instead of window-wide rows',
+    (tester) async {
+      tester.view.physicalSize = const Size(1600, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      await pumpPage(tester, store: MemoryPlayerSettingsStore());
+
+      final column = tester.getRect(find.byKey(SettingsPage.columnKey));
+      expect(column.width, lessThanOrEqualTo(SettingsPage.columnMaxWidth + 1));
+
+      final cache = tester.getRect(find.byKey(SettingsPage.diskCacheLimitKey));
+      expect(cache.left, greaterThan(column.left - 1));
+      expect(cache.right, lessThan(column.right + 1));
+      // 控件贴在分组卡片右侧,而不是 1600 宽窗口的右沿。
+      expect(cache.right, lessThan(1200));
+
+      final restore = tester.getRect(
+        find.byKey(SettingsPage.restoreDefaultsKey),
+      );
+      expect(restore.right, lessThan(column.right + 1));
+      expect(restore.left, greaterThan(column.center.dx));
+      expect(restore.right, lessThan(1200));
+    },
+  );
 }

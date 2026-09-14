@@ -244,6 +244,24 @@ void main() {
   );
 
   testWidgets(
+    'refresh button falls back to libraries when media rows are hidden',
+    (tester) async {
+      server.items.clear();
+      await pumpLoggedIn(tester);
+
+      expect(find.byKey(CatalogKeys.resumeRow), findsNothing);
+      expect(find.byKey(CatalogKeys.nextUpRow), findsNothing);
+      expect(find.byKey(CatalogKeys.latestMoviesRow), findsNothing);
+      expect(find.byKey(CatalogKeys.latestSeriesRow), findsNothing);
+      expect(find.byKey(homeRefreshKey), findsOneWidget);
+      expect(
+        inRow(CatalogKeys.librariesMenu, find.byKey(homeRefreshKey)),
+        findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets(
     'a home row shows error and retry after quiet retries are exhausted',
     (tester) async {
       server.latestMovieStatus = 500;

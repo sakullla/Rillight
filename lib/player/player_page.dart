@@ -23,6 +23,10 @@ import 'package:rillight/player/player_window.dart';
 import 'package:rillight/player/player_window_host.dart';
 import 'package:rillight/player/video_backend.dart';
 
+/// 播放器顶栏命中高度:内边距 + 标题行。剧集面板从这之下铺开,避免挡住关闭/置顶。
+const double kPlayerChromeBarExtent =
+    AppSpacing.sm + kWindowChromeHeight + AppSpacing.sm + AppSpacing.lg;
+
 class PlayerPage extends StatefulWidget {
   const PlayerPage({
     super.key,
@@ -201,11 +205,20 @@ class PlayerPageState extends State<PlayerPage> {
     if (current == null || !current.canBrowseEpisodes) {
       return;
     }
+    if (_episodesOpen) {
+      _closeEpisodeList();
+      return;
+    }
     unawaited(current.loadEpisodeList());
+    current.setControlsPinned(true);
     setState(() => _episodesOpen = true);
   }
 
   void _closeEpisodeList() {
+    if (!_episodesOpen) {
+      return;
+    }
+    controller?.setControlsPinned(false);
     setState(() => _episodesOpen = false);
   }
 
@@ -252,6 +265,10 @@ class PlayerPageState extends State<PlayerPage> {
           return KeyEventResult.handled;
         }
         if (event.logicalKey == LogicalKeyboardKey.escape) {
+          if (_episodesOpen) {
+            _closeEpisodeList();
+            return KeyEventResult.handled;
+          }
           current.onEscape();
           return KeyEventResult.handled;
         }
@@ -292,7 +309,8 @@ class PlayerPageState extends State<PlayerPage> {
               cursor:
                   (!current.controlsVisible &&
                       current.nextEpisode == null &&
-                      !current.playbackEnded)
+                      !current.playbackEnded &&
+                      !_episodesOpen)
                   ? SystemMouseCursors.none
                   : MouseCursor.defer,
               child: Stack(
@@ -382,12 +400,9 @@ class PlayerPageState extends State<PlayerPage> {
                     ),
                   if (current.nextEpisode != null)
                     _NextEpisodeBanner(controller: current),
-                  if (_episodesOpen && current.canBrowseEpisodes)
-                    _EpisodeListPanel(
-                      controller: current,
-                      onClose: _closeEpisodeList,
-                    ),
                   if (current.activeSkipSegment != null &&
+                      current.skipPromptVisible &&
+                      current.nextEpisode == null &&
                       !current.loading &&
                       !current.playbackEnded)
                     _SkipSegmentButton(controller: current),
@@ -422,6 +437,11 @@ class PlayerPageState extends State<PlayerPage> {
                     controller: current,
                     visible: current.controlsVisible,
                   ),
+                  if (_episodesOpen && current.canBrowseEpisodes)
+                    _EpisodeListPanel(
+                      controller: current,
+                      onClose: _closeEpisodeList,
+                    ),
                 ],
               ),
             ),
@@ -544,6 +564,7 @@ class _PlayerChromeBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
     final scrim = theme.colorScheme.scrim;
     final title = controller.item?.displayName ?? '';
     return Positioned(
@@ -595,6 +616,23 @@ class _PlayerChromeBar extends StatelessWidget {
                                 ),
                         ),
                       ),
+                    ),
+                  ),
+                  IconButton(
+                    key: const Key('player-always-on-top'),
+                    tooltip: controller.isAlwaysOnTop
+                        ? l10n.alwaysOnTopOff
+                        : l10n.alwaysOnTop,
+                    color: controller.isAlwaysOnTop
+                        ? theme.colorScheme.primary
+                        : theme.colorScheme.onSurface,
+                    onPressed: () {
+                      unawaited(controller.toggleAlwaysOnTop());
+                    },
+                    icon: Icon(
+                      controller.isAlwaysOnTop
+                          ? Icons.push_pin_rounded
+                          : Icons.push_pin_outlined,
                     ),
                   ),
                   IconButton(
@@ -816,8 +854,7 @@ class _SkipSegmentButton extends StatelessWidget {
   }
 }
 
-/// 播放中的剧集列表面板:当前季分集 ListView.builder 惰性构建,
-/// 可切换季,点击任意集立即切集。
+/// 播放中的剧集列表:点遮罩或关闭钮收起,列表从顶栏下方开始以免挡住窗口关闭。
 class _EpisodeListPanel extends StatelessWidget {
   const _EpisodeListPanel({required this.controller, required this.onClose});
 
@@ -834,101 +871,137 @@ class _EpisodeListPanel extends StatelessWidget {
         .where((season) => season.id == controller.episodeSeasonId)
         .toList();
     return Positioned(
-      top: 0,
-      bottom: 0,
+      top: kPlayerChromeBarExtent,
+      left: 0,
       right: 0,
-      width: 340,
-      child: LiquidGlass(
-        kind: LiquidGlassKind.panel,
-        // 顶部让位给窗口标题栏(拖拽/关闭),底部让位给控制条。
-        padding: EdgeInsets.fromLTRB(
-          AppSpacing.lg,
-          kWindowChromeHeight + AppSpacing.xl,
-          AppSpacing.lg,
-          AppSpacing.huge,
-        ),
-        child: Material(
-          key: const Key('player-episodes-panel'),
-          type: MaterialType.transparency,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      l10n.playerEpisodes,
-                      style: theme.textTheme.titleMedium,
-                    ),
-                  ),
-                  if (seasons.length > 1) _SeasonPicker(controller: controller),
-                  IconButton(
-                    key: const Key('player-episodes-close'),
-                    tooltip: MaterialLocalizations.of(
-                      context,
-                    ).closeButtonTooltip,
-                    onPressed: onClose,
-                    icon: const Icon(Icons.close_rounded),
-                  ),
-                ],
+      bottom: 0,
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: GestureDetector(
+              key: const Key('player-episodes-dismiss'),
+              behavior: HitTestBehavior.opaque,
+              onTap: onClose,
+              child: ColoredBox(
+                color: scheme.scrim.withValues(
+                  alpha: AppScrim.of(context, AppScrim.barrier),
+                ),
               ),
-              const SizedBox(height: AppSpacing.sm),
-              Expanded(
-                child:
-                    controller.episodeListLoading && controller.episodes.isEmpty
-                    ? const Center(
-                        child: CircularProgressIndicator(strokeWidth: 3),
-                      )
-                    : controller.episodeListFailed &&
-                          controller.episodes.isEmpty
-                    ? Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            l10n.playbackFailed,
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              color: scheme.onSurfaceVariant,
+            ),
+          ),
+          Positioned(
+            top: 0,
+            bottom: 0,
+            right: 0,
+            width: 360,
+            child: Material(
+              key: const Key('player-episodes-panel'),
+              color: scheme.surfaceContainerHigh,
+              elevation: 8,
+              shadowColor: scheme.shadow,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.md,
+                  AppSpacing.md,
+                  AppSpacing.md,
+                  AppSpacing.lg,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            l10n.playerEpisodes,
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              color: scheme.onSurface,
                             ),
                           ),
-                          const SizedBox(height: AppSpacing.sm),
-                          OutlinedButton(
-                            key: const Key('player-episodes-retry'),
-                            onPressed: () {
-                              unawaited(controller.loadEpisodeList());
-                            },
-                            child: Text(l10n.retry),
-                          ),
-                        ],
-                      )
-                    : ListView.builder(
-                        key: const Key('player-episodes-list'),
-                        itemCount: controller.episodes.length,
-                        itemBuilder: (context, index) {
-                          final episode = controller.episodes[index];
-                          final isCurrent = episode.id == controller.itemId;
-                          return _EpisodeRow(
-                            episode: episode,
-                            isCurrent: isCurrent,
-                            onTap: () {
-                              unawaited(controller.playEpisode(episode));
-                            },
-                          );
-                        },
-                      ),
-              ),
-              if (currentSeason.length == 1)
-                Padding(
-                  padding: const EdgeInsets.only(top: AppSpacing.sm),
-                  child: Text(
-                    currentSeason.first.name,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: scheme.onSurfaceVariant,
+                        ),
+                        if (seasons.length > 1)
+                          _SeasonPicker(controller: controller),
+                        IconButton(
+                          key: const Key('player-episodes-close'),
+                          tooltip: MaterialLocalizations.of(
+                            context,
+                          ).closeButtonTooltip,
+                          color: scheme.onSurface,
+                          onPressed: onClose,
+                          icon: const Icon(Icons.close_rounded),
+                        ),
+                      ],
                     ),
-                  ),
+                    const SizedBox(height: AppSpacing.sm),
+                    Expanded(child: _episodeListBody(context, l10n, scheme)),
+                    if (currentSeason.length == 1)
+                      Padding(
+                        padding: const EdgeInsets.only(top: AppSpacing.sm),
+                        child: Text(
+                          currentSeason.first.name,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
-            ],
+              ),
+            ),
           ),
-        ),
+        ],
+      ),
+    );
+  }
+
+  Widget _episodeListBody(
+    BuildContext context,
+    AppLocalizations l10n,
+    ColorScheme scheme,
+  ) {
+    if (controller.episodeListLoading && controller.episodes.isEmpty) {
+      return const Center(child: CircularProgressIndicator(strokeWidth: 3));
+    }
+    if (controller.episodeListFailed && controller.episodes.isEmpty) {
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            l10n.playbackFailed,
+            style: Theme.of(
+              context,
+            ).textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          OutlinedButton(
+            key: const Key('player-episodes-retry'),
+            onPressed: () {
+              unawaited(controller.loadEpisodeList());
+            },
+            child: Text(l10n.retry),
+          ),
+        ],
+      );
+    }
+    return Scrollbar(
+      child: ListView.builder(
+        key: const Key('player-episodes-list'),
+        itemCount: controller.episodes.length,
+        itemBuilder: (context, index) {
+          final episode = controller.episodes[index];
+          final isCurrent = episode.id == controller.itemId;
+          return _EnsureCurrentEpisodeVisible(
+            selected: isCurrent,
+            token: controller.itemId,
+            child: _EpisodeRow(
+              episode: episode,
+              isCurrent: isCurrent,
+              onTap: () {
+                unawaited(controller.playEpisode(episode));
+              },
+            ),
+          );
+        },
       ),
     );
   }
@@ -1006,9 +1079,11 @@ class _EpisodeRow extends StatelessWidget {
     final number = episode.indexNumber;
     return ListTile(
       key: Key('player-episode-${episode.id}'),
-      dense: true,
       selected: isCurrent,
-      selectedColor: scheme.primary,
+      selectedTileColor: scheme.surfaceContainerHighest,
+      selectedColor: scheme.onSurface,
+      textColor: scheme.onSurface,
+      iconColor: scheme.onSurface,
       leading: number == null
           ? null
           : SizedBox(
@@ -1016,16 +1091,19 @@ class _EpisodeRow extends StatelessWidget {
               child: Text(
                 '$number',
                 textAlign: TextAlign.end,
-                style: theme.textTheme.labelMedium,
+                style: theme.textTheme.labelLarge?.copyWith(
+                  color: scheme.onSurface,
+                ),
               ),
             ),
       title: Text(
         episode.name,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
-        style: isCurrent
-            ? theme.textTheme.bodyMedium?.copyWith(color: scheme.primary)
-            : theme.textTheme.bodyMedium,
+        style: theme.textTheme.bodyLarge?.copyWith(
+          color: scheme.onSurface,
+          fontWeight: isCurrent ? FontWeight.w600 : FontWeight.w400,
+        ),
       ),
       trailing: episode.userData.played
           ? Icon(Icons.check_rounded, size: 18, color: scheme.onSurfaceVariant)
@@ -1033,6 +1111,60 @@ class _EpisodeRow extends StatelessWidget {
       onTap: onTap,
     );
   }
+}
+
+/// 当前集进入可视区,长列表打开时能看到正在播放的那一集。
+class _EnsureCurrentEpisodeVisible extends StatefulWidget {
+  const _EnsureCurrentEpisodeVisible({
+    required this.selected,
+    required this.token,
+    required this.child,
+  });
+
+  final bool selected;
+  final String token;
+  final Widget child;
+
+  @override
+  State<_EnsureCurrentEpisodeVisible> createState() =>
+      _EnsureCurrentEpisodeVisibleState();
+}
+
+class _EnsureCurrentEpisodeVisibleState
+    extends State<_EnsureCurrentEpisodeVisible> {
+  @override
+  void initState() {
+    super.initState();
+    if (widget.selected) {
+      _schedule();
+    }
+  }
+
+  @override
+  void didUpdateWidget(_EnsureCurrentEpisodeVisible oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.selected &&
+        (!oldWidget.selected || oldWidget.token != widget.token)) {
+      _schedule();
+    }
+  }
+
+  void _schedule() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      Scrollable.ensureVisible(
+        context,
+        alignment: 0.25,
+        duration: AppMotion.durationOf(context, AppMotion.fast),
+        curve: AppMotion.standard,
+      );
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }
 
 /// 顶部提示横幅;[onDismiss] 非空时(持续显示态)附带关闭钮。
@@ -1258,8 +1390,6 @@ class _ControlsRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
     return Row(
       children: [
         _PlayerIconButton(
@@ -1273,62 +1403,8 @@ class _ControlsRow extends StatelessWidget {
         ),
         _VolumeControl(controller: controller),
         const Spacer(),
-        if (controller.isTranscode)
-          _ControlMenu<int>(
-            key: PlayerKeys.quality,
-            tooltip: l10n.qualityAuto,
-            icon: Icons.high_quality_outlined,
-            onSelected: controller.setMaxBitrate,
-            items: [
-              CheckedPopupMenuItem(
-                value: kTranscodeBitrates.first,
-                checked:
-                    controller.maxStreamingBitrate ==
-                        kTranscodeBitrates.first ||
-                    !kTranscodeBitrates.contains(
-                      controller.maxStreamingBitrate,
-                    ),
-                child: Text(l10n.qualityAuto),
-              ),
-              for (final bitrate in kTranscodeBitrates.skip(1))
-                CheckedPopupMenuItem(
-                  value: bitrate,
-                  checked: controller.maxStreamingBitrate == bitrate,
-                  child: Text(l10n.qualityMbps(bitrate ~/ 1000000)),
-                ),
-            ],
-          ),
-        _SpeedControl(controller: controller),
-        if (danmaku != null) ...[
-          _PlayerIconButton(
-            key: const Key('player-danmaku-toggle'),
-            tooltip: l10n.danmaku,
-            onPressed: () => unawaited(danmaku!.toggleDanmaku()),
-            iconSize: 22,
-            color: danmaku!.danmakuOn ? scheme.primary : null,
-            icon: danmaku!.danmakuOn
-                ? Icons.forum_rounded
-                : Icons.forum_outlined,
-          ),
+        if (danmaku != null)
           _DanmakuSettingsMenu(danmaku: danmaku!, onSearch: onDanmakuSearch),
-        ],
-        if (controller.canSetManualSkip)
-          _SkipSettingsControl(controller: controller),
-        if (controller.audioTracks.length > 1)
-          _ControlMenu<int>(
-            key: PlayerKeys.audio,
-            tooltip: l10n.audioTrack,
-            icon: Icons.audiotrack_rounded,
-            onSelected: controller.setAudio,
-            items: [
-              for (final track in controller.audioTracks)
-                CheckedPopupMenuItem(
-                  value: track.index,
-                  checked: track.index == controller.audioStreamIndex,
-                  child: Text(track.label),
-                ),
-            ],
-          ),
         if (controller.subtitleTracks.isNotEmpty)
           _ControlMenu<int>(
             key: PlayerKeys.subtitle,
@@ -1361,33 +1437,7 @@ class _ControlsRow extends StatelessWidget {
             iconSize: 22,
             icon: Icons.playlist_play_rounded,
           ),
-        if (controller.canSwitchMediaSource)
-          _ControlMenu<String>(
-            key: const Key('player-media-source'),
-            tooltip: l10n.mediaSource,
-            icon: Icons.layers_outlined,
-            onSelected: controller.switchMediaSource,
-            items: [
-              for (final source in controller.mediaSources)
-                CheckedPopupMenuItem(
-                  value: source.id,
-                  checked: source.id == controller.resolved?.mediaSource.id,
-                  child: Text(source.label),
-                ),
-            ],
-          ),
-        _PlayerIconButton(
-          key: const Key('player-always-on-top'),
-          tooltip: controller.isAlwaysOnTop
-              ? l10n.alwaysOnTopOff
-              : l10n.alwaysOnTop,
-          color: controller.isAlwaysOnTop ? scheme.primary : null,
-          onPressed: controller.toggleAlwaysOnTop,
-          iconSize: 20,
-          icon: controller.isAlwaysOnTop
-              ? Icons.push_pin_rounded
-              : Icons.push_pin_outlined,
-        ),
+        _PlaybackOverflowMenu(controller: controller),
         _PlayerIconButton(
           key: PlayerKeys.fullscreen,
           tooltip: controller.isFullScreen
@@ -1403,40 +1453,254 @@ class _ControlsRow extends StatelessWidget {
   }
 }
 
-/// 倍速组:固定阶梯菜单 + 当前倍速回显。
-class _SpeedControl extends StatelessWidget {
-  const _SpeedControl({required this.controller});
+/// 低频播放设置收入溢出菜单,控制条只留主操作与高频入口
+/// (播放/音量/弹幕/字幕/剧集/全屏)。点开后再进子菜单选具体项。
+class _PlaybackOverflowMenu extends StatelessWidget {
+  const _PlaybackOverflowMenu({required this.controller});
 
   final PlayerController controller;
 
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final theme = Theme.of(context);
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        _ControlMenu<double>(
-          key: const Key('player-speed'),
-          tooltip: l10n.playbackRate,
-          icon: Icons.speed,
-          onSelected: controller.setRate,
+    final scheme = Theme.of(context).colorScheme;
+    return PopupMenuButton<_PlaybackOverflowAction>(
+      key: PlayerKeys.more,
+      tooltip: l10n.playerPlaybackSettings,
+      padding: EdgeInsets.zero,
+      splashRadius: 20,
+      constraints: _controlMenuConstraints,
+      icon: Icon(Icons.settings_outlined, color: scheme.onSurface),
+      onSelected: (action) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (context.mounted) {
+            unawaited(_openAction(context, action));
+          }
+        });
+      },
+      itemBuilder: (context) {
+        final l10n = AppLocalizations.of(context);
+        return [
+          PopupMenuItem(
+            key: PlayerKeys.speed,
+            value: _PlaybackOverflowAction.speed,
+            child: _PlaybackSettingRow(
+              label: l10n.playbackRate,
+              value: _rateLabel(controller.playbackRate),
+              valueKey: PlayerKeys.speedLabel,
+            ),
+          ),
+          if (controller.audioTracks.length > 1)
+            PopupMenuItem(
+              key: PlayerKeys.audio,
+              value: _PlaybackOverflowAction.audio,
+              child: _PlaybackSettingRow(
+                label: l10n.audioTrack,
+                value: _currentAudioLabel(controller, l10n),
+              ),
+            ),
+          if (controller.isTranscode)
+            PopupMenuItem(
+              key: PlayerKeys.quality,
+              value: _PlaybackOverflowAction.quality,
+              child: _PlaybackSettingRow(
+                label: l10n.quality,
+                value: _qualityLabel(l10n, controller.maxStreamingBitrate),
+              ),
+            ),
+          if (controller.canSwitchMediaSource)
+            PopupMenuItem(
+              key: PlayerKeys.mediaSource,
+              value: _PlaybackOverflowAction.mediaSource,
+              child: _PlaybackSettingRow(
+                label: l10n.mediaSource,
+                value: _compactMediaSourceLabel(
+                  controller.resolved?.mediaSource.label ?? l10n.mediaSource,
+                ),
+                valueKey: PlayerKeys.mediaSourceLabel,
+              ),
+            ),
+          if (controller.canSetManualSkip)
+            PopupMenuItem(
+              key: PlayerKeys.skipSettings,
+              value: _PlaybackOverflowAction.skip,
+              child: _PlaybackSettingRow(
+                label: l10n.skipSettings,
+                value: _skipSummary(controller, l10n),
+              ),
+            ),
+        ];
+      },
+    );
+  }
+
+  Future<void> _openAction(
+    BuildContext context,
+    _PlaybackOverflowAction action,
+  ) async {
+    if (!context.mounted) {
+      return;
+    }
+    final position = _buttonMenuPosition(context);
+    switch (action) {
+      case _PlaybackOverflowAction.speed:
+        final rate = await showMenu<double>(
+          context: context,
+          position: position,
+          constraints: _controlMenuConstraints,
           items: [
-            for (final rate in kPlaybackRateLadder)
+            for (final value in kPlaybackRateLadder)
               CheckedPopupMenuItem(
-                value: rate,
-                checked: rate == controller.playbackRate,
-                child: Text(_rateLabel(rate)),
+                value: value,
+                checked: value == controller.playbackRate,
+                child: Text(_rateLabel(value)),
               ),
           ],
-        ),
-        SizedBox(
-          width: 38,
-          child: Text(
-            key: const Key('player-speed-label'),
-            _rateLabel(controller.playbackRate),
-            textAlign: TextAlign.end,
-            style: _overlayTimeStyle(theme),
+        );
+        if (rate != null && context.mounted) {
+          unawaited(controller.setRate(rate));
+        }
+      case _PlaybackOverflowAction.audio:
+        final index = await showMenu<int>(
+          context: context,
+          position: position,
+          constraints: _controlMenuConstraints,
+          items: [
+            for (final track in controller.audioTracks)
+              CheckedPopupMenuItem(
+                value: track.index,
+                checked: track.index == controller.audioStreamIndex,
+                child: Text(track.label),
+              ),
+          ],
+        );
+        if (index != null && context.mounted) {
+          unawaited(controller.setAudio(index));
+        }
+      case _PlaybackOverflowAction.quality:
+        final bitrate = await showMenu<int>(
+          context: context,
+          position: position,
+          constraints: _controlMenuConstraints,
+          items: [
+            CheckedPopupMenuItem(
+              value: kTranscodeBitrates.first,
+              checked:
+                  controller.maxStreamingBitrate == kTranscodeBitrates.first ||
+                  !kTranscodeBitrates.contains(controller.maxStreamingBitrate),
+              child: Text(AppLocalizations.of(context).qualityAuto),
+            ),
+            for (final value in kTranscodeBitrates.skip(1))
+              CheckedPopupMenuItem(
+                value: value,
+                checked: controller.maxStreamingBitrate == value,
+                child: Text(
+                  AppLocalizations.of(context).qualityMbps(value ~/ 1000000),
+                ),
+              ),
+          ],
+        );
+        if (bitrate != null && context.mounted) {
+          unawaited(controller.setMaxBitrate(bitrate));
+        }
+      case _PlaybackOverflowAction.mediaSource:
+        if (controller.loading) {
+          return;
+        }
+        final sourceId = await showMenu<String>(
+          context: context,
+          position: position,
+          constraints: _controlMenuConstraints,
+          items: [
+            for (final source in controller.mediaSources)
+              CheckedPopupMenuItem(
+                value: source.id,
+                checked: source.id == controller.resolved?.mediaSource.id,
+                child: Text(source.label),
+              ),
+          ],
+        );
+        if (sourceId != null && context.mounted) {
+          unawaited(controller.switchMediaSource(sourceId));
+        }
+      case _PlaybackOverflowAction.skip:
+        final selected = await showMenu<String>(
+          context: context,
+          position: position,
+          constraints: _controlMenuConstraints,
+          items: [
+            CheckedPopupMenuItem(
+              value: 'off',
+              checked:
+                  controller.manualIntroSkipSeconds == null &&
+                  controller.manualOutroSkipSeconds == null,
+              child: Text(AppLocalizations.of(context).skipManualOff),
+            ),
+            for (final seconds in kManualSkipChoices)
+              CheckedPopupMenuItem(
+                value: 'intro:$seconds',
+                checked: controller.manualIntroSkipSeconds == seconds,
+                child: Text(
+                  AppLocalizations.of(context).skipIntroSeconds(seconds),
+                ),
+              ),
+            for (final seconds in kManualSkipChoices)
+              CheckedPopupMenuItem(
+                value: 'outro:$seconds',
+                checked: controller.manualOutroSkipSeconds == seconds,
+                child: Text(
+                  AppLocalizations.of(context).skipOutroSeconds(seconds),
+                ),
+              ),
+          ],
+        );
+        if (selected == null || !context.mounted) {
+          return;
+        }
+        if (selected == 'off') {
+          unawaited(controller.clearManualSkip());
+          return;
+        }
+        final parts = selected.split(':');
+        final seconds = int.tryParse(parts.length > 1 ? parts[1] : '');
+        if (seconds == null) {
+          return;
+        }
+        if (selected.startsWith('intro:')) {
+          unawaited(controller.setManualIntroSkip(seconds));
+        } else if (selected.startsWith('outro:')) {
+          unawaited(controller.setManualOutroSkip(seconds));
+        }
+    }
+  }
+}
+
+enum _PlaybackOverflowAction { speed, quality, audio, mediaSource, skip }
+
+/// 溢出菜单第一层:左侧类别,右侧当前值。
+class _PlaybackSettingRow extends StatelessWidget {
+  const _PlaybackSettingRow({
+    required this.label,
+    required this.value,
+    this.valueKey,
+  });
+
+  final String label;
+  final String value;
+  final Key? valueKey;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Row(
+      children: [
+        Expanded(child: Text(label)),
+        const SizedBox(width: AppSpacing.md),
+        Text(
+          value,
+          key: valueKey,
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
           ),
         ),
       ],
@@ -1452,59 +1716,59 @@ String _rateLabel(double rate) {
   return '${trimmed}x';
 }
 
-/// 手动片头/片尾设置(仅无服务器章节标记的剧集显示):
-/// 固定档位菜单,选择即按剧记忆并立即生效。
-class _SkipSettingsControl extends StatelessWidget {
-  const _SkipSettingsControl({required this.controller});
-
-  final PlayerController controller;
-
-  @override
-  Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context);
-    return _ControlMenu<String>(
-      key: const Key('player-skip-settings'),
-      tooltip: l10n.skipSettings,
-      icon: Icons.skip_next_rounded,
-      onSelected: (value) {
-        if (value == 'off') {
-          unawaited(controller.clearManualSkip());
-          return;
-        }
-        final parts = value.split(':');
-        final seconds = int.tryParse(parts.length > 1 ? parts[1] : '');
-        if (seconds == null) {
-          return;
-        }
-        if (value.startsWith('intro:')) {
-          unawaited(controller.setManualIntroSkip(seconds));
-        } else if (value.startsWith('outro:')) {
-          unawaited(controller.setManualOutroSkip(seconds));
-        }
-      },
-      items: [
-        CheckedPopupMenuItem(
-          value: 'off',
-          checked:
-              controller.manualIntroSkipSeconds == null &&
-              controller.manualOutroSkipSeconds == null,
-          child: Text(l10n.skipManualOff),
-        ),
-        for (final seconds in kManualSkipChoices)
-          CheckedPopupMenuItem(
-            value: 'intro:$seconds',
-            checked: controller.manualIntroSkipSeconds == seconds,
-            child: Text(l10n.skipIntroSeconds(seconds)),
-          ),
-        for (final seconds in kManualSkipChoices)
-          CheckedPopupMenuItem(
-            value: 'outro:$seconds',
-            checked: controller.manualOutroSkipSeconds == seconds,
-            child: Text(l10n.skipOutroSeconds(seconds)),
-          ),
-      ],
-    );
+String _qualityLabel(AppLocalizations l10n, int bitrate) {
+  if (bitrate == kTranscodeBitrates.first ||
+      !kTranscodeBitrates.contains(bitrate)) {
+    return l10n.qualityAuto;
   }
+  return l10n.qualityMbps(bitrate ~/ 1000000);
+}
+
+String _currentAudioLabel(PlayerController controller, AppLocalizations l10n) {
+  for (final track in controller.audioTracks) {
+    if (track.index == controller.audioStreamIndex) {
+      return track.label;
+    }
+  }
+  return l10n.audioTrack;
+}
+
+String _skipSummary(PlayerController controller, AppLocalizations l10n) {
+  final intro = controller.manualIntroSkipSeconds;
+  final outro = controller.manualOutroSkipSeconds;
+  if (intro == null && outro == null) {
+    return l10n.skipManualOff;
+  }
+  if (intro != null && outro != null) {
+    return '${l10n.skipIntroSeconds(intro)} · ${l10n.skipOutroSeconds(outro)}';
+  }
+  if (intro != null) {
+    return l10n.skipIntroSeconds(intro);
+  }
+  return l10n.skipOutroSeconds(outro!);
+}
+
+String _compactMediaSourceLabel(String label, {int maxChars = 12}) {
+  final trimmed = label.trim();
+  if (trimmed.length <= maxChars) {
+    return trimmed;
+  }
+  return '${trimmed.substring(0, maxChars - 1)}…';
+}
+
+RelativeRect _buttonMenuPosition(BuildContext context) {
+  final box = context.findRenderObject() as RenderBox?;
+  final overlay = Overlay.of(context).context.findRenderObject() as RenderBox?;
+  if (box == null || overlay == null) {
+    return RelativeRect.fill;
+  }
+  return RelativeRect.fromRect(
+    Rect.fromPoints(
+      box.localToGlobal(Offset.zero, ancestor: overlay),
+      box.localToGlobal(box.size.bottomRight(Offset.zero), ancestor: overlay),
+    ),
+    Offset.zero & overlay.size,
+  );
 }
 
 /// 弹幕设置菜单:状态回显 + 显示参数(不透明度/字号/速度/区域/密度)
@@ -1525,11 +1789,17 @@ class _DanmakuSettingsMenu extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     return _ControlMenu<String>(
       key: const Key('player-danmaku-menu'),
-      tooltip: l10n.danmakuSettings,
-      icon: Icons.tune_rounded,
+      tooltip: l10n.danmaku,
+      icon: danmaku.danmakuOn ? Icons.forum_rounded : Icons.forum_outlined,
+      iconColor: danmaku.danmakuOn ? scheme.primary : null,
       onSelected: (value) {
+        if (value == 'toggle') {
+          unawaited(danmaku.toggleDanmaku());
+          return;
+        }
         if (value == 'search') {
           onSearch?.call();
           return;
@@ -1574,6 +1844,12 @@ class _DanmakuSettingsMenu extends StatelessWidget {
         );
       },
       items: [
+        CheckedPopupMenuItem(
+          value: 'toggle',
+          checked: danmaku.danmakuOn,
+          child: Text(l10n.danmaku),
+        ),
+        const PopupMenuDivider(),
         PopupMenuItem<String>(
           enabled: false,
           height: AppSpacing.lg,
@@ -1849,8 +2125,7 @@ class _VolumeControl extends StatelessWidget {
   }
 }
 
-/// 控制层图标按钮:统一的暖白前景,供按钮行各处复用;
-/// [color] 非空时(如置顶开启)以高亮色标识激活状态。
+/// 控制层图标按钮:统一的暖白前景,供按钮行各处复用。
 class _PlayerIconButton extends StatelessWidget {
   const _PlayerIconButton({
     super.key,
@@ -1858,13 +2133,11 @@ class _PlayerIconButton extends StatelessWidget {
     required this.onPressed,
     this.tooltip,
     this.iconSize = 24,
-    this.color,
   });
 
   final String? tooltip;
   final double iconSize;
   final IconData icon;
-  final Color? color;
   final VoidCallback? onPressed;
 
   @override
@@ -1873,7 +2146,7 @@ class _PlayerIconButton extends StatelessWidget {
     return IconButton(
       tooltip: tooltip,
       onPressed: onPressed,
-      color: color ?? scheme.onSurface,
+      color: scheme.onSurface,
       iconSize: iconSize,
       icon: Icon(icon),
     );
@@ -1882,6 +2155,13 @@ class _PlayerIconButton extends StatelessWidget {
 
 const _subtitleOffToken = -1;
 
+/// 倍速阶梯约 8 项需完整显示,避免菜单内滚动。
+const _controlMenuConstraints = BoxConstraints(
+  minWidth: 200,
+  maxWidth: 360,
+  maxHeight: 416,
+);
+
 /// 控制条右侧用图标打开菜单,长轨名只出现在弹出层。
 ///
 /// 音轨/字幕/画质共用主题级 popupMenuTheme 外观,不做局部覆盖。
@@ -1889,31 +2169,41 @@ class _ControlMenu<T> extends StatelessWidget {
   const _ControlMenu({
     super.key,
     required this.tooltip,
-    required this.icon,
     required this.items,
     required this.onSelected,
-  });
+    this.icon,
+    this.iconColor,
+    this.child,
+  }) : assert(icon != null || child != null);
 
   final String tooltip;
-  final IconData icon;
+  final IconData? icon;
+  final Color? iconColor;
+  final Widget? child;
   final List<PopupMenuEntry<T>> items;
   final ValueChanged<T> onSelected;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    if (child != null) {
+      return PopupMenuButton<T>(
+        tooltip: tooltip,
+        onSelected: onSelected,
+        constraints: _controlMenuConstraints,
+        padding: EdgeInsets.zero,
+        splashRadius: 20,
+        itemBuilder: (context) => items,
+        child: child,
+      );
+    }
     return PopupMenuButton<T>(
       tooltip: tooltip,
       onSelected: onSelected,
-      constraints: const BoxConstraints(
-        minWidth: 200,
-        maxWidth: 360,
-        // 倍速阶梯 8 项(约 384px)需完整显示,避免菜单内滚动。
-        maxHeight: 416,
-      ),
+      constraints: _controlMenuConstraints,
       padding: EdgeInsets.zero,
       splashRadius: 20,
-      icon: Icon(icon, color: scheme.onSurface),
+      icon: Icon(icon, color: iconColor ?? scheme.onSurface),
       itemBuilder: (context) => items,
     );
   }

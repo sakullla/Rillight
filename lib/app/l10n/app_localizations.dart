@@ -430,11 +430,59 @@ abstract class AppLocalizations {
   /// **'集'**
   String get episodesRow;
 
+  /// Appends the next window of episodes on the detail page; distinct from the shelf 'more' grid link.
+  ///
+  /// In zh, this message translates to:
+  /// **'加载更多'**
+  String get episodesLoadMore;
+
   /// Label for the poster-wall sort control.
   ///
   /// In zh, this message translates to:
   /// **'排序'**
   String get sortBy;
+
+  /// Single library filter control that opens type, watch, year, and genre options.
+  ///
+  /// In zh, this message translates to:
+  /// **'筛选'**
+  String get libraryFilter;
+
+  /// Clears every active library filter.
+  ///
+  /// In zh, this message translates to:
+  /// **'清除筛选'**
+  String get libraryFilterClear;
+
+  /// Library filter dimension for Movie vs Series.
+  ///
+  /// In zh, this message translates to:
+  /// **'类型'**
+  String get libraryFilterType;
+
+  /// Library filter dimension for played vs unplayed.
+  ///
+  /// In zh, this message translates to:
+  /// **'观看状态'**
+  String get libraryFilterWatch;
+
+  /// Library filter dimension for production year.
+  ///
+  /// In zh, this message translates to:
+  /// **'年份'**
+  String get libraryFilterYear;
+
+  /// Library filter dimension for genre.
+  ///
+  /// In zh, this message translates to:
+  /// **'流派'**
+  String get libraryFilterGenre;
+
+  /// Clears one library filter dimension.
+  ///
+  /// In zh, this message translates to:
+  /// **'全部'**
+  String get libraryFilterAll;
 
   /// Sort poster walls by SortName A to Z.
   ///
@@ -736,6 +784,12 @@ abstract class AppLocalizations {
   /// **'转码'**
   String get transcode;
 
+  /// Transcode bitrate selector label in the player overflow menu.
+  ///
+  /// In zh, this message translates to:
+  /// **'画质'**
+  String get quality;
+
   /// Automatic transcode quality preset.
   ///
   /// In zh, this message translates to:
@@ -868,11 +922,23 @@ abstract class AppLocalizations {
   /// **'磁盘缓冲上限'**
   String get settingsDiskCacheLimit;
 
+  /// Short explanation under the disk cache limit row.
+  ///
+  /// In zh, this message translates to:
+  /// **'限制本地缓冲占用'**
+  String get settingsDiskCacheLimitHint;
+
   /// Setting row label for hardware decoding mode.
   ///
   /// In zh, this message translates to:
   /// **'硬件解码'**
   String get settingsHardwareDecoding;
+
+  /// Short explanation under the hardware decoding row.
+  ///
+  /// In zh, this message translates to:
+  /// **'用显卡解码，降低 CPU 占用'**
+  String get settingsHardwareDecodingHint;
 
   /// Hardware decoding follows the platform default.
   ///
@@ -897,6 +963,12 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'解码后端'**
   String get settingsDecoderBackend;
+
+  /// Short explanation under the decoder backend row.
+  ///
+  /// In zh, this message translates to:
+  /// **'不确定时保持自动即可'**
+  String get settingsDecoderBackendHint;
 
   /// Decoder backend follows the platform default.
   ///
@@ -946,6 +1018,24 @@ abstract class AppLocalizations {
   /// **'弹幕服务'**
   String get settingsDanmakuService;
 
+  /// Short explanation under the danmaku service section title.
+  ///
+  /// In zh, this message translates to:
+  /// **'默认使用官方源；自建服务时再填写'**
+  String get settingsDanmakuServiceHint;
+
+  /// Tooltip to reveal the danmaku access token.
+  ///
+  /// In zh, this message translates to:
+  /// **'显示令牌'**
+  String get settingsShowToken;
+
+  /// Tooltip to hide the danmaku access token.
+  ///
+  /// In zh, this message translates to:
+  /// **'隐藏令牌'**
+  String get settingsHideToken;
+
   /// Setting row label for the custom danmaku server address.
   ///
   /// In zh, this message translates to:
@@ -975,6 +1065,12 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'倍速'**
   String get playbackRate;
+
+  /// Player overflow control for speed, audio, quality, source, and skip settings.
+  ///
+  /// In zh, this message translates to:
+  /// **'播放设置'**
+  String get playerPlaybackSettings;
 
   /// Keep the player window above other windows.
   ///

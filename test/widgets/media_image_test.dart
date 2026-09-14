@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
@@ -761,6 +762,123 @@ void main() {
     await load('tag-2');
     expect(fetches, 2);
   });
+
+  test('hung fetches time out and release concurrency slots', () async {
+    MediaImageCache.instance.fetchTimeout = const Duration(milliseconds: 40);
+    final hung = Completer<Uint8List?>();
+    addTearDown(() {
+      if (!hung.isCompleted) {
+        hung.complete(null);
+      }
+    });
+    final missed = MediaImageCache.instance.load(
+      serverId: 'server-1',
+      itemId: 'hung',
+      type: 'Primary',
+      tag: 'tag-x',
+      maxWidth: 280,
+      fetch: () => hung.future,
+    );
+    var extraFetches = 0;
+    final extra = MediaImageCache.instance.load(
+      serverId: 'server-1',
+      itemId: 'ok',
+      type: 'Primary',
+      tag: 'tag-y',
+      maxWidth: 280,
+      fetch: () async {
+        extraFetches++;
+        return kTinyPng;
+      },
+    );
+    expect(await missed, isNull);
+    expect(await extra, isNotNull);
+    expect(extraFetches, 1);
+  });
+
+  test('timeouts are not negatively cached and can retry', () async {
+    MediaImageCache.instance.fetchTimeout = const Duration(milliseconds: 40);
+    var fetches = 0;
+    Future<Uint8List?> fetch() async {
+      fetches++;
+      if (fetches == 1) {
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+        return kTinyPng;
+      }
+      return kTinyPng;
+    }
+
+    final first = await MediaImageCache.instance.load(
+      serverId: 'server-1',
+      itemId: 'retry',
+      type: 'Primary',
+      tag: 'tag-x',
+      maxWidth: 280,
+      fetch: fetch,
+    );
+    expect(first, isNull);
+    expect(fetches, 1);
+
+    final second = await MediaImageCache.instance.load(
+      serverId: 'server-1',
+      itemId: 'retry',
+      type: 'Primary',
+      tag: 'tag-x',
+      maxWidth: 280,
+      fetch: fetch,
+    );
+    expect(second, isNotNull);
+    expect(fetches, 2);
+  });
+
+  test('slow disk writes do not block other image fetches', () async {
+    final hang = Completer<void>();
+    addTearDown(() {
+      if (!hang.isCompleted) {
+        hang.complete();
+      }
+    });
+    MediaImageCache.instance.debugSetDiskStore(_HangingWriteStore(hang));
+
+    final first = await MediaImageCache.instance.load(
+      serverId: 'server-1',
+      itemId: 'a',
+      type: 'Primary',
+      tag: 'tag-x',
+      maxWidth: 280,
+      fetch: () async => kTinyPng,
+    );
+    expect(first, isNotNull);
+
+    final second = await MediaImageCache.instance.load(
+      serverId: 'server-1',
+      itemId: 'b',
+      type: 'Primary',
+      tag: 'tag-y',
+      maxWidth: 280,
+      fetch: () async => kTinyPng,
+    );
+    expect(second, isNotNull);
+    hang.complete();
+  });
+}
+
+class _HangingWriteStore implements MediaImageDiskStore {
+  _HangingWriteStore(this.hang);
+
+  final Completer<void> hang;
+
+  @override
+  Future<Uint8List?> read(String key) async => null;
+
+  @override
+  Future<void> write(String key, Uint8List bytes) => hang.future;
+
+  @override
+  Future<void> remove(String key) async {}
+
+  @override
+  Future<void> clear() async {}
 }
 
 class _FakeDiskStore implements MediaImageDiskStore {

@@ -17,6 +17,7 @@ import 'package:rillight/library/shelf_grid_page.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 
 import '../emby/fake_emby_server.dart';
+import '../helpers/top_bar_hit.dart';
 
 const _device = EmbyDeviceInfo(
   clientName: '灯川 Rillight',
@@ -259,7 +260,11 @@ void main() {
   }
 
   Future<void> tapFilter(WidgetTester tester, String dimension) async {
-    await _tapBelowTopBar(tester, find.byKey(gridFilterKey(dimension)));
+    if (find.byKey(gridFilterKey(dimension)).evaluate().isEmpty) {
+      await tapBelowTopBar(tester, find.byKey(gridFilterMenuKey));
+      await tester.pumpAndSettle();
+    }
+    await tester.tap(find.byKey(gridFilterKey(dimension)));
     await tester.pumpAndSettle();
   }
 
@@ -290,14 +295,19 @@ void main() {
     await pumpLoggedIn(tester);
     await openLibrary(tester, 'view-movies');
 
-    expect(find.byKey(gridFilterKey('type')), findsOneWidget);
-    expect(find.byKey(gridFilterKey('watch')), findsOneWidget);
-    expect(find.byKey(gridFilterKey('year')), findsOneWidget);
-    expect(find.byKey(gridFilterKey('genre')), findsOneWidget);
-    // 未选择筛选时不显示清除按钮,排序保留。
+    expect(find.byKey(gridFilterMenuKey), findsOneWidget);
+    expect(find.byKey(gridFilterKey('watch')), findsNothing);
     expect(find.byKey(gridFilterClearKey), findsNothing);
     expect(find.byKey(CatalogKeys.sortBy), findsOneWidget);
     expect(find.byKey(gridRefreshKey), findsOneWidget);
+
+    await tapBelowTopBar(tester, find.byKey(gridFilterMenuKey));
+    await tester.pumpAndSettle();
+    expect(find.byKey(gridFilterKey('watch')), findsOneWidget);
+    expect(find.byKey(gridFilterKey('year')), findsOneWidget);
+    expect(find.byKey(gridFilterKey('genre')), findsOneWidget);
+    await tester.tap(find.widgetWithText(TextButton, '确定'));
+    await tester.pumpAndSettle();
 
     // 非片库来源(最近更新电影更多页)不显示筛选控件。
     await goHome(tester);
@@ -305,7 +315,7 @@ void main() {
       CatalogKeys.shelfMore(CatalogKeys.shelfLatestMovies),
     );
     await tester.ensureVisible(more);
-    await _tapBelowTopBar(tester, more);
+    await tapBelowTopBar(tester, more);
     await tester.pumpAndSettle();
     expect(find.byKey(gridFilterKey('watch')), findsNothing);
     expect(find.byKey(CatalogKeys.sortBy), findsOneWidget);
@@ -373,7 +383,7 @@ void main() {
       );
 
       // 清除全部:恢复完整网格。
-      await _tapBelowTopBar(tester, find.byKey(gridFilterClearKey));
+      await tapBelowTopBar(tester, find.byKey(gridFilterClearKey));
       await tester.pumpAndSettle();
       expect(posterNames(tester), containsAll(['未分类型电影', '新电影', '新剧集', '老剧集']));
       expect(
@@ -462,7 +472,7 @@ void main() {
       contains('Genres=${Uri.encodeQueryComponent('科幻')}'),
     );
 
-    await _tapBelowTopBar(tester, find.byKey(gridFilterClearKey));
+    await tapBelowTopBar(tester, find.byKey(gridFilterClearKey));
     await tester.pumpAndSettle();
     expect(posterNames(tester), contains('科幻片'));
     expect(posterNames(tester), contains('喜剧片'));
@@ -499,7 +509,7 @@ void main() {
     await chooseOption(tester, 'year', '2025');
 
     // 与现有排序组合:按标题升序。
-    await _tapBelowTopBar(tester, find.byKey(CatalogKeys.sortBy));
+    await tapBelowTopBar(tester, find.byKey(CatalogKeys.sortBy));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(CatalogKeys.sortOption('SortName')));
     await tester.pumpAndSettle();
@@ -518,7 +528,7 @@ void main() {
     );
 
     // 现有排序选项全部保留。
-    await _tapBelowTopBar(tester, find.byKey(CatalogKeys.sortBy));
+    await tapBelowTopBar(tester, find.byKey(CatalogKeys.sortBy));
     await tester.pumpAndSettle();
     expect(
       find.byKey(CatalogKeys.sortOption('DateLastContentAdded')),
@@ -558,18 +568,4 @@ void main() {
     await tester.pumpAndSettle();
     expect(posterNames(tester), isNotEmpty);
   });
-}
-
-/// 顶栏叠在内容上时,控件中心可能落在栏内;点到栏下方仍落在同一控件上的位置。
-Future<void> _tapBelowTopBar(WidgetTester tester, Finder finder) async {
-  final bar = find.byKey(AppShell.topBarKey);
-  final rect = tester.getRect(finder);
-  var dy = rect.center.dy;
-  if (bar.evaluate().isNotEmpty) {
-    final barBottom = tester.getRect(bar).bottom;
-    if (dy <= barBottom) {
-      dy = (barBottom + 1).clamp(rect.top + 1, rect.bottom - 1).toDouble();
-    }
-  }
-  await tester.tapAt(Offset(rect.center.dx, dy));
 }

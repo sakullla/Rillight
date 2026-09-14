@@ -351,6 +351,11 @@ void main() {
     );
 
     await _tapVisible(tester, find.byKey(Key('saved-line-${lanLine.id}')));
+    final lanTile = find.byKey(Key('saved-line-${lanLine.id}'));
+    final tileFill = tester.widget<Material>(
+      find.ancestor(of: lanTile, matching: find.byType(Material)).first,
+    );
+    expect(tileFill.color?.a, closeTo(0.35, 0.01));
     expect(
       tester
           .widget<TextField>(find.byKey(ConnectFormKeys.address))

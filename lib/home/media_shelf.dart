@@ -45,8 +45,6 @@ class MediaShelf extends StatefulWidget {
     this.itemBuilder,
     this.onRemoveFromResume,
     this.headerAction,
-    this.focusedId,
-    this.focusNonce = 0,
   });
 
   final String shelfId;
@@ -64,8 +62,6 @@ class MediaShelf extends StatefulWidget {
   final Widget Function(BuildContext context, EmbyItem item)? itemBuilder;
   final ValueChanged<EmbyItem>? onRemoveFromResume;
   final Widget? headerAction;
-  final String? focusedId;
-  final int focusNonce;
 
   /// 竖版海报卡宽,随 [AppBreakpoints] 缩放。
   static double posterWidthFor(double screenWidth) {
@@ -176,7 +172,6 @@ class _MediaShelfState extends State<MediaShelf> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         _updateScrollButtons();
-        _scrollToFocused();
       }
     });
   }
@@ -184,19 +179,11 @@ class _MediaShelfState extends State<MediaShelf> {
   @override
   void didUpdateWidget(MediaShelf oldWidget) {
     super.didUpdateWidget(oldWidget);
-    final focusChanged =
-        oldWidget.focusedId != widget.focusedId ||
-        oldWidget.focusNonce != widget.focusNonce ||
-        oldWidget.items != widget.items;
     if (!listEquals(oldWidget.items, widget.items) ||
-        oldWidget.loading != widget.loading ||
-        focusChanged) {
+        oldWidget.loading != widget.loading) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
           _updateScrollButtons();
-          if (focusChanged) {
-            _scrollToFocused();
-          }
         }
       });
     }
@@ -257,37 +244,6 @@ class _MediaShelfState extends State<MediaShelf> {
         ),
       );
     });
-  }
-
-  void _scrollToFocused() {
-    final id = widget.focusedId;
-    if (id == null || id.isEmpty || !_controller.hasClients) {
-      return;
-    }
-    final index = widget.items.indexWhere((item) => item.id == id);
-    if (index < 0) {
-      return;
-    }
-    final screenWidth = MediaQuery.sizeOf(context).width;
-    final cardWidth = widget.wide
-        ? MediaShelf.wideCardWidthFor(screenWidth)
-        : MediaShelf.posterWidthFor(screenWidth);
-    const gap = MediaShelf.cardGap;
-    const pad = AppSpacing.page;
-    final position = _controller.position;
-    if (position.maxScrollExtent <= 0 && index > 0) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
-          _scrollToFocused();
-        }
-      });
-      return;
-    }
-    final itemStart = pad + index * (cardWidth + gap);
-    final target = (itemStart - (position.viewportDimension - cardWidth) / 2)
-        .clamp(position.minScrollExtent, position.maxScrollExtent);
-    _controller.jumpTo(target);
-    _updateScrollButtons();
   }
 
   void _page(int direction) {
@@ -360,6 +316,8 @@ class _MediaShelfState extends State<MediaShelf> {
                           : MediaShelf.posterWidthFor(screenWidth),
                       posterAspectRatio: widget.wide ? 16 / 9 : 2 / 3,
                     )
+                  : widget.headerAction != null
+                  ? const SizedBox.shrink()
                   : Align(
                       alignment: Alignment.centerLeft,
                       child: TextButton.icon(
@@ -381,54 +339,66 @@ class _MediaShelfState extends State<MediaShelf> {
                     },
                     child: FocusTraversalGroup(
                       policy: ReadingOrderTraversalPolicy(),
-                      child: Listener(
-                        onPointerSignal: _onVerticalWheelToParent,
-                        child: ListView.separated(
-                          controller: _controller,
-                          scrollCacheExtent: const ScrollCacheExtent.viewport(
-                            1,
-                          ),
-                          // 首张卡片外缘仍落在 AppSpacing.page 竖线上。
-                          padding: const EdgeInsets.symmetric(
-                            horizontal:
-                                AppSpacing.page - MediaShelf.hoverGutter,
-                          ),
-                          scrollDirection: Axis.horizontal,
-                          itemBuilder: (context, index) {
-                            final item = widget.items[index];
-                            final child =
-                                widget.itemBuilder?.call(context, item) ??
-                                PosterCard(
-                                  item: item,
-                                  showProgress: widget.showProgress,
-                                  wide: widget.wide,
-                                  width: widget.wide
-                                      ? MediaShelf.wideCardWidthFor(screenWidth)
-                                      : MediaShelf.posterWidthFor(screenWidth),
-                                  onTap: () => widget.onTap(item),
-                                  onRemoveFromResume: widget.onRemoveFromResume,
-                                );
-                            return Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: MediaShelf.hoverGutter,
-                              ),
-                              child: Align(
-                                alignment: Alignment.center,
-                                child: Listener(
-                                  onPointerSignal: _onVerticalWheelToParent,
-                                  child: Shortcuts(
-                                    shortcuts: _kShelfArrowShortcuts,
-                                    child: _EnsureVisibleOnFocus(child: child),
+                      child: ScrollConfiguration(
+                        behavior: const _ShelfScrollBehavior(),
+                        child: Listener(
+                          onPointerSignal: _onVerticalWheelToParent,
+                          child: ListView.separated(
+                            controller: _controller,
+                            scrollCacheExtent: const ScrollCacheExtent.viewport(
+                              1,
+                            ),
+                            // 首张卡片外缘仍落在 AppSpacing.page 竖线上。
+                            padding: const EdgeInsets.symmetric(
+                              horizontal:
+                                  AppSpacing.page - MediaShelf.hoverGutter,
+                            ),
+                            scrollDirection: Axis.horizontal,
+                            itemBuilder: (context, index) {
+                              final item = widget.items[index];
+                              final child =
+                                  widget.itemBuilder?.call(context, item) ??
+                                  PosterCard(
+                                    item: item,
+                                    showProgress: widget.showProgress,
+                                    wide: widget.wide,
+                                    width: widget.wide
+                                        ? MediaShelf.wideCardWidthFor(
+                                            screenWidth,
+                                          )
+                                        : MediaShelf.posterWidthFor(
+                                            screenWidth,
+                                          ),
+                                    onTap: () => widget.onTap(item),
+                                    onRemoveFromResume:
+                                        widget.onRemoveFromResume,
+                                  );
+                              return Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: MediaShelf.hoverGutter,
+                                ),
+                                child: Align(
+                                  alignment: Alignment.center,
+                                  child: Listener(
+                                    onPointerSignal: _onVerticalWheelToParent,
+                                    child: Shortcuts(
+                                      shortcuts: _kShelfArrowShortcuts,
+                                      child: _EnsureVisibleOnFocus(
+                                        child: child,
+                                      ),
+                                    ),
                                   ),
                                 ),
-                              ),
-                            );
-                          },
-                          separatorBuilder: (context, index) => const SizedBox(
-                            width:
-                                MediaShelf.cardGap - 2 * MediaShelf.hoverGutter,
+                              );
+                            },
+                            separatorBuilder: (context, index) =>
+                                const SizedBox(
+                                  width:
+                                      MediaShelf.cardGap -
+                                      2 * MediaShelf.hoverGutter,
+                                ),
+                            itemCount: widget.items.length,
                           ),
-                          itemCount: widget.items.length,
                         ),
                       ),
                     ),
@@ -509,6 +479,19 @@ class _EnsureVisibleOnFocus extends StatelessWidget {
       child: child,
     );
   }
+}
+
+class _ShelfScrollBehavior extends MaterialScrollBehavior {
+  const _ShelfScrollBehavior();
+
+  @override
+  Set<PointerDeviceKind> get dragDevices => const {
+    PointerDeviceKind.mouse,
+    PointerDeviceKind.touch,
+    PointerDeviceKind.stylus,
+    PointerDeviceKind.trackpad,
+    PointerDeviceKind.invertedStylus,
+  };
 }
 
 class _ScrollButton extends StatelessWidget {

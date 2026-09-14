@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -21,6 +23,7 @@ import 'package:rillight/player/player_window.dart';
 import 'package:rillight/player/video_backend.dart';
 
 import '../emby/fake_emby_server.dart';
+import '../helpers/top_bar_hit.dart';
 
 const _device = EmbyDeviceInfo(
   clientName: '灯川 Rillight',
@@ -190,17 +193,19 @@ void main() {
     return tester.state<PlayerPageState>(find.byType(PlayerPage)).controller!;
   }
 
+  Future<void> playListedEpisode(WidgetTester tester, String episodeId) async {
+    final row = find.byKey(CatalogKeys.episode(episodeId));
+    await ensureVisibleBelowTopBar(tester, row);
+    await tapBelowTopBar(tester, row);
+    await tester.pump();
+    await waitFor(tester, find.byKey(PlayerKeys.playPause));
+  }
+
   Future<void> openEpisode(WidgetTester tester, String episodeId) async {
     await openLibrary(tester, 'view-tv');
     await tester.tap(find.byKey(CatalogKeys.item('series-anim')));
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.byKey(CatalogKeys.episode(episodeId)));
-    await tester.tap(find.byKey(CatalogKeys.episode(episodeId)));
-    await tester.pumpAndSettle();
-    await tester.ensureVisible(find.byKey(PlayerKeys.open));
-    await tester.tap(find.byKey(PlayerKeys.open));
-    await tester.pump();
-    await waitFor(tester, find.byKey(PlayerKeys.playPause));
+    await playListedEpisode(tester, episodeId);
   }
 
   /// 弹出菜单项:点击整行(而非 Text 本身,后者不参与命中测试)。
@@ -210,6 +215,24 @@ void main() {
         matching: find.byWidgetPredicate((widget) => widget is PopupMenuItem),
       )
       .last;
+
+  Future<void> openPlaybackSettings(WidgetTester tester) async {
+    await waitFor(tester, find.byKey(PlayerKeys.more));
+    await tester.tap(find.byKey(PlayerKeys.more));
+    await tester.pumpAndSettle();
+  }
+
+  Future<void> choosePlaybackOption(
+    WidgetTester tester,
+    Key settingKey,
+    String option,
+  ) async {
+    await openPlaybackSettings(tester);
+    await tester.tap(find.byKey(settingKey));
+    await tester.pumpAndSettle();
+    await tester.tap(popupItem(option));
+    await tester.pumpAndSettle();
+  }
 
   double controlsOpacity(WidgetTester tester) {
     return tester
@@ -396,9 +419,10 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(PlayerKeys.open));
     await tester.pump();
-    await waitFor(tester, find.byKey(PlayerKeys.quality));
+    await waitFor(tester, find.byKey(PlayerKeys.playPause));
 
-    expect(find.byKey(PlayerKeys.quality), findsOneWidget);
+    expect(find.byKey(PlayerKeys.more), findsOneWidget);
+    expect(find.byKey(PlayerKeys.quality), findsNothing);
     expect(find.text('自动'), findsNothing);
     expect(find.byKey(PlayerKeys.volume), findsOneWidget);
     expect(backend.openedUrl!.path, contains('master.m3u8'));
@@ -406,13 +430,13 @@ void main() {
 
     await tester.runAsync(() => controllerOf(tester).setAudio(1));
     await tester.pump();
-    await waitFor(tester, find.byKey(PlayerKeys.quality));
+    await waitFor(tester, find.byKey(PlayerKeys.playPause));
     expect(backend.openCount, firstOpen + 1);
     expect(server.lastPlaybackInfoBody?['AudioStreamIndex'], 1);
 
     await tester.runAsync(() => controllerOf(tester).setMaxBitrate(4000000));
     await tester.pump();
-    await waitFor(tester, find.byKey(PlayerKeys.quality));
+    await waitFor(tester, find.byKey(PlayerKeys.playPause));
     expect(backend.openCount, firstOpen + 2);
     expect(server.lastPlaybackInfoBody?['MaxStreamingBitrate'], 4000000);
     expect(
@@ -430,15 +454,7 @@ void main() {
     await openLibrary(tester, 'view-tv');
     await tester.tap(find.byKey(CatalogKeys.item('series-friends')));
     await tester.pumpAndSettle();
-    await tester.ensureVisible(
-      find.byKey(CatalogKeys.episode('episode-friends-s1e1')),
-    );
-    await tester.tap(find.byKey(CatalogKeys.episode('episode-friends-s1e1')));
-    await tester.pumpAndSettle();
-    await tester.ensureVisible(find.byKey(PlayerKeys.open));
-    await tester.tap(find.byKey(PlayerKeys.open));
-    await tester.pump();
-    await waitFor(tester, find.byKey(PlayerKeys.playPause));
+    await playListedEpisode(tester, 'episode-friends-s1e1');
 
     backend.completePlayback();
     await tester.pump();
@@ -495,15 +511,7 @@ void main() {
     await openLibrary(tester, 'view-tv');
     await tester.tap(find.byKey(CatalogKeys.item('series-friends')));
     await tester.pumpAndSettle();
-    await tester.ensureVisible(
-      find.byKey(CatalogKeys.episode('episode-friends-s1e2')),
-    );
-    await tester.tap(find.byKey(CatalogKeys.episode('episode-friends-s1e2')));
-    await tester.pumpAndSettle();
-    await tester.ensureVisible(find.byKey(PlayerKeys.open));
-    await tester.tap(find.byKey(PlayerKeys.open));
-    await tester.pump();
-    await waitFor(tester, find.byKey(PlayerKeys.playPause));
+    await playListedEpisode(tester, 'episode-friends-s1e2');
 
     backend.completePlayback();
     await tester.pump();
@@ -705,15 +713,7 @@ void main() {
       await openLibrary(tester, 'view-tv');
       await tester.tap(find.byKey(CatalogKeys.item('series-friends')));
       await tester.pumpAndSettle();
-      await tester.ensureVisible(
-        find.byKey(CatalogKeys.episode('episode-friends-s1e1')),
-      );
-      await tester.tap(find.byKey(CatalogKeys.episode('episode-friends-s1e1')));
-      await tester.pumpAndSettle();
-      await tester.ensureVisible(find.byKey(PlayerKeys.open));
-      await tester.tap(find.byKey(PlayerKeys.open));
-      await tester.pump();
-      await waitFor(tester, find.byKey(PlayerKeys.playPause));
+      await playListedEpisode(tester, 'episode-friends-s1e1');
 
       backend.completePlayback();
       await tester.pump();
@@ -779,6 +779,81 @@ void main() {
       expect(controller.progressSyncFailed, isTrue);
     },
   );
+
+  test(
+    'close waits for an in-flight Stopped started by setMaxBitrate',
+    () async {
+      var closeCount = 0;
+      final controller = await startStandaloneController(
+        onClose: () => closeCount++,
+      );
+      addTearDown(controller.dispose);
+
+      server.sessionsDelay = const Duration(milliseconds: 800);
+      final switching = controller.setMaxBitrate(4000000);
+      for (var i = 0; i < 50 && stoppedEvents().isEmpty; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+      expect(stoppedEvents(), isNotEmpty);
+
+      final watch = Stopwatch()..start();
+      await controller.close();
+      watch.stop();
+      await switching;
+
+      expect(closeCount, 1);
+      expect(stoppedEvents(), hasLength(1));
+      expect(watch.elapsed, greaterThan(const Duration(milliseconds: 200)));
+    },
+  );
+
+  test('a second close joins the first and fires onClose once', () async {
+    var closeCount = 0;
+    final controller = await startStandaloneController(
+      onClose: () => closeCount++,
+    );
+    addTearDown(controller.dispose);
+    server.sessionsDelay = const Duration(milliseconds: 400);
+    final first = controller.close();
+    final second = controller.close();
+    await Future.wait([first, second]);
+    expect(closeCount, 1);
+    expect(stoppedEvents(), hasLength(1));
+  });
+
+  test('close waits for snapshot delete before onClose', () async {
+    final gated = _GatedDeleteStore();
+    snapshots = gated;
+    gated.deleteGate = Completer<void>();
+    addTearDown(() {
+      if (!gated.deleteGate!.isCompleted) {
+        gated.deleteGate!.complete();
+      }
+    });
+
+    var closed = false;
+    Object? snapshotAtClose;
+    final controller = await startStandaloneController(
+      onClose: () {
+        closed = true;
+        snapshotAtClose = snapshots.snapshot;
+      },
+    );
+    addTearDown(controller.dispose);
+    expect(snapshots.snapshot, isNotNull);
+
+    final closing = controller.close();
+    await Future<void>.delayed(Duration.zero);
+    expect(closed, isFalse);
+    expect(snapshots.snapshot, isNotNull);
+
+    gated.deleteGate!.complete();
+    await closing;
+    expect(closed, isTrue);
+    expect(snapshotAtClose, isNull);
+    expect(snapshots.snapshot, isNull);
+    expect(snapshots.deleteCount, 1);
+  });
 
   testWidgets('text subtitle is handed to the backend as an external URL', (
     tester,
@@ -973,6 +1048,28 @@ void main() {
     expect(find.text('飞屋环游记 (2009)'), findsOneWidget);
   });
 
+  testWidgets('infrequent playback settings sit behind the overflow menu', (
+    tester,
+  ) async {
+    await pumpLoggedIn(tester);
+    await openPlayable(tester, 'movie-up');
+    await waitFor(tester, find.byKey(PlayerKeys.playPause));
+
+    expect(find.byKey(PlayerKeys.more), findsOneWidget);
+    expect(find.byKey(PlayerKeys.speed), findsNothing);
+    expect(find.byKey(PlayerKeys.quality), findsNothing);
+    expect(find.byKey(PlayerKeys.audio), findsNothing);
+    expect(find.byKey(PlayerKeys.mediaSource), findsNothing);
+    expect(find.byKey(PlayerKeys.skipSettings), findsNothing);
+    expect(find.byKey(PlayerKeys.fullscreen), findsOneWidget);
+
+    await openPlaybackSettings(tester);
+    expect(find.byKey(PlayerKeys.speed), findsOneWidget);
+    expect(find.text('倍速'), findsOneWidget);
+    expect(find.byKey(PlayerKeys.quality), findsNothing);
+    expect(find.byKey(PlayerKeys.mediaSource), findsNothing);
+  });
+
   testWidgets(
     'speed menu switches rate instantly and echoes the current rate',
     (tester) async {
@@ -982,24 +1079,27 @@ void main() {
 
       expect(controllerOf(tester).playbackRate, 1.0);
       expect(backend.rate, 1.0);
+      await openPlaybackSettings(tester);
       expect(find.text('1x'), findsOneWidget);
 
-      await tester.tap(find.byKey(const Key('player-speed')));
+      await tester.tap(find.byKey(PlayerKeys.speed));
       await tester.pumpAndSettle();
       await tester.tap(popupItem('2x'));
       await tester.pumpAndSettle();
 
       expect(controllerOf(tester).playbackRate, 2.0);
       expect(backend.rate, 2.0);
+      await openPlaybackSettings(tester);
       expect(find.text('2x'), findsOneWidget);
 
-      await tester.tap(find.byKey(const Key('player-speed')));
+      await tester.tap(find.byKey(PlayerKeys.speed));
       await tester.pumpAndSettle();
       await tester.tap(popupItem('1x'));
       await tester.pumpAndSettle();
 
       expect(controllerOf(tester).playbackRate, 1.0);
       expect(backend.rate, 1.0);
+      await openPlaybackSettings(tester);
       expect(find.text('1x'), findsOneWidget);
     },
   );
@@ -1016,7 +1116,10 @@ void main() {
     await tester.pump();
     expect(controllerOf(tester).playbackRate, 1.25);
     expect(backend.rate, 1.25);
+    await openPlaybackSettings(tester);
     expect(find.text('1.25x'), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
 
     await tester.sendKeyEvent(LogicalKeyboardKey.bracketRight);
     await tester.pump();
@@ -1033,6 +1136,7 @@ void main() {
     await tester.pump();
     expect(controllerOf(tester).playbackRate, 0.75);
     expect(backend.rate, 0.75);
+    await openPlaybackSettings(tester);
     expect(find.text('0.75x'), findsOneWidget);
   });
 
@@ -1045,15 +1149,7 @@ void main() {
     await openLibrary(tester, 'view-tv');
     await tester.tap(find.byKey(CatalogKeys.item('series-friends')));
     await tester.pumpAndSettle();
-    await tester.ensureVisible(
-      find.byKey(CatalogKeys.episode('episode-friends-s1e1')),
-    );
-    await tester.tap(find.byKey(CatalogKeys.episode('episode-friends-s1e1')));
-    await tester.pumpAndSettle();
-    await tester.ensureVisible(find.byKey(PlayerKeys.open));
-    await tester.tap(find.byKey(PlayerKeys.open));
-    await tester.pump();
-    await waitFor(tester, find.byKey(PlayerKeys.playPause));
+    await playListedEpisode(tester, 'episode-friends-s1e1');
 
     for (var i = 0; i < 3; i++) {
       await tester.sendKeyEvent(LogicalKeyboardKey.bracketRight);
@@ -1071,6 +1167,7 @@ void main() {
 
     expect(controllerOf(tester).playbackRate, 2.0);
     expect(backend.rate, 2.0);
+    await openPlaybackSettings(tester);
     expect(find.text('2x'), findsOneWidget);
   });
 
@@ -1087,10 +1184,7 @@ void main() {
     await pumpLoggedIn(tester, settingsStore: store);
     await openEpisode(tester, 'episode-anim-1');
 
-    await tester.tap(find.byKey(PlayerKeys.audio));
-    await tester.pumpAndSettle();
-    await tester.tap(popupItem('日语'));
-    await tester.pumpAndSettle();
+    await choosePlaybackOption(tester, PlayerKeys.audio, '日语');
     expect(backend.audioIndex, 2);
 
     await tester.tap(find.byKey(PlayerKeys.subtitle));
@@ -1207,7 +1301,7 @@ void main() {
     await openPlayable(tester, 'movie-up');
     await waitFor(tester, find.byKey(PlayerKeys.playPause));
     expect(find.byKey(const Key('player-episodes')), findsNothing);
-    expect(find.byKey(const Key('player-media-source')), findsNothing);
+    expect(find.byKey(PlayerKeys.mediaSource), findsNothing);
   });
 
   testWidgets(
@@ -1240,15 +1334,7 @@ void main() {
       await openLibrary(tester, 'view-tv');
       await tester.tap(find.byKey(CatalogKeys.item('series-friends')));
       await tester.pumpAndSettle();
-      await tester.ensureVisible(
-        find.byKey(CatalogKeys.episode('episode-friends-s1e1')),
-      );
-      await tester.tap(find.byKey(CatalogKeys.episode('episode-friends-s1e1')));
-      await tester.pumpAndSettle();
-      await tester.ensureVisible(find.byKey(PlayerKeys.open));
-      await tester.tap(find.byKey(PlayerKeys.open));
-      await tester.pump();
-      await waitFor(tester, find.byKey(PlayerKeys.playPause));
+      await playListedEpisode(tester, 'episode-friends-s1e1');
 
       // 剧集入口仅播放剧集时显示。
       await tester.tap(find.byKey(const Key('player-episodes')));
@@ -1320,15 +1406,7 @@ void main() {
     await openLibrary(tester, 'view-tv');
     await tester.tap(find.byKey(CatalogKeys.item('series-friends')));
     await tester.pumpAndSettle();
-    await tester.ensureVisible(
-      find.byKey(CatalogKeys.episode('episode-friends-s1e1')),
-    );
-    await tester.tap(find.byKey(CatalogKeys.episode('episode-friends-s1e1')));
-    await tester.pumpAndSettle();
-    await tester.ensureVisible(find.byKey(PlayerKeys.open));
-    await tester.tap(find.byKey(PlayerKeys.open));
-    await tester.pump();
-    await waitFor(tester, find.byKey(PlayerKeys.playPause));
+    await playListedEpisode(tester, 'episode-friends-s1e1');
 
     // 分集拉取失败:面板显示失败态与重试入口,不影响播放。
     server.itemsStatus = 500;
@@ -1433,6 +1511,51 @@ void main() {
     );
   });
 
+  testWidgets('episode panel is opaque and closes without leaving the player', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await pumpLoggedIn(tester);
+    await openLibrary(tester, 'view-tv');
+    await tester.tap(find.byKey(CatalogKeys.item('series-friends')));
+    await tester.pumpAndSettle();
+    await playListedEpisode(tester, 'episode-friends-s1e1');
+
+    await tester.tap(find.byKey(const Key('player-episodes')));
+    await waitFor(tester, find.byKey(const Key('player-episodes-panel')));
+    final panel = tester.widget<Material>(
+      find.byKey(const Key('player-episodes-panel')),
+    );
+    expect(panel.color, isNotNull);
+    expect(panel.color!.a, 1.0);
+    expect(
+      find.byKey(const Key('player-episode-episode-friends-s1e1')),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.byKey(const Key('player-episodes-close')));
+    await tester.pump();
+    expect(find.byKey(const Key('player-episodes-panel')), findsNothing);
+    expect(find.byType(PlayerPage), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('player-episodes')));
+    await waitFor(tester, find.byKey(const Key('player-episodes-dismiss')));
+    await tester.tap(find.byKey(const Key('player-episodes-dismiss')));
+    await tester.pump();
+    expect(find.byKey(const Key('player-episodes-panel')), findsNothing);
+    expect(find.byType(PlayerPage), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('player-episodes')));
+    await waitFor(tester, find.byKey(const Key('player-episodes-panel')));
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pump();
+    expect(find.byKey(const Key('player-episodes-panel')), findsNothing);
+    expect(find.byType(PlayerPage), findsOneWidget);
+  });
+
   testWidgets('chapter markers surface skip intro and outro buttons', (
     tester,
   ) async {
@@ -1443,7 +1566,10 @@ void main() {
     await waitFor(tester, find.byKey(PlayerKeys.playPause));
 
     // 有服务器章节标记时不显示手动设置入口。
-    expect(find.byKey(const Key('player-skip-settings')), findsNothing);
+    await openPlaybackSettings(tester);
+    expect(find.byKey(PlayerKeys.skipSettings), findsNothing);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
 
     // 起播即在片头区间,跳过片头立即可见,点击跳到区间终点。
     await waitFor(tester, find.byKey(const Key('player-skip-segment')));
@@ -1462,13 +1588,13 @@ void main() {
     await waitFor(tester, find.byKey(const Key('player-skip-segment')));
     expect(find.text('跳过片头'), findsOneWidget);
 
-    // 进入片尾区间显示跳过片尾。
+    // 进入片尾区间改为下一集入口,不再叠一个跳过片尾。
     await tester.runAsync(
       () => controllerOf(tester).seekTo(const Duration(minutes: 21)),
     );
     await tester.pump();
-    await waitFor(tester, find.byKey(const Key('player-skip-segment')));
-    expect(find.text('跳过片尾'), findsOneWidget);
+    await waitFor(tester, find.byKey(PlayerKeys.nextEpisode));
+    expect(find.byKey(const Key('player-skip-segment')), findsNothing);
     // 收尾排空未等待的上报链。
     await tester.pump(const Duration(milliseconds: 50));
   });
@@ -1484,11 +1610,7 @@ void main() {
     await waitFor(tester, find.byKey(PlayerKeys.playPause));
 
     // 无章节标记的剧集显示手动设置入口。
-    await waitFor(tester, find.byKey(const Key('player-skip-settings')));
-    await tester.tap(find.byKey(const Key('player-skip-settings')));
-    await tester.pumpAndSettle();
-    await tester.tap(popupItem('片头 60 秒'));
-    await tester.pumpAndSettle();
+    await choosePlaybackOption(tester, PlayerKeys.skipSettings, '片头 60 秒');
 
     final preference = (await store.read()).seriesPreferences['series-anim'];
     expect(preference, isNotNull);
@@ -1533,15 +1655,16 @@ void main() {
     await tester.pump();
     await waitFor(tester, find.byKey(PlayerKeys.playPause));
 
-    await waitFor(tester, find.byKey(const Key('player-media-source')));
+    await openPlaybackSettings(tester);
+    expect(find.byKey(PlayerKeys.mediaSourceLabel), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
     await tester.runAsync(
       () => controllerOf(tester).seekTo(const Duration(seconds: 60)),
     );
     await tester.pump();
 
-    await tester.tap(find.byKey(const Key('player-media-source')));
-    await tester.pumpAndSettle();
-    await tester.tap(popupItem('4K 版本'));
+    await choosePlaybackOption(tester, PlayerKeys.mediaSource, '4K 版本');
     for (var i = 0; i < 80; i++) {
       if (controllerOf(tester).resolved?.mediaSource.id == 'src-4k' &&
           !controllerOf(tester).loading) {
@@ -1561,13 +1684,57 @@ void main() {
         .where((event) => event.kind == 'Playing')
         .last;
     expect(lastPlaying.body['MediaSourceId'], 'src-4k');
+    await openPlaybackSettings(tester);
+    expect(
+      tester.widget<Text>(find.byKey(PlayerKeys.mediaSourceLabel)).data,
+      '4K 版本',
+    );
   });
 
   testWidgets('single media source hides the switch entry', (tester) async {
     await pumpLoggedIn(tester);
     await openPlayable(tester, 'movie-inception');
     await waitFor(tester, find.byKey(PlayerKeys.playPause));
-    expect(find.byKey(const Key('player-media-source')), findsNothing);
+    await openPlaybackSettings(tester);
+    expect(find.byKey(PlayerKeys.mediaSource), findsNothing);
+  });
+
+  testWidgets('chosen media source name carries to the next episode', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    server = multiSourceSeriesServer();
+    adapter = FakeEmbyAdapter([server]);
+    await pumpLoggedIn(tester);
+    await openEpisode(tester, 'episode-anim-1');
+
+    await choosePlaybackOption(tester, PlayerKeys.mediaSource, '4K 版本');
+    for (var i = 0; i < 80; i++) {
+      if (controllerOf(tester).resolved?.mediaSource.id == 'e1-4k' &&
+          !controllerOf(tester).loading) {
+        break;
+      }
+      await tester.pump(const Duration(milliseconds: 20));
+    }
+    expect(controllerOf(tester).resolved?.mediaSource.id, 'e1-4k');
+
+    backend.completePlayback();
+    await tester.pump();
+    await waitFor(tester, find.byKey(PlayerKeys.nextEpisodePlay));
+    await tester.tap(find.byKey(PlayerKeys.nextEpisodePlay));
+    await tester.pump();
+    await waitFor(tester, find.byKey(PlayerKeys.playPause));
+
+    expect(controllerOf(tester).itemId, 'episode-anim-2');
+    expect(controllerOf(tester).resolved?.mediaSource.id, 'e2-4k');
+    await openPlaybackSettings(tester);
+    expect(
+      tester.widget<Text>(find.byKey(PlayerKeys.mediaSourceLabel)).data,
+      '4K 版本',
+    );
   });
 
   testWidgets('strm remote direct stream opens without session headers', (
@@ -1954,6 +2121,70 @@ FakeEmbyServer chapteredSeriesServer() {
   );
 }
 
+/// 双版本剧集夹具:两集各自有独立 MediaSourceId、同名「4K 版本」,
+/// 供播放中换源后下一集按显示名对齐。
+FakeEmbyServer multiSourceSeriesServer() {
+  const minute = 10000000 * 60;
+  return FakeEmbyServer(
+    items: [
+      ...defaultCatalogItems().where(
+        (item) =>
+            item.id != 'series-friends' &&
+            item.id != 'season-friends-1' &&
+            item.id != 'episode-friends-s1e1' &&
+            item.id != 'episode-friends-s1e2',
+      ),
+      FakeEmbyItem(
+        id: 'series-anim',
+        name: '测试动画',
+        type: 'Series',
+        parentId: 'view-tv',
+        productionYear: 2024,
+        childCount: 2,
+        primaryImageTag: 'tag-anim',
+      ),
+      FakeEmbyItem(
+        id: 'season-anim-1',
+        name: '第 1 季',
+        type: 'Season',
+        parentId: 'series-anim',
+        seriesId: 'series-anim',
+        seriesName: '测试动画',
+        indexNumber: 1,
+      ),
+      FakeEmbyItem(
+        id: 'episode-anim-1',
+        name: '第一集',
+        type: 'Episode',
+        parentId: 'season-anim-1',
+        seriesId: 'series-anim',
+        seriesName: '测试动画',
+        seasonId: 'season-anim-1',
+        indexNumber: 1,
+        parentIndexNumber: 1,
+        runTimeTicks: minute * 22,
+        primaryImageTag: 'tag-anim-e1',
+        extraSources: const [FakeMediaSource(id: 'e1-4k', name: '4K 版本')],
+      ),
+      FakeEmbyItem(
+        id: 'episode-anim-2',
+        name: '第二集',
+        type: 'Episode',
+        parentId: 'season-anim-1',
+        seriesId: 'series-anim',
+        seriesName: '测试动画',
+        seasonId: 'season-anim-1',
+        indexNumber: 2,
+        parentIndexNumber: 1,
+        nextUp: true,
+        runTimeTicks: minute * 22,
+        primaryImageTag: 'tag-anim-e2',
+        extraSources: const [FakeMediaSource(id: 'e2-4k', name: '4K 版本')],
+      ),
+    ],
+  );
+}
+
 /// 双媒体源电影夹具(默认源 + 4K 额外源),供换源测试使用。
 FakeEmbyServer multiSourceMovieServer() {
   const minute = 10000000 * 60;
@@ -2038,4 +2269,17 @@ FakeEmbyServer transcodePgsMovieServer() {
       ),
     ],
   );
+}
+
+class _GatedDeleteStore extends MemoryPlaybackSessionSnapshotStore {
+  Completer<void>? deleteGate;
+
+  @override
+  Future<void> delete() async {
+    final gate = deleteGate;
+    if (gate != null) {
+      await gate.future;
+    }
+    await super.delete();
+  }
 }

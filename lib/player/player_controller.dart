@@ -36,6 +36,18 @@ class PlayerSkipSegment {
 /// 手动片头/片尾时长的可选档位(秒)。
 const List<int> kManualSkipChoices = [30, 60, 90, 120];
 
+/// 跳过按钮展示时长;打开 OSD 时重新计时。
+const Duration kSkipPromptHold = Duration(seconds: 8);
+
+/// 短于此时长的标记不弹出跳过钮。
+const Duration kMinSkipSegment = Duration(seconds: 3);
+
+/// 无片尾标记时,提前给出下一集入口的提前量。
+const Duration kNextUpLead = Duration(minutes: 3);
+
+/// 过短的剧集不提前弹出下一集,避免开场就出现。
+const Duration kMinRuntimeForEarlyNextUp = Duration(minutes: 6);
+
 /// 倍速固定阶梯(快捷键降/升档与控制层菜单共用)。
 const List<double> kPlaybackRateLadder = [
   0.5,
@@ -163,12 +175,19 @@ class PlayerController extends ChangeNotifier {
   List<PlayerSkipSegment> _skipSegments = const [];
   bool _hasServerSkipMarkers = false;
   PlayerSkipSegment? activeSkipSegment;
+  bool skipPromptVisible = false;
   int? manualIntroSkipSeconds;
   int? manualOutroSkipSeconds;
+  bool controlsPinned = false;
+  bool _nextUpOffered = false;
+  bool _nextUpLoading = false;
 
   // --- 媒体源切换(R9) ---
   List<PlaybackMediaSource> mediaSources = const [];
   String? activeMediaSourceId;
+
+  /// 按源显示名跨集对齐(Emby 每集 MediaSourceId 不同)。
+  String? _preferredSourceName;
 
   PlayMethod? get playMethod => resolved?.playMethod;
   bool get isTranscode => playMethod == PlayMethod.transcode;
@@ -198,9 +217,10 @@ class PlayerController extends ChangeNotifier {
   Timer? _progressFailBannerTimer;
   Timer? _subtitleNoticeTimer;
 
-  /// 播放完成路径发出但未等待的 Stopped;close()/shutdownSession() 先等它,
-  /// 保证倒计时期间关窗不会与之竞争。
+  /// 在途 Stopped(_handleCompleted / _stopSession / close 共用);
+  /// 后续 close()/shutdown 先等它,避免 exit(0) 截断上报。
   Future<void>? _pendingStopped;
+  Future<void>? _closing;
 
   /// 快照 IO 串行化:写与删按发起顺序执行,避免 Stopped 删除后被迟到的
   /// Progress 写入复活;失败一律吞掉。
@@ -208,6 +228,7 @@ class PlayerController extends ChangeNotifier {
   bool _snapshotDraining = false;
   Timer? _hideTimer;
   Timer? _nextTimer;
+  Timer? _skipPromptTimer;
   Timer? _settingsSaveTimer;
   StreamSubscription<Duration>? _positionSub;
   StreamSubscription<Duration>? _durationSub;
@@ -229,6 +250,9 @@ class PlayerController extends ChangeNotifier {
     subtitleNotice = null;
     nextEpisode = null;
     playbackEnded = false;
+    _nextUpOffered = false;
+    skipPromptVisible = false;
+    _skipPromptTimer?.cancel();
     loading = true;
     mediaSources = const [];
     _skipSegments = const [];
@@ -538,12 +562,27 @@ class PlayerController extends ChangeNotifier {
 
   void onUserActivity() {
     controlsVisible = true;
+    if (activeSkipSegment != null) {
+      _showSkipPrompt();
+    }
     _scheduleHide();
     _emit();
   }
 
+  /// 剧集列表面板打开时钉住控制层,避免顶栏盖住关闭钮后又自动隐藏。
+  void setControlsPinned(bool pinned) {
+    controlsPinned = pinned;
+    if (pinned) {
+      controlsVisible = true;
+      _hideTimer?.cancel();
+    } else {
+      _scheduleHide();
+    }
+    _emit();
+  }
+
   void hideControlsOnPointerExit() {
-    if (!isPlaying || nextEpisode != null || playbackEnded) {
+    if (controlsPinned || !isPlaying || nextEpisode != null || playbackEnded) {
       return;
     }
     _hideTimer?.cancel();
@@ -555,7 +594,7 @@ class PlayerController extends ChangeNotifier {
   }
 
   void toggleControls() {
-    if (nextEpisode != null || playbackEnded) {
+    if (controlsPinned || nextEpisode != null || playbackEnded) {
       onUserActivity();
       return;
     }
@@ -570,6 +609,9 @@ class PlayerController extends ChangeNotifier {
 
   void _scheduleHide() {
     _hideTimer?.cancel();
+    if (controlsPinned) {
+      return;
+    }
     if (isPlaying && nextEpisode == null && !playbackEnded) {
       _hideTimer = Timer(controlsHideAfter, () {
         controlsVisible = false;
@@ -596,7 +638,7 @@ class PlayerController extends ChangeNotifier {
     await _playItem(next.id, fromStart: true);
   }
 
-  /// 切到任意集(剧集列表入口):换集后重置为默认媒体源,
+  /// 切到任意集(剧集列表入口):源 id 每集不同,保留显示名以便对齐同名版本;
   /// 续播语义由 start() 按新集的进度决定。
   Future<void> playEpisode(EmbyItem episode) async {
     if (episode.id == itemId) {
@@ -608,7 +650,8 @@ class PlayerController extends ChangeNotifier {
   /// 进程内切到另一集(ADR-4):不经 host 重启通道,直接以新 itemId
   /// 重走 start(),autoResume 由 [fromStart] 决定——剧集列表切集
   /// (fromStart=false)时部分观看的集从续播位置起播。
-  /// 首次起播请求携带的源/轨道/章节起点只对首个条目有效,换集后清除。
+  /// 首次起播请求携带的源/轨道/章节起点只对首个条目有效,换集后清除 id;
+  /// 片源显示名保留,供下一集按 Name 对齐。
   Future<void> _playItem(String targetId, {required bool fromStart}) async {
     await shutdownSession();
     itemId = targetId;
@@ -819,29 +862,49 @@ class PlayerController extends ChangeNotifier {
     _updateActiveSkip();
   }
 
-  /// 服务器章节标记:Name 含 Intro/Outro/片头/片尾 的章节区间。
-  /// 区间终点为下一章节起点;末章取片长(不可得时退 30 秒)。
+  /// 服务器章节标记:优先 Emby `MarkerType`(IntroStart/IntroEnd/CreditsStart),
+  /// 否则回退到 Name 含 Intro/Outro/片头/片尾 的章节区间。
   List<PlayerSkipSegment> _chapterSkipSegments(List<ItemChapter> chapters) {
     if (chapters.isEmpty) {
       return const [];
     }
-    final result = <PlayerSkipSegment>[];
+    Duration? introStart;
+    Duration? introEnd;
+    Duration? creditsStart;
+    Duration? creditsEnd;
+    final named = <PlayerSkipSegment>[];
     for (var i = 0; i < chapters.length; i++) {
-      final name = chapters[i].name.toLowerCase();
+      final chapter = chapters[i];
+      final start = durationFromTicks(chapter.startPositionTicks);
+      final type = chapter.markerType?.trim().toLowerCase() ?? '';
+      switch (type) {
+        case 'introstart':
+          introStart = start;
+          continue;
+        case 'introend':
+          introEnd = start;
+          continue;
+        case 'creditsstart':
+          creditsStart = start;
+          continue;
+        case 'creditsend':
+          creditsEnd = start;
+          continue;
+      }
+      final name = chapter.name.toLowerCase();
       final isOutro = name.contains('outro') || name.contains('片尾');
       final isIntro =
           !isOutro && (name.contains('intro') || name.contains('片头'));
       if (!isIntro && !isOutro) {
         continue;
       }
-      final start = durationFromTicks(chapters[i].startPositionTicks);
       var end = i + 1 < chapters.length
           ? durationFromTicks(chapters[i + 1].startPositionTicks)
           : (duration > start ? duration : start + const Duration(seconds: 30));
       if (end <= start) {
         continue;
       }
-      result.add(
+      named.add(
         PlayerSkipSegment(
           kind: isOutro ? PlayerSkipKind.outro : PlayerSkipKind.intro,
           start: start,
@@ -849,23 +912,177 @@ class PlayerController extends ChangeNotifier {
         ),
       );
     }
-    return result;
+    if (introStart != null || creditsStart != null) {
+      final result = <PlayerSkipSegment>[];
+      if (introStart != null) {
+        final end = introEnd ?? introStart + const Duration(seconds: 90);
+        if (end > introStart) {
+          result.add(
+            PlayerSkipSegment(
+              kind: PlayerSkipKind.intro,
+              start: introStart,
+              end: end,
+            ),
+          );
+        }
+      }
+      if (creditsStart != null) {
+        final end =
+            creditsEnd ??
+            (duration > creditsStart
+                ? duration
+                : creditsStart + const Duration(seconds: 30));
+        if (end > creditsStart) {
+          result.add(
+            PlayerSkipSegment(
+              kind: PlayerSkipKind.outro,
+              start: creditsStart,
+              end: end,
+            ),
+          );
+        }
+      }
+      return result;
+    }
+    return named;
   }
 
   void _updateActiveSkip() {
     PlayerSkipSegment? next;
     for (final segment in _skipSegments) {
-      if (position >= segment.start && position < segment.end) {
+      if (position >= segment.start &&
+          position < segment.end &&
+          segment.end - segment.start >= kMinSkipSegment) {
         next = segment;
         break;
       }
     }
+    final changed = !_sameSkip(activeSkipSegment, next);
     activeSkipSegment = next;
+    if (next == null) {
+      _skipPromptTimer?.cancel();
+      skipPromptVisible = false;
+      return;
+    }
+    if (changed) {
+      _showSkipPrompt();
+    }
+  }
+
+  static bool _sameSkip(PlayerSkipSegment? a, PlayerSkipSegment? b) {
+    if (identical(a, b)) {
+      return true;
+    }
+    if (a == null || b == null) {
+      return false;
+    }
+    return a.kind == b.kind && a.start == b.start && a.end == b.end;
+  }
+
+  void _showSkipPrompt() {
+    _skipPromptTimer?.cancel();
+    skipPromptVisible = true;
+    _skipPromptTimer = Timer(kSkipPromptHold, () {
+      skipPromptVisible = false;
+      _emit();
+    });
   }
 
   void _setPosition(Duration value) {
     position = value;
     _updateActiveSkip();
+    _maybeOfferNextUp();
+  }
+
+  /// 片尾标记处,或无标记时片长最后约 3 分钟,提前给出下一集(不倒计时)。
+  void _maybeOfferNextUp() {
+    if (_disposed ||
+        loading ||
+        playbackEnded ||
+        nextEpisode != null ||
+        _nextUpOffered ||
+        _nextUpLoading) {
+      return;
+    }
+    final current = item;
+    if (current == null || !current.isEpisode) {
+      return;
+    }
+    if (duration <= Duration.zero) {
+      return;
+    }
+    Duration? threshold;
+    for (final segment in _skipSegments) {
+      if (segment.kind == PlayerSkipKind.outro) {
+        threshold = segment.start;
+        break;
+      }
+    }
+    if (threshold == null) {
+      if (duration < kMinRuntimeForEarlyNextUp) {
+        return;
+      }
+      threshold = duration - kNextUpLead;
+      if (threshold < Duration.zero) {
+        threshold = Duration.zero;
+      }
+    }
+    if (position < threshold) {
+      return;
+    }
+    _nextUpOffered = true;
+    unawaited(_offerEarlyNextEpisode());
+  }
+
+  Future<void> _offerEarlyNextEpisode() async {
+    final current = item;
+    if (current == null) {
+      _nextUpOffered = false;
+      return;
+    }
+    _nextUpLoading = true;
+    try {
+      final next = await client.getNextEpisode(current);
+      if (_disposed || playbackEnded) {
+        return;
+      }
+      if (next == null || nextEpisode != null) {
+        if (next == null) {
+          _nextUpOffered = false;
+        }
+        return;
+      }
+      nextEpisode = NextEpisodeOffer(item: next);
+      controlsVisible = true;
+      _hideTimer?.cancel();
+      _emit();
+    } on EmbyException {
+      _nextUpOffered = false;
+    } finally {
+      _nextUpLoading = false;
+    }
+  }
+
+  void _beginNextEpisodeCountdown(EmbyItem next) {
+    nextEpisode = NextEpisodeOffer(item: next, remaining: nextEpisodeCountdown);
+    controlsVisible = true;
+    _emit();
+    _nextTimer?.cancel();
+    _nextTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      final offer = nextEpisode;
+      if (offer == null || offer.remaining == null) {
+        timer.cancel();
+        return;
+      }
+      final left = offer.remaining! - const Duration(seconds: 1);
+      if (left <= Duration.zero) {
+        timer.cancel();
+        unawaited(playNextEpisode());
+      } else {
+        nextEpisode = NextEpisodeOffer(item: offer.item, remaining: left);
+        _emit();
+      }
+    });
   }
 
   // ---------------------------------------------------------------------
@@ -883,16 +1100,29 @@ class PlayerController extends ChangeNotifier {
     }
     final startTicks = ticksFromDuration(position);
     activeMediaSourceId = sourceId;
+    for (final source in mediaSources) {
+      if (source.id == sourceId) {
+        _preferredSourceName = source.label;
+        break;
+      }
+    }
     onUserActivity();
+    unawaited(_persistSeriesPreference());
     await _reopen(startTicks: startTicks);
   }
 
   /// 关闭播放器:取消定时器 → 在 [stoppedDeadline] 内等待 Stopped 送达
   /// (或失败/超时)→ 再回调 [onClose]。宿主据此在 onClose 后安全退出进程。
-  Future<void> close() async {
+  /// 重复调用加入同一次关闭,只触发一次 [onClose]。
+  Future<void> close() {
+    return _closing ??= _close();
+  }
+
+  Future<void> _close() async {
     _hideTimer?.cancel();
     _nextTimer?.cancel();
     _nextTimer = null;
+    _skipPromptTimer?.cancel();
     _progressTimer?.cancel();
     _progressTimer = null;
     await _awaitPendingStopped();
@@ -914,6 +1144,7 @@ class PlayerController extends ChangeNotifier {
     _hideTimer?.cancel();
     _nextTimer?.cancel();
     _nextTimer = null;
+    _skipPromptTimer?.cancel();
     await _persistSettings();
     await _stopSession();
     if (window.isFullScreen) {
@@ -996,6 +1227,7 @@ class PlayerController extends ChangeNotifier {
     disconnectDetail = null;
     nextEpisode = null;
     playbackEnded = false;
+    _nextUpOffered = false;
     _nextTimer?.cancel();
     _emit();
 
@@ -1014,12 +1246,20 @@ class PlayerController extends ChangeNotifier {
         return;
       }
       mediaSources = info.mediaSources;
+      final chosenId = preferredPlaybackSourceId(
+        sources: info.mediaSources,
+        requestedId: activeMediaSourceId ?? preferredMediaSourceId,
+        requestedName: _preferredSourceName,
+      );
+      if (chosenId != null) {
+        activeMediaSourceId = chosenId;
+      }
       final next = resolvePlayback(
         info: info,
         baseUrl: client.baseUrl!,
         accessToken: client.accessToken!,
         itemId: itemId,
-        mediaSourceId: activeMediaSourceId ?? preferredMediaSourceId,
+        mediaSourceId: chosenId,
       );
       if (next == null) {
         error = PlayerErrorKind.noStream;
@@ -1212,11 +1452,25 @@ class PlayerController extends ChangeNotifier {
 
   /// 发送 Stopped,以 [stoppedDeadline] 为上限;成功后删除会话快照,
   /// 超时/异常按上报失败处理(快照保留供宿主代发)。
-  Future<void> _sendStopped() async {
+  /// 在途 future 记入 [_pendingStopped],供后续 close/shutdown 等待。
+  Future<void> _sendStopped() {
+    return _trackStopped(_doSendStopped());
+  }
+
+  Future<void> _trackStopped(Future<void> pending) {
+    _pendingStopped = pending;
+    return pending.whenComplete(() {
+      if (identical(_pendingStopped, pending)) {
+        _pendingStopped = null;
+      }
+    });
+  }
+
+  Future<void> _doSendStopped() async {
     try {
       await client.reportStopped(_currentReport()).timeout(stoppedDeadline);
       _onReportSucceeded();
-      _enqueueSnapshot(snapshotStore.delete);
+      await _enqueueSnapshot(snapshotStore.delete);
     } on EmbyException catch (failure) {
       _onReportFailed(failure);
     } on TimeoutException {
@@ -1226,7 +1480,6 @@ class PlayerController extends ChangeNotifier {
 
   void _onReportSucceeded() {
     _reportFailureStreak = 0;
-    sessionExpired = false;
     _clearProgressSyncFailed();
   }
 
@@ -1282,15 +1535,27 @@ class PlayerController extends ChangeNotifier {
       userId: userId,
       timestamp: DateTime.now(),
     );
-    _enqueueSnapshot(() => snapshotStore.write(snapshot));
+    unawaited(_enqueueSnapshot(() => snapshotStore.write(snapshot)));
   }
 
   /// 空闲时立刻执行(内存实现即时生效),忙时按序排队;任何失败吞掉。
-  void _enqueueSnapshot(Future<void> Function() operation) {
-    _snapshotOps.add(operation);
+  /// 返回对应本次操作完成的 Future,供 Stopped 成功路径在 onClose 前等待删除。
+  Future<void> _enqueueSnapshot(Future<void> Function() operation) {
+    final done = Completer<void>();
+    _snapshotOps.add(() async {
+      try {
+        await operation();
+      } catch (_) {
+      } finally {
+        if (!done.isCompleted) {
+          done.complete();
+        }
+      }
+    });
     if (!_snapshotDraining) {
       unawaited(_drainSnapshotOps());
     }
+    return done.future;
   }
 
   Future<void> _drainSnapshotOps() async {
@@ -1298,12 +1563,13 @@ class PlayerController extends ChangeNotifier {
     try {
       while (_snapshotOps.isNotEmpty) {
         final operation = _snapshotOps.removeAt(0);
-        try {
-          await operation();
-        } catch (_) {}
+        await operation();
       }
     } finally {
       _snapshotDraining = false;
+      if (_snapshotOps.isNotEmpty) {
+        unawaited(_drainSnapshotOps());
+      }
     }
   }
 
@@ -1376,7 +1642,8 @@ class PlayerController extends ChangeNotifier {
       return;
     }
     try {
-      final next = await client.getNextEpisode(item!);
+      final existing = nextEpisode?.item;
+      final next = existing ?? await client.getNextEpisode(item!);
       if (_disposed) {
         return;
       }
@@ -1391,28 +1658,7 @@ class PlayerController extends ChangeNotifier {
         _emit();
         return;
       }
-      nextEpisode = NextEpisodeOffer(
-        item: next,
-        remaining: nextEpisodeCountdown,
-      );
-      controlsVisible = true;
-      _emit();
-      _nextTimer?.cancel();
-      _nextTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-        final offer = nextEpisode;
-        if (offer == null || offer.remaining == null) {
-          timer.cancel();
-          return;
-        }
-        final left = offer.remaining! - const Duration(seconds: 1);
-        if (left <= Duration.zero) {
-          timer.cancel();
-          unawaited(playNextEpisode());
-        } else {
-          nextEpisode = NextEpisodeOffer(item: offer.item, remaining: left);
-          _emit();
-        }
-      });
+      _beginNextEpisodeCountdown(next);
     } on EmbyException {
       _showPlaybackEnded();
     }
@@ -1489,6 +1735,7 @@ class PlayerController extends ChangeNotifier {
     if (preference.maxStreamingBitrate != null) {
       maxStreamingBitrate = preference.maxStreamingBitrate!;
     }
+    _preferredSourceName ??= preference.mediaSourceName;
     manualIntroSkipSeconds = preference.introSkipSeconds;
     manualOutroSkipSeconds = preference.outroSkipSeconds;
   }
@@ -1504,6 +1751,7 @@ class PlayerController extends ChangeNotifier {
       audioStreamIndex: audioStreamIndex,
       subtitleStreamIndex: subtitleStreamIndex,
       maxStreamingBitrate: maxStreamingBitrate,
+      mediaSourceName: _preferredSourceName,
       introSkipSeconds: manualIntroSkipSeconds,
       outroSkipSeconds: manualOutroSkipSeconds,
     );
@@ -1533,6 +1781,7 @@ class PlayerController extends ChangeNotifier {
     _progressFailBannerTimer?.cancel();
     _subtitleNoticeTimer?.cancel();
     _nextTimer?.cancel();
+    _skipPromptTimer?.cancel();
     _settingsSaveTimer?.cancel();
     unawaited(_persistSettings());
     unawaited(_positionSub?.cancel());

@@ -19,6 +19,36 @@ class ResolvedPlayback {
   bool get isTranscode => playMethod == PlayMethod.transcode;
 }
 
+/// 从 PlaybackInfo 的多个媒体源里选出要播的那一个。
+///
+/// 先按 [requestedId] 精确匹配;下一集的源 id 会变,再按 [requestedName]
+/// (MediaSource.Name,如「4K 版本」)对齐,都对不上才回落第一个源。
+String? preferredPlaybackSourceId({
+  required List<PlaybackMediaSource> sources,
+  String? requestedId,
+  String? requestedName,
+}) {
+  if (sources.isEmpty) {
+    return null;
+  }
+  if (requestedId != null && requestedId.isNotEmpty) {
+    for (final source in sources) {
+      if (source.id == requestedId) {
+        return source.id;
+      }
+    }
+  }
+  final name = requestedName?.trim();
+  if (name != null && name.isNotEmpty) {
+    for (final source in sources) {
+      if (source.label.trim() == name) {
+        return source.id;
+      }
+    }
+  }
+  return sources.first.id;
+}
+
 /// 解析起播流:直连优先(服务端 DirectStreamUrl,否则 strm 远端 Path,
 /// 否则静态流地址),不可直连且有 TranscodingUrl 时转码。
 ///

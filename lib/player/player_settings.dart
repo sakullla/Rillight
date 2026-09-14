@@ -13,9 +13,10 @@ enum HardwareDecodingMode { auto, on, off }
 /// 硬件解码后端:auto 走平台默认,其余为 mpv hwdec 值。
 enum HardwareDecoderBackend { auto, d3d11va, nvdec, videotoolbox }
 
-/// 按剧(seriesId)记忆的播放偏好:音轨/字幕(含关闭)/码率/手动片头片尾。
+/// 按剧(seriesId)记忆的播放偏好:音轨/字幕(含关闭)/码率/片源名/手动片头片尾。
 ///
 /// [subtitleStreamIndex] 为 null 表示该剧字幕处于关闭状态;
+/// [mediaSourceName] 按 MediaSource.Name 跨集对齐(源 id 每集不同);
 /// [introSkipSeconds]/[outroSkipSeconds] 为无服务器章节标记时的
 /// 手动跳过时长(秒),null 表示未设置。
 /// 记录存在即视为有效快照,不存在记录时运行时沿用默认逻辑。
@@ -24,6 +25,7 @@ class PlayerSeriesPreference {
     this.audioStreamIndex,
     this.subtitleStreamIndex,
     this.maxStreamingBitrate,
+    this.mediaSourceName,
     this.introSkipSeconds,
     this.outroSkipSeconds,
   });
@@ -31,6 +33,7 @@ class PlayerSeriesPreference {
   final int? audioStreamIndex;
   final int? subtitleStreamIndex;
   final int? maxStreamingBitrate;
+  final String? mediaSourceName;
   final int? introSkipSeconds;
   final int? outroSkipSeconds;
 
@@ -38,6 +41,8 @@ class PlayerSeriesPreference {
     if (audioStreamIndex != null) 'audioStreamIndex': audioStreamIndex,
     if (subtitleStreamIndex != null) 'subtitleStreamIndex': subtitleStreamIndex,
     if (maxStreamingBitrate != null) 'maxStreamingBitrate': maxStreamingBitrate,
+    if (mediaSourceName != null && mediaSourceName!.isNotEmpty)
+      'mediaSourceName': mediaSourceName,
     if (introSkipSeconds != null) 'introSkipSeconds': introSkipSeconds,
     if (outroSkipSeconds != null) 'outroSkipSeconds': outroSkipSeconds,
   };
@@ -47,6 +52,7 @@ class PlayerSeriesPreference {
       audioStreamIndex: _readInt(json['audioStreamIndex']),
       subtitleStreamIndex: _readInt(json['subtitleStreamIndex']),
       maxStreamingBitrate: _readInt(json['maxStreamingBitrate']),
+      mediaSourceName: _readString(json['mediaSourceName']),
       introSkipSeconds: _readInt(json['introSkipSeconds']),
       outroSkipSeconds: _readInt(json['outroSkipSeconds']),
     );
@@ -194,6 +200,13 @@ int? _readInt(dynamic raw) {
     return raw.round();
   }
   return int.tryParse(raw?.toString() ?? '');
+}
+
+String? _readString(dynamic raw) {
+  if (raw is String && raw.trim().isNotEmpty) {
+    return raw.trim();
+  }
+  return null;
 }
 
 double? _readDouble(dynamic raw) {

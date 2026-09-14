@@ -178,6 +178,19 @@ void main() {
 
     expect(taps, 1);
     expect(host.current, isNull);
+    expect(tester.getSize(find.byType(SeasonPosterCard)).width, 132);
+  });
+
+  testWidgets('selected season border does not expand the card', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _wrap(
+        host: host,
+        child: SeasonPosterCard(item: _season, selected: true, onTap: () {}),
+      ),
+    );
+    expect(tester.getSize(find.byType(SeasonPosterCard)).width, 132);
   });
 
   testWidgets('episode hover play opens the episode, not a series id', (

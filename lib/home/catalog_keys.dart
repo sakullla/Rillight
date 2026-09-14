@@ -45,6 +45,8 @@ abstract final class CatalogKeys {
   static Key library(String id) => Key('catalog-library-$id');
   static Key season(String id) => Key('catalog-season-$id');
   static Key episode(String id) => Key('catalog-episode-$id');
+  static Key episodePlay(String id) => Key('catalog-episode-play-$id');
+  static Key episodePlayed(String id) => Key('catalog-episode-played-$id');
   static Key shelfMore(String shelfId) => Key('catalog-more-$shelfId');
   static Key shelfScrollLeft(String shelfId) =>
       Key('catalog-scroll-left-$shelfId');

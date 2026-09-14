@@ -275,7 +275,8 @@ Future<Uint8List?> loadChapterImage(
 ///   服务器换图后自动重新拉取;
 /// - 负缓存带 TTL,失败结果不再被永久吞掉;
 /// - 磁盘写入失败时降级为仅内存缓存,不影响显示。
-/// 同时限制并发拉取,网格快滑时不会一次打几十张把 UI 打卡。
+/// 同时限制并发网络拉取,网格快滑时不会一次打几十张把 UI 打卡。
+/// 磁盘读写不占用该并发槽,避免写盘变慢后缩略图停在第几十张不再刷新。
 class MediaImageCache {
   MediaImageCache._();
 
@@ -290,10 +291,14 @@ class MediaImageCache {
   /// 负缓存(拉取失败)的 TTL。
   static const Duration defaultNegativeTtl = Duration(seconds: 30);
 
-  static const int _maxConcurrentFetches = 12;
+  /// 单次网络拉取超时。超时记为未命中并释放并发槽,避免骨架永远转圈。
+  static const Duration defaultFetchTimeout = Duration(seconds: 12);
+
+  static const int _maxConcurrentFetches = 6;
 
   int memoryLimitBytes = defaultMemoryLimitBytes;
   Duration negativeTtl = defaultNegativeTtl;
+  Duration fetchTimeout = defaultFetchTimeout;
   DateTime Function() clock = DateTime.now;
 
   final LinkedHashMap<String, Uint8List> _bytes = LinkedHashMap();
@@ -331,6 +336,7 @@ class MediaImageCache {
   void resetConfiguration() {
     memoryLimitBytes = defaultMemoryLimitBytes;
     negativeTtl = defaultNegativeTtl;
+    fetchTimeout = defaultFetchTimeout;
     clock = DateTime.now;
     debugSetDiskStore(null);
   }
@@ -384,8 +390,9 @@ class MediaImageCache {
       _misses.remove(cacheKey);
     }
     return _inflight.putIfAbsent(cacheKey, () async {
-      await _acquire();
       try {
+        // 磁盘读写不占网络并发槽:网格滑过几十张时写盘变慢,不能把后面的
+        // 缩略图堵在 _acquire 队列里一直转圈。
         if (_diskResolved) {
           final disk = await _readDisk(cacheKey);
           if (disk != null && disk.isNotEmpty) {
@@ -393,25 +400,36 @@ class MediaImageCache {
             return disk;
           }
         } else {
-          // 首次使用时后台解析磁盘层;解析完成前本次仅走内存+网络。
           unawaited(_ensureDiskStore());
         }
-        final bytes = await fetch();
+        await _acquire();
+        Uint8List? bytes;
+        var timedOut = false;
+        try {
+          bytes = await fetch().timeout(fetchTimeout);
+        } on TimeoutException {
+          timedOut = true;
+          bytes = null;
+        } finally {
+          _release();
+        }
         if (bytes != null && bytes.isNotEmpty) {
-          _storeBytes(cacheKey, bytes);
+          final loaded = bytes;
+          _storeBytes(cacheKey, loaded);
           if (_diskResolved) {
-            await _writeDisk(cacheKey, bytes);
+            unawaited(_writeDisk(cacheKey, loaded));
           } else {
             unawaited(
-              _ensureDiskStore().then((_) => _writeDisk(cacheKey, bytes)),
+              _ensureDiskStore().then((_) => _writeDisk(cacheKey, loaded)),
             );
           }
-          return bytes;
+          return loaded;
         }
-        _recordMiss(cacheKey);
+        if (!timedOut) {
+          _recordMiss(cacheKey);
+        }
         return null;
       } finally {
-        _release();
         _inflight.remove(cacheKey);
       }
     });
@@ -466,13 +484,15 @@ class MediaImageCache {
         });
   }
 
+  static const Duration _diskIoTimeout = Duration(seconds: 2);
+
   Future<Uint8List?> _readDisk(String cacheKey) async {
     final store = _diskStore;
     if (store == null) {
       return null;
     }
     try {
-      return await store.read(cacheKey);
+      return await store.read(cacheKey).timeout(_diskIoTimeout);
     } catch (_) {
       return null;
     }
@@ -484,7 +504,7 @@ class MediaImageCache {
       return;
     }
     try {
-      await store.write(cacheKey, bytes);
+      await store.write(cacheKey, bytes).timeout(_diskIoTimeout);
     } catch (_) {
       // 磁盘写入失败降级为仅内存缓存,不影响显示。
     }

@@ -12,9 +12,10 @@ import 'package:rillight/media_image/media_image.dart';
 
 /// 首页片库入口,只作内容行;进库主路径是顶栏库名.
 class LibraryTiles extends StatelessWidget {
-  const LibraryTiles({super.key, required this.libraries});
+  const LibraryTiles({super.key, required this.libraries, this.headerAction});
 
   final List<EmbyItem> libraries;
+  final Widget? headerAction;
 
   @override
   Widget build(BuildContext context) {
@@ -37,6 +38,7 @@ class LibraryTiles extends StatelessWidget {
           items: items,
           wide: true,
           extent: tileWidth * 9 / 16 + AppSpacing.xs,
+          headerAction: headerAction,
           onTap: (library) => context.push(AppRoutes.library(library.id)),
           itemBuilder: (context, library) {
             return _LibraryCard(library: library, width: tileWidth);

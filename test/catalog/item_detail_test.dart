@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
@@ -21,6 +22,7 @@ import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/player/player_keys.dart';
 
 import '../emby/fake_emby_server.dart';
+import '../helpers/top_bar_hit.dart';
 
 const _device = EmbyDeviceInfo(
   clientName: '灯川 Rillight',
@@ -183,6 +185,16 @@ void main() {
     expect(tester.widget<SelectableText>(_headerTitle()).data, contains('老友记'));
     expect(find.byKey(CatalogKeys.viewEpisode), findsOneWidget);
     expect(find.byKey(CatalogKeys.seriesLink), findsNothing);
+    expect(find.byKey(CatalogKeys.overview), findsOneWidget);
+    expect(find.text('简介'), findsOneWidget);
+    expect(find.text('Six friends living in New York.'), findsWidgets);
+    expect(
+      find.descendant(
+        of: find.byKey(CatalogKeys.episodesRow),
+        matching: find.text('Monica gets a new apartment.'),
+      ),
+      findsOneWidget,
+    );
 
     final row = find.byKey(CatalogKeys.episodesRow);
     expect(row, findsOneWidget);
@@ -204,8 +216,11 @@ void main() {
     );
     expect(second.top, greaterThanOrEqualTo(first.bottom));
     expect(second.left, first.left);
+    expect(_rowSelected(tester, 'episode-friends-s1e1'), isTrue);
+    expect(_rowSelected(tester, 'episode-friends-s1e2'), isFalse);
     for (final id in _episodeRowIds(tester)) {
-      expect(_rowSelected(tester, id), isFalse, reason: id);
+      expect(find.byKey(CatalogKeys.episodePlay(id)), findsOneWidget);
+      expect(find.byKey(CatalogKeys.episodePlayed(id)), findsOneWidget);
     }
   });
 
@@ -221,23 +236,127 @@ void main() {
       contains('The One with the Sonogram'),
     );
     expect(find.byKey(CatalogKeys.seriesLink), findsOneWidget);
-    expect(find.byKey(CatalogKeys.viewSeries), findsNothing);
+    expect(find.byKey(CatalogKeys.viewSeries), findsOneWidget);
     expect(find.byKey(CatalogKeys.locateEpisode), findsOneWidget);
+    expect(find.byKey(CatalogKeys.overview), findsOneWidget);
+    expect(find.text('简介'), findsOneWidget);
+    expect(find.text('Six friends living in New York.'), findsWidgets);
+    expect(find.byKey(CatalogKeys.episodesRow), findsNothing);
 
-    expect(_episodeRowIds(tester), [
-      'episode-friends-s1e1',
-      'episode-friends-s1e2',
+    expect(find.byKey(PlayerKeys.open), findsOneWidget);
+  });
+
+  testWidgets('resumable episode row shows continue play', (tester) async {
+    const ticksPerMinute = 10000000 * 60;
+    server.setEpisodes(_series, const [
+      FakeEpisode(
+        id: 'resume-e9',
+        name: '第 9 集',
+        seasonId: _season1,
+        indexNumber: 9,
+        runTimeTicks: ticksPerMinute * 24,
+        playbackPositionTicks: ticksPerMinute * 10,
+        playedPercentage: 42,
+      ),
     ]);
-    expect(_rowSelected(tester, 'episode-friends-s1e2'), isTrue);
-    expect(_rowSelected(tester, 'episode-friends-s1e1'), isFalse);
+    final app = await pumpApp(tester);
+    await openItem(tester, app, 'resume-e9');
 
-    final thumb = find.descendant(
-      of: find.byKey(CatalogKeys.episode('episode-friends-s1e1')),
-      matching: find.byType(MediaImage),
+    expect(find.byKey(PlayerKeys.open), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(PlayerKeys.open),
+        matching: find.text('继续播放'),
+      ),
+      findsOneWidget,
     );
-    expect(thumb, findsOneWidget);
-    expect(tester.widget<MediaImage>(thumb).preferThumb, isTrue);
-    expect(tester.getSize(thumb), const Size(224, 126));
+    expect(find.byKey(CatalogKeys.episodesRow), findsNothing);
+  });
+
+  testWidgets('episode row check marks the episode played', (tester) async {
+    final app = await pumpApp(tester);
+    await openItem(tester, app, _series);
+
+    const id = 'episode-friends-s1e2';
+    final toggle = find.byKey(CatalogKeys.episodePlayed(id));
+    await tester.ensureVisible(toggle);
+    await tester.pumpAndSettle();
+    expect(tester.widget<IconButton>(toggle).tooltip, '标记已看');
+
+    await tester.tap(toggle);
+    await tester.pumpAndSettle();
+
+    expect(
+      server.requests.any(
+        (request) =>
+            request.contains('POST ') && request.contains('/PlayedItems/$id'),
+      ),
+      isTrue,
+    );
+    expect(
+      tester
+          .widget<IconButton>(find.byKey(CatalogKeys.episodePlayed(id)))
+          .tooltip,
+      '标记未看',
+    );
+  });
+
+  testWidgets('episode row check can clear played', (tester) async {
+    final app = await pumpApp(tester);
+    await openItem(tester, app, _series);
+
+    const id = 'episode-friends-s1e1';
+    final toggle = find.byKey(CatalogKeys.episodePlayed(id));
+    await tester.ensureVisible(toggle);
+    await tester.pumpAndSettle();
+    expect(tester.widget<IconButton>(toggle).tooltip, '标记未看');
+
+    await tester.tap(toggle);
+    await tester.pumpAndSettle();
+
+    expect(
+      server.requests.any(
+        (request) =>
+            request.contains('DELETE ') && request.contains('/PlayedItems/$id'),
+      ),
+      isTrue,
+    );
+    expect(
+      tester
+          .widget<IconButton>(find.byKey(CatalogKeys.episodePlayed(id)))
+          .tooltip,
+      '标记已看',
+    );
+  });
+
+  testWidgets('episode row context menu can mark played', (tester) async {
+    final app = await pumpApp(tester);
+    await openItem(tester, app, _series);
+
+    const id = 'episode-friends-s1e2';
+    final row = find.byKey(CatalogKeys.episode(id));
+    await tester.ensureVisible(row);
+    await tester.pumpAndSettle();
+    await tester.tap(row, buttons: kSecondaryButton);
+    await tester.pumpAndSettle();
+
+    expect(find.text('标记已看'), findsOneWidget);
+    await tester.tap(find.text('标记已看'));
+    await tester.pumpAndSettle();
+
+    expect(
+      server.requests.any(
+        (request) =>
+            request.contains('POST ') && request.contains('/PlayedItems/$id'),
+      ),
+      isTrue,
+    );
+    expect(
+      tester
+          .widget<IconButton>(find.byKey(CatalogKeys.episodePlayed(id)))
+          .tooltip,
+      '标记未看',
+    );
   });
 
   testWidgets('skeleton header matches the loaded header height', (
@@ -291,14 +410,14 @@ void main() {
       ),
     ]);
     final app = await pumpApp(tester);
-    await openItem(tester, app, 'dup-e2-web');
+    await openItem(tester, app, _series);
 
     final ids = _episodeRowIds(tester);
     expect(ids, ['dup-e1', 'dup-e2-web', 'dup-e2-bd']);
     expect(ids.toSet().length, ids.length);
-    expect(_rowSelected(tester, 'dup-e2-web'), isTrue);
+    expect(_rowSelected(tester, 'dup-e1'), isTrue);
+    expect(_rowSelected(tester, 'dup-e2-web'), isFalse);
     expect(_rowSelected(tester, 'dup-e2-bd'), isFalse);
-    expect(_rowSelected(tester, 'dup-e1'), isFalse);
   });
 
   testWidgets('episode whose season is missing still lists by its seasonId', (
@@ -342,11 +461,9 @@ void main() {
       episodeQueries.where((r) => r.contains('ParentId=$_season1')),
       isEmpty,
     );
-    final ids = _episodeRowIds(tester);
-    expect(ids, ['ghost-e1', 'ghost-e2']);
-    expect(ids.toSet().length, ids.length);
-    expect(_rowSelected(tester, 'ghost-e1'), isTrue);
+    expect(find.byKey(CatalogKeys.episodesRow), findsNothing);
     expect(find.byKey(CatalogKeys.nextEpisode), findsOneWidget);
+    expect(find.byKey(CatalogKeys.viewSeries), findsOneWidget);
   });
 
   testWidgets('season switch failure shows an inline error that retries', (
@@ -371,8 +488,8 @@ void main() {
 
     server.itemsStatus = 500;
     final picker = find.byKey(CatalogKeys.seasonPicker);
-    await _ensureVisibleBelowTopBar(tester, picker);
-    await _tapBelowTopBar(tester, picker);
+    await ensureVisibleBelowTopBar(tester, picker);
+    await tapBelowTopBar(tester, picker);
     await tester.pumpAndSettle();
     await tester.tap(find.text('第 2 季').last);
     await tester.pumpAndSettle();
@@ -389,8 +506,8 @@ void main() {
       matching: find.byType(FilledButton),
     );
     expect(retry, findsOneWidget);
-    await _ensureVisibleBelowTopBar(tester, retry);
-    await _tapBelowTopBar(tester, retry);
+    await ensureVisibleBelowTopBar(tester, retry);
+    await tapBelowTopBar(tester, retry);
     await tester.pumpAndSettle();
 
     expect(find.byType(AppErrorView), findsNothing);
@@ -419,9 +536,13 @@ void main() {
     final more = find.byKey(CatalogKeys.episodesLoadMore);
     expect(more, findsOneWidget);
     expect(tester.widget(more), isA<OutlinedButton>());
+    expect(
+      find.descendant(of: more, matching: find.text('加载更多')),
+      findsOneWidget,
+    );
 
-    await _ensureVisibleBelowTopBar(tester, more);
-    await _tapBelowTopBar(tester, more);
+    await ensureVisibleBelowTopBar(tester, more);
+    await tapBelowTopBar(tester, more);
     await tester.pumpAndSettle();
 
     ids = _episodeRowIds(tester);
@@ -429,6 +550,71 @@ void main() {
     expect(ids.toSet().length, 100);
     expect(ids.last, 'bulk-e100');
     expect(find.byKey(CatalogKeys.episodesLoadMore), findsNothing);
+  });
+
+  testWidgets('jumping to an off-screen episode scrolls it into view', (
+    tester,
+  ) async {
+    server.setEpisodes(_series, [
+      for (var i = 1; i <= 40; i++)
+        FakeEpisode(
+          id: 'bulk-e$i',
+          name: 'Episode $i',
+          seasonId: _season1,
+          indexNumber: i,
+        ),
+    ]);
+    final app = await pumpApp(tester);
+    await openItem(tester, app, _series);
+    expect(_rowSelected(tester, 'bulk-e1'), isTrue);
+
+    final locate = find.byKey(CatalogKeys.locateEpisode);
+    await ensureVisibleBelowTopBar(tester, locate);
+    await tapBelowTopBar(tester, locate);
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), '40');
+    await tester.testTextInput.receiveAction(TextInputAction.go);
+    await tester.pumpAndSettle();
+
+    expect(_rowSelected(tester, 'bulk-e40'), isTrue);
+    final barBottom = tester.getRect(find.byKey(AppShell.topBarKey)).bottom;
+    final rect = tester.getRect(find.byKey(CatalogKeys.episode('bulk-e40')));
+    expect(rect.bottom, greaterThan(barBottom));
+    expect(rect.top, lessThan(800));
+  });
+
+  testWidgets('empty season still shows the season picker', (tester) async {
+    server.setSeasons(_series, const [
+      FakeSeason(id: _season1, name: '第 1 季', indexNumber: 1),
+      FakeSeason(id: 'season-friends-2', name: '第 2 季', indexNumber: 2),
+    ]);
+    server.setEpisodes(_series, const [
+      FakeEpisode(id: 's1e1', name: 'One', seasonId: _season1, indexNumber: 1),
+    ]);
+    final app = await pumpApp(tester);
+    await openItem(tester, app, _series);
+    expect(find.byKey(CatalogKeys.seasonPicker), findsOneWidget);
+
+    final picker = find.byKey(CatalogKeys.seasonPicker);
+    await ensureVisibleBelowTopBar(tester, picker);
+    await tapBelowTopBar(tester, picker);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('第 2 季').last);
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(CatalogKeys.episodesRow), findsOneWidget);
+    expect(find.byKey(CatalogKeys.seasonPicker), findsOneWidget);
+    expect(_episodeRowIds(tester), isEmpty);
+
+    await ensureVisibleBelowTopBar(
+      tester,
+      find.byKey(CatalogKeys.seasonPicker),
+    );
+    await tapBelowTopBar(tester, find.byKey(CatalogKeys.seasonPicker));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('第 1 季').last);
+    await tester.pumpAndSettle();
+    expect(_episodeRowIds(tester), ['s1e1']);
   });
 }
 
@@ -452,9 +638,10 @@ List<String> _episodeRowIds(WidgetTester tester) {
   final wells = find.descendant(of: row, matching: find.byType(InkWell));
   return [
     for (final element in wells.evaluate())
-      if (element.widget.key case ValueKey<String>(
-        value: final value,
-      ) when value.startsWith(_episodeKeyPrefix))
+      if (element.widget.key case ValueKey<String>(value: final value)
+          when value.startsWith(_episodeKeyPrefix) &&
+              !value.startsWith('catalog-episode-play-') &&
+              !value.startsWith('catalog-episode-played-'))
         value.substring(_episodeKeyPrefix.length),
   ];
 }
@@ -470,41 +657,4 @@ bool _rowSelected(WidgetTester tester, String id) {
   }
   expect(color, Colors.transparent);
   return false;
-}
-
-/// 顶栏叠在内容上时,控件中心可能落在栏内;点到栏下方仍落在同一控件上的位置。
-Future<void> _tapBelowTopBar(WidgetTester tester, Finder finder) async {
-  final bar = find.byKey(AppShell.topBarKey);
-  final rect = tester.getRect(finder);
-  var dy = rect.center.dy;
-  if (bar.evaluate().isNotEmpty) {
-    final barBottom = tester.getRect(bar).bottom;
-    if (dy <= barBottom) {
-      dy = (barBottom + 1).clamp(rect.top + 1, rect.bottom - 1).toDouble();
-    }
-  }
-  await tester.tapAt(Offset(rect.center.dx, dy));
-}
-
-Future<void> _ensureVisibleBelowTopBar(
-  WidgetTester tester,
-  Finder finder,
-) async {
-  final context = tester.element(finder);
-  final scrollable = Scrollable.maybeOf(context);
-  if (scrollable == null) {
-    await tester.ensureVisible(finder);
-    await tester.pumpAndSettle();
-    return;
-  }
-  final viewport = scrollable.position.viewportDimension;
-  final bar = find.byKey(AppShell.topBarKey);
-  final barBottom = bar.evaluate().isEmpty ? 0.0 : tester.getRect(bar).bottom;
-  final alignment = viewport <= 0 ? 0.0 : ((barBottom + 8) / viewport);
-  await Scrollable.ensureVisible(
-    context,
-    alignment: alignment.clamp(0.0, 1.0).toDouble(),
-    duration: Duration.zero,
-  );
-  await tester.pumpAndSettle();
 }

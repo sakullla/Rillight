@@ -244,9 +244,41 @@
   "@episodesRow": {
     "description": "Detail shelf title for episodes in the selected season."
   },
+  "episodesLoadMore": "加载更多",
+  "@episodesLoadMore": {
+    "description": "Appends the next window of episodes on the detail page; distinct from the shelf 'more' grid link."
+  },
   "sortBy": "排序",
   "@sortBy": {
     "description": "Label for the poster-wall sort control."
+  },
+  "libraryFilter": "筛选",
+  "@libraryFilter": {
+    "description": "Single library filter control that opens type, watch, year, and genre options."
+  },
+  "libraryFilterClear": "清除筛选",
+  "@libraryFilterClear": {
+    "description": "Clears every active library filter."
+  },
+  "libraryFilterType": "类型",
+  "@libraryFilterType": {
+    "description": "Library filter dimension for Movie vs Series."
+  },
+  "libraryFilterWatch": "观看状态",
+  "@libraryFilterWatch": {
+    "description": "Library filter dimension for played vs unplayed."
+  },
+  "libraryFilterYear": "年份",
+  "@libraryFilterYear": {
+    "description": "Library filter dimension for production year."
+  },
+  "libraryFilterGenre": "流派",
+  "@libraryFilterGenre": {
+    "description": "Library filter dimension for genre."
+  },
+  "libraryFilterAll": "全部",
+  "@libraryFilterAll": {
+    "description": "Clears one library filter dimension."
   },
   "sortByName": "标题",
   "@sortByName": {
@@ -476,6 +508,10 @@
   "@transcode": {
     "description": "Label when the server is transcoding."
   },
+  "quality": "画质",
+  "@quality": {
+    "description": "Transcode bitrate selector label in the player overflow menu."
+  },
   "qualityAuto": "自动",
   "@qualityAuto": {
     "description": "Automatic transcode quality preset."
@@ -574,9 +610,17 @@
   "@settingsDiskCacheLimit": {
     "description": "Setting row label for the on-disk playback cache size limit."
   },
+  "settingsDiskCacheLimitHint": "限制本地缓冲占用",
+  "@settingsDiskCacheLimitHint": {
+    "description": "Short explanation under the disk cache limit row."
+  },
   "settingsHardwareDecoding": "硬件解码",
   "@settingsHardwareDecoding": {
     "description": "Setting row label for hardware decoding mode."
+  },
+  "settingsHardwareDecodingHint": "用显卡解码，降低 CPU 占用",
+  "@settingsHardwareDecodingHint": {
+    "description": "Short explanation under the hardware decoding row."
   },
   "settingsHardwareDecodingAuto": "自动",
   "@settingsHardwareDecodingAuto": {
@@ -593,6 +637,10 @@
   "settingsDecoderBackend": "解码后端",
   "@settingsDecoderBackend": {
     "description": "Setting row label for the hardware decoder backend."
+  },
+  "settingsDecoderBackendHint": "不确定时保持自动即可",
+  "@settingsDecoderBackendHint": {
+    "description": "Short explanation under the decoder backend row."
   },
   "settingsBackendAuto": "自动",
   "@settingsBackendAuto": {
@@ -631,6 +679,18 @@
   "@settingsDanmakuService": {
     "description": "Settings section title for the danmaku service source."
   },
+  "settingsDanmakuServiceHint": "默认使用官方源；自建服务时再填写",
+  "@settingsDanmakuServiceHint": {
+    "description": "Short explanation under the danmaku service section title."
+  },
+  "settingsShowToken": "显示令牌",
+  "@settingsShowToken": {
+    "description": "Tooltip to reveal the danmaku access token."
+  },
+  "settingsHideToken": "隐藏令牌",
+  "@settingsHideToken": {
+    "description": "Tooltip to hide the danmaku access token."
+  },
   "settingsDanmakuServer": "自定义服务地址",
   "@settingsDanmakuServer": {
     "description": "Setting row label for the custom danmaku server address."
@@ -650,6 +710,10 @@
   "playbackRate": "倍速",
   "@playbackRate": {
     "description": "Playback speed selector label on the player controls."
+  },
+  "playerPlaybackSettings": "播放设置",
+  "@playerPlaybackSettings": {
+    "description": "Player overflow control for speed, audio, quality, source, and skip settings."
   },
   "alwaysOnTop": "窗口置顶",
   "@alwaysOnTop": {

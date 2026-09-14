@@ -2,8 +2,10 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:rillight/app/app_shell.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/theme/tokens.dart';
+import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/player/player_runtime_options.dart';
 import 'package:rillight/player/player_settings.dart';
 
@@ -24,6 +26,11 @@ class SettingsPage extends StatefulWidget {
   static const danmakuServerFieldKey = Key('settings-danmaku-server');
   static const danmakuTokenFieldKey = Key('settings-danmaku-token');
   static const restoreDefaultsKey = Key('settings-restore-defaults');
+  static const tokenVisibilityKey = Key('settings-token-visibility');
+  static const columnKey = Key('settings-column');
+
+  /// 设置正文限宽,避免标签贴左、控件贴窗沿。
+  static const double columnMaxWidth = 680;
 
   /// 可选的磁盘缓冲上限档位(MiB)。
   static const diskCacheLimitChoices = <int>[512, 1024, 2048, 4096, 8192];
@@ -41,6 +48,7 @@ class _SettingsPageState extends State<SettingsPage> {
   PlayerSettingsStore? _store;
   PlayerSettings _settings = const PlayerSettings();
   var _loaded = false;
+  var _tokenVisible = false;
 
   @override
   void initState() {
@@ -138,6 +146,21 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
+  Future<void> _restoreDefaults() {
+    // 与 PlayerRuntimeOptions.defaultSettings 一致的显式默认值,
+    // 另以空串清除自定义弹幕服务(合并写下 null 不覆盖旧值)。
+    return _save(
+      PlayerSettings(
+        volume: _settings.clampedVolume,
+        diskCacheLimitMiB: PlayerRuntimeDefaults.diskCacheLimitMiB,
+        hardwareDecoding: HardwareDecodingMode.auto,
+        hardwareDecoder: HardwareDecoderBackend.auto,
+        danmakuServer: '',
+        danmakuToken: '',
+      ),
+    );
+  }
+
   /// 页面状态中的弹幕服务值回填输入框(加载完成/恢复默认时);
   /// 正在输入的字段不打扰。
   void _syncDanmakuControllers() {
@@ -155,10 +178,24 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
+  /// 顶栏叠在内容上,正文下沉到返回钮与窗口按钮之下。
+  double _overlayTop(BuildContext context) {
+    if (context.findAncestorWidgetOfExactType<AppShell>() == null) {
+      return 0;
+    }
+    final hasChrome =
+        context.findAncestorWidgetOfExactType<WindowChromeHost>() != null;
+    if (!hasChrome) {
+      return AppShell.topBarHeight;
+    }
+    return kWindowChromeHeight > AppShell.topBarHeight
+        ? kWindowChromeHeight
+        : AppShell.topBarHeight;
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final theme = Theme.of(context);
     final backends = PlayerRuntimeOptions.availableBackends(_platform);
     final limitChoices = <int>[...SettingsPage.diskCacheLimitChoices];
     final effectiveLimit = PlayerRuntimeOptions.effectiveDiskCacheLimitMiB(
@@ -170,202 +207,216 @@ class _SettingsPageState extends State<SettingsPage> {
     }
     final decoding = _settings.hardwareDecoding ?? HardwareDecodingMode.auto;
     final backend = _settings.hardwareDecoder ?? HardwareDecoderBackend.auto;
+    final showPageTitle =
+        context.findAncestorWidgetOfExactType<AppShell>() == null;
 
     return ListView(
-      padding: const EdgeInsets.all(AppSpacing.page),
+      padding: EdgeInsets.fromLTRB(
+        AppSpacing.page,
+        _overlayTop(context) + AppSpacing.xl,
+        AppSpacing.page,
+        AppSpacing.xl,
+      ),
       children: [
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                l10n.settings,
-                style: theme.textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
+        Align(
+          alignment: Alignment.topCenter,
+          child: ConstrainedBox(
+            key: SettingsPage.columnKey,
+            constraints: const BoxConstraints(
+              maxWidth: SettingsPage.columnMaxWidth,
             ),
-            OutlinedButton(
-              key: SettingsPage.restoreDefaultsKey,
-              onPressed: _loaded
-                  ? () => _save(
-                      // 与 PlayerRuntimeOptions.defaultSettings 一致的显式默认值,
-                      // 另以空串清除自定义弹幕服务(合并写下 null 不覆盖旧值)。
-                      PlayerSettings(
-                        volume: _settings.clampedVolume,
-                        diskCacheLimitMiB:
-                            PlayerRuntimeDefaults.diskCacheLimitMiB,
-                        hardwareDecoding: HardwareDecodingMode.auto,
-                        hardwareDecoder: HardwareDecoderBackend.auto,
-                        danmakuServer: '',
-                        danmakuToken: '',
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (showPageTitle) ...[
+                  Text(
+                    l10n.settings,
+                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.xl),
+                ],
+                _SettingsSection(
+                  icon: Icons.play_circle_outline_rounded,
+                  title: l10n.settingsPlayback,
+                  subtitle: l10n.settingsAppliesToNewPlayback,
+                  trailing: TextButton.icon(
+                    key: SettingsPage.restoreDefaultsKey,
+                    onPressed: _loaded ? _restoreDefaults : null,
+                    style: TextButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.sm,
                       ),
-                    )
-                  : null,
-              child: Text(l10n.settingsRestoreDefaults),
-            ),
-          ],
-        ),
-        const SizedBox(height: AppSpacing.md),
-        Text(
-          l10n.settingsPlayback,
-          style: theme.textTheme.titleMedium?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
-        ),
-        const SizedBox(height: AppSpacing.xs),
-        _SettingsRow(
-          label: l10n.settingsDiskCacheLimit,
-          child: DropdownButton<int>(
-            key: SettingsPage.diskCacheLimitKey,
-            value: effectiveLimit,
-            items: [
-              for (final limit in limitChoices)
-                DropdownMenuItem(
-                  value: limit,
-                  child: Text(l10n.settingsCacheSize(limit / 1024)),
+                    ),
+                    icon: const Icon(Icons.settings_backup_restore_rounded),
+                    label: Text(l10n.settingsRestoreDefaults),
+                  ),
+                  children: [
+                    _SettingsChoiceRow(
+                      label: l10n.settingsDiskCacheLimit,
+                      hint: l10n.settingsDiskCacheLimitHint,
+                      child: _SettingsDropdown<int>(
+                        dropdownKey: SettingsPage.diskCacheLimitKey,
+                        value: effectiveLimit,
+                        items: [
+                          for (final limit in limitChoices)
+                            DropdownMenuItem(
+                              value: limit,
+                              child: Text(l10n.settingsCacheSize(limit / 1024)),
+                            ),
+                        ],
+                        onChanged: _loaded
+                            ? (value) {
+                                if (value != null) {
+                                  _save(
+                                    PlayerSettings(
+                                      volume: _settings.clampedVolume,
+                                      diskCacheLimitMiB: value,
+                                      hardwareDecoding: decoding,
+                                      hardwareDecoder: backend,
+                                      danmakuServer: _settings.danmakuServer,
+                                      danmakuToken: _settings.danmakuToken,
+                                    ),
+                                  );
+                                }
+                              }
+                            : null,
+                      ),
+                    ),
+                    _SettingsChoiceRow(
+                      label: l10n.settingsHardwareDecoding,
+                      hint: l10n.settingsHardwareDecodingHint,
+                      child: _SettingsDropdown<HardwareDecodingMode>(
+                        dropdownKey: SettingsPage.hardwareDecodingKey,
+                        value: decoding,
+                        items: [
+                          DropdownMenuItem(
+                            value: HardwareDecodingMode.auto,
+                            child: Text(l10n.settingsHardwareDecodingAuto),
+                          ),
+                          DropdownMenuItem(
+                            value: HardwareDecodingMode.on,
+                            child: Text(l10n.settingsHardwareDecodingOn),
+                          ),
+                          DropdownMenuItem(
+                            value: HardwareDecodingMode.off,
+                            child: Text(l10n.settingsHardwareDecodingOff),
+                          ),
+                        ],
+                        onChanged: _loaded
+                            ? (value) {
+                                if (value != null) {
+                                  _save(
+                                    PlayerSettings(
+                                      volume: _settings.clampedVolume,
+                                      diskCacheLimitMiB:
+                                          _settings.diskCacheLimitMiB,
+                                      hardwareDecoding: value,
+                                      hardwareDecoder: backend,
+                                      danmakuServer: _settings.danmakuServer,
+                                      danmakuToken: _settings.danmakuToken,
+                                    ),
+                                  );
+                                }
+                              }
+                            : null,
+                      ),
+                    ),
+                    _SettingsChoiceRow(
+                      label: l10n.settingsDecoderBackend,
+                      hint: l10n.settingsDecoderBackendHint,
+                      child: _SettingsDropdown<HardwareDecoderBackend>(
+                        dropdownKey: SettingsPage.decoderBackendKey,
+                        value: backends.contains(backend)
+                            ? backend
+                            : HardwareDecoderBackend.auto,
+                        items: [
+                          for (final value in backends)
+                            DropdownMenuItem(
+                              value: value,
+                              child: Text(_backendLabel(l10n, value)),
+                            ),
+                        ],
+                        onChanged: _loaded && backends.length > 1
+                            ? (value) {
+                                if (value != null) {
+                                  _save(
+                                    PlayerSettings(
+                                      volume: _settings.clampedVolume,
+                                      diskCacheLimitMiB:
+                                          _settings.diskCacheLimitMiB,
+                                      hardwareDecoding: decoding,
+                                      hardwareDecoder: value,
+                                      danmakuServer: _settings.danmakuServer,
+                                      danmakuToken: _settings.danmakuToken,
+                                    ),
+                                  );
+                                }
+                              }
+                            : null,
+                      ),
+                    ),
+                  ],
                 ),
-            ],
-            onChanged: _loaded
-                ? (value) {
-                    if (value != null) {
-                      _save(
-                        PlayerSettings(
-                          volume: _settings.clampedVolume,
-                          diskCacheLimitMiB: value,
-                          hardwareDecoding: decoding,
-                          hardwareDecoder: backend,
-                          danmakuServer: _settings.danmakuServer,
-                          danmakuToken: _settings.danmakuToken,
+                const SizedBox(height: AppSpacing.lg),
+                _SettingsSection(
+                  icon: Icons.subtitles_outlined,
+                  title: l10n.settingsDanmakuService,
+                  subtitle: l10n.settingsDanmakuServiceHint,
+                  children: [
+                    _SettingsField(
+                      label: l10n.settingsDanmakuServer,
+                      child: TextField(
+                        key: SettingsPage.danmakuServerFieldKey,
+                        controller: _danmakuServerController,
+                        focusNode: _danmakuServerFocus,
+                        enabled: _loaded,
+                        keyboardType: TextInputType.url,
+                        textInputAction: TextInputAction.next,
+                        onSubmitted: (_) {
+                          _commitDanmakuService();
+                          _danmakuTokenFocus.requestFocus();
+                        },
+                        decoration: InputDecoration(
+                          hintText: l10n.settingsDanmakuServerHint,
                         ),
-                      );
-                    }
-                  }
-                : null,
-          ),
-        ),
-        _SettingsRow(
-          label: l10n.settingsHardwareDecoding,
-          child: DropdownButton<HardwareDecodingMode>(
-            key: SettingsPage.hardwareDecodingKey,
-            value: decoding,
-            items: [
-              DropdownMenuItem(
-                value: HardwareDecodingMode.auto,
-                child: Text(l10n.settingsHardwareDecodingAuto),
-              ),
-              DropdownMenuItem(
-                value: HardwareDecodingMode.on,
-                child: Text(l10n.settingsHardwareDecodingOn),
-              ),
-              DropdownMenuItem(
-                value: HardwareDecodingMode.off,
-                child: Text(l10n.settingsHardwareDecodingOff),
-              ),
-            ],
-            onChanged: _loaded
-                ? (value) {
-                    if (value != null) {
-                      _save(
-                        PlayerSettings(
-                          volume: _settings.clampedVolume,
-                          diskCacheLimitMiB: _settings.diskCacheLimitMiB,
-                          hardwareDecoding: value,
-                          hardwareDecoder: backend,
-                          danmakuServer: _settings.danmakuServer,
-                          danmakuToken: _settings.danmakuToken,
+                      ),
+                    ),
+                    _SettingsField(
+                      label: l10n.settingsDanmakuToken,
+                      child: TextField(
+                        key: SettingsPage.danmakuTokenFieldKey,
+                        controller: _danmakuTokenController,
+                        focusNode: _danmakuTokenFocus,
+                        enabled: _loaded,
+                        obscureText: !_tokenVisible,
+                        textInputAction: TextInputAction.done,
+                        onSubmitted: (_) => _commitDanmakuService(),
+                        decoration: InputDecoration(
+                          hintText: l10n.settingsDanmakuTokenHint,
+                          suffixIcon: IconButton(
+                            key: SettingsPage.tokenVisibilityKey,
+                            tooltip: _tokenVisible
+                                ? l10n.settingsHideToken
+                                : l10n.settingsShowToken,
+                            onPressed: () {
+                              setState(() => _tokenVisible = !_tokenVisible);
+                            },
+                            icon: Icon(
+                              _tokenVisible
+                                  ? Icons.visibility_off_outlined
+                                  : Icons.visibility_outlined,
+                            ),
+                          ),
                         ),
-                      );
-                    }
-                  }
-                : null,
-          ),
-        ),
-        _SettingsRow(
-          label: l10n.settingsDecoderBackend,
-          child: DropdownButton<HardwareDecoderBackend>(
-            key: SettingsPage.decoderBackendKey,
-            value: backends.contains(backend)
-                ? backend
-                : HardwareDecoderBackend.auto,
-            items: [
-              for (final value in backends)
-                DropdownMenuItem(
-                  value: value,
-                  child: Text(_backendLabel(l10n, value)),
+                      ),
+                    ),
+                  ],
                 ),
-            ],
-            onChanged: _loaded && backends.length > 1
-                ? (value) {
-                    if (value != null) {
-                      _save(
-                        PlayerSettings(
-                          volume: _settings.clampedVolume,
-                          diskCacheLimitMiB: _settings.diskCacheLimitMiB,
-                          hardwareDecoding: decoding,
-                          hardwareDecoder: value,
-                          danmakuServer: _settings.danmakuServer,
-                          danmakuToken: _settings.danmakuToken,
-                        ),
-                      );
-                    }
-                  }
-                : null,
-          ),
-        ),
-        const SizedBox(height: AppSpacing.md),
-        Text(
-          l10n.settingsDanmakuService,
-          style: theme.textTheme.titleMedium?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
-        ),
-        const SizedBox(height: AppSpacing.xs),
-        _SettingsRow(
-          label: l10n.settingsDanmakuServer,
-          child: SizedBox(
-            width: 320,
-            child: TextField(
-              key: SettingsPage.danmakuServerFieldKey,
-              controller: _danmakuServerController,
-              focusNode: _danmakuServerFocus,
-              enabled: _loaded,
-              keyboardType: TextInputType.url,
-              textInputAction: TextInputAction.next,
-              onSubmitted: (_) {
-                _commitDanmakuService();
-                _danmakuTokenFocus.requestFocus();
-              },
-              decoration: InputDecoration(
-                hintText: l10n.settingsDanmakuServerHint,
-                isDense: true,
-              ),
+              ],
             ),
-          ),
-        ),
-        _SettingsRow(
-          label: l10n.settingsDanmakuToken,
-          child: SizedBox(
-            width: 220,
-            child: TextField(
-              key: SettingsPage.danmakuTokenFieldKey,
-              controller: _danmakuTokenController,
-              focusNode: _danmakuTokenFocus,
-              enabled: _loaded,
-              obscureText: true,
-              textInputAction: TextInputAction.done,
-              onSubmitted: (_) => _commitDanmakuService(),
-              decoration: InputDecoration(
-                hintText: l10n.settingsDanmakuTokenHint,
-                isDense: true,
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(height: AppSpacing.sm),
-        Text(
-          l10n.settingsAppliesToNewPlayback,
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
           ),
         ),
       ],
@@ -386,8 +437,137 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 }
 
-class _SettingsRow extends StatelessWidget {
-  const _SettingsRow({required this.label, required this.child});
+class _SettingsSection extends StatelessWidget {
+  const _SettingsSection({
+    required this.icon,
+    required this.title,
+    this.subtitle,
+    this.trailing,
+    required this.children,
+  });
+
+  final IconData icon;
+  final String title;
+  final String? subtitle;
+  final Widget? trailing;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Material(
+      color: scheme.surfaceContainer,
+      borderRadius: BorderRadius.circular(AppRadii.lg),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(
+          AppSpacing.lg,
+          AppSpacing.md,
+          AppSpacing.lg,
+          AppSpacing.sm,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: scheme.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(AppRadii.sm),
+                  ),
+                  child: SizedBox(
+                    width: 36,
+                    height: 36,
+                    child: Center(
+                      child: Icon(icon, size: 20, color: scheme.onSurface),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: AppSpacing.sm),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(title, style: theme.textTheme.titleMedium),
+                        if (subtitle != null) ...[
+                          const SizedBox(height: 2),
+                          Text(
+                            subtitle!,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: scheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+                ?trailing,
+              ],
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            for (var i = 0; i < children.length; i++) ...[
+              if (i > 0)
+                Divider(
+                  height: 1,
+                  color: scheme.outlineVariant.withValues(alpha: 0.8),
+                ),
+              children[i],
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SettingsChoiceRow extends StatelessWidget {
+  const _SettingsChoiceRow({
+    required this.label,
+    required this.hint,
+    required this.child,
+  });
+
+  final String label;
+  final String hint;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label, style: theme.textTheme.titleSmall),
+                const SizedBox(height: 2),
+                Text(
+                  hint,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: AppSpacing.md),
+          child,
+        ],
+      ),
+    );
+  }
+}
+
+class _SettingsField extends StatelessWidget {
+  const _SettingsField({required this.label, required this.child});
 
   final String label;
   final Widget child;
@@ -396,12 +576,58 @@ class _SettingsRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: AppSpacing.xxs),
-      child: Row(
+      padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Expanded(child: Text(label, style: theme.textTheme.bodyLarge)),
+          Text(label, style: theme.textTheme.titleSmall),
+          const SizedBox(height: AppSpacing.xs),
           child,
         ],
+      ),
+    );
+  }
+}
+
+class _SettingsDropdown<T> extends StatelessWidget {
+  const _SettingsDropdown({
+    required this.dropdownKey,
+    required this.value,
+    required this.items,
+    required this.onChanged,
+  });
+
+  final Key dropdownKey;
+  final T value;
+  final List<DropdownMenuItem<T>> items;
+  final ValueChanged<T?>? onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(AppRadii.md),
+        border: Border.all(color: scheme.outlineVariant),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.sm,
+          vertical: AppSpacing.xxs,
+        ),
+        child: DropdownButtonHideUnderline(
+          child: DropdownButton<T>(
+            key: dropdownKey,
+            value: value,
+            isDense: true,
+            borderRadius: BorderRadius.circular(AppRadii.md),
+            alignment: AlignmentDirectional.centerEnd,
+            items: items,
+            onChanged: onChanged,
+          ),
+        ),
       ),
     );
   }

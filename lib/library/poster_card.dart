@@ -253,62 +253,74 @@ class SeasonPosterCard extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              DecoratedBox(
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(AppRadii.sm),
-                  border: Border.all(
-                    color: selected ? colorScheme.primary : Colors.transparent,
-                    width: 2,
-                  ),
-                ),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(AppRadii.sm),
-                  child: SizedBox(
-                    width: width,
-                    height: height,
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        MediaImage(
-                          item: item,
-                          width: width,
-                          height: height,
-                          maxWidth: 280,
-                        ),
-                        _PosterRevealOverlay(
-                          item: item,
-                          title: item.name,
-                          revealed: highlighted,
-                        ),
-                        if (item.childCount != null && item.childCount! > 0)
-                          Positioned(
-                            top: AppSpacing.xs,
-                            right: AppSpacing.xs,
-                            child: DecoratedBox(
-                              decoration: BoxDecoration(
-                                color: colorScheme.scrim.withValues(
-                                  alpha: 0.72,
+              SizedBox(
+                width: width,
+                height: height,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(AppRadii.sm),
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          MediaImage(
+                            item: item,
+                            width: width,
+                            height: height,
+                            maxWidth: 280,
+                          ),
+                          _PosterRevealOverlay(
+                            item: item,
+                            title: item.name,
+                            revealed: highlighted,
+                          ),
+                          if (item.childCount != null && item.childCount! > 0)
+                            Positioned(
+                              top: AppSpacing.xs,
+                              right: AppSpacing.xs,
+                              child: DecoratedBox(
+                                decoration: BoxDecoration(
+                                  color: colorScheme.scrim.withValues(
+                                    alpha: 0.72,
+                                  ),
+                                  borderRadius: BorderRadius.circular(
+                                    AppRadii.md,
+                                  ),
                                 ),
-                                borderRadius: BorderRadius.circular(
-                                  AppRadii.md,
-                                ),
-                              ),
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: AppSpacing.xs,
-                                  vertical: AppSpacing.xxs,
-                                ),
-                                child: Text(
-                                  '${item.childCount}',
-                                  style: Theme.of(context).textTheme.labelMedium
-                                      ?.copyWith(color: colorScheme.onSurface),
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: AppSpacing.xs,
+                                    vertical: AppSpacing.xxs,
+                                  ),
+                                  child: Text(
+                                    '${item.childCount}',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .labelMedium
+                                        ?.copyWith(
+                                          color: colorScheme.onSurface,
+                                        ),
+                                  ),
                                 ),
                               ),
                             ),
-                          ),
-                      ],
+                        ],
+                      ),
                     ),
-                  ),
+                    if (selected)
+                      IgnorePointer(
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(AppRadii.sm),
+                            border: Border.all(
+                              color: colorScheme.primary,
+                              width: 2,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
               ),
               const SizedBox(height: AppSpacing.xs),

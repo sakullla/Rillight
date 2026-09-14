@@ -140,6 +140,7 @@ class ItemChapter {
     required this.startPositionTicks,
     this.imageTag,
     this.imageIndex,
+    this.markerType,
   });
 
   final String name;
@@ -147,13 +148,18 @@ class ItemChapter {
   final String? imageTag;
   final int? imageIndex;
 
+  /// Emby/Jellyfin 扫描标记:`IntroStart` / `IntroEnd` / `CreditsStart` 等。
+  final String? markerType;
+
   factory ItemChapter.fromJson(Map<String, dynamic> json) {
     final tag = json['ImageTag']?.toString().trim();
+    final marker = json['MarkerType']?.toString().trim();
     return ItemChapter(
       name: json['Name']?.toString() ?? '',
       startPositionTicks: _asInt(json['StartPositionTicks']) ?? 0,
       imageTag: (tag == null || tag.isEmpty) ? null : tag,
       imageIndex: _asInt(json['ImageIndex']),
+      markerType: (marker == null || marker.isEmpty) ? null : marker,
     );
   }
 }

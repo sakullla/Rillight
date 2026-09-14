@@ -127,17 +127,20 @@ class FakeChapter {
     required this.name,
     required this.startPositionTicks,
     this.imageTag,
+    this.markerType,
   });
 
   final String name;
   final int startPositionTicks;
   final String? imageTag;
+  final String? markerType;
 
   Map<String, dynamic> toJson() {
     return {
       'Name': name,
       'StartPositionTicks': startPositionTicks,
       if (imageTag != null) 'ImageTag': imageTag,
+      if (markerType != null) 'MarkerType': markerType,
     };
   }
 }

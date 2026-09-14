@@ -253,7 +253,7 @@ class _SearchPageState extends State<SearchPage> {
         maxCrossAxisExtent: ShelfGridPage.maxCrossAxisExtentFor(screenWidth),
         padding: const EdgeInsets.fromLTRB(
           AppSpacing.page,
-          0,
+          AppSpacing.xs,
           AppSpacing.page,
           AppSpacing.xxl,
         ),
@@ -281,7 +281,7 @@ class _SearchPageState extends State<SearchPage> {
           controller: _scrollController,
           padding: const EdgeInsets.fromLTRB(
             AppSpacing.page,
-            0,
+            AppSpacing.xs,
             AppSpacing.page,
             AppSpacing.xxl,
           ),

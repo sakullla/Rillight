@@ -57,6 +57,10 @@ enum _HomeRow {
   };
 }
 
+/// 手动刷新钮的挂载点:优先第一个无错误的媒体行,否则第一个可见媒体行,
+/// 媒体行全隐藏时落到片库行。
+enum _RefreshSlot { resume, nextUp, latestMovies, latestSeries, libraries }
+
 class _HomePageState extends State<HomePage> {
   bool _refreshing = false;
 
@@ -76,20 +80,33 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  /// 刷新钮挂在「继续观看」货架 header;该行隐藏时退到首个可见的
-  /// 首页媒体行 header。片库行不参与:其可见性由 LibraryNavScope 决定,
-  /// 且 [CatalogController.reloadHomeRows] 不刷新片库列表。
-  _HomeRow? _refreshHost(CatalogController catalog) {
+  /// 刷新钮挂在「继续观看」货架 header;该行隐藏或出错时退到下一可见
+  /// 无错误媒体行。四个媒体行都隐藏时挂到片库行,避免首页没有刷新入口。
+  _RefreshSlot? _refreshHost(CatalogController catalog) {
+    _RefreshSlot? firstVisible;
     for (final row in _HomeRow.values) {
-      if (!row.stateOf(catalog).hidden) {
-        return row;
+      final state = row.stateOf(catalog);
+      if (state.hidden) {
+        continue;
+      }
+      final slot = _RefreshSlot.values[row.index];
+      firstVisible ??= slot;
+      if (state.error == null) {
+        return slot;
       }
     }
-    return null;
+    if (firstVisible != null) {
+      return firstVisible;
+    }
+    return catalog.libraries.isEmpty ? null : _RefreshSlot.libraries;
   }
 
-  Widget? _refreshAction(AppLocalizations l10n, _HomeRow? host, _HomeRow row) {
-    if (host != row) {
+  Widget? _refreshAction(
+    AppLocalizations l10n,
+    _RefreshSlot? host,
+    _RefreshSlot slot,
+  ) {
+    if (host != slot) {
       return null;
     }
     return IconButton(
@@ -139,7 +156,7 @@ class _HomePageState extends State<HomePage> {
                   headerAction: _refreshAction(
                     l10n,
                     refreshHost,
-                    _HomeRow.resume,
+                    _RefreshSlot.resume,
                   ),
                   onTap: (item) => context.push(AppRoutes.item(item.id)),
                   onRetry: catalog.reloadHomeRows,
@@ -148,7 +165,14 @@ class _HomePageState extends State<HomePage> {
                 ),
               ),
               RepaintBoundary(
-                child: LibraryTiles(libraries: catalog.libraries),
+                child: LibraryTiles(
+                  libraries: catalog.libraries,
+                  headerAction: _refreshAction(
+                    l10n,
+                    refreshHost,
+                    _RefreshSlot.libraries,
+                  ),
+                ),
               ),
               RepaintBoundary(
                 child: HomeMediaRow(
@@ -159,7 +183,7 @@ class _HomePageState extends State<HomePage> {
                   headerAction: _refreshAction(
                     l10n,
                     refreshHost,
-                    _HomeRow.nextUp,
+                    _RefreshSlot.nextUp,
                   ),
                   onTap: (item) => context.push(AppRoutes.item(item.id)),
                   onRetry: catalog.reloadHomeRows,
@@ -175,7 +199,7 @@ class _HomePageState extends State<HomePage> {
                   headerAction: _refreshAction(
                     l10n,
                     refreshHost,
-                    _HomeRow.latestMovies,
+                    _RefreshSlot.latestMovies,
                   ),
                   onTap: (item) => context.push(AppRoutes.item(item.id)),
                   onRetry: catalog.reloadHomeRows,
@@ -191,7 +215,7 @@ class _HomePageState extends State<HomePage> {
                   headerAction: _refreshAction(
                     l10n,
                     refreshHost,
-                    _HomeRow.latestSeries,
+                    _RefreshSlot.latestSeries,
                   ),
                   onTap: (item) => context.push(AppRoutes.item(item.id)),
                   onRetry: catalog.reloadHomeRows,

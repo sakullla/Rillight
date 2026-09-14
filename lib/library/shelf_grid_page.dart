@@ -42,6 +42,9 @@ const Map<ShortcutActivator, Intent> _kGridArrowShortcuts = {
 /// 网格头部手动刷新按钮(绕过缓存立即重拉)的 key。
 const Key gridRefreshKey = Key('catalog-grid-refresh');
 
+/// 网格头部筛选总入口;点开后选择类型/观看状态/年份/流派。
+const Key gridFilterMenuKey = Key('catalog-grid-filter-menu');
+
 /// 网格头部筛选按钮 key(按维度:type/watch/year/genre)。
 Key gridFilterKey(String dimension) => Key('catalog-grid-filter-$dimension');
 
@@ -446,6 +449,9 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
   }
 
   Future<void> _loadMore() async {
+    if (!_paged || !_hasMore || _loading || _loadingMore || _refreshing) {
+      return;
+    }
     final gen = _loadGen;
     final start = _fetched;
     setState(() => _loadingMore = true);
@@ -478,6 +484,10 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
       }
       // 分页追加失败不打断已有内容,保留重试机会(再次滚动到底部重试)。
       setState(() => _loadingMore = false);
+    } finally {
+      if (mounted && gen == _loadGen && _loadingMore) {
+        setState(() => _loadingMore = false);
+      }
     }
   }
 
@@ -921,9 +931,7 @@ class _Header extends StatelessWidget {
   }
 }
 
-/// 片库头部筛选胶囊组:类型/已看/年份/流派可组合,可整体清除。
-///
-/// 文案为硬编码中文:app_zh.arb 不在本任务 scope,复用条目缺失(见任务 concerns)。
+/// 片库头部筛选:一个「筛选」入口 + 已选项可单独去掉,排序单独放在旁边。
 class _FilterBar extends StatelessWidget {
   const _FilterBar({
     required this.filters,
@@ -943,157 +951,275 @@ class _FilterBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final children = <Widget>[
-      if (typeFilterable)
-        _pill(
+    final l10n = AppLocalizations.of(context);
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    final chips = <Widget>[
+      if (typeFilterable && filters.type != CatalogTypeFilter.all)
+        _activeChip(
           context,
-          dimension: 'type',
-          dimensionLabel: '类型',
-          icon: Icons.category_outlined,
-          options: const [(_all, '全部'), ('Movie', '电影'), ('Series', '剧集')],
-          selected: filters.type == CatalogTypeFilter.all
-              ? _all
-              : filters.type.itemType!,
-          selectedLabel: filters.type.label,
-          onSelected: (value) => onChanged(
-            filters.copyWith(
-              type: value == 'Movie'
-                  ? CatalogTypeFilter.movie
-                  : value == 'Series'
-                  ? CatalogTypeFilter.series
-                  : CatalogTypeFilter.all,
-            ),
-          ),
+          label: filters.type.label,
+          onDeleted: () =>
+              onChanged(filters.copyWith(type: CatalogTypeFilter.all)),
         ),
-      _pill(
-        context,
-        dimension: 'watch',
-        dimensionLabel: '已看',
-        icon: Icons.visibility_outlined,
-        options: const [(_all, '全部'), ('IsUnplayed', '未看'), ('IsPlayed', '已看')],
-        selected: filters.watch.param ?? _all,
-        selectedLabel: filters.watch.label,
-        onSelected: (value) => onChanged(
-          filters.copyWith(
-            watch: value == 'IsUnplayed'
-                ? CatalogWatchFilter.unplayed
-                : value == 'IsPlayed'
-                ? CatalogWatchFilter.played
-                : CatalogWatchFilter.all,
-          ),
+      if (filters.watch != CatalogWatchFilter.all)
+        _activeChip(
+          context,
+          label: filters.watch.label,
+          onDeleted: () =>
+              onChanged(filters.copyWith(watch: CatalogWatchFilter.all)),
         ),
-      ),
-      _pill(
-        context,
-        dimension: 'year',
-        dimensionLabel: '年份',
-        icon: Icons.calendar_today_outlined,
-        options: [
-          const (_all, '全部'),
-          for (final year in yearOptions) ('$year', '$year'),
-        ],
-        selected: filters.years.isEmpty ? _all : '${filters.years.first}',
-        selectedLabel: filters.years.isEmpty ? '全部' : '${filters.years.first}',
-        onSelected: (value) => onChanged(
-          filters.copyWith(
-            years: value == _all ? const [] : [int.parse(value)],
-          ),
+      if (filters.years.isNotEmpty)
+        _activeChip(
+          context,
+          label: '${filters.years.first}',
+          onDeleted: () => onChanged(filters.copyWith(years: const [])),
         ),
-      ),
-      _pill(
-        context,
-        dimension: 'genre',
-        dimensionLabel: '流派',
-        icon: Icons.style_outlined,
-        options: [
-          const (_all, '全部'),
-          for (final genre in genreOptions) (genre, genre),
-        ],
-        selected: filters.genres.isEmpty ? _all : filters.genres.first,
-        selectedLabel: filters.genres.isEmpty ? '全部' : filters.genres.first,
-        onSelected: (value) => onChanged(
-          filters.copyWith(genres: value == _all ? const [] : [value]),
+      if (filters.genres.isNotEmpty)
+        _activeChip(
+          context,
+          label: filters.genres.first,
+          onDeleted: () => onChanged(filters.copyWith(genres: const [])),
         ),
-      ),
-      if (filters.isNotEmpty)
+    ];
+    return Wrap(
+      spacing: AppSpacing.xs,
+      runSpacing: AppSpacing.xs,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
         LiquidGlass(
           kind: LiquidGlassKind.pill,
           borderRadius: BorderRadius.circular(AppRadii.md),
           child: Material(
             type: MaterialType.transparency,
-            shape: const CircleBorder(),
-            child: IconButton(
-              key: gridFilterClearKey,
-              tooltip: '清除筛选',
-              onPressed: () => onChanged(const ShelfFilters()),
-              icon: const Icon(Icons.filter_alt_off_outlined, size: 18),
+            child: Tooltip(
+              message: l10n.libraryFilter,
+              child: InkWell(
+                key: gridFilterMenuKey,
+                borderRadius: BorderRadius.circular(AppRadii.md),
+                onTap: () => _openPanel(context),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.sm,
+                    vertical: AppSpacing.xs,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.filter_list_rounded,
+                        size: 18,
+                        color: filters.isNotEmpty
+                            ? colorScheme.primary
+                            : colorScheme.onSurfaceVariant,
+                      ),
+                      const SizedBox(width: AppSpacing.xs),
+                      Text(l10n.libraryFilter, style: textTheme.labelLarge),
+                    ],
+                  ),
+                ),
+              ),
             ),
           ),
         ),
-    ];
-    // Wrap 而非内嵌横向滚动:不引入第二个 Scrollable,
-    // 窄窗口下换行展示全部筛选维度。
-    return Wrap(
-      spacing: AppSpacing.xs,
-      runSpacing: AppSpacing.xs,
-      children: children,
+        ...chips,
+        if (filters.isNotEmpty)
+          IconButton(
+            key: gridFilterClearKey,
+            tooltip: l10n.libraryFilterClear,
+            visualDensity: VisualDensity.compact,
+            onPressed: () => onChanged(const ShelfFilters()),
+            icon: const Icon(Icons.filter_alt_off_outlined, size: 18),
+          ),
+      ],
     );
   }
 
-  Widget _pill(
-    BuildContext context, {
+  Future<void> _openPanel(BuildContext context) async {
+    final l10n = AppLocalizations.of(context);
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: Text(l10n.libraryFilter),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (typeFilterable)
+                _dimensionMenu(
+                  context: dialogContext,
+                  dimension: 'type',
+                  label: l10n.libraryFilterType,
+                  options: [
+                    for (final option in CatalogTypeFilter.values)
+                      (
+                        option.itemType ?? _all,
+                        option == CatalogTypeFilter.all
+                            ? l10n.libraryFilterAll
+                            : option.label,
+                      ),
+                  ],
+                  selected: filters.type.itemType ?? _all,
+                  onSelected: (value) {
+                    onChanged(
+                      filters.copyWith(
+                        type: value == 'Movie'
+                            ? CatalogTypeFilter.movie
+                            : value == 'Series'
+                            ? CatalogTypeFilter.series
+                            : CatalogTypeFilter.all,
+                      ),
+                    );
+                    Navigator.pop(dialogContext);
+                  },
+                ),
+              _dimensionMenu(
+                context: dialogContext,
+                dimension: 'watch',
+                label: l10n.libraryFilterWatch,
+                options: [
+                  for (final option in CatalogWatchFilter.values)
+                    (
+                      option.param ?? _all,
+                      option == CatalogWatchFilter.all
+                          ? l10n.libraryFilterAll
+                          : option.label,
+                    ),
+                ],
+                selected: filters.watch.param ?? _all,
+                onSelected: (value) {
+                  onChanged(
+                    filters.copyWith(
+                      watch: value == 'IsUnplayed'
+                          ? CatalogWatchFilter.unplayed
+                          : value == 'IsPlayed'
+                          ? CatalogWatchFilter.played
+                          : CatalogWatchFilter.all,
+                    ),
+                  );
+                  Navigator.pop(dialogContext);
+                },
+              ),
+              _dimensionMenu(
+                context: dialogContext,
+                dimension: 'year',
+                label: l10n.libraryFilterYear,
+                options: [
+                  (_all, l10n.libraryFilterAll),
+                  for (final year in yearOptions) ('$year', '$year'),
+                ],
+                selected: filters.years.isEmpty
+                    ? _all
+                    : '${filters.years.first}',
+                onSelected: (value) {
+                  onChanged(
+                    filters.copyWith(
+                      years: value == _all ? const [] : [int.parse(value)],
+                    ),
+                  );
+                  Navigator.pop(dialogContext);
+                },
+              ),
+              _dimensionMenu(
+                context: dialogContext,
+                dimension: 'genre',
+                label: l10n.libraryFilterGenre,
+                options: [
+                  (_all, l10n.libraryFilterAll),
+                  for (final genre in genreOptions) (genre, genre),
+                ],
+                selected: filters.genres.isEmpty ? _all : filters.genres.first,
+                onSelected: (value) {
+                  onChanged(
+                    filters.copyWith(
+                      genres: value == _all ? const [] : [value],
+                    ),
+                  );
+                  Navigator.pop(dialogContext);
+                },
+              ),
+            ],
+          ),
+          actions: [
+            if (filters.isNotEmpty)
+              TextButton(
+                onPressed: () {
+                  onChanged(const ShelfFilters());
+                  Navigator.pop(dialogContext);
+                },
+                child: Text(l10n.libraryFilterClear),
+              ),
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: Text(
+                MaterialLocalizations.of(dialogContext).okButtonLabel,
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _dimensionMenu({
+    required BuildContext context,
     required String dimension,
-    required String dimensionLabel,
-    required IconData icon,
+    required String label,
     required List<(String, String)> options,
     required String selected,
-    required String selectedLabel,
     required ValueChanged<String> onSelected,
   }) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final textTheme = Theme.of(context).textTheme;
-    final active = selected != _all;
+    final theme = Theme.of(context);
+    final selectedLabel = options
+        .where((option) => option.$1 == selected)
+        .map((option) => option.$2)
+        .firstOrNull;
     return PopupMenuButton<String>(
       key: gridFilterKey(dimension),
-      tooltip: dimensionLabel,
+      tooltip: label,
       initialValue: selected,
+      constraints: const BoxConstraints(maxHeight: 360),
       onSelected: onSelected,
       itemBuilder: (context) => [
-        for (final (value, label) in options)
+        for (final (value, optionLabel) in options)
           CheckedPopupMenuItem<String>(
             key: gridFilterOption(dimension, value),
             value: value,
             checked: value == selected,
-            child: Text(label),
+            child: Text(optionLabel),
           ),
       ],
-      child: LiquidGlass(
-        kind: LiquidGlassKind.pill,
-        borderRadius: BorderRadius.circular(AppRadii.md),
-        padding: const EdgeInsets.symmetric(
-          horizontal: AppSpacing.sm,
-          vertical: AppSpacing.xs,
-        ),
-        child: Row(
+      child: ListTile(
+        contentPadding: EdgeInsets.zero,
+        title: Text(label, style: theme.textTheme.labelMedium),
+        trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
-              icon,
-              size: 18,
-              color: active
-                  ? colorScheme.primary
-                  : colorScheme.onSurfaceVariant,
-            ),
-            const SizedBox(width: AppSpacing.xs),
             Text(
-              active ? selectedLabel : dimensionLabel,
-              style: textTheme.labelLarge,
+              selectedLabel ?? l10nLabel(context),
+              style: theme.textTheme.bodyMedium,
             ),
-            const SizedBox(width: AppSpacing.xxs),
-            Icon(Icons.arrow_drop_down, color: colorScheme.onSurfaceVariant),
+            const Icon(Icons.arrow_drop_down_rounded),
           ],
         ),
       ),
+    );
+  }
+
+  String l10nLabel(BuildContext context) =>
+      AppLocalizations.of(context).libraryFilterAll;
+
+  Widget _activeChip(
+    BuildContext context, {
+    required String label,
+    required VoidCallback onDeleted,
+  }) {
+    return InputChip(
+      visualDensity: VisualDensity.compact,
+      label: Text(label),
+      onDeleted: onDeleted,
+      deleteIcon: const Icon(Icons.close_rounded, size: 16),
     );
   }
 }

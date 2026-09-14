@@ -24,6 +24,7 @@ import 'package:rillight/search/search_overlay.dart';
 import 'package:rillight/search/search_page.dart';
 
 import '../emby/fake_emby_server.dart';
+import '../helpers/top_bar_hit.dart';
 
 const _device = EmbyDeviceInfo(
   clientName: '灯川 Rillight',
@@ -285,17 +286,27 @@ void main() {
     await tester.tap(find.byKey(CatalogKeys.item('series-friends')));
     await tester.pumpAndSettle();
     expect(find.text('老友记 (1994)'), findsOneWidget);
-    final episode = find.byKey(CatalogKeys.episode('episode-friends-s1e2'));
-    await tester.ensureVisible(episode);
-    await tester.tap(episode);
-    await tester.pumpAndSettle();
-    expect(find.textContaining('The One with the Sonogram'), findsWidgets);
     expect(find.byKey(CatalogKeys.overview), findsOneWidget);
     expect(find.text('简介'), findsOneWidget);
-    expect(find.text('Six friends living in New York.'), findsOneWidget);
+    expect(find.text('Six friends living in New York.'), findsWidgets);
+    expect(
+      find.descendant(
+        of: find.byKey(CatalogKeys.episodesRow),
+        matching: find.text('Monica gets a new apartment.'),
+      ),
+      findsOneWidget,
+    );
+    await tester.tap(find.byKey(CatalogKeys.viewEpisode));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('The Pilot'), findsWidgets);
+    expect(find.byKey(CatalogKeys.overview), findsOneWidget);
+    expect(find.text('简介'), findsOneWidget);
+    expect(find.text('Monica gets a new apartment.'), findsWidgets);
     expect(find.byKey(CatalogKeys.seriesLink), findsOneWidget);
-    await _ensureVisibleBelowTopBar(tester, find.byKey(CatalogKeys.seriesLink));
-    await _tapBelowTopBar(tester, find.byKey(CatalogKeys.seriesLink));
+    expect(find.byKey(CatalogKeys.viewSeries), findsOneWidget);
+    expect(find.byKey(CatalogKeys.episodesRow), findsNothing);
+    await ensureVisibleBelowTopBar(tester, find.byKey(CatalogKeys.viewSeries));
+    await tapBelowTopBar(tester, find.byKey(CatalogKeys.viewSeries));
     await tester.pumpAndSettle();
     expect(find.text('老友记 (1994)'), findsOneWidget);
   });
@@ -341,42 +352,32 @@ void main() {
     await openLibrary(tester, 'view-tv');
     await tester.tap(find.byKey(CatalogKeys.item('series-friends')));
     await tester.pumpAndSettle();
-    final first = find.byKey(CatalogKeys.episode('episode-friends-s1e1'));
+    final first = find.byKey(CatalogKeys.viewEpisode);
     await tester.ensureVisible(first);
     await tester.tap(first);
     await tester.pumpAndSettle();
     expect(find.textContaining('The Pilot'), findsWidgets);
-    expect(find.text('Monica gets a new apartment.'), findsOneWidget);
+    expect(find.text('Monica gets a new apartment.'), findsWidgets);
     expect(find.byKey(CatalogKeys.seriesLink), findsOneWidget);
-    expect(find.byKey(CatalogKeys.viewSeries), findsNothing);
+    expect(find.byKey(CatalogKeys.viewSeries), findsOneWidget);
     expect(find.byKey(CatalogKeys.nextEpisode), findsOneWidget);
-    expect(find.byKey(CatalogKeys.episodesRow), findsOneWidget);
+    expect(find.byKey(CatalogKeys.episodesRow), findsNothing);
 
-    await _ensureVisibleBelowTopBar(
-      tester,
-      find.byKey(CatalogKeys.nextEpisode),
-    );
-    await _tapBelowTopBar(tester, find.byKey(CatalogKeys.nextEpisode));
+    await ensureVisibleBelowTopBar(tester, find.byKey(CatalogKeys.nextEpisode));
+    await tapBelowTopBar(tester, find.byKey(CatalogKeys.nextEpisode));
     await tester.pump();
-    expect(find.byKey(CatalogKeys.episodesRow), findsOneWidget);
+    expect(find.byKey(CatalogKeys.episodesRow), findsNothing);
     await tester.pumpAndSettle();
     expect(find.textContaining('The One with the Sonogram'), findsWidgets);
     expect(find.text('Monica gets a new apartment.'), findsNothing);
-    expect(find.text('Six friends living in New York.'), findsOneWidget);
+    expect(find.text('Six friends living in New York.'), findsWidgets);
     expect(find.byKey(CatalogKeys.nextEpisode), findsNothing);
 
-    final previous = find.byKey(CatalogKeys.episode('episode-friends-s1e1'));
-    await _ensureVisibleBelowTopBar(tester, previous);
-    await _tapBelowTopBar(tester, previous);
-    await tester.pump();
-    expect(find.byKey(CatalogKeys.episodesRow), findsOneWidget);
-    await tester.pumpAndSettle();
-    expect(find.textContaining('The Pilot'), findsWidgets);
-
-    await _ensureVisibleBelowTopBar(tester, find.byKey(CatalogKeys.seriesLink));
-    await _tapBelowTopBar(tester, find.byKey(CatalogKeys.seriesLink));
+    await ensureVisibleBelowTopBar(tester, find.byKey(CatalogKeys.viewSeries));
+    await tapBelowTopBar(tester, find.byKey(CatalogKeys.viewSeries));
     await tester.pumpAndSettle();
     expect(find.text('老友记 (1994)'), findsOneWidget);
+    expect(find.byKey(CatalogKeys.episodesRow), findsOneWidget);
   });
 
   testWidgets('episode more page lists episode titles as wide thumbs', (
@@ -387,8 +388,8 @@ void main() {
     await tester.tap(find.byKey(CatalogKeys.item('series-friends')));
     await tester.pumpAndSettle();
     final more = find.byKey(CatalogKeys.shelfMore(CatalogKeys.shelfEpisodes));
-    await _ensureVisibleBelowTopBar(tester, more);
-    await _tapBelowTopBar(tester, more);
+    await ensureVisibleBelowTopBar(tester, more);
+    await tapBelowTopBar(tester, more);
     await tester.pumpAndSettle();
     expect(find.text('1. The Pilot'), findsOneWidget);
     expect(find.text('2. The One with the Sonogram'), findsOneWidget);
@@ -396,8 +397,8 @@ void main() {
     await _tapDetailBack(tester);
     await tester.pumpAndSettle();
     expect(find.byKey(CatalogKeys.episodesRow), findsOneWidget);
-    await _ensureVisibleBelowTopBar(tester, more);
-    await _tapBelowTopBar(tester, more);
+    await ensureVisibleBelowTopBar(tester, more);
+    await tapBelowTopBar(tester, more);
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(CatalogKeys.episode('episode-friends-s1e2')));
     await tester.pumpAndSettle();
@@ -414,7 +415,7 @@ void main() {
     await tester.ensureVisible(resumeItem);
     await tester.tap(resumeItem);
     await tester.pumpAndSettle();
-    await _tapBelowTopBar(tester, find.byKey(CatalogKeys.playedToggle));
+    await tapBelowTopBar(tester, find.byKey(CatalogKeys.playedToggle));
     await tester.pumpAndSettle();
 
     await _tapDetailBack(tester);
@@ -517,6 +518,15 @@ void main() {
     final grid = find.descendant(
       of: find.byType(SearchOverlay),
       matching: find.byType(GridView),
+    );
+    expect(
+      tester.widget<GridView>(grid).padding,
+      const EdgeInsets.fromLTRB(
+        AppSpacing.page,
+        AppSpacing.xs,
+        AppSpacing.page,
+        AppSpacing.xxl,
+      ),
     );
     for (var i = 0; i < 30; i++) {
       await tester.drag(grid, const Offset(0, -400));
@@ -694,6 +704,50 @@ void main() {
       expect(find.text('ShelfTail'), findsOneWidget);
     },
   );
+
+  testWidgets('overflowing shelf can be dragged sideways with the mouse', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(320, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    for (var i = 0; i < 8; i++) {
+      server.items.add(
+        FakeEmbyItem(
+          id: 'movie-extra-$i',
+          name: 'Extra $i',
+          type: 'Movie',
+          parentId: 'view-movies',
+          dateCreated: DateTime.utc(2000, 1, i + 1),
+        ),
+      );
+    }
+
+    await pumpLoggedIn(tester);
+    await tester.ensureVisible(find.byKey(CatalogKeys.latestMoviesRow));
+
+    final scrollable = find.descendant(
+      of: find.byKey(CatalogKeys.latestMoviesRow),
+      matching: find.byWidgetPredicate(
+        (widget) =>
+            widget is Scrollable && widget.axisDirection == AxisDirection.right,
+      ),
+    );
+    final position = tester.state<ScrollableState>(scrollable).position;
+    expect(position.pixels, 0);
+
+    await tester.drag(
+      scrollable,
+      const Offset(-200, 0),
+      kind: PointerDeviceKind.mouse,
+    );
+    await tester.pumpAndSettle();
+
+    expect(position.pixels, greaterThan(0));
+    expect(find.byKey(CatalogKeys.latestMoviesRow), findsOneWidget);
+  });
 
   testWidgets('detail similar row appears only when the API returns items', (
     tester,
@@ -1105,7 +1159,7 @@ void main() {
     }
 
     final refresh = find.byKey(homeRefreshKey);
-    await _ensureVisibleBelowTopBar(tester, refresh);
+    await ensureVisibleBelowTopBar(tester, refresh);
     await tester.pumpAndSettle();
     await tester.tap(refresh);
     await tester.pumpAndSettle();
@@ -1233,43 +1287,6 @@ Future<void> _tapDetailBack(WidgetTester tester) async {
   await tester.tap(back);
 }
 
-/// 顶栏叠在内容上时,控件中心可能落在栏内;点到栏下方仍落在同一控件上的位置.
-Future<void> _tapBelowTopBar(WidgetTester tester, Finder finder) async {
-  final bar = find.byKey(AppShell.topBarKey);
-  final rect = tester.getRect(finder);
-  var dy = rect.center.dy;
-  if (bar.evaluate().isNotEmpty) {
-    final barBottom = tester.getRect(bar).bottom;
-    if (dy <= barBottom) {
-      dy = (barBottom + 1).clamp(rect.top + 1, rect.bottom - 1).toDouble();
-    }
-  }
-  await tester.tapAt(Offset(rect.center.dx, dy));
-}
-
-Future<void> _ensureVisibleBelowTopBar(
-  WidgetTester tester,
-  Finder finder,
-) async {
-  final context = tester.element(finder);
-  final scrollable = Scrollable.maybeOf(context);
-  if (scrollable == null) {
-    await tester.ensureVisible(finder);
-    await tester.pumpAndSettle();
-    return;
-  }
-  final viewport = scrollable.position.viewportDimension;
-  final bar = find.byKey(AppShell.topBarKey);
-  final barBottom = bar.evaluate().isEmpty ? 0.0 : tester.getRect(bar).bottom;
-  final alignment = viewport <= 0 ? 0.0 : ((barBottom + 8) / viewport);
-  await Scrollable.ensureVisible(
-    context,
-    alignment: alignment.clamp(0.0, 1.0).toDouble(),
-    duration: Duration.zero,
-  );
-  await tester.pumpAndSettle();
-}
-
 FocusNode? _focusOf(WidgetTester tester, Finder host) {
   final inner = find.descendant(of: host, matching: find.byType(ClipRRect));
   final context = inner.evaluate().isNotEmpty
@@ -1282,8 +1299,8 @@ FocusNode? _focusOf(WidgetTester tester, Finder host) {
 
 Future<void> _openLatestMoviesMore(WidgetTester tester) async {
   final more = find.byKey(CatalogKeys.shelfMore(CatalogKeys.shelfLatestMovies));
-  await _ensureVisibleBelowTopBar(tester, more);
-  await _tapBelowTopBar(tester, more);
+  await ensureVisibleBelowTopBar(tester, more);
+  await tapBelowTopBar(tester, more);
   await tester.pumpAndSettle();
 }
 
