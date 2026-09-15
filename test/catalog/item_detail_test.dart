@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
 import 'package:rillight/app/app_shell.dart';
 import 'package:rillight/app/routes.dart';
+import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/app_error_view.dart';
 import 'package:rillight/app/widgets/liquid_glass.dart';
 import 'package:rillight/app/widgets/scrim_icon_button.dart';
@@ -17,6 +18,7 @@ import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/home_hero.dart';
+import 'package:rillight/library/episode_grid.dart';
 import 'package:rillight/library/item_detail_page.dart';
 import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/player/player_bindings.dart';
@@ -74,8 +76,9 @@ void main() {
   Future<RillightApp> pumpApp(
     WidgetTester tester, {
     PlayerWindowHost? host,
+    Size viewSize = const Size(1200, 800),
   }) async {
-    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.physicalSize = viewSize;
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
@@ -201,7 +204,7 @@ void main() {
     );
   });
 
-  testWidgets('series header renders poster and a vertical episode list', (
+  testWidgets('series header renders poster and a responsive episode grid', (
     tester,
   ) async {
     final app = await pumpApp(tester);
@@ -223,26 +226,61 @@ void main() {
       ),
       findsNothing,
     );
+    final row = find.byKey(CatalogKeys.episodesRow);
+    // 卡片承载「N. 标题」,简介不常驻网格卡片(ADR-3)。
     expect(
-      find.descendant(
-        of: find.byKey(CatalogKeys.episodesRow),
-        matching: find.text('Monica gets a new apartment.'),
-      ),
+      find.descendant(of: row, matching: find.text('1. The Pilot')),
       findsOneWidget,
     );
-
-    final row = find.byKey(CatalogKeys.episodesRow);
+    expect(
+      find.descendant(
+        of: row,
+        matching: find.text('Monica gets a new apartment.'),
+      ),
+      findsNothing,
+    );
     expect(row, findsOneWidget);
     expect(find.descendant(of: row, matching: find.text('集')), findsOneWidget);
     expect(
       find.byKey(CatalogKeys.shelfMore(CatalogKeys.shelfEpisodes)),
       findsOneWidget,
     );
-    expect(_episodeRowIds(tester), [
+    expect(_episodeCardIds(tester), [
       'episode-friends-s1e1',
       'episode-friends-s1e2',
     ]);
-    // 纵向列表:第二行在第一行下方,而不是右侧。
+    // 响应式网格:卡片按 ~340px 目标宽分列铺满可用宽度,不再有 1080px
+    // 上限;1200px 窗口下内容宽 1152 → 3 列,两张卡同行并排。
+    final first = tester.getRect(
+      find.byKey(CatalogKeys.episode('episode-friends-s1e1')),
+    );
+    final second = tester.getRect(
+      find.byKey(CatalogKeys.episode('episode-friends-s1e2')),
+    );
+    const contentWidth = 1200 - AppSpacing.page * 2;
+    final columns = EpisodeGrid.columnsFor(contentWidth, 1200);
+    expect(columns, greaterThan(1));
+    final cardWidth = EpisodeGrid.cardWidthFor(contentWidth, columns);
+    expect(first.width, moreOrLessEquals(cardWidth));
+    expect(second.top, moreOrLessEquals(first.top));
+    expect(
+      second.left,
+      moreOrLessEquals(first.left + cardWidth + EpisodeGrid.spacing),
+    );
+    expect(_cardSelected(tester, 'episode-friends-s1e1'), isTrue);
+    expect(_cardSelected(tester, 'episode-friends-s1e2'), isFalse);
+    for (final id in _episodeCardIds(tester)) {
+      expect(find.byKey(CatalogKeys.episodePlay(id)), findsOneWidget);
+      expect(find.byKey(CatalogKeys.episodePlayed(id)), findsOneWidget);
+    }
+  });
+
+  testWidgets('episode grid drops to a single column below the compact width', (
+    tester,
+  ) async {
+    final app = await pumpApp(tester, viewSize: const Size(900, 800));
+    await openItem(tester, app, _series);
+
     final first = tester.getRect(
       find.byKey(CatalogKeys.episode('episode-friends-s1e1')),
     );
@@ -251,16 +289,10 @@ void main() {
     );
     expect(second.top, greaterThanOrEqualTo(first.bottom));
     expect(second.left, first.left);
-    expect(first.width, 1080);
-    expect(_rowSelected(tester, 'episode-friends-s1e1'), isTrue);
-    expect(_rowSelected(tester, 'episode-friends-s1e2'), isFalse);
-    for (final id in _episodeRowIds(tester)) {
-      expect(find.byKey(CatalogKeys.episodePlay(id)), findsOneWidget);
-      expect(find.byKey(CatalogKeys.episodePlayed(id)), findsOneWidget);
-    }
+    expect(first.width, 900 - AppSpacing.page * 2);
   });
 
-  testWidgets('episode row tap opens details instead of playing', (
+  testWidgets('episode card tap opens details instead of playing', (
     tester,
   ) async {
     final app = await pumpApp(tester);
@@ -279,7 +311,7 @@ void main() {
     expect(find.byKey(CatalogKeys.viewSeries), findsOneWidget);
   });
 
-  testWidgets('episode row play button starts playback', (tester) async {
+  testWidgets('episode card play button starts playback', (tester) async {
     final host = _SilentPlayerHost();
     final app = await pumpApp(tester, host: host);
     await openItem(tester, app, _series);
@@ -295,7 +327,7 @@ void main() {
     expect(host.current?.itemId, id);
   });
 
-  testWidgets('episode header uses a 16:9 thumb and marks the current row', (
+  testWidgets('episode header uses a 16:9 thumb for the poster', (
     tester,
   ) async {
     final app = await pumpApp(tester);
@@ -323,7 +355,7 @@ void main() {
     expect(find.byKey(PlayerKeys.open), findsOneWidget);
   });
 
-  testWidgets('resumable episode row shows continue play', (tester) async {
+  testWidgets('resumable episode shows continue play', (tester) async {
     const ticksPerMinute = 10000000 * 60;
     server.setEpisodes(_series, const [
       FakeEpisode(
@@ -383,7 +415,7 @@ void main() {
     expect(find.text('已看 42%'), findsNothing);
   });
 
-  testWidgets('episode row check marks the episode played', (tester) async {
+  testWidgets('episode card check marks the episode played', (tester) async {
     final app = await pumpApp(tester);
     await openItem(tester, app, _series);
 
@@ -411,7 +443,7 @@ void main() {
     );
   });
 
-  testWidgets('episode row check can clear played', (tester) async {
+  testWidgets('episode card check can clear played', (tester) async {
     final app = await pumpApp(tester);
     await openItem(tester, app, _series);
 
@@ -439,7 +471,7 @@ void main() {
     );
   });
 
-  testWidgets('episode row context menu can mark played', (tester) async {
+  testWidgets('episode card context menu can mark played', (tester) async {
     final app = await pumpApp(tester);
     await openItem(tester, app, _series);
 
@@ -496,7 +528,7 @@ void main() {
     );
   });
 
-  testWidgets('episodes sharing an index number stay as distinct rows', (
+  testWidgets('episodes sharing an index number stay as distinct cards', (
     tester,
   ) async {
     server.setEpisodes(_series, const [
@@ -522,12 +554,12 @@ void main() {
     final app = await pumpApp(tester);
     await openItem(tester, app, _series);
 
-    final ids = _episodeRowIds(tester);
+    final ids = _episodeCardIds(tester);
     expect(ids, ['dup-e1', 'dup-e2-web', 'dup-e2-bd']);
     expect(ids.toSet().length, ids.length);
-    expect(_rowSelected(tester, 'dup-e1'), isTrue);
-    expect(_rowSelected(tester, 'dup-e2-web'), isFalse);
-    expect(_rowSelected(tester, 'dup-e2-bd'), isFalse);
+    expect(_cardSelected(tester, 'dup-e1'), isTrue);
+    expect(_cardSelected(tester, 'dup-e2-web'), isFalse);
+    expect(_cardSelected(tester, 'dup-e2-bd'), isFalse);
   });
 
   testWidgets('episode whose season is missing still lists by its seasonId', (
@@ -594,7 +626,7 @@ void main() {
     ]);
     final app = await pumpApp(tester);
     await openItem(tester, app, _series);
-    expect(_episodeRowIds(tester), ['s1e1']);
+    expect(_episodeCardIds(tester), ['s1e1']);
 
     server.itemsStatus = 500;
     final picker = find.byKey(CatalogKeys.seasonPicker);
@@ -608,7 +640,7 @@ void main() {
     expect(row, findsOneWidget);
     final error = find.descendant(of: row, matching: find.byType(AppErrorView));
     expect(error, findsOneWidget);
-    expect(_episodeRowIds(tester), isEmpty);
+    expect(_episodeCardIds(tester), isEmpty);
 
     server.itemsStatus = null;
     final retry = find.descendant(
@@ -621,7 +653,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(AppErrorView), findsNothing);
-    expect(_episodeRowIds(tester), ['s2e1']);
+    expect(_episodeCardIds(tester), ['s2e1']);
   });
 
   testWidgets('load more appends the next episode window without duplicates', (
@@ -639,7 +671,7 @@ void main() {
     final app = await pumpApp(tester);
     await openItem(tester, app, _series);
 
-    var ids = _episodeRowIds(tester);
+    var ids = _episodeCardIds(tester);
     expect(ids.length, 80);
     expect(ids.first, 'bulk-e1');
     expect(ids.last, 'bulk-e80');
@@ -655,7 +687,7 @@ void main() {
     await tapBelowTopBar(tester, more);
     await tester.pumpAndSettle();
 
-    ids = _episodeRowIds(tester);
+    ids = _episodeCardIds(tester);
     expect(ids.length, 100);
     expect(ids.toSet().length, 100);
     expect(ids.last, 'bulk-e100');
@@ -676,7 +708,7 @@ void main() {
     ]);
     final app = await pumpApp(tester);
     await openItem(tester, app, _series);
-    expect(_rowSelected(tester, 'bulk-e1'), isTrue);
+    expect(_cardSelected(tester, 'bulk-e1'), isTrue);
 
     final locate = find.byKey(CatalogKeys.locateEpisode);
     await ensureVisibleBelowTopBar(tester, locate);
@@ -686,7 +718,7 @@ void main() {
     await tester.testTextInput.receiveAction(TextInputAction.go);
     await tester.pumpAndSettle();
 
-    expect(_rowSelected(tester, 'bulk-e40'), isTrue);
+    expect(_cardSelected(tester, 'bulk-e40'), isTrue);
     final barBottom = tester.getRect(find.byKey(AppShell.topBarKey)).bottom;
     final rect = tester.getRect(find.byKey(CatalogKeys.episode('bulk-e40')));
     expect(rect.bottom, greaterThan(barBottom));
@@ -714,7 +746,7 @@ void main() {
 
     expect(find.byKey(CatalogKeys.episodesRow), findsOneWidget);
     expect(find.byKey(CatalogKeys.seasonPicker), findsOneWidget);
-    expect(_episodeRowIds(tester), isEmpty);
+    expect(_episodeCardIds(tester), isEmpty);
 
     await ensureVisibleBelowTopBar(
       tester,
@@ -724,7 +756,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('第 1 季').last);
     await tester.pumpAndSettle();
-    expect(_episodeRowIds(tester), ['s1e1']);
+    expect(_episodeCardIds(tester), ['s1e1']);
   });
 }
 
@@ -739,8 +771,8 @@ Finder _headerTitle() {
 
 const _episodeKeyPrefix = 'catalog-episode-';
 
-/// 分集分区内各行的条目 id,按渲染顺序。
-List<String> _episodeRowIds(WidgetTester tester) {
+/// 分集分区内各卡片的条目 id,按渲染顺序。
+List<String> _episodeCardIds(WidgetTester tester) {
   final row = find.byKey(CatalogKeys.episodesRow);
   if (row.evaluate().isEmpty) {
     return const [];
@@ -756,8 +788,8 @@ List<String> _episodeRowIds(WidgetTester tester) {
   ];
 }
 
-/// 当前集行以 surfaceContainerHigh 底色标示;其余行透明。
-bool _rowSelected(WidgetTester tester, String id) {
+/// 当前集卡片以 surfaceContainerHigh 底色标示;其余卡片透明。
+bool _cardSelected(WidgetTester tester, String id) {
   final well = find.byKey(CatalogKeys.episode(id));
   final material = find.ancestor(of: well, matching: find.byType(Material));
   final color = tester.widget<Material>(material.first).color;
