@@ -145,6 +145,25 @@ class FakeChapter {
   }
 }
 
+/// 详情 People 数组中的演职员/制作人员条目。
+class FakePerson {
+  const FakePerson({required this.name, this.type, this.role, this.imageTag});
+
+  final String name;
+  final String? type;
+  final String? role;
+  final String? imageTag;
+
+  Map<String, dynamic> toJson() {
+    return {
+      'Name': name,
+      if (type != null) 'Type': type,
+      if (role != null) 'Role': role,
+      if (imageTag != null) 'PrimaryImageTag': imageTag,
+    };
+  }
+}
+
 class FakeMediaSource {
   const FakeMediaSource({
     required this.id,
@@ -206,6 +225,7 @@ class FakeEmbyItem {
     this.supportsDirectStream = true,
     this.mediaStreams = const [],
     this.chapters = const [],
+    this.people = const [],
     this.extraSources = const [],
     this.remotePath,
   }) : dateCreated = dateCreated ?? DateTime.utc(2024, 1, 1),
@@ -254,6 +274,9 @@ class FakeEmbyItem {
   bool supportsDirectStream;
   List<FakeMediaStream> mediaStreams;
   List<FakeChapter> chapters;
+
+  /// 详情 People;仅详情路径请求 People 字段时客户端才会读取。
+  List<FakePerson> people;
 
   /// 额外媒体源(多版本场景,如同片 1080p/4K 两版)。
   List<FakeMediaSource> extraSources;
@@ -311,6 +334,8 @@ class FakeEmbyItem {
         ],
       if (chapters.isNotEmpty)
         'Chapters': [for (final chapter in chapters) chapter.toJson()],
+      if (people.isNotEmpty)
+        'People': [for (final person in people) person.toJson()],
       'UserData': {
         'Played': played,
         'PlaybackPositionTicks': playbackPositionTicks,

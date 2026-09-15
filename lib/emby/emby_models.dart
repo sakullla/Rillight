@@ -303,6 +303,36 @@ class ItemMediaSource {
   }
 }
 
+/// 详情 People 数组中的演职员/制作人员条目。
+class ItemPerson {
+  const ItemPerson({
+    required this.name,
+    this.type,
+    this.role,
+    this.primaryImageTag,
+  });
+
+  final String name;
+
+  /// Emby PersonType:`Actor` / `Director` / `Writer` 等。
+  final String? type;
+
+  /// 演员饰演的角色名;非演员条目通常为 null。
+  final String? role;
+
+  /// 头像 Primary 图 tag,缺失时由 UI 做文字兜底。
+  final String? primaryImageTag;
+
+  factory ItemPerson.fromJson(Map<String, dynamic> json) {
+    return ItemPerson(
+      name: json['Name']?.toString() ?? '',
+      type: _stringTag(json['Type']),
+      role: _stringTag(json['Role']),
+      primaryImageTag: _stringTag(json['PrimaryImageTag']),
+    );
+  }
+}
+
 class EmbyItem {
   const EmbyItem({
     required this.id,
@@ -311,6 +341,8 @@ class EmbyItem {
     this.collectionType,
     this.overview,
     this.productionYear,
+    this.premiereDate,
+    this.dateCreated,
     this.runTimeTicks,
     this.childCount,
     this.seriesName,
@@ -331,6 +363,7 @@ class EmbyItem {
     this.genres = const [],
     this.mediaSources = const [],
     this.chapters = const [],
+    this.people = const [],
     this.userData = const EmbyUserData(),
   });
 
@@ -340,6 +373,13 @@ class EmbyItem {
   final String? collectionType;
   final String? overview;
   final int? productionYear;
+
+  /// 播出日期(Emby `PremiereDate`);ISO8601 解析失败或缺失时为 null。
+  final DateTime? premiereDate;
+
+  /// 入库日期(Emby `DateCreated`);ISO8601 解析失败或缺失时为 null。
+  final DateTime? dateCreated;
+
   final int? runTimeTicks;
   final int? childCount;
   final String? seriesName;
@@ -362,6 +402,9 @@ class EmbyItem {
   final List<String> genres;
   final List<ItemMediaSource> mediaSources;
   final List<ItemChapter> chapters;
+
+  /// 演职员与制作人员;仅详情路径请求 People 字段后才有值。
+  final List<ItemPerson> people;
   final EmbyUserData userData;
 
   bool get isMovie => type == 'Movie';
@@ -513,6 +556,7 @@ class EmbyItem {
     final rawSources = json['MediaSources'];
     final rawChapters = json['Chapters'];
     final rawGenres = json['Genres'];
+    final rawPeople = json['People'];
     return EmbyItem(
       id: id,
       name: json['Name']?.toString() ?? '',
@@ -520,6 +564,8 @@ class EmbyItem {
       collectionType: json['CollectionType']?.toString(),
       overview: _plotFromJson(json),
       productionYear: _asInt(json['ProductionYear']),
+      premiereDate: _asDateTime(json['PremiereDate']),
+      dateCreated: _asDateTime(json['DateCreated']),
       runTimeTicks: _asInt(json['RunTimeTicks']),
       childCount: _asInt(json['ChildCount']),
       seriesName: json['SeriesName']?.toString(),
@@ -554,6 +600,12 @@ class EmbyItem {
             if (chapter is Map)
               ItemChapter.fromJson(Map<String, dynamic>.from(chapter)),
       ],
+      people: [
+        if (rawPeople is List)
+          for (final person in rawPeople)
+            if (person is Map)
+              ItemPerson.fromJson(Map<String, dynamic>.from(person)),
+      ],
       userData: EmbyUserData.fromJson(json['UserData']),
     );
   }
@@ -566,6 +618,8 @@ class EmbyItem {
       collectionType: collectionType,
       overview: overview,
       productionYear: productionYear,
+      premiereDate: premiereDate,
+      dateCreated: dateCreated,
       runTimeTicks: runTimeTicks,
       childCount: childCount,
       seriesName: seriesName,
@@ -586,6 +640,7 @@ class EmbyItem {
       genres: genres,
       mediaSources: mediaSources,
       chapters: chapters,
+      people: people,
       userData: userData ?? this.userData,
     );
   }
@@ -723,6 +778,18 @@ String? _nonEmptyText(dynamic value) {
     return null;
   }
   return text;
+}
+
+/// Emby 日期是 ISO8601 字符串(小数秒可达 7 位 ticks,DateTime.parse 截断处理);
+/// 缺失或非法值一律置 null,由 UI 省略对应展示项。
+DateTime? _asDateTime(dynamic value) {
+  if (value is DateTime) {
+    return value;
+  }
+  if (value is String) {
+    return DateTime.tryParse(value);
+  }
+  return null;
 }
 
 int? _asInt(dynamic value) {

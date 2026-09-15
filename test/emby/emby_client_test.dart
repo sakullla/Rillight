@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/emby/emby_errors.dart';
+import 'package:rillight/emby/emby_models.dart';
 
 import 'fake_emby_server.dart';
 
@@ -32,6 +33,22 @@ void main() {
       device: _device,
       dio: dioForFakeEmby(adapter, timeout: timeout),
     );
+  }
+
+  Future<EmbyClient> signedInClient() async {
+    final emby = client();
+    final auth = await emby.authenticateByName(
+      baseUrl: server.baseUrl,
+      username: 'alice',
+      password: 'correct-horse',
+      serverId: server.serverId,
+    );
+    emby.attachSession(
+      baseUrl: server.baseUrl,
+      accessToken: auth.accessToken,
+      userId: auth.user.id,
+    );
+    return emby;
   }
 
   test('Public Info returns server id and name', () async {
@@ -310,5 +327,136 @@ void main() {
     expect(server.requests.last, contains('Filters=IsUnplayed'));
     expect(server.requests.last, contains('Genres=Drama'));
     expect(server.requests.last, contains('Years=1994'));
+  });
+
+  test('fromJson parses PremiereDate, DateCreated and People', () {
+    final item = EmbyItem.fromJson({
+      'Id': 'ep-1',
+      'Name': 'The Pilot',
+      'Type': 'Episode',
+      // Emby 小数秒可达 7 位 ticks,解析应截断而非失败。
+      'PremiereDate': '2024-05-02T00:00:00.0000000Z',
+      'DateCreated': '2024-05-01T10:20:30.1234567Z',
+      'People': [
+        {
+          'Name': '演员甲',
+          'Type': 'Actor',
+          'Role': '角色 A',
+          'PrimaryImageTag': 'tag-actor',
+        },
+        {'Name': '导演乙', 'Type': 'Director'},
+      ],
+    });
+
+    expect(item.premiereDate, DateTime.utc(2024, 5, 2));
+    expect(item.dateCreated, DateTime.utc(2024, 5, 1, 10, 20, 30, 123, 456));
+    expect(item.people, hasLength(2));
+    expect(item.people[0].name, '演员甲');
+    expect(item.people[0].type, 'Actor');
+    expect(item.people[0].role, '角色 A');
+    expect(item.people[0].primaryImageTag, 'tag-actor');
+    expect(item.people[1].name, '导演乙');
+    expect(item.people[1].type, 'Director');
+    expect(item.people[1].role, isNull);
+    expect(item.people[1].primaryImageTag, isNull);
+  });
+
+  test('fromJson maps missing or invalid dates to null and empty people', () {
+    final item = EmbyItem.fromJson({
+      'Id': 'ep-2',
+      'Name': 'No Dates',
+      'Type': 'Episode',
+      'PremiereDate': 'not-a-date',
+      'DateCreated': 12345,
+    });
+
+    expect(item.premiereDate, isNull);
+    expect(item.dateCreated, isNull);
+    expect(item.people, isEmpty);
+  });
+
+  test('copyWith keeps premiereDate, dateCreated and people', () {
+    final item = EmbyItem.fromJson({
+      'Id': 'ep-3',
+      'Name': 'Copy',
+      'Type': 'Episode',
+      'PremiereDate': '2024-05-02T00:00:00Z',
+      'DateCreated': '2024-05-01T00:00:00Z',
+      'People': [
+        {'Name': '演员甲', 'Type': 'Actor'},
+      ],
+    });
+
+    final copy = item.copyWith(userData: const EmbyUserData(played: true));
+    expect(copy.userData.played, isTrue);
+    expect(copy.premiereDate, item.premiereDate);
+    expect(copy.dateCreated, item.dateCreated);
+    expect(copy.people, same(item.people));
+  });
+
+  test('getItem parses detail dates and People from the server', () async {
+    server.items.add(
+      FakeEmbyItem(
+        id: 'episode-people',
+        name: '有演职员集',
+        type: 'Episode',
+        parentId: 'season-friends-1',
+        seriesId: 'series-friends',
+        seasonId: 'season-friends-1',
+        premiereDate: DateTime.utc(1994, 9, 22),
+        people: const [
+          FakePerson(
+            name: '演员甲',
+            type: 'Actor',
+            role: '角色 A',
+            imageTag: 'tag-actor',
+          ),
+          FakePerson(name: '导演乙', type: 'Director'),
+        ],
+      ),
+    );
+    final emby = await signedInClient();
+
+    final item = await emby.getItem(
+      'episode-people',
+      fields: '${EmbyClient.itemFields},People',
+    );
+    expect(server.requests.last, contains('Fields='));
+    expect(server.requests.last, contains('People'));
+    expect(item.premiereDate, DateTime.utc(1994, 9, 22));
+    expect(item.dateCreated, DateTime.utc(2024, 1, 1));
+    expect(item.people, hasLength(2));
+    expect(item.people[0].name, '演员甲');
+    expect(item.people[0].role, '角色 A');
+    expect(item.people[0].primaryImageTag, 'tag-actor');
+    expect(item.people[1].type, 'Director');
+  });
+
+  test('getItem defaults to itemFields without People', () async {
+    final emby = await signedInClient();
+
+    await emby.getItem('movie-inception');
+    final request = server.requests.last;
+    expect(request, contains('Fields='));
+    expect(request, contains('MediaSources'));
+    expect(request, isNot(contains('People')));
+  });
+
+  test('season window queryItems never requests People', () async {
+    final emby = await signedInClient();
+
+    // 默认网格字段。
+    await emby.queryItems(parentId: 'season-friends-1');
+    expect(server.requests.last, isNot(contains('People')));
+
+    // 季列表窗口显式传 itemFields 时同样不含 People。
+    await emby.queryItems(
+      parentId: 'season-friends-1',
+      includeItemTypes: 'Episode',
+      fields: EmbyClient.itemFields,
+    );
+    final request = server.requests.last;
+    expect(request, contains('PremiereDate'));
+    expect(request, isNot(contains('People')));
   });
 }

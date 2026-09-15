@@ -384,12 +384,15 @@ class EmbyClient {
     );
   }
 
-  Future<EmbyItem> getItem(String itemId) async {
+  /// 单条目详情。[fields] 覆盖默认 [itemFields];集详情路径传
+  /// `'$itemFields,People'` 以取演职员,季列表等高频路径不要带 People
+  /// (同 [gridFields] 注释,大字段会拖慢 /Items)。
+  Future<EmbyItem> getItem(String itemId, {String? fields}) async {
     final data = await _request(
       'GET',
       '/Users/${_requireUserId()}/Items/$itemId',
       queryParameters: {
-        'Fields': itemFields,
+        'Fields': fields ?? itemFields,
         'EnableImageTypes': detailImageTypes,
       },
     );
