@@ -99,6 +99,8 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
 
   /// 已加载分集窗口之后的季内偏移;小于 [_episodeTotal] 时还有后续分集可追加。
   int _episodeWindowEnd = 0;
+  PlayerWindowHost? _playerHost;
+  PlayerOpenRequest? _playerRequest;
 
   @override
   void initState() {
@@ -117,6 +119,33 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     if (oldWidget.itemId != widget.itemId && widget.itemId != _itemId) {
       _itemId = widget.itemId;
       _load();
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final host = PlayerWindowScope.maybeOf(context);
+    if (!identical(host, _playerHost)) {
+      _playerHost?.removeListener(_onPlayerWindow);
+      _playerHost = host;
+      _playerHost?.addListener(_onPlayerWindow);
+      _playerRequest = host?.current;
+    }
+  }
+
+  @override
+  void dispose() {
+    _playerHost?.removeListener(_onPlayerWindow);
+    super.dispose();
+  }
+
+  void _onPlayerWindow() {
+    final current = _playerHost?.current;
+    final closed = _playerRequest != null && current == null;
+    _playerRequest = current;
+    if (closed && mounted) {
+      unawaited(_load(keepChrome: true, refreshCatalog: true));
     }
   }
 
@@ -152,7 +181,10 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     unawaited(_load(keepChrome: true));
   }
 
-  Future<void> _load({bool keepChrome = false}) async {
+  Future<void> _load({
+    bool keepChrome = false,
+    bool refreshCatalog = false,
+  }) async {
     final gen = ++_loadGen;
     final keep = keepChrome && _item != null && _error == null;
     if (!keep) {
@@ -214,6 +246,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
       EmbyItem? nextEpisode;
       final reuseCatalog =
           keep &&
+          !refreshCatalog &&
           _seriesId != null &&
           ((item.isEpisode && item.seriesId == _seriesId) ||
               (item.isSeries && item.id == _seriesId));
@@ -314,7 +347,9 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
         _seriesId = seriesId;
         _seriesOverview = seriesOverview;
         if (item.isSeries) {
-          _focusedEpisodeId ??= _playTarget(item)?.id;
+          if (refreshCatalog || _focusedEpisodeId == null) {
+            _focusedEpisodeId = _playTarget(item)?.id;
+          }
         }
         _nextEpisode = nextEpisode;
         _similar = similar;

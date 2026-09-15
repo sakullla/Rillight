@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:rillight/emby/device_profile.dart';
@@ -47,6 +48,27 @@ const Duration kNextUpLead = Duration(minutes: 3);
 
 /// 过短的剧集不提前弹出下一集,避免开场就出现。
 const Duration kMinRuntimeForEarlyNextUp = Duration(minutes: 6);
+
+/// 播放器剧集面板一窗条数,与详情页分集窗口对齐。
+const int kPlayerEpisodePageSize = 80;
+
+/// 当前集所在窗的 StartIndex:前面留 [leading] 条,并尽量填满一页。
+int playerEpisodeWindowStart({
+  required int? indexNumber,
+  required int total,
+  int pageSize = kPlayerEpisodePageSize,
+  int leading = 4,
+}) {
+  if (total <= pageSize || pageSize <= 0) {
+    return 0;
+  }
+  final pos = math.max(0, (indexNumber ?? 1) - 1);
+  var start = pos <= leading ? 0 : pos - leading;
+  if (start + pageSize > total) {
+    start = total - pageSize;
+  }
+  return start;
+}
 
 /// 倍速固定阶梯(快捷键降/升档与控制层菜单共用)。
 const List<double> kPlaybackRateLadder = [
@@ -171,6 +193,15 @@ class PlayerController extends ChangeNotifier {
   List<EmbyItem> seasons = const [];
   List<EmbyItem> episodes = const [];
   String? episodeSeasonId;
+  int episodeTotal = 0;
+  int episodeWindowStart = 0;
+  int episodeWindowEnd = 0;
+  bool episodeLoadingMore = false;
+  bool episodeLoadingEarlier = false;
+
+  bool get hasMoreEpisodes => episodeWindowEnd < episodeTotal;
+
+  bool get hasEarlierEpisodes => episodeWindowStart > 0;
 
   // --- 片头片尾跳过(R8) ---
   List<PlayerSkipSegment> _skipSegments = const [];
@@ -281,6 +312,7 @@ class PlayerController extends ChangeNotifier {
         seasons = const [];
         episodes = const [];
         episodeSeasonId = null;
+        _resetEpisodeWindow();
       }
       try {
         user = await client.getUser();
@@ -670,7 +702,7 @@ class PlayerController extends ChangeNotifier {
   // 剧集列表与切集(R7)
   // ---------------------------------------------------------------------
 
-  /// 拉取当前剧的季列表与当前季的分集列表。
+  /// 拉取当前剧的季列表与当前季的分集窗口。
   /// 失败仅置失败状态(入口隐藏/可重试),不阻塞播放。
   Future<void> loadEpisodeList() async {
     if (!canBrowseEpisodes) {
@@ -678,7 +710,7 @@ class PlayerController extends ChangeNotifier {
     }
     final seriesId = item!.seriesId!;
     if (_episodeSeriesId == seriesId) {
-      // 同剧已加载:仅刷新当前集高亮,不重复拉取。
+      await _ensureCurrentInWindow();
       return;
     }
     await _loadSeasons(seriesId);
@@ -721,7 +753,7 @@ class PlayerController extends ChangeNotifier {
           seasonId = loaded.isEmpty ? null : loaded.first.id;
         }
       }
-      await _loadSeasonEpisodes(seasonId);
+      await _loadSeasonEpisodes(seasonId, aroundCurrent: true);
       // 分集列表拉取成功后才标记归属;失败时保持未加载,
       // 保证同剧重试(loadEpisodeList)不会因早退而失效。
       _episodeSeriesId = seriesId;
@@ -746,7 +778,10 @@ class PlayerController extends ChangeNotifier {
     episodeListFailed = false;
     _emit();
     try {
-      await _loadSeasonEpisodes(seasonId);
+      await _loadSeasonEpisodes(
+        seasonId,
+        aroundCurrent: item?.seasonId == seasonId,
+      );
     } on EmbyException {
       if (_disposed) {
         return;
@@ -757,26 +792,174 @@ class PlayerController extends ChangeNotifier {
     _emit();
   }
 
-  Future<void> _loadSeasonEpisodes(String? seasonId) async {
+  Future<void> _ensureCurrentInWindow() async {
+    final seasonId = item?.seasonId ?? episodeSeasonId;
+    if (seasonId == null || seasonId.isEmpty) {
+      return;
+    }
+    if (episodeSeasonId != seasonId) {
+      return;
+    }
+    if (episodes.any((episode) => episode.id == itemId)) {
+      return;
+    }
+    episodeListLoading = true;
+    episodeListFailed = false;
+    episodes = const [];
+    _emit();
+    try {
+      await _loadSeasonEpisodes(seasonId, aroundCurrent: true);
+    } on EmbyException {
+      if (_disposed) {
+        return;
+      }
+      episodeListFailed = true;
+    }
+    episodeListLoading = false;
+    _emit();
+  }
+
+  Future<void> loadMoreEpisodes() async {
+    final seasonId = episodeSeasonId;
+    if (seasonId == null ||
+        seasonId.isEmpty ||
+        episodeLoadingMore ||
+        !hasMoreEpisodes) {
+      return;
+    }
+    final gen = ++_episodePageGen;
+    episodeLoadingMore = true;
+    _emit();
+    try {
+      final page = await _querySeasonEpisodes(seasonId, episodeWindowEnd);
+      if (_disposed || gen != _episodePageGen) {
+        return;
+      }
+      if (episodeSeasonId == seasonId) {
+        episodes = _dedupeEpisodes([...episodes, ...page.items]);
+        episodeTotal = page.totalRecordCount ?? episodeTotal;
+        episodeWindowEnd = page.items.isEmpty
+            ? episodeTotal
+            : episodeWindowEnd + page.items.length;
+      }
+    } on EmbyException {
+      if (_disposed || gen != _episodePageGen) {
+        return;
+      }
+      episodeListFailed = true;
+    }
+    if (_disposed || gen != _episodePageGen) {
+      return;
+    }
+    episodeLoadingMore = false;
+    _emit();
+  }
+
+  Future<void> loadEarlierEpisodes() async {
+    final seasonId = episodeSeasonId;
+    if (seasonId == null ||
+        seasonId.isEmpty ||
+        episodeLoadingEarlier ||
+        !hasEarlierEpisodes) {
+      return;
+    }
+    final gen = ++_episodePageGen;
+    final start = math.max(0, episodeWindowStart - kPlayerEpisodePageSize);
+    final limit = episodeWindowStart - start;
+    episodeLoadingEarlier = true;
+    _emit();
+    try {
+      final page = await _querySeasonEpisodes(seasonId, start, limit: limit);
+      if (_disposed || gen != _episodePageGen) {
+        return;
+      }
+      if (episodeSeasonId == seasonId) {
+        episodes = _dedupeEpisodes([...page.items, ...episodes]);
+        episodeTotal = page.totalRecordCount ?? episodeTotal;
+        episodeWindowStart = start;
+      }
+    } on EmbyException {
+      if (_disposed || gen != _episodePageGen) {
+        return;
+      }
+      episodeListFailed = true;
+    }
+    if (_disposed || gen != _episodePageGen) {
+      return;
+    }
+    episodeLoadingEarlier = false;
+    _emit();
+  }
+
+  Future<void> _loadSeasonEpisodes(
+    String? seasonId, {
+    required bool aroundCurrent,
+  }) async {
     if (seasonId == null || seasonId.isEmpty) {
       episodes = const [];
       episodeSeasonId = null;
+      _resetEpisodeWindow();
       return;
     }
-    final loaded = await client.getItems(
+    final index = aroundCurrent ? item?.indexNumber : 1;
+    var start = index == null || index <= 1 ? 0 : math.max(0, index - 1 - 4);
+    var page = await _querySeasonEpisodes(seasonId, start);
+    if (_disposed) {
+      return;
+    }
+    final total = page.totalRecordCount ?? page.items.length;
+    final filledStart = playerEpisodeWindowStart(
+      indexNumber: index,
+      total: total,
+    );
+    if (filledStart != start) {
+      page = await _querySeasonEpisodes(seasonId, filledStart);
+      if (_disposed) {
+        return;
+      }
+      start = filledStart;
+    }
+    episodes = _dedupeEpisodes(page.items);
+    episodeSeasonId = seasonId;
+    episodeTotal = page.totalRecordCount ?? page.items.length;
+    episodeWindowStart = start;
+    episodeWindowEnd = start + page.items.length;
+  }
+
+  Future<EmbyItemPage> _querySeasonEpisodes(
+    String seasonId,
+    int startIndex, {
+    int limit = kPlayerEpisodePageSize,
+  }) {
+    return client.queryItems(
       parentId: seasonId,
       includeItemTypes: 'Episode',
       recursive: true,
       sortBy: 'IndexNumber',
       sortOrder: 'Ascending',
+      startIndex: startIndex,
+      limit: limit,
       fields: EmbyClient.gridFields,
     );
-    if (_disposed) {
-      return;
-    }
-    episodes = loaded;
-    episodeSeasonId = seasonId;
   }
+
+  void _resetEpisodeWindow() {
+    episodeTotal = 0;
+    episodeWindowStart = 0;
+    episodeWindowEnd = 0;
+    episodeLoadingMore = false;
+    episodeLoadingEarlier = false;
+  }
+
+  List<EmbyItem> _dedupeEpisodes(Iterable<EmbyItem> items) {
+    final seen = <String>{};
+    return [
+      for (final episode in items)
+        if (seen.add(episode.id)) episode,
+    ];
+  }
+
+  int _episodePageGen = 0;
 
   // ---------------------------------------------------------------------
   // 片头片尾跳过(R8)

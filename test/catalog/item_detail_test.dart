@@ -350,6 +350,39 @@ void main() {
     expect(find.byKey(CatalogKeys.episodesRow), findsNothing);
   });
 
+  testWidgets('closing the player refreshes detail playback progress', (
+    tester,
+  ) async {
+    const ticksPerMinute = 10000000 * 60;
+    server.setEpisodes(_series, const [
+      FakeEpisode(
+        id: 'resume-e9',
+        name: '第 9 集',
+        seasonId: _season1,
+        indexNumber: 9,
+        runTimeTicks: ticksPerMinute * 24,
+        playbackPositionTicks: ticksPerMinute * 10,
+        playedPercentage: 42,
+      ),
+    ]);
+    final host = _SilentPlayerHost();
+    final app = await pumpApp(tester, host: host);
+    await openItem(tester, app, 'resume-e9');
+    expect(find.text('已看 42%'), findsWidgets);
+
+    final item = server.items.firstWhere((entry) => entry.id == 'resume-e9');
+    item.playbackPositionTicks = ticksPerMinute * 20;
+    item.playedPercentage = 80;
+
+    await host.open(const PlayerOpenRequest(itemId: 'resume-e9'));
+    await tester.pump();
+    await host.close();
+    await tester.pump();
+    await tester.pumpAndSettle();
+    expect(find.text('已看 80%'), findsWidgets);
+    expect(find.text('已看 42%'), findsNothing);
+  });
+
   testWidgets('episode row check marks the episode played', (tester) async {
     final app = await pumpApp(tester);
     await openItem(tester, app, _series);

@@ -31,6 +31,41 @@ import 'package:rillight/player/video_backend.dart';
 const double kPlayerChromeBarExtent =
     AppSpacing.sm + kWindowChromeHeight + AppSpacing.sm + AppSpacing.lg;
 
+/// 剧集行固定高度,给 ListView 按 index 做 O(1) jumpTo。
+///
+/// [Scrollable.ensureVisible] 只能滚到已经建出来的行;120 集时当前集
+/// 往往还在 builder 窗口外,打开面板会停在第 1 集。行高固定后
+/// `offset = index * extent` 不必先构建前面的行。
+const double kPlayerEpisodeRowExtent = 112;
+
+/// 把当前集放到视口约 [alignment] 处;打开面板用 jumpTo,不 animate,
+/// 避免长列表滑过上百行。
+double playerEpisodeListOffset({
+  required int index,
+  required int itemCount,
+  required double itemExtent,
+  required double viewport,
+  double alignment = 0.25,
+}) {
+  if (index <= 0 || itemCount <= 0 || itemExtent <= 0) {
+    return 0;
+  }
+  final maxOffset = itemCount * itemExtent > viewport
+      ? itemCount * itemExtent - viewport
+      : 0.0;
+  if (maxOffset <= 0) {
+    return 0;
+  }
+  final raw = index * itemExtent - viewport * alignment;
+  if (raw < 0) {
+    return 0;
+  }
+  if (raw > maxOffset) {
+    return maxOffset;
+  }
+  return raw;
+}
+
 class PlayerPage extends StatefulWidget {
   const PlayerPage({
     super.key,
@@ -237,7 +272,7 @@ class PlayerPageState extends State<PlayerPage> {
   }
 
   void _openDanmakuPanel() {
-    if (_danmaku == null) {
+    if (_danmaku == null || !_danmaku!.isConfigured) {
       return;
     }
     if (_danmakuPanelOpen) {
@@ -265,7 +300,7 @@ class PlayerPageState extends State<PlayerPage> {
   }
 
   void _openDanmakuSearch() {
-    if (_danmaku == null) {
+    if (_danmaku == null || !_danmaku!.isConfigured) {
       return;
     }
     if (_episodesOpen) {
@@ -525,6 +560,7 @@ class PlayerPageState extends State<PlayerPage> {
                     visible: current.controlsVisible,
                   ),
                   if (_danmaku != null &&
+                      _danmaku!.isConfigured &&
                       _danmaku!.danmakuOn &&
                       !_danmakuPanelOpen &&
                       !_danmakuSearchOpen &&
@@ -1153,27 +1189,19 @@ class _EpisodeListPanel extends StatelessWidget {
         ],
       );
     }
-    return Scrollbar(
-      child: ListView.builder(
-        key: const Key('player-episodes-list'),
-        itemCount: controller.episodes.length,
-        itemBuilder: (context, index) {
-          final episode = controller.episodes[index];
-          final isCurrent = episode.id == controller.itemId;
-          return _EnsureCurrentEpisodeVisible(
-            selected: isCurrent,
-            token: controller.itemId,
-            child: _EpisodeRow(
-              episode: episode,
-              isCurrent: isCurrent,
-              progress: _episodeProgress(episode, isCurrent),
-              onTap: () {
-                unawaited(controller.playEpisode(episode));
-              },
-            ),
-          );
-        },
-      ),
+    return _EpisodeListView(
+      episodes: controller.episodes,
+      currentId: controller.itemId,
+      hasEarlier: controller.hasEarlierEpisodes,
+      hasMore: controller.hasMoreEpisodes,
+      loadingEarlier: controller.episodeLoadingEarlier,
+      loadingMore: controller.episodeLoadingMore,
+      progressFor: (episode, isCurrent) => _episodeProgress(episode, isCurrent),
+      onPlay: (episode) {
+        unawaited(controller.playEpisode(episode));
+      },
+      onLoadEarlier: () => unawaited(controller.loadEarlierEpisodes()),
+      onLoadMore: () => unawaited(controller.loadMoreEpisodes()),
     );
   }
 
@@ -1242,7 +1270,8 @@ class _SeasonPicker extends StatelessWidget {
   }
 }
 
-/// 单集行:16:9 缩略图 + 集号标题 + 时长/进度 + 一行简介,当前集高亮。
+/// 单集行:16:9 缩略图 + 集号标题 + 时长/进度 + 简介,当前集高亮。
+/// 固定高度交给外层 [itemExtent],内部用 Flexible 吃掉多余文案,避免 ListTile 撑破。
 class _EpisodeRow extends StatelessWidget {
   const _EpisodeRow({
     required this.episode,
@@ -1283,75 +1312,76 @@ class _EpisodeRow extends StatelessWidget {
           ),
         ),
       ),
-      child: ListTile(
-        key: Key('player-episode-${episode.id}'),
-        selected: isCurrent,
-        selectedTileColor: scheme.surfaceContainerHighest,
-        selectedColor: scheme.onSurface,
-        textColor: scheme.onSurface,
-        iconColor: scheme.onSurface,
-        contentPadding: const EdgeInsets.fromLTRB(
-          AppSpacing.sm,
-          AppSpacing.xs,
-          AppSpacing.sm,
-          AppSpacing.xs,
-        ),
-        minVerticalPadding: AppSpacing.xs,
-        title: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _EpisodeThumb(
-              episode: episode,
-              isCurrent: isCurrent,
-              played: played,
-              progress: progress,
+      child: Material(
+        color: isCurrent ? scheme.surfaceContainerHighest : Colors.transparent,
+        child: InkWell(
+          key: Key('player-episode-${episode.id}'),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(
+              AppSpacing.sm,
+              AppSpacing.xs,
+              AppSpacing.sm,
+              AppSpacing.xs,
             ),
-            const SizedBox(width: AppSpacing.sm),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    title,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.titleSmall?.copyWith(
-                      color: scheme.onSurface,
-                      fontWeight: isCurrent ? FontWeight.w700 : FontWeight.w500,
-                    ),
+            child: Row(
+              children: [
+                _EpisodeThumb(
+                  episode: episode,
+                  isCurrent: isCurrent,
+                  played: played,
+                  progress: progress,
+                ),
+                const SizedBox(width: AppSpacing.sm),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          color: scheme.onSurface,
+                          fontWeight: isCurrent
+                              ? FontWeight.w700
+                              : FontWeight.w500,
+                        ),
+                      ),
+                      if (meta.isNotEmpty) ...[
+                        const SizedBox(height: AppSpacing.xxs),
+                        Text(
+                          meta.join(' · '),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: isCurrent
+                                ? scheme.primary
+                                : scheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                      if (overview != null) ...[
+                        const SizedBox(height: AppSpacing.xxs),
+                        Expanded(
+                          child: Text(
+                            overview,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: scheme.onSurface.withValues(alpha: 0.72),
+                              height: 1.35,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
-                  if (meta.isNotEmpty) ...[
-                    const SizedBox(height: AppSpacing.xxs),
-                    Text(
-                      meta.join(' · '),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: isCurrent
-                            ? scheme.primary
-                            : scheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                  if (overview != null) ...[
-                    const SizedBox(height: AppSpacing.xxs),
-                    Text(
-                      overview,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: scheme.onSurface.withValues(alpha: 0.72),
-                        height: 1.35,
-                      ),
-                    ),
-                  ],
-                ],
-              ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
-        onTap: onTap,
       ),
     );
   }
@@ -1503,58 +1533,168 @@ String? _playerEpisodeOverview(String? raw) {
   return stripped.isEmpty ? null : stripped;
 }
 
-/// 当前集进入可视区,长列表打开时能看到正在播放的那一集。
-class _EnsureCurrentEpisodeVisible extends StatefulWidget {
-  const _EnsureCurrentEpisodeVisible({
-    required this.selected,
-    required this.token,
-    required this.child,
+/// 惰性剧集列表:按固定行高 jumpTo 当前集,长季不必先构建第 1..N 行。
+class _EpisodeListView extends StatefulWidget {
+  const _EpisodeListView({
+    required this.episodes,
+    required this.currentId,
+    required this.hasEarlier,
+    required this.hasMore,
+    required this.loadingEarlier,
+    required this.loadingMore,
+    required this.progressFor,
+    required this.onPlay,
+    required this.onLoadEarlier,
+    required this.onLoadMore,
   });
 
-  final bool selected;
-  final String token;
-  final Widget child;
+  final List<EmbyItem> episodes;
+  final String currentId;
+  final bool hasEarlier;
+  final bool hasMore;
+  final bool loadingEarlier;
+  final bool loadingMore;
+  final double Function(EmbyItem episode, bool isCurrent) progressFor;
+  final ValueChanged<EmbyItem> onPlay;
+  final VoidCallback onLoadEarlier;
+  final VoidCallback onLoadMore;
 
   @override
-  State<_EnsureCurrentEpisodeVisible> createState() =>
-      _EnsureCurrentEpisodeVisibleState();
+  State<_EpisodeListView> createState() => _EpisodeListViewState();
 }
 
-class _EnsureCurrentEpisodeVisibleState
-    extends State<_EnsureCurrentEpisodeVisible> {
+class _EpisodeListViewState extends State<_EpisodeListView> {
+  static const _estimatedViewport = 560.0;
+  static const _edgeExtent = kPlayerEpisodeRowExtent * 2;
+
+  late final ScrollController _scroll = ScrollController(
+    initialScrollOffset: _offsetFor(_estimatedViewport),
+  );
+
+  int get _currentIndex {
+    return widget.episodes.indexWhere(
+      (episode) => episode.id == widget.currentId,
+    );
+  }
+
+  double _offsetFor(double viewport) {
+    return playerEpisodeListOffset(
+      index: _currentIndex < 0 ? 0 : _currentIndex,
+      itemCount: widget.episodes.length,
+      itemExtent: kPlayerEpisodeRowExtent,
+      viewport: viewport,
+    );
+  }
+
+  int _prependedCount(List<EmbyItem> previous, List<EmbyItem> next) {
+    if (previous.isEmpty || next.length <= previous.length) {
+      return 0;
+    }
+    final index = next.indexWhere((episode) => episode.id == previous.first.id);
+    return index > 0 ? index : 0;
+  }
+
   @override
   void initState() {
     super.initState();
-    if (widget.selected) {
-      _schedule();
-    }
-  }
-
-  @override
-  void didUpdateWidget(_EnsureCurrentEpisodeVisible oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (widget.selected &&
-        (!oldWidget.selected || oldWidget.token != widget.token)) {
-      _schedule();
-    }
-  }
-
-  void _schedule() {
+    _scroll.addListener(_onScroll);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) {
-        return;
-      }
-      Scrollable.ensureVisible(
-        context,
-        alignment: 0.25,
-        duration: AppMotion.durationOf(context, AppMotion.fast),
-        curve: AppMotion.standard,
-      );
+      _jumpToCurrent();
+      _maybeLoadEdges();
     });
   }
 
   @override
-  Widget build(BuildContext context) => widget.child;
+  void didUpdateWidget(_EpisodeListView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final prepended = _prependedCount(oldWidget.episodes, widget.episodes);
+    if (prepended > 0 && _scroll.hasClients) {
+      _scroll.position.correctBy(prepended * kPlayerEpisodeRowExtent);
+    }
+    final wasIn = oldWidget.episodes.any(
+      (episode) => episode.id == widget.currentId,
+    );
+    final isIn = widget.episodes.any(
+      (episode) => episode.id == widget.currentId,
+    );
+    final shouldJump =
+        oldWidget.currentId != widget.currentId || (!wasIn && isIn);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (shouldJump) {
+        _jumpToCurrent();
+      }
+      _maybeLoadEdges();
+    });
+  }
+
+  void _onScroll() => _maybeLoadEdges();
+
+  void _maybeLoadEdges() {
+    if (!mounted || !_scroll.hasClients) {
+      return;
+    }
+    final position = _scroll.position;
+    if (widget.hasEarlier &&
+        !widget.loadingEarlier &&
+        position.pixels <= _edgeExtent) {
+      widget.onLoadEarlier();
+    }
+    if (widget.hasMore &&
+        !widget.loadingMore &&
+        position.pixels >= position.maxScrollExtent - _edgeExtent) {
+      widget.onLoadMore();
+    }
+  }
+
+  void _jumpToCurrent() {
+    if (!mounted || !_scroll.hasClients) {
+      return;
+    }
+    final viewport = _scroll.position.viewportDimension;
+    if (viewport <= 0) {
+      return;
+    }
+    final next = _offsetFor(viewport);
+    if ((next - _scroll.offset).abs() < 1) {
+      return;
+    }
+    _scroll.jumpTo(next);
+  }
+
+  @override
+  void dispose() {
+    _scroll.removeListener(_onScroll);
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scrollbar(
+      controller: _scroll,
+      child: ListView.builder(
+        key: const Key('player-episodes-list'),
+        controller: _scroll,
+        itemExtent: kPlayerEpisodeRowExtent,
+        itemCount: widget.episodes.length,
+        itemBuilder: (context, index) {
+          final episode = widget.episodes[index];
+          final isCurrent = episode.id == widget.currentId;
+          return ClipRect(
+            child: SizedBox(
+              height: kPlayerEpisodeRowExtent,
+              child: _EpisodeRow(
+                episode: episode,
+                isCurrent: isCurrent,
+                progress: widget.progressFor(episode, isCurrent),
+                onTap: () => widget.onPlay(episode),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
 }
 
 /// 顶部提示横幅;[onDismiss] 非空时(持续显示态)附带关闭钮。
@@ -1785,6 +1925,7 @@ class _ControlsRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
+    final danmakuController = danmaku;
     return Row(
       children: [
         _PlayerIconButton(
@@ -1798,8 +1939,11 @@ class _ControlsRow extends StatelessWidget {
         ),
         _VolumeControl(controller: controller),
         const Spacer(),
-        if (danmaku != null)
-          _DanmakuButton(danmaku: danmaku!, onPressed: onDanmakuSearch),
+        if (danmakuController != null && danmakuController.isConfigured)
+          _DanmakuButton(
+            danmaku: danmakuController,
+            onPressed: onDanmakuSearch,
+          ),
         if (controller.subtitleTracks.isNotEmpty)
           _ControlMenu<int>(
             key: PlayerKeys.subtitle,
@@ -2263,9 +2407,6 @@ class _DanmakuPanel extends StatelessWidget {
     final unreachable =
         danmaku.status == DanmakuStatus.unreachable ||
         danmaku.status == DanmakuStatus.customUnreachable;
-    final officialUnreachable =
-        !danmaku.usesCustomSource &&
-        danmaku.status == DanmakuStatus.unreachable;
     // 播放器用 Texture,BackdropFilter 糊不住画面;玻璃面板在亮场里
     // 「手动搜索」和说明会看不清。与剧集/搜索侧栏一样用实色。
     return Positioned(
@@ -2317,7 +2458,7 @@ class _DanmakuPanel extends StatelessWidget {
                     color: unreachable ? scheme.error : scheme.onSurfaceVariant,
                   ),
                 ),
-                if (officialUnreachable) ...[
+                if (!danmaku.isConfigured) ...[
                   const SizedBox(height: AppSpacing.sm),
                   Text(
                     l10n.danmakuOfficialSetupHint,

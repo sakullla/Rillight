@@ -193,6 +193,21 @@ void main() {
     return tester.state<PlayerPageState>(find.byType(PlayerPage)).controller!;
   }
 
+  Future<void> waitForEpisodeIdle(WidgetTester tester) async {
+    await tester.pump();
+    for (var i = 0; i < 40; i++) {
+      final current = controllerOf(tester);
+      if (!current.episodeLoadingMore && !current.episodeLoadingEarlier) {
+        await tester.pump();
+        final after = controllerOf(tester);
+        if (!after.episodeLoadingMore && !after.episodeLoadingEarlier) {
+          return;
+        }
+      }
+      await tester.pump(const Duration(milliseconds: 20));
+    }
+  }
+
   Future<void> playListedEpisode(WidgetTester tester, String episodeId) async {
     final play = find.byKey(CatalogKeys.episodePlay(episodeId));
     await ensureVisibleBelowTopBar(tester, play);
@@ -975,6 +990,45 @@ void main() {
     );
   });
 
+  test('episode list offset jumps by index without walking prior rows', () {
+    expect(
+      playerEpisodeListOffset(
+        index: 0,
+        itemCount: 120,
+        itemExtent: 112,
+        viewport: 560,
+      ),
+      0,
+    );
+    expect(
+      playerEpisodeListOffset(
+        index: 80,
+        itemCount: 120,
+        itemExtent: 112,
+        viewport: 560,
+      ),
+      80 * 112 - 560 * 0.25,
+    );
+    expect(
+      playerEpisodeListOffset(
+        index: 119,
+        itemCount: 120,
+        itemExtent: 112,
+        viewport: 560,
+      ),
+      120 * 112 - 560,
+    );
+  });
+
+  test('episode window start fills a page around the current index', () {
+    expect(playerEpisodeWindowStart(indexNumber: 1, total: 191), 0);
+    expect(
+      playerEpisodeWindowStart(indexNumber: 191, total: 191),
+      191 - kPlayerEpisodePageSize,
+    );
+    expect(playerEpisodeWindowStart(indexNumber: 40, total: 191), 40 - 1 - 4);
+  });
+
   testWidgets('volume tiers map to mpv and persist the user percent', (
     tester,
   ) async {
@@ -1399,6 +1453,16 @@ void main() {
     expect(find.byKey(PlayerKeys.mediaSource), findsNothing);
   });
 
+  testWidgets('hides the danmaku button when no service is configured', (
+    tester,
+  ) async {
+    await pumpLoggedIn(tester);
+    await openPlayable(tester, 'movie-up');
+    await waitFor(tester, find.byKey(PlayerKeys.playPause));
+    await tester.pump();
+    expect(find.byKey(const Key('player-danmaku-menu')), findsNothing);
+  });
+
   testWidgets('danmaku button opens a compact panel with search', (
     tester,
   ) async {
@@ -1406,14 +1470,23 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
-    await pumpLoggedIn(tester);
+    await pumpLoggedIn(
+      tester,
+      settingsStore: MemoryPlayerSettingsStore(
+        const PlayerSettings(
+          danmakuAppId: 'test-app',
+          danmakuToken: 'test-secret',
+        ),
+      ),
+    );
     await openPlayable(tester, 'movie-up');
     await waitFor(tester, find.byKey(PlayerKeys.playPause));
+    await waitFor(tester, find.byKey(const Key('player-danmaku-menu')));
 
     await tester.tap(find.byKey(const Key('player-danmaku-menu')));
     await tester.pump();
     await waitFor(tester, find.byKey(const Key('player-danmaku-panel')));
-    await waitFor(tester, find.byKey(const Key('player-danmaku-setup-hint')));
+    expect(find.byKey(const Key('player-danmaku-setup-hint')), findsNothing);
     expect(find.byKey(const Key('player-danmaku-search')), findsOneWidget);
     expect(find.byKey(const Key('player-danmaku-toggle')), findsOneWidget);
     expect(find.text('不透明度'), findsNothing);
@@ -1429,6 +1502,8 @@ void main() {
       findsOneWidget,
     );
     expect(find.byKey(const Key('player-danmaku-panel')), findsNothing);
+    // 搜索面板会按片名打官方 API;测试绑定不允许真实 HTTP,把 Dio 超时走完。
+    await tester.pump(const Duration(seconds: 21));
   });
 
   testWidgets(
@@ -1471,10 +1546,13 @@ void main() {
       );
 
       // 当前集高亮,季默认取当前集所在季。
-      final currentRow = tester.widget<ListTile>(
-        find.byKey(const Key('player-episode-episode-friends-s1e1')),
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('player-episode-episode-friends-s1e1')),
+          matching: find.textContaining('正在观看'),
+        ),
+        findsOneWidget,
       );
-      expect(currentRow.selected, isTrue);
       expect(controllerOf(tester).episodeSeasonId, 'season-friends-1');
       expect(find.byKey(const Key('player-season-picker')), findsNothing);
       final panel = find.byKey(const Key('player-episodes-panel'));
@@ -1536,10 +1614,13 @@ void main() {
       // 切集在播放进程内完成:面板保留,新集行高亮。
       await waitFor(tester, find.byKey(PlayerKeys.playPause));
       expect(find.byKey(const Key('player-episodes-panel')), findsOneWidget);
-      final switchedRow = tester.widget<ListTile>(
-        find.byKey(const Key('player-episode-episode-friends-s1e2')),
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('player-episode-episode-friends-s1e2')),
+          matching: find.textContaining('正在观看'),
+        ),
+        findsOneWidget,
       );
-      expect(switchedRow.selected, isTrue);
       expect(controllerOf(tester).itemId, 'episode-friends-s1e2');
     },
   );
@@ -1634,19 +1715,30 @@ void main() {
       find.byKey(const Key('player-episode-episode-anim-1')),
     );
     final list = find.byKey(const Key('player-episodes-list'));
-    expect(controllerOf(tester).episodes.length, 120);
-    // 惰性构建:首屏远少于全集数。
+    expect(controllerOf(tester).episodes.length, kPlayerEpisodePageSize);
+    expect(controllerOf(tester).hasMoreEpisodes, isTrue);
+    // 惰性构建:首屏远少于当前窗口。
     final builtRows = find
-        .byWidgetPredicate(
-          (widget) =>
-              widget is ListTile &&
-              widget.key != null &&
-              widget.key.toString().contains('player-episode-'),
-        )
+        .byWidgetPredicate((widget) {
+          final key = widget.key;
+          return key is ValueKey<String> &&
+              key.value.startsWith('player-episode-');
+        })
         .evaluate()
         .length;
-    expect(builtRows, lessThan(120));
-    // 滚动到末尾的第 120 集仍可命中。
+    expect(builtRows, lessThan(kPlayerEpisodePageSize));
+    final scroll = tester.widget<ListView>(list).controller!;
+    scroll.jumpTo(scroll.position.maxScrollExtent);
+    await tester.pump();
+    for (var i = 0; i < 40; i++) {
+      if (controllerOf(tester).episodes.length == 120) {
+        break;
+      }
+      await tester.pump(const Duration(milliseconds: 20));
+    }
+    expect(controllerOf(tester).episodes.length, 120);
+    expect(controllerOf(tester).hasMoreEpisodes, isFalse);
+    await waitForEpisodeIdle(tester);
     await tester.dragUntilVisible(
       find.byKey(const Key('player-episode-episode-anim-120')),
       list,
@@ -1656,6 +1748,112 @@ void main() {
       find.byKey(const Key('player-episode-episode-anim-120')),
       findsOneWidget,
     );
+  });
+
+  testWidgets('opening the episode panel jumps to the playing episode', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    server = longSeasonSeriesServer();
+    adapter = FakeEmbyAdapter([server]);
+    await pumpLoggedIn(tester);
+    await openEpisode(tester, 'episode-anim-1');
+    await waitFor(tester, find.byKey(PlayerKeys.playPause));
+
+    await tester.tap(find.byKey(const Key('player-episodes')));
+    await waitFor(
+      tester,
+      find.byKey(const Key('player-episode-episode-anim-1')),
+    );
+    final current = controllerOf(
+      tester,
+    ).episodes.firstWhere((episode) => episode.id == 'episode-anim-80');
+    await tester.tap(find.byKey(const Key('player-episodes-close')));
+    await tester.pump();
+    await tester.runAsync(() => controllerOf(tester).playEpisode(current));
+    await waitFor(tester, find.byKey(PlayerKeys.playPause));
+    expect(controllerOf(tester).itemId, 'episode-anim-80');
+
+    await tester.tap(find.byKey(const Key('player-episodes')));
+    await waitFor(
+      tester,
+      find.byKey(const Key('player-episode-episode-anim-80')),
+    );
+    expect(
+      find.byKey(const Key('player-episode-episode-anim-1')),
+      findsNothing,
+    );
+    expect(tester.takeException(), isNull);
+    await waitForEpisodeIdle(tester);
+  });
+
+  testWidgets('opening a late episode pages around it without overflow', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    server = longSeasonSeriesServer();
+    adapter = FakeEmbyAdapter([server]);
+    await pumpLoggedIn(tester);
+    await openEpisode(tester, 'episode-anim-1');
+    await waitFor(tester, find.byKey(PlayerKeys.playPause));
+
+    await tester.tap(find.byKey(const Key('player-episodes')));
+    await waitFor(
+      tester,
+      find.byKey(const Key('player-episode-episode-anim-1')),
+    );
+    await tester.tap(find.byKey(const Key('player-episodes-close')));
+    await tester.pump();
+    await tester.runAsync(() async {
+      final late = await controllerOf(
+        tester,
+      ).client.getItem('episode-anim-120');
+      await controllerOf(tester).playEpisode(late);
+    });
+    await waitFor(tester, find.byKey(PlayerKeys.playPause));
+
+    await tester.tap(find.byKey(const Key('player-episodes')));
+    await waitFor(
+      tester,
+      find.byKey(const Key('player-episode-episode-anim-120')),
+    );
+    expect(controllerOf(tester).hasEarlierEpisodes, isTrue);
+    expect(
+      find.byKey(const Key('player-episode-episode-anim-1')),
+      findsNothing,
+    );
+    expect(tester.takeException(), isNull);
+
+    final scroll = tester
+        .widget<ListView>(find.byKey(const Key('player-episodes-list')))
+        .controller!;
+    scroll.jumpTo(0);
+    await tester.pump();
+    final topIndex = (scroll.offset / kPlayerEpisodeRowExtent).floor().clamp(
+      0,
+      controllerOf(tester).episodes.length - 1,
+    );
+    final topId = controllerOf(tester).episodes[topIndex].id;
+    for (var i = 0; i < 40; i++) {
+      if (!controllerOf(tester).hasEarlierEpisodes) {
+        break;
+      }
+      await tester.pump(const Duration(milliseconds: 20));
+    }
+    expect(controllerOf(tester).hasEarlierEpisodes, isFalse);
+    expect(controllerOf(tester).episodes.first.id, 'episode-anim-1');
+    final stillIndex = (scroll.offset / kPlayerEpisodeRowExtent).round().clamp(
+      0,
+      controllerOf(tester).episodes.length - 1,
+    );
+    expect(controllerOf(tester).episodes[stillIndex].id, topId);
+    await waitForEpisodeIdle(tester);
   });
 
   testWidgets('episode panel is opaque and closes without leaving the player', (
@@ -2195,6 +2393,7 @@ FakeEmbyServer longSeasonSeriesServer() {
           indexNumber: i,
           parentIndexNumber: 1,
           runTimeTicks: minute * 22,
+          overview: '韩立将计就计，谷双浦卧底身份败露。慕兰底牌大哭上阵，噬魂法不诡，黄龙山风波未平。',
         ),
     ],
   );

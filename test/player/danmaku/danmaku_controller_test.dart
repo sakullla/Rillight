@@ -169,6 +169,21 @@ void main() {
     store = MemoryPlayerSettingsStore(_testOfficialAuth);
   });
 
+  test(
+    'isConfigured requires official credentials or a custom server',
+    () async {
+      final empty = makeController(settings: MemoryPlayerSettingsStore());
+      await empty.startSession(context());
+      expect(empty.isConfigured, isFalse);
+      empty.dispose();
+
+      final official = makeController();
+      await official.startSession(context());
+      expect(official.isConfigured, isTrue);
+      official.dispose();
+    },
+  );
+
   test('auto match loads comments and writes series memory', () async {
     client.matchResponse = const DanmakuMatchResponse(
       isMatched: true,

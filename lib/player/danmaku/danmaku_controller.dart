@@ -75,7 +75,9 @@ class DanmakuController extends ChangeNotifier {
   }) : _injectedStore = settingsStore,
        _client = client ?? DandanplayClient(),
        _hasher = hasher ?? DanmakuStreamHasher(),
-       layout = DanmakuLayout(measurer: textMeasurer ?? _defaultMeasure);
+       layout = DanmakuLayout(measurer: textMeasurer ?? _defaultMeasure) {
+    unawaited(_primeSettings());
+  }
 
   final PlayerSettingsStore? _injectedStore;
   final DandanplayClient _client;
@@ -121,6 +123,7 @@ class DanmakuController extends ChangeNotifier {
 
   Future<void>? _restoreFuture;
   PlayerSettingsStore? _store;
+  bool _disposed = false;
 
   // --- 播放位置喂入(渲染层插值用) ---
 
@@ -140,6 +143,9 @@ class DanmakuController extends ChangeNotifier {
     final secret = customToken;
     return id != null && id.isNotEmpty && secret != null && secret.isNotEmpty;
   }
+
+  /// 已填自定义服务或官方 AppId,控制条才露出弹幕入口。
+  bool get isConfigured => usesCustomSource || hasOfficialCredentials;
 
   DandanplaySource get _source {
     final url = customServerUrl;
@@ -221,13 +227,16 @@ class DanmakuController extends ChangeNotifier {
 
   /// 弹幕开关:关闭立即清屏;开启时对当前会话重新解析加载。
   Future<void> toggleDanmaku() async {
+    await _ensureRestored();
+    if (_disposed) {
+      return;
+    }
     danmakuOn = !danmakuOn;
     if (danmakuOn) {
       final context = _context;
       if (context != null) {
         status = DanmakuStatus.loading;
         notifyListeners();
-        await _ensureRestored();
         await _resolveAndLoad(context);
       } else {
         status = DanmakuStatus.idle;
@@ -246,6 +255,10 @@ class DanmakuController extends ChangeNotifier {
 
   /// 更新显示参数:立即生效并持久化。
   Future<void> setDisplay(DanmakuDisplaySettings next) async {
+    await _ensureRestored();
+    if (_disposed) {
+      return;
+    }
     display = next;
     layout.settings = next;
     layout.reset();
@@ -568,8 +581,22 @@ class DanmakuController extends ChangeNotifier {
     return _store ??= _injectedStore ?? await openPlayerSettingsStore();
   }
 
+  Future<void> _primeSettings() async {
+    await _ensureRestored();
+    if (_disposed) {
+      return;
+    }
+    notifyListeners();
+  }
+
   Future<void> _ensureRestored() {
     return _restoreFuture ??= _restore();
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
   }
 
   Future<void> _restore() async {
