@@ -297,12 +297,18 @@ void main() {
       ),
       findsNothing,
     );
+    // 卡片承载「N. 标题」,简介不常驻网格卡片(同 item_detail_test 的 ADR-3 语义)。
+    final row = find.byKey(CatalogKeys.episodesRow);
+    expect(
+      find.descendant(of: row, matching: find.text('1. The Pilot')),
+      findsOneWidget,
+    );
     expect(
       find.descendant(
-        of: find.byKey(CatalogKeys.episodesRow),
+        of: row,
         matching: find.text('Monica gets a new apartment.'),
       ),
-      findsOneWidget,
+      findsNothing,
     );
     final episode = find.byKey(CatalogKeys.episode('episode-friends-s1e1'));
     await tester.ensureVisible(episode);
