@@ -1918,7 +1918,9 @@ class _DetailHeader extends StatelessWidget {
                       _DetailPoster(
                         item: item,
                         layoutWidth: width,
-                        overview: item.isSeries ? null : overview,
+                        overview: (item.isSeries || item.isEpisode)
+                            ? null
+                            : overview,
                       ),
                       const SizedBox(width: AppSpacing.xl),
                       Expanded(
@@ -1962,8 +1964,7 @@ class _DetailHeader extends StatelessWidget {
 }
 
 /// 头部左栏:电影为 2:3 海报(底带叠简介),剧集海报只作识别、简介在信息栏;
-/// 单集为 16:9 缩略图并叠本集简介。不走 backdrop 候选,头部只保留一张
-/// preferBackdrop 图。
+/// 单集为 16:9 缩略图,简介由 hero 下的概览分区承载(可展开收起),海报不再叠简介带。
 class _DetailPoster extends StatelessWidget {
   const _DetailPoster({
     required this.item,

@@ -342,14 +342,19 @@ void main() {
     expect(find.byKey(CatalogKeys.seriesLink), findsOneWidget);
     expect(find.byKey(CatalogKeys.viewSeries), findsOneWidget);
     expect(find.byKey(CatalogKeys.locateEpisode), findsOneWidget);
-    expect(find.byKey(CatalogKeys.overview), findsOneWidget);
+    // 单集简介由概览分区承载(可展开收起),海报不再叠简介带。
+    expect(find.byKey(CatalogKeys.overview), findsNothing);
     expect(find.text('简介'), findsNothing);
     expect(
       find.descendant(
         of: find.byKey(ItemDetailPage.posterKey),
         matching: find.text('Six friends living in New York.'),
       ),
-      findsOneWidget,
+      findsNothing,
+    );
+    expect(
+      tester.widget<Text>(find.byKey(EpisodeOverviewSection.textKey)).data,
+      'Six friends living in New York.',
     );
     expect(find.byKey(CatalogKeys.episodesRow), findsNothing);
 

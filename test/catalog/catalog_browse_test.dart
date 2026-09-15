@@ -16,6 +16,7 @@ import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/home_hero.dart';
 import 'package:rillight/home/home_page.dart';
+import 'package:rillight/library/episode_detail_sections.dart';
 import 'package:rillight/library/item_detail_page.dart';
 import 'package:rillight/library/poster_card.dart';
 import 'package:rillight/library/shelf_grid_page.dart';
@@ -315,14 +316,19 @@ void main() {
     await tester.tap(episode);
     await tester.pumpAndSettle();
     expect(find.textContaining('The Pilot'), findsWidgets);
-    expect(find.byKey(CatalogKeys.overview), findsOneWidget);
+    // 单集简介由概览分区承载(可展开收起),海报不再叠简介带。
+    expect(find.byKey(CatalogKeys.overview), findsNothing);
     expect(find.text('简介'), findsNothing);
     expect(
       find.descendant(
         of: find.byKey(ItemDetailPage.posterKey),
         matching: find.text('Monica gets a new apartment.'),
       ),
-      findsOneWidget,
+      findsNothing,
+    );
+    expect(
+      tester.widget<Text>(find.byKey(EpisodeOverviewSection.textKey)).data,
+      'Monica gets a new apartment.',
     );
     expect(find.byKey(CatalogKeys.seriesLink), findsOneWidget);
     expect(find.byKey(CatalogKeys.viewSeries), findsOneWidget);

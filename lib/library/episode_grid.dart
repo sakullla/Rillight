@@ -72,8 +72,11 @@ class EpisodeGrid extends StatelessWidget {
   }
 
   /// 卡宽:列间距均分后每列恰好铺满可用宽度。
+  /// 多列时减微小 epsilon,避免浮点舍入使一行总宽超出可用宽度、
+  /// 行末卡片被 Wrap 换行(单列无换行风险,保持恰好铺满)。
   static double cardWidthFor(double availableWidth, int columns) {
-    return (availableWidth - spacing * (columns - 1)) / columns;
+    final width = (availableWidth - spacing * (columns - 1)) / columns;
+    return columns == 1 ? width : width - 0.01;
   }
 
   @override
