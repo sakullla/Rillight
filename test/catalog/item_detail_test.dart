@@ -18,6 +18,7 @@ import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/home_hero.dart';
+import 'package:rillight/library/episode_detail_sections.dart';
 import 'package:rillight/library/episode_grid.dart';
 import 'package:rillight/library/item_detail_page.dart';
 import 'package:rillight/media_image/media_image.dart';
@@ -757,6 +758,237 @@ void main() {
     await tester.tap(find.text('第 1 季').last);
     await tester.pumpAndSettle();
     expect(_episodeCardIds(tester), ['s1e1']);
+  });
+
+  testWidgets('episode meta row shows premiere date and metadata section', (
+    tester,
+  ) async {
+    server.setEpisodes(_series, [
+      FakeEpisode(
+        id: 'dated-e1',
+        name: 'Dated One',
+        seasonId: _season1,
+        indexNumber: 1,
+        premiereDate: DateTime.utc(2024, 11, 4),
+        dateCreated: DateTime.utc(2025, 1, 15),
+      ),
+    ]);
+    final app = await pumpApp(tester);
+    await openItem(tester, app, 'dated-e1');
+
+    // 元信息行播出日期胶囊(yyyy-MM-dd)。
+    expect(find.text('首播 2024-11-04'), findsOneWidget);
+    // 元数据分区:入库日期。
+    expect(find.byKey(EpisodeMetadataSection.sectionKey), findsOneWidget);
+    expect(find.text('入库日期'), findsOneWidget);
+    expect(find.text('2025-01-15'), findsOneWidget);
+  });
+
+  testWidgets('episode meta row omits the premiere date when missing', (
+    tester,
+  ) async {
+    final app = await pumpApp(tester);
+    await openItem(tester, app, 'episode-friends-s1e2');
+
+    // 无播出日期时省略该胶囊,不留占位文案。
+    expect(find.textContaining('首播'), findsNothing);
+    // 有入库日期,元数据分区仍渲染。
+    expect(find.byKey(EpisodeMetadataSection.sectionKey), findsOneWidget);
+  });
+
+  testWidgets('episode overview expands and collapses', (tester) async {
+    final longOverview = List.filled(
+      60,
+      'Monica gets a new apartment and the gang adjusts to the change.',
+    ).join(' ');
+    server.setEpisodes(_series, [
+      FakeEpisode(
+        id: 'long-e1',
+        name: 'Long One',
+        seasonId: _season1,
+        indexNumber: 1,
+        overview: longOverview,
+      ),
+    ]);
+    final app = await pumpApp(tester);
+    await openItem(tester, app, 'long-e1');
+
+    final text = find.byKey(EpisodeOverviewSection.textKey);
+    expect(text, findsOneWidget);
+    expect(tester.widget<Text>(text).maxLines, 3);
+    final toggle = find.byKey(EpisodeOverviewSection.toggleKey);
+    await tester.ensureVisible(toggle);
+    await tester.pumpAndSettle();
+    expect(
+      find.descendant(of: toggle, matching: find.text('展开')),
+      findsOneWidget,
+    );
+
+    await tester.tap(toggle);
+    await tester.pumpAndSettle();
+    expect(tester.widget<Text>(text).maxLines, isNull);
+    expect(
+      find.descendant(of: toggle, matching: find.text('收起')),
+      findsOneWidget,
+    );
+
+    await tester.ensureVisible(toggle);
+    await tester.pumpAndSettle();
+    await tester.tap(toggle);
+    await tester.pumpAndSettle();
+    expect(tester.widget<Text>(text).maxLines, 3);
+    expect(
+      find.descendant(of: toggle, matching: find.text('展开')),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('episode people section renders grouped cast with fallback', (
+    tester,
+  ) async {
+    server.setEpisodes(_series, const [
+      FakeEpisode(
+        id: 'cast-e1',
+        name: 'Cast One',
+        seasonId: _season1,
+        indexNumber: 1,
+      ),
+    ]);
+    server.items.firstWhere((item) => item.id == 'cast-e1').people = const [
+      FakePerson(name: 'Courteney Cox', type: 'Actor', role: 'Monica Geller'),
+      FakePerson(name: 'James Burrows', type: 'Director'),
+      FakePerson(name: 'David Crane', type: 'Writer'),
+    ];
+    final app = await pumpApp(tester);
+    await openItem(tester, app, 'cast-e1');
+
+    final section = find.byKey(EpisodePeopleSection.sectionKey);
+    expect(section, findsOneWidget);
+    expect(find.text('演职员'), findsOneWidget);
+    expect(find.text('演员'), findsOneWidget);
+    expect(find.text('导演'), findsOneWidget);
+    expect(find.text('编剧'), findsOneWidget);
+    expect(find.text('Courteney Cox'), findsOneWidget);
+    expect(find.text('Monica Geller'), findsOneWidget);
+    expect(find.text('James Burrows'), findsOneWidget);
+    // 无图条目以名字首字圆形兜底。
+    expect(find.text('D'), findsOneWidget);
+  });
+
+  testWidgets('episode people section is hidden without people', (
+    tester,
+  ) async {
+    final app = await pumpApp(tester);
+    await openItem(tester, app, 'episode-friends-s1e2');
+
+    expect(find.byKey(EpisodePeopleSection.sectionKey), findsNothing);
+    expect(find.text('演职员'), findsNothing);
+  });
+
+  testWidgets('episode media streams section renders grouped tracks', (
+    tester,
+  ) async {
+    server.setEpisodes(_series, const [
+      FakeEpisode(
+        id: 'media-e1',
+        name: 'Media One',
+        seasonId: _season1,
+        indexNumber: 1,
+        mediaStreams: [
+          FakeMediaStream(
+            index: 0,
+            type: 'Video',
+            codec: 'h264',
+            displayTitle: '1080p',
+          ),
+          FakeMediaStream(
+            index: 1,
+            type: 'Audio',
+            codec: 'ac3',
+            language: 'eng',
+            displayTitle: 'English',
+            isDefault: true,
+            channels: 6,
+          ),
+          FakeMediaStream(
+            index: 2,
+            type: 'Subtitle',
+            codec: 'subrip',
+            language: 'chi',
+            displayTitle: '中文',
+            isTextSubtitleStream: true,
+          ),
+        ],
+      ),
+    ]);
+    final app = await pumpApp(tester);
+    await openItem(tester, app, 'media-e1');
+
+    expect(find.byKey(EpisodeMediaStreamsSection.sectionKey), findsOneWidget);
+    expect(find.text('媒体信息'), findsOneWidget);
+    expect(find.text('视频'), findsOneWidget);
+    expect(find.text('音轨'), findsOneWidget);
+    expect(find.text('字幕'), findsOneWidget);
+    expect(find.textContaining('H264'), findsOneWidget);
+    expect(find.textContaining('AC3'), findsOneWidget);
+    expect(find.textContaining('6 声道'), findsOneWidget);
+    expect(find.textContaining('SUBRIP'), findsOneWidget);
+  });
+
+  testWidgets('episode media section is hidden without streams', (
+    tester,
+  ) async {
+    final app = await pumpApp(tester);
+    await openItem(tester, app, 'episode-friends-s1e2');
+
+    expect(find.byKey(EpisodeMediaStreamsSection.sectionKey), findsNothing);
+    expect(find.text('媒体信息'), findsNothing);
+  });
+
+  testWidgets('next episode card opens the next episode detail', (
+    tester,
+  ) async {
+    final app = await pumpApp(tester);
+    await openItem(tester, app, 'episode-friends-s1e1');
+
+    final card = find.byKey(NextEpisodeCard.cardKey);
+    expect(card, findsOneWidget);
+    await tester.ensureVisible(card);
+    await tester.pumpAndSettle();
+    await tester.tap(card);
+    await tester.pumpAndSettle();
+
+    expect(app.router.state.uri.path, AppRoutes.item('episode-friends-s1e2'));
+    expect(find.textContaining('The One with the Sonogram'), findsWidgets);
+  });
+
+  testWidgets('next episode card is hidden on the season finale', (
+    tester,
+  ) async {
+    final app = await pumpApp(tester);
+    await openItem(tester, app, 'episode-friends-s1e2');
+
+    expect(find.byKey(NextEpisodeCard.sectionKey), findsNothing);
+    expect(find.byKey(NextEpisodeCard.cardKey), findsNothing);
+  });
+
+  testWidgets('episode detail request asks for the People field', (
+    tester,
+  ) async {
+    final app = await pumpApp(tester);
+    server.requests.clear();
+    await openItem(tester, app, 'episode-friends-s1e2');
+
+    // fake server 对 People 无条件序列化,必须钉住请求侧的 Fields,
+    // 防止详情链路退回不带 People 的请求而测试假绿。
+    final detailRequests = server.requests
+        .where((request) => request.contains('/Items/episode-friends-s1e2?'))
+        .toList();
+    expect(detailRequests, isNotEmpty);
+    expect(
+      detailRequests.every((request) => request.contains('People')),
+      isTrue,
+    );
   });
 }
 

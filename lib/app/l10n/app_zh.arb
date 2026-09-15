@@ -891,5 +891,71 @@
   "danmakuEpisodes": "分集",
   "@danmakuEpisodes": {
     "description": "Section header listing episodes of a searched anime."
+  },
+  "detailOverview": "概览",
+  "@detailOverview": {
+    "description": "Episode detail section title for the plot overview."
+  },
+  "detailCast": "演职员",
+  "@detailCast": {
+    "description": "Episode detail section title for cast and crew."
+  },
+  "detailMediaInfo": "媒体信息",
+  "@detailMediaInfo": {
+    "description": "Episode detail section title for media stream information."
+  },
+  "detailMetadata": "元数据",
+  "@detailMetadata": {
+    "description": "Episode detail section title for secondary metadata such as the date added."
+  },
+  "expand": "展开",
+  "@expand": {
+    "description": "Expands a truncated overview to full text."
+  },
+  "collapse": "收起",
+  "@collapse": {
+    "description": "Collapses an expanded overview back to a few lines."
+  },
+  "premiereDate": "首播 {date}",
+  "@premiereDate": {
+    "description": "Episode premiere/air date label, date formatted yyyy-MM-dd.",
+    "placeholders": {
+      "date": {
+        "type": "String"
+      }
+    }
+  },
+  "dateAdded": "入库日期",
+  "@dateAdded": {
+    "description": "Label for the date an item was added to the library."
+  },
+  "personTypeActor": "演员",
+  "@personTypeActor": {
+    "description": "Cast group label for actors."
+  },
+  "personTypeDirector": "导演",
+  "@personTypeDirector": {
+    "description": "Cast group label for directors."
+  },
+  "personTypeWriter": "编剧",
+  "@personTypeWriter": {
+    "description": "Cast group label for writers."
+  },
+  "personTypeOther": "其他",
+  "@personTypeOther": {
+    "description": "Cast group label for crew members of other types."
+  },
+  "videoTrack": "视频",
+  "@videoTrack": {
+    "description": "Media stream group label for video tracks."
+  },
+  "audioChannels": "{channels} 声道",
+  "@audioChannels": {
+    "description": "Audio channel count in media stream information.",
+    "placeholders": {
+      "channels": {
+        "type": "int"
+      }
+    }
   }
 }

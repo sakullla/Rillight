@@ -1299,6 +1299,90 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'分集'**
   String get danmakuEpisodes;
+
+  /// Episode detail section title for the plot overview.
+  ///
+  /// In zh, this message translates to:
+  /// **'概览'**
+  String get detailOverview;
+
+  /// Episode detail section title for cast and crew.
+  ///
+  /// In zh, this message translates to:
+  /// **'演职员'**
+  String get detailCast;
+
+  /// Episode detail section title for media stream information.
+  ///
+  /// In zh, this message translates to:
+  /// **'媒体信息'**
+  String get detailMediaInfo;
+
+  /// Episode detail section title for secondary metadata such as the date added.
+  ///
+  /// In zh, this message translates to:
+  /// **'元数据'**
+  String get detailMetadata;
+
+  /// Expands a truncated overview to full text.
+  ///
+  /// In zh, this message translates to:
+  /// **'展开'**
+  String get expand;
+
+  /// Collapses an expanded overview back to a few lines.
+  ///
+  /// In zh, this message translates to:
+  /// **'收起'**
+  String get collapse;
+
+  /// Episode premiere/air date label, date formatted yyyy-MM-dd.
+  ///
+  /// In zh, this message translates to:
+  /// **'首播 {date}'**
+  String premiereDate(String date);
+
+  /// Label for the date an item was added to the library.
+  ///
+  /// In zh, this message translates to:
+  /// **'入库日期'**
+  String get dateAdded;
+
+  /// Cast group label for actors.
+  ///
+  /// In zh, this message translates to:
+  /// **'演员'**
+  String get personTypeActor;
+
+  /// Cast group label for directors.
+  ///
+  /// In zh, this message translates to:
+  /// **'导演'**
+  String get personTypeDirector;
+
+  /// Cast group label for writers.
+  ///
+  /// In zh, this message translates to:
+  /// **'编剧'**
+  String get personTypeWriter;
+
+  /// Cast group label for crew members of other types.
+  ///
+  /// In zh, this message translates to:
+  /// **'其他'**
+  String get personTypeOther;
+
+  /// Media stream group label for video tracks.
+  ///
+  /// In zh, this message translates to:
+  /// **'视频'**
+  String get videoTrack;
+
+  /// Audio channel count in media stream information.
+  ///
+  /// In zh, this message translates to:
+  /// **'{channels} 声道'**
+  String audioChannels(int channels);
 }
 
 class _AppLocalizationsDelegate

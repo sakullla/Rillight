@@ -152,9 +152,10 @@ CatalogRequest catalogSimilarRequest({
 CatalogRequest catalogItemRequest({
   required String userId,
   required String itemId,
+  String fields = EmbyClient.itemFields,
 }) {
   return CatalogRequest('/Users/$userId/Items/$itemId', {
-    'Fields': EmbyClient.itemFields,
+    'Fields': fields,
     'EnableImageTypes': EmbyClient.detailImageTypes,
   });
 }

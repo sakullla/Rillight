@@ -307,12 +307,17 @@ class ItemMediaSource {
 class ItemPerson {
   const ItemPerson({
     required this.name,
+    this.id,
     this.type,
     this.role,
     this.primaryImageTag,
   });
 
   final String name;
+
+  /// Emby Person 条目 Id;头像按 `/Items/{id}/Images/Primary` 构造,
+  /// 缺失时 UI 只能做文字兜底。
+  final String? id;
 
   /// Emby PersonType:`Actor` / `Director` / `Writer` 等。
   final String? type;
@@ -326,6 +331,7 @@ class ItemPerson {
   factory ItemPerson.fromJson(Map<String, dynamic> json) {
     return ItemPerson(
       name: json['Name']?.toString() ?? '',
+      id: _stringTag(json['Id']),
       type: _stringTag(json['Type']),
       role: _stringTag(json['Role']),
       primaryImageTag: _stringTag(json['PrimaryImageTag']),

@@ -645,4 +645,50 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get danmakuEpisodes => '分集';
+
+  @override
+  String get detailOverview => '概览';
+
+  @override
+  String get detailCast => '演职员';
+
+  @override
+  String get detailMediaInfo => '媒体信息';
+
+  @override
+  String get detailMetadata => '元数据';
+
+  @override
+  String get expand => '展开';
+
+  @override
+  String get collapse => '收起';
+
+  @override
+  String premiereDate(String date) {
+    return '首播 $date';
+  }
+
+  @override
+  String get dateAdded => '入库日期';
+
+  @override
+  String get personTypeActor => '演员';
+
+  @override
+  String get personTypeDirector => '导演';
+
+  @override
+  String get personTypeWriter => '编剧';
+
+  @override
+  String get personTypeOther => '其他';
+
+  @override
+  String get videoTrack => '视频';
+
+  @override
+  String audioChannels(int channels) {
+    return '$channels 声道';
+  }
 }

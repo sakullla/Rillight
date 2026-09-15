@@ -25,6 +25,7 @@ import 'package:rillight/home/catalog_failure.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/home/media_shelf.dart';
+import 'package:rillight/library/episode_detail_sections.dart';
 import 'package:rillight/library/episode_grid.dart';
 import 'package:rillight/library/item_format.dart';
 import 'package:rillight/library/poster_card.dart';
@@ -216,7 +217,11 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     // 先显:详情条目命中缓存时先渲染主体,后台继续拉完整数据后无感更新。
     if (!keep && _item == null) {
       final hit = await _cache.lookup(
-        catalogItemRequest(userId: client.userId ?? '', itemId: requestedId),
+        catalogItemRequest(
+          userId: client.userId ?? '',
+          itemId: requestedId,
+          fields: _detailFields,
+        ),
       );
       if (!mounted || gen != _loadGen) {
         return;
@@ -384,7 +389,11 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     return parseCatalogItem(
       await _cache.fetch(
         client,
-        catalogItemRequest(userId: client.userId ?? '', itemId: itemId),
+        catalogItemRequest(
+          userId: client.userId ?? '',
+          itemId: itemId,
+          fields: _detailFields,
+        ),
       ),
     );
   }
@@ -1003,6 +1012,8 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                   _setPlayed(value);
                 },
               ),
+              if (item.isEpisode)
+                EpisodeOverviewSection(overview: _displayOverview(item)),
               if (item.chapters.isNotEmpty)
                 _ChapterStrip(
                   itemId: item.id,
@@ -1018,6 +1029,23 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                     );
                   },
                 ),
+              if (item.isEpisode) ...[
+                EpisodePeopleSection(people: item.people),
+                EpisodeMediaStreamsSection(
+                  source: _sourceById(item, _mediaSourceId),
+                ),
+                NextEpisodeCard(
+                  episode: _nextEpisodeAfter(item),
+                  onTap: () {
+                    final next = _nextEpisodeAfter(item);
+                    if (next == null) {
+                      return;
+                    }
+                    _openEpisodeDetails(next.id);
+                  },
+                ),
+                EpisodeMetadataSection(item: item),
+              ],
               if (item.isSeries) ...[
                 if (continueWatching.isNotEmpty)
                   MediaShelf(
@@ -2173,6 +2201,8 @@ class _MetaRow extends StatelessWidget {
             key: CatalogKeys.playTarget,
           ),
         if (runtime != null) chip(runtime!),
+        if (item.isEpisode && item.premiereDate != null)
+          chip(l10n.premiereDate(formatDateYmd(item.premiereDate!))),
         if (item.isSeries && seasonCount > 0)
           chip(l10n.seasonCount(seasonCount)),
         if (item.childCount != null && item.isSeries)
@@ -2463,6 +2493,10 @@ class _DetailMenuButton<T> extends StatelessWidget {
     );
   }
 }
+
+/// 详情路径字段:在 [EmbyClient.itemFields] 之上加 People,单条目详情
+/// 开销可忽略(ADR-2);季列表等 /Items 高频路径不带 People。
+const _detailFields = '${EmbyClient.itemFields},People';
 
 /// 详情页加载骨架:头部占位块(与真实头部同高)+ 文本行 + 分集网格占位。
 class _DetailSkeleton extends StatelessWidget {
