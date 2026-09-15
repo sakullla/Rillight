@@ -109,6 +109,26 @@ void main() {
     expect(auth.isLoggedIn, isTrue);
   });
 
+  testWidgets('password field can reveal the typed value', (tester) async {
+    await tester.pumpWidget(RillightApp(auth: controller()));
+    await _settle(tester);
+
+    expect(
+      tester
+          .widget<TextField>(find.byKey(ConnectFormKeys.password))
+          .obscureText,
+      isTrue,
+    );
+    await tester.tap(find.byKey(ConnectFormKeys.passwordVisibility));
+    await _settle(tester);
+    expect(
+      tester
+          .widget<TextField>(find.byKey(ConnectFormKeys.password))
+          .obscureText,
+      isFalse,
+    );
+  });
+
   testWidgets('session icon button matches the title bar icon constraints', (
     tester,
   ) async {

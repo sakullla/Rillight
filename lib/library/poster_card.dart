@@ -56,6 +56,7 @@ class PosterCard extends StatelessWidget {
             children: [
               ClipRRect(
                 borderRadius: BorderRadius.circular(AppRadii.md),
+                clipBehavior: Clip.hardEdge,
                 child: SizedBox(
                   width: width,
                   height: height,
@@ -159,6 +160,7 @@ class EpisodeThumbCard extends StatelessWidget {
             children: [
               ClipRRect(
                 borderRadius: BorderRadius.circular(AppRadii.sm),
+                clipBehavior: Clip.hardEdge,
                 child: SizedBox(
                   width: width,
                   height: height,
@@ -261,6 +263,7 @@ class SeasonPosterCard extends StatelessWidget {
                   children: [
                     ClipRRect(
                       borderRadius: BorderRadius.circular(AppRadii.sm),
+                      clipBehavior: Clip.hardEdge,
                       child: Stack(
                         fit: StackFit.expand,
                         children: [
@@ -434,6 +437,8 @@ class _PosterRevealOverlay extends StatelessWidget {
         '${item.productionYear}',
       ?runtimeLabel(l10n, item),
     ];
+    final overview = plainOverview(item.overview);
+    final showTitle = showMeta && overview == null;
     return IgnorePointer(
       ignoring: !revealed,
       child: AnimatedOpacity(
@@ -494,7 +499,7 @@ class _PosterRevealOverlay extends StatelessWidget {
                           ),
                         ),
                       ),
-                    if (showMeta)
+                    if (showTitle || showMeta || overview != null)
                       Align(
                         alignment: Alignment.bottomCenter,
                         child: Padding(
@@ -507,18 +512,19 @@ class _PosterRevealOverlay extends StatelessWidget {
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Text(
-                                title,
-                                maxLines: 3,
-                                overflow: TextOverflow.ellipsis,
-                                textAlign: TextAlign.center,
-                                style: theme.textTheme.labelLarge?.copyWith(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w600,
+                              if (showTitle)
+                                Text(
+                                  title,
+                                  maxLines: 3,
+                                  overflow: TextOverflow.ellipsis,
+                                  textAlign: TextAlign.center,
+                                  style: theme.textTheme.labelLarge?.copyWith(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w600,
+                                  ),
                                 ),
-                              ),
-                              if (meta.isNotEmpty) ...[
-                                const SizedBox(height: 2),
+                              if (showMeta && meta.isNotEmpty) ...[
+                                if (showTitle) const SizedBox(height: 2),
                                 Text(
                                   meta.join(' · '),
                                   maxLines: 1,
@@ -526,6 +532,20 @@ class _PosterRevealOverlay extends StatelessWidget {
                                   textAlign: TextAlign.center,
                                   style: theme.textTheme.labelMedium?.copyWith(
                                     color: Colors.white.withValues(alpha: 0.88),
+                                  ),
+                                ),
+                              ],
+                              if (overview != null) ...[
+                                if (showMeta && meta.isNotEmpty)
+                                  const SizedBox(height: AppSpacing.xxs),
+                                Text(
+                                  overview,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  textAlign: TextAlign.start,
+                                  style: theme.textTheme.labelSmall?.copyWith(
+                                    color: Colors.white.withValues(alpha: 0.92),
+                                    height: 1.35,
                                   ),
                                 ),
                               ],

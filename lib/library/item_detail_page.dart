@@ -11,6 +11,8 @@ import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/app_error_view.dart';
 import 'package:rillight/app/widgets/backdrop_scrim.dart';
+import 'package:rillight/app/widgets/media_source_menu_tile.dart';
+import 'package:rillight/app/widgets/poster_overview_band.dart';
 import 'package:rillight/app/widgets/scrim_icon_button.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/app/window_chrome.dart';
@@ -215,6 +217,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
           _seriesId != null &&
           ((item.isEpisode && item.seriesId == _seriesId) ||
               (item.isSeries && item.id == _seriesId));
+      var seriesOverviewTask = Future<String?>.value(_seriesOverview);
       if (item.isSeries || item.isEpisode) {
         seriesId = reuseCatalog
             ? _seriesId
@@ -222,6 +225,12 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
         if (!mounted || gen != _loadGen) {
           return;
         }
+        seriesOverviewTask = _seriesOverviewTask(
+          client,
+          item: item,
+          seriesId: seriesId,
+          cached: _seriesOverview,
+        );
         if (reuseCatalog && _seasons.isNotEmpty) {
           seasons = _seasons;
         } else if (seriesId != null && seriesId.isNotEmpty) {
@@ -289,23 +298,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
           }
         }
       }
-      var seriesOverview = _seriesOverview;
-      if (item.isSeries) {
-        seriesOverview = item.overview;
-      } else if (item.isEpisode &&
-          seriesOverview == null &&
-          seriesId != null &&
-          seriesId.isNotEmpty) {
-        try {
-          final series = await client.getItem(seriesId);
-          seriesOverview = series.overview ?? '';
-        } on EmbyException {
-          seriesOverview = '';
-        }
-        if (!mounted || gen != _loadGen) {
-          return;
-        }
-      }
+      final seriesOverview = await seriesOverviewTask;
       if (!mounted || gen != _loadGen) {
         return;
       }
@@ -570,6 +563,19 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     });
   }
 
+  /// 分集详情走独立路由:返回键能回到剧集列表。
+  /// 行点击进详情;播放按钮才开播放器。
+  void _openEpisodeDetails(String id) {
+    if (id.isEmpty) {
+      return;
+    }
+    if (id == _itemId) {
+      _revealEpisode(id);
+      return;
+    }
+    context.push(AppRoutes.item(id));
+  }
+
   void _openOrRevealEpisode(String id) {
     if (_item?.isSeries ?? false) {
       _revealEpisode(id);
@@ -735,18 +741,39 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
   }
 
   String? _displayOverview(EmbyItem item) {
-    final own = item.overview?.trim();
-    if (own != null && own.isNotEmpty) {
+    final own = plainOverview(item.overview);
+    if (own != null) {
       return own;
     }
     if (!item.isEpisode) {
       return null;
     }
-    final fallback = _seriesOverview?.trim();
-    if (fallback != null && fallback.isNotEmpty) {
-      return fallback;
+    return plainOverview(_seriesOverview);
+  }
+
+  Future<String?> _seriesOverviewTask(
+    EmbyClient client, {
+    required EmbyItem item,
+    required String? seriesId,
+    required String? cached,
+  }) async {
+    if (item.isSeries) {
+      return item.overview;
     }
-    return null;
+    if (!item.isEpisode) {
+      return cached;
+    }
+    if (cached != null) {
+      return cached;
+    }
+    if (seriesId == null || seriesId.isEmpty) {
+      return '';
+    }
+    try {
+      return (await client.getItem(seriesId)).overview ?? '';
+    } on EmbyException {
+      return '';
+    }
   }
 
   EmbyItem? _playTarget(EmbyItem item) {
@@ -900,12 +927,6 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                         }
                         _showItem(next.id);
                       },
-                onViewEpisode:
-                    item.isSeries &&
-                        playTarget != null &&
-                        playTarget.id != item.id
-                    ? () => _showItem(playTarget.id)
-                    : null,
                 onViewSeries:
                     item.isEpisode && (_seriesId ?? item.seriesId) != null
                     ? () {
@@ -930,7 +951,12 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                 onAudio: (index) => setState(() => _audioStreamIndex = index),
                 onSubtitle: (index) =>
                     setState(() => _subtitleStreamIndex = index),
-                onLocateEpisode: item.isEpisode ? _locateCurrentEpisode : null,
+                overview: _displayOverview(item),
+                onLocateEpisode: item.isEpisode
+                    ? _locateCurrentEpisode
+                    : playTarget == null || !item.isSeries
+                    ? null
+                    : () => _revealEpisode(playTarget.id),
                 onPlay: playTarget == null
                     ? null
                     : () => _openPlayer(playTarget.id),
@@ -940,10 +966,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                 onPlayedChanged: (value) {
                   _setPlayed(value);
                 },
-                overview: _displayOverview(item),
               ),
-              if (item.isSeries || item.isEpisode)
-                _OverviewSection(text: _displayOverview(item)),
               if (item.chapters.isNotEmpty)
                 _ChapterStrip(
                   itemId: item.id,
@@ -967,13 +990,13 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                     title: l10n.resumeRow,
                     items: continueWatching,
                     wide: true,
-                    onTap: (episode) => unawaited(_openPlayer(episode.id)),
+                    onTap: (episode) => _openEpisodeDetails(episode.id),
                     itemBuilder: (context, episode) {
                       return EpisodeThumbCard(
                         item: episode,
                         width: wideCardWidth,
                         selected: episode.id == playTarget?.id,
-                        onTap: () => unawaited(_openPlayer(episode.id)),
+                        onTap: () => _openEpisodeDetails(episode.id),
                       );
                     },
                   ),
@@ -1010,7 +1033,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                     onSelectSeason: _selectSeason,
                     onLocate: _seasonId == null ? null : _openEpisodePicker,
                   ),
-                  onTap: (episode) => unawaited(_openPlayer(episode.id)),
+                  onTap: (episode) => _openEpisodeDetails(episode.id),
                   onPlay: (episode) => unawaited(_openPlayer(episode.id)),
                   onTogglePlayed: (episode) {
                     unawaited(
@@ -1681,45 +1704,6 @@ class _SeriesLink extends StatelessWidget {
   }
 }
 
-class _OverviewSection extends StatelessWidget {
-  const _OverviewSection({required this.text});
-
-  final String? text;
-
-  @override
-  Widget build(BuildContext context) {
-    final body = text?.trim();
-    if (body == null || body.isEmpty) {
-      return const SizedBox.shrink();
-    }
-    final theme = Theme.of(context);
-    final l10n = AppLocalizations.of(context);
-    return Padding(
-      key: CatalogKeys.overview,
-      padding: const EdgeInsets.fromLTRB(
-        AppSpacing.page,
-        AppSpacing.md,
-        AppSpacing.page,
-        AppSpacing.sm,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(l10n.overview, style: theme.textTheme.titleMedium),
-          const SizedBox(height: AppSpacing.sm),
-          SelectableText(
-            body,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: theme.colorScheme.onSurface.withValues(alpha: 0.82),
-              height: 1.45,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 /// 分集窗口:一次查询得到的分集及其在季内的服务端偏移终点。
 class _EpisodeWindow {
   const _EpisodeWindow({
@@ -1760,10 +1744,11 @@ List<EmbyItem> _sortedByIndex(List<EmbyItem> items) {
 }
 
 /// 详情页头部:全幅 backdrop + [BackdropScrim] 作底,前景为
-/// 海报区 | 信息区(剧名链接、标题、元信息胶囊、简介、操作)两栏。
+/// 海报区(含底部简介叠字) | 信息区(剧名链接、标题、元信息胶囊、操作)两栏。
 ///
-/// 高度至少为 [heightFor] + 顶栏叠加;内容更高时按内容自增,
-/// 简介不再被挤出头部。骨架屏用同一算法取高,首帧不跳变。
+/// 高度至少为 [heightFor] + 顶栏叠加;内容更高时按内容自增。
+/// 剧集不拉半屏空英雄位:分集才是主体,头部随海报+信息贴合。
+/// 骨架屏用同一算法取高,首帧不跳变。
 class _DetailHeader extends StatelessWidget {
   const _DetailHeader({
     super.key,
@@ -1777,7 +1762,6 @@ class _DetailHeader extends StatelessWidget {
     this.seasonCount = 0,
     this.seriesId,
     this.nextEpisode,
-    this.onViewEpisode,
     this.onOpenNextEpisode,
     this.onViewSeries,
     this.mediaSourceId,
@@ -1800,7 +1784,6 @@ class _DetailHeader extends StatelessWidget {
   final int seasonCount;
   final String? seriesId;
   final EmbyItem? nextEpisode;
-  final VoidCallback? onViewEpisode;
   final VoidCallback? onOpenNextEpisode;
   final VoidCallback? onViewSeries;
   final String? mediaSourceId;
@@ -1810,16 +1793,21 @@ class _DetailHeader extends StatelessWidget {
   final ValueChanged<int>? onAudio;
   final ValueChanged<int?>? onSubtitle;
   final VoidCallback? onLocateEpisode;
-
-  /// 头部摘要:电影/剧集用自身简介,单集优先本集、否则回退剧集简介。
   final String? overview;
 
   /// 顶带在顶栏之下继续溶入的高度。
   static const double _topBandFade = 36;
 
-  /// 头部最小高度:约半屏,夹在 360–640 之间。[width] 预留给断点差异,
-  /// 当前各断点共用同一比例。
-  static double heightFor(double width, double viewportHeight) {
+  /// 头部最小高度:电影/单集约半屏画幅,夹在 360–640 之间。
+  /// 剧集 [billboard] 为 false,不定死半屏,避免无 backdrop 时大块空白。
+  static double heightFor(
+    double width,
+    double viewportHeight, {
+    bool billboard = true,
+  }) {
+    if (!billboard) {
+      return 0;
+    }
     return (viewportHeight * 0.52).clamp(360.0, 640.0);
   }
 
@@ -1829,7 +1817,9 @@ class _DetailHeader extends StatelessWidget {
       builder: (context, constraints) {
         final width = constraints.maxWidth;
         final viewportHeight = MediaQuery.sizeOf(context).height;
-        final minHeight = heightFor(width, viewportHeight) + topOverlap;
+        final billboard = !item.isSeries;
+        final minHeight =
+            heightFor(width, viewportHeight, billboard: billboard) + topOverlap;
         return SizedBox(
           width: double.infinity,
           child: ConstrainedBox(
@@ -1861,7 +1851,11 @@ class _DetailHeader extends StatelessWidget {
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
-                      _DetailPoster(item: item, layoutWidth: width),
+                      _DetailPoster(
+                        item: item,
+                        layoutWidth: width,
+                        overview: item.isSeries ? null : overview,
+                      ),
                       const SizedBox(width: AppSpacing.xl),
                       Expanded(
                         child: _DetailInfo(
@@ -1870,18 +1864,18 @@ class _DetailHeader extends StatelessWidget {
                           compact: width < AppBreakpoints.compact,
                           seasonCount: seasonCount,
                           seriesId: seriesId,
-                          nextEpisode: nextEpisode,
+                          overview: item.isSeries ? overview : null,
+                          playEpisode: item.isSeries ? nextEpisode : null,
                           onLocateEpisode: onLocateEpisode,
-                          overview: overview,
                           actions: _DetailActions(
                             item: item,
                             busyPlayed: busyPlayed,
                             onPlay: onPlay,
                             onPlayFromStart: onPlayFromStart,
                             onOpenNextEpisode: onOpenNextEpisode,
-                            onViewEpisode: onViewEpisode,
                             onViewSeries: onViewSeries,
                             onPlayedChanged: onPlayedChanged,
+                            playEpisode: item.isSeries ? nextEpisode : null,
                             mediaSourceId: mediaSourceId,
                             audioStreamIndex: audioStreamIndex,
                             subtitleStreamIndex: subtitleStreamIndex,
@@ -1903,13 +1897,19 @@ class _DetailHeader extends StatelessWidget {
   }
 }
 
-/// 头部左栏:电影/剧集为 2:3 海报,单集为 16:9 缩略图;不走 backdrop 候选,
-/// 头部只保留一张 preferBackdrop 图。
+/// 头部左栏:电影为 2:3 海报(底带叠简介),剧集海报只作识别、简介在信息栏;
+/// 单集为 16:9 缩略图并叠本集简介。不走 backdrop 候选,头部只保留一张
+/// preferBackdrop 图。
 class _DetailPoster extends StatelessWidget {
-  const _DetailPoster({required this.item, required this.layoutWidth});
+  const _DetailPoster({
+    required this.item,
+    required this.layoutWidth,
+    this.overview,
+  });
 
   final EmbyItem item;
   final double layoutWidth;
+  final String? overview;
 
   static double posterWidthFor(double width) {
     if (width < AppBreakpoints.compact) {
@@ -1956,13 +1956,24 @@ class _DetailPoster extends StatelessWidget {
         child: SizedBox(
           width: width,
           height: height,
-          child: MediaImage(
-            key: ValueKey('detail-poster-${item.id}'),
-            item: item,
-            width: width,
-            height: height,
-            preferThumb: episode,
-            maxWidth: episode ? 720 : 480,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              MediaImage(
+                key: ValueKey('detail-poster-${item.id}'),
+                item: item,
+                width: width,
+                height: height,
+                preferThumb: episode,
+                maxWidth: episode ? 720 : 480,
+              ),
+              if (overview != null && overview!.isNotEmpty)
+                PosterOverviewBand(
+                  text: overview!,
+                  maxLines: episode ? 2 : 4,
+                  textKey: CatalogKeys.overview,
+                ),
+            ],
           ),
         ),
       ),
@@ -1970,7 +1981,7 @@ class _DetailPoster extends StatelessWidget {
   }
 }
 
-/// 头部右栏:剧名链接(单集)、标题、元信息胶囊、简介摘要与操作区。
+/// 头部右栏:剧名链接(单集)、标题、元信息胶囊与操作区。
 class _DetailInfo extends StatelessWidget {
   const _DetailInfo({
     required this.item,
@@ -1978,10 +1989,10 @@ class _DetailInfo extends StatelessWidget {
     required this.compact,
     required this.seasonCount,
     required this.seriesId,
-    required this.nextEpisode,
     required this.onLocateEpisode,
-    required this.overview,
     required this.actions,
+    this.overview,
+    this.playEpisode,
   });
 
   final EmbyItem item;
@@ -1989,16 +2000,14 @@ class _DetailInfo extends StatelessWidget {
   final bool compact;
   final int seasonCount;
   final String? seriesId;
-  final EmbyItem? nextEpisode;
   final VoidCallback? onLocateEpisode;
-  final String? overview;
   final Widget actions;
+  final String? overview;
+  final EmbyItem? playEpisode;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final overview = this.overview?.trim();
-    final hasOverview = overview != null && overview.isNotEmpty;
     final seriesName = item.seriesName;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -2023,18 +2032,21 @@ class _DetailInfo extends StatelessWidget {
           item: item,
           runtime: runtime,
           seasonCount: seasonCount,
-          nextEpisode: nextEpisode,
+          playEpisode: playEpisode,
           onLocateEpisode: onLocateEpisode,
         ),
-        if (hasOverview) ...[
-          const SizedBox(height: AppSpacing.sm),
+        if (overview != null && overview!.isNotEmpty) ...[
+          const SizedBox(height: AppSpacing.md),
           ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 720),
-            child: SelectableText(
-              overview,
-              maxLines: compact ? 2 : 3,
+            constraints: const BoxConstraints(maxWidth: 640),
+            child: Text(
+              overview!,
+              key: CatalogKeys.overview,
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
               style: theme.textTheme.bodyMedium?.copyWith(
-                color: theme.colorScheme.onSurface.withValues(alpha: 0.86),
+                color: theme.colorScheme.onSurface.withValues(alpha: 0.88),
+                height: 1.45,
               ),
             ),
           ),
@@ -2046,20 +2058,20 @@ class _DetailInfo extends StatelessWidget {
   }
 }
 
-/// 头部元信息行:集标/下一集、时长、季集数与观看进度。
+/// 头部元信息行:集标、时长、季集数与观看进度。
 class _MetaRow extends StatelessWidget {
   const _MetaRow({
     required this.item,
     required this.runtime,
     required this.seasonCount,
-    required this.nextEpisode,
+    this.playEpisode,
     this.onLocateEpisode,
   });
 
   final EmbyItem item;
   final String? runtime;
   final int seasonCount;
-  final EmbyItem? nextEpisode;
+  final EmbyItem? playEpisode;
   final VoidCallback? onLocateEpisode;
 
   @override
@@ -2082,21 +2094,31 @@ class _MetaRow extends StatelessWidget {
       );
     }
 
-    Widget locateChip(String text, {VoidCallback? onTap}) {
+    Widget locateChip(
+      String text, {
+      VoidCallback? onTap,
+      String? tooltip,
+      Key? key,
+    }) {
       final body = chip(text);
       if (onTap == null) {
         return body;
       }
       return Tooltip(
-        message: l10n.pickEpisode,
+        message: tooltip ?? l10n.pickEpisode,
         child: InkWell(
-          key: CatalogKeys.locateEpisode,
+          key: key ?? CatalogKeys.locateEpisode,
           onTap: onTap,
           borderRadius: BorderRadius.circular(999),
           child: body,
         ),
       );
     }
+
+    final listed = playEpisode;
+    final playCode = listed != null && listed.isEpisode
+        ? seasonEpisodeCode(listed) ?? episodeLabel(listed)
+        : null;
 
     return Wrap(
       spacing: AppSpacing.sm,
@@ -2107,8 +2129,13 @@ class _MetaRow extends StatelessWidget {
             seasonEpisodeCode(item) ?? episodeLabel(item),
             onTap: onLocateEpisode,
           ),
-        if (nextEpisode != null && item.isSeries)
-          chip(episodeLabel(nextEpisode!)),
+        if (item.isSeries && playCode != null)
+          locateChip(
+            playCode,
+            onTap: onLocateEpisode,
+            tooltip: l10n.locateEpisode,
+            key: CatalogKeys.playTarget,
+          ),
         if (runtime != null) chip(runtime!),
         if (item.isSeries && seasonCount > 0)
           chip(l10n.seasonCount(seasonCount)),
@@ -2139,7 +2166,7 @@ ButtonStyle _detailGhostButtonStyle(ColorScheme scheme) {
   );
 }
 
-/// 操作区:播放/从头播放/下一集(查看本集)一组,已看与片源/音轨/字幕
+/// 操作区:播放/从头播放/下一集一组,已看与片源/音轨/字幕
 /// 圆钮一组,两组之间以 [AppSpacing.md] 分隔。
 class _DetailActions extends StatelessWidget {
   const _DetailActions({
@@ -2149,8 +2176,8 @@ class _DetailActions extends StatelessWidget {
     this.onPlay,
     this.onPlayFromStart,
     this.onOpenNextEpisode,
-    this.onViewEpisode,
     this.onViewSeries,
+    this.playEpisode,
     this.mediaSourceId,
     this.audioStreamIndex,
     this.subtitleStreamIndex,
@@ -2165,8 +2192,8 @@ class _DetailActions extends StatelessWidget {
   final VoidCallback? onPlay;
   final VoidCallback? onPlayFromStart;
   final VoidCallback? onOpenNextEpisode;
-  final VoidCallback? onViewEpisode;
   final VoidCallback? onViewSeries;
+  final EmbyItem? playEpisode;
   final String? mediaSourceId;
   final int? audioStreamIndex;
   final int? subtitleStreamIndex;
@@ -2186,7 +2213,7 @@ class _DetailActions extends StatelessWidget {
     String sourceLabel = '';
     for (final source in item.mediaSources) {
       if (source.id == sourceId) {
-        sourceLabel = source.label;
+        sourceLabel = source.presentation.compact;
         break;
       }
     }
@@ -2208,6 +2235,16 @@ class _DetailActions extends StatelessWidget {
     }
     final ghost = _detailGhostButtonStyle(scheme);
     final played = item.userData.played;
+    final resume = onPlayFromStart != null || item.canResume;
+    final listed = playEpisode;
+    final playCode = listed != null && listed.isEpisode
+        ? seasonEpisodeCode(listed)
+        : null;
+    final playLabel = playCode == null
+        ? (resume ? l10n.resumePlay : l10n.play)
+        : (resume
+              ? l10n.resumePlayEpisode(playCode)
+              : l10n.playEpisode(playCode));
     final primary = <Widget>[
       if (onPlay != null)
         FilledButton.icon(
@@ -2221,11 +2258,7 @@ class _DetailActions extends StatelessWidget {
             ),
           ),
           icon: const Icon(Icons.play_arrow_rounded, size: 26),
-          label: Text(
-            onPlayFromStart != null || item.canResume
-                ? l10n.resumePlay
-                : l10n.play,
-          ),
+          label: Text(playLabel),
         ),
       if (onPlayFromStart != null)
         OutlinedButton(
@@ -2241,14 +2274,6 @@ class _DetailActions extends StatelessWidget {
           style: ghost,
           icon: const Icon(Icons.skip_next_rounded),
           label: Text(l10n.nextEpisode),
-        ),
-      if (onViewEpisode != null)
-        OutlinedButton.icon(
-          key: CatalogKeys.viewEpisode,
-          onPressed: onViewEpisode,
-          style: ghost,
-          icon: const Icon(Icons.slideshow_outlined),
-          label: Text(l10n.viewThisEpisode),
         ),
       if (onViewSeries != null)
         OutlinedButton.icon(
@@ -2277,12 +2302,13 @@ class _DetailActions extends StatelessWidget {
           menuKey: CatalogKeys.mediaSource,
           tooltip: '${l10n.mediaSource} · $sourceLabel',
           icon: Icons.movie_filter_outlined,
+          constraints: const BoxConstraints(minWidth: 280, maxWidth: 420),
           items: [
             for (final source in item.mediaSources)
               CheckedPopupMenuItem(
                 value: source.id,
                 checked: source.id == sourceId,
-                child: Text(source.label),
+                child: MediaSourceMenuTile(view: source.presentation),
               ),
           ],
           onSelected: (value) => onMediaSource?.call(value),
@@ -2355,6 +2381,7 @@ class _DetailMenuButton<T> extends StatelessWidget {
     required this.items,
     required this.onSelected,
     this.menuKey,
+    this.constraints,
   });
 
   final Key? menuKey;
@@ -2362,6 +2389,7 @@ class _DetailMenuButton<T> extends StatelessWidget {
   final IconData icon;
   final List<PopupMenuEntry<T>> items;
   final ValueChanged<T> onSelected;
+  final BoxConstraints? constraints;
 
   Future<void> _open(BuildContext context) async {
     final button = context.findRenderObject()! as RenderBox;
@@ -2380,6 +2408,7 @@ class _DetailMenuButton<T> extends StatelessWidget {
     final value = await showMenu<T>(
       context: context,
       position: position,
+      constraints: constraints,
       items: items,
     );
     if (value != null) {
@@ -2438,13 +2467,24 @@ class _EpisodeList extends StatelessWidget {
   final Set<String> busyPlayedIds;
   final VoidCallback? onMore;
 
+  /// 分集列表内容栏宽度:贴页面边距,上限 1080,避免超宽屏拉成一条细岛。
+  static const double maxWidth = 1080;
+
+  static double widthFor(double screenWidth) {
+    final inner = screenWidth - AppSpacing.page * 2;
+    if (inner <= 0) {
+      return screenWidth;
+    }
+    return math.min(maxWidth, inner);
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final theme = Theme.of(context);
-    final thumbWidth = _EpisodeRow.thumbWidthFor(
-      MediaQuery.sizeOf(context).width,
-    );
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final thumbWidth = _EpisodeRow.thumbWidthFor(screenWidth);
+    final listWidth = widthFor(screenWidth);
     final error = this.error;
     return Padding(
       key: CatalogKeys.episodesRow,
@@ -2485,40 +2525,48 @@ class _EpisodeList extends StatelessWidget {
           else if (loading && episodes.isEmpty)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: AppSpacing.page),
-              child: Column(
-                children: [
-                  for (var i = 0; i < 3; i++)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: AppSpacing.xs),
-                      child: _EpisodeRowSkeleton(thumbWidth: thumbWidth),
-                    ),
-                ],
+              child: SizedBox(
+                width: listWidth,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    for (var i = 0; i < 3; i++)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: AppSpacing.xs),
+                        child: _EpisodeRowSkeleton(thumbWidth: thumbWidth),
+                      ),
+                  ],
+                ),
               ),
             )
           else ...[
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: AppSpacing.page),
-              child: Column(
-                children: [
-                  for (final episode in episodes)
-                    Padding(
-                      key: ValueKey('episode-row-${episode.id}'),
-                      padding: const EdgeInsets.only(bottom: AppSpacing.xxs),
-                      child: _EnsureVisibleWhenSelected(
-                        selected: episode.id == currentId,
-                        token: revealToken,
-                        child: _EpisodeRow(
-                          item: episode,
-                          thumbWidth: thumbWidth,
+              child: SizedBox(
+                width: listWidth,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    for (final episode in episodes)
+                      Padding(
+                        key: ValueKey('episode-row-${episode.id}'),
+                        padding: const EdgeInsets.only(bottom: AppSpacing.xs),
+                        child: _EnsureVisibleWhenSelected(
                           selected: episode.id == currentId,
-                          busyPlayed: busyPlayedIds.contains(episode.id),
-                          onTap: () => onTap(episode),
-                          onPlay: () => onPlay(episode),
-                          onTogglePlayed: () => onTogglePlayed(episode),
+                          token: revealToken,
+                          child: _EpisodeRow(
+                            item: episode,
+                            thumbWidth: thumbWidth,
+                            selected: episode.id == currentId,
+                            busyPlayed: busyPlayedIds.contains(episode.id),
+                            onTap: () => onTap(episode),
+                            onPlay: () => onPlay(episode),
+                            onTogglePlayed: () => onTogglePlayed(episode),
+                          ),
                         ),
                       ),
-                    ),
-                ],
+                  ],
+                ),
               ),
             ),
             if (hasMore)
@@ -2600,7 +2648,7 @@ class _EnsureVisibleWhenSelectedState
 }
 
 /// 分集行:16:9 缩略图 + 「N. 标题」+ 时长/进度 + 本集简介;
-/// 右侧为已看开关与播放,右键菜单提供同样的操作。
+/// 点整行进入集详情,右侧播放按钮才开播,右键菜单同样可播放/标已看。
 /// 当前集以 surfaceContainerHigh 底色与 primary 左边条标示。
 class _EpisodeRow extends StatelessWidget {
   const _EpisodeRow({
@@ -2682,7 +2730,7 @@ class _EpisodeRow extends StatelessWidget {
       ?runtimeLabel(l10n, item),
       if (item.canResume) l10n.playbackProgress((progress * 100).round()),
     ];
-    final overview = item.overview?.trim();
+    final overview = plainOverview(item.overview);
     final thumbHeight = thumbWidth * 9 / 16;
     final compact = MediaQuery.sizeOf(context).width < AppBreakpoints.compact;
     return ClipRRect(

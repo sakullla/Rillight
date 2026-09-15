@@ -6,13 +6,22 @@ import 'package:rillight/app/theme/tokens.dart';
 /// 纯呈现组件,不持有业务数据;动画周期取 [AppMotion.slow] 的整数倍,
 /// 保持在 token 时长体系内。
 class SkeletonBlock extends StatefulWidget {
-  const SkeletonBlock({super.key, this.width, this.height, this.borderRadius});
+  const SkeletonBlock({
+    super.key,
+    this.width,
+    this.height,
+    this.borderRadius,
+    this.animated = true,
+  });
 
   final double? width;
   final double? height;
 
   /// 圆角,默认 [AppRadii.sm]。
   final BorderRadius? borderRadius;
+
+  /// 网格滚动时关闭扫光:每个格子一台 AnimationController 会把滑动打卡。
+  final bool animated;
 
   @override
   State<SkeletonBlock> createState() => _SkeletonBlockState();
@@ -23,40 +32,70 @@ class _SkeletonBlockState extends State<SkeletonBlock>
   /// shimmer 循环周期:slow 阶梯的四倍。
   static final Duration _period = AppMotion.slow * 4;
 
-  late final AnimationController _controller;
+  AnimationController? _controller;
 
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(vsync: this, duration: _period)..repeat();
+    if (widget.animated) {
+      _controller = AnimationController(vsync: this, duration: _period)
+        ..repeat();
+    }
+  }
+
+  @override
+  void didUpdateWidget(SkeletonBlock oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.animated == widget.animated) {
+      return;
+    }
+    if (widget.animated) {
+      _controller ??= AnimationController(vsync: this, duration: _period);
+      _controller!.repeat();
+    } else {
+      _controller?.stop();
+    }
   }
 
   @override
   void dispose() {
-    _controller.dispose();
+    _controller?.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final radius = widget.borderRadius ?? BorderRadius.circular(AppRadii.sm);
+    final controller = _controller;
+    if (!widget.animated || controller == null) {
+      return SizedBox(
+        width: widget.width,
+        height: widget.height,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: colorScheme.surfaceContainerHighest,
+            borderRadius: radius,
+          ),
+        ),
+      );
+    }
     return AnimatedBuilder(
-      animation: _controller,
+      animation: controller,
       builder: (context, _) {
         return SizedBox(
           width: widget.width,
           height: widget.height,
           child: DecoratedBox(
             decoration: BoxDecoration(
-              borderRadius:
-                  widget.borderRadius ?? BorderRadius.circular(AppRadii.sm),
+              borderRadius: radius,
               gradient: LinearGradient(
                 colors: [
                   colorScheme.surfaceContainerHigh,
                   colorScheme.surfaceContainerHighest,
                   colorScheme.surfaceContainerHigh,
                 ],
-                transform: _SweepGradientTransform(_controller.value),
+                transform: _SweepGradientTransform(controller.value),
               ),
             ),
           ),

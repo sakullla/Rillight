@@ -7,11 +7,15 @@ import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/app_error_view.dart';
 import 'package:rillight/app/widgets/liquid_glass.dart';
+import 'package:rillight/app/widgets/media_source_menu_tile.dart';
+import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/emby/device_profile.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_failure.dart';
+import 'package:rillight/library/item_format.dart';
+import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/player/danmaku/danmaku_controller.dart';
 import 'package:rillight/player/danmaku/danmaku_renderer.dart';
 import 'package:rillight/player/danmaku/dandanplay_models.dart';
@@ -59,6 +63,8 @@ class PlayerPageState extends State<PlayerPage> {
   bool _dragSeeking = false;
   double _dragValue = 0;
   bool _episodesOpen = false;
+  bool _danmakuPanelOpen = false;
+  bool _danmakuSearchOpen = false;
 
   bool _pointerNearWindowEdge(Offset local) {
     final size = MediaQuery.sizeOf(context);
@@ -209,6 +215,12 @@ class PlayerPageState extends State<PlayerPage> {
       _closeEpisodeList();
       return;
     }
+    if (_danmakuPanelOpen) {
+      setState(() => _danmakuPanelOpen = false);
+    }
+    if (_danmakuSearchOpen) {
+      setState(() => _danmakuSearchOpen = false);
+    }
     unawaited(current.loadEpisodeList());
     current.setControlsPinned(true);
     setState(() => _episodesOpen = true);
@@ -218,8 +230,62 @@ class PlayerPageState extends State<PlayerPage> {
     if (!_episodesOpen) {
       return;
     }
-    controller?.setControlsPinned(false);
+    if (!_danmakuPanelOpen && !_danmakuSearchOpen) {
+      controller?.setControlsPinned(false);
+    }
     setState(() => _episodesOpen = false);
+  }
+
+  void _openDanmakuPanel() {
+    if (_danmaku == null) {
+      return;
+    }
+    if (_danmakuPanelOpen) {
+      _closeDanmakuPanel();
+      return;
+    }
+    if (_episodesOpen) {
+      _closeEpisodeList();
+    }
+    if (_danmakuSearchOpen) {
+      setState(() => _danmakuSearchOpen = false);
+    }
+    controller?.setControlsPinned(true);
+    setState(() => _danmakuPanelOpen = true);
+  }
+
+  void _closeDanmakuPanel() {
+    if (!_danmakuPanelOpen) {
+      return;
+    }
+    if (!_episodesOpen && !_danmakuSearchOpen) {
+      controller?.setControlsPinned(false);
+    }
+    setState(() => _danmakuPanelOpen = false);
+  }
+
+  void _openDanmakuSearch() {
+    if (_danmaku == null) {
+      return;
+    }
+    if (_episodesOpen) {
+      setState(() => _episodesOpen = false);
+    }
+    if (_danmakuPanelOpen) {
+      setState(() => _danmakuPanelOpen = false);
+    }
+    controller?.setControlsPinned(true);
+    setState(() => _danmakuSearchOpen = true);
+  }
+
+  void _closeDanmakuSearch() {
+    if (!_danmakuSearchOpen) {
+      return;
+    }
+    if (!_episodesOpen && !_danmakuPanelOpen) {
+      controller?.setControlsPinned(false);
+    }
+    setState(() => _danmakuSearchOpen = false);
   }
 
   @override
@@ -265,6 +331,14 @@ class PlayerPageState extends State<PlayerPage> {
           return KeyEventResult.handled;
         }
         if (event.logicalKey == LogicalKeyboardKey.escape) {
+          if (_danmakuSearchOpen) {
+            _closeDanmakuSearch();
+            return KeyEventResult.handled;
+          }
+          if (_danmakuPanelOpen) {
+            _closeDanmakuPanel();
+            return KeyEventResult.handled;
+          }
           if (_episodesOpen) {
             _closeEpisodeList();
             return KeyEventResult.handled;
@@ -291,6 +365,11 @@ class PlayerPageState extends State<PlayerPage> {
               if (event.scrollDelta.dy == 0) {
                 return;
               }
+              // 剧集/弹幕侧栏自己吃滚轮;根 Listener 是 translucent,
+              // 不拦住的话滑列表会把音量一起改掉。
+              if (_episodesOpen || _danmakuPanelOpen || _danmakuSearchOpen) {
+                return;
+              }
               final delta = event.scrollDelta.dy < 0
                   ? PlayerController.volumeWheelStep
                   : -PlayerController.volumeWheelStep;
@@ -310,13 +389,21 @@ class PlayerPageState extends State<PlayerPage> {
                   (!current.controlsVisible &&
                       current.nextEpisode == null &&
                       !current.playbackEnded &&
-                      !_episodesOpen)
+                      !_episodesOpen &&
+                      !_danmakuPanelOpen &&
+                      !_danmakuSearchOpen)
                   ? SystemMouseCursors.none
                   : MouseCursor.defer,
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  IgnorePointer(child: current.backend.buildView()),
+                  RepaintBoundary(
+                    child: IgnorePointer(
+                      child: current.backend.buildView(
+                        key: const ValueKey('player-video-surface'),
+                      ),
+                    ),
+                  ),
                   Positioned.fill(
                     child: GestureDetector(
                       key: PlayerKeys.surface,
@@ -370,7 +457,7 @@ class PlayerPageState extends State<PlayerPage> {
                       dragValue: _dragValue,
                       danmaku: _danmaku,
                       onOpenEpisodes: _openEpisodeList,
-                      onDanmakuSearch: _openDanmakuSearch,
+                      onDanmakuSearch: _openDanmakuPanel,
                       onDragStart: (value) {
                         current.onUserActivity();
                         setState(() {
@@ -437,6 +524,27 @@ class PlayerPageState extends State<PlayerPage> {
                     controller: current,
                     visible: current.controlsVisible,
                   ),
+                  if (_danmaku != null &&
+                      _danmaku!.danmakuOn &&
+                      !_danmakuPanelOpen &&
+                      !_danmakuSearchOpen &&
+                      !_episodesOpen &&
+                      !current.loading &&
+                      current.error == null &&
+                      (_danmaku!.status == DanmakuStatus.noMatch))
+                    _DanmakuMatchChip(onSearch: _openDanmakuSearch),
+                  if (_danmakuPanelOpen && _danmaku != null)
+                    _DanmakuPanel(
+                      danmaku: _danmaku!,
+                      onClose: _closeDanmakuPanel,
+                      onSearch: _openDanmakuSearch,
+                    ),
+                  if (_danmakuSearchOpen && _danmaku != null)
+                    _DanmakuSearchPanel(
+                      danmaku: _danmaku!,
+                      initialKeyword: _danmakuSearchKeyword(),
+                      onClose: _closeDanmakuSearch,
+                    ),
                   if (_episodesOpen && current.canBrowseEpisodes)
                     _EpisodeListPanel(
                       controller: current,
@@ -462,54 +570,16 @@ class PlayerPageState extends State<PlayerPage> {
         !current.playbackEnded;
   }
 
-  Future<void> _openDanmakuSearch() async {
-    final danmaku = _danmaku;
-    if (danmaku == null || !mounted) {
-      return;
+  String _danmakuSearchKeyword() {
+    final matched = _danmaku?.matchedTitle?.trim();
+    if (matched != null && matched.isNotEmpty) {
+      return matched;
     }
-    final l10n = AppLocalizations.of(context);
-    final keyword = await showDialog<String>(
-      context: context,
-      builder: (dialogContext) {
-        final field = TextEditingController();
-        return AlertDialog(
-          title: Text(l10n.danmakuSearchTitle),
-          content: TextField(
-            key: const Key('player-danmaku-search-field'),
-            controller: field,
-            autofocus: true,
-            decoration: InputDecoration(hintText: l10n.danmakuSearchHint),
-            onSubmitted: (value) => Navigator.pop(dialogContext, value),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: Text(
-                MaterialLocalizations.of(dialogContext).cancelButtonLabel,
-              ),
-            ),
-            FilledButton(
-              key: const Key('player-danmaku-search-submit'),
-              onPressed: () => Navigator.pop(dialogContext, field.text),
-              child: Text(l10n.danmakuSearch),
-            ),
-          ],
-        );
-      },
-    );
-    final term = keyword?.trim() ?? '';
-    if (term.isEmpty) {
-      return;
+    final series = controller?.item?.seriesName?.trim();
+    if (series != null && series.isNotEmpty) {
+      return series;
     }
-    final animes = await danmaku.search(term);
-    if (!mounted) {
-      return;
-    }
-    await showDialog<void>(
-      context: context,
-      builder: (dialogContext) =>
-          _DanmakuSearchResults(danmaku: danmaku, animes: animes),
-    );
+    return controller?.item?.name ?? '';
   }
 
   String? _errorText(AppLocalizations l10n, PlayerController current) {
@@ -567,47 +637,64 @@ class _PlayerChromeBar extends StatelessWidget {
     final l10n = AppLocalizations.of(context);
     final scrim = theme.colorScheme.scrim;
     final title = controller.item?.displayName ?? '';
+    // 拖拽铺满整条顶栏。渐变层 IgnorePointer,否则 DecoratedBox 会吃掉
+    // 标题外 padding 的命中,顶缘正中拖不动窗口。置顶/关闭叠在拖拽层之上。
     return Positioned(
       left: 0,
       right: 0,
       top: 0,
-      child: _FadeThrough(
-        visible: visible,
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.bottomCenter,
-              end: Alignment.topCenter,
-              colors: [
-                Colors.transparent,
-                scrim.withValues(
-                  alpha: AppScrim.of(context, AppScrim.playerBarSoft),
+      height: kPlayerChromeBarExtent,
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: IgnorePointer(
+              child: _FadeThrough(
+                visible: visible,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.bottomCenter,
+                      end: Alignment.topCenter,
+                      colors: [
+                        Colors.transparent,
+                        scrim.withValues(
+                          alpha: AppScrim.of(context, AppScrim.playerBarSoft),
+                        ),
+                        scrim.withValues(
+                          alpha: AppScrim.of(context, AppScrim.playerPanel),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
-                scrim.withValues(
-                  alpha: AppScrim.of(context, AppScrim.playerPanel),
-                ),
-              ],
+              ),
             ),
           ),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(
-              AppSpacing.md,
-              AppSpacing.sm,
-              AppSpacing.sm,
-              AppSpacing.lg,
+          const Positioned.fill(
+            child: WindowDragArea(
+              key: Key('player-window-drag'),
+              child: SizedBox.expand(),
             ),
-            child: SizedBox(
-              height: kWindowChromeHeight + AppSpacing.sm,
-              child: Row(
-                children: [
-                  Expanded(
-                    child: WindowDragArea(
-                      key: const Key('player-window-drag'),
-                      child: SizedBox.expand(
+          ),
+          _FadeThrough(
+            visible: visible,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.md,
+                AppSpacing.sm,
+                AppSpacing.sm,
+                AppSpacing.lg,
+              ),
+              child: SizedBox(
+                height: kWindowChromeHeight + AppSpacing.sm,
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: IgnorePointer(
                         child: Align(
                           alignment: Alignment.centerLeft,
                           child: title.isEmpty
-                              ? const SizedBox.expand()
+                              ? const SizedBox.shrink()
                               : Text(
                                   title,
                                   maxLines: 1,
@@ -617,40 +704,85 @@ class _PlayerChromeBar extends StatelessWidget {
                         ),
                       ),
                     ),
-                  ),
-                  IconButton(
-                    key: const Key('player-always-on-top'),
-                    tooltip: controller.isAlwaysOnTop
-                        ? l10n.alwaysOnTopOff
-                        : l10n.alwaysOnTop,
-                    color: controller.isAlwaysOnTop
-                        ? theme.colorScheme.primary
-                        : theme.colorScheme.onSurface,
-                    onPressed: () {
-                      unawaited(controller.toggleAlwaysOnTop());
-                    },
-                    icon: Icon(
-                      controller.isAlwaysOnTop
+                    _PlayerChromeIconButton(
+                      buttonKey: const Key('player-always-on-top'),
+                      tooltip: controller.isAlwaysOnTop
+                          ? l10n.alwaysOnTopOff
+                          : l10n.alwaysOnTop,
+                      color: controller.isAlwaysOnTop
+                          ? theme.colorScheme.primary
+                          : theme.colorScheme.onSurface,
+                      onPressed: () {
+                        unawaited(controller.toggleAlwaysOnTop());
+                      },
+                      icon: controller.isAlwaysOnTop
                           ? Icons.push_pin_rounded
                           : Icons.push_pin_outlined,
+                      rotation: _kPinTilt,
                     ),
-                  ),
-                  IconButton(
-                    key: const Key('player-window-close'),
-                    tooltip: MaterialLocalizations.of(
-                      context,
-                    ).closeButtonTooltip,
-                    color: theme.colorScheme.onSurface,
-                    onPressed: () {
-                      unawaited(controller.close());
-                    },
-                    icon: const Icon(Icons.close_rounded),
-                  ),
-                ],
+                    _PlayerChromeIconButton(
+                      buttonKey: const Key('player-window-close'),
+                      tooltip: MaterialLocalizations.of(
+                        context,
+                      ).closeButtonTooltip,
+                      color: theme.colorScheme.onSurface,
+                      onPressed: () {
+                        unawaited(controller.close());
+                      },
+                      icon: Icons.close_rounded,
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
-        ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 播放窗顶栏按钮:与主窗口搜索/会话钮同高同字号,避免默认 48 点 IconButton
+/// 在标题栏里画出一块大方块。图钉侧倾 45°,直立的 push_pin 看起来像字母 T。
+const _kPinTilt = -0.7853981633974483;
+
+class _PlayerChromeIconButton extends StatelessWidget {
+  const _PlayerChromeIconButton({
+    required this.buttonKey,
+    required this.tooltip,
+    required this.icon,
+    required this.onPressed,
+    this.color,
+    this.rotation = 0,
+  });
+
+  final Key buttonKey;
+  final String tooltip;
+  final IconData icon;
+  final Color? color;
+  final double rotation;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final foreground = color ?? scheme.onSurface;
+    Widget glyph = Icon(icon);
+    if (rotation != 0) {
+      glyph = Transform.rotate(angle: rotation, child: glyph);
+    }
+    return Tooltip(
+      message: tooltip,
+      preferBelow: true,
+      child: IconButton(
+        key: buttonKey,
+        onPressed: onPressed,
+        padding: EdgeInsets.zero,
+        constraints: kTitleBarIconConstraints,
+        visualDensity: VisualDensity.compact,
+        iconSize: 18,
+        color: foreground,
+        icon: glyph,
       ),
     );
   }
@@ -821,6 +953,7 @@ class _NextEpisodeBanner extends StatelessWidget {
 }
 
 /// 播放到片头/片尾区间时右下角的跳过按钮:点击跳到区间终点。
+/// 用贴合文字的玻璃胶囊,不再套主题 [FilledButton],避免两侧空一截。
 class _SkipSegmentButton extends StatelessWidget {
   const _SkipSegmentButton({required this.controller});
 
@@ -829,23 +962,42 @@ class _SkipSegmentButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     final segment = controller.activeSkipSegment!;
     return Positioned(
       right: AppSpacing.xl,
       bottom: 112,
       child: LiquidGlass(
-        kind: LiquidGlassKind.control,
-        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
+        kind: LiquidGlassKind.pill,
         child: Material(
           key: const Key('player-skip-segment'),
           type: MaterialType.transparency,
-          child: FilledButton.icon(
-            onPressed: () => unawaited(controller.skipCurrentSegment()),
-            icon: const Icon(Icons.fast_forward_rounded, size: 18),
-            label: Text(
-              segment.kind == PlayerSkipKind.outro
-                  ? l10n.skipOutro
-                  : l10n.skipIntro,
+          child: InkWell(
+            onTap: () => unawaited(controller.skipCurrentSegment()),
+            borderRadius: BorderRadius.circular(999),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.md,
+                vertical: AppSpacing.xs,
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.fast_forward_rounded,
+                    size: 18,
+                    color: scheme.onSurface,
+                  ),
+                  const SizedBox(width: AppSpacing.xs),
+                  Text(
+                    segment.kind == PlayerSkipKind.outro
+                        ? l10n.skipOutro
+                        : l10n.skipIntro,
+                    style: theme.textTheme.labelLarge,
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -893,7 +1045,7 @@ class _EpisodeListPanel extends StatelessWidget {
             top: 0,
             bottom: 0,
             right: 0,
-            width: 360,
+            width: 400,
             child: Material(
               key: const Key('player-episodes-panel'),
               color: scheme.surfaceContainerHigh,
@@ -913,14 +1065,28 @@ class _EpisodeListPanel extends StatelessWidget {
                       children: [
                         Expanded(
                           child: Text(
-                            l10n.playerEpisodes,
+                            _episodePanelTitle(l10n),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                             style: theme.textTheme.titleMedium?.copyWith(
                               color: scheme.onSurface,
                             ),
                           ),
                         ),
                         if (seasons.length > 1)
-                          _SeasonPicker(controller: controller),
+                          _SeasonPicker(controller: controller)
+                        else if (currentSeason.length == 1)
+                          Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: AppSpacing.sm,
+                            ),
+                            child: Text(
+                              currentSeason.first.name,
+                              style: theme.textTheme.labelMedium?.copyWith(
+                                color: scheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ),
                         IconButton(
                           key: const Key('player-episodes-close'),
                           tooltip: MaterialLocalizations.of(
@@ -934,16 +1100,6 @@ class _EpisodeListPanel extends StatelessWidget {
                     ),
                     const SizedBox(height: AppSpacing.sm),
                     Expanded(child: _episodeListBody(context, l10n, scheme)),
-                    if (currentSeason.length == 1)
-                      Padding(
-                        padding: const EdgeInsets.only(top: AppSpacing.sm),
-                        child: Text(
-                          currentSeason.first.name,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: scheme.onSurfaceVariant,
-                          ),
-                        ),
-                      ),
                   ],
                 ),
               ),
@@ -954,13 +1110,27 @@ class _EpisodeListPanel extends StatelessWidget {
     );
   }
 
+  String _episodePanelTitle(AppLocalizations l10n) {
+    final seriesName = controller.item?.seriesName?.trim();
+    if (seriesName != null && seriesName.isNotEmpty) {
+      return seriesName;
+    }
+    return l10n.playerEpisodes;
+  }
+
   Widget _episodeListBody(
     BuildContext context,
     AppLocalizations l10n,
     ColorScheme scheme,
   ) {
     if (controller.episodeListLoading && controller.episodes.isEmpty) {
-      return const Center(child: CircularProgressIndicator(strokeWidth: 3));
+      return ListView.separated(
+        padding: EdgeInsets.zero,
+        itemCount: 6,
+        separatorBuilder: (context, index) =>
+            const SizedBox(height: AppSpacing.xxs),
+        itemBuilder: (context, index) => const _EpisodeRowSkeleton(),
+      );
     }
     if (controller.episodeListFailed && controller.episodes.isEmpty) {
       return Column(
@@ -996,6 +1166,7 @@ class _EpisodeListPanel extends StatelessWidget {
             child: _EpisodeRow(
               episode: episode,
               isCurrent: isCurrent,
+              progress: _episodeProgress(episode, isCurrent),
               onTap: () {
                 unawaited(controller.playEpisode(episode));
               },
@@ -1004,6 +1175,17 @@ class _EpisodeListPanel extends StatelessWidget {
         },
       ),
     );
+  }
+
+  double _episodeProgress(EmbyItem episode, bool isCurrent) {
+    if (isCurrent) {
+      final duration = controller.duration;
+      if (duration > Duration.zero) {
+        return (controller.position.inMilliseconds / duration.inMilliseconds)
+            .clamp(0.0, 1.0);
+      }
+    }
+    return episode.playbackProgress;
   }
 }
 
@@ -1060,57 +1242,265 @@ class _SeasonPicker extends StatelessWidget {
   }
 }
 
-/// 单集行:集号+名称+已看勾选,当前集高亮。
+/// 单集行:16:9 缩略图 + 集号标题 + 时长/进度 + 一行简介,当前集高亮。
 class _EpisodeRow extends StatelessWidget {
   const _EpisodeRow({
     required this.episode,
     required this.isCurrent,
+    required this.progress,
     required this.onTap,
   });
 
+  static const thumbWidth = 128.0;
+  static const thumbHeight = thumbWidth * 9 / 16;
+
   final EmbyItem episode;
   final bool isCurrent;
+  final double progress;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final number = episode.indexNumber;
-    return ListTile(
-      key: Key('player-episode-${episode.id}'),
-      selected: isCurrent,
-      selectedTileColor: scheme.surfaceContainerHighest,
-      selectedColor: scheme.onSurface,
-      textColor: scheme.onSurface,
-      iconColor: scheme.onSurface,
-      leading: number == null
-          ? null
-          : SizedBox(
-              width: 28,
-              child: Text(
-                '$number',
-                textAlign: TextAlign.end,
-                style: theme.textTheme.labelLarge?.copyWith(
-                  color: scheme.onSurface,
-                ),
-              ),
-            ),
-      title: Text(
-        episode.name,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: theme.textTheme.bodyLarge?.copyWith(
-          color: scheme.onSurface,
-          fontWeight: isCurrent ? FontWeight.w600 : FontWeight.w400,
+    final title = number == null ? episode.name : '$number. ${episode.name}';
+    final played = episode.userData.played;
+    final overview = _playerEpisodeOverview(episode.overview);
+    final meta = <String>[
+      ?runtimeLabel(l10n, episode),
+      if (isCurrent) l10n.nowPlayingEpisode,
+      if (!isCurrent && progress > 0 && progress < 1)
+        l10n.playbackProgress((progress * 100).round()),
+    ];
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        border: Border(
+          left: BorderSide(
+            width: 3,
+            color: isCurrent ? scheme.primary : Colors.transparent,
+          ),
         ),
       ),
-      trailing: episode.userData.played
-          ? Icon(Icons.check_rounded, size: 18, color: scheme.onSurfaceVariant)
-          : null,
-      onTap: onTap,
+      child: ListTile(
+        key: Key('player-episode-${episode.id}'),
+        selected: isCurrent,
+        selectedTileColor: scheme.surfaceContainerHighest,
+        selectedColor: scheme.onSurface,
+        textColor: scheme.onSurface,
+        iconColor: scheme.onSurface,
+        contentPadding: const EdgeInsets.fromLTRB(
+          AppSpacing.sm,
+          AppSpacing.xs,
+          AppSpacing.sm,
+          AppSpacing.xs,
+        ),
+        minVerticalPadding: AppSpacing.xs,
+        title: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _EpisodeThumb(
+              episode: episode,
+              isCurrent: isCurrent,
+              played: played,
+              progress: progress,
+            ),
+            const SizedBox(width: AppSpacing.sm),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      color: scheme.onSurface,
+                      fontWeight: isCurrent ? FontWeight.w700 : FontWeight.w500,
+                    ),
+                  ),
+                  if (meta.isNotEmpty) ...[
+                    const SizedBox(height: AppSpacing.xxs),
+                    Text(
+                      meta.join(' · '),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: isCurrent
+                            ? scheme.primary
+                            : scheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                  if (overview != null) ...[
+                    const SizedBox(height: AppSpacing.xxs),
+                    Text(
+                      overview,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: scheme.onSurface.withValues(alpha: 0.72),
+                        height: 1.35,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+        onTap: onTap,
+      ),
     );
   }
+}
+
+class _EpisodeThumb extends StatelessWidget {
+  const _EpisodeThumb({
+    required this.episode,
+    required this.isCurrent,
+    required this.played,
+    required this.progress,
+  });
+
+  final EmbyItem episode;
+  final bool isCurrent;
+  final bool played;
+  final double progress;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(AppRadii.sm),
+      child: SizedBox(
+        width: _EpisodeRow.thumbWidth,
+        height: _EpisodeRow.thumbHeight,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            RepaintBoundary(
+              child: MediaImage(
+                key: ValueKey(episode.id),
+                item: episode,
+                width: _EpisodeRow.thumbWidth,
+                height: _EpisodeRow.thumbHeight,
+                preferThumb: true,
+                maxWidth: 240,
+              ),
+            ),
+            if (isCurrent)
+              ColoredBox(
+                color: scheme.scrim.withValues(alpha: 0.42),
+                child: Icon(
+                  Icons.play_arrow_rounded,
+                  color: scheme.onSurface,
+                  size: 28,
+                ),
+              ),
+            if (played && !isCurrent)
+              Align(
+                alignment: Alignment.topRight,
+                child: Padding(
+                  padding: const EdgeInsets.all(AppSpacing.xxs),
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: scheme.scrim.withValues(alpha: 0.55),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(2),
+                      child: Icon(
+                        Icons.check_rounded,
+                        size: 14,
+                        color: scheme.onSurface,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            if (progress > 0 && (isCurrent || progress < 1))
+              Align(
+                alignment: Alignment.bottomCenter,
+                child: _EpisodeProgressBar(value: progress),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _EpisodeProgressBar extends StatelessWidget {
+  const _EpisodeProgressBar({required this.value});
+
+  final double value;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 3,
+      child: ColoredBox(
+        color: Colors.black.withValues(alpha: 0.45),
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: FractionallySizedBox(
+            widthFactor: value.clamp(0.0, 1.0),
+            child: ColoredBox(color: Theme.of(context).colorScheme.primary),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _EpisodeRowSkeleton extends StatelessWidget {
+  const _EpisodeRowSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Padding(
+      padding: EdgeInsets.symmetric(
+        horizontal: AppSpacing.sm,
+        vertical: AppSpacing.xs,
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SkeletonBlock(
+            width: _EpisodeRow.thumbWidth,
+            height: _EpisodeRow.thumbHeight,
+          ),
+          SizedBox(width: AppSpacing.sm),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SkeletonBlock(width: 168, height: 14),
+              SizedBox(height: AppSpacing.xs),
+              SkeletonBlock(width: 88, height: 12),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+String? _playerEpisodeOverview(String? raw) {
+  final text = raw?.trim();
+  if (text == null || text.isEmpty) {
+    return null;
+  }
+  final stripped = text
+      .replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), ' ')
+      .replaceAll(RegExp(r'<[^>]+>'), '')
+      .replaceAll('&nbsp;', ' ')
+      .replaceAll('&amp;', '&')
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+  return stripped.isEmpty ? null : stripped;
 }
 
 /// 当前集进入可视区,长列表打开时能看到正在播放的那一集。
@@ -1343,6 +1733,10 @@ class _SeekTimeline extends StatelessWidget {
                   0.0,
                   1.0,
                 ));
+    final bufferValue = playerBufferFraction(
+      buffer: controller.buffer,
+      duration: controller.duration,
+    );
     return Row(
       children: [
         Text(_clock(controller.position), style: _overlayTimeStyle(theme)),
@@ -1353,6 +1747,7 @@ class _SeekTimeline extends StatelessWidget {
             child: Slider(
               key: PlayerKeys.seekBar,
               value: value,
+              secondaryTrackValue: bufferValue,
               onChanged: !seekEnabled
                   ? null
                   : (next) {
@@ -1404,7 +1799,7 @@ class _ControlsRow extends StatelessWidget {
         _VolumeControl(controller: controller),
         const Spacer(),
         if (danmaku != null)
-          _DanmakuSettingsMenu(danmaku: danmaku!, onSearch: onDanmakuSearch),
+          _DanmakuButton(danmaku: danmaku!, onPressed: onDanmakuSearch),
         if (controller.subtitleTracks.isNotEmpty)
           _ControlMenu<int>(
             key: PlayerKeys.subtitle,
@@ -1515,7 +1910,8 @@ class _PlaybackOverflowMenu extends StatelessWidget {
               child: _PlaybackSettingRow(
                 label: l10n.mediaSource,
                 value: _compactMediaSourceLabel(
-                  controller.resolved?.mediaSource.label ?? l10n.mediaSource,
+                  controller.resolved?.mediaSource.presentation.compact ??
+                      l10n.mediaSource,
                 ),
                 valueKey: PlayerKeys.mediaSourceLabel,
               ),
@@ -1616,7 +2012,7 @@ class _PlaybackOverflowMenu extends StatelessWidget {
               CheckedPopupMenuItem(
                 value: source.id,
                 checked: source.id == controller.resolved?.mediaSource.id,
-                child: Text(source.label),
+                child: MediaSourceMenuTile(view: source.presentation),
               ),
           ],
         );
@@ -1771,196 +2167,300 @@ RelativeRect _buttonMenuPosition(BuildContext context) {
   );
 }
 
-/// 弹幕设置菜单:状态回显 + 显示参数(不透明度/字号/速度/区域/密度)
-/// + 手动搜索 + 自定义服务不可用时的回退入口。
-class _DanmakuSettingsMenu extends StatelessWidget {
-  const _DanmakuSettingsMenu({required this.danmaku, this.onSearch});
-
-  static const List<double> _opacityChoices = [0.25, 0.5, 0.75, 1];
-  static const List<double> _fontChoices = [0.5, 0.75, 1, 1.25, 1.5, 2];
-  static const List<double> _speedChoices = [0.5, 1, 1.5, 2];
-  static const List<double> _areaChoices = [0.25, 0.5, 0.75, 1];
-  static const List<int> _densityChoices = [10, 20, 40];
+/// 控制条弹幕入口:打开设置面板(开关、搜索、显示参数都在面板里)。
+class _DanmakuButton extends StatelessWidget {
+  const _DanmakuButton({required this.danmaku, this.onPressed});
 
   final DanmakuController danmaku;
-  final VoidCallback? onSearch;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final scheme = Theme.of(context).colorScheme;
+    return _PlayerIconButton(
+      key: const Key('player-danmaku-menu'),
+      tooltip: l10n.danmaku,
+      onPressed: onPressed,
+      icon: danmaku.danmakuOn ? Icons.forum_rounded : Icons.forum_outlined,
+      iconColor: danmaku.danmakuOn ? scheme.primary : null,
+    );
+  }
+}
+
+/// 未自动匹配时的提示胶囊:点开手动搜索,不必翻设置菜单。
+class _DanmakuMatchChip extends StatelessWidget {
+  const _DanmakuMatchChip({required this.onSearch});
+
+  final VoidCallback onSearch;
 
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    return _ControlMenu<String>(
-      key: const Key('player-danmaku-menu'),
-      tooltip: l10n.danmaku,
-      icon: danmaku.danmakuOn ? Icons.forum_rounded : Icons.forum_outlined,
-      iconColor: danmaku.danmakuOn ? scheme.primary : null,
-      onSelected: (value) {
-        if (value == 'toggle') {
-          unawaited(danmaku.toggleDanmaku());
-          return;
-        }
-        if (value == 'search') {
-          onSearch?.call();
-          return;
-        }
-        if (value == 'fallback') {
-          unawaited(danmaku.useOfficialSource());
-          return;
-        }
-        final parts = value.split(':');
-        if (parts.length < 2) {
-          return;
-        }
-        if (parts[0] == 'density') {
-          final unlimited = parts[1] == 'unlimited';
-          final cap = int.tryParse(parts[1]);
-          if (!unlimited && cap == null) {
-            return;
-          }
-          unawaited(
-            danmaku.setDisplay(
-              danmaku.display.copyWith(
-                maxVisibleCount: cap,
-                unlimitedDensity: unlimited,
+    return Positioned(
+      left: AppSpacing.xl,
+      bottom: 112,
+      child: LiquidGlass(
+        kind: LiquidGlassKind.pill,
+        child: Material(
+          key: const Key('player-danmaku-match-chip'),
+          type: MaterialType.transparency,
+          child: InkWell(
+            onTap: () {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                onSearch();
+              });
+            },
+            borderRadius: BorderRadius.circular(999),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.md,
+                vertical: AppSpacing.xs,
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.subtitles_off_rounded,
+                    size: 18,
+                    color: scheme.onSurface,
+                  ),
+                  const SizedBox(width: AppSpacing.xs),
+                  Text(
+                    l10n.danmakuMatchHint,
+                    style: theme.textTheme.labelLarge,
+                  ),
+                ],
               ),
             ),
-          );
-          return;
-        }
-        final parsed = double.tryParse(parts[1]);
-        if (parsed == null) {
-          return;
-        }
-        unawaited(
-          danmaku.setDisplay(
-            danmaku.display.copyWith(
-              opacity: parts[0] == 'opacity' ? parsed : null,
-              fontScale: parts[0] == 'font' ? parsed : null,
-              speed: parts[0] == 'speed' ? parsed : null,
-              areaFraction: parts[0] == 'area' ? parsed : null,
-            ),
           ),
-        );
-      },
-      items: [
-        CheckedPopupMenuItem(
-          value: 'toggle',
-          checked: danmaku.danmakuOn,
-          child: Text(l10n.danmaku),
-        ),
-        const PopupMenuDivider(),
-        PopupMenuItem<String>(
-          enabled: false,
-          height: AppSpacing.lg,
-          child: Text(
-            _statusText(l10n),
-            key: const Key('player-danmaku-status'),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.labelMedium?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
-          ),
-        ),
-        _section(theme, l10n.danmakuOpacity),
-        for (final choice in _opacityChoices)
-          CheckedPopupMenuItem(
-            value: 'opacity:$choice',
-            checked: _near(danmaku.display.opacity, choice),
-            child: Text(_percentLabel(choice)),
-          ),
-        _section(theme, l10n.danmakuFontSize),
-        for (final choice in _fontChoices)
-          CheckedPopupMenuItem(
-            value: 'font:$choice',
-            checked: _near(danmaku.display.fontScale, choice),
-            child: Text(_percentLabel(choice)),
-          ),
-        _section(theme, l10n.danmakuSpeed),
-        for (final choice in _speedChoices)
-          CheckedPopupMenuItem(
-            value: 'speed:$choice',
-            checked: _near(danmaku.display.speed, choice),
-            child: Text(_percentLabel(choice)),
-          ),
-        _section(theme, l10n.danmakuDisplayArea),
-        for (final choice in _areaChoices)
-          CheckedPopupMenuItem(
-            value: 'area:$choice',
-            checked: _near(danmaku.display.areaFraction, choice),
-            child: Text(_percentLabel(choice)),
-          ),
-        _section(theme, l10n.danmakuDensity),
-        CheckedPopupMenuItem(
-          value: 'density:unlimited',
-          checked: danmaku.display.maxVisibleCount == null,
-          child: Text(l10n.danmakuUnlimited),
-        ),
-        for (final choice in _densityChoices)
-          CheckedPopupMenuItem(
-            value: 'density:$choice',
-            checked: danmaku.display.maxVisibleCount == choice,
-            child: Text('$choice'),
-          ),
-        const PopupMenuDivider(),
-        PopupMenuItem<String>(
-          value: 'search',
-          height: 40,
-          child: Text(l10n.danmakuSearch),
-        ),
-        if (danmaku.status == DanmakuStatus.customUnreachable)
-          PopupMenuItem<String>(
-            value: 'fallback',
-            height: 40,
-            child: Text(l10n.danmakuUseOfficial),
-          ),
-      ],
-    );
-  }
-
-  /// 菜单顶部状态行:来源 + 匹配状态回显。
-  String _statusText(AppLocalizations l10n) {
-    final source = danmaku.usesCustomSource
-        ? l10n.danmakuCustom
-        : l10n.danmakuOfficial;
-    final String state;
-    switch (danmaku.status) {
-      case DanmakuStatus.active:
-        state = danmaku.matchedTitle == null || danmaku.matchedTitle!.isEmpty
-            ? (danmaku.hasComments ? '' : l10n.danmakuNoComments)
-            : l10n.danmakuMatchedTo(danmaku.matchedTitle!);
-      case DanmakuStatus.loading:
-        state = l10n.danmakuMatching;
-      case DanmakuStatus.noMatch:
-        state = l10n.danmakuNoMatch;
-      case DanmakuStatus.customUnreachable:
-        state = l10n.danmakuCustomUnreachable;
-      case DanmakuStatus.unreachable:
-        state = l10n.danmakuOfficialUnreachable;
-      case DanmakuStatus.off:
-      case DanmakuStatus.idle:
-        state = '';
-    }
-    return state.isEmpty ? source : '$source · $state';
-  }
-
-  static PopupMenuItem<String> _section(ThemeData theme, String label) {
-    return PopupMenuItem<String>(
-      enabled: false,
-      height: AppSpacing.xl,
-      child: Text(
-        label,
-        style: theme.textTheme.labelMedium?.copyWith(
-          color: theme.colorScheme.onSurfaceVariant,
         ),
       ),
     );
   }
+}
 
-  static String _percentLabel(double value) => '${(value * 100).round()}%';
+/// 弹幕面板:开关、匹配状态、手动搜索、滑条式显示参数。
+class _DanmakuPanel extends StatelessWidget {
+  const _DanmakuPanel({
+    required this.danmaku,
+    required this.onClose,
+    required this.onSearch,
+  });
 
-  static bool _near(double a, double b) => (a - b).abs() < 0.01;
+  final DanmakuController danmaku;
+  final VoidCallback onClose;
+  final VoidCallback onSearch;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final display = danmaku.display;
+    final unreachable =
+        danmaku.status == DanmakuStatus.unreachable ||
+        danmaku.status == DanmakuStatus.customUnreachable;
+    final officialUnreachable =
+        !danmaku.usesCustomSource &&
+        danmaku.status == DanmakuStatus.unreachable;
+    // 播放器用 Texture,BackdropFilter 糊不住画面;玻璃面板在亮场里
+    // 「手动搜索」和说明会看不清。与剧集/搜索侧栏一样用实色。
+    return Positioned(
+      right: AppSpacing.xl,
+      bottom: 112,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 360),
+        child: Material(
+          key: const Key('player-danmaku-panel'),
+          color: scheme.surfaceContainerHigh,
+          elevation: 8,
+          shadowColor: scheme.shadow,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppRadii.xl),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: Padding(
+            padding: const EdgeInsets.all(AppSpacing.md),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        l10n.danmaku,
+                        style: theme.textTheme.titleSmall,
+                      ),
+                    ),
+                    Switch.adaptive(
+                      key: const Key('player-danmaku-toggle'),
+                      value: danmaku.danmakuOn,
+                      onChanged: (_) => unawaited(danmaku.toggleDanmaku()),
+                    ),
+                    IconButton(
+                      tooltip: MaterialLocalizations.of(
+                        context,
+                      ).closeButtonTooltip,
+                      onPressed: onClose,
+                      icon: const Icon(Icons.close_rounded),
+                    ),
+                  ],
+                ),
+                Text(
+                  _danmakuStatusText(l10n, danmaku),
+                  key: const Key('player-danmaku-status'),
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: unreachable ? scheme.error : scheme.onSurfaceVariant,
+                  ),
+                ),
+                if (officialUnreachable) ...[
+                  const SizedBox(height: AppSpacing.sm),
+                  Text(
+                    l10n.danmakuOfficialSetupHint,
+                    key: const Key('player-danmaku-setup-hint'),
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: AppSpacing.sm),
+                FilledButton.tonal(
+                  key: const Key('player-danmaku-search'),
+                  onPressed: () {
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      onSearch();
+                    });
+                  },
+                  child: Text(l10n.danmakuSearch),
+                ),
+                if (!unreachable) ...[
+                  const SizedBox(height: AppSpacing.md),
+                  _DanmakuSliderRow(
+                    label: l10n.danmakuOpacity,
+                    value: display.opacity,
+                    min: 0.1,
+                    max: 1,
+                    onChanged: (value) {
+                      unawaited(
+                        danmaku.setDisplay(display.copyWith(opacity: value)),
+                      );
+                    },
+                  ),
+                  _DanmakuSliderRow(
+                    label: l10n.danmakuFontSize,
+                    value: display.fontScale,
+                    min: 0.5,
+                    max: 2,
+                    onChanged: (value) {
+                      unawaited(
+                        danmaku.setDisplay(display.copyWith(fontScale: value)),
+                      );
+                    },
+                  ),
+                  _DanmakuSliderRow(
+                    label: l10n.danmakuSpeed,
+                    value: display.speed,
+                    min: 0.5,
+                    max: 2,
+                    onChanged: (value) {
+                      unawaited(
+                        danmaku.setDisplay(display.copyWith(speed: value)),
+                      );
+                    },
+                  ),
+                  _DanmakuSliderRow(
+                    label: l10n.danmakuDisplayArea,
+                    value: display.areaFraction,
+                    min: 0.1,
+                    max: 1,
+                    onChanged: (value) {
+                      unawaited(
+                        danmaku.setDisplay(
+                          display.copyWith(areaFraction: value),
+                        ),
+                      );
+                    },
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DanmakuSliderRow extends StatelessWidget {
+  const _DanmakuSliderRow({
+    required this.label,
+    required this.value,
+    required this.min,
+    required this.max,
+    required this.onChanged,
+  });
+
+  final String label;
+  final double value;
+  final double min;
+  final double max;
+  final ValueChanged<double> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Expanded(child: Text(label, style: theme.textTheme.labelMedium)),
+            Text(
+              '${(value * 100).round()}%',
+              style: theme.textTheme.labelSmall,
+            ),
+          ],
+        ),
+        Slider(
+          value: value.clamp(min, max),
+          min: min,
+          max: max,
+          onChanged: onChanged,
+        ),
+      ],
+    );
+  }
+}
+
+String _danmakuStatusText(AppLocalizations l10n, DanmakuController danmaku) {
+  final source = danmaku.usesCustomSource
+      ? l10n.danmakuCustom
+      : l10n.danmakuOfficial;
+  final String state;
+  switch (danmaku.status) {
+    case DanmakuStatus.active:
+      state = danmaku.matchedTitle == null || danmaku.matchedTitle!.isEmpty
+          ? (danmaku.hasComments ? '' : l10n.danmakuNoComments)
+          : l10n.danmakuMatchedTo(danmaku.matchedTitle!);
+    case DanmakuStatus.loading:
+      state = l10n.danmakuMatching;
+    case DanmakuStatus.noMatch:
+      state = l10n.danmakuNoMatch;
+    case DanmakuStatus.customUnreachable:
+      state = l10n.danmakuCustomUnreachable;
+    case DanmakuStatus.unreachable:
+      state = danmaku.hasOfficialCredentials
+          ? l10n.danmakuOfficialUnreachable
+          : l10n.danmakuOfficialNeedsAuth;
+    case DanmakuStatus.off:
+    case DanmakuStatus.idle:
+      state = '';
+  }
+  return state.isEmpty ? source : '$source · $state';
 }
 
 /// 自定义弹幕服务不可用提示:明确提示并可一键回退官方源。
@@ -2012,60 +2512,257 @@ class _DanmakuSourceBanner extends StatelessWidget {
   }
 }
 
-/// 弹幕手动搜索结果:动画展开为分集,选择后加载该集弹幕并写入按剧记忆。
-class _DanmakuSearchResults extends StatelessWidget {
-  const _DanmakuSearchResults({required this.danmaku, required this.animes});
+/// 弹幕手动搜索:右侧实色面板,与剧集列表同一套浮层,不走透明 Dialog。
+class _DanmakuSearchPanel extends StatefulWidget {
+  const _DanmakuSearchPanel({
+    required this.danmaku,
+    required this.initialKeyword,
+    required this.onClose,
+  });
 
   final DanmakuController danmaku;
-  final List<DanmakuAnime> animes;
+  final String initialKeyword;
+  final VoidCallback onClose;
+
+  @override
+  State<_DanmakuSearchPanel> createState() => _DanmakuSearchPanelState();
+}
+
+class _DanmakuSearchPanelState extends State<_DanmakuSearchPanel> {
+  late final TextEditingController _field;
+  List<DanmakuAnime> _animes = const [];
+  bool _loading = false;
+  bool _searched = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _field = TextEditingController(text: widget.initialKeyword);
+    if (widget.initialKeyword.trim().isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        unawaited(_runSearch());
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _field.dispose();
+    super.dispose();
+  }
+
+  Future<void> _runSearch() async {
+    final term = _field.text.trim();
+    if (term.isEmpty) {
+      return;
+    }
+    setState(() {
+      _loading = true;
+      _searched = true;
+    });
+    final results = await widget.danmaku.search(term);
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _animes = results;
+      _loading = false;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    return AlertDialog(
-      title: Text(l10n.danmakuSearchTitle),
-      content: SizedBox(
-        width: 460,
-        height: 380,
-        child: animes.isEmpty
-            ? Center(child: Text(l10n.danmakuNoMatch))
-            : ListView.builder(
-                itemCount: animes.length,
-                itemBuilder: (context, index) {
-                  final anime = animes[index];
-                  return ExpansionTile(
-                    key: Key('player-danmaku-anime-${anime.animeId}'),
-                    dense: true,
-                    title: Text(
-                      anime.animeTitle,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    subtitle: anime.type == null ? null : Text(anime.type!),
-                    children: [
-                      for (final episode in anime.episodes)
-                        ListTile(
-                          dense: true,
-                          key: Key(
-                            'player-danmaku-episode-${episode.episodeId}',
-                          ),
-                          title: Text(episode.episodeTitle),
-                          onTap: () {
-                            unawaited(danmaku.selectEpisode(anime, episode));
-                            Navigator.pop(context);
-                          },
-                        ),
-                    ],
-                  );
-                },
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final overlayWidth = MediaQuery.sizeOf(context).width;
+    final panelWidth = overlayWidth < 440 ? overlayWidth : 400.0;
+    return Positioned(
+      top: kPlayerChromeBarExtent,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: GestureDetector(
+              key: const Key('player-danmaku-search-dismiss'),
+              behavior: HitTestBehavior.opaque,
+              onTap: widget.onClose,
+              child: ColoredBox(
+                color: scheme.scrim.withValues(
+                  alpha: AppScrim.of(context, AppScrim.barrier),
+                ),
               ),
+            ),
+          ),
+          Positioned(
+            top: 0,
+            bottom: 0,
+            right: 0,
+            width: panelWidth,
+            child: Material(
+              key: const Key('player-danmaku-search-panel'),
+              color: scheme.surfaceContainerHigh,
+              elevation: 8,
+              shadowColor: scheme.shadow,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.md,
+                  AppSpacing.md,
+                  AppSpacing.md,
+                  AppSpacing.lg,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            l10n.danmakuSearchTitle,
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              color: scheme.onSurface,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: MaterialLocalizations.of(
+                            context,
+                          ).closeButtonTooltip,
+                          color: scheme.onSurface,
+                          onPressed: widget.onClose,
+                          icon: const Icon(Icons.close_rounded),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                    TextField(
+                      key: const Key('player-danmaku-search-field'),
+                      controller: _field,
+                      autofocus: widget.initialKeyword.trim().isEmpty,
+                      textInputAction: TextInputAction.search,
+                      style: theme.textTheme.bodyMedium,
+                      decoration: InputDecoration(
+                        hintText: l10n.danmakuSearchHint,
+                        filled: true,
+                        fillColor: scheme.surfaceContainerHighest,
+                        prefixIcon: const Icon(Icons.search_rounded, size: 20),
+                        suffixIcon: IconButton(
+                          key: const Key('player-danmaku-search-submit'),
+                          tooltip: l10n.danmakuSearch,
+                          onPressed: _loading
+                              ? null
+                              : () => unawaited(_runSearch()),
+                          icon: const Icon(Icons.arrow_forward_rounded),
+                        ),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(AppRadii.md),
+                          borderSide: BorderSide.none,
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(AppRadii.md),
+                          borderSide: BorderSide.none,
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(AppRadii.md),
+                          borderSide: BorderSide(
+                            color: scheme.outline.withValues(alpha: 0.4),
+                          ),
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: AppSpacing.md,
+                          vertical: AppSpacing.sm,
+                        ),
+                      ),
+                      onSubmitted: (_) => unawaited(_runSearch()),
+                    ),
+                    const SizedBox(height: AppSpacing.md),
+                    Expanded(child: _results(l10n, theme, scheme)),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: Text(MaterialLocalizations.of(context).closeButtonLabel),
+    );
+  }
+
+  Widget _results(AppLocalizations l10n, ThemeData theme, ColorScheme scheme) {
+    if (_loading) {
+      return const Center(child: CircularProgressIndicator(strokeWidth: 3));
+    }
+    if (!_searched) {
+      return Center(
+        child: Text(
+          l10n.danmakuSearchHint,
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: scheme.onSurfaceVariant,
+          ),
         ),
-      ],
+      );
+    }
+    if (_animes.isEmpty) {
+      return Center(
+        child: Text(
+          l10n.danmakuNoMatch,
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: scheme.onSurfaceVariant,
+          ),
+        ),
+      );
+    }
+    return ListView.builder(
+      itemCount: _animes.length,
+      itemBuilder: (context, index) {
+        final anime = _animes[index];
+        return Theme(
+          data: theme.copyWith(dividerColor: Colors.transparent),
+          child: ExpansionTile(
+            key: Key('player-danmaku-anime-${anime.animeId}'),
+            dense: true,
+            initiallyExpanded: _animes.length == 1,
+            tilePadding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
+            childrenPadding: const EdgeInsets.only(left: AppSpacing.md),
+            title: Text(
+              anime.animeTitle,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.titleSmall,
+            ),
+            subtitle: anime.type == null
+                ? null
+                : Text(
+                    anime.type!,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+            children: [
+              if (anime.episodes.isEmpty)
+                ListTile(
+                  dense: true,
+                  title: Text(
+                    l10n.danmakuNoMatch,
+                    style: theme.textTheme.bodySmall,
+                  ),
+                )
+              else
+                for (final episode in anime.episodes)
+                  ListTile(
+                    dense: true,
+                    key: Key('player-danmaku-episode-${episode.episodeId}'),
+                    title: Text(episode.episodeTitle),
+                    onTap: () {
+                      unawaited(widget.danmaku.selectEpisode(anime, episode));
+                      widget.onClose();
+                    },
+                  ),
+            ],
+          ),
+        );
+      },
     );
   }
 }
@@ -2133,11 +2830,13 @@ class _PlayerIconButton extends StatelessWidget {
     required this.onPressed,
     this.tooltip,
     this.iconSize = 24,
+    this.iconColor,
   });
 
   final String? tooltip;
   final double iconSize;
   final IconData icon;
+  final Color? iconColor;
   final VoidCallback? onPressed;
 
   @override
@@ -2146,7 +2845,7 @@ class _PlayerIconButton extends StatelessWidget {
     return IconButton(
       tooltip: tooltip,
       onPressed: onPressed,
-      color: scheme.onSurface,
+      color: iconColor ?? scheme.onSurface,
       iconSize: iconSize,
       icon: Icon(icon),
     );
@@ -2157,9 +2856,9 @@ const _subtitleOffToken = -1;
 
 /// 倍速阶梯约 8 项需完整显示,避免菜单内滚动。
 const _controlMenuConstraints = BoxConstraints(
-  minWidth: 200,
-  maxWidth: 360,
-  maxHeight: 416,
+  minWidth: 280,
+  maxWidth: 420,
+  maxHeight: 480,
 );
 
 /// 控制条右侧用图标打开菜单,长轨名只出现在弹出层。
@@ -2224,7 +2923,8 @@ SliderThemeData _overlaySliderTheme(
   return theme.sliderTheme.copyWith(
     trackHeight: 3,
     activeTrackColor: onSurface,
-    inactiveTrackColor: onSurface.withValues(alpha: 0.28),
+    secondaryActiveTrackColor: onSurface.withValues(alpha: 0.52),
+    inactiveTrackColor: onSurface.withValues(alpha: 0.22),
     thumbColor: onSurface,
     overlayColor: onSurface.withValues(alpha: 0.18),
     thumbShape: RoundSliderThumbShape(enabledThumbRadius: thumbRadius),

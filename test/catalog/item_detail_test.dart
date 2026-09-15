@@ -19,7 +19,9 @@ import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/home_hero.dart';
 import 'package:rillight/library/item_detail_page.dart';
 import 'package:rillight/media_image/media_image.dart';
+import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_keys.dart';
+import 'package:rillight/player/player_window_host.dart';
 
 import '../emby/fake_emby_server.dart';
 import '../helpers/top_bar_hit.dart';
@@ -50,6 +52,11 @@ class _DelayedEmbyServer extends FakeEmbyServer {
   }
 }
 
+class _SilentPlayerHost extends OverlayPlayerWindowHost {
+  @override
+  bool get embedsPlayerInCaller => false;
+}
+
 void main() {
   late _DelayedEmbyServer server;
   late FakeEmbyAdapter adapter;
@@ -64,7 +71,10 @@ void main() {
     HomeHero.autoAdvanceEnabled = true;
   });
 
-  Future<RillightApp> pumpApp(WidgetTester tester) async {
+  Future<RillightApp> pumpApp(
+    WidgetTester tester, {
+    PlayerWindowHost? host,
+  }) async {
     tester.view.physicalSize = const Size(1200, 800);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -82,7 +92,12 @@ void main() {
       );
     });
     expect(auth.isLoggedIn, isTrue);
-    final app = RillightApp(auth: auth);
+    final app = RillightApp(
+      auth: auth,
+      playerBindings: host == null
+          ? const PlayerBindings()
+          : PlayerBindings(windowHost: host),
+    );
     await tester.pumpWidget(app);
     await tester.pumpAndSettle();
     return app;
@@ -168,6 +183,17 @@ void main() {
     );
     expect(find.byKey(CatalogKeys.seriesLink), findsNothing);
     expect(find.byKey(CatalogKeys.episodesRow), findsNothing);
+    expect(find.byKey(CatalogKeys.overview), findsOneWidget);
+    expect(find.text('简介'), findsNothing);
+    expect(
+      find.descendant(
+        of: find.byKey(ItemDetailPage.posterKey),
+        matching: find.text(
+          'A thief who steals corporate secrets through dream-sharing.',
+        ),
+      ),
+      findsOneWidget,
+    );
     expect(find.byKey(CatalogKeys.chapter(0)), findsOneWidget);
     expect(
       find.byKey(CatalogKeys.shelfScrollRight(CatalogKeys.shelfChapters)),
@@ -183,11 +209,20 @@ void main() {
 
     expectHeaderShape(tester, posterSize: const Size(200, 300));
     expect(tester.widget<SelectableText>(_headerTitle()).data, contains('老友记'));
-    expect(find.byKey(CatalogKeys.viewEpisode), findsOneWidget);
+    expect(find.byKey(CatalogKeys.viewEpisode), findsNothing);
+    expect(find.byKey(CatalogKeys.playTarget), findsOneWidget);
+    expect(find.text('播放 S1E1'), findsOneWidget);
     expect(find.byKey(CatalogKeys.seriesLink), findsNothing);
     expect(find.byKey(CatalogKeys.overview), findsOneWidget);
-    expect(find.text('简介'), findsOneWidget);
-    expect(find.text('Six friends living in New York.'), findsWidgets);
+    expect(find.text('简介'), findsNothing);
+    expect(find.text('Six friends living in New York.'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(ItemDetailPage.posterKey),
+        matching: find.text('Six friends living in New York.'),
+      ),
+      findsNothing,
+    );
     expect(
       find.descendant(
         of: find.byKey(CatalogKeys.episodesRow),
@@ -216,12 +251,48 @@ void main() {
     );
     expect(second.top, greaterThanOrEqualTo(first.bottom));
     expect(second.left, first.left);
+    expect(first.width, 1080);
     expect(_rowSelected(tester, 'episode-friends-s1e1'), isTrue);
     expect(_rowSelected(tester, 'episode-friends-s1e2'), isFalse);
     for (final id in _episodeRowIds(tester)) {
       expect(find.byKey(CatalogKeys.episodePlay(id)), findsOneWidget);
       expect(find.byKey(CatalogKeys.episodePlayed(id)), findsOneWidget);
     }
+  });
+
+  testWidgets('episode row tap opens details instead of playing', (
+    tester,
+  ) async {
+    final app = await pumpApp(tester);
+    await openItem(tester, app, _series);
+
+    const id = 'episode-friends-s1e2';
+    final row = find.byKey(CatalogKeys.episode(id));
+    await tester.ensureVisible(row);
+    await tester.pumpAndSettle();
+    await tester.tap(row);
+    await tester.pumpAndSettle();
+
+    expect(app.router.state.uri.path, AppRoutes.item(id));
+    expect(app.windowHost.current, isNull);
+    expect(find.textContaining('The One with the Sonogram'), findsWidgets);
+    expect(find.byKey(CatalogKeys.viewSeries), findsOneWidget);
+  });
+
+  testWidgets('episode row play button starts playback', (tester) async {
+    final host = _SilentPlayerHost();
+    final app = await pumpApp(tester, host: host);
+    await openItem(tester, app, _series);
+
+    const id = 'episode-friends-s1e2';
+    final play = find.byKey(CatalogKeys.episodePlay(id));
+    await tester.ensureVisible(play);
+    await tester.pumpAndSettle();
+    await tester.tap(play);
+    await tester.pumpAndSettle();
+
+    expect(app.router.state.uri.path, AppRoutes.item(_series));
+    expect(host.current?.itemId, id);
   });
 
   testWidgets('episode header uses a 16:9 thumb and marks the current row', (
@@ -239,8 +310,14 @@ void main() {
     expect(find.byKey(CatalogKeys.viewSeries), findsOneWidget);
     expect(find.byKey(CatalogKeys.locateEpisode), findsOneWidget);
     expect(find.byKey(CatalogKeys.overview), findsOneWidget);
-    expect(find.text('简介'), findsOneWidget);
-    expect(find.text('Six friends living in New York.'), findsWidgets);
+    expect(find.text('简介'), findsNothing);
+    expect(
+      find.descendant(
+        of: find.byKey(ItemDetailPage.posterKey),
+        matching: find.text('Six friends living in New York.'),
+      ),
+      findsOneWidget,
+    );
     expect(find.byKey(CatalogKeys.episodesRow), findsNothing);
 
     expect(find.byKey(PlayerKeys.open), findsOneWidget);

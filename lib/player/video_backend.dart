@@ -17,12 +17,14 @@ class VideoOpenRequest {
 abstract class VideoBackend {
   Stream<Duration> get positionStream;
   Stream<Duration> get durationStream;
+  Stream<Duration> get bufferStream;
   Stream<bool> get playingStream;
   Stream<bool> get completedStream;
   Stream<String> get errorStream;
 
   Duration get position;
   Duration get duration;
+  Duration get buffer;
   bool get isPlaying;
 
   Future<void> open(VideoOpenRequest request);
@@ -56,6 +58,9 @@ class FakeVideoBackend implements VideoBackend {
   Duration position = Duration.zero;
 
   @override
+  Duration buffer = Duration.zero;
+
+  @override
   bool isPlaying = false;
 
   Uri? openedUrl;
@@ -71,6 +76,7 @@ class FakeVideoBackend implements VideoBackend {
 
   final _position = StreamController<Duration>.broadcast();
   final _duration = StreamController<Duration>.broadcast();
+  final _buffer = StreamController<Duration>.broadcast();
   final _playing = StreamController<bool>.broadcast();
   final _completed = StreamController<bool>.broadcast();
   final _error = StreamController<String>.broadcast();
@@ -79,6 +85,8 @@ class FakeVideoBackend implements VideoBackend {
   Stream<Duration> get positionStream => _position.stream;
   @override
   Stream<Duration> get durationStream => _duration.stream;
+  @override
+  Stream<Duration> get bufferStream => _buffer.stream;
   @override
   Stream<bool> get playingStream => _playing.stream;
   @override
@@ -93,12 +101,14 @@ class FakeVideoBackend implements VideoBackend {
     openedStart = request.start;
     openedHeaders = request.headers;
     position = request.start;
+    buffer = Duration.zero;
     isPlaying = true;
     subtitleOff = false;
     subtitleUri = null;
     subtitleIndex = null;
     _duration.add(duration);
     _position.add(position);
+    _buffer.add(buffer);
     _playing.add(true);
     _completed.add(false);
   }
@@ -131,6 +141,11 @@ class FakeVideoBackend implements VideoBackend {
       position = duration;
     }
     _position.add(position);
+  }
+
+  void emitBuffer(Duration value) {
+    buffer = value < Duration.zero ? Duration.zero : value;
+    _buffer.add(buffer);
   }
 
   @override

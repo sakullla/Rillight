@@ -153,6 +153,7 @@ class PlayerController extends ChangeNotifier {
   int? subtitleStreamIndex;
   Duration position = Duration.zero;
   Duration duration = Duration.zero;
+  Duration buffer = Duration.zero;
   PlayerErrorKind? error;
   EmbyException? loadFailure;
   SubtitleNoticeKind? subtitleNotice;
@@ -232,6 +233,7 @@ class PlayerController extends ChangeNotifier {
   Timer? _settingsSaveTimer;
   StreamSubscription<Duration>? _positionSub;
   StreamSubscription<Duration>? _durationSub;
+  StreamSubscription<Duration>? _bufferSub;
   StreamSubscription<bool>? _playingSub;
   StreamSubscription<bool>? _completedSub;
   StreamSubscription<String>? _errorSub;
@@ -1181,6 +1183,13 @@ class PlayerController extends ChangeNotifier {
         _emit();
       }
     });
+    _bufferSub = backend.bufferStream.listen((value) {
+      buffer = value < Duration.zero ? Duration.zero : value;
+      if (duration > Duration.zero && buffer > duration) {
+        buffer = duration;
+      }
+      _emit();
+    });
     _playingSub = backend.playingStream.listen((playing) {
       isPlaying = playing;
       if (playing) {
@@ -1225,6 +1234,7 @@ class PlayerController extends ChangeNotifier {
     loading = true;
     disconnected = false;
     disconnectDetail = null;
+    buffer = Duration.zero;
     nextEpisode = null;
     playbackEnded = false;
     _nextUpOffered = false;
@@ -1786,6 +1796,7 @@ class PlayerController extends ChangeNotifier {
     unawaited(_persistSettings());
     unawaited(_positionSub?.cancel());
     unawaited(_durationSub?.cancel());
+    unawaited(_bufferSub?.cancel());
     unawaited(_playingSub?.cancel());
     unawaited(_completedSub?.cancel());
     unawaited(_errorSub?.cancel());
@@ -1795,14 +1806,26 @@ class PlayerController extends ChangeNotifier {
   }
 }
 
-/// UI 音量百分比(0–100)到 mpv volume 的感知幂映射:f(x) = x³。
+/// UI 音量百分比(0–100)到 mpv / media_kit volume(同样是 0–100)。
 ///
-/// mpv 的音量刻度近似线性作用于信号幅度,而人耳响度感知近似幂律;
-/// 以立方曲线换算,使等量百分比变化对应等量听感变化,与主流播放器一致。
-/// 持久化与 UI 显示均保存用户百分比,所有 backend 音量调用统一经此换算。
+/// 滑条旁显示的就是这个百分比,必须一对一交给 backend。此前用立方曲线
+/// 把 17% 压成约 0.5,听感接近静音。持久化仍存用户百分比。
 double mpvVolumeForPercent(int percent) {
-  final x = (percent.clamp(0, 100)) / 100;
-  return 100 * x * x * x;
+  return percent.clamp(0, 100).toDouble();
+}
+
+/// 时间轴缓存带比例:mpv `demuxer-cache-time` / 片长。
+///
+/// 对应 HTML video `buffered` 的单段近似(缓存终点),画在已播轨道下面。
+double playerBufferFraction({
+  required Duration buffer,
+  required Duration duration,
+}) {
+  final durationMs = duration.inMilliseconds;
+  if (durationMs <= 0) {
+    return 0;
+  }
+  return (buffer.inMilliseconds / durationMs).clamp(0.0, 1.0);
 }
 
 bool isFatalPlaybackError(String message, {required bool playing}) {

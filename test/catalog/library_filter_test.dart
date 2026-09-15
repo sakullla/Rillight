@@ -306,6 +306,9 @@ void main() {
     expect(find.byKey(gridFilterKey('watch')), findsOneWidget);
     expect(find.byKey(gridFilterKey('year')), findsOneWidget);
     expect(find.byKey(gridFilterKey('genre')), findsOneWidget);
+    final panel = tester.widget<Material>(find.byKey(gridFilterPanelKey));
+    expect(panel.color, isNotNull);
+    expect(panel.color!.a, 1.0);
     await tester.tap(find.widgetWithText(TextButton, '确定'));
     await tester.pumpAndSettle();
 

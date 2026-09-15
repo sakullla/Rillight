@@ -3,7 +3,9 @@ import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
+import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
@@ -54,10 +56,15 @@ class MediaImage extends StatefulWidget {
 }
 
 class _LoadedImage {
-  const _LoadedImage({required this.bytes, required this.type});
+  const _LoadedImage({
+    required this.bytes,
+    required this.type,
+    required this.cacheKey,
+  });
 
   final Uint8List bytes;
   final String type;
+  final String cacheKey;
 }
 
 class _MediaImageState extends State<MediaImage> {
@@ -75,12 +82,12 @@ class _MediaImageState extends State<MediaImage> {
   int get _requestMaxWidth => widget.maxWidth ?? widget.width?.round() ?? 280;
 
   /// 缓存 key 的服务器维度:多服务器之间不串图。
-  String get _serverId => AuthScope.of(context).session?.server.id ?? '';
+  String get _serverId => AuthScope.maybeOf(context)?.session?.server.id ?? '';
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (_hasImageSource) {
+    if (_hasImageSource && AuthScope.maybeOf(context) != null) {
       _future ??= _load();
     }
   }
@@ -117,24 +124,71 @@ class _MediaImageState extends State<MediaImage> {
       return null;
     }
     final candidate = _candidates.first;
+    final maxWidth = _requestMaxWidth;
+    final cacheKey = MediaImageCache.key(
+      serverId: _serverId,
+      itemId: candidate.itemId,
+      type: candidate.type,
+      tag: candidate.tag,
+      maxWidth: maxWidth,
+    );
     final bytes = MediaImageCache.instance.peek(
       serverId: _serverId,
       itemId: candidate.itemId,
       type: candidate.type,
       tag: candidate.tag,
-      maxWidth: _requestMaxWidth,
+      maxWidth: maxWidth,
     );
     if (bytes != null && bytes.isNotEmpty) {
-      return _LoadedImage(bytes: bytes, type: candidate.type);
+      return _LoadedImage(
+        bytes: bytes,
+        type: candidate.type,
+        cacheKey: cacheKey,
+      );
     }
     return null;
   }
 
   Future<_LoadedImage?> _load() async {
+    for (var attempt = 0; attempt < 3; attempt++) {
+      if (!mounted) {
+        return null;
+      }
+      final loaded = await _loadOnce();
+      if (loaded != null) {
+        return loaded;
+      }
+      if (!mounted || !_canRetryLoad()) {
+        return null;
+      }
+      await Future<void>.delayed(Duration(milliseconds: 200 * (attempt + 1)));
+    }
+    return null;
+  }
+
+  bool _canRetryLoad() {
+    final serverId = _serverId;
+    final maxWidth = _requestMaxWidth;
+    for (final candidate in _candidates) {
+      if (!MediaImageCache.instance.isNegativeCached(
+        serverId: serverId,
+        itemId: candidate.itemId,
+        type: candidate.type,
+        tag: candidate.tag,
+        maxWidth: maxWidth,
+      )) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  Future<_LoadedImage?> _loadOnce() async {
     final client = AuthScope.of(context).client;
     final serverId = _serverId;
     final maxWidth = _requestMaxWidth;
     for (final candidate in _candidates) {
+      CancelToken? token;
       final bytes = await MediaImageCache.instance.load(
         serverId: serverId,
         itemId: candidate.itemId,
@@ -142,12 +196,14 @@ class _MediaImageState extends State<MediaImage> {
         tag: candidate.tag,
         maxWidth: maxWidth,
         fetch: () async {
+          token = CancelToken();
           try {
             final data = await client.getItemImage(
               candidate.itemId,
               type: candidate.type,
               tag: candidate.tag,
               maxWidth: maxWidth,
+              cancelToken: token,
             );
             if (data.isEmpty) {
               return null;
@@ -157,9 +213,20 @@ class _MediaImageState extends State<MediaImage> {
             return null;
           }
         },
+        onAbort: () => token?.cancel('image-timeout'),
       );
       if (bytes != null && bytes.isNotEmpty) {
-        return _LoadedImage(bytes: bytes, type: candidate.type);
+        return _LoadedImage(
+          bytes: bytes,
+          type: candidate.type,
+          cacheKey: MediaImageCache.key(
+            serverId: serverId,
+            itemId: candidate.itemId,
+            type: candidate.type,
+            tag: candidate.tag,
+            maxWidth: maxWidth,
+          ),
+        );
       }
     }
     return null;
@@ -169,9 +236,13 @@ class _MediaImageState extends State<MediaImage> {
   Widget build(BuildContext context) {
     final width = widget.width;
     final height = widget.height;
-    if (!_hasImageSource) {
+    if (!_hasImageSource || AuthScope.maybeOf(context) == null) {
       return PosterPlaceholder(width: width, height: height);
     }
+    // 缓存命中立刻画。Image 自带 ScrollAwareImageProvider:已在
+    // ImageCache 里的图不停,高速滑动才推迟解码。桌面滚轮是离散
+    // jumpTo,isScrollingNotifier 几乎不亮,自造停稳门会把回滑海报
+    // 换成骨架再按帧限额解码,比直接画更卡。
     final cached = _peekLoaded();
     if (cached != null) {
       return _paint(context, cached, width, height);
@@ -197,22 +268,18 @@ class _MediaImageState extends State<MediaImage> {
     double? width,
     double? height,
   ) {
-    final dpr = MediaQuery.maybeDevicePixelRatioOf(context) ?? 1;
-    final displayWidth = width == null || width <= 0
-        ? null
-        : math.max(1, (width * dpr).round());
-    final cacheWidth = displayWidth == null
-        ? null
-        : math.min(displayWidth, _requestMaxWidth);
-    return Image.memory(
-      loaded.bytes,
+    // 拉取时已按 maxWidth 缩小,这里不再用 cacheWidth 二次解码;
+    // 单元格宽度差 1px 时 cacheWidth 还会把同一张图解成不同尺寸。
+    // ImageCache 用字符串 key,避免每帧对整段 JPEG 做 ==/hashCode。
+    return Image(
+      image: _MediaMemoryImage(cacheKey: loaded.cacheKey, bytes: loaded.bytes),
       width: width,
       height: height,
-      cacheWidth: cacheWidth,
       fit: BoxFit.cover,
       alignment: Alignment.center,
       filterQuality: FilterQuality.low,
       gaplessPlayback: true,
+      isAntiAlias: false,
       errorBuilder: (context, error, stackTrace) {
         return PosterPlaceholder(width: width, height: height);
       },
@@ -224,8 +291,49 @@ class _MediaImageState extends State<MediaImage> {
       width: width,
       height: height,
       borderRadius: BorderRadius.circular(AppRadii.sm),
+      animated: false,
     );
   }
+}
+
+/// [ImageCache] 按字符串 key 命中,避免 [MemoryImage] 每帧扫描整段字节。
+class _MediaMemoryImage extends ImageProvider<_MediaMemoryImage> {
+  const _MediaMemoryImage({required this.cacheKey, required this.bytes});
+
+  final String cacheKey;
+  final Uint8List bytes;
+
+  @override
+  Future<_MediaMemoryImage> obtainKey(ImageConfiguration configuration) {
+    return SynchronousFuture<_MediaMemoryImage>(this);
+  }
+
+  @override
+  ImageStreamCompleter loadImage(
+    _MediaMemoryImage key,
+    ImageDecoderCallback decode,
+  ) {
+    return MultiFrameImageStreamCompleter(
+      codec: _loadAsync(key, decode),
+      scale: 1,
+      debugLabel: 'MediaMemoryImage($cacheKey)',
+    );
+  }
+
+  Future<ui.Codec> _loadAsync(
+    _MediaMemoryImage key,
+    ImageDecoderCallback decode,
+  ) {
+    return ui.ImmutableBuffer.fromUint8List(key.bytes).then(decode);
+  }
+
+  @override
+  bool operator ==(Object other) {
+    return other is _MediaMemoryImage && other.cacheKey == cacheKey;
+  }
+
+  @override
+  int get hashCode => cacheKey.hashCode;
 }
 
 /// 章节图统一经 [MediaImageCache] 管道加载,与海报/剧照共用内存+磁盘两级缓存,
@@ -294,7 +402,7 @@ class MediaImageCache {
   /// 单次网络拉取超时。超时记为未命中并释放并发槽,避免骨架永远转圈。
   static const Duration defaultFetchTimeout = Duration(seconds: 12);
 
-  static const int _maxConcurrentFetches = 6;
+  static const int _maxConcurrentFetches = 8;
 
   int memoryLimitBytes = defaultMemoryLimitBytes;
   Duration negativeTtl = defaultNegativeTtl;
@@ -349,16 +457,34 @@ class MediaImageCache {
     String variant = '',
     required int maxWidth,
   }) {
-    return _touch(
-      key(
-        serverId: serverId,
-        itemId: itemId,
-        type: type,
-        tag: tag,
-        variant: variant,
-        maxWidth: maxWidth,
-      ),
-    );
+    return _bytes[key(
+      serverId: serverId,
+      itemId: itemId,
+      type: type,
+      tag: tag,
+      variant: variant,
+      maxWidth: maxWidth,
+    )];
+  }
+
+  bool isNegativeCached({
+    required String serverId,
+    required String itemId,
+    required String type,
+    String? tag,
+    String variant = '',
+    required int maxWidth,
+  }) {
+    final expiry =
+        _misses[key(
+          serverId: serverId,
+          itemId: itemId,
+          type: type,
+          tag: tag,
+          variant: variant,
+          maxWidth: maxWidth,
+        )];
+    return expiry != null && clock().isBefore(expiry);
   }
 
   Future<Uint8List?> load({
@@ -369,6 +495,7 @@ class MediaImageCache {
     String variant = '',
     required int maxWidth,
     required Future<Uint8List?> Function() fetch,
+    VoidCallback? onAbort,
   }) {
     final cacheKey = key(
       serverId: serverId,
@@ -410,6 +537,7 @@ class MediaImageCache {
         } on TimeoutException {
           timedOut = true;
           bytes = null;
+          onAbort?.call();
         } finally {
           _release();
         }
@@ -521,9 +649,14 @@ class MediaImageCache {
   }
 
   void _release() {
-    if (_waiters.isNotEmpty) {
-      _waiters.removeAt(0).complete();
-    } else {
+    while (_waiters.isNotEmpty) {
+      final next = _waiters.removeAt(0);
+      if (!next.isCompleted) {
+        next.complete();
+        return;
+      }
+    }
+    if (_activeFetches > 0) {
       _activeFetches--;
     }
   }
@@ -607,6 +740,7 @@ class FileMediaImageDiskStore implements MediaImageDiskStore {
   static const String _fileSuffix = '.img';
 
   Map<String, _DiskEntry>? _index;
+  Future<Map<String, _DiskEntry>>? _indexBuild;
   int _totalBytes = 0;
 
   static String _fileName(String key) {
@@ -614,11 +748,17 @@ class FileMediaImageDiskStore implements MediaImageDiskStore {
     return '$encoded$_fileSuffix';
   }
 
-  Future<Map<String, _DiskEntry>> _ensureIndex() async {
+  Future<Map<String, _DiskEntry>> _ensureIndex() {
     final index = _index;
     if (index != null) {
-      return index;
+      return Future<Map<String, _DiskEntry>>.value(index);
     }
+    return _indexBuild ??= _buildIndex().whenComplete(() {
+      _indexBuild = null;
+    });
+  }
+
+  Future<Map<String, _DiskEntry>> _buildIndex() async {
     final entries = <String, _DiskEntry>{};
     var total = 0;
     try {
@@ -666,21 +806,36 @@ class FileMediaImageDiskStore implements MediaImageDiskStore {
 
   @override
   Future<Uint8List?> read(String key) async {
-    final entries = await _ensureIndex();
     final name = _fileName(key);
-    final entry = entries[name];
-    if (entry == null) {
+    final indexed = _index?[name];
+    if (indexed != null) {
+      return _readIndexed(name, indexed);
+    }
+    if (_index != null) {
       return null;
     }
+    // 索引还在扫目录时不要堵住缩略图:按文件名直接读,扫盘放到后台。
+    unawaited(_ensureIndex());
+    final file = File('${directory.path}/$name');
+    try {
+      if (!await file.exists()) {
+        return null;
+      }
+      return await file.readAsBytes();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<Uint8List?> _readIndexed(String name, _DiskEntry entry) async {
     try {
       final bytes = await entry.file.readAsBytes();
       final now = DateTime.now();
-      entries[name] = entry.withLastUsed(now);
-      // 读取即视为最近使用,尽力刷新 mtime 供 LRU 回收参考。
+      _index?[name] = entry.withLastUsed(now);
       unawaited(entry.file.setLastModified(now).catchError((_) => now));
       return bytes;
     } catch (_) {
-      entries.remove(name);
+      _index?.remove(name);
       _totalBytes = math.max(0, _totalBytes - entry.size);
       unawaited(_deleteQuietly(entry.file));
       return null;
@@ -692,7 +847,7 @@ class FileMediaImageDiskStore implements MediaImageDiskStore {
     final entries = await _ensureIndex();
     final name = _fileName(key);
     final file = File('${directory.path}/$name');
-    await file.writeAsBytes(bytes, flush: true);
+    await file.writeAsBytes(bytes, flush: false);
     final previous = entries[name];
     if (previous != null) {
       _totalBytes = math.max(0, _totalBytes - previous.size);

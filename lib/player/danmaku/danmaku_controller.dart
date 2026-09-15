@@ -27,7 +27,7 @@ enum DanmakuStatus {
   /// 自定义服务不可用(明确提示,可回退官方源)。
   customUnreachable,
 
-  /// 官方源不可达(静默无弹幕)。
+  /// 官方源不可达或未配置 AppId。
   unreachable,
 }
 
@@ -105,6 +105,9 @@ class DanmakuController extends ChangeNotifier {
   String? customServerUrl;
   String? customToken;
 
+  /// 官方开放平台 AppId;与 [customToken](官方源时作 AppSecret)成对使用。
+  String? officialAppId;
+
   /// 自定义服务失败后本会话内回退官方源(不持久化)。
   bool _officialFallback = false;
   Map<String, DanmakuSeriesMemory> _memories = const {};
@@ -131,12 +134,22 @@ class DanmakuController extends ChangeNotifier {
       customServerUrl != null &&
       customServerUrl!.isNotEmpty;
 
+  /// 官方源已配置成对的 AppId 与 AppSecret。
+  bool get hasOfficialCredentials {
+    final id = officialAppId;
+    final secret = customToken;
+    return id != null && id.isNotEmpty && secret != null && secret.isNotEmpty;
+  }
+
   DandanplaySource get _source {
     final url = customServerUrl;
     if (usesCustomSource) {
       return DandanplaySource.custom(url!, customToken);
     }
-    return DandanplaySource.official;
+    return DandanplaySource.officialWith(
+      appId: officialAppId,
+      appSecret: customToken,
+    );
   }
 
   /// 按播放状态估计当前时间轴位置(暂停时冻结在最后已知位置)。
@@ -204,6 +217,8 @@ class DanmakuController extends ChangeNotifier {
     await _resolveAndLoad(context);
   }
 
+  bool get _canCallOfficialApi => usesCustomSource || hasOfficialCredentials;
+
   /// 弹幕开关:关闭立即清屏;开启时对当前会话重新解析加载。
   Future<void> toggleDanmaku() async {
     danmakuOn = !danmakuOn;
@@ -239,15 +254,34 @@ class DanmakuController extends ChangeNotifier {
   }
 
   /// 手动搜索(匹配错误时切换剧集入口)。失败返回空列表。
+  ///
+  /// 优先 `/search/episodes`(带分集);官方 `/search/anime` 往往只有作品名,
+  /// 展开后是空的,所以缺分集时再拉 `/bangumi/{id}`。
   Future<List<DanmakuAnime>> search(String keyword) async {
     final term = keyword.trim();
     if (term.isEmpty) {
       return const [];
     }
-    try {
-      return await _client.searchAnime(_source, term);
-    } on DanmakuApiException {
+    if (!_canCallOfficialApi) {
       return const [];
+    }
+    try {
+      var results = await _client.searchEpisodes(
+        _source,
+        anime: term,
+        episode: _context?.episodeIndex,
+      );
+      if (results.isEmpty) {
+        results = await _client.searchAnime(_source, term);
+      }
+      return await _ensureEpisodes(_source, results);
+    } on DanmakuApiException {
+      try {
+        final results = await _client.searchAnime(_source, term);
+        return await _ensureEpisodes(_source, results);
+      } on DanmakuApiException {
+        return const [];
+      }
     }
   }
 
@@ -255,6 +289,11 @@ class DanmakuController extends ChangeNotifier {
   Future<void> selectEpisode(DanmakuAnime anime, DanmakuEpisode episode) async {
     final context = _context;
     if (context == null) {
+      return;
+    }
+    if (!_canCallOfficialApi) {
+      status = DanmakuStatus.unreachable;
+      notifyListeners();
       return;
     }
     final generation = _sessionGeneration;
@@ -303,6 +342,12 @@ class DanmakuController extends ChangeNotifier {
 
   Future<void> _resolveAndLoad(DanmakuEpisodeContext context) async {
     final generation = _sessionGeneration;
+    if (!_canCallOfficialApi) {
+      status = DanmakuStatus.unreachable;
+      statusDetail = null;
+      notifyListeners();
+      return;
+    }
     final source = _source;
     try {
       var animeId = 0;
@@ -323,7 +368,8 @@ class DanmakuController extends ChangeNotifier {
           episodeId = memory.episodeId!;
           resolved = true;
         } else {
-          final animes = await _client.searchAnime(source, memory.animeTitle);
+          var animes = await _client.searchAnime(source, memory.animeTitle);
+          animes = await _ensureEpisodes(source, animes);
           final anime = _findAnimeById(animes, memory.animeId);
           final picked = anime == null
               ? null
@@ -360,14 +406,25 @@ class DanmakuController extends ChangeNotifier {
         }
       }
 
-      // 3. 标题搜索降级。
+      // 3. 标题搜索降级:先 search/episodes(带分集),再 search/anime + bangumi。
       if (!resolved) {
         var keyword = context.seriesTitle?.trim() ?? '';
         if (keyword.isEmpty) {
-          keyword = context.fileName ?? context.title ?? '';
+          keyword = context.title?.trim() ?? '';
+        }
+        if (keyword.isEmpty) {
+          keyword = context.fileName ?? '';
         }
         if (keyword.isNotEmpty) {
-          final animes = await _client.searchAnime(source, keyword);
+          var animes = await _client.searchEpisodes(
+            source,
+            anime: keyword,
+            episode: context.episodeIndex,
+          );
+          if (animes.isEmpty) {
+            animes = await _client.searchAnime(source, keyword);
+          }
+          animes = await _ensureEpisodes(source, animes);
           final anime = _pickAnime(animes, context.isMovie);
           final picked = anime == null
               ? null
@@ -414,7 +471,6 @@ class DanmakuController extends ChangeNotifier {
       status = DanmakuStatus.customUnreachable;
       statusDetail = failure.toString();
     } else {
-      // 官方源不可达:静默无弹幕。
       status = DanmakuStatus.unreachable;
       statusDetail = null;
     }
@@ -439,6 +495,26 @@ class DanmakuController extends ChangeNotifier {
       episodeNumber: context.episodeIndex,
     );
     await _writeSettings();
+  }
+
+  Future<List<DanmakuAnime>> _ensureEpisodes(
+    DandanplaySource source,
+    List<DanmakuAnime> animes,
+  ) async {
+    final filled = <DanmakuAnime>[];
+    for (final anime in animes.take(12)) {
+      if (anime.episodes.isNotEmpty) {
+        filled.add(anime);
+        continue;
+      }
+      try {
+        final detailed = await _client.fetchBangumi(source, anime.animeId);
+        filled.add(detailed ?? anime);
+      } on DanmakuApiException {
+        filled.add(anime);
+      }
+    }
+    return filled;
   }
 
   static DanmakuAnime? _findAnimeById(List<DanmakuAnime> animes, int animeId) {
@@ -506,6 +582,8 @@ class DanmakuController extends ChangeNotifier {
       customServerUrl = (server == null || server.isEmpty) ? null : server;
       final token = settings.danmakuToken?.trim();
       customToken = (token == null || token.isEmpty) ? null : token;
+      final appId = settings.danmakuAppId?.trim();
+      officialAppId = (appId == null || appId.isEmpty) ? null : appId;
       _memories = Map.of(settings.danmakuSeriesMemories);
     } catch (_) {
       // 设置不可读时按默认运行,不阻塞弹幕会话。
@@ -521,6 +599,7 @@ class DanmakuController extends ChangeNotifier {
           danmakuDisplay: display,
           danmakuServer: customServerUrl,
           danmakuToken: customToken,
+          danmakuAppId: officialAppId,
           danmakuSeriesMemories: _memories,
         ),
       );

@@ -148,6 +148,18 @@ abstract class AppLocalizations {
   /// **'密码'**
   String get password;
 
+  /// Tooltip to reveal the connect-form password.
+  ///
+  /// In zh, this message translates to:
+  /// **'显示密码'**
+  String get showPassword;
+
+  /// Tooltip to hide the connect-form password.
+  ///
+  /// In zh, this message translates to:
+  /// **'隐藏密码'**
+  String get hidePassword;
+
   /// Optional HTTP User-Agent for a server line.
   ///
   /// In zh, this message translates to:
@@ -688,17 +700,23 @@ abstract class AppLocalizations {
   /// **'继续播放'**
   String get resumePlay;
 
+  /// Start the named episode from a series detail page.
+  ///
+  /// In zh, this message translates to:
+  /// **'播放 {code}'**
+  String playEpisode(String code);
+
+  /// Resume the named episode from a series detail page.
+  ///
+  /// In zh, this message translates to:
+  /// **'继续播放 {code}'**
+  String resumePlayEpisode(String code);
+
   /// Open the parent series from an episode detail page.
   ///
   /// In zh, this message translates to:
   /// **'查看剧集'**
   String get viewSeries;
-
-  /// Open the current or resume episode from a series detail page.
-  ///
-  /// In zh, this message translates to:
-  /// **'查看本集'**
-  String get viewThisEpisode;
 
   /// Open the next episode from an episode detail page.
   ///
@@ -1021,7 +1039,7 @@ abstract class AppLocalizations {
   /// Short explanation under the danmaku service section title.
   ///
   /// In zh, this message translates to:
-  /// **'默认使用官方源；自建服务时再填写'**
+  /// **'官方源需 AppId；国产剧可改用兼容自建服务'**
   String get settingsDanmakuServiceHint;
 
   /// Tooltip to reveal the danmaku access token.
@@ -1048,16 +1066,28 @@ abstract class AppLocalizations {
   /// **'留空使用官方源'**
   String get settingsDanmakuServerHint;
 
-  /// Setting row label for the custom danmaku service access token.
+  /// Setting row label for the official dandanplay AppId.
+  ///
+  /// In zh, this message translates to:
+  /// **'官方 AppId'**
+  String get settingsDanmakuAppId;
+
+  /// Hint that the official danmaku source requires an AppId.
+  ///
+  /// In zh, this message translates to:
+  /// **'官方源必填，在弹弹play 开放平台申请'**
+  String get settingsDanmakuAppIdHint;
+
+  /// Setting row label for AppSecret or a custom service token.
   ///
   /// In zh, this message translates to:
   /// **'访问令牌'**
   String get settingsDanmakuToken;
 
-  /// Hint that the danmaku service access token is optional.
+  /// Hint covering official AppSecret and custom Bearer token.
   ///
   /// In zh, this message translates to:
-  /// **'可选，自建服务时填写'**
+  /// **'官方源填 AppSecret；自定义服务填访问令牌'**
   String get settingsDanmakuTokenHint;
 
   /// Playback speed selector label on the player controls.
@@ -1189,8 +1219,14 @@ abstract class AppLocalizations {
   /// Hint text of the danmaku search keyword field.
   ///
   /// In zh, this message translates to:
-  /// **'输入动画或电影名称'**
+  /// **'输入动画或影视名称'**
   String get danmakuSearchHint;
+
+  /// On-player chip when auto match failed; tap opens search.
+  ///
+  /// In zh, this message translates to:
+  /// **'未匹配到弹幕，点此搜索'**
+  String get danmakuMatchHint;
 
   /// Danmaku match status when nothing matched.
   ///
@@ -1239,6 +1275,18 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'弹幕服务不可达'**
   String get danmakuOfficialUnreachable;
+
+  /// Danmaku status when official AppId and AppSecret are missing.
+  ///
+  /// In zh, this message translates to:
+  /// **'未配置 AppId'**
+  String get danmakuOfficialNeedsAuth;
+
+  /// Explains that official danmaku auth is configured in the main window.
+  ///
+  /// In zh, this message translates to:
+  /// **'在主窗口「设置 → 弹幕服务」填写官方 AppId 与 AppSecret，或改用自定义服务。'**
+  String get danmakuOfficialSetupHint;
 
   /// Danmaku status when the matched episode has no comments.
   ///

@@ -194,9 +194,9 @@ void main() {
   }
 
   Future<void> playListedEpisode(WidgetTester tester, String episodeId) async {
-    final row = find.byKey(CatalogKeys.episode(episodeId));
-    await ensureVisibleBelowTopBar(tester, row);
-    await tapBelowTopBar(tester, row);
+    final play = find.byKey(CatalogKeys.episodePlay(episodeId));
+    await ensureVisibleBelowTopBar(tester, play);
+    await tapBelowTopBar(tester, play);
     await tester.pump();
     await waitFor(tester, find.byKey(PlayerKeys.playPause));
   }
@@ -264,6 +264,23 @@ void main() {
       server.playbackEvents.map((event) => event.kind),
       contains('Playing'),
     );
+  });
+
+  testWidgets('seek bar paints demuxer cache as the secondary track', (
+    tester,
+  ) async {
+    await pumpLoggedIn(tester);
+    await openPlayable(tester, 'movie-up');
+    await waitFor(tester, find.byKey(PlayerKeys.playPause));
+    await waitFor(tester, find.byKey(PlayerKeys.seekBar));
+
+    final duration = controllerOf(tester).duration;
+    expect(duration, greaterThan(Duration.zero));
+    backend.emitBuffer(Duration(milliseconds: duration.inMilliseconds ~/ 2));
+    await tester.pump();
+
+    final slider = tester.widget<Slider>(find.byKey(PlayerKeys.seekBar));
+    expect(slider.secondaryTrackValue, closeTo(0.5, 0.02));
   });
 
   testWidgets('detail play from start opens at zero instead of resume', (
@@ -892,14 +909,70 @@ void main() {
     expect(find.text('100%'), findsOneWidget);
   });
 
-  test('volume percent maps to mpv volume through the cube curve', () {
+  testWidgets('mouse wheel over the episode panel does not change volume', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await pumpLoggedIn(tester);
+    await openLibrary(tester, 'view-tv');
+    await tester.tap(find.byKey(CatalogKeys.item('series-friends')));
+    await tester.pumpAndSettle();
+    await playListedEpisode(tester, 'episode-friends-s1e1');
+    await waitFor(tester, find.text('100%'));
+
+    await tester.tap(find.byKey(const Key('player-episodes')));
+    await waitFor(tester, find.byKey(const Key('player-episodes-panel')));
+    for (var i = 0; i < 20; i++) {
+      await tester.pump(const Duration(milliseconds: 20));
+    }
+
+    await tester.sendEventToBinding(
+      PointerScrollEvent(
+        position: tester.getCenter(
+          find.byKey(const Key('player-episodes-list')),
+        ),
+        scrollDelta: const Offset(0, 120),
+      ),
+    );
+    await tester.pump();
+    expect(find.text('100%'), findsOneWidget);
+    expect(find.text('95%'), findsNothing);
+    expect(backend.volume, closeTo(mpvVolumeForPercent(100), 1e-6));
+  });
+
+  test('volume percent maps linearly to mpv volume', () {
     expect(mpvVolumeForPercent(0), 0.0);
-    expect(mpvVolumeForPercent(10), closeTo(0.1, 1e-6));
-    expect(mpvVolumeForPercent(50), closeTo(12.5, 1e-6));
-    expect(mpvVolumeForPercent(90), closeTo(72.9, 1e-6));
+    expect(mpvVolumeForPercent(10), 10.0);
+    expect(mpvVolumeForPercent(17), 17.0);
+    expect(mpvVolumeForPercent(50), 50.0);
+    expect(mpvVolumeForPercent(90), 90.0);
     expect(mpvVolumeForPercent(100), 100.0);
     expect(mpvVolumeForPercent(120), 100.0);
     expect(mpvVolumeForPercent(-5), 0.0);
+  });
+
+  test('buffer fraction is cache end over duration', () {
+    expect(
+      playerBufferFraction(buffer: Duration.zero, duration: Duration.zero),
+      0.0,
+    );
+    expect(
+      playerBufferFraction(
+        buffer: const Duration(minutes: 11),
+        duration: const Duration(minutes: 22),
+      ),
+      0.5,
+    );
+    expect(
+      playerBufferFraction(
+        buffer: const Duration(minutes: 30),
+        duration: const Duration(minutes: 22),
+      ),
+      1.0,
+    );
   });
 
   testWidgets('volume tiers map to mpv and persist the user percent', (
@@ -1026,6 +1099,19 @@ void main() {
     expect(find.byType(WindowDragArea), findsOneWidget);
     expect(find.byKey(const Key('player-window-drag')), findsOneWidget);
     expect(find.byKey(PlayerKeys.playPause), findsOneWidget);
+    final player = tester.getRect(find.byType(PlayerPage));
+    final drag = tester.getRect(find.byKey(const Key('player-window-drag')));
+    expect(drag.top, player.top);
+    expect(drag.left, player.left);
+    expect(drag.width, player.width);
+    expect(drag.height, kPlayerChromeBarExtent);
+    expect(drag.contains(Offset(player.center.dx, player.top + 4)), isTrue);
+    final caption = Offset(player.center.dx, player.top + 4);
+    final hits = tester.hitTestOnBinding(caption);
+    final dragBox = tester.renderObject(
+      find.byKey(const Key('player-window-drag')),
+    );
+    expect(hits.path.any((entry) => entry.target == dragBox), isTrue);
 
     await tester.tap(find.byKey(const Key('player-window-close')));
     await waitForGone(tester, find.byType(PlayerPage));
@@ -1272,11 +1358,20 @@ void main() {
     expect(window.isAlwaysOnTop, isFalse);
     expect(find.byIcon(Icons.push_pin_outlined), findsOneWidget);
 
-    await tester.tap(find.byKey(const Key('player-always-on-top')));
+    final pin = find.byKey(const Key('player-always-on-top'));
+    await tester.tap(pin);
     await tester.pump();
     expect(window.isAlwaysOnTop, isTrue);
     expect(find.byIcon(Icons.push_pin_rounded), findsOneWidget);
     expect(find.byIcon(Icons.push_pin_outlined), findsNothing);
+
+    final hover = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await hover.addPointer(location: Offset.zero);
+    addTearDown(hover.removePointer);
+    await hover.moveTo(tester.getCenter(pin));
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pump();
+    expect(find.text('取消置顶'), findsOneWidget);
 
     // T 快捷键切换置顶。
     await tester.tap(find.byKey(PlayerKeys.surface));
@@ -1302,6 +1397,38 @@ void main() {
     await waitFor(tester, find.byKey(PlayerKeys.playPause));
     expect(find.byKey(const Key('player-episodes')), findsNothing);
     expect(find.byKey(PlayerKeys.mediaSource), findsNothing);
+  });
+
+  testWidgets('danmaku button opens a compact panel with search', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await pumpLoggedIn(tester);
+    await openPlayable(tester, 'movie-up');
+    await waitFor(tester, find.byKey(PlayerKeys.playPause));
+
+    await tester.tap(find.byKey(const Key('player-danmaku-menu')));
+    await tester.pump();
+    await waitFor(tester, find.byKey(const Key('player-danmaku-panel')));
+    await waitFor(tester, find.byKey(const Key('player-danmaku-setup-hint')));
+    expect(find.byKey(const Key('player-danmaku-search')), findsOneWidget);
+    expect(find.byKey(const Key('player-danmaku-toggle')), findsOneWidget);
+    expect(find.text('不透明度'), findsNothing);
+    expect(find.text('25%'), findsNothing);
+    expect(find.byType(AlertDialog), findsNothing);
+
+    await tester.tap(find.byKey(const Key('player-danmaku-search')));
+    await tester.pump();
+    await tester.pump();
+    await waitFor(tester, find.byKey(const Key('player-danmaku-search-panel')));
+    expect(
+      find.byKey(const Key('player-danmaku-search-field')),
+      findsOneWidget,
+    );
+    expect(find.byKey(const Key('player-danmaku-panel')), findsNothing);
   });
 
   testWidgets(
@@ -1350,6 +1477,26 @@ void main() {
       expect(currentRow.selected, isTrue);
       expect(controllerOf(tester).episodeSeasonId, 'season-friends-1');
       expect(find.byKey(const Key('player-season-picker')), findsNothing);
+      final panel = find.byKey(const Key('player-episodes-panel'));
+      expect(
+        find.descendant(of: panel, matching: find.textContaining('正在观看')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: panel, matching: find.textContaining('22分钟')),
+        findsWidgets,
+      );
+      expect(
+        find.descendant(
+          of: panel,
+          matching: find.text('Monica gets a new apartment.'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: panel, matching: find.textContaining('已看 45%')),
+        findsOneWidget,
+      );
 
       // 点击部分观看的集:进程内切集,从续播位置(回退 5 秒)起播,
       // 旧集 Stopped、新集 Playing 上报正确。

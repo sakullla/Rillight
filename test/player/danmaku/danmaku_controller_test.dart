@@ -26,6 +26,7 @@ class FakeDandanplayClient extends DandanplayClient {
   Object? matchError;
   Object? searchError;
   Object? commentError;
+  DanmakuAnime? bangumiResponse;
 
   /// 可控时序门闩:按 episodeId 阻塞 fetchComments,测试快速换集时旧会话
   /// 慢完成的丢弃行为。
@@ -64,6 +65,23 @@ class FakeDandanplayClient extends DandanplayClient {
       throw searchError!;
     }
     return searchResponse;
+  }
+
+  @override
+  Future<List<DanmakuAnime>> searchEpisodes(
+    DandanplaySource source, {
+    required String anime,
+    int? episode,
+  }) {
+    return searchAnime(source, anime);
+  }
+
+  @override
+  Future<DanmakuAnime?> fetchBangumi(
+    DandanplaySource source,
+    int animeId,
+  ) async {
+    return bangumiResponse;
   }
 
   @override
@@ -126,6 +144,11 @@ DanmakuEpisodeContext context({
   );
 }
 
+const _testOfficialAuth = PlayerSettings(
+  danmakuAppId: 'test-app',
+  danmakuToken: 'test-secret',
+);
+
 void main() {
   late FakeDandanplayClient client;
   late FakeHasher hasher;
@@ -143,7 +166,7 @@ void main() {
   setUp(() {
     client = FakeDandanplayClient();
     hasher = FakeHasher('deadbeef');
-    store = MemoryPlayerSettingsStore();
+    store = MemoryPlayerSettingsStore(_testOfficialAuth);
   });
 
   test('auto match loads comments and writes series memory', () async {
@@ -168,6 +191,8 @@ void main() {
     // 直连流先哈希再匹配。
     expect(hasher.requested, hasLength(1));
     expect(client.matchCalls.single.$2['fileHash'], 'deadbeef');
+    expect(client.matchCalls.single.$1.appId, 'test-app');
+    expect(client.matchCalls.single.$1.appSecret, 'test-secret');
     expect(client.commentCalls.single.$2, 100);
 
     final memory = (await store.read()).danmakuSeriesMemories['series-1'];
@@ -208,6 +233,8 @@ void main() {
     () async {
       store = MemoryPlayerSettingsStore(
         const PlayerSettings(
+          danmakuAppId: 'test-app',
+          danmakuToken: 'test-secret',
           danmakuSeriesMemories: {
             'series-1': DanmakuSeriesMemory(
               animeId: 7,
@@ -250,6 +277,8 @@ void main() {
     () async {
       store = MemoryPlayerSettingsStore(
         const PlayerSettings(
+          danmakuAppId: 'test-app',
+          danmakuToken: 'test-secret',
           danmakuSeriesMemories: {
             'series-1': DanmakuSeriesMemory(
               animeId: 7,
@@ -316,6 +345,17 @@ void main() {
     expect(controller.hasComments, isFalse);
   });
 
+  test('official source without AppId does not call the API', () async {
+    store = MemoryPlayerSettingsStore();
+    final controller = makeController();
+    await controller.startSession(context());
+    expect(controller.status, DanmakuStatus.unreachable);
+    expect(controller.hasOfficialCredentials, isFalse);
+    expect(client.matchCalls, isEmpty);
+    expect(client.searchCalls, isEmpty);
+    expect(await controller.search('Show'), isEmpty);
+  });
+
   test('official source unreachable is silent', () async {
     client.matchError = unreachable;
     final controller = makeController();
@@ -331,6 +371,7 @@ void main() {
         const PlayerSettings(
           danmakuServer: 'https://dan.example.com',
           danmakuToken: 'secret',
+          danmakuAppId: 'test-app',
         ),
       );
       client.matchError = unreachable;
@@ -361,6 +402,8 @@ void main() {
       expect(controller.status, DanmakuStatus.active);
       match = client.matchCalls.last;
       expect(match.$1.isCustom, isFalse);
+      expect(match.$1.appId, 'test-app');
+      expect(match.$1.appSecret, 'secret');
       expect(client.commentCalls, hasLength(1));
     },
   );
@@ -459,6 +502,22 @@ void main() {
 
     client.searchError = unreachable;
     expect(await controller.search('Show'), isEmpty);
+  });
+
+  test('search fills missing episodes from bangumi details', () async {
+    client.searchResponse = const [
+      DanmakuAnime(animeId: 12, animeTitle: 'Hollow', type: 'tvseries'),
+    ];
+    client.bangumiResponse = const DanmakuAnime(
+      animeId: 12,
+      animeTitle: 'Hollow',
+      type: 'tvseries',
+      episodes: [DanmakuEpisode(episodeId: 88, episodeTitle: '第01话')],
+    );
+    final controller = makeController();
+    await controller.startSession(context());
+    final results = await controller.search('Hollow');
+    expect(results.single.episodes.single.episodeId, 88);
   });
 
   test('position feed estimates with rate and notifies on jumps', () {

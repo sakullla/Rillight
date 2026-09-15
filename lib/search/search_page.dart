@@ -17,13 +17,21 @@ import 'package:rillight/library/shelf_grid_page.dart';
 import 'package:rillight/search/search_action.dart';
 
 class SearchPage extends StatefulWidget {
-  const SearchPage({super.key, this.autofocus = false, this.focusNode});
+  const SearchPage({
+    super.key,
+    this.autofocus = false,
+    this.focusNode,
+    this.trailing,
+  });
 
   /// 覆盖层打开时自动聚焦输入框。
   final bool autofocus;
 
   /// 由覆盖层持有时传入,便于再次呼出时聚焦且不重复入栈。
   final FocusNode? focusNode;
+
+  /// 覆盖层关闭钮等:与搜索框同一行、贴窗口右侧,输入框仍居中。
+  final Widget? trailing;
 
   /// 每页条数,与 searchByName 的 Limit 一致。
   static const int pageSize = 50;
@@ -195,52 +203,60 @@ class _SearchPageState extends State<SearchPage> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final screenWidth = MediaQuery.sizeOf(context).width;
+    final embedded = widget.trailing != null;
+    final field = ConstrainedBox(
+      constraints: BoxConstraints(
+        maxWidth: SearchPage.fieldWidthFor(screenWidth),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: TextField(
+              key: CatalogKeys.searchField,
+              controller: _query,
+              focusNode: widget.focusNode,
+              autofocus: widget.autofocus,
+              textInputAction: TextInputAction.search,
+              style: Theme.of(context).textTheme.titleMedium,
+              decoration: InputDecoration(
+                hintText: l10n.searchHint,
+                prefixIcon: const Icon(Icons.search),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: AppSpacing.lg,
+                  vertical: AppSpacing.md,
+                ),
+              ),
+              onSubmitted: (value) => _submit(value),
+            ),
+          ),
+          const SizedBox(width: AppSpacing.sm),
+          FilledButton(
+            key: CatalogKeys.searchSubmit,
+            onPressed: _loading ? null : () => _submit(),
+            child: Text(l10n.search),
+          ),
+        ],
+      ),
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(
+          padding: EdgeInsets.fromLTRB(
+            embedded ? 0 : AppSpacing.md,
+            embedded ? AppSpacing.xs : AppSpacing.xl,
+            embedded ? 0 : AppSpacing.md,
             AppSpacing.md,
-            AppSpacing.xl,
-            AppSpacing.md,
-            AppSpacing.lg,
           ),
-          child: Center(
-            child: ConstrainedBox(
-              constraints: BoxConstraints(
-                maxWidth: SearchPage.fieldWidthFor(screenWidth),
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      key: CatalogKeys.searchField,
-                      controller: _query,
-                      focusNode: widget.focusNode,
-                      autofocus: widget.autofocus,
-                      textInputAction: TextInputAction.search,
-                      style: Theme.of(context).textTheme.titleMedium,
-                      decoration: InputDecoration(
-                        hintText: l10n.searchHint,
-                        prefixIcon: const Icon(Icons.search),
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: AppSpacing.lg,
-                          vertical: AppSpacing.md,
-                        ),
-                      ),
-                      onSubmitted: (value) => _submit(value),
-                    ),
-                  ),
-                  const SizedBox(width: AppSpacing.sm),
-                  FilledButton(
-                    key: CatalogKeys.searchSubmit,
-                    onPressed: _loading ? null : () => _submit(),
-                    child: Text(l10n.search),
-                  ),
-                ],
-              ),
-            ),
-          ),
+          child: embedded
+              ? Row(
+                  children: [
+                    const SizedBox(width: 48),
+                    Expanded(child: Center(child: field)),
+                    widget.trailing!,
+                  ],
+                )
+              : Center(child: field),
         ),
         Expanded(child: _buildBody(l10n, screenWidth)),
       ],

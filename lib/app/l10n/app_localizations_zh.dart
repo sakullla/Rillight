@@ -36,6 +36,12 @@ class AppLocalizationsZh extends AppLocalizations {
   String get password => '密码';
 
   @override
+  String get showPassword => '显示密码';
+
+  @override
+  String get hidePassword => '隐藏密码';
+
+  @override
   String get userAgent => 'User-Agent';
 
   @override
@@ -324,10 +330,17 @@ class AppLocalizationsZh extends AppLocalizations {
   String get resumePlay => '继续播放';
 
   @override
-  String get viewSeries => '查看剧集';
+  String playEpisode(String code) {
+    return '播放 $code';
+  }
 
   @override
-  String get viewThisEpisode => '查看本集';
+  String resumePlayEpisode(String code) {
+    return '继续播放 $code';
+  }
+
+  @override
+  String get viewSeries => '查看剧集';
 
   @override
   String get nextEpisode => '下一集';
@@ -495,7 +508,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsDanmakuService => '弹幕服务';
 
   @override
-  String get settingsDanmakuServiceHint => '默认使用官方源；自建服务时再填写';
+  String get settingsDanmakuServiceHint => '官方源需 AppId；国产剧可改用兼容自建服务';
 
   @override
   String get settingsShowToken => '显示令牌';
@@ -510,10 +523,16 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsDanmakuServerHint => '留空使用官方源';
 
   @override
+  String get settingsDanmakuAppId => '官方 AppId';
+
+  @override
+  String get settingsDanmakuAppIdHint => '官方源必填，在弹弹play 开放平台申请';
+
+  @override
   String get settingsDanmakuToken => '访问令牌';
 
   @override
-  String get settingsDanmakuTokenHint => '可选，自建服务时填写';
+  String get settingsDanmakuTokenHint => '官方源填 AppSecret；自定义服务填访问令牌';
 
   @override
   String get playbackRate => '倍速';
@@ -583,7 +602,10 @@ class AppLocalizationsZh extends AppLocalizations {
   String get danmakuSearchTitle => '搜索弹幕';
 
   @override
-  String get danmakuSearchHint => '输入动画或电影名称';
+  String get danmakuSearchHint => '输入动画或影视名称';
+
+  @override
+  String get danmakuMatchHint => '未匹配到弹幕，点此搜索';
 
   @override
   String get danmakuNoMatch => '未匹配到弹幕';
@@ -610,6 +632,13 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get danmakuOfficialUnreachable => '弹幕服务不可达';
+
+  @override
+  String get danmakuOfficialNeedsAuth => '未配置 AppId';
+
+  @override
+  String get danmakuOfficialSetupHint =>
+      '在主窗口「设置 → 弹幕服务」填写官方 AppId 与 AppSecret，或改用自定义服务。';
 
   @override
   String get danmakuNoComments => '本集无弹幕';

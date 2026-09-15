@@ -64,3 +64,22 @@ String continueWatchingSubtitle(EmbyItem item) {
   }
   return code ?? name;
 }
+
+/// 去掉简介里的 HTML/实体,供海报叠字与列表展示共用。
+String? plainOverview(String? raw) {
+  final text = raw?.trim();
+  if (text == null || text.isEmpty) {
+    return null;
+  }
+  final stripped = text
+      .replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), '\n')
+      .replaceAll(RegExp(r'</p>', caseSensitive: false), '\n')
+      .replaceAll(RegExp(r'<[^>]+>'), '')
+      .replaceAll('&nbsp;', ' ')
+      .replaceAll('&amp;', '&')
+      .replaceAll('&lt;', '<')
+      .replaceAll('&gt;', '>')
+      .replaceAll(RegExp(r'\n{3,}'), '\n\n')
+      .trim();
+  return stripped.isEmpty ? null : stripped;
+}

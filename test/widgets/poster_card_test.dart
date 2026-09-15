@@ -17,6 +17,15 @@ const _movie = EmbyItem(
   runTimeTicks: 27000000000,
 );
 
+const _movieWithPlot = EmbyItem(
+  id: 'movie-plot',
+  name: '有简介的电影',
+  type: 'Movie',
+  productionYear: 2021,
+  runTimeTicks: 27000000000,
+  overview: 'A thief who steals corporate secrets through dream-sharing.',
+);
+
 const _series = EmbyItem(
   id: 'series-1',
   name: '剧集系列',
@@ -92,6 +101,31 @@ void main() {
     expect(find.byTooltip('可播电影'), findsOneWidget);
     expect(taps, 0);
     expect(host.current, isNull);
+  });
+
+  testWidgets('hover reveals a two-line overview on the poster', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _wrap(
+        host: host,
+        child: PosterCard(item: _movieWithPlot, onTap: () {}),
+      ),
+    );
+
+    expect(
+      find.text('A thief who steals corporate secrets through dream-sharing.'),
+      findsNothing,
+    );
+
+    await _hover(tester, find.byType(PosterCard));
+
+    expect(
+      find.text('A thief who steals corporate secrets through dream-sharing.'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('2021'), findsOneWidget);
+    expect(find.text('有简介的电影'), findsOneWidget);
   });
 
   testWidgets('play button opens the player and does not open detail', (

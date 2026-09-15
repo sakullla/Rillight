@@ -2,6 +2,47 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/emby/emby_models.dart';
 
 void main() {
+  test('movie without ImageTags still tries Primary', () {
+    final item = EmbyItem.fromJson({
+      'Id': 'movie-no-tag',
+      'Name': '无标签',
+      'Type': 'Movie',
+    });
+    expect(item.primaryImageTag, isNull);
+    expect(
+      item.imageCandidates().map((ref) => '${ref.itemId}:${ref.type}'),
+      contains('movie-no-tag:Primary'),
+    );
+  });
+
+  test('parses nested ImageTags Tag objects', () {
+    final item = EmbyItem.fromJson({
+      'Id': 'movie-nested',
+      'Name': '嵌套标签',
+      'Type': 'Movie',
+      'ImageTags': {
+        'Primary': {'Tag': 'nested-primary'},
+      },
+    });
+    expect(item.primaryImageTag, 'nested-primary');
+  });
+
+  test('parses PrimaryImageTag when ImageTags is omitted', () {
+    final item = EmbyItem.fromJson({
+      'Id': 'series-tag-only',
+      'Name': '完美的谎言',
+      'Type': 'Series',
+      'PrimaryImageTag': 'tag-from-field',
+    });
+    expect(item.primaryImageTag, 'tag-from-field');
+    expect(
+      item.imageCandidates().map(
+        (ref) => '${ref.itemId}:${ref.type}:${ref.tag}',
+      ),
+      contains('series-tag-only:Primary:tag-from-field'),
+    );
+  });
+
   test('TotalRecordCount drives hasMore past a short first page', () {
     const page = EmbyItemPage(
       items: [EmbyItem(id: 'a', name: 'A', type: 'Series')],
@@ -181,5 +222,37 @@ void main() {
       'IntroEnd',
       'CreditsStart',
     ]);
+  });
+
+  test('plot falls back to ShortOverview and Taglines', () {
+    expect(
+      EmbyItem.fromJson({
+        'Id': 'movie-short',
+        'Name': '短简介',
+        'Type': 'Movie',
+        'ShortOverview': '  只有短简介  ',
+      }).overview,
+      '只有短简介',
+    );
+    expect(
+      EmbyItem.fromJson({
+        'Id': 'movie-tagline',
+        'Name': '标语',
+        'Type': 'Movie',
+        'Taglines': ['第一句标语', '第二句'],
+      }).overview,
+      '第一句标语',
+    );
+    expect(
+      EmbyItem.fromJson({
+        'Id': 'movie-overview',
+        'Name': '正文',
+        'Type': 'Movie',
+        'Overview': '完整剧情',
+        'ShortOverview': '短简介',
+        'Taglines': ['标语'],
+      }).overview,
+      '完整剧情',
+    );
   });
 }

@@ -24,6 +24,8 @@ abstract final class PlayerRuntimeDefaults {
 /// 解码/渲染平台默认(hwdec)、音质链路(audio-exclusive)。
 /// 注意不设置 `vo`:media_kit 的 VideoController 以 vo=libmpv 走渲染 API,
 /// 外部覆盖 vo 会使内嵌视频输出失效;等比缩放由 mpv 默认 keepaspect 保证。
+/// 硬解必须用 *-copy:libmpv 纹理吃不到 D3D11/NVDEC/VT 零拷贝表面,
+/// 直出会在关键帧或画面尺寸变化时裂屏闪一帧。
 class PlayerRuntimeOptions {
   const PlayerRuntimeOptions._();
 
@@ -66,13 +68,28 @@ class PlayerRuntimeOptions {
     }
     final hwdec = _hardwareDecodingValue(settings, platform);
     if (hwdec != null) {
-      properties['hwdec'] = hwdec;
+      properties['hwdec'] = embedHwdec(hwdec);
     }
     return properties;
   }
 
+  /// libmpv 嵌入渲染要把硬解表面 copy 回系统内存再上传纹理。
+  static String embedHwdec(String hwdec) {
+    if (hwdec == 'no' ||
+        hwdec == 'yes' ||
+        hwdec.endsWith('-copy') ||
+        hwdec.endsWith('-safe')) {
+      return hwdec;
+    }
+    if (hwdec == 'auto') {
+      return 'auto-copy';
+    }
+    return '$hwdec-copy';
+  }
+
   /// 平台默认硬件解码后端:Windows d3d11va、macOS videotoolbox;
   /// Linux 无既定默认,不显式指定以维持 mpv 默认行为。
+  /// 写入 mpv 前再经 [embedHwdec] 加上 -copy。
   static String? platformDefaultHwdec(TargetPlatform platform) {
     switch (platform) {
       case TargetPlatform.windows:

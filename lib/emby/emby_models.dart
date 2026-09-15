@@ -1,4 +1,5 @@
 import 'package:rillight/emby/emby_errors.dart';
+import 'package:rillight/emby/media_source_format.dart';
 
 class PublicServerInfo {
   const PublicServerInfo({
@@ -165,14 +166,33 @@ class ItemChapter {
 }
 
 class ItemMediaStream {
-  const ItemMediaStream({required this.index, required this.type, this.label});
+  const ItemMediaStream({
+    required this.index,
+    required this.type,
+    this.label,
+    this.codec,
+    this.channels,
+    this.width,
+    this.height,
+    this.bitRate,
+    this.videoRange,
+    this.videoRangeType,
+  });
 
   final int index;
   final String type;
   final String? label;
+  final String? codec;
+  final int? channels;
+  final int? width;
+  final int? height;
+  final int? bitRate;
+  final String? videoRange;
+  final String? videoRangeType;
 
   bool get isAudio => type == 'Audio';
   bool get isSubtitle => type == 'Subtitle';
+  bool get isVideo => type == 'Video';
 
   factory ItemMediaStream.fromJson(Map<String, dynamic> json) {
     final title = json['DisplayTitle']?.toString().trim();
@@ -181,6 +201,13 @@ class ItemMediaStream {
     return ItemMediaStream(
       index: _asInt(json['Index']) ?? 0,
       type: json['Type']?.toString() ?? '',
+      codec: codec,
+      channels: _asInt(json['Channels']),
+      width: _asInt(json['Width']),
+      height: _asInt(json['Height']),
+      bitRate: _asInt(json['BitRate']),
+      videoRange: json['VideoRange']?.toString(),
+      videoRangeType: json['VideoRangeType']?.toString(),
       label: (title != null && title.isNotEmpty)
           ? title
           : (language != null && language.isNotEmpty)
@@ -191,10 +218,24 @@ class ItemMediaStream {
 }
 
 class ItemMediaSource {
-  const ItemMediaSource({required this.id, this.name, this.streams = const []});
+  const ItemMediaSource({
+    required this.id,
+    this.name,
+    this.container,
+    this.size,
+    this.bitrate,
+    this.width,
+    this.height,
+    this.streams = const [],
+  });
 
   final String id;
   final String? name;
+  final String? container;
+  final int? size;
+  final int? bitrate;
+  final int? width;
+  final int? height;
   final List<ItemMediaStream> streams;
 
   String get label {
@@ -203,6 +244,33 @@ class ItemMediaSource {
       return title;
     }
     return id;
+  }
+
+  MediaSourceView get presentation {
+    ItemMediaStream? video;
+    ItemMediaStream? audio;
+    for (final stream in streams) {
+      if (video == null && stream.isVideo) {
+        video = stream;
+      }
+      if (audio == null && stream.isAudio) {
+        audio = stream;
+      }
+    }
+    return formatMediaSource(
+      name: name,
+      container: container,
+      sizeBytes: size,
+      bitrate: bitrate ?? video?.bitRate,
+      width: width ?? video?.width,
+      height: height ?? video?.height,
+      videoCodec: video?.codec,
+      videoRange: video?.videoRange,
+      videoRangeType: video?.videoRangeType,
+      audioCodec: audio?.codec,
+      audioChannels: audio?.channels,
+      audioTitle: audio?.label,
+    );
   }
 
   List<ItemMediaStream> get audioStreams => [
@@ -220,6 +288,11 @@ class ItemMediaSource {
     return ItemMediaSource(
       id: json['Id']?.toString() ?? '',
       name: json['Name']?.toString() ?? json['Path']?.toString(),
+      container: json['Container']?.toString(),
+      size: _asInt(json['Size']),
+      bitrate: _asInt(json['Bitrate']),
+      width: _asInt(json['Width']),
+      height: _asInt(json['Height']),
       streams: [
         if (raw is List)
           for (final stream in raw)
@@ -380,6 +453,9 @@ class EmbyItem {
     if (!seriesPoster) {
       add(id, 'Primary', primaryImageTag);
     }
+    if (refs.isEmpty && !isEpisode) {
+      add(id, 'Primary', primaryImageTag, requireTag: false);
+    }
     if (landscape && !isEpisode) {
       add(id, 'Thumb', thumbImageTag);
       final parentThumb = parentThumbItemId;
@@ -427,7 +503,8 @@ class EmbyItem {
     }
     final tags = json['ImageTags'];
     final tagMap = tags is Map ? Map<dynamic, dynamic>.from(tags) : const {};
-    final primaryTag = _mapImageTag(tagMap, 'Primary');
+    final primaryTag =
+        _mapImageTag(tagMap, 'Primary') ?? _stringTag(json['PrimaryImageTag']);
     final thumbTag = _mapImageTag(tagMap, 'Thumb');
     final backdropTag =
         _firstListTag(json['BackdropImageTags']) ??
@@ -441,7 +518,7 @@ class EmbyItem {
       name: json['Name']?.toString() ?? '',
       type: json['Type']?.toString() ?? '',
       collectionType: json['CollectionType']?.toString(),
-      overview: json['Overview']?.toString(),
+      overview: _plotFromJson(json),
       productionYear: _asInt(json['ProductionYear']),
       runTimeTicks: _asInt(json['RunTimeTicks']),
       childCount: _asInt(json['ChildCount']),
@@ -591,7 +668,24 @@ String? _stringTag(dynamic value) {
 }
 
 String? _mapImageTag(Map<dynamic, dynamic> tags, String key) {
-  return _stringTag(tags[key]);
+  final direct = tags[key] ?? tags[key.toLowerCase()];
+  if (direct != null) {
+    return _imageTagValue(direct);
+  }
+  final wanted = key.toLowerCase();
+  for (final entry in tags.entries) {
+    if (entry.key.toString().toLowerCase() == wanted) {
+      return _imageTagValue(entry.value);
+    }
+  }
+  return null;
+}
+
+String? _imageTagValue(dynamic value) {
+  if (value is Map) {
+    return _stringTag(value['Tag'] ?? value['tag']);
+  }
+  return _stringTag(value);
 }
 
 String? _firstListTag(dynamic value) {
@@ -599,6 +693,36 @@ String? _firstListTag(dynamic value) {
     return null;
   }
   return _stringTag(value.first);
+}
+
+/// 条目剧情:优先 Overview,部分 Emby/刮削只填 ShortOverview 或 Taglines。
+String? _plotFromJson(Map<String, dynamic> json) {
+  final overview = _nonEmptyText(json['Overview']);
+  if (overview != null) {
+    return overview;
+  }
+  final shortOverview = _nonEmptyText(json['ShortOverview']);
+  if (shortOverview != null) {
+    return shortOverview;
+  }
+  final taglines = json['Taglines'];
+  if (taglines is List) {
+    for (final tagline in taglines) {
+      final text = _nonEmptyText(tagline);
+      if (text != null) {
+        return text;
+      }
+    }
+  }
+  return null;
+}
+
+String? _nonEmptyText(dynamic value) {
+  final text = value?.toString().trim();
+  if (text == null || text.isEmpty) {
+    return null;
+  }
+  return text;
 }
 
 int? _asInt(dynamic value) {

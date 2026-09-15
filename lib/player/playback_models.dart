@@ -1,3 +1,5 @@
+import 'package:rillight/emby/media_source_format.dart';
+
 enum PlayMethod {
   directPlay('DirectPlay'),
   directStream('DirectStream'),
@@ -37,6 +39,11 @@ class MediaStreamInfo {
     this.isDefault = false,
     this.isTextSubtitleStream,
     this.channels,
+    this.width,
+    this.height,
+    this.bitRate,
+    this.videoRange,
+    this.videoRangeType,
   });
 
   final int index;
@@ -47,6 +54,11 @@ class MediaStreamInfo {
   final bool isDefault;
   final bool? isTextSubtitleStream;
   final int? channels;
+  final int? width;
+  final int? height;
+  final int? bitRate;
+  final String? videoRange;
+  final String? videoRangeType;
 
   bool get isAudio => type == 'Audio';
   bool get isSubtitle => type == 'Subtitle';
@@ -123,6 +135,11 @@ class MediaStreamInfo {
           ? json['IsTextSubtitleStream'] as bool
           : null,
       channels: _asInt(json['Channels']),
+      width: _asInt(json['Width']),
+      height: _asInt(json['Height']),
+      bitRate: _asInt(json['BitRate']),
+      videoRange: json['VideoRange']?.toString(),
+      videoRangeType: json['VideoRangeType']?.toString(),
     );
   }
 }
@@ -142,6 +159,10 @@ class PlaybackMediaSource {
     this.runTimeTicks,
     this.defaultAudioStreamIndex,
     this.defaultSubtitleStreamIndex,
+    this.size,
+    this.bitrate,
+    this.width,
+    this.height,
     this.mediaStreams = const [],
   });
 
@@ -162,6 +183,10 @@ class PlaybackMediaSource {
   final int? runTimeTicks;
   final int? defaultAudioStreamIndex;
   final int? defaultSubtitleStreamIndex;
+  final int? size;
+  final int? bitrate;
+  final int? width;
+  final int? height;
   final List<MediaStreamInfo> mediaStreams;
 
   String get label {
@@ -183,6 +208,33 @@ class PlaybackMediaSource {
 
   List<MediaStreamInfo> get subtitleStreams =>
       mediaStreams.where((stream) => stream.isSubtitle).toList();
+
+  MediaSourceView get presentation {
+    MediaStreamInfo? video;
+    MediaStreamInfo? audio;
+    for (final stream in mediaStreams) {
+      if (video == null && stream.isVideo) {
+        video = stream;
+      }
+      if (audio == null && stream.isAudio) {
+        audio = stream;
+      }
+    }
+    return formatMediaSource(
+      name: name,
+      container: container,
+      sizeBytes: size,
+      bitrate: bitrate ?? video?.bitRate,
+      width: width ?? video?.width,
+      height: height ?? video?.height,
+      videoCodec: video?.codec,
+      videoRange: video?.videoRange,
+      videoRangeType: video?.videoRangeType,
+      audioCodec: audio?.codec,
+      audioChannels: audio?.channels,
+      audioTitle: audio?.displayTitle,
+    );
+  }
 
   MediaStreamInfo? streamByIndex(int index) {
     for (final stream in mediaStreams) {
@@ -219,6 +271,10 @@ class PlaybackMediaSource {
       runTimeTicks: _asInt(json['RunTimeTicks']),
       defaultAudioStreamIndex: _asInt(json['DefaultAudioStreamIndex']),
       defaultSubtitleStreamIndex: _asInt(json['DefaultSubtitleStreamIndex']),
+      size: _asInt(json['Size']),
+      bitrate: _asInt(json['Bitrate']),
+      width: _asInt(json['Width']),
+      height: _asInt(json['Height']),
       mediaStreams: streams,
     );
   }

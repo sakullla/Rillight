@@ -323,8 +323,9 @@ class _HeroIndicators extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const active = Colors.white;
-    final inactive = Colors.white.withValues(alpha: 0.35);
+    final scheme = Theme.of(context).colorScheme;
+    const activeAlpha = 1.0;
+    const inactiveAlpha = 0.35;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -346,7 +347,9 @@ class _HeroIndicators extends StatelessWidget {
                   width: i == index ? 18 : 6,
                   height: 6,
                   decoration: BoxDecoration(
-                    color: i == index ? active : inactive,
+                    color: scheme.onSurface.withValues(
+                      alpha: i == index ? activeAlpha : inactiveAlpha,
+                    ),
                     borderRadius: BorderRadius.circular(AppRadii.sm / 2),
                   ),
                 ),
@@ -372,8 +375,14 @@ class _HeroContent extends StatelessWidget {
     final titleStyle = compact
         ? theme.textTheme.headlineLarge
         : theme.textTheme.displayMedium;
+    final title = item.isEpisode && (item.seriesName?.isNotEmpty ?? false)
+        ? item.seriesName!
+        : item.name;
+    final episodeLine = item.isEpisode ? continueWatchingSubtitle(item) : '';
     final meta = <String>[
-      if (item.productionYear != null && item.productionYear! > 0)
+      if (!item.isEpisode &&
+          item.productionYear != null &&
+          item.productionYear! > 0)
         '${item.productionYear}',
       ?runtimeLabel(l10n, item),
       if (item.playbackProgress > 0)
@@ -387,15 +396,26 @@ class _HeroContent extends StatelessWidget {
         ConstrainedBox(
           constraints: BoxConstraints(maxWidth: textBlockWidth),
           child: Text(
-            itemTitle(item),
+            title,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
             style: titleStyle?.copyWith(
-              color: Colors.white,
+              color: theme.colorScheme.onSurface,
               fontWeight: FontWeight.w800,
             ),
           ),
         ),
+        if (episodeLine.isNotEmpty) ...[
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            episodeLine,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.titleMedium?.copyWith(
+              color: theme.colorScheme.onSurface.withValues(alpha: 0.86),
+            ),
+          ),
+        ],
         if (meta.isNotEmpty) ...[
           const SizedBox(height: AppSpacing.xs),
           Text(
@@ -403,7 +423,7 @@ class _HeroContent extends StatelessWidget {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: theme.textTheme.labelLarge?.copyWith(
-              color: Colors.white.withValues(alpha: 0.78),
+              color: theme.colorScheme.onSurface.withValues(alpha: 0.78),
             ),
           ),
         ],
@@ -421,7 +441,7 @@ class _HeroContent extends StatelessWidget {
               maxLines: compact ? 2 : 3,
               overflow: TextOverflow.ellipsis,
               style: theme.textTheme.bodyMedium?.copyWith(
-                color: Colors.white.withValues(alpha: 0.86),
+                color: theme.colorScheme.onSurface.withValues(alpha: 0.86),
               ),
             ),
           ),
@@ -457,8 +477,10 @@ class _HeroContent extends StatelessWidget {
             OutlinedButton(
               onPressed: () => context.push(AppRoutes.item(item.id)),
               style: OutlinedButton.styleFrom(
-                foregroundColor: Colors.white,
-                side: BorderSide(color: Colors.white.withValues(alpha: 0.42)),
+                foregroundColor: theme.colorScheme.onSurface,
+                side: BorderSide(
+                  color: theme.colorScheme.onSurface.withValues(alpha: 0.42),
+                ),
                 minimumSize: const Size(0, 48),
                 padding: const EdgeInsets.symmetric(
                   horizontal: AppSpacing.lg,

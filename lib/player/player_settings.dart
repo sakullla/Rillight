@@ -77,6 +77,7 @@ class PlayerSettings {
     this.danmakuDisplay,
     this.danmakuServer,
     this.danmakuToken,
+    this.danmakuAppId,
     this.danmakuSeriesMemories = const {},
   });
 
@@ -105,8 +106,11 @@ class PlayerSettings {
   /// 自定义 dandanplay 兼容服务基地址（空表示官方直连）。
   final String? danmakuServer;
 
-  /// 自定义服务的访问令牌。
+  /// 自定义服务的访问令牌;官方源时作为 AppSecret。
   final String? danmakuToken;
+
+  /// 官方 dandanplay 开放平台 AppId;自定义源忽略。
+  final String? danmakuAppId;
 
   /// 弹幕按剧匹配记忆，key 为 seriesId。
   final Map<String, DanmakuSeriesMemory> danmakuSeriesMemories;
@@ -142,6 +146,7 @@ class PlayerSettings {
     if (danmakuDisplay != null) 'danmakuDisplay': danmakuDisplay!.toJson(),
     if (danmakuServer != null) 'danmakuServer': danmakuServer,
     if (danmakuToken != null) 'danmakuToken': danmakuToken,
+    if (danmakuAppId != null) 'danmakuAppId': danmakuAppId,
     if (danmakuSeriesMemories.isNotEmpty)
       'danmakuSeriesMemories': {
         for (final entry in danmakuSeriesMemories.entries)
@@ -184,6 +189,9 @@ class PlayerSettings {
           : null,
       danmakuToken: json['danmakuToken'] is String
           ? json['danmakuToken'] as String
+          : null,
+      danmakuAppId: json['danmakuAppId'] is String
+          ? json['danmakuAppId'] as String
           : null,
       danmakuSeriesMemories: _readDanmakuMemories(
         json['danmakuSeriesMemories'],

@@ -135,6 +135,7 @@ void main() {
         volume: 40,
         danmakuServer: 'https://dan.example.com/ddplay',
         danmakuToken: 'secret',
+        danmakuAppId: 'app-id',
       ),
     );
     await pumpPage(tester, store: store);
@@ -152,6 +153,13 @@ void main() {
           .controller!
           .text,
       'secret',
+    );
+    expect(
+      tester
+          .widget<TextField>(find.byKey(SettingsPage.danmakuAppIdFieldKey))
+          .controller!
+          .text,
+      'app-id',
     );
   });
 
@@ -173,6 +181,12 @@ void main() {
       await tester.testTextInput.receiveAction(TextInputAction.next);
       await tester.pump();
       await tester.enterText(
+        find.byKey(SettingsPage.danmakuAppIdFieldKey),
+        'app-id',
+      );
+      await tester.testTextInput.receiveAction(TextInputAction.next);
+      await tester.pump();
+      await tester.enterText(
         find.byKey(SettingsPage.danmakuTokenFieldKey),
         'secret',
       );
@@ -181,6 +195,7 @@ void main() {
 
       final settings = await store.read();
       expect(settings.danmakuServer, 'https://dan.example.com/ddplay');
+      expect(settings.danmakuAppId, 'app-id');
       expect(settings.danmakuToken, 'secret');
       // 弹幕服务保存不清掉音量/解码等既有字段。
       expect(settings.volume, 42);
@@ -230,6 +245,7 @@ void main() {
     final settings = await store.read();
     // 空串/未配置都按官方源解析。
     expect((settings.danmakuServer ?? '').isEmpty, isTrue);
+    expect((settings.danmakuAppId ?? '').isEmpty, isTrue);
     expect((settings.danmakuToken ?? '').isEmpty, isTrue);
     // 音量不属于本页管理,恢复默认不覆盖已存音量。
     expect(settings.volume, 40);
@@ -237,6 +253,13 @@ void main() {
     expect(
       tester
           .widget<TextField>(find.byKey(SettingsPage.danmakuServerFieldKey))
+          .controller!
+          .text,
+      '',
+    );
+    expect(
+      tester
+          .widget<TextField>(find.byKey(SettingsPage.danmakuAppIdFieldKey))
           .controller!
           .text,
       '',
@@ -292,6 +315,17 @@ void main() {
       expect(cache.right, lessThan(column.right + 1));
       // 控件贴在分组卡片右侧,而不是 1600 宽窗口的右沿。
       expect(cache.right, lessThan(1200));
+
+      final decoding = tester.getRect(
+        find.byKey(SettingsPage.hardwareDecodingKey),
+      );
+      final backend = tester.getRect(
+        find.byKey(SettingsPage.decoderBackendKey),
+      );
+      expect(cache.width, closeTo(decoding.width, 1));
+      expect(decoding.width, closeTo(backend.width, 1));
+      expect(cache.right, closeTo(decoding.right, 1));
+      expect(decoding.right, closeTo(backend.right, 1));
 
       final restore = tester.getRect(
         find.byKey(SettingsPage.restoreDefaultsKey),

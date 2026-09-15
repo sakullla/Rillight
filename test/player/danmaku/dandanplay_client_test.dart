@@ -126,6 +126,40 @@ void main() {
     expect(captured.headers['Authorization'], 'Bearer secret');
   });
 
+  test(
+    'official source with app credentials sends X-AppId and X-AppSecret',
+    () async {
+      late RequestOptions captured;
+      final client = clientFor((options) {
+        captured = options;
+        return {'success': true, 'isMatched': false, 'matches': <Object?>[]};
+      });
+      final source = DandanplaySource.officialWith(
+        appId: 'app-id',
+        appSecret: 'app-secret',
+      );
+      expect(source.isCustom, isFalse);
+      expect(source.headers(), {
+        'X-AppId': 'app-id',
+        'X-AppSecret': 'app-secret',
+      });
+      await client.match(
+        source,
+        fileName: 'foo.mkv',
+        fileHash: '',
+        fileSize: 0,
+        videoDuration: 24,
+      );
+      expect(captured.headers['X-AppId'], 'app-id');
+      expect(captured.headers['X-AppSecret'], 'app-secret');
+      expect(captured.headers['Authorization'], isNull);
+    },
+  );
+
+  test('official source without credentials sends no auth headers', () {
+    expect(DandanplaySource.official.headers(), isEmpty);
+  });
+
   test('searchAnime parses animes and episodes', () async {
     late RequestOptions captured;
     final client = clientFor((options) {
@@ -164,6 +198,57 @@ void main() {
     });
     expect(await client.searchAnime(DandanplaySource.official, '  '), isEmpty);
     expect(requests, 0);
+  });
+
+  test('searchEpisodes posts anime and episode query', () async {
+    late RequestOptions captured;
+    final client = clientFor((options) {
+      captured = options;
+      return {
+        'success': true,
+        'animes': [
+          {
+            'animeId': 8,
+            'animeTitle': 'Bar',
+            'type': 'tvseries',
+            'episodes': [
+              {'episodeId': 21, 'episodeTitle': '第01话'},
+            ],
+          },
+        ],
+      };
+    });
+    final animes = await client.searchEpisodes(
+      DandanplaySource.official,
+      anime: 'Bar',
+      episode: 1,
+    );
+    expect(captured.uri.path, contains('/api/v2/search/episodes'));
+    expect(captured.uri.queryParameters['anime'], 'Bar');
+    expect(captured.uri.queryParameters['episode'], '1');
+    expect(animes.single.episodes.single.episodeId, 21);
+  });
+
+  test('fetchBangumi reads wrapped bangumi.episodes', () async {
+    final client = clientFor((options) {
+      expect(options.uri.path, contains('/api/v2/bangumi/9'));
+      return {
+        'success': true,
+        'bangumi': {
+          'animeId': 9,
+          'animeTitle': 'Baz',
+          'type': 'tvseries',
+          'episodes': [
+            {'episodeId': 31, 'episodeTitle': '第01话'},
+            {'episodeId': 32, 'episodeTitle': '第02话'},
+          ],
+        },
+      };
+    });
+    final anime = await client.fetchBangumi(DandanplaySource.official, 9);
+    expect(anime, isNotNull);
+    expect(anime!.animeTitle, 'Baz');
+    expect(anime.episodes.map((e) => e.episodeId), [31, 32]);
   });
 
   test('fetchComments parses p/m fields and sorts by time', () async {

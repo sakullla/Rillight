@@ -18,7 +18,15 @@ class MediaKitVideoBackend implements VideoBackend {
         libass: true,
       ),
     );
-    videoController = VideoController(_player);
+    videoController = VideoController(
+      _player,
+      configuration: const VideoControllerConfiguration(
+        vo: 'libmpv',
+        // 创建时先落到 copy,避免 NativeVideoController 默认 hwdec=auto
+        // 在 open 之后把运行时的 *-copy 盖回去。
+        hwdec: 'auto-copy',
+      ),
+    );
     _settingsStore = settingsStore;
   }
 
@@ -31,6 +39,8 @@ class MediaKitVideoBackend implements VideoBackend {
   @override
   Stream<Duration> get durationStream => _player.stream.duration;
   @override
+  Stream<Duration> get bufferStream => _player.stream.buffer;
+  @override
   Stream<bool> get playingStream => _player.stream.playing;
   @override
   Stream<bool> get completedStream => _player.stream.completed;
@@ -41,6 +51,8 @@ class MediaKitVideoBackend implements VideoBackend {
   Duration get position => _player.state.position;
   @override
   Duration get duration => _player.state.duration;
+  @override
+  Duration get buffer => _player.state.buffer;
   @override
   bool get isPlaying => _player.state.playing;
 

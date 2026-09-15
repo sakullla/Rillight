@@ -22,6 +22,7 @@ abstract final class ConnectFormKeys {
   static const username = Key('connect-username');
   static const password = Key('connect-password');
   static const submit = Key('connect-submit');
+  static const passwordVisibility = Key('connect-password-visibility');
   static const addServer = Key('connect-add-server');
   static const addLine = Key('connect-add-line');
   static const deleteLine = Key('connect-delete-line');
@@ -46,6 +47,7 @@ class _ConnectPageState extends State<ConnectPage> {
   String? _selectedServerId;
   String? _selectedLineId;
   bool _moreExpanded = false;
+  bool _passwordVisible = false;
   String _serverQuery = '';
   final List<TextEditingController> _extraLines = [];
 
@@ -311,11 +313,27 @@ class _ConnectPageState extends State<ConnectPage> {
                     key: ConnectFormKeys.password,
                     controller: _password,
                     enabled: !auth.isBusy,
-                    obscureText: true,
+                    obscureText: !_passwordVisible,
                     autofillHints: const [AutofillHints.password],
                     textInputAction: TextInputAction.done,
                     onSubmitted: auth.isBusy ? null : (_) => _submit(),
-                    decoration: InputDecoration(labelText: l10n.password),
+                    decoration: InputDecoration(
+                      labelText: l10n.password,
+                      suffixIcon: IconButton(
+                        key: ConnectFormKeys.passwordVisibility,
+                        tooltip: _passwordVisible
+                            ? l10n.hidePassword
+                            : l10n.showPassword,
+                        onPressed: () {
+                          setState(() => _passwordVisible = !_passwordVisible);
+                        },
+                        icon: Icon(
+                          _passwordVisible
+                              ? Icons.visibility_off_outlined
+                              : Icons.visibility_outlined,
+                        ),
+                      ),
+                    ),
                   ),
                 ],
               ),

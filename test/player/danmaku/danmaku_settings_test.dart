@@ -32,6 +32,7 @@ void main() {
       ),
       danmakuServer: 'https://dan.example.com/ddplay',
       danmakuToken: 'secret',
+      danmakuAppId: 'app-id',
       danmakuSeriesMemories: {
         'series-1': DanmakuSeriesMemory(
           animeId: 7,
@@ -53,6 +54,7 @@ void main() {
     expect(loaded.danmakuDisplay!.blockedKeywords, ['广告', 'spam']);
     expect(loaded.danmakuServer, 'https://dan.example.com/ddplay');
     expect(loaded.danmakuToken, 'secret');
+    expect(loaded.danmakuAppId, 'app-id');
     final memory = loaded.danmakuSeriesMemories['series-1'];
     expect(memory!.animeId, 7);
     expect(memory.episodeId, 100);
@@ -67,6 +69,7 @@ void main() {
       expect(loaded.danmakuEnabled, isNull);
       expect(loaded.danmakuDisplay, isNull);
       expect(loaded.danmakuServer, isNull);
+      expect(loaded.danmakuAppId, isNull);
       expect(loaded.danmakuSeriesMemories, isEmpty);
     },
   );
@@ -94,6 +97,7 @@ void main() {
           danmakuEnabled: true,
           danmakuServer: 'https://dan.example.com',
           danmakuToken: 'secret',
+          danmakuAppId: 'app-id',
           danmakuSeriesMemories: {
             'series-1': DanmakuSeriesMemory(
               animeId: 7,
@@ -109,6 +113,7 @@ void main() {
       expect(loaded.volume, 61);
       expect(loaded.danmakuServer, 'https://dan.example.com');
       expect(loaded.danmakuToken, 'secret');
+      expect(loaded.danmakuAppId, 'app-id');
       expect(loaded.danmakuSeriesMemories['series-1']!.episodeId, 100);
     },
   );

@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/theme.dart';
@@ -719,6 +720,16 @@ void main() {
 
     await load();
     expect(fetches, 1);
+    expect(
+      MediaImageCache.instance.isNegativeCached(
+        serverId: 'server-1',
+        itemId: 'a',
+        type: 'Primary',
+        tag: 'tag-x',
+        maxWidth: 280,
+      ),
+      isTrue,
+    );
     // TTL 内不再重试。
     await load();
     expect(fetches, 1);
@@ -796,6 +807,38 @@ void main() {
     expect(extraFetches, 1);
   });
 
+  test('timeout abort is invoked so HTTP can be cancelled', () async {
+    MediaImageCache.instance.fetchTimeout = const Duration(milliseconds: 40);
+    final hung = Completer<Uint8List?>();
+    addTearDown(() {
+      if (!hung.isCompleted) {
+        hung.complete(null);
+      }
+    });
+    var aborted = false;
+    final missed = await MediaImageCache.instance.load(
+      serverId: 'server-1',
+      itemId: 'abort',
+      type: 'Primary',
+      tag: 'tag-x',
+      maxWidth: 280,
+      fetch: () => hung.future,
+      onAbort: () => aborted = true,
+    );
+    expect(missed, isNull);
+    expect(aborted, isTrue);
+    expect(
+      MediaImageCache.instance.isNegativeCached(
+        serverId: 'server-1',
+        itemId: 'abort',
+        type: 'Primary',
+        tag: 'tag-x',
+        maxWidth: 280,
+      ),
+      isFalse,
+    );
+  });
+
   test('timeouts are not negatively cached and can retry', () async {
     MediaImageCache.instance.fetchTimeout = const Duration(milliseconds: 40);
     var fetches = 0;
@@ -860,6 +903,66 @@ void main() {
     );
     expect(second, isNotNull);
     hang.complete();
+  });
+
+  testWidgets('paints cached tiles immediately after jumpTo recreates them', (
+    tester,
+  ) async {
+    for (var i = 0; i < 8; i++) {
+      server.items.add(
+        FakeEmbyItem(
+          id: 'scroll-$i',
+          name: '海报$i',
+          type: 'Movie',
+          primaryImageTag: 'tag-scroll-$i',
+        ),
+      );
+    }
+    final auth = await connect(tester);
+    await tester.runAsync(() async {
+      await tester.pumpWidget(
+        wrap(
+          auth,
+          SizedBox(
+            width: 120,
+            height: 200,
+            child: ListView.builder(
+              scrollCacheExtent: const ScrollCacheExtent.pixels(0),
+              itemExtent: 190,
+              itemCount: 8,
+              itemBuilder: (context, index) {
+                return MediaImage(
+                  item: EmbyItem(
+                    id: 'scroll-$index',
+                    name: '海报$index',
+                    type: 'Movie',
+                    primaryImageTag: 'tag-scroll-$index',
+                  ),
+                  width: 120,
+                  height: 180,
+                );
+              },
+            ),
+          ),
+        ),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    });
+    await tester.pump();
+    await tester.pump();
+    expect(find.byType(Image), findsWidgets);
+
+    final position = tester
+        .state<ScrollableState>(find.byType(Scrollable))
+        .position;
+    position.jumpTo(190 * 6);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+    position.jumpTo(0);
+    await tester.pump();
+    expect(find.byType(Image), findsWidgets);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(MediaImageCache.defaultFetchTimeout);
   });
 }
 

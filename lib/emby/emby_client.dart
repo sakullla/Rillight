@@ -1,4 +1,7 @@
+import 'dart:io';
+
 import 'package:dio/dio.dart';
+import 'package:dio/io.dart';
 import 'package:rillight/emby/device_profile.dart';
 import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/emby/emby_errors.dart';
@@ -6,6 +9,33 @@ import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/emby/emby_url.dart';
 import 'package:rillight/player/playback_models.dart';
 import 'package:rillight/player/playback_resolver.dart';
+
+/// 图和 JSON 共用一个 Host。Dart 默认每主机 6 条连接,网格一滑就排队超时。
+/// 只改默认 adapter 的 HttpClient,不替换整个 adapter,避免丢掉 Dio 的空闲回收。
+const int _maxConnectionsPerHost = 16;
+
+Dio _createEmbyDio({
+  required Duration connectTimeout,
+  required Duration receiveTimeout,
+}) {
+  final dio = Dio(
+    BaseOptions(
+      connectTimeout: connectTimeout,
+      receiveTimeout: receiveTimeout,
+      sendTimeout: connectTimeout,
+      headers: const {'Accept': 'application/json'},
+    ),
+  );
+  final adapter = dio.httpClientAdapter;
+  if (adapter is IOHttpClientAdapter) {
+    adapter.createHttpClient = () {
+      return HttpClient()
+        ..idleTimeout = const Duration(seconds: 3)
+        ..maxConnectionsPerHost = _maxConnectionsPerHost;
+    };
+  }
+  return dio;
+}
 
 class EmbyClient {
   EmbyClient({
@@ -17,13 +47,9 @@ class EmbyClient {
     this.onRefreshSession,
   }) : _dio =
            dio ??
-           Dio(
-             BaseOptions(
-               connectTimeout: connectTimeout,
-               receiveTimeout: receiveTimeout,
-               sendTimeout: connectTimeout,
-               headers: const {'Accept': 'application/json'},
-             ),
+           _createEmbyDio(
+             connectTimeout: connectTimeout,
+             receiveTimeout: receiveTimeout,
            );
 
   final EmbyDeviceInfo device;
@@ -129,13 +155,16 @@ class EmbyClient {
   }
 
   static const itemFields =
-      'Overview,ProductionYear,RunTimeTicks,ChildCount,SeriesInfo,'
-      'DateCreated,PremiereDate,CommunityRating,SortName,MediaSources,Chapters';
+      'Overview,ShortOverview,Taglines,ProductionYear,RunTimeTicks,ChildCount,'
+      'SeriesInfo,DateCreated,PremiereDate,CommunityRating,SortName,'
+      'MediaSources,Chapters,ImageTags';
 
   /// 海报网格不需要 MediaSources/Chapters,大库带上这两项会把 /Items 拖死。
+  /// ImageTags 必须显式要:部分 Emby/Jellyfin 不带这个 Field 时条目有标题没海报 tag,
+  /// 网格就会整页灰块。
   static const gridFields =
-      'Overview,ProductionYear,RunTimeTicks,ChildCount,SeriesInfo,'
-      'DateCreated,PremiereDate,CommunityRating,SortName';
+      'Overview,ShortOverview,Taglines,ProductionYear,RunTimeTicks,ChildCount,'
+      'SeriesInfo,DateCreated,PremiereDate,CommunityRating,SortName,ImageTags';
   static const imageTypes = 'Primary,Backdrop,Thumb';
   static const detailImageTypes = 'Primary,Backdrop,Thumb,Chapter';
 
@@ -486,8 +515,15 @@ class EmbyClient {
     String itemId, {
     String? tag,
     int maxWidth = 280,
+    CancelToken? cancelToken,
   }) {
-    return getItemImage(itemId, type: 'Primary', tag: tag, maxWidth: maxWidth);
+    return getItemImage(
+      itemId,
+      type: 'Primary',
+      tag: tag,
+      maxWidth: maxWidth,
+      cancelToken: cancelToken,
+    );
   }
 
   Future<List<int>> getChapterImage(
@@ -495,6 +531,7 @@ class EmbyClient {
     required int index,
     String? tag,
     int maxWidth = 400,
+    CancelToken? cancelToken,
   }) async {
     try {
       return await _requestBytes(
@@ -503,6 +540,7 @@ class EmbyClient {
           'maxWidth': '$maxWidth',
           if (tag != null && tag.isNotEmpty) 'tag': tag,
         },
+        cancelToken: cancelToken,
       );
     } catch (_) {
       if (tag == null || tag.isEmpty) {
@@ -511,6 +549,7 @@ class EmbyClient {
       return _requestBytes(
         '/Items/$itemId/Images/Chapter/$index',
         queryParameters: {'maxWidth': '$maxWidth'},
+        cancelToken: cancelToken,
       );
     }
   }
@@ -520,6 +559,7 @@ class EmbyClient {
     String type = 'Primary',
     String? tag,
     int maxWidth = 280,
+    CancelToken? cancelToken,
   }) {
     return _requestBytes(
       '/Items/$itemId/Images/$type',
@@ -527,6 +567,7 @@ class EmbyClient {
         'maxWidth': '$maxWidth',
         if (tag != null && tag.isNotEmpty) 'tag': tag,
       },
+      cancelToken: cancelToken,
     );
   }
 
@@ -625,6 +666,7 @@ class EmbyClient {
   Future<List<int>> _requestBytes(
     String path, {
     Map<String, dynamic>? queryParameters,
+    CancelToken? cancelToken,
   }) async {
     if (!hasSession) {
       throw const EmbyException(EmbyFailureKind.sessionExpired);
@@ -636,10 +678,14 @@ class EmbyClient {
     return _withAuthRetry(() async {
       final response = await _dio.requestUri<dynamic>(
         uri,
+        cancelToken: cancelToken,
         options: Options(
           method: 'GET',
           responseType: ResponseType.bytes,
-          headers: _headers(token: _accessToken, userId: _userId),
+          headers: {
+            ..._headers(token: _accessToken, userId: _userId),
+            'Accept': '*/*',
+          },
         ),
       );
       final data = response.data;
@@ -656,6 +702,9 @@ class EmbyClient {
     } on EmbyException {
       rethrow;
     } on DioException catch (error) {
+      if (error.type == DioExceptionType.cancel) {
+        throw EmbyException.fromDio(error);
+      }
       final mapped = EmbyException.fromDio(error);
       if (mapped.kind != EmbyFailureKind.sessionExpired) {
         throw mapped;

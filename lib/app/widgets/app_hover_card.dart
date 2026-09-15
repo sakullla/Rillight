@@ -151,6 +151,8 @@ class _AppHoverCardState extends State<AppHoverCard> {
           autofocus: widget.autofocus,
           canRequestFocus: widget.onTap != null,
           borderRadius: radius,
+          splashFactory: NoSplash.splashFactory,
+          overlayColor: const WidgetStatePropertyAll(Colors.transparent),
           child: widget.child,
         ),
       ),

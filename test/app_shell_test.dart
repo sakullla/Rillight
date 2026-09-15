@@ -464,7 +464,7 @@ void main() {
     expect(find.byKey(CatalogKeys.back), findsNothing);
   });
 
-  testWidgets('back button survives in-place episode switch on detail', (
+  testWidgets('back button returns from episode details to the series list', (
     tester,
   ) async {
     final auth = await _connect(tester);
@@ -477,14 +477,19 @@ void main() {
     expect(find.byType(ItemDetailPage), findsOneWidget);
     expect(find.byKey(CatalogKeys.back), findsOneWidget);
 
-    await ensureVisibleBelowTopBar(tester, find.byKey(CatalogKeys.viewEpisode));
-    await tapBelowTopBar(tester, find.byKey(CatalogKeys.viewEpisode));
+    await ensureVisibleBelowTopBar(
+      tester,
+      find.byKey(CatalogKeys.episode('episode-friends-s1e1')),
+    );
+    await tapBelowTopBar(
+      tester,
+      find.byKey(CatalogKeys.episode('episode-friends-s1e1')),
+    );
     await tester.pumpAndSettle();
 
-    // 查看本集是页内切换,不 push 新路由,返回钮仍在顶栏。
     expect(
       GoRouter.of(tester.element(find.byType(ItemDetailPage))).state.uri.path,
-      AppRoutes.item('series-friends'),
+      AppRoutes.item('episode-friends-s1e1'),
     );
     expect(find.textContaining('The Pilot'), findsWidgets);
     final back = find.byKey(CatalogKeys.back);
@@ -498,6 +503,14 @@ void main() {
     );
 
     await tester.tap(back);
+    await tester.pumpAndSettle();
+    expect(
+      GoRouter.of(tester.element(find.byType(ItemDetailPage))).state.uri.path,
+      AppRoutes.item('series-friends'),
+    );
+    expect(find.text('老友记 (1994)'), findsOneWidget);
+
+    await tester.tap(find.byKey(CatalogKeys.back));
     await tester.pumpAndSettle();
     expect(find.byType(ItemDetailPage), findsNothing);
     expect(find.byType(HomePage), findsOneWidget);

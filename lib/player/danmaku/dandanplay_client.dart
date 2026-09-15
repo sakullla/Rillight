@@ -36,13 +36,24 @@ class DandanplaySource {
   const DandanplaySource._({
     required this.baseUri,
     this.token,
+    this.appId,
+    this.appSecret,
     this.custom = false,
   });
 
-  /// 官方 dandanplay 开放 API,默认直连。
-  static final DandanplaySource official = DandanplaySource._(
-    baseUri: Uri.parse('https://api.dandanplay.net'),
-  );
+  /// 官方 dandanplay 开放 API。自 2025-01 起需 [appId]/[appSecret]。
+  static final DandanplaySource official = DandanplaySource.officialWith();
+
+  /// 官方源;凭证成对才写入 X-AppId / X-AppSecret(开放平台凭证模式)。
+  factory DandanplaySource.officialWith({String? appId, String? appSecret}) {
+    final id = appId?.trim();
+    final secret = appSecret?.trim();
+    return DandanplaySource._(
+      baseUri: Uri.parse('https://api.dandanplay.net'),
+      appId: (id == null || id.isEmpty) ? null : id,
+      appSecret: (secret == null || secret.isEmpty) ? null : secret,
+    );
+  }
 
   /// 兼容自建服务(如 misaka_danmu_server),baseUri 可带路径前缀。
   factory DandanplaySource.custom(String baseUrl, [String? token]) {
@@ -71,6 +82,8 @@ class DandanplaySource {
 
   final Uri baseUri;
   final String? token;
+  final String? appId;
+  final String? appSecret;
   final bool custom;
 
   bool get isCustom => custom;
@@ -84,13 +97,21 @@ class DandanplaySource {
     return baseUri.replace(path: '$prefix$apiPath');
   }
 
-  /// 兼容服务的令牌经 Authorization: Bearer 头携带。
+  /// 自定义源用 Bearer;官方源用开放平台凭证头(不引入签名依赖)。
   Map<String, String> headers() {
-    final value = token;
-    if (value == null || value.isEmpty) {
+    if (custom) {
+      final value = token;
+      if (value == null || value.isEmpty) {
+        return const {};
+      }
+      return {'Authorization': 'Bearer $value'};
+    }
+    final id = appId;
+    final secret = appSecret;
+    if (id == null || id.isEmpty || secret == null || secret.isEmpty) {
       return const {};
     }
-    return {'Authorization': 'Bearer $value'};
+    return {'X-AppId': id, 'X-AppSecret': secret};
   }
 }
 
@@ -175,39 +196,95 @@ class DandanplayClient {
       '/api/v2/search/anime',
       queryParameters: {'keyword': term},
     );
+    return _parseAnimes(data);
+  }
+
+  /// 手动匹配用的分集搜索:GET /api/v2/search/episodes。
+  ///
+  /// 官方 `/search/anime` 通常只返回作品、不含分集;此接口才带 episodeId,
+  /// 否则手动搜索展开后是空的。
+  Future<List<DanmakuAnime>> searchEpisodes(
+    DandanplaySource source, {
+    required String anime,
+    int? episode,
+  }) async {
+    final term = anime.trim();
+    if (term.isEmpty) {
+      return const [];
+    }
+    final data = await _requestJson(
+      source,
+      'GET',
+      '/api/v2/search/episodes',
+      queryParameters: {
+        'anime': term,
+        if (episode != null && episode > 0) 'episode': '$episode',
+      },
+    );
+    return _parseAnimes(data);
+  }
+
+  /// 作品详情:GET /api/v2/bangumi/{animeId},补全 search/anime 缺的分集。
+  Future<DanmakuAnime?> fetchBangumi(
+    DandanplaySource source,
+    int animeId,
+  ) async {
+    if (animeId <= 0) {
+      return null;
+    }
+    final data = await _requestJson(source, 'GET', '/api/v2/bangumi/$animeId');
+    final raw = data['bangumi'] ?? data;
+    if (raw is! Map) {
+      return null;
+    }
+    return _animeFromMap(Map<String, dynamic>.from(raw));
+  }
+
+  static List<DanmakuAnime> _parseAnimes(Map<String, dynamic> data) {
     final animes = <DanmakuAnime>[];
     final rawAnimes = data['animes'];
-    if (rawAnimes is List) {
-      for (final entry in rawAnimes) {
-        if (entry is! Map) {
+    if (rawAnimes is! List) {
+      return animes;
+    }
+    for (final entry in rawAnimes) {
+      if (entry is! Map) {
+        continue;
+      }
+      final anime = _animeFromMap(Map<String, dynamic>.from(entry));
+      if (anime != null) {
+        animes.add(anime);
+      }
+    }
+    return animes;
+  }
+
+  static DanmakuAnime? _animeFromMap(Map<String, dynamic> entry) {
+    final animeId = _asInt(entry['animeId']) ?? 0;
+    final title = entry['animeTitle']?.toString() ?? '';
+    if (animeId <= 0 && title.isEmpty) {
+      return null;
+    }
+    final episodes = <DanmakuEpisode>[];
+    final rawEpisodes = entry['episodes'];
+    if (rawEpisodes is List) {
+      for (final episode in rawEpisodes) {
+        if (episode is! Map) {
           continue;
         }
-        final episodes = <DanmakuEpisode>[];
-        final rawEpisodes = entry['episodes'];
-        if (rawEpisodes is List) {
-          for (final episode in rawEpisodes) {
-            if (episode is! Map) {
-              continue;
-            }
-            episodes.add(
-              DanmakuEpisode(
-                episodeId: _asInt(episode['episodeId']) ?? 0,
-                episodeTitle: episode['episodeTitle']?.toString() ?? '',
-              ),
-            );
-          }
-        }
-        animes.add(
-          DanmakuAnime(
-            animeId: _asInt(entry['animeId']) ?? 0,
-            animeTitle: entry['animeTitle']?.toString() ?? '',
-            type: entry['type']?.toString(),
-            episodes: episodes,
+        episodes.add(
+          DanmakuEpisode(
+            episodeId: _asInt(episode['episodeId']) ?? 0,
+            episodeTitle: episode['episodeTitle']?.toString() ?? '',
           ),
         );
       }
     }
-    return animes;
+    return DanmakuAnime(
+      animeId: animeId,
+      animeTitle: title,
+      type: entry['type']?.toString(),
+      episodes: episodes,
+    );
   }
 
   /// 弹幕:GET /api/v2/comment/{episodeId}。

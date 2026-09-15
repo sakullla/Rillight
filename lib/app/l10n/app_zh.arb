@@ -36,6 +36,14 @@
   "@password": {
     "description": "Label for the Emby password field."
   },
+  "showPassword": "显示密码",
+  "@showPassword": {
+    "description": "Tooltip to reveal the connect-form password."
+  },
+  "hidePassword": "隐藏密码",
+  "@hidePassword": {
+    "description": "Tooltip to hide the connect-form password."
+  },
   "userAgent": "User-Agent",
   "@userAgent": {
     "description": "Optional HTTP User-Agent for a server line."
@@ -444,13 +452,27 @@
   "@resumePlay": {
     "description": "Resume playback from the saved position."
   },
+  "playEpisode": "播放 {code}",
+  "@playEpisode": {
+    "description": "Start the named episode from a series detail page.",
+    "placeholders": {
+      "code": {
+        "type": "String"
+      }
+    }
+  },
+  "resumePlayEpisode": "继续播放 {code}",
+  "@resumePlayEpisode": {
+    "description": "Resume the named episode from a series detail page.",
+    "placeholders": {
+      "code": {
+        "type": "String"
+      }
+    }
+  },
   "viewSeries": "查看剧集",
   "@viewSeries": {
     "description": "Open the parent series from an episode detail page."
-  },
-  "viewThisEpisode": "查看本集",
-  "@viewThisEpisode": {
-    "description": "Open the current or resume episode from a series detail page."
   },
   "nextEpisode": "下一集",
   "@nextEpisode": {
@@ -679,7 +701,7 @@
   "@settingsDanmakuService": {
     "description": "Settings section title for the danmaku service source."
   },
-  "settingsDanmakuServiceHint": "默认使用官方源；自建服务时再填写",
+  "settingsDanmakuServiceHint": "官方源需 AppId；国产剧可改用兼容自建服务",
   "@settingsDanmakuServiceHint": {
     "description": "Short explanation under the danmaku service section title."
   },
@@ -699,13 +721,21 @@
   "@settingsDanmakuServerHint": {
     "description": "Hint that an empty custom danmaku server falls back to the official source."
   },
+  "settingsDanmakuAppId": "官方 AppId",
+  "@settingsDanmakuAppId": {
+    "description": "Setting row label for the official dandanplay AppId."
+  },
+  "settingsDanmakuAppIdHint": "官方源必填，在弹弹play 开放平台申请",
+  "@settingsDanmakuAppIdHint": {
+    "description": "Hint that the official danmaku source requires an AppId."
+  },
   "settingsDanmakuToken": "访问令牌",
   "@settingsDanmakuToken": {
-    "description": "Setting row label for the custom danmaku service access token."
+    "description": "Setting row label for AppSecret or a custom service token."
   },
-  "settingsDanmakuTokenHint": "可选，自建服务时填写",
+  "settingsDanmakuTokenHint": "官方源填 AppSecret；自定义服务填访问令牌",
   "@settingsDanmakuTokenHint": {
-    "description": "Hint that the danmaku service access token is optional."
+    "description": "Hint covering official AppSecret and custom Bearer token."
   },
   "playbackRate": "倍速",
   "@playbackRate": {
@@ -801,9 +831,13 @@
   "@danmakuSearchTitle": {
     "description": "Title of the danmaku search dialogs."
   },
-  "danmakuSearchHint": "输入动画或电影名称",
+  "danmakuSearchHint": "输入动画或影视名称",
   "@danmakuSearchHint": {
     "description": "Hint text of the danmaku search keyword field."
+  },
+  "danmakuMatchHint": "未匹配到弹幕，点此搜索",
+  "@danmakuMatchHint": {
+    "description": "On-player chip when auto match failed; tap opens search."
   },
   "danmakuNoMatch": "未匹配到弹幕",
   "@danmakuNoMatch": {
@@ -841,6 +875,14 @@
   "danmakuOfficialUnreachable": "弹幕服务不可达",
   "@danmakuOfficialUnreachable": {
     "description": "Danmaku status when the official source is unreachable."
+  },
+  "danmakuOfficialNeedsAuth": "未配置 AppId",
+  "@danmakuOfficialNeedsAuth": {
+    "description": "Danmaku status when official AppId and AppSecret are missing."
+  },
+  "danmakuOfficialSetupHint": "在主窗口「设置 → 弹幕服务」填写官方 AppId 与 AppSecret，或改用自定义服务。",
+  "@danmakuOfficialSetupHint": {
+    "description": "Explains that official danmaku auth is configured in the main window."
   },
   "danmakuNoComments": "本集无弹幕",
   "@danmakuNoComments": {

@@ -10,6 +10,8 @@ import 'package:window_manager/window_manager.dart';
 
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
+  PaintingBinding.instance.imageCache.maximumSize = 2000;
+  PaintingBinding.instance.imageCache.maximumSizeBytes = 256 << 20;
   MediaKit.ensureInitialized();
   if (args.isNotEmpty &&
       (args.first == 'player' || args.first == 'multi_window')) {

@@ -24,6 +24,7 @@ class SettingsPage extends StatefulWidget {
   static const hardwareDecodingKey = Key('settings-hardware-decoding');
   static const decoderBackendKey = Key('settings-decoder-backend');
   static const danmakuServerFieldKey = Key('settings-danmaku-server');
+  static const danmakuAppIdFieldKey = Key('settings-danmaku-app-id');
   static const danmakuTokenFieldKey = Key('settings-danmaku-token');
   static const restoreDefaultsKey = Key('settings-restore-defaults');
   static const tokenVisibilityKey = Key('settings-token-visibility');
@@ -31,6 +32,9 @@ class SettingsPage extends StatefulWidget {
 
   /// 设置正文限宽,避免标签贴左、控件贴窗沿。
   static const double columnMaxWidth = 680;
+
+  /// 播放选项下拉的统一宽度,避免「2.0 GB」和「自动」缩成一串长短不一的胶囊。
+  static const double choiceControlWidth = 176;
 
   /// 可选的磁盘缓冲上限档位(MiB)。
   static const diskCacheLimitChoices = <int>[512, 1024, 2048, 4096, 8192];
@@ -41,8 +45,10 @@ class SettingsPage extends StatefulWidget {
 
 class _SettingsPageState extends State<SettingsPage> {
   final _danmakuServerController = TextEditingController();
+  final _danmakuAppIdController = TextEditingController();
   final _danmakuTokenController = TextEditingController();
   final _danmakuServerFocus = FocusNode();
+  final _danmakuAppIdFocus = FocusNode();
   final _danmakuTokenFocus = FocusNode();
 
   PlayerSettingsStore? _store;
@@ -54,6 +60,7 @@ class _SettingsPageState extends State<SettingsPage> {
   void initState() {
     super.initState();
     _danmakuServerFocus.addListener(_handleDanmakuServerFocusChange);
+    _danmakuAppIdFocus.addListener(_handleDanmakuAppIdFocusChange);
     _danmakuTokenFocus.addListener(_handleDanmakuTokenFocusChange);
     _load();
   }
@@ -61,10 +68,13 @@ class _SettingsPageState extends State<SettingsPage> {
   @override
   void dispose() {
     _danmakuServerFocus.removeListener(_handleDanmakuServerFocusChange);
+    _danmakuAppIdFocus.removeListener(_handleDanmakuAppIdFocusChange);
     _danmakuTokenFocus.removeListener(_handleDanmakuTokenFocusChange);
     _danmakuServerFocus.dispose();
+    _danmakuAppIdFocus.dispose();
     _danmakuTokenFocus.dispose();
     _danmakuServerController.dispose();
+    _danmakuAppIdController.dispose();
     _danmakuTokenController.dispose();
     super.dispose();
   }
@@ -110,6 +120,12 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
+  void _handleDanmakuAppIdFocusChange() {
+    if (!_danmakuAppIdFocus.hasFocus) {
+      _commitDanmakuService();
+    }
+  }
+
   void _handleDanmakuTokenFocusChange() {
     if (!_danmakuTokenFocus.hasFocus) {
       _commitDanmakuService();
@@ -119,19 +135,21 @@ class _SettingsPageState extends State<SettingsPage> {
   /// 提交弹幕服务输入:与已存值一致时不写,避免无谓落盘。
   void _commitDanmakuService() {
     final server = _danmakuServerController.text.trim();
+    final appId = _danmakuAppIdController.text.trim();
     final token = _danmakuTokenController.text.trim();
     if (server == (_settings.danmakuServer ?? '') &&
+        appId == (_settings.danmakuAppId ?? '') &&
         token == (_settings.danmakuToken ?? '')) {
       return;
     }
-    unawaited(_saveDanmakuService(server, token));
+    unawaited(_saveDanmakuService(server, appId, token));
   }
 
   /// 弹幕服务保存:与本页既有行一致,携带本页管理的全部字段做整页写。
   ///
   /// 未由本页写入的字段(弹幕显示参数、按剧记忆等)由 store 合并写保留;
   /// 空串显式覆盖旧值即清除(回官方源),弹幕控制器读取时把空串按未配置解析。
-  Future<void> _saveDanmakuService(String server, String token) {
+  Future<void> _saveDanmakuService(String server, String appId, String token) {
     return _save(
       PlayerSettings(
         volume: _settings.clampedVolume,
@@ -141,6 +159,7 @@ class _SettingsPageState extends State<SettingsPage> {
         hardwareDecoder:
             _settings.hardwareDecoder ?? HardwareDecoderBackend.auto,
         danmakuServer: server,
+        danmakuAppId: appId,
         danmakuToken: token,
       ),
     );
@@ -156,6 +175,7 @@ class _SettingsPageState extends State<SettingsPage> {
         hardwareDecoding: HardwareDecodingMode.auto,
         hardwareDecoder: HardwareDecoderBackend.auto,
         danmakuServer: '',
+        danmakuAppId: '',
         danmakuToken: '',
       ),
     );
@@ -168,6 +188,12 @@ class _SettingsPageState extends State<SettingsPage> {
       final server = _settings.danmakuServer ?? '';
       if (_danmakuServerController.text != server) {
         _danmakuServerController.text = server;
+      }
+    }
+    if (!_danmakuAppIdFocus.hasFocus) {
+      final appId = _settings.danmakuAppId ?? '';
+      if (_danmakuAppIdController.text != appId) {
+        _danmakuAppIdController.text = appId;
       }
     }
     if (!_danmakuTokenFocus.hasFocus) {
@@ -277,6 +303,7 @@ class _SettingsPageState extends State<SettingsPage> {
                                       hardwareDecoding: decoding,
                                       hardwareDecoder: backend,
                                       danmakuServer: _settings.danmakuServer,
+                                      danmakuAppId: _settings.danmakuAppId,
                                       danmakuToken: _settings.danmakuToken,
                                     ),
                                   );
@@ -316,6 +343,7 @@ class _SettingsPageState extends State<SettingsPage> {
                                       hardwareDecoding: value,
                                       hardwareDecoder: backend,
                                       danmakuServer: _settings.danmakuServer,
+                                      danmakuAppId: _settings.danmakuAppId,
                                       danmakuToken: _settings.danmakuToken,
                                     ),
                                   );
@@ -350,6 +378,7 @@ class _SettingsPageState extends State<SettingsPage> {
                                       hardwareDecoding: decoding,
                                       hardwareDecoder: value,
                                       danmakuServer: _settings.danmakuServer,
+                                      danmakuAppId: _settings.danmakuAppId,
                                       danmakuToken: _settings.danmakuToken,
                                     ),
                                   );
@@ -377,10 +406,27 @@ class _SettingsPageState extends State<SettingsPage> {
                         textInputAction: TextInputAction.next,
                         onSubmitted: (_) {
                           _commitDanmakuService();
-                          _danmakuTokenFocus.requestFocus();
+                          _danmakuAppIdFocus.requestFocus();
                         },
                         decoration: InputDecoration(
                           hintText: l10n.settingsDanmakuServerHint,
+                        ),
+                      ),
+                    ),
+                    _SettingsField(
+                      label: l10n.settingsDanmakuAppId,
+                      child: TextField(
+                        key: SettingsPage.danmakuAppIdFieldKey,
+                        controller: _danmakuAppIdController,
+                        focusNode: _danmakuAppIdFocus,
+                        enabled: _loaded,
+                        textInputAction: TextInputAction.next,
+                        onSubmitted: (_) {
+                          _commitDanmakuService();
+                          _danmakuTokenFocus.requestFocus();
+                        },
+                        decoration: InputDecoration(
+                          hintText: l10n.settingsDanmakuAppIdHint,
                         ),
                       ),
                     ),
@@ -505,7 +551,10 @@ class _SettingsSection extends StatelessWidget {
                     ),
                   ),
                 ),
-                ?trailing,
+                if (trailing != null) ...[
+                  const SizedBox(width: AppSpacing.sm),
+                  Flexible(child: trailing!),
+                ],
               ],
             ),
             const SizedBox(height: AppSpacing.sm),
@@ -559,7 +608,7 @@ class _SettingsChoiceRow extends StatelessWidget {
             ),
           ),
           const SizedBox(width: AppSpacing.md),
-          child,
+          SizedBox(width: SettingsPage.choiceControlWidth, child: child),
         ],
       ),
     );
@@ -608,22 +657,26 @@ class _SettingsDropdown<T> extends StatelessWidget {
     final scheme = theme.colorScheme;
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: scheme.surfaceContainerHighest,
+        color: theme.inputDecorationTheme.fillColor ?? scheme.surface,
         borderRadius: BorderRadius.circular(AppRadii.md),
         border: Border.all(color: scheme.outlineVariant),
       ),
       child: Padding(
-        padding: const EdgeInsets.symmetric(
-          horizontal: AppSpacing.sm,
-          vertical: AppSpacing.xxs,
-        ),
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
         child: DropdownButtonHideUnderline(
           child: DropdownButton<T>(
             key: dropdownKey,
             value: value,
-            isDense: true,
+            isExpanded: true,
             borderRadius: BorderRadius.circular(AppRadii.md),
-            alignment: AlignmentDirectional.centerEnd,
+            alignment: AlignmentDirectional.centerStart,
+            icon: Icon(
+              Icons.expand_more_rounded,
+              color: scheme.onSurfaceVariant,
+            ),
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: scheme.onSurface,
+            ),
             items: items,
             onChanged: onChanged,
           ),

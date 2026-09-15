@@ -98,16 +98,16 @@ void main() {
   });
 
   group('decoding and rendering platform defaults', () {
-    test('windows defaults to d3d11va and never overrides vo', () {
+    test('windows defaults to d3d11va-copy and never overrides vo', () {
       final properties = build(platform: TargetPlatform.windows);
-      expect(properties['hwdec'], 'd3d11va');
+      expect(properties['hwdec'], 'd3d11va-copy');
       // media_kit 的 VideoController 依赖 vo=libmpv 渲染,不得覆盖。
       expect(properties.containsKey('vo'), isFalse);
     });
 
-    test('macOS defaults to videotoolbox', () {
+    test('macOS defaults to videotoolbox-copy', () {
       final properties = build(platform: TargetPlatform.macOS);
-      expect(properties['hwdec'], 'videotoolbox');
+      expect(properties['hwdec'], 'videotoolbox-copy');
     });
 
     test('linux auto leaves hwdec to mpv defaults', () {
@@ -135,7 +135,7 @@ void main() {
         ),
         platform: TargetPlatform.windows,
       );
-      expect(properties['hwdec'], 'nvdec');
+      expect(properties['hwdec'], 'nvdec-copy');
     });
 
     test('backend not applicable on the platform falls back to default', () {
@@ -146,15 +146,23 @@ void main() {
         ),
         platform: TargetPlatform.windows,
       );
-      expect(properties['hwdec'], 'd3d11va');
+      expect(properties['hwdec'], 'd3d11va-copy');
     });
 
     test('restore-defaults settings resolve to the platform defaults', () {
       final restored = PlayerRuntimeOptions.defaultSettings(volume: 42);
       expect(restored.volume, 42);
       final properties = build(settings: restored);
-      expect(properties['hwdec'], 'd3d11va');
+      expect(properties['hwdec'], 'd3d11va-copy');
       expect(properties['demuxer-max-bytes'], build()['demuxer-max-bytes']);
+    });
+
+    test('embedHwdec does not double-suffix copy or rewrite off', () {
+      expect(PlayerRuntimeOptions.embedHwdec('d3d11va'), 'd3d11va-copy');
+      expect(PlayerRuntimeOptions.embedHwdec('d3d11va-copy'), 'd3d11va-copy');
+      expect(PlayerRuntimeOptions.embedHwdec('auto'), 'auto-copy');
+      expect(PlayerRuntimeOptions.embedHwdec('auto-safe'), 'auto-safe');
+      expect(PlayerRuntimeOptions.embedHwdec('no'), 'no');
     });
   });
 

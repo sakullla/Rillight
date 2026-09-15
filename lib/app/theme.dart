@@ -309,7 +309,17 @@ abstract final class AppTheme {
           color: _surfaceHighest,
           borderRadius: BorderRadius.circular(AppRadii.sm),
         ),
-        textStyle: labelMedium.copyWith(color: _onSurface),
+        // 桌面默认 minHeight 24 + 竖向 4 点内边距会裁切雅黑体;顶栏靠右
+        // 时「取消置顶」最后一个字看起来缺笔。
+        textStyle: labelMedium.copyWith(
+          color: _onSurface,
+          fontWeight: FontWeight.w400,
+          height: 1.35,
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        margin: const EdgeInsets.symmetric(horizontal: 12),
+        constraints: const BoxConstraints(minHeight: 32),
+        preferBelow: true,
         waitDuration: const Duration(milliseconds: 400),
       ),
       iconButtonTheme: IconButtonThemeData(

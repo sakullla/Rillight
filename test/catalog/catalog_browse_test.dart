@@ -16,6 +16,7 @@ import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/home_hero.dart';
 import 'package:rillight/home/home_page.dart';
+import 'package:rillight/library/item_detail_page.dart';
 import 'package:rillight/library/poster_card.dart';
 import 'package:rillight/library/shelf_grid_page.dart';
 import 'package:rillight/media_image/media_image.dart';
@@ -273,7 +274,7 @@ void main() {
     expect(find.text('Inception (2010)'), findsOneWidget);
     expect(
       find.text('A thief who steals corporate secrets through dream-sharing.'),
-      findsOneWidget,
+      findsWidgets,
     );
     expect(find.text('已看 40%'), findsOneWidget);
     expect(find.text('章节'), findsOneWidget);
@@ -287,8 +288,15 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('老友记 (1994)'), findsOneWidget);
     expect(find.byKey(CatalogKeys.overview), findsOneWidget);
-    expect(find.text('简介'), findsOneWidget);
-    expect(find.text('Six friends living in New York.'), findsWidgets);
+    expect(find.text('简介'), findsNothing);
+    expect(find.text('Six friends living in New York.'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(ItemDetailPage.posterKey),
+        matching: find.text('Six friends living in New York.'),
+      ),
+      findsNothing,
+    );
     expect(
       find.descendant(
         of: find.byKey(CatalogKeys.episodesRow),
@@ -296,12 +304,20 @@ void main() {
       ),
       findsOneWidget,
     );
-    await tester.tap(find.byKey(CatalogKeys.viewEpisode));
+    final episode = find.byKey(CatalogKeys.episode('episode-friends-s1e1'));
+    await tester.ensureVisible(episode);
+    await tester.tap(episode);
     await tester.pumpAndSettle();
     expect(find.textContaining('The Pilot'), findsWidgets);
     expect(find.byKey(CatalogKeys.overview), findsOneWidget);
-    expect(find.text('简介'), findsOneWidget);
-    expect(find.text('Monica gets a new apartment.'), findsWidgets);
+    expect(find.text('简介'), findsNothing);
+    expect(
+      find.descendant(
+        of: find.byKey(ItemDetailPage.posterKey),
+        matching: find.text('Monica gets a new apartment.'),
+      ),
+      findsOneWidget,
+    );
     expect(find.byKey(CatalogKeys.seriesLink), findsOneWidget);
     expect(find.byKey(CatalogKeys.viewSeries), findsOneWidget);
     expect(find.byKey(CatalogKeys.episodesRow), findsNothing);
@@ -352,7 +368,7 @@ void main() {
     await openLibrary(tester, 'view-tv');
     await tester.tap(find.byKey(CatalogKeys.item('series-friends')));
     await tester.pumpAndSettle();
-    final first = find.byKey(CatalogKeys.viewEpisode);
+    final first = find.byKey(CatalogKeys.episode('episode-friends-s1e1'));
     await tester.ensureVisible(first);
     await tester.tap(first);
     await tester.pumpAndSettle();
@@ -403,6 +419,7 @@ void main() {
     await tester.tap(find.byKey(CatalogKeys.episode('episode-friends-s1e2')));
     await tester.pumpAndSettle();
     expect(find.textContaining('The One with the Sonogram'), findsWidgets);
+    expect(find.byKey(CatalogKeys.viewSeries), findsOneWidget);
   });
 
   testWidgets('marking played updates continue watching from the server', (
@@ -559,7 +576,7 @@ void main() {
     expect(find.text('飞屋环游记 (2009)'), findsOneWidget);
     expect(
       find.text('An old man flies his house to Paradise Falls.'),
-      findsOneWidget,
+      findsWidgets,
     );
   });
 
