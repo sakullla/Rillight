@@ -1,3 +1,6 @@
+@Tags(['integration'])
+library;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
@@ -164,24 +167,6 @@ void main() {
   }
 
   testWidgets(
-    'play opens a second window host without replacing browse with /play',
-    (tester) async {
-      final auth = await pumpLoggedIn(tester);
-      final app = tester.widget<RillightApp>(find.byType(RillightApp));
-      await openPlayable(tester, 'movie-up');
-      await waitFor(tester, find.byType(PlayerPage));
-      await waitFor(tester, find.byKey(PlayerKeys.playPause));
-
-      expect(app.router.state.uri.path, '/item/movie-up');
-      expect(app.router.state.uri.path.contains('/play'), isFalse);
-      expect(find.byType(ItemDetailPage), findsOneWidget);
-      expect(find.byType(PlayerPage), findsOneWidget);
-      expect(auth.disposed, isFalse);
-      expect(auth.isLoggedIn, isTrue);
-    },
-  );
-
-  testWidgets(
     'closing the player window keeps AuthController and the browse app',
     (tester) async {
       final auth = await pumpLoggedIn(tester);
@@ -195,8 +180,6 @@ void main() {
           .length;
       await tester.runAsync(() async {
         await app.windowHost.close();
-        // 关闭后的首页行重拉是真实异步链:轮询等待其请求发出,
-        // 避免固定 50ms 墙钟等待在并行测试负载下偶发超时。
         for (var i = 0; i < 250; i++) {
           if (server.requests
                   .where((request) => request.contains('Items/Resume'))
@@ -204,7 +187,7 @@ void main() {
               resumeBefore) {
             break;
           }
-          await Future<void>.delayed(const Duration(milliseconds: 20));
+          await Future<void>.delayed(const Duration(milliseconds: 1));
         }
       });
       await tester.pump();

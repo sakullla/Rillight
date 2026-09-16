@@ -1,5 +1,9 @@
+@Tags(['integration'])
+library;
+
 import 'dart:async';
 
+import 'package:fake_async/fake_async.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
@@ -94,7 +98,7 @@ void main() {
       processControl: control,
       snapshotStoreForPid: storeFor,
       closeTimeout: const Duration(milliseconds: 50),
-      reportTimeout: const Duration(seconds: 2),
+      reportTimeout: const Duration(milliseconds: 50),
       watchInterval: const Duration(milliseconds: 10),
     );
   }
@@ -223,29 +227,39 @@ void main() {
     test('an unexpectedly exited process is detected, cleared and its Stopped '
         'is resent', () async {
       final auth = await loggedInAuth();
-      final host = newHost(auth);
-      addTearDown(() {
-        host.dispose();
-        auth.dispose();
+      addTearDown(auth.dispose);
+
+      fakeAsync((async) {
+        final host = newHost(auth);
+        addTearDown(host.dispose);
+
+        var opened = false;
+        host.open(const PlayerOpenRequest(itemId: 'movie-up')).then((_) {
+          opened = true;
+        });
+        async.flushMicrotasks();
+        expect(opened, isTrue);
+        final pid = control.lastPid;
+
+        var wrote = false;
+        storeFor(pid).write(snapshotFor(auth, positionTicks: 777)).then((_) {
+          wrote = true;
+        });
+        async.flushMicrotasks();
+        expect(wrote, isTrue);
+
+        control.exit(pid);
+        async.elapse(const Duration(milliseconds: 20));
+        async.flushMicrotasks();
+
+        expect(host.current, isNull);
+        expect(stoppedEvents(), hasLength(1));
+        expect(stoppedEvents().single.body['PositionTicks'], 777);
+        expect(calls, ['spawn:$pid']);
+        async.elapse(const Duration(milliseconds: 20));
+        async.flushMicrotasks();
+        expect(storeFor(pid).snapshot, isNull);
       });
-
-      await host.open(const PlayerOpenRequest(itemId: 'movie-up'));
-      final pid = control.lastPid;
-      await storeFor(pid).write(snapshotFor(auth, positionTicks: 777));
-
-      control.exit(pid);
-      for (var i = 0; i < 100 && stoppedEvents().isEmpty; i++) {
-        await Future<void>.delayed(const Duration(milliseconds: 10));
-      }
-
-      expect(host.current, isNull);
-      expect(stoppedEvents(), hasLength(1));
-      expect(stoppedEvents().single.body['PositionTicks'], 777);
-      expect(calls, ['spawn:$pid']);
-      for (var i = 0; i < 100 && storeFor(pid).snapshot != null; i++) {
-        await Future<void>.delayed(const Duration(milliseconds: 10));
-      }
-      expect(storeFor(pid).snapshot, isNull);
     });
 
     test(
@@ -277,50 +291,52 @@ void main() {
 
     test('overlapping close then open keeps the new pid watched', () async {
       final auth = await loggedInAuth();
-      final host = newHost(auth);
-      addTearDown(() {
-        host.dispose();
-        auth.dispose();
+      addTearDown(auth.dispose);
+
+      fakeAsync((async) {
+        final host = newHost(auth);
+        addTearDown(host.dispose);
+
+        var opened = false;
+        host.open(const PlayerOpenRequest(itemId: 'movie-up')).then((_) {
+          opened = true;
+        });
+        async.flushMicrotasks();
+        expect(opened, isTrue);
+        final firstPid = control.lastPid;
+        control.requestCloseHold = Completer<void>();
+
+        var closed = false;
+        host.close().then((_) => closed = true);
+        async.flushMicrotasks();
+        expect(calls, contains('requestClose:$firstPid'));
+
+        var openedSecond = false;
+        host.open(const PlayerOpenRequest(itemId: 'movie-inception')).then((_) {
+          openedSecond = true;
+        });
+        control.requestCloseHold!.complete();
+        async.flushMicrotasks();
+        expect(closed, isTrue);
+        expect(openedSecond, isTrue);
+
+        final secondPid = control.lastPid;
+        expect(secondPid, firstPid + 1);
+        expect(host.current?.itemId, 'movie-inception');
+        expect(control.isAlive(secondPid), isTrue);
+        expect(control.isAlive(firstPid), isFalse);
+        expect(calls, [
+          'spawn:$firstPid',
+          'requestClose:$firstPid',
+          'kill:$firstPid',
+          'spawn:$secondPid',
+        ]);
+
+        control.exit(secondPid);
+        async.elapse(const Duration(milliseconds: 20));
+        async.flushMicrotasks();
+        expect(host.current, isNull);
       });
-
-      await host.open(const PlayerOpenRequest(itemId: 'movie-up'));
-      final firstPid = control.lastPid;
-      control.requestCloseHold = Completer<void>();
-
-      final closeFuture = host.close();
-      for (
-        var i = 0;
-        i < 100 && !calls.contains('requestClose:$firstPid');
-        i++
-      ) {
-        await Future<void>.delayed(const Duration(milliseconds: 10));
-      }
-      expect(calls, contains('requestClose:$firstPid'));
-
-      final openFuture = host.open(
-        const PlayerOpenRequest(itemId: 'movie-inception'),
-      );
-      control.requestCloseHold!.complete();
-      await closeFuture;
-      await openFuture;
-
-      final secondPid = control.lastPid;
-      expect(secondPid, firstPid + 1);
-      expect(host.current?.itemId, 'movie-inception');
-      expect(control.isAlive(secondPid), isTrue);
-      expect(control.isAlive(firstPid), isFalse);
-      expect(calls, [
-        'spawn:$firstPid',
-        'requestClose:$firstPid',
-        'kill:$firstPid',
-        'spawn:$secondPid',
-      ]);
-
-      control.exit(secondPid);
-      for (var i = 0; i < 100 && host.current != null; i++) {
-        await Future<void>.delayed(const Duration(milliseconds: 10));
-      }
-      expect(host.current, isNull);
     });
 
     test('close joins watcher reconcile before logout', () async {
@@ -336,7 +352,7 @@ void main() {
           gate: releaseRead,
         ),
         closeTimeout: const Duration(milliseconds: 50),
-        reportTimeout: const Duration(seconds: 2),
+        reportTimeout: const Duration(milliseconds: 50),
         watchInterval: const Duration(milliseconds: 10),
       );
       addTearDown(() {
@@ -353,7 +369,7 @@ void main() {
 
       control.exit(pid);
       for (var i = 0; i < 100 && !calls.contains('reconcile:$pid'); i++) {
-        await Future<void>.delayed(const Duration(milliseconds: 10));
+        await Future<void>.delayed(const Duration(milliseconds: 1));
       }
       expect(calls, contains('reconcile:$pid'));
       expect(host.current, isNull);
@@ -393,7 +409,7 @@ void main() {
       await storeFor(pid).write(snapshotFor(auth));
       await auth.logout();
       for (var i = 0; i < 20 && host.current != null; i++) {
-        await Future<void>.delayed(const Duration(milliseconds: 10));
+        await Future<void>.delayed(Duration.zero);
       }
 
       expect(host.current, isNull);

@@ -478,6 +478,9 @@ class FakeEmbyServer {
 
   /// /Sessions/Playing、/Progress、/Stopped 三类上报在响应前等待的时长。
   Duration? sessionsDelay;
+
+  /// 若设置,Playing/Progress/Stopped 在响应前等待该 Completer,优先于 [sessionsDelay]。
+  Completer<void>? sessionsHold;
   final Set<String> issuedTokens = {};
   final Set<String> loggedOutTokens = {};
   int _tokenSeq = 0;
@@ -879,9 +882,16 @@ class FakeEmbyServer {
     playbackEvents.add(
       FakePlaybackEvent(kind: kind, body: body, userAgent: userAgent),
     );
-    final delay = sessionsDelay;
-    if (delay != null && segments.length >= 2 && segments[1] == 'Playing') {
-      await Future<void>.delayed(delay);
+    if (segments.length >= 2 && segments[1] == 'Playing') {
+      final hold = sessionsHold;
+      if (hold != null) {
+        await hold.future;
+      } else {
+        final delay = sessionsDelay;
+        if (delay != null) {
+          await Future<void>.delayed(delay);
+        }
+      }
     }
     if (kind == 'Progress' && progressStatus != null) {
       return _json(progressStatus!, {'error': 'progress failed'});

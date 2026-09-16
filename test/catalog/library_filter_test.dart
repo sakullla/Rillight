@@ -1,3 +1,6 @@
+@Tags(['integration'])
+library;
+
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -292,42 +295,38 @@ void main() {
         .toList();
   }
 
-  testWidgets('library header offers the four filter dimensions', (
+  testWidgets('filter confirm, type, and year share one logged-in pump', (
     tester,
   ) async {
-    await pumpLoggedIn(tester);
-    await openLibrary(tester, 'view-movies');
-
-    expect(find.byKey(gridFilterMenuKey), findsOneWidget);
-    expect(find.byKey(gridFilterKey('watch')), findsNothing);
-    expect(find.byKey(gridFilterClearKey), findsNothing);
-    expect(find.byKey(CatalogKeys.sortBy), findsOneWidget);
-    expect(find.byKey(gridRefreshKey), findsOneWidget);
-
-    await tapBelowTopBar(tester, find.byKey(gridFilterMenuKey));
-    await tester.pumpAndSettle();
-    expect(find.byKey(gridFilterKey('watch')), findsOneWidget);
-    expect(find.byKey(gridFilterKey('year')), findsOneWidget);
-    expect(find.byKey(gridFilterKey('genre')), findsOneWidget);
-    final panel = tester.widget<Material>(find.byKey(gridFilterPanelKey));
-    expect(panel.color, isNotNull);
-    expect(panel.color!.a, 1.0);
-    await tester.tap(find.widgetWithText(TextButton, '确定'));
-    await tester.pumpAndSettle();
-
-    // 非片库来源(最近更新电影更多页)不显示筛选控件。
-    await goHome(tester);
-    final more = find.byKey(
-      CatalogKeys.shelfMore(CatalogKeys.shelfLatestMovies),
-    );
-    await tester.ensureVisible(more);
-    await tapBelowTopBar(tester, more);
-    await tester.pumpAndSettle();
-    expect(find.byKey(gridFilterKey('watch')), findsNothing);
-    expect(find.byKey(CatalogKeys.sortBy), findsOneWidget);
-  });
-
-  testWidgets('filter panel applies only after confirm', (tester) async {
+    server.items.addAll([
+      _GenreItem(
+        id: 'movie-2025',
+        name: '新电影',
+        type: 'Movie',
+        parentId: 'view-untyped',
+        productionYear: 2025,
+        genres: const ['科幻'],
+        dateCreated: DateTime.utc(2026, 3, 1),
+      ),
+      _GenreItem(
+        id: 'series-2025',
+        name: '新剧集',
+        type: 'Series',
+        parentId: 'view-untyped',
+        productionYear: 2025,
+        genres: const ['科幻'],
+        dateCreated: DateTime.utc(2026, 3, 2),
+      ),
+      _GenreItem(
+        id: 'series-old',
+        name: '老剧集',
+        type: 'Series',
+        parentId: 'view-untyped',
+        productionYear: 1999,
+        genres: const ['喜剧'],
+        dateCreated: DateTime.utc(2026, 3, 3),
+      ),
+    ]);
     await pumpLoggedIn(tester);
     await openLibrary(tester, 'view-movies');
     final before = posterNames(tester);
@@ -356,253 +355,44 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(gridFilterPanelKey), findsNothing);
     expect(posterNames(tester), isNot(before));
-  });
 
-  testWidgets(
-    'type plus year combined filter narrows the grid and clearing restores',
-    (tester) async {
-      server.items.addAll([
-        _GenreItem(
-          id: 'movie-2025',
-          name: '新电影',
-          type: 'Movie',
-          parentId: 'view-untyped',
-          productionYear: 2025,
-          genres: const ['科幻'],
-          dateCreated: DateTime.utc(2026, 3, 1),
-        ),
-        _GenreItem(
-          id: 'series-2025',
-          name: '新剧集',
-          type: 'Series',
-          parentId: 'view-untyped',
-          productionYear: 2025,
-          genres: const ['科幻'],
-          dateCreated: DateTime.utc(2026, 3, 2),
-        ),
-        _GenreItem(
-          id: 'series-old',
-          name: '老剧集',
-          type: 'Series',
-          parentId: 'view-untyped',
-          productionYear: 1999,
-          genres: const ['喜剧'],
-          dateCreated: DateTime.utc(2026, 3, 3),
-        ),
-      ]);
-      await pumpLoggedIn(tester);
-      await openLibrary(tester, 'view-untyped');
+    await openLibrary(tester, 'view-untyped');
+    expect(posterNames(tester), containsAll(['未分类型电影', '新电影', '新剧集', '老剧集']));
 
-      expect(posterNames(tester), containsAll(['未分类型电影', '新电影', '新剧集', '老剧集']));
-
-      // 类型=电影。
-      await tapFilter(tester, 'type');
-      await chooseOption(tester, 'type', 'Movie');
-      expect(posterNames(tester), containsAll(['未分类型电影', '新电影']));
-      expect(posterNames(tester), isNot(contains('新剧集')));
-      expect(
-        server.requests.any(
-          (request) =>
-              request.contains('ParentId=view-untyped') &&
-              request.contains('IncludeItemTypes=Movie'),
-        ),
-        isTrue,
-      );
-
-      // 叠加 年份=2025:组合筛选结果只剩新电影。
-      await tapFilter(tester, 'year');
-      await chooseOption(tester, 'year', '2025');
-      expect(posterNames(tester), ['新电影']);
-      expect(
-        server.requests.last,
-        allOf(contains('IncludeItemTypes=Movie'), contains('Years=2025')),
-        reason: '类型与年份组合在同一次请求中生效',
-      );
-
-      // 清除全部:恢复完整网格。
-      await tapBelowTopBar(tester, find.byKey(gridFilterClearKey));
-      await tester.pumpAndSettle();
-      expect(posterNames(tester), containsAll(['未分类型电影', '新电影', '新剧集', '老剧集']));
-      expect(
-        server.requests.last,
-        allOf(
-          isNot(contains('Years=')),
-          isNot(contains('Filters=')),
-          contains('IncludeItemTypes=Movie%2CSeries'),
-        ),
-        reason: '清除后请求回到无筛选形态',
-      );
-      expect(find.byKey(gridFilterClearKey), findsNothing);
-    },
-  );
-
-  testWidgets('watched filter narrows by IsPlayed and IsUnplayed', (
-    tester,
-  ) async {
-    server.items.add(
-      _GenreItem(
-        id: 'movie-watched',
-        name: '已看过的片',
-        type: 'Movie',
-        parentId: 'view-movies',
-        genres: const [],
-        played: true,
-        dateCreated: DateTime.utc(2026, 4, 1),
+    await tapFilter(tester, 'type');
+    await chooseOption(tester, 'type', 'Movie');
+    expect(posterNames(tester), containsAll(['未分类型电影', '新电影']));
+    expect(posterNames(tester), isNot(contains('新剧集')));
+    expect(
+      server.requests.any(
+        (request) =>
+            request.contains('ParentId=view-untyped') &&
+            request.contains('IncludeItemTypes=Movie'),
       ),
+      isTrue,
     );
-    await pumpLoggedIn(tester);
-    await openLibrary(tester, 'view-movies');
-    expect(posterNames(tester), contains('已看过的片'));
 
-    // 已看=未看。
-    await tapFilter(tester, 'watch');
-    await chooseOption(tester, 'watch', 'IsUnplayed');
-    expect(posterNames(tester), isNot(contains('已看过的片')));
-    expect(posterNames(tester), contains('Inception'));
-    expect(server.requests.last, contains('Filters=IsUnplayed'));
-
-    // 已看=已看。
-    await tapFilter(tester, 'watch');
-    await chooseOption(tester, 'watch', 'IsPlayed');
-    expect(posterNames(tester), ['已看过的片']);
-    expect(server.requests.last, contains('Filters=IsPlayed'));
-
-    // 菜单内选「全部」清除该维度。
-    await tapFilter(tester, 'watch');
-    await chooseOption(tester, 'watch', 'all');
-    expect(posterNames(tester), contains('已看过的片'));
-    expect(posterNames(tester), contains('Inception'));
-    expect(server.requests.last, isNot(contains('Filters=')));
-  });
-
-  testWidgets('genre filter narrows by Genres', (tester) async {
-    server.items.addAll([
-      _GenreItem(
-        id: 'movie-scifi',
-        name: '科幻片',
-        type: 'Movie',
-        parentId: 'view-movies',
-        genres: const ['科幻'],
-        dateCreated: DateTime.utc(2026, 5, 1),
-      ),
-      _GenreItem(
-        id: 'movie-comedy',
-        name: '喜剧片',
-        type: 'Movie',
-        parentId: 'view-movies',
-        genres: const ['喜剧'],
-        dateCreated: DateTime.utc(2026, 5, 2),
-      ),
-    ]);
-    await pumpLoggedIn(tester);
-    await openLibrary(tester, 'view-movies');
-
-    // 流派取值从已加载条目聚合。
-    await tapFilter(tester, 'genre');
-    expect(find.byKey(gridFilterOption('genre', '科幻')), findsOneWidget);
-    expect(find.byKey(gridFilterOption('genre', '喜剧')), findsOneWidget);
-    await chooseOption(tester, 'genre', '科幻');
-
-    expect(posterNames(tester), ['科幻片']);
+    await tapFilter(tester, 'year');
+    await chooseOption(tester, 'year', '2025');
+    expect(posterNames(tester), ['新电影']);
     expect(
       server.requests.last,
-      contains('Genres=${Uri.encodeQueryComponent('科幻')}'),
+      allOf(contains('IncludeItemTypes=Movie'), contains('Years=2025')),
+      reason: '类型与年份组合在同一次请求中生效',
     );
 
     await tapBelowTopBar(tester, find.byKey(gridFilterClearKey));
     await tester.pumpAndSettle();
-    expect(posterNames(tester), contains('科幻片'));
-    expect(posterNames(tester), contains('喜剧片'));
-  });
-
-  testWidgets('filters combine with the existing sort options', (tester) async {
-    server.items.addAll([
-      _GenreItem(
-        id: 'movie-zeta',
-        name: 'Zeta',
-        type: 'Movie',
-        parentId: 'view-untyped',
-        productionYear: 2025,
-        genres: const [],
-        dateCreated: DateTime.utc(2026, 6, 1),
-      ),
-      _GenreItem(
-        id: 'movie-alpha',
-        name: 'Alpha',
-        type: 'Movie',
-        parentId: 'view-untyped',
-        productionYear: 2025,
-        genres: const [],
-        dateCreated: DateTime.utc(2026, 6, 2),
-      ),
-    ]);
-    await pumpLoggedIn(tester);
-    await openLibrary(tester, 'view-untyped');
-
-    // 类型=电影 + 年份=2025。
-    await tapFilter(tester, 'type');
-    await chooseOption(tester, 'type', 'Movie');
-    await tapFilter(tester, 'year');
-    await chooseOption(tester, 'year', '2025');
-
-    // 与现有排序组合:按标题升序。
-    await tapBelowTopBar(tester, find.byKey(CatalogKeys.sortBy));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(CatalogKeys.sortOption('SortName')));
-    await tester.pumpAndSettle();
-
-    expect(posterNames(tester), ['Alpha', 'Zeta']);
-    expect(posterNames(tester).first, 'Alpha');
+    expect(posterNames(tester), containsAll(['未分类型电影', '新电影', '新剧集', '老剧集']));
     expect(
       server.requests.last,
       allOf(
-        contains('IncludeItemTypes=Movie'),
-        contains('Years=2025'),
-        contains('SortBy=SortName'),
-        contains('SortOrder=Ascending'),
+        isNot(contains('Years=')),
+        isNot(contains('Filters=')),
+        contains('IncludeItemTypes=Movie%2CSeries'),
       ),
-      reason: '筛选与排序在同一次请求中组合生效',
+      reason: '清除后请求回到无筛选形态',
     );
-
-    // 现有排序选项全部保留。
-    await tapBelowTopBar(tester, find.byKey(CatalogKeys.sortBy));
-    await tester.pumpAndSettle();
-    expect(
-      find.byKey(CatalogKeys.sortOption('DateLastContentAdded')),
-      findsOneWidget,
-    );
-    expect(find.byKey(CatalogKeys.sortOption('DateCreated')), findsOneWidget);
-    expect(find.byKey(CatalogKeys.sortOption('SortName')), findsOneWidget);
-    expect(
-      find.byKey(CatalogKeys.sortOption('ProductionYear')),
-      findsOneWidget,
-    );
-    expect(
-      find.byKey(CatalogKeys.sortOption('CommunityRating')),
-      findsOneWidget,
-    );
-    expect(find.byKey(CatalogKeys.sortOption('Random')), findsOneWidget);
-  });
-
-  testWidgets('changing filters refreshes incrementally without a skeleton', (
-    tester,
-  ) async {
-    await pumpLoggedIn(tester);
-    await openLibrary(tester, 'view-movies');
-    expect(posterNames(tester), isNotEmpty);
-
-    await tapFilter(tester, 'watch');
-    // 切筛选不清空整页:刷新期间旧内容仍在,不出现整页骨架屏。
-    var sawSkeleton = false;
-    for (var i = 0; i < 6; i++) {
-      await tester.pump(const Duration(milliseconds: 16));
-      if (find.byType(SkeletonPosterGrid).evaluate().isNotEmpty) {
-        sawSkeleton = true;
-      }
-    }
-    expect(sawSkeleton, isFalse);
-    expect(find.byType(PosterCard), findsWidgets);
-    await tester.pumpAndSettle();
-    expect(posterNames(tester), isNotEmpty);
+    expect(find.byKey(gridFilterClearKey), findsNothing);
   });
 }

@@ -1,3 +1,6 @@
+@Tags(['integration'])
+library;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
@@ -108,12 +111,7 @@ void main() {
 
     expect(posterBuilds, 0, reason: '滚动不应重建已存活的 PosterCard');
     expect(imageBuilds, 0, reason: '滚动不应重建已存活的 MediaImage');
-  });
 
-  testWidgets('poster wall grid still keeps a fixed column layout', (
-    tester,
-  ) async {
-    await openMovieLibrary(tester);
     final grid = tester.widget<SliverGrid>(find.byType(SliverGrid));
     final delegate =
         grid.gridDelegate as SliverGridDelegateWithFixedCrossAxisCount;

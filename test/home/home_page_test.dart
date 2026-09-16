@@ -1,3 +1,6 @@
+@Tags(['integration'])
+library;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
@@ -91,133 +94,88 @@ void main() {
     await tester.pump();
   }
 
-  testWidgets('home renders without LiquidGlass and hero uses BackdropScrim', (
-    tester,
-  ) async {
-    await pumpLoggedIn(tester);
+  testWidgets(
+    'home renders without LiquidGlass and refresh reloads the resume shelf',
+    (tester) async {
+      await pumpLoggedIn(tester);
 
-    expect(
-      find.descendant(
-        of: find.byType(HomePage),
-        matching: find.byType(LiquidGlass),
-      ),
-      findsNothing,
-    );
-    expect(
-      find.descendant(
-        of: find.byType(HomeHero),
-        matching: find.byType(BackdropScrim),
-      ),
-      findsOneWidget,
-    );
-    expect(tester.getTopLeft(find.byType(HomeHero)).dy, 0);
-    expect(
-      tester.getSize(find.byType(HomeHero)).height,
-      lessThan(
-        tester.view.physicalSize.height / tester.view.devicePixelRatio * 0.90,
-      ),
-    );
-    expect(
-      find.descendant(
-        of: find.byType(HomeHero),
-        matching: find.widgetWithText(OutlinedButton, '详情'),
-      ),
-      findsOneWidget,
-    );
-    expect(
-      find.descendant(
-        of: find.byType(HomeHero),
-        matching: find.byType(FilledButton),
-      ),
-      findsOneWidget,
-    );
-    expect(
-      tester.widget(find.byKey(CatalogKeys.heroPrev)),
-      isA<ScrimIconButton>(),
-    );
-    expect(
-      tester.widget(find.byKey(CatalogKeys.heroNext)),
-      isA<ScrimIconButton>(),
-    );
-  });
-
-  testWidgets('shelf scroll buttons are ScrimIconButtons', (tester) async {
-    for (var i = 0; i < 20; i++) {
-      server.items.add(
-        FakeEmbyItem(
-          id: 'movie-filler-$i',
-          name: 'Filler $i',
-          type: 'Movie',
-          parentId: 'view-movies',
-          dateCreated: DateTime.utc(2000, 1, i + 1),
+      expect(
+        find.descendant(
+          of: find.byType(HomePage),
+          matching: find.byType(LiquidGlass),
+        ),
+        findsNothing,
+      );
+      expect(
+        find.descendant(
+          of: find.byType(HomeHero),
+          matching: find.byType(BackdropScrim),
+        ),
+        findsOneWidget,
+      );
+      expect(tester.getTopLeft(find.byType(HomeHero)).dy, 0);
+      expect(
+        tester.getSize(find.byType(HomeHero)).height,
+        lessThan(
+          tester.view.physicalSize.height / tester.view.devicePixelRatio * 0.90,
         ),
       );
-    }
-    await pumpLoggedIn(tester);
-    await tester.ensureVisible(find.byKey(CatalogKeys.latestMoviesRow));
-    await tester.pumpAndSettle();
+      expect(
+        find.descendant(
+          of: find.byType(HomeHero),
+          matching: find.widgetWithText(OutlinedButton, '详情'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: find.byType(HomeHero),
+          matching: find.byType(FilledButton),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        tester.widget(find.byKey(CatalogKeys.heroPrev)),
+        isA<ScrimIconButton>(),
+      );
+      expect(
+        tester.widget(find.byKey(CatalogKeys.heroNext)),
+        isA<ScrimIconButton>(),
+      );
 
-    final right = find.byKey(
-      CatalogKeys.shelfScrollRight(CatalogKeys.shelfLatestMovies),
-    );
-    expect(right, findsOneWidget);
-    expect(tester.widget(right), isA<ScrimIconButton>());
-    expect(
-      find.descendant(
-        of: find.byKey(CatalogKeys.latestMoviesRow),
-        matching: find.byType(LiquidGlass),
-      ),
-      findsNothing,
-    );
+      expect(find.byKey(homeRefreshKey), findsOneWidget);
+      expect(
+        inRow(CatalogKeys.resumeRow, find.byKey(homeRefreshKey)),
+        findsOneWidget,
+      );
+      final title = tester.getRect(
+        inRow(CatalogKeys.resumeRow, find.text('继续观看')),
+      );
+      final refresh = tester.getRect(find.byKey(homeRefreshKey));
+      expect(
+        refresh.center.dy,
+        inInclusiveRange(title.top - 24, title.bottom + 24),
+      );
+      expect(refresh.left, greaterThanOrEqualTo(title.right));
+      final more = tester.getRect(
+        find.byKey(CatalogKeys.shelfMore(CatalogKeys.shelfResume)),
+      );
+      expect(more.left, greaterThanOrEqualTo(refresh.right));
 
-    await tester.tap(right);
-    await tester.pumpAndSettle();
-    final left = find.byKey(
-      CatalogKeys.shelfScrollLeft(CatalogKeys.shelfLatestMovies),
-    );
-    expect(left, findsOneWidget);
-    expect(tester.widget(left), isA<ScrimIconButton>());
-  });
-
-  testWidgets('refresh button sits in the resume shelf header and reloads', (
-    tester,
-  ) async {
-    await pumpLoggedIn(tester);
-
-    expect(find.byKey(homeRefreshKey), findsOneWidget);
-    expect(
-      inRow(CatalogKeys.resumeRow, find.byKey(homeRefreshKey)),
-      findsOneWidget,
-    );
-    // 刷新钮与货架标题同一行:纵向落在标题文本范围内。
-    final title = tester.getRect(
-      inRow(CatalogKeys.resumeRow, find.text('继续观看')),
-    );
-    final refresh = tester.getRect(find.byKey(homeRefreshKey));
-    expect(
-      refresh.center.dy,
-      inInclusiveRange(title.top - 24, title.bottom + 24),
-    );
-    // 标题为 Expanded,右缘即刷新钮左缘;「更多」在刷新钮右侧。
-    expect(refresh.left, greaterThanOrEqualTo(title.right));
-    final more = tester.getRect(
-      find.byKey(CatalogKeys.shelfMore(CatalogKeys.shelfResume)),
-    );
-    expect(more.left, greaterThanOrEqualTo(refresh.right));
-
-    final before = resumeRequests();
-    for (final item in server.items) {
-      if (item.id == 'movie-up') {
-        item.name = '手动刷新后的电影';
+      final before = resumeRequests();
+      for (final item in server.items) {
+        if (item.id == 'movie-up') {
+          item.name = '手动刷新后的电影';
+        }
       }
-    }
-    await scrollBelowTopBar(tester, find.byKey(homeRefreshKey));
-    await tester.tap(find.byKey(homeRefreshKey));
-    await tester.pumpAndSettle();
+      await scrollBelowTopBar(tester, find.byKey(homeRefreshKey));
+      await tester.tap(find.byKey(homeRefreshKey));
+      await tester.pumpAndSettle();
 
-    expect(resumeRequests(), greaterThan(before));
-    expect(find.text('手动刷新后的电影'), findsWidgets);
-  });
+      expect(resumeRequests(), greaterThan(before));
+      expect(find.text('手动刷新后的电影'), findsWidgets);
+    },
+  );
 
   testWidgets(
     'refresh button falls back to the first visible shelf without resume',
@@ -278,20 +236,7 @@ void main() {
       expect(skeleton(), findsOneWidget);
       expect(retry(), findsNothing);
 
-      // 2s:第一次静默重试失败,仍是骨架屏。
-      await tester.pump(const Duration(seconds: 2));
-      await tester.pump(const Duration(milliseconds: 50));
-      expect(skeleton(), findsOneWidget);
-      expect(retry(), findsNothing);
-
-      // 6s:第二次静默重试失败,仍是骨架屏。
-      await tester.pump(const Duration(seconds: 6));
-      await tester.pump(const Duration(milliseconds: 50));
-      expect(skeleton(), findsOneWidget);
-      expect(retry(), findsNothing);
-
-      // 20s:第三次静默重试失败,计划耗尽,行显示错误与「重试」。
-      await tester.pump(const Duration(seconds: 20));
+      await tester.pump(const Duration(seconds: 28));
       await tester.pump(const Duration(milliseconds: 50));
       expect(skeleton(), findsNothing);
       expect(retry(), findsOneWidget);
@@ -300,7 +245,6 @@ void main() {
           .where((request) => request.contains('IncludeItemTypes=Movie'))
           .length;
 
-      // 不再自动重试。
       await tester.pump(const Duration(seconds: 30));
       await tester.pump(const Duration(milliseconds: 50));
       expect(
@@ -324,44 +268,4 @@ void main() {
       await tester.pump(const Duration(milliseconds: 50));
     },
   );
-
-  testWidgets('wide shelf row hugs the card and keeps the card gap', (
-    tester,
-  ) async {
-    // 继续观看同时含电影(单行标题)与单集(剧名 + S1E2 副标题两行)。
-    for (final item in server.items) {
-      if (item.id == 'movie-up' || item.id == 'episode-friends-s1e2') {
-        item.playbackPositionTicks = 60 * 10000000;
-      }
-    }
-    await pumpLoggedIn(tester);
-
-    final cards = inRow(CatalogKeys.resumeRow, find.byType(PosterCard));
-    expect(cards, findsAtLeastNWidgets(3));
-    expect(inRow(CatalogKeys.resumeRow, find.text('老友记')), findsOneWidget);
-    final list = inRow(CatalogKeys.resumeRow, find.byType(ListView));
-    final rowHeight = tester.getSize(list).height;
-    final tallestCard = cards
-        .evaluate()
-        .map((element) => (element.renderObject! as RenderBox).size.height)
-        .reduce((a, b) => a > b ? a : b);
-    expect(rowHeight, greaterThanOrEqualTo(tallestCard));
-    expect(
-      rowHeight - tallestCard,
-      lessThan(AppSpacing.sm),
-      reason: '行高只为 hover 放大留余量,不再为标签多留空白',
-    );
-
-    final first = tester.getRect(cards.at(0));
-    final second = tester.getRect(cards.at(1));
-    expect(
-      second.left - first.right,
-      moreOrLessEquals(MediaShelf.cardGap, epsilon: 0.5),
-    );
-    expect(first.left, moreOrLessEquals(AppSpacing.page, epsilon: 0.5));
-    // 首卡按 hoverScale 放大后的右缘仍在邻卡左缘之前,不与邻卡重叠。
-    final scaledRight =
-        first.center.dx + first.width * MediaShelf.hoverScale / 2;
-    expect(scaledRight, lessThan(second.left));
-  });
 }

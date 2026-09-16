@@ -1,3 +1,6 @@
+@Tags(['integration'])
+library;
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -94,7 +97,7 @@ void main() {
   }
 
   testWidgets(
-    'home rows show resume progress and hide empty or missing NextUp',
+    'home, library details, mark played, and search share one logged-in pump',
     (tester) async {
       await pumpLoggedIn(tester);
 
@@ -163,481 +166,147 @@ void main() {
         find.byKey(AppShell.libraryNavKey('view-untyped')),
         findsOneWidget,
       );
-    },
-  );
 
-  testWidgets('continue watching can hide an item from the row', (
-    tester,
-  ) async {
-    await pumpLoggedIn(tester);
-    final resumeCard = find.descendant(
-      of: find.byKey(CatalogKeys.resumeRow),
-      matching: find.byKey(CatalogKeys.item('movie-inception')),
-    );
-    expect(resumeCard, findsOneWidget);
-    await tester.ensureVisible(resumeCard);
-    await tester.pumpAndSettle();
-    final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
-    await gesture.addPointer(location: Offset.zero);
-    addTearDown(gesture.removePointer);
-    await gesture.moveTo(tester.getCenter(resumeCard));
-    await tester.pumpAndSettle();
-    await tester.tap(
-      find.byKey(CatalogKeys.removeFromResume('movie-inception')),
-    );
-    await tester.pumpAndSettle();
-    expect(
-      find.descendant(
-        of: find.byKey(CatalogKeys.resumeRow),
-        matching: find.byKey(CatalogKeys.item('movie-inception')),
-      ),
-      findsNothing,
-    );
-  });
-
-  testWidgets('empty catalog rows are hidden and NextUp 404 is not faked', (
-    tester,
-  ) async {
-    for (final item in server.items) {
-      item.playbackPositionTicks = 0;
-      item.playedPercentage = null;
-      item.nextUp = false;
-    }
-    server.items.removeWhere(
-      (item) =>
-          item.type == 'Movie' ||
-          item.type == 'Episode' ||
-          item.type == 'Series',
-    );
-    server.nextUpStatus = 404;
-    await pumpLoggedIn(tester);
-
-    expect(find.byKey(CatalogKeys.resumeRow), findsNothing);
-    expect(find.byKey(CatalogKeys.nextUpRow), findsNothing);
-    expect(find.byKey(CatalogKeys.latestMoviesRow), findsNothing);
-    expect(find.byKey(CatalogKeys.latestSeriesRow), findsNothing);
-    expect(find.text('The One with the Sonogram'), findsNothing);
-  });
-
-  testWidgets('a failed home row keeps skeleton and retries quietly', (
-    tester,
-  ) async {
-    server.latestMovieStatus = 500;
-    final auth = AuthController(
-      client: EmbyClient(device: _device, dio: dioForFakeEmby(adapter)),
-      credentials: MemoryCredentialStore(),
-      servers: MemoryServerListStore(),
-    );
-    await tester.runAsync(() {
-      return auth.connect(
-        address: server.baseUrl.toString(),
-        username: 'alice',
-        password: 'correct-horse',
-      );
-    });
-    await tester.pumpWidget(RillightApp(auth: auth));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 50));
-
-    expect(find.byKey(CatalogKeys.resumeRow), findsOneWidget);
-    expect(find.byKey(CatalogKeys.latestMoviesRow), findsOneWidget);
-    expect(find.text('飞屋环游记'), findsNothing);
-    expect(find.text('Inception'), findsWidgets);
-    expect(find.text('重试'), findsNothing);
-
-    server.latestMovieStatus = null;
-    await tester.pump(const Duration(seconds: 2));
-    await tester.pump();
-    expect(find.text('飞屋环游记'), findsWidgets);
-    await tester.pump(const Duration(milliseconds: 50));
-    await tester.pump(const Duration(milliseconds: 50));
-  });
-
-  testWidgets('library poster wall opens movie and series episode details', (
-    tester,
-  ) async {
-    await pumpLoggedIn(tester);
-
-    await openLibrary(tester, 'view-movies');
-    expect(find.byKey(AppShell.libraryNavKey('view-movies')), findsOneWidget);
-    expect(
-      find.descendant(
-        of: find.byType(CustomScrollView),
-        matching: find.text('电影'),
-      ),
-      findsNothing,
-    );
-    expect(find.byKey(CatalogKeys.item('movie-inception')), findsOneWidget);
-    expect(find.byKey(CatalogKeys.item('movie-up')), findsOneWidget);
-
-    await tester.tap(find.byKey(CatalogKeys.item('movie-inception')));
-    await tester.pumpAndSettle();
-    expect(find.text('Inception (2010)'), findsOneWidget);
-    expect(
-      find.text('A thief who steals corporate secrets through dream-sharing.'),
-      findsWidgets,
-    );
-    expect(find.text('已看 40%'), findsOneWidget);
-    expect(find.text('章节'), findsOneWidget);
-    expect(find.byKey(CatalogKeys.chapter(0)), findsOneWidget);
-    expect(find.text('Chapter 1'), findsOneWidget);
-
-    await _tapDetailBack(tester);
-    await tester.pumpAndSettle();
-    await openLibrary(tester, 'view-tv');
-    await tester.tap(find.byKey(CatalogKeys.item('series-friends')));
-    await tester.pumpAndSettle();
-    expect(find.text('老友记 (1994)'), findsOneWidget);
-    expect(find.byKey(CatalogKeys.overview), findsOneWidget);
-    expect(find.text('简介'), findsNothing);
-    expect(find.text('Six friends living in New York.'), findsOneWidget);
-    expect(
-      find.descendant(
-        of: find.byKey(ItemDetailPage.posterKey),
-        matching: find.text('Six friends living in New York.'),
-      ),
-      findsNothing,
-    );
-    // 行内承载「N. 标题」与本集简介(纵向列表,ADR-3 修订)。
-    final row = find.byKey(CatalogKeys.episodesRow);
-    expect(
-      find.descendant(of: row, matching: find.text('1. The Pilot')),
-      findsOneWidget,
-    );
-    expect(
-      find.descendant(
-        of: row,
-        matching: find.text('Monica gets a new apartment.'),
-      ),
-      findsOneWidget,
-    );
-    final episode = find.byKey(CatalogKeys.episode('episode-friends-s1e1'));
-    await tester.ensureVisible(episode);
-    await tester.tap(episode);
-    await tester.pumpAndSettle();
-    expect(find.textContaining('The Pilot'), findsWidgets);
-    // 单集简介由概览分区承载(可展开收起),海报不再叠简介带。
-    expect(find.byKey(CatalogKeys.overview), findsNothing);
-    expect(find.text('简介'), findsNothing);
-    expect(
-      find.descendant(
-        of: find.byKey(ItemDetailPage.posterKey),
-        matching: find.text('Monica gets a new apartment.'),
-      ),
-      findsNothing,
-    );
-    expect(
-      tester.widget<Text>(find.byKey(EpisodeOverviewSection.textKey)).data,
-      'Monica gets a new apartment.',
-    );
-    expect(find.byKey(CatalogKeys.seriesLink), findsOneWidget);
-    expect(find.byKey(CatalogKeys.viewSeries), findsOneWidget);
-    expect(find.byKey(CatalogKeys.episodesRow), findsNothing);
-    await ensureVisibleBelowTopBar(tester, find.byKey(CatalogKeys.viewSeries));
-    await tapBelowTopBar(tester, find.byKey(CatalogKeys.viewSeries));
-    await tester.pumpAndSettle();
-    expect(find.text('老友记 (1994)'), findsOneWidget);
-  });
-
-  testWidgets('overflowing chapters can scroll sideways', (tester) async {
-    tester.view.physicalSize = const Size(900, 800);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-    for (final item in server.items) {
-      if (item.id != 'movie-inception') {
-        continue;
-      }
-      item.chapters = [
-        for (var i = 0; i < 12; i++)
-          FakeChapter(
-            name: 'Chapter ${i + 1}',
-            startPositionTicks: i * 60 * 10000000,
-          ),
-      ];
-    }
-    await pumpLoggedIn(tester);
-    await tester.tap(find.byKey(CatalogKeys.item('movie-inception')).first);
-    await tester.pumpAndSettle();
-    final right = find.byKey(
-      CatalogKeys.shelfScrollRight(CatalogKeys.shelfChapters),
-    );
-    await tester.ensureVisible(find.byKey(CatalogKeys.chapter(0)));
-    await tester.pump();
-    expect(right, findsOneWidget);
-    await tester.tap(right);
-    await tester.pumpAndSettle();
-    expect(
-      find.byKey(CatalogKeys.shelfScrollLeft(CatalogKeys.shelfChapters)),
-      findsOneWidget,
-    );
-  });
-
-  testWidgets('episode detail opens next episode and parent series', (
-    tester,
-  ) async {
-    await pumpLoggedIn(tester);
-    await openLibrary(tester, 'view-tv');
-    await tester.tap(find.byKey(CatalogKeys.item('series-friends')));
-    await tester.pumpAndSettle();
-    final first = find.byKey(CatalogKeys.episode('episode-friends-s1e1'));
-    await tester.ensureVisible(first);
-    await tester.tap(first);
-    await tester.pumpAndSettle();
-    expect(find.textContaining('The Pilot'), findsWidgets);
-    expect(find.text('Monica gets a new apartment.'), findsWidgets);
-    expect(find.byKey(CatalogKeys.seriesLink), findsOneWidget);
-    expect(find.byKey(CatalogKeys.viewSeries), findsOneWidget);
-    expect(find.byKey(CatalogKeys.nextEpisode), findsOneWidget);
-    expect(find.byKey(CatalogKeys.episodesRow), findsNothing);
-
-    await ensureVisibleBelowTopBar(tester, find.byKey(CatalogKeys.nextEpisode));
-    await tapBelowTopBar(tester, find.byKey(CatalogKeys.nextEpisode));
-    await tester.pump();
-    expect(find.byKey(CatalogKeys.episodesRow), findsNothing);
-    await tester.pumpAndSettle();
-    expect(find.textContaining('The One with the Sonogram'), findsWidgets);
-    expect(find.text('Monica gets a new apartment.'), findsNothing);
-    expect(find.text('Six friends living in New York.'), findsWidgets);
-    expect(find.byKey(CatalogKeys.nextEpisode), findsNothing);
-
-    await ensureVisibleBelowTopBar(tester, find.byKey(CatalogKeys.viewSeries));
-    await tapBelowTopBar(tester, find.byKey(CatalogKeys.viewSeries));
-    await tester.pumpAndSettle();
-    expect(find.text('老友记 (1994)'), findsOneWidget);
-    expect(find.byKey(CatalogKeys.episodesRow), findsOneWidget);
-  });
-
-  testWidgets('episode more page lists episode titles as wide thumbs', (
-    tester,
-  ) async {
-    await pumpLoggedIn(tester);
-    await openLibrary(tester, 'view-tv');
-    await tester.tap(find.byKey(CatalogKeys.item('series-friends')));
-    await tester.pumpAndSettle();
-    final more = find.byKey(CatalogKeys.shelfMore(CatalogKeys.shelfEpisodes));
-    await ensureVisibleBelowTopBar(tester, more);
-    await tapBelowTopBar(tester, more);
-    await tester.pumpAndSettle();
-    expect(find.text('1. The Pilot'), findsOneWidget);
-    expect(find.text('2. The One with the Sonogram'), findsOneWidget);
-    expect(find.byKey(CatalogKeys.back), findsOneWidget);
-    await _tapDetailBack(tester);
-    await tester.pumpAndSettle();
-    expect(find.byKey(CatalogKeys.episodesRow), findsOneWidget);
-    await ensureVisibleBelowTopBar(tester, more);
-    await tapBelowTopBar(tester, more);
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(CatalogKeys.episode('episode-friends-s1e2')));
-    await tester.pumpAndSettle();
-    expect(find.textContaining('The One with the Sonogram'), findsWidgets);
-    expect(find.byKey(CatalogKeys.viewSeries), findsOneWidget);
-  });
-
-  testWidgets('marking played updates continue watching from the server', (
-    tester,
-  ) async {
-    await pumpLoggedIn(tester);
-    expect(find.byKey(CatalogKeys.resumeRow), findsOneWidget);
-
-    final resumeItem = find.byKey(CatalogKeys.item('movie-inception')).first;
-    await tester.ensureVisible(resumeItem);
-    await tester.tap(resumeItem);
-    await tester.pumpAndSettle();
-    await tapBelowTopBar(tester, find.byKey(CatalogKeys.playedToggle));
-    await tester.pumpAndSettle();
-
-    await _tapDetailBack(tester);
-    await tester.pumpAndSettle();
-    expect(find.byKey(CatalogKeys.resumeRow), findsNothing);
-    await tester.ensureVisible(find.byKey(CatalogKeys.item('movie-inception')));
-    expect(find.byKey(CatalogKeys.item('movie-inception')), findsWidgets);
-  });
-
-  testWidgets('search hits open detail; empty query does not request', (
-    tester,
-  ) async {
-    await pumpLoggedIn(tester);
-    final beforeSearch = server.requests
-        .where((request) => request.contains('SearchTerm='))
-        .length;
-
-    await tester.tap(find.byTooltip('搜索'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(CatalogKeys.searchSubmit));
-    await tester.pumpAndSettle();
-    expect(find.text('输入片名后搜索'), findsOneWidget);
-    expect(find.text('没有结果'), findsNothing);
-    expect(
-      server.requests
-          .where((request) => request.contains('SearchTerm='))
-          .length,
-      beforeSearch,
-    );
-
-    await tester.enterText(find.byKey(CatalogKeys.searchField), 'Inception');
-    await tester.tap(find.byKey(CatalogKeys.searchSubmit));
-    await tester.pumpAndSettle();
-    final overlayHit = find.descendant(
-      of: find.byType(SearchOverlay),
-      matching: find.byKey(CatalogKeys.item('movie-inception')),
-    );
-    expect(overlayHit, findsOneWidget);
-
-    await tester.tap(overlayHit);
-    await tester.pumpAndSettle();
-    expect(find.byType(SearchOverlay), findsNothing);
-    expect(find.text('Inception (2010)'), findsOneWidget);
-  });
-
-  testWidgets('search HTTP failure is an error, not empty success', (
-    tester,
-  ) async {
-    server.searchStatus = 500;
-    await pumpLoggedIn(tester);
-    await tester.tap(find.byTooltip('搜索'));
-    await tester.pumpAndSettle();
-    await tester.enterText(find.byKey(CatalogKeys.searchField), 'Inception');
-    await tester.tap(find.byKey(CatalogKeys.searchSubmit));
-    await tester.pumpAndSettle();
-
-    expect(find.byType(AppErrorView), findsOneWidget);
-    expect(find.text('HTTP 500: search failed'), findsOneWidget);
-    expect(find.text('没有结果'), findsNothing);
-    expect(find.byKey(CatalogKeys.searchNoResults), findsNothing);
-  });
-
-  testWidgets('search overlay paginates 50 items with 600px prefetch', (
-    tester,
-  ) async {
-    tester.view.physicalSize = const Size(1200, 900);
-    tester.view.devicePixelRatio = 1.0;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-
-    for (var i = 0; i < 70; i++) {
-      server.items.add(
-        FakeEmbyItem(
-          id: 'search-hit-$i',
-          name: 'PagedHit $i',
-          type: 'Movie',
-          parentId: 'view-movies',
+      await openLibrary(tester, 'view-movies');
+      expect(find.byKey(AppShell.libraryNavKey('view-movies')), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byType(CustomScrollView),
+          matching: find.text('电影'),
         ),
+        findsNothing,
       );
-    }
-    await pumpLoggedIn(tester);
-    await tester.tap(find.byTooltip('搜索'));
-    await tester.pumpAndSettle();
-    expect(find.byType(SearchOverlay), findsOneWidget);
-    expect(find.byType(SearchPage), findsOneWidget);
+      expect(find.byKey(CatalogKeys.item('movie-inception')), findsOneWidget);
+      expect(find.byKey(CatalogKeys.item('movie-up')), findsOneWidget);
 
-    await tester.enterText(find.byKey(CatalogKeys.searchField), 'PagedHit');
-    await tester.tap(find.byKey(CatalogKeys.searchSubmit));
-    await tester.pumpAndSettle();
-    Finder overlayItem(String id) {
-      return find.descendant(
+      await tester.tap(find.byKey(CatalogKeys.item('movie-inception')));
+      await tester.pumpAndSettle();
+      expect(find.text('Inception (2010)'), findsOneWidget);
+      expect(
+        find.text(
+          'A thief who steals corporate secrets through dream-sharing.',
+        ),
+        findsWidgets,
+      );
+      expect(find.text('已看 40%'), findsOneWidget);
+      expect(find.text('章节'), findsOneWidget);
+      expect(find.byKey(CatalogKeys.chapter(0)), findsOneWidget);
+      expect(find.text('Chapter 1'), findsOneWidget);
+
+      await _tapDetailBack(tester);
+      await tester.pumpAndSettle();
+      await openLibrary(tester, 'view-tv');
+      await tester.tap(find.byKey(CatalogKeys.item('series-friends')));
+      await tester.pumpAndSettle();
+      expect(find.text('老友记 (1994)'), findsOneWidget);
+      expect(find.byKey(CatalogKeys.overview), findsOneWidget);
+      expect(find.text('简介'), findsNothing);
+      expect(find.text('Six friends living in New York.'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(ItemDetailPage.posterKey),
+          matching: find.text('Six friends living in New York.'),
+        ),
+        findsNothing,
+      );
+      final row = find.byKey(CatalogKeys.episodesRow);
+      expect(
+        find.descendant(of: row, matching: find.text('1. The Pilot')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: row,
+          matching: find.text('Monica gets a new apartment.'),
+        ),
+        findsOneWidget,
+      );
+      final episode = find.byKey(CatalogKeys.episode('episode-friends-s1e1'));
+      await tester.ensureVisible(episode);
+      await tester.tap(episode);
+      await tester.pumpAndSettle();
+      expect(find.textContaining('The Pilot'), findsWidgets);
+      expect(find.byKey(CatalogKeys.overview), findsNothing);
+      expect(find.text('简介'), findsNothing);
+      expect(
+        find.descendant(
+          of: find.byKey(ItemDetailPage.posterKey),
+          matching: find.text('Monica gets a new apartment.'),
+        ),
+        findsNothing,
+      );
+      expect(
+        tester.widget<Text>(find.byKey(EpisodeOverviewSection.textKey)).data,
+        'Monica gets a new apartment.',
+      );
+      expect(find.byKey(CatalogKeys.seriesLink), findsOneWidget);
+      expect(find.byKey(CatalogKeys.viewSeries), findsOneWidget);
+      expect(find.byKey(CatalogKeys.episodesRow), findsNothing);
+      await ensureVisibleBelowTopBar(
+        tester,
+        find.byKey(CatalogKeys.viewSeries),
+      );
+      await tapBelowTopBar(tester, find.byKey(CatalogKeys.viewSeries));
+      await tester.pumpAndSettle();
+      expect(find.text('老友记 (1994)'), findsOneWidget);
+
+      await goHome(tester);
+      expect(find.byKey(CatalogKeys.resumeRow), findsOneWidget);
+      final resumeItem = find.byKey(CatalogKeys.item('movie-inception')).first;
+      await tester.ensureVisible(resumeItem);
+      await tester.tap(resumeItem);
+      await tester.pumpAndSettle();
+      await tapBelowTopBar(tester, find.byKey(CatalogKeys.playedToggle));
+      await tester.pumpAndSettle();
+      await _tapDetailBack(tester);
+      await tester.pumpAndSettle();
+      expect(find.byKey(CatalogKeys.resumeRow), findsNothing);
+      await tester.ensureVisible(
+        find.byKey(CatalogKeys.item('movie-inception')),
+      );
+      expect(find.byKey(CatalogKeys.item('movie-inception')), findsWidgets);
+
+      final beforeSearch = server.requests
+          .where((request) => request.contains('SearchTerm='))
+          .length;
+      await tester.tap(find.byTooltip('搜索'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(CatalogKeys.searchSubmit));
+      await tester.pumpAndSettle();
+      expect(find.text('输入片名后搜索'), findsOneWidget);
+      expect(find.text('没有结果'), findsNothing);
+      expect(
+        server.requests
+            .where((request) => request.contains('SearchTerm='))
+            .length,
+        beforeSearch,
+      );
+
+      await tester.enterText(find.byKey(CatalogKeys.searchField), 'Inception');
+      await tester.tap(find.byKey(CatalogKeys.searchSubmit));
+      await tester.pumpAndSettle();
+      final overlayHit = find.descendant(
         of: find.byType(SearchOverlay),
-        matching: find.byKey(CatalogKeys.item(id)),
+        matching: find.byKey(CatalogKeys.item('movie-inception')),
       );
-    }
-
-    expect(overlayItem('search-hit-0'), findsOneWidget);
-    expect(overlayItem('search-hit-69'), findsNothing);
-
-    final grid = find.descendant(
-      of: find.byType(SearchOverlay),
-      matching: find.byType(GridView),
-    );
-    expect(
-      tester.widget<GridView>(grid).padding,
-      const EdgeInsets.fromLTRB(
-        AppSpacing.page,
-        AppSpacing.xs,
-        AppSpacing.page,
-        AppSpacing.xxl,
-      ),
-    );
-    for (var i = 0; i < 30; i++) {
-      await tester.drag(grid, const Offset(0, -400));
+      expect(overlayHit, findsOneWidget);
+      await tester.tap(overlayHit);
       await tester.pumpAndSettle();
-      if (overlayItem('search-hit-69').evaluate().isNotEmpty) {
-        break;
-      }
-    }
-    expect(overlayItem('search-hit-69'), findsOneWidget);
-    expect(
-      server.requests.any(
-        (request) =>
-            request.contains('SearchTerm=PagedHit') &&
-            request.contains('StartIndex=50'),
-      ),
-      isTrue,
-    );
-  });
+      expect(find.byType(SearchOverlay), findsNothing);
+      expect(find.text('Inception (2010)'), findsOneWidget);
 
-  testWidgets('a failed cover uses a placeholder and other items still open', (
-    tester,
-  ) async {
-    await pumpLoggedIn(tester);
-
-    expect(find.byType(PosterPlaceholder), findsWidgets);
-    final upCard = find.byKey(CatalogKeys.item('movie-up'));
-    await tester.ensureVisible(upCard);
-    await tester.tap(upCard);
-    await tester.pumpAndSettle();
-    expect(find.text('飞屋环游记 (2009)'), findsOneWidget);
-    expect(
-      find.text('An old man flies his house to Paradise Falls.'),
-      findsWidgets,
-    );
-  });
-
-  testWidgets('more page and movie library change order when SortBy changes', (
-    tester,
-  ) async {
-    await pumpLoggedIn(tester);
-    await _openLatestMoviesMore(tester);
-
-    expect(find.text('最近更新的电影'), findsWidgets);
-    expect(find.text('更新日期'), findsWidgets);
-    expect(_posterNames(tester).first, '飞屋环游记');
-
-    await _tapGridSort(tester);
-    await tester.tap(find.byKey(CatalogKeys.sortOption('SortName')));
-    await tester.pumpAndSettle();
-    expect(_posterNames(tester).first, 'Inception');
-    expect(
-      server.requests.any(
-        (request) =>
-            request.contains('SortBy=SortName') &&
-            request.contains('SortOrder=Ascending'),
-      ),
-      isTrue,
-    );
-
-    await goHome(tester);
-    await openLibrary(tester, 'view-movies');
-    expect(_posterNames(tester).first, '飞屋环游记');
-    await _tapGridSort(tester);
-    await tester.tap(find.byKey(CatalogKeys.sortOption('SortName')));
-    await tester.pumpAndSettle();
-    expect(_posterNames(tester).first, 'Inception');
-  });
-
-  testWidgets(
-    'changing sort shows the server failure instead of the old order',
-    (tester) async {
-      await pumpLoggedIn(tester);
-      await _openLatestMoviesMore(tester);
-      expect(_posterNames(tester).first, '飞屋环游记');
-
-      server.itemsStatus = 500;
-      await _tapGridSort(tester);
-      await tester.tap(find.byKey(CatalogKeys.sortOption('SortName')));
+      await _tapDetailBack(tester);
       await tester.pumpAndSettle();
-
-      expect(find.text('HTTP 500: items failed'), findsOneWidget);
-      expect(find.text('飞屋环游记'), findsNothing);
+      server.searchStatus = 500;
+      await tester.tap(find.byTooltip('搜索'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(CatalogKeys.searchField), 'Inception');
+      await tester.tap(find.byKey(CatalogKeys.searchSubmit));
+      await tester.pumpAndSettle();
+      expect(find.byType(AppErrorView), findsOneWidget);
+      expect(find.text('HTTP 500: search failed'), findsOneWidget);
+      expect(find.text('没有结果'), findsNothing);
+      expect(find.byKey(CatalogKeys.searchNoResults), findsNothing);
     },
   );
 
@@ -658,644 +327,6 @@ void main() {
       ShelfGridPage.maxCrossAxisExtentFor(AppBreakpoints.large + 1),
       greaterThanOrEqualTo(220),
     );
-  });
-
-  testWidgets('poster grid column count grows with the window width', (
-    tester,
-  ) async {
-    int crossAxisCount() {
-      final grid = tester.widget<SliverGrid>(find.byType(SliverGrid));
-      final delegate =
-          grid.gridDelegate as SliverGridDelegateWithFixedCrossAxisCount;
-      return delegate.crossAxisCount;
-    }
-
-    await pumpLoggedIn(tester);
-    await _openLatestMoviesMore(tester);
-    final compactCount = crossAxisCount();
-
-    tester.view.physicalSize = const Size(1920, 1080);
-    tester.view.devicePixelRatio = 1.0;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-    await tester.pumpAndSettle();
-
-    expect(crossAxisCount(), greaterThan(compactCount));
-  });
-
-  testWidgets(
-    'overflowing shelf reveals hidden posters with the right control',
-    (tester) async {
-      tester.view.physicalSize = const Size(320, 900);
-      tester.view.devicePixelRatio = 1.0;
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.view.resetDevicePixelRatio);
-
-      for (var i = 0; i < 8; i++) {
-        server.items.add(
-          FakeEmbyItem(
-            id: 'movie-extra-$i',
-            name: 'Extra $i',
-            type: 'Movie',
-            parentId: 'view-movies',
-            dateCreated: DateTime.utc(2000, 1, i + 1),
-          ),
-        );
-      }
-      server.items.add(
-        FakeEmbyItem(
-          id: 'movie-shelf-tail',
-          name: 'ShelfTail',
-          type: 'Movie',
-          parentId: 'view-movies',
-          dateCreated: DateTime.utc(1999, 1, 1),
-        ),
-      );
-
-      await pumpLoggedIn(tester);
-      await tester.ensureVisible(find.byKey(CatalogKeys.latestMoviesRow));
-      expect(
-        find.byKey(CatalogKeys.shelfScrollRight(CatalogKeys.shelfLatestMovies)),
-        findsOneWidget,
-      );
-      expect(find.text('ShelfTail'), findsNothing);
-
-      var taps = 0;
-      while (find.text('ShelfTail').evaluate().isEmpty && taps < 16) {
-        await tester.tap(
-          find.byKey(
-            CatalogKeys.shelfScrollRight(CatalogKeys.shelfLatestMovies),
-          ),
-        );
-        await tester.pumpAndSettle();
-        taps++;
-      }
-      expect(find.text('ShelfTail'), findsOneWidget);
-    },
-  );
-
-  testWidgets('overflowing shelf can be dragged sideways with the mouse', (
-    tester,
-  ) async {
-    tester.view.physicalSize = const Size(320, 900);
-    tester.view.devicePixelRatio = 1.0;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-
-    for (var i = 0; i < 8; i++) {
-      server.items.add(
-        FakeEmbyItem(
-          id: 'movie-extra-$i',
-          name: 'Extra $i',
-          type: 'Movie',
-          parentId: 'view-movies',
-          dateCreated: DateTime.utc(2000, 1, i + 1),
-        ),
-      );
-    }
-
-    await pumpLoggedIn(tester);
-    await tester.ensureVisible(find.byKey(CatalogKeys.latestMoviesRow));
-
-    final scrollable = find.descendant(
-      of: find.byKey(CatalogKeys.latestMoviesRow),
-      matching: find.byWidgetPredicate(
-        (widget) =>
-            widget is Scrollable && widget.axisDirection == AxisDirection.right,
-      ),
-    );
-    final position = tester.state<ScrollableState>(scrollable).position;
-    expect(position.pixels, 0);
-
-    await tester.drag(
-      scrollable,
-      const Offset(-200, 0),
-      kind: PointerDeviceKind.mouse,
-    );
-    await tester.pumpAndSettle();
-
-    expect(position.pixels, greaterThan(0));
-    expect(find.byKey(CatalogKeys.latestMoviesRow), findsOneWidget);
-  });
-
-  testWidgets('detail similar row appears only when the API returns items', (
-    tester,
-  ) async {
-    await pumpLoggedIn(tester);
-    final inception = find.byKey(CatalogKeys.item('movie-inception')).first;
-    await tester.ensureVisible(inception);
-    await tester.tap(inception);
-    await tester.pumpAndSettle();
-    expect(find.byKey(CatalogKeys.similarRow), findsOneWidget);
-    expect(find.text('更多类似'), findsOneWidget);
-    expect(find.byKey(CatalogKeys.item('movie-up')), findsWidgets);
-
-    await _tapDetailBack(tester);
-    await tester.pumpAndSettle();
-    server.similarEmpty = true;
-    final up = find.byKey(CatalogKeys.item('movie-up')).first;
-    await tester.ensureVisible(up);
-    await tester.tap(up);
-    await tester.pumpAndSettle();
-    expect(find.text('飞屋环游记 (2009)'), findsOneWidget);
-    expect(find.byKey(CatalogKeys.similarRow), findsNothing);
-  });
-
-  testWidgets('top bar switches libraries without returning home', (
-    tester,
-  ) async {
-    await pumpLoggedIn(tester);
-    await tester.tap(find.byKey(AppShell.libraryNavKey('view-movies')));
-    await tester.pumpAndSettle();
-    expect(find.byKey(CatalogKeys.librarySwitcher), findsNothing);
-    expect(find.byKey(CatalogKeys.item('movie-inception')), findsOneWidget);
-    expect(find.byKey(CatalogKeys.item('series-friends')), findsNothing);
-    expect(_posterNames(tester).first, '飞屋环游记');
-
-    await _tapGridSort(tester);
-    await tester.tap(find.byKey(CatalogKeys.sortOption('SortName')));
-    await tester.pumpAndSettle();
-    expect(_posterNames(tester).first, 'Inception');
-
-    await tester.tap(find.byKey(AppShell.libraryNavKey('view-tv')));
-    await tester.pumpAndSettle();
-    expect(find.byKey(AppShell.homeNavKey), findsOneWidget);
-    expect(find.byKey(CatalogKeys.item('movie-inception')), findsNothing);
-    await tester.ensureVisible(find.byKey(CatalogKeys.item('series-friends')));
-    expect(find.byKey(CatalogKeys.item('series-friends')), findsOneWidget);
-
-    await tester.tap(find.byKey(AppShell.libraryNavKey('view-movies')));
-    await tester.pumpAndSettle();
-    expect(find.byKey(CatalogKeys.item('series-friends')), findsNothing);
-    expect(_posterNames(tester).first, '飞屋环游记');
-  });
-
-  testWidgets('home hero rotates featured items via arrows', (tester) async {
-    await pumpLoggedIn(tester);
-    expect(find.byType(HomeHero), findsOneWidget);
-    expect(tester.getTopLeft(find.byType(HomeHero)).dy, 0);
-    expect(
-      tester.getSize(find.byType(HomeHero)).height,
-      lessThan(
-        tester.view.physicalSize.height / tester.view.devicePixelRatio * 0.90,
-      ),
-    );
-    expect(find.byKey(CatalogKeys.heroNext), findsOneWidget);
-    expect(find.byKey(const Key('catalog-hero-index-0')), findsOneWidget);
-
-    await tester.tap(find.byKey(CatalogKeys.heroNext));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('catalog-hero-index-0')), findsNothing);
-    expect(find.byKey(const Key('catalog-hero-index-1')), findsOneWidget);
-
-    await tester.tap(find.byKey(CatalogKeys.heroPrev));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('catalog-hero-index-0')), findsOneWidget);
-
-    await tester.tap(find.byKey(CatalogKeys.heroDot(1)));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('catalog-hero-index-1')), findsOneWidget);
-  });
-
-  testWidgets('home hero auto-advance pauses on hover and focus', (
-    tester,
-  ) async {
-    final auth = await pumpLoggedIn(tester);
-    HomeHero.autoAdvanceEnabled = true;
-    await tester.pumpWidget(RillightApp(auth: auth));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 200));
-    expect(find.byKey(const Key('catalog-hero-index-0')), findsOneWidget);
-
-    await tester.pump(
-      HomeHero.autoAdvanceInterval + const Duration(milliseconds: 1),
-    );
-    expect(find.byKey(const Key('catalog-hero-index-1')), findsOneWidget);
-
-    final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
-    await gesture.addPointer(location: Offset.zero);
-    addTearDown(gesture.removePointer);
-    await gesture.moveTo(tester.getCenter(find.byType(HomeHero)));
-    await tester.pump();
-    await tester.pump(HomeHero.autoAdvanceInterval);
-    expect(find.byKey(const Key('catalog-hero-index-1')), findsOneWidget);
-
-    await gesture.moveTo(Offset.zero);
-    await tester.pump();
-    final details = find.descendant(
-      of: find.byType(HomeHero),
-      matching: find.widgetWithText(OutlinedButton, '详情'),
-    );
-    _focusOf(tester, details)?.requestFocus();
-    await tester.pump();
-    await tester.pump(HomeHero.autoAdvanceInterval);
-    expect(find.byKey(const Key('catalog-hero-index-1')), findsOneWidget);
-  });
-
-  testWidgets('home hero does not auto-advance when animations are disabled', (
-    tester,
-  ) async {
-    await pumpLoggedIn(tester);
-    tester.platformDispatcher.accessibilityFeaturesTestValue =
-        const FakeAccessibilityFeatures(reduceMotion: true);
-    addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
-    HomeHero.autoAdvanceEnabled = true;
-    await tester.pump();
-    expect(find.byKey(const Key('catalog-hero-index-0')), findsOneWidget);
-    await tester.pump(HomeHero.autoAdvanceInterval);
-    expect(find.byKey(const Key('catalog-hero-index-0')), findsOneWidget);
-    expect(find.byKey(const Key('catalog-hero-index-1')), findsNothing);
-  });
-
-  testWidgets('shelf arrow keys move focus between adjacent posters', (
-    tester,
-  ) async {
-    await pumpLoggedIn(tester);
-    final movies = find.byKey(CatalogKeys.latestMoviesRow);
-    final first = find.descendant(
-      of: movies,
-      matching: find.byKey(CatalogKeys.item('movie-up')),
-    );
-    final second = find.descendant(
-      of: movies,
-      matching: find.byKey(CatalogKeys.item('movie-broken')),
-    );
-    await tester.ensureVisible(first);
-    _focusOf(tester, first)?.requestFocus();
-    await tester.pump();
-    expect(_focusOf(tester, first)?.hasPrimaryFocus, isTrue);
-
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
-    await tester.pumpAndSettle();
-    expect(_focusOf(tester, second)?.hasPrimaryFocus, isTrue);
-
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
-    await tester.pumpAndSettle();
-    expect(_focusOf(tester, first)?.hasPrimaryFocus, isTrue);
-  });
-
-  testWidgets('vertical wheel on a shelf still scrolls the home page', (
-    tester,
-  ) async {
-    tester.view.physicalSize = const Size(800, 500);
-    tester.view.devicePixelRatio = 1.0;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-
-    await pumpLoggedIn(tester);
-    final poster = find.descendant(
-      of: find.byKey(CatalogKeys.latestMoviesRow),
-      matching: find.byKey(CatalogKeys.item('movie-up')),
-    );
-    await tester.ensureVisible(poster);
-    final scrollable = tester.state<ScrollableState>(
-      find
-          .descendant(
-            of: find.byType(SingleChildScrollView),
-            matching: find.byWidgetPredicate(
-              (widget) => widget is Scrollable && widget.axis == Axis.vertical,
-            ),
-          )
-          .first,
-    );
-    final before = scrollable.position.pixels;
-    await tester.sendEventToBinding(
-      PointerScrollEvent(
-        position: tester.getCenter(poster),
-        scrollDelta: const Offset(0, 180),
-      ),
-    );
-    await tester.pump();
-    expect(scrollable.position.pixels, greaterThan(before));
-  });
-
-  testWidgets(
-    'detail hero is full-width with readable title and poster fallback',
-    (tester) async {
-      tester.view.physicalSize = const Size(1200, 900);
-      tester.view.devicePixelRatio = 1.0;
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.view.resetDevicePixelRatio);
-      MediaImage.debugClearCache();
-      addTearDown(MediaImage.debugClearCache);
-
-      await pumpLoggedIn(tester);
-      final inception = find.byKey(CatalogKeys.item('movie-inception')).first;
-      await tester.ensureVisible(inception);
-      await tester.tap(inception);
-      await tester.pumpAndSettle();
-
-      final hero = _detailHero();
-      expect(hero, findsOneWidget);
-      expect(tester.getTopLeft(hero).dx, 0);
-      expect(tester.getTopLeft(hero).dy, 0);
-      expect(tester.getSize(hero).width, 1200);
-
-      final title = find.text('Inception (2010)');
-      expect(title, findsOneWidget);
-      expect(tester.getRect(hero).overlaps(tester.getRect(title)), isTrue);
-      expect(find.byKey(PlayerKeys.open), findsOneWidget);
-      expect(
-        tester
-            .getRect(hero)
-            .overlaps(tester.getRect(find.byKey(PlayerKeys.open))),
-        isTrue,
-      );
-      expect(find.byKey(CatalogKeys.back), findsOneWidget);
-      expect(find.byKey(CatalogKeys.playedToggle), findsOneWidget);
-      expect(find.text('章节'), findsOneWidget);
-      expect(find.byType(SelectableText), findsWidgets);
-      expect(find.byKey(CatalogKeys.similarRow), findsOneWidget);
-
-      await _pumpUntilHeroImage(tester);
-      final image = tester.widget<Image>(
-        find.descendant(of: hero, matching: find.byType(Image)),
-      );
-      expect(image.fit, BoxFit.cover);
-      expect(image.alignment, Alignment.center);
-      expect(
-        server.requests.where(
-          (request) => request.contains('/Images/Backdrop'),
-        ),
-        isEmpty,
-      );
-    },
-  );
-
-  testWidgets('switching versions restores the new source default audio', (
-    tester,
-  ) async {
-    tester.view.physicalSize = const Size(1200, 900);
-    tester.view.devicePixelRatio = 1.0;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-    server.items.add(_VersionedMovie());
-
-    await pumpLoggedIn(tester);
-    await openLibrary(tester, 'view-movies');
-    final item = find.byKey(CatalogKeys.item('movie-versions'));
-    await tester.ensureVisible(item);
-    await tester.tap(item);
-    await tester.pumpAndSettle();
-
-    await tester.ensureVisible(find.byKey(CatalogKeys.mediaSource));
-    expect(find.byKey(CatalogKeys.mediaSource), findsOneWidget);
-    expect(find.byKey(CatalogKeys.detailAudio), findsOneWidget);
-
-    await tester.tap(find.byKey(CatalogKeys.mediaSource));
-    await tester.pumpAndSettle();
-    expect(find.text('导演剪辑'), findsWidgets);
-    await tester.tap(find.text('剧场版').last);
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.byKey(CatalogKeys.detailAudio));
-    await tester.pumpAndSettle();
-    expect(find.text('普通话'), findsWidgets);
-    expect(find.byKey(PlayerKeys.open), findsOneWidget);
-  });
-
-  testWidgets('library poster wall loads more pages at the bottom', (
-    tester,
-  ) async {
-    _addPagedMovies(server, 70);
-    await pumpLoggedIn(tester);
-    await openLibrary(tester, 'view-movies');
-    expect(find.byKey(CatalogKeys.item('bulk-0')), findsOneWidget);
-    expect(find.byKey(CatalogKeys.item('bulk-69')), findsNothing);
-
-    await _scrollGridUntil(tester, find.byKey(CatalogKeys.item('bulk-69')));
-    expect(find.byKey(CatalogKeys.item('bulk-69')), findsOneWidget);
-    expect(
-      server.requests.any(
-        (request) =>
-            request.contains('ParentId=view-movies') &&
-            request.contains('Limit=${ShelfGridPage.pageSize}') &&
-            request.contains('StartIndex=${ShelfGridPage.pageSize}'),
-      ),
-      isTrue,
-    );
-  });
-
-  testWidgets('append failure keeps the first page and retries later', (
-    tester,
-  ) async {
-    _addPagedMovies(server, 70);
-    await pumpLoggedIn(tester);
-    await openLibrary(tester, 'view-movies');
-    expect(find.byKey(CatalogKeys.item('bulk-0')), findsOneWidget);
-    expect(find.byKey(CatalogKeys.item('bulk-69')), findsNothing);
-    expect(_posterNames(tester), contains('飞屋环游记'));
-
-    bool requestedSecondPage() {
-      return server.requests.any(
-        (request) =>
-            request.contains('ParentId=view-movies') &&
-            request.contains('StartIndex=${ShelfGridPage.pageSize}'),
-      );
-    }
-
-    expect(requestedSecondPage(), isFalse);
-
-    server.itemsStatus = 500;
-    await _prefetchNextGridPage(tester);
-    expect(requestedSecondPage(), isTrue);
-    expect(find.byType(AppErrorView), findsNothing);
-    expect(find.byType(PosterCard), findsWidgets);
-    expect(find.byKey(CatalogKeys.item('bulk-69')), findsNothing);
-
-    await _jumpGridToTop(tester);
-    expect(find.byKey(CatalogKeys.item('bulk-0')), findsOneWidget);
-    expect(_posterNames(tester).first, '飞屋环游记');
-    expect(find.byKey(CatalogKeys.sortBy), findsOneWidget);
-
-    server.itemsStatus = null;
-    await _scrollGridUntil(tester, find.byKey(CatalogKeys.item('bulk-69')));
-    expect(find.byKey(CatalogKeys.item('bulk-69')), findsOneWidget);
-  });
-
-  testWidgets('similar shelf more stays on a single page', (tester) async {
-    _addPagedMovies(server, 70);
-    await pumpLoggedIn(tester);
-    final inception = find.byKey(CatalogKeys.item('movie-inception')).first;
-    await tester.ensureVisible(inception);
-    await tester.tap(inception);
-    await tester.pumpAndSettle();
-
-    final more = find.byKey(CatalogKeys.shelfMore(CatalogKeys.shelfSimilar));
-    await tester.ensureVisible(more);
-    await tester.tap(more);
-    await tester.pumpAndSettle();
-
-    expect(find.byKey(CatalogKeys.item('bulk-0')), findsOneWidget);
-    expect(find.byKey(CatalogKeys.item('bulk-69')), findsNothing);
-
-    await _scrollGridUntil(
-      tester,
-      find.byKey(CatalogKeys.item('bulk-69')),
-      maxDrags: 12,
-    );
-    expect(find.byKey(CatalogKeys.item('bulk-69')), findsNothing);
-    final similarRequests = server.requests.where(
-      (request) => request.contains('/Similar'),
-    );
-    expect(similarRequests, isNotEmpty);
-    expect(similarRequests, everyElement(isNot(contains('StartIndex='))));
-  });
-
-  testWidgets('grid arrow keys move focus by row and column', (tester) async {
-    server.items.add(
-      FakeEmbyItem(
-        id: 'movie-grid-tail',
-        name: 'GridTail',
-        type: 'Movie',
-        parentId: 'view-movies',
-        dateCreated: DateTime.utc(1990, 1, 1),
-      ),
-    );
-    await pumpLoggedIn(tester);
-    await openLibrary(tester, 'view-movies');
-
-    final first = find.byKey(CatalogKeys.item('movie-up'));
-    final nextColumn = find.byKey(CatalogKeys.item('movie-broken'));
-    final nextRow = find.byKey(CatalogKeys.item('movie-grid-tail'));
-    await tester.ensureVisible(first);
-    _focusOf(tester, first)?.requestFocus();
-    await tester.pump();
-    expect(_focusOf(tester, first)?.hasPrimaryFocus, isTrue);
-
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
-    await tester.pumpAndSettle();
-    expect(_focusOf(tester, nextColumn)?.hasPrimaryFocus, isTrue);
-
-    _focusOf(tester, first)?.requestFocus();
-    await tester.pump();
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-    await tester.pumpAndSettle();
-    expect(_focusOf(tester, nextRow)?.hasPrimaryFocus, isTrue);
-  });
-
-  testWidgets('home refresh entry re-pulls rows from the network', (
-    tester,
-  ) async {
-    await pumpLoggedIn(tester);
-    final resumeBefore = server.requests
-        .where((request) => request.contains('Items/Resume'))
-        .length;
-    for (final item in server.items) {
-      if (item.id == 'movie-up') {
-        item.name = '手动刷新后的电影';
-      }
-    }
-
-    final refresh = find.byKey(homeRefreshKey);
-    await ensureVisibleBelowTopBar(tester, refresh);
-    await tester.pumpAndSettle();
-    await tester.tap(refresh);
-    await tester.pumpAndSettle();
-
-    expect(
-      server.requests
-          .where((request) => request.contains('Items/Resume'))
-          .length,
-      greaterThan(resumeBefore),
-      reason: '手动刷新绕过缓存立即重拉',
-    );
-    expect(find.text('手动刷新后的电影'), findsWidgets);
-  });
-
-  testWidgets('grid refresh entry bypasses the cache and re-pulls', (
-    tester,
-  ) async {
-    await pumpLoggedIn(tester);
-    await openLibrary(tester, 'view-movies');
-    expect(find.text('飞屋环游记'), findsOneWidget);
-    for (final item in server.items) {
-      if (item.id == 'movie-up') {
-        item.name = '手动刷新后的电影';
-      }
-    }
-
-    await tester.tap(find.byKey(gridRefreshKey));
-    await tester.pumpAndSettle();
-
-    expect(find.text('手动刷新后的电影'), findsOneWidget);
-    expect(find.text('飞屋环游记'), findsNothing);
-    expect(find.byType(PosterCard), findsWidgets);
-  });
-
-  testWidgets('re-entering a grid offline keeps the cached first page', (
-    tester,
-  ) async {
-    await pumpLoggedIn(tester);
-    await openLibrary(tester, 'view-movies');
-    expect(find.byKey(CatalogKeys.item('movie-inception')), findsOneWidget);
-
-    await goHome(tester);
-    server.itemsStatus = 500;
-    await openLibrary(tester, 'view-movies');
-
-    // 先显:命中缓存立即渲染,后台重拉失败也保留已有内容。
-    expect(find.byKey(CatalogKeys.item('movie-inception')), findsOneWidget);
-    expect(find.byKey(CatalogKeys.item('movie-up')), findsOneWidget);
-    expect(find.byType(AppErrorView), findsNothing);
-    expect(find.byType(SkeletonPosterGrid), findsNothing);
-  });
-
-  testWidgets('changing sort refreshes incrementally without a full skeleton', (
-    tester,
-  ) async {
-    await pumpLoggedIn(tester);
-    await _openLatestMoviesMore(tester);
-    expect(_posterNames(tester).first, '飞屋环游记');
-
-    await _tapGridSort(tester);
-    await tester.tap(find.byKey(CatalogKeys.sortOption('SortName')));
-    // 切排序不清空整页:刷新期间旧内容仍在,不出现整页骨架屏。
-    var sawSkeleton = false;
-    for (var i = 0; i < 6; i++) {
-      await tester.pump(const Duration(milliseconds: 16));
-      if (find.byType(SkeletonPosterGrid).evaluate().isNotEmpty) {
-        sawSkeleton = true;
-      }
-    }
-    expect(sawSkeleton, isFalse);
-    expect(find.byType(PosterCard), findsWidgets);
-    await tester.pumpAndSettle();
-    expect(_posterNames(tester).first, 'Inception');
-  });
-
-  testWidgets('scrolling five pages keeps items unique by id', (tester) async {
-    _addPagedMovies(server, 300);
-    await pumpLoggedIn(tester);
-    await openLibrary(tester, 'view-movies');
-
-    await _scrollGridUntil(
-      tester,
-      find.byKey(CatalogKeys.item('bulk-299')),
-      maxDrags: 120,
-    );
-    expect(find.byKey(CatalogKeys.item('bulk-299')), findsOneWidget);
-    expect(
-      server.requests.any(
-        (request) =>
-            request.contains('ParentId=view-movies') &&
-            request.contains('StartIndex=${ShelfGridPage.pageSize * 4}'),
-      ),
-      isTrue,
-      reason: '至少翻过 5 页',
-    );
-    // 网格 delegate 的 childCount 即已加载条目数:无重复无缺失时应等于总数。
-    final grid = tester.widget<SliverGrid>(
-      find.descendant(
-        of: find.byType(CustomScrollView),
-        matching: find.byType(SliverGrid),
-      ),
-    );
-    final childCount = grid.delegate.estimatedChildCount;
-    expect(childCount, 305, reason: '305 条全部加载,无重复无缺失');
-    // 可见卡片各自 id 唯一。
-    final visibleIds = _posterNames(tester);
-    expect(visibleIds.toSet().length, visibleIds.length);
   });
 }
 

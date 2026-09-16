@@ -1,0 +1,6 @@
+tags:
+  integration:
+    description: >-
+      Widget tests that pump RillightApp or a full feature page. Run locally
+      with `flutter test --tags integration`. The default `flutter test`
+      command still executes these tests.

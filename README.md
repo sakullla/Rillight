@@ -12,4 +12,7 @@
 flutter pub get
 flutter run -d windows
 flutter test
+flutter test --tags integration
 ```
+
+On a local Windows developer loop (after `flutter pub get`, without clearing the test cache), `flutter test` over all of `test/` should finish in ≤15s wall clock, and `flutter test --tags integration` (widget tests that pump `RillightApp` or a full feature page) should finish in ≤10s. Those integration-style tests stay in `test/` and are still run by the full suite. CI keeps `flutter test` as pass/fail only and has no duration target.
