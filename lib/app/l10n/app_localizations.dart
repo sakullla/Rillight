@@ -1150,30 +1150,6 @@ abstract class AppLocalizations {
   /// **'跳过片尾'**
   String get skipOutro;
 
-  /// Manual intro/outro skip duration selector label.
-  ///
-  /// In zh, this message translates to:
-  /// **'片头片尾'**
-  String get skipSettings;
-
-  /// Clear manually set intro/outro skip durations.
-  ///
-  /// In zh, this message translates to:
-  /// **'关闭手动跳过'**
-  String get skipManualOff;
-
-  /// Manual intro skip duration option.
-  ///
-  /// In zh, this message translates to:
-  /// **'片头 {seconds} 秒'**
-  String skipIntroSeconds(int seconds);
-
-  /// Manual outro skip duration option.
-  ///
-  /// In zh, this message translates to:
-  /// **'片尾 {seconds} 秒'**
-  String skipOutroSeconds(int seconds);
-
   /// Danmaku (bullet comments) toggle in the player controls.
   ///
   /// In zh, this message translates to:

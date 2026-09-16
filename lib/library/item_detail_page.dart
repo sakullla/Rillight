@@ -1062,10 +1062,19 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                     wide: true,
                     onTap: (episode) => _showItem(episode.id),
                     itemBuilder: (context, episode) {
+                      // 集详情内的分集条用更小的卡宽:它是导航条,
+                      // 不该比头部缩略图更抢眼。
+                      // 同一集被重复入库为多个条目时 id 不同,
+                      // 按 季+集号 兜底判定当前集。
+                      final isCurrent =
+                          episode.id == item.id ||
+                          (episode.indexNumber == item.indexNumber &&
+                              item.seasonId != null &&
+                              episode.seasonId == item.seasonId);
                       return EpisodeThumbCard(
                         item: episode,
-                        width: wideCardWidth,
-                        selected: episode.id == item.id,
+                        width: 232,
+                        selected: isCurrent,
                         onTap: () => _showItem(episode.id),
                       );
                     },
@@ -1305,9 +1314,10 @@ class _EpisodeDetailHeader extends StatelessWidget {
             AppSpacing.page,
             AppSpacing.md,
           ),
+          // 信息与缩略图垂直居中对齐,避免操作区下方死空。
           child: wide
               ? Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
                     thumb,
                     const SizedBox(width: AppSpacing.xl),
@@ -1565,22 +1575,32 @@ class _ChapterTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     final name = chapter.name.trim().isEmpty ? '${index + 1}' : chapter.name;
-    return SizedBox(
-      width: 180,
-      child: Material(
-        color: theme.colorScheme.surfaceContainerHigh,
+    final hasImage = chapter.imageTag != null && chapter.imageTag!.isNotEmpty;
+    // 紧凑透明条目:细描边胶囊,有小图时带 56x32 章节图,
+    // 无图以小播放图标代替,不再用灰底大板。
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(AppRadii.md),
+      child: InkWell(
+        onTap: onTap,
         borderRadius: BorderRadius.circular(AppRadii.md),
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(AppRadii.md),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(
-              horizontal: AppSpacing.sm,
-              vertical: AppSpacing.xs,
+        child: Container(
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.sm,
+            vertical: AppSpacing.xs,
+          ),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(AppRadii.md),
+            border: Border.all(
+              color: scheme.onSurfaceVariant.withValues(alpha: 0.28),
             ),
-            child: Row(
-              children: [
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (hasImage)
                 ClipRRect(
                   borderRadius: BorderRadius.circular(AppRadii.sm),
                   child: SizedBox(
@@ -1592,30 +1612,36 @@ class _ChapterTile extends StatelessWidget {
                       tag: chapter.imageTag,
                     ),
                   ),
+                )
+              else
+                Icon(
+                  Icons.play_arrow_rounded,
+                  size: 20,
+                  color: scheme.onSurfaceVariant,
                 ),
-                const SizedBox(width: AppSpacing.sm),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(
-                        name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.titleSmall,
+              const SizedBox(width: AppSpacing.sm),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 168),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelLarge,
+                    ),
+                    Text(
+                      chapterClock(chapter.startPositionTicks),
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
                       ),
-                      Text(
-                        chapterClock(chapter.startPositionTicks),
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),

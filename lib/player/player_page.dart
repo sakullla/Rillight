@@ -1199,6 +1199,8 @@ class _EpisodeListPanel extends StatelessWidget {
     return _EpisodeListView(
       episodes: controller.episodes,
       currentId: controller.itemId,
+      currentIndexNumber: controller.item?.indexNumber,
+      currentSeasonId: controller.item?.seasonId,
       hasEarlier: controller.hasEarlierEpisodes,
       hasMore: controller.hasMoreEpisodes,
       loadingEarlier: controller.episodeLoadingEarlier,
@@ -1545,6 +1547,8 @@ class _EpisodeListView extends StatefulWidget {
   const _EpisodeListView({
     required this.episodes,
     required this.currentId,
+    this.currentIndexNumber,
+    this.currentSeasonId,
     required this.hasEarlier,
     required this.hasMore,
     required this.loadingEarlier,
@@ -1557,6 +1561,12 @@ class _EpisodeListView extends StatefulWidget {
 
   final List<EmbyItem> episodes;
   final String currentId;
+
+  /// 当前集的集号与季 id;媒体库把同一集重复入库为多个条目时,
+  /// 列表里的条目 id 与播放中的 itemId 不同,按 id 匹配不到,
+  /// 需要按 季+集号 兜底定位与高亮。
+  final int? currentIndexNumber;
+  final String? currentSeasonId;
   final bool hasEarlier;
   final bool hasMore;
   final bool loadingEarlier;
@@ -1565,6 +1575,19 @@ class _EpisodeListView extends StatefulWidget {
   final ValueChanged<EmbyItem> onPlay;
   final VoidCallback onLoadEarlier;
   final VoidCallback onLoadMore;
+
+  bool isCurrentEpisode(EmbyItem episode) {
+    if (episode.id == currentId) {
+      return true;
+    }
+    final indexNumber = currentIndexNumber;
+    final seasonId = currentSeasonId;
+    return indexNumber != null &&
+        episode.indexNumber == indexNumber &&
+        seasonId != null &&
+        seasonId.isNotEmpty &&
+        episode.seasonId == seasonId;
+  }
 
   @override
   State<_EpisodeListView> createState() => _EpisodeListViewState();
@@ -1579,9 +1602,7 @@ class _EpisodeListViewState extends State<_EpisodeListView> {
   );
 
   int get _currentIndex {
-    return widget.episodes.indexWhere(
-      (episode) => episode.id == widget.currentId,
-    );
+    return widget.episodes.indexWhere(widget.isCurrentEpisode);
   }
 
   double _offsetFor(double viewport) {
@@ -1618,12 +1639,8 @@ class _EpisodeListViewState extends State<_EpisodeListView> {
     if (prepended > 0 && _scroll.hasClients) {
       _scroll.position.correctBy(prepended * kPlayerEpisodeRowExtent);
     }
-    final wasIn = oldWidget.episodes.any(
-      (episode) => episode.id == widget.currentId,
-    );
-    final isIn = widget.episodes.any(
-      (episode) => episode.id == widget.currentId,
-    );
+    final wasIn = oldWidget.episodes.any(oldWidget.isCurrentEpisode);
+    final isIn = widget.episodes.any(widget.isCurrentEpisode);
     final shouldJump =
         oldWidget.currentId != widget.currentId || (!wasIn && isIn);
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1686,7 +1703,7 @@ class _EpisodeListViewState extends State<_EpisodeListView> {
         itemCount: widget.episodes.length,
         itemBuilder: (context, index) {
           final episode = widget.episodes[index];
-          final isCurrent = episode.id == widget.currentId;
+          final isCurrent = widget.isCurrentEpisode(episode);
           return ClipRect(
             child: SizedBox(
               height: kPlayerEpisodeRowExtent,
@@ -2067,15 +2084,6 @@ class _PlaybackOverflowMenu extends StatelessWidget {
                 valueKey: PlayerKeys.mediaSourceLabel,
               ),
             ),
-          if (controller.canSetManualSkip)
-            PopupMenuItem(
-              key: PlayerKeys.skipSettings,
-              value: _PlaybackOverflowAction.skip,
-              child: _PlaybackSettingRow(
-                label: l10n.skipSettings,
-                value: _skipSummary(controller, l10n),
-              ),
-            ),
         ];
       },
     );
@@ -2170,59 +2178,11 @@ class _PlaybackOverflowMenu extends StatelessWidget {
         if (sourceId != null && context.mounted) {
           unawaited(controller.switchMediaSource(sourceId));
         }
-      case _PlaybackOverflowAction.skip:
-        final selected = await showMenu<String>(
-          context: context,
-          position: position,
-          constraints: _controlMenuConstraints,
-          items: [
-            CheckedPopupMenuItem(
-              value: 'off',
-              checked:
-                  controller.manualIntroSkipSeconds == null &&
-                  controller.manualOutroSkipSeconds == null,
-              child: Text(AppLocalizations.of(context).skipManualOff),
-            ),
-            for (final seconds in kManualSkipChoices)
-              CheckedPopupMenuItem(
-                value: 'intro:$seconds',
-                checked: controller.manualIntroSkipSeconds == seconds,
-                child: Text(
-                  AppLocalizations.of(context).skipIntroSeconds(seconds),
-                ),
-              ),
-            for (final seconds in kManualSkipChoices)
-              CheckedPopupMenuItem(
-                value: 'outro:$seconds',
-                checked: controller.manualOutroSkipSeconds == seconds,
-                child: Text(
-                  AppLocalizations.of(context).skipOutroSeconds(seconds),
-                ),
-              ),
-          ],
-        );
-        if (selected == null || !context.mounted) {
-          return;
-        }
-        if (selected == 'off') {
-          unawaited(controller.clearManualSkip());
-          return;
-        }
-        final parts = selected.split(':');
-        final seconds = int.tryParse(parts.length > 1 ? parts[1] : '');
-        if (seconds == null) {
-          return;
-        }
-        if (selected.startsWith('intro:')) {
-          unawaited(controller.setManualIntroSkip(seconds));
-        } else if (selected.startsWith('outro:')) {
-          unawaited(controller.setManualOutroSkip(seconds));
-        }
     }
   }
 }
 
-enum _PlaybackOverflowAction { speed, quality, audio, mediaSource, skip }
+enum _PlaybackOverflowAction { speed, quality, audio, mediaSource }
 
 /// 溢出菜单第一层:左侧类别,右侧当前值。
 class _PlaybackSettingRow extends StatelessWidget {
@@ -2278,21 +2238,6 @@ String _currentAudioLabel(PlayerController controller, AppLocalizations l10n) {
     }
   }
   return l10n.audioTrack;
-}
-
-String _skipSummary(PlayerController controller, AppLocalizations l10n) {
-  final intro = controller.manualIntroSkipSeconds;
-  final outro = controller.manualOutroSkipSeconds;
-  if (intro == null && outro == null) {
-    return l10n.skipManualOff;
-  }
-  if (intro != null && outro != null) {
-    return '${l10n.skipIntroSeconds(intro)} · ${l10n.skipOutroSeconds(outro)}';
-  }
-  if (intro != null) {
-    return l10n.skipIntroSeconds(intro);
-  }
-  return l10n.skipOutroSeconds(outro!);
 }
 
 String _compactMediaSourceLabel(String label, {int maxChars = 12}) {

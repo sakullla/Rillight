@@ -34,9 +34,6 @@ class PlayerSkipSegment {
   final Duration end;
 }
 
-/// 手动片头/片尾时长的可选档位(秒)。
-const List<int> kManualSkipChoices = [30, 60, 90, 120];
-
 /// 跳过按钮展示时长;打开 OSD 时重新计时。
 const Duration kSkipPromptHold = Duration(seconds: 8);
 
@@ -205,11 +202,8 @@ class PlayerController extends ChangeNotifier {
 
   // --- 片头片尾跳过(R8) ---
   List<PlayerSkipSegment> _skipSegments = const [];
-  bool _hasServerSkipMarkers = false;
   PlayerSkipSegment? activeSkipSegment;
   bool skipPromptVisible = false;
-  int? manualIntroSkipSeconds;
-  int? manualOutroSkipSeconds;
   bool controlsPinned = false;
   bool _nextUpOffered = false;
   bool _nextUpLoading = false;
@@ -238,9 +232,6 @@ class PlayerController extends ChangeNotifier {
         seriesId != null &&
         seriesId.isNotEmpty;
   }
-
-  /// 无服务器章节标记的剧集才提供手动片头/片尾设置。
-  bool get canSetManualSkip => canBrowseEpisodes && !_hasServerSkipMarkers;
 
   /// 多个媒体源时才提供换源入口。
   bool get canSwitchMediaSource => mediaSources.length > 1;
@@ -289,10 +280,7 @@ class PlayerController extends ChangeNotifier {
     loading = true;
     mediaSources = const [];
     _skipSegments = const [];
-    _hasServerSkipMarkers = false;
     activeSkipSegment = null;
-    manualIntroSkipSeconds = null;
-    manualOutroSkipSeconds = null;
     _emit();
     try {
       await _restoreSettings();
@@ -980,73 +968,12 @@ class PlayerController extends ChangeNotifier {
     await seekTo(segment.end);
   }
 
-  /// 手动设置片头时长(秒);null/非正数表示关闭。按剧记忆并立即生效。
-  Future<void> setManualIntroSkip(int? seconds) async {
-    manualIntroSkipSeconds = _normalizeManualSkip(seconds);
-    await _persistSeriesPreference();
-    _rebuildSkipSegments();
-    _emit();
-  }
-
-  /// 手动设置片尾时长(秒);null/非正数表示关闭。按剧记忆并立即生效。
-  Future<void> setManualOutroSkip(int? seconds) async {
-    manualOutroSkipSeconds = _normalizeManualSkip(seconds);
-    await _persistSeriesPreference();
-    _rebuildSkipSegments();
-    _emit();
-  }
-
-  /// 关闭手动片头/片尾(不影响服务器章节标记)。
-  Future<void> clearManualSkip() async {
-    manualIntroSkipSeconds = null;
-    manualOutroSkipSeconds = null;
-    await _persistSeriesPreference();
-    _rebuildSkipSegments();
-    _emit();
-  }
-
-  static int? _normalizeManualSkip(int? seconds) =>
-      (seconds != null && seconds > 0) ? seconds : null;
-
   void _rebuildSkipSegments() {
     final current = item;
     final segments = <PlayerSkipSegment>[];
-    _hasServerSkipMarkers = false;
     if (current != null) {
-      final chapterSegments = _chapterSkipSegments(current.chapters);
-      if (chapterSegments.isNotEmpty) {
-        // 优先服务器章节标记。
-        _hasServerSkipMarkers = true;
-        segments.addAll(chapterSegments);
-      } else {
-        final intro = manualIntroSkipSeconds;
-        final outro = manualOutroSkipSeconds;
-        if (intro != null && intro > 0) {
-          segments.add(
-            PlayerSkipSegment(
-              kind: PlayerSkipKind.intro,
-              start: Duration.zero,
-              end: Duration(seconds: intro),
-            ),
-          );
-        }
-        if (outro != null && outro > 0 && duration > Duration.zero) {
-          final end = duration;
-          var start = end - Duration(seconds: outro);
-          if (start < Duration.zero) {
-            start = Duration.zero;
-          }
-          if (start < end) {
-            segments.add(
-              PlayerSkipSegment(
-                kind: PlayerSkipKind.outro,
-                start: start,
-                end: end,
-              ),
-            );
-          }
-        }
-      }
+      // 仅服务器章节标记驱动跳过段,无标记则不跳过。
+      segments.addAll(_chapterSkipSegments(current.chapters));
     }
     _skipSegments = segments;
     _updateActiveSkip();
@@ -1441,6 +1368,9 @@ class PlayerController extends ChangeNotifier {
     _emit();
 
     try {
+      // 不带 MediaSourceId 请求:部分服务端(含 Emby)收到该参数时只返回
+      // 这一个源,播放器就再也列不出其它版本;全部源在本地用
+      // [preferredPlaybackSourceId] 按 id/显示名挑选。
       final info = await client.getPlaybackInfo(
         itemId: itemId,
         maxStreamingBitrate: maxStreamingBitrate,
@@ -1449,7 +1379,6 @@ class PlayerController extends ChangeNotifier {
         subtitleStreamIndex: subtitleOff
             ? null
             : (subtitle ?? preferredSubtitleStreamIndex),
-        mediaSourceId: activeMediaSourceId ?? preferredMediaSourceId,
       );
       if (_disposed) {
         return;
@@ -1929,7 +1858,7 @@ class PlayerController extends ChangeNotifier {
     } catch (_) {}
   }
 
-  /// start() 时按 item.seriesId 解析记忆的音轨/字幕/码率与手动片头片尾。
+  /// start() 时按 item.seriesId 解析记忆的音轨/字幕/码率。
   void _applyRememberedPreference() {
     _rememberedPreference = null;
     final seriesId = item?.seriesId;
@@ -1945,11 +1874,9 @@ class PlayerController extends ChangeNotifier {
       maxStreamingBitrate = preference.maxStreamingBitrate!;
     }
     _preferredSourceName ??= preference.mediaSourceName;
-    manualIntroSkipSeconds = preference.introSkipSeconds;
-    manualOutroSkipSeconds = preference.outroSkipSeconds;
   }
 
-  /// 播放中选择音轨/字幕(含关闭)/码率/手动片头片尾后写入按剧记忆。
+  /// 播放中选择音轨/字幕(含关闭)/码率后写入按剧记忆。
   Future<void> _persistSeriesPreference() async {
     final seriesId = item?.seriesId;
     if (seriesId == null || seriesId.isEmpty) {
@@ -1961,8 +1888,6 @@ class PlayerController extends ChangeNotifier {
       subtitleStreamIndex: subtitleStreamIndex,
       maxStreamingBitrate: maxStreamingBitrate,
       mediaSourceName: _preferredSourceName,
-      introSkipSeconds: manualIntroSkipSeconds,
-      outroSkipSeconds: manualOutroSkipSeconds,
     );
     await _writeSettings();
   }

@@ -1200,7 +1200,6 @@ void main() {
     expect(find.byKey(PlayerKeys.quality), findsNothing);
     expect(find.byKey(PlayerKeys.audio), findsNothing);
     expect(find.byKey(PlayerKeys.mediaSource), findsNothing);
-    expect(find.byKey(PlayerKeys.skipSettings), findsNothing);
     expect(find.byKey(PlayerKeys.fullscreen), findsOneWidget);
 
     await openPlaybackSettings(tester);
@@ -1910,9 +1909,7 @@ void main() {
     await openEpisode(tester, 'episode-anim-1');
     await waitFor(tester, find.byKey(PlayerKeys.playPause));
 
-    // 有服务器章节标记时不显示手动设置入口。
     await openPlaybackSettings(tester);
-    expect(find.byKey(PlayerKeys.skipSettings), findsNothing);
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
 
@@ -2041,46 +2038,6 @@ void main() {
     expect(find.byKey(const Key('player-skip-segment')), findsNothing);
   });
 
-  testWidgets('manual intro skip is remembered per series and auto-applied', (
-    tester,
-  ) async {
-    server = multiTrackSeriesServer();
-    adapter = FakeEmbyAdapter([server]);
-    final store = MemoryPlayerSettingsStore();
-    await pumpLoggedIn(tester, settingsStore: store);
-    await openEpisode(tester, 'episode-anim-1');
-    await waitFor(tester, find.byKey(PlayerKeys.playPause));
-
-    // 无章节标记的剧集显示手动设置入口。
-    await choosePlaybackOption(tester, PlayerKeys.skipSettings, '片头 60 秒');
-
-    final preference = (await store.read()).seriesPreferences['series-anim'];
-    expect(preference, isNotNull);
-    expect(preference!.introSkipSeconds, 60);
-
-    // 设置立即生效:片头区间内显示跳过按钮。
-    await waitFor(tester, find.byKey(const Key('player-skip-segment')));
-    expect(find.text('跳过片头'), findsOneWidget);
-    await tester.runAsync(
-      () => controllerOf(tester).seekTo(const Duration(seconds: 70)),
-    );
-    await tester.pump();
-    expect(find.byKey(const Key('player-skip-segment')), findsNothing);
-
-    // 同剧下一集自动应用记忆的手动片头时长。
-    backend.completePlayback();
-    await tester.pump();
-    await waitFor(tester, find.byKey(PlayerKeys.nextEpisodePlay));
-    await tester.tap(find.byKey(PlayerKeys.nextEpisodePlay));
-    await waitFor(tester, find.byKey(PlayerKeys.playPause));
-    await waitFor(tester, find.byKey(const Key('player-skip-segment')));
-    expect(find.text('跳过片头'), findsOneWidget);
-    expect(
-      controllerOf(tester).activeSkipSegment?.end,
-      const Duration(seconds: 60),
-    );
-  });
-
   testWidgets('media source menu switches source from the current position', (
     tester,
   ) async {
@@ -2119,7 +2076,9 @@ void main() {
     expect(controllerOf(tester).resolved?.mediaSource.id, 'src-4k');
     expect(backend.openedUrl!.queryParameters['MediaSourceId'], 'src-4k');
     expect(backend.openedStart, const Duration(seconds: 60));
-    expect(server.lastPlaybackInfoBody?['MediaSourceId'], 'src-4k');
+    // PlaybackInfo 不带 MediaSourceId:服务端收到该参数时只返回单个源,
+    // 播放器将列不出其它版本(此前导致播放器内无法切换片源)。
+    expect(server.lastPlaybackInfoBody?['MediaSourceId'], isNull);
 
     // 进度上报对新源正确(MediaSourceId 为新源)。
     final lastPlaying = server.playbackEvents

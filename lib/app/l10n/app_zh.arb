@@ -777,32 +777,6 @@
   "@skipOutro": {
     "description": "Skip forward past the current outro segment."
   },
-  "skipSettings": "片头片尾",
-  "@skipSettings": {
-    "description": "Manual intro/outro skip duration selector label."
-  },
-  "skipManualOff": "关闭手动跳过",
-  "@skipManualOff": {
-    "description": "Clear manually set intro/outro skip durations."
-  },
-  "skipIntroSeconds": "片头 {seconds} 秒",
-  "@skipIntroSeconds": {
-    "description": "Manual intro skip duration option.",
-    "placeholders": {
-      "seconds": {
-        "type": "int"
-      }
-    }
-  },
-  "skipOutroSeconds": "片尾 {seconds} 秒",
-  "@skipOutroSeconds": {
-    "description": "Manual outro skip duration option.",
-    "placeholders": {
-      "seconds": {
-        "type": "int"
-      }
-    }
-  },
   "danmaku": "弹幕",
   "@danmaku": {
     "description": "Danmaku (bullet comments) toggle in the player controls."

@@ -565,22 +565,6 @@ class AppLocalizationsZh extends AppLocalizations {
   String get skipOutro => '跳过片尾';
 
   @override
-  String get skipSettings => '片头片尾';
-
-  @override
-  String get skipManualOff => '关闭手动跳过';
-
-  @override
-  String skipIntroSeconds(int seconds) {
-    return '片头 $seconds 秒';
-  }
-
-  @override
-  String skipOutroSeconds(int seconds) {
-    return '片尾 $seconds 秒';
-  }
-
-  @override
   String get danmaku => '弹幕';
 
   @override

@@ -19,7 +19,6 @@ abstract final class PlayerKeys {
   static const subtitle = Key('player-subtitle');
   static const mediaSource = Key('player-media-source');
   static const mediaSourceLabel = Key('player-media-source-label');
-  static const skipSettings = Key('player-skip-settings');
   static const resumeContinue = Key('player-resume-continue');
   static const resumeFromStart = Key('player-resume-start');
   static const nextEpisode = Key('player-next-episode');
