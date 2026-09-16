@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
 import 'package:rillight/app/app_shell.dart';
-import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/backdrop_scrim.dart';
 import 'package:rillight/app/widgets/liquid_glass.dart';
 import 'package:rillight/app/widgets/scrim_icon_button.dart';
@@ -18,8 +17,6 @@ import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/home_hero.dart';
 import 'package:rillight/home/home_page.dart';
-import 'package:rillight/home/media_shelf.dart';
-import 'package:rillight/library/poster_card.dart';
 
 import '../emby/fake_emby_server.dart';
 

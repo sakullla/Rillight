@@ -1,32 +1,23 @@
 @Tags(['integration'])
 library;
 
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
 import 'package:rillight/app/app_shell.dart';
 import 'package:rillight/app/widgets/app_error_view.dart';
-import 'package:rillight/app/widgets/poster_placeholder.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/app/theme/tokens.dart';
-import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/home_hero.dart';
-import 'package:rillight/home/home_page.dart';
 import 'package:rillight/library/episode_detail_sections.dart';
 import 'package:rillight/library/item_detail_page.dart';
-import 'package:rillight/library/poster_card.dart';
 import 'package:rillight/library/shelf_grid_page.dart';
-import 'package:rillight/media_image/media_image.dart';
-import 'package:rillight/player/player_keys.dart';
 import 'package:rillight/search/search_overlay.dart';
-import 'package:rillight/search/search_page.dart';
 
 import '../emby/fake_emby_server.dart';
 import '../helpers/top_bar_hit.dart';
@@ -330,195 +321,9 @@ void main() {
   });
 }
 
-/// 网格页头排序必须落在叠层顶栏下方,普通 center tap 即可命中,不能点到搜索/会话.
-Future<void> _tapGridSort(WidgetTester tester) async {
-  final sortBy = find.byKey(CatalogKeys.sortBy);
-  expect(sortBy, findsOneWidget);
-  final barBottom = tester.getRect(find.byKey(AppShell.topBarKey)).bottom;
-  expect(tester.getCenter(sortBy).dy, greaterThan(barBottom));
-  await tester.tap(sortBy);
-  await tester.pumpAndSettle();
-}
-
 /// 返回钮在顶栏内,与首页导航并列。
 Future<void> _tapDetailBack(WidgetTester tester) async {
   final back = find.byKey(CatalogKeys.back);
   expect(back, findsOneWidget);
   await tester.tap(back);
-}
-
-FocusNode? _focusOf(WidgetTester tester, Finder host) {
-  final inner = find.descendant(of: host, matching: find.byType(ClipRRect));
-  final context = inner.evaluate().isNotEmpty
-      ? tester.element(inner.first)
-      : tester.element(
-          find.descendant(of: host, matching: find.byType(Text)).first,
-        );
-  return Focus.maybeOf(context);
-}
-
-Future<void> _openLatestMoviesMore(WidgetTester tester) async {
-  final more = find.byKey(CatalogKeys.shelfMore(CatalogKeys.shelfLatestMovies));
-  await ensureVisibleBelowTopBar(tester, more);
-  await tapBelowTopBar(tester, more);
-  await tester.pumpAndSettle();
-}
-
-void _addPagedMovies(FakeEmbyServer server, int count) {
-  for (var i = 0; i < count; i++) {
-    server.items.add(
-      FakeEmbyItem(
-        id: 'bulk-$i',
-        name: 'Bulk $i',
-        type: 'Movie',
-        parentId: 'view-movies',
-        primaryImageTag: 'tag-bulk-$i',
-        dateCreated: DateTime.utc(
-          1990,
-          1,
-          1,
-        ).add(Duration(days: count - 1 - i)),
-      ),
-    );
-  }
-}
-
-ScrollableState _gridScrollable(WidgetTester tester) {
-  return tester.state<ScrollableState>(
-    find.descendant(
-      of: find.byType(CustomScrollView),
-      matching: find.byType(Scrollable),
-    ),
-  );
-}
-
-Future<void> _jumpGridToTop(WidgetTester tester) async {
-  FocusManager.instance.primaryFocus?.unfocus();
-  await tester.pump();
-  _gridScrollable(tester).position.jumpTo(0);
-  await tester.pump();
-}
-
-Future<void> _prefetchNextGridPage(WidgetTester tester) async {
-  final position = _gridScrollable(tester).position;
-  var target = position.maxScrollExtent - ShelfGridPage.loadMoreThreshold + 1;
-  if (target < 0) {
-    target = 0;
-  }
-  position.jumpTo(target);
-  await tester.pump();
-  await tester.pumpAndSettle();
-}
-
-Future<void> _scrollGridUntil(
-  WidgetTester tester,
-  Finder target, {
-  int maxDrags = 24,
-}) async {
-  final grid = find.byType(CustomScrollView);
-  for (var i = 0; i < maxDrags; i++) {
-    if (target.evaluate().isNotEmpty) {
-      return;
-    }
-    await tester.drag(grid, const Offset(0, -400));
-    await tester.pumpAndSettle();
-  }
-}
-
-List<String> _posterNames(WidgetTester tester) {
-  return tester
-      .widgetList<PosterCard>(
-        find.descendant(
-          of: find.byType(CustomScrollView),
-          matching: find.byType(PosterCard),
-        ),
-      )
-      .map((card) => card.item.name)
-      .toList();
-}
-
-Finder _detailHero() {
-  return find.byWidgetPredicate(
-    (widget) => widget is MediaImage && widget.preferBackdrop,
-  );
-}
-
-Future<void> _pumpUntilHeroImage(WidgetTester tester) async {
-  final image = find.descendant(
-    of: _detailHero(),
-    matching: find.byType(Image),
-  );
-  for (var i = 0; i < 12; i++) {
-    if (image.evaluate().isNotEmpty) {
-      return;
-    }
-    await tester.runAsync(() async {
-      await Future<void>.delayed(const Duration(milliseconds: 50));
-    });
-    await tester.pump();
-  }
-  fail('detail hero image did not load');
-}
-
-class _VersionedMovie extends FakeEmbyItem {
-  _VersionedMovie()
-    : super(
-        id: 'movie-versions',
-        name: '双版本片',
-        type: 'Movie',
-        parentId: 'view-movies',
-        overview: 'Two cuts of the same film.',
-        productionYear: 2022,
-        primaryImageTag: 'tag-versions',
-      );
-
-  @override
-  Map<String, dynamic> toJson() {
-    final json = super.toJson();
-    json['MediaSources'] = [
-      {
-        'Id': 'source-a',
-        'Name': '导演剪辑',
-        'MediaStreams': [
-          const FakeMediaStream(
-            index: 0,
-            type: 'Video',
-            displayTitle: '1080p',
-          ).toJson(),
-          const FakeMediaStream(
-            index: 1,
-            type: 'Audio',
-            displayTitle: 'English',
-          ).toJson(),
-          const FakeMediaStream(
-            index: 2,
-            type: 'Audio',
-            displayTitle: '日本語',
-          ).toJson(),
-        ],
-      },
-      {
-        'Id': 'source-b',
-        'Name': '剧场版',
-        'MediaStreams': [
-          const FakeMediaStream(
-            index: 0,
-            type: 'Video',
-            displayTitle: '1080p',
-          ).toJson(),
-          const FakeMediaStream(
-            index: 3,
-            type: 'Audio',
-            displayTitle: '普通话',
-          ).toJson(),
-          const FakeMediaStream(
-            index: 4,
-            type: 'Audio',
-            displayTitle: '粤语',
-          ).toJson(),
-        ],
-      },
-    ];
-    return json;
-  }
 }

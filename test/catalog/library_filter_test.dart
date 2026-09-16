@@ -17,7 +17,6 @@ import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/library/poster_card.dart';
 import 'package:rillight/library/shelf_grid_page.dart';
-import 'package:rillight/app/widgets/skeleton.dart';
 
 import '../emby/fake_emby_server.dart';
 import '../helpers/top_bar_hit.dart';
@@ -39,7 +38,6 @@ class _GenreItem extends FakeEmbyItem {
     required this.genres,
     super.productionYear,
     super.dateCreated,
-    super.played,
   });
 
   final List<String> genres;

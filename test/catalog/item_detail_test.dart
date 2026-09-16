@@ -4,16 +4,10 @@ library;
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
-import 'package:rillight/app/app_shell.dart';
 import 'package:rillight/app/routes.dart';
-import 'package:rillight/app/theme/tokens.dart';
-import 'package:rillight/app/widgets/app_error_view.dart';
-import 'package:rillight/app/widgets/liquid_glass.dart';
-import 'package:rillight/app/widgets/scrim_icon_button.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/server_list_store.dart';
@@ -21,11 +15,8 @@ import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/home_hero.dart';
-import 'package:rillight/library/episode_detail_sections.dart';
 import 'package:rillight/library/item_detail_page.dart';
-import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/player/player_bindings.dart';
-import 'package:rillight/player/player_keys.dart';
 import 'package:rillight/player/player_window_host.dart';
 
 import '../emby/fake_emby_server.dart';
@@ -118,58 +109,6 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(ItemDetailPage), findsOneWidget);
     expect(find.byKey(ItemDetailPage.headerKey), findsOneWidget);
-  }
-
-  void expectHeaderShape(WidgetTester tester, {required Size posterSize}) {
-    final header = find.byKey(ItemDetailPage.headerKey);
-    final rect = tester.getRect(header);
-    expect(rect.left, 0);
-    expect(rect.width, 1200);
-
-    final poster = find.byKey(ItemDetailPage.posterKey);
-    expect(poster, findsOneWidget);
-    expect(tester.getSize(poster), posterSize);
-    final posterImages = find.descendant(
-      of: poster,
-      matching: find.byType(MediaImage),
-    );
-    expect(posterImages, findsOneWidget);
-    expect(tester.widget<MediaImage>(posterImages).preferBackdrop, isFalse);
-
-    final backdrops = find.descendant(
-      of: header,
-      matching: find.byWidgetPredicate(
-        (widget) => widget is MediaImage && widget.preferBackdrop,
-      ),
-    );
-    expect(backdrops, findsOneWidget);
-
-    final title = _headerTitle();
-    expect(title, findsOneWidget);
-    final open = find.byKey(PlayerKeys.open);
-    expect(open, findsOneWidget);
-    expect(
-      tester.getTopLeft(open).dy,
-      greaterThan(tester.getBottomLeft(title).dy),
-    );
-    expect(tester.getRect(open).overlaps(rect), isTrue);
-    expect(
-      tester.getTopLeft(open).dx,
-      greaterThan(tester.getRect(poster).right),
-    );
-
-    expect(
-      find.descendant(
-        of: header,
-        matching: find.byKey(CatalogKeys.playedToggle),
-      ),
-      findsOneWidget,
-    );
-    expect(
-      tester.widget(find.byKey(CatalogKeys.playedToggle)),
-      isA<ScrimIconButton>(),
-    );
-    expect(find.byType(LiquidGlass), findsNothing);
   }
 
   testWidgets('episode card play button starts playback', (tester) async {
@@ -274,15 +213,6 @@ void main() {
   });
 }
 
-Finder _headerTitle() {
-  return find
-      .descendant(
-        of: find.byKey(ItemDetailPage.headerKey),
-        matching: find.byType(SelectableText),
-      )
-      .first;
-}
-
 const _episodeKeyPrefix = 'catalog-episode-';
 
 /// 分集分区内各卡片的条目 id,按渲染顺序。
@@ -300,17 +230,4 @@ List<String> _episodeCardIds(WidgetTester tester) {
               !value.startsWith('catalog-episode-played-'))
         value.substring(_episodeKeyPrefix.length),
   ];
-}
-
-/// 当前集卡片以 surfaceContainerHigh 底色标示;其余卡片透明。
-bool _cardSelected(WidgetTester tester, String id) {
-  final well = find.byKey(CatalogKeys.episode(id));
-  final material = find.ancestor(of: well, matching: find.byType(Material));
-  final color = tester.widget<Material>(material.first).color;
-  final scheme = Theme.of(tester.element(well)).colorScheme;
-  if (color == scheme.surfaceContainerHigh) {
-    return true;
-  }
-  expect(color, Colors.transparent);
-  return false;
 }

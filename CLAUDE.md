@@ -18,7 +18,8 @@ Use a Flutter SDK compatible with Dart `^3.11.5`, with desktop support enabled.
 - `flutter build windows` — create a release build; substitute the host desktop target as appropriate.
 - `flutter analyze` — run static analysis and configured lints.
 - `dart format lib test` — format Dart source and tests.
-- `flutter test` — run the test suite.
+- `flutter test` — run the full `test/` suite (local Windows wall-clock target ≤15s).
+- `flutter test --tags integration` — run widget tests that pump `RillightApp` or a full feature page (local Windows wall-clock target ≤10s; still included in `flutter test`).
 - `flutter gen-l10n` — regenerate localization after editing `lib/app/l10n/app_zh.arb`.
 
 Playback uses media_kit/libmpv. Linux requires system libmpv or a bundled copy.
@@ -29,7 +30,7 @@ Follow `flutter_lints` from `analysis_options.yaml` and Dart formatter output, u
 
 ## Testing Guidelines
 
-Tests use `flutter_test`, with descriptive `test` and `testWidgets` cases in `*_test.dart` files. Add regression coverage for changed behavior, especially authentication, catalog loading, and playback resolution. Run targeted tests with `flutter test test/player/playback_resolver_test.dart`, then the full suite. No numeric coverage threshold is configured.
+Tests use `flutter_test`, with descriptive `test` and `testWidgets` cases in `*_test.dart` files. Add regression coverage for changed behavior, especially authentication, catalog loading, and playback resolution. Run targeted tests with `flutter test test/player/playback_resolver_test.dart`, then the full suite. Widget tests that pump `RillightApp` or a full feature page are tagged `integration` (`dart_test.yaml`); `flutter test --tags integration` runs that subset, and the default `flutter test` still includes it. Local Windows targets: full suite ≤15s, integration tags ≤10s. CI must stay green on `flutter test` but has no duration SLO. No numeric coverage threshold is configured.
 
 ## Release Procedure
 

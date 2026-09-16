@@ -12,7 +12,6 @@ import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/widgets/app_error_view.dart';
 import 'package:rillight/app/widgets/poster_placeholder.dart';
 import 'package:rillight/app/widgets/scrim_icon_button.dart';
-import 'package:rillight/app/widgets/liquid_glass.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/server_list_store.dart';
@@ -27,7 +26,6 @@ import 'package:rillight/search/search_overlay.dart';
 import 'package:rillight/search/search_page.dart';
 
 import 'emby/fake_emby_server.dart';
-import 'helpers/top_bar_hit.dart';
 
 const _device = EmbyDeviceInfo(
   clientName: 'Rillight',
@@ -318,28 +316,6 @@ void main() {
       );
     });
   });
-}
-
-double _barrierOpacity(WidgetTester tester) {
-  return tester
-      .widget<AnimatedOpacity>(
-        find.descendant(
-          of: find.byType(SearchOverlayBarrier),
-          matching: find.byType(AnimatedOpacity),
-        ),
-      )
-      .opacity;
-}
-
-bool _barrierIgnoringPointer(WidgetTester tester) {
-  return tester
-      .widget<IgnorePointer>(
-        find.descendant(
-          of: find.byType(SearchOverlayBarrier),
-          matching: find.byType(IgnorePointer),
-        ),
-      )
-      .ignoring;
 }
 
 Future<AuthController> _connect(

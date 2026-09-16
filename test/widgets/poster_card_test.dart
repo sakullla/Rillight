@@ -1,6 +1,5 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/theme.dart';
@@ -15,38 +14,6 @@ const _movie = EmbyItem(
   type: 'Movie',
   productionYear: 2020,
   runTimeTicks: 27000000000,
-);
-
-const _movieWithPlot = EmbyItem(
-  id: 'movie-plot',
-  name: '有简介的电影',
-  type: 'Movie',
-  productionYear: 2021,
-  runTimeTicks: 27000000000,
-  overview: 'A thief who steals corporate secrets through dream-sharing.',
-);
-
-const _series = EmbyItem(
-  id: 'series-1',
-  name: '剧集系列',
-  type: 'Series',
-  productionYear: 1994,
-);
-
-const _season = EmbyItem(
-  id: 'season-1',
-  name: '第一季',
-  type: 'Season',
-  childCount: 12,
-);
-
-const _episode = EmbyItem(
-  id: 'episode-1',
-  name: '试播集',
-  type: 'Episode',
-  seriesName: '剧集系列',
-  indexNumber: 2,
-  parentIndexNumber: 1,
 );
 
 Widget _wrap({required OverlayPlayerWindowHost host, required Widget child}) {

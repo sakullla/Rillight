@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:typed_data';
 
-import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -570,36 +569,5 @@ class _FakeDiskStore implements MediaImageDiskStore {
   @override
   Future<void> clear() async {
     files.clear();
-  }
-}
-
-class _BackdropServingAdapter implements HttpClientAdapter {
-  _BackdropServingAdapter(this.inner);
-
-  final FakeEmbyAdapter inner;
-
-  @override
-  Future<ResponseBody> fetch(
-    RequestOptions options,
-    Stream<Uint8List>? requestStream,
-    Future<void>? cancelFuture,
-  ) {
-    if (options.uri.path.contains('/Images/Backdrop')) {
-      return Future<ResponseBody>.value(
-        ResponseBody.fromBytes(
-          kTinyPng,
-          200,
-          headers: {
-            Headers.contentTypeHeader: ['image/png'],
-          },
-        ),
-      );
-    }
-    return inner.fetch(options, requestStream, cancelFuture);
-  }
-
-  @override
-  void close({bool force = false}) {
-    inner.close(force: force);
   }
 }
