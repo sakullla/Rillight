@@ -685,46 +685,55 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
       shortcuts: _kGridArrowShortcuts,
       child: FocusTraversalGroup(
         policy: ReadingOrderTraversalPolicy(),
-        child: CustomScrollView(
-          controller: _scrollController,
-          scrollCacheExtent: const ScrollCacheExtent.viewport(1),
-          slivers: [
-            SliverToBoxAdapter(
-              child: _Header(
-                title: _title(l10n),
-                titleOverride: widget.titleOverride,
-                showTitle: widget.showTitle,
-                sort: _sort,
-                options: options,
-                onSort: _selectSort,
-                showSort: _items.isNotEmpty,
-                onRefresh: _manualRefresh,
-                refreshing: _refreshing,
-                filters: _filterable ? _filters : null,
-                typeFilterable: _typeFilterable,
-                yearOptions: _yearOptions,
-                genreOptions: _genreOptions,
-                onFiltersChanged: _filterable ? _selectFilters : null,
+        // 列数只依赖页面盒约束宽度,用 box LayoutBuilder 在滚动视图外算一次。
+        // 不能用 SliverLayoutBuilder:SliverConstraints 含 scrollOffset,
+        // 每滚一帧都不同,会让 SliverGrid 连同整屏卡片每帧重建。
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final gridDelegate = ShelfGridPage.gridDelegateFor(
+              screenWidth: screenWidth,
+              availableWidth: math.max(
+                1,
+                constraints.maxWidth - AppSpacing.page * 2,
               ),
-            ),
-            SliverPadding(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpacing.page,
-                AppSpacing.xs,
-                AppSpacing.page,
-                AppSpacing.xxl,
-              ),
-              sliver: SliverLayoutBuilder(
-                builder: (context, constraints) {
-                  return SliverGrid(
-                    gridDelegate: ShelfGridPage.gridDelegateFor(
-                      screenWidth: screenWidth,
-                      availableWidth: constraints.crossAxisExtent,
-                      episodes: _episodes,
+              episodes: _episodes,
+              wide: _wideGrid,
+            );
+            return CustomScrollView(
+              controller: _scrollController,
+              scrollCacheExtent: const ScrollCacheExtent.viewport(1),
+              slivers: [
+                SliverToBoxAdapter(
+                  child: _Header(
+                    title: _title(l10n),
+                    titleOverride: widget.titleOverride,
+                    showTitle: widget.showTitle,
+                    sort: _sort,
+                    options: options,
+                    onSort: _selectSort,
+                    showSort: _items.isNotEmpty,
+                    onRefresh: _manualRefresh,
+                    refreshing: _refreshing,
+                    filters: _filterable ? _filters : null,
+                    typeFilterable: _typeFilterable,
+                    yearOptions: _yearOptions,
+                    genreOptions: _genreOptions,
+                    onFiltersChanged: _filterable ? _selectFilters : null,
+                  ),
+                ),
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.page,
+                    AppSpacing.xs,
+                    AppSpacing.page,
+                    AppSpacing.xxl,
+                  ),
+                  sliver: SliverGrid(
+                    gridDelegate: gridDelegate,
+                    delegate: _ShelfChildDelegate(
+                      items: _items,
                       wide: _wideGrid,
-                    ),
-                    delegate: SliverChildBuilderDelegate(
-                      (context, index) {
+                      builder: (context, index) {
                         final item = _items[index];
                         return _EnsureVisibleOnFocus(
                           child: ShelfGridPage.gridCard(
@@ -750,24 +759,41 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
                           ),
                         );
                       },
-                      childCount: _items.length,
-                      addAutomaticKeepAlives: false,
                     ),
-                  );
-                },
-              ),
-            ),
-            if (_loadingMore)
-              const SliverToBoxAdapter(
-                child: Padding(
-                  padding: EdgeInsets.only(bottom: AppSpacing.xxl),
-                  child: Center(child: CircularProgressIndicator()),
+                  ),
                 ),
-              ),
-          ],
+                if (_loadingMore)
+                  const SliverToBoxAdapter(
+                    child: Padding(
+                      padding: EdgeInsets.only(bottom: AppSpacing.xxl),
+                      child: Center(child: CircularProgressIndicator()),
+                    ),
+                  ),
+              ],
+            );
+          },
         ),
       ),
     );
+  }
+}
+
+/// 网格子项 delegate:默认 [SliverChildBuilderDelegate.shouldRebuild] 恒为
+/// true,页面任何 setState(如分页 footer 出现/消失、刷新态切换)都会把
+/// 整屏卡片重建一遍。条目列表未换引用、布局形态未变时跳过。
+class _ShelfChildDelegate extends SliverChildBuilderDelegate {
+  _ShelfChildDelegate({
+    required this.items,
+    required this.wide,
+    required NullableIndexedWidgetBuilder builder,
+  }) : super(builder, childCount: items.length, addAutomaticKeepAlives: false);
+
+  final List<EmbyItem> items;
+  final bool wide;
+
+  @override
+  bool shouldRebuild(covariant _ShelfChildDelegate oldDelegate) {
+    return !identical(oldDelegate.items, items) || oldDelegate.wide != wide;
   }
 }
 

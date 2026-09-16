@@ -986,6 +986,38 @@ void main() {
     );
   });
 
+  testWidgets('season episode strip lists the whole season for paging', (
+    tester,
+  ) async {
+    server.setEpisodes(_series, [
+      for (var i = 1; i <= 12; i++)
+        FakeEpisode(
+          id: 's1e$i',
+          name: 'Episode $i',
+          seasonId: _season1,
+          indexNumber: i,
+        ),
+    ]);
+    final app = await pumpApp(tester);
+    await openItem(tester, app, 's1e12');
+
+    // 整季 12 集都在分集条里:此前只加载当前集附近一窗,
+    // 条内不溢出,无法向左翻页。横排惰性构建,断言条目数而非离屏文本;
+    // ListView.separated 的 childCount = 12 条目 + 11 分隔 = 23。
+    final listCounts = tester
+        .widgetList<ListView>(find.byType(ListView))
+        .map(
+          (list) => switch (list.childrenDelegate) {
+            SliverChildBuilderDelegate(builder: _, childCount: final count) =>
+              count,
+            _ => null,
+          },
+        )
+        .toList();
+    expect(listCounts, contains(23));
+    expect(find.text('1. Episode 1'), findsOneWidget);
+  });
+
   testWidgets('season episode strip remains on the season finale', (
     tester,
   ) async {

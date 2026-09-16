@@ -295,17 +295,28 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
           episodeTotal = _episodeTotal;
           episodeWindowEnd = _episodeWindowEnd;
         } else if (seasonId != null && seasonId.isNotEmpty) {
-          final window = await _loadEpisodeWindow(
-            client,
-            seasonId: seasonId,
-            current: item.isEpisode ? item : null,
-          );
-          if (!mounted || gen != _loadGen) {
-            return;
+          if (item.isEpisode) {
+            // 集详情:整季拉取,供本季分集横排完整切集导航。
+            final window = await _loadSeasonEpisodes(client, seasonId, item);
+            episodes = window.items;
+            episodeTotal = window.total;
+            episodeWindowEnd = window.end;
+          } else {
+            final window = await _loadEpisodeWindow(
+              client,
+              seasonId: seasonId,
+              current: item.isEpisode ? item : null,
+            );
+            if (!mounted || gen != _loadGen) {
+              return;
+            }
+            episodes = window.items;
+            episodeTotal = window.total;
+            episodeWindowEnd = window.end;
           }
-          episodes = window.items;
-          episodeTotal = window.total;
-          episodeWindowEnd = window.end;
+        }
+        if (!mounted || gen != _loadGen) {
+          return;
         }
         if (item.isEpisode) {
           nextEpisode = _siblingAfter(item, episodes);
@@ -419,17 +430,43 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
   Future<EmbyItemPage> _queryEpisodes(
     EmbyClient client,
     String seasonId,
-    int startIndex,
-  ) {
+    int startIndex, {
+    int? limit,
+  }) {
     return client.queryItems(
       parentId: seasonId,
       includeItemTypes: 'Episode',
       sortBy: 'IndexNumber',
       sortOrder: 'Ascending',
       startIndex: startIndex,
-      limit: _episodePageSize,
+      limit: limit ?? _episodePageSize,
       fields: EmbyClient.itemFields,
     );
+  }
+
+  /// 集详情页一次拉整季(上限 [_episodeDetailSeasonLimit]):本季分集
+  /// 横排是切集导航,只给当前窗口会出现"无法向左翻页"。超限季退回窗口。
+  Future<_EpisodeWindow> _loadSeasonEpisodes(
+    EmbyClient client,
+    String seasonId,
+    EmbyItem current,
+  ) async {
+    final page = await _queryEpisodes(
+      client,
+      seasonId,
+      0,
+      limit: _episodeDetailSeasonLimit,
+    );
+    final total = page.totalRecordCount ?? page.items.length;
+    final items = _dedupeById(page.items);
+    final merged = items.any((episode) => episode.id == current.id)
+        ? items
+        : _sortedByIndex([...items, current]);
+    if (total > page.items.length) {
+      // 超大季:退回当前集窗口,行为同旧实现。
+      return _loadEpisodeWindow(client, seasonId: seasonId, current: current);
+    }
+    return _EpisodeWindow(items: merged, total: total, end: page.items.length);
   }
 
   /// 以当前集(或给定集号)前 4 条为起点拉一窗分集;结果按 id 去重,
@@ -2043,6 +2080,9 @@ class _EpisodeWindow {
 }
 
 const _episodePageSize = 80;
+
+/// 集详情页整季拉取上限;超过该集数的季退回当前集窗口。
+const _episodeDetailSeasonLimit = 300;
 
 List<EmbyItem> _dedupeById(Iterable<EmbyItem> items) {
   final seen = <String>{};
