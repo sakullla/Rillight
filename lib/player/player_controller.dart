@@ -102,6 +102,7 @@ class PlayerController extends ChangeNotifier {
     this.seekStep = const Duration(seconds: 10),
     this.onClose,
     this.onOpenItem,
+    this.onOpenItemDetail,
     this.preferredMediaSourceId,
     this.preferredAudioStreamIndex,
     this.preferredSubtitleStreamIndex,
@@ -131,6 +132,10 @@ class PlayerController extends ChangeNotifier {
   final Duration seekStep;
   final VoidCallback? onClose;
   final ValueChanged<String>? onOpenItem;
+
+  /// 进程内不可播放的条目(如剧集)改为通知主窗口打开详情页;
+  /// 独立播放进程在 [onOpenItem] 之外提供该回调。
+  final ValueChanged<String>? onOpenItemDetail;
   PlayerSettingsStore? settingsStore;
 
   /// 会话快照:Playing/Progress 成功后写入,Stopped 成功后删除,
@@ -239,6 +244,10 @@ class PlayerController extends ChangeNotifier {
   Timer? _progressTimer;
   Timer? _progressFailBannerTimer;
   Timer? _subtitleNoticeTimer;
+
+  /// 换源/重开后重断言外挂字幕的到期时刻;挂在进度上报节拍上,
+  /// 不新增独立定时器(避免测试与dispose遗漏时残留挂起定时器)。
+  DateTime? _subtitleReassertDue;
 
   /// 在途 Stopped(_handleCompleted / _stopSession / close 共用);
   /// 后续 close()/shutdown 先等它,避免 exit(0) 截断上报。
@@ -385,6 +394,12 @@ class PlayerController extends ChangeNotifier {
   void openEndedSeries() {
     final seriesId = item?.seriesId;
     if (seriesId != null && seriesId.isNotEmpty) {
+      // 剧集不可在播放器内播放:优先交给主窗口打开详情页。
+      final openDetail = onOpenItemDetail;
+      if (openDetail != null) {
+        openDetail(seriesId);
+        return;
+      }
       onOpenItem?.call(seriesId);
       return;
     }
@@ -1463,6 +1478,9 @@ class PlayerController extends ChangeNotifier {
       isPlaying = backend.isPlaying;
 
       await _applyTracks(next);
+      // 换源/重开后部分后端会丢外挂字幕选择(字幕要等一会儿才出现),
+      // 起流片刻后重断言一次,字幕晚显的问题即消失。
+      _scheduleSubtitleReassert();
       await _beginSession(startTicks: startTicks);
       loading = false;
       error = null;
@@ -1511,6 +1529,31 @@ class PlayerController extends ChangeNotifier {
     );
   }
 
+  /// 起流 2 秒后重断言外挂字幕选择:直接播放的外挂文本字幕在重开
+  /// 后偶发丢失,延迟重放一次即可恢复;烧录/内嵌轨道无副作用。
+  /// 到期检查挂在进度上报节拍上执行。
+  void _scheduleSubtitleReassert() {
+    _subtitleReassertDue = DateTime.now().add(const Duration(seconds: 2));
+  }
+
+  void _maybeReassertSubtitle() {
+    final due = _subtitleReassertDue;
+    if (due == null || DateTime.now().isBefore(due)) {
+      return;
+    }
+    _subtitleReassertDue = null;
+    final current = resolved;
+    final index = subtitleStreamIndex;
+    if (current == null || index == null) {
+      return;
+    }
+    final stream = current.mediaSource.streamByIndex(index);
+    if (stream == null || !stream.isSubtitle) {
+      return;
+    }
+    unawaited(_applyTracks(current));
+  }
+
   int? _defaultTextSubtitle(PlaybackMediaSource source) {
     final index = source.defaultSubtitleStreamIndex;
     if (index == null) {
@@ -1549,6 +1592,7 @@ class PlayerController extends ChangeNotifier {
       return;
     }
     _progressTimer = Timer.periodic(progressInterval, (_) {
+      _maybeReassertSubtitle();
       unawaited(_reportProgress(eventName: 'TimeUpdate'));
     });
   }

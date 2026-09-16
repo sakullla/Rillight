@@ -48,8 +48,14 @@ class _Section extends StatelessWidget {
 }
 
 /// 概览分区:默认 3 行截断,超长时提供展开/收起。
+///
+/// [compact] 为 true 时不带分区标题与页面边距,直接嵌入 hero 信息栏。
 class EpisodeOverviewSection extends StatefulWidget {
-  const EpisodeOverviewSection({super.key, required this.overview});
+  const EpisodeOverviewSection({
+    super.key,
+    required this.overview,
+    this.compact = false,
+  });
 
   /// 正文文本,供测试断言 maxLines。
   static const textKey = Key('episode-overview-text');
@@ -60,6 +66,7 @@ class EpisodeOverviewSection extends StatefulWidget {
   static const _collapsedLines = 3;
 
   final String? overview;
+  final bool compact;
 
   @override
   State<EpisodeOverviewSection> createState() => _EpisodeOverviewSectionState();
@@ -93,46 +100,48 @@ class _EpisodeOverviewSectionState extends State<EpisodeOverviewSection> {
       color: theme.colorScheme.onSurface.withValues(alpha: 0.88),
       height: 1.45,
     );
-    return _Section(
-      title: l10n.detailOverview,
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final toggleable =
-              _expanded ||
-              _exceedsCollapsedLines(context, constraints.maxWidth, style);
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                overview,
-                key: EpisodeOverviewSection.textKey,
-                maxLines: _expanded
-                    ? null
-                    : EpisodeOverviewSection._collapsedLines,
-                overflow: _expanded
-                    ? TextOverflow.visible
-                    : TextOverflow.ellipsis,
-                style: style,
-              ),
-              if (toggleable)
-                TextButton(
-                  key: EpisodeOverviewSection.toggleKey,
-                  onPressed: () => setState(() => _expanded = !_expanded),
-                  style: TextButton.styleFrom(
-                    foregroundColor: theme.colorScheme.primary,
-                    padding: EdgeInsets.zero,
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    visualDensity: VisualDensity.compact,
-                    textStyle: theme.textTheme.labelLarge,
-                  ),
-                  child: Text(_expanded ? l10n.collapse : l10n.expand),
+    final body = LayoutBuilder(
+      builder: (context, constraints) {
+        final toggleable =
+            _expanded ||
+            _exceedsCollapsedLines(context, constraints.maxWidth, style);
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              overview,
+              key: EpisodeOverviewSection.textKey,
+              maxLines: _expanded
+                  ? null
+                  : EpisodeOverviewSection._collapsedLines,
+              overflow: _expanded
+                  ? TextOverflow.visible
+                  : TextOverflow.ellipsis,
+              style: style,
+            ),
+            if (toggleable)
+              TextButton(
+                key: EpisodeOverviewSection.toggleKey,
+                onPressed: () => setState(() => _expanded = !_expanded),
+                style: TextButton.styleFrom(
+                  foregroundColor: theme.colorScheme.primary,
+                  padding: EdgeInsets.zero,
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  visualDensity: VisualDensity.compact,
+                  textStyle: theme.textTheme.labelLarge,
                 ),
-            ],
-          );
-        },
-      ),
+                child: Text(_expanded ? l10n.collapse : l10n.expand),
+              ),
+          ],
+        );
+      },
     );
+    if (widget.compact) {
+      return body;
+    }
+    return _Section(title: l10n.detailOverview, child: body);
   }
 }
 
@@ -174,33 +183,38 @@ class EpisodePeopleSection extends StatelessWidget {
         if (groups.containsKey(type)) type,
       if (groups.containsKey('')) '',
     ];
+    // 各分组横向并排(演员组在前),组内人物 Wrap 换行;
+    // 导演/编剧通常只有一两人,不再各占一整行留下大片空白。
     return _Section(
       title: l10n.detailCast,
-      child: Column(
+      child: Wrap(
         key: sectionKey,
-        crossAxisAlignment: CrossAxisAlignment.start,
+        spacing: AppSpacing.xxxl,
+        runSpacing: AppSpacing.lg,
+        crossAxisAlignment: WrapCrossAlignment.start,
         children: [
-          for (var i = 0; i < orderedTypes.length; i++) ...[
-            if (i > 0) const SizedBox(height: AppSpacing.md),
-            Text(
-              _groupLabel(
-                l10n,
-                orderedTypes[i].isEmpty ? null : orderedTypes[i],
-              ),
-              style: theme.textTheme.titleSmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
-            ),
-            const SizedBox(height: AppSpacing.xs),
-            Wrap(
-              spacing: AppSpacing.lg,
-              runSpacing: AppSpacing.sm,
+          for (final type in orderedTypes)
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
-                for (final person in groups[orderedTypes[i]]!)
-                  _PersonChip(person: person),
+                Text(
+                  _groupLabel(l10n, type.isEmpty ? null : type),
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                Wrap(
+                  spacing: AppSpacing.md,
+                  runSpacing: AppSpacing.md,
+                  children: [
+                    for (final person in groups[type]!)
+                      _PersonChip(person: person),
+                  ],
+                ),
               ],
             ),
-          ],
         ],
       ),
     );
@@ -212,12 +226,15 @@ class _PersonChip extends StatelessWidget {
 
   final ItemPerson person;
 
+  /// 卡宽:头像 + 两行居中文字。
+  static const double width = 104;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final role = person.role?.trim();
     return SizedBox(
-      width: 88,
+      width: width,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -228,7 +245,7 @@ class _PersonChip extends StatelessWidget {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             textAlign: TextAlign.center,
-            style: theme.textTheme.bodySmall,
+            style: theme.textTheme.labelLarge,
           ),
           if (role != null && role.isNotEmpty)
             Text(
@@ -253,13 +270,16 @@ class _PersonAvatar extends StatefulWidget {
 
   final ItemPerson person;
 
-  static const double size = 64;
+  static const double size = 80;
 
   @override
   State<_PersonAvatar> createState() => _PersonAvatarState();
 }
 
 class _PersonAvatarState extends State<_PersonAvatar> {
+  /// 头像请求宽:80 逻辑像素 × 2 倍屏留余量。
+  static const _avatarRequestWidth = 192;
+
   Future<Uint8List?>? _future;
 
   bool get _hasImage {
@@ -283,13 +303,13 @@ class _PersonAvatarState extends State<_PersonAvatar> {
       itemId: widget.person.id!,
       type: 'Primary',
       tag: widget.person.primaryImageTag,
-      maxWidth: 128,
+      maxWidth: _avatarRequestWidth,
       fetch: () async {
         try {
           final data = await auth.client.getItemImage(
             widget.person.id!,
             tag: widget.person.primaryImageTag,
-            maxWidth: 128,
+            maxWidth: _avatarRequestWidth,
           );
           if (data.isEmpty) {
             return null;
@@ -378,28 +398,52 @@ class EpisodeMediaStreamsSection extends StatelessWidget {
     }
     final lineStyle = theme.textTheme.bodyMedium?.copyWith(
       color: theme.colorScheme.onSurface.withValues(alpha: 0.88),
+      height: 1.5,
     );
+    final labelStyle = theme.textTheme.titleSmall?.copyWith(
+      color: theme.colorScheme.onSurfaceVariant,
+      height: 1.5,
+    );
+    // 规格表式两列:左列固定宽的轨道类型,右列该类型的各条轨道,
+    // 一眼能对齐比较,不再是标题—正文交替的长条。
     return _Section(
       title: l10n.detailMediaInfo,
-      child: Column(
-        key: sectionKey,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          for (var i = 0; i < groups.length; i++) ...[
-            if (i > 0) const SizedBox(height: AppSpacing.md),
-            Text(
-              groups[i].$1,
-              style: theme.textTheme.titleSmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 880),
+        child: Column(
+          key: sectionKey,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (var i = 0; i < groups.length; i++)
+              Padding(
+                padding: EdgeInsets.only(top: i == 0 ? 0 : AppSpacing.sm),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SizedBox(
+                      width: _labelWidth,
+                      child: Text(groups[i].$1, style: labelStyle),
+                    ),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          for (final line in groups[i].$2)
+                            Text(line, style: lineStyle),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-            const SizedBox(height: AppSpacing.xxs),
-            for (final line in groups[i].$2) Text(line, style: lineStyle),
           ],
-        ],
+        ),
       ),
     );
   }
+
+  /// 左列标签宽:容纳"视频/音轨/字幕"两字 + 间距。
+  static const double _labelWidth = 72;
 
   static String _joined(List<String?> parts) {
     return [

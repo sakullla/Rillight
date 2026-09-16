@@ -165,9 +165,35 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
        _snapshotStoreForPid =
            snapshotStoreForPid ?? FilePlaybackSessionSnapshotStore.forPid {
     auth.addListener(_onAuth);
+    _registerHostChannelHandler();
   }
 
   final AuthController auth;
+
+  /// 播放器进程请求主窗口打开条目详情(如播放结束"查看剧集")。
+  ValueChanged<String>? onOpenItemRoute;
+
+  void _registerHostChannelHandler() {
+    Future<void> register() async {
+      try {
+        await _hostChannel.setMethodCallHandler((call) async {
+          if (call.method != 'openItem') {
+            return;
+          }
+          final args = call.arguments;
+          final itemId = args is Map ? args['itemId']?.toString() : null;
+          if (itemId == null || itemId.isEmpty) {
+            return;
+          }
+          onOpenItemRoute?.call(itemId);
+        });
+      } catch (_) {
+        // 测试环境无平台通道,忽略注册失败。
+      }
+    }
+
+    unawaited(register());
+  }
 
   /// 等待播放进程响应 WM_CLOSE 自行退出的上限。
   final Duration closeTimeout;
@@ -565,6 +591,28 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
                   userAgent: _launch.userAgent,
                 ),
               );
+            },
+            // 播放结束"查看剧集":通知主窗口打开详情页,
+            // 剧集在播放器内不可播放(此前直接重开播放器报"条目不可用")。
+            onOpenItemDetail: (itemId) async {
+              try {
+                await _hostChannel.invokeMethod('openItem', {'itemId': itemId});
+              } catch (_) {
+                // 主窗口不可达(如旧版本宿主):退回原重开行为。
+                _applyLaunch(
+                  PlayerWindowLaunch(
+                    request: PlayerOpenRequest(
+                      itemId: itemId,
+                      autoResume: false,
+                    ),
+                    baseUrl: _launch.baseUrl,
+                    accessToken: _launch.accessToken,
+                    userId: _launch.userId,
+                    device: _launch.device,
+                    userAgent: _launch.userAgent,
+                  ),
+                );
+              }
             },
           ),
         ),

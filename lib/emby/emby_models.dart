@@ -458,11 +458,16 @@ class EmbyItem {
   bool get canResume => !userData.played && userData.playbackPositionTicks > 0;
 
   /// 海报/剧照候选:横图优先本集 Thumb;剧海报与本集 Primary 相同时跳过,避免一排同一张剧图。
+  ///
+  /// [preferParentBackdrop] 用于单集 hero 底图:先取所属剧集的 Backdrop,
+  /// 与前景的本集剧照形成两张不同的图;无剧集 backdrop 时才退回本集横图。
   List<ItemImageRef> imageCandidates({
     bool preferBackdrop = false,
     bool preferThumb = false,
+    bool preferParentBackdrop = false,
   }) {
-    final landscape = preferBackdrop || preferThumb || isEpisode;
+    final landscape =
+        preferBackdrop || preferThumb || preferParentBackdrop || isEpisode;
     final refs = <ItemImageRef>[];
     void add(
       String itemId,
@@ -482,6 +487,13 @@ class EmbyItem {
       refs.add(ItemImageRef(itemId: itemId, type: type, tag: tag));
     }
 
+    if (preferParentBackdrop) {
+      final parentBackdrop = parentBackdropItemId;
+      if (parentBackdrop != null) {
+        add(parentBackdrop, 'Backdrop', parentBackdropImageTag);
+      }
+      add(id, 'Backdrop', backdropImageTag);
+    }
     if (preferBackdrop) {
       add(id, 'Backdrop', backdropImageTag);
       if (!isEpisode) {

@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter/widgets.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:rillight/app/app.dart';
+import 'package:rillight/app/router.dart';
 import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/auth/auth_bootstrap.dart';
 import 'package:rillight/player/desktop_player_window.dart';
@@ -32,13 +35,20 @@ Future<void> main(List<String> args) async {
   }
   await configureMainWindow();
   final auth = await createProductionAuth();
+  final router = createAppRouter(auth: auth);
+  final playerHost = DesktopPlayerWindowHost(auth: auth);
+  // 播放器进程请求打开条目详情(播放结束"查看剧集"):
+  // 主窗口路由到详情页并前置主窗口。
+  playerHost.onOpenItemRoute = (itemId) {
+    router.push(AppRoutes.item(itemId));
+    unawaited(windowManager.focus());
+  };
   runApp(
     WindowChromeHost(
       child: RillightApp(
         auth: auth,
-        playerBindings: PlayerBindings(
-          windowHost: DesktopPlayerWindowHost(auth: auth),
-        ),
+        router: router,
+        playerBindings: PlayerBindings(windowHost: playerHost),
       ),
     ),
   );

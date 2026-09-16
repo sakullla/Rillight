@@ -144,6 +144,35 @@ void main() {
     );
   });
 
+  test('episode hero backdrop prefers series backdrop over own still', () {
+    final item = EmbyItem.fromJson({
+      'Id': 'ep-5',
+      'Name': '剧集底图',
+      'Type': 'Episode',
+      'SeriesId': 'series-1',
+      'ImageTags': {'Thumb': 'thumb-5'},
+      'ParentBackdropItemId': 'series-1',
+      'ParentBackdropImageTags': ['back-5'],
+    });
+    // 集详情 hero:底图先取剧集 backdrop,与前景本集剧照分开;
+    // 剧集没有 backdrop 时才退回本集横图。
+    final refs = item.imageCandidates(preferParentBackdrop: true);
+    expect(
+      refs.map((ref) => '${ref.itemId}:${ref.type}').toList(),
+      containsAllInOrder(['series-1:Backdrop', 'ep-5:Thumb']),
+    );
+    expect(refs.first.itemId, 'series-1');
+
+    final noParent = EmbyItem.fromJson({
+      'Id': 'ep-6',
+      'Name': '无剧集底图',
+      'Type': 'Episode',
+      'ImageTags': {'Thumb': 'thumb-6'},
+    }).imageCandidates(preferParentBackdrop: true);
+    expect(noParent.first.itemId, 'ep-6');
+    expect(noParent.first.type, 'Thumb');
+  });
+
   test('image candidates always carry tags for cache keys', () {
     final item = EmbyItem.fromJson({
       'Id': 'ep-4',
@@ -161,6 +190,7 @@ void main() {
       item.imageCandidates(),
       item.imageCandidates(preferThumb: true),
       item.imageCandidates(preferBackdrop: true),
+      item.imageCandidates(preferParentBackdrop: true),
     ]) {
       expect(refs, isNotEmpty);
       for (final ref in refs) {

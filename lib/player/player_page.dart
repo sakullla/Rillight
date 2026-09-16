@@ -77,6 +77,7 @@ class PlayerPage extends StatefulWidget {
     this.startTimeTicks,
     this.onClosed,
     this.onOpenItem,
+    this.onOpenItemDetail,
   });
 
   final String itemId;
@@ -87,6 +88,7 @@ class PlayerPage extends StatefulWidget {
   final int? startTimeTicks;
   final VoidCallback? onClosed;
   final ValueChanged<String>? onOpenItem;
+  final ValueChanged<String>? onOpenItemDetail;
 
   @override
   State<PlayerPage> createState() => PlayerPageState();
@@ -135,6 +137,7 @@ class PlayerPageState extends State<PlayerPage> {
       snapshotStore: bindings.snapshotStore,
       onClose: _leave,
       onOpenItem: _openItem,
+      onOpenItemDetail: widget.onOpenItemDetail ?? _openItem,
     );
     controller = created;
     created.addListener(_onController);
@@ -754,7 +757,6 @@ class _PlayerChromeBar extends StatelessWidget {
                       icon: controller.isAlwaysOnTop
                           ? Icons.push_pin_rounded
                           : Icons.push_pin_outlined,
-                      rotation: _kPinTilt,
                     ),
                     _PlayerChromeIconButton(
                       buttonKey: const Key('player-window-minimize'),
@@ -788,9 +790,7 @@ class _PlayerChromeBar extends StatelessWidget {
 }
 
 /// 播放窗顶栏按钮:与主窗口搜索/会话钮同高同字号,避免默认 48 点 IconButton
-/// 在标题栏里画出一块大方块。图钉侧倾 45°,直立的 push_pin 看起来像字母 T。
-const _kPinTilt = -0.7853981633974483;
-
+/// 在标题栏里画出一块大方块。
 class _PlayerChromeIconButton extends StatelessWidget {
   const _PlayerChromeIconButton({
     required this.buttonKey,
@@ -798,24 +798,18 @@ class _PlayerChromeIconButton extends StatelessWidget {
     required this.icon,
     required this.onPressed,
     this.color,
-    this.rotation = 0,
   });
 
   final Key buttonKey;
   final String tooltip;
   final IconData icon;
   final Color? color;
-  final double rotation;
   final VoidCallback onPressed;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final foreground = color ?? scheme.onSurface;
-    Widget glyph = Icon(icon);
-    if (rotation != 0) {
-      glyph = Transform.rotate(angle: rotation, child: glyph);
-    }
     return Tooltip(
       message: tooltip,
       preferBelow: true,
@@ -827,7 +821,7 @@ class _PlayerChromeIconButton extends StatelessWidget {
         visualDensity: VisualDensity.compact,
         iconSize: 18,
         color: foreground,
-        icon: glyph,
+        icon: Icon(icon),
       ),
     );
   }

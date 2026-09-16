@@ -353,45 +353,78 @@ void main() {
     expect(host.current?.itemId, id);
   });
 
-  testWidgets('episode header omits the duplicate poster thumb', (
+  testWidgets('episode hero layers the still over the series backdrop', (
     tester,
   ) async {
     final app = await pumpApp(tester);
     await openItem(tester, app, 'episode-friends-s1e2');
 
-    // 单集 hero 不重复显示与 backdrop 同源的小缩略图,信息区铺满底部。
-    expect(find.byKey(ItemDetailPage.posterKey), findsNothing);
+    // 单集 hero:全幅底图取所属剧集 backdrop,前景左侧为本集 16:9 剧照,
+    // 右侧信息栏(剧名链接、标题、元信息、简介、操作)——两张图各司其职。
     final header = find.byKey(ItemDetailPage.headerKey);
     final rect = tester.getRect(header);
+    expect(rect.left, 0);
     expect(rect.width, 1200);
+    // 单集 hero 最小高 0.42 视高(340–520)+ 顶栏叠加。
+    expect(rect.height, greaterThanOrEqualTo(340));
+    final backdrops = find.descendant(
+      of: header,
+      matching: find.byWidgetPredicate(
+        (widget) => widget is MediaImage && widget.preferParentBackdrop,
+      ),
+    );
+    expect(backdrops, findsOneWidget);
+    // 顶栏叠在 hero 之上:前景内容整体下沉,不与返回键/窗口铬相撞。
+    final barBottom = tester.getRect(find.byKey(AppShell.topBarKey)).bottom;
+    final poster = find.byKey(ItemDetailPage.posterKey);
+    expect(poster, findsOneWidget);
+    expect(tester.getSize(poster), const Size(384, 216));
+    expect(tester.getTopLeft(poster).dy, greaterThanOrEqualTo(barBottom));
+    final posterImage = tester.widget<MediaImage>(
+      find.descendant(of: poster, matching: find.byType(MediaImage)),
+    );
+    expect(posterImage.preferThumb, isTrue);
+    expect(posterImage.preferParentBackdrop, isFalse);
+
+    final title = _headerTitle();
     expect(
-      tester.getRect(_headerTitle()).left,
-      greaterThanOrEqualTo(AppSpacing.page),
+      tester.getRect(title).left,
+      greaterThan(tester.getRect(poster).right),
     );
     expect(
-      tester.widget<SelectableText>(_headerTitle()).data,
+      tester.widget<SelectableText>(title).data,
       contains('The One with the Sonogram'),
     );
     expect(find.byKey(CatalogKeys.seriesLink), findsOneWidget);
     expect(find.byKey(CatalogKeys.viewSeries), findsOneWidget);
     expect(find.byKey(CatalogKeys.locateEpisode), findsOneWidget);
-    // 单集简介由概览分区承载(可展开收起),海报不再叠简介带。
+    // 单集简介内嵌在 hero 信息栏(可展开收起),不另起"概览"分区,
+    // 剧照上也不叠简介带。
     expect(find.byKey(CatalogKeys.overview), findsNothing);
     expect(find.text('简介'), findsNothing);
+    expect(find.text('概览'), findsNothing);
     expect(
       find.descendant(
-        of: find.byKey(ItemDetailPage.posterKey),
+        of: poster,
         matching: find.text('Six friends living in New York.'),
       ),
       findsNothing,
     );
+    final overview = find.byKey(EpisodeOverviewSection.textKey);
+    expect(find.descendant(of: header, matching: overview), findsOneWidget);
     expect(
-      tester.widget<Text>(find.byKey(EpisodeOverviewSection.textKey)).data,
+      tester.widget<Text>(overview).data,
       'Six friends living in New York.',
     );
     expect(find.byKey(CatalogKeys.episodesRow), findsNothing);
 
-    expect(find.byKey(PlayerKeys.open), findsOneWidget);
+    final open = find.byKey(PlayerKeys.open);
+    expect(open, findsOneWidget);
+    expect(tester.getRect(open).overlaps(rect), isTrue);
+    expect(
+      tester.getTopLeft(open).dy,
+      greaterThan(tester.getBottomLeft(overview).dy),
+    );
   });
 
   testWidgets('resumable episode shows continue play', (tester) async {
@@ -1015,7 +1048,21 @@ void main() {
         )
         .toList();
     expect(listCounts, contains(23));
-    expect(find.text('1. Episode 1'), findsOneWidget);
+    // 条打开时自动滚到当前集(第 12 集)而不是停在第 1 集。
+    final current = find.byKey(CatalogKeys.episode('s1e12'));
+    expect(current, findsOneWidget);
+    final rect = tester.getRect(current);
+    expect(rect.left, greaterThanOrEqualTo(0));
+    expect(rect.right, lessThanOrEqualTo(1200));
+    expect(find.text('12. Episode 12'), findsOneWidget);
+    expect(
+      find.byKey(CatalogKeys.shelfScrollLeft('season-episodes')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(CatalogKeys.shelfMore('season-episodes')),
+      findsOneWidget,
+    );
   });
 
   testWidgets('season episode strip remains on the season finale', (

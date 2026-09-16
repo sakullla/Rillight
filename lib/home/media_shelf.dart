@@ -45,6 +45,7 @@ class MediaShelf extends StatefulWidget {
     this.itemBuilder,
     this.onRemoveFromResume,
     this.headerAction,
+    this.focusItemId,
   });
 
   final String shelfId;
@@ -62,6 +63,11 @@ class MediaShelf extends StatefulWidget {
   final Widget Function(BuildContext context, EmbyItem item)? itemBuilder;
   final ValueChanged<EmbyItem>? onRemoveFromResume;
   final Widget? headerAction;
+
+  /// 首次布局及该值变化时把对应条目滚到行中央(集详情的"本季分集"条
+  /// 打开第 10 集时不该停在第 1 集)。卡片节距按默认卡宽 + [cardGap] 估算,
+  /// 自定义 [itemBuilder] 需使用同档卡宽。
+  final String? focusItemId;
 
   /// 竖版海报卡宽,随 [AppBreakpoints] 缩放。
   static double posterWidthFor(double screenWidth) {
@@ -171,6 +177,7 @@ class _MediaShelfState extends State<MediaShelf> {
     _controller.addListener(_updateScrollButtons);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
+        _revealFocusItem();
         _updateScrollButtons();
       }
     });
@@ -179,13 +186,43 @@ class _MediaShelfState extends State<MediaShelf> {
   @override
   void didUpdateWidget(MediaShelf oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (!listEquals(oldWidget.items, widget.items) ||
+    final focusChanged = oldWidget.focusItemId != widget.focusItemId;
+    if (focusChanged ||
+        !listEquals(oldWidget.items, widget.items) ||
         oldWidget.loading != widget.loading) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
+          if (focusChanged) {
+            _revealFocusItem();
+          }
           _updateScrollButtons();
         }
       });
+    }
+  }
+
+  /// 把 [MediaShelf.focusItemId] 对应的卡片滚到行中央;列表惰性构建,
+  /// 目标可能尚未挂载,所以按卡片节距直接算偏移而不用 ensureVisible。
+  void _revealFocusItem() {
+    final id = widget.focusItemId;
+    if (id == null || !_controller.hasClients) {
+      return;
+    }
+    final index = widget.items.indexWhere((item) => item.id == id);
+    if (index < 0) {
+      return;
+    }
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final cardWidth = widget.wide
+        ? MediaShelf.wideCardWidthFor(screenWidth)
+        : MediaShelf.posterWidthFor(screenWidth);
+    final pitch = cardWidth + MediaShelf.cardGap;
+    final position = _controller.position;
+    final cardStart = AppSpacing.page + index * pitch;
+    final target = (cardStart - (position.viewportDimension - cardWidth) / 2)
+        .clamp(position.minScrollExtent, position.maxScrollExtent);
+    if ((target - position.pixels).abs() > 0.5) {
+      _controller.jumpTo(target);
     }
   }
 

@@ -23,6 +23,7 @@ class MediaImage extends StatefulWidget {
     this.height,
     this.preferBackdrop = false,
     this.preferThumb = false,
+    this.preferParentBackdrop = false,
     this.maxWidth,
   });
 
@@ -31,6 +32,9 @@ class MediaImage extends StatefulWidget {
   final double? height;
   final bool preferBackdrop;
   final bool preferThumb;
+
+  /// 优先所属剧集的 Backdrop(单集 hero 底图),见 [EmbyItem.imageCandidates]。
+  final bool preferParentBackdrop;
   final int? maxWidth;
 
   /// 清空内存与磁盘两级缓存,仅测试使用。
@@ -74,6 +78,7 @@ class _MediaImageState extends State<MediaImage> {
     return widget.item.imageCandidates(
       preferBackdrop: widget.preferBackdrop,
       preferThumb: widget.preferThumb,
+      preferParentBackdrop: widget.preferParentBackdrop,
     );
   }
 
@@ -111,6 +116,7 @@ class _MediaImageState extends State<MediaImage> {
             widget.item.seriesPrimaryImageTag ||
         oldWidget.preferBackdrop != widget.preferBackdrop ||
         oldWidget.preferThumb != widget.preferThumb ||
+        oldWidget.preferParentBackdrop != widget.preferParentBackdrop ||
         maxWidthChanged ||
         widthChanged) {
       _future = _hasImageSource ? _load() : null;
