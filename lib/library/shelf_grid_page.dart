@@ -1045,220 +1045,206 @@ class _FilterBar extends StatelessWidget {
     final l10n = AppLocalizations.of(context);
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    // 草稿:面板内选择仅暂存,点击「确定」才生效;取消/点遮罩丢弃。
+    var draft = filters;
     await showDialog<void>(
       context: context,
       barrierColor: scheme.scrim.withValues(
         alpha: AppScrim.of(context, AppScrim.barrier),
       ),
       builder: (dialogContext) {
-        return Dialog(
-          backgroundColor: Colors.transparent,
-          elevation: 0,
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 420),
-            child: Material(
-              key: gridFilterPanelKey,
-              color: scheme.surfaceContainerHigh,
-              elevation: 12,
-              shadowColor: Colors.black.withValues(alpha: 0.45),
-              surfaceTintColor: Colors.transparent,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(AppRadii.xl),
-                side: BorderSide(
-                  color: Colors.white.withValues(alpha: AppGlass.edgeLight),
+        Widget dimensionChips({
+          required String dimension,
+          required String label,
+          required List<(String, String)> options,
+          required String selected,
+          required ValueChanged<String> onSelected,
+        }) {
+          return Column(
+            key: gridFilterKey(dimension),
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(label, style: theme.textTheme.labelLarge),
+              const SizedBox(height: AppSpacing.xs),
+              Wrap(
+                spacing: AppSpacing.xs,
+                runSpacing: AppSpacing.xs,
+                children: [
+                  for (final (value, optionLabel) in options)
+                    ChoiceChip(
+                      key: gridFilterOption(dimension, value),
+                      label: Text(optionLabel),
+                      selected: value == selected,
+                      onSelected: (_) => onSelected(value),
+                    ),
+                ],
+              ),
+            ],
+          );
+        }
+
+        return StatefulBuilder(
+          builder: (dialogContext, setPanelState) {
+            return Dialog(
+              backgroundColor: Colors.transparent,
+              elevation: 0,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 480),
+                child: Material(
+                  key: gridFilterPanelKey,
+                  color: scheme.surfaceContainerHigh,
+                  elevation: 12,
+                  shadowColor: Colors.black.withValues(alpha: 0.45),
+                  surfaceTintColor: Colors.transparent,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(AppRadii.xl),
+                    side: BorderSide(
+                      color: Colors.white.withValues(alpha: AppGlass.edgeLight),
+                    ),
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                      AppSpacing.lg,
+                      AppSpacing.md,
+                      AppSpacing.lg,
+                      AppSpacing.sm,
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Text(
+                          l10n.libraryFilter,
+                          style: theme.textTheme.titleMedium,
+                        ),
+                        const SizedBox(height: AppSpacing.sm),
+                        if (typeFilterable) ...[
+                          dimensionChips(
+                            dimension: 'type',
+                            label: l10n.libraryFilterType,
+                            options: [
+                              for (final option in CatalogTypeFilter.values)
+                                (
+                                  option.itemType ?? _all,
+                                  option == CatalogTypeFilter.all
+                                      ? l10n.libraryFilterAll
+                                      : option.label,
+                                ),
+                            ],
+                            selected: draft.type.itemType ?? _all,
+                            onSelected: (value) => setPanelState(() {
+                              draft = draft.copyWith(
+                                type: value == 'Movie'
+                                    ? CatalogTypeFilter.movie
+                                    : value == 'Series'
+                                    ? CatalogTypeFilter.series
+                                    : CatalogTypeFilter.all,
+                              );
+                            }),
+                          ),
+                          const SizedBox(height: AppSpacing.sm),
+                        ],
+                        dimensionChips(
+                          dimension: 'watch',
+                          label: l10n.libraryFilterWatch,
+                          options: [
+                            for (final option in CatalogWatchFilter.values)
+                              (
+                                option.param ?? _all,
+                                option == CatalogWatchFilter.all
+                                    ? l10n.libraryFilterAll
+                                    : option.label,
+                              ),
+                          ],
+                          selected: draft.watch.param ?? _all,
+                          onSelected: (value) => setPanelState(() {
+                            draft = draft.copyWith(
+                              watch: value == 'IsUnplayed'
+                                  ? CatalogWatchFilter.unplayed
+                                  : value == 'IsPlayed'
+                                  ? CatalogWatchFilter.played
+                                  : CatalogWatchFilter.all,
+                            );
+                          }),
+                        ),
+                        const SizedBox(height: AppSpacing.sm),
+                        dimensionChips(
+                          dimension: 'year',
+                          label: l10n.libraryFilterYear,
+                          options: [
+                            (_all, l10n.libraryFilterAll),
+                            for (final year in yearOptions) ('$year', '$year'),
+                          ],
+                          selected: draft.years.isEmpty
+                              ? _all
+                              : '${draft.years.first}',
+                          onSelected: (value) => setPanelState(() {
+                            draft = draft.copyWith(
+                              years: value == _all
+                                  ? const []
+                                  : [int.parse(value)],
+                            );
+                          }),
+                        ),
+                        const SizedBox(height: AppSpacing.sm),
+                        dimensionChips(
+                          dimension: 'genre',
+                          label: l10n.libraryFilterGenre,
+                          options: [
+                            (_all, l10n.libraryFilterAll),
+                            for (final genre in genreOptions) (genre, genre),
+                          ],
+                          selected: draft.genres.isEmpty
+                              ? _all
+                              : draft.genres.first,
+                          onSelected: (value) => setPanelState(() {
+                            draft = draft.copyWith(
+                              genres: value == _all ? const [] : [value],
+                            );
+                          }),
+                        ),
+                        const SizedBox(height: AppSpacing.md),
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: Wrap(
+                            spacing: AppSpacing.xs,
+                            children: [
+                              if (draft.isNotEmpty)
+                                TextButton(
+                                  onPressed: () => setPanelState(
+                                    () => draft = const ShelfFilters(),
+                                  ),
+                                  child: Text(l10n.libraryFilterClear),
+                                ),
+                              TextButton(
+                                onPressed: () => Navigator.pop(dialogContext),
+                                child: Text(l10n.libraryFilterCancel),
+                              ),
+                              TextButton(
+                                onPressed: () {
+                                  onChanged(draft);
+                                  Navigator.pop(dialogContext);
+                                },
+                                child: Text(
+                                  MaterialLocalizations.of(
+                                    dialogContext,
+                                  ).okButtonLabel,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
               ),
-              clipBehavior: Clip.antiAlias,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(
-                  AppSpacing.lg,
-                  AppSpacing.md,
-                  AppSpacing.lg,
-                  AppSpacing.sm,
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Text(
-                      l10n.libraryFilter,
-                      style: theme.textTheme.titleMedium,
-                    ),
-                    const SizedBox(height: AppSpacing.sm),
-                    if (typeFilterable)
-                      _dimensionMenu(
-                        context: dialogContext,
-                        dimension: 'type',
-                        label: l10n.libraryFilterType,
-                        options: [
-                          for (final option in CatalogTypeFilter.values)
-                            (
-                              option.itemType ?? _all,
-                              option == CatalogTypeFilter.all
-                                  ? l10n.libraryFilterAll
-                                  : option.label,
-                            ),
-                        ],
-                        selected: filters.type.itemType ?? _all,
-                        onSelected: (value) {
-                          onChanged(
-                            filters.copyWith(
-                              type: value == 'Movie'
-                                  ? CatalogTypeFilter.movie
-                                  : value == 'Series'
-                                  ? CatalogTypeFilter.series
-                                  : CatalogTypeFilter.all,
-                            ),
-                          );
-                          Navigator.pop(dialogContext);
-                        },
-                      ),
-                    _dimensionMenu(
-                      context: dialogContext,
-                      dimension: 'watch',
-                      label: l10n.libraryFilterWatch,
-                      options: [
-                        for (final option in CatalogWatchFilter.values)
-                          (
-                            option.param ?? _all,
-                            option == CatalogWatchFilter.all
-                                ? l10n.libraryFilterAll
-                                : option.label,
-                          ),
-                      ],
-                      selected: filters.watch.param ?? _all,
-                      onSelected: (value) {
-                        onChanged(
-                          filters.copyWith(
-                            watch: value == 'IsUnplayed'
-                                ? CatalogWatchFilter.unplayed
-                                : value == 'IsPlayed'
-                                ? CatalogWatchFilter.played
-                                : CatalogWatchFilter.all,
-                          ),
-                        );
-                        Navigator.pop(dialogContext);
-                      },
-                    ),
-                    _dimensionMenu(
-                      context: dialogContext,
-                      dimension: 'year',
-                      label: l10n.libraryFilterYear,
-                      options: [
-                        (_all, l10n.libraryFilterAll),
-                        for (final year in yearOptions) ('$year', '$year'),
-                      ],
-                      selected: filters.years.isEmpty
-                          ? _all
-                          : '${filters.years.first}',
-                      onSelected: (value) {
-                        onChanged(
-                          filters.copyWith(
-                            years: value == _all
-                                ? const []
-                                : [int.parse(value)],
-                          ),
-                        );
-                        Navigator.pop(dialogContext);
-                      },
-                    ),
-                    _dimensionMenu(
-                      context: dialogContext,
-                      dimension: 'genre',
-                      label: l10n.libraryFilterGenre,
-                      options: [
-                        (_all, l10n.libraryFilterAll),
-                        for (final genre in genreOptions) (genre, genre),
-                      ],
-                      selected: filters.genres.isEmpty
-                          ? _all
-                          : filters.genres.first,
-                      onSelected: (value) {
-                        onChanged(
-                          filters.copyWith(
-                            genres: value == _all ? const [] : [value],
-                          ),
-                        );
-                        Navigator.pop(dialogContext);
-                      },
-                    ),
-                    const SizedBox(height: AppSpacing.sm),
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: Wrap(
-                        spacing: AppSpacing.xs,
-                        children: [
-                          if (filters.isNotEmpty)
-                            TextButton(
-                              onPressed: () {
-                                onChanged(const ShelfFilters());
-                                Navigator.pop(dialogContext);
-                              },
-                              child: Text(l10n.libraryFilterClear),
-                            ),
-                          TextButton(
-                            onPressed: () => Navigator.pop(dialogContext),
-                            child: Text(
-                              MaterialLocalizations.of(
-                                dialogContext,
-                              ).okButtonLabel,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
+            );
+          },
         );
       },
-    );
-  }
-
-  Widget _dimensionMenu({
-    required BuildContext context,
-    required String dimension,
-    required String label,
-    required List<(String, String)> options,
-    required String selected,
-    required ValueChanged<String> onSelected,
-  }) {
-    final theme = Theme.of(context);
-    final selectedLabel = options
-        .where((option) => option.$1 == selected)
-        .map((option) => option.$2)
-        .firstOrNull;
-    return PopupMenuButton<String>(
-      key: gridFilterKey(dimension),
-      tooltip: label,
-      initialValue: selected,
-      constraints: const BoxConstraints(maxHeight: 360),
-      onSelected: onSelected,
-      itemBuilder: (context) => [
-        for (final (value, optionLabel) in options)
-          CheckedPopupMenuItem<String>(
-            key: gridFilterOption(dimension, value),
-            value: value,
-            checked: value == selected,
-            child: Text(optionLabel),
-          ),
-      ],
-      child: ListTile(
-        contentPadding: EdgeInsets.zero,
-        title: Text(label, style: theme.textTheme.labelMedium),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              selectedLabel ?? l10nLabel(context),
-              style: theme.textTheme.bodyMedium,
-            ),
-            const Icon(Icons.arrow_drop_down_rounded),
-          ],
-        ),
-      ),
     );
   }
 

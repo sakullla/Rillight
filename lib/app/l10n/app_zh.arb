@@ -272,6 +272,14 @@
   "@libraryFilterClear": {
     "description": "Clears every active library filter."
   },
+  "libraryFilterCancel": "取消",
+  "@libraryFilterCancel": {
+    "description": "Discards staged filter changes and closes the filter panel without applying."
+  },
+  "minimizeWindow": "最小化",
+  "@minimizeWindow": {
+    "description": "Minimizes the player window to the taskbar."
+  },
   "libraryFilterType": "类型",
   "@libraryFilterType": {
     "description": "Library filter dimension for Movie vs Series."

@@ -516,6 +516,11 @@ class PlayerController extends ChangeNotifier {
     return window.setAlwaysOnTop(!window.isAlwaysOnTop);
   }
 
+  Future<void> minimize() {
+    onUserActivity();
+    return window.minimize();
+  }
+
   Future<void> setAudio(int index) async {
     audioStreamIndex = index;
     await _persistSeriesPreference();
@@ -1049,14 +1054,16 @@ class PlayerController extends ChangeNotifier {
 
   /// 服务器章节标记:优先 Emby `MarkerType`(IntroStart/IntroEnd/CreditsStart),
   /// 否则回退到 Name 含 Intro/Outro/片头/片尾 的章节区间。
+  /// 一集可能有多处片头/片尾(如分割放送、多段回顾),标记路径按
+  /// "每个起点配其后第一个同名终点"展开为多段。
   List<PlayerSkipSegment> _chapterSkipSegments(List<ItemChapter> chapters) {
     if (chapters.isEmpty) {
       return const [];
     }
-    Duration? introStart;
-    Duration? introEnd;
-    Duration? creditsStart;
-    Duration? creditsEnd;
+    final introStarts = <Duration>[];
+    final introEnds = <Duration>[];
+    final creditsStarts = <Duration>[];
+    final creditsEnds = <Duration>[];
     final named = <PlayerSkipSegment>[];
     for (var i = 0; i < chapters.length; i++) {
       final chapter = chapters[i];
@@ -1064,16 +1071,16 @@ class PlayerController extends ChangeNotifier {
       final type = chapter.markerType?.trim().toLowerCase() ?? '';
       switch (type) {
         case 'introstart':
-          introStart = start;
+          introStarts.add(start);
           continue;
         case 'introend':
-          introEnd = start;
+          introEnds.add(start);
           continue;
         case 'creditsstart':
-          creditsStart = start;
+          creditsStarts.add(start);
           continue;
         case 'creditsend':
-          creditsEnd = start;
+          creditsEnds.add(start);
           continue;
       }
       final name = chapter.name.toLowerCase();
@@ -1097,31 +1104,40 @@ class PlayerController extends ChangeNotifier {
         ),
       );
     }
-    if (introStart != null || creditsStart != null) {
+    if (introStarts.isNotEmpty || creditsStarts.isNotEmpty) {
       final result = <PlayerSkipSegment>[];
-      if (introStart != null) {
-        final end = introEnd ?? introStart + const Duration(seconds: 90);
-        if (end > introStart) {
+      Duration? firstAfter(Duration start, List<Duration> ends) {
+        Duration? match;
+        for (final end in ends) {
+          if (end > start && (match == null || end < match)) {
+            match = end;
+          }
+        }
+        return match;
+      }
+
+      for (final start in introStarts) {
+        final end =
+            firstAfter(start, introEnds) ?? start + const Duration(seconds: 90);
+        if (end > start) {
           result.add(
             PlayerSkipSegment(
               kind: PlayerSkipKind.intro,
-              start: introStart,
+              start: start,
               end: end,
             ),
           );
         }
       }
-      if (creditsStart != null) {
+      for (final start in creditsStarts) {
         final end =
-            creditsEnd ??
-            (duration > creditsStart
-                ? duration
-                : creditsStart + const Duration(seconds: 30));
-        if (end > creditsStart) {
+            firstAfter(start, creditsEnds) ??
+            (duration > start ? duration : start + const Duration(seconds: 30));
+        if (end > start) {
           result.add(
             PlayerSkipSegment(
               kind: PlayerSkipKind.outro,
-              start: creditsStart,
+              start: start,
               end: end,
             ),
           );

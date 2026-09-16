@@ -757,6 +757,15 @@ class _PlayerChromeBar extends StatelessWidget {
                       rotation: _kPinTilt,
                     ),
                     _PlayerChromeIconButton(
+                      buttonKey: const Key('player-window-minimize'),
+                      tooltip: l10n.minimizeWindow,
+                      color: theme.colorScheme.onSurface,
+                      onPressed: () {
+                        unawaited(controller.minimize());
+                      },
+                      icon: Icons.remove_rounded,
+                    ),
+                    _PlayerChromeIconButton(
                       buttonKey: const Key('player-window-close'),
                       tooltip: MaterialLocalizations.of(
                         context,
@@ -949,6 +958,15 @@ class _NextEpisodeBanner extends StatelessWidget {
                         : l10n.nextEpisodeIn(seconds),
                     style: theme.textTheme.titleMedium,
                   ),
+                  const SizedBox(width: AppSpacing.sm),
+                  // 无论是否倒计时,都可以点击关闭本次推荐。
+                  IconButton(
+                    key: PlayerKeys.nextEpisodeCancel,
+                    tooltip: l10n.cancelNextEpisode,
+                    onPressed: controller.cancelNextEpisode,
+                    visualDensity: VisualDensity.compact,
+                    icon: const Icon(Icons.close_rounded, size: 18),
+                  ),
                 ],
               ),
               const SizedBox(height: AppSpacing.xxs),
@@ -964,21 +982,10 @@ class _NextEpisodeBanner extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: AppSpacing.sm),
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (seconds != null)
-                    TextButton(
-                      key: PlayerKeys.nextEpisodeCancel,
-                      onPressed: controller.cancelNextEpisode,
-                      child: Text(l10n.cancelNextEpisode),
-                    ),
-                  FilledButton(
-                    key: PlayerKeys.nextEpisodePlay,
-                    onPressed: controller.playNextEpisode,
-                    child: Text(l10n.playNextEpisode),
-                  ),
-                ],
+              FilledButton(
+                key: PlayerKeys.nextEpisodePlay,
+                onPressed: controller.playNextEpisode,
+                child: Text(l10n.playNextEpisode),
               ),
             ],
           ),

@@ -273,7 +273,10 @@ void main() {
     String dimension,
     String value,
   ) async {
+    // 面板为草稿式:点选项只暂存,点「确定」才生效并关闭面板。
     await tester.tap(find.byKey(gridFilterOption(dimension, value)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(TextButton, '确定'));
     await tester.pumpAndSettle();
   }
 
@@ -322,6 +325,37 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(gridFilterKey('watch')), findsNothing);
     expect(find.byKey(CatalogKeys.sortBy), findsOneWidget);
+  });
+
+  testWidgets('filter panel applies only after confirm', (tester) async {
+    await pumpLoggedIn(tester);
+    await openLibrary(tester, 'view-movies');
+    final before = posterNames(tester);
+
+    await tapBelowTopBar(tester, find.byKey(gridFilterMenuKey));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(gridFilterOption('watch', 'IsPlayed')));
+    await tester.pumpAndSettle();
+
+    // 未点确定:网格不变,面板仍开着。
+    expect(posterNames(tester), before);
+    expect(find.byKey(gridFilterPanelKey), findsOneWidget);
+
+    // 取消:丢弃草稿并关闭,网格仍不变。
+    await tester.tap(find.widgetWithText(TextButton, '取消'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(gridFilterPanelKey), findsNothing);
+    expect(posterNames(tester), before);
+
+    // 重开面板,选择后点确定才生效。
+    await tapBelowTopBar(tester, find.byKey(gridFilterMenuKey));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(gridFilterOption('watch', 'IsPlayed')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(TextButton, '确定'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(gridFilterPanelKey), findsNothing);
+    expect(posterNames(tester), isNot(before));
   });
 
   testWidgets(

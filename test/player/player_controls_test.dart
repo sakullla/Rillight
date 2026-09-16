@@ -1944,6 +1944,103 @@ void main() {
     await tester.pump(const Duration(milliseconds: 50));
   });
 
+  testWidgets('multiple marker-based intro segments each offer a skip', (
+    tester,
+  ) async {
+    const minute = 10000000 * 60;
+    server = FakeEmbyServer(
+      items: [
+        ...defaultCatalogItems().where(
+          (item) =>
+              item.id != 'series-friends' &&
+              item.id != 'season-friends-1' &&
+              item.id != 'episode-friends-s1e1' &&
+              item.id != 'episode-friends-s1e2',
+        ),
+        FakeEmbyItem(
+          id: 'series-anim',
+          name: '测试动画',
+          type: 'Series',
+          parentId: 'view-tv',
+          productionYear: 2024,
+          childCount: 1,
+        ),
+        FakeEmbyItem(
+          id: 'season-anim-1',
+          name: '第 1 季',
+          type: 'Season',
+          parentId: 'series-anim',
+          seriesId: 'series-anim',
+          seriesName: '测试动画',
+          indexNumber: 1,
+        ),
+        FakeEmbyItem(
+          id: 'episode-anim-1',
+          name: '第一集',
+          type: 'Episode',
+          parentId: 'season-anim-1',
+          seriesId: 'series-anim',
+          seriesName: '测试动画',
+          seasonId: 'season-anim-1',
+          indexNumber: 1,
+          parentIndexNumber: 1,
+          runTimeTicks: minute * 22,
+          chapters: const [
+            FakeChapter(
+              name: 'A',
+              startPositionTicks: 0,
+              markerType: 'IntroStart',
+            ),
+            FakeChapter(
+              name: 'B',
+              startPositionTicks: 30 * 10000000,
+              markerType: 'IntroEnd',
+            ),
+            FakeChapter(
+              name: 'C',
+              startPositionTicks: 5 * minute,
+              markerType: 'IntroStart',
+            ),
+            FakeChapter(
+              name: 'D',
+              startPositionTicks: 5 * minute + 30 * 10000000,
+              markerType: 'IntroEnd',
+            ),
+          ],
+        ),
+      ],
+    );
+    adapter = FakeEmbyAdapter([server]);
+    await pumpLoggedIn(tester);
+    await openEpisode(tester, 'episode-anim-1');
+    await waitFor(tester, find.byKey(PlayerKeys.playPause));
+
+    // 第一段片头:起播即出现,点击跳到该段终点(30s)。
+    await waitFor(tester, find.byKey(const Key('player-skip-segment')));
+    expect(find.text('跳过片头'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('player-skip-segment')));
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.pump();
+    expect(controllerOf(tester).position, const Duration(seconds: 30));
+    expect(find.byKey(const Key('player-skip-segment')), findsNothing);
+
+    // 第二段片头(5:00–5:30):进入区间再次出现,点击跳到 5:30。
+    await tester.runAsync(
+      () => controllerOf(tester).seekTo(const Duration(minutes: 5)),
+    );
+    await tester.pump();
+    await waitFor(tester, find.byKey(const Key('player-skip-segment')));
+    expect(find.text('跳过片头'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('player-skip-segment')));
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.pump();
+    expect(
+      controllerOf(tester).position,
+      const Duration(minutes: 5, seconds: 30),
+    );
+    expect(find.byKey(const Key('player-skip-segment')), findsNothing);
+  });
+
   testWidgets('manual intro skip is remembered per series and auto-applied', (
     tester,
   ) async {

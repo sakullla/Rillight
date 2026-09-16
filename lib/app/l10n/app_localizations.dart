@@ -472,6 +472,18 @@ abstract class AppLocalizations {
   /// **'清除筛选'**
   String get libraryFilterClear;
 
+  /// Discards staged filter changes and closes the filter panel without applying.
+  ///
+  /// In zh, this message translates to:
+  /// **'取消'**
+  String get libraryFilterCancel;
+
+  /// Minimizes the player window to the taskbar.
+  ///
+  /// In zh, this message translates to:
+  /// **'最小化'**
+  String get minimizeWindow;
+
   /// Library filter dimension for Movie vs Series.
   ///
   /// In zh, this message translates to:

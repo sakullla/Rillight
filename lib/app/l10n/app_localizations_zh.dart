@@ -206,6 +206,12 @@ class AppLocalizationsZh extends AppLocalizations {
   String get libraryFilterClear => '清除筛选';
 
   @override
+  String get libraryFilterCancel => '取消';
+
+  @override
+  String get minimizeWindow => '最小化';
+
+  @override
   String get libraryFilterType => '类型';
 
   @override

@@ -23,6 +23,8 @@ class PlayerWindow extends ChangeNotifier {
     _alwaysOnTop = value;
     notifyListeners();
   }
+
+  Future<void> minimize() async {}
 }
 
 class WindowManagerPlayerWindow extends PlayerWindow {
@@ -49,6 +51,13 @@ class WindowManagerPlayerWindow extends PlayerWindow {
     await super.setAlwaysOnTop(value);
     try {
       await windowManager.setAlwaysOnTop(value);
+    } catch (_) {}
+  }
+
+  @override
+  Future<void> minimize() async {
+    try {
+      await windowManager.minimize();
     } catch (_) {}
   }
 }
