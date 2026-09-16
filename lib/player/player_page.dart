@@ -1361,7 +1361,8 @@ class _EpisodeRowState extends State<_EpisodeRow> {
     if (left + cardWidth > screen.width - 8) {
       left = (screen.width - cardWidth - 8).clamp(8.0, double.infinity);
     }
-    final cardHeight = (cardWidth * 9 / 16) + 220;
+    // 卡片估算高:缩略图 + 文本区(简介上限 148 + 标题/元信息/按钮)。
+    final cardHeight = (cardWidth * 9 / 16) + 320;
     var top = target.dy;
     if (top + cardHeight > screen.height - 8) {
       top = (screen.height - cardHeight - 8).clamp(8.0, double.infinity);
@@ -1552,58 +1553,57 @@ class _EpisodeHoverCard extends StatelessWidget {
                   preferThumb: true,
                   maxWidth: 640,
                 ),
-                Flexible(
-                  child: Padding(
-                    padding: const EdgeInsets.all(AppSpacing.md),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          title,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.titleSmall?.copyWith(
-                            fontWeight: FontWeight.w700,
-                          ),
+                Padding(
+                  padding: const EdgeInsets.all(AppSpacing.md),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
                         ),
-                        if (meta.isNotEmpty) ...[
-                          const SizedBox(height: AppSpacing.xxs),
-                          Text(
-                            meta.join(' · '),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: scheme.onSurfaceVariant,
-                            ),
-                          ),
-                        ],
-                        if (overview != null) ...[
-                          const SizedBox(height: AppSpacing.xs),
-                          Flexible(
-                            child: SingleChildScrollView(
-                              child: Text(
-                                overview,
-                                style: theme.textTheme.bodySmall?.copyWith(
-                                  color: scheme.onSurface.withValues(
-                                    alpha: 0.78,
-                                  ),
-                                  height: 1.4,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                        const SizedBox(height: AppSpacing.sm),
-                        FilledButton.icon(
-                          onPressed: onPlay,
-                          icon: const Icon(Icons.play_arrow_rounded),
-                          label: Text(
-                            episode.canResume ? l10n.resumePlay : l10n.play,
+                      ),
+                      if (meta.isNotEmpty) ...[
+                        const SizedBox(height: AppSpacing.xxs),
+                        Text(
+                          meta.join(' · '),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: scheme.onSurfaceVariant,
                           ),
                         ),
                       ],
-                    ),
+                      if (overview != null) ...[
+                        const SizedBox(height: AppSpacing.xs),
+                        // Overlay 中高度无界,Flexible 失效;
+                        // 固定上限避免长简介把卡片撑出屏幕。
+                        ConstrainedBox(
+                          constraints: const BoxConstraints(maxHeight: 148),
+                          child: SingleChildScrollView(
+                            child: Text(
+                              overview,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: scheme.onSurface.withValues(alpha: 0.78),
+                                height: 1.4,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: AppSpacing.sm),
+                      FilledButton.icon(
+                        onPressed: onPlay,
+                        icon: const Icon(Icons.play_arrow_rounded),
+                        label: Text(
+                          episode.canResume ? l10n.resumePlay : l10n.play,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],
