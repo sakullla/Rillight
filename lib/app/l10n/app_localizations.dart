@@ -1348,6 +1348,12 @@ abstract class AppLocalizations {
   /// **'入库日期'**
   String get dateAdded;
 
+  /// Episode meta chip for the library add date, date formatted yyyy-MM-dd.
+  ///
+  /// In zh, this message translates to:
+  /// **'入库 {date}'**
+  String dateAddedOn(String date);
+
   /// Cast group label for actors.
   ///
   /// In zh, this message translates to:

@@ -673,6 +673,11 @@ class AppLocalizationsZh extends AppLocalizations {
   String get dateAdded => '入库日期';
 
   @override
+  String dateAddedOn(String date) {
+    return '入库 $date';
+  }
+
+  @override
   String get personTypeActor => '演员';
 
   @override

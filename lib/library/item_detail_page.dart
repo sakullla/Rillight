@@ -26,7 +26,7 @@ import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/home/media_shelf.dart';
 import 'package:rillight/library/episode_detail_sections.dart';
-import 'package:rillight/library/episode_grid.dart';
+import 'package:rillight/library/episode_list.dart';
 import 'package:rillight/library/item_format.dart';
 import 'package:rillight/library/poster_card.dart';
 import 'package:rillight/media_image/media_image.dart';
@@ -1079,7 +1079,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                       );
                     },
                   ),
-                EpisodeGrid(
+                EpisodeList(
                   episodes: _episodes,
                   currentId: _focusedEpisodeId ?? playTarget?.id,
                   revealToken: _episodeReveal,
@@ -1339,7 +1339,7 @@ class _ChapterTile extends StatelessWidget {
     final theme = Theme.of(context);
     final name = chapter.name.trim().isEmpty ? '${index + 1}' : chapter.name;
     return SizedBox(
-      width: 220,
+      width: 180,
       child: Material(
         color: theme.colorScheme.surfaceContainerHigh,
         borderRadius: BorderRadius.circular(AppRadii.md),
@@ -1347,14 +1347,17 @@ class _ChapterTile extends StatelessWidget {
           onTap: onTap,
           borderRadius: BorderRadius.circular(AppRadii.md),
           child: Padding(
-            padding: const EdgeInsets.all(AppSpacing.sm),
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.sm,
+              vertical: AppSpacing.xs,
+            ),
             child: Row(
               children: [
                 ClipRRect(
                   borderRadius: BorderRadius.circular(AppRadii.sm),
                   child: SizedBox(
-                    width: 72,
-                    height: 40,
+                    width: 56,
+                    height: 32,
                     child: _ChapterThumb(
                       itemId: itemId,
                       index: chapter.imageIndex ?? index,
@@ -1862,15 +1865,20 @@ class _DetailHeader extends StatelessWidget {
   /// 顶带在顶栏之下继续溶入的高度。
   static const double _topBandFade = 36;
 
-  /// 头部最小高度:电影/单集约半屏画幅,夹在 360–640 之间。
+  /// 头部最小高度:电影约半屏画幅,夹在 360–640 之间;单集压缩为
+  /// 0.32 视高(280–420),backdrop 与缩略图同源,不再半屏空旷;
   /// 剧集 [billboard] 为 false,不定死半屏,避免无 backdrop 时大块空白。
   static double heightFor(
     double width,
     double viewportHeight, {
     bool billboard = true,
+    bool episode = false,
   }) {
     if (!billboard) {
       return 0;
+    }
+    if (episode) {
+      return (viewportHeight * 0.32).clamp(280.0, 420.0);
     }
     return (viewportHeight * 0.52).clamp(360.0, 640.0);
   }
@@ -1883,7 +1891,13 @@ class _DetailHeader extends StatelessWidget {
         final viewportHeight = MediaQuery.sizeOf(context).height;
         final billboard = !item.isSeries;
         final minHeight =
-            heightFor(width, viewportHeight, billboard: billboard) + topOverlap;
+            heightFor(
+              width,
+              viewportHeight,
+              billboard: billboard,
+              episode: item.isEpisode,
+            ) +
+            topOverlap;
         return SizedBox(
           width: double.infinity,
           child: ConstrainedBox(
@@ -1915,14 +1929,16 @@ class _DetailHeader extends StatelessWidget {
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
-                      _DetailPoster(
-                        item: item,
-                        layoutWidth: width,
-                        overview: (item.isSeries || item.isEpisode)
-                            ? null
-                            : overview,
-                      ),
-                      const SizedBox(width: AppSpacing.xl),
+                      // 单集 backdrop 与缩略图同源,不再重复显示小图,
+                      // 信息区直接铺满 hero 底部。
+                      if (!item.isEpisode) ...[
+                        _DetailPoster(
+                          item: item,
+                          layoutWidth: width,
+                          overview: item.isSeries ? null : overview,
+                        ),
+                        const SizedBox(width: AppSpacing.xl),
+                      ],
                       Expanded(
                         child: _DetailInfo(
                           item: item,
@@ -2204,6 +2220,8 @@ class _MetaRow extends StatelessWidget {
         if (runtime != null) chip(runtime!),
         if (item.isEpisode && item.premiereDate != null)
           chip(l10n.premiereDate(formatDateYmd(item.premiereDate!))),
+        if (item.isEpisode && item.dateCreated != null)
+          chip(l10n.dateAddedOn(formatDateYmd(item.dateCreated!))),
         if (item.isSeries && seasonCount > 0)
           chip(l10n.seasonCount(seasonCount)),
         if (item.childCount != null && item.isSeries)
@@ -2530,7 +2548,7 @@ class _DetailSkeleton extends StatelessWidget {
                   children: [
                     SkeletonBlock(width: width * 0.2, height: AppSpacing.lg),
                     const SizedBox(height: AppSpacing.sm),
-                    const EpisodeGridSkeleton(),
+                    const EpisodeListSkeleton(),
                   ],
                 ),
               ),

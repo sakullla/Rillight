@@ -19,7 +19,6 @@ import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/home_hero.dart';
 import 'package:rillight/library/episode_detail_sections.dart';
-import 'package:rillight/library/episode_grid.dart';
 import 'package:rillight/library/item_detail_page.dart';
 import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/player/player_bindings.dart';
@@ -205,7 +204,7 @@ void main() {
     );
   });
 
-  testWidgets('series header renders poster and a responsive episode grid', (
+  testWidgets('series header renders poster and a full-width episode list', (
     tester,
   ) async {
     final app = await pumpApp(tester);
@@ -228,7 +227,7 @@ void main() {
       findsNothing,
     );
     final row = find.byKey(CatalogKeys.episodesRow);
-    // 卡片承载「N. 标题」,简介不常驻网格卡片(ADR-3)。
+    // 行内承载「N. 标题」与本集简介(纵向列表,ADR-3 修订)。
     expect(
       find.descendant(of: row, matching: find.text('1. The Pilot')),
       findsOneWidget,
@@ -238,7 +237,7 @@ void main() {
         of: row,
         matching: find.text('Monica gets a new apartment.'),
       ),
-      findsNothing,
+      findsOneWidget,
     );
     expect(row, findsOneWidget);
     expect(find.descendant(of: row, matching: find.text('集')), findsOneWidget);
@@ -250,8 +249,8 @@ void main() {
       'episode-friends-s1e1',
       'episode-friends-s1e2',
     ]);
-    // 响应式网格:卡片按 ~340px 目标宽分列铺满可用宽度,不再有 1080px
-    // 上限;1200px 窗口下内容宽 1152 → 3 列,两张卡同行并排。
+    // 纵向行列表:两行纵向排布,行内容自适应伸展铺满内容宽,
+    // 不再有 1080px 上限;每行缩略图左、文本中、操作右。
     final first = tester.getRect(
       find.byKey(CatalogKeys.episode('episode-friends-s1e1')),
     );
@@ -259,39 +258,65 @@ void main() {
       find.byKey(CatalogKeys.episode('episode-friends-s1e2')),
     );
     const contentWidth = 1200 - AppSpacing.page * 2;
-    final columns = EpisodeGrid.columnsFor(contentWidth, 1200);
-    expect(columns, greaterThan(1));
-    final cardWidth = EpisodeGrid.cardWidthFor(contentWidth, columns);
-    expect(first.width, moreOrLessEquals(cardWidth));
-    expect(second.top, moreOrLessEquals(first.top));
-    expect(
-      second.left,
-      moreOrLessEquals(first.left + cardWidth + EpisodeGrid.spacing),
-    );
+    expect(first.width, moreOrLessEquals(contentWidth));
+    expect(second.top, greaterThanOrEqualTo(first.bottom));
+    expect(second.left, first.left);
     expect(_cardSelected(tester, 'episode-friends-s1e1'), isTrue);
     expect(_cardSelected(tester, 'episode-friends-s1e2'), isFalse);
+    // 操作控件保留在树中(键盘/测试可达),平时隐藏、选中时可见。
     for (final id in _episodeCardIds(tester)) {
       expect(find.byKey(CatalogKeys.episodePlay(id)), findsOneWidget);
       expect(find.byKey(CatalogKeys.episodePlayed(id)), findsOneWidget);
     }
   });
 
-  testWidgets('episode grid drops to a single column below the compact width', (
-    tester,
-  ) async {
-    final app = await pumpApp(tester, viewSize: const Size(900, 800));
+  testWidgets('episode list rows keep synopsis and meta', (tester) async {
+    final app = await pumpApp(tester);
     await openItem(tester, app, _series);
 
-    final first = tester.getRect(
-      find.byKey(CatalogKeys.episode('episode-friends-s1e1')),
+    final row = find.byKey(CatalogKeys.episodesRow);
+    // 行内承载「N. 标题」、时长与简介(ADR-3 修订:恢复纵向列表)。
+    expect(
+      find.descendant(of: row, matching: find.text('1. The Pilot')),
+      findsOneWidget,
     );
-    final second = tester.getRect(
-      find.byKey(CatalogKeys.episode('episode-friends-s1e2')),
+    expect(find.descendant(of: row, matching: find.text('22分钟')), findsWidgets);
+    expect(
+      find.descendant(
+        of: row,
+        matching: find.text('Monica gets a new apartment.'),
+      ),
+      findsOneWidget,
     );
-    expect(second.top, greaterThanOrEqualTo(first.bottom));
-    expect(second.left, first.left);
-    expect(first.width, 900 - AppSpacing.page * 2);
+    // 未悬停时操作控件隐藏。
+    final play = find.byKey(CatalogKeys.episodePlay('episode-friends-s1e2'));
+    expect(
+      tester
+          .widget<AnimatedOpacity>(
+            find.ancestor(of: play, matching: find.byType(AnimatedOpacity)),
+          )
+          .opacity,
+      0,
+    );
   });
+
+  testWidgets(
+    'episode list rows fill the window width below the compact breakpoint',
+    (tester) async {
+      final app = await pumpApp(tester, viewSize: const Size(900, 800));
+      await openItem(tester, app, _series);
+
+      final first = tester.getRect(
+        find.byKey(CatalogKeys.episode('episode-friends-s1e1')),
+      );
+      final second = tester.getRect(
+        find.byKey(CatalogKeys.episode('episode-friends-s1e2')),
+      );
+      expect(second.top, greaterThanOrEqualTo(first.bottom));
+      expect(second.left, first.left);
+      expect(first.width, 900 - AppSpacing.page * 2);
+    },
+  );
 
   testWidgets('episode card tap opens details instead of playing', (
     tester,
@@ -328,13 +353,21 @@ void main() {
     expect(host.current?.itemId, id);
   });
 
-  testWidgets('episode header uses a 16:9 thumb for the poster', (
+  testWidgets('episode header omits the duplicate poster thumb', (
     tester,
   ) async {
     final app = await pumpApp(tester);
     await openItem(tester, app, 'episode-friends-s1e2');
 
-    expectHeaderShape(tester, posterSize: const Size(320, 180));
+    // 单集 hero 不重复显示与 backdrop 同源的小缩略图,信息区铺满底部。
+    expect(find.byKey(ItemDetailPage.posterKey), findsNothing);
+    final header = find.byKey(ItemDetailPage.headerKey);
+    final rect = tester.getRect(header);
+    expect(rect.width, 1200);
+    expect(
+      tester.getRect(_headerTitle()).left,
+      greaterThanOrEqualTo(AppSpacing.page),
+    );
     expect(
       tester.widget<SelectableText>(_headerTitle()).data,
       contains('The One with the Sonogram'),

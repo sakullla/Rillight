@@ -929,6 +929,15 @@
   "@dateAdded": {
     "description": "Label for the date an item was added to the library."
   },
+  "dateAddedOn": "入库 {date}",
+  "@dateAddedOn": {
+    "description": "Episode meta chip for the library add date, date formatted yyyy-MM-dd.",
+    "placeholders": {
+      "date": {
+        "type": "String"
+      }
+    }
+  },
   "personTypeActor": "演员",
   "@personTypeActor": {
     "description": "Cast group label for actors."
