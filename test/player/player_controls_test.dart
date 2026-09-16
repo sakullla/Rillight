@@ -1900,6 +1900,45 @@ void main() {
     expect(find.byType(PlayerPage), findsOneWidget);
   });
 
+  testWidgets('hovering an episode row shows a detail card that dismisses', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await pumpLoggedIn(tester);
+    await openLibrary(tester, 'view-tv');
+    await tester.tap(find.byKey(CatalogKeys.item('series-friends')));
+    await tester.pumpAndSettle();
+    await playListedEpisode(tester, 'episode-friends-s1e1');
+
+    await tester.tap(find.byKey(const Key('player-episodes')));
+    await waitFor(tester, find.byKey(const Key('player-episodes-panel')));
+
+    final rowCenter = tester.getCenter(
+      find.byKey(const Key('player-episode-episode-friends-s1e2')),
+    );
+    final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await gesture.addPointer(location: rowCenter);
+    addTearDown(gesture.removePointer);
+    await gesture.moveTo(rowCenter);
+    // 悬停 350ms 后弹出详情卡。
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(
+      find.byKey(const Key('episode-hover-episode-friends-s1e2')),
+      findsOneWidget,
+    );
+
+    // 移出悬停,卡片延迟消失。
+    await gesture.moveTo(const Offset(20, 20));
+    await tester.pump(const Duration(milliseconds: 350));
+    expect(
+      find.byKey(const Key('episode-hover-episode-friends-s1e2')),
+      findsNothing,
+    );
+  });
+
   testWidgets('chapter markers surface skip intro and outro buttons', (
     tester,
   ) async {

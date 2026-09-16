@@ -1275,7 +1275,7 @@ class _SeasonPicker extends StatelessWidget {
 
 /// 单集行:16:9 缩略图 + 集号标题 + 时长/进度 + 简介,当前集高亮。
 /// 固定高度交给外层 [itemExtent],内部用 Flexible 吃掉多余文案,避免 ListTile 撑破。
-class _EpisodeRow extends StatelessWidget {
+class _EpisodeRow extends StatefulWidget {
   const _EpisodeRow({
     required this.episode,
     required this.isCurrent,
@@ -1292,6 +1292,95 @@ class _EpisodeRow extends StatelessWidget {
   final VoidCallback onTap;
 
   @override
+  State<_EpisodeRow> createState() => _EpisodeRowState();
+}
+
+class _EpisodeRowState extends State<_EpisodeRow> {
+  OverlayEntry? _hoverEntry;
+  Timer? _showTimer;
+  Timer? _hideTimer;
+
+  bool get _isCurrent => widget.isCurrent;
+  EmbyItem get episode => widget.episode;
+
+  @override
+  void dispose() {
+    _showTimer?.cancel();
+    _hideTimer?.cancel();
+    _hoverEntry?.remove();
+    _hoverEntry = null;
+    super.dispose();
+  }
+
+  void _onEnter() {
+    _hideTimer?.cancel();
+    _showTimer ??= Timer(const Duration(milliseconds: 350), _showCard);
+  }
+
+  void _onExit() {
+    _showTimer?.cancel();
+    _showTimer = null;
+    _scheduleHide();
+  }
+
+  void _scheduleHide() {
+    _hideTimer?.cancel();
+    _hideTimer = Timer(const Duration(milliseconds: 300), _removeCard);
+  }
+
+  void _cancelHide() {
+    _hideTimer?.cancel();
+    _hideTimer = null;
+  }
+
+  void _removeCard() {
+    _hoverEntry?.remove();
+    _hoverEntry = null;
+  }
+
+  void _showCard() {
+    _showTimer = null;
+    if (!mounted || _hoverEntry != null) {
+      return;
+    }
+    final overlay = Overlay.maybeOf(context);
+    final box = context.findRenderObject();
+    if (overlay == null || box is! RenderBox || !box.attached) {
+      return;
+    }
+    final target = box.localToGlobal(Offset.zero);
+    final rowSize = box.size;
+    final screen = MediaQuery.sizeOf(context);
+    const cardWidth = 320.0;
+    const gap = 12.0;
+    // 面板在窗口右侧,卡片优先弹到行左侧(视频区上方),空间不足再弹右侧。
+    var left = target.dx - cardWidth - gap;
+    if (left < 8) {
+      left = target.dx + rowSize.width + gap;
+    }
+    if (left + cardWidth > screen.width - 8) {
+      left = (screen.width - cardWidth - 8).clamp(8.0, double.infinity);
+    }
+    final cardHeight = (cardWidth * 9 / 16) + 220;
+    var top = target.dy;
+    if (top + cardHeight > screen.height - 8) {
+      top = (screen.height - cardHeight - 8).clamp(8.0, double.infinity);
+    }
+    _hoverEntry = OverlayEntry(
+      builder: (context) => _EpisodeHoverCard(
+        episode: episode,
+        left: left,
+        top: top,
+        width: cardWidth,
+        onPlay: widget.onTap,
+        onEnter: _cancelHide,
+        onExit: _scheduleHide,
+      ),
+    );
+    overlay.insert(_hoverEntry!);
+  }
+
+  @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final theme = Theme.of(context);
@@ -1302,83 +1391,219 @@ class _EpisodeRow extends StatelessWidget {
     final overview = _playerEpisodeOverview(episode.overview);
     final meta = <String>[
       ?runtimeLabel(l10n, episode),
-      if (isCurrent) l10n.nowPlayingEpisode,
-      if (!isCurrent && progress > 0 && progress < 1)
-        l10n.playbackProgress((progress * 100).round()),
+      if (_isCurrent) l10n.nowPlayingEpisode,
+      if (!_isCurrent && widget.progress > 0 && widget.progress < 1)
+        l10n.playbackProgress((widget.progress * 100).round()),
     ];
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        border: Border(
-          left: BorderSide(
-            width: 3,
-            color: isCurrent ? scheme.primary : Colors.transparent,
+    return MouseRegion(
+      onEnter: (_) => _onEnter(),
+      onExit: (_) => _onExit(),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          border: Border(
+            left: BorderSide(
+              width: 3,
+              color: _isCurrent ? scheme.primary : Colors.transparent,
+            ),
+          ),
+        ),
+        child: Material(
+          color: _isCurrent
+              ? scheme.surfaceContainerHighest
+              : Colors.transparent,
+          child: InkWell(
+            key: Key('player-episode-${episode.id}'),
+            onTap: widget.onTap,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.sm,
+                AppSpacing.xs,
+                AppSpacing.sm,
+                AppSpacing.xs,
+              ),
+              child: Row(
+                children: [
+                  _EpisodeThumb(
+                    episode: episode,
+                    isCurrent: _isCurrent,
+                    played: played,
+                    progress: widget.progress,
+                  ),
+                  const SizedBox(width: AppSpacing.sm),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          title,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            color: scheme.onSurface,
+                            fontWeight: _isCurrent
+                                ? FontWeight.w700
+                                : FontWeight.w500,
+                          ),
+                        ),
+                        if (meta.isNotEmpty) ...[
+                          const SizedBox(height: AppSpacing.xxs),
+                          Text(
+                            meta.join(' · '),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: _isCurrent
+                                  ? scheme.primary
+                                  : scheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                        if (overview != null) ...[
+                          const SizedBox(height: AppSpacing.xxs),
+                          Expanded(
+                            child: Text(
+                              overview,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: scheme.onSurface.withValues(alpha: 0.72),
+                                height: 1.35,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
         ),
       ),
-      child: Material(
-        color: isCurrent ? scheme.surfaceContainerHighest : Colors.transparent,
-        child: InkWell(
-          key: Key('player-episode-${episode.id}'),
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(
-              AppSpacing.sm,
-              AppSpacing.xs,
-              AppSpacing.sm,
-              AppSpacing.xs,
+    );
+  }
+}
+
+/// 悬停详情卡:鼠标悬停剧集行 350ms 后弹出(Netflix 式 hover card),
+/// 大图 + 标题 + 元信息 + 完整简介 + 播放按钮;移入卡片可交互,移出消失。
+class _EpisodeHoverCard extends StatelessWidget {
+  const _EpisodeHoverCard({
+    required this.episode,
+    required this.left,
+    required this.top,
+    required this.width,
+    required this.onPlay,
+    required this.onEnter,
+    required this.onExit,
+  });
+
+  final EmbyItem episode;
+  final double left;
+  final double top;
+  final double width;
+  final VoidCallback onPlay;
+  final VoidCallback onEnter;
+  final VoidCallback onExit;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final number = episode.indexNumber;
+    final title = number == null ? episode.name : '$number. ${episode.name}';
+    final overview = _playerEpisodeOverview(episode.overview);
+    final meta = <String>[
+      ?seasonEpisodeCode(episode),
+      ?runtimeLabel(l10n, episode),
+      if (episode.productionYear != null && episode.productionYear! > 0)
+        '${episode.productionYear}',
+    ];
+    return Positioned(
+      left: left,
+      top: top,
+      child: MouseRegion(
+        onEnter: (_) => onEnter(),
+        onExit: (_) => onExit(),
+        child: Material(
+          color: scheme.surfaceContainerHigh,
+          elevation: 16,
+          shadowColor: Colors.black.withValues(alpha: 0.5),
+          surfaceTintColor: Colors.transparent,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppRadii.lg),
+            side: BorderSide(
+              color: Colors.white.withValues(alpha: AppGlass.edgeLight),
             ),
-            child: Row(
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: SizedBox(
+            width: width,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _EpisodeThumb(
-                  episode: episode,
-                  isCurrent: isCurrent,
-                  played: played,
-                  progress: progress,
+                MediaImage(
+                  key: ValueKey('episode-hover-${episode.id}'),
+                  item: episode,
+                  width: width,
+                  height: width * 9 / 16,
+                  preferThumb: true,
+                  maxWidth: 640,
                 ),
-                const SizedBox(width: AppSpacing.sm),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        title,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.titleSmall?.copyWith(
-                          color: scheme.onSurface,
-                          fontWeight: isCurrent
-                              ? FontWeight.w700
-                              : FontWeight.w500,
-                        ),
-                      ),
-                      if (meta.isNotEmpty) ...[
-                        const SizedBox(height: AppSpacing.xxs),
+                Flexible(
+                  child: Padding(
+                    padding: const EdgeInsets.all(AppSpacing.md),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
                         Text(
-                          meta.join(' · '),
-                          maxLines: 1,
+                          title,
+                          maxLines: 2,
                           overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: isCurrent
-                                ? scheme.primary
-                                : scheme.onSurfaceVariant,
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w700,
                           ),
                         ),
-                      ],
-                      if (overview != null) ...[
-                        const SizedBox(height: AppSpacing.xxs),
-                        Expanded(
-                          child: Text(
-                            overview,
-                            maxLines: 2,
+                        if (meta.isNotEmpty) ...[
+                          const SizedBox(height: AppSpacing.xxs),
+                          Text(
+                            meta.join(' · '),
+                            maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: theme.textTheme.bodySmall?.copyWith(
-                              color: scheme.onSurface.withValues(alpha: 0.72),
-                              height: 1.35,
+                              color: scheme.onSurfaceVariant,
                             ),
+                          ),
+                        ],
+                        if (overview != null) ...[
+                          const SizedBox(height: AppSpacing.xs),
+                          Flexible(
+                            child: SingleChildScrollView(
+                              child: Text(
+                                overview,
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: scheme.onSurface.withValues(
+                                    alpha: 0.78,
+                                  ),
+                                  height: 1.4,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                        const SizedBox(height: AppSpacing.sm),
+                        FilledButton.icon(
+                          onPressed: onPlay,
+                          icon: const Icon(Icons.play_arrow_rounded),
+                          label: Text(
+                            episode.canResume ? l10n.resumePlay : l10n.play,
                           ),
                         ),
                       ],
-                    ],
+                    ),
                   ),
                 ),
               ],
