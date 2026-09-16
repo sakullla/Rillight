@@ -442,6 +442,12 @@ abstract class AppLocalizations {
   /// **'集'**
   String get episodesRow;
 
+  /// Episode detail shelf title for the season's episode strip used to switch episodes.
+  ///
+  /// In zh, this message translates to:
+  /// **'本季分集'**
+  String get seasonEpisodes;
+
   /// Appends the next window of episodes on the detail page; distinct from the shelf 'more' grid link.
   ///
   /// In zh, this message translates to:

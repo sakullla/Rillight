@@ -191,6 +191,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get episodesRow => '集';
 
   @override
+  String get seasonEpisodes => '本季分集';
+
+  @override
   String get episodesLoadMore => '加载更多';
 
   @override

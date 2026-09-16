@@ -798,40 +798,21 @@ void main() {
     expect(_episodeCardIds(tester), ['s1e1']);
   });
 
-  testWidgets('episode meta row shows premiere date and metadata section', (
-    tester,
-  ) async {
+  testWidgets('episode meta row shows added date chip', (tester) async {
     server.setEpisodes(_series, [
       FakeEpisode(
         id: 'dated-e1',
         name: 'Dated One',
         seasonId: _season1,
         indexNumber: 1,
-        premiereDate: DateTime.utc(2024, 11, 4),
         dateCreated: DateTime.utc(2025, 1, 15),
       ),
     ]);
     final app = await pumpApp(tester);
     await openItem(tester, app, 'dated-e1');
 
-    // 元信息行播出日期胶囊(yyyy-MM-dd)。
-    expect(find.text('首播 2024-11-04'), findsOneWidget);
-    // 元数据分区:入库日期。
-    expect(find.byKey(EpisodeMetadataSection.sectionKey), findsOneWidget);
-    expect(find.text('入库日期'), findsOneWidget);
-    expect(find.text('2025-01-15'), findsOneWidget);
-  });
-
-  testWidgets('episode meta row omits the premiere date when missing', (
-    tester,
-  ) async {
-    final app = await pumpApp(tester);
-    await openItem(tester, app, 'episode-friends-s1e2');
-
-    // 无播出日期时省略该胶囊,不留占位文案。
-    expect(find.textContaining('首播'), findsNothing);
-    // 有入库日期,元数据分区仍渲染。
-    expect(find.byKey(EpisodeMetadataSection.sectionKey), findsOneWidget);
+    // 元信息行入库日期胶囊(yyyy-MM-dd),一眼可见。
+    expect(find.text('入库 2025-01-15'), findsOneWidget);
   });
 
   testWidgets('episode overview expands and collapses', (tester) async {
@@ -983,31 +964,40 @@ void main() {
     expect(find.text('媒体信息'), findsNothing);
   });
 
-  testWidgets('next episode card opens the next episode detail', (
+  testWidgets('season episode strip switches to the tapped episode', (
     tester,
   ) async {
     final app = await pumpApp(tester);
     await openItem(tester, app, 'episode-friends-s1e1');
 
-    final card = find.byKey(NextEpisodeCard.cardKey);
-    expect(card, findsOneWidget);
-    await tester.ensureVisible(card);
+    // 本季分集横排:当前季全部集数可见。
+    expect(find.text('1. The Pilot'), findsOneWidget);
+    final other = find.byKey(CatalogKeys.episode('episode-friends-s1e2'));
+    expect(other, findsOneWidget);
+    await tester.ensureVisible(other);
     await tester.pumpAndSettle();
-    await tester.tap(card);
+    await tester.tap(other);
     await tester.pumpAndSettle();
 
-    expect(app.router.state.uri.path, AppRoutes.item('episode-friends-s1e2'));
-    expect(find.textContaining('The One with the Sonogram'), findsWidgets);
+    // 集详情内切集为原地切换(详情页 _showItem),页面内容更新为新集。
+    expect(
+      tester.widget<SelectableText>(_headerTitle()).data,
+      contains('The One with the Sonogram'),
+    );
   });
 
-  testWidgets('next episode card is hidden on the season finale', (
+  testWidgets('season episode strip remains on the season finale', (
     tester,
   ) async {
     final app = await pumpApp(tester);
     await openItem(tester, app, 'episode-friends-s1e2');
 
-    expect(find.byKey(NextEpisodeCard.sectionKey), findsNothing);
-    expect(find.byKey(NextEpisodeCard.cardKey), findsNothing);
+    // 季终集同样渲染本季分集横排,不再使用"下一集卡片"。
+    expect(find.text('本季分集'), findsOneWidget);
+    expect(
+      find.byKey(CatalogKeys.episode('episode-friends-s1e1')),
+      findsOneWidget,
+    );
   });
 
   testWidgets('episode detail request asks for the People field', (

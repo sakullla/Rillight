@@ -252,6 +252,10 @@
   "@episodesRow": {
     "description": "Detail shelf title for episodes in the selected season."
   },
+  "seasonEpisodes": "本季分集",
+  "@seasonEpisodes": {
+    "description": "Episode detail shelf title for the season's episode strip used to switch episodes."
+  },
   "episodesLoadMore": "加载更多",
   "@episodesLoadMore": {
     "description": "Appends the next window of episodes on the detail page; distinct from the shelf 'more' grid link."
