@@ -82,6 +82,7 @@ static void Update(void* data) { [(__bridge RillightSurface*)data schedule]; }
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_RECTANGLE, image, 0);
         if (bound != kCGLNoError || glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) failure = @"IOSurface framebuffer creation failed";
         else {
+          // control.dart enforces video-timing-offset=0 before initialization.
           mpv_opengl_fbo target{static_cast<int>(fbo), w, h, 0}; int flip = 0, block = 0;
           mpv_render_frame_info info{};
           mpv_render_context_get_info(self->render, {MPV_RENDER_PARAM_NEXT_FRAME_INFO, &info});

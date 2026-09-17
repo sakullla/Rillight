@@ -17,6 +17,21 @@ void main() {
   );
 
   test(
+    'nonblocking surfaces enforce zero early video presentation offset',
+    () async {
+      final player = await MpvPlayer.create(
+        libraryPath: library,
+        video: false,
+        options: {'vo': 'null', 'ao': 'null', 'video-timing-offset': '0.05'},
+      );
+      addTearDown(player.dispose);
+      expect(await player.getProperty('video-timing-offset'), 0);
+      expect(await player.getProperty('video-sync'), 'audio');
+    },
+    skip: unavailable,
+  );
+
+  test(
     'preload surface notifications do not claim a video first frame',
     () async {
       const channel = MethodChannel('rillight_player');
@@ -24,6 +39,7 @@ void main() {
           TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
       messenger.setMockMethodCallHandler(channel, (call) async {
         if (call.method == 'create') return 42;
+        if (call.method == 'detach') return false;
         if (call.method == 'status') return {'frames': 1, 'error': ''};
         return null;
       });
@@ -59,6 +75,7 @@ void main() {
         if (call.method == 'create') {
           throw PlatformException(code: 'render-create');
         }
+        if (call.method == 'detach') return false;
         return null;
       });
       addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
@@ -69,7 +86,7 @@ void main() {
         ),
         throwsA(isA<PlatformException>()),
       );
-      expect(calls, ['create', 'dispose']);
+      expect(calls, ['create', if (Platform.isLinux) 'detach', 'dispose']);
       final player = await create();
       await player.dispose();
     },

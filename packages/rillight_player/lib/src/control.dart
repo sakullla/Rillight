@@ -71,6 +71,10 @@ void controlMain((SendPort, Map<String, String>, String?) arguments) {
         'input-vo-keyboard': 'no',
         'hwdec': 'auto-copy',
         ...options,
+        // Surfaces use BLOCK_FOR_TARGET_TIME=0 so close never waits inside
+        // libmpv's presentation sleep. Disable the corresponding early lead
+        // rather than publishing audio-timed video up to 50 ms too soon.
+        'video-timing-offset': '0',
       };
       for (final entry in effective.entries) {
         api!.check(

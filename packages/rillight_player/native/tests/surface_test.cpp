@@ -3,6 +3,7 @@
 #include <iostream>
 #include <set>
 #include <vector>
+#include <cmath>
 
 class Registrar : public flutter::TextureRegistrar {
  public:
@@ -21,6 +22,8 @@ int main(int argc, char** argv) {
   mpv_set_option_string(player, "ao", "null");
   mpv_set_option_string(player, "hwdec", "auto-copy");
   mpv_set_option_string(player, "keep-open", "yes");
+  // Match the control isolate's mandatory timing policy.
+  mpv_set_option_string(player, "video-timing-offset", "0");
   if (mpv_initialize(player) < 0) return 4;
   Registrar registrar;
   auto surface = std::make_shared<VideoSurface>(player, &registrar);
@@ -33,6 +36,8 @@ int main(int argc, char** argv) {
   std::set<HANDLE> handles;
   int imports = 0;
   bool resized = false;
+  double sync_sum = 0, sync_peak = 0;
+  int sync_samples = 0;
   for (int i = 0; i < 400; ++i) {
     auto event = mpv_wait_event(player, 0);
     if (event->event_id == MPV_EVENT_END_FILE && static_cast<mpv_event_end_file*>(event->data)->error < 0) return 7;
@@ -49,6 +54,12 @@ int main(int argc, char** argv) {
     if (i == 100) surface->Resize(640, 360);
     if (i == 200) { const char* seek[] = {"seek", "1", "absolute+exact", nullptr}; mpv_command(player, seek); }
     if (i == 300) surface->Resize(1920, 1080);
+    double sync = 0;
+    if (i > 30 && mpv_get_property(player, "avsync", MPV_FORMAT_DOUBLE, &sync) >= 0 && std::isfinite(sync)) {
+      sync_sum += std::abs(sync);
+      sync_peak = std::max(sync_peak, std::abs(sync));
+      ++sync_samples;
+    }
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
   auto frames = surface->frames();
@@ -74,6 +85,7 @@ int main(int argc, char** argv) {
   if (registrar.notified != notifications) return 8;
   surface.reset();
   mpv_terminate_destroy(player);
-  std::cout << "frames=" << frames << " imports=" << imports << " distinct_handles=" << handles.size() << " resized=" << resized << " bounded=" << bounded << " error=" << error << '\n';
-  return frames > 20 && handles.size() > 5 && resized && bounded && error.empty() ? 0 : 9;
+  const double sync_mean = sync_samples ? sync_sum / sync_samples : 0;
+  std::cout << "frames=" << frames << " imports=" << imports << " distinct_handles=" << handles.size() << " resized=" << resized << " bounded=" << bounded << " avsync_samples=" << sync_samples << " avsync_mean=" << sync_mean << " avsync_peak=" << sync_peak << " error=" << error << '\n';
+  return frames > 20 && handles.size() > 5 && resized && bounded && error.empty() && sync_samples > 5 && sync_mean < 0.075 && sync_peak < 0.2 ? 0 : 9;
 }

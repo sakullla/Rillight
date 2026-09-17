@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
 import 'control.dart';
+import 'surface_retirement.dart';
 
 class MpvEvent {
   const MpvEvent(this.type, {this.property, this.value, this.error});
@@ -256,11 +257,13 @@ class MpvPlayer {
     // Native method only completes after texture unregister and render free.
     // Never destroy the core while an outstanding renderer might reference it.
     if (_surfaceRequested) {
-      await _channel
-          .invokeMethod<void>('dispose', {'handle': _handle})
-          .timeout(const Duration(seconds: 15));
-      _surfaceRequested = false;
       _textureId.value = null;
+      await retireSurface(
+        channel: _channel,
+        handle: _handle,
+        needsRasterBarrier: defaultTargetPlatform == TargetPlatform.linux,
+      );
+      _surfaceRequested = false;
     }
     await _request('dispose');
     await _finishDispose();

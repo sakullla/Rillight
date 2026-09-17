@@ -124,6 +124,7 @@ void VideoSurface::Render() {
   frame->width = width_; frame->height = height_;
   mpv_opengl_fbo fbo{0, width_, height_, 0};
   // The pbuffer is imported as a texture, not presented as a GL window.
+  // control.dart enforces video-timing-offset=0 for the nonblocking renderer.
   int flip = 0, block = 0;
   mpv_render_frame_info info{};
   mpv_render_context_get_info(render_, {MPV_RENDER_PARAM_NEXT_FRAME_INFO, &info});
