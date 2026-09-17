@@ -7,6 +7,9 @@ import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_errors.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/player/playback_check_in.dart';
+import 'package:rillight/player/playback_coordinator.dart';
+import 'package:rillight/player/playback_session.dart';
+import 'package:rillight/player/playback_state.dart';
 import 'package:rillight/player/playback_models.dart';
 import 'package:rillight/player/playback_resolver.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
@@ -99,6 +102,7 @@ class PlayerController extends ChangeNotifier {
     required this.window,
     this.autoResume = true,
     this.progressInterval = const Duration(seconds: 10),
+    this.stoppedTimeout = stoppedDeadline,
     this.progressFailBannerFor = const Duration(seconds: 4),
     this.controlsHideAfter = const Duration(seconds: 5),
     this.nextEpisodeCountdown = const Duration(seconds: 10),
@@ -129,6 +133,7 @@ class PlayerController extends ChangeNotifier {
   final PlayerWindow window;
   bool autoResume;
   final Duration progressInterval;
+  final Duration stoppedTimeout;
   final Duration progressFailBannerFor;
   final Duration controlsHideAfter;
   final Duration nextEpisodeCountdown;
@@ -172,6 +177,38 @@ class PlayerController extends ChangeNotifier {
   int _reportFailureStreak = 0;
   bool _disposed = false;
   bool _sessionStarted = false;
+  final PlaybackCoordinator _operations = PlaybackCoordinator();
+  final PlaybackState state = PlaybackState();
+  PlaybackSession? _session;
+  Future<void>? _disposing;
+  int _trackRevision = 0;
+  final _trackRevisions = <String, int>{};
+  int? _snapshotOwner;
+  String? trackFailure;
+  String? _operationBaseUrl;
+  String? _operationUserId;
+  String? _operationToken;
+
+  PlaybackOperation? _beginOperation() {
+    final operation = _operations.begin();
+    if (operation != null) {
+      _operationBaseUrl = client.baseUrl?.toString();
+      _operationUserId = client.userId;
+      _operationToken = client.accessToken;
+      _trackRevision++;
+      _episodePageGen++;
+    }
+    return operation;
+  }
+
+  bool get isBuffering => state.buffering;
+  bool _accepts(PlaybackOperation? operation) =>
+      !_disposed &&
+      _operations.accepts(operation) &&
+      _operationBaseUrl == client.baseUrl?.toString() &&
+      _operationUserId == client.userId &&
+      _operationToken == client.accessToken;
+
   int volume = 100;
   int _unmutedVolume = 100;
   double playbackRate = 1.0;
@@ -216,6 +253,7 @@ class PlayerController extends ChangeNotifier {
   bool _nextUpOffered = false;
   bool _nextUpLoading = false;
   bool _handlingCompleted = false;
+  bool _pendingCompletion = false;
 
   // --- 媒体源切换(R9) ---
   List<PlaybackMediaSource> mediaSources = const [];
@@ -266,14 +304,20 @@ class PlayerController extends ChangeNotifier {
   Timer? _nextTimer;
   Timer? _skipPromptTimer;
   Timer? _settingsSaveTimer;
-  StreamSubscription<Duration>? _positionSub;
-  StreamSubscription<Duration>? _durationSub;
-  StreamSubscription<Duration>? _bufferSub;
-  StreamSubscription<bool>? _playingSub;
-  StreamSubscription<bool>? _completedSub;
-  StreamSubscription<String>? _errorSub;
+  StreamSubscription<VideoBackendEvent>? _eventSub;
 
   Future<void> start() async {
+    final operation = _beginOperation();
+    if (operation == null || _disposed) return;
+    await _start(operation);
+  }
+
+  Future<void> _start(PlaybackOperation operation) async {
+    final stopped = _stopSession();
+    await _operations.interrupt(backend.stop);
+    await stopped;
+    if (!_accepts(operation)) return;
+    state.phase = PlaybackPhase.loading;
     error = null;
     loadFailure = null;
     disconnected = false;
@@ -288,7 +332,9 @@ class PlayerController extends ChangeNotifier {
     nextEpisode = null;
     playbackEnded = false;
     _nextUpOffered = false;
+    _nextUpLoading = false;
     _handlingCompleted = false;
+    _pendingCompletion = false;
     skipPromptVisible = false;
     _skipPromptTimer?.cancel();
     loading = true;
@@ -297,11 +343,13 @@ class PlayerController extends ChangeNotifier {
     activeSkipSegment = null;
     _emit();
     try {
-      await _restoreSettings();
-      item = await client.getItem(itemId);
-      if (_disposed) {
+      await _restoreSettings(operation);
+      if (!_accepts(operation)) return;
+      final loadedItem = await client.getItem(itemId);
+      if (!_accepts(operation)) {
         return;
       }
+      item = loadedItem;
       if (!item!.isPlayable) {
         error = PlayerErrorKind.notPlayable;
         loading = false;
@@ -317,8 +365,11 @@ class PlayerController extends ChangeNotifier {
         _resetEpisodeWindow();
       }
       try {
-        user = await client.getUser();
+        final loadedUser = await client.getUser();
+        if (!_accepts(operation)) return;
+        user = loadedUser;
       } on EmbyException {
+        if (!_accepts(operation)) return;
         user = null;
       }
       duration = durationFromTicks(item!.runTimeTicks ?? 0);
@@ -335,6 +386,7 @@ class PlayerController extends ChangeNotifier {
       final chapterTicks = startTimeTicks;
       if (chapterTicks != null && chapterTicks > 0) {
         await _open(
+          operation: operation,
           startTicks: chapterTicks,
           audio: audioStreamIndex,
           subtitle: subtitleStreamIndex,
@@ -347,6 +399,7 @@ class PlayerController extends ChangeNotifier {
           : 0;
       if (!autoResume) {
         await _open(
+          operation: operation,
           startTicks: 0,
           audio: audioStreamIndex,
           subtitle: subtitleStreamIndex,
@@ -355,13 +408,14 @@ class PlayerController extends ChangeNotifier {
         return;
       }
       await _open(
+        operation: operation,
         startTicks: resumeTicks > 0 ? _rewound(resumeTicks) : 0,
         audio: audioStreamIndex,
         subtitle: subtitleStreamIndex,
         subtitleOff: memorySubtitleOff,
       );
     } on EmbyException catch (failure) {
-      if (_disposed) {
+      if (!_accepts(operation)) {
         return;
       }
       error = PlayerErrorKind.load;
@@ -379,24 +433,15 @@ class PlayerController extends ChangeNotifier {
       await replay();
       return;
     }
-    await backend.playOrPause();
+    final operation = _operations.current;
+    if (operation != null) {
+      await _operations.run(operation, backend.playOrPause);
+    }
   }
 
   Future<void> replay() async {
-    if (_disposed) {
-      return;
-    }
-    playbackEnded = false;
-    nextEpisode = null;
-    _handlingCompleted = false;
-    _nextTimer?.cancel();
-    _nextTimer = null;
-    await _open(
-      startTicks: 0,
-      audio: audioStreamIndex,
-      subtitle: subtitleStreamIndex,
-      subtitleOff: subtitleStreamIndex == null,
-    );
+    if (_disposed || _operations.isClosed) return;
+    await _reopen(startTicks: 0);
   }
 
   void openEndedSeries() {
@@ -430,19 +475,17 @@ class PlayerController extends ChangeNotifier {
     onUserActivity();
     if (playbackEnded) {
       playbackEnded = false;
-      await _open(
-        startTicks: ticksFromDuration(target),
-        audio: audioStreamIndex,
-        subtitle: subtitleStreamIndex,
-        subtitleOff: subtitleStreamIndex == null,
-      );
+      await _reopen(startTicks: ticksFromDuration(target));
       return;
     }
     if (isTranscode) {
       await _reopen(startTicks: ticksFromDuration(target));
       return;
     }
-    await backend.seek(target);
+    final operation = _operations.current;
+    if (operation == null) return;
+    await _operations.run(operation, () => backend.seek(target));
+    if (!_accepts(operation)) return;
     _setPosition(target);
     _emit();
     await _reportProgress(eventName: 'Seek');
@@ -451,11 +494,18 @@ class PlayerController extends ChangeNotifier {
   static const volumeWheelStep = 5;
 
   Future<void> setVolume(int value) async {
+    final operation = _operations.current;
+    if (!_accepts(operation)) return;
     volume = value.clamp(0, 100);
     if (volume > 0) {
       _unmutedVolume = volume;
     }
-    await backend.setVolume(mpvVolumeForPercent(volume));
+    final selected = volume;
+    await _operations.run(
+      operation!,
+      () => backend.setVolume(mpvVolumeForPercent(selected)),
+    );
+    if (!_accepts(operation)) return;
     onUserActivity();
     _scheduleSettingsSave();
   }
@@ -474,6 +524,8 @@ class PlayerController extends ChangeNotifier {
 
   /// 设置倍速:阶梯内取值,立即下发 backend 并持久化(跨集/重启沿用)。
   Future<void> setRate(double rate) async {
+    final operation = _operations.current;
+    if (!_accepts(operation)) return;
     final value = rate
         .clamp(kPlaybackRateLadder.first, kPlaybackRateLadder.last)
         .toDouble();
@@ -482,7 +534,8 @@ class PlayerController extends ChangeNotifier {
       return;
     }
     playbackRate = value;
-    await backend.setRate(playbackRate);
+    await _operations.run(operation!, () => backend.setRate(value));
+    if (!_accepts(operation)) return;
     onUserActivity();
     _scheduleSettingsSave();
   }
@@ -531,68 +584,84 @@ class PlayerController extends ChangeNotifier {
   }
 
   Future<void> setAudio(int index) async {
-    audioStreamIndex = index;
-    await _persistSeriesPreference();
+    if (loading || _operations.isClosed) return;
     if (isTranscode) {
-      await _reopen(startTicks: ticksFromDuration(position));
+      await _reopen(startTicks: ticksFromDuration(position), audio: index);
       return;
     }
-    await backend.setAudioIndex(index);
-    _emit();
-    await _reportProgress(eventName: 'AudioTrackChange');
+    await _selectTrack(
+      () => backend.setAudioIndex(index),
+      () => audioStreamIndex = index,
+      'AudioTrackChange',
+    );
   }
 
   Future<void> setSubtitle(int? index) async {
-    if (index == null) {
-      subtitleStreamIndex = null;
-      _clearSubtitleNotice();
-      await backend.setSubtitleOff();
+    if (loading || _operations.isClosed) return;
+    final source = resolved?.mediaSource;
+    if (source == null) return;
+    final stream = index == null ? null : source.streamByIndex(index);
+    if (index != null && (stream == null || !stream.isSubtitle)) return;
+    if (isTranscode) {
+      await _reopen(
+        startTicks: ticksFromDuration(position),
+        subtitle: index,
+        subtitleOff: index == null,
+      );
+      return;
+    }
+    final uri = stream == null || stream.isBitmapSubtitle
+        ? null
+        : client.subtitleStreamUrl(
+            itemId: itemId,
+            mediaSourceId: source.id,
+            index: index!,
+            format: stream.externalSubtitleFormat,
+          );
+    await _selectTrack(
+      () => index == null
+          ? backend.setSubtitleOff()
+          : stream!.isBitmapSubtitle
+          ? backend.setSubtitleIndex(index)
+          : backend.setSubtitleUri(uri!, title: stream.label),
+      () {
+        subtitleStreamIndex = index;
+        _clearSubtitleNotice();
+      },
+      'SubtitleTrackChange',
+    );
+  }
+
+  Future<void> _selectTrack(
+    Future<void> Function() apply,
+    VoidCallback commit,
+    String event,
+  ) async {
+    final operation = _operations.current;
+    if (operation == null || !_accepts(operation)) return;
+    final revision = ++_trackRevision;
+    _trackRevisions[event] = revision;
+    try {
+      await _operations.run(operation, () async {
+        if (revision == _trackRevisions[event]) await apply();
+      });
+      if (!_accepts(operation) || revision != _trackRevisions[event]) return;
+      commit();
+      trackFailure = null;
       _emit();
       await _persistSeriesPreference();
-      await _reportProgress(eventName: 'SubtitleTrackChange');
-      return;
+      if (!_accepts(operation) || revision != _trackRevisions[event]) return;
+      await _reportProgress(eventName: event);
+    } catch (failure) {
+      if (!_accepts(operation) || revision != _trackRevisions[event]) return;
+      trackFailure = failure.toString();
+      _emit();
     }
-    final stream = resolved?.mediaSource.streamByIndex(index);
-    if (stream == null || !stream.isSubtitle) {
-      return;
-    }
-    if (stream.isBitmapSubtitle) {
-      // 先记录选择意图(供按剧记忆)。
-      subtitleStreamIndex = index;
-      await _persistSeriesPreference();
-      if (!isTranscode) {
-        // 直连:mpv 直接渲染容器内嵌位图轨道,无需烧录重开。
-        _clearSubtitleNotice();
-        await backend.setSubtitleIndex(index);
-        _emit();
-        await _reportProgress(eventName: 'SubtitleTrackChange');
-        return;
-      }
-      // 转码:请求服务器烧录进流。
-      _showSubtitleNotice(SubtitleNoticeKind.bitmapBurnIn);
-      await _reopen(startTicks: ticksFromDuration(position), subtitle: index);
-      return;
-    }
-    subtitleStreamIndex = index;
-    _clearSubtitleNotice();
-    final source = resolved!.mediaSource;
-    await backend.setSubtitleUri(
-      client.subtitleStreamUrl(
-        itemId: itemId,
-        mediaSourceId: source.id,
-        index: index,
-        format: stream.externalSubtitleFormat,
-      ),
-      title: stream.label,
-    );
-    _emit();
-    await _persistSeriesPreference();
-    await _reportProgress(eventName: 'SubtitleTrackChange');
   }
 
   Future<void> setMaxBitrate(int bitrate) async {
+    if (_operations.isClosed) return;
     maxStreamingBitrate = bitrate;
-    await _persistSeriesPreference();
     await _reopen(startTicks: ticksFromDuration(position));
   }
 
@@ -701,7 +770,12 @@ class PlayerController extends ChangeNotifier {
   /// 首次起播请求携带的源/轨道/章节起点只对首个条目有效,换集后清除 id;
   /// 片源显示名保留,供下一集按 Name 对齐。
   Future<void> _playItem(String targetId, {required bool fromStart}) async {
-    await shutdownSession();
+    final operation = _beginOperation();
+    if (operation == null || _disposed) return;
+    final stopped = _stopSession();
+    await _operations.interrupt(backend.stop);
+    await stopped;
+    if (!_accepts(operation)) return;
     itemId = targetId;
     activeMediaSourceId = null;
     preferredMediaSourceId = null;
@@ -709,7 +783,7 @@ class PlayerController extends ChangeNotifier {
     preferredSubtitleStreamIndex = null;
     startTimeTicks = null;
     autoResume = !fromStart;
-    await start();
+    await _start(operation);
   }
 
   // ---------------------------------------------------------------------
@@ -734,6 +808,8 @@ class PlayerController extends ChangeNotifier {
   String? _episodeSeriesId;
 
   Future<void> _loadSeasons(String seriesId) async {
+    final operation = _operations.current;
+    if (!_accepts(operation)) return;
     episodeListLoading = true;
     episodeListFailed = false;
     _emit();
@@ -746,7 +822,7 @@ class PlayerController extends ChangeNotifier {
         sortOrder: 'Ascending',
         fields: EmbyClient.gridFields,
       );
-      if (_disposed) {
+      if (!_accepts(operation)) {
         return;
       }
       seasons = loaded;
@@ -770,11 +846,12 @@ class PlayerController extends ChangeNotifier {
       await _loadSeasonEpisodes(seasonId, aroundCurrent: true);
       // 分集列表拉取成功后才标记归属;失败时保持未加载,
       // 保证同剧重试(loadEpisodeList)不会因早退而失效。
+      if (!_accepts(operation)) return;
       _episodeSeriesId = seriesId;
       episodeListLoading = false;
       _emit();
     } on EmbyException {
-      if (_disposed) {
+      if (!_accepts(operation)) {
         return;
       }
       episodeListLoading = false;
@@ -785,6 +862,8 @@ class PlayerController extends ChangeNotifier {
 
   /// 切换剧集列表显示的季(不切集,仅换列表内容)。
   Future<void> selectSeason(String seasonId) async {
+    final operation = _operations.current;
+    if (!_accepts(operation)) return;
     if (episodeListLoading || episodeSeasonId == seasonId) {
       return;
     }
@@ -797,16 +876,19 @@ class PlayerController extends ChangeNotifier {
         aroundCurrent: item?.seasonId == seasonId,
       );
     } on EmbyException {
-      if (_disposed) {
+      if (!_accepts(operation)) {
         return;
       }
       episodeListFailed = true;
     }
+    if (!_accepts(operation)) return;
     episodeListLoading = false;
     _emit();
   }
 
   Future<void> _ensureCurrentInWindow() async {
+    final operation = _operations.current;
+    if (!_accepts(operation)) return;
     final seasonId = item?.seasonId ?? episodeSeasonId;
     if (seasonId == null || seasonId.isEmpty) {
       return;
@@ -824,11 +906,12 @@ class PlayerController extends ChangeNotifier {
     try {
       await _loadSeasonEpisodes(seasonId, aroundCurrent: true);
     } on EmbyException {
-      if (_disposed) {
+      if (!_accepts(operation)) {
         return;
       }
       episodeListFailed = true;
     }
+    if (!_accepts(operation)) return;
     episodeListLoading = false;
     _emit();
   }
@@ -909,6 +992,8 @@ class PlayerController extends ChangeNotifier {
     String? seasonId, {
     required bool aroundCurrent,
   }) async {
+    final operation = _operations.current;
+    if (!_accepts(operation)) return;
     if (seasonId == null || seasonId.isEmpty) {
       episodes = const [];
       episodeSeasonId = null;
@@ -918,7 +1003,7 @@ class PlayerController extends ChangeNotifier {
     final index = aroundCurrent ? item?.indexNumber : 1;
     var start = index == null || index <= 1 ? 0 : math.max(0, index - 1 - 4);
     var page = await _querySeasonEpisodes(seasonId, start);
-    if (_disposed) {
+    if (!_accepts(operation)) {
       return;
     }
     final total = page.totalRecordCount ?? page.items.length;
@@ -928,7 +1013,7 @@ class PlayerController extends ChangeNotifier {
     );
     if (filledStart != start) {
       page = await _querySeasonEpisodes(seasonId, filledStart);
-      if (_disposed) {
+      if (!_accepts(operation)) {
         return;
       }
       start = filledStart;
@@ -1141,28 +1226,6 @@ class PlayerController extends ChangeNotifier {
     position = value;
     _updateActiveSkip();
     _maybeOfferNextUp();
-    _maybeCompleteFromPosition();
-  }
-
-  bool _hasReachedPlaybackEnd() {
-    if (loading || isPlaying || duration <= Duration.zero) {
-      return false;
-    }
-    if (position >= duration) {
-      return true;
-    }
-    return duration - position <= kPlaybackEndSlack;
-  }
-
-  /// libmpv keep-open 常停在末帧却不发 completed;进度到片尾也要出结束引导。
-  void _maybeCompleteFromPosition() {
-    if (_disposed || loading || playbackEnded || _handlingCompleted) {
-      return;
-    }
-    if (!_hasReachedPlaybackEnd()) {
-      return;
-    }
-    unawaited(_handleCompleted());
   }
 
   /// 片尾标记处,或无标记时片长最后约 3 分钟,提前给出下一集(不倒计时)。
@@ -1206,6 +1269,8 @@ class PlayerController extends ChangeNotifier {
   }
 
   Future<void> _offerEarlyNextEpisode() async {
+    final operation = _operations.current;
+    if (!_accepts(operation)) return;
     final current = item;
     if (current == null) {
       _nextUpOffered = false;
@@ -1214,7 +1279,7 @@ class PlayerController extends ChangeNotifier {
     _nextUpLoading = true;
     try {
       final next = await client.getNextEpisode(current);
-      if (_disposed) {
+      if (!_accepts(operation)) {
         return;
       }
       if (next == null || nextEpisode != null) {
@@ -1232,9 +1297,9 @@ class PlayerController extends ChangeNotifier {
       _hideTimer?.cancel();
       _emit();
     } on EmbyException {
-      _nextUpOffered = false;
+      if (_accepts(operation)) _nextUpOffered = false;
     } finally {
-      _nextUpLoading = false;
+      if (_accepts(operation)) _nextUpLoading = false;
     }
   }
 
@@ -1282,7 +1347,6 @@ class PlayerController extends ChangeNotifier {
       }
     }
     onUserActivity();
-    unawaited(_persistSeriesPreference());
     await _reopen(startTicks: startTicks);
   }
 
@@ -1294,37 +1358,69 @@ class PlayerController extends ChangeNotifier {
   }
 
   Future<void> _close() async {
+    await disposeAsync();
+    if (window.isFullScreen) await window.setFullScreen(false);
+    onClose?.call();
+  }
+
+  /// Stops this media session but keeps the backend reusable for a new item.
+  Future<void> shutdownSession() async {
+    if (_disposed || _operations.isClosed) return;
+    _operations.invalidate();
+    _cancelPlaybackTimers();
+    final stopped = _stopSession();
+    await _operations.interrupt(backend.stop);
+    await _operations.drained;
+    await stopped;
+    await _persistSettings();
+    if (window.isFullScreen) await window.setFullScreen(false);
+  }
+
+  void _cancelPlaybackTimers() {
     _hideTimer?.cancel();
     _nextTimer?.cancel();
     _nextTimer = null;
     _skipPromptTimer?.cancel();
     _progressTimer?.cancel();
     _progressTimer = null;
-    await _awaitPendingStopped();
-    final shouldReport = checkIn.stop();
-    _sessionStarted = false;
-    if (window.isFullScreen) {
-      await window.setFullScreen(false);
-    }
-    if (shouldReport) {
-      await _sendStopped();
-    }
-    onClose?.call();
+    _subtitleReassertDue = null;
   }
 
-  Future<void> shutdownSession() async {
-    if (_disposed) {
-      return;
+  /// Flutter's synchronous dispose delegates to this joinable cleanup. Hosts
+  /// await this before closing the native window or exiting the process.
+  Future<void> disposeAsync() => _disposing ??= _disposeResources();
+
+  Future<void> _disposeResources({bool reportStopped = true}) async {
+    _operations.close();
+    state.phase = PlaybackPhase.closing;
+    _cancelPlaybackTimers();
+    _progressFailBannerTimer?.cancel();
+    _subtitleNoticeTimer?.cancel();
+    _settingsSaveTimer?.cancel();
+    final Future<void> stopped;
+    if (reportStopped) {
+      stopped = _stopSession();
+    } else {
+      // An unannounced widget teardown cannot await a network request. Keep the
+      // last snapshot for the process host's Stopped compensation.
+      _session?.stopped = true;
+      _session = null;
+      _sessionStarted = false;
+      checkIn.stop();
+      stopped = _awaitPendingStopped();
     }
-    _hideTimer?.cancel();
-    _nextTimer?.cancel();
-    _nextTimer = null;
-    _skipPromptTimer?.cancel();
+    await _eventSub?.cancel();
+    try {
+      await _operations.interrupt(backend.stop);
+    } finally {
+      await _operations.drained;
+      await backend.dispose();
+    }
+    isPlaying = false;
+    state.buffering = false;
+    await stopped;
     await _persistSettings();
-    await _stopSession();
-    if (window.isFullScreen) {
-      await window.setFullScreen(false);
-    }
+    state.phase = PlaybackPhase.closed;
   }
 
   /// 手动关闭进度同步失败横幅(持续显示态可关闭;失败计数保留,
@@ -1340,81 +1436,84 @@ class PlayerController extends ChangeNotifier {
   }
 
   void _bindBackend() {
-    _positionSub = backend.positionStream.listen((value) {
-      _setPosition(value);
-      if (disconnected && isPlaying) {
-        disconnected = false;
-        disconnectDetail = null;
+    _eventSub = backend.events.listen((event) {
+      final operation = _operations.current;
+      if (!_accepts(operation) || event.sessionId != operation!.id) return;
+      switch (event.kind) {
+        case VideoEventKind.position:
+          _setPosition(event.value as Duration);
+        case VideoEventKind.duration:
+          final value = event.value as Duration;
+          if (value > Duration.zero) {
+            duration = value;
+            _rebuildSkipSegments();
+            _maybeOfferNextUp();
+          }
+        case VideoEventKind.buffer:
+          buffer = event.value as Duration;
+          if (buffer < Duration.zero) buffer = Duration.zero;
+          if (duration > Duration.zero && buffer > duration) buffer = duration;
+        case VideoEventKind.buffering:
+          state.buffering = event.value as bool;
+          state.updatePlaying(isPlaying);
+        case VideoEventKind.playing:
+          isPlaying = event.value as bool;
+          state.updatePlaying(isPlaying);
+          if (isPlaying) {
+            disconnected = false;
+            disconnectDetail = null;
+            onUserActivity();
+          } else {
+            controlsVisible = true;
+            _hideTimer?.cancel();
+          }
+          if (_sessionStarted && !disconnected) {
+            unawaited(
+              _reportProgress(eventName: isPlaying ? 'Unpause' : 'Pause'),
+            );
+          }
+        case VideoEventKind.completed:
+          if (event.value == true) {
+            if (loading) {
+              _pendingCompletion = true;
+            } else {
+              unawaited(_handleCompleted());
+            }
+          }
+        case VideoEventKind.error:
+          final message = event.value as String;
+          if (!isFatalPlaybackError(message, playing: isPlaying)) return;
+          disconnected = true;
+          disconnectDetail = message.trim().isEmpty ? null : message.trim();
+          controlsVisible = true;
+          state.phase = PlaybackPhase.failed;
+          _hideTimer?.cancel();
       }
-      _emit();
-    });
-    _durationSub = backend.durationStream.listen((value) {
-      if (value > Duration.zero) {
-        duration = value;
-        // 片长更新后手动片尾区间终点随之变化。
-        _rebuildSkipSegments();
-        _maybeOfferNextUp();
-        _maybeCompleteFromPosition();
-        _emit();
-      }
-    });
-    _bufferSub = backend.bufferStream.listen((value) {
-      buffer = value < Duration.zero ? Duration.zero : value;
-      if (duration > Duration.zero && buffer > duration) {
-        buffer = duration;
-      }
-      _emit();
-    });
-    _playingSub = backend.playingStream.listen((playing) {
-      isPlaying = playing;
-      if (playing) {
-        disconnected = false;
-        disconnectDetail = null;
-        onUserActivity();
-      } else {
-        controlsVisible = true;
-        _hideTimer?.cancel();
-        _maybeCompleteFromPosition();
-      }
-      _emit();
-      if (_sessionStarted && !disconnected) {
-        unawaited(_reportProgress(eventName: playing ? 'Unpause' : 'Pause'));
-      }
-    });
-    _completedSub = backend.completedStream.listen((done) {
-      if (done) {
-        unawaited(_handleCompleted());
-      }
-    });
-    _errorSub = backend.errorStream.listen((message) {
-      if (_disposed || isPlaying) {
-        return;
-      }
-      if (!isFatalPlaybackError(message, playing: false)) {
-        return;
-      }
-      disconnected = true;
-      disconnectDetail = message.trim().isEmpty ? null : message.trim();
-      controlsVisible = true;
-      _hideTimer?.cancel();
       _emit();
     });
   }
 
   Future<void> _open({
+    required PlaybackOperation operation,
     required int startTicks,
     int? audio,
     int? subtitle,
     bool subtitleOff = false,
   }) async {
+    if (!_accepts(operation)) return;
     loading = true;
+    state.phase = PlaybackPhase.loading;
+    state.buffering = false;
+    isPlaying = false;
     disconnected = false;
     disconnectDetail = null;
     buffer = Duration.zero;
     nextEpisode = null;
     playbackEnded = false;
     _nextUpOffered = false;
+    _nextUpLoading = false;
     _handlingCompleted = false;
+    _pendingCompletion = false;
     _nextTimer?.cancel();
     _emit();
 
@@ -1431,7 +1530,7 @@ class PlayerController extends ChangeNotifier {
             ? null
             : (subtitle ?? preferredSubtitleStreamIndex),
       );
-      if (_disposed) {
+      if (!_accepts(operation)) {
         return;
       }
       mediaSources = info.mediaSources;
@@ -1458,7 +1557,7 @@ class PlayerController extends ChangeNotifier {
       }
       resolved = next;
       final memory = _rememberedPreference;
-      audioStreamIndex =
+      final selectedAudio =
           matchPreferredStreamIndex(
             streams: next.mediaSource.audioStreams,
             preferredIndex:
@@ -1467,10 +1566,11 @@ class PlayerController extends ChangeNotifier {
             title: memory?.audioTitle,
           ) ??
           next.mediaSource.defaultAudioStreamIndex;
+      final int? selectedSubtitle;
       if (subtitleOff) {
-        subtitleStreamIndex = null;
+        selectedSubtitle = null;
       } else {
-        subtitleStreamIndex =
+        selectedSubtitle =
             matchPreferredStreamIndex(
               streams: next.mediaSource.subtitleStreams,
               preferredIndex:
@@ -1483,8 +1583,8 @@ class PlayerController extends ChangeNotifier {
             fallbackSubtitleStreamIndex(next.mediaSource);
       }
 
-      if (subtitleStreamIndex != null) {
-        final stream = next.mediaSource.streamByIndex(subtitleStreamIndex!);
+      if (selectedSubtitle != null) {
+        final stream = next.mediaSource.streamByIndex(selectedSubtitle);
         if (stream != null && stream.isBitmapSubtitle) {
           if (next.isTranscode) {
             // 转码:服务器烧录进流。
@@ -1494,61 +1594,97 @@ class PlayerController extends ChangeNotifier {
         }
       }
 
-      await backend.open(
-        VideoOpenRequest(
-          url: next.streamUrl,
-          start: durationFromTicks(startTicks),
-          // 仅当流地址与 Emby 服务器同源时附加会话头;strm 等远端
-          // 直连地址传空 headers,避免令牌泄漏给第三方主机。
-          headers: playbackStreamHeaders(
-            streamUrl: next.streamUrl,
-            baseUrl: client.baseUrl!,
-            sessionHeaders: client.sessionHeaders,
+      await _operations.run(operation, () async {
+        await backend.open(
+          VideoOpenRequest(
+            sessionId: operation.id,
+            url: next.streamUrl,
+            start: durationFromTicks(startTicks),
+            // 仅当流地址与 Emby 服务器同源时附加会话头;strm 等远端
+            // 直连地址传空 headers,避免令牌泄漏给第三方主机。
+            headers: playbackStreamHeaders(
+              streamUrl: next.streamUrl,
+              baseUrl: client.baseUrl!,
+              sessionHeaders: client.sessionHeaders,
+            ),
           ),
-        ),
-      );
-      await backend.setVolume(mpvVolumeForPercent(volume));
-      // 换集/重开不重置倍速:mpv 重新起流后显式恢复当前倍速。
-      await backend.setRate(playbackRate);
-      final runtime = next.mediaSource.runTimeTicks ?? item?.runTimeTicks ?? 0;
-      if (runtime > 0) {
-        duration = durationFromTicks(runtime);
-      }
-      _setPosition(durationFromTicks(startTicks));
-      _rebuildSkipSegments();
-      isPlaying = backend.isPlaying;
+        );
+        if (!_accepts(operation)) return;
+        await backend.setVolume(mpvVolumeForPercent(volume));
+        // 换集/重开不重置倍速:mpv 重新起流后显式恢复当前倍速。
+        if (!_accepts(operation)) return;
+        await backend.setRate(playbackRate);
+        if (!_accepts(operation)) return;
+        final runtime =
+            next.mediaSource.runTimeTicks ?? item?.runTimeTicks ?? 0;
+        if (runtime > 0) {
+          duration = durationFromTicks(runtime);
+        }
+        _setPosition(durationFromTicks(startTicks));
+        _rebuildSkipSegments();
+        isPlaying = backend.isPlaying;
 
-      await _applyTracks(next);
+        await _applyTracks(
+          next,
+          operation,
+          audio: selectedAudio,
+          subtitle: selectedSubtitle,
+        );
+      });
+      if (!_accepts(operation)) return;
+      audioStreamIndex = selectedAudio;
+      subtitleStreamIndex = selectedSubtitle;
       // 换源/重开后部分后端会丢外挂字幕选择(字幕要等一会儿才出现),
       // 起流片刻后重断言一次,字幕晚显的问题即消失。
       _scheduleSubtitleReassert();
-      await _beginSession(startTicks: startTicks);
       loading = false;
+      state.updatePlaying(isPlaying);
+      final started = _beginSession(operation, startTicks: startTicks);
+      if (_pendingCompletion) {
+        _pendingCompletion = false;
+        unawaited(_handleCompleted());
+      }
+      await started;
+      if (!_accepts(operation)) return;
       error = null;
       _preferredSourceName ??= next.mediaSource.label;
       await _persistSeriesPreference();
+      if (!_accepts(operation)) return;
       onUserActivity();
       _emit();
     } on EmbyException catch (failure) {
-      if (_disposed) {
+      if (!_accepts(operation)) {
         return;
       }
       error = PlayerErrorKind.load;
       loadFailure = failure;
       loading = false;
       _emit();
+    } catch (_) {
+      if (!_accepts(operation)) return;
+      error = PlayerErrorKind.load;
+      state.phase = PlaybackPhase.failed;
+      loading = false;
+      _emit();
     }
   }
 
-  Future<void> _applyTracks(ResolvedPlayback next) async {
-    if (audioStreamIndex != null) {
-      await backend.setAudioIndex(audioStreamIndex!);
+  Future<void> _applyTracks(
+    ResolvedPlayback next,
+    PlaybackOperation operation, {
+    required int? audio,
+    required int? subtitle,
+  }) async {
+    if (!_accepts(operation)) return;
+    if (audio != null) {
+      await backend.setAudioIndex(audio);
+      if (!_accepts(operation)) return;
     }
-    if (subtitleStreamIndex == null) {
+    if (subtitle == null) {
       await backend.setSubtitleOff();
       return;
     }
-    final stream = next.mediaSource.streamByIndex(subtitleStreamIndex!);
+    final stream = next.mediaSource.streamByIndex(subtitle);
     if (stream == null || !stream.isSubtitle) {
       return;
     }
@@ -1558,14 +1694,14 @@ class PlayerController extends ChangeNotifier {
     }
     if (stream.isBitmapSubtitle) {
       // 直连:mpv 直接渲染容器内嵌位图轨道(PGS 等)。
-      await backend.setSubtitleIndex(subtitleStreamIndex!);
+      await backend.setSubtitleIndex(subtitle);
       return;
     }
     await backend.setSubtitleUri(
       client.subtitleStreamUrl(
         itemId: itemId,
         mediaSourceId: next.mediaSource.id,
-        index: subtitleStreamIndex!,
+        index: subtitle,
         format: stream.externalSubtitleFormat,
       ),
       title: stream.label,
@@ -1594,36 +1730,81 @@ class PlayerController extends ChangeNotifier {
     if (stream == null || !stream.isSubtitle) {
       return;
     }
-    unawaited(_applyTracks(current));
+    final operation = _operations.current;
+    if (operation == null || loading) return;
+    unawaited(
+      _operations
+          .run(
+            operation,
+            () => _applyTracks(
+              current,
+              operation,
+              audio: audioStreamIndex,
+              subtitle: subtitleStreamIndex,
+            ),
+          )
+          .catchError((Object _) {}),
+    );
   }
 
-  Future<void> _reopen({required int startTicks, int? subtitle}) async {
-    await _stopSession();
-    final nextSubtitle = subtitle ?? subtitleStreamIndex;
+  Future<void> _reopen({
+    required int startTicks,
+    int? subtitle,
+    int? audio,
+    bool subtitleOff = false,
+  }) async {
+    final operation = _beginOperation();
+    if (operation == null || _disposed) return;
+    final nextSubtitle = subtitleOff ? null : subtitle ?? subtitleStreamIndex;
+    final nextAudio = audio ?? audioStreamIndex;
+    final stopped = _stopSession();
+    await _operations.interrupt(backend.stop);
+    await stopped;
+    if (!_accepts(operation)) return;
     await _open(
+      operation: operation,
       startTicks: startTicks,
-      audio: audioStreamIndex,
+      audio: nextAudio,
       subtitle: nextSubtitle,
       subtitleOff: nextSubtitle == null,
     );
   }
 
-  Future<void> _beginSession({required int startTicks}) async {
+  bool _ownsSession(PlaybackSession session) =>
+      identical(_session, session) &&
+      !session.stopped &&
+      session.ownsCredentials &&
+      !_operations.isClosed &&
+      !_disposed;
+
+  Future<void> _beginSession(
+    PlaybackOperation operation, {
+    required int startTicks,
+  }) async {
+    if (!_accepts(operation)) return;
+    final report = _currentReport(positionTicks: startTicks);
+    final session = PlaybackSession(
+      id: operation.id,
+      client: client,
+      report: report,
+    );
+    _session = session;
     checkIn.start();
     _sessionStarted = true;
     sessionExpired = false;
     try {
-      await client.reportPlaying(_currentReport(positionTicks: startTicks));
+      await session.enqueue(() => client.reportPlaying(report));
+      if (!_ownsSession(session) || !_accepts(operation)) return;
       _onReportSucceeded();
-      _writeSnapshot(positionTicks: startTicks);
+      _writeSnapshot(session, report);
     } on EmbyException catch (failure) {
+      if (!_ownsSession(session) || !_accepts(operation)) return;
       _onReportFailed(failure);
     }
+    if (!_ownsSession(session)) return;
     _progressTimer?.cancel();
     _progressTimer = null;
-    if (sessionExpired) {
-      return;
-    }
+    if (sessionExpired) return;
     _progressTimer = Timer.periodic(progressInterval, (_) {
       _maybeReassertSubtitle();
       unawaited(_reportProgress(eventName: 'TimeUpdate'));
@@ -1631,65 +1812,70 @@ class PlayerController extends ChangeNotifier {
   }
 
   Future<void> _reportProgress({String? eventName}) async {
-    if (!checkIn.canProgress || sessionExpired) {
-      return;
-    }
+    final session = _session;
+    if (session == null || !_ownsSession(session) || sessionExpired) return;
+    final report = _currentReport(eventName: eventName);
+    session.report = report;
     try {
-      await client.reportProgress(_currentReport(eventName: eventName));
+      await session.enqueue(() => client.reportProgress(report));
+      if (!_ownsSession(session)) return;
       _onReportSucceeded();
-      // 请求期间会话已停止(Stopped 已删快照)时不再写入,避免复活快照。
-      if (checkIn.canProgress) {
-        _writeSnapshot();
-      }
+      _writeSnapshot(session, report);
     } on EmbyException catch (failure) {
-      _onReportFailed(failure);
+      if (_ownsSession(session)) _onReportFailed(failure);
     }
   }
 
-  Future<void> _stopSession() async {
+  Future<void> _stopSession() {
     _progressTimer?.cancel();
     _progressTimer = null;
-    await _awaitPendingStopped();
-    final shouldReport = checkIn.stop();
+    final session = _session;
+    if (session == null) return _awaitPendingStopped();
+    final report = _currentReport();
+    session.report = report;
+    session.stopped = true;
+    _session = null;
+    checkIn.stop();
     _sessionStarted = false;
-    if (!shouldReport) {
-      return;
-    }
-    await _sendStopped();
+    return _trackStopped(_doSendStopped(session, report));
   }
 
   Future<void> _awaitPendingStopped() async {
     final pending = _pendingStopped;
-    if (pending != null) {
-      await pending;
-    }
-  }
-
-  /// 发送 Stopped,以 [stoppedDeadline] 为上限;成功后删除会话快照,
-  /// 超时/异常按上报失败处理(快照保留供宿主代发)。
-  /// 在途 future 记入 [_pendingStopped],供后续 close/shutdown 等待。
-  Future<void> _sendStopped() {
-    return _trackStopped(_doSendStopped());
+    if (pending != null) await pending;
   }
 
   Future<void> _trackStopped(Future<void> pending) {
     _pendingStopped = pending;
     return pending.whenComplete(() {
-      if (identical(_pendingStopped, pending)) {
-        _pendingStopped = null;
-      }
+      if (identical(_pendingStopped, pending)) _pendingStopped = null;
     });
   }
 
-  Future<void> _doSendStopped() async {
+  Future<void> _doSendStopped(
+    PlaybackSession session,
+    PlaybackReport report,
+  ) async {
     try {
-      await client.reportStopped(_currentReport()).timeout(stoppedDeadline);
-      _onReportSucceeded();
-      await _enqueueSnapshot(snapshotStore.delete);
+      await session
+          .enqueue(() => client.reportStopped(report))
+          .timeout(stoppedTimeout);
+      if (!session.ownsCredentials) return;
+      if (_session == null) _onReportSucceeded();
+      await _enqueueSnapshot(() async {
+        final snapshot = await snapshotStore.read();
+        if (_snapshotOwner == session.id &&
+            snapshot?.playSessionId == report.playSessionId &&
+            snapshot?.itemId == report.itemId &&
+            snapshot?.baseUrl == session.baseUrl &&
+            snapshot?.userId == session.userId) {
+          await snapshotStore.delete();
+        }
+      });
     } on EmbyException catch (failure) {
-      _onReportFailed(failure);
+      if (_session == null && session.ownsCredentials) _onReportFailed(failure);
     } on TimeoutException {
-      _onReportFailed(null);
+      if (_session == null) _onReportFailed(null);
     }
   }
 
@@ -1700,6 +1886,10 @@ class PlayerController extends ChangeNotifier {
 
   /// [failure] 为 null 表示超时。
   void _onReportFailed(EmbyException? failure) {
+    if (_operations.isClosed || _disposed) {
+      progressSyncFailed = true;
+      return;
+    }
     if (failure?.kind == EmbyFailureKind.sessionExpired) {
       _progressTimer?.cancel();
       _progressTimer = null;
@@ -1733,24 +1923,33 @@ class PlayerController extends ChangeNotifier {
     });
   }
 
-  void _writeSnapshot({int? positionTicks}) {
-    final baseUrl = client.baseUrl;
-    final userId = client.userId;
-    if (baseUrl == null || userId == null || userId.isEmpty) {
+  void _writeSnapshot(PlaybackSession session, PlaybackReport report) {
+    final baseUrl = session.baseUrl;
+    final userId = session.userId;
+    if (!_ownsSession(session) ||
+        baseUrl == null ||
+        userId == null ||
+        userId.isEmpty) {
       return;
     }
-    final report = _currentReport(positionTicks: positionTicks);
     final snapshot = PlaybackSessionSnapshot(
       itemId: report.itemId,
       mediaSourceId: report.mediaSourceId,
       playSessionId: report.playSessionId,
       playMethod: report.playMethod,
       positionTicks: report.positionTicks,
-      baseUrl: baseUrl.toString(),
+      baseUrl: baseUrl,
       userId: userId,
       timestamp: DateTime.now(),
     );
-    unawaited(_enqueueSnapshot(() => snapshotStore.write(snapshot)));
+    unawaited(
+      _enqueueSnapshot(() async {
+        if (_ownsSession(session)) {
+          _snapshotOwner = session.id;
+          await snapshotStore.write(snapshot);
+        }
+      }),
+    );
   }
 
   /// 空闲时立刻执行(内存实现即时生效),忙时按序排队;任何失败吞掉。
@@ -1839,10 +2038,14 @@ class PlayerController extends ChangeNotifier {
   }
 
   Future<void> _handleCompleted() async {
+    final operation = _operations.current;
+    if (!_accepts(operation)) return;
     if (_disposed || _handlingCompleted || playbackEnded) {
       return;
     }
     _handlingCompleted = true;
+    state.phase = PlaybackPhase.ended;
+    state.buffering = false;
     isPlaying = false;
     controlsVisible = true;
     _hideTimer?.cancel();
@@ -1869,7 +2072,7 @@ class PlayerController extends ChangeNotifier {
     _showPlaybackEnded();
     try {
       final next = await client.getNextEpisode(item!);
-      if (_disposed || next == null) {
+      if (!_accepts(operation) || next == null) {
         return;
       }
       _presentCompletedNext(next);
@@ -1910,16 +2113,20 @@ class PlayerController extends ChangeNotifier {
   }
 
   /// 读取音量/倍速与按剧记忆,起播与换集前恢复。
-  Future<void> _restoreSettings() async {
+  Future<void> _restoreSettings(PlaybackOperation operation) async {
     try {
       final settings = await (await _settings()).read();
+      if (!_accepts(operation)) return;
       volume = settings.clampedVolume;
       playbackRate = settings.effectivePlaybackRate;
       _seriesPreferences = Map.of(settings.seriesPreferences);
       if (volume > 0) {
         _unmutedVolume = volume;
       }
-      await backend.setVolume(mpvVolumeForPercent(volume));
+      await _operations.run(
+        operation,
+        () => backend.setVolume(mpvVolumeForPercent(volume)),
+      );
     } catch (_) {}
   }
 
@@ -1940,13 +2147,12 @@ class PlayerController extends ChangeNotifier {
   /// 文件存储为合并写,不会清掉主进程写入的其他字段。
   Future<void> _writeSettings() async {
     try {
-      await (await _settings()).write(
-        PlayerSettings(
-          volume: volume,
-          playbackRate: playbackRate,
-          seriesPreferences: _seriesPreferences,
-        ),
+      final value = PlayerSettings(
+        volume: volume,
+        playbackRate: playbackRate,
+        seriesPreferences: Map.of(_seriesPreferences),
       );
+      await (await _settings()).write(value);
     } catch (_) {}
   }
 
@@ -2012,26 +2218,10 @@ class PlayerController extends ChangeNotifier {
 
   @override
   void dispose() {
-    if (_disposed) {
-      return;
-    }
+    if (_disposed) return;
+    unawaited(_disposing ??= _disposeResources(reportStopped: false));
     _disposed = true;
-    _hideTimer?.cancel();
-    _progressTimer?.cancel();
-    _progressFailBannerTimer?.cancel();
-    _subtitleNoticeTimer?.cancel();
-    _nextTimer?.cancel();
-    _skipPromptTimer?.cancel();
-    _settingsSaveTimer?.cancel();
-    unawaited(_persistSettings());
-    unawaited(_positionSub?.cancel());
-    unawaited(_durationSub?.cancel());
-    unawaited(_bufferSub?.cancel());
-    unawaited(_playingSub?.cancel());
-    unawaited(_completedSub?.cancel());
-    unawaited(_errorSub?.cancel());
     window.removeListener(_emit);
-    unawaited(backend.dispose());
     super.dispose();
   }
 }

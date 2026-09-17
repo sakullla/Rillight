@@ -6,15 +6,39 @@ class VideoOpenRequest {
   const VideoOpenRequest({
     required this.url,
     this.start = Duration.zero,
+    this.sessionId = 0,
     this.headers = const {},
   });
 
+  final int sessionId;
   final Uri url;
   final Duration start;
   final Map<String, String> headers;
 }
 
+enum VideoEventKind {
+  position,
+  duration,
+  buffer,
+  playing,
+  buffering,
+  completed,
+  error,
+}
+
+/// The backend preserves the originating open's identity, including late events.
+class VideoBackendEvent {
+  const VideoBackendEvent(this.sessionId, this.kind, this.value);
+  final int sessionId;
+  final VideoEventKind kind;
+  final Object value;
+}
+
 abstract class VideoBackend {
+  Stream<VideoBackendEvent> get events;
+
+  /// Cancels pending opens and stops audio/video before completing.
+  Future<void> stop();
   Stream<Duration> get positionStream;
   Stream<Duration> get durationStream;
   Stream<Duration> get bufferStream;
@@ -74,6 +98,23 @@ class FakeVideoBackend implements VideoBackend {
   double volume = 100;
   double rate = 1.0;
 
+  int sessionId = 0;
+  final _events = StreamController<VideoBackendEvent>.broadcast();
+  @override
+  Stream<VideoBackendEvent> get events => _events.stream;
+
+  void emitEvent(VideoEventKind kind, Object value, {int? forSession}) {
+    _events.add(VideoBackendEvent(forSession ?? sessionId, kind, value));
+  }
+
+  void emitBuffering(bool value) => emitEvent(VideoEventKind.buffering, value);
+
+  @override
+  Future<void> stop() async {
+    isPlaying = false;
+    emitEvent(VideoEventKind.playing, false);
+  }
+
   final _position = StreamController<Duration>.broadcast();
   final _duration = StreamController<Duration>.broadcast();
   final _buffer = StreamController<Duration>.broadcast();
@@ -96,6 +137,7 @@ class FakeVideoBackend implements VideoBackend {
 
   @override
   Future<void> open(VideoOpenRequest request) async {
+    sessionId = request.sessionId;
     openCount += 1;
     openedUrl = request.url;
     openedStart = request.start;
@@ -107,22 +149,29 @@ class FakeVideoBackend implements VideoBackend {
     subtitleUri = null;
     subtitleIndex = null;
     _duration.add(duration);
+    emitEvent(VideoEventKind.duration, duration);
     _position.add(position);
+    emitEvent(VideoEventKind.position, position);
     _buffer.add(buffer);
+    emitEvent(VideoEventKind.buffer, buffer);
     _playing.add(true);
+    emitEvent(VideoEventKind.playing, true);
     _completed.add(false);
+    emitEvent(VideoEventKind.completed, false);
   }
 
   @override
   Future<void> play() async {
     isPlaying = true;
     _playing.add(true);
+    emitEvent(VideoEventKind.playing, true);
   }
 
   @override
   Future<void> pause() async {
     isPlaying = false;
     _playing.add(false);
+    emitEvent(VideoEventKind.playing, false);
   }
 
   @override
@@ -141,11 +190,13 @@ class FakeVideoBackend implements VideoBackend {
       position = duration;
     }
     _position.add(position);
+    emitEvent(VideoEventKind.position, position);
   }
 
   void emitBuffer(Duration value) {
     buffer = value < Duration.zero ? Duration.zero : value;
     _buffer.add(buffer);
+    emitEvent(VideoEventKind.buffer, buffer);
   }
 
   @override
@@ -184,14 +235,18 @@ class FakeVideoBackend implements VideoBackend {
 
   void emitError(String message) {
     _error.add(message);
+    emitEvent(VideoEventKind.error, message);
   }
 
   void completePlayback() {
     isPlaying = false;
     position = duration;
     _position.add(position);
+    emitEvent(VideoEventKind.position, position);
     _playing.add(false);
+    emitEvent(VideoEventKind.playing, false);
     _completed.add(true);
+    emitEvent(VideoEventKind.completed, true);
   }
 
   /// keep-open 停在末帧:进度到头并暂停,但不发 completed。
@@ -201,9 +256,12 @@ class FakeVideoBackend implements VideoBackend {
     if (position > duration) {
       duration = position;
       _duration.add(duration);
+      emitEvent(VideoEventKind.duration, duration);
     }
     _position.add(position);
+    emitEvent(VideoEventKind.position, position);
     _playing.add(false);
+    emitEvent(VideoEventKind.playing, false);
   }
 
   /// 仅标记关闭:换集时宿主会新建 PlayerPage 并复用同一注入实例,

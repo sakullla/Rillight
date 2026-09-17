@@ -457,7 +457,7 @@ class PlayerPageState extends State<PlayerPage> {
                         child: DanmakuView(controller: _danmaku!),
                       ),
                     ),
-                  if (current.loading)
+                  if (current.loading || current.isBuffering)
                     Center(
                       child: Column(
                         mainAxisSize: MainAxisSize.min,

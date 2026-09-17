@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -28,7 +29,31 @@ class MediaKitVideoBackend implements VideoBackend {
       ),
     );
     _settingsStore = settingsStore;
+    void forward<T>(Stream<T> stream, VideoEventKind kind) {
+      _subscriptions.add(
+        stream.listen((value) {
+          _events.add(VideoBackendEvent(_sessionId, kind, value as Object));
+        }),
+      );
+    }
+
+    forward(_player.stream.position, VideoEventKind.position);
+    forward(_player.stream.duration, VideoEventKind.duration);
+    forward(_player.stream.buffer, VideoEventKind.buffer);
+    forward(_player.stream.playing, VideoEventKind.playing);
+    forward(_player.stream.buffering, VideoEventKind.buffering);
+    forward(_player.stream.completed, VideoEventKind.completed);
+    forward(_player.stream.error, VideoEventKind.error);
   }
+
+  final _events = StreamController<VideoBackendEvent>.broadcast();
+  final _subscriptions = <StreamSubscription<dynamic>>[];
+  int _sessionId = 0;
+  Future<void>? _disposing;
+  @override
+  Stream<VideoBackendEvent> get events => _events.stream;
+  @override
+  Future<void> stop() => _player.stop();
 
   late final Player _player;
   late final VideoController videoController;
@@ -58,6 +83,7 @@ class MediaKitVideoBackend implements VideoBackend {
 
   @override
   Future<void> open(VideoOpenRequest request) async {
+    _sessionId = request.sessionId;
     await _applyRuntimeOptions(request.url);
     await _player.open(
       Media(
@@ -169,7 +195,15 @@ class MediaKitVideoBackend implements VideoBackend {
   }
 
   @override
-  Future<void> dispose() => _player.dispose();
+  Future<void> dispose() => _disposing ??= _dispose();
+
+  Future<void> _dispose() async {
+    for (final subscription in _subscriptions) {
+      await subscription.cancel();
+    }
+    await _player.dispose();
+    await _events.close();
+  }
 
   @override
   Widget buildView({Key? key}) {

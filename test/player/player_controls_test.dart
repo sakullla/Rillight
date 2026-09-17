@@ -3,7 +3,6 @@ library;
 
 import 'dart:async';
 
-import 'package:fake_async/fake_async.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
@@ -104,6 +103,7 @@ void main() {
     ValueChanged<String>? onOpenItem,
     void Function(String itemId, {String? seasonId})? onOpenItemDetail,
     Duration progressInterval = const Duration(seconds: 10),
+    Duration stoppedTimeout = PlayerController.stoppedDeadline,
     String itemId = 'movie-up',
     PlayerSettingsStore? settingsStore,
   }) async {
@@ -124,6 +124,7 @@ void main() {
       itemId: itemId,
       backend: backend,
       window: window,
+      stoppedTimeout: stoppedTimeout,
       progressInterval: progressInterval,
       settingsStore: settingsStore ?? MemoryPlayerSettingsStore(),
       snapshotStore: snapshots,
@@ -227,7 +228,7 @@ void main() {
     expect(controllerOf(tester).playbackEnded, isFalse);
   });
 
-  testWidgets('pausing on the last frame still shows the replay card', (
+  testWidgets('pausing on the last frame without EOF does not end playback', (
     tester,
   ) async {
     await pumpLoggedIn(tester);
@@ -236,9 +237,9 @@ void main() {
 
     backend.pauseAtEndWithoutComplete(at: controllerOf(tester).duration);
     await tester.pump();
-    await waitFor(tester, find.byKey(PlayerKeys.playbackEnded));
-    expect(find.text('播放结束'), findsOneWidget);
-    expect(find.byKey(PlayerKeys.replay), findsOneWidget);
+    expect(find.byKey(PlayerKeys.playbackEnded), findsNothing);
+    expect(find.byKey(PlayerKeys.replay), findsNothing);
+    expect(controllerOf(tester).playbackEnded, isFalse);
     expect(find.byKey(PlayerKeys.nextEpisode), findsNothing);
     await tester.pump(PlayerController.stoppedDeadline);
     await tester.pump();
@@ -455,11 +456,12 @@ void main() {
   );
 
   test(
-    'close gives up on a hanging Stopped within 3s and keeps the snapshot',
+    'close gives up on a hanging Stopped at its deadline and keeps the snapshot',
     () async {
       var closed = false;
       final controller = await startStandaloneController(
         onClose: () => closed = true,
+        stoppedTimeout: const Duration(milliseconds: 1),
       );
       addTearDown(controller.dispose);
       expect(snapshots.snapshot, isNotNull);
@@ -472,14 +474,10 @@ void main() {
         }
       });
 
-      fakeAsync((async) {
-        final closing = controller.close();
-        expect(closed, isFalse);
-        async.elapse(PlayerController.stoppedDeadline);
-        async.flushMicrotasks();
-        expect(closed, isTrue);
-        closing.ignore();
-      });
+      final closing = controller.close();
+      expect(closed, isFalse);
+      await closing;
+      expect(closed, isTrue);
 
       // 假服务器在挂起前已记录事件:恰一次 Stopped;超时按失败处理,快照保留。
       expect(stoppedEvents(), hasLength(1));
