@@ -1,6 +1,5 @@
-@Tags(['integration'])
-library;
-
+import '../helpers/image_cache_fixture.dart';
+import '../helpers/settle.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
@@ -30,6 +29,7 @@ const _device = EmbyDeviceInfo(
 );
 
 void main() {
+  setUp(isolateImageCache);
   late FakeEmbyServer server;
   late FakeEmbyAdapter adapter;
 
@@ -58,7 +58,7 @@ void main() {
     });
     expect(auth.isLoggedIn, isTrue);
     await tester.pumpWidget(RillightApp(auth: auth));
-    await tester.pumpAndSettle();
+    await settle(tester);
     return auth;
   }
 
@@ -67,7 +67,7 @@ void main() {
       final home = find.byKey(AppShell.homeNavKey);
       if (home.evaluate().isNotEmpty) {
         await tester.tap(home);
-        await tester.pumpAndSettle();
+        await settle(tester);
         return;
       }
       final back = find.byKey(CatalogKeys.back);
@@ -75,7 +75,7 @@ void main() {
         return;
       }
       await tester.tap(back);
-      await tester.pumpAndSettle();
+      await settle(tester);
     }
   }
 
@@ -84,7 +84,7 @@ void main() {
     final tile = find.byKey(CatalogKeys.library(viewId));
     await tester.ensureVisible(tile);
     await tester.tap(tile);
-    await tester.pumpAndSettle();
+    await settle(tester);
   }
 
   testWidgets(
@@ -171,7 +171,7 @@ void main() {
       expect(find.byKey(CatalogKeys.item('movie-up')), findsOneWidget);
 
       await tester.tap(find.byKey(CatalogKeys.item('movie-inception')));
-      await tester.pumpAndSettle();
+      await settle(tester);
       expect(find.text('Inception (2010)'), findsOneWidget);
       expect(
         find.text(
@@ -185,10 +185,10 @@ void main() {
       expect(find.text('Chapter 1'), findsOneWidget);
 
       await _tapDetailBack(tester);
-      await tester.pumpAndSettle();
+      await settle(tester);
       await openLibrary(tester, 'view-tv');
       await tester.tap(find.byKey(CatalogKeys.item('series-friends')));
-      await tester.pumpAndSettle();
+      await settle(tester);
       expect(find.text('老友记 (1994)'), findsOneWidget);
       expect(find.byKey(CatalogKeys.overview), findsOneWidget);
       expect(find.text('简介'), findsNothing);
@@ -215,7 +215,7 @@ void main() {
       final episode = find.byKey(CatalogKeys.episode('episode-friends-s1e1'));
       await tester.ensureVisible(episode);
       await tester.tap(episode);
-      await tester.pumpAndSettle();
+      await settle(tester);
       expect(find.textContaining('The Pilot'), findsWidgets);
       expect(find.byKey(CatalogKeys.overview), findsNothing);
       expect(find.text('简介'), findsNothing);
@@ -238,7 +238,7 @@ void main() {
         find.byKey(CatalogKeys.viewSeries),
       );
       await tapBelowTopBar(tester, find.byKey(CatalogKeys.viewSeries));
-      await tester.pumpAndSettle();
+      await settle(tester);
       expect(find.text('老友记 (1994)'), findsOneWidget);
 
       await goHome(tester);
@@ -246,11 +246,11 @@ void main() {
       final resumeItem = find.byKey(CatalogKeys.item('movie-inception')).first;
       await tester.ensureVisible(resumeItem);
       await tester.tap(resumeItem);
-      await tester.pumpAndSettle();
+      await settle(tester);
       await tapBelowTopBar(tester, find.byKey(CatalogKeys.playedToggle));
-      await tester.pumpAndSettle();
+      await settle(tester);
       await _tapDetailBack(tester);
-      await tester.pumpAndSettle();
+      await settle(tester);
       expect(find.byKey(CatalogKeys.resumeRow), findsNothing);
       await tester.ensureVisible(
         find.byKey(CatalogKeys.item('movie-inception')),
@@ -261,9 +261,9 @@ void main() {
           .where((request) => request.contains('SearchTerm='))
           .length;
       await tester.tap(find.byTooltip('搜索'));
-      await tester.pumpAndSettle();
+      await settle(tester);
       await tester.tap(find.byKey(CatalogKeys.searchSubmit));
-      await tester.pumpAndSettle();
+      await settle(tester);
       expect(find.text('输入片名后搜索'), findsOneWidget);
       expect(find.text('没有结果'), findsNothing);
       expect(
@@ -275,30 +275,31 @@ void main() {
 
       await tester.enterText(find.byKey(CatalogKeys.searchField), 'Inception');
       await tester.tap(find.byKey(CatalogKeys.searchSubmit));
-      await tester.pumpAndSettle();
+      await settle(tester);
       final overlayHit = find.descendant(
         of: find.byType(SearchOverlay),
         matching: find.byKey(CatalogKeys.item('movie-inception')),
       );
       expect(overlayHit, findsOneWidget);
       await tester.tap(overlayHit);
-      await tester.pumpAndSettle();
+      await settle(tester);
       expect(find.byType(SearchOverlay), findsNothing);
       expect(find.text('Inception (2010)'), findsOneWidget);
 
       await _tapDetailBack(tester);
-      await tester.pumpAndSettle();
+      await settle(tester);
       server.searchStatus = 500;
       await tester.tap(find.byTooltip('搜索'));
-      await tester.pumpAndSettle();
+      await settle(tester);
       await tester.enterText(find.byKey(CatalogKeys.searchField), 'Inception');
       await tester.tap(find.byKey(CatalogKeys.searchSubmit));
-      await tester.pumpAndSettle();
+      await settle(tester);
       expect(find.byType(AppErrorView), findsOneWidget);
       expect(find.text('HTTP 500: search failed'), findsOneWidget);
       expect(find.text('没有结果'), findsNothing);
       expect(find.byKey(CatalogKeys.searchNoResults), findsNothing);
     },
+    tags: ['integration'],
   );
 
   test('grid column max extent is at least 180/200/220', () {

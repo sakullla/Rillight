@@ -1,6 +1,5 @@
-@Tags(['integration'])
-library;
-
+import '../helpers/image_cache_fixture.dart';
+import '../helpers/settle.dart';
 import 'dart:async';
 
 import 'package:fake_async/fake_async.dart';
@@ -55,6 +54,7 @@ class _TrackingAuth extends AuthController {
 }
 
 void main() {
+  setUp(isolateImageCache);
   late FakeEmbyServer server;
   late FakeEmbyAdapter adapter;
   late List<String> calls;
@@ -597,16 +597,16 @@ void main() {
       Future<_TrackingAuth> Function()? authFor,
     }) async {
       final auth = await tester.runAsync(authFor ?? loggedInAuth);
-      await tester.pumpWidget(
-        RillightApp(
-          auth: auth!,
-          playerBindings: PlayerBindings(
-            windowHost: hostFor(auth),
-            snapshotStore: MemoryPlaybackSessionSnapshotStore(),
-          ),
+      final app = RillightApp(
+        auth: auth!,
+        playerBindings: PlayerBindings(
+          windowHost: hostFor(auth),
+          snapshotStore: MemoryPlaybackSessionSnapshotStore(),
         ),
       );
-      await tester.pumpAndSettle();
+      app.router.go('/item/movie-up');
+      await tester.pumpWidget(app);
+      await settle(tester);
       return auth;
     }
 
@@ -650,6 +650,7 @@ void main() {
         expect(host.current, isNull);
         expect(storeFor(pid).snapshot, isNotNull);
       },
+      tags: ['integration'],
     );
 
     testWidgets('logout closes the player window before auth.logout', (
@@ -670,10 +671,10 @@ void main() {
       await tester.pump();
 
       await tester.tap(find.byKey(SessionActions.serverMenuKey));
-      await tester.pumpAndSettle();
+      await settle(tester);
       await tester.tap(find.text('退出登录'));
       await pumpUntil(tester, () => !auth.isLoggedIn);
-      await tester.pumpAndSettle();
+      await settle(tester);
 
       expect(auth.isLoggedIn, isFalse);
       expect(
@@ -681,7 +682,7 @@ void main() {
         containsAllInOrder(['requestClose:$pid', 'kill:$pid', 'logout']),
       );
       expect(host.current, isNull);
-    });
+    }, tags: ['integration']);
 
     testWidgets('switching servers closes the player window before switchTo', (
       tester,
@@ -723,10 +724,10 @@ void main() {
       await tester.pump();
 
       await tester.tap(find.byKey(SessionActions.serverMenuKey));
-      await tester.pumpAndSettle();
+      await settle(tester);
       await tester.tap(find.text('另一台'));
       await pumpUntil(tester, () => auth.session?.server.id == other.serverId);
-      await tester.pumpAndSettle();
+      await settle(tester);
 
       expect(auth.session?.server.id, other.serverId);
       expect(
@@ -738,7 +739,7 @@ void main() {
         ]),
       );
       expect(host.current, isNull);
-    });
+    }, tags: ['integration']);
 
     testWidgets('MainWindowCloseGuard closes the player before destroying', (
       tester,

@@ -1,6 +1,4 @@
-@Tags(['integration'])
-library;
-
+import '../helpers/image_cache_fixture.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
@@ -62,6 +60,7 @@ Future<void> _expandMore(WidgetTester tester) async {
 }
 
 void main() {
+  setUp(isolateImageCache);
   late FakeEmbyServer server;
   late FakeEmbyAdapter adapter;
 
@@ -147,6 +146,7 @@ void main() {
       );
       expect(auth.isLoggedIn, isFalse);
     },
+    tags: ['integration'],
   );
 
   testWidgets('two lines can be selected and a failed line stays on connect', (
@@ -224,7 +224,7 @@ void main() {
     expect(find.text('连接失败'), findsNothing);
     expect(auth.isLoggedIn, isFalse);
     expect(auth.client.baseUrl, isNull);
-  });
+  }, tags: ['integration']);
 
   testWidgets('path and User-Agent under 更多 are composed into the saved line', (
     tester,
@@ -253,5 +253,5 @@ void main() {
     expect(server.lastUserAgent, 'CustomUA/1.0');
     expect(auth.client.sessionHeaders['User-Agent'], 'CustomUA/1.0');
     expect(auth.savedServers.single.baseUrl, 'http://emby.test:8096/emby');
-  });
+  }, tags: ['integration']);
 }

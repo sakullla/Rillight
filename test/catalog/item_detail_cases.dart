@@ -1,6 +1,5 @@
-@Tags(['integration'])
-library;
-
+import '../helpers/image_cache_fixture.dart';
+import '../helpers/settle.dart';
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
@@ -54,6 +53,7 @@ class _SilentPlayerHost extends OverlayPlayerWindowHost {
 }
 
 void main() {
+  setUp(isolateImageCache);
   late _DelayedEmbyServer server;
   late FakeEmbyAdapter adapter;
 
@@ -95,8 +95,6 @@ void main() {
           ? const PlayerBindings()
           : PlayerBindings(windowHost: host),
     );
-    await tester.pumpWidget(app);
-    await tester.pumpAndSettle();
     return app;
   }
 
@@ -105,8 +103,9 @@ void main() {
     RillightApp app,
     String itemId,
   ) async {
-    app.router.push(AppRoutes.item(itemId));
-    await tester.pumpAndSettle();
+    app.router.go(AppRoutes.item(itemId));
+    await tester.pumpWidget(app);
+    await settle(tester);
     expect(find.byType(ItemDetailPage), findsOneWidget);
     expect(find.byKey(ItemDetailPage.headerKey), findsOneWidget);
   }
@@ -121,11 +120,11 @@ void main() {
     await tester.ensureVisible(play);
     await tester.pump();
     await tester.tap(play);
-    await tester.pumpAndSettle();
+    await settle(tester);
 
     expect(app.router.state.uri.path, AppRoutes.item(_series));
     expect(host.current?.itemId, id);
-  });
+  }, tags: ['integration']);
 
   testWidgets('episode card check marks the episode played', (tester) async {
     final app = await pumpApp(tester);
@@ -138,7 +137,7 @@ void main() {
     expect(tester.widget<IconButton>(toggle).tooltip, '标记已看');
 
     await tester.tap(toggle);
-    await tester.pumpAndSettle();
+    await settle(tester);
 
     expect(
       server.requests.any(
@@ -153,7 +152,7 @@ void main() {
           .tooltip,
       '标记未看',
     );
-  });
+  }, tags: ['integration']);
 
   testWidgets('load more appends the next episode window without duplicates', (
     tester,
@@ -184,14 +183,14 @@ void main() {
 
     await ensureVisibleBelowTopBar(tester, more);
     await tapBelowTopBar(tester, more);
-    await tester.pumpAndSettle();
+    await settle(tester);
 
     ids = _episodeCardIds(tester);
     expect(ids.length, 100);
     expect(ids.toSet().length, 100);
     expect(ids.last, 'bulk-e100');
     expect(find.byKey(CatalogKeys.episodesLoadMore), findsNothing);
-  });
+  }, tags: ['integration']);
 
   testWidgets('view series from an episode opens that season', (tester) async {
     server.setSeasons('series-friends', [
@@ -226,7 +225,7 @@ void main() {
     await openItem(tester, app, 'episode-friends-s4e17');
     await ensureVisibleBelowTopBar(tester, find.byKey(CatalogKeys.viewSeries));
     await tapBelowTopBar(tester, find.byKey(CatalogKeys.viewSeries));
-    await tester.pumpAndSettle();
+    await settle(tester);
 
     expect(app.router.state.uri.path, AppRoutes.item(_series));
     expect(app.router.state.uri.queryParameters['season'], 'season-friends-2');
@@ -245,7 +244,7 @@ void main() {
       find.byKey(CatalogKeys.episode('episode-friends-s1e1')),
       findsNothing,
     );
-  });
+  }, tags: ['integration']);
 
   testWidgets('episode detail request asks for the People field', (
     tester,
@@ -264,7 +263,7 @@ void main() {
       detailRequests.every((request) => request.contains('People')),
       isTrue,
     );
-  });
+  }, tags: ['integration']);
 }
 
 const _episodeKeyPrefix = 'catalog-episode-';

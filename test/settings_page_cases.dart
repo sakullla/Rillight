@@ -1,3 +1,4 @@
+import 'helpers/image_cache_fixture.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
@@ -6,6 +7,7 @@ import 'package:rillight/player/player_runtime_options.dart';
 import 'package:rillight/player/player_settings.dart';
 
 void main() {
+  setUp(isolateImageCache);
   Future<void> pumpPage(
     WidgetTester tester, {
     required PlayerSettingsStore store,
@@ -58,7 +60,7 @@ void main() {
           .value,
       HardwareDecoderBackend.auto,
     );
-  });
+  }, tags: ['integration']);
 
   testWidgets('changing the disk cache limit persists and echoes', (
     tester,
@@ -89,7 +91,7 @@ void main() {
           .value,
       1024,
     );
-  });
+  }, tags: ['integration']);
 
   testWidgets('restore defaults writes explicit defaults', (tester) async {
     final store = MemoryPlayerSettingsStore(
@@ -111,5 +113,5 @@ void main() {
     expect(settings.hardwareDecoder, HardwareDecoderBackend.auto);
     // 音量不属于本页管理,恢复默认不覆盖已存音量。
     expect(settings.volume, 40);
-  });
+  }, tags: ['integration']);
 }

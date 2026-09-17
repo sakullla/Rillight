@@ -1,17 +1,16 @@
-@Tags(['integration'])
-library;
-
+import '../helpers/image_cache_fixture.dart';
+import '../helpers/settle.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
+import 'package:rillight/home/home_hero.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
-import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/library/item_detail_page.dart';
 import 'package:rillight/player/playback_models.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
@@ -33,6 +32,8 @@ const _device = EmbyDeviceInfo(
 );
 
 void main() {
+  setUp(isolateImageCache);
+  late RillightApp app;
   late FakeEmbyServer server;
   late FakeEmbyAdapter adapter;
   late FakeVideoBackend backend;
@@ -40,11 +41,16 @@ void main() {
   late MemoryPlaybackSessionSnapshotStore snapshots;
 
   setUp(() {
+    HomeHero.autoAdvanceEnabled = false;
     server = FakeEmbyServer();
     adapter = FakeEmbyAdapter([server]);
     backend = FakeVideoBackend();
     window = PlayerWindow();
     snapshots = MemoryPlaybackSessionSnapshotStore();
+  });
+
+  tearDown(() {
+    HomeHero.autoAdvanceEnabled = true;
   });
 
   PlayerBindings bindings({
@@ -82,17 +88,14 @@ void main() {
       );
     });
     expect(auth.isLoggedIn, isTrue);
-    await tester.pumpWidget(
-      RillightApp(
-        auth: auth,
-        playerBindings: bindings(
-          hideAfter: hideAfter,
-          progressInterval: progressInterval,
-          settingsStore: settingsStore ?? MemoryPlayerSettingsStore(),
-        ),
+    app = RillightApp(
+      auth: auth,
+      playerBindings: bindings(
+        hideAfter: hideAfter,
+        progressInterval: progressInterval,
+        settingsStore: settingsStore ?? MemoryPlayerSettingsStore(),
       ),
     );
-    await tester.pumpAndSettle();
     return auth;
   }
 
@@ -162,10 +165,9 @@ void main() {
   }
 
   Future<void> openPlayable(WidgetTester tester, String itemId) async {
-    final item = find.byKey(CatalogKeys.item(itemId)).first;
-    await tester.ensureVisible(item);
-    await tester.tap(item);
-    await tester.pumpAndSettle();
+    app.router.go('/item/$itemId');
+    await tester.pumpWidget(app);
+    await settle(tester);
     await tester.tap(find.byKey(PlayerKeys.open));
     await tester.pump();
     await waitFor(tester, find.byType(PlayerPage));
@@ -196,9 +198,9 @@ void main() {
 
     failing.failSubtitleOff = true;
     await tester.tap(find.byTooltip('字幕'));
-    await tester.pumpAndSettle();
+    await settle(tester);
     await tester.tap(find.widgetWithText(CheckedPopupMenuItem<int>, '关闭字幕'));
-    await tester.pumpAndSettle();
+    await settle(tester);
 
     final banner = find.byKey(const ValueKey('player-track-failure'));
     expect(banner, findsOneWidget);
@@ -213,13 +215,13 @@ void main() {
 
     failing.failSubtitleOff = false;
     await tester.tap(find.byTooltip('字幕'));
-    await tester.pumpAndSettle();
+    await settle(tester);
     await tester.tap(find.widgetWithText(CheckedPopupMenuItem<int>, '关闭字幕'));
-    await tester.pumpAndSettle();
+    await settle(tester);
     expect(controllerOf(tester).subtitleStreamIndex, isNull);
     expect(failing.subtitleOff, isTrue);
     expect(banner, findsNothing);
-  });
+  }, tags: ['integration']);
 
   testWidgets('saved progress resumes without a continue-or-restart prompt', (
     tester,
@@ -240,7 +242,7 @@ void main() {
       server.playbackEvents.map((event) => event.kind),
       contains('Playing'),
     );
-  });
+  }, tags: ['integration']);
 
   testWidgets('movie end shows replay card instead of a blank frame', (
     tester,
@@ -264,7 +266,7 @@ void main() {
     await waitFor(tester, find.byKey(PlayerKeys.playPause));
     expect(backend.openCount, opens + 1);
     expect(controllerOf(tester).playbackEnded, isFalse);
-  });
+  }, tags: ['integration']);
 
   testWidgets('pausing on the last frame without EOF does not end playback', (
     tester,
@@ -281,7 +283,7 @@ void main() {
     expect(find.byKey(PlayerKeys.nextEpisode), findsNothing);
     await tester.pump(PlayerController.stoppedDeadline);
     await tester.pump();
-  });
+  }, tags: ['integration']);
 
   testWidgets('view series from the ended card opens series detail', (
     tester,
@@ -304,7 +306,7 @@ void main() {
     expect(app.router.state.uri.queryParameters['season'], 'season-friends-1');
     await tester.pump(PlayerController.stoppedDeadline);
     await tester.pump();
-  });
+  }, tags: ['integration']);
 
   test(
     'openEndedSeries opens series detail instead of playing the series',
@@ -468,6 +470,7 @@ void main() {
       expect(find.byKey(PlayerKeys.progressSyncFailed), findsNothing);
       expect(controllerOf(tester).progressSyncPersistent, isFalse);
     },
+    tags: ['integration'],
   );
 
   test(

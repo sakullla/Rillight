@@ -36,6 +36,9 @@ jobs:
       - name: Check formatting
         run: dart format --output=none --set-exit-if-changed lib test packages/rillight_player/lib packages/rillight_player/test
 
+      - name: Check test collection
+        run: python3 tool/test_execution/generate_suites.py --check
+
       - name: Analyze
         run: flutter analyze
 

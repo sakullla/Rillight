@@ -1,6 +1,5 @@
-@Tags(['integration'])
-library;
-
+import '../helpers/image_cache_fixture.dart';
+import '../helpers/settle.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
@@ -70,6 +69,7 @@ class _FailingPlayerWindowHost extends PlayerWindowHost {
 }
 
 void main() {
+  setUp(isolateImageCache);
   late FakeEmbyServer server;
   late FakeEmbyAdapter adapter;
   late FakeVideoBackend backend;
@@ -121,7 +121,7 @@ void main() {
         playerBindings: bindings(windowHost: windowHost),
       ),
     );
-    await tester.pumpAndSettle();
+    await settle(tester);
     return auth;
   }
 
@@ -152,16 +152,16 @@ void main() {
     );
     if (homeTitle.evaluate().isNotEmpty) {
       await tester.tap(homeTitle);
-      await tester.pumpAndSettle();
+      await settle(tester);
     }
     final movies = find.byKey(CatalogKeys.library('view-movies'));
     await tester.ensureVisible(movies);
     await tester.tap(movies);
-    await tester.pumpAndSettle();
+    await settle(tester);
     final item = find.byKey(CatalogKeys.item(itemId)).first;
     await tester.ensureVisible(item);
     await tester.tap(item);
-    await tester.pumpAndSettle();
+    await settle(tester);
     await tester.tap(find.byKey(PlayerKeys.open));
     await tester.pump();
   }
@@ -214,11 +214,11 @@ void main() {
       expect(backCenter.dy, greaterThan(bar.top));
       expect(backCenter.dy, lessThan(bar.bottom));
       await tester.tap(back);
-      await tester.pumpAndSettle();
+      await settle(tester);
       final inception = find.byKey(CatalogKeys.item('movie-inception'));
       await tester.ensureVisible(inception.first);
       await tester.tap(inception.first);
-      await tester.pumpAndSettle();
+      await settle(tester);
       await tester.tap(find.byKey(PlayerKeys.open));
       await tester.pump();
       await waitFor(tester, find.byType(PlayerPage));
@@ -230,6 +230,7 @@ void main() {
       expect(app.router.state.uri.path.contains('/play'), isFalse);
       expect(find.byType(ItemDetailPage), findsOneWidget);
     },
+    tags: ['integration'],
   );
 
   test(
@@ -263,5 +264,6 @@ void main() {
       expect(find.byType(PlayerPage), findsNothing);
       expect(find.byType(ItemDetailPage), findsOneWidget);
     },
+    tags: ['integration'],
   );
 }

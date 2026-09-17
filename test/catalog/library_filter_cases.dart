@@ -1,6 +1,5 @@
-@Tags(['integration'])
-library;
-
+import '../helpers/image_cache_fixture.dart';
+import '../helpers/settle.dart';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -8,13 +7,11 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
-import 'package:rillight/app/app_shell.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
-import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/library/poster_card.dart';
 import 'package:rillight/library/shelf_grid_page.dart';
 
@@ -208,8 +205,10 @@ class _FilteringEmbyServer extends FakeEmbyServer {
 }
 
 void main() {
+  setUp(isolateImageCache);
   late _FilteringEmbyServer server;
   late FakeEmbyAdapter adapter;
+  late RillightApp app;
 
   setUp(() {
     server = _FilteringEmbyServer();
@@ -230,43 +229,23 @@ void main() {
       );
     });
     expect(auth.isLoggedIn, isTrue);
-    await tester.pumpWidget(RillightApp(auth: auth));
-    await tester.pumpAndSettle();
+    app = RillightApp(auth: auth);
     return auth;
   }
 
-  Future<void> goHome(WidgetTester tester) async {
-    for (var i = 0; i < 8; i++) {
-      final home = find.byKey(AppShell.homeNavKey);
-      if (home.evaluate().isNotEmpty) {
-        await tester.tap(home);
-        await tester.pumpAndSettle();
-        return;
-      }
-      final back = find.byKey(CatalogKeys.back);
-      if (back.evaluate().isEmpty) {
-        return;
-      }
-      await tester.tap(back);
-      await tester.pumpAndSettle();
-    }
-  }
-
   Future<void> openLibrary(WidgetTester tester, String viewId) async {
-    await goHome(tester);
-    final tile = find.byKey(CatalogKeys.library(viewId));
-    await tester.ensureVisible(tile);
-    await tester.tap(tile);
-    await tester.pumpAndSettle();
+    app.router.go('/library/$viewId');
+    await tester.pumpWidget(app);
+    await settle(tester);
   }
 
   Future<void> tapFilter(WidgetTester tester, String dimension) async {
     if (find.byKey(gridFilterKey(dimension)).evaluate().isEmpty) {
       await tapBelowTopBar(tester, find.byKey(gridFilterMenuKey));
-      await tester.pumpAndSettle();
+      await settle(tester);
     }
     await tester.tap(find.byKey(gridFilterKey(dimension)));
-    await tester.pumpAndSettle();
+    await settle(tester);
   }
 
   Future<void> chooseOption(
@@ -276,9 +255,9 @@ void main() {
   ) async {
     // 面板为草稿式:点选项只暂存,点「确定」才生效并关闭面板。
     await tester.tap(find.byKey(gridFilterOption(dimension, value)));
-    await tester.pumpAndSettle();
+    await settle(tester);
     await tester.tap(find.widgetWithText(TextButton, '确定'));
-    await tester.pumpAndSettle();
+    await settle(tester);
   }
 
   List<String> posterNames(WidgetTester tester) {
@@ -330,9 +309,9 @@ void main() {
     final before = posterNames(tester);
 
     await tapBelowTopBar(tester, find.byKey(gridFilterMenuKey));
-    await tester.pumpAndSettle();
+    await settle(tester);
     await tester.tap(find.byKey(gridFilterOption('watch', 'IsPlayed')));
-    await tester.pumpAndSettle();
+    await settle(tester);
 
     // 未点确定:网格不变,面板仍开着。
     expect(posterNames(tester), before);
@@ -340,17 +319,17 @@ void main() {
 
     // 取消:丢弃草稿并关闭,网格仍不变。
     await tester.tap(find.widgetWithText(TextButton, '取消'));
-    await tester.pumpAndSettle();
+    await settle(tester);
     expect(find.byKey(gridFilterPanelKey), findsNothing);
     expect(posterNames(tester), before);
 
     // 重开面板,选择后点确定才生效。
     await tapBelowTopBar(tester, find.byKey(gridFilterMenuKey));
-    await tester.pumpAndSettle();
+    await settle(tester);
     await tester.tap(find.byKey(gridFilterOption('watch', 'IsPlayed')));
-    await tester.pumpAndSettle();
+    await settle(tester);
     await tester.tap(find.widgetWithText(TextButton, '确定'));
-    await tester.pumpAndSettle();
+    await settle(tester);
     expect(find.byKey(gridFilterPanelKey), findsNothing);
     expect(posterNames(tester), isNot(before));
 
@@ -380,7 +359,7 @@ void main() {
     );
 
     await tapBelowTopBar(tester, find.byKey(gridFilterClearKey));
-    await tester.pumpAndSettle();
+    await settle(tester);
     expect(posterNames(tester), containsAll(['未分类型电影', '新电影', '新剧集', '老剧集']));
     expect(
       server.requests.last,
@@ -392,5 +371,5 @@ void main() {
       reason: '清除后请求回到无筛选形态',
     );
     expect(find.byKey(gridFilterClearKey), findsNothing);
-  });
+  }, tags: ['integration']);
 }

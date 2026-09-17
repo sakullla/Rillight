@@ -1,6 +1,5 @@
-@Tags(['integration'])
-library;
-
+import 'helpers/image_cache_fixture.dart';
+import 'helpers/settle.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -35,11 +34,12 @@ const _device = EmbyDeviceInfo(
 );
 
 void main() {
+  setUp(isolateImageCache);
   group('app shell integration', () {
     testWidgets('unsigned connect shell, theme, and deep link', (tester) async {
       final app = RillightApp();
       await tester.pumpWidget(app);
-      await tester.pumpAndSettle();
+      await settle(tester);
 
       expect(find.byType(NavigationRail), findsNothing);
       expect(find.byKey(AppShell.topBarKey), findsNothing);
@@ -56,11 +56,11 @@ void main() {
       );
 
       app.router.go('/library/view-movies');
-      await tester.pumpAndSettle();
+      await settle(tester);
       expect(find.text('连接服务器'), findsOneWidget);
       expect(find.byKey(AppShell.topBarKey), findsNothing);
       expect(find.byType(LibraryPage), findsNothing);
-    });
+    }, tags: ['integration']);
   });
 
   testWidgets('AppErrorView shows failure message and retry', (tester) async {
@@ -129,7 +129,7 @@ void main() {
         expect(auth.session?.server.name, '第二台');
 
         await tester.pumpWidget(RillightApp(auth: auth));
-        await tester.pumpAndSettle();
+        await settle(tester);
 
         expect(find.byType(NavigationRail), findsNothing);
         expect(find.byKey(AppShell.topBarKey), findsOneWidget);
@@ -141,7 +141,7 @@ void main() {
           find.byKey(CatalogKeys.library('view-movies')),
         );
         await tester.tap(find.byKey(CatalogKeys.library('view-movies')));
-        await tester.pumpAndSettle();
+        await settle(tester);
 
         bool isHomeCatalog(String request) {
           return request.contains('Items/Resume') ||
@@ -153,9 +153,9 @@ void main() {
         final firstHomeBefore = first.requests.where(isHomeCatalog).length;
 
         await tester.tap(find.byKey(SessionActions.serverMenuKey));
-        await tester.pumpAndSettle();
+        await settle(tester);
         await tester.tap(find.textContaining('灯川测试').last);
-        await tester.pumpAndSettle();
+        await settle(tester);
 
         expect(auth.session?.server.name, '灯川测试');
         expect(find.text('Inception'), findsWidgets);
@@ -167,6 +167,7 @@ void main() {
           greaterThan(firstHomeBefore),
         );
       },
+      tags: ['integration'],
     );
 
     testWidgets(
@@ -175,7 +176,7 @@ void main() {
         final auth = await _connect(tester);
         final app = RillightApp(auth: auth);
         await tester.pumpWidget(app);
-        await tester.pumpAndSettle();
+        await settle(tester);
 
         expect(find.byType(NavigationRail), findsNothing);
         expect(find.byKey(AppShell.topBarKey), findsOneWidget);
@@ -188,7 +189,7 @@ void main() {
         );
 
         await tester.tap(find.byKey(AppShell.libraryNavKey('view-movies')));
-        await tester.pumpAndSettle();
+        await settle(tester);
         expect(find.byType(LibraryPage), findsOneWidget);
         expect(
           GoRouter.of(tester.element(find.byType(LibraryPage))).state.uri.path,
@@ -196,7 +197,7 @@ void main() {
         );
 
         await tester.tap(find.byTooltip('搜索'));
-        await tester.pumpAndSettle();
+        await settle(tester);
         expect(find.byType(SearchOverlay), findsOneWidget);
         expect(find.byType(SearchPage), findsOneWidget);
         expect(find.byType(LibraryPage), findsOneWidget);
@@ -208,24 +209,24 @@ void main() {
         );
 
         await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-        await tester.pumpAndSettle();
+        await settle(tester);
         expect(find.byType(SearchOverlay), findsNothing);
         expect(find.byType(LibraryPage), findsOneWidget);
 
         await tester.tap(find.byTooltip('搜索'));
-        await tester.pumpAndSettle();
+        await settle(tester);
         expect(find.byType(SearchOverlay), findsOneWidget);
 
         await tester.tap(find.byKey(SearchOverlay.closeKey));
-        await tester.pumpAndSettle();
+        await settle(tester);
         expect(find.byType(SearchOverlay), findsNothing);
 
         await tester.tap(find.byKey(AppShell.homeNavKey));
-        await tester.pumpAndSettle();
+        await settle(tester);
         expect(find.byType(HomePage), findsOneWidget);
 
         app.router.push(AppRoutes.item('movie-inception'));
-        await tester.pumpAndSettle();
+        await settle(tester);
         expect(find.byType(ItemDetailPage), findsOneWidget);
 
         final back = find.byKey(CatalogKeys.back);
@@ -250,11 +251,12 @@ void main() {
         expect(tester.getSize(back), const Size(40, 40));
 
         await tester.tap(back);
-        await tester.pumpAndSettle();
+        await settle(tester);
         expect(find.byType(ItemDetailPage), findsNothing);
         expect(find.byType(HomePage), findsOneWidget);
         expect(find.byKey(CatalogKeys.back), findsNothing);
       },
+      tags: ['integration'],
     );
 
     testWidgets('top bar keeps five libraries and puts the rest in overflow', (
@@ -275,19 +277,19 @@ void main() {
         ),
       );
       await tester.pumpWidget(RillightApp(auth: auth));
-      await tester.pumpAndSettle();
+      await settle(tester);
 
       expect(find.byKey(AppShell.libraryNavKey('view-lib-0')), findsOneWidget);
       expect(find.byKey(AppShell.overflowNavKey), findsOneWidget);
       expect(find.byKey(AppShell.libraryNavKey('view-lib-7')), findsNothing);
 
       await tester.tap(find.byKey(AppShell.overflowNavKey));
-      await tester.pumpAndSettle();
+      await settle(tester);
       expect(find.text('电视-7'), findsOneWidget);
       expect(find.text('自定义导航'), findsOneWidget);
 
       await tester.tap(find.text('自定义导航'));
-      await tester.pumpAndSettle();
+      await settle(tester);
       expect(find.text('自定义导航'), findsWidgets);
       expect(find.text('保存'), findsOneWidget);
 
@@ -314,7 +316,7 @@ void main() {
         tester.getTopLeft(dialogText('电视-1')).dy,
         lessThan(tester.getTopLeft(dialogText('电视-0')).dy),
       );
-    });
+    }, tags: ['integration']);
   });
 }
 

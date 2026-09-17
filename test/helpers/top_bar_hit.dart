@@ -1,3 +1,4 @@
+import 'settle.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app_shell.dart';
@@ -24,7 +25,7 @@ Future<void> ensureVisibleBelowTopBar(
   final scrollable = Scrollable.maybeOf(context);
   if (scrollable == null) {
     await tester.ensureVisible(finder);
-    await tester.pumpAndSettle();
+    await settle(tester);
     return;
   }
   final viewport = scrollable.position.viewportDimension;
@@ -36,5 +37,5 @@ Future<void> ensureVisibleBelowTopBar(
     alignment: alignment.clamp(0.0, 1.0).toDouble(),
     duration: Duration.zero,
   );
-  await tester.pumpAndSettle();
+  await settle(tester);
 }

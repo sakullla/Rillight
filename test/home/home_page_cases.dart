@@ -1,6 +1,5 @@
-@Tags(['integration'])
-library;
-
+import '../helpers/image_cache_fixture.dart';
+import '../helpers/settle.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
@@ -28,6 +27,7 @@ const _device = EmbyDeviceInfo(
 );
 
 void main() {
+  setUp(isolateImageCache);
   late FakeEmbyServer server;
   late FakeEmbyAdapter adapter;
 
@@ -61,7 +61,7 @@ void main() {
   Future<AuthController> pumpLoggedIn(WidgetTester tester) async {
     final auth = await connect(tester);
     await tester.pumpWidget(RillightApp(auth: auth));
-    await tester.pumpAndSettle();
+    await settle(tester);
     return auth;
   }
 
@@ -167,11 +167,12 @@ void main() {
       }
       await scrollBelowTopBar(tester, find.byKey(homeRefreshKey));
       await tester.tap(find.byKey(homeRefreshKey));
-      await tester.pumpAndSettle();
+      await settle(tester);
 
       expect(resumeRequests(), greaterThan(before));
       expect(find.text('手动刷新后的电影'), findsWidgets);
     },
+    tags: ['integration'],
   );
 
   testWidgets(
@@ -193,9 +194,10 @@ void main() {
       final before = resumeRequests();
       await scrollBelowTopBar(tester, find.byKey(homeRefreshKey));
       await tester.tap(find.byKey(homeRefreshKey));
-      await tester.pumpAndSettle();
+      await settle(tester);
       expect(resumeRequests(), greaterThan(before));
     },
+    tags: ['integration'],
   );
 
   testWidgets(
@@ -214,6 +216,7 @@ void main() {
         findsOneWidget,
       );
     },
+    tags: ['integration'],
   );
 
   testWidgets(
@@ -264,5 +267,6 @@ void main() {
       await tester.pump(const Duration(milliseconds: 50));
       await tester.pump(const Duration(milliseconds: 50));
     },
+    tags: ['integration'],
   );
 }

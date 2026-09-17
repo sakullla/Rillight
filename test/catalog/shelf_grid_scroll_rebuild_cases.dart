@@ -1,6 +1,5 @@
-@Tags(['integration'])
-library;
-
+import '../helpers/image_cache_fixture.dart';
+import '../helpers/settle.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
@@ -9,7 +8,6 @@ import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
-import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/home_hero.dart';
 import 'package:rillight/library/poster_card.dart';
 import 'package:rillight/library/shelf_grid_page.dart';
@@ -25,6 +23,7 @@ const _device = EmbyDeviceInfo(
 );
 
 void main() {
+  setUp(isolateImageCache);
   late FakeEmbyServer server;
 
   setUp(() {
@@ -68,12 +67,10 @@ void main() {
         password: 'correct-horse',
       );
     });
-    await tester.pumpWidget(RillightApp(auth: auth));
-    await tester.pumpAndSettle();
-    final tile = find.byKey(CatalogKeys.library('view-movies'));
-    await tester.ensureVisible(tile);
-    await tester.tap(tile);
-    await tester.pumpAndSettle();
+    final app = RillightApp(auth: auth);
+    app.router.go('/library/view-movies');
+    await tester.pumpWidget(app);
+    await settle(tester);
     expect(find.byType(ShelfGridPage), findsOneWidget);
   }
 
@@ -123,5 +120,5 @@ void main() {
       return box.localToGlobal(Offset.zero).dy == firstTop;
     }).length;
     expect(firstRow, delegate.crossAxisCount);
-  });
+  }, tags: ['integration']);
 }
