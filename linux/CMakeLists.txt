@@ -126,3 +126,20 @@ if(NOT CMAKE_BUILD_TYPE MATCHES "Debug")
   install(FILES "${AOT_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
     COMPONENT Runtime)
 endif()
+
+# Bundle the fixed source-built media stack on every normal Flutter install.
+# The checker patches every ELF RUNPATH, including plugins and transitive libs.
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+set(RILLIGHT_MPV_PREFIX "$ENV{RILLIGHT_MPV_PREFIX}" CACHE PATH "Fixed libmpv build prefix")
+if(NOT EXISTS "${RILLIGHT_MPV_PREFIX}/rillight-source-versions.txt")
+  message(FATAL_ERROR "Build packages/rillight_player/native/build_linux.sh and set RILLIGHT_MPV_PREFIX and PKG_CONFIG_PATH to that prefix")
+endif()
+install(CODE "
+  execute_process(COMMAND \"${Python3_EXECUTABLE}\"
+    \"${CMAKE_CURRENT_SOURCE_DIR}/../tool/linux_release_checks.py\" bundle
+    \"${RILLIGHT_MPV_PREFIX}\" \"${CMAKE_INSTALL_PREFIX}\"
+    RESULT_VARIABLE bundle_status)
+  if(NOT bundle_status EQUAL 0)
+    message(FATAL_ERROR \"Linux native bundle verification failed\")
+  endif()
+" COMPONENT Runtime)

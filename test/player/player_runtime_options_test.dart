@@ -35,7 +35,7 @@ void main() {
       );
       expect(properties['demuxer-max-bytes'], '${1024 * 1024 * 1024}');
       expect(
-        properties['demuxer-back-playback-bytes'],
+        properties['demuxer-max-back-bytes'],
         '${(1024 * 1024 * 1024) ~/ 2}',
       );
     });
@@ -73,7 +73,7 @@ void main() {
         '${PlayerRuntimeDefaults.hlsDemuxerMaxBytes}',
       );
       expect(
-        properties['demuxer-back-playback-bytes'],
+        properties['demuxer-max-back-bytes'],
         '${PlayerRuntimeDefaults.hlsDemuxerBackBytes}',
       );
       // 缓冲目录与磁盘缓存仍开启。
@@ -101,7 +101,7 @@ void main() {
     test('windows defaults to d3d11va-copy and never overrides vo', () {
       final properties = build(platform: TargetPlatform.windows);
       expect(properties['hwdec'], 'd3d11va-copy');
-      // media_kit 的 VideoController 依赖 vo=libmpv 渲染,不得覆盖。
+      // 自有视频插件依赖 vo=libmpv 渲染,不得覆盖。
       expect(properties.containsKey('vo'), isFalse);
     });
 

@@ -76,12 +76,17 @@ static void Update(void* data) { [(__bridge RillightSurface*)data schedule]; }
       GLuint image = 0, fbo = 0;
       NSString* failure = nil;
       if (allocated == kCVReturnSuccess) {
+        glActiveTexture(GL_TEXTURE0);
         glGenTextures(1, &image); glBindTexture(GL_TEXTURE_RECTANGLE, image);
         CGLError bound = CGLTexImageIOSurface2D(self->context.CGLContextObj, GL_TEXTURE_RECTANGLE, GL_RGBA8, w, h, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, CVPixelBufferGetIOSurface(buffer), 0);
         glGenFramebuffers(1, &fbo); glBindFramebuffer(GL_FRAMEBUFFER, fbo);
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_RECTANGLE, image, 0);
         if (bound != kCGLNoError || glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) failure = @"IOSurface framebuffer creation failed";
         else {
+          // libmpv expects standard texture/FBO bindings on API entry; the
+          // target FBO itself is supplied explicitly in the render parameters.
+          glBindTexture(GL_TEXTURE_RECTANGLE, 0);
+          glBindFramebuffer(GL_FRAMEBUFFER, 0);
           // control.dart enforces video-timing-offset=0 before initialization.
           mpv_opengl_fbo target{static_cast<int>(fbo), w, h, 0}; int flip = 0, block = 0;
           mpv_render_frame_info info{};

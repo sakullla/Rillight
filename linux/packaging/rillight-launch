@@ -1,0 +1,51 @@
+#!/bin/sh
+# Desktop entry and terminal launch share the same dependency diagnostics.
+set -u
+unset LD_LIBRARY_PATH LD_PRELOAD LD_AUDIT
+umask 077
+app_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+state_dir=${XDG_STATE_HOME:-"$HOME/.local/state"}/rillight
+mkdir -p "$state_dir" || exit 1
+log="$state_dir/launch.log"
+if [ -f "$log" ]; then mv -f "$log" "$state_dir/launch.previous.log"; fi
+printf 'Rillight launch %s\n' "$(date -Iseconds)" > "$log"
+failure=''
+if [ ! -x "$app_dir/rillight" ]; then failure='缺少主程序或没有执行权限。'; fi
+if [ ! -f "$app_dir/lib/libmpv.so.2" ]; then failure='安装包缺少 libmpv.so.2，请重新安装。'; fi
+if [ -n "$failure" ]; then printf '%s\n' "$failure" >> "$log"; fi
+if ! command -v ldd >/dev/null 2>&1; then
+  failure='缺少系统诊断工具 ldd（libc-bin）。'
+else
+  # Check every plugin as well as the executable: RUNPATH is not transitive.
+  for binary in "$app_dir/rillight" "$app_dir"/lib/*.so*; do
+    [ -f "$binary" ] || continue
+    # An unreferenced old ABI1 file does not affect this ABI2 application.
+    # Actual ABI1 consumers are still detected by their ldd dependency lists.
+    case "$binary" in */libmpv.so.1*) continue;; esac
+    printf '\n%s\n' "$binary" >> "$log"
+    report=$(LC_ALL=C ldd "$binary" 2>&1)
+    status=$?
+    printf '%s\n' "$report" >> "$log"
+    missing=$(printf '%s\n' "$report" | sed -n 's/^[[:space:]]*\([^[:space:]]*\)[[:space:]]*=>[[:space:]]*not found.*/\1/p')
+    if [ -n "$missing" ]; then failure="缺少共享库：$missing"; fi
+    case "$report" in *'libmpv.so.1'*) failure='播放组件仍依赖旧版 libmpv.so.1，请重新安装当前版本。';; esac
+    case "$report" in *'not a dynamic executable'*|*'statically linked'*) status=0;; esac
+    if [ "$status" -ne 0 ]; then failure='无法加载程序或播放组件，请查看诊断日志。'; fi
+  done
+fi
+if [ -n "$failure" ]; then
+  printf '\n%s\n' "$failure" >> "$log"
+  message="$failure
+请重新安装最新的 Rillight 软件包，并使用系统软件管理器修复依赖。
+诊断日志：$log"
+  if command -v zenity >/dev/null 2>&1; then
+    # GOption rejects Chinese arguments in a plain C locale (e.g. a minimal
+    # container). Keep the diagnostic UTF-8 without changing the app's locale.
+    LC_ALL=C.UTF-8 zenity --error --title='Rillight 启动失败' --no-markup --ok-label='确定' --text="$message" 2>> "$log" || true
+  elif command -v notify-send >/dev/null 2>&1; then
+    notify-send 'Rillight 启动失败' "$message" 2>> "$log" || true
+  fi
+  printf '%s\n' "$message" >&2
+  exit 1
+fi
+exec "$app_dir/rillight" "$@" >> "$log" 2>&1

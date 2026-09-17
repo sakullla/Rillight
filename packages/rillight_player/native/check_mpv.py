@@ -1,6 +1,7 @@
 """Check the loaded library version; pkg-config's version is only its C API."""
 import ctypes
 import json
+from pathlib import Path
 import re
 import sys
 
@@ -33,5 +34,11 @@ try:
     match = re.search(r'(\d+)\.(\d+)\.(\d+)', result['mpv-version'])
     if not match or tuple(map(int, match.groups())) < (0, 41, 0):
         raise RuntimeError('mpv 0.41.0 or newer is required')
+    ffmpeg = result['ffmpeg-version']
+    release = re.search(r'(\d+)\.(\d+)\.(\d+)', ffmpeg)
+    manifest = json.loads((Path(__file__).parent / 'dependencies.json').read_text())
+    pinned_git = manifest['windows']['mpv']['ffmpeg']
+    if not ((release and tuple(map(int, release.groups())) >= (9, 0, 1)) or ffmpeg == pinned_git):
+        raise RuntimeError(f'FFmpeg 9.0.1 or the locked newer git build is required; loaded {ffmpeg}')
 finally:
     library.mpv_terminate_destroy(player)

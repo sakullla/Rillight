@@ -5,6 +5,32 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/player/player_settings.dart';
 
 void main() {
+  test('concurrent stores merge and readers only see complete JSON', () async {
+    final directory = await Directory.systemTemp.createTemp(
+      'rillight-settings-atomic-',
+    );
+    addTearDown(() => directory.delete(recursive: true));
+    final file = File('${directory.path}/settings.json');
+    await file.writeAsString('{"futureField":true,"volume":0}');
+    final writes = [
+      for (var i = 0; i < 20; i++)
+        FilePlayerSettingsStore(file).write(
+          i.isEven
+              ? PlayerSettings(volume: i)
+              : PlayerSettings(diskCacheLimitMiB: 128 + i),
+        ),
+    ];
+    final writing = Future.wait(writes);
+    for (var i = 0; i < 20; i++) {
+      final current = await FilePlayerSettingsStore(file).read();
+      expect(current.volume, inInclusiveRange(0, 18));
+    }
+    await writing;
+    final result = jsonDecode(await file.readAsString()) as Map;
+    expect(result['volume'], 18);
+    expect(result['diskCacheLimitMiB'], 147);
+    expect(result['futureField'], isTrue);
+  });
   test('memory store keeps the last written volume', () async {
     final store = MemoryPlayerSettingsStore();
     await store.write(const PlayerSettings(volume: 42));

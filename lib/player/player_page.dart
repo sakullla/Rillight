@@ -19,7 +19,7 @@ import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/player/danmaku/danmaku_controller.dart';
 import 'package:rillight/player/danmaku/danmaku_renderer.dart';
 import 'package:rillight/player/danmaku/dandanplay_models.dart';
-import 'package:rillight/player/media_kit_video_backend.dart';
+import 'package:rillight/player/mpv_video_backend.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_controller.dart';
 import 'package:rillight/player/player_keys.dart';
@@ -3298,7 +3298,7 @@ VideoBackend _createBackend(PlayerBindings bindings) {
     }
     return true;
   }());
-  return MediaKitVideoBackend();
+  return MpvVideoBackend(settingsStore: bindings.settingsStore);
 }
 
 String _clock(Duration duration) {

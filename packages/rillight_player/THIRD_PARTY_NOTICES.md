@@ -11,13 +11,19 @@ license texts and provide corresponding source under the component licenses.
   https://github.com/shinchiro/mpv-winbuild-cmake. macOS dylibs are provided by
   IINA: https://github.com/iina/iina and https://iina.io/dylibs/universal/.
   The full upstream build configuration must be retained when upgrading.
+  Linux builds apply `native/patches/mpv-zero-scaler-padding.patch` to the locked
+  v0.41.0 commit. It zero-initializes unused scaler LUT channels, preventing
+  uninitialized NaN values from contaminating OpenGL filtering. The patch is
+  LGPL-2.1-or-later, like the modified upstream file; its SHA256 is recorded in
+  `native/dependencies.json` and the installed source-version record. Linux
+  bundles include the patch under `data/rillight_player/patches/`.
 - **libmpv C API headers**: copied without modification from mpv v0.41.0,
   ISC license and Copyright (C) 2017 the mpv developers preserved in each file.
 - **ANGLE**: https://github.com/google/angle (BSD-3-Clause, with third party
   components); fixed Windows distribution by
   https://github.com/alexmercerind/flutter-windows-ANGLE-OpenGL-ES/tree/v1.0.1.
 - **FFmpeg**: https://ffmpeg.org/legal.html (LGPL-2.1-or-later; GPL-enabled
-  configurations use GPL). Linux build pins n8.0.1. Windows and macOS component
+  configurations use GPL). Linux build pins n9.0.1. Windows and macOS component
   versions are those in their fixed distributions, not the Dart package version.
 - **libplacebo**: https://code.videolan.org/videolan/libplacebo (LGPL-2.1-or-later).
 - **libass**: https://github.com/libass/libass (ISC).

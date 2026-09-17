@@ -26,6 +26,7 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
+          flutter-version: '3.47.4'
           channel: stable
           cache: true
 
@@ -33,10 +34,23 @@ jobs:
         run: flutter pub get
 
       - name: Check formatting
-        run: dart format --output=none --set-exit-if-changed lib test
+        run: dart format --output=none --set-exit-if-changed lib test packages/rillight_player/lib packages/rillight_player/test
 
       - name: Analyze
         run: flutter analyze
 
       - name: Test
         run: flutter test
+
+      - name: Native package and Linux installer contracts
+        run: |
+          flutter test packages/rillight_player/test
+          python3 tool/linux_release_checks_test.py
+          python3 macos/verify_bundle_test.py
+          bash linux/packaging/launcher_contract_test.sh
+
+  linux-package:
+    uses: ./.github/workflows/linux-package.yml
+
+  macos-package:
+    uses: ./.github/workflows/macos-package.yml

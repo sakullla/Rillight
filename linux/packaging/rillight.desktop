@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=灯川 Rillight
+Comment=Emby desktop client
+Exec=/opt/rillight/rillight-launch
+Icon=rillight
+Terminal=false
+Type=Application
+Categories=AudioVideo;Video;Player;
+StartupWMClass=com.sakullla.rillight

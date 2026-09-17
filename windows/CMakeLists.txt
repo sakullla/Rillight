@@ -72,6 +72,12 @@ endif()
 set(INSTALL_BUNDLE_DATA_DIR "${CMAKE_INSTALL_PREFIX}/data")
 set(INSTALL_BUNDLE_LIB_DIR "${CMAKE_INSTALL_PREFIX}")
 
+# Remove only retired plugin binaries when incrementally rebuilding a bundle.
+install(CODE "file(REMOVE
+  \"${CMAKE_INSTALL_PREFIX}/media_kit_video_plugin.dll\"
+  \"${CMAKE_INSTALL_PREFIX}/media_kit_libs_windows_video_plugin.dll\"
+  \"${CMAKE_INSTALL_PREFIX}/desktop_multi_window_plugin.dll\")" COMPONENT Runtime)
+
 install(TARGETS ${BINARY_NAME} RUNTIME DESTINATION "${CMAKE_INSTALL_PREFIX}"
   COMPONENT Runtime)
 

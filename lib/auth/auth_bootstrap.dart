@@ -10,8 +10,16 @@ import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
 
 Future<AuthController> createProductionAuth() async {
-  final support = await getApplicationSupportDirectory();
-  final dir = Directory('${support.path}/rillight');
+  final validation = Platform.environment['RILLIGHT_VALIDATION_DIRECTORY'];
+  if (validation != null &&
+      (validation.isEmpty || !Directory(validation).isAbsolute)) {
+    throw ArgumentError(
+      'RILLIGHT_VALIDATION_DIRECTORY must be an absolute directory',
+    );
+  }
+  final dir = validation != null
+      ? Directory(validation)
+      : Directory('${(await getApplicationSupportDirectory()).path}/rillight');
   await dir.create(recursive: true);
 
   final deviceId = await loadOrCreateDeviceId(File('${dir.path}/device_id'));
@@ -26,7 +34,9 @@ Future<AuthController> createProductionAuth() async {
   final fallback = FileCredentialStore(File('${dir.path}/credentials.json'));
   final controller = AuthController(
     client: client,
-    credentials: windowsKeychainOrFallback(fallback),
+    credentials: validation != null
+        ? fallback
+        : windowsKeychainOrFallback(fallback),
     servers: FileServerListStore(File('${dir.path}/servers.json')),
   );
   await controller.restore();

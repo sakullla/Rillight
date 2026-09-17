@@ -159,6 +159,10 @@ Uri embyResourceUri(Uri baseUrl, String pathOrUrl, String accessToken) {
     ).replace(queryParameters: parsed.queryParameters);
   }
   final params = Map<String, String>.from(resolved.queryParameters);
+  if (resolved.origin != baseUrl.origin) {
+    params.removeWhere((key, value) => value == accessToken);
+    return resolved.replace(queryParameters: params);
+  }
   if (!params.containsKey('api_key') && !params.containsKey('ApiKey')) {
     params['api_key'] = accessToken;
   }

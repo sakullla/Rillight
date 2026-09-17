@@ -17,15 +17,14 @@ abstract final class PlayerRuntimeDefaults {
   static const int bytesPerMiB = 1024 * 1024;
 }
 
-/// 播放器运行时选项:集中构造 open 前经 NativePlayer.setProperty 注入的
+/// 播放器运行时选项:集中构造独立 libmpv 实例创建前注入的
 /// mpv 属性集。
 ///
 /// 属性来源三类(ADR-3):网络缓冲(cache-on-disk + 磁盘缓存目录)、
 /// 解码/渲染平台默认(hwdec)、音质链路(audio-exclusive)。
-/// 注意不设置 `vo`:media_kit 的 VideoController 以 vo=libmpv 走渲染 API,
+/// 注意不设置 `vo`:自有视频插件以 vo=libmpv 走渲染 API,
 /// 外部覆盖 vo 会使内嵌视频输出失效;等比缩放由 mpv 默认 keepaspect 保证。
-/// 硬解必须用 *-copy:libmpv 纹理吃不到 D3D11/NVDEC/VT 零拷贝表面,
-/// 直出会在关键帧或画面尺寸变化时裂屏闪一帧。
+/// 当前 ANGLE/GL 接入使用 *-copy 兼容路径；后续直接表面互操作需独立验证。
 class PlayerRuntimeOptions {
   const PlayerRuntimeOptions._();
 
@@ -59,12 +58,12 @@ class PlayerRuntimeOptions {
     if (liveOrHlsStream) {
       properties['demuxer-max-bytes'] =
           '${PlayerRuntimeDefaults.hlsDemuxerMaxBytes}';
-      properties['demuxer-back-playback-bytes'] =
+      properties['demuxer-max-back-bytes'] =
           '${PlayerRuntimeDefaults.hlsDemuxerBackBytes}';
     } else {
       final limit = effectiveDiskCacheLimitBytes(settings);
       properties['demuxer-max-bytes'] = '$limit';
-      properties['demuxer-back-playback-bytes'] = '${limit ~/ 2}';
+      properties['demuxer-max-back-bytes'] = '${limit ~/ 2}';
     }
     final hwdec = _hardwareDecodingValue(settings, platform);
     if (hwdec != null) {
@@ -175,6 +174,13 @@ class PlayerDiskCache {
 
   /// 系统临时目录下的专用缓存目录。
   static Directory defaultDirectory() {
+    final validation = Platform.environment['RILLIGHT_VALIDATION_DIRECTORY'];
+    if (validation != null && validation.isNotEmpty) {
+      if (!Directory(validation).isAbsolute) {
+        throw ArgumentError('Validation directory must be absolute');
+      }
+      return Directory('$validation/cache');
+    }
     return Directory(
       '${Directory.systemTemp.path}'
       '${Platform.pathSeparator}rillight-player-cache',

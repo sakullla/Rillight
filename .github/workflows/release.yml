@@ -25,6 +25,7 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
+          flutter-version: '3.47.4'
           channel: stable
           cache: true
 
@@ -56,145 +57,14 @@ jobs:
           if-no-files-found: error
 
   macos:
-    name: Build macOS (ad-hoc signed)
-    runs-on: macos-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          cache: true
-
-      - name: Install dependencies
-        run: flutter pub get
-
-      - name: Build macOS
-        run: flutter build macos --release
-
-      - name: Ad-hoc sign and package macOS
-        shell: bash
-        run: |
-          set -euo pipefail
-          app_path="build/macos/Build/Products/Release/rillight.app"
-          test -d "$app_path"
-
-          # '-' is Apple's ad-hoc pseudo-identity. It needs no certificate,
-          # developer team, or provisioning profile, and is not notarized.
-          codesign --deep --force --verbose --sign - --timestamp=none "$app_path"
-
-          signature_info="$(codesign --display --verbose=4 "$app_path" 2>&1)"
-          echo "$signature_info"
-          grep -q '^Signature=adhoc$' <<< "$signature_info"
-          codesign --verify --deep --strict --verbose=2 "$app_path"
-
-          mac_arch="$(uname -m)"
-          archive="Rillight-macos-${GITHUB_REF_NAME}-${mac_arch}-adhoc.dmg"
-          staging="$RUNNER_TEMP/rillight-dmg"
-          mkdir -p "$staging"
-          ditto "$app_path" "$staging/rillight.app"
-          hdiutil create \
-            -volname "Rillight" \
-            -srcfolder "$staging" \
-            -ov \
-            -format UDZO \
-            "$archive"
-
-      - name: Upload macOS package
-        uses: actions/upload-artifact@v6
-        with:
-          name: release-macos
-          path: Rillight-macos-${{ github.ref_name }}-*-adhoc.dmg
-          if-no-files-found: error
+    uses: ./.github/workflows/macos-package.yml
+    with:
+      version: ${{ github.ref_name }}
 
   linux:
-    name: Build Linux
-    runs-on: ubuntu-22.04
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-
-      - name: Install Linux dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            clang \
-            cmake \
-            ninja-build \
-            pkg-config \
-            libgtk-3-dev \
-            libstdc++-12-dev \
-            libmpv-dev
-
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          cache: true
-
-      - name: Install dependencies
-        run: flutter pub get
-
-      - name: Build Linux
-        run: flutter build linux --release
-
-      - name: Package Linux installer
-        shell: bash
-        run: |
-          set -euo pipefail
-          version="${GITHUB_REF_NAME#v}"
-          package_root="$RUNNER_TEMP/rillight-deb"
-          mkdir -p \
-            "$package_root/DEBIAN" \
-            "$package_root/opt/rillight" \
-            "$package_root/usr/share/applications" \
-            "$package_root/usr/share/icons/hicolor/256x256/apps" \
-            dist/linux
-
-          cp -a build/linux/x64/release/bundle/. "$package_root/opt/rillight/"
-          cp macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_256.png \
-            "$package_root/usr/share/icons/hicolor/256x256/apps/rillight.png"
-
-          cat > "$package_root/usr/share/applications/rillight.desktop" <<EOF
-          [Desktop Entry]
-          Name=灯川 Rillight
-          Comment=Emby desktop client
-          Exec=/opt/rillight/rillight
-          Icon=rillight
-          Terminal=false
-          Type=Application
-          Categories=AudioVideo;Video;Player;
-          EOF
-
-          installed_size="$(du -sk "$package_root/opt/rillight" | cut -f1)"
-          cat > "$package_root/DEBIAN/control" <<EOF
-          Package: rillight
-          Version: $version
-          Section: video
-          Priority: optional
-          Architecture: amd64
-          Depends: libgtk-3-0, mpv
-          Maintainer: com.sakullla
-          Installed-Size: $installed_size
-          Description: 灯川 Rillight desktop Emby client
-          EOF
-
-          dpkg-deb --build --root-owner-group \
-            "$package_root" \
-            "dist/linux/Rillight-linux-x64-${GITHUB_REF_NAME}.deb"
-
-      - name: Upload Linux package
-        uses: actions/upload-artifact@v6
-        with:
-          name: release-linux
-          path: dist/linux/Rillight-linux-x64-${{ github.ref_name }}.deb
-          if-no-files-found: error
+    uses: ./.github/workflows/linux-package.yml
+    with:
+      version: ${{ github.ref_name }}
 
   release:
     name: Create draft release

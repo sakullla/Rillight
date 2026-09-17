@@ -11,7 +11,7 @@ Rillight is a Flutter desktop Emby client for Windows, macOS, and Linux, with a 
 
 ## Build, Test, and Development Commands
 
-Use a Flutter SDK compatible with Dart `^3.11.5`, with desktop support enabled.
+Use Flutter 3.47.4 with desktop support enabled (Dart constraint `^3.11.5`).
 
 - `flutter pub get` — install dependencies.
 - `flutter run -d windows` — launch locally; use `macos` or `linux` on the corresponding host.
@@ -22,7 +22,9 @@ Use a Flutter SDK compatible with Dart `^3.11.5`, with desktop support enabled.
 - `flutter test --tags integration` — run widget tests that pump `RillightApp` or a full feature page (local Windows wall-clock target ≤10s; still included in `flutter test`).
 - `flutter gen-l10n` — regenerate localization after editing `lib/app/l10n/app_zh.arb`.
 
-Playback uses media_kit/libmpv. Linux requires system libmpv or a bundled copy.
+Playback uses the owned `packages/rillight_player` libmpv adapter and independent player processes on all desktop platforms. Release packages bundle pinned native media libraries. Linux packages require a clean ELF/RUNPATH check and Ubuntu 24.04 install/desktop-launch regression (`tool/linux_release_checks.py`); do not create ABI-spoofing libmpv symlinks. Windows native playback validation uses `tool/player_smoke.ps1` with isolated synthetic credentials/settings/cache. macOS requires 12+ with the pinned Flutter SDK. See the package README for source builds, library hashes and licensing.
+
+Linux actual-window validation uses `linux/packaging/playback_smoke.sh`: H.264/HEVC/AV1/VP9 must produce changing colored frames, in addition to passing control checks. The recorded Docker run uses Xvfb/software Mesa and a virtual audio sink; its substantial 1080p/4K drops do not establish hardware performance or physical audio output.
 
 ## Coding Style & Naming Conventions
 
@@ -32,9 +34,11 @@ Follow `flutter_lints` from `analysis_options.yaml` and Dart formatter output, u
 
 Tests use `flutter_test`, with descriptive `test` and `testWidgets` cases in `*_test.dart` files. Add regression coverage for changed behavior, especially authentication, catalog loading, and playback resolution. Run targeted tests with `flutter test test/player/playback_resolver_test.dart`, then the full suite. Widget tests that pump `RillightApp` or a full feature page are tagged `integration` (`dart_test.yaml`); `flutter test --tags integration` runs that subset, and the default `flutter test` still includes it. Local Windows targets: full suite ≤15s, integration tags ≤10s. CI must stay green on `flutter test` but has no duration SLO. No numeric coverage threshold is configured.
 
+Report native build, package launch, actual video/audio output and GPU stability evidence separately. The smoke's `*-core.png` files verify libmpv subtitle composition; they do not capture Flutter's displayed texture or prove absence of flicker. Distinguish Docker/Xvfb checks from hardware desktop validation, and configured CI from executed results. Current validation scope is recorded in `integration_test/README.md`.
+
 ## Release Procedure
 
-CI only runs formatting, analysis, and tests. Desktop release builds are created by `.github/workflows/release.yml` when a semantic-version tag matching `v*` is pushed.
+PR/main CI runs formatting, analysis, tests, Linux package regression and macOS build/bundle checks. Desktop releases are packaged and published by `.github/workflows/release.yml` when a semantic-version tag matching `v*` is pushed.
 
 Before tagging a release:
 

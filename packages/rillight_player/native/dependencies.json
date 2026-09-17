@@ -302,7 +302,9 @@
     ],
     "snapshot_date": "2026-09-17",
     "license": "GPL-3.0-or-later distribution; see component notices",
-    "delivery": "raw universal dylibs; bundle every locked file into Contents/Frameworks"
+    "delivery": "raw universal dylibs; bundle every locked file into Contents/Frameworks",
+    "ffmpeg": "9.0.1",
+    "ffmpeg_verification": "Version strings in both architectures of locked libavutil.61.dylib; runtime load still requires macOS"
   },
   "linux": {
     "pkg_config": "mpv >= 2.5.0 (client API); runtime mpv-version >= 0.41.0",
@@ -313,12 +315,23 @@
       "mpv": {
         "version": "0.41.0",
         "repository": "https://github.com/mpv-player/mpv.git",
-        "commit": "41f6a645068483470267271e1d09966ca3b9f413"
+        "commit": "41f6a645068483470267271e1d09966ca3b9f413",
+        "patches": [
+          {
+            "path": "patches/mpv-zero-scaler-padding.patch",
+            "sha256": "b1ec7b58540c0096e553e11459e110ef48400bd769d296ea42e4c6f783545a57",
+            "reason": "Initialize unused scaler LUT components: NaN padding poisons GL linear filtering and produces black frames. Locally reproduced with explicit NaN injection; zero padding preserves the selected scaler and decoder options.",
+            "license": "LGPL-2.1-or-later (same as modified upstream file)",
+            "runtime_version": "The real library may report a dirty/local-build suffix; the base release and patch hash identify this build."
+          }
+        ]
       },
       "ffmpeg": {
-        "version": "n8.0.1",
+        "version": "n9.0.1",
         "repository": "https://github.com/FFmpeg/FFmpeg.git",
-        "commit": "894da5ca7d742e4429ffb2af534fcda0103ef593"
+        "commit": "bf1b838f2ab88b4f8fd83443325c782ea0e0f7fa",
+        "release_archive": "https://ffmpeg.org/releases/ffmpeg-9.0.1.tar.xz",
+        "release_sha256": "cf38e0e28c7e5605942c4a77755349b0145804a397af37eb1fb4c77cb237f635"
       },
       "libplacebo": {
         "version": "v7.351.0",
@@ -374,6 +387,16 @@
       "name": "IINA-GPL-3.0.txt",
       "url": "https://raw.githubusercontent.com/iina/iina/develop/LICENSE",
       "sha256": "589ed823e9a84c56feb95ac58e7cf384626b9cbf4fda2a907bc36e103de1bad2"
+    },
+    {
+      "name": "FFmpeg-GPL-2.0.txt",
+      "url": "https://raw.githubusercontent.com/FFmpeg/FFmpeg/bf1b838f2ab88b4f8fd83443325c782ea0e0f7fa/COPYING.GPLv2",
+      "sha256": "8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643"
+    },
+    {
+      "name": "FFmpeg-LGPL-2.1.txt",
+      "url": "https://raw.githubusercontent.com/FFmpeg/FFmpeg/bf1b838f2ab88b4f8fd83443325c782ea0e0f7fa/COPYING.LGPLv2.1",
+      "sha256": "246041b6ecf9bc32d718a62c57877c78b5eb397b6467e74ed7ae2626ab189c30"
     }
   ]
 }

@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/widgets.dart';
-import 'package:media_kit/media_kit.dart';
 import 'package:rillight/app/app.dart';
 import 'package:rillight/app/router.dart';
 import 'package:rillight/app/window_chrome.dart';
@@ -14,7 +13,6 @@ Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
   PaintingBinding.instance.imageCache.maximumSize = 2000;
   PaintingBinding.instance.imageCache.maximumSizeBytes = 256 << 20;
-  MediaKit.ensureInitialized();
   if (args.isNotEmpty && args.first == 'player') {
     await windowManager.ensureInitialized();
     await windowManager.hide();

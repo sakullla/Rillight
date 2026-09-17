@@ -80,6 +80,25 @@ void main() {
       EmbyItem.fromJson({'Id': id, 'Type': 'Episode', 'Name': id});
 
   test(
+    'immediate item switch preserves debounced volume and rate changes',
+    () async {
+      await settings.write(
+        const PlayerSettings(volume: 80, playbackRate: 1.25),
+      );
+      await controller.start();
+      await controller.setRate(1);
+      await controller.setVolume(15);
+      await controller.playEpisode(episode('episode-friends-s1e1'));
+      expect(controller.playbackRate, 1);
+      expect(controller.volume, 15);
+      expect(backend.rate, 1);
+      expect(backend.volume, 15);
+      expect((await settings.read()).playbackRate, 1);
+      expect((await settings.read()).volume, 15);
+    },
+  );
+
+  test(
     'reverse item responses cannot overwrite the newest item or report',
     () async {
       final gate = client.itemGates['movie-up'] = Completer<void>();

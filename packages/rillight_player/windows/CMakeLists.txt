@@ -12,5 +12,9 @@ target_link_libraries(${PLUGIN_NAME} PRIVATE flutter flutter_wrapper_plugin d3d1
 set(rillight_player_bundled_libraries "${RILLIGHT_MPV}/libmpv-2.dll" PARENT_SCOPE)
 file(GLOB ANGLE_RUNTIME "${RILLIGHT_ANGLE}/*.dll")
 set(rillight_player_bundled_libraries "${RILLIGHT_MPV}/libmpv-2.dll" ${ANGLE_RUNTIME} PARENT_SCOPE)
-install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../native/dependencies.json" "${CMAKE_CURRENT_SOURCE_DIR}/../THIRD_PARTY_NOTICES.md" DESTINATION "${CMAKE_INSTALL_PREFIX}/data/rillight_player" COMPONENT Runtime)
-install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../native/licenses" DESTINATION "${CMAKE_INSTALL_PREFIX}/data/rillight_player" COMPONENT Runtime)
+# Flutter creates the runner target before loading plugins, but finalizes its
+# install prefix afterward. Bind to the runner's generated output directory;
+# an early CMAKE_INSTALL_PREFIX can still be the default Program Files path.
+set(RILLIGHT_RUNTIME_NOTICES "$<TARGET_FILE_DIR:${BINARY_NAME}>/data/rillight_player")
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../native/dependencies.json" "${CMAKE_CURRENT_SOURCE_DIR}/../THIRD_PARTY_NOTICES.md" DESTINATION "${RILLIGHT_RUNTIME_NOTICES}" COMPONENT Runtime)
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../native/licenses" DESTINATION "${RILLIGHT_RUNTIME_NOTICES}" COMPONENT Runtime)

@@ -24,12 +24,18 @@ stalled native teardown reports a timeout; the process host owns escalation.
 - macOS: worker queue renders to a fresh IOSurface/CVPixelBuffer, finishes GPU
   work before publication, and retains it for Flutter. It never recycles a
   mutable buffer pool. Async unregistration precedes render/core destruction.
-- Linux: GDK context sharing follows Flutter's `FlTextureGL` contract. A worker
-  renders to new GL allocations and completes GPU work before publication.
-  Latest/displayed/producing allocations are bounded; deleting old allocations
-  uses GL's retained-resource semantics, never a writable rotating texture pool.
-  The initial import uses an initialized transparent 1x1 texture. Notifications
-  are coalesced onto the GTK main loop and check registration/generation again.
+- Linux: libmpv still uses its OpenGL Render API on a worker. Flutter 3.47's
+  EGL renderer does not share GDK/GLX texture names, so the worker reads completed
+  RGBA frames and publishes immutable pixel buffers; `FlPixelBufferTexture`
+  uploads them inside Flutter's own GL context. This explicitly adds one GPU
+  readback/upload per published frame, including on Wayland; it is not an mpv
+  software-renderer fallback. Latest/displayed/producing CPU frames are bounded
+  to three. Initial import uses a transparent 1x1 frame. GTK notifications are
+  coalesced and check registration/generation again before publication.
+  The Linux source build zero-initializes mpv's scaler LUT padding. Uninitialized
+  NaN padding reproducibly poisoned OpenGL filtering in software Mesa, producing
+  black frames despite valid decoded input. This one-line patch preserves
+  scaling quality, decoder direct rendering and automatic hardware decoding.
 
 All surfaces disable libmpv's internal target-time sleep. The control isolate
 therefore enforces `video-timing-offset=0`, including when a caller supplies an
@@ -51,16 +57,22 @@ first clears the Dart texture ID, then uses an explicit two-stage protocol:
    after unregister; its completed Future proves that earlier raster callbacks
    and the unregister task have run. It does not wait for a vsync/frame-timing
    callback, so it also works without a mounted view or visible window.
-3. Dart sends `dispose` only after that barrier. The worker frees the retired
-   GL allocations, joins, and drops the texture GObject. Core destruction is
-   still last. The producer never rewrites published texture allocations.
+3. Dart sends `dispose` only after that barrier. The worker frees producer GL
+   allocations and CPU frames. The pixel texture's parent GL destructor runs
+   with a cleanup EGL context that shares Flutter's raster context (captured
+   before the first upload), then the worker joins. Core destruction is last.
 
 Initialization/render failures retain allocations and follow exactly this
 retirement path. A missing native surface returns `detach=false`; all other
 detach/barrier failures, malformed replies, and timeouts retain resources for
 process-host escalation. A late completion after timeout cannot trigger
-dispose. Loss of the channel only stops producers: engine finalization, after
-FlutterEngineShutdown joins raster, is the alternate safe retirement signal.
+dispose. Loss of the channel only stops producers. Engine finalization, after
+FlutterEngineShutdown joins raster, releases producer/CPU resources but cannot
+run the pixel texture parent's GL destructor after the engine destroyed EGL.
+That abrupt-engine-exit path deliberately retains the small texture/Surface
+owner until process exit. Normal awaited disposal releases it using the shared
+cleanup context; an unavailable cleanup context reports an error and retains
+the owner for process-host escalation rather than calling GL without a context.
 
 This ordering was checked against Flutter **3.47.4**, framework commit
 `9584c6713b324636289d067944a46fd6b49df14b`, engine commit
@@ -75,14 +87,16 @@ upgrading Flutter:
   reference immediately, which is why the plugin retains a separate reference.
 - `shell/platform/linux/fl_engine.cc`, `fl_engine_dispose`: synchronous engine
   shutdown precedes GObject finalization and its weak-notify retirement hook.
+- `shell/platform/linux/fl_pixel_buffer_texture.cc`: copies pixel data with
+  `glTexImage2D` synchronously after the callback, and deletes its private GL
+  texture from parent `dispose`; the plugin must supply the correct GL context.
 
 `test/surface_retirement_test.dart` covers ordering, absent surfaces, errors,
 timeouts and late completions, plus an actual raster snapshot without a widget.
-These Windows-hosted tests do not prove Linux GTK/GL behavior. On Linux, validate
-first import before file load, close during import/resize, minimize then close,
-failed initialization/render and engine teardown, with GL diagnostics enabled;
-there must be no GTK thread assertions, null GError access, or access to retired
-texture objects. Native Linux build/GPU execution remains unverified here.
+The Linux production main/child smoke also exercises import, resize, close,
+reopen and failed media loads in Ubuntu 24.04 under Xvfb/software Mesa. This
+does not establish hardware-driver behavior, every engine-crash boundary, or
+minimize/restore on a physical desktop. Those paths still need target hardware.
 
 There is no automatic software renderer downgrade. Native errors propagate.
 Windows fake-registrar smoke verifies production, resize, descriptor lifetime
@@ -97,16 +111,20 @@ and shutdown; it does not replace real Flutter import or visual validation.
   client API 2.5, FFmpeg N-126390-g9fc8c785e. This is explicitly a git build.
   CMake verifies SHA256 and bundles libmpv and ANGLE runtime DLLs.
 - macOS universal x64/arm64: IINA libmpv **0.41.0**, minimum **macOS 11.0**.
+  The locked libavutil reports **FFmpeg 9.0.1** in both architecture strings;
+  this is static binary evidence, not a macOS runtime load. The application
+  requires **macOS 12.0+** because Flutter 3.47.4 has a higher minimum.
   All 45 dylibs are locked by individual SHA256. CocoaPods runs
   `native/prepare_macos.py`; set `RILLIGHT_NATIVE_CACHE` to reuse a verified
   download cache. Runner must execute, before application signing:
   `python3 packages/rillight_player/native/bundle_macos.py path/to/Rillight.app`.
   This copies the dependency closure into Contents/Frameworks, checks links,
   signs each dylib with the build identity, and includes the manifest/notices.
-- Linux requires **mpv >= 0.41.0**, both at build and runtime. System libraries
-  may be used only if they meet that version; Ubuntu 22.04's stock libmpv does
-  not. `bash native/build_linux.sh ABSOLUTE_PREFIX` builds fixed mpv 0.41.0,
-  FFmpeg n8.0.1 and libplacebo v7.351.0 sources without root installation.
+- Linux requires **mpv >= 0.41.0**, both at build and runtime. The application
+  release requires the fixed source prefix with its recorded scaler patch;
+  arbitrary system libraries do not satisfy that packaging contract.
+  `bash native/build_linux.sh ABSOLUTE_PREFIX` builds fixed mpv 0.41.0,
+  FFmpeg n9.0.1 and libplacebo v7.351.0 sources without root installation.
   Export the printed PKG_CONFIG_PATH/LD_LIBRARY_PATH before Flutter build.
   `mpv.pc` reports client API 2.5.0, so the script also initializes the actual
   library with `native/check_mpv.py` and verifies `mpv-version >= 0.41.0`.
@@ -114,11 +132,13 @@ and shutdown; it does not replace real Flutter import or visual validation.
 
 Ubuntu source-build prerequisites: build-essential git nasm pkg-config
 python3-venv libass-dev libgnutls28-dev libaom-dev libegl1-mesa-dev
-libgl1-mesa-dev libasound2-dev libpulse-dev libva-dev libdrm-dev libx11-dev
+libgl1-mesa-dev libvulkan-dev libasound2-dev libpulse-dev libva-dev libdrm-dev libx11-dev
 libxext-dev libxrandr-dev libxinerama-dev libxcursor-dev libxpresent-dev
 libwayland-dev wayland-protocols libxkbcommon-dev libepoxy-dev libgtk-3-dev
 patchelf. Runtime needs matching system GL/GTK, audio, font and TLS libraries.
-The source script has not been executed on the Windows development host.
+The Windows development host uses isolated Linux Docker containers for source
+build and installed-package verification; consult the current delivery evidence
+for the actual result. No container run substitutes for macOS validation.
 
 ## Development checks
 
@@ -131,5 +151,13 @@ On Windows configure `native/tests` with CMake, set `FLUTTER_ENGINE` to the
 Flutter engine artifacts/windows-x64 directory and optionally
 `RILLIGHT_ARCHIVE_CACHE` to a verified archive cache. Build Release and run
 `surface_test.exe path/to/video`. Repeat with 1080p60 and 4K HEVC material.
-macOS/Linux source is implemented but native build, GPU and signing validation
-must be performed on the corresponding OS; no Windows test proves those paths.
+Linux was built on Ubuntu 22.04 and installed on Ubuntu 24.04. The real player
+window displayed moving H.264, HEVC, AV1 and VP9 video with the default decoder
+direct-rendering policy; subtitles, seek, switching, close/reopen and a virtual
+PulseAudio stream passed. See `linux/packaging/README.md` in the application
+repository for the repeatable window-pixel checks. Xvfb software Mesa incurred
+substantial 1080p/4K frame drops: this is functional evidence, not a real-time
+performance result. The RGBA readback/upload cost, physical GPU/hardware decode,
+audio output and end-to-end synchronization remain to be measured on hardware.
+macOS has not been built/run on this host; native compilation, signing and
+playback require the Mac CI/host. Windows results do not validate that path.

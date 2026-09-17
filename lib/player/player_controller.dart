@@ -350,6 +350,11 @@ class PlayerController extends ChangeNotifier {
     activeSkipSegment = null;
     _emit();
     try {
+      // A just-changed volume/rate may still be waiting on its debounce. Save
+      // it before reading settings for the next item, otherwise a quick switch
+      // restores the old value and the delayed save persists that stale value.
+      if (_settingsSaveTimer != null) await _persistSettings();
+      if (!_accepts(operation)) return;
       await _restoreSettings(operation);
       if (!_accepts(operation)) return;
       final loadedItem = await client.getItem(itemId);
@@ -1628,6 +1633,8 @@ class PlayerController extends ChangeNotifier {
             sessionId: operation.id,
             url: next.streamUrl,
             start: durationFromTicks(startTicks),
+            credentialOrigin: client.baseUrl,
+            credentialHeaders: client.sessionHeaders,
             // 仅当流地址与 Emby 服务器同源时附加会话头;strm 等远端
             // 直连地址传空 headers,避免令牌泄漏给第三方主机。
             headers: playbackStreamHeaders(
@@ -1716,7 +1723,7 @@ class PlayerController extends ChangeNotifier {
     required int? subtitle,
   }) async {
     if (!_accepts(operation)) return;
-    if (audio != null) {
+    if (audio != null && !next.isTranscode) {
       await backend.setAudioIndex(audio);
       if (!_accepts(operation)) return;
     }
@@ -2266,7 +2273,7 @@ class PlayerController extends ChangeNotifier {
   }
 }
 
-/// UI 音量百分比(0–100)到 mpv / media_kit volume(同样是 0–100)。
+/// UI 音量百分比(0–100)到 mpv volume(同样是 0–100)。
 ///
 /// 滑条旁显示的就是这个百分比,必须一对一交给 backend。此前用立方曲线
 /// 把 17% 压成约 0.5,听感接近静音。持久化仍存用户百分比。

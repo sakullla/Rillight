@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
 import 'control.dart';
+import 'surface_health.dart';
 import 'surface_retirement.dart';
 
 class MpvEvent {
@@ -34,8 +35,15 @@ class MpvPlayer {
   bool _controlFailed = false;
   bool _firstFrame = false;
   bool _mediaLoaded = false;
-  bool _polling = false;
   bool _surfaceRequested = false;
+  late final _surfaceHealth = SurfaceHealth(
+    readStatus: () => _channel.invokeMapMethod<String, dynamic>('status', {
+      'handle': _handle,
+    }),
+    readTracks: () => getProperty('track-list'),
+    onStatus: _surfaceStatus,
+    onError: _surfaceError,
+  );
   Timer? _poll;
   Future<void>? _disposeFuture;
   late final String nativeVersion;
@@ -143,7 +151,10 @@ class MpvPlayer {
       return;
     }
     if (_closing) return;
-    if (event == 6) _mediaLoaded = false;
+    if (event == 6) {
+      _mediaLoaded = false;
+      _firstFrame = false;
+    }
     if (event == 8) _mediaLoaded = true;
     final type = switch (event) {
       6 => 'start-file',
@@ -156,6 +167,13 @@ class MpvPlayer {
       _ => null,
     };
     if (type != null) {
+      if (_surfaceRequested) {
+        _surfaceHealth.event(
+          type,
+          property: message['property'] as String?,
+          value: message['value'],
+        );
+      }
       _events.add(
         MpvEvent(
           type,
@@ -167,32 +185,20 @@ class MpvPlayer {
     }
   }
 
-  Future<void> _pollSurface() async {
-    if (_closing || _polling) return;
-    _polling = true;
-    try {
-      final status = await _channel.invokeMapMethod<String, dynamic>('status', {
-        'handle': _handle,
-      });
-      if (_closing || status == null) return;
-      if (!_firstFrame &&
-          _mediaLoaded &&
-          status['frames'] is int &&
-          status['frames'] > 0) {
-        _firstFrame = true;
-        _events.add(const MpvEvent('first-frame'));
-      }
-      if (status['error'] case final String error when error.isNotEmpty) {
-        _poll?.cancel();
-        _events.add(MpvEvent('error', error: error));
-      }
-    } catch (error) {
-      if (!_closing) {
-        _events.add(MpvEvent('error', error: 'Video surface: $error'));
-      }
-    } finally {
-      _polling = false;
+  Future<void> _pollSurface() => _surfaceHealth.poll();
+
+  void _surfaceStatus(Map<String, dynamic> status) {
+    if (_closing) return;
+    if (!_firstFrame && _mediaLoaded && (status['frames'] as int) > 0) {
+      _firstFrame = true;
+      _events.add(const MpvEvent('first-frame'));
     }
+  }
+
+  void _surfaceError(String message) {
+    if (_closing) return;
+    _poll?.cancel();
+    _events.add(MpvEvent('error', error: 'Video surface: $message'));
   }
 
   Future<Object?> _request(
@@ -252,6 +258,7 @@ class MpvPlayer {
   Future<void> dispose() => _disposeFuture ??= _dispose();
   Future<void> _dispose() async {
     _closing = true;
+    _surfaceHealth.close();
     _poll?.cancel();
     _failPending(StateError('Player disposed'));
     // Native method only completes after texture unregister and render free.
@@ -272,6 +279,7 @@ class MpvPlayer {
   Future<void> _finishDispose() async {
     if (_closed) return;
     _closed = true;
+    _surfaceHealth.close();
     _receive.close();
     await _events.close();
     _textureId.dispose();

@@ -8,12 +8,16 @@ class VideoOpenRequest {
     this.start = Duration.zero,
     this.sessionId = 0,
     this.headers = const {},
+    this.credentialOrigin,
+    this.credentialHeaders = const {},
   });
 
   final int sessionId;
   final Uri url;
   final Duration start;
   final Map<String, String> headers;
+  final Uri? credentialOrigin;
+  final Map<String, String> credentialHeaders;
 }
 
 enum VideoEventKind {

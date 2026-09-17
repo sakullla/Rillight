@@ -16,13 +16,11 @@ dependencies:
   win32: ^5.14.0
   go_router: ^16.2.0
   intl: any
-  media_kit: ^1.2.6
-  media_kit_libs_video: ^1.0.7
-  media_kit_video: ^2.0.1
+  rillight_player:
+    path: packages/rillight_player
   path_provider: ^2.1.6
   screen_retriever: ^0.2.0
   window_manager: ^0.5.2
-  desktop_multi_window: ^0.3.1
 
 dev_dependencies:
   flutter_test:

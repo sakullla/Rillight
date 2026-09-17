@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -305,16 +306,28 @@ class FilePlayerSettingsStore implements PlayerSettingsStore {
   FilePlayerSettingsStore(this.file);
 
   final File file;
+  static final _writes = <String, Future<void>>{};
+  static int _temporaryId = 0;
 
   @override
-  Future<PlayerSettings> read() async {
+  Future<PlayerSettings> read() => _serialize(_readLocked);
+
+  Future<PlayerSettings> _readLocked() async {
     try {
-      if (!await file.exists()) {
-        return const PlayerSettings();
-      }
-      final decoded = jsonDecode(await file.readAsString());
-      if (decoded is Map) {
-        return PlayerSettings.fromJson(Map<String, dynamic>.from(decoded));
+      await file.parent.create(recursive: true);
+      final lock = await File('${file.path}.lock').open(mode: FileMode.append);
+      var locked = false;
+      try {
+        await lock.lock(FileLock.blockingShared);
+        locked = true;
+        if (!await file.exists()) return const PlayerSettings();
+        final decoded = jsonDecode(await file.readAsString());
+        if (decoded is Map) {
+          return PlayerSettings.fromJson(Map<String, dynamic>.from(decoded));
+        }
+      } finally {
+        if (locked) await lock.unlock();
+        await lock.close();
       }
     } catch (_) {}
     return const PlayerSettings();
@@ -325,25 +338,81 @@ class FilePlayerSettingsStore implements PlayerSettingsStore {
   /// 未配置字段(及未来扩展的未知字段)得以保留,双进程以文件为唯一权威,
   /// 避免播放进程只写音量时清掉其他设置;「恢复默认」写入显式默认值即可覆盖。
   @override
-  Future<void> write(PlayerSettings settings) async {
+  Future<void> write(PlayerSettings settings) =>
+      _serialize(() => _writeLocked(settings));
+
+  Future<T> _serialize<T>(Future<T> Function() operation) {
+    final key = file.absolute.path;
+    final previous = _writes[key] ?? Future<void>.value();
+    final next = previous.then((_) => operation());
+    final settled = next.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace _) {},
+    );
+    _writes[key] = settled;
+    unawaited(
+      settled.then((_) {
+        if (identical(_writes[key], settled)) _writes.remove(key);
+      }),
+    );
+    return next;
+  }
+
+  Future<void> _writeLocked(PlayerSettings settings) async {
     await file.parent.create(recursive: true);
-    final merged = <String, dynamic>{};
+    final lock = await File('${file.path}.lock').open(mode: FileMode.append);
+    await lock.lock(FileLock.blockingExclusive);
+    final temporary = File('${file.path}.$pid.${++_temporaryId}.tmp');
     try {
-      if (await file.exists()) {
-        final decoded = jsonDecode(await file.readAsString());
-        if (decoded is Map) {
-          merged.addAll(Map<String, dynamic>.from(decoded));
+      final merged = <String, dynamic>{};
+      try {
+        if (await file.exists()) {
+          final decoded = jsonDecode(await file.readAsString());
+          if (decoded is Map) {
+            merged.addAll(Map<String, dynamic>.from(decoded));
+          }
+        }
+      } on FormatException {
+        // A corrupt JSON file can be repaired; an I/O failure must not turn an
+        // unreadable existing configuration into a partial replacement.
+      }
+      for (final entry in settings.toJson().entries) {
+        final existing = merged[entry.key];
+        merged[entry.key] = existing is Map && entry.value is Map
+            ? {...existing, ...entry.value as Map}
+            : entry.value;
+      }
+      await temporary.writeAsString(
+        const JsonEncoder.withIndent('  ').convert(merged),
+        flush: true,
+      );
+      // Windows readers may briefly hold a handle without delete sharing.
+      // Retry replacement while retaining the old complete file and lock.
+      for (var attempt = 0; ; attempt++) {
+        try {
+          await temporary.rename(file.path);
+          break;
+        } on FileSystemException {
+          if (!Platform.isWindows || attempt >= 49) rethrow;
+          await Future<void>.delayed(const Duration(milliseconds: 20));
         }
       }
-    } catch (_) {}
-    merged.addAll(settings.toJson());
-    await file.writeAsString(
-      const JsonEncoder.withIndent('  ').convert(merged),
-    );
+    } finally {
+      if (await temporary.exists()) await temporary.delete();
+      await lock.unlock();
+      await lock.close();
+    }
   }
 }
 
 Future<PlayerSettingsStore> openPlayerSettingsStore() async {
+  final validation = Platform.environment['RILLIGHT_VALIDATION_DIRECTORY'];
+  if (validation != null && validation.isNotEmpty) {
+    if (!Directory(validation).isAbsolute) {
+      throw ArgumentError('Validation directory must be absolute');
+    }
+    return FilePlayerSettingsStore(File('$validation/player_settings.json'));
+  }
   try {
     final support = await getApplicationSupportDirectory();
     return FilePlayerSettingsStore(

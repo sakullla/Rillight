@@ -1,0 +1,64 @@
+name: macOS native build and package checks
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        type: string
+        default: v0.0.0-ci
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.4'
+          channel: stable
+          cache: true
+      - name: Install Flutter and native dependencies
+        run: flutter pub get
+      - name: Compile the native macOS application
+        run: flutter build macos --release
+      - name: Verify locked dylib closure and runtime versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          app="build/macos/Build/Products/Release/rillight.app"
+          python3 macos/verify_bundle.py "$app"
+          # Probe the packaged libraries; this is not a GUI/playback test.
+          DYLD_LIBRARY_PATH="$PWD/$app/Contents/Frameworks" \
+            python3 packages/rillight_player/native/check_mpv.py \
+            "$app/Contents/Frameworks/libmpv.2.dylib" > macos-native-versions.json
+      - name: Ad-hoc sign, verify and package
+        shell: bash
+        env:
+          BUILD_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          app="build/macos/Build/Products/Release/rillight.app"
+          codesign --deep --force --verbose --sign - --timestamp=none "$app"
+          signature_info="$(codesign --display --verbose=4 "$app" 2>&1)"
+          echo "$signature_info"
+          grep -q '^Signature=adhoc$' <<< "$signature_info"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          staging="$RUNNER_TEMP/rillight-dmg"
+          mkdir -p "$staging"
+          ditto "$app" "$staging/rillight.app"
+          hdiutil create -volname "Rillight" -srcfolder "$staging" -ov -format UDZO \
+            "Rillight-macos-${BUILD_VERSION}-$(uname -m)-adhoc.dmg"
+      - uses: actions/upload-artifact@v6
+        with:
+          name: release-macos
+          path: Rillight-macos-*-adhoc.dmg
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v6
+        with:
+          name: macos-native-versions
+          path: macos-native-versions.json
+          if-no-files-found: error
+
