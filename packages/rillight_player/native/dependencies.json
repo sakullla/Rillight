@@ -1,0 +1,379 @@
+{
+  "windows": {
+    "mpv": {
+      "version": "0.41.0-1023-g69e63f425",
+      "client_api": "2.5",
+      "ffmpeg": "N-126390-g9fc8c785e",
+      "channel": "shinchiro git build, not the v0.41.0 release tag",
+      "archive": "mpv-dev-x86_64-20260903-git-69e63f425a.7z",
+      "url": "https://github.com/shinchiro/mpv-winbuild-cmake/releases/download/20260903/mpv-dev-x86_64-20260903-git-69e63f425a.7z",
+      "sha256": "fac135c68a35b7639e39d72c0c365104edbaebdea39a0dfdd8c36e8c8e80faef",
+      "source": "https://github.com/shinchiro/mpv-winbuild-cmake/tree/20260903",
+      "license": "GPL-2.0-or-later; component source and license links in THIRD_PARTY_NOTICES.md"
+    },
+    "angle": {
+      "version": "flutter-windows-ANGLE-OpenGL-ES v1.0.1",
+      "archive": "ANGLE.7z",
+      "url": "https://github.com/alexmercerind/flutter-windows-ANGLE-OpenGL-ES/releases/download/v1.0.1/ANGLE.7z",
+      "sha256": "cc5911bb15d596fd5a2b362613ad35b7093b427117269a7359054a65746a5f9a",
+      "source": "https://github.com/alexmercerind/flutter-windows-ANGLE-OpenGL-ES/tree/v1.0.1",
+      "license": "BSD-3-Clause and bundled third-party licenses"
+    }
+  },
+  "macos": {
+    "mpv_version": "0.41.0",
+    "source": "https://github.com/iina/iina",
+    "files": [
+      {
+        "name": "libarchive.13.dylib",
+        "url": "https://iina.io/dylibs/universal/libarchive.13.dylib",
+        "sha256": "6b6831243614013e36b7c44806676a0ec1a4530dfffeb3b89ca61a330be84bac",
+        "size": 1660464
+      },
+      {
+        "name": "libass.9.dylib",
+        "url": "https://iina.io/dylibs/universal/libass.9.dylib",
+        "sha256": "1741863a4f58fd5151e5935760299cafffe56fc6f5f498c6b7b90579660aa06c",
+        "size": 559136
+      },
+      {
+        "name": "libavcodec.63.dylib",
+        "url": "https://iina.io/dylibs/universal/libavcodec.63.dylib",
+        "sha256": "839696c69cbca6ee06c570e4b6feb8ea1bb986147b0fdb82365853bc7216d00d",
+        "size": 29523392
+      },
+      {
+        "name": "libavdevice.63.dylib",
+        "url": "https://iina.io/dylibs/universal/libavdevice.63.dylib",
+        "sha256": "80afb1cfefffb3a8c526ae57b4c730321243bae8b32a6a57819691a623fb4e51",
+        "size": 196640
+      },
+      {
+        "name": "libavfilter.12.dylib",
+        "url": "https://iina.io/dylibs/universal/libavfilter.12.dylib",
+        "sha256": "00a76e337fdff3e095443f9aeab5caf0ef3fd621cc06b85d0347601f38e0f09a",
+        "size": 9432320
+      },
+      {
+        "name": "libavformat.63.dylib",
+        "url": "https://iina.io/dylibs/universal/libavformat.63.dylib",
+        "sha256": "258545d955e45e3e9b60c787013ca6fc8e24f025b3bddcb74b5aa89ca8a94134",
+        "size": 5230992
+      },
+      {
+        "name": "libavutil.61.dylib",
+        "url": "https://iina.io/dylibs/universal/libavutil.61.dylib",
+        "sha256": "ca7490b7ab764e115cc28cfe97d4242f9142715f9ceb05114246c8a59bbcccba",
+        "size": 1608976
+      },
+      {
+        "name": "libbluray.3.dylib",
+        "url": "https://iina.io/dylibs/universal/libbluray.3.dylib",
+        "sha256": "24709efd79de502af8acc014358ee008dca47bc7f37012f98649460f17199a86",
+        "size": 785184
+      },
+      {
+        "name": "libbrotlicommon.1.dylib",
+        "url": "https://iina.io/dylibs/universal/libbrotlicommon.1.dylib",
+        "sha256": "cb044552cbed3db811df4cb799c95c1e0a68b0115cbd2b21480268e7d64dd9e8",
+        "size": 362528
+      },
+      {
+        "name": "libbrotlidec.1.dylib",
+        "url": "https://iina.io/dylibs/universal/libbrotlidec.1.dylib",
+        "sha256": "c0e7ac1d7e8b46b66319dcfa3595ee6cd74772b09bdae4669b6aefbe167775fc",
+        "size": 167856
+      },
+      {
+        "name": "libbrotlienc.1.dylib",
+        "url": "https://iina.io/dylibs/universal/libbrotlienc.1.dylib",
+        "sha256": "cb872f84827f542f2bce1a83ec7b59254e47e524ffca4ca2fd9cd93944b94894",
+        "size": 1667312
+      },
+      {
+        "name": "libbs2b.0.dylib",
+        "url": "https://iina.io/dylibs/universal/libbs2b.0.dylib",
+        "sha256": "d7da52ddbdeda6f56c095df9bfb23ff2ab56e6c10cffed2fd41c2c5278eb6024",
+        "size": 102624
+      },
+      {
+        "name": "libdav1d.7.dylib",
+        "url": "https://iina.io/dylibs/universal/libdav1d.7.dylib",
+        "sha256": "144b9f57c54959c72b3fad08743a42b1acdd2976eb002b2bf159e0d804ea0027",
+        "size": 3331952
+      },
+      {
+        "name": "libfontconfig.1.dylib",
+        "url": "https://iina.io/dylibs/universal/libfontconfig.1.dylib",
+        "sha256": "267837c22a6fba3782b3bb942469406584fef305510a77645aa7c68654f003c5",
+        "size": 779792
+      },
+      {
+        "name": "libfreetype.6.dylib",
+        "url": "https://iina.io/dylibs/universal/libfreetype.6.dylib",
+        "sha256": "c1db8e2f8bc7af38e5131f43070efe9966fc3a5881af2892913d792843cf666e",
+        "size": 1499376
+      },
+      {
+        "name": "libfribidi.0.dylib",
+        "url": "https://iina.io/dylibs/universal/libfribidi.0.dylib",
+        "sha256": "1968a53a4bdd74debc238a64e226c44b2567843ef890556b8f9f3ce4f6c2f13a",
+        "size": 316720
+      },
+      {
+        "name": "libharfbuzz.0.dylib",
+        "url": "https://iina.io/dylibs/universal/libharfbuzz.0.dylib",
+        "sha256": "90bfd0144cf207c1bac86543158aad0ef64552a1968aa1d6f0ad780b4468d391",
+        "size": 2952896
+      },
+      {
+        "name": "libjpeg.62.dylib",
+        "url": "https://iina.io/dylibs/universal/libjpeg.62.dylib",
+        "sha256": "4ad203e03e600a6fa4f48ac14e567c0bcb0d0a2315d0350ec30789450a39227c",
+        "size": 1582128
+      },
+      {
+        "name": "libjxl.0.11.dylib",
+        "url": "https://iina.io/dylibs/universal/libjxl.0.11.dylib",
+        "sha256": "ba1a4817eaae9b001f845e131bd6ac44b06295aca0d4319ef915cb00c7926ab4",
+        "size": 6397456
+      },
+      {
+        "name": "libjxl_cms.0.11.dylib",
+        "url": "https://iina.io/dylibs/universal/libjxl_cms.0.11.dylib",
+        "sha256": "4f49e43618ceea14aeea387da99430c4e83c360f5fbbd317389514e9c4a7ab6b",
+        "size": 943696
+      },
+      {
+        "name": "libjxl_threads.0.11.dylib",
+        "url": "https://iina.io/dylibs/universal/libjxl_threads.0.11.dylib",
+        "sha256": "eb600185e39a00d6298de96080c00ee609a7fd4bac476f940d9d2c9c963ab246",
+        "size": 103536
+      },
+      {
+        "name": "liblcms2.2.dylib",
+        "url": "https://iina.io/dylibs/universal/liblcms2.2.dylib",
+        "sha256": "09dcd5f5afbba33dccc67f87d4dbd9e4b76956ea9e04401646f15a8e128f8d98",
+        "size": 829104
+      },
+      {
+        "name": "libluajit-5.1.2.dylib",
+        "url": "https://iina.io/dylibs/universal/libluajit-5.1.2.dylib",
+        "sha256": "6b5f9b1c7a7e0ad05afd289105d2d73c9736eebf07adc251f08ed8b93204acbc",
+        "size": 1408896
+      },
+      {
+        "name": "liblz4.1.dylib",
+        "url": "https://iina.io/dylibs/universal/liblz4.1.dylib",
+        "sha256": "a26c6f9cbe03c45ac4041b373eda25ed7c9081e4d018eafcd5aa2adca1222ebb",
+        "size": 423216
+      },
+      {
+        "name": "libmpv.2.dylib",
+        "url": "https://iina.io/dylibs/universal/libmpv.2.dylib",
+        "sha256": "1a270fbd14a4acfdf69a439ff3fadc43cd0ab328dadc1c8e1ecd9a52e927084c",
+        "size": 8476656
+      },
+      {
+        "name": "libmujs.dylib",
+        "url": "https://iina.io/dylibs/universal/libmujs.dylib",
+        "sha256": "6e908869b900b556e6e2b07d82907daf7adbe3f860166c050d04c5d2612d950e",
+        "size": 829120
+      },
+      {
+        "name": "libogg.0.dylib",
+        "url": "https://iina.io/dylibs/universal/libogg.0.dylib",
+        "sha256": "1071dd2b0dbc164667b10ac29ad20bf2ac715fe89e9da9409ee3a82012b1ba31",
+        "size": 135696
+      },
+      {
+        "name": "libplacebo.360.dylib",
+        "url": "https://iina.io/dylibs/universal/libplacebo.360.dylib",
+        "sha256": "eeb6f6dbbbda4e8c9034d0d6cdef338f1016f057d25ba7e5c214e3673f9f56ec",
+        "size": 1899456
+      },
+      {
+        "name": "librav1e.0.8.dylib",
+        "url": "https://iina.io/dylibs/universal/librav1e.0.8.dylib",
+        "sha256": "238d0adcb5322fefbacbae934046f4d5650e575d9f2155606cbf0b1625278584",
+        "size": 7680832
+      },
+      {
+        "name": "librubberband.3.dylib",
+        "url": "https://iina.io/dylibs/universal/librubberband.3.dylib",
+        "sha256": "3be986d4b4a8465bd52eec53e30d2edd4a8181c295d17cb55068ef4b248aa2e3",
+        "size": 969792
+      },
+      {
+        "name": "libsharpyuv.0.dylib",
+        "url": "https://iina.io/dylibs/universal/libsharpyuv.0.dylib",
+        "sha256": "3413ae5ff68ff2b3442bb1f0b4fa85131ad16c24de62e4dc3776b1a0bff01deb",
+        "size": 133408
+      },
+      {
+        "name": "libsoxr.0.dylib",
+        "url": "https://iina.io/dylibs/universal/libsoxr.0.dylib",
+        "sha256": "23aacb01953b6a51b2b09e47cb7138151cb7bd59ec721cb1709fb74553a03c50",
+        "size": 435088
+      },
+      {
+        "name": "libspeex.1.dylib",
+        "url": "https://iina.io/dylibs/universal/libspeex.1.dylib",
+        "sha256": "7d43fae0304e4f32bbbae88dec9746f46efe4046f3a11d14a03370b63ac29fc9",
+        "size": 337232
+      },
+      {
+        "name": "libSvtAv1Enc.4.dylib",
+        "url": "https://iina.io/dylibs/universal/libSvtAv1Enc.4.dylib",
+        "sha256": "1db0f898977f4be2a421cb16e9bcbf78e184c040980128743cb56a1558761f96",
+        "size": 12181056
+      },
+      {
+        "name": "libswresample.7.dylib",
+        "url": "https://iina.io/dylibs/universal/libswresample.7.dylib",
+        "sha256": "bb86e2078e0759ee02cd6cdb39433af968749926bb19d6fc5ac0d4005fb5a65c",
+        "size": 300480
+      },
+      {
+        "name": "libswscale.10.dylib",
+        "url": "https://iina.io/dylibs/universal/libswscale.10.dylib",
+        "sha256": "6c81a06bded308e3062ebbc59c87f1d57ce210b4ee6590a8594d1fa59fb3396d",
+        "size": 2882544
+      },
+      {
+        "name": "libuchardet.0.dylib",
+        "url": "https://iina.io/dylibs/universal/libuchardet.0.dylib",
+        "sha256": "15dac1e8369269c2a4f941839932fde5e185ddb00c41e196c2f45dcdd2f5906a",
+        "size": 468032
+      },
+      {
+        "name": "libudfread.3.dylib",
+        "url": "https://iina.io/dylibs/universal/libudfread.3.dylib",
+        "sha256": "446155117f30525f2922b25d8b1989d7d6101e1839ec304d7380aef6207b64e1",
+        "size": 134976
+      },
+      {
+        "name": "libunibreak.7.dylib",
+        "url": "https://iina.io/dylibs/universal/libunibreak.7.dylib",
+        "sha256": "564c658eb40dd67f08d91f062b0cc6db92921ebbc40ec7f27139faffaace4fc0",
+        "size": 387984
+      },
+      {
+        "name": "libvorbis.0.dylib",
+        "url": "https://iina.io/dylibs/universal/libvorbis.0.dylib",
+        "sha256": "556ebddd3c81cafb0d47f90860294bf886439ac44fed701b034db69a94ea70b6",
+        "size": 517744
+      },
+      {
+        "name": "libvorbisenc.2.dylib",
+        "url": "https://iina.io/dylibs/universal/libvorbisenc.2.dylib",
+        "sha256": "2d086d2cdd58fed3b8c3c08d9a81e0463a72b6450f8ccdfd04dff8b9875f4b20",
+        "size": 1519616
+      },
+      {
+        "name": "libwebp.7.dylib",
+        "url": "https://iina.io/dylibs/universal/libwebp.7.dylib",
+        "sha256": "09a9f64c67a7a935762a4bbc83a29588f67c045c836e868c0cf09965152a61ec",
+        "size": 1182848
+      },
+      {
+        "name": "libwebpmux.3.dylib",
+        "url": "https://iina.io/dylibs/universal/libwebpmux.3.dylib",
+        "sha256": "f05f69f021dd7eef21f01fd1c1eddf6667e7e8e5aa73cfd4e2feca5d8d5bd501",
+        "size": 169728
+      },
+      {
+        "name": "libzimg.2.dylib",
+        "url": "https://iina.io/dylibs/universal/libzimg.2.dylib",
+        "sha256": "b9eb86a521830f5a0973ad64b60f92e959e2bda1fee4240fe715681d73342de9",
+        "size": 1110960
+      },
+      {
+        "name": "libzstd.1.dylib",
+        "url": "https://iina.io/dylibs/universal/libzstd.1.dylib",
+        "sha256": "374f03cb507d1f1aaaf6177168f677ed23c3fb54a827564688651ccf42e18b3a",
+        "size": 1809616
+      }
+    ],
+    "minimum_macos": "11.0",
+    "architectures": [
+      "x86_64",
+      "arm64"
+    ],
+    "snapshot_date": "2026-09-17",
+    "license": "GPL-3.0-or-later distribution; see component notices",
+    "delivery": "raw universal dylibs; bundle every locked file into Contents/Frameworks"
+  },
+  "linux": {
+    "pkg_config": "mpv >= 2.5.0 (client API); runtime mpv-version >= 0.41.0",
+    "runtime": "libmpv.so.2",
+    "source": "https://github.com/mpv-player/mpv/tree/v0.41.0",
+    "minimum_version": "0.41.0",
+    "source_build": {
+      "mpv": {
+        "version": "0.41.0",
+        "repository": "https://github.com/mpv-player/mpv.git",
+        "commit": "41f6a645068483470267271e1d09966ca3b9f413"
+      },
+      "ffmpeg": {
+        "version": "n8.0.1",
+        "repository": "https://github.com/FFmpeg/FFmpeg.git",
+        "commit": "894da5ca7d742e4429ffb2af534fcda0103ef593"
+      },
+      "libplacebo": {
+        "version": "v7.351.0",
+        "repository": "https://github.com/haasn/libplacebo.git",
+        "commit": "3188549fba13bbdf3a5a98de2a38c2e71f04e21e"
+      }
+    }
+  },
+  "upstream_stable": "0.41.0",
+  "verified_at": "2026-09-17",
+  "headers": [
+    {
+      "name": "client.h",
+      "url": "https://raw.githubusercontent.com/mpv-player/mpv/v0.41.0/include/mpv/client.h",
+      "sha256": "3c073236a09cb456c6e80587d5523c8771c32fb22ca014e0f99cc3d43905b75c",
+      "license": "ISC"
+    },
+    {
+      "name": "render.h",
+      "url": "https://raw.githubusercontent.com/mpv-player/mpv/v0.41.0/include/mpv/render.h",
+      "sha256": "192691941602052f00df0587f126246c48785a1cf21de68d22a92ea1908d1c55",
+      "license": "ISC"
+    },
+    {
+      "name": "render_gl.h",
+      "url": "https://raw.githubusercontent.com/mpv-player/mpv/v0.41.0/include/mpv/render_gl.h",
+      "sha256": "48662c0ed9872a14dd9e1684105c97f69f94a0414709c254c5d372adc41d2e69",
+      "license": "ISC"
+    }
+  ],
+  "license_texts": [
+    {
+      "name": "media-kit-MIT.txt",
+      "url": "https://raw.githubusercontent.com/media-kit/media-kit/main/LICENSE",
+      "sha256": "2e3000f38718f050869d57540c288c661a446f64df1ba4ea4764df552b04a331"
+    },
+    {
+      "name": "mpv-GPL-2.0.txt",
+      "url": "https://raw.githubusercontent.com/mpv-player/mpv/v0.41.0/LICENSE.GPL",
+      "sha256": "edaef632cbb643e4e7a221717a6c441a4c1a7c918e6e4d56debc3d8739b233f6"
+    },
+    {
+      "name": "mpv-LGPL-2.1.txt",
+      "url": "https://raw.githubusercontent.com/mpv-player/mpv/v0.41.0/LICENSE.LGPL",
+      "sha256": "72b672113d642cbb8ef5dcc76938db801983c56e50b1400ab930f1a64d6dc8d9"
+    },
+    {
+      "name": "ANGLE-BSD.txt",
+      "url": "https://raw.githubusercontent.com/google/angle/main/LICENSE",
+      "sha256": "bf4da21bd20bcfb5b60b7ecc67fa864a79be049e21d6178076887f178dd6c71a"
+    },
+    {
+      "name": "IINA-GPL-3.0.txt",
+      "url": "https://raw.githubusercontent.com/iina/iina/develop/LICENSE",
+      "sha256": "589ed823e9a84c56feb95ac58e7cf384626b9cbf4fda2a907bc36e103de1bad2"
+    }
+  ]
+}

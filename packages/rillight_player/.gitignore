@@ -1,0 +1,8 @@
+.dart_tool/
+build/
+pubspec.lock
+__pycache__/
+macos/.cache/
+macos/Frameworks/
+macos/Libraries/
+macos/Headers/

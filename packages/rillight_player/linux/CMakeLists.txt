@@ -1,0 +1,17 @@
+cmake_minimum_required(VERSION 3.16)
+project(rillight_player LANGUAGES CXX)
+set(PLUGIN_NAME rillight_player_plugin)
+find_package(PkgConfig REQUIRED)
+# mpv.pc reports the CLIENT API version, not the application release version.
+# mpv 0.41 uses API 2.5; Dart additionally verifies the loaded mpv-version.
+pkg_check_modules(MPV REQUIRED IMPORTED_TARGET mpv>=2.5.0)
+pkg_check_modules(EPOXY REQUIRED IMPORTED_TARGET epoxy)
+add_library(${PLUGIN_NAME} SHARED rillight_player_plugin.cc)
+apply_standard_settings(${PLUGIN_NAME})
+target_compile_features(${PLUGIN_NAME} PRIVATE cxx_std_17)
+target_compile_options(${PLUGIN_NAME} PRIVATE -fexceptions)
+target_include_directories(${PLUGIN_NAME} INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+target_link_libraries(${PLUGIN_NAME} PRIVATE flutter PkgConfig::MPV PkgConfig::EPOXY)
+set(rillight_player_bundled_libraries "" PARENT_SCOPE)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../native/dependencies.json" "${CMAKE_CURRENT_SOURCE_DIR}/../THIRD_PARTY_NOTICES.md" DESTINATION "data/rillight_player" COMPONENT Runtime)
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../native/licenses" DESTINATION "data/rillight_player" COMPONENT Runtime)
