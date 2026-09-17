@@ -28,6 +28,11 @@ int spawnStandalonePlayer({
   final startup = calloc<STARTUPINFO>();
   final processInfo = calloc<PROCESS_INFORMATION>();
   final commandPtr = command.toNativeUtf16();
+  final entries = playerProcessEnvironment().entries.toList()
+    ..sort((a, b) => a.key.toLowerCase().compareTo(b.key.toLowerCase()));
+  final environment =
+      ('${entries.map((e) => '${e.key}=${e.value}').join('\u0000')}\u0000')
+          .toNativeUtf16();
   startup.ref.cb = sizeOf<STARTUPINFO>();
   var flags =
       CREATE_UNICODE_ENVIRONMENT |
@@ -40,7 +45,7 @@ int spawnStandalonePlayer({
     nullptr,
     FALSE,
     flags,
-    nullptr,
+    environment.cast(),
     nullptr,
     startup,
     processInfo,
@@ -54,12 +59,13 @@ int spawnStandalonePlayer({
       nullptr,
       FALSE,
       flags,
-      nullptr,
+      environment.cast(),
       nullptr,
       startup,
       processInfo,
     );
   }
+  final error = ok == FALSE ? GetLastError() : 0;
   final pid = processInfo.ref.dwProcessId;
   if (processInfo.ref.hThread != 0) {
     CloseHandle(processInfo.ref.hThread);
@@ -67,17 +73,18 @@ int spawnStandalonePlayer({
   if (processInfo.ref.hProcess != 0) {
     CloseHandle(processInfo.ref.hProcess);
   }
+  calloc.free(environment);
   calloc.free(commandPtr);
   calloc.free(startup);
   calloc.free(processInfo);
   if (ok == FALSE || pid == 0) {
-    throw WindowsException(HRESULT_FROM_WIN32(GetLastError()));
+    throw WindowsException(HRESULT_FROM_WIN32(error));
   }
   return pid;
 }
 
 bool isPidAlive(int pid) {
-  if (pid <= 0) {
+  if (pid <= 0 || !Platform.isWindows) {
     return false;
   }
   final handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);

@@ -33,6 +33,9 @@ abstract class PlayerWindowHost extends ChangeNotifier {
 
   Future<void> open(PlayerOpenRequest request);
   Future<void> close();
+
+  /// Last-resort process cleanup when graceful shutdown exceeds its deadline.
+  Future<void> forceClose() => close();
 }
 
 class OverlayPlayerWindowHost extends PlayerWindowHost {

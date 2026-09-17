@@ -133,6 +133,59 @@ void main() {
   }
 
   group('DesktopPlayerWindowHost', () {
+    test(
+      'a delayed detail command cannot route after another player opens',
+      () async {
+        final auth = await loggedInAuth();
+        final gate = Completer<PlayerHostOpenItemCommand?>();
+        var consumed = false;
+        final host = newHost(
+          auth,
+          consumeOpenItem: () async {
+            if (consumed) return null;
+            consumed = true;
+            return gate.future;
+          },
+        );
+        addTearDown(() {
+          host.dispose();
+          auth.dispose();
+        });
+        String? routed;
+        host.onOpenItemRoute = (id, {seasonId}) => routed = id;
+        await host.open(const PlayerOpenRequest(itemId: 'movie-up'));
+        for (var i = 0; i < 50 && !consumed; i++) {
+          await Future<void>.delayed(const Duration(milliseconds: 2));
+        }
+        expect(consumed, isTrue);
+        await host.open(const PlayerOpenRequest(itemId: 'movie-inception'));
+        gate.complete(const PlayerHostOpenItemCommand(itemId: 'old-detail'));
+        await Future<void>.delayed(Duration.zero);
+        expect(routed, isNull);
+        expect(host.current?.itemId, 'movie-inception');
+      },
+    );
+
+    test('close during spawn cannot publish the late player window', () async {
+      final auth = await loggedInAuth();
+      final host = newHost(auth);
+      addTearDown(() {
+        host.dispose();
+        auth.dispose();
+      });
+      control.spawnHold = Completer<void>();
+      final opening = host.open(const PlayerOpenRequest(itemId: 'movie-up'));
+      for (var i = 0; i < 50 && control.spawnedArguments.isEmpty; i++) {
+        await Future<void>.delayed(Duration.zero);
+      }
+      final closing = host.close();
+      control.spawnHold!.complete();
+      await Future.wait([opening, closing]);
+      expect(host.current, isNull);
+      expect(control.alive, isEmpty);
+      expect(calls.where((e) => e.startsWith('kill:')), hasLength(1));
+    });
+
     test('opening a second item requests close, kills on timeout, and resends '
         'Stopped once from the snapshot before deleting it', () async {
       final auth = await loggedInAuth();
@@ -166,11 +219,16 @@ void main() {
     });
 
     test('watch delivers an open-item command to the main window', () async {
-      addTearDown(() async {
-        await PlayerHostOpenItem.consume();
-      });
       final auth = await loggedInAuth();
-      final host = newHost(auth, consumeOpenItem: PlayerHostOpenItem.consume);
+      PlayerHostOpenItemCommand? pending;
+      final host = newHost(
+        auth,
+        consumeOpenItem: () async {
+          final command = pending;
+          pending = null;
+          return command;
+        },
+      );
       addTearDown(() {
         host.dispose();
         auth.dispose();
@@ -183,8 +241,8 @@ void main() {
         openedSeason = seasonId;
       };
       await host.open(const PlayerOpenRequest(itemId: 'episode-friends-s1e1'));
-      await PlayerHostOpenItem.write(
-        'series-friends',
+      pending = const PlayerHostOpenItemCommand(
+        itemId: 'series-friends',
         seasonId: 'season-friends-1',
       );
       for (var i = 0; i < 40 && opened == null; i++) {

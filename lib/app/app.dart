@@ -128,7 +128,10 @@ class _MainWindowCloseGuardState extends State<MainWindowCloseGuard>
     try {
       await widget.host.close().timeout(widget.closeTimeout);
     } catch (_) {
-      // 播放窗口关闭失败或超时不应阻止主窗口退出。
+      // Do not abandon a player that is still starting or closing.
+      try {
+        await widget.host.forceClose();
+      } catch (_) {}
     }
     try {
       await (widget.destroyWindow ?? _destroyMainWindow)();

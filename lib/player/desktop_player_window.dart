@@ -2,9 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/product.dart';
 import 'package:rillight/app/theme.dart';
@@ -22,15 +20,11 @@ import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_host_command.dart';
 import 'package:rillight/player/player_page.dart';
 import 'package:rillight/player/player_process_control.dart';
+import 'package:rillight/player/player_process_protocol.dart';
 import 'package:rillight/player/player_runtime_options.dart';
 import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/player_window_host.dart';
 import 'package:window_manager/window_manager.dart';
-
-const _hostChannel = WindowMethodChannel(
-  'rillight/player_host',
-  mode: ChannelMode.unidirectional,
-);
 
 /// 播放进程窗口:隐藏系统标题栏。开窗尺寸按工作区自适应,不写死分辨率。
 const WindowOptions kPlayerWindowOptions = WindowOptions(
@@ -49,6 +43,7 @@ class PlayerWindowLaunch {
     required this.userId,
     required this.device,
     this.userAgent,
+    this.protocol,
   });
 
   final PlayerOpenRequest request;
@@ -57,6 +52,7 @@ class PlayerWindowLaunch {
   final String userId;
   final EmbyDeviceInfo device;
   final String? userAgent;
+  final PlayerProcessProtocol? protocol;
 
   factory PlayerWindowLaunch.fromAuth({
     required AuthController auth,
@@ -108,6 +104,9 @@ class PlayerWindowLaunch {
       accessToken: json['accessToken'] as String? ?? '',
       userId: json['userId'] as String? ?? '',
       userAgent: json['userAgent'] as String?,
+      protocol: json['processSessionId'] == null
+          ? null
+          : PlayerProcessProtocol.fromJson(json),
       device: EmbyDeviceInfo(
         clientName: json['clientName'] as String? ?? kHttpClientName,
         deviceName: json['deviceName'] as String? ?? 'desktop',
@@ -120,6 +119,7 @@ class PlayerWindowLaunch {
   Map<String, dynamic> toJson() {
     return {
       'businessId': businessId,
+      ...?protocol?.fields,
       'itemId': request.itemId,
       'autoResume': request.autoResume,
       if (request.mediaSourceId != null) 'mediaSourceId': request.mediaSourceId,
@@ -152,7 +152,7 @@ typedef PlayerHostOpenItemConsumer =
 
 /// 独立播放进程宿主。
 ///
-/// 关闭顺序:先 [PlayerProcessControl.requestClose](WM_CLOSE,播放进程
+/// 关闭顺序:先 [PlayerProcessControl.requestClose](会话 close 消息,播放进程
 /// 自行发 Stopped),超时再 [PlayerProcessControl.kill];进程终止或意外
 /// 退出后读取其会话快照,快照仍在(播放进程未能成功发出 Stopped)且归属
 /// 当前会话时由主进程代发 Stopped,成功后删除快照,失败则保留并通过
@@ -166,12 +166,10 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
     this.closeTimeout = const Duration(seconds: 4),
     this.reportTimeout = const Duration(seconds: 3),
     this.watchInterval = const Duration(milliseconds: 400),
-  }) : _control = processControl ?? const WindowsPlayerProcessControl(),
-       _snapshotStoreForPid =
-           snapshotStoreForPid ?? FilePlaybackSessionSnapshotStore.forPid,
-       _consumeOpenItem = consumeOpenItem ?? PlayerHostOpenItem.consume {
+  }) : _control = processControl ?? createPlayerProcessControl(),
+       _snapshotStoreForPid = snapshotStoreForPid,
+       _consumeOpenItem = consumeOpenItem {
     auth.addListener(_onAuth);
-    _registerHostChannelHandler();
   }
 
   final AuthController auth;
@@ -179,35 +177,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
   /// 播放器进程请求主窗口打开条目详情(如播放结束"查看剧集")。
   void Function(String itemId, {String? seasonId})? onOpenItemRoute;
 
-  void _registerHostChannelHandler() {
-    Future<void> register() async {
-      try {
-        await _hostChannel.setMethodCallHandler((call) async {
-          if (call.method != 'openItem') {
-            return;
-          }
-          final args = call.arguments;
-          final itemId = args is Map ? args['itemId']?.toString() : null;
-          if (itemId == null || itemId.isEmpty) {
-            return;
-          }
-          final season = args is Map
-              ? args['seasonId']?.toString().trim()
-              : null;
-          onOpenItemRoute?.call(
-            itemId,
-            seasonId: season == null || season.isEmpty ? null : season,
-          );
-        });
-      } catch (_) {
-        // 测试环境无平台通道,忽略注册失败。
-      }
-    }
-
-    unawaited(register());
-  }
-
-  /// 等待播放进程响应 WM_CLOSE 自行退出的上限。
+  /// 等待播放进程响应会话 close 消息并自行退出的上限。
   final Duration closeTimeout;
 
   /// 主进程代发 Stopped 的上限。
@@ -217,14 +187,20 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
   final Duration watchInterval;
 
   final PlayerProcessControl _control;
-  final PlaybackSnapshotStoreLocator _snapshotStoreForPid;
-  final PlayerHostOpenItemConsumer _consumeOpenItem;
+  final PlaybackSnapshotStoreLocator? _snapshotStoreForPid;
+  final PlayerHostOpenItemConsumer? _consumeOpenItem;
   final _notices = StreamController<PlayerHostNotice>.broadcast();
   int _pid = 0;
   Timer? _watch;
   PlayerOpenRequest? _current;
   var _disposed = false;
   var _epoch = 0;
+  var _requestRevision = 0;
+  int _activeRevision = 0;
+  bool _watchBusy = false;
+  String? _authIdentity;
+  String get _currentAuthIdentity =>
+      '${auth.client.baseUrl}|${auth.client.userId}|${auth.client.accessToken}';
 
   /// 串行化 open/close 与 watcher 代发,避免 close 清掉后开的 pid,
   /// 并让 close() 等到在途 reconcile 结束后再回到登出。
@@ -241,23 +217,40 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
 
   @override
   Future<void> open(PlayerOpenRequest request) {
+    final revision = ++_requestRevision;
+    _control.cancelPendingSpawns();
     return _runInFlight(() async {
-      final launch = PlayerWindowLaunch.fromAuth(auth: auth, request: request);
+      if (_disposed || revision != _requestRevision) return;
       await _stopProcess();
+      if (_disposed || revision != _requestRevision) return;
+      final launch = PlayerWindowLaunch.fromAuth(auth: auth, request: request);
       try {
         final pid = await _control.spawn(
           executable: Platform.resolvedExecutable,
           arguments: launch.toArguments(),
         );
+        if (_disposed ||
+            revision != _requestRevision ||
+            auth.client.baseUrl?.toString() != launch.baseUrl ||
+            auth.client.userId != launch.userId ||
+            auth.client.accessToken != launch.accessToken) {
+          await _control.kill(pid);
+          await _control.release(pid);
+          return;
+        }
         _pid = pid;
+        _activeRevision = revision;
+        _authIdentity = _currentAuthIdentity;
         _epoch++;
         _current = request;
         notifyListeners();
         _startWatch(pid);
       } catch (error) {
-        _pid = 0;
-        _current = null;
-        notifyListeners();
+        if (error is PlayerProcessStartupException) {
+          await _reconcileSnapshot(error.pid);
+          await _control.release(error.pid);
+        }
+        if (!_disposed && revision == _requestRevision) _clearWindow();
         rethrow;
       }
     });
@@ -265,13 +258,26 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
 
   @override
   Future<void> close() {
+    _requestRevision++;
+    _control.cancelPendingSpawns();
     return _runInFlight(() async {
       final epoch = _epoch;
       await _stopProcess();
-      if (_epoch == epoch) {
-        _clearWindow();
-      }
+      if (_epoch == epoch) _clearWindow();
     });
+  }
+
+  @override
+  Future<void> forceClose() async {
+    _requestRevision++;
+    _control.cancelPendingSpawns();
+    _watch?.cancel();
+    await _control.terminateAll();
+    for (final pid in _control.activePids.toList()) {
+      await _reconcileSnapshot(pid);
+      await _control.release(pid);
+    }
+    _clearWindow();
   }
 
   Future<void> _runInFlight(Future<void> Function() action) {
@@ -281,31 +287,37 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
   }
 
   void _onAuth() {
-    if (!auth.isLoggedIn) {
+    if (!auth.isLoggedIn ||
+        (_authIdentity != null && _authIdentity != _currentAuthIdentity)) {
       unawaited(close());
     }
   }
 
   void _startWatch(int pid) {
     _watch?.cancel();
+    final epoch = _epoch;
     _watch = Timer.periodic(watchInterval, (timer) {
-      unawaited(_deliverOpenItem());
-      if (_control.isAlive(pid)) {
-        return;
-      }
-      timer.cancel();
-      if (_watch == timer) {
-        _watch = null;
-      }
-      unawaited(
-        _runInFlight(() async {
-          if (_pid != pid) {
-            return;
-          }
-          _clearWindow();
-          await _reconcileSnapshot(pid);
-        }),
-      );
+      if (_watchBusy || _disposed) return;
+      _watchBusy = true;
+      unawaited(() async {
+        try {
+          await _control.heartbeat(pid);
+          await _deliverOpenItem(pid, epoch);
+          if (_control.isAlive(pid)) return;
+          timer.cancel();
+          if (_watch == timer) _watch = null;
+          await _runInFlight(() async {
+            if (_pid != pid || _epoch != epoch) return;
+            _clearWindow();
+            await _reconcileSnapshot(pid);
+            await _control.release(pid);
+          });
+        } catch (_) {
+          // A close may remove the mailbox while a watcher read is in flight.
+        } finally {
+          _watchBusy = false;
+        }
+      }());
     });
   }
 
@@ -313,21 +325,28 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
     _watch?.cancel();
     _watch = null;
     final pid = _pid;
+    final epoch = _epoch;
     _pid = 0;
-    if (pid == 0) {
-      return;
-    }
-    final closed = await _control.requestClose(pid, closeTimeout);
-    if (!closed) {
-      _control.kill(pid);
-    }
-    await _deliverOpenItem();
+    if (pid == 0) return;
+    var closed = false;
+    try {
+      closed = await _control.requestClose(pid, closeTimeout);
+    } catch (_) {}
+    if (!closed) await _control.kill(pid);
+    await _deliverOpenItem(pid, epoch);
     await _reconcileSnapshot(pid);
+    await _control.release(pid);
   }
 
-  Future<void> _deliverOpenItem() async {
-    final command = await _consumeOpenItem();
-    if (command == null || command.itemId.isEmpty || _disposed) {
+  Future<void> _deliverOpenItem(int pid, int epoch) async {
+    final command =
+        await (_consumeOpenItem?.call() ?? _control.consumeOpenItem(pid));
+    if (command == null ||
+        command.itemId.isEmpty ||
+        _disposed ||
+        epoch != _epoch ||
+        _activeRevision != _requestRevision ||
+        (_pid != 0 && _pid != pid)) {
       return;
     }
     onOpenItemRoute?.call(command.itemId, seasonId: command.seasonId);
@@ -338,7 +357,11 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
   /// 播放进程成功发出 Stopped 后删除快照可能仍在途,此处重复代发是
   /// 幂等的,不视为错误。快照归属其他服务器/用户时不代发。
   Future<void> _reconcileSnapshot(int pid) async {
-    final store = _snapshotStoreForPid(pid);
+    if (_snapshotStoreForPid == null && !_control.activePids.contains(pid)) {
+      return;
+    }
+    final store =
+        _snapshotStoreForPid?.call(pid) ?? _control.snapshotStore(pid);
     final snapshot = await store.read();
     if (snapshot == null) {
       return;
@@ -348,6 +371,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
         snapshot.userId != client.userId) {
       return;
     }
+    final token = client.accessToken;
     try {
       await client
           .reportStopped(PlaybackReport.fromSnapshot(snapshot))
@@ -356,7 +380,11 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
       _notify(PlayerHostNotice.progressSyncFailed);
       return;
     }
-    await store.delete();
+    if (client.accessToken == token &&
+        snapshot.baseUrl == client.baseUrl?.toString() &&
+        snapshot.userId == client.userId) {
+      await store.delete();
+    }
   }
 
   void _notify(PlayerHostNotice notice) {
@@ -374,48 +402,43 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
     _watch = null;
     _pid = 0;
     _current = null;
-    notifyListeners();
+    _authIdentity = null;
+    if (!_disposed) notifyListeners();
   }
 
   @override
   void dispose() {
     _disposed = true;
+    _requestRevision++;
+    _control.cancelPendingSpawns();
     auth.removeListener(_onAuth);
     unawaited(_runInFlight(_stopProcess).whenComplete(_notices.close));
     super.dispose();
   }
 }
 
-Future<void> runPlayerWindow({
-  WindowController? controller,
-  String? argumentFallback,
-}) async {
+Future<void> runPlayerWindow({String? argumentFallback}) async {
   PlayerWindowLaunch launch;
   try {
-    var raw = controller?.arguments.trim() ?? '';
-    if (raw.isEmpty) {
-      raw = argumentFallback ?? '';
-    }
+    var raw = argumentFallback ?? '';
     final file = File(raw);
     if (raw.isNotEmpty && file.existsSync()) {
-      raw = file.readAsStringSync();
+      raw = await file.readAsString();
+      await file.delete();
     }
     launch = PlayerWindowLaunch.fromArguments(raw);
-  } catch (error) {
-    runApp(
-      MaterialApp(
-        home: Scaffold(body: Center(child: Text(error.toString()))),
-      ),
-    );
-    return;
+    if (launch.protocol == null) {
+      throw const FormatException('Missing player process endpoint');
+    }
+  } catch (_) {
+    exitCode = 1;
+    exit(1);
   }
-  runApp(PlayerWindowApp(controller: controller, launch: launch));
+  runApp(PlayerWindowApp(launch: launch));
 }
 
 class PlayerWindowApp extends StatefulWidget {
-  const PlayerWindowApp({super.key, this.controller, required this.launch});
-
-  final WindowController? controller;
+  const PlayerWindowApp({super.key, required this.launch});
   final PlayerWindowLaunch launch;
 
   @override
@@ -426,7 +449,10 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
   late PlayerWindowLaunch _launch;
   late final AuthController _auth;
   var _playerKey = GlobalKey<PlayerPageState>();
-  var _closing = false;
+  Future<void>? _closing;
+  Timer? _commands;
+  bool _readingCommand = false;
+  int _launchRevision = 0;
 
   @override
   void initState() {
@@ -435,29 +461,29 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
     _auth = _authFor(_launch);
     windowManager.addListener(this);
     unawaited(_configureWindow());
-    final controller = widget.controller;
-    if (controller != null) {
-      unawaited(
-        controller.setWindowMethodHandler((call) async {
-          switch (call.method) {
-            case 'open':
-              _applyLaunch(_asLaunch(call.arguments));
-              return null;
-            case 'window_close':
-              await _closeWindow();
-              return null;
-            default:
-              throw MissingPluginException('Not implemented: ${call.method}');
+    _commands = Timer.periodic(const Duration(milliseconds: 100), (_) {
+      if (_readingCommand || _closing != null) return;
+      _readingCommand = true;
+      unawaited(() async {
+        try {
+          final endpoint = _launch.protocol;
+          if (endpoint != null &&
+              (await endpoint.read('close') != null ||
+                  await endpoint.parentExpired())) {
+            await _closeWindow();
           }
-        }),
-      );
-    }
+        } finally {
+          _readingCommand = false;
+        }
+      }());
+    });
   }
 
   @override
   void dispose() {
     windowManager.removeListener(this);
-    unawaited(_notifyHostClosed());
+    _commands?.cancel();
+    _auth.dispose();
     super.dispose();
   }
 
@@ -481,11 +507,13 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
     );
   }
 
-  void _applyLaunch(PlayerWindowLaunch launch) {
-    if (!mounted) {
+  Future<void> _applyLaunch(PlayerWindowLaunch launch) async {
+    if (!mounted || _closing != null) {
       return;
     }
-    unawaited(_playerKey.currentState?.controller?.shutdownSession());
+    final revision = ++_launchRevision;
+    await _playerKey.currentState?.controller?.disposeAsync();
+    if (!mounted || _closing != null || revision != _launchRevision) return;
     _playerKey = GlobalKey<PlayerPageState>();
     setState(() {
       _launch = launch;
@@ -496,16 +524,6 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
         userAgent: launch.userAgent,
       );
     });
-  }
-
-  PlayerWindowLaunch _asLaunch(dynamic arguments) {
-    if (arguments is String) {
-      return PlayerWindowLaunch.fromArguments(arguments);
-    }
-    if (arguments is Map) {
-      return PlayerWindowLaunch.fromJson(Map<String, dynamic>.from(arguments));
-    }
-    throw FormatException('unsupported player window payload: $arguments');
   }
 
   Future<void> _configureWindow() async {
@@ -524,51 +542,34 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
       await windowManager.setTitle(_playerWindowTitle);
       await windowManager.show();
       await windowManager.focus();
+      await _launch.protocol?.write('ready');
     } catch (_) {
-      try {
-        await windowManager.hide();
-        await applyAdaptiveWindowSize(
-          minimumSize: kMinPlayerWindowSize,
-          maximumSize: kMaxPlayerWindowSize,
-        );
-        await windowManager.setTitleBarStyle(TitleBarStyle.hidden);
-        await windowManager.show();
-      } catch (_) {}
+      await _launch.protocol?.write('failed');
+      await _closeWindow();
     }
   }
 
   Future<void> _openItemInHost(String itemId, {String? seasonId}) async {
     try {
-      await PlayerHostOpenItem.write(itemId, seasonId: seasonId);
+      final protocol = _launch.protocol;
+      if (protocol != null) {
+        await PlayerHostOpenItem.write(
+          itemId,
+          protocol: protocol,
+          seasonId: seasonId,
+        );
+      }
     } catch (_) {}
     await _closeWindow();
   }
 
-  Future<void> _closeWindow() async {
-    if (_closing) {
-      return;
-    }
-    _closing = true;
-    await _playerKey.currentState?.controller?.shutdownSession();
-    await _reclaimDiskCache();
-    await _notifyHostClosed();
-    if (widget.controller == null) {
-      exit(0);
-    }
-    try {
-      await windowManager.setPreventClose(false);
-      await windowManager.destroy();
-    } catch (_) {
-      try {
-        await windowManager.close();
-      } catch (_) {}
-    }
-  }
+  Future<void> _closeWindow() => _closing ??= _disposeAndExit();
 
-  Future<void> _notifyHostClosed() async {
-    try {
-      await _hostChannel.invokeMethod('closed');
-    } catch (_) {}
+  Future<void> _disposeAndExit() async {
+    _commands?.cancel();
+    await _playerKey.currentState?.controller?.disposeAsync();
+    await _reclaimDiskCache();
+    exit(0);
   }
 
   /// 关窗时按设置的上限回收 mpv 磁盘缓冲目录,避免长期占用增长。
@@ -589,7 +590,13 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
     return AuthScope(
       controller: _auth,
       child: PlayerScope(
-        bindings: const PlayerBindings(),
+        bindings: PlayerBindings(
+          snapshotStore: _launch.protocol == null
+              ? null
+              : FilePlaybackSessionSnapshotStore(
+                  File('${_launch.protocol!.directory.path}/snapshot.json'),
+                ),
+        ),
         child: MaterialApp(
           title: _playerWindowTitle,
           debugShowCheckedModeBanner: false,
@@ -619,6 +626,7 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
                   userId: _launch.userId,
                   device: _launch.device,
                   userAgent: _launch.userAgent,
+                  protocol: _launch.protocol,
                 ),
               );
             },

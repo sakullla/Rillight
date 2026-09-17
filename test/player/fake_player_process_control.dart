@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:rillight/player/player_process_control.dart';
+import 'package:rillight/player/player_host_command.dart';
+import 'package:rillight/player/playback_session_snapshot.dart';
 
 /// 记录 spawn/requestClose/kill 调用序列的进程控制假实现。
 ///
@@ -22,6 +24,7 @@ class FakePlayerProcessControl implements PlayerProcessControl {
 
   /// 若设置,`requestClose` 先等到该 Completer 完成(用于模拟关闭挂起)。
   Completer<void>? requestCloseHold;
+  Completer<void>? spawnHold;
 
   /// 在 [requestCloseHold] 之后额外等待的时长。
   Duration requestCloseDelay = Duration.zero;
@@ -45,6 +48,7 @@ class FakePlayerProcessControl implements PlayerProcessControl {
     alive.add(pid);
     spawnedArguments.add(arguments);
     calls.add('spawn:$pid');
+    await spawnHold?.future;
     return pid;
   }
 
@@ -68,9 +72,29 @@ class FakePlayerProcessControl implements PlayerProcessControl {
   }
 
   @override
-  void kill(int pid) {
+  Future<void> kill(int pid) async {
     calls.add('kill:$pid');
     alive.remove(pid);
+  }
+
+  @override
+  Future<PlayerHostOpenItemCommand?> consumeOpenItem(int pid) async => null;
+  @override
+  Future<void> heartbeat(int pid) async {}
+  @override
+  Future<void> release(int pid) async {}
+  @override
+  void cancelPendingSpawns() {}
+  @override
+  Iterable<int> get activePids => alive.toList();
+  @override
+  PlaybackSessionSnapshotStore snapshotStore(int pid) =>
+      MemoryPlaybackSessionSnapshotStore();
+  @override
+  Future<void> terminateAll() async {
+    for (final pid in alive.toList()) {
+      await kill(pid);
+    }
   }
 
   /// 模拟播放进程意外退出(崩溃或被外部结束)。
