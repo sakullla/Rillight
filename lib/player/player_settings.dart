@@ -15,25 +15,43 @@ enum HardwareDecoderBackend { auto, d3d11va, nvdec, videotoolbox }
 
 /// 按剧(seriesId)记忆的播放偏好:音轨/字幕(含关闭)/码率/片源名。
 ///
-/// [subtitleStreamIndex] 为 null 表示该剧字幕处于关闭状态;
+/// [subtitleOff] 为 true 才表示用户关闭了字幕;缺省字段只表示未指定,
+/// 换集时走默认字幕。轨道序号跨集会变,同时记下语言/标题以便对齐。
 /// [mediaSourceName] 按 MediaSource.Name 跨集对齐(源 id 每集不同)。
-/// 记录存在即视为有效快照,不存在记录时运行时沿用默认逻辑。
 class PlayerSeriesPreference {
   const PlayerSeriesPreference({
     this.audioStreamIndex,
+    this.audioLanguage,
+    this.audioTitle,
     this.subtitleStreamIndex,
+    this.subtitleLanguage,
+    this.subtitleTitle,
+    this.subtitleOff = false,
     this.maxStreamingBitrate,
     this.mediaSourceName,
   });
 
   final int? audioStreamIndex;
+  final String? audioLanguage;
+  final String? audioTitle;
   final int? subtitleStreamIndex;
+  final String? subtitleLanguage;
+  final String? subtitleTitle;
+  final bool subtitleOff;
   final int? maxStreamingBitrate;
   final String? mediaSourceName;
 
   Map<String, dynamic> toJson() => {
     if (audioStreamIndex != null) 'audioStreamIndex': audioStreamIndex,
+    if (audioLanguage != null && audioLanguage!.isNotEmpty)
+      'audioLanguage': audioLanguage,
+    if (audioTitle != null && audioTitle!.isNotEmpty) 'audioTitle': audioTitle,
     if (subtitleStreamIndex != null) 'subtitleStreamIndex': subtitleStreamIndex,
+    if (subtitleLanguage != null && subtitleLanguage!.isNotEmpty)
+      'subtitleLanguage': subtitleLanguage,
+    if (subtitleTitle != null && subtitleTitle!.isNotEmpty)
+      'subtitleTitle': subtitleTitle,
+    if (subtitleOff) 'subtitleOff': true,
     if (maxStreamingBitrate != null) 'maxStreamingBitrate': maxStreamingBitrate,
     if (mediaSourceName != null && mediaSourceName!.isNotEmpty)
       'mediaSourceName': mediaSourceName,
@@ -42,7 +60,12 @@ class PlayerSeriesPreference {
   factory PlayerSeriesPreference.fromJson(Map<String, dynamic> json) {
     return PlayerSeriesPreference(
       audioStreamIndex: _readInt(json['audioStreamIndex']),
+      audioLanguage: _readString(json['audioLanguage']),
+      audioTitle: _readString(json['audioTitle']),
       subtitleStreamIndex: _readInt(json['subtitleStreamIndex']),
+      subtitleLanguage: _readString(json['subtitleLanguage']),
+      subtitleTitle: _readString(json['subtitleTitle']),
+      subtitleOff: json['subtitleOff'] == true,
       maxStreamingBitrate: _readInt(json['maxStreamingBitrate']),
       mediaSourceName: _readString(json['mediaSourceName']),
     );

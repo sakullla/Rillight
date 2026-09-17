@@ -179,3 +179,72 @@ Map<String, String> playbackStreamHeaders({
       streamUrl.port == baseUrl.port;
   return sameOrigin ? sessionHeaders : const {};
 }
+
+/// 跨集对齐音轨/字幕:语言+标题优先,序号只作兜底(每集 Index 常变)。
+int? matchPreferredStreamIndex({
+  required List<MediaStreamInfo> streams,
+  int? preferredIndex,
+  String? language,
+  String? title,
+}) {
+  if (streams.isEmpty) {
+    return null;
+  }
+  final lang = language?.trim() ?? '';
+  final name = title?.trim() ?? '';
+  if (lang.isNotEmpty && name.isNotEmpty) {
+    for (final stream in streams) {
+      if (_sameIgnoreCase(stream.language, language) &&
+          _sameIgnoreCase(stream.displayTitle ?? stream.label, title)) {
+        return stream.index;
+      }
+    }
+  }
+  if (lang.isNotEmpty) {
+    for (final stream in streams) {
+      if (_sameIgnoreCase(stream.language, language)) {
+        return stream.index;
+      }
+    }
+  }
+  if (name.isNotEmpty) {
+    for (final stream in streams) {
+      if (_sameIgnoreCase(stream.displayTitle ?? stream.label, title)) {
+        return stream.index;
+      }
+    }
+  }
+  if (preferredIndex != null) {
+    for (final stream in streams) {
+      if (stream.index == preferredIndex) {
+        return stream.index;
+      }
+    }
+  }
+  return null;
+}
+
+/// 默认字幕:服务端默认轨(含位图),否则第一条文本轨,再否则第一条字幕。
+int? fallbackSubtitleStreamIndex(PlaybackMediaSource source) {
+  final index = source.defaultSubtitleStreamIndex;
+  if (index != null) {
+    final stream = source.streamByIndex(index);
+    if (stream != null && stream.isSubtitle) {
+      return index;
+    }
+  }
+  for (final stream in source.subtitleStreams) {
+    if (stream.isTextSubtitle) {
+      return stream.index;
+    }
+  }
+  return source.subtitleStreams.isEmpty
+      ? null
+      : source.subtitleStreams.first.index;
+}
+
+bool _sameIgnoreCase(String? left, String? right) {
+  final a = left?.trim().toLowerCase() ?? '';
+  final b = right?.trim().toLowerCase() ?? '';
+  return a.isNotEmpty && a == b;
+}

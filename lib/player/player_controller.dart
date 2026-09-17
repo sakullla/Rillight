@@ -323,19 +323,21 @@ class PlayerController extends ChangeNotifier {
       }
       duration = durationFromTicks(item!.runTimeTicks ?? 0);
       _applyRememberedPreference();
-      subtitleStreamIndex = preferredSubtitleStreamIndex;
-      audioStreamIndex = preferredAudioStreamIndex ?? audioStreamIndex;
       final memory = _rememberedPreference;
-      final memoryAudio = memory?.audioStreamIndex;
-      final memorySubtitle = memory?.subtitleStreamIndex;
-      final memorySubtitleOff =
-          memory != null && memory.subtitleStreamIndex == null;
+      final memorySubtitleOff = memory?.subtitleOff ?? false;
+      subtitleStreamIndex = memorySubtitleOff
+          ? null
+          : (preferredSubtitleStreamIndex ?? memory?.subtitleStreamIndex);
+      audioStreamIndex =
+          preferredAudioStreamIndex ??
+          memory?.audioStreamIndex ??
+          audioStreamIndex;
       final chapterTicks = startTimeTicks;
       if (chapterTicks != null && chapterTicks > 0) {
         await _open(
           startTicks: chapterTicks,
-          audio: memoryAudio,
-          subtitle: memorySubtitle,
+          audio: audioStreamIndex,
+          subtitle: subtitleStreamIndex,
           subtitleOff: memorySubtitleOff,
         );
         return;
@@ -346,16 +348,16 @@ class PlayerController extends ChangeNotifier {
       if (!autoResume) {
         await _open(
           startTicks: 0,
-          audio: memoryAudio,
-          subtitle: memorySubtitle,
+          audio: audioStreamIndex,
+          subtitle: subtitleStreamIndex,
           subtitleOff: memorySubtitleOff,
         );
         return;
       }
       await _open(
         startTicks: resumeTicks > 0 ? _rewound(resumeTicks) : 0,
-        audio: memoryAudio,
-        subtitle: memorySubtitle,
+        audio: audioStreamIndex,
+        subtitle: subtitleStreamIndex,
         subtitleOff: memorySubtitleOff,
       );
     } on EmbyException catch (failure) {
@@ -1455,29 +1457,34 @@ class PlayerController extends ChangeNotifier {
         return;
       }
       resolved = next;
-      audioStreamIndex = audio ?? next.mediaSource.defaultAudioStreamIndex;
-      // 记忆的音轨在新一集不存在时回退默认,避免下发无效轨道。
-      if (audioStreamIndex != null &&
-          !next.mediaSource.audioStreams.any(
-            (stream) => stream.index == audioStreamIndex,
-          )) {
-        audioStreamIndex = next.mediaSource.defaultAudioStreamIndex;
-      }
-      if (subtitle != null) {
-        final stream = next.mediaSource.streamByIndex(subtitle);
-        if (stream != null && stream.isSubtitle) {
-          subtitleStreamIndex = subtitle;
-        } else {
-          subtitleStreamIndex = _defaultTextSubtitle(next.mediaSource);
-        }
-      } else if (subtitleOff) {
+      final memory = _rememberedPreference;
+      audioStreamIndex =
+          matchPreferredStreamIndex(
+            streams: next.mediaSource.audioStreams,
+            preferredIndex:
+                audio ?? preferredAudioStreamIndex ?? memory?.audioStreamIndex,
+            language: memory?.audioLanguage,
+            title: memory?.audioTitle,
+          ) ??
+          next.mediaSource.defaultAudioStreamIndex;
+      if (subtitleOff) {
         subtitleStreamIndex = null;
       } else {
-        subtitleStreamIndex = _defaultTextSubtitle(next.mediaSource);
+        subtitleStreamIndex =
+            matchPreferredStreamIndex(
+              streams: next.mediaSource.subtitleStreams,
+              preferredIndex:
+                  subtitle ??
+                  preferredSubtitleStreamIndex ??
+                  memory?.subtitleStreamIndex,
+              language: memory?.subtitleLanguage,
+              title: memory?.subtitleTitle,
+            ) ??
+            fallbackSubtitleStreamIndex(next.mediaSource);
       }
 
-      if (subtitle != null) {
-        final stream = next.mediaSource.streamByIndex(subtitle);
+      if (subtitleStreamIndex != null) {
+        final stream = next.mediaSource.streamByIndex(subtitleStreamIndex!);
         if (stream != null && stream.isBitmapSubtitle) {
           if (next.isTranscode) {
             // 转码:服务器烧录进流。
@@ -1518,6 +1525,8 @@ class PlayerController extends ChangeNotifier {
       await _beginSession(startTicks: startTicks);
       loading = false;
       error = null;
+      _preferredSourceName ??= next.mediaSource.label;
+      await _persistSeriesPreference();
       onUserActivity();
       _emit();
     } on EmbyException catch (failure) {
@@ -1588,24 +1597,14 @@ class PlayerController extends ChangeNotifier {
     unawaited(_applyTracks(current));
   }
 
-  int? _defaultTextSubtitle(PlaybackMediaSource source) {
-    final index = source.defaultSubtitleStreamIndex;
-    if (index == null) {
-      return null;
-    }
-    final stream = source.streamByIndex(index);
-    if (stream != null && stream.isTextSubtitle) {
-      return index;
-    }
-    return null;
-  }
-
   Future<void> _reopen({required int startTicks, int? subtitle}) async {
     await _stopSession();
+    final nextSubtitle = subtitle ?? subtitleStreamIndex;
     await _open(
       startTicks: startTicks,
       audio: audioStreamIndex,
-      subtitle: subtitle ?? subtitleStreamIndex,
+      subtitle: nextSubtitle,
+      subtitleOff: nextSubtitle == null,
     );
   }
 
@@ -1966,7 +1965,7 @@ class PlayerController extends ChangeNotifier {
     if (preference.maxStreamingBitrate != null) {
       maxStreamingBitrate = preference.maxStreamingBitrate!;
     }
-    _preferredSourceName ??= preference.mediaSourceName;
+    _preferredSourceName = preference.mediaSourceName ?? _preferredSourceName;
   }
 
   /// 播放中选择音轨/字幕(含关闭)/码率后写入按剧记忆。
@@ -1975,10 +1974,24 @@ class PlayerController extends ChangeNotifier {
     if (seriesId == null || seriesId.isEmpty) {
       return;
     }
+    final source = resolved?.mediaSource;
+    final audio = audioStreamIndex == null
+        ? null
+        : source?.streamByIndex(audioStreamIndex!);
+    final subtitle = subtitleStreamIndex == null
+        ? null
+        : source?.streamByIndex(subtitleStreamIndex!);
+    final hasSubtitles = source?.subtitleStreams.isNotEmpty ?? false;
+    _preferredSourceName ??= source?.label;
     _seriesPreferences = Map.of(_seriesPreferences);
     _seriesPreferences[seriesId] = PlayerSeriesPreference(
       audioStreamIndex: audioStreamIndex,
+      audioLanguage: audio?.language,
+      audioTitle: audio?.displayTitle ?? audio?.label,
       subtitleStreamIndex: subtitleStreamIndex,
+      subtitleLanguage: subtitle?.language,
+      subtitleTitle: subtitle?.displayTitle ?? subtitle?.label,
+      subtitleOff: subtitleStreamIndex == null && hasSubtitles,
       maxStreamingBitrate: maxStreamingBitrate,
       mediaSourceName: _preferredSourceName,
     );

@@ -105,6 +105,7 @@ void main() {
     void Function(String itemId, {String? seasonId})? onOpenItemDetail,
     Duration progressInterval = const Duration(seconds: 10),
     String itemId = 'movie-up',
+    PlayerSettingsStore? settingsStore,
   }) async {
     final client = EmbyClient(device: _device, dio: dioForFakeEmby(adapter));
     final auth = AuthController(
@@ -124,7 +125,7 @@ void main() {
       backend: backend,
       window: window,
       progressInterval: progressInterval,
-      settingsStore: MemoryPlayerSettingsStore(),
+      settingsStore: settingsStore ?? MemoryPlayerSettingsStore(),
       snapshotStore: snapshots,
       onClose: onClose,
       onOpenItem: onOpenItem,
@@ -325,6 +326,64 @@ void main() {
       }
       expect(controller.nextEpisode?.item.id, 'episode-friends-s1e2');
       expect(controller.playbackEnded, isFalse);
+    },
+  );
+
+  test('next episode keeps subtitle language and bitrate', () async {
+    _withEpisodeStreams(
+      server,
+      subtitleIndexById: {'episode-friends-s1e1': 2, 'episode-friends-s1e2': 4},
+    );
+    final controller = await startStandaloneController(
+      itemId: 'episode-friends-s1e1',
+    );
+    addTearDown(controller.dispose);
+    expect(controller.subtitleStreamIndex, 2);
+
+    await controller.setSubtitle(2);
+    await controller.setMaxBitrate(4000000);
+    final next = await controller.client.getItem('episode-friends-s1e2');
+    controller.nextEpisode = NextEpisodeOffer(item: next);
+    await controller.playNextEpisode();
+
+    expect(controller.itemId, 'episode-friends-s1e2');
+    expect(controller.subtitleStreamIndex, 4);
+    expect(controller.maxStreamingBitrate, 4000000);
+    expect(controller.error, isNull);
+  });
+
+  test(
+    'bitrate-only memory does not turn subtitles off on the next episode',
+    () async {
+      _withEpisodeStreams(
+        server,
+        subtitleIndexById: {
+          'episode-friends-s1e1': 2,
+          'episode-friends-s1e2': 3,
+        },
+      );
+      final store = MemoryPlayerSettingsStore(
+        const PlayerSettings(
+          seriesPreferences: {
+            'series-friends': PlayerSeriesPreference(
+              maxStreamingBitrate: 4000000,
+            ),
+          },
+        ),
+      );
+      final controller = await startStandaloneController(
+        itemId: 'episode-friends-s1e1',
+        settingsStore: store,
+      );
+      addTearDown(controller.dispose);
+      expect(controller.subtitleStreamIndex, 2);
+      expect(controller.maxStreamingBitrate, 4000000);
+
+      final next = await controller.client.getItem('episode-friends-s1e2');
+      controller.nextEpisode = NextEpisodeOffer(item: next);
+      await controller.playNextEpisode();
+      expect(controller.subtitleStreamIndex, 3);
+      expect(controller.maxStreamingBitrate, 4000000);
     },
   );
 
@@ -592,6 +651,38 @@ void main() {
     );
     expect(playerEpisodeWindowStart(indexNumber: 40, total: 191), 40 - 1 - 4);
   });
+}
+
+void _withEpisodeStreams(
+  FakeEmbyServer server, {
+  required Map<String, int> subtitleIndexById,
+}) {
+  for (final item in server.items) {
+    final subtitleIndex = subtitleIndexById[item.id];
+    if (subtitleIndex == null) {
+      continue;
+    }
+    item.mediaStreams = [
+      const FakeMediaStream(index: 0, type: 'Video', codec: 'h264'),
+      const FakeMediaStream(
+        index: 1,
+        type: 'Audio',
+        codec: 'aac',
+        language: 'jpn',
+        displayTitle: 'Japanese',
+        isDefault: true,
+      ),
+      FakeMediaStream(
+        index: subtitleIndex,
+        type: 'Subtitle',
+        codec: 'ass',
+        language: 'chi',
+        displayTitle: '中文',
+        isDefault: true,
+        isTextSubtitleStream: true,
+      ),
+    ];
+  }
 }
 
 class _GatedDeleteStore extends MemoryPlaybackSessionSnapshotStore {

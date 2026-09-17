@@ -25,6 +25,30 @@ void main() {
     expect((await FilePlayerSettingsStore(file).read()).volume, 7);
   });
 
+  test('series preference keeps missing subtitle as unspecified, not off', () {
+    final preference = PlayerSeriesPreference.fromJson(const {
+      'maxStreamingBitrate': 4000000,
+      'audioStreamIndex': 1,
+    });
+    expect(preference.subtitleOff, isFalse);
+    expect(preference.subtitleStreamIndex, isNull);
+    expect(preference.toJson().containsKey('subtitleOff'), isFalse);
+  });
+
+  test('series preference round-trips subtitleOff and language', () {
+    const preference = PlayerSeriesPreference(
+      subtitleOff: true,
+      subtitleLanguage: 'chi',
+      subtitleTitle: '中文',
+      maxStreamingBitrate: 8000000,
+    );
+    final decoded = PlayerSeriesPreference.fromJson(preference.toJson());
+    expect(decoded.subtitleOff, isTrue);
+    expect(decoded.subtitleLanguage, 'chi');
+    expect(decoded.subtitleTitle, '中文');
+    expect(decoded.maxStreamingBitrate, 8000000);
+  });
+
   test('series preference round-trips mediaSourceName', () {
     final preference = PlayerSeriesPreference.fromJson(const {
       'mediaSourceName': '4K 版本',

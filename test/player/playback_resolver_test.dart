@@ -289,4 +289,71 @@ void main() {
     expect(srt.isTextSubtitle, isTrue);
     expect(pgs.isBitmapSubtitle, isTrue);
   });
+
+  test('matches subtitle by language when indexes differ', () {
+    const streams = [
+      MediaStreamInfo(
+        index: 4,
+        type: 'Subtitle',
+        language: 'eng',
+        displayTitle: 'English',
+        isTextSubtitleStream: true,
+      ),
+      MediaStreamInfo(
+        index: 5,
+        type: 'Subtitle',
+        language: 'chi',
+        displayTitle: '中文',
+        isTextSubtitleStream: true,
+      ),
+    ];
+    expect(
+      matchPreferredStreamIndex(
+        streams: streams,
+        preferredIndex: 2,
+        language: 'chi',
+        title: '中文',
+      ),
+      5,
+    );
+  });
+
+  test('falls back to default then first text subtitle', () {
+    final source = PlaybackMediaSource.fromJson({
+      'Id': 'src',
+      'DefaultSubtitleStreamIndex': 3,
+      'MediaStreams': [
+        {'Index': 0, 'Type': 'Video'},
+        {
+          'Index': 2,
+          'Type': 'Subtitle',
+          'Codec': 'ass',
+          'IsTextSubtitleStream': true,
+        },
+        {
+          'Index': 3,
+          'Type': 'Subtitle',
+          'Codec': 'pgssub',
+          'IsTextSubtitleStream': false,
+        },
+      ],
+    });
+    expect(fallbackSubtitleStreamIndex(source), 3);
+    expect(
+      fallbackSubtitleStreamIndex(
+        PlaybackMediaSource.fromJson({
+          'Id': 'src-2',
+          'MediaStreams': [
+            {
+              'Index': 2,
+              'Type': 'Subtitle',
+              'Codec': 'ass',
+              'IsTextSubtitleStream': true,
+            },
+          ],
+        }),
+      ),
+      2,
+    );
+  });
 }
