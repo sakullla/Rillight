@@ -218,6 +218,84 @@ void main() {
       expect(storeFor(firstPid).deleteCount, 1);
     });
 
+    for (final reopen in [false, true]) {
+      test('cancelled late spawn reconciles after exit and before release '
+          'when ${reopen ? 'reopening' : 'closing'}', () async {
+        final auth = await loggedInAuth();
+        final host = newHost(auth);
+        addTearDown(() {
+          host.dispose();
+          auth.dispose();
+        });
+        control.spawnHold = Completer<void>();
+        control.killHold = Completer<void>();
+        final opening = host.open(const PlayerOpenRequest(itemId: 'movie-up'));
+        for (var i = 0; i < 50 && control.spawnedArguments.isEmpty; i++) {
+          await Future<void>.delayed(Duration.zero);
+        }
+        final pid = control.lastPid;
+        await storeFor(pid).write(snapshotFor(auth));
+        var released = false;
+        control.onRelease = (releasedPid) {
+          if (releasedPid != pid) return;
+          expect(control.isAlive(pid), isFalse);
+          expect(stoppedEvents(), hasLength(1));
+          expect(storeFor(pid).snapshot, isNull);
+          released = true;
+        };
+        final next = reopen
+            ? host.open(const PlayerOpenRequest(itemId: 'movie-inception'))
+            : host.close();
+        control.spawnHold!.complete();
+        for (var i = 0; i < 50 && !calls.contains('kill:$pid'); i++) {
+          await Future<void>.delayed(Duration.zero);
+        }
+        expect(calls, contains('kill:$pid'));
+        expect(stoppedEvents(), isEmpty);
+        expect(released, isFalse);
+        control.killHold!.complete();
+        await Future.wait([opening, next]);
+        expect(released, isTrue);
+        expect(stoppedEvents().single.body['PlaySessionId'], 'play-host-1');
+        expect(host.current?.itemId, reopen ? 'movie-inception' : null);
+        control.onRelease = null;
+        await host.close();
+      });
+    }
+
+    for (final foreignSnapshot in [false, true]) {
+      test(
+        'cancelled late spawn retains ${foreignSnapshot ? 'foreign' : 'failed'} '
+        'Stopped snapshot',
+        () async {
+          final auth = await loggedInAuth();
+          final host = newHost(auth);
+          addTearDown(() {
+            host.dispose();
+            auth.dispose();
+          });
+          server.stoppedStatus = 500;
+          control.spawnHold = Completer<void>();
+          final opening = host.open(
+            const PlayerOpenRequest(itemId: 'movie-up'),
+          );
+          for (var i = 0; i < 50 && control.spawnedArguments.isEmpty; i++) {
+            await Future<void>.delayed(Duration.zero);
+          }
+          final pid = control.lastPid;
+          await storeFor(pid).write(
+            snapshotFor(auth, userId: foreignSnapshot ? 'another-user' : null),
+          );
+          final closing = host.close();
+          control.spawnHold!.complete();
+          await Future.wait([opening, closing]);
+          expect(stoppedEvents(), hasLength(foreignSnapshot ? 0 : 1));
+          expect(storeFor(pid).snapshot, isNotNull);
+          expect(storeFor(pid).deleteCount, 0);
+        },
+      );
+    }
+
     test('watch delivers an open-item command to the main window', () async {
       final auth = await loggedInAuth();
       PlayerHostOpenItemCommand? pending;

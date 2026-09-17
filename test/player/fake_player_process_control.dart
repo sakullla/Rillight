@@ -25,6 +25,8 @@ class FakePlayerProcessControl implements PlayerProcessControl {
   /// 若设置,`requestClose` 先等到该 Completer 完成(用于模拟关闭挂起)。
   Completer<void>? requestCloseHold;
   Completer<void>? spawnHold;
+  Completer<void>? killHold;
+  void Function(int pid)? onRelease;
 
   /// 在 [requestCloseHold] 之后额外等待的时长。
   Duration requestCloseDelay = Duration.zero;
@@ -74,6 +76,7 @@ class FakePlayerProcessControl implements PlayerProcessControl {
   @override
   Future<void> kill(int pid) async {
     calls.add('kill:$pid');
+    await killHold?.future;
     alive.remove(pid);
   }
 
@@ -82,7 +85,7 @@ class FakePlayerProcessControl implements PlayerProcessControl {
   @override
   Future<void> heartbeat(int pid) async {}
   @override
-  Future<void> release(int pid) async {}
+  Future<void> release(int pid) async => onRelease?.call(pid);
   @override
   void cancelPendingSpawns() {}
   @override

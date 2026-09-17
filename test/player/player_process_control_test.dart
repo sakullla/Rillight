@@ -49,6 +49,89 @@ void main() {
   });
 
   test(
+    'Windows keeps the original process object when its PID is reused',
+    () async {
+      final original = _FakeWindowsProcess(42);
+      var processByPid = original;
+      final control = WindowsPlayerProcessControl(
+        spawnProcess: ({required executable, required payloadPath}) {
+          _readyForWindowsChild(payloadPath, processByPid.pid);
+          return processByPid;
+        },
+      );
+      final pid = await control.spawn(executable: 'test', arguments: '{}');
+      expect(control.isAlive(pid), isTrue);
+      original.alive = false;
+      // A PID lookup now resolves to another process. The retained object must
+      // still report the original exit and never terminate the replacement.
+      final replacement = _FakeWindowsProcess(pid);
+      processByPid = replacement;
+      expect(control.isAlive(pid), isFalse);
+      expect(await control.requestClose(pid, Duration.zero), isTrue);
+      await control.kill(pid);
+      expect(original.closeCount, 0);
+      await control.release(pid);
+      await control.release(pid);
+      expect(original.closeCount, 1);
+      expect(original.terminateCount, 0);
+      expect(replacement.alive, isTrue);
+      expect(replacement.terminateCount, 0);
+      expect(replacement.closeCount, 0);
+      expect(control.activePids, isEmpty);
+    },
+  );
+
+  test(
+    'Windows termination waits on the original object and retains it until release',
+    () async {
+      final child = _FakeWindowsProcess(42)..exitOnTerminate = false;
+      final control = WindowsPlayerProcessControl(
+        pollInterval: const Duration(milliseconds: 1),
+        spawnProcess: ({required executable, required payloadPath}) {
+          _readyForWindowsChild(payloadPath, child.pid);
+          return child;
+        },
+      );
+      final pid = await control.spawn(executable: 'test', arguments: '{}');
+      await expectLater(control.release(pid), throwsStateError);
+      expect(control.activePids, [pid]);
+      var terminated = false;
+      final killing = control.kill(pid).then((_) => terminated = true);
+      await Future<void>.delayed(Duration.zero);
+      expect(child.terminateCount, 1);
+      expect(child.closeCount, 0);
+      expect(terminated, isFalse);
+      child.alive = false;
+      await killing;
+      expect(child.closeCount, 0);
+      await control.release(pid);
+      expect(child.closeCount, 1);
+    },
+  );
+
+  test(
+    'Windows failed startup retains its terminated handle until reconciliation',
+    () async {
+      final child = _FakeWindowsProcess(42);
+      final control = WindowsPlayerProcessControl(
+        pollInterval: const Duration(milliseconds: 1),
+        startupTimeout: Duration.zero,
+        spawnProcess: ({required executable, required payloadPath}) => child,
+      );
+      await expectLater(
+        control.spawn(executable: 'test', arguments: '{}'),
+        throwsA(isA<PlayerProcessStartupException>()),
+      );
+      expect(child.terminateCount, 1);
+      expect(child.closeCount, 0);
+      expect(child.alive, isFalse);
+      expect(control.activePids, [child.pid]);
+      await control.release(child.pid);
+      expect(child.closeCount, 1);
+    },
+  );
+
+  test(
     'startup timeout terminates the child and preserves its snapshot for reconciliation',
     () async {
       final control = _ControlledProcess(
@@ -112,9 +195,31 @@ Future<void> main(List<String> args) async {
   while (await endpoint.read('close') == null) {
     await Future<void>.delayed(const Duration(milliseconds: 10));
   }
+  // STILL_ACTIVE is also a legal exit code; use the process signal to detect exit.
+  exit(259);
 }
+
 ''');
-      final control = _ActualChildProcess(script.path);
+      var executable = _dartExecutable();
+      final DesktopPlayerProcessControl control;
+      if (Platform.isWindows) {
+        executable = '${root.path}/child.exe';
+        final compiled = await Process.run(
+          '${File(_dartExecutable()).parent.path}/dart.exe',
+          ['compile', 'exe', script.path, '-o', executable],
+        );
+        expect(
+          compiled.exitCode,
+          0,
+          reason: '${compiled.stdout}\n${compiled.stderr}',
+        );
+        control = WindowsPlayerProcessControl(
+          pollInterval: const Duration(milliseconds: 10),
+          startupTimeout: const Duration(seconds: 5),
+        );
+      } else {
+        control = _ActualChildProcess(script.path);
+      }
       addTearDown(() async {
         await control.terminateAll();
         for (final pid in control.activePids) {
@@ -123,7 +228,7 @@ Future<void> main(List<String> args) async {
         await root.delete(recursive: true);
       });
       final child = await control.spawn(
-        executable: _dartExecutable(),
+        executable: executable,
         arguments: '{}',
       );
       expect(control.isAlive(child), isTrue);
@@ -139,8 +244,54 @@ Future<void> main(List<String> args) async {
       );
       expect(control.isAlive(child), isFalse);
       await control.release(child);
+      if (Platform.isWindows) {
+        // Exercise real TerminateProcess/WaitForSingleObject as well as the
+        // graceful protocol path; both must retain ownership until release.
+        final secondChild = await control.spawn(
+          executable: executable,
+          arguments: '{}',
+        );
+        await control.kill(secondChild);
+        expect(control.isAlive(secondChild), isFalse);
+        expect(control.activePids, [secondChild]);
+        await control.release(secondChild);
+        await control.release(secondChild);
+        expect(control.activePids, isEmpty);
+      }
     },
   );
+}
+
+void _readyForWindowsChild(String payloadPath, int pid) {
+  final endpoint = PlayerProcessProtocol.fromJson(
+    jsonDecode(File(payloadPath).readAsStringSync()),
+  );
+  File('${endpoint.directory.path}/ready.json').writeAsStringSync(
+    jsonEncode({'sessionId': endpoint.sessionId, 'pid': pid}),
+  );
+}
+
+class _FakeWindowsProcess implements WindowsPlayerProcess {
+  _FakeWindowsProcess(this.pid);
+  @override
+  final int pid;
+  bool alive = true;
+  bool exitOnTerminate = true;
+  int terminateCount = 0;
+  int closeCount = 0;
+  @override
+  bool get isAlive => alive;
+  @override
+  void terminate() {
+    terminateCount++;
+    if (exitOnTerminate) alive = false;
+  }
+
+  @override
+  void close() {
+    expect(alive, isFalse);
+    closeCount++;
+  }
 }
 
 String _dartExecutable() {

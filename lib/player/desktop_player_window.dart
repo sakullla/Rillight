@@ -235,6 +235,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
             auth.client.userId != launch.userId ||
             auth.client.accessToken != launch.accessToken) {
           await _control.kill(pid);
+          await _reconcileSnapshot(pid);
           await _control.release(pid);
           return;
         }

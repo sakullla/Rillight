@@ -166,24 +166,58 @@ abstract class DesktopPlayerProcessControl implements PlayerProcessControl {
 }
 
 class WindowsPlayerProcessControl extends DesktopPlayerProcessControl {
-  WindowsPlayerProcessControl({super.pollInterval, super.startupTimeout});
+  WindowsPlayerProcessControl({
+    super.pollInterval,
+    super.startupTimeout,
+    WindowsPlayerProcess Function({
+      required String executable,
+      required String payloadPath,
+    })?
+    spawnProcess,
+  }) : _spawnProcess = spawnProcess ?? spawnStandalonePlayer;
+
+  final WindowsPlayerProcess Function({
+    required String executable,
+    required String payloadPath,
+  })
+  _spawnProcess;
+  final Map<int, WindowsPlayerProcess> _children = {};
 
   @override
-  Future<int> launch(String executable, String payloadPath) async =>
-      spawnStandalonePlayer(executable: executable, payloadPath: payloadPath);
+  Future<int> launch(String executable, String payloadPath) async {
+    final child = _spawnProcess(
+      executable: executable,
+      payloadPath: payloadPath,
+    );
+    _children[child.pid] = child;
+    return child.pid;
+  }
 
   @override
-  bool isAlive(int pid) => isPidAlive(pid);
+  bool isAlive(int pid) => _children[pid]?.isAlive ?? false;
 
   @override
   Future<void> terminate(int pid) async {
-    if (!isAlive(pid)) return;
-    killPid(pid);
+    final child = _children[pid];
+    if (child == null || !child.isAlive) return;
+    child.terminate();
     final deadline = DateTime.now().add(const Duration(seconds: 2));
-    while (isAlive(pid) && DateTime.now().isBefore(deadline)) {
+    while (child.isAlive && DateTime.now().isBefore(deadline)) {
       await Future<void>.delayed(pollInterval);
     }
-    if (isAlive(pid)) throw StateError('Player process did not terminate');
+    if (child.isAlive) throw StateError('Player process did not terminate');
+  }
+
+  @override
+  Future<void> release(int pid) async {
+    final child = _children[pid];
+    if (child != null && child.isAlive) {
+      throw StateError('Cannot release a running player process');
+    }
+    // Keep the original handle until snapshot/mailbox cleanup completes.
+    await super.release(pid);
+    child?.close();
+    if (identical(_children[pid], child)) _children.remove(pid);
   }
 }
 
