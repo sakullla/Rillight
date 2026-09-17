@@ -197,6 +197,13 @@ class PlayerController extends ChangeNotifier {
       _operationToken = client.accessToken;
       _trackRevision++;
       _episodePageGen++;
+      episodeListLoading = false;
+      episodeLoadingMore = false;
+      episodeLoadingEarlier = false;
+      _nextTimer?.cancel();
+      _nextTimer = null;
+      nextEpisode = null;
+      trackFailure = null;
     }
     return operation;
   }
@@ -643,13 +650,16 @@ class PlayerController extends ChangeNotifier {
     _trackRevisions[event] = revision;
     try {
       await _operations.run(operation, () async {
-        if (revision == _trackRevisions[event]) await apply();
+        if (revision != _trackRevisions[event]) return;
+        await apply();
+        if (!_accepts(operation)) return;
+        // A newer selection may already be queued. This successful mutation is
+        // still the actual backend state until that next selection succeeds.
+        commit();
+        trackFailure = null;
+        _emit();
+        await _persistSeriesPreference();
       });
-      if (!_accepts(operation) || revision != _trackRevisions[event]) return;
-      commit();
-      trackFailure = null;
-      _emit();
-      await _persistSeriesPreference();
       if (!_accepts(operation) || revision != _trackRevisions[event]) return;
       await _reportProgress(eventName: event);
     } catch (failure) {
@@ -657,6 +667,11 @@ class PlayerController extends ChangeNotifier {
       trackFailure = failure.toString();
       _emit();
     }
+  }
+
+  void dismissTrackFailure() {
+    trackFailure = null;
+    _emit();
   }
 
   Future<void> setMaxBitrate(int bitrate) async {
@@ -917,10 +932,14 @@ class PlayerController extends ChangeNotifier {
   }
 
   Future<void> loadMoreEpisodes() async {
+    final operation = _operations.current;
+    if (!_accepts(operation)) return;
     final seasonId = episodeSeasonId;
     if (seasonId == null ||
         seasonId.isEmpty ||
         episodeLoadingMore ||
+        episodeLoadingEarlier ||
+        episodeListLoading ||
         !hasMoreEpisodes) {
       return;
     }
@@ -929,7 +948,7 @@ class PlayerController extends ChangeNotifier {
     _emit();
     try {
       final page = await _querySeasonEpisodes(seasonId, episodeWindowEnd);
-      if (_disposed || gen != _episodePageGen) {
+      if (!_accepts(operation) || gen != _episodePageGen) {
         return;
       }
       if (episodeSeasonId == seasonId) {
@@ -940,12 +959,12 @@ class PlayerController extends ChangeNotifier {
             : episodeWindowEnd + page.items.length;
       }
     } on EmbyException {
-      if (_disposed || gen != _episodePageGen) {
+      if (!_accepts(operation) || gen != _episodePageGen) {
         return;
       }
       episodeListFailed = true;
     }
-    if (_disposed || gen != _episodePageGen) {
+    if (!_accepts(operation) || gen != _episodePageGen) {
       return;
     }
     episodeLoadingMore = false;
@@ -953,10 +972,14 @@ class PlayerController extends ChangeNotifier {
   }
 
   Future<void> loadEarlierEpisodes() async {
+    final operation = _operations.current;
+    if (!_accepts(operation)) return;
     final seasonId = episodeSeasonId;
     if (seasonId == null ||
         seasonId.isEmpty ||
         episodeLoadingEarlier ||
+        episodeLoadingMore ||
+        episodeListLoading ||
         !hasEarlierEpisodes) {
       return;
     }
@@ -967,7 +990,7 @@ class PlayerController extends ChangeNotifier {
     _emit();
     try {
       final page = await _querySeasonEpisodes(seasonId, start, limit: limit);
-      if (_disposed || gen != _episodePageGen) {
+      if (!_accepts(operation) || gen != _episodePageGen) {
         return;
       }
       if (episodeSeasonId == seasonId) {
@@ -976,12 +999,12 @@ class PlayerController extends ChangeNotifier {
         episodeWindowStart = start;
       }
     } on EmbyException {
-      if (_disposed || gen != _episodePageGen) {
+      if (!_accepts(operation) || gen != _episodePageGen) {
         return;
       }
       episodeListFailed = true;
     }
-    if (_disposed || gen != _episodePageGen) {
+    if (!_accepts(operation) || gen != _episodePageGen) {
       return;
     }
     episodeLoadingEarlier = false;
@@ -1304,13 +1327,18 @@ class PlayerController extends ChangeNotifier {
   }
 
   void _beginNextEpisodeCountdown(EmbyItem next) {
+    final operation = _operations.current;
+    if (!_accepts(operation)) return;
     nextEpisode = NextEpisodeOffer(item: next, remaining: nextEpisodeCountdown);
     controlsVisible = true;
     _emit();
     _nextTimer?.cancel();
     _nextTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       final offer = nextEpisode;
-      if (offer == null || offer.remaining == null) {
+      if (!_accepts(operation) ||
+          offer == null ||
+          offer.item.id != next.id ||
+          offer.remaining == null) {
         timer.cancel();
         return;
       }
@@ -1653,19 +1681,31 @@ class PlayerController extends ChangeNotifier {
       onUserActivity();
       _emit();
     } on EmbyException catch (failure) {
-      if (!_accepts(operation)) {
-        return;
-      }
-      error = PlayerErrorKind.load;
-      loadFailure = failure;
-      loading = false;
-      _emit();
+      await _failOpen(operation, failure: failure);
     } catch (_) {
-      if (!_accepts(operation)) return;
-      error = PlayerErrorKind.load;
-      state.phase = PlaybackPhase.failed;
-      loading = false;
-      _emit();
+      await _failOpen(operation);
+    }
+  }
+
+  Future<void> _failOpen(
+    PlaybackOperation operation, {
+    EmbyException? failure,
+  }) async {
+    if (!_accepts(operation)) return;
+    try {
+      // Queue cleanup with the failed open's identity. A new operation can
+      // supersede it while queued, and must never be stopped by stale cleanup.
+      await _operations.run(operation, backend.stop);
+    } finally {
+      if (_accepts(operation)) {
+        isPlaying = false;
+        state.buffering = false;
+        error = PlayerErrorKind.load;
+        loadFailure = failure;
+        state.phase = PlaybackPhase.failed;
+        loading = false;
+        _emit();
+      }
     }
   }
 

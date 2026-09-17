@@ -183,6 +183,44 @@ void main() {
     return tester.state<PlayerPageState>(find.byType(PlayerPage)).controller!;
   }
 
+  testWidgets('failed subtitle selection shows a dismissible player banner', (
+    tester,
+  ) async {
+    final failing = _FailingSubtitleBackend();
+    backend = failing;
+    _withEpisodeStreams(server, subtitleIndexById: {'movie-up': 2});
+    await pumpLoggedIn(tester);
+    await openPlayable(tester, 'movie-up');
+    await waitFor(tester, find.byKey(PlayerKeys.playPause));
+    expect(controllerOf(tester).subtitleStreamIndex, 2);
+
+    failing.failSubtitleOff = true;
+    await tester.tap(find.byTooltip('字幕'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(CheckedPopupMenuItem<int>, '关闭字幕'));
+    await tester.pumpAndSettle();
+
+    final banner = find.byKey(const ValueKey('player-track-failure'));
+    expect(banner, findsOneWidget);
+    expect(find.text('音轨 / 字幕：加载失败'), findsOneWidget);
+    expect(controllerOf(tester).subtitleStreamIndex, 2);
+    expect(failing.subtitleOff, isFalse);
+    await tester.tap(
+      find.descendant(of: banner, matching: find.byType(IconButton)),
+    );
+    await tester.pump();
+    expect(banner, findsNothing);
+
+    failing.failSubtitleOff = false;
+    await tester.tap(find.byTooltip('字幕'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(CheckedPopupMenuItem<int>, '关闭字幕'));
+    await tester.pumpAndSettle();
+    expect(controllerOf(tester).subtitleStreamIndex, isNull);
+    expect(failing.subtitleOff, isTrue);
+    expect(banner, findsNothing);
+  });
+
   testWidgets('saved progress resumes without a continue-or-restart prompt', (
     tester,
   ) async {
@@ -693,5 +731,15 @@ class _GatedDeleteStore extends MemoryPlaybackSessionSnapshotStore {
       await gate.future;
     }
     await super.delete();
+  }
+}
+
+class _FailingSubtitleBackend extends FakeVideoBackend {
+  bool failSubtitleOff = false;
+
+  @override
+  Future<void> setSubtitleOff() async {
+    if (failSubtitleOff) throw StateError('subtitle switch failed');
+    await super.setSubtitleOff();
   }
 }

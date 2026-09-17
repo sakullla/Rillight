@@ -233,6 +233,133 @@ void main() {
   );
 
   test(
+    'a queued failed track keeps the previous successful mutation',
+    () async {
+      await controller.playEpisode(episode('episode-friends-s1e1'));
+      final gate = backend.audioGates[7] = Completer<void>();
+      final first = controller.setAudio(7);
+      await _until(() => backend.audioRequests.contains(7));
+      backend.failedAudioIndices.add(8);
+      final second = controller.setAudio(8);
+      gate.complete();
+      await Future.wait([first, second]);
+      expect(backend.audioIndex, 7);
+      expect(controller.audioStreamIndex, 7);
+      expect(controller.trackFailure, contains('track failed'));
+      final preference =
+          (await settings.read()).seriesPreferences[controller.item!.seriesId];
+      expect(preference?.audioStreamIndex, 7);
+      expect(
+        client.reports
+            .where((e) => e.$2.eventName == 'AudioTrackChange')
+            .any((e) => e.$2.audioStreamIndex == 8),
+        isFalse,
+      );
+    },
+  );
+
+  for (final stage in ['volume', 'rate', 'audio', 'subtitle']) {
+    test('failed $stage initialization stops the opened media', () async {
+      backend.failInitialization = stage;
+      await controller.start();
+      expect(backend.openCount, 1);
+      expect(backend.isPlaying, isFalse);
+      expect(controller.isPlaying, isFalse);
+      expect(controller.loading, isFalse);
+      expect(controller.error, PlayerErrorKind.load);
+      expect(controller.state.phase, PlaybackPhase.failed);
+      expect(client.reports, isEmpty);
+      backend.failInitialization = null;
+      await controller.start();
+      expect(controller.error, isNull);
+      expect(backend.isPlaying, isTrue);
+    });
+  }
+
+  test('stale initialization failure cannot stop the newer open', () async {
+    final gate = backend.rateGate = Completer<void>();
+    backend.failInitialization = 'rate';
+    final starting = controller.start();
+    await _until(() => backend.rateStarted);
+    final switching = controller.playEpisode(episode('episode-friends-s1e1'));
+    gate.complete();
+    await Future.wait([starting, switching]);
+    expect(controller.itemId, 'episode-friends-s1e1');
+    expect(controller.error, isNull);
+    expect(backend.isPlaying, isTrue);
+    expect(
+      client.reports.where((e) => e.$1 == 'Playing').single.$2.itemId,
+      'episode-friends-s1e1',
+    );
+  });
+
+  test(
+    'manual selection cancels an EOF countdown before awaiting Stopped',
+    () async {
+      await controller.disposeAsync();
+      controller.dispose();
+      controller = PlayerController(
+        client: client,
+        itemId: 'episode-friends-s1e1',
+        backend: backend,
+        window: PlayerWindow(),
+        settingsStore: settings,
+        snapshotStore: snapshots,
+        stoppedTimeout: const Duration(minutes: 1),
+        nextEpisodeCountdown: const Duration(seconds: 1),
+      );
+      await controller.start();
+      client.stoppedGate = Completer<void>();
+      backend.completePlayback();
+      await _until(() => controller.nextEpisode?.remaining != null);
+      var switched = false;
+      final switching = controller.playEpisode(episode('movie-up')).then((_) {
+        switched = true;
+      });
+      await Future<void>.delayed(const Duration(milliseconds: 1100));
+      expect(switched, isFalse);
+      client.stoppedGate!.complete();
+      await switching;
+      expect(controller.itemId, 'movie-up');
+      expect(client.requestedItems, isNot(contains('episode-friends-s1e2')));
+    },
+  );
+
+  for (final direction in ['list', 'more', 'earlier']) {
+    test('superseding $direction loading releases its busy flag', () async {
+      await controller.playEpisode(episode('episode-friends-s1e1'));
+      if (direction != 'list') {
+        await controller.loadEpisodeList();
+        controller.episodeWindowStart = 80;
+        controller.episodeWindowEnd = 160;
+        controller.episodeTotal = 200;
+      }
+      Future<void> load() => switch (direction) {
+        'more' => controller.loadMoreEpisodes(),
+        'earlier' => controller.loadEarlierEpisodes(),
+        _ => controller.loadEpisodeList(),
+      };
+      final gate = client.queryGate = Completer<void>();
+      final count = client.queryCount;
+      final pending = load();
+      await _until(() => client.queryCount > count);
+      final starting = controller.start();
+      expect(controller.episodeListLoading, isFalse);
+      expect(controller.episodeLoadingMore, isFalse);
+      expect(controller.episodeLoadingEarlier, isFalse);
+      await starting;
+      gate.complete();
+      await pending;
+      final beforeRetry = client.queryCount;
+      await load();
+      expect(client.queryCount, greaterThan(beforeRetry));
+      expect(controller.episodeListLoading, isFalse);
+      expect(controller.episodeLoadingMore, isFalse);
+      expect(controller.episodeLoadingEarlier, isFalse);
+    });
+  }
+
+  test(
     'a late Progress response cannot resurrect the stopped session snapshot',
     () async {
       await controller.start();
@@ -294,6 +421,12 @@ class _ControlledBackend extends FakeVideoBackend {
   bool openStarted = false;
   bool _openCancelled = false;
   bool failAudio = false;
+  final audioGates = <int, Completer<void>>{};
+  final audioRequests = <int>[];
+  final failedAudioIndices = <int>{};
+  String? failInitialization;
+  Completer<void>? rateGate;
+  bool rateStarted = false;
   int disposeCount = 0;
 
   @override
@@ -315,8 +448,37 @@ class _ControlledBackend extends FakeVideoBackend {
 
   @override
   Future<void> setAudioIndex(int index) async {
-    if (failAudio) throw StateError('track failed');
+    audioRequests.add(index);
+    await audioGates[index]?.future;
+    if (failAudio || failedAudioIndices.contains(index)) {
+      throw StateError('track failed');
+    }
+    if (failInitialization == 'audio') throw StateError('audio failed');
     await super.setAudioIndex(index);
+  }
+
+  @override
+  Future<void> setVolume(double volume) async {
+    if (isPlaying && failInitialization == 'volume') {
+      throw StateError('volume failed');
+    }
+    await super.setVolume(volume);
+  }
+
+  @override
+  Future<void> setRate(double rate) async {
+    rateStarted = true;
+    final fail = failInitialization == 'rate';
+    if (fail) failInitialization = null;
+    await rateGate?.future;
+    if (fail) throw StateError('rate failed');
+    await super.setRate(rate);
+  }
+
+  @override
+  Future<void> setSubtitleOff() async {
+    if (failInitialization == 'subtitle') throw StateError('subtitle failed');
+    await super.setSubtitleOff();
   }
 
   @override
@@ -326,6 +488,9 @@ class _ControlledBackend extends FakeVideoBackend {
   }
 
   void release() {
+    for (final gate in [...audioGates.values, ?rateGate]) {
+      if (!gate.isCompleted) gate.complete();
+    }
     if (openGate != null && !openGate!.isCompleted) openGate!.complete();
     if (disposeGate != null && !disposeGate!.isCompleted) {
       disposeGate!.complete();
@@ -341,6 +506,44 @@ class _ControlledClient extends EmbyClient {
   final reports = <(String, PlaybackReport)>[];
   Completer<void>? playingGate;
   Completer<void>? progressGate;
+  Completer<void>? stoppedGate;
+  Completer<void>? queryGate;
+  int queryCount = 0;
+
+  @override
+  Future<EmbyItemPage> queryItems({
+    String? parentId,
+    String? searchTerm,
+    String? includeItemTypes,
+    bool recursive = false,
+    int? limit,
+    int? startIndex,
+    String? sortBy,
+    String? sortOrder,
+    List<String>? filters,
+    List<String>? genres,
+    List<int>? years,
+    String fields = EmbyClient.gridFields,
+  }) async {
+    queryCount++;
+    final gate = queryGate;
+    final page = await super.queryItems(
+      parentId: parentId,
+      searchTerm: searchTerm,
+      includeItemTypes: includeItemTypes,
+      recursive: recursive,
+      limit: limit,
+      startIndex: startIndex,
+      sortBy: sortBy,
+      sortOrder: sortOrder,
+      filters: filters,
+      genres: genres,
+      years: years,
+      fields: fields,
+    );
+    await gate?.future;
+    return page;
+  }
 
   @override
   Future<EmbyItem> getItem(String itemId, {String? fields}) async {
@@ -365,10 +568,17 @@ class _ControlledClient extends EmbyClient {
   @override
   Future<void> reportStopped(PlaybackReport report) async {
     reports.add(('Stopped', report));
+    await stoppedGate?.future;
   }
 
   void release() {
-    for (final gate in [...itemGates.values, ?playingGate, ?progressGate]) {
+    for (final gate in [
+      ...itemGates.values,
+      ?playingGate,
+      ?progressGate,
+      ?stoppedGate,
+      ?queryGate,
+    ]) {
       if (!gate.isCompleted) gate.complete();
     }
   }

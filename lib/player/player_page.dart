@@ -555,6 +555,13 @@ class PlayerPageState extends State<PlayerPage> {
                       key: PlayerKeys.subtitleNotice,
                       text: _subtitleNoticeText(l10n, current.subtitleNotice!),
                     ),
+                  if (current.trackFailure != null)
+                    _Banner(
+                      key: const ValueKey('player-track-failure'),
+                      text:
+                          '${l10n.audioTrack} / ${l10n.subtitleTrack}：${l10n.errorLoadFailed}',
+                      onDismiss: current.dismissTrackFailure,
+                    ),
                   if (_danmaku?.status == DanmakuStatus.customUnreachable &&
                       !current.loading)
                     _DanmakuSourceBanner(controller: _danmaku!),
