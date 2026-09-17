@@ -12,6 +12,7 @@ import 'package:rillight/player/player_page.dart';
 import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/player_window_host.dart';
 import 'package:window_manager/window_manager.dart';
+import 'package:win32/win32.dart' as win32;
 import 'package:rillight_player/rillight_player.dart';
 import 'package:rillight/main.dart' as production;
 
@@ -41,6 +42,35 @@ Future<void> main(List<String> args) async {
       });
       final controller = page!.controller!;
       final backend = controller.backend as MpvVideoBackend;
+      Future<void> checkDisplayRequest(String phase, bool expected) async {
+        if (!Platform.isWindows) return;
+        var previous = 0;
+        var thread = 0;
+        await _until(() {
+          // Windows exposes the previous calling-thread execution state via
+          // this API. Temporarily clear and immediately restore it, without
+          // changing the user's power plan or any other process's request.
+          thread = win32.GetCurrentThreadId();
+          previous = win32.SetThreadExecutionState(win32.ES_CONTINUOUS);
+          if (previous == 0) {
+            throw StateError('Cannot inspect thread execution state');
+          }
+          if (win32.SetThreadExecutionState(previous) == 0) {
+            throw StateError('Cannot restore thread execution state');
+          }
+          return (previous & win32.ES_DISPLAY_REQUIRED != 0) == expected;
+        }, timeout: const Duration(seconds: 3));
+        await record('display-power-request', {
+          'phase': phase,
+          'pid': pid,
+          'threadId': thread,
+          'previousFlags': '0x${previous.toRadixString(16)}',
+          'displayRequired': previous & win32.ES_DISPLAY_REQUIRED != 0,
+          'method':
+              'SetThreadExecutionState previous UI-thread flags; restored immediately',
+        });
+      }
+
       Future<void> captureCoreSubtitle(String label) async {
         // Let the selected subtitle decoder receive packets and render within
         // the synthetic fixture's 0–8/12 second subtitle interval.
@@ -110,6 +140,7 @@ Future<void> main(List<String> args) async {
       }
 
       await loaded('baseline-loaded');
+      await checkDisplayRequest('playing', true);
       if (controller.position < const Duration(seconds: 2)) {
         throw StateError('Server resume was not applied');
       }
@@ -117,8 +148,10 @@ Future<void> main(List<String> args) async {
       await controller.setVolume(15);
       await controller.togglePlay();
       await _until(() => !controller.isPlaying);
+      await checkDisplayRequest('paused', false);
       await controller.togglePlay();
       await _until(() => controller.isPlaying);
+      await checkDisplayRequest('resumed', true);
       await controller.seekTo(const Duration(seconds: 2));
       await controller.setRate(1.25);
       await windowManager.setSize(const Size(960, 540));
@@ -195,6 +228,19 @@ Future<void> main(List<String> args) async {
       await loaded('reopened-baseline');
       await controller.seekTo(const Duration(seconds: 3));
       await record('seek-resume', controller.position.inMilliseconds);
+      await controller.seekTo(
+        controller.duration - const Duration(milliseconds: 500),
+      );
+      await _until(() => controller.playbackEnded);
+      await checkDisplayRequest('eof', false);
+      await controller.replay();
+      await loaded('replayed-for-power-check');
+      await checkDisplayRequest('replayed', true);
+      await controller.shutdownSession();
+      await checkDisplayRequest('stopped', false);
+      await controller.replay();
+      await loaded('restarted-for-power-check');
+      await checkDisplayRequest('restarted', true);
       await controller.playEpisode(
         EmbyItem.fromJson({'Id': 'broken', 'Type': 'Movie', 'Name': 'broken'}),
       );
@@ -202,8 +248,20 @@ Future<void> main(List<String> args) async {
         throw StateError('Failed open did not stop');
       }
       await record('failed-open-stopped');
+      await checkDisplayRequest('failed-open', false);
+      await controller.playEpisode(
+        EmbyItem.fromJson({
+          'Id': 'baseline',
+          'Type': 'Movie',
+          'Name': 'baseline',
+        }),
+      );
+      await loaded('dispose-power-check');
+      await checkDisplayRequest('before-dispose', true);
       await controller.disposeAsync();
+      await checkDisplayRequest('disposed', false);
       await controller.disposeAsync();
+      await checkDisplayRequest('disposed-again', false);
       await record('disposed');
       await File(
         '${root.path}/player-result.json',

@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/player/mpv_video_backend.dart';
+import 'package:rillight/player/playback_wake_lock.dart';
 import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/video_backend.dart';
 import 'package:rillight_player/rillight_player.dart';
@@ -12,10 +13,19 @@ void main() {
   late Directory cache;
   late MpvVideoBackend backend;
   late List<_Driver> drivers;
+  late ScreenWakeLockCoordinator wakeCoordinator;
+  late List<bool> wakeRequests;
   setUp(() async {
     cache = await Directory.systemTemp.createTemp('rillight-backend-test-');
     drivers = [];
+    wakeRequests = [];
+    wakeCoordinator = ScreenWakeLockCoordinator(
+      toggle: (enabled) async {
+        wakeRequests.add(enabled);
+      },
+    );
     backend = MpvVideoBackend(
+      wakeLock: PlaybackWakeLock(coordinator: wakeCoordinator),
       settingsStore: MemoryPlayerSettingsStore(),
       diskCacheDirectory: cache,
       createSession: (options) async {
@@ -31,6 +41,87 @@ void main() {
   });
   VideoOpenRequest request(int id) =>
       VideoOpenRequest(sessionId: id, url: Uri.file('sample.mkv'));
+
+  test(
+    'wake lock follows playback, pause, EOF, error and stopped sessions',
+    () async {
+      await backend.open(request(1));
+      await wakeCoordinator.settle();
+      expect(wakeRequests, [true]);
+      final old = drivers.single;
+      void emit(String key, Object value) => old.eventsController.add(
+        MpvEvent('property', property: key, value: value),
+      );
+      emit('pause', true);
+      await wakeCoordinator.settle();
+      expect(wakeRequests.last, isFalse);
+      emit('pause', false);
+      await wakeCoordinator.settle();
+      expect(wakeRequests.last, isTrue);
+      emit('eof-reached', true);
+      emit('pause', false);
+      emit('core-idle', false);
+      await wakeCoordinator.settle();
+      expect(
+        wakeRequests.last,
+        isFalse,
+        reason: 'EOF cannot be undone by late playing properties',
+      );
+      await backend.open(request(2));
+      await wakeCoordinator.settle();
+      expect(wakeRequests.last, isTrue);
+      old.eventsController.add(const MpvEvent('file-loaded'));
+      await backend.stop();
+      emit('core-idle', false);
+      await wakeCoordinator.settle();
+      expect(wakeRequests.last, isFalse);
+      await backend.open(request(3));
+      drivers.last.eventsController.add(
+        const MpvEvent('error', error: 'failure'),
+      );
+      await wakeCoordinator.settle();
+      expect(wakeRequests.last, isFalse);
+      await backend.dispose();
+      expect(wakeCoordinator.confirmed, isFalse);
+    },
+  );
+
+  test(
+    'stop remains bounded while an old enable is pending and compensates it later',
+    () async {
+      await backend.dispose();
+      final enabled = Completer<void>();
+      wakeCoordinator = ScreenWakeLockCoordinator(
+        waitTimeout: const Duration(milliseconds: 10),
+        toggle: (value) async {
+          wakeRequests.add(value);
+          if (value) await enabled.future;
+        },
+      );
+      backend = MpvVideoBackend(
+        wakeLock: PlaybackWakeLock(coordinator: wakeCoordinator),
+        settingsStore: MemoryPlayerSettingsStore(),
+        diskCacheDirectory: cache,
+        createSession: (_) async {
+          final driver = _Driver();
+          drivers.add(driver);
+          return driver;
+        },
+      );
+      await backend.open(request(1));
+      await backend.stop();
+      expect(drivers.single.disposed, 1);
+      expect(wakeRequests, [true]);
+      enabled.complete();
+      await wakeCoordinator.settle();
+      expect(wakeRequests, [true, false]);
+      drivers.single.eventsController.add(
+        const MpvEvent('property', property: 'pause', value: false),
+      );
+      await wakeCoordinator.settle();
+      expect(wakeRequests, [true, false]);
+    },
+  );
 
   test('each open owns a core and cannot relabel a previous event', () async {
     final events = <VideoBackendEvent>[];
@@ -59,6 +150,7 @@ void main() {
     await backend.dispose();
     final driver = _Driver()..firstFrame = false;
     backend = MpvVideoBackend(
+      wakeLock: PlaybackWakeLock(coordinator: wakeCoordinator),
       settingsStore: MemoryPlayerSettingsStore(),
       diskCacheDirectory: cache,
       createSession: (_) async => driver,
@@ -77,6 +169,7 @@ void main() {
     final driver = _Driver()..firstFrame = false;
     driver.tracks.removeWhere((t) => t['type'] == 'video');
     backend = MpvVideoBackend(
+      wakeLock: PlaybackWakeLock(coordinator: wakeCoordinator),
       settingsStore: MemoryPlayerSettingsStore(),
       diskCacheDirectory: cache,
       createSession: (_) async => driver,
@@ -92,6 +185,7 @@ void main() {
       final creating = Completer<MpvSessionDriver>();
       var factoryCalled = false;
       backend = MpvVideoBackend(
+        wakeLock: PlaybackWakeLock(coordinator: wakeCoordinator),
         settingsStore: MemoryPlayerSettingsStore(),
         diskCacheDirectory: cache,
         createSession: (_) {
@@ -131,6 +225,7 @@ void main() {
     await backend.dispose();
     final driver = _Driver()..failOpen = true;
     backend = MpvVideoBackend(
+      wakeLock: PlaybackWakeLock(coordinator: wakeCoordinator),
       settingsStore: MemoryPlayerSettingsStore(),
       diskCacheDirectory: cache,
       createSession: (_) async => driver,
@@ -159,6 +254,7 @@ void main() {
       await backend.dispose();
       final driver = _Driver()..failSurface = true;
       backend = MpvVideoBackend(
+        wakeLock: PlaybackWakeLock(coordinator: wakeCoordinator),
         settingsStore: MemoryPlayerSettingsStore(),
         diskCacheDirectory: cache,
         createSession: (_) async => driver,

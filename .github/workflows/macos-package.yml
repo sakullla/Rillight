@@ -22,8 +22,16 @@ jobs:
           cache: true
       - name: Install Flutter and native dependencies
         run: flutter pub get
-      - name: Compile the native macOS application
-        run: flutter build macos --release
+      - name: Verify signing and Mach-O audit regressions
+        run: python3 macos/verify_bundle_test.py
+      - name: Compile the Release sandbox proxy test target
+        run: flutter build macos --release --target integration_test/macos_proxy_smoke.dart
+      - name: Exercise production loopback proxy and missing-server negative control
+        run: |
+          python3 macos/proxy_smoke.py build/macos/Build/Products/Release/rillight.app \
+            build/macos-proxy-sandbox-evidence
+      - name: Restore the ordinary release entry point
+        run: flutter build macos --release --target lib/main.dart
       - name: Verify locked dylib closure and runtime versions
         shell: bash
         run: |
@@ -41,11 +49,9 @@ jobs:
         run: |
           set -euo pipefail
           app="build/macos/Build/Products/Release/rillight.app"
-          codesign --deep --force --verbose --sign - --timestamp=none "$app"
-          signature_info="$(codesign --display --verbose=4 "$app" 2>&1)"
-          echo "$signature_info"
-          grep -q '^Signature=adhoc$' <<< "$signature_info"
-          codesign --verify --deep --strict --verbose=2 "$app"
+          python3 macos/sign_bundle.py "$app"
+          python3 macos/verify_bundle.py --signed "$app"
+          codesign --display --entitlements :- "$app" > macos-release-entitlements.plist
           staging="$RUNNER_TEMP/rillight-dmg"
           mkdir -p "$staging"
           ditto "$app" "$staging/rillight.app"
@@ -57,8 +63,12 @@ jobs:
           path: Rillight-macos-*-adhoc.dmg
           if-no-files-found: error
       - uses: actions/upload-artifact@v6
+        if: always()
         with:
           name: macos-native-versions
-          path: macos-native-versions.json
-          if-no-files-found: error
+          path: |
+            macos-native-versions.json
+            macos-release-entitlements.plist
+            build/macos-proxy-sandbox-evidence
+          if-no-files-found: warn
 

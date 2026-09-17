@@ -39,6 +39,21 @@ try {
   }
   $result = Get-Content -LiteralPath (Join-Path $output 'result.json') -Raw | ConvertFrom-Json
   if (-not $result.passed) { throw ('Playback validation failed: ' + $result.error) }
+  $powerEvidence = @(Get-Content -LiteralPath (Join-Path $output 'player.jsonl') |
+    ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.event -eq 'display-power-request' })
+  $requiredPowerStates = @{
+    playing=$true; paused=$false; resumed=$true; eof=$false; replayed=$true;
+    stopped=$false; restarted=$true; 'failed-open'=$false; 'before-dispose'=$true;
+    disposed=$false; 'disposed-again'=$false
+  }
+  foreach ($phase in $requiredPowerStates.Keys) {
+    $row = @($powerEvidence | Where-Object { $_.value.phase -eq $phase })
+    if ($row.Count -ne 1 -or $row[0].value.displayRequired -ne $requiredPowerStates[$phase]) {
+      throw "Missing or incorrect actual UI-thread display request evidence: $phase"
+    }
+  }
+  $powerEvidence | ForEach-Object { $_.value } | ConvertTo-Json -Depth 5 |
+    Set-Content -LiteralPath (Join-Path $output 'display-power-requests.json') -Encoding utf8
   python tool/verify_player_dependencies.py
   if ($LASTEXITCODE -ne 0) { throw 'Dependency verification failed' }
   Write-Output 'Release-mode production main/child playback validation passed.'

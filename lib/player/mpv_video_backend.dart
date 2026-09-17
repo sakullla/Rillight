@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:rillight/app/product.dart';
 import 'package:rillight/player/playback_http_proxy.dart';
+import 'package:rillight/player/playback_wake_lock.dart';
 import 'package:rillight/player/player_runtime_options.dart';
 import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/video_backend.dart';
@@ -57,6 +58,7 @@ class _Session {
   Future<void>? retiring;
   bool cancelled = false;
   bool failed = false;
+  bool ended = false;
   bool loaded = false;
   bool firstFrame = false;
   bool hasVideo = true;
@@ -68,9 +70,11 @@ class MpvVideoBackend implements VideoBackend {
   MpvVideoBackend({
     PlayerSettingsStore? settingsStore,
     MpvSessionFactory? createSession,
+    PlaybackWakeLock? wakeLock,
     this.openTimeout = const Duration(seconds: 45),
     this.diskCacheDirectory,
   }) : _settingsStore = settingsStore,
+       _wakeLock = wakeLock ?? PlaybackWakeLock(),
        _createSession =
            createSession ??
            ((options) async =>
@@ -78,6 +82,7 @@ class MpvVideoBackend implements VideoBackend {
 
   PlayerSettingsStore? _settingsStore;
   final MpvSessionFactory _createSession;
+  final PlaybackWakeLock _wakeLock;
   final Duration openTimeout;
   final Directory? diskCacheDirectory;
   final _events = StreamController<VideoBackendEvent>.broadcast();
@@ -94,7 +99,7 @@ class MpvVideoBackend implements VideoBackend {
 
   Future<Map<String, Object?>> diagnostics() async {
     final driver = _driver;
-    final result = <String, Object?>{};
+    final result = <String, Object?>{'wake-lock': _wakeLock.diagnostics};
     for (final key in [
       'mpv-version',
       'ffmpeg-version',
@@ -259,11 +264,16 @@ class MpvVideoBackend implements VideoBackend {
         session.failed = true;
         lastFailure = failure;
         isPlaying = false;
+        _wakeLock.update(false);
         _emit(session, VideoEventKind.playing, false);
         if (!session.ready.isCompleted) session.ready.completeError(failure);
         _emit(session, VideoEventKind.error, failure.toString());
         unawaited(stop().catchError((Object _) {}));
       case 'end-file':
+        session.ended = true;
+        isPlaying = false;
+        _wakeLock.update(false);
+        _emit(session, VideoEventKind.playing, false);
         final value = event.value;
         if (value is Map && value['reason'] == 0) {
           _emit(session, VideoEventKind.completed, true);
@@ -304,7 +314,11 @@ class MpvVideoBackend implements VideoBackend {
           case 'paused-for-cache':
             if (value is bool) _emit(session, VideoEventKind.buffering, value);
           case 'eof-reached':
-            if (value == true) _emit(session, VideoEventKind.completed, true);
+            if (value is bool) {
+              session.ended = value;
+              _playing(session);
+              if (value) _emit(session, VideoEventKind.completed, true);
+            }
         }
     }
   }
@@ -331,7 +345,13 @@ class MpvVideoBackend implements VideoBackend {
   }
 
   void _playing(_Session session) {
-    final playing = session.loaded && !session.paused && !session.idle;
+    final playing =
+        session.loaded &&
+        !session.paused &&
+        !session.idle &&
+        !session.ended &&
+        !session.failed;
+    _wakeLock.update(playing);
     if (playing != isPlaying) {
       isPlaying = playing;
       _emit(session, VideoEventKind.playing, playing);
@@ -348,6 +368,7 @@ class MpvVideoBackend implements VideoBackend {
   }
 
   Future<void> _stopActive() async {
+    final releasingWakeLock = _wakeLock.release();
     final session = _active;
     _active = null;
     isPlaying = false;
@@ -358,7 +379,7 @@ class MpvVideoBackend implements VideoBackend {
         _retire(session),
       ]).then<void>((_) {});
     }
-    await _retirement;
+    await Future.wait([_retirement, releasingWakeLock]);
   }
 
   Future<void> _retire(_Session session) =>
@@ -448,7 +469,11 @@ class MpvVideoBackend implements VideoBackend {
   Future<void> dispose() => _disposing ??= _dispose();
   Future<void> _dispose() async {
     _disposed = true;
-    await stop();
+    try {
+      await stop();
+    } finally {
+      await _wakeLock.dispose();
+    }
     await _events.close();
     _view.dispose();
   }

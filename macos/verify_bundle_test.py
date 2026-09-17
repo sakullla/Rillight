@@ -1,10 +1,14 @@
 """Portable regression for thin/fat otool output used by native packaging."""
 from pathlib import Path
+import plistlib
 import sys
+import tempfile
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'packages/rillight_player/native'))
 from bundle_macos import otool_dependencies
+from sign_bundle import release_entitlements, sign, verify_signed_entitlements
 
 
 class OtoolDependenciesTest(unittest.TestCase):
@@ -25,6 +29,69 @@ class OtoolDependenciesTest(unittest.TestCase):
         output = '/Users/runner/libmpv.2.dylib:\n' \
                  '\t/Users/builder/lib/libbad.dylib (compatibility version 1.0.0, current version 1.0.0)\n'
         self.assertEqual(otool_dependencies(output), ['/Users/builder/lib/libbad.dylib'])
+
+
+class ReleaseSigningTest(unittest.TestCase):
+    def test_release_retains_all_three_required_rights(self):
+        expected = release_entitlements()
+        for key in ('app-sandbox', 'network.client', 'network.server'):
+            self.assertIs(expected['com.apple.security.' + key], True)
+
+    def test_missing_server_in_release_configuration_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'Release.entitlements'
+            expected = release_entitlements()
+            del expected['com.apple.security.network.server']
+            path.write_bytes(plistlib.dumps(expected))
+            with self.assertRaisesRegex(ValueError, 'network server'):
+                release_entitlements(path)
+
+    def test_signature_validity_does_not_hide_lost_entitlements(self):
+        expected = release_entitlements()
+        actual = {**expected, 'com.apple.security.network.server': False}
+        with patch('sign_bundle.subprocess.check_output', return_value=plistlib.dumps(actual)):
+            with self.assertRaisesRegex(ValueError, 'Signed entitlements differ'):
+                verify_signed_entitlements('rillight.app', expected)
+
+    def test_app_rights_are_not_applied_to_nested_libraries(self):
+        self.check_signing(False)
+
+    def test_negative_control_removes_only_server_and_keeps_sandbox(self):
+        self.check_signing(True)
+
+    def check_signing(self, negative):
+        expected = release_entitlements()
+        if negative:
+            expected.pop('com.apple.security.network.server')
+        commands = []
+
+        def execute(command):
+            commands.append(command)
+            if '--entitlements' in command:
+                path = Path(command[command.index('--entitlements') + 1])
+                self.assertEqual(plistlib.loads(path.read_bytes()), expected)
+
+        def output(command, **kwargs):
+            if '--verbose=4' in command:
+                return 'Executable=rillight\nSignature=adhoc\n'
+            return plistlib.dumps(expected)
+
+        with tempfile.TemporaryDirectory() as directory:
+            app = Path(directory) / 'rillight.app'
+            (app / 'Contents/MacOS').mkdir(parents=True)
+            framework = app / 'Contents/Frameworks/Plugin.framework'
+            framework.mkdir(parents=True)
+            library = app / 'Contents/Frameworks/libmpv.2.dylib'
+            library.write_bytes(b'fixture')
+            with patch('sign_bundle.subprocess.check_call', side_effect=execute), \
+                 patch('sign_bundle.subprocess.check_output', side_effect=output):
+                sign(app, without_server_for_test=negative)
+            signing = [command for command in commands if '--sign' in command]
+            self.assertEqual(len(signing), 3)
+            self.assertTrue(all('--entitlements' not in c and '--deep' not in c for c in signing[:-1]))
+            self.assertEqual(signing[-1][-1], str(app.resolve()))
+            self.assertIn('--entitlements', signing[-1])
+            self.assertNotIn('--deep', signing[-1])
 
 
 if __name__ == '__main__':
