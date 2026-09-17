@@ -28,6 +28,6 @@ Windows 实际播放验证：`powershell -NoProfile -ExecutionPolicy Bypass -Fil
 
 HTTP 媒体、HLS 分段/密钥和字幕经会话本地代理，每次重定向按来源附加 Emby 凭据；第三方请求保留自定义 User-Agent，但不携带 Emby 令牌。播放设置继续使用 MiB，并通过文件锁、合并与原子替换保护主窗/播放进程的并发保存。
 
-On a local Windows developer loop (after `flutter pub get`, without clearing the test cache), `flutter test` over all of `test/` should finish in ≤15s wall clock, and `flutter test --tags integration` (widget tests that pump `RillightApp` or a full feature page) should finish in ≤10s. Those integration-style tests stay in `test/` and are still run by the full suite. CI keeps `flutter test` as pass/fail only and has no duration target.
+On a local Windows developer loop, run `flutter test` for the full suite and `flutter test --tags integration` for the full-page subset. Integration-style tests stay in `test/` and are also included in the full suite; CI checks pass/fail only.
 
 既有测试保留在对应功能目录的 `*_cases.dart` 中，由 `test/suites/` 的少量入口加载；例如 `flutter test test/player/playback_resolver_cases.dart` 可单独运行。新增普通 `*_test.dart` 仍会自动发现；新增或重命名 case 模块后运行 `python tool/test_execution/generate_suites.py`，默认测试会检查是否漏收。完整页面使用逐例 `integration` 标签，纯逻辑和局部 widget 保留在全量测试中；[原用例归属表](tool/test_execution/classification.md)记录标签调整。

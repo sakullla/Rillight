@@ -18,8 +18,8 @@ Use Flutter 3.47.4 with desktop support enabled (Dart constraint `^3.11.5`).
 - `flutter build windows` — create a release build; substitute the host desktop target as appropriate.
 - `flutter analyze` — run static analysis and configured lints.
 - `dart format lib test` — format Dart source and tests.
-- `flutter test` — run the full `test/` suite (local Windows wall-clock target ≤15s).
-- `flutter test --tags integration` — run widget tests that pump `RillightApp` or a full feature page (local Windows wall-clock target ≤10s; still included in `flutter test`).
+- `flutter test` — run the full `test/` suite.
+- `flutter test --tags integration` — run widget tests that pump `RillightApp` or a full feature page (still included in `flutter test`).
 - `flutter gen-l10n` — regenerate localization after editing `lib/app/l10n/app_zh.arb`.
 
 Playback uses the owned `packages/rillight_player` libmpv adapter and independent player processes on all desktop platforms. Release packages bundle pinned native media libraries. Linux packages require a clean ELF/RUNPATH check and Ubuntu 24.04 install/desktop-launch regression (`tool/linux_release_checks.py`); do not create ABI-spoofing libmpv symlinks. Windows native playback validation uses `tool/player_smoke.ps1` with isolated synthetic credentials/settings/cache. macOS requires 12+ with the pinned Flutter SDK. See the package README for source builds, library hashes and licensing.
@@ -34,7 +34,7 @@ Follow `flutter_lints` from `analysis_options.yaml` and Dart formatter output, u
 
 Tests use `flutter_test`. Existing feature cases live in `*_cases.dart`, loaded by generated `test/suites/*_test.dart` entrypoints to reduce compilation and process startup. Run one module with `flutter test test/player/playback_resolver_cases.dart`, then the full suite. New ordinary `*_test.dart` files are still discovered automatically. After adding or renaming a `*_cases.dart` module, run `python tool/test_execution/generate_suites.py`; collection fails on an unregistered module, and CI checks generated entrypoints. Keep pure HTTP tests separate from suites registering `testWidgets`, which installs Flutter's HTTP mock.
 
-Add regression coverage for changed behavior, especially authentication, catalog loading, and playback resolution. Put `tags: ['integration']` on each widget test that pumps `RillightApp` or a full feature page; imported libraries do not propagate library-level tags. Pure controller tests and small standalone widgets stay in the full suite without that tag. `flutter test --tags integration` runs the full-page subset, also included in default `flutter test`. Local Windows targets remain full suite ≤15s and integration tags ≤10s. CI has no duration SLO. No numeric coverage threshold is configured. See `tool/test_execution/classification.md` for the original case-to-tag mapping.
+Add regression coverage for changed behavior, especially authentication, catalog loading, and playback resolution. Put `tags: ['integration']` on each widget test that pumps `RillightApp` or a full feature page; imported libraries do not propagate library-level tags. Pure controller tests and small standalone widgets stay in the full suite without that tag. `flutter test --tags integration` runs the full-page subset, also included in default `flutter test`. CI requires the tests to pass; no numeric coverage threshold is configured. See `tool/test_execution/classification.md` for the original case-to-tag mapping.
 
 Report native build, package launch, actual video/audio output and GPU stability evidence separately. The smoke's `*-core.png` files verify libmpv subtitle composition; they do not capture Flutter's displayed texture or prove absence of flicker. Distinguish Docker/Xvfb checks from hardware desktop validation, and configured CI from executed results. Current validation scope is recorded in `integration_test/README.md`.
 
