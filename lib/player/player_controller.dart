@@ -46,6 +46,9 @@ const Duration kNextUpLead = Duration(minutes: 3);
 /// 过短的剧集不提前弹出下一集,避免开场就出现。
 const Duration kMinRuntimeForEarlyNextUp = Duration(minutes: 6);
 
+/// keep-open 停在末帧时,进度可能比容器片长短几十到几百毫秒。
+const Duration kPlaybackEndSlack = Duration(milliseconds: 400);
+
 /// 播放器剧集面板一窗条数,与详情页分集窗口对齐。
 const int kPlayerEpisodePageSize = 80;
 
@@ -135,7 +138,7 @@ class PlayerController extends ChangeNotifier {
 
   /// 进程内不可播放的条目(如剧集)改为通知主窗口打开详情页;
   /// 独立播放进程在 [onOpenItem] 之外提供该回调。
-  final ValueChanged<String>? onOpenItemDetail;
+  final void Function(String itemId, {String? seasonId})? onOpenItemDetail;
   PlayerSettingsStore? settingsStore;
 
   /// 会话快照:Playing/Progress 成功后写入,Stopped 成功后删除,
@@ -212,6 +215,7 @@ class PlayerController extends ChangeNotifier {
   bool controlsPinned = false;
   bool _nextUpOffered = false;
   bool _nextUpLoading = false;
+  bool _handlingCompleted = false;
 
   // --- 媒体源切换(R9) ---
   List<PlaybackMediaSource> mediaSources = const [];
@@ -284,6 +288,7 @@ class PlayerController extends ChangeNotifier {
     nextEpisode = null;
     playbackEnded = false;
     _nextUpOffered = false;
+    _handlingCompleted = false;
     skipPromptVisible = false;
     _skipPromptTimer?.cancel();
     loading = true;
@@ -381,6 +386,7 @@ class PlayerController extends ChangeNotifier {
     }
     playbackEnded = false;
     nextEpisode = null;
+    _handlingCompleted = false;
     _nextTimer?.cancel();
     _nextTimer = null;
     await _open(
@@ -394,14 +400,12 @@ class PlayerController extends ChangeNotifier {
   void openEndedSeries() {
     final seriesId = item?.seriesId;
     if (seriesId != null && seriesId.isNotEmpty) {
-      // 剧集不可在播放器内播放:优先交给主窗口打开详情页。
+      // 剧集不是片源:只请主窗口打开详情,绝不走 onOpenItem(_applyLaunch)。
       final openDetail = onOpenItemDetail;
       if (openDetail != null) {
-        openDetail(seriesId);
+        openDetail(seriesId, seasonId: item?.seasonId);
         return;
       }
-      onOpenItem?.call(seriesId);
-      return;
     }
     unawaited(close());
   }
@@ -1135,6 +1139,28 @@ class PlayerController extends ChangeNotifier {
     position = value;
     _updateActiveSkip();
     _maybeOfferNextUp();
+    _maybeCompleteFromPosition();
+  }
+
+  bool _hasReachedPlaybackEnd() {
+    if (loading || isPlaying || duration <= Duration.zero) {
+      return false;
+    }
+    if (position >= duration) {
+      return true;
+    }
+    return duration - position <= kPlaybackEndSlack;
+  }
+
+  /// libmpv keep-open 常停在末帧却不发 completed;进度到片尾也要出结束引导。
+  void _maybeCompleteFromPosition() {
+    if (_disposed || loading || playbackEnded || _handlingCompleted) {
+      return;
+    }
+    if (!_hasReachedPlaybackEnd()) {
+      return;
+    }
+    unawaited(_handleCompleted());
   }
 
   /// 片尾标记处,或无标记时片长最后约 3 分钟,提前给出下一集(不倒计时)。
@@ -1186,13 +1212,17 @@ class PlayerController extends ChangeNotifier {
     _nextUpLoading = true;
     try {
       final next = await client.getNextEpisode(current);
-      if (_disposed || playbackEnded) {
+      if (_disposed) {
         return;
       }
       if (next == null || nextEpisode != null) {
         if (next == null) {
           _nextUpOffered = false;
         }
+        return;
+      }
+      if (playbackEnded || _handlingCompleted) {
+        _presentCompletedNext(next);
         return;
       }
       nextEpisode = NextEpisodeOffer(item: next);
@@ -1321,6 +1351,8 @@ class PlayerController extends ChangeNotifier {
         duration = value;
         // 片长更新后手动片尾区间终点随之变化。
         _rebuildSkipSegments();
+        _maybeOfferNextUp();
+        _maybeCompleteFromPosition();
         _emit();
       }
     });
@@ -1340,6 +1372,7 @@ class PlayerController extends ChangeNotifier {
       } else {
         controlsVisible = true;
         _hideTimer?.cancel();
+        _maybeCompleteFromPosition();
       }
       _emit();
       if (_sessionStarted && !disconnected) {
@@ -1379,6 +1412,7 @@ class PlayerController extends ChangeNotifier {
     nextEpisode = null;
     playbackEnded = false;
     _nextUpOffered = false;
+    _handlingCompleted = false;
     _nextTimer?.cancel();
     _emit();
 
@@ -1806,10 +1840,13 @@ class PlayerController extends ChangeNotifier {
   }
 
   Future<void> _handleCompleted() async {
-    if (_disposed || checkIn.isStopped) {
+    if (_disposed || _handlingCompleted || playbackEnded) {
       return;
     }
+    _handlingCompleted = true;
     isPlaying = false;
+    controlsVisible = true;
+    _hideTimer?.cancel();
     final pending = _stopSession();
     _pendingStopped = pending;
     unawaited(
@@ -1819,31 +1856,43 @@ class PlayerController extends ChangeNotifier {
         }
       }),
     );
+
+    final existing = nextEpisode?.item;
+    if (existing != null) {
+      _presentCompletedNext(existing);
+      return;
+    }
     if (item == null || !item!.isEpisode) {
       _showPlaybackEnded();
       return;
     }
+    // 先出结束引导,避免等下一集请求时停在末帧没有入口。
+    _showPlaybackEnded();
     try {
-      final existing = nextEpisode?.item;
-      final next = existing ?? await client.getNextEpisode(item!);
-      if (_disposed) {
+      final next = await client.getNextEpisode(item!);
+      if (_disposed || next == null) {
         return;
       }
-      if (next == null) {
-        _showPlaybackEnded();
-        return;
-      }
-      final autoplay = user?.enableNextEpisodeAutoPlay ?? true;
-      if (!autoplay) {
-        nextEpisode = NextEpisodeOffer(item: next);
-        controlsVisible = true;
-        _emit();
-        return;
-      }
-      _beginNextEpisodeCountdown(next);
+      _presentCompletedNext(next);
     } on EmbyException {
-      _showPlaybackEnded();
+      // 结束卡已在。
     }
+  }
+
+  void _presentCompletedNext(EmbyItem next) {
+    if (_disposed) {
+      return;
+    }
+    playbackEnded = false;
+    final autoplay = user?.enableNextEpisodeAutoPlay ?? true;
+    if (!autoplay) {
+      nextEpisode = NextEpisodeOffer(item: next);
+      controlsVisible = true;
+      _hideTimer?.cancel();
+      _emit();
+      return;
+    }
+    _beginNextEpisodeCountdown(next);
   }
 
   void _showPlaybackEnded() {

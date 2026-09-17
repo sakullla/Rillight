@@ -193,6 +193,60 @@ void main() {
     expect(find.byKey(CatalogKeys.episodesLoadMore), findsNothing);
   });
 
+  testWidgets('view series from an episode opens that season', (tester) async {
+    server.setSeasons('series-friends', [
+      const FakeSeason(id: 'season-friends-1', name: '第 1 季', indexNumber: 1),
+      const FakeSeason(id: 'season-friends-2', name: '第 4 季', indexNumber: 4),
+    ]);
+    server.setEpisodes('series-friends', [
+      const FakeEpisode(
+        id: 'episode-friends-s1e1',
+        name: 'The Pilot',
+        seasonId: 'season-friends-1',
+        indexNumber: 1,
+        parentIndexNumber: 1,
+      ),
+      const FakeEpisode(
+        id: 'episode-friends-s1e2',
+        name: 'The One with the Sonogram',
+        seasonId: 'season-friends-1',
+        indexNumber: 2,
+        parentIndexNumber: 1,
+      ),
+      const FakeEpisode(
+        id: 'episode-friends-s4e17',
+        name: 'S4E17',
+        seasonId: 'season-friends-2',
+        indexNumber: 17,
+        parentIndexNumber: 4,
+        overview: 'later season',
+      ),
+    ]);
+    final app = await pumpApp(tester);
+    await openItem(tester, app, 'episode-friends-s4e17');
+    await ensureVisibleBelowTopBar(tester, find.byKey(CatalogKeys.viewSeries));
+    await tapBelowTopBar(tester, find.byKey(CatalogKeys.viewSeries));
+    await tester.pumpAndSettle();
+
+    expect(app.router.state.uri.path, AppRoutes.item(_series));
+    expect(app.router.state.uri.queryParameters['season'], 'season-friends-2');
+    expect(
+      find.descendant(
+        of: find.byKey(CatalogKeys.seasonPicker),
+        matching: find.text('第 4 季'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(CatalogKeys.episode('episode-friends-s4e17')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(CatalogKeys.episode('episode-friends-s1e1')),
+      findsNothing,
+    );
+  });
+
   testWidgets('episode detail request asks for the People field', (
     tester,
   ) async {

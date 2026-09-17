@@ -58,6 +58,7 @@ class RillightApp extends StatelessWidget {
                       host: windowHost,
                       child: _PlayerWindowLayer(
                         host: windowHost,
+                        router: router,
                         child: child ?? const SizedBox.shrink(),
                       ),
                     ),
@@ -207,9 +208,14 @@ class _PlayerHostNoticeListenerState extends State<_PlayerHostNoticeListener> {
 }
 
 class _PlayerWindowLayer extends StatelessWidget {
-  const _PlayerWindowLayer({required this.host, required this.child});
+  const _PlayerWindowLayer({
+    required this.host,
+    required this.router,
+    required this.child,
+  });
 
   final PlayerWindowHost host;
+  final GoRouter router;
   final Widget child;
 
   @override
@@ -241,6 +247,14 @@ class _PlayerWindowLayer extends StatelessWidget {
                           audioStreamIndex: request.audioStreamIndex,
                           subtitleStreamIndex: request.subtitleStreamIndex,
                           startTimeTicks: request.startTimeTicks,
+                          onOpenItemDetail: (itemId, {seasonId}) {
+                            unawaited(() async {
+                              await host.close();
+                              router.push(
+                                AppRoutes.item(itemId, seasonId: seasonId),
+                              );
+                            }());
+                          },
                         );
                       },
                     );

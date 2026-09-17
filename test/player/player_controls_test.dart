@@ -13,6 +13,7 @@ import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/home/catalog_keys.dart';
+import 'package:rillight/library/item_detail_page.dart';
 import 'package:rillight/player/playback_models.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/player_bindings.dart';
@@ -100,7 +101,10 @@ void main() {
   /// Stopped→onClose 顺序与 3 秒上限。
   Future<PlayerController> startStandaloneController({
     VoidCallback? onClose,
+    ValueChanged<String>? onOpenItem,
+    void Function(String itemId, {String? seasonId})? onOpenItemDetail,
     Duration progressInterval = const Duration(seconds: 10),
+    String itemId = 'movie-up',
   }) async {
     final client = EmbyClient(device: _device, dio: dioForFakeEmby(adapter));
     final auth = AuthController(
@@ -116,13 +120,15 @@ void main() {
     expect(auth.isLoggedIn, isTrue);
     final controller = PlayerController(
       client: client,
-      itemId: 'movie-up',
+      itemId: itemId,
       backend: backend,
       window: window,
       progressInterval: progressInterval,
       settingsStore: MemoryPlayerSettingsStore(),
       snapshotStore: snapshots,
       onClose: onClose,
+      onOpenItem: onOpenItem,
+      onOpenItemDetail: onOpenItemDetail,
     );
     await controller.start();
     expect(controller.loading, isFalse);
@@ -219,6 +225,108 @@ void main() {
     expect(backend.openCount, opens + 1);
     expect(controllerOf(tester).playbackEnded, isFalse);
   });
+
+  testWidgets('pausing on the last frame still shows the replay card', (
+    tester,
+  ) async {
+    await pumpLoggedIn(tester);
+    await openPlayable(tester, 'movie-up');
+    await waitFor(tester, find.byKey(PlayerKeys.playPause));
+
+    backend.pauseAtEndWithoutComplete(at: controllerOf(tester).duration);
+    await tester.pump();
+    await waitFor(tester, find.byKey(PlayerKeys.playbackEnded));
+    expect(find.text('播放结束'), findsOneWidget);
+    expect(find.byKey(PlayerKeys.replay), findsOneWidget);
+    expect(find.byKey(PlayerKeys.nextEpisode), findsNothing);
+    await tester.pump(PlayerController.stoppedDeadline);
+    await tester.pump();
+  });
+
+  testWidgets('view series from the ended card opens series detail', (
+    tester,
+  ) async {
+    await pumpLoggedIn(tester);
+    await openPlayable(tester, 'episode-friends-s1e2');
+    await waitFor(tester, find.byKey(PlayerKeys.playPause));
+
+    backend.completePlayback();
+    await tester.pump();
+    await waitFor(tester, find.byKey(PlayerKeys.endedViewSeries));
+    await tester.tap(find.byKey(PlayerKeys.endedViewSeries));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    await waitForGone(tester, find.byType(PlayerPage));
+    expect(find.text('条目不可用'), findsNothing);
+    await waitFor(tester, find.byType(ItemDetailPage));
+    final app = tester.widget<RillightApp>(find.byType(RillightApp));
+    expect(app.router.state.uri.path, '/item/series-friends');
+    expect(app.router.state.uri.queryParameters['season'], 'season-friends-1');
+    await tester.pump(PlayerController.stoppedDeadline);
+    await tester.pump();
+  });
+
+  test(
+    'openEndedSeries opens series detail instead of playing the series',
+    () async {
+      String? detailId;
+      String? detailSeasonId;
+      String? openId;
+      final controller = await startStandaloneController(
+        itemId: 'episode-friends-s1e2',
+        onOpenItem: (id) => openId = id,
+        onOpenItemDetail: (id, {seasonId}) {
+          detailId = id;
+          detailSeasonId = seasonId;
+        },
+      );
+      addTearDown(controller.dispose);
+
+      controller.openEndedSeries();
+      expect(detailId, 'series-friends');
+      expect(detailSeasonId, 'season-friends-1');
+      expect(openId, isNull);
+      expect(controller.error, isNull);
+    },
+  );
+
+  test(
+    'openEndedSeries without a detail callback closes instead of playing',
+    () async {
+      final closed = Completer<void>();
+      String? openId;
+      final controller = await startStandaloneController(
+        itemId: 'episode-friends-s1e2',
+        onClose: closed.complete,
+        onOpenItem: (id) => openId = id,
+      );
+      addTearDown(controller.dispose);
+
+      controller.openEndedSeries();
+      await closed.future.timeout(const Duration(seconds: 5));
+      expect(openId, isNull);
+    },
+  );
+
+  test(
+    'episode pause at end offers the next episode without a completed event',
+    () async {
+      final controller = await startStandaloneController(
+        itemId: 'episode-friends-s1e1',
+      );
+      addTearDown(controller.dispose);
+
+      backend.pauseAtEndWithoutComplete(at: controller.duration);
+      for (var i = 0; i < 50; i++) {
+        if (controller.nextEpisode != null) {
+          break;
+        }
+        await Future<void>.delayed(Duration.zero);
+      }
+      expect(controller.nextEpisode?.item.id, 'episode-friends-s1e2');
+      expect(controller.playbackEnded, isFalse);
+    },
+  );
 
   testWidgets(
     'repeated progress failures keep the banner until a report succeeds',

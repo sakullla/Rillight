@@ -194,6 +194,18 @@ class FakeVideoBackend implements VideoBackend {
     _completed.add(true);
   }
 
+  /// keep-open 停在末帧:进度到头并暂停,但不发 completed。
+  void pauseAtEndWithoutComplete({Duration? at}) {
+    isPlaying = false;
+    position = at ?? duration;
+    if (position > duration) {
+      duration = position;
+      _duration.add(duration);
+    }
+    _position.add(position);
+    _playing.add(false);
+  }
+
   /// 仅标记关闭:换集时宿主会新建 PlayerPage 并复用同一注入实例,
   /// 不真正关闭事件流,保证跨页仍可收发事件。
   @override

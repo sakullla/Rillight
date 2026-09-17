@@ -56,8 +56,10 @@ GoRouter createAppRouter({required AuthController auth}) {
           ),
           GoRoute(
             path: '/item/:itemId',
-            builder: (context, state) =>
-                ItemDetailPage(itemId: state.pathParameters['itemId'] ?? ''),
+            builder: (context, state) => ItemDetailPage(
+              itemId: state.pathParameters['itemId'] ?? '',
+              initialSeasonId: state.uri.queryParameters['season'],
+            ),
           ),
           GoRoute(
             path: AppRoutes.search,

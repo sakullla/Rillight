@@ -19,6 +19,7 @@ import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/player/playback_models.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/player_bindings.dart';
+import 'package:rillight/player/player_host_command.dart';
 import 'package:rillight/player/player_page.dart';
 import 'package:rillight/player/player_process_control.dart';
 import 'package:rillight/player/player_runtime_options.dart';
@@ -146,6 +147,9 @@ class PlayerWindowLaunch {
 typedef PlaybackSnapshotStoreLocator =
     PlaybackSessionSnapshotStore Function(int pid);
 
+typedef PlayerHostOpenItemConsumer =
+    Future<PlayerHostOpenItemCommand?> Function();
+
 /// 独立播放进程宿主。
 ///
 /// 关闭顺序:先 [PlayerProcessControl.requestClose](WM_CLOSE,播放进程
@@ -158,12 +162,14 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
     required this.auth,
     PlayerProcessControl? processControl,
     PlaybackSnapshotStoreLocator? snapshotStoreForPid,
+    PlayerHostOpenItemConsumer? consumeOpenItem,
     this.closeTimeout = const Duration(seconds: 4),
     this.reportTimeout = const Duration(seconds: 3),
     this.watchInterval = const Duration(milliseconds: 400),
   }) : _control = processControl ?? const WindowsPlayerProcessControl(),
        _snapshotStoreForPid =
-           snapshotStoreForPid ?? FilePlaybackSessionSnapshotStore.forPid {
+           snapshotStoreForPid ?? FilePlaybackSessionSnapshotStore.forPid,
+       _consumeOpenItem = consumeOpenItem ?? PlayerHostOpenItem.consume {
     auth.addListener(_onAuth);
     _registerHostChannelHandler();
   }
@@ -171,7 +177,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
   final AuthController auth;
 
   /// 播放器进程请求主窗口打开条目详情(如播放结束"查看剧集")。
-  ValueChanged<String>? onOpenItemRoute;
+  void Function(String itemId, {String? seasonId})? onOpenItemRoute;
 
   void _registerHostChannelHandler() {
     Future<void> register() async {
@@ -185,7 +191,13 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
           if (itemId == null || itemId.isEmpty) {
             return;
           }
-          onOpenItemRoute?.call(itemId);
+          final season = args is Map
+              ? args['seasonId']?.toString().trim()
+              : null;
+          onOpenItemRoute?.call(
+            itemId,
+            seasonId: season == null || season.isEmpty ? null : season,
+          );
         });
       } catch (_) {
         // 测试环境无平台通道,忽略注册失败。
@@ -206,6 +218,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
 
   final PlayerProcessControl _control;
   final PlaybackSnapshotStoreLocator _snapshotStoreForPid;
+  final PlayerHostOpenItemConsumer _consumeOpenItem;
   final _notices = StreamController<PlayerHostNotice>.broadcast();
   int _pid = 0;
   Timer? _watch;
@@ -276,6 +289,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
   void _startWatch(int pid) {
     _watch?.cancel();
     _watch = Timer.periodic(watchInterval, (timer) {
+      unawaited(_deliverOpenItem());
       if (_control.isAlive(pid)) {
         return;
       }
@@ -307,7 +321,16 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
     if (!closed) {
       _control.kill(pid);
     }
+    await _deliverOpenItem();
     await _reconcileSnapshot(pid);
+  }
+
+  Future<void> _deliverOpenItem() async {
+    final command = await _consumeOpenItem();
+    if (command == null || command.itemId.isEmpty || _disposed) {
+      return;
+    }
+    onOpenItemRoute?.call(command.itemId, seasonId: command.seasonId);
   }
 
   /// 播放进程已终止:快照仍在时用主进程会话代发 Stopped。
@@ -514,6 +537,13 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
     }
   }
 
+  Future<void> _openItemInHost(String itemId, {String? seasonId}) async {
+    try {
+      await PlayerHostOpenItem.write(itemId, seasonId: seasonId);
+    } catch (_) {}
+    await _closeWindow();
+  }
+
   Future<void> _closeWindow() async {
     if (_closing) {
       return;
@@ -592,27 +622,11 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
                 ),
               );
             },
-            // 播放结束"查看剧集":通知主窗口打开详情页,
-            // 剧集在播放器内不可播放(此前直接重开播放器报"条目不可用")。
-            onOpenItemDetail: (itemId) async {
-              try {
-                await _hostChannel.invokeMethod('openItem', {'itemId': itemId});
-              } catch (_) {
-                // 主窗口不可达(如旧版本宿主):退回原重开行为。
-                _applyLaunch(
-                  PlayerWindowLaunch(
-                    request: PlayerOpenRequest(
-                      itemId: itemId,
-                      autoResume: false,
-                    ),
-                    baseUrl: _launch.baseUrl,
-                    accessToken: _launch.accessToken,
-                    userId: _launch.userId,
-                    device: _launch.device,
-                    userAgent: _launch.userAgent,
-                  ),
-                );
-              }
+            // 播放结束"查看剧集":写临时文件请主窗口打开详情,再关播放器。
+            // 独立 CreateProcess 没有可用的 WindowMethodChannel,等待它
+            // 只会误判成功或卡住;绝不能把剧集 id 当片源重开。
+            onOpenItemDetail: (itemId, {seasonId}) {
+              unawaited(_openItemInHost(itemId, seasonId: seasonId));
             },
           ),
         ),

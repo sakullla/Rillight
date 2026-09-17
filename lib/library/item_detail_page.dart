@@ -34,9 +34,12 @@ import 'package:rillight/player/player_keys.dart';
 import 'package:rillight/player/player_window_host.dart';
 
 class ItemDetailPage extends StatefulWidget {
-  const ItemDetailPage({super.key, required this.itemId});
+  const ItemDetailPage({super.key, required this.itemId, this.initialSeasonId});
 
   final String itemId;
+
+  /// 打开剧集时预选的季;单集「查看剧集」带入所属季,避免落到第一季。
+  final String? initialSeasonId;
 
   /// 加载完成后的头部根节点,供测试比对骨架/真实头部高度。
   static const headerKey = Key('detail-header');
@@ -121,6 +124,15 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     if (oldWidget.itemId != widget.itemId && widget.itemId != _itemId) {
       _itemId = widget.itemId;
       _load();
+      return;
+    }
+    final nextSeason = widget.initialSeasonId?.trim();
+    if (nextSeason != null &&
+        nextSeason.isNotEmpty &&
+        nextSeason != oldWidget.initialSeasonId?.trim() &&
+        nextSeason != _seasonId &&
+        (_item?.isSeries ?? false)) {
+      unawaited(_selectSeason(nextSeason));
     }
   }
 
@@ -286,7 +298,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
         if (item.isEpisode) {
           seasonId = _preferredSeasonId(item, seasons);
         } else if (seasons.isNotEmpty) {
-          seasonId = seasons.first.id;
+          seasonId = _requestedSeasonId() ?? seasons.first.id;
         }
         if (reuseCatalog &&
             seasonId == _seasonId &&
@@ -407,6 +419,15 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
         ),
       ),
     );
+  }
+
+  /// 剧集页预选季:路由 `season` 有值则用之,缺省仍是第一季。
+  String? _requestedSeasonId() {
+    final requested = widget.initialSeasonId?.trim();
+    if (requested == null || requested.isEmpty) {
+      return null;
+    }
+    return requested;
   }
 
   /// 单集所属季:优先条目自带的 seasonId/parentId,即使季列表里没有它
@@ -699,6 +720,17 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
         _episodesLoading = false;
       });
     }
+  }
+
+  void _openSeriesPage() {
+    final item = _item;
+    final seriesId = _seriesId ?? item?.seriesId;
+    if (seriesId == null || seriesId.isEmpty) {
+      return;
+    }
+    context.push(
+      AppRoutes.item(seriesId, seasonId: item?.seasonId ?? _seasonId),
+    );
   }
 
   void _openSeason(EmbyItem season) {
@@ -1008,13 +1040,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                       },
                 onViewSeries:
                     item.isEpisode && (_seriesId ?? item.seriesId) != null
-                    ? () {
-                        final seriesId = _seriesId ?? item.seriesId;
-                        if (seriesId == null || seriesId.isEmpty) {
-                          return;
-                        }
-                        context.push(AppRoutes.item(seriesId));
-                      }
+                    ? _openSeriesPage
                     : null,
                 busyPlayed: _busyPlayed,
                 mediaSourceId: _mediaSourceId,
@@ -1841,10 +1867,11 @@ class _SeasonJump extends StatelessWidget {
 }
 
 class _SeriesLink extends StatelessWidget {
-  const _SeriesLink({required this.name, this.seriesId});
+  const _SeriesLink({required this.name, this.seriesId, this.seasonId});
 
   final String name;
   final String? seriesId;
+  final String? seasonId;
 
   @override
   Widget build(BuildContext context) {
@@ -1865,7 +1892,8 @@ class _SeriesLink extends StatelessWidget {
       message: AppLocalizations.of(context).viewSeries,
       child: TextButton.icon(
         key: CatalogKeys.seriesLink,
-        onPressed: () => context.push(AppRoutes.item(seriesId!)),
+        onPressed: () =>
+            context.push(AppRoutes.item(seriesId!, seasonId: seasonId)),
         style: TextButton.styleFrom(
           foregroundColor: theme.colorScheme.onSurface.withValues(alpha: 0.9),
           padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 2),
@@ -2223,7 +2251,11 @@ class _DetailInfo extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         if (item.isEpisode && seriesName != null && seriesName.isNotEmpty)
-          _SeriesLink(name: seriesName, seriesId: seriesId ?? item.seriesId),
+          _SeriesLink(
+            name: seriesName,
+            seriesId: seriesId ?? item.seriesId,
+            seasonId: item.seasonId ?? item.parentId,
+          ),
         SelectableText(
           itemTitle(item),
           maxLines: 2,

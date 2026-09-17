@@ -1,7 +1,7 @@
 name: rillight
 description: "灯川 Rillight desktop Emby client"
 publish_to: 'none'
-version: 0.1.7+8
+version: 0.1.8+9
 
 environment:
   sdk: ^3.11.5
@@ -23,6 +23,14 @@ dependencies:
   screen_retriever: ^0.2.0
   window_manager: ^0.5.2
   desktop_multi_window: ^0.3.1
+
+# third_party/media_kit_video 是 pub.dev media_kit_video 2.0.1 的原样拷贝，
+# 仅修改 windows/angle_surface_manager.{h,cc}：Read() 拷贝纹理后等待 GPU 完成
+# （D3D11 事件查询），避免 Flutter 侧采样到半写入纹理导致偶发裂屏/黑帧。
+# 升级 media_kit_video 时需重新拷贝并重放该补丁。
+dependency_overrides:
+  media_kit_video:
+    path: third_party/media_kit_video
 
 dev_dependencies:
   flutter_test:

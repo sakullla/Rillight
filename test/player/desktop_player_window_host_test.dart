@@ -16,6 +16,7 @@ import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/player/desktop_player_window.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/player_bindings.dart';
+import 'package:rillight/player/player_host_command.dart';
 import 'package:rillight/player/player_window_host.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -92,11 +93,15 @@ void main() {
     return auth;
   }
 
-  DesktopPlayerWindowHost newHost(AuthController auth) {
+  DesktopPlayerWindowHost newHost(
+    AuthController auth, {
+    PlayerHostOpenItemConsumer? consumeOpenItem,
+  }) {
     return DesktopPlayerWindowHost(
       auth: auth,
       processControl: control,
       snapshotStoreForPid: storeFor,
+      consumeOpenItem: consumeOpenItem ?? () async => null,
       closeTimeout: const Duration(milliseconds: 50),
       reportTimeout: const Duration(milliseconds: 50),
       watchInterval: const Duration(milliseconds: 10),
@@ -158,6 +163,35 @@ void main() {
       expect(stopped.single.body['PositionTicks'], 4200000000);
       expect(storeFor(firstPid).snapshot, isNull);
       expect(storeFor(firstPid).deleteCount, 1);
+    });
+
+    test('watch delivers an open-item command to the main window', () async {
+      addTearDown(() async {
+        await PlayerHostOpenItem.consume();
+      });
+      final auth = await loggedInAuth();
+      final host = newHost(auth, consumeOpenItem: PlayerHostOpenItem.consume);
+      addTearDown(() {
+        host.dispose();
+        auth.dispose();
+      });
+
+      String? opened;
+      String? openedSeason;
+      host.onOpenItemRoute = (itemId, {seasonId}) {
+        opened = itemId;
+        openedSeason = seasonId;
+      };
+      await host.open(const PlayerOpenRequest(itemId: 'episode-friends-s1e1'));
+      await PlayerHostOpenItem.write(
+        'series-friends',
+        seasonId: 'season-friends-1',
+      );
+      for (var i = 0; i < 40 && opened == null; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      expect(opened, 'series-friends');
+      expect(openedSeason, 'season-friends-1');
     });
 
     test('graceful close skips kill and tolerates a stale snapshot', () async {
@@ -351,6 +385,7 @@ void main() {
           pid: pid,
           gate: releaseRead,
         ),
+        consumeOpenItem: () async => null,
         closeTimeout: const Duration(milliseconds: 50),
         reportTimeout: const Duration(milliseconds: 50),
         watchInterval: const Duration(milliseconds: 10),

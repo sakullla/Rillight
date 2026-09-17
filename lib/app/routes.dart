@@ -17,7 +17,16 @@ abstract final class AppRoutes {
   }
 
   static String library(String viewId) => '/library/$viewId';
-  static String item(String itemId) => '/item/$itemId';
+  static String item(String itemId, {String? seasonId}) {
+    final season = seasonId?.trim() ?? '';
+    if (season.isEmpty) {
+      return '/item/$itemId';
+    }
+    return Uri(
+      path: '/item/$itemId',
+      queryParameters: {'season': season},
+    ).toString();
+  }
 
   static String shelfItems({
     String? parentId,

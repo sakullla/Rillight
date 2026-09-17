@@ -88,7 +88,7 @@ class PlayerPage extends StatefulWidget {
   final int? startTimeTicks;
   final VoidCallback? onClosed;
   final ValueChanged<String>? onOpenItem;
-  final ValueChanged<String>? onOpenItemDetail;
+  final void Function(String itemId, {String? seasonId})? onOpenItemDetail;
 
   @override
   State<PlayerPage> createState() => PlayerPageState();
@@ -137,7 +137,7 @@ class PlayerPageState extends State<PlayerPage> {
       snapshotStore: bindings.snapshotStore,
       onClose: _leave,
       onOpenItem: _openItem,
-      onOpenItemDetail: widget.onOpenItemDetail ?? _openItem,
+      onOpenItemDetail: widget.onOpenItemDetail,
     );
     controller = created;
     created.addListener(_onController);
@@ -885,19 +885,24 @@ class _PlaybackEndedOverlay extends StatelessWidget {
                         FilledButton.icon(
                           key: PlayerKeys.replay,
                           onPressed: () => unawaited(controller.replay()),
+                          style: _endedActionStyle(theme, filled: true),
                           icon: const Icon(Icons.replay_rounded),
                           label: Text(l10n.replay),
                         ),
                         if (hasSeries)
-                          OutlinedButton(
+                          OutlinedButton.icon(
                             key: PlayerKeys.endedViewSeries,
                             onPressed: controller.openEndedSeries,
-                            child: Text(l10n.viewSeries),
+                            style: _endedActionStyle(theme),
+                            icon: const Icon(Icons.video_library_outlined),
+                            label: Text(l10n.viewSeries),
                           ),
-                        OutlinedButton(
+                        OutlinedButton.icon(
                           key: PlayerKeys.endedClose,
                           onPressed: () => unawaited(controller.close()),
-                          child: Text(l10n.closePlayer),
+                          style: _endedActionStyle(theme),
+                          icon: const Icon(Icons.close_rounded),
+                          label: Text(l10n.closePlayer),
                         ),
                       ],
                     ),
@@ -910,6 +915,34 @@ class _PlaybackEndedOverlay extends StatelessWidget {
       ),
     );
   }
+}
+
+ButtonStyle _endedActionStyle(ThemeData theme, {bool filled = false}) {
+  final label = theme.textTheme.labelLarge?.copyWith(
+    fontSize: 15,
+    height: 1.25,
+    fontWeight: FontWeight.w600,
+    letterSpacing: 0,
+  );
+  const size = Size(0, 44);
+  const padding = EdgeInsets.symmetric(
+    horizontal: AppSpacing.lg,
+    vertical: AppSpacing.sm,
+  );
+  if (filled) {
+    return FilledButton.styleFrom(
+      minimumSize: size,
+      padding: padding,
+      textStyle: label,
+      iconSize: 20,
+    );
+  }
+  return OutlinedButton.styleFrom(
+    minimumSize: size,
+    padding: padding,
+    textStyle: label,
+    iconSize: 20,
+  );
 }
 
 class _NextEpisodeBanner extends StatelessWidget {
