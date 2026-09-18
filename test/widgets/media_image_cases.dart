@@ -33,6 +33,7 @@ void main() {
   setUp(() {
     MediaImage.debugResetCacheConfiguration();
     MediaImage.debugClearCache();
+    MediaImageCache.instance.debugSetDiskStore(_DisabledDiskStore());
     server = FakeEmbyServer();
     adapter = FakeEmbyAdapter([server]);
     server.items.add(
@@ -124,26 +125,37 @@ void main() {
     tester,
   ) async {
     final auth = await connect(tester);
-    server.failingImageIds.add('img-movie');
+    const missing = EmbyItem(
+      id: 'img-missing',
+      name: '缺失海报',
+      type: 'Movie',
+      primaryImageTag: 'tag-missing',
+    );
+    server.items.add(
+      FakeEmbyItem(
+        id: missing.id,
+        name: missing.name,
+        type: missing.type,
+        primaryImageTag: missing.primaryImageTag,
+      ),
+    );
+    server.failingImageIds.add(missing.id);
+    MediaImageCache.instance.fetchTimeout = const Duration(milliseconds: 80);
+
     await tester.runAsync(() async {
-      await tester.pumpWidget(buildSubject(auth, withTag));
-    });
-    // A failed fetch can retry twice (200ms then 400ms) before the
-    // FutureBuilder leaves the skeleton. Wait for the placeholder, not a
-    // single 50ms slice that CI often loses.
-    var found = false;
-    for (var i = 0; i < 20; i++) {
-      await tester.pump();
-      if (find.byType(PosterPlaceholder).evaluate().isNotEmpty) {
-        found = true;
-        break;
-      }
-      await tester.runAsync(() async {
+      await tester.pumpWidget(buildSubject(auth, missing));
+      // FutureBuilder listens on this zone. Pump here after the 404, not
+      // back in fake-async where the completion never rebuilds the tree.
+      for (var i = 0; i < 40; i++) {
+        await tester.pump();
+        if (find.byType(PosterPlaceholder).evaluate().isNotEmpty) {
+          return;
+        }
         await Future<void>.delayed(const Duration(milliseconds: 50));
-      });
-    }
-    expect(found, isTrue);
+      }
+    });
     expect(find.byType(PosterPlaceholder), findsOneWidget);
+    expect(find.byType(Image), findsNothing);
   });
 
   testWidgets('reuses bytes for the same itemId+type+maxWidth', (tester) async {
@@ -550,6 +562,20 @@ class _HangingWriteStore implements MediaImageDiskStore {
 
   @override
   Future<void> write(String key, Uint8List bytes) => hang.future;
+
+  @override
+  Future<void> remove(String key) async {}
+
+  @override
+  Future<void> clear() async {}
+}
+
+class _DisabledDiskStore implements MediaImageDiskStore {
+  @override
+  Future<Uint8List?> read(String key) async => null;
+
+  @override
+  Future<void> write(String key, Uint8List bytes) async {}
 
   @override
   Future<void> remove(String key) async {}
