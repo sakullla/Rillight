@@ -1,6 +1,5 @@
 """Audit the built macOS application's dylib closure before final signing."""
 import argparse
-import json
 from pathlib import Path
 import plistlib
 import subprocess
@@ -12,19 +11,20 @@ from bundle_macos import otool_dependencies
 def verify(app_path, *, signed=False):
     app = Path(app_path).resolve()
     frameworks = app / 'Contents/Frameworks'
-    manifest = json.loads((app / 'Contents/Resources/rillight-native-dependencies.json').read_text())
+    if not (app / 'Contents/Resources/rillight-native-dependencies.json').is_file():
+        raise RuntimeError('Missing bundled native dependency record')
     with (app / 'Contents/Info.plist').open('rb') as source:
         info = plistlib.load(source)
     minimum = tuple(map(int, info['LSMinimumSystemVersion'].split('.')))
     if minimum < (12, 0):
         raise RuntimeError('Flutter 3.47.4 requires the application minimum to be macOS 12')
-    for entry in manifest['macos']['files']:
-        library = frameworks / entry['name']
-        if not library.is_file():
-            raise RuntimeError('Missing locked dylib: ' + entry['name'])
+    libraries = sorted(frameworks.glob('*.dylib'))
+    if not any(library.name == 'libmpv.2.dylib' for library in libraries):
+        raise RuntimeError('Missing libmpv.2.dylib')
+    for library in libraries:
         architectures = subprocess.check_output(['lipo', '-archs', str(library)], text=True).split()
         if not {'x86_64', 'arm64'}.issubset(architectures):
-            raise RuntimeError('Locked dylib is not universal: ' + entry['name'])
+            raise RuntimeError('Bundled dylib is not universal: ' + library.name)
     binaries = [app / 'Contents/MacOS' / info['CFBundleExecutable'], *frameworks.glob('*.dylib')]
     for framework in frameworks.glob('*.framework'):
         binary = framework / framework.stem
@@ -48,7 +48,7 @@ def verify(app_path, *, signed=False):
     commands = subprocess.check_output(['otool', '-l', str(main)], text=True)
     if 'path @executable_path/../Frameworks ' not in commands:
         raise RuntimeError('Application is missing its private Frameworks runpath')
-    print(f'Checked {len(binaries)} Mach-O binaries and {len(manifest["macos"]["files"])} locked universal dylibs')
+    print(f'Checked {len(binaries)} Mach-O binaries and {len(libraries)} bundled universal dylibs')
     if signed:
         from sign_bundle import release_entitlements, verify_signed_entitlements
         verify_signed_entitlements(app, release_entitlements())

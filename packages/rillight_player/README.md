@@ -110,13 +110,14 @@ and shutdown; it does not replace real Flutter import or visual validation.
 - Windows x64: **0.41.0-1023-g69e63f425**, shinchiro 20260903 git build,
   client API 2.5, FFmpeg N-126390-g9fc8c785e. This is explicitly a git build.
   CMake verifies SHA256 and bundles libmpv and ANGLE runtime DLLs.
-- macOS universal x64/arm64: IINA libmpv **0.41.0**, minimum **macOS 11.0**.
-  The locked libavutil reports **FFmpeg 9.0.1** in both architecture strings;
-  this is static binary evidence, not a macOS runtime load. The application
-  requires **macOS 12.0+** because Flutter 3.47.4 has a higher minimum.
-  All 45 dylibs are locked by individual SHA256. CocoaPods runs
-  `native/prepare_macos.py`; set `RILLIGHT_NATIVE_CACHE` to reuse a verified
-  download cache. Runner must execute, before application signing:
+- macOS universal x64/arm64: IINA libmpv, minimum **macOS 11.0**.
+  CocoaPods runs `native/prepare_macos.py`, which fetches IINA's live
+  `filelist.txt` and the listed universal dylibs. Remote dylibs are not
+  SHA256-locked in this repository; the download is accepted when it is a
+  universal Mach-O. Runtime still requires **mpv >= 0.41.0** and
+  **FFmpeg >= 9.0.1**. The application requires **macOS 12.0+** because
+  Flutter 3.47.4 has a higher minimum. Set `RILLIGHT_NATIVE_CACHE` to reuse
+  HTTP-revalidated downloads. Runner must execute, before application signing:
   `python3 packages/rillight_player/native/bundle_macos.py path/to/Rillight.app`.
   This copies the dependency closure into Contents/Frameworks, checks links,
   signs each dylib with the build identity, and includes the manifest/notices.

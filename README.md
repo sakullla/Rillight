@@ -4,9 +4,9 @@
 
 本仓库只包含桌面目标（`windows` / `macos` / `linux`），不含 Android 或 iOS。播放由仓内 `packages/rillight_player` 直接接入 libmpv，三平台均使用独立播放进程。每次媒体打开拥有独立内核、视频表面和会话身份；关闭等待原生音画与纹理释放。
 
-发行包捆绑 libmpv 和媒体依赖，版本、来源与校验值见 [`dependencies.json`](packages/rillight_player/native/dependencies.json)。当前稳定版基线为 mpv 0.41.0；Windows 固定构建为 `0.41.0-1023-g69e63f425`，它是 git 构建。macOS 应用最低版本为 12（Flutter 3.47.4 要求）。Linux deb 自带新版 `libmpv.so.2`，不需要手工创建 `.so.1` 软链接或设置 `LD_LIBRARY_PATH`。使用桌面菜单或 `/usr/bin/rillight` 启动；依赖缺失时启动包装会提供诊断。
+发行包捆绑 libmpv 和媒体依赖，Windows/Linux 的版本、来源与校验值见 [`dependencies.json`](packages/rillight_player/native/dependencies.json)。当前稳定版基线为 mpv 0.41.0；Windows 固定构建为 `0.41.0-1023-g69e63f425`，它是 git 构建。macOS 在构建时从 IINA 的 live dylib 列表下载 universal 库，不在仓库内锁定远程文件哈希；应用最低版本为 12（Flutter 3.47.4 要求）。Linux deb 自带新版 `libmpv.so.2`，不需要手工创建 `.so.1` 软链接或设置 `LD_LIBRARY_PATH`。使用桌面菜单或 `/usr/bin/rillight` 启动；依赖缺失时启动包装会提供诊断。
 
-配套 FFmpeg 基线升级为 9.0.1，Linux 按固定提交整套重建；Windows 保留兼容的固定开发构建 `N-126390-g9fc8c785e`。版本检查读取实际加载库的属性，不根据文件名推断版本。macOS 固定媒体库的实际加载与签名仍需对应系统验证。
+配套 FFmpeg 基线升级为 9.0.1，Linux 按固定提交整套重建；Windows 保留兼容的固定开发构建 `N-126390-g9fc8c785e`。版本检查读取实际加载库的属性，不根据文件名推断版本。macOS 媒体库的实际加载与签名仍需对应系统验证。
 
 ## 开发
 

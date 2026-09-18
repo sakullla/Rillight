@@ -1,5 +1,7 @@
 """Portable regression for thin/fat otool output used by native packaging."""
 from io import BytesIO
+import json
+import os
 from pathlib import Path
 import plistlib
 import sys
@@ -8,32 +10,38 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'packages/rillight_player/native'))
+import prepare_macos
 from bundle_macos import otool_dependencies
-from prepare_macos import USER_AGENT, download
+from prepare_macos import FILELIST_URL, USER_AGENT, download, parse_filelist, prepare_dylibs
 from sign_bundle import release_entitlements, sign, verify_signed_entitlements
+
+FAT = b'\xca\xfe\xba\xbe' + b'\x00\x00\x00\x02' + b'\x00' * 24
+ROOT = Path(__file__).resolve().parents[1]
+
+
+class FakeResponse:
+    def __init__(self, data, headers=None):
+        self._data = BytesIO(data)
+        self.headers = headers or {}
+
+    def read(self, size=-1):
+        return self._data.read(size)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
 
 
 class NativeDownloadTest(unittest.TestCase):
     def test_download_sends_an_explicit_user_agent(self):
         captured = {}
 
-        class Response:
-            def __init__(self):
-                self._data = BytesIO(b'dylib')
-
-            def read(self, size=-1):
-                return self._data.read(size)
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *args):
-                return False
-
         def urlopen(request, **kwargs):
             captured['headers'] = dict(request.header_items())
             captured['url'] = request.full_url
-            return Response()
+            return FakeResponse(b'dylib')
 
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory) / 'libogg.0.dylib'
@@ -47,6 +55,68 @@ class NativeDownloadTest(unittest.TestCase):
     def test_python_urllib_without_user_agent_is_the_known_403_path(self):
         self.assertNotIn('Python-urllib', USER_AGENT)
         self.assertTrue(USER_AGENT.startswith('Rillight/'))
+
+    def test_manifest_does_not_pin_iina_dylib_hashes(self):
+        manifest = json.loads((ROOT / 'packages/rillight_player/native/dependencies.json').read_text())
+        self.assertNotIn('files', manifest['macos'])
+        self.assertNotIn('sha256', json.dumps(manifest['macos']))
+        self.assertEqual(manifest['macos']['dylibs_url'], 'https://iina.io/dylibs/universal')
+        self.assertEqual(manifest['macos']['filelist_url'], FILELIST_URL)
+
+    def test_filelist_requires_libmpv_and_rejects_paths(self):
+        names = parse_filelist('libogg.0.dylib\nlibmpv.2.dylib\nlibogg.0.dylib\n')
+        self.assertEqual(names, ['libogg.0.dylib', 'libmpv.2.dylib'])
+        with self.assertRaisesRegex(RuntimeError, 'missing libmpv.2.dylib'):
+            parse_filelist('libogg.0.dylib\n')
+        with self.assertRaisesRegex(RuntimeError, 'Invalid IINA file list entry'):
+            parse_filelist('../libmpv.2.dylib\n')
+
+    def test_prepare_follows_live_filelist_without_sha256(self):
+        requested = []
+        payloads = {
+            FILELIST_URL: b'libmpv.2.dylib\nlibogg.0.dylib\n',
+            'https://iina.io/dylibs/universal/libmpv.2.dylib': FAT + b'mpv',
+            'https://iina.io/dylibs/universal/libogg.0.dylib': FAT + b'ogg',
+        }
+
+        def urlopen(request, **kwargs):
+            requested.append(request.full_url)
+            headers = {key.lower(): value for key, value in request.header_items()}
+            self.assertEqual(headers['user-agent'], USER_AGENT)
+            return FakeResponse(payloads[request.full_url], {'ETag': '"live"'})
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            leftover = root / 'macos/Libraries/libarchive.13.dylib'
+            leftover.parent.mkdir(parents=True)
+            leftover.write_bytes(FAT + b'stale')
+            with patch.object(prepare_macos, 'ROOT', root), \
+                    patch.dict(os.environ, {'RILLIGHT_NATIVE_CACHE': str(root / 'cache')}), \
+                    patch('prepare_macos.urllib.request.urlopen', side_effect=urlopen):
+                prepare_dylibs()
+            libraries = root / 'macos/Libraries'
+            self.assertEqual((libraries / 'libmpv.2.dylib').read_bytes(), FAT + b'mpv')
+            self.assertEqual((libraries / 'libogg.0.dylib').read_bytes(), FAT + b'ogg')
+            self.assertFalse(leftover.exists())
+        self.assertEqual(requested[0], FILELIST_URL)
+        self.assertIn('https://iina.io/dylibs/universal/libmpv.2.dylib', requested)
+
+    def test_non_macho_download_is_rejected(self):
+        payloads = {
+            FILELIST_URL: b'libmpv.2.dylib\n',
+            'https://iina.io/dylibs/universal/libmpv.2.dylib': b'<!doctype html>',
+        }
+
+        def urlopen(request, **kwargs):
+            return FakeResponse(payloads[request.full_url])
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with patch.object(prepare_macos, 'ROOT', root), \
+                    patch.dict(os.environ, {'RILLIGHT_NATIVE_CACHE': str(root / 'cache')}), \
+                    patch('prepare_macos.urllib.request.urlopen', side_effect=urlopen):
+                with self.assertRaisesRegex(RuntimeError, 'universal Mach-O'):
+                    prepare_dylibs()
 
 
 class OtoolDependenciesTest(unittest.TestCase):

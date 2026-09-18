@@ -32,7 +32,7 @@ jobs:
             build/macos-proxy-sandbox-evidence
       - name: Restore the ordinary release entry point
         run: flutter build macos --release --target lib/main.dart
-      - name: Verify locked dylib closure and runtime versions
+      - name: Verify bundled dylib closure and runtime versions
         shell: bash
         run: |
           set -euo pipefail
