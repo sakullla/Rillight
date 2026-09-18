@@ -280,6 +280,24 @@ void main() {
     },
   );
 
+  test('fetchComments accepts count/comments envelope without success', () async {
+    final client = clientFor((options) {
+      expect(options.uri.path, '/api/v2/comment/10002');
+      return {
+        'count': 1,
+        'comments': [
+          {'cid': 1, 'p': '1.00,1,16777215,[qiyi]', 'm': '二刷'},
+        ],
+      };
+    });
+    final comments = await client.fetchComments(
+      DandanplaySource.official,
+      10002,
+    );
+    expect(comments, hasLength(1));
+    expect(comments.single.text, '二刷');
+  });
+
   test('fetchComments parses p/m fields and sorts by time', () async {
     final client = clientFor((options) {
       expect(options.uri.path, contains('/api/v2/comment/100'));

@@ -406,6 +406,10 @@ class DandanplayClient {
     }
     final map = Map<String, dynamic>.from(data);
     if (!map.containsKey('success') && !map.containsKey('errorCode')) {
+      // 兼容源评论包常只有 count/comments，没有 success/errorCode。
+      if (map['comments'] is List) {
+        return map;
+      }
       throw const DanmakuApiException(
         DanmakuApiFailureKind.incompatible,
         detail: '响应缺少 dandanplay 业务包字段',
