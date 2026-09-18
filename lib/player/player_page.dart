@@ -263,7 +263,7 @@ class PlayerPageState extends State<PlayerPage> {
       setState(() => _danmakuPanelOpen = false);
     }
     if (_danmakuSearchOpen) {
-      setState(() => _danmakuSearchOpen = false);
+      _closeDanmakuSearch();
     }
     unawaited(current.loadEpisodeList());
     current.setControlsPinned(true);
@@ -292,7 +292,7 @@ class PlayerPageState extends State<PlayerPage> {
       _closeEpisodeList();
     }
     if (_danmakuSearchOpen) {
-      setState(() => _danmakuSearchOpen = false);
+      _closeDanmakuSearch();
     }
     controller?.setControlsPinned(true);
     setState(() => _danmakuPanelOpen = true);
@@ -2906,6 +2906,7 @@ class _DanmakuSearchPanelState extends State<_DanmakuSearchPanel> {
   List<DanmakuAnime> _animes = const [];
   bool _loading = false;
   bool _searched = false;
+  int _searchGeneration = 0;
 
   @override
   void initState() {
@@ -2928,6 +2929,7 @@ class _DanmakuSearchPanelState extends State<_DanmakuSearchPanel> {
 
   @override
   void dispose() {
+    _searchGeneration++;
     _fieldFocus.dispose();
     _field.dispose();
     super.dispose();
@@ -2938,12 +2940,13 @@ class _DanmakuSearchPanelState extends State<_DanmakuSearchPanel> {
     if (term.isEmpty) {
       return;
     }
+    final generation = ++_searchGeneration;
     setState(() {
       _loading = true;
       _searched = true;
     });
     final results = await widget.danmaku.search(term);
-    if (!mounted) {
+    if (!mounted || generation != _searchGeneration) {
       return;
     }
     setState(() {
@@ -3024,6 +3027,7 @@ class _DanmakuSearchPanelState extends State<_DanmakuSearchPanel> {
                       controller: _field,
                       focusNode: _fieldFocus,
                       autofocus: true,
+                      enabled: true,
                       enableInteractiveSelection: true,
                       textInputAction: TextInputAction.search,
                       style: theme.textTheme.bodyMedium,
@@ -3035,9 +3039,7 @@ class _DanmakuSearchPanelState extends State<_DanmakuSearchPanel> {
                         suffixIcon: IconButton(
                           key: const Key('player-danmaku-search-submit'),
                           tooltip: l10n.danmakuSearch,
-                          onPressed: _loading
-                              ? null
-                              : () => unawaited(_runSearch()),
+                          onPressed: () => unawaited(_runSearch()),
                           icon: const Icon(Icons.arrow_forward_rounded),
                         ),
                         border: OutlineInputBorder(
@@ -3075,7 +3077,12 @@ class _DanmakuSearchPanelState extends State<_DanmakuSearchPanel> {
 
   Widget _results(AppLocalizations l10n, ThemeData theme, ColorScheme scheme) {
     if (_loading) {
-      return const Center(child: CircularProgressIndicator(strokeWidth: 3));
+      return const Center(
+        child: CircularProgressIndicator(
+          key: Key('player-danmaku-search-loading'),
+          strokeWidth: 3,
+        ),
+      );
     }
     if (!_searched) {
       return Center(
