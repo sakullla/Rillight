@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/widgets.dart';
 import 'package:rillight/player/danmaku/danmaku_hash.dart';
 import 'package:rillight/player/danmaku/danmaku_layout.dart';
@@ -40,7 +41,9 @@ class DanmakuEpisodeContext {
     this.seriesTitle,
     this.title,
     this.fileName,
+    this.fileSize = 0,
     this.episodeIndex,
+    this.seasonIndex,
     this.streamUrl,
     this.duration = Duration.zero,
     this.isMovie = false,
@@ -53,7 +56,9 @@ class DanmakuEpisodeContext {
   final String? seriesTitle;
   final String? title;
   final String? fileName;
+  final int fileSize;
   final int? episodeIndex;
+  final int? seasonIndex;
 
   /// 直连播放流地址(用于 16MB 哈希);转码流为 null(哈希无意义)。
   final Uri? streamUrl;
@@ -120,6 +125,11 @@ class DanmakuController extends ChangeNotifier {
   /// 会话代际:每次 [startSession] 递增;旧会话的异步结果
   /// (弹幕落地/按剧记忆写入/状态落地)前校验未变,快速换集时丢弃。
   int _sessionGeneration = 0;
+
+  /// 手动搜索代际:新搜索或会话切换递增,迟到结果返回空列表。
+  int _searchGeneration = 0;
+  CancelToken? _sessionCancelToken;
+  CancelToken? _searchCancelToken;
 
   Future<void>? _restoreFuture;
   PlayerSettingsStore? _store;
@@ -205,6 +215,9 @@ class DanmakuController extends ChangeNotifier {
   /// 开启新会话:重置布局并按 记忆→哈希匹配→标题搜索 降级解析。
   Future<void> startSession(DanmakuEpisodeContext context) async {
     _sessionGeneration++;
+    _cancelActiveToken(_sessionCancelToken);
+    _sessionCancelToken = CancelToken();
+    _cancelSearchRequests();
     _context = context;
     _sessionKey = '${context.itemId}|${context.mediaSourceId}';
     layout.reset();
@@ -278,21 +291,66 @@ class DanmakuController extends ChangeNotifier {
     if (!_canCallOfficialApi) {
       return const [];
     }
+    _cancelActiveToken(_searchCancelToken);
+    final token = CancelToken();
+    _searchCancelToken = token;
+    final generation = ++_searchGeneration;
     try {
       var results = await _client.searchEpisodes(
         _source,
         anime: term,
         episode: _context?.episodeIndex,
+        cancelToken: token,
       );
       if (results.isEmpty) {
-        results = await _client.searchAnime(_source, term);
+        results = await _client.searchAnime(_source, term, cancelToken: token);
       }
-      return await _ensureEpisodes(_source, results);
-    } on DanmakuApiException {
+      results = await _ensureEpisodes(_source, results, cancelToken: token);
+      if (_requestDropped(
+        generation: generation,
+        current: _searchGeneration,
+        token: token,
+      )) {
+        return const [];
+      }
+      return results;
+    } on DanmakuApiException catch (failure) {
+      if (_requestDropped(
+        generation: generation,
+        current: _searchGeneration,
+        token: token,
+        failure: failure,
+      )) {
+        return const [];
+      }
       try {
-        final results = await _client.searchAnime(_source, term);
-        return await _ensureEpisodes(_source, results);
-      } on DanmakuApiException {
+        final results = await _client.searchAnime(
+          _source,
+          term,
+          cancelToken: token,
+        );
+        final filled = await _ensureEpisodes(
+          _source,
+          results,
+          cancelToken: token,
+        );
+        if (_requestDropped(
+          generation: generation,
+          current: _searchGeneration,
+          token: token,
+        )) {
+          return const [];
+        }
+        return filled;
+      } on DanmakuApiException catch (fallbackFailure) {
+        if (_requestDropped(
+          generation: generation,
+          current: _searchGeneration,
+          token: token,
+          failure: fallbackFailure,
+        )) {
+          return const [];
+        }
         return const [];
       }
     }
@@ -310,11 +368,20 @@ class DanmakuController extends ChangeNotifier {
       return;
     }
     final generation = _sessionGeneration;
+    final cancelToken = _sessionCancelToken;
     status = DanmakuStatus.loading;
     notifyListeners();
     try {
-      final loaded = await _client.fetchComments(_source, episode.episodeId);
-      if (generation != _sessionGeneration) {
+      final loaded = await _client.fetchComments(
+        _source,
+        episode.episodeId,
+        cancelToken: cancelToken,
+      );
+      if (_requestDropped(
+        generation: generation,
+        current: _sessionGeneration,
+        token: cancelToken,
+      )) {
         // 与 _resolveAndLoad 同族保护:会话已切换,选择结果不落地。
         return;
       }
@@ -329,7 +396,12 @@ class DanmakuController extends ChangeNotifier {
       status = DanmakuStatus.active;
       notifyListeners();
     } on DanmakuApiException catch (failure) {
-      if (generation != _sessionGeneration) {
+      if (_requestDropped(
+        generation: generation,
+        current: _sessionGeneration,
+        token: cancelToken,
+        failure: failure,
+      )) {
         return;
       }
       _handleLoadFailure(failure);
@@ -355,6 +427,7 @@ class DanmakuController extends ChangeNotifier {
 
   Future<void> _resolveAndLoad(DanmakuEpisodeContext context) async {
     final generation = _sessionGeneration;
+    final cancelToken = _sessionCancelToken;
     if (!_canCallOfficialApi) {
       status = DanmakuStatus.unreachable;
       statusDetail = null;
@@ -362,13 +435,24 @@ class DanmakuController extends ChangeNotifier {
       return;
     }
     final source = _source;
-    try {
-      var animeId = 0;
-      var animeTitle = '';
-      var episodeId = 0;
-      var resolved = false;
+    var animeId = 0;
+    var animeTitle = '';
+    var episodeId = 0;
+    var resolved = false;
+    DanmakuApiException? lookupFailure;
 
-      // 1. 按剧记忆:同集直接复用,同剧后续集沿用动画并按集号对位。
+    bool dropped([DanmakuApiException? failure]) {
+      return _requestDropped(
+        generation: generation,
+        current: _sessionGeneration,
+        token: cancelToken,
+        failure: failure,
+      );
+    }
+
+    // 三步彼此隔离:一步 API 失败记入 lookupFailure 后继续,取消则丢弃整链。
+    // 1. 按剧记忆:同集直接复用,同剧后续集沿用动画并按集号对位。
+    try {
       final memory = context.seriesId == null
           ? null
           : _memories[context.seriesId];
@@ -381,8 +465,16 @@ class DanmakuController extends ChangeNotifier {
           episodeId = memory.episodeId!;
           resolved = true;
         } else {
-          var animes = await _client.searchAnime(source, memory.animeTitle);
-          animes = await _ensureEpisodes(source, animes);
+          var animes = await _client.searchAnime(
+            source,
+            memory.animeTitle,
+            cancelToken: cancelToken,
+          );
+          animes = await _ensureEpisodes(
+            source,
+            animes,
+            cancelToken: cancelToken,
+          );
           final anime = _findAnimeById(animes, memory.animeId);
           final picked = anime == null
               ? null
@@ -395,20 +487,32 @@ class DanmakuController extends ChangeNotifier {
           }
         }
       }
+    } on DanmakuApiException catch (failure) {
+      if (dropped(failure)) {
+        return;
+      }
+      lookupFailure = failure;
+    }
 
-      // 2. dandanplay 匹配:直连流先取前 16MB 哈希,不可得时按文件名降级。
-      if (!resolved) {
+    // 2. dandanplay 匹配:直连流先取前 16MB 哈希,不可得时按文件名降级。
+    if (!resolved) {
+      try {
         final streamUrl = context.streamUrl;
         var hash = '';
         if (streamUrl != null) {
           hash = await _hasher.hashOf(streamUrl) ?? '';
         }
+        if (dropped()) {
+          return;
+        }
         final match = await _client.match(
           source,
           fileName: context.fileName ?? context.title ?? '',
           fileHash: hash,
-          fileSize: 0,
-          videoDuration: context.duration.inMinutes,
+          fileSize: context.fileSize,
+          videoDuration: context.duration.inSeconds,
+          matchMode: hash.isEmpty ? 'fileNameOnly' : 'hashAndFileName',
+          cancelToken: cancelToken,
         );
         if (match.isMatched && match.matches.isNotEmpty) {
           final candidate = match.matches.first;
@@ -417,10 +521,17 @@ class DanmakuController extends ChangeNotifier {
           episodeId = candidate.episodeId;
           resolved = true;
         }
+      } on DanmakuApiException catch (failure) {
+        if (dropped(failure)) {
+          return;
+        }
+        lookupFailure = failure;
       }
+    }
 
-      // 3. 标题搜索降级:先 search/episodes(带分集),再 search/anime + bangumi。
-      if (!resolved) {
+    // 3. 标题搜索降级:先 search/episodes(带分集),再 search/anime + bangumi。
+    if (!resolved) {
+      try {
         var keyword = context.seriesTitle?.trim() ?? '';
         if (keyword.isEmpty) {
           keyword = context.title?.trim() ?? '';
@@ -433,11 +544,20 @@ class DanmakuController extends ChangeNotifier {
             source,
             anime: keyword,
             episode: context.episodeIndex,
+            cancelToken: cancelToken,
           );
           if (animes.isEmpty) {
-            animes = await _client.searchAnime(source, keyword);
+            animes = await _client.searchAnime(
+              source,
+              keyword,
+              cancelToken: cancelToken,
+            );
           }
-          animes = await _ensureEpisodes(source, animes);
+          animes = await _ensureEpisodes(
+            source,
+            animes,
+            cancelToken: cancelToken,
+          );
           final anime = _pickAnime(animes, context.isMovie);
           final picked = anime == null
               ? null
@@ -449,19 +569,34 @@ class DanmakuController extends ChangeNotifier {
             resolved = true;
           }
         }
-      }
-
-      if (!resolved) {
-        if (generation != _sessionGeneration) {
+      } on DanmakuApiException catch (failure) {
+        if (dropped(failure)) {
           return;
         }
-        status = DanmakuStatus.noMatch;
-        notifyListeners();
+        lookupFailure = failure;
+      }
+    }
+
+    if (!resolved) {
+      if (dropped()) {
         return;
       }
+      if (lookupFailure != null) {
+        _handleLoadFailure(lookupFailure);
+      } else {
+        status = DanmakuStatus.noMatch;
+        notifyListeners();
+      }
+      return;
+    }
 
-      final loaded = await _client.fetchComments(source, episodeId);
-      if (generation != _sessionGeneration) {
+    try {
+      final loaded = await _client.fetchComments(
+        source,
+        episodeId,
+        cancelToken: cancelToken,
+      );
+      if (dropped()) {
         // 新会话已开启:旧会话结果不落地、不写记忆。
         return;
       }
@@ -471,7 +606,7 @@ class DanmakuController extends ChangeNotifier {
       status = DanmakuStatus.active;
       notifyListeners();
     } on DanmakuApiException catch (failure) {
-      if (generation != _sessionGeneration) {
+      if (dropped(failure)) {
         return;
       }
       _handleLoadFailure(failure);
@@ -479,6 +614,9 @@ class DanmakuController extends ChangeNotifier {
   }
 
   void _handleLoadFailure(DanmakuApiException failure) {
+    if (failure.kind == DanmakuApiFailureKind.cancelled) {
+      return;
+    }
     if (usesCustomSource &&
         (failure.kind == DanmakuApiFailureKind.unreachable ||
             failure.kind == DanmakuApiFailureKind.incompatible)) {
@@ -494,6 +632,30 @@ class DanmakuController extends ChangeNotifier {
       statusDetail = null;
     }
     notifyListeners();
+  }
+
+  void _cancelActiveToken(CancelToken? token) {
+    if (token != null && !token.isCancelled) {
+      token.cancel();
+    }
+  }
+
+  void _cancelSearchRequests() {
+    _searchGeneration++;
+    _cancelActiveToken(_searchCancelToken);
+    _searchCancelToken = null;
+  }
+
+  bool _requestDropped({
+    required int generation,
+    required int current,
+    CancelToken? token,
+    DanmakuApiException? failure,
+  }) {
+    return _disposed ||
+        generation != current ||
+        (token?.isCancelled ?? false) ||
+        failure?.kind == DanmakuApiFailureKind.cancelled;
   }
 
   Future<void> _remember(
@@ -518,8 +680,9 @@ class DanmakuController extends ChangeNotifier {
 
   Future<List<DanmakuAnime>> _ensureEpisodes(
     DandanplaySource source,
-    List<DanmakuAnime> animes,
-  ) async {
+    List<DanmakuAnime> animes, {
+    CancelToken? cancelToken,
+  }) async {
     final filled = <DanmakuAnime>[];
     for (final anime in animes.take(12)) {
       if (anime.episodes.isNotEmpty) {
@@ -527,9 +690,16 @@ class DanmakuController extends ChangeNotifier {
         continue;
       }
       try {
-        final detailed = await _client.fetchBangumi(source, anime.animeId);
+        final detailed = await _client.fetchBangumi(
+          source,
+          anime.animeId,
+          cancelToken: cancelToken,
+        );
         filled.add(detailed ?? anime);
-      } on DanmakuApiException {
+      } on DanmakuApiException catch (failure) {
+        if (failure.kind == DanmakuApiFailureKind.cancelled) {
+          rethrow;
+        }
         filled.add(anime);
       }
     }
@@ -602,6 +772,8 @@ class DanmakuController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _cancelActiveToken(_sessionCancelToken);
+    _cancelSearchRequests();
     super.dispose();
   }
 

@@ -13,6 +13,9 @@ enum DanmakuApiFailureKind {
 
   /// HTTP 层错误或业务包 success=false。
   http,
+
+  /// 请求被取消;不得升级为服务不可达。
+  cancelled,
 }
 
 class DanmakuApiException implements Exception {
@@ -136,27 +139,30 @@ class DandanplayClient {
 
   /// 匹配:POST /api/v2/match。
   ///
-  /// [fileHash] 为前 16MB 的 MD5(不可得时传空串,服务端按文件名降级);
-  /// [videoDuration] 为视频时长(分钟)。
+  /// [fileHash] 为前 16MB 的 MD5(不可得时传空串,并用 [matchMode] fileNameOnly);
+  /// [videoDuration] 为视频时长(秒)。
   Future<DanmakuMatchResponse> match(
     DandanplaySource source, {
     required String fileName,
     required String fileHash,
     required int fileSize,
     required int videoDuration,
+    String matchMode = 'hashAndFileName',
+    CancelToken? cancelToken,
   }) async {
     final body = <String, dynamic>{
       'fileName': fileName,
       'fileHash': fileHash,
       'fileSize': fileSize,
       'videoDuration': videoDuration,
-      'matchMode': 'hashAndFileName',
+      'matchMode': matchMode,
     };
     final data = await _requestJson(
       source,
       'POST',
       '/api/v2/match',
       body: body,
+      cancelToken: cancelToken,
     );
     final matches = <DanmakuMatchCandidate>[];
     final rawMatches = data['matches'];
@@ -184,8 +190,9 @@ class DandanplayClient {
   /// 标题搜索:GET /api/v2/search/anime(降级匹配与手动搜索共用)。
   Future<List<DanmakuAnime>> searchAnime(
     DandanplaySource source,
-    String keyword,
-  ) async {
+    String keyword, {
+    CancelToken? cancelToken,
+  }) async {
     final term = keyword.trim();
     if (term.isEmpty) {
       return const [];
@@ -195,6 +202,7 @@ class DandanplayClient {
       'GET',
       '/api/v2/search/anime',
       queryParameters: {'keyword': term},
+      cancelToken: cancelToken,
     );
     return _parseAnimes(data);
   }
@@ -207,6 +215,7 @@ class DandanplayClient {
     DandanplaySource source, {
     required String anime,
     int? episode,
+    CancelToken? cancelToken,
   }) async {
     final term = anime.trim();
     if (term.isEmpty) {
@@ -220,6 +229,7 @@ class DandanplayClient {
         'anime': term,
         if (episode != null && episode > 0) 'episode': '$episode',
       },
+      cancelToken: cancelToken,
     );
     return _parseAnimes(data);
   }
@@ -227,12 +237,18 @@ class DandanplayClient {
   /// 作品详情:GET /api/v2/bangumi/{animeId},补全 search/anime 缺的分集。
   Future<DanmakuAnime?> fetchBangumi(
     DandanplaySource source,
-    int animeId,
-  ) async {
+    int animeId, {
+    CancelToken? cancelToken,
+  }) async {
     if (animeId <= 0) {
       return null;
     }
-    final data = await _requestJson(source, 'GET', '/api/v2/bangumi/$animeId');
+    final data = await _requestJson(
+      source,
+      'GET',
+      '/api/v2/bangumi/$animeId',
+      cancelToken: cancelToken,
+    );
     final raw = data['bangumi'] ?? data;
     if (raw is! Map) {
       return null;
@@ -295,6 +311,7 @@ class DandanplayClient {
     DandanplaySource source,
     int episodeId, {
     int? serverTimestamp,
+    CancelToken? cancelToken,
   }) async {
     final data = await _requestJson(
       source,
@@ -305,6 +322,7 @@ class DandanplayClient {
         'chConvert': '1',
         if (serverTimestamp != null) 'ts': '$serverTimestamp',
       },
+      cancelToken: cancelToken,
     );
     final comments = <DanmakuComment>[];
     final rawComments = data['comments'];
@@ -346,6 +364,7 @@ class DandanplayClient {
     String apiPath, {
     Object? body,
     Map<String, String>? queryParameters,
+    CancelToken? cancelToken,
   }) async {
     var uri = source.resolve(apiPath);
     if (queryParameters != null && queryParameters.isNotEmpty) {
@@ -358,6 +377,7 @@ class DandanplayClient {
       response = await _dio.requestUri<dynamic>(
         uri,
         data: body,
+        cancelToken: cancelToken,
         options: Options(
           method: method,
           headers: {
@@ -387,6 +407,10 @@ class DandanplayClient {
     }
     final map = Map<String, dynamic>.from(data);
     if (!map.containsKey('success') && !map.containsKey('errorCode')) {
+      // 兼容源评论包常只有 count/comments，没有 success/errorCode。
+      if (map['comments'] is List) {
+        return map;
+      }
       throw const DanmakuApiException(
         DanmakuApiFailureKind.incompatible,
         detail: '响应缺少 dandanplay 业务包字段',
@@ -413,9 +437,13 @@ class DandanplayClient {
           DanmakuApiFailureKind.unreachable,
           detail: error.message ?? 'network unreachable',
         );
+      case DioExceptionType.cancel:
+        return DanmakuApiException(
+          DanmakuApiFailureKind.cancelled,
+          detail: error.message ?? 'cancelled',
+        );
       case DioExceptionType.badCertificate:
       case DioExceptionType.badResponse:
-      case DioExceptionType.cancel:
       case DioExceptionType.unknown:
         final status = error.response?.statusCode;
         if (status == null) {

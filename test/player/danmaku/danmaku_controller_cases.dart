@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/player/danmaku/danmaku_controller.dart';
+import 'package:rillight/player/danmaku/danmaku_match_query.dart';
 import 'package:rillight/player/danmaku/danmaku_hash.dart';
 import 'package:rillight/player/danmaku/danmaku_layout.dart';
 import 'package:rillight/player/danmaku/dandanplay_client.dart';
@@ -32,6 +33,34 @@ class FakeDandanplayClient extends DandanplayClient {
   /// 慢完成的丢弃行为。
   final Map<int, Completer<void>> commentGates = {};
 
+  /// 阻塞 searchAnime/searchEpisodes,测试在途搜索被取消后不落地。
+  Completer<void>? searchGate;
+
+  Future<void> _awaitIfGated(
+    Completer<void>? gate,
+    CancelToken? cancelToken,
+  ) async {
+    void throwIfCancelled() {
+      if (cancelToken != null && cancelToken.isCancelled) {
+        throw const DanmakuApiException(
+          DanmakuApiFailureKind.cancelled,
+          detail: 'cancelled',
+        );
+      }
+    }
+
+    throwIfCancelled();
+    if (gate == null) {
+      return;
+    }
+    if (cancelToken == null) {
+      await gate.future;
+      return;
+    }
+    await Future.any<Object?>([gate.future, cancelToken.whenCancel]);
+    throwIfCancelled();
+  }
+
   @override
   Future<DanmakuMatchResponse> match(
     DandanplaySource source, {
@@ -39,6 +68,8 @@ class FakeDandanplayClient extends DandanplayClient {
     required String fileHash,
     required int fileSize,
     required int videoDuration,
+    String matchMode = 'hashAndFileName',
+    CancelToken? cancelToken,
   }) async {
     matchCalls.add((
       source,
@@ -47,8 +78,10 @@ class FakeDandanplayClient extends DandanplayClient {
         'fileHash': fileHash,
         'fileSize': fileSize,
         'videoDuration': videoDuration,
+        'matchMode': matchMode,
       },
     ));
+    await _awaitIfGated(null, cancelToken);
     if (matchError != null) {
       throw matchError!;
     }
@@ -58,9 +91,11 @@ class FakeDandanplayClient extends DandanplayClient {
   @override
   Future<List<DanmakuAnime>> searchAnime(
     DandanplaySource source,
-    String keyword,
-  ) async {
+    String keyword, {
+    CancelToken? cancelToken,
+  }) async {
     searchCalls.add((source, keyword));
+    await _awaitIfGated(searchGate, cancelToken);
     if (searchError != null) {
       throw searchError!;
     }
@@ -72,15 +107,18 @@ class FakeDandanplayClient extends DandanplayClient {
     DandanplaySource source, {
     required String anime,
     int? episode,
+    CancelToken? cancelToken,
   }) {
-    return searchAnime(source, anime);
+    return searchAnime(source, anime, cancelToken: cancelToken);
   }
 
   @override
   Future<DanmakuAnime?> fetchBangumi(
     DandanplaySource source,
-    int animeId,
-  ) async {
+    int animeId, {
+    CancelToken? cancelToken,
+  }) async {
+    await _awaitIfGated(null, cancelToken);
     return bangumiResponse;
   }
 
@@ -89,12 +127,10 @@ class FakeDandanplayClient extends DandanplayClient {
     DandanplaySource source,
     int episodeId, {
     int? serverTimestamp,
+    CancelToken? cancelToken,
   }) async {
     commentCalls.add((source, episodeId));
-    final gate = commentGates[episodeId];
-    if (gate != null) {
-      await gate.future;
-    }
+    await _awaitIfGated(commentGates[episodeId], cancelToken);
     if (commentError != null) {
       throw commentError!;
     }
@@ -143,6 +179,7 @@ DanmakuEpisodeContext context({
     seriesTitle: 'Show',
     title: 'Show 1',
     fileName: '[G] Show - 01.mkv',
+    fileSize: 2048,
     episodeIndex: index,
     streamUrl: directStream ? Uri.parse('https://emby/stream') : null,
     duration: const Duration(minutes: 24),
@@ -247,6 +284,9 @@ void main() {
     await controller.startSession(context());
     expect(client.matchCalls.single.$2['fileHash'], '');
     expect(client.matchCalls.single.$2['fileName'], '[G] Show - 01.mkv');
+    expect(client.matchCalls.single.$2['fileSize'], 2048);
+    expect(client.matchCalls.single.$2['videoDuration'], 24 * 60);
+    expect(client.matchCalls.single.$2['matchMode'], 'fileNameOnly');
   });
 
   test(
@@ -318,6 +358,36 @@ void main() {
       expect(controller.status, DanmakuStatus.active);
     },
   );
+
+  test('match error still loads comments via title search', () async {
+    store = MemoryPlayerSettingsStore(
+      const PlayerSettings(
+        danmakuServer: 'https://dan.example.com',
+        danmakuToken: 'secret',
+      ),
+    );
+    client.matchError = unreachable;
+    client.searchResponse = const [
+      DanmakuAnime(
+        animeId: 9,
+        animeTitle: 'Show',
+        type: 'tvseries',
+        episodes: [
+          DanmakuEpisode(episodeId: 200, episodeTitle: '第01话'),
+          DanmakuEpisode(episodeId: 201, episodeTitle: '第02话'),
+        ],
+      ),
+    ];
+    client.commentResponse = [comment(1, 5)];
+    final controller = makeController();
+    await controller.startSession(context());
+    expect(controller.status, DanmakuStatus.active);
+    expect(controller.hasComments, isTrue);
+    expect(controller.matchedTitle, 'Show');
+    expect(client.matchCalls, hasLength(1));
+    expect(client.searchCalls, isNotEmpty);
+    expect(client.commentCalls.single.$2, 200);
+  });
 
   test('match miss falls back to title search and episode index', () async {
     client.searchResponse = const [
@@ -553,6 +623,90 @@ void main() {
     expect(await controller.search('Show'), isEmpty);
   });
 
+  test(
+    'newer search drops in-flight results without unavailable banner',
+    () async {
+      store = MemoryPlayerSettingsStore(
+        const PlayerSettings(
+          danmakuServer: 'https://dan.example.com',
+          danmakuToken: 'secret',
+        ),
+      );
+      final controller = makeController();
+      await controller.startSession(context());
+      expect(controller.status, DanmakuStatus.noMatch);
+
+      client.searchCalls.clear();
+      client.searchResponse = const [
+        DanmakuAnime(
+          animeId: 1,
+          animeTitle: 'Stale',
+          type: 'tvseries',
+          episodes: [DanmakuEpisode(episodeId: 1, episodeTitle: '第01话')],
+        ),
+      ];
+      client.searchGate = Completer<void>();
+      final stale = controller.search('Stale');
+      while (client.searchCalls.isEmpty) {
+        await Future<void>.delayed(Duration.zero);
+      }
+
+      client.searchResponse = const [
+        DanmakuAnime(
+          animeId: 2,
+          animeTitle: 'Fresh',
+          type: 'tvseries',
+          episodes: [DanmakuEpisode(episodeId: 2, episodeTitle: '第01话')],
+        ),
+      ];
+      final fresh = controller.search('Fresh');
+      client.searchGate!.complete();
+
+      expect(await stale, isEmpty);
+      final freshResults = await fresh;
+      expect(freshResults, hasLength(1));
+      expect(freshResults.single.animeTitle, 'Fresh');
+      expect(controller.status, DanmakuStatus.noMatch);
+    },
+  );
+
+  test(
+    'session switch drops in-flight search without unavailable banner',
+    () async {
+      store = MemoryPlayerSettingsStore(
+        const PlayerSettings(
+          danmakuServer: 'https://dan.example.com',
+          danmakuToken: 'secret',
+        ),
+      );
+      final controller = makeController();
+      await controller.startSession(context());
+      expect(controller.status, DanmakuStatus.noMatch);
+
+      client.searchCalls.clear();
+      client.searchResponse = const [
+        DanmakuAnime(
+          animeId: 1,
+          animeTitle: 'Stale',
+          type: 'tvseries',
+          episodes: [DanmakuEpisode(episodeId: 1, episodeTitle: '第01话')],
+        ),
+      ];
+      client.searchGate = Completer<void>();
+      final pending = controller.search('Stale');
+      while (client.searchCalls.isEmpty) {
+        await Future<void>.delayed(Duration.zero);
+      }
+
+      client.searchResponse = const [];
+      final session = controller.startSession(context(itemId: 'item-2'));
+      client.searchGate!.complete();
+      await session;
+      expect(await pending, isEmpty);
+      expect(controller.status, DanmakuStatus.noMatch);
+    },
+  );
+
   test('search fills missing episodes from bangumi details', () async {
     client.searchResponse = const [
       DanmakuAnime(animeId: 12, animeTitle: 'Hollow', type: 'tvseries'),
@@ -706,5 +860,38 @@ void main() {
     final memoryAfter = (await store.read()).danmakuSeriesMemories['series-1'];
     expect(memoryAfter!.episodeId, 200);
     expect(controller.comments.single.cid, 2);
+  });
+
+  test('match fileName keeps release-style path basename', () {
+    expect(
+      danmakuMatchFileName(
+        pathBaseName: '无忧渡.S02E08.2160p.WEB-DL.mkv',
+        seriesTitle: '无忧渡',
+        episodeIndex: 8,
+        seasonIndex: 2,
+      ),
+      '无忧渡.S02E08.2160p.WEB-DL.mkv',
+    );
+  });
+
+  test('match fileName synthesizes SxxExx when path is missing', () {
+    expect(
+      danmakuMatchFileName(
+        seriesTitle: '生万物',
+        title: '绣绣大婚当日遭抢亲',
+        seasonIndex: 2,
+        episodeIndex: 8,
+      ),
+      '生万物 S02E08',
+    );
+    expect(
+      danmakuMatchFileName(
+        seriesTitle: '生万物',
+        seasonIndex: 2,
+        episodeIndex: 8,
+        height: 2160,
+      ),
+      '生万物.S02E08.2160p',
+    );
   });
 }

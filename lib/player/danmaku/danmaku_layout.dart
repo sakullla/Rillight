@@ -106,8 +106,12 @@ const double kDanmakuScrollSeconds = 12;
 /// 顶部/底部固定弹幕的停留时长(秒)。
 const double kDanmakuFixedSeconds = 5;
 
-/// 播放位置回跳任意幅度或前跳超过该阈值视为 seek:清屏并按新位置重建。
+/// 播放位置回跳或前跳超过该阈值视为 seek:清屏并按新位置重建。
+/// 小于该幅度的回退视为进度抖动,不得重排车道,否则弹幕会上下左右跳。
 const Duration kDanmakuSeekThreshold = Duration(seconds: 2);
+
+/// 同车道弹幕之间的最小像素间隙,避免描边重叠。
+const double kDanmakuCollisionGap = 8;
 
 /// 一帧待绘制弹幕:文本、颜色、字号与画布内位置。
 class DanmakuFrame {
@@ -188,26 +192,25 @@ class DanmakuLayout {
     _width = size.width;
     _height = size.height;
     final last = _lastPosition;
-    final isSeek =
-        last == null ||
-        position < last ||
-        position - last > kDanmakuSeekThreshold;
-    if (isSeek) {
-      _handleSeek(position);
+    final seek = _isSeek(position, last);
+    // 未达 seek 阈值的回退当成时钟抖动:保持单调时钟,已上场弹幕车道不动。
+    final clock = (!seek && last != null && position < last) ? last : position;
+    if (seek) {
+      _handleSeek(clock);
     } else {
-      _spawnDue(position);
+      _spawnDue(clock);
     }
-    _lastPosition = position;
-    _expire(position);
+    _lastPosition = clock;
+    _expire(clock);
 
     final frames = <DanmakuFrame>[];
     final fontSize = kDanmakuBaseFontSize * settings.fontScale;
     final lineHeight = fontSize * 1.35;
     final areaHeight = _height * settings.areaFraction;
     for (final entry in _active) {
-      final progress =
-          (position - entry.spawn).inMicroseconds /
-          entry.lifespan.inMicroseconds;
+      final span = entry.lifespan.inMicroseconds;
+      final raw = span <= 0 ? 1.0 : (clock - entry.spawn).inMicroseconds / span;
+      final progress = raw.clamp(0.0, 1.0);
       final left = switch (entry.comment.renderMode) {
         DanmakuMode.scroll => _width - progress * (_width + entry.width),
         _ => (_width - entry.width) / 2,
@@ -233,6 +236,16 @@ class DanmakuLayout {
     return frames;
   }
 
+  bool _isSeek(Duration position, Duration? last) {
+    if (last == null) {
+      return true;
+    }
+    if (position < last) {
+      return last - position > kDanmakuSeekThreshold;
+    }
+    return position - last > kDanmakuSeekThreshold;
+  }
+
   /// seek:清屏重建。显示窗口覆盖新位置的弹幕按其真实出现时刻复位
   /// (滚动进度按时间比例恢复,位置跟随新播放位置)。
   void _handleSeek(Duration position) {
@@ -246,12 +259,17 @@ class DanmakuLayout {
       index = comments.length;
     }
     _cursor = index;
-    // 回看窗口内已出现但尚未退出的弹幕按真实时刻重新播种。
-    for (var i = index - 1; i >= 0; i--) {
-      final at = comments[i].time * 1000;
+    // 按时间正序播种,车道分配与正向播放一致,避免 seek 后上下乱跳。
+    var start = index;
+    while (start > 0) {
+      final at = comments[start - 1].time * 1000;
       if (position.inMilliseconds - at > maxLifespan) {
         break;
       }
+      start--;
+    }
+    for (var i = start; i < index; i++) {
+      final at = comments[i].time * 1000;
       _spawn(comments[i], Duration(milliseconds: at.round()));
     }
   }
@@ -280,7 +298,23 @@ class DanmakuLayout {
     if (_active.isEmpty) {
       return;
     }
-    _active.removeWhere((entry) => position - entry.spawn >= entry.lifespan);
+    _active.removeWhere((entry) {
+      final dead = position - entry.spawn >= entry.lifespan;
+      if (dead) {
+        _clearLaneIfCurrent(entry);
+      }
+      return dead;
+    });
+  }
+
+  void _clearLaneIfCurrent(_ActiveEntry entry) {
+    final lanes = _laneLast[entry.comment.renderMode];
+    if (lanes == null || entry.lane >= lanes.length) {
+      return;
+    }
+    if (identical(lanes[entry.lane], entry)) {
+      lanes[entry.lane] = null;
+    }
   }
 
   void _spawn(DanmakuComment comment, Duration spawn) {
@@ -351,10 +385,9 @@ class DanmakuLayout {
     return (_height * settings.areaFraction / lineHeight).floor();
   }
 
-  /// 车道空闲判定:
-  /// - 固定弹幕:前一条已退出该车道即可。
-  /// - 滚动弹幕:推导防追尾条件——同速时前一条须完全进入画面;
-  ///   新条更快(更宽)时要求足够的前距,保证新条在旧条退出前不追上。
+  /// 车道空闲判定(当前几何,不重排已上场弹幕):
+  /// - 固定弹幕:前一条仍在该车道则占用。
+  /// - 滚动弹幕:前一条须整段进入画面,且新条在旧条离开前追不上。
   bool _laneFree(
     List<_ActiveEntry?> lanes,
     int lane,
@@ -368,19 +401,44 @@ class DanmakuLayout {
       return true;
     }
     if (spawn - last.spawn >= last.lifespan) {
+      lanes[lane] = null;
       return true;
     }
     if (mode != DanmakuMode.scroll) {
       return false;
     }
-    final v1 = (_width + last.width) / last.lifespan.inMicroseconds;
-    final v2 = (_width + width) / lifespan.inMicroseconds;
-    final head = (spawn - last.spawn).inMicroseconds;
-    // head 是时间余量,速度单位为 像素/微秒,换算统一。
-    if (v2 <= v1) {
-      return head * v1 >= last.width;
+    return _scrollLaneClear(last, width, lifespan, spawn);
+  }
+
+  bool _scrollLaneClear(
+    _ActiveEntry last,
+    double width,
+    Duration lifespan,
+    Duration spawn,
+  ) {
+    final lastSpan = last.lifespan.inMicroseconds;
+    final nextSpan = lifespan.inMicroseconds;
+    if (lastSpan <= 0 || nextSpan <= 0 || _width <= 0) {
+      return false;
     }
-    final required = (last.width + (v2 - v1) * (_width + last.width) / v1) / v2;
-    return head >= required;
+    final lastProgress = ((spawn - last.spawn).inMicroseconds / lastSpan).clamp(
+      0.0,
+      1.0,
+    );
+    final lastLeft = _width - lastProgress * (_width + last.width);
+    final lastRight = lastLeft + last.width;
+    // 前一条还挂在右沿外,新条会叠在同一入口。
+    if (lastRight > _width - kDanmakuCollisionGap) {
+      return false;
+    }
+    final v1 = (_width + last.width) / lastSpan;
+    final v2 = (_width + width) / nextSpan;
+    if (v2 <= v1) {
+      return true;
+    }
+    // 旧条右缘离开左边界时,新条左缘仍须留出间隙。
+    final timeToLastExit = lastRight / v1;
+    final newLeftThen = _width - v2 * timeToLastExit;
+    return newLeftThen >= kDanmakuCollisionGap;
   }
 }

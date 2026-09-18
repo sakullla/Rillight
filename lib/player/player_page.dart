@@ -17,9 +17,11 @@ import 'package:rillight/home/catalog_failure.dart';
 import 'package:rillight/library/item_format.dart';
 import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/player/danmaku/danmaku_controller.dart';
+import 'package:rillight/player/danmaku/danmaku_match_query.dart';
 import 'package:rillight/player/danmaku/danmaku_renderer.dart';
 import 'package:rillight/player/danmaku/dandanplay_models.dart';
 import 'package:rillight/player/mpv_video_backend.dart';
+import 'package:rillight/player/playback_models.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_controller.dart';
 import 'package:rillight/player/player_keys.dart';
@@ -193,7 +195,14 @@ class PlayerPageState extends State<PlayerPage> {
       return null;
     }
     final path = resolved.mediaSource.path;
-    final fileName = _baseName(path).isNotEmpty ? _baseName(path) : item.name;
+    final fileName = danmakuMatchFileName(
+      pathBaseName: _baseName(path),
+      seriesTitle: item.seriesName,
+      title: item.name,
+      seasonIndex: item.parentIndexNumber,
+      episodeIndex: item.indexNumber,
+      height: resolved.mediaSource.height,
+    );
     return DanmakuEpisodeContext(
       itemId: current.itemId,
       mediaSourceId: resolved.mediaSource.id,
@@ -201,9 +210,13 @@ class PlayerPageState extends State<PlayerPage> {
       seriesTitle: item.seriesName,
       title: item.name,
       fileName: fileName,
+      fileSize: resolved.mediaSource.size ?? 0,
       episodeIndex: item.indexNumber,
+      seasonIndex: item.parentIndexNumber,
       streamUrl: resolved.isTranscode ? null : resolved.streamUrl,
-      duration: current.duration,
+      duration: current.duration > Duration.zero
+          ? current.duration
+          : durationFromTicks(resolved.mediaSource.runTimeTicks ?? 0),
       isMovie: !item.isEpisode,
     );
   }
@@ -263,7 +276,7 @@ class PlayerPageState extends State<PlayerPage> {
       setState(() => _danmakuPanelOpen = false);
     }
     if (_danmakuSearchOpen) {
-      setState(() => _danmakuSearchOpen = false);
+      _closeDanmakuSearch();
     }
     unawaited(current.loadEpisodeList());
     current.setControlsPinned(true);
@@ -292,7 +305,7 @@ class PlayerPageState extends State<PlayerPage> {
       _closeEpisodeList();
     }
     if (_danmakuSearchOpen) {
-      setState(() => _danmakuSearchOpen = false);
+      _closeDanmakuSearch();
     }
     controller?.setControlsPinned(true);
     setState(() => _danmakuPanelOpen = true);
@@ -467,6 +480,10 @@ class PlayerPageState extends State<PlayerPage> {
                       key: PlayerKeys.surface,
                       behavior: HitTestBehavior.opaque,
                       onTapUp: (_) {
+                        if (_danmakuPanelOpen) {
+                          _closeDanmakuPanel();
+                          return;
+                        }
                         current.toggleControls();
                       },
                     ),
@@ -2277,7 +2294,7 @@ class _ControlsRow extends StatelessWidget {
             tooltip: l10n.playerEpisodes,
             onPressed: onOpenEpisodes,
             iconSize: 22,
-            icon: Icons.playlist_play_rounded,
+            icon: Icons.video_library_rounded,
           ),
         _PlaybackOverflowMenu(controller: controller),
         _PlayerIconButton(
@@ -2557,7 +2574,9 @@ class _DanmakuButton extends StatelessWidget {
       key: const Key('player-danmaku-menu'),
       tooltip: l10n.danmaku,
       onPressed: onPressed,
-      icon: danmaku.danmakuOn ? Icons.forum_rounded : Icons.forum_outlined,
+      icon: danmaku.danmakuOn
+          ? Icons.chat_bubble_rounded
+          : Icons.chat_bubble_outline_rounded,
       iconColor: danmaku.danmakuOn ? scheme.primary : null,
     );
   }
@@ -2906,6 +2925,7 @@ class _DanmakuSearchPanelState extends State<_DanmakuSearchPanel> {
   List<DanmakuAnime> _animes = const [];
   bool _loading = false;
   bool _searched = false;
+  int _searchGeneration = 0;
 
   @override
   void initState() {
@@ -2928,6 +2948,7 @@ class _DanmakuSearchPanelState extends State<_DanmakuSearchPanel> {
 
   @override
   void dispose() {
+    _searchGeneration++;
     _fieldFocus.dispose();
     _field.dispose();
     super.dispose();
@@ -2938,12 +2959,13 @@ class _DanmakuSearchPanelState extends State<_DanmakuSearchPanel> {
     if (term.isEmpty) {
       return;
     }
+    final generation = ++_searchGeneration;
     setState(() {
       _loading = true;
       _searched = true;
     });
     final results = await widget.danmaku.search(term);
-    if (!mounted) {
+    if (!mounted || generation != _searchGeneration) {
       return;
     }
     setState(() {
@@ -3024,6 +3046,7 @@ class _DanmakuSearchPanelState extends State<_DanmakuSearchPanel> {
                       controller: _field,
                       focusNode: _fieldFocus,
                       autofocus: true,
+                      enabled: true,
                       enableInteractiveSelection: true,
                       textInputAction: TextInputAction.search,
                       style: theme.textTheme.bodyMedium,
@@ -3035,9 +3058,7 @@ class _DanmakuSearchPanelState extends State<_DanmakuSearchPanel> {
                         suffixIcon: IconButton(
                           key: const Key('player-danmaku-search-submit'),
                           tooltip: l10n.danmakuSearch,
-                          onPressed: _loading
-                              ? null
-                              : () => unawaited(_runSearch()),
+                          onPressed: () => unawaited(_runSearch()),
                           icon: const Icon(Icons.arrow_forward_rounded),
                         ),
                         border: OutlineInputBorder(
@@ -3075,7 +3096,12 @@ class _DanmakuSearchPanelState extends State<_DanmakuSearchPanel> {
 
   Widget _results(AppLocalizations l10n, ThemeData theme, ColorScheme scheme) {
     if (_loading) {
-      return const Center(child: CircularProgressIndicator(strokeWidth: 3));
+      return const Center(
+        child: CircularProgressIndicator(
+          key: Key('player-danmaku-search-loading'),
+          strokeWidth: 3,
+        ),
+      );
     }
     if (!_searched) {
       return Center(

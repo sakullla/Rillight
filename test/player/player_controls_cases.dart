@@ -193,6 +193,39 @@ void main() {
     return tester.state<PlayerPageState>(find.byType(PlayerPage)).controller!;
   }
 
+  Future<void> openDanmakuSearch(WidgetTester tester) async {
+    await waitFor(tester, find.byKey(const Key('player-danmaku-menu')));
+    await tester.tap(find.byKey(const Key('player-danmaku-menu')));
+    await settle(tester);
+    await tester.tap(find.byKey(const Key('player-danmaku-search')));
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+  }
+
+  void pressPlayerIcon(WidgetTester tester, Key key) {
+    tester
+        .widget<IconButton>(
+          find.descendant(
+            of: find.byKey(key),
+            matching: find.byType(IconButton),
+          ),
+        )
+        .onPressed!();
+  }
+
+  Future<void> flushPlayerAsync(
+    WidgetTester tester, {
+    Duration extra = Duration.zero,
+  }) async {
+    if (extra > Duration.zero) {
+      await tester.pump(extra);
+    }
+    for (var i = 0; i < 8; i++) {
+      await tester.pump(Duration.zero);
+    }
+  }
+
   testWidgets('failed subtitle selection shows a dismissible player banner', (
     tester,
   ) async {
@@ -530,6 +563,166 @@ void main() {
     expect(controllerOf(tester).isPlaying, playing);
   }, tags: ['integration']);
 
+  testWidgets('danmaku search Esc restores play-pause shortcut', (
+    tester,
+  ) async {
+    await pumpLoggedIn(
+      tester,
+      settingsStore: MemoryPlayerSettingsStore(
+        const PlayerSettings(danmakuAppId: 'app', danmakuToken: 'secret'),
+      ),
+      danmakuClient: _SilentDanmakuClient(),
+    );
+    await openPlayable(tester, 'movie-up');
+    await waitFor(tester, find.byKey(PlayerKeys.playPause));
+    await openDanmakuSearch(tester);
+
+    expect(
+      find.byKey(const Key('player-danmaku-search-panel')),
+      findsOneWidget,
+    );
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pump();
+    await tester.pump();
+    expect(find.byKey(const Key('player-danmaku-search-panel')), findsNothing);
+
+    final playing = controllerOf(tester).isPlaying;
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await tester.pump();
+    expect(controllerOf(tester).isPlaying, isNot(playing));
+    await flushPlayerAsync(tester);
+  }, tags: ['integration']);
+
+  testWidgets(
+    'displacing danmaku search with settings or episodes restores play-pause',
+    (tester) async {
+      await pumpLoggedIn(
+        tester,
+        settingsStore: MemoryPlayerSettingsStore(
+          const PlayerSettings(danmakuAppId: 'app', danmakuToken: 'secret'),
+        ),
+        danmakuClient: _SilentDanmakuClient(),
+      );
+      await openPlayable(tester, 'episode-friends-s1e2');
+      await waitFor(tester, find.byKey(PlayerKeys.playPause));
+      await openDanmakuSearch(tester);
+      expect(
+        find.byKey(const Key('player-danmaku-search-panel')),
+        findsOneWidget,
+      );
+
+      pressPlayerIcon(tester, const Key('player-danmaku-menu'));
+      await tester.pump();
+      await tester.pump();
+      expect(
+        find.byKey(const Key('player-danmaku-search-panel')),
+        findsNothing,
+      );
+      expect(find.byKey(const Key('player-danmaku-panel')), findsOneWidget);
+
+      var playing = controllerOf(tester).isPlaying;
+      await tester.sendKeyEvent(LogicalKeyboardKey.space);
+      await tester.pump();
+      expect(controllerOf(tester).isPlaying, isNot(playing));
+
+      await tester.tap(find.byKey(const Key('player-danmaku-search')));
+      await tester.pump();
+      await tester.pump();
+      expect(
+        find.byKey(const Key('player-danmaku-search-panel')),
+        findsOneWidget,
+      );
+
+      pressPlayerIcon(tester, const Key('player-episodes'));
+      await tester.pump();
+      await tester.pump();
+      expect(
+        find.byKey(const Key('player-danmaku-search-panel')),
+        findsNothing,
+      );
+      expect(find.byKey(const Key('player-episodes-panel')), findsOneWidget);
+
+      playing = controllerOf(tester).isPlaying;
+      await tester.sendKeyEvent(LogicalKeyboardKey.space);
+      await tester.pump();
+      expect(controllerOf(tester).isPlaying, isNot(playing));
+      await waitFor(tester, find.byKey(const Key('player-episodes-list')));
+      await flushPlayerAsync(tester, extra: const Duration(seconds: 12));
+    },
+    tags: ['integration'],
+  );
+
+  testWidgets('tapping empty player surface closes the danmaku panel', (
+    tester,
+  ) async {
+    await pumpLoggedIn(
+      tester,
+      settingsStore: MemoryPlayerSettingsStore(
+        const PlayerSettings(danmakuAppId: 'app', danmakuToken: 'secret'),
+      ),
+      danmakuClient: _SilentDanmakuClient(),
+    );
+    await openPlayable(tester, 'movie-up');
+    await waitFor(tester, find.byKey(PlayerKeys.playPause));
+    await waitFor(tester, find.byKey(const Key('player-danmaku-menu')));
+    pressPlayerIcon(tester, const Key('player-danmaku-menu'));
+    await tester.pump();
+    await tester.pump();
+    expect(find.byKey(const Key('player-danmaku-panel')), findsOneWidget);
+
+    await tester.tap(find.byKey(PlayerKeys.surface));
+    await tester.pump();
+    expect(find.byKey(const Key('player-danmaku-panel')), findsNothing);
+  }, tags: ['integration']);
+
+  testWidgets('danmaku search field stays editable while results load', (
+    tester,
+  ) async {
+    await pumpLoggedIn(
+      tester,
+      settingsStore: MemoryPlayerSettingsStore(
+        const PlayerSettings(danmakuAppId: 'app', danmakuToken: 'secret'),
+      ),
+      danmakuClient: _HangingSearchDanmakuClient(),
+    );
+    await openPlayable(tester, 'movie-up');
+    await waitFor(tester, find.byKey(PlayerKeys.playPause));
+    await openDanmakuSearch(tester);
+
+    final field = find.byKey(const Key('player-danmaku-search-field'));
+    final panel = find.byKey(const Key('player-danmaku-search-panel'));
+    await waitFor(
+      tester,
+      find.descendant(
+        of: panel,
+        matching: find.byKey(const Key('player-danmaku-search-loading')),
+      ),
+    );
+    expect(tester.widget<TextField>(field).enabled, isTrue);
+    expect(
+      tester
+          .widget<IconButton>(
+            find.byKey(const Key('player-danmaku-search-submit')),
+          )
+          .onPressed,
+      isNotNull,
+    );
+
+    await tester.enterText(field, '新关键词');
+    await tester.pump();
+    expect(tester.widget<TextField>(field).controller!.text, '新关键词');
+    await tester.tap(find.byKey(const Key('player-danmaku-search-submit')));
+    await tester.pump();
+    expect(tester.widget<TextField>(field).enabled, isTrue);
+    expect(
+      find.descendant(
+        of: panel,
+        matching: find.byKey(const Key('player-danmaku-search-loading')),
+      ),
+      findsOneWidget,
+    );
+  }, tags: ['integration']);
+
   test(
     'close waits for Stopped before onClose and reports the last position',
     () async {
@@ -810,6 +1003,42 @@ class _FailingSubtitleBackend extends FakeVideoBackend {
   }
 }
 
+class _HangingSearchDanmakuClient extends DandanplayClient {
+  _HangingSearchDanmakuClient() : super(dio: Dio());
+
+  @override
+  Future<DanmakuMatchResponse> match(
+    DandanplaySource source, {
+    required String fileName,
+    required String fileHash,
+    required int fileSize,
+    required int videoDuration,
+    String matchMode = 'hashAndFileName',
+    CancelToken? cancelToken,
+  }) async {
+    return const DanmakuMatchResponse(isMatched: false, matches: []);
+  }
+
+  @override
+  Future<List<DanmakuAnime>> searchAnime(
+    DandanplaySource source,
+    String keyword, {
+    CancelToken? cancelToken,
+  }) {
+    return Completer<List<DanmakuAnime>>().future;
+  }
+
+  @override
+  Future<List<DanmakuAnime>> searchEpisodes(
+    DandanplaySource source, {
+    required String anime,
+    int? episode,
+    CancelToken? cancelToken,
+  }) {
+    return Completer<List<DanmakuAnime>>().future;
+  }
+}
+
 class _SilentDanmakuClient extends DandanplayClient {
   _SilentDanmakuClient() : super(dio: Dio());
 
@@ -820,6 +1049,8 @@ class _SilentDanmakuClient extends DandanplayClient {
     required String fileHash,
     required int fileSize,
     required int videoDuration,
+    String matchMode = 'hashAndFileName',
+    CancelToken? cancelToken,
   }) async {
     return const DanmakuMatchResponse(isMatched: false, matches: []);
   }
@@ -827,8 +1058,9 @@ class _SilentDanmakuClient extends DandanplayClient {
   @override
   Future<List<DanmakuAnime>> searchAnime(
     DandanplaySource source,
-    String keyword,
-  ) async {
+    String keyword, {
+    CancelToken? cancelToken,
+  }) async {
     return const [];
   }
 
@@ -837,6 +1069,7 @@ class _SilentDanmakuClient extends DandanplayClient {
     DandanplaySource source, {
     required String anime,
     int? episode,
+    CancelToken? cancelToken,
   }) async {
     return const [];
   }
