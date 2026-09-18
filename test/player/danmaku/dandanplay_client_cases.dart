@@ -24,7 +24,21 @@ class _ScriptedAdapter implements HttpClientAdapter {
     Future<void>? cancelFuture,
   ) async {
     requests.add(options);
-    final result = await _handler(options);
+    final pending = Future<Object?>(() async => _handler(options));
+    final Object? result;
+    if (cancelFuture == null) {
+      result = await pending;
+    } else {
+      result = await Future.any<Object?>([
+        pending,
+        cancelFuture.then<Object?>((_) {
+          throw DioException(
+            requestOptions: options,
+            type: DioExceptionType.cancel,
+          );
+        }),
+      ]);
+    }
     if (result is ResponseBody) {
       return result;
     }
@@ -251,9 +265,25 @@ void main() {
     expect(anime.episodes.map((e) => e.episodeId), [31, 32]);
   });
 
+  test(
+    'fetchComments stays on /api/v2/comment/{id} without url query',
+    () async {
+      late RequestOptions captured;
+      final client = clientFor((options) {
+        captured = options;
+        return {'success': true, 'comments': <Object>[]};
+      });
+      await client.fetchComments(DandanplaySource.official, 10001);
+      expect(captured.method, 'GET');
+      expect(captured.uri.path, '/api/v2/comment/10001');
+      expect(captured.uri.queryParameters.containsKey('url'), isFalse);
+    },
+  );
+
   test('fetchComments parses p/m fields and sorts by time', () async {
     final client = clientFor((options) {
       expect(options.uri.path, contains('/api/v2/comment/100'));
+      expect(options.uri.queryParameters.containsKey('url'), isFalse);
       return {
         'success': true,
         'comments': [
@@ -273,6 +303,31 @@ void main() {
     expect(comments[1].renderMode, DanmakuMode.bottom);
     expect(comments[2].renderMode, DanmakuMode.scroll);
     expect(comments[2].color, 16711680);
+  });
+
+  test('cancelled request maps to cancelled not unreachable', () async {
+    final client = clientFor((options) async {
+      await Completer<void>().future;
+      return {'success': true};
+    });
+    final token = CancelToken();
+    final future = client.searchAnime(
+      DandanplaySource.official,
+      'foo',
+      cancelToken: token,
+    );
+    await Future<void>.delayed(Duration.zero);
+    token.cancel();
+    await expectLater(
+      future,
+      throwsA(
+        isA<DanmakuApiException>().having(
+          (e) => e.kind,
+          'kind',
+          DanmakuApiFailureKind.cancelled,
+        ),
+      ),
+    );
   });
 
   test('transport failure maps to unreachable', () async {
