@@ -83,7 +83,9 @@ class MainWindowCloseGuard extends StatefulWidget {
     required this.host,
     required this.child,
     this.destroyWindow,
-    this.closeTimeout = const Duration(seconds: 8),
+    this.closeTimeout = const Duration(seconds: 2),
+    this.forceCloseTimeout = const Duration(seconds: 1),
+    this.idleCloseTimeout = const Duration(milliseconds: 400),
   });
 
   final PlayerWindowHost host;
@@ -92,8 +94,14 @@ class MainWindowCloseGuard extends StatefulWidget {
   /// 关闭播放窗口后销毁主窗口的动作;缺省走 window_manager。
   final Future<void> Function()? destroyWindow;
 
-  /// 等待播放窗口关闭的总上限,超时也继续销毁主窗口。
+  /// 有播放窗口时等待其关闭的上限,超时后 forceClose,再销毁主窗口。
   final Duration closeTimeout;
+
+  /// 优雅关闭超时后,强制结束播放进程的上限。
+  final Duration forceCloseTimeout;
+
+  /// 没有播放窗口时仍调用 close() 以取消在途 spawn,但很快放弃等待。
+  final Duration idleCloseTimeout;
 
   @override
   State<MainWindowCloseGuard> createState() => _MainWindowCloseGuardState();
@@ -125,12 +133,15 @@ class _MainWindowCloseGuardState extends State<MainWindowCloseGuard>
       return;
     }
     _closing = true;
+    final wait = widget.host.current == null
+        ? widget.idleCloseTimeout
+        : widget.closeTimeout;
     try {
-      await widget.host.close().timeout(widget.closeTimeout);
+      await widget.host.close().timeout(wait);
     } catch (_) {
       // Do not abandon a player that is still starting or closing.
       try {
-        await widget.host.forceClose();
+        await widget.host.forceClose().timeout(widget.forceCloseTimeout);
       } catch (_) {}
     }
     try {

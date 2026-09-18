@@ -775,7 +775,69 @@ void main() {
       ]);
       expect(host.current, isNull);
     });
+
+    testWidgets('MainWindowCloseGuard destroys immediately when idle', (
+      tester,
+    ) async {
+      final host = OverlayPlayerWindowHost();
+      addTearDown(host.dispose);
+      var destroyed = false;
+      await tester.pumpWidget(
+        MainWindowCloseGuard(
+          host: host,
+          closeTimeout: const Duration(seconds: 8),
+          destroyWindow: () async => destroyed = true,
+          child: const SizedBox(),
+        ),
+      );
+      final listener =
+          tester.state(find.byType(MainWindowCloseGuard)) as WindowListener;
+      listener.onWindowClose();
+      await tester.pump();
+      expect(destroyed, isTrue);
+    });
+
+    testWidgets(
+      'MainWindowCloseGuard destroys after close and forceClose time out',
+      (tester) async {
+        final hang = Completer<void>();
+        addTearDown(() {
+          if (!hang.isCompleted) hang.complete();
+        });
+        final host = _HangingPlayerWindowHost(hang);
+        addTearDown(host.dispose);
+        await host.open(const PlayerOpenRequest(itemId: 'movie-up'));
+        var destroyed = false;
+        await tester.pumpWidget(
+          MainWindowCloseGuard(
+            host: host,
+            closeTimeout: const Duration(milliseconds: 20),
+            forceCloseTimeout: const Duration(milliseconds: 20),
+            destroyWindow: () async => destroyed = true,
+            child: const SizedBox(),
+          ),
+        );
+        final listener =
+            tester.state(find.byType(MainWindowCloseGuard)) as WindowListener;
+        listener.onWindowClose();
+        await pumpUntil(tester, () => destroyed);
+        expect(destroyed, isTrue);
+        expect(hang.isCompleted, isFalse);
+      },
+    );
   });
+}
+
+class _HangingPlayerWindowHost extends OverlayPlayerWindowHost {
+  _HangingPlayerWindowHost(this.hang);
+
+  final Completer<void> hang;
+
+  @override
+  Future<void> close() => hang.future;
+
+  @override
+  Future<void> forceClose() => hang.future;
 }
 
 /// 把 [read] 挂起,让测试在 watcher 已进入 reconcile 后再调用 close/logout。

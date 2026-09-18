@@ -127,10 +127,22 @@ void main() {
     server.failingImageIds.add('img-movie');
     await tester.runAsync(() async {
       await tester.pumpWidget(buildSubject(auth, withTag));
-      await Future<void>.delayed(const Duration(milliseconds: 50));
     });
-    await tester.pump();
-
+    // A failed fetch can retry twice (200ms then 400ms) before the
+    // FutureBuilder leaves the skeleton. Wait for the placeholder, not a
+    // single 50ms slice that CI often loses.
+    var found = false;
+    for (var i = 0; i < 20; i++) {
+      await tester.pump();
+      if (find.byType(PosterPlaceholder).evaluate().isNotEmpty) {
+        found = true;
+        break;
+      }
+      await tester.runAsync(() async {
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      });
+    }
+    expect(found, isTrue);
     expect(find.byType(PosterPlaceholder), findsOneWidget);
   });
 

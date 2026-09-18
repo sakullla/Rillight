@@ -36,6 +36,11 @@ post_install do |installer|
       if Gem::Version.new(minimum) < Gem::Version.new('12.0')
         config.build_settings['MACOSX_DEPLOYMENT_TARGET'] = '12.0'
       end
+      next unless target.name == 'rillight_player'
+      flags = config.build_settings['OTHER_LDFLAGS']
+      flags = flags.nil? ? ['$(inherited)'] : Array(flags)
+      flags << '-framework FlutterMacOS' unless flags.any? { |flag| flag.to_s.include?('FlutterMacOS') }
+      config.build_settings['OTHER_LDFLAGS'] = flags
     end
   end
 end

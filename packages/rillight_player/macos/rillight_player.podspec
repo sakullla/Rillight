@@ -15,5 +15,14 @@ Pod::Spec.new do |s|
   s.platform = :osx, '11.0'
   s.vendored_libraries = 'Libraries/*.dylib'
   s.frameworks = 'OpenGL', 'CoreVideo', 'IOSurface'
-  s.pod_target_xcconfig = { 'DEFINES_MODULE' => 'YES', 'CLANG_CXX_LANGUAGE_STANDARD' => 'c++17', 'HEADER_SEARCH_PATHS' => '$(inherited) "${PODS_TARGET_SRCROOT}/Headers"', 'GCC_WARN_ABOUT_DEPRECATED_FUNCTIONS' => 'NO' }
+  # Vendored universal dylibs make CocoaPods compile this pod for x86_64 as
+  # well as arm64. The method-channel symbols live in FlutterMacOS; without
+  # an explicit link the x86_64 slice fails with FlutterMethodNotImplemented.
+  s.pod_target_xcconfig = {
+    'DEFINES_MODULE' => 'YES',
+    'CLANG_CXX_LANGUAGE_STANDARD' => 'c++17',
+    'HEADER_SEARCH_PATHS' => '$(inherited) "${PODS_TARGET_SRCROOT}/Headers"',
+    'GCC_WARN_ABOUT_DEPRECATED_FUNCTIONS' => 'NO',
+    'OTHER_LDFLAGS' => '$(inherited) -framework FlutterMacOS',
+  }
 end

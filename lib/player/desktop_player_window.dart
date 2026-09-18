@@ -21,8 +21,6 @@ import 'package:rillight/player/player_host_command.dart';
 import 'package:rillight/player/player_page.dart';
 import 'package:rillight/player/player_process_control.dart';
 import 'package:rillight/player/player_process_protocol.dart';
-import 'package:rillight/player/player_runtime_options.dart';
-import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/player_window_host.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -163,7 +161,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
     PlayerProcessControl? processControl,
     PlaybackSnapshotStoreLocator? snapshotStoreForPid,
     PlayerHostOpenItemConsumer? consumeOpenItem,
-    this.closeTimeout = const Duration(seconds: 4),
+    this.closeTimeout = const Duration(seconds: 1),
     this.reportTimeout = const Duration(seconds: 3),
     this.watchInterval = const Duration(milliseconds: 400),
   }) : _control = processControl ?? createPlayerProcessControl(),
@@ -569,20 +567,8 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
   Future<void> _disposeAndExit() async {
     _commands?.cancel();
     await _playerKey.currentState?.controller?.disposeAsync();
-    await _reclaimDiskCache();
+    // Next playback already reclaims the cache. Do not block process exit.
     exit(0);
-  }
-
-  /// 关窗时按设置的上限回收 mpv 磁盘缓冲目录,避免长期占用增长。
-  Future<void> _reclaimDiskCache() async {
-    try {
-      final store = await openPlayerSettingsStore();
-      final settings = await store.read();
-      await PlayerDiskCache.reclaim(
-        PlayerDiskCache.defaultDirectory(),
-        PlayerRuntimeOptions.effectiveDiskCacheLimitBytes(settings),
-      );
-    } catch (_) {}
   }
 
   @override
