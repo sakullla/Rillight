@@ -17,10 +17,10 @@ class DanmakuView extends StatefulWidget {
   final DanmakuController controller;
 
   @override
-  State<DanmakuView> createState() => _DanmakuViewState();
+  DanmakuViewState createState() => DanmakuViewState();
 }
 
-class _DanmakuViewState extends State<DanmakuView>
+class DanmakuViewState extends State<DanmakuView>
     with SingleTickerProviderStateMixin {
   final ValueNotifier<List<DanmakuFrame>> _frames = ValueNotifier(const []);
 
@@ -28,8 +28,21 @@ class _DanmakuViewState extends State<DanmakuView>
   final Map<String, TextPainter> _strokePainters = {};
   final Map<String, TextPainter> _fillPainters = {};
   List<DanmakuComment>? _cachedComments;
+  DanmakuDisplaySettings? _cachedDisplay;
 
   Ticker? _ticker;
+
+  /// 当前 ticker 是否在转;暂停后再播必须重新 start。
+  @visibleForTesting
+  bool get debugTickerActive => _ticker?.isActive ?? false;
+
+  /// 最近一次绘制帧,供测试观察暂停冻结与恢复后位移。
+  @visibleForTesting
+  List<DanmakuFrame> get debugFrames => _frames.value;
+
+  /// 描边 painter 缓存条数;参数变化后不得残留旧键。
+  @visibleForTesting
+  int get debugStrokePainterCount => _strokePainters.length;
 
   @override
   void initState() {
@@ -45,6 +58,7 @@ class _DanmakuViewState extends State<DanmakuView>
       oldWidget.controller.removeListener(_onControllerChanged);
       widget.controller.addListener(_onControllerChanged);
       _cachedComments = null;
+      _cachedDisplay = null;
       _strokePainters.clear();
       _fillPainters.clear();
       _frames.value = const [];
@@ -70,23 +84,31 @@ class _DanmakuViewState extends State<DanmakuView>
     _paintFrame();
   }
 
-  /// 换集或重建会话后清掉旧文本缓存,防止无限增长。
+  /// 换集或显示参数变化后清掉旧文本缓存,防止无限增长。
   void _invalidateStaleCache() {
-    if (!identical(_cachedComments, widget.controller.comments)) {
-      _cachedComments = widget.controller.comments;
-      _strokePainters.clear();
-      _fillPainters.clear();
+    final comments = widget.controller.comments;
+    final display = widget.controller.display;
+    if (identical(_cachedComments, comments) &&
+        identical(_cachedDisplay, display)) {
+      return;
     }
+    _cachedComments = comments;
+    _cachedDisplay = display;
+    _strokePainters.clear();
+    _fillPainters.clear();
   }
 
   /// 仅在「有弹幕且播放中」运转 ticker;暂停/无弹幕时停止。
+  /// 已创建但被 stop 的 ticker 在恢复播放时必须再次 start。
   void _syncTicker() {
     final controller = widget.controller;
     final shouldTick = controller.hasComments && controller.playing;
-    if (shouldTick && _ticker == null) {
-      _ticker = createTicker((_) => _paintFrame());
-      _ticker!.start();
-    } else if (!shouldTick) {
+    if (shouldTick) {
+      _ticker ??= createTicker((_) => _paintFrame());
+      if (!_ticker!.isActive) {
+        _ticker!.start();
+      }
+    } else {
       _ticker?.stop();
     }
   }
@@ -121,7 +143,7 @@ class _DanmakuPainter extends CustomPainter {
     required this.frames,
     required this.strokePainters,
     required this.fillPainters,
-  });
+  }) : super(repaint: frames);
 
   final ValueListenable<List<DanmakuFrame>> frames;
   final Map<String, TextPainter> strokePainters;
