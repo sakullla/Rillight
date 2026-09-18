@@ -95,7 +95,9 @@ class PlayerSettings {
     this.danmakuSeriesMemories = const {},
   });
 
-  /// 音量(0–100);null 表示「未配置」,读取回落默认 100。
+  /// 音量百分比;100 为原片 0 dB,超过 100 为额外增益。
+  /// null 表示「未配置」,读取回落默认 100。
+  static const int volumeMax = 150;
   final int? volume;
 
   /// 磁盘缓冲容量上限(MiB)。
@@ -129,7 +131,7 @@ class PlayerSettings {
   /// 弹幕按剧匹配记忆，key 为 seriesId。
   final Map<String, DanmakuSeriesMemory> danmakuSeriesMemories;
 
-  int get clampedVolume => (volume ?? 100).clamp(0, 100);
+  int get clampedVolume => (volume ?? 100).clamp(0, volumeMax);
 
   double get effectivePlaybackRate {
     final value = playbackRate;
@@ -178,7 +180,7 @@ class PlayerSettings {
         ? raw.round()
         : int.tryParse(raw?.toString() ?? '');
     return PlayerSettings(
-      volume: value?.clamp(0, 100),
+      volume: value?.clamp(0, volumeMax),
       diskCacheLimitMiB: _readInt(json['diskCacheLimitMiB']),
       hardwareDecoding: _readEnum(
         HardwareDecodingMode.values,

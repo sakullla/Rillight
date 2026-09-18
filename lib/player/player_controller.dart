@@ -508,7 +508,7 @@ class PlayerController extends ChangeNotifier {
   Future<void> setVolume(int value) async {
     final operation = _operations.current;
     if (!_accepts(operation)) return;
-    volume = value.clamp(0, 100);
+    volume = value.clamp(0, PlayerSettings.volumeMax);
     if (volume > 0) {
       _unmutedVolume = volume;
     }
@@ -2273,12 +2273,12 @@ class PlayerController extends ChangeNotifier {
   }
 }
 
-/// UI 音量百分比(0–100)到 mpv volume(同样是 0–100)。
+/// UI 音量百分比到 mpv volume。
 ///
-/// 滑条旁显示的就是这个百分比,必须一对一交给 backend。此前用立方曲线
-/// 把 17% 压成约 0.5,听感接近静音。持久化仍存用户百分比。
+/// 100 为原片 0 dB;超过 100 为额外增益,上限 [PlayerSettings.volumeMax]。
+/// 滑条旁显示的就是这个百分比,必须一对一交给 backend。
 double mpvVolumeForPercent(int percent) {
-  return percent.clamp(0, 100).toDouble();
+  return percent.clamp(0, PlayerSettings.volumeMax).toDouble();
 }
 
 /// 时间轴缓存带比例:mpv `demuxer-cache-time` / 片长。

@@ -54,6 +54,11 @@ class PlayerRuntimeOptions {
       'demuxer-cache-dir': cacheDir,
       // 音质:维持共享模式;scaletempo 用 mpv 默认,不加劣化链路。
       'audio-exclusive': 'no',
+      // 100 为原片 0 dB;volume-max 允许滑条超过 100 做增益(与 IINA 默认一致)。
+      'volume-max': '${PlayerSettings.volumeMax}',
+      // 有 ReplayGain 标签的片子按音轨对齐;无标签则保持原片电平。
+      'replaygain': 'track',
+      'replaygain-clip': 'no',
     };
     if (liveOrHlsStream) {
       properties['demuxer-max-bytes'] =

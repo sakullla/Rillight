@@ -627,7 +627,9 @@ void main() {
     expect(mpvVolumeForPercent(50), 50.0);
     expect(mpvVolumeForPercent(90), 90.0);
     expect(mpvVolumeForPercent(100), 100.0);
-    expect(mpvVolumeForPercent(120), 100.0);
+    expect(mpvVolumeForPercent(120), 120.0);
+    expect(mpvVolumeForPercent(150), 150.0);
+    expect(mpvVolumeForPercent(200), PlayerSettings.volumeMax.toDouble());
     expect(mpvVolumeForPercent(-5), 0.0);
   });
 

@@ -29,6 +29,13 @@ void main() {
       expect(properties['demuxer-cache-dir'], cacheDir);
     });
 
+    test('allows volume above 100 percent without clipping replaygain', () {
+      final properties = build();
+      expect(properties['volume-max'], '${PlayerSettings.volumeMax}');
+      expect(properties['replaygain'], 'track');
+      expect(properties['replaygain-clip'], 'no');
+    });
+
     test('converts the configured disk limit to demuxer byte budgets', () {
       final properties = build(
         settings: const PlayerSettings(diskCacheLimitMiB: 1024),

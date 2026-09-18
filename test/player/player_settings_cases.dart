@@ -86,7 +86,11 @@ void main() {
   });
 
   test('fromJson clamps out of range values', () {
-    expect(PlayerSettings.fromJson({'volume': 140}).volume, 100);
+    expect(PlayerSettings.fromJson({'volume': 140}).volume, 140);
+    expect(
+      PlayerSettings.fromJson({'volume': 200}).volume,
+      PlayerSettings.volumeMax,
+    );
     expect(PlayerSettings.fromJson({'volume': -3}).volume, 0);
   });
 

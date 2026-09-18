@@ -23,6 +23,7 @@ import 'package:rillight/player/mpv_video_backend.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_controller.dart';
 import 'package:rillight/player/player_keys.dart';
+import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/player_window.dart';
 import 'package:rillight/player/player_window_host.dart';
 import 'package:rillight/player/video_backend.dart';
@@ -3121,7 +3122,8 @@ class _DanmakuSearchPanelState extends State<_DanmakuSearchPanel> {
 
 /// 音量组:静音按钮 + 音量滑条 + 百分比回显。
 ///
-/// 滑条、显示与持久化均使用 [PlayerController.volume] 的用户百分比,
+/// 滑条、显示与持久化均使用 [PlayerController.volume] 的用户百分比
+/// (0–[PlayerSettings.volumeMax],100 为原片 0 dB),
 /// mpv 换算统一在 [PlayerController.setVolume] 内经 [mpvVolumeForPercent] 完成。
 class _VolumeControl extends StatelessWidget {
   const _VolumeControl({required this.controller});
@@ -3150,9 +3152,11 @@ class _VolumeControl extends StatelessWidget {
             data: _overlaySliderTheme(theme, thumbRadius: 5),
             child: Slider(
               key: PlayerKeys.volume,
-              value: controller.volume.clamp(0, 100).toDouble(),
+              value: controller.volume
+                  .clamp(0, PlayerSettings.volumeMax)
+                  .toDouble(),
               min: 0,
-              max: 100,
+              max: PlayerSettings.volumeMax.toDouble(),
               label: l10n.volumePercent(controller.volume),
               onChanged: (value) {
                 controller.setVolume(value.round());
@@ -3161,7 +3165,7 @@ class _VolumeControl extends StatelessWidget {
           ),
         ),
         SizedBox(
-          width: 40,
+          width: 44,
           child: Text(
             key: PlayerKeys.volumePercent,
             l10n.volumePercent(controller.volume),
