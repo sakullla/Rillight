@@ -520,7 +520,11 @@ void main() {
       await closing;
       expect(closed, isTrue);
 
-      // 假服务器在挂起前已记录事件:恰一次 Stopped;超时按失败处理,快照保留。
+      // 1ms 上限可在 HTTP 到达假服务器前到期;close 仍必须返回。
+      // 在途 Stopped 随后被记录并挂起,超时按失败处理,快照保留。
+      for (var i = 0; i < 50 && stoppedEvents().isEmpty; i++) {
+        await Future<void>.delayed(Duration.zero);
+      }
       expect(stoppedEvents(), hasLength(1));
       expect(snapshots.snapshot, isNotNull);
       expect(controller.progressSyncFailed, isTrue);
