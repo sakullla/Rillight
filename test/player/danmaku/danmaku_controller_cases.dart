@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/player/danmaku/danmaku_controller.dart';
+import 'package:rillight/player/danmaku/danmaku_match_query.dart';
 import 'package:rillight/player/danmaku/danmaku_hash.dart';
 import 'package:rillight/player/danmaku/danmaku_layout.dart';
 import 'package:rillight/player/danmaku/dandanplay_client.dart';
@@ -67,6 +68,7 @@ class FakeDandanplayClient extends DandanplayClient {
     required String fileHash,
     required int fileSize,
     required int videoDuration,
+    String matchMode = 'hashAndFileName',
     CancelToken? cancelToken,
   }) async {
     matchCalls.add((
@@ -76,6 +78,7 @@ class FakeDandanplayClient extends DandanplayClient {
         'fileHash': fileHash,
         'fileSize': fileSize,
         'videoDuration': videoDuration,
+        'matchMode': matchMode,
       },
     ));
     await _awaitIfGated(null, cancelToken);
@@ -176,6 +179,7 @@ DanmakuEpisodeContext context({
     seriesTitle: 'Show',
     title: 'Show 1',
     fileName: '[G] Show - 01.mkv',
+    fileSize: 2048,
     episodeIndex: index,
     streamUrl: directStream ? Uri.parse('https://emby/stream') : null,
     duration: const Duration(minutes: 24),
@@ -280,6 +284,9 @@ void main() {
     await controller.startSession(context());
     expect(client.matchCalls.single.$2['fileHash'], '');
     expect(client.matchCalls.single.$2['fileName'], '[G] Show - 01.mkv');
+    expect(client.matchCalls.single.$2['fileSize'], 2048);
+    expect(client.matchCalls.single.$2['videoDuration'], 24 * 60);
+    expect(client.matchCalls.single.$2['matchMode'], 'fileNameOnly');
   });
 
   test(
@@ -853,5 +860,38 @@ void main() {
     final memoryAfter = (await store.read()).danmakuSeriesMemories['series-1'];
     expect(memoryAfter!.episodeId, 200);
     expect(controller.comments.single.cid, 2);
+  });
+
+  test('match fileName keeps release-style path basename', () {
+    expect(
+      danmakuMatchFileName(
+        pathBaseName: '无忧渡.S02E08.2160p.WEB-DL.mkv',
+        seriesTitle: '无忧渡',
+        episodeIndex: 8,
+        seasonIndex: 2,
+      ),
+      '无忧渡.S02E08.2160p.WEB-DL.mkv',
+    );
+  });
+
+  test('match fileName synthesizes SxxExx when path is missing', () {
+    expect(
+      danmakuMatchFileName(
+        seriesTitle: '生万物',
+        title: '绣绣大婚当日遭抢亲',
+        seasonIndex: 2,
+        episodeIndex: 8,
+      ),
+      '生万物 S02E08',
+    );
+    expect(
+      danmakuMatchFileName(
+        seriesTitle: '生万物',
+        seasonIndex: 2,
+        episodeIndex: 8,
+        height: 2160,
+      ),
+      '生万物.S02E08.2160p',
+    );
   });
 }

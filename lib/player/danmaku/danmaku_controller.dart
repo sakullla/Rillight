@@ -41,7 +41,9 @@ class DanmakuEpisodeContext {
     this.seriesTitle,
     this.title,
     this.fileName,
+    this.fileSize = 0,
     this.episodeIndex,
+    this.seasonIndex,
     this.streamUrl,
     this.duration = Duration.zero,
     this.isMovie = false,
@@ -54,7 +56,9 @@ class DanmakuEpisodeContext {
   final String? seriesTitle;
   final String? title;
   final String? fileName;
+  final int fileSize;
   final int? episodeIndex;
+  final int? seasonIndex;
 
   /// 直连播放流地址(用于 16MB 哈希);转码流为 null(哈希无意义)。
   final Uri? streamUrl;
@@ -505,8 +509,9 @@ class DanmakuController extends ChangeNotifier {
           source,
           fileName: context.fileName ?? context.title ?? '',
           fileHash: hash,
-          fileSize: 0,
-          videoDuration: context.duration.inMinutes,
+          fileSize: context.fileSize,
+          videoDuration: context.duration.inSeconds,
+          matchMode: hash.isEmpty ? 'fileNameOnly' : 'hashAndFileName',
           cancelToken: cancelToken,
         );
         if (match.isMatched && match.matches.isNotEmpty) {

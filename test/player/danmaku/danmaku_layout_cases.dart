@@ -177,4 +177,53 @@ void main() {
     final layout = layoutWith(comments: const []);
     expect(layout.update(const Duration(seconds: 5), size), isEmpty);
   });
+
+  test('small position rewind does not reshuffle lanes or x', () {
+    final layout = layoutWith(
+      comments: [
+        comment(1, 1, text: 'aaaa'),
+        comment(2, 1.02, text: 'bbbb'),
+        comment(3, 1.04, text: 'cccc'),
+      ],
+    );
+    layout.update(const Duration(milliseconds: 1000), size);
+    final stable = layout.update(const Duration(milliseconds: 3000), size);
+    expect(stable, isNotEmpty);
+    final jittered = layout.update(const Duration(milliseconds: 2800), size);
+    expect(jittered.map((f) => f.id), stable.map((f) => f.id));
+    for (var i = 0; i < stable.length; i++) {
+      expect(jittered[i].id, stable[i].id);
+      expect(jittered[i].top, stable[i].top);
+      expect(jittered[i].left, closeTo(stable[i].left, 0.01));
+    }
+  });
+
+  test('simultaneous comments take different lanes instead of overlapping', () {
+    final layout = layoutWith(
+      comments: [
+        comment(1, 1, text: 'same-time-a'),
+        comment(2, 1, text: 'same-time-b'),
+      ],
+    );
+    final frames = layout.update(const Duration(milliseconds: 1000), size);
+    expect(frames, hasLength(2));
+    expect(frames[0].top, isNot(frames[1].top));
+    expect((frames[0].left - frames[1].left).abs(), lessThan(1));
+  });
+
+  test('busy lane rejects a new comment until the previous fully entered', () {
+    final layout = layoutWith(
+      comments: [
+        comment(1, 1, text: 'xxxxxxxxxx'),
+        comment(2, 1.05, text: 'yyyyyyyyyy'),
+      ],
+    );
+    final frames = layout.update(const Duration(milliseconds: 1050), size);
+    expect(frames.map((f) => f.id), contains(1));
+    final first = frames.singleWhere((f) => f.id == 1);
+    final second = frames.where((f) => f.id == 2);
+    if (second.isNotEmpty) {
+      expect(second.single.top, isNot(first.top));
+    }
+  });
 }

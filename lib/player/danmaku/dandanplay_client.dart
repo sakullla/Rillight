@@ -139,14 +139,15 @@ class DandanplayClient {
 
   /// 匹配:POST /api/v2/match。
   ///
-  /// [fileHash] 为前 16MB 的 MD5(不可得时传空串,服务端按文件名降级);
-  /// [videoDuration] 为视频时长(分钟)。
+  /// [fileHash] 为前 16MB 的 MD5(不可得时传空串,并用 [matchMode] fileNameOnly);
+  /// [videoDuration] 为视频时长(秒)。
   Future<DanmakuMatchResponse> match(
     DandanplaySource source, {
     required String fileName,
     required String fileHash,
     required int fileSize,
     required int videoDuration,
+    String matchMode = 'hashAndFileName',
     CancelToken? cancelToken,
   }) async {
     final body = <String, dynamic>{
@@ -154,7 +155,7 @@ class DandanplayClient {
       'fileHash': fileHash,
       'fileSize': fileSize,
       'videoDuration': videoDuration,
-      'matchMode': 'hashAndFileName',
+      'matchMode': matchMode,
     };
     final data = await _requestJson(
       source,

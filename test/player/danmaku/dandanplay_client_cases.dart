@@ -101,17 +101,18 @@ void main() {
       DandanplaySource.official,
       fileName: '[Group] Foo - 01 [1080p].mkv',
       fileHash: '0123abcd',
-      fileSize: 0,
-      videoDuration: 24,
+      fileSize: 123456,
+      videoDuration: 2739,
+      matchMode: 'fileNameOnly',
     );
     expect(captured.uri.toString(), 'https://api.dandanplay.net/api/v2/match');
     expect(captured.method, 'POST');
     final body = captured.data as Map<String, dynamic>;
     expect(body['fileName'], '[Group] Foo - 01 [1080p].mkv');
     expect(body['fileHash'], '0123abcd');
-    expect(body['fileSize'], 0);
-    expect(body['videoDuration'], 24);
-    expect(body['matchMode'], 'hashAndFileName');
+    expect(body['fileSize'], 123456);
+    expect(body['videoDuration'], 2739);
+    expect(body['matchMode'], 'fileNameOnly');
     expect(response.isMatched, isTrue);
     expect(response.matches.single.animeId, 1);
     expect(response.matches.single.episodeId, 100);
@@ -280,23 +281,26 @@ void main() {
     },
   );
 
-  test('fetchComments accepts count/comments envelope without success', () async {
-    final client = clientFor((options) {
-      expect(options.uri.path, '/api/v2/comment/10002');
-      return {
-        'count': 1,
-        'comments': [
-          {'cid': 1, 'p': '1.00,1,16777215,[qiyi]', 'm': '二刷'},
-        ],
-      };
-    });
-    final comments = await client.fetchComments(
-      DandanplaySource.official,
-      10002,
-    );
-    expect(comments, hasLength(1));
-    expect(comments.single.text, '二刷');
-  });
+  test(
+    'fetchComments accepts count/comments envelope without success',
+    () async {
+      final client = clientFor((options) {
+        expect(options.uri.path, '/api/v2/comment/10002');
+        return {
+          'count': 1,
+          'comments': [
+            {'cid': 1, 'p': '1.00,1,16777215,[qiyi]', 'm': 'hello'},
+          ],
+        };
+      });
+      final comments = await client.fetchComments(
+        DandanplaySource.official,
+        10002,
+      );
+      expect(comments, hasLength(1));
+      expect(comments.single.text, 'hello');
+    },
+  );
 
   test('fetchComments parses p/m fields and sorts by time', () async {
     final client = clientFor((options) {

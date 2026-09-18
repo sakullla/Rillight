@@ -17,9 +17,11 @@ import 'package:rillight/home/catalog_failure.dart';
 import 'package:rillight/library/item_format.dart';
 import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/player/danmaku/danmaku_controller.dart';
+import 'package:rillight/player/danmaku/danmaku_match_query.dart';
 import 'package:rillight/player/danmaku/danmaku_renderer.dart';
 import 'package:rillight/player/danmaku/dandanplay_models.dart';
 import 'package:rillight/player/mpv_video_backend.dart';
+import 'package:rillight/player/playback_models.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_controller.dart';
 import 'package:rillight/player/player_keys.dart';
@@ -193,7 +195,14 @@ class PlayerPageState extends State<PlayerPage> {
       return null;
     }
     final path = resolved.mediaSource.path;
-    final fileName = _baseName(path).isNotEmpty ? _baseName(path) : item.name;
+    final fileName = danmakuMatchFileName(
+      pathBaseName: _baseName(path),
+      seriesTitle: item.seriesName,
+      title: item.name,
+      seasonIndex: item.parentIndexNumber,
+      episodeIndex: item.indexNumber,
+      height: resolved.mediaSource.height,
+    );
     return DanmakuEpisodeContext(
       itemId: current.itemId,
       mediaSourceId: resolved.mediaSource.id,
@@ -201,9 +210,13 @@ class PlayerPageState extends State<PlayerPage> {
       seriesTitle: item.seriesName,
       title: item.name,
       fileName: fileName,
+      fileSize: resolved.mediaSource.size ?? 0,
       episodeIndex: item.indexNumber,
+      seasonIndex: item.parentIndexNumber,
       streamUrl: resolved.isTranscode ? null : resolved.streamUrl,
-      duration: current.duration,
+      duration: current.duration > Duration.zero
+          ? current.duration
+          : durationFromTicks(resolved.mediaSource.runTimeTicks ?? 0),
       isMovie: !item.isEpisode,
     );
   }
@@ -467,6 +480,10 @@ class PlayerPageState extends State<PlayerPage> {
                       key: PlayerKeys.surface,
                       behavior: HitTestBehavior.opaque,
                       onTapUp: (_) {
+                        if (_danmakuPanelOpen) {
+                          _closeDanmakuPanel();
+                          return;
+                        }
                         current.toggleControls();
                       },
                     ),
@@ -2277,7 +2294,7 @@ class _ControlsRow extends StatelessWidget {
             tooltip: l10n.playerEpisodes,
             onPressed: onOpenEpisodes,
             iconSize: 22,
-            icon: Icons.playlist_play_rounded,
+            icon: Icons.video_library_rounded,
           ),
         _PlaybackOverflowMenu(controller: controller),
         _PlayerIconButton(
@@ -2557,7 +2574,9 @@ class _DanmakuButton extends StatelessWidget {
       key: const Key('player-danmaku-menu'),
       tooltip: l10n.danmaku,
       onPressed: onPressed,
-      icon: danmaku.danmakuOn ? Icons.forum_rounded : Icons.forum_outlined,
+      icon: danmaku.danmakuOn
+          ? Icons.chat_bubble_rounded
+          : Icons.chat_bubble_outline_rounded,
       iconColor: danmaku.danmakuOn ? scheme.primary : null,
     );
   }

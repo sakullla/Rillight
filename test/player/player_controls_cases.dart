@@ -652,6 +652,29 @@ void main() {
     tags: ['integration'],
   );
 
+  testWidgets('tapping empty player surface closes the danmaku panel', (
+    tester,
+  ) async {
+    await pumpLoggedIn(
+      tester,
+      settingsStore: MemoryPlayerSettingsStore(
+        const PlayerSettings(danmakuAppId: 'app', danmakuToken: 'secret'),
+      ),
+      danmakuClient: _SilentDanmakuClient(),
+    );
+    await openPlayable(tester, 'movie-up');
+    await waitFor(tester, find.byKey(PlayerKeys.playPause));
+    await waitFor(tester, find.byKey(const Key('player-danmaku-menu')));
+    _pressPlayerIcon(tester, const Key('player-danmaku-menu'));
+    await tester.pump();
+    await tester.pump();
+    expect(find.byKey(const Key('player-danmaku-panel')), findsOneWidget);
+
+    await tester.tap(find.byKey(PlayerKeys.surface));
+    await tester.pump();
+    expect(find.byKey(const Key('player-danmaku-panel')), findsNothing);
+  }, tags: ['integration']);
+
   testWidgets('danmaku search field stays editable while results load', (
     tester,
   ) async {
