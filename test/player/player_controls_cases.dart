@@ -1013,6 +1013,7 @@ class _HangingSearchDanmakuClient extends DandanplayClient {
     required String fileHash,
     required int fileSize,
     required int videoDuration,
+    String matchMode = 'hashAndFileName',
     CancelToken? cancelToken,
   }) async {
     return const DanmakuMatchResponse(isMatched: false, matches: []);
@@ -1048,6 +1049,7 @@ class _SilentDanmakuClient extends DandanplayClient {
     required String fileHash,
     required int fileSize,
     required int videoDuration,
+    String matchMode = 'hashAndFileName',
     CancelToken? cancelToken,
   }) async {
     return const DanmakuMatchResponse(isMatched: false, matches: []);
