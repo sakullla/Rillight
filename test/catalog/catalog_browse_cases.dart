@@ -179,6 +179,19 @@ void main() {
         ),
         findsWidgets,
       );
+      expect(
+        find.descendant(
+          of: find.byKey(ItemDetailPage.posterKey),
+          matching: find.text(
+            'A thief who steals corporate secrets through dream-sharing.',
+          ),
+        ),
+        findsNothing,
+      );
+      expect(
+        tester.widget<Text>(find.byKey(EpisodeOverviewSection.textKey)).data,
+        'A thief who steals corporate secrets through dream-sharing.',
+      );
       expect(find.text('已看 40%'), findsOneWidget);
       expect(find.text('章节'), findsOneWidget);
       expect(find.byKey(CatalogKeys.chapter(0)), findsOneWidget);
@@ -190,7 +203,7 @@ void main() {
       await tester.tap(find.byKey(CatalogKeys.item('series-friends')));
       await settle(tester);
       expect(find.text('老友记 (1994)'), findsOneWidget);
-      expect(find.byKey(CatalogKeys.overview), findsOneWidget);
+      expect(find.byKey(EpisodeOverviewSection.textKey), findsOneWidget);
       expect(find.text('简介'), findsNothing);
       expect(find.text('Six friends living in New York.'), findsOneWidget);
       expect(

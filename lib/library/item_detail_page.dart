@@ -12,7 +12,6 @@ import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/app_error_view.dart';
 import 'package:rillight/app/widgets/backdrop_scrim.dart';
 import 'package:rillight/app/widgets/media_source_menu_tile.dart';
-import 'package:rillight/app/widgets/poster_overview_band.dart';
 import 'package:rillight/app/widgets/scrim_icon_button.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/app/window_chrome.dart';
@@ -1056,15 +1055,14 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                 onAudio: (index) => setState(() => _audioStreamIndex = index),
                 onSubtitle: (index) =>
                     setState(() => _subtitleStreamIndex = index),
-                overview: item.isEpisode ? null : _displayOverview(item),
-                // 单集简介放在 hero 信息栏内(可展开收起),与流媒体客户端
-                // 的"标题—元信息—简介—操作"层级一致,不再另起分区。
-                overviewWidget: item.isEpisode && _displayOverview(item) != null
-                    ? EpisodeOverviewSection(
+                overview: null,
+                // 电影/剧集/单集简介都放在标题旁信息栏,海报只作识别、不叠字。
+                overviewWidget: _displayOverview(item) == null
+                    ? null
+                    : EpisodeOverviewSection(
                         overview: _displayOverview(item),
                         compact: true,
-                      )
-                    : null,
+                      ),
                 onLocateEpisode: item.isEpisode
                     ? _locateCurrentEpisode
                     : playTarget == null || !item.isSeries
@@ -1957,7 +1955,7 @@ List<EmbyItem> _sortedByIndex(List<EmbyItem> items) {
 }
 
 /// 详情页头部:全幅 backdrop + [BackdropScrim] 作底,前景为
-/// 海报区(含底部简介叠字) | 信息区(剧名链接、标题、元信息胶囊、操作)两栏。
+/// 干净海报 | 信息区(剧名链接、标题、元信息胶囊、简介、操作)两栏。
 ///
 /// 高度至少为 [heightFor] + 顶栏叠加;内容更高时按内容自增。
 /// 剧集不拉半屏空英雄位:分集才是主体,头部随海报+信息贴合。
@@ -2082,11 +2080,7 @@ class _DetailHeader extends StatelessWidget {
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
-                      _DetailPoster(
-                        item: item,
-                        layoutWidth: width,
-                        overview: item.isSeries ? null : overview,
-                      ),
+                      _DetailPoster(item: item, layoutWidth: width),
                       const SizedBox(width: AppSpacing.xl),
                       Expanded(
                         child: _DetailInfo(
@@ -2095,7 +2089,7 @@ class _DetailHeader extends StatelessWidget {
                           compact: width < AppBreakpoints.compact,
                           seasonCount: seasonCount,
                           seriesId: seriesId,
-                          overview: item.isSeries ? overview : null,
+                          overview: overview,
                           overviewWidget: overviewWidget,
                           playEpisode: item.isSeries ? nextEpisode : null,
                           onLocateEpisode: onLocateEpisode,
@@ -2129,18 +2123,12 @@ class _DetailHeader extends StatelessWidget {
   }
 }
 
-/// 头部左栏:电影为 2:3 海报(底带叠简介),剧集海报只作识别、简介在信息栏;
-/// 单集为 16:9 缩略图,简介由 hero 下的概览分区承载(可展开收起),海报不再叠简介带。
+/// 头部左栏:电影/剧集为干净 2:3 海报,单集为 16:9 剧照;简介一律在信息栏。
 class _DetailPoster extends StatelessWidget {
-  const _DetailPoster({
-    required this.item,
-    required this.layoutWidth,
-    this.overview,
-  });
+  const _DetailPoster({required this.item, required this.layoutWidth});
 
   final EmbyItem item;
   final double layoutWidth;
-  final String? overview;
 
   static double posterWidthFor(double width) {
     if (width < AppBreakpoints.compact) {
@@ -2175,11 +2163,12 @@ class _DetailPoster extends StatelessWidget {
       key: ItemDetailPage.posterKey,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(AppRadii.lg),
+        border: Border.all(color: scheme.onSurface.withValues(alpha: 0.12)),
         boxShadow: [
           BoxShadow(
-            color: scheme.shadow.withValues(alpha: 0.5),
-            blurRadius: 24,
-            offset: const Offset(0, 12),
+            color: scheme.shadow.withValues(alpha: 0.45),
+            blurRadius: 28,
+            offset: const Offset(0, 14),
           ),
         ],
       ),
@@ -2188,24 +2177,13 @@ class _DetailPoster extends StatelessWidget {
         child: SizedBox(
           width: width,
           height: height,
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              MediaImage(
-                key: ValueKey('detail-poster-${item.id}'),
-                item: item,
-                width: width,
-                height: height,
-                preferThumb: episode,
-                maxWidth: episode ? 720 : 480,
-              ),
-              if (overview != null && overview!.isNotEmpty)
-                PosterOverviewBand(
-                  text: overview!,
-                  maxLines: episode ? 2 : 4,
-                  textKey: CatalogKeys.overview,
-                ),
-            ],
+          child: MediaImage(
+            key: ValueKey('detail-poster-${item.id}'),
+            item: item,
+            width: width,
+            height: height,
+            preferThumb: episode,
+            maxWidth: episode ? 720 : 480,
           ),
         ),
       ),
@@ -2293,7 +2271,7 @@ class _DetailInfo extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: theme.colorScheme.onSurface.withValues(alpha: 0.88),
-                height: 1.45,
+                height: 1.5,
               ),
             ),
           ),

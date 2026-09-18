@@ -98,7 +98,7 @@ class _EpisodeOverviewSectionState extends State<EpisodeOverviewSection> {
     }
     final style = theme.textTheme.bodyMedium?.copyWith(
       color: theme.colorScheme.onSurface.withValues(alpha: 0.88),
-      height: 1.45,
+      height: 1.5,
     );
     final body = LayoutBuilder(
       builder: (context, constraints) {
