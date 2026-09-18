@@ -9,8 +9,11 @@ root = Path(__file__).resolve().parent.parent
 for path in [root / 'pubspec.yaml', root / 'pubspec.lock',
              *root.glob('lib/**/*.dart'), *root.glob('windows/flutter/generated*'),
              *root.glob('linux/flutter/generated*'), *root.glob('macos/Flutter/Generated*')]:
-    if path.is_file() and re.search(r'media_kit|desktop_multi_window', path.read_text(encoding='utf-8')):
+    text = path.read_text(encoding='utf-8')
+    if re.search(r'media_kit|desktop_multi_window', text):
         raise RuntimeError(f'Retired playback dependency remains in {path.relative_to(root)}')
+    if path.name == 'generated_plugins.cmake' and re.search(r'^\s*jni\s*$', text, re.M):
+        raise RuntimeError(f'Desktop plugin list must not include the Android jni FFI plugin: {path.relative_to(root)}')
 manifest = json.loads((root / 'packages/rillight_player/native/dependencies.json').read_text())
 for name in ['mpv', 'angle']:
     if not re.fullmatch('[a-f0-9]{64}', manifest['windows'][name]['sha256']):

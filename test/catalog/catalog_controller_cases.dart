@@ -133,6 +133,43 @@ void main() {
     },
   );
 
+  test('hideFromResume stays gone after a resume refresh', () async {
+    final server = FakeEmbyServer();
+    final adapter = FakeEmbyAdapter([server]);
+    final auth = AuthController(
+      client: EmbyClient(device: _device, dio: dioForFakeEmby(adapter)),
+      credentials: MemoryCredentialStore(),
+      servers: MemoryServerListStore(),
+    );
+    await auth.connect(
+      address: server.baseUrl.toString(),
+      username: 'alice',
+      password: 'correct-horse',
+    );
+    final catalog = CatalogController(
+      auth: auth,
+      cache: CatalogCache()..debugSetDiskStore(_FakeCatalogDisk()),
+    );
+    addTearDown(catalog.dispose);
+    await catalog.reload();
+    expect(catalog.resume.items.map((item) => item.id), ['movie-inception']);
+
+    await catalog.hideFromResume(catalog.resume.items.single);
+    expect(catalog.resume.items, isEmpty);
+    expect(catalog.resume.hidden, isTrue);
+
+    await catalog.reloadHomeRows();
+    expect(catalog.resume.items, isEmpty);
+    expect(catalog.resume.hidden, isTrue);
+    expect(
+      server.requests.any(
+        (request) =>
+            request.contains('HideFromResume') && request.contains('Hide=true'),
+      ),
+      isTrue,
+    );
+  });
+
   test('manual refresh pulls fresh data even with a TTL-fresh cache', () async {
     final server = FakeEmbyServer();
     final adapter = FakeEmbyAdapter([server]);

@@ -411,9 +411,14 @@ class EmbyClient {
   }
 
   /// 从继续观看移除:优先 HideFromResume,旧版 Emby 则清零播放进度。
+  ///
+  /// Emby/Jellyfin 的 Hide 查询参数缺省为 false,不传则请求成功但条目仍留在 Resume。
   Future<void> hideFromResume(String itemId) async {
     try {
-      await postJson('/Users/${_requireUserId()}/Items/$itemId/HideFromResume');
+      await postJson(
+        '/Users/${_requireUserId()}/Items/$itemId/HideFromResume',
+        queryParameters: const {'Hide': 'true'},
+      );
     } on EmbyException {
       await postJson(
         '/Users/${_requireUserId()}/Items/$itemId/UserData',
@@ -421,6 +426,7 @@ class EmbyClient {
           'PlaybackPositionTicks': 0,
           'PlayedPercentage': 0,
           'Played': false,
+          'HideFromResume': true,
         },
       );
     }

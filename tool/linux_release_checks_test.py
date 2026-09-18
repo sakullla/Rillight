@@ -104,6 +104,24 @@ class LinuxReleaseTests(unittest.TestCase):
         self.assertEqual(checks.parse_ldd(' libmpv.so.2 => /opt/rillight/lib/libmpv.so.2 (0x123)\n'),
                          {'libmpv.so.2': '/opt/rillight/lib/libmpv.so.2'})
 
+    def test_unresolved_runtime_dependency_names_the_file(self):
+        with patch.object(checks, 'run', return_value='libjvm.so => not found\n'):
+            with self.assertRaises(ValueError) as raised:
+                checks.verify_bundle(self.bundle)
+        message = str(raised.exception)
+        self.assertIn('Unresolved ELF dependency', message)
+        self.assertRegex(message, r'^\S+: Unresolved')
+
+    def test_jvm_helper_is_not_a_desktop_runtime_dependency(self):
+        write_elf(self.bundle / 'lib/libdartjni.so', ['libjvm.so', 'libc.so.6'], 'libdartjni.so')
+        with self.assertRaisesRegex(ValueError, r'libdartjni\.so: desktop bundle must not link a JVM'):
+            checks.verify_bundle(self.bundle, runtime=False)
+
+    def test_desktop_plugin_list_does_not_register_android_jni(self):
+        for name in ('linux/flutter/generated_plugins.cmake', 'windows/flutter/generated_plugins.cmake'):
+            text = (checks.ROOT / name).read_text(encoding='utf-8')
+            self.assertNotRegex(text, r'^\s*jni\s*$', msg=name)
+
     def test_desktop_cannot_bypass_wrapper(self):
         desktop = self.bundle / 'rillight.desktop'
         desktop.write_text('[Desktop Entry]\nExec=/opt/rillight/rillight\nTerminal=false\n')

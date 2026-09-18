@@ -1,4 +1,5 @@
 """Portable regression for thin/fat otool output used by native packaging."""
+from io import BytesIO
 from pathlib import Path
 import plistlib
 import sys
@@ -8,7 +9,44 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'packages/rillight_player/native'))
 from bundle_macos import otool_dependencies
+from prepare_macos import USER_AGENT, download
 from sign_bundle import release_entitlements, sign, verify_signed_entitlements
+
+
+class NativeDownloadTest(unittest.TestCase):
+    def test_download_sends_an_explicit_user_agent(self):
+        captured = {}
+
+        class Response:
+            def __init__(self):
+                self._data = BytesIO(b'dylib')
+
+            def read(self, size=-1):
+                return self._data.read(size)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+        def urlopen(request, **kwargs):
+            captured['headers'] = dict(request.header_items())
+            captured['url'] = request.full_url
+            return Response()
+
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / 'libogg.0.dylib'
+            with patch('prepare_macos.urllib.request.urlopen', side_effect=urlopen):
+                download('https://iina.io/dylibs/universal/libogg.0.dylib', target)
+            self.assertEqual(target.read_bytes(), b'dylib')
+        self.assertEqual(captured['url'], 'https://iina.io/dylibs/universal/libogg.0.dylib')
+        headers = {key.lower(): value for key, value in captured['headers'].items()}
+        self.assertEqual(headers['user-agent'], USER_AGENT)
+
+    def test_python_urllib_without_user_agent_is_the_known_403_path(self):
+        self.assertNotIn('Python-urllib', USER_AGENT)
+        self.assertTrue(USER_AGENT.startswith('Rillight/'))
 
 
 class OtoolDependenciesTest(unittest.TestCase):

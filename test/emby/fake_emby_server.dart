@@ -211,6 +211,7 @@ class FakeEmbyItem {
     this.played = false,
     this.playbackPositionTicks = 0,
     this.playedPercentage,
+    this.hideFromResume = false,
     this.nextUp = false,
     DateTime? dateCreated,
     DateTime? premiereDate,
@@ -260,6 +261,7 @@ class FakeEmbyItem {
   bool played;
   int playbackPositionTicks;
   double? playedPercentage;
+  bool hideFromResume;
   bool nextUp;
   DateTime dateCreated;
   DateTime dateLastContentAdded;
@@ -1024,6 +1026,7 @@ class FakeEmbyServer {
               (item) =>
                   (item.type == 'Movie' || item.type == 'Episode') &&
                   !item.played &&
+                  !item.hideFromResume &&
                   item.playbackPositionTicks > 0,
             )
             .toList(),
@@ -1047,8 +1050,9 @@ class FakeEmbyServer {
       if (item == null) {
         return _json(404, {'error': 'not found'});
       }
-      item.playbackPositionTicks = 0;
-      item.playedPercentage = 0;
+      // Real Emby binds a missing Hide query as false and leaves Resume unchanged.
+      item.hideFromResume =
+          options.uri.queryParameters['Hide']?.toLowerCase() == 'true';
       return _json(200, {'ok': true});
     }
     if (rest.length == 3 &&

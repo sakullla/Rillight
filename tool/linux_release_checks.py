@@ -129,8 +129,13 @@ def verify_bundle(bundle, *, runtime=True, desktop=None):
         for name in meta['needed']:
             if name.startswith(MEDIA) and bundle / 'lib' / name not in files:
                 raise ValueError(f'{path.name}: unbundled media dependency {name}')
+            if name == 'libjvm.so' or name.startswith('libjawt.so'):
+                raise ValueError(f'{path.name}: desktop bundle must not link a JVM')
         if runtime and meta['needed']:
-            resolved = parse_ldd(run(['ldd', path]))
+            try:
+                resolved = parse_ldd(run(['ldd', path]))
+            except ValueError as error:
+                raise ValueError(f'{path.name}: {error}') from error
             for name in meta['needed']:
                 local = bundle / 'lib' / name
                 if local.is_file() and Path(resolved.get(name, '/missing')).resolve() != local.resolve():

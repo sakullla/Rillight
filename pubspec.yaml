@@ -23,6 +23,12 @@ dependencies:
   window_manager: ^0.5.2
   wakelock_plus: ^1.5.2
 
+# 2.3+ depends on package:jni, an FFI plugin for Linux/Windows that links
+# libjvm.so whenever a JDK is present (GitHub-hosted runners). This app is
+# desktop-only and must not ship a JVM helper in the Linux bundle.
+dependency_overrides:
+  path_provider_android: 2.2.23
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

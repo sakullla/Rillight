@@ -8,10 +8,17 @@ import urllib.request
 
 ROOT = Path(__file__).resolve().parent.parent
 MANIFEST = json.loads((ROOT / 'native/dependencies.json').read_text())
+USER_AGENT = 'Rillight/1.0 (+https://github.com/sakullla/Rillight)'
 
 
 def verified(path, entry):
     return path.is_file() and hashlib.sha256(path.read_bytes()).hexdigest() == entry['sha256']
+
+
+def download(url, destination):
+    request = urllib.request.Request(url, headers={'User-Agent': USER_AGENT, 'Accept': '*/*'})
+    with urllib.request.urlopen(request) as response, Path(destination).open('wb') as output:
+        shutil.copyfileobj(response, output)
 
 
 def prepare():
@@ -26,7 +33,7 @@ def prepare():
         cached = cache / entry['name']
         if not cached.exists():
             temporary = cached.with_suffix('.download')
-            urllib.request.urlretrieve(entry['url'], temporary)
+            download(entry['url'], temporary)
             if not verified(temporary, entry):
                 raise RuntimeError('macOS native download SHA256 mismatch: ' + entry['name'])
             temporary.replace(cached)
