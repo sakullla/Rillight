@@ -11,10 +11,11 @@ Rillight is a Flutter desktop Emby client for Windows, macOS, and Linux, with a 
 
 ## Build, Test, and Development Commands
 
-Use a Flutter SDK compatible with Dart `^3.11.5`, with desktop support enabled.
+Use Flutter 3.47.4 with desktop support enabled (Dart constraint `^3.11.5`).
 
 - `flutter pub get` — install dependencies.
-- `flutter run -d windows` — launch locally; use `macos` or `linux` on the corresponding host.
+- `flutter run -d macos` — launch the native macOS desktop window locally (macOS 12+).
+- `flutter run -d windows` — launch locally; use `linux` on the corresponding host.
 - `flutter build windows` — create a release build; substitute the host desktop target as appropriate.
 - `flutter analyze` — run static analysis and configured lints.
 - `dart format lib test` — format Dart source and tests.
