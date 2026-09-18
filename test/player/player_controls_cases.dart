@@ -193,7 +193,7 @@ void main() {
     return tester.state<PlayerPageState>(find.byType(PlayerPage)).controller!;
   }
 
-  Future<void> _openDanmakuSearch(WidgetTester tester) async {
+  Future<void> openDanmakuSearch(WidgetTester tester) async {
     await waitFor(tester, find.byKey(const Key('player-danmaku-menu')));
     await tester.tap(find.byKey(const Key('player-danmaku-menu')));
     await settle(tester);
@@ -203,7 +203,7 @@ void main() {
     await tester.pump();
   }
 
-  void _pressPlayerIcon(WidgetTester tester, Key key) {
+  void pressPlayerIcon(WidgetTester tester, Key key) {
     tester
         .widget<IconButton>(
           find.descendant(
@@ -214,7 +214,7 @@ void main() {
         .onPressed!();
   }
 
-  Future<void> _flushPlayerAsync(
+  Future<void> flushPlayerAsync(
     WidgetTester tester, {
     Duration extra = Duration.zero,
   }) async {
@@ -575,7 +575,7 @@ void main() {
     );
     await openPlayable(tester, 'movie-up');
     await waitFor(tester, find.byKey(PlayerKeys.playPause));
-    await _openDanmakuSearch(tester);
+    await openDanmakuSearch(tester);
 
     expect(
       find.byKey(const Key('player-danmaku-search-panel')),
@@ -590,7 +590,7 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.space);
     await tester.pump();
     expect(controllerOf(tester).isPlaying, isNot(playing));
-    await _flushPlayerAsync(tester);
+    await flushPlayerAsync(tester);
   }, tags: ['integration']);
 
   testWidgets(
@@ -605,13 +605,13 @@ void main() {
       );
       await openPlayable(tester, 'episode-friends-s1e2');
       await waitFor(tester, find.byKey(PlayerKeys.playPause));
-      await _openDanmakuSearch(tester);
+      await openDanmakuSearch(tester);
       expect(
         find.byKey(const Key('player-danmaku-search-panel')),
         findsOneWidget,
       );
 
-      _pressPlayerIcon(tester, const Key('player-danmaku-menu'));
+      pressPlayerIcon(tester, const Key('player-danmaku-menu'));
       await tester.pump();
       await tester.pump();
       expect(
@@ -633,7 +633,7 @@ void main() {
         findsOneWidget,
       );
 
-      _pressPlayerIcon(tester, const Key('player-episodes'));
+      pressPlayerIcon(tester, const Key('player-episodes'));
       await tester.pump();
       await tester.pump();
       expect(
@@ -647,7 +647,7 @@ void main() {
       await tester.pump();
       expect(controllerOf(tester).isPlaying, isNot(playing));
       await waitFor(tester, find.byKey(const Key('player-episodes-list')));
-      await _flushPlayerAsync(tester, extra: const Duration(seconds: 12));
+      await flushPlayerAsync(tester, extra: const Duration(seconds: 12));
     },
     tags: ['integration'],
   );
@@ -665,7 +665,7 @@ void main() {
     await openPlayable(tester, 'movie-up');
     await waitFor(tester, find.byKey(PlayerKeys.playPause));
     await waitFor(tester, find.byKey(const Key('player-danmaku-menu')));
-    _pressPlayerIcon(tester, const Key('player-danmaku-menu'));
+    pressPlayerIcon(tester, const Key('player-danmaku-menu'));
     await tester.pump();
     await tester.pump();
     expect(find.byKey(const Key('player-danmaku-panel')), findsOneWidget);
@@ -687,7 +687,7 @@ void main() {
     );
     await openPlayable(tester, 'movie-up');
     await waitFor(tester, find.byKey(PlayerKeys.playPause));
-    await _openDanmakuSearch(tester);
+    await openDanmakuSearch(tester);
 
     final field = find.byKey(const Key('player-danmaku-search-field'));
     final panel = find.byKey(const Key('player-danmaku-search-panel'));
