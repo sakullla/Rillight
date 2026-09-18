@@ -1,4 +1,5 @@
 import 'package:flutter/widgets.dart';
+import 'package:rillight/player/danmaku/dandanplay_client.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/player_window.dart';
@@ -16,6 +17,7 @@ class PlayerBindings {
     this.seekStep = const Duration(seconds: 10),
     this.settingsStore,
     this.snapshotStore,
+    this.danmakuClient,
   });
 
   final VideoBackend Function()? createBackend;
@@ -27,6 +29,10 @@ class PlayerBindings {
   /// `FilePlaybackSessionSnapshotStore`,测试注入
   /// `MemoryPlaybackSessionSnapshotStore`。
   final PlaybackSessionSnapshotStore? snapshotStore;
+
+  /// 弹幕 API 客户端;为 null 时 [DanmakuController] 使用默认
+  /// [DandanplayClient],测试注入不拨号的 fake。
+  final DandanplayClient? danmakuClient;
   final Duration progressInterval;
   final Duration controlsHideAfter;
   final Duration nextEpisodeCountdown;

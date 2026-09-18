@@ -479,9 +479,15 @@ class DanmakuController extends ChangeNotifier {
   }
 
   void _handleLoadFailure(DanmakuApiException failure) {
-    if (usesCustomSource) {
-      // 自定义服务不可用:明确提示,可回退官方源。
+    if (usesCustomSource &&
+        (failure.kind == DanmakuApiFailureKind.unreachable ||
+            failure.kind == DanmakuApiFailureKind.incompatible)) {
+      // 连不上或根本不是 dandanplay 兼容包,才提示整站不可用。
       status = DanmakuStatus.customUnreachable;
+      statusDetail = failure.toString();
+    } else if (usesCustomSource) {
+      // HTTP 500/429 等:搜索仍可用,不要把横幅钉死在「服务不可用」。
+      status = DanmakuStatus.noMatch;
       statusDetail = failure.toString();
     } else {
       status = DanmakuStatus.unreachable;

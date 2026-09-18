@@ -2,7 +2,9 @@ import '../helpers/image_cache_fixture.dart';
 import '../helpers/settle.dart';
 import 'dart:async';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
 import 'package:rillight/home/home_hero.dart';
@@ -14,6 +16,8 @@ import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/library/item_detail_page.dart';
 import 'package:rillight/player/playback_models.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
+import 'package:rillight/player/danmaku/dandanplay_client.dart';
+import 'package:rillight/player/danmaku/dandanplay_models.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/player_controller.dart';
@@ -57,6 +61,7 @@ void main() {
     Duration hideAfter = const Duration(days: 1),
     Duration progressInterval = const Duration(seconds: 10),
     PlayerSettingsStore? settingsStore,
+    DandanplayClient? danmakuClient,
   }) {
     return PlayerBindings(
       createBackend: () => backend,
@@ -66,6 +71,7 @@ void main() {
       nextEpisodeCountdown: const Duration(seconds: 3),
       settingsStore: settingsStore,
       snapshotStore: snapshots,
+      danmakuClient: danmakuClient,
     );
   }
 
@@ -74,6 +80,7 @@ void main() {
     Duration hideAfter = const Duration(days: 1),
     Duration progressInterval = const Duration(seconds: 10),
     PlayerSettingsStore? settingsStore,
+    DandanplayClient? danmakuClient,
   }) async {
     final auth = AuthController(
       client: EmbyClient(device: _device, dio: dioForFakeEmby(adapter)),
@@ -94,6 +101,7 @@ void main() {
         hideAfter: hideAfter,
         progressInterval: progressInterval,
         settingsStore: settingsStore ?? MemoryPlayerSettingsStore(),
+        danmakuClient: danmakuClient,
       ),
     );
     return auth;
@@ -473,6 +481,55 @@ void main() {
     tags: ['integration'],
   );
 
+  testWidgets('danmaku search field can be focused, selected, and edited', (
+    tester,
+  ) async {
+    await pumpLoggedIn(
+      tester,
+      settingsStore: MemoryPlayerSettingsStore(
+        const PlayerSettings(danmakuAppId: 'app', danmakuToken: 'secret'),
+      ),
+      danmakuClient: _SilentDanmakuClient(),
+    );
+    await openPlayable(tester, 'movie-up');
+    await waitFor(tester, find.byKey(PlayerKeys.playPause));
+    await waitFor(tester, find.byKey(const Key('player-danmaku-menu')));
+    await tester.tap(find.byKey(const Key('player-danmaku-menu')));
+    await settle(tester);
+    await tester.tap(find.byKey(const Key('player-danmaku-search')));
+    await tester.pump();
+    await tester.pump();
+
+    final field = find.byKey(const Key('player-danmaku-search-field'));
+    expect(field, findsOneWidget);
+    final textField = tester.widget<TextField>(field);
+    expect(textField.controller!.text, isNotEmpty);
+    expect(textField.controller!.selection.baseOffset, 0);
+    expect(
+      textField.controller!.selection.extentOffset,
+      textField.controller!.text.length,
+    );
+    expect(
+      tester
+          .state<EditableTextState>(
+            find.descendant(of: field, matching: find.byType(EditableText)),
+          )
+          .widget
+          .focusNode
+          .hasFocus,
+      isTrue,
+    );
+
+    final playing = controllerOf(tester).isPlaying;
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await tester.pump();
+    expect(controllerOf(tester).isPlaying, playing);
+    await tester.enterText(field, '自定义 关键词');
+    await tester.pump();
+    expect(textField.controller!.text, '自定义 关键词');
+    expect(controllerOf(tester).isPlaying, playing);
+  }, tags: ['integration']);
+
   test(
     'close waits for Stopped before onClose and reports the last position',
     () async {
@@ -750,5 +807,37 @@ class _FailingSubtitleBackend extends FakeVideoBackend {
   Future<void> setSubtitleOff() async {
     if (failSubtitleOff) throw StateError('subtitle switch failed');
     await super.setSubtitleOff();
+  }
+}
+
+class _SilentDanmakuClient extends DandanplayClient {
+  _SilentDanmakuClient() : super(dio: Dio());
+
+  @override
+  Future<DanmakuMatchResponse> match(
+    DandanplaySource source, {
+    required String fileName,
+    required String fileHash,
+    required int fileSize,
+    required int videoDuration,
+  }) async {
+    return const DanmakuMatchResponse(isMatched: false, matches: []);
+  }
+
+  @override
+  Future<List<DanmakuAnime>> searchAnime(
+    DandanplaySource source,
+    String keyword,
+  ) async {
+    return const [];
+  }
+
+  @override
+  Future<List<DanmakuAnime>> searchEpisodes(
+    DandanplaySource source, {
+    required String anime,
+    int? episode,
+  }) async {
+    return const [];
   }
 }

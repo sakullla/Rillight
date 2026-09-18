@@ -103,6 +103,7 @@ class PlayerPageState extends State<PlayerPage> {
   bool _episodesOpen = false;
   bool _danmakuPanelOpen = false;
   bool _danmakuSearchOpen = false;
+  final FocusNode _playerShortcuts = FocusNode(debugLabel: 'player-shortcuts');
 
   bool _pointerNearWindowEdge(Offset local) {
     final size = MediaQuery.sizeOf(context);
@@ -142,7 +143,10 @@ class PlayerPageState extends State<PlayerPage> {
     );
     controller = created;
     created.addListener(_onController);
-    final danmaku = DanmakuController(settingsStore: bindings.settingsStore);
+    final danmaku = DanmakuController(
+      settingsStore: bindings.settingsStore,
+      client: bindings.danmakuClient,
+    );
     _danmaku = danmaku;
     danmaku.addListener(_onDanmakuChanged);
     unawaited(created.start());
@@ -155,6 +159,7 @@ class PlayerPageState extends State<PlayerPage> {
     final current = controller;
     current?.removeListener(_onController);
     current?.dispose();
+    _playerShortcuts.dispose();
     super.dispose();
   }
 
@@ -325,6 +330,12 @@ class PlayerPageState extends State<PlayerPage> {
       controller?.setControlsPinned(false);
     }
     setState(() => _danmakuSearchOpen = false);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _danmakuSearchOpen) {
+        return;
+      }
+      _playerShortcuts.requestFocus();
+    });
   }
 
   @override
@@ -335,10 +346,18 @@ class PlayerPageState extends State<PlayerPage> {
       return const ColoredBox(color: Colors.black);
     }
     return Focus(
+      focusNode: _playerShortcuts,
       autofocus: true,
-      descendantsAreFocusable: false,
+      descendantsAreFocusable: _danmakuSearchOpen,
       onKeyEvent: (node, event) {
         if (event is! KeyDownEvent) {
+          return KeyEventResult.ignored;
+        }
+        if (_danmakuSearchOpen) {
+          if (event.logicalKey == LogicalKeyboardKey.escape) {
+            _closeDanmakuSearch();
+            return KeyEventResult.handled;
+          }
           return KeyEventResult.ignored;
         }
         if (event.logicalKey == LogicalKeyboardKey.space) {
@@ -2883,6 +2902,7 @@ class _DanmakuSearchPanel extends StatefulWidget {
 
 class _DanmakuSearchPanelState extends State<_DanmakuSearchPanel> {
   late final TextEditingController _field;
+  final FocusNode _fieldFocus = FocusNode();
   List<DanmakuAnime> _animes = const [];
   bool _loading = false;
   bool _searched = false;
@@ -2891,15 +2911,24 @@ class _DanmakuSearchPanelState extends State<_DanmakuSearchPanel> {
   void initState() {
     super.initState();
     _field = TextEditingController(text: widget.initialKeyword);
-    if (widget.initialKeyword.trim().isNotEmpty) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
+    _field.selection = TextSelection(
+      baseOffset: 0,
+      extentOffset: _field.text.length,
+    );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      _fieldFocus.requestFocus();
+      if (widget.initialKeyword.trim().isNotEmpty) {
         unawaited(_runSearch());
-      });
-    }
+      }
+    });
   }
 
   @override
   void dispose() {
+    _fieldFocus.dispose();
     _field.dispose();
     super.dispose();
   }
@@ -2993,7 +3022,9 @@ class _DanmakuSearchPanelState extends State<_DanmakuSearchPanel> {
                     TextField(
                       key: const Key('player-danmaku-search-field'),
                       controller: _field,
-                      autofocus: widget.initialKeyword.trim().isEmpty,
+                      focusNode: _fieldFocus,
+                      autofocus: true,
+                      enableInteractiveSelection: true,
                       textInputAction: TextInputAction.search,
                       style: theme.textTheme.bodyMedium,
                       decoration: InputDecoration(

@@ -120,6 +120,12 @@ const unreachable = DanmakuApiException(
   detail: 'network down',
 );
 
+const commentHttpFailure = DanmakuApiException(
+  DanmakuApiFailureKind.http,
+  statusCode: 500,
+  detail: 'HTTP 500',
+);
+
 DanmakuComment comment(int cid, double time) =>
     DanmakuComment(cid: cid, time: time, mode: 1, color: 16777215, text: 'hi');
 
@@ -420,6 +426,34 @@ void main() {
       expect(match.$1.appId, 'test-app');
       expect(match.$1.appSecret, 'secret');
       expect(client.commentCalls, hasLength(1));
+    },
+  );
+
+  test(
+    'custom source comment HTTP error does not pin the unavailable banner',
+    () async {
+      store = MemoryPlayerSettingsStore(
+        const PlayerSettings(
+          danmakuServer: 'https://dan.example.com',
+          danmakuToken: 'secret',
+        ),
+      );
+      client.matchResponse = const DanmakuMatchResponse(
+        isMatched: true,
+        matches: [
+          DanmakuMatchCandidate(
+            animeId: 7,
+            animeTitle: 'Show',
+            episodeId: 100,
+            episodeTitle: '第01话',
+          ),
+        ],
+      );
+      client.commentError = commentHttpFailure;
+      final controller = makeController();
+      await controller.startSession(context());
+      expect(controller.status, DanmakuStatus.noMatch);
+      expect(controller.hasComments, isFalse);
     },
   );
 
