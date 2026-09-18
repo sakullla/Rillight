@@ -24,6 +24,8 @@ jobs:
         run: flutter pub get
       - name: Verify signing and Mach-O audit regressions
         run: python3 macos/verify_bundle_test.py
+      - name: Verify drag-install DMG layout regressions
+        run: python3 macos/package_dmg_test.py
       - name: Compile the Release sandbox proxy test target
         run: flutter build macos --release --target integration_test/macos_proxy_smoke.dart
       - name: Exercise production loopback proxy and missing-server negative control
@@ -52,10 +54,7 @@ jobs:
           python3 macos/sign_bundle.py "$app"
           python3 macos/verify_bundle.py --signed "$app"
           codesign --display --entitlements :- "$app" > macos-release-entitlements.plist
-          staging="$RUNNER_TEMP/rillight-dmg"
-          mkdir -p "$staging"
-          ditto "$app" "$staging/rillight.app"
-          hdiutil create -volname "Rillight" -srcfolder "$staging" -ov -format UDZO \
+          python3 macos/package_dmg.py "$app" \
             "Rillight-macos-${BUILD_VERSION}-$(uname -m)-adhoc.dmg"
       - uses: actions/upload-artifact@v6
         with:
