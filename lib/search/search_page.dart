@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/routes.dart';
@@ -14,6 +15,7 @@ import 'package:rillight/home/catalog_failure.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/library/shelf_grid_page.dart';
+import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/search/search_action.dart';
 
 class SearchPage extends StatefulWidget {
@@ -293,33 +295,36 @@ class _SearchPageState extends State<SearchPage> {
     }
     return LayoutBuilder(
       builder: (context, constraints) {
-        return GridView.builder(
-          controller: _scrollController,
-          padding: const EdgeInsets.fromLTRB(
-            AppSpacing.page,
-            AppSpacing.xs,
-            AppSpacing.page,
-            AppSpacing.xxl,
+        return MediaImageScrollListener(
+          child: GridView.builder(
+            controller: _scrollController,
+            scrollCacheExtent: const ScrollCacheExtent.viewport(0.5),
+            padding: const EdgeInsets.fromLTRB(
+              AppSpacing.page,
+              AppSpacing.xs,
+              AppSpacing.page,
+              AppSpacing.xxl,
+            ),
+            gridDelegate: ShelfGridPage.gridDelegateFor(
+              screenWidth: screenWidth,
+              availableWidth: constraints.maxWidth - AppSpacing.page * 2,
+            ),
+            itemCount: _items.length + (_loadingMore ? 1 : 0),
+            itemBuilder: (context, index) {
+              if (index >= _items.length) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              final item = _items[index];
+              return ShelfGridPage.gridCard(
+                context,
+                item,
+                onTap: () {
+                  closeSearch(context);
+                  context.push(AppRoutes.item(item.id));
+                },
+              );
+            },
           ),
-          gridDelegate: ShelfGridPage.gridDelegateFor(
-            screenWidth: screenWidth,
-            availableWidth: constraints.maxWidth - AppSpacing.page * 2,
-          ),
-          itemCount: _items.length + (_loadingMore ? 1 : 0),
-          itemBuilder: (context, index) {
-            if (index >= _items.length) {
-              return const Center(child: CircularProgressIndicator());
-            }
-            final item = _items[index];
-            return ShelfGridPage.gridCard(
-              context,
-              item,
-              onTap: () {
-                closeSearch(context);
-                context.push(AppRoutes.item(item.id));
-              },
-            );
-          },
         );
       },
     );

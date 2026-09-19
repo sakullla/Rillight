@@ -89,18 +89,21 @@ void main() {
     final position = gridPosition(tester);
     expect(find.byType(PosterCard), findsWidgets);
 
+    final livePosters = find.byType(PosterCard).evaluate().toSet();
+    final liveImages = find.byType(MediaImage).evaluate().toSet();
     var posterBuilds = 0;
     var imageBuilds = 0;
     debugOnRebuildDirtyWidget = (element, builtOnce) {
       final widget = element.widget;
-      if (widget is PosterCard) {
+      if (widget is PosterCard && livePosters.contains(element)) {
         posterBuilds++;
-      } else if (widget is MediaImage) {
+      } else if (widget is MediaImage && liveImages.contains(element)) {
         imageBuilds++;
       }
     };
 
-    // 模拟桌面滚轮:每帧跳一小段,首屏与缓存区内的卡片仍然全部存活。
+    // 模拟桌面滚轮:每帧跳一小段。已挂上的卡片不应因滚动重建;
+    // 缓存区只有半屏,底部可能新进一行,那些首建不算。
     for (var frame = 0; frame < 6; frame++) {
       position.jumpTo(position.pixels + 40);
       await tester.pump();
@@ -120,5 +123,7 @@ void main() {
       return box.localToGlobal(Offset.zero).dy == firstTop;
     }).length;
     expect(firstRow, delegate.crossAxisCount);
+    await tester.pumpWidget(const SizedBox.shrink());
+    MediaImage.debugResetCacheConfiguration();
   }, tags: ['integration']);
 }

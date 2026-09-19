@@ -264,6 +264,22 @@ void main() {
       isTrue,
     );
   }, tags: ['integration']);
+
+  testWidgets(
+    'movie detail resumes from catalog progress when the item payload omits ticks',
+    (tester) async {
+      server.stripDetailPlaybackProgress = true;
+      final app = await pumpApp(tester);
+      await tester.pumpWidget(app);
+      await settle(tester);
+      await openItem(tester, app, 'movie-inception');
+
+      expect(find.text('继续播放'), findsOneWidget);
+      expect(find.byKey(CatalogKeys.resumeProgress), findsOneWidget);
+      expect(find.text('已看 40%'), findsOneWidget);
+    },
+    tags: ['integration'],
+  );
 }
 
 const _episodeKeyPrefix = 'catalog-episode-';

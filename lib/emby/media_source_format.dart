@@ -269,6 +269,61 @@ String? _bitrateLabel(int? bitrate) {
 
 final _cjk = RegExp(r'[\u4e00-\u9fff]');
 
+/// 从 MediaSource.Name 抽出跨集仍稳定的版本标签(发行组/来源站)。
+///
+/// Emby 剧集多版本的 Name 是整段文件名,SxxExx 每集都变,不能拿来精确对齐。
+/// Infuse 8.5 修过「记住 Emby/Jellyfin 剧集所选版本」;Emby 自己展示版本时
+/// 也会去掉文件名里各源相同的前缀,只留组名。
+class MediaSourceMatchTokens {
+  const MediaSourceMatchTokens({
+    required this.tokens,
+    this.resolution,
+    this.videoCodec,
+    this.rawName = '',
+  });
+
+  /// 去掉分辨率/编码/集号之后的剩余标签,如 `LINETV`、`猎户发布组`。
+  final List<String> tokens;
+  final String? resolution;
+  final String? videoCodec;
+  final String rawName;
+
+  String get fingerprint => tokens.join(' · ');
+}
+
+/// 跨集记忆用的短标签;没有组名时为空,调用方再回落整名(如「4K 版本」)。
+String mediaSourceFingerprint(String? name) {
+  return mediaSourceMatchTokens(name).fingerprint;
+}
+
+MediaSourceMatchTokens mediaSourceMatchTokens(String? name) {
+  final raw = name?.trim() ?? '';
+  if (raw.isEmpty) {
+    return const MediaSourceMatchTokens(tokens: []);
+  }
+  final parsed = _parseReleaseName(raw);
+  return MediaSourceMatchTokens(
+    tokens: [
+      for (final token in parsed.leftover)
+        if (!_isEpisodeIndexToken(token)) token,
+    ],
+    resolution: parsed.resolution,
+    videoCodec: parsed.videoCodec,
+    rawName: raw,
+  );
+}
+
+final _episodeIndexToken = RegExp(
+  r'^(?:s\d{1,2}e\d{1,3}|e\d{1,3}|ep\d{1,3}|s\d{1,2}|'
+  r'第[0-9０-９一二三四五六七八九十百千万两]+[季集话彈弹]|'
+  r'season\d+|episode\d+|\d{1,3}|(?:19|20)\d{2})$',
+  caseSensitive: false,
+);
+
+bool _isEpisodeIndexToken(String token) {
+  return _episodeIndexToken.hasMatch(token.trim());
+}
+
 class _ParsedRelease {
   const _ParsedRelease({
     this.resolution,
@@ -325,6 +380,11 @@ _ParsedRelease _parseReleaseName(String name) {
     }
     leftover.add(_prettyGroup(token));
   }
+  leftover.removeWhere(
+    (token) =>
+        _isEpisodeIndexToken(token) ||
+        (token.toUpperCase() == 'DL' && leftover.contains('WEB-DL')),
+  );
   return _ParsedRelease(
     resolution: resolution,
     hdr: hdr,

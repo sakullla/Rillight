@@ -297,6 +297,34 @@ void main() {
     expect(banner, findsNothing);
   }, tags: ['integration']);
 
+  testWidgets('toggling subtitle still hits player controls', (tester) async {
+    _withEpisodeStreams(server, subtitleIndexById: {'movie-up': 2});
+    await pumpLoggedIn(tester);
+    await openPlayable(tester, 'movie-up');
+    await waitFor(tester, find.byKey(PlayerKeys.playPause));
+    expect(find.byType(BackdropFilter), findsNothing);
+
+    await tester.tap(find.byTooltip('字幕'));
+    await settle(tester);
+    await tester.tap(find.widgetWithText(CheckedPopupMenuItem<int>, '关闭字幕'));
+    await settle(tester);
+    expect(controllerOf(tester).subtitleStreamIndex, isNull);
+
+    await tester.tap(find.byTooltip('字幕'));
+    await settle(tester);
+    await tester.tap(find.widgetWithText(CheckedPopupMenuItem<int>, '中文'));
+    await settle(tester);
+    expect(controllerOf(tester).subtitleStreamIndex, 2);
+
+    await tester.tap(find.byKey(PlayerKeys.playPause));
+    await tester.pump();
+    expect(controllerOf(tester).isPlaying, isFalse);
+    await tester.tap(find.byKey(const Key('player-window-close')));
+    await tester.pump();
+    await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+    await waitForGone(tester, find.byType(PlayerPage));
+  }, tags: ['integration']);
+
   testWidgets('saved progress resumes without a continue-or-restart prompt', (
     tester,
   ) async {
@@ -309,6 +337,9 @@ void main() {
 
     expect(find.byKey(PlayerKeys.volumePercent), findsOneWidget);
     expect(find.text('100%'), findsOneWidget);
+    final volumeSlider = tester.widget<Slider>(find.byKey(PlayerKeys.volume));
+    expect(volumeSlider.divisions, isNull);
+    expect(volumeSlider.max, PlayerSettings.volumeMax.toDouble());
     expect(backend.openedUrl, isNotNull);
     expect(backend.openedUrl!.queryParameters['static'], 'true');
     expect(backend.openedStart, greaterThan(Duration.zero));
@@ -324,6 +355,8 @@ void main() {
     await openPlayable(tester, 'movie-up');
     await waitFor(tester, find.byKey(PlayerKeys.playPause));
     expect(find.byKey(PlayerKeys.networkSpeed), findsOneWidget);
+    expect(find.byType(NetworkSpeedReadout), findsOneWidget);
+    expect(find.byIcon(Icons.download_rounded), findsNothing);
     expect(find.text('0 KB/s'), findsOneWidget);
 
     backend.emitEvent(VideoEventKind.cacheSpeed, 2.5 * 1024 * 1024);
@@ -355,7 +388,7 @@ void main() {
     await openPlayable(tester, 'movie-up');
     await waitFor(tester, find.byKey(PlayerKeys.playPause));
 
-    backend.completePlayback();
+    backend.completePlayback(at: controllerOf(tester).duration);
     await tester.pump();
     await waitFor(tester, find.byKey(PlayerKeys.playbackEnded));
     expect(find.text('播放结束'), findsOneWidget);
@@ -396,7 +429,7 @@ void main() {
     await openPlayable(tester, 'episode-friends-s1e2');
     await waitFor(tester, find.byKey(PlayerKeys.playPause));
 
-    backend.completePlayback();
+    backend.completePlayback(at: controllerOf(tester).duration);
     await tester.pump();
     await waitFor(tester, find.byKey(PlayerKeys.endedViewSeries));
     await tester.tap(find.byKey(PlayerKeys.endedViewSeries));
@@ -473,6 +506,77 @@ void main() {
       expect(controller.playbackEnded, isFalse);
     },
   );
+
+  test('next episode overlay does not pin the seek bar', () async {
+    final controller = await startStandaloneController(
+      itemId: 'episode-friends-s1e1',
+    );
+    addTearDown(controller.dispose);
+    final next = await controller.client.getItem('episode-friends-s1e2');
+    controller.nextEpisode = NextEpisodeOffer(item: next);
+    controller.controlsVisible = true;
+    controller.hideControlsOnPointerExit();
+    expect(controller.controlsVisible, isFalse);
+    expect(controller.nextEpisode?.item.id, 'episode-friends-s1e2');
+    controller.toggleControls();
+    expect(controller.controlsVisible, isTrue);
+    controller.toggleControls();
+    expect(controller.controlsVisible, isFalse);
+    expect(controller.nextEpisode?.item.id, 'episode-friends-s1e2');
+  });
+
+  test('skip intro stays visible for the whole intro after resume', () async {
+    const second = 10000000;
+    final episode = server.items.firstWhere(
+      (item) => item.id == 'episode-friends-s1e1',
+    );
+    episode.played = false;
+    episode.playedPercentage = 2;
+    episode.playbackPositionTicks = 20 * second;
+    episode.chapters = const [
+      FakeChapter(
+        name: 'Intro',
+        startPositionTicks: 0,
+        markerType: 'IntroStart',
+      ),
+      FakeChapter(
+        name: 'Intro End',
+        startPositionTicks: 90 * second,
+        markerType: 'IntroEnd',
+      ),
+    ];
+    final controller = await startStandaloneController(
+      itemId: 'episode-friends-s1e1',
+    );
+    addTearDown(controller.dispose);
+    expect(controller.activeSkipSegment?.kind, PlayerSkipKind.intro);
+    expect(controller.skipPromptVisible, isTrue);
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    expect(controller.skipPromptVisible, isTrue);
+  });
+
+  test('resuming in the last minutes still offers the next episode', () async {
+    const minute = 10000000 * 60;
+    final episode = server.items.firstWhere(
+      (item) => item.id == 'episode-friends-s1e1',
+    );
+    episode.played = false;
+    episode.playedPercentage = 86;
+    episode.playbackPositionTicks = 19 * minute + 10 * 10000000;
+    final controller = await startStandaloneController(
+      itemId: 'episode-friends-s1e1',
+    );
+    addTearDown(controller.dispose);
+    for (var i = 0; i < 50; i++) {
+      if (controller.nextEpisode != null) {
+        break;
+      }
+      await Future<void>.delayed(Duration.zero);
+    }
+    expect(controller.nextEpisode?.item.id, 'episode-friends-s1e2');
+    controller.hideControlsOnPointerExit();
+    expect(controller.controlsVisible, isFalse);
+  });
 
   test('next episode keeps subtitle language and bitrate', () async {
     _withEpisodeStreams(
@@ -944,6 +1048,106 @@ void main() {
     expect(controllerOf(tester).controlsVisible, isFalse);
   }, tags: ['integration']);
 
+  testWidgets(
+    'switching danmaku source then hiding OSD still closes the player',
+    (tester) async {
+      setPlayerLogicalSize(tester);
+      await pumpLoggedIn(
+        tester,
+        settingsStore: MemoryPlayerSettingsStore(
+          const PlayerSettings(danmakuAppId: 'app', danmakuToken: 'secret'),
+        ),
+        danmakuClient: _SearchSelectDanmakuClient(),
+      );
+      await openPlayable(tester, 'movie-up');
+      await waitFor(tester, find.byKey(PlayerKeys.playPause));
+      await waitFor(tester, find.byType(DanmakuView));
+      await openDanmakuPanel(tester);
+      await tester.tap(find.byKey(DanmakuKeys.search));
+      await tester.pump();
+      await tester.pump();
+      await waitFor(tester, find.byKey(DanmakuKeys.searchPanel));
+      await waitFor(tester, find.byKey(DanmakuKeys.searchEpisode(201)));
+      await tester.tap(find.byKey(DanmakuKeys.searchEpisode(201)));
+      await tester.pump();
+      await flushPlayerAsync(tester);
+      expect(find.byKey(DanmakuKeys.searchPanel), findsNothing);
+      expect(find.byType(DanmakuView), findsOneWidget);
+
+      final surface = tester.getRect(find.byKey(PlayerKeys.surface));
+      await tester.tapAt(
+        Offset(surface.center.dx, surface.top + surface.height * 0.4),
+      );
+      await tester.pump();
+      expect(controllerOf(tester).controlsVisible, isFalse);
+      controllerOf(tester).onUserActivity();
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('player-window-close')));
+      await tester.pump();
+      await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+      await waitForGone(tester, find.byType(PlayerPage));
+    },
+    tags: ['integration'],
+  );
+
+  testWidgets('toggling danmaku off and on still closes after OSD hides', (
+    tester,
+  ) async {
+    setPlayerLogicalSize(tester);
+    await pumpLoggedIn(
+      tester,
+      settingsStore: MemoryPlayerSettingsStore(
+        const PlayerSettings(danmakuAppId: 'app', danmakuToken: 'secret'),
+      ),
+      danmakuClient: _MatchedDanmakuClient(
+        comments: const [
+          DanmakuComment(cid: 1, time: 0, mode: 1, color: 16777215, text: '弹幕'),
+        ],
+      ),
+    );
+    await openPlayable(tester, 'movie-up');
+    await waitFor(tester, find.byType(DanmakuView));
+    await openDanmakuPanel(tester);
+    await tester.tap(find.byKey(DanmakuKeys.toggle));
+    await flushPlayerAsync(tester);
+    expect(find.byType(DanmakuView), findsOneWidget);
+    expect(
+      tester
+          .state<DanmakuViewState>(find.byType(DanmakuView))
+          .debugTickerActive,
+      isFalse,
+    );
+    expect(
+      tester.state<DanmakuViewState>(find.byType(DanmakuView)).debugActiveCount,
+      0,
+    );
+    await tester.tap(find.byKey(DanmakuKeys.toggle));
+    await flushPlayerAsync(tester);
+    expect(find.byType(DanmakuView), findsOneWidget);
+    expect(find.byType(BackdropFilter), findsNothing);
+    await tester.tap(find.byKey(PlayerKeys.playPause));
+    await tester.pump();
+    expect(controllerOf(tester).isPlaying, isFalse);
+    await tester.tap(find.byKey(PlayerKeys.playPause));
+    await tester.pump();
+    expect(controllerOf(tester).isPlaying, isTrue);
+    await tester.tap(find.byKey(PlayerKeys.surface));
+    await tester.pump();
+    expect(find.byKey(DanmakuKeys.panel), findsNothing);
+    final surface = tester.getRect(find.byKey(PlayerKeys.surface));
+    await tester.tapAt(
+      Offset(surface.center.dx, surface.top + surface.height * 0.4),
+    );
+    await tester.pump();
+    expect(controllerOf(tester).controlsVisible, isFalse);
+    controllerOf(tester).onUserActivity();
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('player-window-close')));
+    await tester.pump();
+    await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+    await waitForGone(tester, find.byType(PlayerPage));
+  }, tags: ['integration']);
+
   testWidgets('danmaku search field stays editable while results load', (
     tester,
   ) async {
@@ -1125,12 +1329,23 @@ void main() {
     await waitFor(tester, find.byKey(const Key('player-window-close')));
     await tester.pump(const Duration(milliseconds: 50));
     expect(controllerOf(tester).controlsVisible, isFalse);
-    await tester.tap(
-      find.byKey(const Key('player-window-close')),
-      warnIfMissed: false,
+    final closeHit = tester.widget<IgnorePointer>(
+      find
+          .ancestor(
+            of: find.byKey(const Key('player-window-close')),
+            matching: find.byType(IgnorePointer),
+          )
+          .first,
     );
-    await tester.pump(const Duration(milliseconds: 50));
+    expect(closeHit.ignoring, isTrue);
     expect(find.byType(PlayerPage), findsOneWidget);
+
+    controllerOf(tester).onUserActivity();
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('player-window-close')));
+    await tester.pump();
+    await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+    await waitForGone(tester, find.byType(PlayerPage));
   }, tags: ['integration']);
 
   test('close still fires onClose if backend dispose hangs', () async {
@@ -1223,6 +1438,32 @@ void main() {
     expect(formatNetworkThroughput(2.5 * 1024 * 1024), '2.5 MB/s');
     expect(formatNetworkThroughput(12.4 * 1024 * 1024), '12 MB/s');
   });
+
+  testWidgets(
+    'network readout uses an inbound arrow instead of a download tray',
+    (tester) async {
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(
+            body: NetworkSpeedReadout(bytesPerSecond: 2.5 * 1024 * 1024),
+          ),
+        ),
+      );
+      expect(find.byIcon(Icons.download_rounded), findsNothing);
+      expect(find.byIcon(Icons.download), findsNothing);
+      expect(find.byIcon(Icons.wifi), findsNothing);
+      expect(find.byIcon(Icons.speed), findsNothing);
+      expect(find.text('2.5 MB/s'), findsOneWidget);
+      expect(
+        find.byWidgetPredicate(
+          (widget) =>
+              widget is CustomPaint &&
+              widget.painter is InboundSpeedMarkPainter,
+        ),
+        findsOneWidget,
+      );
+    },
+  );
 
   test('buffer fraction is cache end over duration', () {
     expect(
@@ -1385,6 +1626,77 @@ class _HangingSearchDanmakuClient extends DandanplayClient {
     CancelToken? cancelToken,
   }) {
     return Completer<List<DanmakuAnime>>().future;
+  }
+}
+
+class _SearchSelectDanmakuClient extends DandanplayClient {
+  _SearchSelectDanmakuClient() : super(dio: Dio());
+
+  @override
+  Future<DanmakuMatchResponse> match(
+    DandanplaySource source, {
+    required String fileName,
+    required String fileHash,
+    required int fileSize,
+    required int videoDuration,
+    String matchMode = 'hashAndFileName',
+    CancelToken? cancelToken,
+  }) async {
+    return const DanmakuMatchResponse(
+      isMatched: true,
+      matches: [
+        DanmakuMatchCandidate(
+          animeId: 1,
+          animeTitle: 'Wrong',
+          episodeId: 100,
+          episodeTitle: '第01话',
+        ),
+      ],
+    );
+  }
+
+  @override
+  Future<List<DanmakuComment>> fetchComments(
+    DandanplaySource source,
+    int episodeId, {
+    int? serverTimestamp,
+    CancelToken? cancelToken,
+  }) async {
+    return [
+      DanmakuComment(
+        cid: episodeId,
+        time: 0,
+        mode: 1,
+        color: 16777215,
+        text: '弹幕$episodeId',
+      ),
+    ];
+  }
+
+  @override
+  Future<List<DanmakuAnime>> searchAnime(
+    DandanplaySource source,
+    String keyword, {
+    CancelToken? cancelToken,
+  }) {
+    return searchEpisodes(source, anime: keyword);
+  }
+
+  @override
+  Future<List<DanmakuAnime>> searchEpisodes(
+    DandanplaySource source, {
+    required String anime,
+    int? episode,
+    CancelToken? cancelToken,
+  }) async {
+    return const [
+      DanmakuAnime(
+        animeId: 9,
+        animeTitle: 'Right',
+        type: 'tvseries',
+        episodes: [DanmakuEpisode(episodeId: 201, episodeTitle: '第01话')],
+      ),
+    ];
   }
 }
 

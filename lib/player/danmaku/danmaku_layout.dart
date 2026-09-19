@@ -31,6 +31,12 @@ const double kDanmakuFixedSeconds = 5;
 /// 小于该幅度的回退视为进度抖动,不得重排车道,否则弹幕会上下左右跳。
 const Duration kDanmakuSeekThreshold = Duration(seconds: 2);
 
+/// 显示时钟与媒体时钟差超过该值才硬同步(卡顿恢复 / 非 seek 失步)。
+const Duration kDanmakuHardResync = Duration(milliseconds: 400);
+
+/// 单帧显示时钟最多前进这么多,主线程卡顿恢复时不要一次跳完。
+const Duration kDanmakuMaxFrameStep = Duration(milliseconds: 50);
+
 /// 同车道弹幕之间的最小像素间隙,避免描边重叠。
 const double kDanmakuCollisionGap = 8;
 
@@ -118,6 +124,7 @@ class DanmakuLayout {
   final Map<DanmakuMode, List<DanmakuActive?>> _laneLast = {};
   final Map<DanmakuMode, int> _lastAssigned = {};
   Duration? _lastPosition;
+  List<DanmakuEntry>? _sourceIdentity;
   int _cursor = 0;
   double _width = 0;
   double _height = 0;
@@ -151,6 +158,12 @@ class DanmakuLayout {
   /// 按播放位置推进一帧,原地更新并返回 [activeEntries] 自身。
   List<DanmakuFrame> update(Duration position, Size size) {
     _syncMetrics(size);
+    final source = entries;
+    // 换源/重搜会换掉整表;旧 cursor 落在新表越界或错集,同屏就空了。
+    if (!identical(source, _sourceIdentity)) {
+      _sourceIdentity = source;
+      reset();
+    }
     final last = _lastPosition;
     final seek = _isSeek(position, last);
     // 未达 seek 阈值的回退当成时钟抖动:保持单调时钟,已上场弹幕车道不动。

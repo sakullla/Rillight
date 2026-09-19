@@ -132,6 +132,14 @@ void main() {
         findsOneWidget,
       );
       expect(
+        find.descendant(
+          of: find.byKey(CatalogKeys.heroPlay),
+          matching: find.text('继续播放'),
+        ),
+        findsOneWidget,
+      );
+      expect(find.textContaining('已看 40%'), findsWidgets);
+      expect(
         tester.widget(find.byKey(CatalogKeys.heroPrev)),
         isA<ScrimIconButton>(),
       );

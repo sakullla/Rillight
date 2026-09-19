@@ -96,6 +96,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
   bool _episodesLoading = false;
   bool _loadingMore = false;
   String? _mediaSourceId;
+  bool _pickedMediaSource = false;
   int? _audioStreamIndex;
   int? _subtitleStreamIndex;
   int _loadGen = 0;
@@ -187,6 +188,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
         _mediaSourceId = shown.mediaSources.isEmpty
             ? null
             : shown.mediaSources.first.id;
+        _pickedMediaSource = false;
         _audioStreamIndex = _defaultAudio(shown, _mediaSourceId);
         _subtitleStreamIndex = _defaultSubtitle(shown, _mediaSourceId);
       });
@@ -217,6 +219,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
         _focusedEpisodeId = null;
         _nextEpisode = null;
         _mediaSourceId = null;
+        _pickedMediaSource = false;
         _audioStreamIndex = null;
         _subtitleStreamIndex = null;
         _episodeTotal = 0;
@@ -386,6 +389,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
         _mediaSourceId = item.mediaSources.isEmpty
             ? null
             : item.mediaSources.first.id;
+        _pickedMediaSource = false;
         _audioStreamIndex = _defaultAudio(item, _mediaSourceId);
         _subtitleStreamIndex = _defaultSubtitle(item, _mediaSourceId);
       });
@@ -753,9 +757,13 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
         PlayerOpenRequest(
           itemId: itemId,
           autoResume: !fromBeginning && startTimeTicks == null,
-          mediaSourceId: _item?.id == itemId ? _mediaSourceId : null,
-          audioStreamIndex: _item?.id == itemId ? _audioStreamIndex : null,
-          subtitleStreamIndex: _item?.id == itemId
+          mediaSourceId: _item?.id == itemId && _pickedMediaSource
+              ? _mediaSourceId
+              : null,
+          audioStreamIndex: _item?.id == itemId && _pickedMediaSource
+              ? _audioStreamIndex
+              : null,
+          subtitleStreamIndex: _item?.id == itemId && _pickedMediaSource
               ? _subtitleStreamIndex
               : null,
           startTimeTicks: startTimeTicks,
@@ -889,6 +897,21 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     }
   }
 
+  /// 详情 /Items/{id} 有时不带 ticks,继续观看列表却有百分比。
+  /// 首页已拉过 Resume 时,把那份 UserData 补到当前条目。
+  EmbyItem _withCatalogResume(EmbyItem item) {
+    if (item.canResume) {
+      return item;
+    }
+    final rows = CatalogScope.maybeOf(context)?.resume.items ?? const [];
+    for (final entry in rows) {
+      if (entry.id == item.id && entry.canResume) {
+        return item.copyWith(userData: entry.userData);
+      }
+    }
+    return item;
+  }
+
   EmbyItem? _playTarget(EmbyItem item) {
     if (item.isPlayable) {
       return item;
@@ -997,10 +1020,11 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
           : catalogFailureMessage(l10n, error);
       return AppErrorView(message: message, onRetry: _load);
     }
-    final item = _item;
-    if (item == null) {
+    final rawItem = _item;
+    if (rawItem == null) {
       return AppErrorView(message: l10n.itemUnavailable, onRetry: _load);
     }
+    final item = _withCatalogResume(rawItem);
 
     final runtime = runtimeLabel(l10n, item);
     final showSimilar = _similar.isNotEmpty || _similarError != null;
@@ -1047,6 +1071,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                 subtitleStreamIndex: _subtitleStreamIndex,
                 onMediaSource: (id) {
                   setState(() {
+                    _pickedMediaSource = true;
                     _mediaSourceId = id;
                     _audioStreamIndex = _defaultAudio(item, id);
                     _subtitleStreamIndex = _defaultSubtitle(item, id);
@@ -1070,7 +1095,12 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                     : () => _revealEpisode(playTarget.id),
                 onPlay: playTarget == null
                     ? null
-                    : () => _openPlayer(playTarget.id),
+                    : () => _openPlayer(
+                        playTarget.id,
+                        startTimeTicks: playTarget.canResume
+                            ? playTarget.resumePositionTicks
+                            : null,
+                      ),
                 onPlayFromStart: playTarget == null || !playTarget.canResume
                     ? null
                     : () => _openPlayer(playTarget.id, fromBeginning: true),

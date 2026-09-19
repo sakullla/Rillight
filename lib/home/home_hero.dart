@@ -390,7 +390,7 @@ class _HeroContent extends StatelessWidget {
           item.productionYear! > 0)
         '${item.productionYear}',
       ?runtimeLabel(l10n, item),
-      if (item.playbackProgress > 0)
+      if (item.canResume)
         l10n.playbackProgress((item.playbackProgress * 100).round()),
     ];
     final textBlockWidth = HomeHero.textBlockWidthFor(width);
@@ -458,12 +458,18 @@ class _HeroContent extends StatelessWidget {
           children: [
             if (item.isPlayable || item.isSeries)
               FilledButton.icon(
+                key: CatalogKeys.heroPlay,
                 onPressed: () {
                   if (item.isPlayable) {
                     unawaited(
-                      PlayerWindowScope.of(
-                        context,
-                      ).open(PlayerOpenRequest(itemId: item.id)),
+                      PlayerWindowScope.of(context).open(
+                        PlayerOpenRequest(
+                          itemId: item.id,
+                          startTimeTicks: item.canResume
+                              ? item.resumePositionTicks
+                              : null,
+                        ),
+                      ),
                     );
                     return;
                   }
@@ -477,7 +483,11 @@ class _HeroContent extends StatelessWidget {
                   ),
                 ),
                 icon: const Icon(Icons.play_arrow),
-                label: Text(l10n.play),
+                label: Text(
+                  item.isPlayable && item.canResume
+                      ? l10n.resumePlay
+                      : l10n.play,
+                ),
               ),
             OutlinedButton(
               onPressed: () => context.push(AppRoutes.item(item.id)),

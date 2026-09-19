@@ -155,6 +155,16 @@ void main() {
     expect(frames.single.left, closeTo(800 - (0.2 / 12) * (800 + width), 0.5));
   });
 
+  test('replacing the comment source rebuilds at the current playhead', () {
+    final layout = layoutWith(comments: [comment(1, 0)]);
+    layout.update(const Duration(seconds: 10), size);
+    expect(layout.activeEntries.single.id, 1);
+
+    layout.comments = [comment(2, 9)];
+    final frames = layout.update(const Duration(seconds: 10), size);
+    expect(frames.map((f) => f.id), [2]);
+  });
+
   test('seek backward rebuilds earlier comments', () {
     final layout = layoutWith(comments: [comment(1, 1), comment(2, 300)]);
     layout.update(const Duration(milliseconds: 300100), size);

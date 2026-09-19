@@ -144,7 +144,8 @@ class _WindowDragAreaState extends State<WindowDragArea> {
   @override
   Widget build(BuildContext context) {
     return Listener(
-      behavior: HitTestBehavior.translucent,
+      // 子级 OSD 淡出后 Opacity=0 不参与命中;opaque 才能继续拖窗口。
+      behavior: HitTestBehavior.opaque,
       onPointerDown: _onPointerDown,
       onPointerMove: _onPointerMove,
       onPointerUp: _onPointerEnd,

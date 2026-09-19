@@ -12,8 +12,9 @@ import 'package:window_manager/window_manager.dart';
 
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
-  configurePaintingImageCache();
-  if (args.isNotEmpty && args.first == 'player') {
+  final playerProcess = args.isNotEmpty && args.first == 'player';
+  configurePaintingImageCache(playerProcess: playerProcess);
+  if (playerProcess) {
     await windowManager.ensureInitialized();
     await windowManager.hide();
     await runPlayerWindow(argumentFallback: args.length > 1 ? args[1] : '');

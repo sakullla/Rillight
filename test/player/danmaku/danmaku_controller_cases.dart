@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:dio/dio.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/player/danmaku/danmaku_controller.dart';
 import 'package:rillight/player/danmaku/danmaku_match_query.dart';
@@ -197,8 +198,10 @@ DanmakuEpisodeContext context({
   String itemId = 'item-1',
   String? seriesId = 'series-1',
   int? index = 1,
+  int? seasonIndex,
   bool directStream = true,
   bool isMovie = false,
+  String fileName = '[G] Show - 01.mkv',
 }) {
   return DanmakuEpisodeContext(
     itemId: itemId,
@@ -206,9 +209,10 @@ DanmakuEpisodeContext context({
     seriesId: seriesId,
     seriesTitle: 'Show',
     title: 'Show 1',
-    fileName: '[G] Show - 01.mkv',
+    fileName: fileName,
     fileSize: 2048,
     episodeIndex: index,
+    seasonIndex: seasonIndex,
     streamUrl: directStream ? Uri.parse('https://emby/stream') : null,
     duration: const Duration(minutes: 24),
     isMovie: isMovie,
@@ -455,6 +459,42 @@ void main() {
     final controller = makeController();
     await controller.startSession(context(seriesId: null, isMovie: true));
     expect(client.commentCalls.single.$2, 400);
+  });
+
+  test('auto match prefers library year over remake listed first', () async {
+    client.matchResponse = const DanmakuMatchResponse(
+      isMatched: true,
+      matches: [
+        DanmakuMatchCandidate(
+          animeId: 2017,
+          animeTitle: '触不可及(美版)(2017)【外语电影】from tencent',
+          episodeId: 1,
+          episodeTitle: '正片',
+        ),
+        DanmakuMatchCandidate(
+          animeId: 2014,
+          animeTitle: '触不可及(2014)【华语电影】from iqiyi',
+          episodeId: 2,
+          episodeTitle: '正片',
+        ),
+      ],
+    );
+    client.commentResponse = [comment(1, 5)];
+    final controller = makeController();
+    await controller.startSession(
+      const DanmakuEpisodeContext(
+        itemId: 'movie-1',
+        mediaSourceId: 'ms',
+        title: '触不可及',
+        fileName: '触不可及(2014)',
+        fileSize: 2048,
+        duration: Duration(minutes: 101),
+        isMovie: true,
+        productionYear: 2014,
+      ),
+    );
+    expect(controller.matchedTitle, '触不可及(2014)【华语电影】from iqiyi');
+    expect(client.commentCalls.single.$2, 2);
   });
 
   test('no match at all lands in noMatch status', () async {
@@ -782,6 +822,44 @@ void main() {
   });
 
   test(
+    'selectEpisode rebuilds on-screen comments at the current playhead',
+    () async {
+      client.matchResponse = const DanmakuMatchResponse(
+        isMatched: true,
+        matches: [
+          DanmakuMatchCandidate(
+            animeId: 1,
+            animeTitle: 'Wrong',
+            episodeId: 100,
+            episodeTitle: '第01话',
+          ),
+        ],
+      );
+      client.commentResponse = [comment(1, 0)];
+      final controller = makeController();
+      await controller.startSession(context());
+      const playhead = Duration(seconds: 10);
+      const viewport = Size(800, 400);
+      controller.updatePosition(playhead, playing: true, rate: 1);
+      controller.layout.update(playhead, viewport);
+      expect(controller.layout.activeEntries.single.entry.cid, 1);
+
+      client.commentResponse = [comment(2, 9)];
+      const anime = DanmakuAnime(
+        animeId: 9,
+        animeTitle: 'Right',
+        type: 'tvseries',
+        episodes: [DanmakuEpisode(episodeId: 201, episodeTitle: '第01话')],
+      );
+      await controller.selectEpisode(anime, anime.episodes.single);
+      controller.layout.update(playhead, viewport);
+      expect(controller.layout.activeEntries.map((item) => item.entry.cid), [
+        2,
+      ]);
+    },
+  );
+
+  test(
     'newer search drops in-flight results without unavailable banner',
     () async {
       store = MemoryPlayerSettingsStore(
@@ -917,6 +995,29 @@ void main() {
       rate: 2,
     );
     expect(controller.estimatePosition(), const Duration(seconds: 20));
+  });
+
+  test('quantized time-pos does not snap the display clock backward', () async {
+    final controller = makeController();
+    controller.updatePosition(
+      const Duration(seconds: 10),
+      playing: true,
+      rate: 1,
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 80));
+    final mid = controller.estimatePosition();
+    expect(mid, greaterThan(const Duration(seconds: 10)));
+    controller.updatePosition(
+      const Duration(seconds: 10),
+      playing: true,
+      rate: 1,
+    );
+    final after = controller.estimatePosition();
+    expect(
+      after.inMilliseconds,
+      closeTo(mid.inMilliseconds, 20),
+      reason: '晚到的 time-pos 不得把已插值的时钟拽回去',
+    );
   });
 
   test('episode number parsing covers common title shapes', () {
@@ -1195,5 +1296,240 @@ void main() {
       ),
       '生万物.S02E08.2160p',
     );
+  });
+
+  test('movie fileName appends production year', () {
+    expect(
+      danmakuMatchFileName(title: '触不可及', productionYear: 2014),
+      '触不可及(2014)',
+    );
+    expect(
+      danmakuMatchFileName(
+        pathBaseName: '触不可及.mkv',
+        title: '触不可及',
+        productionYear: 2014,
+      ),
+      '触不可及(2014).mkv',
+    );
+    expect(
+      danmakuMatchFileName(
+        pathBaseName: '触不可及(2014).mkv',
+        productionYear: 2014,
+      ),
+      '触不可及(2014).mkv',
+    );
+  });
+
+  test('match ranking prefers year and rejects remake tags', () {
+    const remake = DanmakuMatchCandidate(
+      animeId: 2017,
+      animeTitle: '触不可及(美版)(2017)【外语电影】from tencent',
+      episodeId: 1,
+      episodeTitle: '正片',
+    );
+    const original = DanmakuMatchCandidate(
+      animeId: 2014,
+      animeTitle: '触不可及(2014)【华语电影】from iqiyi',
+      episodeId: 2,
+      episodeTitle: '正片',
+    );
+    expect(
+      pickBestDanmakuTitle(
+        [remake, original],
+        (item) => item.animeTitle,
+        libraryTitle: '触不可及',
+        year: 2014,
+      ),
+      original,
+    );
+  });
+
+  test('match fileName injects SxxExx when the path has no season', () {
+    expect(
+      danmakuMatchFileName(
+        pathBaseName: '边境领主 第04集.mkv',
+        seriesTitle: '从零开始的边境领主',
+        seasonIndex: 4,
+        episodeIndex: 4,
+      ),
+      '从零开始的边境领主 S04E04',
+    );
+    expect(
+      danmakuMatchFileName(
+        pathBaseName: 'Show.S01E04.mkv',
+        seriesTitle: 'Show',
+        seasonIndex: 4,
+        episodeIndex: 4,
+      ),
+      'Show S04E04',
+    );
+  });
+
+  test('season ranking prefers 第4季 over the untitled first season', () {
+    const first = DanmakuMatchCandidate(
+      animeId: 1,
+      animeTitle: 'Show',
+      episodeId: 1,
+      episodeTitle: '第01话',
+    );
+    const fourth = DanmakuMatchCandidate(
+      animeId: 4,
+      animeTitle: 'Show 第4季',
+      episodeId: 40,
+      episodeTitle: '第01话',
+    );
+    expect(
+      pickBestDanmakuTitle(
+        [first, fourth],
+        (item) => item.animeTitle,
+        libraryTitle: 'Show',
+        seasonIndex: 4,
+      ),
+      fourth,
+    );
+    expect(parseSeasonNumber('第四季'), 4);
+    expect(
+      danmakuSearchKeyword(seriesTitle: 'Show', seasonIndex: 4),
+      'Show 第4季',
+    );
+    expect(danmakuMemoryKey('series-1', 4), 'series-1#s4');
+    expect(danmakuMemoryKey('series-1', 1), 'series-1');
+  });
+
+  test('season 1 memory does not auto-match a later season', () async {
+    store = MemoryPlayerSettingsStore(
+      const PlayerSettings(
+        danmakuAppId: 'test-app',
+        danmakuToken: 'test-secret',
+        danmakuSeriesMemories: {
+          'series-1': DanmakuSeriesMemory(
+            animeId: 1,
+            animeTitle: 'Show',
+            episodeId: 100,
+            episodeNumber: 1,
+          ),
+        },
+      ),
+    );
+    client.matchResponse = const DanmakuMatchResponse(
+      isMatched: true,
+      matches: [
+        DanmakuMatchCandidate(
+          animeId: 1,
+          animeTitle: 'Show',
+          episodeId: 100,
+          episodeTitle: '第01话',
+        ),
+      ],
+    );
+    client.searchResponse = const [
+      DanmakuAnime(
+        animeId: 4,
+        animeTitle: 'Show 第4季',
+        type: 'tvseries',
+        episodes: [DanmakuEpisode(episodeId: 401, episodeTitle: '第01话')],
+      ),
+    ];
+    final controller = makeController();
+    await controller.startSession(context(index: 1, seasonIndex: 4));
+    expect(client.commentCalls.single.$2, 401);
+    expect(controller.matchedTitle, 'Show 第4季');
+    final settings = await store.read();
+    expect(settings.danmakuSeriesMemories['series-1']!.animeId, 1);
+    expect(settings.danmakuSeriesMemories['series-1#s4']!.animeId, 4);
+  });
+
+  test('filename candidates without exact hash still auto-match', () async {
+    client.matchResponse = const DanmakuMatchResponse(
+      isMatched: false,
+      matches: [
+        DanmakuMatchCandidate(
+          animeId: 7,
+          animeTitle: 'Show',
+          episodeId: 100,
+          episodeTitle: '第01话',
+        ),
+      ],
+    );
+    client.commentResponse = [comment(1, 5)];
+    final controller = makeController();
+    await controller.startSession(context());
+    expect(controller.status, DanmakuStatus.active);
+    expect(client.commentCalls.single.$2, 100);
+    expect(client.searchCalls, isEmpty);
+  });
+
+  test('exact hash of a remake is rejected and search is used', () async {
+    client.matchResponse = const DanmakuMatchResponse(
+      isMatched: true,
+      matches: [
+        DanmakuMatchCandidate(
+          animeId: 2017,
+          animeTitle: '触不可及(美版)(2017)【外语电影】from tencent',
+          episodeId: 1,
+          episodeTitle: '正片',
+        ),
+      ],
+    );
+    client.searchResponse = const [
+      DanmakuAnime(
+        animeId: 2014,
+        animeTitle: '触不可及(2014)',
+        type: 'movie',
+        episodes: [DanmakuEpisode(episodeId: 2, episodeTitle: '正片')],
+      ),
+    ];
+    final controller = makeController();
+    await controller.startSession(
+      const DanmakuEpisodeContext(
+        itemId: 'movie-1',
+        mediaSourceId: 'ms',
+        title: '触不可及',
+        fileName: '触不可及(2014)',
+        fileSize: 2048,
+        duration: Duration(minutes: 101),
+        isMovie: true,
+        productionYear: 2014,
+      ),
+    );
+    expect(controller.matchedTitle, '触不可及(2014)');
+    expect(client.commentCalls.single.$2, 2);
+    expect(client.searchCalls, isNotEmpty);
+  });
+
+  test('changing media source does not rematch the same episode', () async {
+    client.matchResponse = const DanmakuMatchResponse(
+      isMatched: true,
+      matches: [
+        DanmakuMatchCandidate(
+          animeId: 7,
+          animeTitle: 'Show',
+          episodeId: 100,
+          episodeTitle: '第01话',
+        ),
+      ],
+    );
+    client.commentResponse = [comment(1, 5)];
+    final controller = makeController();
+    await controller.startSession(context());
+    expect(client.matchCalls, hasLength(1));
+    controller.syncFromPlayback(
+      const DanmakuEpisodeContext(
+        itemId: 'item-1',
+        mediaSourceId: 'ms-line-tv',
+        seriesId: 'series-1',
+        seriesTitle: 'Show',
+        title: 'Show 1',
+        fileName: 'Show.S01E01.LINETV.mkv',
+        episodeIndex: 1,
+        duration: Duration(minutes: 24),
+      ),
+      position: Duration.zero,
+      playing: false,
+      rate: 1,
+    );
+    await Future<void>.delayed(Duration.zero);
+    expect(client.matchCalls, hasLength(1));
+    expect(controller.status, DanmakuStatus.active);
   });
 }

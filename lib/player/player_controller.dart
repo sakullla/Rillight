@@ -6,6 +6,7 @@ import 'package:rillight/emby/device_profile.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_errors.dart';
 import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/emby/media_source_format.dart';
 import 'package:rillight/player/playback_check_in.dart';
 import 'package:rillight/player/playback_coordinator.dart';
 import 'package:rillight/player/playback_session.dart';
@@ -37,8 +38,12 @@ class PlayerSkipSegment {
   final Duration end;
 }
 
-/// 跳过按钮展示时长;打开 OSD 时重新计时。
-const Duration kSkipPromptHold = Duration(seconds: 8);
+/// 跳过按钮在片头/片尾区间内一直保留,不跟 OSD 一起 8 秒消失。
+/// Netflix/Infuse:Skip Intro 独立于控制条,暂停或唤出 OSD 时若仍在区间内再亮一次。
+
+/// 进度/缓冲/网速刷新下限。mpv time-pos 接近逐帧,整页 setState 会把 CPU
+/// 耗在 Flutter 合成上;弹幕用自己的 ticker 插值,不依赖这次通知。
+const Duration kPlaybackUiMinInterval = Duration(milliseconds: 200);
 
 /// 短于此时长的标记不弹出跳过钮。
 const Duration kMinSkipSegment = Duration(seconds: 3);
@@ -48,9 +53,6 @@ const Duration kNextUpLead = Duration(minutes: 3);
 
 /// 过短的剧集不提前弹出下一集,避免开场就出现。
 const Duration kMinRuntimeForEarlyNextUp = Duration(minutes: 6);
-
-/// keep-open 停在末帧时,进度可能比容器片长短几十到几百毫秒。
-const Duration kPlaybackEndSlack = Duration(milliseconds: 400);
 
 /// 播放器剧集面板一窗条数,与详情页分集窗口对齐。
 const int kPlayerEpisodePageSize = 80;
@@ -232,6 +234,7 @@ class PlayerController extends ChangeNotifier {
 
   /// mpv `cache-speed`,字节/秒。缓冲写满时为 0。
   double cacheSpeedBytesPerSec = 0;
+  DateTime _lastPlaybackUi = DateTime.fromMillisecondsSinceEpoch(0);
   PlayerErrorKind? error;
   EmbyException? loadFailure;
   SubtitleNoticeKind? subtitleNotice;
@@ -273,7 +276,7 @@ class PlayerController extends ChangeNotifier {
   List<PlaybackMediaSource> mediaSources = const [];
   String? activeMediaSourceId;
 
-  /// 按源显示名跨集对齐(Emby 每集 MediaSourceId 不同)。
+  /// 按发行组/版本标签跨集对齐(Emby 每集 MediaSourceId 和文件名都不同)。
   String? _preferredSourceName;
 
   PlayMethod? get playMethod => resolved?.playMethod;
@@ -316,7 +319,6 @@ class PlayerController extends ChangeNotifier {
   bool _snapshotDraining = false;
   Timer? _hideTimer;
   Timer? _nextTimer;
-  Timer? _skipPromptTimer;
   Timer? _settingsSaveTimer;
   StreamSubscription<VideoBackendEvent>? _eventSub;
 
@@ -350,7 +352,6 @@ class PlayerController extends ChangeNotifier {
     _handlingCompleted = false;
     _pendingCompletion = false;
     skipPromptVisible = false;
-    _skipPromptTimer?.cancel();
     loading = true;
     mediaSources = const [];
     _skipSegments = const [];
@@ -413,9 +414,7 @@ class PlayerController extends ChangeNotifier {
         );
         return;
       }
-      final resumeTicks = item!.canResume
-          ? item!.userData.playbackPositionTicks
-          : 0;
+      final resumeTicks = item!.canResume ? item!.resumePositionTicks : 0;
       if (!autoResume) {
         await _open(
           operation: operation,
@@ -737,7 +736,7 @@ class PlayerController extends ChangeNotifier {
   }
 
   void hideControlsOnPointerExit() {
-    if (controlsPinned || !isPlaying || nextEpisode != null || playbackEnded) {
+    if (controlsPinned || !isPlaying || playbackEnded) {
       return;
     }
     _hideTimer?.cancel();
@@ -749,7 +748,7 @@ class PlayerController extends ChangeNotifier {
   }
 
   void toggleControls() {
-    if (controlsPinned || nextEpisode != null || playbackEnded) {
+    if (controlsPinned || playbackEnded) {
       onUserActivity();
       return;
     }
@@ -769,7 +768,7 @@ class PlayerController extends ChangeNotifier {
     if (controlsPinned) {
       return;
     }
-    if (isPlaying && nextEpisode == null && !playbackEnded) {
+    if (isPlaying && !playbackEnded) {
       _hideTimer = Timer(controlsHideAfter, () {
         controlsVisible = false;
         _emit();
@@ -808,7 +807,7 @@ class PlayerController extends ChangeNotifier {
   /// 重走 start(),autoResume 由 [fromStart] 决定——剧集列表切集
   /// (fromStart=false)时部分观看的集从续播位置起播。
   /// 首次起播请求携带的源/轨道/章节起点只对首个条目有效,换集后清除 id;
-  /// 片源显示名保留,供下一集按 Name 对齐。
+  /// 片源发行组标签保留,供下一集按组名对齐。
   Future<void> _playItem(String targetId, {required bool fromStart}) async {
     final operation = _beginOperation();
     if (operation == null || _disposed) return;
@@ -1242,7 +1241,6 @@ class PlayerController extends ChangeNotifier {
     final changed = !_sameSkip(activeSkipSegment, next);
     activeSkipSegment = next;
     if (next == null) {
-      _skipPromptTimer?.cancel();
       skipPromptVisible = false;
       return;
     }
@@ -1262,12 +1260,7 @@ class PlayerController extends ChangeNotifier {
   }
 
   void _showSkipPrompt() {
-    _skipPromptTimer?.cancel();
     skipPromptVisible = true;
-    _skipPromptTimer = Timer(kSkipPromptHold, () {
-      skipPromptVisible = false;
-      _emit();
-    });
   }
 
   void _setPosition(Duration value) {
@@ -1341,8 +1334,6 @@ class PlayerController extends ChangeNotifier {
         return;
       }
       nextEpisode = NextEpisodeOffer(item: next);
-      controlsVisible = true;
-      _hideTimer?.cancel();
       _emit();
     } on EmbyException {
       if (_accepts(operation)) _nextUpOffered = false;
@@ -1355,7 +1346,6 @@ class PlayerController extends ChangeNotifier {
     final operation = _operations.current;
     if (!_accepts(operation)) return;
     nextEpisode = NextEpisodeOffer(item: next, remaining: nextEpisodeCountdown);
-    controlsVisible = true;
     _emit();
     _nextTimer?.cancel();
     _nextTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
@@ -1395,7 +1385,7 @@ class PlayerController extends ChangeNotifier {
     activeMediaSourceId = sourceId;
     for (final source in mediaSources) {
       if (source.id == sourceId) {
-        _preferredSourceName = source.label;
+        _preferredSourceName = _sourceFingerprint(source);
         break;
       }
     }
@@ -1440,7 +1430,6 @@ class PlayerController extends ChangeNotifier {
     _hideTimer?.cancel();
     _nextTimer?.cancel();
     _nextTimer = null;
-    _skipPromptTimer?.cancel();
     _progressTimer?.cancel();
     _progressTimer = null;
     _subtitleReassertDue = null;
@@ -1501,7 +1490,16 @@ class PlayerController extends ChangeNotifier {
       if (!_accepts(operation) || event.sessionId != operation!.id) return;
       switch (event.kind) {
         case VideoEventKind.position:
+          final skip = activeSkipSegment;
+          final prompt = skipPromptVisible;
+          final offered = nextEpisode;
           _setPosition(event.value as Duration);
+          if (identical(skip, activeSkipSegment) &&
+              prompt == skipPromptVisible &&
+              identical(offered, nextEpisode) &&
+              !_playbackUiDue()) {
+            return;
+          }
         case VideoEventKind.duration:
           final value = event.value as Duration;
           if (value > Duration.zero) {
@@ -1554,8 +1552,13 @@ class PlayerController extends ChangeNotifier {
           state.phase = PlaybackPhase.failed;
           _hideTimer?.cancel();
       }
+      _lastPlaybackUi = DateTime.now();
       _emit();
     });
+  }
+
+  bool _playbackUiDue() {
+    return DateTime.now().difference(_lastPlaybackUi) >= kPlaybackUiMinInterval;
   }
 
   Future<void> _open({
@@ -1586,7 +1589,7 @@ class PlayerController extends ChangeNotifier {
     try {
       // 不带 MediaSourceId 请求:部分服务端(含 Emby)收到该参数时只返回
       // 这一个源,播放器就再也列不出其它版本;全部源在本地用
-      // [preferredPlaybackSourceId] 按 id/显示名挑选。
+      // [preferredPlaybackSourceId] 按 id/发行组标签挑选。
       final info = await client.getPlaybackInfo(
         itemId: itemId,
         maxStreamingBitrate: maxStreamingBitrate,
@@ -1715,9 +1718,13 @@ class PlayerController extends ChangeNotifier {
       await started;
       if (!_accepts(operation)) return;
       error = null;
-      _preferredSourceName ??= next.mediaSource.label;
+      _preferredSourceName = _sourceFingerprint(next.mediaSource);
       await _persistSeriesPreference();
       if (!_accepts(operation)) return;
+      // 续播落在片头/片尾或最后几分钟时,loading 期间的 position 不会弹出
+      // 跳过/下一集;开流完成后再判一次。
+      _updateActiveSkip();
+      _maybeOfferNextUp();
       onUserActivity();
       _emit();
     } on EmbyException catch (failure) {
@@ -2169,8 +2176,6 @@ class PlayerController extends ChangeNotifier {
     final autoplay = user?.enableNextEpisodeAutoPlay ?? true;
     if (!autoplay) {
       nextEpisode = NextEpisodeOffer(item: next);
-      controlsVisible = true;
-      _hideTimer?.cancel();
       _emit();
       return;
     }
@@ -2268,7 +2273,7 @@ class PlayerController extends ChangeNotifier {
         ? null
         : source?.streamByIndex(subtitleStreamIndex!);
     final hasSubtitles = source?.subtitleStreams.isNotEmpty ?? false;
-    _preferredSourceName ??= source?.label;
+    _preferredSourceName = _sourceFingerprint(source) ?? _preferredSourceName;
     _seriesPreferences = Map.of(_seriesPreferences);
     _seriesPreferences[seriesId] = PlayerSeriesPreference(
       audioStreamIndex: audioStreamIndex,
@@ -2282,6 +2287,19 @@ class PlayerController extends ChangeNotifier {
       mediaSourceName: _preferredSourceName,
     );
     await _writeSettings();
+  }
+
+  /// 跨集只记发行组,不记整段场景文件名。
+  String? _sourceFingerprint(PlaybackMediaSource? source) {
+    if (source == null) {
+      return null;
+    }
+    final fingerprint = mediaSourceFingerprint(source.name ?? source.label);
+    if (fingerprint.isNotEmpty) {
+      return fingerprint;
+    }
+    final label = source.label.trim();
+    return label.isEmpty ? null : label;
   }
 
   int _rewound(int ticks) {

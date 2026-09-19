@@ -34,6 +34,7 @@ class DanmakuViewState extends State<DanmakuView>
   Ticker? _ticker;
   Timer? _resizeDebounce;
   Size? _lastSize;
+  Duration? _lastDisplayClock;
   DanmakuGlyphStyle? _appliedStyle;
   List<DanmakuEntry>? _preparedEntries;
   int _fixedIdentity = Object.hash(0, 0);
@@ -111,13 +112,15 @@ class DanmakuViewState extends State<DanmakuView>
     _advanceFrame();
   }
 
-  /// 仅在「有弹幕且播放中」运转 ticker;暂停/无弹幕时停止。
+  /// 仅在「开启、有弹幕且播放中」运转 ticker;关闭开关时停转。
   void _syncTicker() {
     final controller = widget.controller;
-    final shouldTick = controller.hasComments && controller.playing;
+    final shouldTick =
+        controller.danmakuOn && controller.hasComments && controller.playing;
     if (shouldTick) {
       _ticker ??= createTicker(_onTick);
       if (!_ticker!.isActive) {
+        _lastDisplayClock = null;
         _ticker!.start();
       }
     } else {
@@ -132,6 +135,12 @@ class DanmakuViewState extends State<DanmakuView>
   }
 
   void _advanceFrame() {
+    if (!widget.controller.danmakuOn) {
+      widget.controller.layout.reset();
+      _scrollTick.value++;
+      _syncFixedIdentity();
+      return;
+    }
     final size = context.size;
     if (size == null || size.isEmpty) {
       return;
@@ -139,10 +148,35 @@ class DanmakuViewState extends State<DanmakuView>
     final sizeChanged = _lastSize != null && _lastSize != size;
     _lastSize = size;
     _syncGlyphCache(size, sizeChanged: sizeChanged);
-    widget.controller.layout.update(widget.controller.estimatePosition(), size);
+    widget.controller.layout.update(_displayClock(), size);
     _drawsThisFrame = 0;
     _scrollTick.value++;
     _syncFixedIdentity();
+  }
+
+  /// vsync 推进显示时钟。媒体 time-pos 是帧量化的,不能每帧当位置真值。
+  Duration _displayClock() {
+    final raw = widget.controller.estimatePosition();
+    if (!widget.controller.playing) {
+      _lastDisplayClock = raw;
+      return raw;
+    }
+    final last = _lastDisplayClock;
+    if (last == null) {
+      _lastDisplayClock = raw;
+      return raw;
+    }
+    final step = raw - last;
+    var clock = raw;
+    if (step.abs() > kDanmakuHardResync) {
+      clock = raw;
+    } else if (step > kDanmakuMaxFrameStep) {
+      clock = last + kDanmakuMaxFrameStep;
+    } else if (step.isNegative) {
+      clock = last;
+    }
+    _lastDisplayClock = clock;
+    return clock;
   }
 
   void _syncGlyphCache(Size size, {required bool sizeChanged}) {
@@ -225,7 +259,9 @@ class DanmakuViewState extends State<DanmakuView>
       child: Stack(
         fit: StackFit.expand,
         children: [
-          CustomPaint(size: Size.infinite, painter: _scrollPainter),
+          RepaintBoundary(
+            child: CustomPaint(size: Size.infinite, painter: _scrollPainter),
+          ),
           RepaintBoundary(
             child: CustomPaint(size: Size.infinite, painter: _fixedPainter),
           ),
@@ -240,6 +276,9 @@ void _paintLayer({
   required DanmakuViewState view,
   required bool scroll,
 }) {
+  if (!view.widget.controller.danmakuOn) {
+    return;
+  }
   final cache = view.widget.controller.glyphCache;
   final outline = cache.outline;
   var draws = 0;

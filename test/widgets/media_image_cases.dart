@@ -148,6 +148,23 @@ void main() {
     );
   });
 
+  test('player process uses a smaller decode budget', () {
+    configurePaintingImageCache(playerProcess: true);
+    expect(
+      PaintingBinding.instance.imageCache.maximumSize,
+      kPlayerProcessImageCacheMaxEntries,
+    );
+    expect(
+      PaintingBinding.instance.imageCache.maximumSizeBytes,
+      kPlayerProcessImageCacheMaxBytes,
+    );
+    expect(
+      MediaImageCache.instance.memoryLimitBytes,
+      kPlayerProcessImageCacheMaxBytes,
+    );
+    configurePaintingImageCache();
+  });
+
   testWidgets('shows a skeleton placeholder while loading', (tester) async {
     final auth = await connect(tester);
     await tester.runAsync(() async {
@@ -586,6 +603,81 @@ void main() {
     expect(find.byType(Image), findsWidgets);
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(MediaImageCache.defaultFetchTimeout);
+  });
+
+  test('waitForScrollIdle holds until the idle window elapses', () async {
+    MediaImageCache.instance.markScrollActivity();
+    expect(MediaImageCache.instance.isScrollBusy, isTrue);
+    var finished = false;
+    final waiting = MediaImageCache.instance.waitForScrollIdle().whenComplete(
+      () => finished = true,
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(finished, isFalse);
+    await waiting;
+    expect(MediaImageCache.instance.isScrollBusy, isFalse);
+  });
+
+  test('disk writes wait until scrolling stops', () async {
+    final disk = _FakeDiskStore();
+    MediaImageCache.instance.debugSetDiskStore(disk);
+    MediaImageCache.instance.markScrollActivity();
+    await MediaImageCache.instance.load(
+      serverId: 'server-1',
+      itemId: 'scroll-write',
+      type: 'Primary',
+      tag: 'tag-x',
+      maxWidth: 280,
+      fetch: () async => kTinyPng,
+    );
+    expect(disk.files, isEmpty);
+    await Future<void>.delayed(const Duration(milliseconds: 250));
+    expect(disk.files, hasLength(1));
+  });
+
+  testWidgets('scroll notifications mark the image cache busy', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SizedBox(
+          height: 200,
+          child: MediaImageScrollListener(
+            child: ListView(
+              children: [
+                for (var i = 0; i < 20; i++)
+                  SizedBox(height: 80, child: Text('$i')),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(MediaImageCache.instance.isScrollBusy, isFalse);
+    await tester.drag(find.byType(ListView), const Offset(0, -120));
+    await tester.pump();
+    expect(MediaImageCache.instance.isScrollBusy, isTrue);
+    MediaImage.debugResetCacheConfiguration();
+  });
+
+  testWidgets('uncached posters wait for scroll idle before fetching', (
+    tester,
+  ) async {
+    final auth = await connect(tester);
+    await tester.runAsync(() async {
+      MediaImageCache.instance.markScrollActivity();
+      await tester.pumpWidget(buildSubject(auth, withTag));
+      MediaImageCache.instance.markScrollActivity();
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    });
+    await tester.pump();
+    expect(imageRequests(), isEmpty);
+    await tester.runAsync(() async {
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+    });
+    await tester.pump();
+    await tester.pump();
+    expect(imageRequests(), isNotEmpty);
+    await tester.pumpWidget(const SizedBox.shrink());
+    MediaImage.debugResetCacheConfiguration();
   });
 }
 

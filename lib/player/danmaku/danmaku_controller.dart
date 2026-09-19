@@ -8,6 +8,7 @@ import 'package:rillight/player/danmaku/danmaku_layout.dart';
 import 'package:rillight/player/danmaku/danmaku_timeline.dart';
 import 'package:rillight/player/danmaku/dandanplay_client.dart';
 import 'package:rillight/player/danmaku/dandanplay_models.dart';
+import 'package:rillight/player/danmaku/danmaku_match_query.dart';
 import 'package:rillight/player/player_settings.dart';
 
 /// 弹幕会话状态(菜单与横幅提示依据)。
@@ -49,9 +50,11 @@ class DanmakuEpisodeContext {
     this.streamUrl,
     this.duration = Duration.zero,
     this.isMovie = false,
+    this.productionYear,
   });
 
-  /// 会话键组成部分:换条目或换媒体源视为新会话。
+  /// 会话按条目划分:同一集换编码/片源仍是同一弹幕库(弹弹 episodeId
+  /// 关联节目,不是具体文件;uosc_danmaku 也按目录记忆而不是按文件哈希换源)。
   final String itemId;
   final String mediaSourceId;
   final String? seriesId;
@@ -66,6 +69,20 @@ class DanmakuEpisodeContext {
   final Uri? streamUrl;
   final Duration duration;
   final bool isMovie;
+  final int? productionYear;
+
+  int? get effectiveSeason => danmakuEffectiveSeason(
+    seasonIndex: seasonIndex,
+    seriesTitle: seriesTitle ?? title,
+  );
+
+  /// 剧集用剧名打分,电影用条目标题;避免拿「第4集」去对番剧名。
+  String get libraryMatchTitle {
+    if (isMovie) {
+      return title ?? seriesTitle ?? '';
+    }
+    return seriesTitle ?? title ?? '';
+  }
 }
 
 /// 弹幕控制器:匹配/降级/记忆、来源选择与回退、显示参数与开关持久化。
@@ -204,7 +221,7 @@ class DanmakuController extends ChangeNotifier {
     required double rate,
   }) {
     if (context != null) {
-      final key = '${context.itemId}|${context.mediaSourceId}';
+      final key = context.itemId;
       if (key != _sessionKey) {
         unawaited(startSession(context));
         return;
@@ -219,16 +236,44 @@ class DanmakuController extends ChangeNotifier {
     required double rate,
   }) {
     final wasPlaying = this.playing;
-    final estimate = estimatePosition();
-    final jumped = (position - estimate).abs() > kDanmakuSeekThreshold;
-    _anchorPosition = position;
-    _anchorAt = DateTime.now();
+    if (wasPlaying && playing && this.playbackRate != rate) {
+      _anchorPosition = estimatePosition();
+      _anchorAt = DateTime.now();
+    }
     this.playing = playing;
     playbackRate = rate;
     layout.playbackRate = rate;
-    if (wasPlaying != playing || jumped) {
-      notifyListeners();
+
+    if (!playing) {
+      _rebaseClock(position);
+      if (wasPlaying) {
+        notifyListeners();
+      }
+      return;
     }
+    if (!wasPlaying) {
+      _rebaseClock(position);
+      notifyListeners();
+      return;
+    }
+
+    // 播放中不要每个 time-pos 都重锚:mpv 按视频帧量化,200ms 喂一次会把
+    // 滚动弹幕钉成一顿一顿。只在 seek / 严重失步时对齐。
+    final estimate = estimatePosition();
+    final drift = position - estimate;
+    if (drift.abs() > kDanmakuSeekThreshold) {
+      _rebaseClock(position);
+      notifyListeners();
+      return;
+    }
+    if (drift.abs() > kDanmakuHardResync) {
+      _rebaseClock(position);
+    }
+  }
+
+  void _rebaseClock(Duration position) {
+    _anchorPosition = position;
+    _anchorAt = DateTime.now();
   }
 
   /// 开启新会话:重置布局并按 记忆→哈希匹配→标题搜索 降级解析。
@@ -238,7 +283,7 @@ class DanmakuController extends ChangeNotifier {
     _sessionCancelToken = CancelToken();
     _cancelSearchRequests();
     _context = context;
-    final key = '${context.itemId}|${context.mediaSourceId}';
+    final key = context.itemId;
     if (key != _sessionKey) {
       // 换集即释放旧缓存:新会话加载失败时不得回退到旧集弹幕。
       _loaded = null;
@@ -352,9 +397,11 @@ class DanmakuController extends ChangeNotifier {
       layout.comments = const [];
       layout.entries = const [];
       glyphCache.clear();
+      layout.reset();
       return;
     }
     _rebuildTimeline();
+    layout.reset();
   }
 
   /// 以当前 [display] 重算时间轴。无已加载评论时只清空时间轴,
@@ -584,11 +631,10 @@ class DanmakuController extends ChangeNotifier {
     DanmakuApiException? lookupFailure;
 
     // 三步彼此隔离:一步 API 失败记入 lookupFailure 后继续,取消则丢弃整链。
-    // 1. 按剧记忆:同集直接复用,同剧后续集沿用动画并按集号对位。
+    // 1. 按剧+季记忆:弹弹每个季度是独立番剧,不能拿第一季的 animeId 套第四季。
     try {
-      final memory = context.seriesId == null
-          ? null
-          : _memories[context.seriesId];
+      final memoryKey = _memoryKeyOf(context);
+      final memory = memoryKey == null ? null : _memories[memoryKey];
       if (memory != null) {
         if (context.episodeIndex != null &&
             memory.episodeId != null &&
@@ -647,8 +693,8 @@ class DanmakuController extends ChangeNotifier {
           matchMode: hash.isEmpty ? 'fileNameOnly' : 'hashAndFileName',
           cancelToken: cancelToken,
         );
-        if (match.isMatched && match.matches.isNotEmpty) {
-          final candidate = match.matches.first;
+        final candidate = _pickAutoMatch(match, context);
+        if (candidate != null) {
           animeId = candidate.animeId;
           animeTitle = candidate.animeTitle;
           episodeId = candidate.episodeId;
@@ -665,13 +711,14 @@ class DanmakuController extends ChangeNotifier {
     // 3. 标题搜索降级:先 search/episodes(带分集),再 search/anime + bangumi。
     if (!resolved) {
       try {
-        var keyword = context.seriesTitle?.trim() ?? '';
-        if (keyword.isEmpty) {
-          keyword = context.title?.trim() ?? '';
-        }
-        if (keyword.isEmpty) {
-          keyword = context.fileName ?? '';
-        }
+        var keyword = danmakuSearchKeyword(
+          seriesTitle: context.seriesTitle,
+          title: context.title,
+          fileName: context.fileName,
+          seasonIndex: context.effectiveSeason,
+          productionYear: context.productionYear,
+          isMovie: context.isMovie,
+        );
         if (keyword.isNotEmpty) {
           var animes = await _client.searchEpisodes(
             source,
@@ -686,12 +733,42 @@ class DanmakuController extends ChangeNotifier {
               cancelToken: cancelToken,
             );
           }
+          if (animes.isEmpty && (context.effectiveSeason ?? 1) > 1) {
+            final fallback = danmakuSearchKeyword(
+              seriesTitle: context.seriesTitle,
+              title: context.title,
+              fileName: context.fileName,
+              productionYear: context.productionYear,
+              isMovie: context.isMovie,
+            );
+            if (fallback.isNotEmpty && fallback != keyword) {
+              animes = await _client.searchEpisodes(
+                source,
+                anime: fallback,
+                episode: context.episodeIndex,
+                cancelToken: cancelToken,
+              );
+              if (animes.isEmpty) {
+                animes = await _client.searchAnime(
+                  source,
+                  fallback,
+                  cancelToken: cancelToken,
+                );
+              }
+            }
+          }
           animes = await _ensureEpisodes(
             source,
             animes,
             cancelToken: cancelToken,
           );
-          final anime = _pickAnime(animes, context.isMovie);
+          final anime = _pickAnime(
+            animes,
+            context.isMovie,
+            title: context.libraryMatchTitle,
+            year: context.productionYear,
+            seasonIndex: context.effectiveSeason,
+          );
           final picked = anime == null
               ? null
               : _pickEpisode(anime.episodes, context.episodeIndex);
@@ -805,7 +882,10 @@ class DanmakuController extends ChangeNotifier {
       return;
     }
     _memories = Map.of(_memories);
-    _memories[seriesId] = DanmakuSeriesMemory(
+    _memories[danmakuMemoryKey(
+      seriesId,
+      context.effectiveSeason,
+    )] = DanmakuSeriesMemory(
       animeId: animeId,
       animeTitle: animeTitle,
       episodeId: episodeId,
@@ -851,17 +931,68 @@ class DanmakuController extends ChangeNotifier {
     return null;
   }
 
-  /// 按条目类型挑选搜索结果:电影取 movie,剧集优先 tvseries。
-  static DanmakuAnime? _pickAnime(List<DanmakuAnime> animes, bool isMovie) {
-    for (final anime in animes) {
-      if (isMovie && anime.isMovie) {
-        return anime;
-      }
-      if (!isMovie && (anime.isSeries || anime.type == null)) {
-        return anime;
-      }
+  static String? _memoryKeyOf(DanmakuEpisodeContext context) {
+    final seriesId = context.seriesId;
+    if (seriesId == null || seriesId.isEmpty) {
+      return null;
     }
-    return animes.isEmpty ? null : animes.first;
+    return danmakuMemoryKey(seriesId, context.effectiveSeason);
+  }
+
+  /// 弹弹精确哈希仍可能把同名翻拍/错季标成 isMatched;片名+季号+年份
+  /// 对不上就不要自动收下,改走搜索。
+  static DanmakuMatchCandidate? _pickAutoMatch(
+    DanmakuMatchResponse match,
+    DanmakuEpisodeContext context,
+  ) {
+    if (match.matches.isEmpty) {
+      return null;
+    }
+    final candidate = pickBestDanmakuTitle(
+      match.matches,
+      (item) => item.animeTitle,
+      libraryTitle: context.libraryMatchTitle,
+      year: context.productionYear,
+      seasonIndex: context.effectiveSeason,
+    );
+    if (candidate == null) {
+      return null;
+    }
+    if (!danmakuAcceptsAutoMatch(
+      candidate.animeTitle,
+      libraryTitle: context.libraryMatchTitle,
+      year: context.productionYear,
+      seasonIndex: context.effectiveSeason,
+    )) {
+      return null;
+    }
+    return candidate;
+  }
+
+  /// 按条目类型挑选搜索结果:电影取 movie,剧集优先 tvseries;
+  /// 同类型多条时按年份/翻拍标记/季号贴近片库标题。
+  static DanmakuAnime? _pickAnime(
+    List<DanmakuAnime> animes,
+    bool isMovie, {
+    String? title,
+    int? year,
+    int? seasonIndex,
+  }) {
+    final typed = [
+      for (final anime in animes)
+        if (isMovie && anime.isMovie)
+          anime
+        else if (!isMovie && (anime.isSeries || anime.type == null))
+          anime,
+    ];
+    final pool = typed.isNotEmpty ? typed : animes;
+    return pickBestDanmakuTitle(
+      pool,
+      (anime) => anime.animeTitle,
+      libraryTitle: title,
+      year: year,
+      seasonIndex: seasonIndex,
+    );
   }
 
   /// 按集号挑选剧集:先按标题中的集号匹配,再退位置对位。

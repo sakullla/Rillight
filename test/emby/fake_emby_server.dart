@@ -483,6 +483,9 @@ class FakeEmbyServer {
 
   /// 若设置,Playing/Progress/Stopped 在响应前等待该 Completer,优先于 [sessionsDelay]。
   Completer<void>? sessionsHold;
+
+  /// 单条详情故意去掉进度,用来测详情页从 Resume 行回填 UserData。
+  bool stripDetailPlaybackProgress = false;
   final Set<String> issuedTokens = {};
   final Set<String> loggedOutTokens = {};
   int _tokenSeq = 0;
@@ -907,6 +910,12 @@ class FakeEmbyServer {
       final item = _itemById(itemId);
       if (item != null) {
         item.playbackPositionTicks = ticks.toInt();
+        final runtime = item.runTimeTicks;
+        if (runtime != null && runtime > 0) {
+          item.playedPercentage = (ticks.toInt() / runtime * 100)
+              .clamp(0, 100)
+              .toDouble();
+        }
       }
     }
     return _json(200, {});
@@ -1075,6 +1084,11 @@ class FakeEmbyServer {
       final item = _itemById(rest[1]);
       if (item == null) {
         return _json(404, {'error': 'not found'});
+      }
+      if (stripDetailPlaybackProgress) {
+        final json = Map<String, dynamic>.from(item.toJson());
+        json['UserData'] = {'Played': false, 'PlaybackPositionTicks': 0};
+        return _json(200, json);
       }
       return _json(200, item.toJson());
     }

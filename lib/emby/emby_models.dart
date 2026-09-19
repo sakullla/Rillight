@@ -339,6 +339,9 @@ class ItemPerson {
   }
 }
 
+/// 进度达到该比例视为看完(对齐 Jellyfin/Emby MaxResumePct 默认 90%)。
+const double kPlaybackCompleteProgress = 0.9;
+
 class EmbyItem {
   const EmbyItem({
     required this.id,
@@ -455,7 +458,35 @@ class EmbyItem {
     return name;
   }
 
-  bool get canResume => !userData.played && userData.playbackPositionTicks > 0;
+  /// 未看完才续播。已标记已看、或进度达到片尾阈值(Emby/Jellyfin
+  /// MaxResumePct 默认 90%)时从头播放,也不再展示「已看 x%」。
+  bool get canResume {
+    if (userData.played) {
+      return false;
+    }
+    final progress = playbackProgress;
+    if (progress > kPlaybackCompleteProgress) {
+      return false;
+    }
+    if (progress > 0) {
+      return true;
+    }
+    return userData.playbackPositionTicks > 0;
+  }
+
+  /// 续播起点。只有百分比时按片长换算,供播放器 seek。
+  int get resumePositionTicks {
+    final ticks = userData.playbackPositionTicks;
+    if (ticks > 0) {
+      return ticks;
+    }
+    final percent = userData.playedPercentage;
+    final runtime = runTimeTicks ?? 0;
+    if (percent == null || percent <= 0 || runtime <= 0) {
+      return 0;
+    }
+    return (runtime * (percent / 100)).round();
+  }
 
   /// 海报/剧照候选:横图优先本集 Thumb;剧海报与本集 Primary 相同时跳过,避免一排同一张剧图。
   ///
@@ -818,7 +849,7 @@ int? _asInt(dynamic value) {
     return value.toInt();
   }
   if (value is String) {
-    return int.tryParse(value);
+    return int.tryParse(value) ?? double.tryParse(value)?.toInt();
   }
   return null;
 }

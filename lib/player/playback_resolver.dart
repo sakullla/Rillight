@@ -1,4 +1,5 @@
 import 'package:rillight/emby/emby_url.dart';
+import 'package:rillight/emby/media_source_format.dart';
 import 'package:rillight/player/playback_models.dart';
 
 class ResolvedPlayback {
@@ -21,8 +22,9 @@ class ResolvedPlayback {
 
 /// 从 PlaybackInfo 的多个媒体源里选出要播的那一个。
 ///
-/// 先按 [requestedId] 精确匹配;下一集的源 id 会变,再按 [requestedName]
-/// (MediaSource.Name,如「4K 版本」)对齐,都对不上才回落第一个源。
+/// 先按 [requestedId] 精确匹配(当前条目换源/详情页手选)。下一集的源 id
+/// 和整段文件名都会变,再按 [requestedName] 的发行组标签对齐;都对不上
+/// 才回落第一个源。
 String? preferredPlaybackSourceId({
   required List<PlaybackMediaSource> sources,
   String? requestedId,
@@ -41,12 +43,98 @@ String? preferredPlaybackSourceId({
   final name = requestedName?.trim();
   if (name != null && name.isNotEmpty) {
     for (final source in sources) {
-      if (source.label.trim() == name) {
+      if (source.label.trim().toLowerCase() == name.toLowerCase()) {
         return source.id;
       }
     }
+    final matched = _matchSourceByFingerprint(sources, name);
+    if (matched != null) {
+      return matched;
+    }
   }
   return sources.first.id;
+}
+
+String? _matchSourceByFingerprint(
+  List<PlaybackMediaSource> sources,
+  String requestedName,
+) {
+  final requested = mediaSourceMatchTokens(requestedName);
+  final parsed = [
+    for (final source in sources)
+      (source, mediaSourceMatchTokens(source.name ?? source.label)),
+  ];
+  final common = _commonTokenSet([for (final entry in parsed) entry.$2.tokens]);
+  var bestId = '';
+  var bestScore = 0;
+  for (final entry in parsed) {
+    final score = _sourceFingerprintScore(
+      requested: requested,
+      candidate: entry.$2,
+      common: common,
+    );
+    if (score > bestScore) {
+      bestScore = score;
+      bestId = entry.$1.id;
+    }
+  }
+  if (bestScore <= 0 || bestId.isEmpty) {
+    return null;
+  }
+  return bestId;
+}
+
+Set<String> _commonTokenSet(Iterable<List<String>> groups) {
+  final iterator = groups.iterator;
+  if (!iterator.moveNext()) {
+    return const {};
+  }
+  final common = <String>{
+    for (final token in iterator.current) token.toUpperCase(),
+  };
+  while (iterator.moveNext()) {
+    common.retainAll({
+      for (final token in iterator.current) token.toUpperCase(),
+    });
+    if (common.isEmpty) {
+      break;
+    }
+  }
+  return common;
+}
+
+int _sourceFingerprintScore({
+  required MediaSourceMatchTokens requested,
+  required MediaSourceMatchTokens candidate,
+  required Set<String> common,
+}) {
+  Set<String> folded(Iterable<String> tokens) => {
+    for (final token in tokens) token.toUpperCase(),
+  };
+  final requestedDistinct = folded(requested.tokens).difference(common);
+  final candidateDistinct = folded(candidate.tokens).difference(common);
+  if (requestedDistinct.isEmpty) {
+    final requestedAll = folded(requested.tokens);
+    final candidateAll = folded(candidate.tokens);
+    if (requestedAll.isEmpty ||
+        requestedAll.length != candidateAll.length ||
+        !candidateAll.containsAll(requestedAll)) {
+      return 0;
+    }
+    return 1;
+  }
+  final overlap = requestedDistinct.intersection(candidateDistinct);
+  if (overlap.isEmpty) {
+    return 0;
+  }
+  var score = overlap.length * 10;
+  if (overlap.length == requestedDistinct.length) {
+    score += 5;
+  }
+  if (candidateDistinct.difference(requestedDistinct).isEmpty) {
+    score += 2;
+  }
+  return score;
 }
 
 /// 解析起播流:直连优先(服务端 DirectStreamUrl,否则 strm 远端 Path,

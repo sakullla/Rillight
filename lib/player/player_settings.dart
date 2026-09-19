@@ -18,7 +18,7 @@ enum HardwareDecoderBackend { auto, d3d11va, nvdec, videotoolbox }
 ///
 /// [subtitleOff] 为 true 才表示用户关闭了字幕;缺省字段只表示未指定,
 /// 换集时走默认字幕。轨道序号跨集会变,同时记下语言/标题以便对齐。
-/// [mediaSourceName] 按 MediaSource.Name 跨集对齐(源 id 每集不同)。
+/// [mediaSourceName] 按发行组/版本标签跨集对齐(源 id 和文件名每集都不同)。
 class PlayerSeriesPreference {
   const PlayerSeriesPreference({
     this.audioStreamIndex,

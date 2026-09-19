@@ -166,6 +166,61 @@ void main() {
     expect(preferredPlaybackSourceId(sources: sources), 'e1-1080');
   });
 
+  test('preferredPlaybackSourceId aligns episodes by release group', () {
+    const nextEpisode = [
+      PlaybackMediaSource(
+        id: 'e2-cr',
+        name: 'Show.S01E02.CR.WEB-DL.1080p.H264.AAC-SonyHD',
+      ),
+      PlaybackMediaSource(
+        id: 'e2-cp',
+        name: 'Show.S01E02.CP+.WEB-DL.1080p.H264.AAC-SonyHD',
+      ),
+      PlaybackMediaSource(
+        id: 'e2-line',
+        name: 'Show.S01E02.LINETV.WEB-DL.1080p.H264.AAC-SonyHD',
+      ),
+      PlaybackMediaSource(
+        id: 'e2-loli',
+        name: '[LoliHouse] Show - 02 [WebRip 1080p HEVC AAC]',
+      ),
+      PlaybackMediaSource(
+        id: 'e2-orion-ja',
+        name: 'Show.S01E02.简日双语.1080p.H265.AAC-猎户发布组',
+      ),
+      PlaybackMediaSource(
+        id: 'e2-orion',
+        name: 'Show.S01E02.1080p.H265.AAC-猎户发布组',
+      ),
+    ];
+    expect(
+      preferredPlaybackSourceId(
+        sources: nextEpisode,
+        requestedId: 'e1-line-stale',
+        requestedName: 'Show.S01E01.LINETV.WEB-DL.1080p.H264.AAC-SonyHD',
+      ),
+      'e2-line',
+    );
+    expect(
+      preferredPlaybackSourceId(
+        sources: nextEpisode,
+        requestedName: 'LINETV · WEB-DL · SonyHD',
+      ),
+      'e2-line',
+    );
+    expect(
+      preferredPlaybackSourceId(
+        sources: nextEpisode,
+        requestedName: '简日双语 · 猎户发布组',
+      ),
+      'e2-orion-ja',
+    );
+    expect(
+      preferredPlaybackSourceId(sources: nextEpisode, requestedName: '猎户发布组'),
+      'e2-orion',
+    );
+  });
+
   test('PlaybackInfo looks up sources by id', () {
     final info = PlaybackInfo.fromJson({
       'PlaySessionId': 'play-multi',

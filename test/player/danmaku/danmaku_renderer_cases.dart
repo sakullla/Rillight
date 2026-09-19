@@ -176,6 +176,22 @@ void main() {
     );
   });
 
+  testWidgets('scroll comments do not jump backward between frames', (
+    tester,
+  ) async {
+    final controller = controllerWith([comment(1, 0)]);
+    controller.updatePosition(Duration.zero, playing: true, rate: 1);
+    await pumpDanmaku(tester, controller);
+    await warmup(tester, controller);
+    var lastLeft = controller.layout.activeEntries.single.left;
+    for (var i = 0; i < 12; i++) {
+      await tester.pump(const Duration(milliseconds: 16));
+      final left = controller.layout.activeEntries.single.left;
+      expect(left, lessThanOrEqualTo(lastLeft + 0.01), reason: '滚动弹幕不得在帧间回跳');
+      lastLeft = left;
+    }
+  });
+
   testWidgets(
     'after warmup ticker frames do not sync-layout and pause freezes',
     (tester) async {

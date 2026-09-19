@@ -68,4 +68,22 @@ void main() {
     expect(source.presentation.detail, contains('BILI'));
     expect(source.presentation.detail, contains('8.5 GB'));
   });
+
+  test('fingerprint keeps release group and drops episode numbers', () {
+    expect(
+      mediaSourceFingerprint('Show.S01E04.LINETV.WEB-DL.1080p.H264.AAC-SonyHD'),
+      'Show · LINETV · WEB-DL · SonyHD',
+    );
+    expect(
+      formatMediaSource(
+        name: 'Show.S01E01.LINETV.WEB-DL.1080p.H264.AAC-SonyHD',
+      ).detail,
+      'Show · LINETV · WEB-DL · SonyHD',
+    );
+    expect(mediaSourceFingerprint('4K 版本'), '版本');
+    expect(
+      mediaSourceFingerprint('Show.S01E04.简日双语.1080p.H265.AAC-猎户发布组'),
+      'Show · 简日双语 · 猎户发布组',
+    );
+  });
 }

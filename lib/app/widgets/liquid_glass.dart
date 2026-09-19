@@ -5,6 +5,30 @@ import 'package:rillight/app/theme/tokens.dart';
 
 enum LiquidGlassKind { bar, panel, control, pill }
 
+/// 覆盖子树里 [LiquidGlass] 是否对背后做 [BackdropFilter]。
+///
+/// 播放器叠在 mpv Texture 上时必须关掉:Impeller 上 BackdropFilter
+/// 的图层会铺满窗口并吃掉点击,[IgnorePointer] 挡不住。
+class LiquidGlassBackdrop extends InheritedWidget {
+  const LiquidGlassBackdrop({
+    super.key,
+    required this.enabled,
+    required super.child,
+  });
+
+  final bool enabled;
+
+  static bool enabledOf(BuildContext context) {
+    final scope = context
+        .dependOnInheritedWidgetOfExactType<LiquidGlassBackdrop>();
+    return scope?.enabled ?? true;
+  }
+
+  @override
+  bool updateShouldNotify(LiquidGlassBackdrop oldWidget) =>
+      enabled != oldWidget.enabled;
+}
+
 /// 液态玻璃浮层:模糊 + 轻微饱和 + 顶部高光 + 细描边。
 ///
 /// 只包导航、对话框、播放控件等浮层。海报墙不要用,滚动时 BackdropFilter
@@ -97,7 +121,8 @@ class LiquidGlass extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final skipBlur = reduced(context);
+    final skipBlur =
+        reduced(context) || !LiquidGlassBackdrop.enabledOf(context);
     final scheme = Theme.of(context).colorScheme;
     final radius = _radius;
     final fill = scheme.surface.withValues(

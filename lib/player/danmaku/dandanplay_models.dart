@@ -99,8 +99,8 @@ class DanmakuMatchResponse {
   final List<DanmakuMatchCandidate> matches;
 }
 
-/// 按剧(seriesId)记忆的 dandanplay 匹配结果:
-/// 记住动画与集,同剧后续集自动沿用该动画并按集号对位。
+/// 按剧+季记忆的 dandanplay 匹配结果:
+/// 记住该季动画与集,同一季后续集自动沿用该动画并按集号对位。
 class DanmakuSeriesMemory {
   const DanmakuSeriesMemory({
     required this.animeId,

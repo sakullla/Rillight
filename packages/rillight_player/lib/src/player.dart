@@ -321,8 +321,13 @@ class _MpvVideoViewState extends State<MpvVideoView> {
       }
       return ValueListenableBuilder<int?>(
         valueListenable: widget.player.textureId,
-        builder: (context, id, _) =>
-            id == null ? const SizedBox.expand() : Texture(textureId: id),
+        builder: (context, id, _) => id == null
+            ? const SizedBox.expand()
+            : Texture(
+                textureId: id,
+                // 默认 low 会再双线性采样一遍,PGS 描边发糊。
+                filterQuality: FilterQuality.medium,
+              ),
       );
     },
   );

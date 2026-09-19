@@ -199,11 +199,31 @@ void main() {
     },
   );
 
+  test(
+    'rapid position events do not notify faster than the UI interval',
+    () async {
+      await controller.start();
+      var notifies = 0;
+      controller.addListener(() => notifies++);
+      backend.emitEvent(VideoEventKind.position, const Duration(seconds: 1));
+      await Future<void>.delayed(Duration.zero);
+      final afterFirst = notifies;
+      backend.emitEvent(VideoEventKind.position, const Duration(seconds: 2));
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.position, const Duration(seconds: 2));
+      expect(notifies, afterFirst);
+      await Future<void>.delayed(kPlaybackUiMinInterval);
+      backend.emitEvent(VideoEventKind.position, const Duration(seconds: 3));
+      await Future<void>.delayed(Duration.zero);
+      expect(notifies, afterFirst + 1);
+    },
+  );
+
   test('EOF stays observable while the Playing report is pending', () async {
     client.playingGate = Completer<void>();
     final starting = controller.start();
     await _until(() => client.reports.any((e) => e.$1 == 'Playing'));
-    backend.completePlayback();
+    backend.completePlayback(at: controller.duration);
     await Future<void>.delayed(Duration.zero);
     expect(controller.playbackEnded, isTrue);
     expect(controller.state.phase, PlaybackPhase.ended);
@@ -224,7 +244,7 @@ void main() {
     expect(controller.playbackEnded, isFalse);
     expect(client.reports.where((e) => e.$1 == 'Stopped'), isEmpty);
     backend.emitBuffering(false);
-    backend.completePlayback();
+    backend.completePlayback(at: controller.duration);
     await Future<void>.delayed(Duration.zero);
     expect(controller.playbackEnded, isTrue);
     expect(controller.state.phase, PlaybackPhase.ended);
@@ -329,7 +349,7 @@ void main() {
       );
       await controller.start();
       client.stoppedGate = Completer<void>();
-      backend.completePlayback();
+      backend.completePlayback(at: controller.duration);
       await _until(() => controller.nextEpisode?.remaining != null);
       var switched = false;
       final switching = controller.playEpisode(episode('movie-up')).then((_) {

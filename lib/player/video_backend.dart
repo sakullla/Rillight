@@ -243,9 +243,14 @@ class FakeVideoBackend implements VideoBackend {
     emitEvent(VideoEventKind.error, message);
   }
 
-  void completePlayback() {
+  void completePlayback({Duration? at}) {
     isPlaying = false;
-    position = duration;
+    position = at ?? duration;
+    if (position > duration) {
+      duration = position;
+      _duration.add(duration);
+      emitEvent(VideoEventKind.duration, duration);
+    }
     _position.add(position);
     emitEvent(VideoEventKind.position, position);
     _playing.add(false);

@@ -11,6 +11,7 @@ import 'package:rillight/emby/emby_errors.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/library/poster_card.dart';
+import 'package:rillight/media_image/media_image.dart';
 
 const Map<ShortcutActivator, Intent> _kShelfArrowShortcuts = {
   SingleActivator(LogicalKeyboardKey.arrowLeft): DirectionalFocusIntent(
@@ -380,61 +381,62 @@ class _MediaShelfState extends State<MediaShelf> {
                         behavior: const _ShelfScrollBehavior(),
                         child: Listener(
                           onPointerSignal: _onVerticalWheelToParent,
-                          child: ListView.separated(
-                            controller: _controller,
-                            scrollCacheExtent: const ScrollCacheExtent.viewport(
-                              1,
-                            ),
-                            // 首张卡片外缘仍落在 AppSpacing.page 竖线上。
-                            padding: const EdgeInsets.symmetric(
-                              horizontal:
-                                  AppSpacing.page - MediaShelf.hoverGutter,
-                            ),
-                            scrollDirection: Axis.horizontal,
-                            itemBuilder: (context, index) {
-                              final item = widget.items[index];
-                              final child =
-                                  widget.itemBuilder?.call(context, item) ??
-                                  PosterCard(
-                                    item: item,
-                                    showProgress: widget.showProgress,
-                                    wide: widget.wide,
-                                    width: widget.wide
-                                        ? MediaShelf.wideCardWidthFor(
-                                            screenWidth,
-                                          )
-                                        : MediaShelf.posterWidthFor(
-                                            screenWidth,
-                                          ),
-                                    onTap: () => widget.onTap(item),
-                                    onRemoveFromResume:
-                                        widget.onRemoveFromResume,
-                                  );
-                              return Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: MediaShelf.hoverGutter,
-                                ),
-                                child: Align(
-                                  alignment: Alignment.center,
-                                  child: Listener(
-                                    onPointerSignal: _onVerticalWheelToParent,
-                                    child: Shortcuts(
-                                      shortcuts: _kShelfArrowShortcuts,
-                                      child: _EnsureVisibleOnFocus(
-                                        child: child,
+                          child: MediaImageScrollListener(
+                            child: ListView.separated(
+                              controller: _controller,
+                              scrollCacheExtent:
+                                  const ScrollCacheExtent.viewport(0.5),
+                              // 首张卡片外缘仍落在 AppSpacing.page 竖线上。
+                              padding: const EdgeInsets.symmetric(
+                                horizontal:
+                                    AppSpacing.page - MediaShelf.hoverGutter,
+                              ),
+                              scrollDirection: Axis.horizontal,
+                              itemBuilder: (context, index) {
+                                final item = widget.items[index];
+                                final child =
+                                    widget.itemBuilder?.call(context, item) ??
+                                    PosterCard(
+                                      item: item,
+                                      showProgress: widget.showProgress,
+                                      wide: widget.wide,
+                                      width: widget.wide
+                                          ? MediaShelf.wideCardWidthFor(
+                                              screenWidth,
+                                            )
+                                          : MediaShelf.posterWidthFor(
+                                              screenWidth,
+                                            ),
+                                      onTap: () => widget.onTap(item),
+                                      onRemoveFromResume:
+                                          widget.onRemoveFromResume,
+                                    );
+                                return Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: MediaShelf.hoverGutter,
+                                  ),
+                                  child: Align(
+                                    alignment: Alignment.center,
+                                    child: Listener(
+                                      onPointerSignal: _onVerticalWheelToParent,
+                                      child: Shortcuts(
+                                        shortcuts: _kShelfArrowShortcuts,
+                                        child: _EnsureVisibleOnFocus(
+                                          child: child,
+                                        ),
                                       ),
                                     ),
                                   ),
-                                ),
-                              );
-                            },
-                            separatorBuilder: (context, index) =>
-                                const SizedBox(
-                                  width:
-                                      MediaShelf.cardGap -
-                                      2 * MediaShelf.hoverGutter,
-                                ),
-                            itemCount: widget.items.length,
+                                );
+                              },
+                              separatorBuilder: (context, index) =>
+                                  const SizedBox(
+                                    width:
+                                        MediaShelf.cardGap -
+                                        2 * MediaShelf.hoverGutter,
+                                  ),
+                              itemCount: widget.items.length,
+                            ),
                           ),
                         ),
                       ),

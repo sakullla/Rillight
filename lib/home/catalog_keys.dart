@@ -29,6 +29,7 @@ abstract final class CatalogKeys {
   static const detailSubtitle = Key('catalog-detail-subtitle');
   static const episodesLoadMore = Key('catalog-episodes-load-more');
   static const librarySwitcher = Key('catalog-library-switcher');
+  static const heroPlay = Key('catalog-hero-play');
   static const heroPrev = Key('catalog-hero-prev');
   static const heroNext = Key('catalog-hero-next');
   static Key heroDot(int index) => Key('catalog-hero-dot-$index');

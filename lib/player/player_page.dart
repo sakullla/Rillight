@@ -111,6 +111,11 @@ class PlayerPageState extends State<PlayerPage> {
   bool _episodesOpen = false;
   bool _danmakuPanelOpen = false;
   bool _danmakuSearchOpen = false;
+
+  /// 弹幕层一旦挂上就别随开关卸掉:开关时拆全屏 CustomPaint
+  /// 叠在 Texture 上,Impeller 会把后续点击吞掉。
+  bool _danmakuLayerPinned = false;
+  String? _danmakuLayerItemId;
   final FocusNode _playerShortcuts = FocusNode(debugLabel: 'player-shortcuts');
 
   bool _pointerNearWindowEdge(Offset local) {
@@ -173,6 +178,15 @@ class PlayerPageState extends State<PlayerPage> {
   void _onController() {
     final current = controller;
     final danmaku = _danmaku;
+    if (current != null &&
+        ((_danmakuLayerItemId != null &&
+                _danmakuLayerItemId != current.itemId) ||
+            current.loading ||
+            current.error != null ||
+            current.playbackEnded)) {
+      _danmakuLayerPinned = false;
+      _danmakuLayerItemId = null;
+    }
     if (current != null && danmaku != null) {
       danmaku.syncFromPlayback(
         _danmakuContext(current),
@@ -187,6 +201,17 @@ class PlayerPageState extends State<PlayerPage> {
   }
 
   void _onDanmakuChanged() {
+    final danmaku = _danmaku;
+    final current = controller;
+    if (danmaku != null &&
+        danmaku.hasComments &&
+        current != null &&
+        !current.loading &&
+        current.error == null &&
+        !current.playbackEnded) {
+      _danmakuLayerPinned = true;
+      _danmakuLayerItemId = current.itemId;
+    }
     if (mounted) {
       setState(() {});
     }
@@ -207,6 +232,7 @@ class PlayerPageState extends State<PlayerPage> {
       seasonIndex: item.parentIndexNumber,
       episodeIndex: item.indexNumber,
       height: resolved.mediaSource.height,
+      productionYear: item.productionYear,
     );
     return DanmakuEpisodeContext(
       itemId: current.itemId,
@@ -223,6 +249,7 @@ class PlayerPageState extends State<PlayerPage> {
           ? current.duration
           : durationFromTicks(resolved.mediaSource.runTimeTicks ?? 0),
       isMovie: !item.isEpisode,
+      productionYear: item.productionYear,
     );
   }
 
@@ -349,10 +376,11 @@ class PlayerPageState extends State<PlayerPage> {
     if (!_danmakuSearchOpen) {
       return;
     }
+    setState(() => _danmakuSearchOpen = false);
     if (!_episodesOpen && !_danmakuPanelOpen) {
       controller?.setControlsPinned(false);
+      controller?.onUserActivity();
     }
-    setState(() => _danmakuSearchOpen = false);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || _danmakuSearchOpen) {
         return;
@@ -368,284 +396,296 @@ class PlayerPageState extends State<PlayerPage> {
     if (current == null) {
       return const ColoredBox(color: Colors.black);
     }
-    return Focus(
-      focusNode: _playerShortcuts,
-      autofocus: true,
-      descendantsAreFocusable: _danmakuSearchOpen || _danmakuPanelOpen,
-      onKeyEvent: (node, event) {
-        if (event is! KeyDownEvent) {
-          return KeyEventResult.ignored;
-        }
-        if (_danmakuSearchOpen) {
-          if (event.logicalKey == LogicalKeyboardKey.escape) {
-            _closeDanmakuSearch();
-            return KeyEventResult.handled;
+    return LiquidGlassBackdrop(
+      enabled: false,
+      child: Focus(
+        focusNode: _playerShortcuts,
+        autofocus: true,
+        descendantsAreFocusable: _danmakuSearchOpen || _danmakuPanelOpen,
+        onKeyEvent: (node, event) {
+          if (event is! KeyDownEvent) {
+            return KeyEventResult.ignored;
           }
-          return KeyEventResult.ignored;
-        }
-        if (event.logicalKey == LogicalKeyboardKey.space) {
-          current.togglePlay();
-          return KeyEventResult.handled;
-        }
-        if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
-          current.seekRelative(-current.seekStep);
-          return KeyEventResult.handled;
-        }
-        if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
-          current.seekRelative(current.seekStep);
-          return KeyEventResult.handled;
-        }
-        if (event.logicalKey == LogicalKeyboardKey.keyF) {
-          current.toggleFullScreen();
-          return KeyEventResult.handled;
-        }
-        if (event.logicalKey == LogicalKeyboardKey.bracketLeft) {
-          current.nudgeRateDown();
-          return KeyEventResult.handled;
-        }
-        if (event.logicalKey == LogicalKeyboardKey.bracketRight) {
-          current.nudgeRateUp();
-          return KeyEventResult.handled;
-        }
-        if (event.logicalKey == LogicalKeyboardKey.keyT) {
-          unawaited(current.toggleAlwaysOnTop());
-          return KeyEventResult.handled;
-        }
-        if (event.logicalKey == LogicalKeyboardKey.escape) {
           if (_danmakuSearchOpen) {
-            _closeDanmakuSearch();
+            if (event.logicalKey == LogicalKeyboardKey.escape) {
+              _closeDanmakuSearch();
+              return KeyEventResult.handled;
+            }
+            return KeyEventResult.ignored;
+          }
+          if (event.logicalKey == LogicalKeyboardKey.space) {
+            current.togglePlay();
             return KeyEventResult.handled;
           }
-          if (_danmakuPanelOpen) {
-            _closeDanmakuPanel();
+          if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+            current.seekRelative(-current.seekStep);
             return KeyEventResult.handled;
           }
-          if (_episodesOpen) {
-            _closeEpisodeList();
+          if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+            current.seekRelative(current.seekStep);
             return KeyEventResult.handled;
           }
-          current.onEscape();
-          return KeyEventResult.handled;
-        }
-        return KeyEventResult.ignored;
-      },
-      child: PopScope(
-        onPopInvokedWithResult: (didPop, result) {
-          if (didPop) {
-            unawaited(current.shutdownSession());
+          if (event.logicalKey == LogicalKeyboardKey.keyF) {
+            current.toggleFullScreen();
+            return KeyEventResult.handled;
           }
+          if (event.logicalKey == LogicalKeyboardKey.bracketLeft) {
+            current.nudgeRateDown();
+            return KeyEventResult.handled;
+          }
+          if (event.logicalKey == LogicalKeyboardKey.bracketRight) {
+            current.nudgeRateUp();
+            return KeyEventResult.handled;
+          }
+          if (event.logicalKey == LogicalKeyboardKey.keyT) {
+            unawaited(current.toggleAlwaysOnTop());
+            return KeyEventResult.handled;
+          }
+          if (event.logicalKey == LogicalKeyboardKey.escape) {
+            if (_danmakuSearchOpen) {
+              _closeDanmakuSearch();
+              return KeyEventResult.handled;
+            }
+            if (_danmakuPanelOpen) {
+              _closeDanmakuPanel();
+              return KeyEventResult.handled;
+            }
+            if (_episodesOpen) {
+              _closeEpisodeList();
+              return KeyEventResult.handled;
+            }
+            current.onEscape();
+            return KeyEventResult.handled;
+          }
+          return KeyEventResult.ignored;
         },
-        child: Scaffold(
-          backgroundColor: Colors.black,
-          body: Listener(
-            behavior: HitTestBehavior.translucent,
-            onPointerSignal: (event) {
-              if (event is! PointerScrollEvent) {
-                return;
-              }
-              if (event.scrollDelta.dy == 0) {
-                return;
-              }
-              // 剧集/弹幕侧栏自己吃滚轮;根 Listener 是 translucent,
-              // 不拦住的话滑列表会把音量一起改掉。
-              if (_episodesOpen || _danmakuPanelOpen || _danmakuSearchOpen) {
-                return;
-              }
-              final delta = event.scrollDelta.dy < 0
-                  ? PlayerController.volumeWheelStep
-                  : -PlayerController.volumeWheelStep;
-              unawaited(current.nudgeVolume(delta));
-            },
-            child: MouseRegion(
-              onHover: (event) {
-                if (_pointerNearWindowEdge(event.localPosition)) {
+        child: PopScope(
+          onPopInvokedWithResult: (didPop, result) {
+            if (didPop) {
+              unawaited(current.shutdownSession());
+            }
+          },
+          child: Scaffold(
+            backgroundColor: Colors.black,
+            body: Listener(
+              behavior: HitTestBehavior.translucent,
+              onPointerSignal: (event) {
+                if (event is! PointerScrollEvent) {
                   return;
                 }
-                current.onPointerHover();
+                if (event.scrollDelta.dy == 0) {
+                  return;
+                }
+                // 剧集/弹幕侧栏自己吃滚轮;根 Listener 是 translucent,
+                // 不拦住的话滑列表会把音量一起改掉。
+                if (_episodesOpen || _danmakuPanelOpen || _danmakuSearchOpen) {
+                  return;
+                }
+                final delta = event.scrollDelta.dy < 0
+                    ? PlayerController.volumeWheelStep
+                    : -PlayerController.volumeWheelStep;
+                unawaited(current.nudgeVolume(delta));
               },
-              onExit: (_) {
-                current.hideControlsOnPointerExit();
-              },
-              cursor:
-                  (!current.controlsVisible &&
-                      current.nextEpisode == null &&
-                      !current.playbackEnded &&
-                      !_episodesOpen &&
-                      !_danmakuPanelOpen &&
-                      !_danmakuSearchOpen)
-                  ? SystemMouseCursors.none
-                  : MouseCursor.defer,
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  RepaintBoundary(
-                    child: IgnorePointer(
-                      child: current.backend.buildView(
-                        key: const ValueKey('player-video-surface'),
-                      ),
-                    ),
-                  ),
-                  // 弹幕只绘制,叠在点击层下面,避免 CustomPaint 吃掉单击。
-                  if (_danmakuOverlayVisible(current))
-                    Positioned.fill(
+              child: MouseRegion(
+                onHover: (event) {
+                  if (_pointerNearWindowEdge(event.localPosition)) {
+                    return;
+                  }
+                  current.onPointerHover();
+                },
+                onExit: (_) {
+                  current.hideControlsOnPointerExit();
+                },
+                cursor:
+                    (!current.controlsVisible &&
+                        current.nextEpisode == null &&
+                        !current.playbackEnded &&
+                        !_episodesOpen &&
+                        !_danmakuPanelOpen &&
+                        !_danmakuSearchOpen)
+                    ? SystemMouseCursors.none
+                    : MouseCursor.defer,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    RepaintBoundary(
                       child: IgnorePointer(
-                        child: DanmakuView(controller: _danmaku!),
+                        child: current.backend.buildView(
+                          key: const ValueKey('player-video-surface'),
+                        ),
                       ),
                     ),
-                  Positioned.fill(
-                    child: GestureDetector(
-                      key: PlayerKeys.surface,
-                      behavior: HitTestBehavior.opaque,
-                      onTapUp: (_) {
-                        if (_danmakuPanelOpen) {
-                          _closeDanmakuPanel();
-                          return;
-                        }
-                        current.toggleControls();
-                      },
-                      child: const SizedBox.expand(),
-                    ),
-                  ),
-                  if (current.loading || current.isBuffering)
-                    Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const SizedBox(
-                            width: 44,
-                            height: 44,
-                            child: CircularProgressIndicator(strokeWidth: 3),
+                    // 弹幕只绘制,叠在点击层下面,避免 CustomPaint 吃掉单击。
+                    if (_danmakuOverlayVisible(current))
+                      Positioned.fill(
+                        child: IgnorePointer(
+                          child: TickerMode(
+                            enabled: _danmaku!.danmakuOn,
+                            child: DanmakuView(controller: _danmaku!),
                           ),
-                          const SizedBox(height: AppSpacing.md),
-                          Text(
-                            l10n.playerLoading,
-                            style: Theme.of(context).textTheme.bodyMedium
-                                ?.copyWith(
-                                  color: Theme.of(context).colorScheme.onSurface
-                                      .withValues(alpha: 0.7),
-                                ),
-                          ),
-                        ],
+                        ),
+                      ),
+                    Positioned.fill(
+                      child: GestureDetector(
+                        key: PlayerKeys.surface,
+                        behavior: HitTestBehavior.opaque,
+                        onTapUp: (_) {
+                          if (_danmakuPanelOpen) {
+                            _closeDanmakuPanel();
+                            return;
+                          }
+                          current.toggleControls();
+                        },
+                        child: const SizedBox.expand(),
                       ),
                     ),
-                  if (_errorText(l10n, current) != null)
-                    AppErrorView(
-                      message: _errorText(l10n, current)!,
-                      onRetry: current.start,
-                    ),
-                  if (!current.loading &&
-                      current.resolved != null &&
-                      !current.playbackEnded &&
-                      current.error == null)
-                    _ControlsBar(
+                    if (current.loading || current.isBuffering)
+                      Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const SizedBox(
+                              width: 44,
+                              height: 44,
+                              child: CircularProgressIndicator(strokeWidth: 3),
+                            ),
+                            const SizedBox(height: AppSpacing.md),
+                            Text(
+                              l10n.playerLoading,
+                              style: Theme.of(context).textTheme.bodyMedium
+                                  ?.copyWith(
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onSurface
+                                        .withValues(alpha: 0.7),
+                                  ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    if (_errorText(l10n, current) != null)
+                      AppErrorView(
+                        message: _errorText(l10n, current)!,
+                        onRetry: current.start,
+                      ),
+                    if (!current.loading &&
+                        current.resolved != null &&
+                        !current.playbackEnded &&
+                        current.error == null)
+                      _ControlsBar(
+                        controller: current,
+                        visible: current.controlsVisible,
+                        dragging: _dragSeeking,
+                        dragValue: _dragValue,
+                        danmaku: _danmaku,
+                        onOpenEpisodes: _openEpisodeList,
+                        onDanmakuSearch: _openDanmakuPanel,
+                        onDragStart: (value) {
+                          current.onUserActivity();
+                          setState(() {
+                            _dragSeeking = true;
+                            _dragValue = value;
+                          });
+                        },
+                        onDragUpdate: (value) {
+                          current.onUserActivity();
+                          setState(() => _dragValue = value);
+                        },
+                        onDragEnd: (value) {
+                          setState(() => _dragSeeking = false);
+                          final duration = current.duration;
+                          if (duration <= Duration.zero) {
+                            return;
+                          }
+                          unawaited(
+                            current.seekTo(
+                              Duration(
+                                milliseconds: (duration.inMilliseconds * value)
+                                    .round(),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    if (current.nextEpisode != null)
+                      _NextEpisodeBanner(controller: current),
+                    if (current.activeSkipSegment != null &&
+                        current.skipPromptVisible &&
+                        current.nextEpisode == null &&
+                        !current.loading &&
+                        !current.playbackEnded)
+                      _SkipSegmentButton(controller: current),
+                    if (current.playbackEnded && current.nextEpisode == null)
+                      _PlaybackEndedOverlay(controller: current),
+                    if (current.disconnected && !current.isPlaying)
+                      _Banner(
+                        key: PlayerKeys.disconnect,
+                        text:
+                            current.disconnectDetail ??
+                            l10n.playbackDisconnected,
+                      ),
+                    if (current.progressSyncFailed &&
+                        !(current.disconnected && !current.isPlaying))
+                      _Banner(
+                        key: PlayerKeys.progressSyncFailed,
+                        text: current.sessionExpired
+                            ? l10n.playbackSessionExpired
+                            : l10n.progressSyncFailed,
+                        onDismiss: current.progressSyncPersistent
+                            ? current.dismissProgressSyncBanner
+                            : null,
+                      ),
+                    if (current.subtitleNotice != null)
+                      _Banner(
+                        key: PlayerKeys.subtitleNotice,
+                        text: _subtitleNoticeText(
+                          l10n,
+                          current.subtitleNotice!,
+                        ),
+                      ),
+                    if (current.trackFailure != null)
+                      _Banner(
+                        key: const ValueKey('player-track-failure'),
+                        text:
+                            '${l10n.audioTrack} / ${l10n.subtitleTrack}：${l10n.errorLoadFailed}',
+                        onDismiss: current.dismissTrackFailure,
+                      ),
+                    if (_danmaku?.status == DanmakuStatus.customUnreachable &&
+                        !current.loading)
+                      _DanmakuSourceBanner(controller: _danmaku!),
+                    _PlayerChromeBar(
                       controller: current,
                       visible: current.controlsVisible,
-                      dragging: _dragSeeking,
-                      dragValue: _dragValue,
-                      danmaku: _danmaku,
-                      onOpenEpisodes: _openEpisodeList,
-                      onDanmakuSearch: _openDanmakuPanel,
-                      onDragStart: (value) {
-                        current.onUserActivity();
-                        setState(() {
-                          _dragSeeking = true;
-                          _dragValue = value;
-                        });
-                      },
-                      onDragUpdate: (value) {
-                        current.onUserActivity();
-                        setState(() => _dragValue = value);
-                      },
-                      onDragEnd: (value) {
-                        setState(() => _dragSeeking = false);
-                        final duration = current.duration;
-                        if (duration <= Duration.zero) {
-                          return;
-                        }
-                        unawaited(
-                          current.seekTo(
-                            Duration(
-                              milliseconds: (duration.inMilliseconds * value)
-                                  .round(),
-                            ),
-                          ),
-                        );
-                      },
                     ),
-                  if (current.nextEpisode != null)
-                    _NextEpisodeBanner(controller: current),
-                  if (current.activeSkipSegment != null &&
-                      current.skipPromptVisible &&
-                      current.nextEpisode == null &&
-                      !current.loading &&
-                      !current.playbackEnded)
-                    _SkipSegmentButton(controller: current),
-                  if (current.playbackEnded && current.nextEpisode == null)
-                    _PlaybackEndedOverlay(controller: current),
-                  if (current.disconnected && !current.isPlaying)
-                    _Banner(
-                      key: PlayerKeys.disconnect,
-                      text:
-                          current.disconnectDetail ?? l10n.playbackDisconnected,
-                    ),
-                  if (current.progressSyncFailed &&
-                      !(current.disconnected && !current.isPlaying))
-                    _Banner(
-                      key: PlayerKeys.progressSyncFailed,
-                      text: current.sessionExpired
-                          ? l10n.playbackSessionExpired
-                          : l10n.progressSyncFailed,
-                      onDismiss: current.progressSyncPersistent
-                          ? current.dismissProgressSyncBanner
-                          : null,
-                    ),
-                  if (current.subtitleNotice != null)
-                    _Banner(
-                      key: PlayerKeys.subtitleNotice,
-                      text: _subtitleNoticeText(l10n, current.subtitleNotice!),
-                    ),
-                  if (current.trackFailure != null)
-                    _Banner(
-                      key: const ValueKey('player-track-failure'),
-                      text:
-                          '${l10n.audioTrack} / ${l10n.subtitleTrack}：${l10n.errorLoadFailed}',
-                      onDismiss: current.dismissTrackFailure,
-                    ),
-                  if (_danmaku?.status == DanmakuStatus.customUnreachable &&
-                      !current.loading)
-                    _DanmakuSourceBanner(controller: _danmaku!),
-                  _PlayerChromeBar(
-                    controller: current,
-                    visible: current.controlsVisible,
-                  ),
-                  if (_danmaku != null &&
-                      _danmaku!.isConfigured &&
-                      _danmaku!.danmakuOn &&
-                      !_danmakuPanelOpen &&
-                      !_danmakuSearchOpen &&
-                      !_episodesOpen &&
-                      !current.loading &&
-                      current.error == null &&
-                      (_danmaku!.status == DanmakuStatus.noMatch))
-                    _DanmakuMatchChip(onSearch: _openDanmakuSearch),
-                  if (_danmakuPanelOpen && _danmaku != null)
-                    DanmakuPanel(
-                      danmaku: _danmaku!,
-                      onClose: _closeDanmakuPanel,
-                      onSearch: _openDanmakuSearch,
-                    ),
-                  if (_danmakuSearchOpen && _danmaku != null)
-                    _DanmakuSearchPanel(
-                      danmaku: _danmaku!,
-                      initialKeyword: _danmakuSearchKeyword(),
-                      onClose: _closeDanmakuSearch,
-                    ),
-                  if (_episodesOpen && current.canBrowseEpisodes)
-                    _EpisodeListPanel(
-                      controller: current,
-                      onClose: _closeEpisodeList,
-                    ),
-                ],
+                    if (_danmaku != null &&
+                        _danmaku!.isConfigured &&
+                        _danmaku!.danmakuOn &&
+                        !_danmakuPanelOpen &&
+                        !_danmakuSearchOpen &&
+                        !_episodesOpen &&
+                        !current.loading &&
+                        current.error == null &&
+                        (_danmaku!.status == DanmakuStatus.noMatch))
+                      _DanmakuMatchChip(onSearch: _openDanmakuSearch),
+                    if (_danmakuPanelOpen && _danmaku != null)
+                      DanmakuPanel(
+                        danmaku: _danmaku!,
+                        onClose: _closeDanmakuPanel,
+                        onSearch: _openDanmakuSearch,
+                      ),
+                    if (_danmakuSearchOpen && _danmaku != null)
+                      _DanmakuSearchPanel(
+                        danmaku: _danmaku!,
+                        initialKeyword: _danmakuSearchKeyword(),
+                        onClose: _closeDanmakuSearch,
+                      ),
+                    if (_episodesOpen && current.canBrowseEpisodes)
+                      _EpisodeListPanel(
+                        controller: current,
+                        onClose: _closeEpisodeList,
+                      ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -654,15 +694,20 @@ class PlayerPageState extends State<PlayerPage> {
     );
   }
 
-  /// 弹幕渲染层仅在「开启且有弹幕」时挂载，其余情况零渲染开销。
+  /// 弹幕层一旦画过就钉住。开关只停绘制,不卸全屏层,避免 Impeller
+  /// 在 Texture 上拆装 CustomPaint 后点不穿。
   bool _danmakuOverlayVisible(PlayerController current) {
     final danmaku = _danmaku;
-    return danmaku != null &&
-        danmaku.danmakuOn &&
-        danmaku.hasComments &&
-        !current.loading &&
-        current.error == null &&
-        !current.playbackEnded;
+    if (danmaku == null ||
+        current.loading ||
+        current.error != null ||
+        current.playbackEnded) {
+      return false;
+    }
+    if (_danmakuLayerPinned && _danmakuLayerItemId == current.itemId) {
+      return true;
+    }
+    return danmaku.danmakuOn && danmaku.hasComments;
   }
 
   String _danmakuSearchKeyword() {
@@ -732,20 +777,21 @@ class _PlayerChromeBar extends StatelessWidget {
     final l10n = AppLocalizations.of(context);
     final scrim = theme.colorScheme.scrim;
     final title = controller.item?.displayName ?? '';
-    // 标题、网速、置顶/最小化/关闭随 OSD 一起淡出(IINA / uosc 同款)。
-    // 隐藏时 IgnorePointer,点击落到拖拽层或画面,而不是点到看不见的按钮。
+    // 标题和窗口钮必须在同一层全宽淡出。右上角单独一块小 Opacity
+    // 叠在 mpv Texture 上时,Impeller 常常不把透明度合成进去,按钮会
+    // 一直亮着。独立播放器没有系统关闭钮,指针移入画面会重新唤出 OSD。
     return Positioned(
       left: 0,
       right: 0,
       top: 0,
       height: kPlayerChromeBarExtent,
-      child: Stack(
-        children: [
-          Positioned.fill(
-            child: WindowDragArea(
-              key: const Key('player-window-drag'),
-              child: _FadeThrough(
-                visible: visible,
+      child: _FadeThrough(
+        visible: visible,
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: WindowDragArea(
+                key: const Key('player-window-drag'),
                 child: DecoratedBox(
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
@@ -786,13 +832,10 @@ class _PlayerChromeBar extends StatelessWidget {
                 ),
               ),
             ),
-          ),
-          Positioned(
-            top: AppSpacing.sm,
-            right: AppSpacing.sm,
-            height: kWindowChromeHeight + AppSpacing.sm,
-            child: _FadeThrough(
-              visible: visible,
+            Positioned(
+              top: AppSpacing.sm,
+              right: AppSpacing.sm,
+              height: kWindowChromeHeight + AppSpacing.sm,
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -803,32 +846,12 @@ class _PlayerChromeBar extends StatelessWidget {
                       message: l10n.playerNetworkSpeedTooltip,
                       child: Padding(
                         padding: const EdgeInsets.only(right: AppSpacing.sm),
-                        child: Row(
+                        child: NetworkSpeedReadout(
                           key: PlayerKeys.networkSpeed,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.download_rounded,
-                              size: 14,
-                              color: theme.colorScheme.onSurface.withValues(
-                                alpha: 0.78,
-                              ),
-                            ),
-                            const SizedBox(width: 4),
-                            Text(
-                              formatNetworkThroughput(
-                                controller.cacheSpeedBytesPerSec,
-                              ),
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                fontFeatures: const [
-                                  FontFeature.tabularFigures(),
-                                ],
-                                color: theme.colorScheme.onSurface.withValues(
-                                  alpha: 0.86,
-                                ),
-                              ),
-                            ),
-                          ],
+                          bytesPerSecond: controller.cacheSpeedBytesPerSec,
+                          color: theme.colorScheme.onSurface.withValues(
+                            alpha: 0.86,
+                          ),
                         ),
                       ),
                     ),
@@ -870,8 +893,8 @@ class _PlayerChromeBar extends StatelessWidget {
                 ],
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -1047,7 +1070,7 @@ class _NextEpisodeBanner extends StatelessWidget {
     final seconds = offer.remaining?.inSeconds;
     return Positioned(
       right: AppSpacing.xl,
-      bottom: 112,
+      bottom: controller.controlsVisible ? 112 : AppSpacing.xl,
       child: LiquidGlass(
         kind: LiquidGlassKind.control,
         padding: const EdgeInsets.all(AppSpacing.lg),
@@ -1514,7 +1537,7 @@ class _EpisodeRowState extends State<_EpisodeRow> {
     final meta = <String>[
       ?runtimeLabel(l10n, episode),
       if (_isCurrent) l10n.nowPlayingEpisode,
-      if (!_isCurrent && widget.progress > 0 && widget.progress < 1)
+      if (!_isCurrent && episode.canResume)
         l10n.playbackProgress((widget.progress * 100).round()),
     ];
     return MouseRegion(
@@ -1800,7 +1823,7 @@ class _EpisodeThumb extends StatelessWidget {
                   ),
                 ),
               ),
-            if (progress > 0 && (isCurrent || progress < 1))
+            if (progress > 0 && (isCurrent || episode.canResume))
               Align(
                 alignment: Alignment.bottomCenter,
                 child: _EpisodeProgressBar(value: progress),
@@ -3003,46 +3026,48 @@ class _DanmakuSearchPanelState extends State<_DanmakuSearchPanel> {
   }
 }
 
-/// 音量组:静音按钮 + 音量滑条 + 百分比回显。
+/// 音量组:静音按钮 + 连续滑条 + 百分比。滚轮仍按 5% 一档;拖动按 1%。
 ///
-/// 滑条、显示与持久化均使用 [PlayerController.volume] 的用户百分比
-/// (0–[PlayerSettings.volumeMax],100 为原片 0 dB),
-/// mpv 换算统一在 [PlayerController.setVolume] 内经 [mpvVolumeForPercent] 完成。
+/// 100 为原片 0 dB,滑条上限 [PlayerSettings.volumeMax] 含增益。
+/// 轨道在 100% 处画刻度,超过 100 时数字改用强调色。
 class _VolumeControl extends StatelessWidget {
   const _VolumeControl({required this.controller});
 
   final PlayerController controller;
 
+  static const _sliderWidth = 148.0;
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final volume = controller.volume.clamp(0, PlayerSettings.volumeMax);
+    final boosted = volume > 100;
+    const unity = 100 / PlayerSettings.volumeMax;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
         _PlayerIconButton(
           key: PlayerKeys.mute,
-          tooltip: controller.volume <= 0 ? l10n.unmute : l10n.mute,
+          tooltip: volume <= 0 ? l10n.unmute : l10n.mute,
           onPressed: controller.toggleMute,
           iconSize: 20,
-          icon: controller.volume <= 0
-              ? Icons.volume_off_rounded
-              : Icons.volume_up_rounded,
+          icon: _volumeIconForLevel(volume),
         ),
         SizedBox(
-          width: 110,
+          width: _sliderWidth,
           child: SliderTheme(
-            data: _overlaySliderTheme(theme, thumbRadius: 5),
+            data: _overlaySliderTheme(theme, thumbRadius: 6).copyWith(
+              secondaryActiveTrackColor: scheme.primary,
+              trackShape: const _VolumeSliderTrackShape(unityFraction: unity),
+              overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
+            ),
             child: Slider(
               key: PlayerKeys.volume,
-              value: controller.volume
-                  .clamp(0, PlayerSettings.volumeMax)
-                  .toDouble(),
+              value: volume.toDouble(),
               min: 0,
               max: PlayerSettings.volumeMax.toDouble(),
-              divisions:
-                  PlayerSettings.volumeMax ~/ PlayerController.volumeWheelStep,
-              label: l10n.volumePercent(controller.volume),
               onChanged: (value) {
                 controller.setVolume(value.round());
               },
@@ -3050,16 +3075,85 @@ class _VolumeControl extends StatelessWidget {
           ),
         ),
         SizedBox(
-          width: 56,
+          width: 44,
           child: Text(
             key: PlayerKeys.volumePercent,
-            l10n.volumePercent(controller.volume),
+            l10n.volumePercent(volume),
             maxLines: 1,
             textAlign: TextAlign.end,
-            style: _overlayTimeStyle(theme),
+            style: _overlayTimeStyle(
+              theme,
+            )?.copyWith(color: boosted ? scheme.primary : scheme.onSurface),
           ),
         ),
       ],
+    );
+  }
+}
+
+IconData _volumeIconForLevel(int volume) {
+  if (volume <= 0) {
+    return Icons.volume_off_rounded;
+  }
+  if (volume < 34) {
+    return Icons.volume_mute_rounded;
+  }
+  if (volume < 67) {
+    return Icons.volume_down_rounded;
+  }
+  return Icons.volume_up_rounded;
+}
+
+/// 在 100%(0 dB)处画刻度,拖动时不量化,避免 5% 一格的粘滞感。
+class _VolumeSliderTrackShape extends RoundedRectSliderTrackShape {
+  const _VolumeSliderTrackShape({required this.unityFraction});
+
+  final double unityFraction;
+
+  @override
+  void paint(
+    PaintingContext context,
+    Offset offset, {
+    required RenderBox parentBox,
+    required SliderThemeData sliderTheme,
+    required Animation<double> enableAnimation,
+    required TextDirection textDirection,
+    required Offset thumbCenter,
+    Offset? secondaryOffset,
+    bool isDiscrete = false,
+    bool isEnabled = false,
+    double additionalActiveTrackHeight = 2,
+  }) {
+    super.paint(
+      context,
+      offset,
+      parentBox: parentBox,
+      sliderTheme: sliderTheme,
+      enableAnimation: enableAnimation,
+      textDirection: textDirection,
+      thumbCenter: thumbCenter,
+      secondaryOffset: secondaryOffset,
+      isDiscrete: isDiscrete,
+      isEnabled: isEnabled,
+      additionalActiveTrackHeight: additionalActiveTrackHeight,
+    );
+    final trackRect = getPreferredRect(
+      parentBox: parentBox,
+      offset: offset,
+      sliderTheme: sliderTheme,
+      isEnabled: isEnabled,
+      isDiscrete: isDiscrete,
+    );
+    final x = trackRect.left + trackRect.width * unityFraction.clamp(0.0, 1.0);
+    final paint = Paint()
+      ..color = (sliderTheme.activeTrackColor ?? const Color(0xFFFFFFFF))
+          .withValues(alpha: 0.78)
+      ..strokeWidth = 1.5
+      ..strokeCap = StrokeCap.round;
+    context.canvas.drawLine(
+      Offset(x, trackRect.center.dy - 5),
+      Offset(x, trackRect.center.dy + 5),
+      paint,
     );
   }
 }
@@ -3130,7 +3224,11 @@ class _ControlMenu<T> extends StatelessWidget {
     if (child != null) {
       return PopupMenuButton<T>(
         tooltip: tooltip,
-        onSelected: onSelected,
+        onSelected: (value) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            onSelected(value);
+          });
+        },
         constraints: _controlMenuConstraints,
         padding: EdgeInsets.zero,
         splashRadius: 20,
@@ -3140,7 +3238,11 @@ class _ControlMenu<T> extends StatelessWidget {
     }
     return PopupMenuButton<T>(
       tooltip: tooltip,
-      onSelected: onSelected,
+      onSelected: (value) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          onSelected(value);
+        });
+      },
       constraints: _controlMenuConstraints,
       padding: EdgeInsets.zero,
       splashRadius: 20,

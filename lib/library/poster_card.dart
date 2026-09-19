@@ -81,7 +81,7 @@ class PosterCard extends StatelessWidget {
                         playKey: PosterCard.playButtonKey(item.id),
                         onRemoveFromResume: onRemoveFromResume,
                       ),
-                      if (showProgress && progress > 0)
+                      if (showProgress && item.canResume)
                         Align(
                           alignment: Alignment.bottomCenter,
                           child: _ResumeProgressBar(
@@ -109,7 +109,7 @@ class PosterCard extends StatelessWidget {
                     ).colorScheme.onSurface.withValues(alpha: 0.72),
                   ),
                 ),
-              if (!wide && showProgress && progress > 0)
+              if (!wide && showProgress && item.canResume)
                 SizedBox(
                   width: width,
                   child: Text(
@@ -184,7 +184,7 @@ class EpisodeThumbCard extends StatelessWidget {
                         showMeta: false,
                         playKey: PosterCard.playButtonKey(item.id),
                       ),
-                      if (progress > 0)
+                      if (item.canResume)
                         Align(
                           alignment: Alignment.bottomCenter,
                           child: _ResumeProgressBar(value: progress),

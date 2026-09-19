@@ -43,4 +43,20 @@ void main() {
     expect(find.text('实色'), findsOneWidget);
     expect(find.byType(BackdropFilter), findsNothing);
   });
+
+  testWidgets('LiquidGlassBackdrop can disable blur', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.dark(),
+        home: const Scaffold(
+          body: LiquidGlassBackdrop(
+            enabled: false,
+            child: LiquidGlass(child: Text('播放器')),
+          ),
+        ),
+      ),
+    );
+    expect(find.text('播放器'), findsOneWidget);
+    expect(find.byType(BackdropFilter), findsNothing);
+  });
 }

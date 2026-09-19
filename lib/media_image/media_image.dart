@@ -22,6 +22,10 @@ const int kPaintingImageCacheMaxEntries = 400;
 /// Flutter [ImageCache] 解码像素上限,约 64 MiB。
 const int kPaintingImageCacheMaxBytes = 64 * 1024 * 1024;
 
+/// 独立播放进程只要剧集缩略图,解码缓存再收一档。
+const int kPlayerProcessImageCacheMaxEntries = 80;
+const int kPlayerProcessImageCacheMaxBytes = 16 * 1024 * 1024;
+
 /// 背景图请求宽度下限:窄窗口仍拉够一张能铺满的底图。
 const int kMediaBackdropMinRequestWidth = 640;
 
@@ -29,8 +33,15 @@ const int kMediaBackdropMinRequestWidth = 640;
 const int kMediaBackdropMaxRequestWidth = 1280;
 
 /// 把 Flutter 解码缓存收到低配可承受的上限。启动时调用一次。
-void configurePaintingImageCache() {
+void configurePaintingImageCache({bool playerProcess = false}) {
   final cache = PaintingBinding.instance.imageCache;
+  if (playerProcess) {
+    cache.maximumSize = kPlayerProcessImageCacheMaxEntries;
+    cache.maximumSizeBytes = kPlayerProcessImageCacheMaxBytes;
+    MediaImageCache.instance.memoryLimitBytes =
+        kPlayerProcessImageCacheMaxBytes;
+    return;
+  }
   cache.maximumSize = kPaintingImageCacheMaxEntries;
   cache.maximumSizeBytes = kPaintingImageCacheMaxBytes;
 }
@@ -197,6 +208,17 @@ class _MediaImageState extends State<MediaImage> {
       if (!mounted) {
         return null;
       }
+      // 内存命中立刻返回,回滑已看过的海报不闪骨架、也不等停稳。
+      // 未命中才等滚动停稳:桌面滚轮是 jumpTo,ScrollAwareImageProvider
+      // 几乎不推迟,这里挡住的是磁盘/网络,不是解码。
+      final peeked = _peekLoaded();
+      if (peeked != null) {
+        return peeked;
+      }
+      await MediaImageCache.instance.waitForScrollIdle();
+      if (!mounted) {
+        return null;
+      }
       final loaded = await _loadOnce();
       if (loaded != null) {
         return loaded;
@@ -282,10 +304,8 @@ class _MediaImageState extends State<MediaImage> {
     if (!_hasImageSource || AuthScope.maybeOf(context) == null) {
       return PosterPlaceholder(width: width, height: height);
     }
-    // 缓存命中立刻画。Image 自带 ScrollAwareImageProvider:已在
-    // ImageCache 里的图不停,高速滑动才推迟解码。桌面滚轮是离散
-    // jumpTo,isScrollingNotifier 几乎不亮,自造停稳门会把回滑海报
-    // 换成骨架再按帧限额解码,比直接画更卡。
+    // 缓存命中立刻画。未命中的磁盘/网络在 [MediaImageCache.waitForScrollIdle]
+    // 之后才走,避免片库快滑时每张新海报都打盘和 CPU。
     final cached = _peekLoaded();
     if (cached != null) {
       return _paint(context, cached, width, height);
@@ -447,6 +467,10 @@ class MediaImageCache {
 
   static const int _maxConcurrentFetches = 8;
 
+  /// 片库滚动停稳后再打未命中的磁盘/网络。桌面滚轮是离散 jumpTo,
+  /// Flutter 自带的滑动推迟几乎不生效。
+  static const Duration defaultScrollIdle = Duration(milliseconds: 80);
+
   int memoryLimitBytes = defaultMemoryLimitBytes;
   Duration negativeTtl = defaultNegativeTtl;
   Duration fetchTimeout = defaultFetchTimeout;
@@ -458,6 +482,11 @@ class MediaImageCache {
   final Map<String, Future<Uint8List?>> _inflight = {};
   int _activeFetches = 0;
   final List<Completer<void>> _waiters = [];
+  DateTime _scrollUntil = DateTime.fromMillisecondsSinceEpoch(0);
+  Timer? _scrollIdleTimer;
+  final List<Completer<void>> _scrollIdleWaiters = [];
+  final Map<String, Uint8List> _pendingDiskWrites = {};
+  Timer? _writeFlushTimer;
 
   MediaImageDiskStore? _diskStore;
   bool _diskResolved = false;
@@ -489,7 +518,62 @@ class MediaImageCache {
     negativeTtl = defaultNegativeTtl;
     fetchTimeout = defaultFetchTimeout;
     clock = DateTime.now;
+    _resetScrollIdle();
+    _pendingDiskWrites.clear();
+    _writeFlushTimer?.cancel();
+    _writeFlushTimer = null;
     debugSetDiskStore(null);
+  }
+
+  /// 货架/网格正在滚:推迟未命中加载与磁盘写入。
+  void markScrollActivity() {
+    _scrollUntil = clock().add(defaultScrollIdle);
+    _scrollIdleTimer?.cancel();
+    _scrollIdleTimer = Timer(defaultScrollIdle, _completeScrollIdleIfQuiet);
+  }
+
+  bool get isScrollBusy => clock().isBefore(_scrollUntil);
+
+  Future<void> waitForScrollIdle() async {
+    if (!isScrollBusy) {
+      return;
+    }
+    final waiter = Completer<void>();
+    _scrollIdleWaiters.add(waiter);
+    await waiter.future;
+  }
+
+  void _completeScrollIdleIfQuiet() {
+    _scrollIdleTimer = null;
+    if (isScrollBusy) {
+      final wait = _scrollUntil.difference(clock());
+      _scrollIdleTimer = Timer(
+        wait.isNegative || wait == Duration.zero ? defaultScrollIdle : wait,
+        _completeScrollIdleIfQuiet,
+      );
+      return;
+    }
+    _releaseScrollIdleWaiters();
+  }
+
+  void _resetScrollIdle() {
+    _scrollIdleTimer?.cancel();
+    _scrollIdleTimer = null;
+    _scrollUntil = DateTime.fromMillisecondsSinceEpoch(0);
+    _releaseScrollIdleWaiters();
+  }
+
+  void _releaseScrollIdleWaiters() {
+    if (_scrollIdleWaiters.isEmpty) {
+      return;
+    }
+    final waiters = List<Completer<void>>.from(_scrollIdleWaiters);
+    _scrollIdleWaiters.clear();
+    for (final waiter in waiters) {
+      if (!waiter.isCompleted) {
+        waiter.complete();
+      }
+    }
   }
 
   Uint8List? peek({
@@ -670,6 +754,38 @@ class MediaImageCache {
   }
 
   Future<void> _writeDisk(String cacheKey, Uint8List bytes) async {
+    if (isScrollBusy) {
+      _pendingDiskWrites[cacheKey] = bytes;
+      _scheduleWriteFlush();
+      return;
+    }
+    await _writeDiskNow(cacheKey, bytes);
+  }
+
+  void _scheduleWriteFlush() {
+    _writeFlushTimer?.cancel();
+    _writeFlushTimer = Timer(defaultScrollIdle, () {
+      _writeFlushTimer = null;
+      if (isScrollBusy) {
+        _scheduleWriteFlush();
+        return;
+      }
+      unawaited(_flushPendingWrites());
+    });
+  }
+
+  Future<void> _flushPendingWrites() async {
+    if (_pendingDiskWrites.isEmpty) {
+      return;
+    }
+    final pending = Map<String, Uint8List>.from(_pendingDiskWrites);
+    _pendingDiskWrites.clear();
+    for (final entry in pending.entries) {
+      await _writeDiskNow(entry.key, entry.value);
+    }
+  }
+
+  Future<void> _writeDiskNow(String cacheKey, Uint8List bytes) async {
     final store = _diskStore;
     if (store == null) {
       return;
@@ -733,6 +849,34 @@ class MediaImageCache {
         waiter.complete();
       }
     }
+    _pendingDiskWrites.clear();
+    _writeFlushTimer?.cancel();
+    _writeFlushTimer = null;
+    _resetScrollIdle();
+  }
+}
+
+/// 货架/网格滚动时通知 [MediaImageCache] 推迟未命中加载与写盘。
+class MediaImageScrollListener extends StatelessWidget {
+  const MediaImageScrollListener({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return NotificationListener<ScrollNotification>(
+      onNotification: (notification) {
+        if (notification.depth != 0) {
+          return false;
+        }
+        if (notification is ScrollStartNotification ||
+            notification is ScrollUpdateNotification) {
+          MediaImageCache.instance.markScrollActivity();
+        }
+        return false;
+      },
+      child: child,
+    );
   }
 }
 

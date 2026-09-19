@@ -11,6 +11,7 @@ import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/home/home_hero.dart';
 import 'package:rillight/home/home_row.dart';
 import 'package:rillight/home/library_tiles.dart';
+import 'package:rillight/media_image/media_image.dart';
 
 /// 首页手动刷新按钮(绕过缓存立即重拉)的 key。
 const Key homeRefreshKey = Key('catalog-home-refresh');
@@ -137,92 +138,94 @@ class _HomePageState extends State<HomePage> {
       builder: (context, _) {
         final overlap = HomePage.heroTopOverlap(context);
         final refreshHost = _refreshHost(catalog);
-        return SingleChildScrollView(
-          padding: const EdgeInsets.only(bottom: AppSpacing.xxl),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              RepaintBoundary(
-                child: HomeHero(catalog: catalog, topOverlap: overlap),
-              ),
-              RepaintBoundary(
-                child: HomeMediaRow(
-                  rowKey: CatalogKeys.resumeRow,
-                  shelfId: CatalogKeys.shelfResume,
-                  title: l10n.resumeRow,
-                  state: catalog.resume,
-                  showProgress: true,
-                  wide: true,
-                  headerAction: _refreshAction(
-                    l10n,
-                    refreshHost,
-                    _RefreshSlot.resume,
-                  ),
-                  onTap: (item) => context.push(AppRoutes.item(item.id)),
-                  onRetry: catalog.reloadHomeRows,
-                  onMore: () => context.push(AppRoutes.shelfResume),
-                  onRemoveFromResume: catalog.hideFromResume,
+        return MediaImageScrollListener(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.only(bottom: AppSpacing.xxl),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                RepaintBoundary(
+                  child: HomeHero(catalog: catalog, topOverlap: overlap),
                 ),
-              ),
-              RepaintBoundary(
-                child: LibraryTiles(
-                  libraries: catalog.libraries,
-                  headerAction: _refreshAction(
-                    l10n,
-                    refreshHost,
-                    _RefreshSlot.libraries,
+                RepaintBoundary(
+                  child: HomeMediaRow(
+                    rowKey: CatalogKeys.resumeRow,
+                    shelfId: CatalogKeys.shelfResume,
+                    title: l10n.resumeRow,
+                    state: catalog.resume,
+                    showProgress: true,
+                    wide: true,
+                    headerAction: _refreshAction(
+                      l10n,
+                      refreshHost,
+                      _RefreshSlot.resume,
+                    ),
+                    onTap: (item) => context.push(AppRoutes.item(item.id)),
+                    onRetry: catalog.reloadHomeRows,
+                    onMore: () => context.push(AppRoutes.shelfResume),
+                    onRemoveFromResume: catalog.hideFromResume,
                   ),
                 ),
-              ),
-              RepaintBoundary(
-                child: HomeMediaRow(
-                  rowKey: CatalogKeys.nextUpRow,
-                  shelfId: CatalogKeys.shelfNextUp,
-                  title: l10n.nextUpRow,
-                  state: catalog.nextUp,
-                  headerAction: _refreshAction(
-                    l10n,
-                    refreshHost,
-                    _RefreshSlot.nextUp,
+                RepaintBoundary(
+                  child: LibraryTiles(
+                    libraries: catalog.libraries,
+                    headerAction: _refreshAction(
+                      l10n,
+                      refreshHost,
+                      _RefreshSlot.libraries,
+                    ),
                   ),
-                  onTap: (item) => context.push(AppRoutes.item(item.id)),
-                  onRetry: catalog.reloadHomeRows,
-                  onMore: () => context.push(AppRoutes.shelfNextUp),
                 ),
-              ),
-              RepaintBoundary(
-                child: HomeMediaRow(
-                  rowKey: CatalogKeys.latestMoviesRow,
-                  shelfId: CatalogKeys.shelfLatestMovies,
-                  title: l10n.latestMoviesRow,
-                  state: catalog.latestMovies,
-                  headerAction: _refreshAction(
-                    l10n,
-                    refreshHost,
-                    _RefreshSlot.latestMovies,
+                RepaintBoundary(
+                  child: HomeMediaRow(
+                    rowKey: CatalogKeys.nextUpRow,
+                    shelfId: CatalogKeys.shelfNextUp,
+                    title: l10n.nextUpRow,
+                    state: catalog.nextUp,
+                    headerAction: _refreshAction(
+                      l10n,
+                      refreshHost,
+                      _RefreshSlot.nextUp,
+                    ),
+                    onTap: (item) => context.push(AppRoutes.item(item.id)),
+                    onRetry: catalog.reloadHomeRows,
+                    onMore: () => context.push(AppRoutes.shelfNextUp),
                   ),
-                  onTap: (item) => context.push(AppRoutes.item(item.id)),
-                  onRetry: catalog.reloadHomeRows,
-                  onMore: () => context.push(AppRoutes.shelfLatestMovies),
                 ),
-              ),
-              RepaintBoundary(
-                child: HomeMediaRow(
-                  rowKey: CatalogKeys.latestSeriesRow,
-                  shelfId: CatalogKeys.shelfLatestSeries,
-                  title: l10n.latestSeriesRow,
-                  state: catalog.latestSeries,
-                  headerAction: _refreshAction(
-                    l10n,
-                    refreshHost,
-                    _RefreshSlot.latestSeries,
+                RepaintBoundary(
+                  child: HomeMediaRow(
+                    rowKey: CatalogKeys.latestMoviesRow,
+                    shelfId: CatalogKeys.shelfLatestMovies,
+                    title: l10n.latestMoviesRow,
+                    state: catalog.latestMovies,
+                    headerAction: _refreshAction(
+                      l10n,
+                      refreshHost,
+                      _RefreshSlot.latestMovies,
+                    ),
+                    onTap: (item) => context.push(AppRoutes.item(item.id)),
+                    onRetry: catalog.reloadHomeRows,
+                    onMore: () => context.push(AppRoutes.shelfLatestMovies),
                   ),
-                  onTap: (item) => context.push(AppRoutes.item(item.id)),
-                  onRetry: catalog.reloadHomeRows,
-                  onMore: () => context.push(AppRoutes.shelfLatestSeries),
                 ),
-              ),
-            ],
+                RepaintBoundary(
+                  child: HomeMediaRow(
+                    rowKey: CatalogKeys.latestSeriesRow,
+                    shelfId: CatalogKeys.shelfLatestSeries,
+                    title: l10n.latestSeriesRow,
+                    state: catalog.latestSeries,
+                    headerAction: _refreshAction(
+                      l10n,
+                      refreshHost,
+                      _RefreshSlot.latestSeries,
+                    ),
+                    onTap: (item) => context.push(AppRoutes.item(item.id)),
+                    onRetry: catalog.reloadHomeRows,
+                    onMore: () => context.push(AppRoutes.shelfLatestSeries),
+                  ),
+                ),
+              ],
+            ),
           ),
         );
       },

@@ -148,7 +148,14 @@ class _DanmakuPanelState extends State<DanmakuPanel> {
                 key: DanmakuKeys.toggle,
                 materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 value: danmaku.danmakuOn,
-                onChanged: (_) => unawaited(danmaku.toggleDanmaku()),
+                onChanged: (_) {
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (!context.mounted) {
+                      return;
+                    }
+                    unawaited(danmaku.toggleDanmaku());
+                  });
+                },
               ),
             ),
             _HudIconButton(
@@ -164,7 +171,13 @@ class _DanmakuPanelState extends State<DanmakuPanel> {
             _HudIconButton(
               tooltip: MaterialLocalizations.of(context).closeButtonTooltip,
               icon: Icons.close_rounded,
-              onPressed: widget.onClose,
+              onPressed: () {
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (context.mounted) {
+                    widget.onClose();
+                  }
+                });
+              },
             ),
           ],
         ),

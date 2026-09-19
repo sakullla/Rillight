@@ -293,7 +293,7 @@ class _EpisodeRowState extends State<EpisodeRow> {
                                 maxWidth: 480,
                               ),
                             ),
-                            if (progress > 0 && !played)
+                            if (item.canResume)
                               Align(
                                 alignment: Alignment.bottomCenter,
                                 child: _EpisodeProgressBar(value: progress),

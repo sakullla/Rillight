@@ -22,6 +22,7 @@ import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/library/poster_card.dart';
 import 'package:rillight/library/shelf_sort.dart';
+import 'package:rillight/media_image/media_image.dart';
 
 const Map<ShortcutActivator, Intent> _kGridArrowShortcuts = {
   SingleActivator(LogicalKeyboardKey.arrowLeft): DirectionalFocusIntent(
@@ -699,77 +700,81 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
               episodes: _episodes,
               wide: _wideGrid,
             );
-            return CustomScrollView(
-              controller: _scrollController,
-              scrollCacheExtent: const ScrollCacheExtent.viewport(1),
-              slivers: [
-                SliverToBoxAdapter(
-                  child: _Header(
-                    title: _title(l10n),
-                    titleOverride: widget.titleOverride,
-                    showTitle: widget.showTitle,
-                    sort: _sort,
-                    options: options,
-                    onSort: _selectSort,
-                    showSort: _items.isNotEmpty,
-                    onRefresh: _manualRefresh,
-                    refreshing: _refreshing,
-                    filters: _filterable ? _filters : null,
-                    typeFilterable: _typeFilterable,
-                    yearOptions: _yearOptions,
-                    genreOptions: _genreOptions,
-                    onFiltersChanged: _filterable ? _selectFilters : null,
-                  ),
-                ),
-                SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(
-                    AppSpacing.page,
-                    AppSpacing.xs,
-                    AppSpacing.page,
-                    AppSpacing.xxl,
-                  ),
-                  sliver: SliverGrid(
-                    gridDelegate: gridDelegate,
-                    delegate: _ShelfChildDelegate(
-                      items: _items,
-                      wide: _wideGrid,
-                      builder: (context, index) {
-                        final item = _items[index];
-                        return _EnsureVisibleOnFocus(
-                          child: ShelfGridPage.gridCard(
-                            context,
-                            item,
-                            wide: _wideGrid,
-                            onTap: () => context.push(AppRoutes.item(item.id)),
-                            onRemoveFromResume: widget.source == 'resume'
-                                ? (entry) {
-                                    unawaited(
-                                      CatalogScope.of(
-                                        context,
-                                      ).hideFromResume(entry),
-                                    );
-                                    setState(() {
-                                      _items = [
-                                        for (final current in _items)
-                                          if (current.id != entry.id) current,
-                                      ];
-                                    });
-                                  }
-                                : null,
-                          ),
-                        );
-                      },
+            return MediaImageScrollListener(
+              child: CustomScrollView(
+                controller: _scrollController,
+                // 预构建半屏即可,快滑时少把屏幕外海报提前打进磁盘/解码。
+                scrollCacheExtent: const ScrollCacheExtent.viewport(0.5),
+                slivers: [
+                  SliverToBoxAdapter(
+                    child: _Header(
+                      title: _title(l10n),
+                      titleOverride: widget.titleOverride,
+                      showTitle: widget.showTitle,
+                      sort: _sort,
+                      options: options,
+                      onSort: _selectSort,
+                      showSort: _items.isNotEmpty,
+                      onRefresh: _manualRefresh,
+                      refreshing: _refreshing,
+                      filters: _filterable ? _filters : null,
+                      typeFilterable: _typeFilterable,
+                      yearOptions: _yearOptions,
+                      genreOptions: _genreOptions,
+                      onFiltersChanged: _filterable ? _selectFilters : null,
                     ),
                   ),
-                ),
-                if (_loadingMore)
-                  const SliverToBoxAdapter(
-                    child: Padding(
-                      padding: EdgeInsets.only(bottom: AppSpacing.xxl),
-                      child: Center(child: CircularProgressIndicator()),
+                  SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(
+                      AppSpacing.page,
+                      AppSpacing.xs,
+                      AppSpacing.page,
+                      AppSpacing.xxl,
+                    ),
+                    sliver: SliverGrid(
+                      gridDelegate: gridDelegate,
+                      delegate: _ShelfChildDelegate(
+                        items: _items,
+                        wide: _wideGrid,
+                        builder: (context, index) {
+                          final item = _items[index];
+                          return _EnsureVisibleOnFocus(
+                            child: ShelfGridPage.gridCard(
+                              context,
+                              item,
+                              wide: _wideGrid,
+                              onTap: () =>
+                                  context.push(AppRoutes.item(item.id)),
+                              onRemoveFromResume: widget.source == 'resume'
+                                  ? (entry) {
+                                      unawaited(
+                                        CatalogScope.of(
+                                          context,
+                                        ).hideFromResume(entry),
+                                      );
+                                      setState(() {
+                                        _items = [
+                                          for (final current in _items)
+                                            if (current.id != entry.id) current,
+                                        ];
+                                      });
+                                    }
+                                  : null,
+                            ),
+                          );
+                        },
+                      ),
                     ),
                   ),
-              ],
+                  if (_loadingMore)
+                    const SliverToBoxAdapter(
+                      child: Padding(
+                        padding: EdgeInsets.only(bottom: AppSpacing.xxl),
+                        child: Center(child: CircularProgressIndicator()),
+                      ),
+                    ),
+                ],
+              ),
             );
           },
         ),

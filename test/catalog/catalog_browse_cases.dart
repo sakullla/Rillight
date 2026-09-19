@@ -193,6 +193,7 @@ void main() {
         'A thief who steals corporate secrets through dream-sharing.',
       );
       expect(find.text('已看 40%'), findsOneWidget);
+      expect(find.text('继续播放'), findsOneWidget);
       expect(find.text('章节'), findsOneWidget);
       expect(find.byKey(CatalogKeys.chapter(0)), findsOneWidget);
       expect(find.text('Chapter 1'), findsOneWidget);

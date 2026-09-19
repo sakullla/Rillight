@@ -361,6 +361,75 @@ void main() {
     expect(item.people[1].primaryImageTag, isNull);
   });
 
+  test(
+    'canResume treats PlayedPercentage as progress when ticks are missing',
+    () {
+      final item = EmbyItem.fromJson({
+        'Id': 'movie-percent',
+        'Name': 'Percent Only',
+        'Type': 'Movie',
+        'RunTimeTicks': 10000000 * 60 * 100,
+        'UserData': {'Played': false, 'PlayedPercentage': 37},
+      });
+      expect(item.canResume, isTrue);
+      expect(item.playbackProgress, closeTo(0.37, 0.001));
+      expect(item.resumePositionTicks, 10000000 * 60 * 37);
+    },
+  );
+
+  test('canResume hides continue when Played or past MaxResumePct', () {
+    final markedPlayed = EmbyItem.fromJson({
+      'Id': 'movie-played',
+      'Name': 'Played',
+      'Type': 'Movie',
+      'UserData': {
+        'Played': true,
+        'PlaybackPositionTicks': 10000000,
+        'PlayedPercentage': 37,
+      },
+    });
+    expect(markedPlayed.canResume, isFalse);
+
+    final finished = EmbyItem.fromJson({
+      'Id': 'movie-finished',
+      'Name': 'Finished',
+      'Type': 'Movie',
+      'UserData': {
+        'Played': true,
+        'PlaybackPositionTicks': 0,
+        'PlayedPercentage': 100,
+      },
+    });
+    expect(finished.canResume, isFalse);
+
+    final watching = EmbyItem.fromJson({
+      'Id': 'movie-watching',
+      'Name': 'Watching',
+      'Type': 'Movie',
+      'UserData': {'Played': false, 'PlayedPercentage': 89},
+    });
+    expect(watching.canResume, isTrue);
+
+    final pastThreshold = EmbyItem.fromJson({
+      'Id': 'movie-ending',
+      'Name': 'Ending',
+      'Type': 'Movie',
+      'UserData': {'Played': false, 'PlayedPercentage': 91},
+    });
+    expect(pastThreshold.canResume, isFalse);
+  });
+
+  test('fromJson parses PlaybackPositionTicks sent as a decimal string', () {
+    final item = EmbyItem.fromJson({
+      'Id': 'movie-ticks',
+      'Name': 'Ticks',
+      'Type': 'Movie',
+      'UserData': {'Played': false, 'PlaybackPositionTicks': '2240000000.0'},
+    });
+    expect(item.userData.playbackPositionTicks, 2240000000);
+    expect(item.canResume, isTrue);
+  });
+
   test('fromJson maps missing or invalid dates to null and empty people', () {
     final item = EmbyItem.fromJson({
       'Id': 'ep-2',
