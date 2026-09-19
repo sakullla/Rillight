@@ -6,6 +6,8 @@ import 'package:rillight/app/app_shell.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/window_chrome.dart';
+import 'package:rillight/player/danmaku/danmaku_display_form.dart';
+import 'package:rillight/player/danmaku/danmaku_display_settings.dart';
 import 'package:rillight/player/player_runtime_options.dart';
 import 'package:rillight/player/player_settings.dart';
 
@@ -100,7 +102,7 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Future<void> _save(PlayerSettings next) async {
-    setState(() => _settings = next);
+    setState(() => _settings = _mergeSettings(_settings, next));
     _syncDanmakuControllers();
     final store = _store;
     if (store == null) {
@@ -109,6 +111,11 @@ class _SettingsPageState extends State<SettingsPage> {
     try {
       await store.write(next);
     } catch (_) {}
+  }
+
+  /// 弹幕显示只携带 [PlayerSettings.danmakuDisplay],其余字段留 null 走合并写。
+  Future<void> _saveDanmakuDisplay(DanmakuDisplaySettings next) {
+    return _save(PlayerSettings(danmakuDisplay: next));
   }
 
   TargetPlatform get _platform => widget.platform ?? defaultTargetPlatform;
@@ -391,6 +398,35 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
                 const SizedBox(height: AppSpacing.lg),
                 _SettingsSection(
+                  icon: Icons.chat_bubble_outline_rounded,
+                  title: l10n.danmakuSettings,
+                  trailing: TextButton.icon(
+                    onPressed: _loaded
+                        ? () => _saveDanmakuDisplay(
+                            const DanmakuDisplaySettings(),
+                          )
+                        : null,
+                    style: TextButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.sm,
+                      ),
+                    ),
+                    icon: const Icon(Icons.settings_backup_restore_rounded),
+                    label: Text(l10n.danmakuRestoreDefaults),
+                  ),
+                  children: [
+                    DanmakuDisplayForm(
+                      value:
+                          _settings.danmakuDisplay ??
+                          const DanmakuDisplaySettings(),
+                      onChanged: _loaded ? _saveDanmakuDisplay : (_) {},
+                      layout: DanmakuFormLayout.settings,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: AppSpacing.lg),
+                _SettingsSection(
                   icon: Icons.subtitles_outlined,
                   title: l10n.settingsDanmakuService,
                   subtitle: l10n.settingsDanmakuServiceHint,
@@ -481,6 +517,28 @@ class _SettingsPageState extends State<SettingsPage> {
         return l10n.settingsBackendAuto;
     }
   }
+}
+
+/// 页面内存态合并:补丁未携带的字段保持当前值,避免稀疏写把下拉框与服务输入清空。
+PlayerSettings _mergeSettings(PlayerSettings current, PlayerSettings patch) {
+  return PlayerSettings(
+    volume: patch.volume ?? current.volume,
+    diskCacheLimitMiB: patch.diskCacheLimitMiB ?? current.diskCacheLimitMiB,
+    hardwareDecoding: patch.hardwareDecoding ?? current.hardwareDecoding,
+    hardwareDecoder: patch.hardwareDecoder ?? current.hardwareDecoder,
+    playbackRate: patch.playbackRate ?? current.playbackRate,
+    seriesPreferences: patch.seriesPreferences.isNotEmpty
+        ? patch.seriesPreferences
+        : current.seriesPreferences,
+    danmakuEnabled: patch.danmakuEnabled ?? current.danmakuEnabled,
+    danmakuDisplay: patch.danmakuDisplay ?? current.danmakuDisplay,
+    danmakuServer: patch.danmakuServer ?? current.danmakuServer,
+    danmakuToken: patch.danmakuToken ?? current.danmakuToken,
+    danmakuAppId: patch.danmakuAppId ?? current.danmakuAppId,
+    danmakuSeriesMemories: patch.danmakuSeriesMemories.isNotEmpty
+        ? patch.danmakuSeriesMemories
+        : current.danmakuSeriesMemories,
+  );
 }
 
 class _SettingsSection extends StatelessWidget {
