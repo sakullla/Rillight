@@ -90,6 +90,7 @@ void controlMain((SendPort, Map<String, String>, String?) arguments) {
         'time-pos',
         'duration',
         'demuxer-cache-time',
+        'cache-speed',
         'pause',
         'paused-for-cache',
         'core-idle',

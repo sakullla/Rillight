@@ -940,6 +940,12 @@ abstract class AppLocalizations {
   /// **'正在打开播放…'**
   String get playerLoading;
 
+  /// Tooltip for live stream download throughput on the player chrome.
+  ///
+  /// In zh, this message translates to:
+  /// **'实时网速'**
+  String get playerNetworkSpeedTooltip;
+
   /// Top-bar entry and page title for app settings.
   ///
   /// In zh, this message translates to:
@@ -1198,10 +1204,10 @@ abstract class AppLocalizations {
   /// **'不限'**
   String get danmakuUnlimited;
 
-  /// Open manual danmaku match search.
+  /// Open danmaku match search from the player overlay.
   ///
   /// In zh, this message translates to:
-  /// **'手动搜索'**
+  /// **'搜索'**
   String get danmakuSearch;
 
   /// Title of the danmaku search dialogs.

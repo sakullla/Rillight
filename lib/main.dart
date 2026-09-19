@@ -5,14 +5,14 @@ import 'package:rillight/app/app.dart';
 import 'package:rillight/app/router.dart';
 import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/auth/auth_bootstrap.dart';
+import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/player/desktop_player_window.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:window_manager/window_manager.dart';
 
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
-  PaintingBinding.instance.imageCache.maximumSize = 2000;
-  PaintingBinding.instance.imageCache.maximumSizeBytes = 256 << 20;
+  configurePaintingImageCache();
   if (args.isNotEmpty && args.first == 'player') {
     await windowManager.ensureInitialized();
     await windowManager.hide();

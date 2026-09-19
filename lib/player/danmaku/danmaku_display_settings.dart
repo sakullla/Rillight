@@ -23,6 +23,9 @@ enum DanmakuDensity {
 /// 字号档位:小 / 中 / 大 / 特大。
 const List<double> kDanmakuFontScaleSteps = [0.75, 1.0, 1.25, 1.5];
 
+/// 默认「大」档。
+const double kDanmakuFontScaleDefault = 1.25;
+
 /// 速度档位:慢 / 标准 / 快 / 极快(穿越秒数 = 12 / speed)。
 const List<double> kDanmakuSpeedSteps = [0.75, 1.0, 1.5, 2.0];
 
@@ -48,7 +51,7 @@ const Duration kDanmakuMergeWindow = Duration(seconds: 20);
 class DanmakuDisplaySettings {
   const DanmakuDisplaySettings({
     this.opacity = 0.85,
-    this.fontScale = 1.0,
+    this.fontScale = kDanmakuFontScaleDefault,
     this.speed = 1.0,
     this.areaFraction = 0.5,
     this.showScroll = true,

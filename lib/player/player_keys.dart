@@ -11,6 +11,7 @@ abstract final class PlayerKeys {
   static const volume = Key('player-volume');
   static const mute = Key('player-mute');
   static const volumePercent = Key('player-volume-percent');
+  static const networkSpeed = Key('player-network-speed');
   static const more = Key('player-more');
   static const quality = Key('player-quality');
   static const speed = Key('player-speed');

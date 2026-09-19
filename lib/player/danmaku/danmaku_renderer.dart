@@ -221,14 +221,16 @@ class DanmakuViewState extends State<DanmakuView>
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        CustomPaint(size: Size.infinite, painter: _scrollPainter),
-        RepaintBoundary(
-          child: CustomPaint(size: Size.infinite, painter: _fixedPainter),
-        ),
-      ],
+    return IgnorePointer(
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          CustomPaint(size: Size.infinite, painter: _scrollPainter),
+          RepaintBoundary(
+            child: CustomPaint(size: Size.infinite, painter: _fixedPainter),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -270,6 +272,9 @@ class _ScrollLayerPainter extends CustomPainter {
   }
 
   @override
+  bool? hitTest(Offset position) => false;
+
+  @override
   bool shouldRepaint(covariant _ScrollLayerPainter oldDelegate) => false;
 }
 
@@ -284,6 +289,9 @@ class _FixedLayerPainter extends CustomPainter {
     view.debugFixedLayerPaintCount++;
     _paintLayer(canvas: canvas, view: view, scroll: false);
   }
+
+  @override
+  bool? hitTest(Offset position) => false;
 
   @override
   bool shouldRepaint(covariant _FixedLayerPainter oldDelegate) => false;

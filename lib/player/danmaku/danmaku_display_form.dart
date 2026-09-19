@@ -37,7 +37,12 @@ class DanmakuDisplayForm extends StatelessWidget {
           children: [
             _BasicGroup(value: value, onChanged: onChanged, compact: false),
             const SizedBox(height: AppSpacing.md),
-            _AdvancedGroup(value: value, onChanged: onChanged, compact: false),
+            _AdvancedGroup(
+              value: value,
+              onChanged: onChanged,
+              compact: false,
+              showRestore: false,
+            ),
           ],
         );
     }
@@ -69,6 +74,7 @@ class _BasicGroup extends StatelessWidget {
             compact: compact,
             onChanged: (opacity) => onChanged(value.copyWith(opacity: opacity)),
           ),
+          if (compact) const SizedBox(height: 6),
           _SegmentedRow<double>(
             key: DanmakuKeys.fontScale,
             label: l10n.danmakuFontSize,
@@ -95,6 +101,7 @@ class _BasicGroup extends StatelessWidget {
             onChanged: (fontScale) =>
                 onChanged(value.copyWith(fontScale: fontScale)),
           ),
+          if (compact) const SizedBox(height: 6),
           _SegmentedRow<double>(
             key: DanmakuKeys.speed,
             label: l10n.danmakuSpeed,
@@ -120,6 +127,7 @@ class _BasicGroup extends StatelessWidget {
             ],
             onChanged: (speed) => onChanged(value.copyWith(speed: speed)),
           ),
+          if (compact) const SizedBox(height: 6),
           _SegmentedRow<double>(
             key: DanmakuKeys.area,
             label: l10n.danmakuDisplayArea,
@@ -146,6 +154,7 @@ class _BasicGroup extends StatelessWidget {
             onChanged: (areaFraction) =>
                 onChanged(value.copyWith(areaFraction: areaFraction)),
           ),
+          if (compact) const SizedBox(height: 8),
           _TypeRow(value: value, onChanged: onChanged, compact: compact),
         ],
       ),
@@ -158,11 +167,13 @@ class _AdvancedGroup extends StatelessWidget {
     required this.value,
     required this.onChanged,
     required this.compact,
+    this.showRestore = true,
   });
 
   final DanmakuDisplaySettings value;
   final ValueChanged<DanmakuDisplaySettings> onChanged;
   final bool compact;
+  final bool showRestore;
 
   @override
   Widget build(BuildContext context) {
@@ -241,20 +252,21 @@ class _AdvancedGroup extends StatelessWidget {
             onChanged: (blockedKeywords) =>
                 onChanged(value.copyWith(blockedKeywords: blockedKeywords)),
           ),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: TextButton.icon(
-              key: DanmakuKeys.restoreDefaults,
-              onPressed: () => onChanged(const DanmakuDisplaySettings()),
-              style: TextButton.styleFrom(
-                visualDensity: compact
-                    ? VisualDensity.compact
-                    : VisualDensity.standard,
+          if (showRestore)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                key: DanmakuKeys.restoreDefaults,
+                onPressed: () => onChanged(const DanmakuDisplaySettings()),
+                style: TextButton.styleFrom(
+                  visualDensity: compact
+                      ? VisualDensity.compact
+                      : VisualDensity.standard,
+                ),
+                icon: const Icon(Icons.settings_backup_restore_rounded),
+                label: Text(l10n.danmakuRestoreDefaults),
               ),
-              icon: const Icon(Icons.settings_backup_restore_rounded),
-              label: Text(l10n.danmakuRestoreDefaults),
             ),
-          ),
         ],
       ),
     );
@@ -277,11 +289,17 @@ class _OpacityRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     final slider = SliderTheme(
       data: SliderTheme.of(context).copyWith(
         overlayShape: SliderComponentShape.noOverlay,
-        trackHeight: compact ? 2 : 4,
-        thumbShape: RoundSliderThumbShape(enabledThumbRadius: compact ? 6 : 8),
+        trackHeight: compact ? 3 : 4,
+        thumbShape: RoundSliderThumbShape(enabledThumbRadius: compact ? 5 : 8),
+        activeTrackColor: compact ? scheme.onSurface : null,
+        inactiveTrackColor: compact
+            ? scheme.onSurface.withValues(alpha: 0.18)
+            : null,
+        thumbColor: compact ? scheme.onSurface : null,
       ),
       child: Slider(
         key: DanmakuKeys.opacity,
@@ -293,11 +311,14 @@ class _OpacityRow extends StatelessWidget {
     );
     final percent = Text(
       '${(value * 100).round()}%',
-      style: theme.textTheme.labelSmall,
+      style: theme.textTheme.labelSmall?.copyWith(
+        color: compact ? scheme.onSurface.withValues(alpha: 0.72) : null,
+        fontFeatures: const [FontFeature.tabularFigures()],
+      ),
     );
     if (compact) {
       return SizedBox(
-        height: 40,
+        height: 32,
         child: Row(
           children: [
             _CompactLabel(label),
@@ -344,19 +365,34 @@ class _SegmentedRow<T extends Object> extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    if (compact) {
+      return SizedBox(
+        height: 32,
+        child: Row(
+          children: [
+            _CompactLabel(label),
+            Expanded(
+              child: _HudChoiceBar<T>(
+                value: value,
+                segments: segments,
+                onChanged: onChanged,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
     final buttons = SegmentedButton<T>(
       showSelectedIcon: false,
       emptySelectionAllowed: false,
       style: ButtonStyle(
-        visualDensity: compact ? VisualDensity.compact : VisualDensity.standard,
+        visualDensity: VisualDensity.standard,
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
         padding: const WidgetStatePropertyAll(
           EdgeInsets.symmetric(horizontal: 4),
         ),
-        minimumSize: WidgetStatePropertyAll(Size(0, compact ? 32 : 40)),
-        textStyle: WidgetStatePropertyAll(
-          theme.textTheme.labelSmall?.copyWith(fontSize: compact ? 11 : 12),
-        ),
+        minimumSize: const WidgetStatePropertyAll(Size(0, 40)),
+        textStyle: WidgetStatePropertyAll(theme.textTheme.labelSmall),
       ),
       segments: segments,
       selected: {value},
@@ -367,17 +403,6 @@ class _SegmentedRow<T extends Object> extends StatelessWidget {
         onChanged(selected.first);
       },
     );
-    if (compact) {
-      return SizedBox(
-        height: 40,
-        child: Row(
-          children: [
-            _CompactLabel(label),
-            Expanded(child: buttons),
-          ],
-        ),
-      );
-    }
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
       child: Column(
@@ -406,50 +431,60 @@ class _TypeRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final chips = Wrap(
-      key: DanmakuKeys.types,
-      spacing: AppSpacing.xxs,
-      runSpacing: AppSpacing.xxs,
-      children: [
-        _TypeChip(
-          key: DanmakuKeys.typeScroll,
-          label: l10n.danmakuTypeScroll,
-          selected: value.showScroll,
-          compact: compact,
-          onSelected: (showScroll) =>
-              onChanged(value.copyWith(showScroll: showScroll)),
-        ),
-        _TypeChip(
-          key: DanmakuKeys.typeTop,
-          label: l10n.danmakuTypeTop,
-          selected: value.showTop,
-          compact: compact,
-          onSelected: (showTop) => onChanged(value.copyWith(showTop: showTop)),
-        ),
-        _TypeChip(
-          key: DanmakuKeys.typeBottom,
-          label: l10n.danmakuTypeBottom,
-          selected: value.showBottom,
-          compact: compact,
-          onSelected: (showBottom) =>
-              onChanged(value.copyWith(showBottom: showBottom)),
-        ),
-        _TypeChip(
-          key: DanmakuKeys.typeColorful,
-          label: l10n.danmakuColorful,
-          selected: value.colorful,
-          compact: compact,
-          onSelected: (colorful) =>
-              onChanged(value.copyWith(colorful: colorful)),
-        ),
-      ],
-    );
+    final chips = [
+      _TypeChip(
+        key: DanmakuKeys.typeScroll,
+        label: l10n.danmakuTypeScroll,
+        selected: value.showScroll,
+        compact: compact,
+        onSelected: (showScroll) =>
+            onChanged(value.copyWith(showScroll: showScroll)),
+      ),
+      _TypeChip(
+        key: DanmakuKeys.typeTop,
+        label: l10n.danmakuTypeTop,
+        selected: value.showTop,
+        compact: compact,
+        onSelected: (showTop) => onChanged(value.copyWith(showTop: showTop)),
+      ),
+      _TypeChip(
+        key: DanmakuKeys.typeBottom,
+        label: l10n.danmakuTypeBottom,
+        selected: value.showBottom,
+        compact: compact,
+        onSelected: (showBottom) =>
+            onChanged(value.copyWith(showBottom: showBottom)),
+      ),
+      _TypeChip(
+        key: DanmakuKeys.typeColorful,
+        label: l10n.danmakuColorful,
+        selected: value.colorful,
+        compact: compact,
+        onSelected: (colorful) => onChanged(value.copyWith(colorful: colorful)),
+      ),
+    ];
     if (compact) {
-      return chips;
+      return SizedBox(
+        key: DanmakuKeys.types,
+        height: 32,
+        child: Row(
+          children: [
+            for (var i = 0; i < chips.length; i++) ...[
+              if (i > 0) const SizedBox(width: 6),
+              Expanded(child: chips[i]),
+            ],
+          ],
+        ),
+      );
     }
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
-      child: chips,
+      child: Wrap(
+        key: DanmakuKeys.types,
+        spacing: AppSpacing.xxs,
+        runSpacing: AppSpacing.xxs,
+        children: chips,
+      ),
     );
   }
 }
@@ -470,13 +505,38 @@ class _TypeChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return FilterChip(
-      label: Text(label),
-      selected: selected,
-      onSelected: onSelected,
-      visualDensity: compact ? VisualDensity.compact : VisualDensity.standard,
-      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-      labelPadding: compact ? const EdgeInsets.symmetric(horizontal: 4) : null,
+    if (!compact) {
+      return FilterChip(
+        label: Text(label),
+        selected: selected,
+        onSelected: onSelected,
+        visualDensity: VisualDensity.standard,
+        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      );
+    }
+    final scheme = Theme.of(context).colorScheme;
+    final selectedFill = scheme.onSurface.withValues(alpha: 0.92);
+    final idleFill = scheme.onSurface.withValues(alpha: 0.08);
+    return Material(
+      color: selected ? selectedFill : idleFill,
+      borderRadius: BorderRadius.circular(999),
+      child: InkWell(
+        onTap: () => onSelected(!selected),
+        borderRadius: BorderRadius.circular(999),
+        child: Center(
+          child: Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+              color: selected
+                  ? scheme.surface
+                  : scheme.onSurface.withValues(alpha: 0.72),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -497,15 +557,33 @@ class _SwitchRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SwitchListTile.adaptive(
-      title: Text(title),
-      value: value,
-      onChanged: onChanged,
-      dense: compact,
-      visualDensity: compact ? VisualDensity.compact : VisualDensity.standard,
-      contentPadding: compact
-          ? EdgeInsets.zero
-          : const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+    if (!compact) {
+      return SwitchListTile.adaptive(
+        title: Text(title),
+        value: value,
+        onChanged: onChanged,
+        contentPadding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+      );
+    }
+    return SizedBox(
+      height: 36,
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.labelMedium,
+            ),
+          ),
+          Switch.adaptive(
+            value: value,
+            onChanged: onChanged,
+            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          ),
+        ],
+      ),
     );
   }
 }
@@ -570,7 +648,7 @@ class _TimeOffsetRow extends StatelessWidget {
     );
     if (compact) {
       return SizedBox(
-        height: 40,
+        height: 36,
         child: Row(
           children: [
             _CompactLabel(l10n.danmakuTimeOffset),
@@ -670,9 +748,15 @@ class _KeywordEditorState extends State<_KeywordEditor> {
       onEditingComplete: _commit,
       onSubmitted: (_) => _commit(),
       decoration: InputDecoration(
-        isDense: widget.compact,
+        isDense: true,
         hintText: l10n.danmakuKeywordHint,
-        border: const OutlineInputBorder(),
+        filled: widget.compact,
+        border: widget.compact
+            ? OutlineInputBorder(
+                borderRadius: BorderRadius.circular(AppRadii.sm),
+                borderSide: BorderSide.none,
+              )
+            : const OutlineInputBorder(),
       ),
     );
     final chips = Wrap(
@@ -700,7 +784,7 @@ class _KeywordEditorState extends State<_KeywordEditor> {
             chips,
             const SizedBox(height: AppSpacing.xxs),
           ],
-          SizedBox(height: 40, child: field),
+          SizedBox(height: 36, child: field),
         ],
       );
     }
@@ -722,6 +806,72 @@ class _KeywordEditorState extends State<_KeywordEditor> {
   }
 }
 
+class _HudChoiceBar<T extends Object> extends StatelessWidget {
+  const _HudChoiceBar({
+    required this.value,
+    required this.segments,
+    required this.onChanged,
+  });
+
+  final T value;
+  final List<ButtonSegment<T>> segments;
+  final ValueChanged<T> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Padding(
+      padding: const EdgeInsets.all(2),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: scheme.onSurface.withValues(alpha: 0.10),
+          borderRadius: BorderRadius.circular(999),
+        ),
+        child: Row(
+          children: [
+            for (final segment in segments)
+              Expanded(
+                child: Material(
+                  color: segment.value == value
+                      ? scheme.onSurface.withValues(alpha: 0.92)
+                      : Colors.transparent,
+                  borderRadius: BorderRadius.circular(999),
+                  child: InkWell(
+                    onTap: () => onChanged(segment.value),
+                    borderRadius: BorderRadius.circular(999),
+                    child: SizedBox(
+                      height: 28,
+                      child: Center(
+                        child: DefaultTextStyle(
+                          style:
+                              (theme.textTheme.labelSmall ?? const TextStyle())
+                                  .copyWith(
+                                    fontWeight: segment.value == value
+                                        ? FontWeight.w600
+                                        : FontWeight.w500,
+                                    color: segment.value == value
+                                        ? scheme.surface
+                                        : scheme.onSurface.withValues(
+                                            alpha: 0.64,
+                                          ),
+                                  ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          child: segment.label ?? const SizedBox.shrink(),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _CompactLabel extends StatelessWidget {
   const _CompactLabel(this.text);
 
@@ -735,7 +885,12 @@ class _CompactLabel extends StatelessWidget {
         text,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
-        style: Theme.of(context).textTheme.labelMedium,
+        style: Theme.of(context).textTheme.labelMedium?.copyWith(
+          color: Theme.of(
+            context,
+          ).colorScheme.onSurface.withValues(alpha: 0.62),
+          fontWeight: FontWeight.w500,
+        ),
       ),
     );
   }

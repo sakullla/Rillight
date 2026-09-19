@@ -111,6 +111,43 @@ void main() {
     primaryImageTag: 'tag-img',
   );
 
+  test('image cache budgets stay well below the old 256 MiB dual cap', () {
+    expect(kPaintingImageCacheMaxBytes, 64 * 1024 * 1024);
+    expect(kPaintingImageCacheMaxEntries, 400);
+    expect(MediaImageCache.defaultMemoryLimitBytes, 64 * 1024 * 1024);
+  });
+
+  test('backdrop request width follows the window pixels and clamps', () {
+    expect(
+      mediaBackdropRequestWidth(layoutWidth: 960, devicePixelRatio: 1),
+      960,
+    );
+    expect(
+      mediaBackdropRequestWidth(layoutWidth: 1920, devicePixelRatio: 1),
+      kMediaBackdropMaxRequestWidth,
+    );
+    expect(
+      mediaBackdropRequestWidth(layoutWidth: 800, devicePixelRatio: 1.25),
+      1000,
+    );
+    expect(
+      mediaBackdropRequestWidth(layoutWidth: 400, devicePixelRatio: 1),
+      kMediaBackdropMinRequestWidth,
+    );
+  });
+
+  test('configurePaintingImageCache applies the decode budget', () {
+    configurePaintingImageCache();
+    expect(
+      PaintingBinding.instance.imageCache.maximumSize,
+      kPaintingImageCacheMaxEntries,
+    );
+    expect(
+      PaintingBinding.instance.imageCache.maximumSizeBytes,
+      kPaintingImageCacheMaxBytes,
+    );
+  });
+
   testWidgets('shows a skeleton placeholder while loading', (tester) async {
     final auth = await connect(tester);
     await tester.runAsync(() async {

@@ -116,11 +116,13 @@ class LiquidGlass extends StatelessWidget {
           children: [
             if (!skipBlur)
               Positioned.fill(
-                child: ColorFiltered(
-                  colorFilter: _saturate,
-                  child: BackdropFilter(
-                    filter: ImageFilter.blur(sigmaX: _sigma, sigmaY: _sigma),
-                    child: const ColoredBox(color: Color(0x00000000)),
+                child: IgnorePointer(
+                  child: ColorFiltered(
+                    colorFilter: _saturate,
+                    child: BackdropFilter(
+                      filter: ImageFilter.blur(sigmaX: _sigma, sigmaY: _sigma),
+                      child: const SizedBox.expand(),
+                    ),
                   ),
                 ),
               ),

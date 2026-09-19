@@ -240,7 +240,12 @@ class _HomeHeroState extends State<HomeHero> {
                               item: item,
                               height: height,
                               preferBackdrop: true,
-                              maxWidth: 1920,
+                              maxWidth: mediaBackdropRequestWidth(
+                                layoutWidth: constraints.maxWidth,
+                                devicePixelRatio: MediaQuery.devicePixelRatioOf(
+                                  context,
+                                ),
+                              ),
                             ),
                           ),
                           Padding(

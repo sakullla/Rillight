@@ -1,6 +1,7 @@
 import 'dart:collection';
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
 import 'package:rillight/player/danmaku/danmaku_layout.dart';
@@ -15,11 +16,44 @@ const int kDanmakuGlyphPrepareChunkSize = 200;
 /// idle 预布局每块时间上限。
 const Duration kDanmakuGlyphPrepareChunkLimit = Duration(milliseconds: 4);
 
-/// 描边颜色(70% 黑)。
-const Color kDanmakuGlyphStrokeColor = Color(0xB0000000);
+/// 描边颜色(约 90% 黑,接近 B 站重墨/描边)。
+const Color kDanmakuGlyphStrokeColor = Color(0xE6000000);
 
-/// 描边宽度。
-const double kDanmakuGlyphStrokeWidth = 3;
+/// 1080p 中号字对应的描边宽度参考(ASS outline ≈ 1.2)。
+const double kDanmakuGlyphStrokeWidth = 1.2;
+
+/// 描边随字号缩放,避免小字被 3px 描边糊成一团。
+double danmakuGlyphStrokeWidth(double fontPx) {
+  return (fontPx * (kDanmakuGlyphStrokeWidth / 50)).clamp(1.0, 2.4);
+}
+
+/// 弹幕用黑体族:Windows 微软雅黑、macOS 苹方、Linux Noto/思源。
+List<String> danmakuFontFallbacks([TargetPlatform? platform]) {
+  switch (platform ?? defaultTargetPlatform) {
+    case TargetPlatform.macOS:
+      return const [
+        'PingFang SC',
+        'Hiragino Sans GB',
+        'Microsoft YaHei',
+        'Noto Sans CJK SC',
+      ];
+    case TargetPlatform.linux:
+      return const [
+        'Noto Sans CJK SC',
+        'Noto Sans SC',
+        'Source Han Sans SC',
+        'WenQuanYi Micro Hei',
+        'Microsoft YaHei',
+      ];
+    default:
+      return const [
+        'Microsoft YaHei',
+        'Microsoft YaHei UI',
+        'PingFang SC',
+        'Noto Sans CJK SC',
+      ];
+  }
+}
 
 /// 彩色关闭时缓存键与填充使用的 RGB。
 const int kDanmakuGlyphWhiteRgb = 0xFFFFFF;
@@ -327,7 +361,7 @@ class DanmakuGlyphCache {
             fontPx: fontPx,
             foreground: Paint()
               ..style = PaintingStyle.stroke
-              ..strokeWidth = kDanmakuGlyphStrokeWidth
+              ..strokeWidth = danmakuGlyphStrokeWidth(fontPx)
               ..strokeJoin = StrokeJoin.round
               ..color = kDanmakuGlyphStrokeColor,
           )
@@ -346,11 +380,13 @@ class DanmakuGlyphCache {
     Color? color,
     Paint? foreground,
   }) {
+    final families = danmakuFontFallbacks();
     final builder = ui.ParagraphBuilder(
       ui.ParagraphStyle(
         textDirection: TextDirection.ltr,
         maxLines: 1,
         fontSize: fontPx,
+        fontFamily: families.first,
         fontWeight: FontWeight.w500,
       ),
     );
@@ -359,6 +395,8 @@ class DanmakuGlyphCache {
         color: color,
         foreground: foreground,
         fontSize: fontPx,
+        fontFamily: families.first,
+        fontFamilyFallback: families.sublist(1),
         fontWeight: FontWeight.w500,
       ),
     );

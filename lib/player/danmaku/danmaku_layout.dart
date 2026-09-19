@@ -6,8 +6,9 @@ import 'package:rillight/player/danmaku/danmaku_timeline.dart';
 // 显示参数已迁至独立文件;此处转出口以兼容仍从本文件导入的调用方。
 export 'package:rillight/player/danmaku/danmaku_display_settings.dart';
 
-/// 基础字号(逻辑像素)。最终字号 =
+/// 基础字号(逻辑像素,1080p「中」档)。最终字号 =
 /// `基础 × fontScale × clamp(viewportHeight / 1080, 0.6, 1.5)`,取整。
+/// 未调过的默认档是「大」(`kDanmakuFontScaleDefault`)。
 const double kDanmakuBaseFontSize = 26;
 
 /// 字号随视口缩放的参考高度。

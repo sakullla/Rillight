@@ -8,6 +8,7 @@ import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/player/danmaku/danmaku_display_form.dart';
 import 'package:rillight/player/danmaku/danmaku_display_settings.dart';
+import 'package:rillight/player/danmaku/danmaku_keys.dart';
 import 'package:rillight/player/player_runtime_options.dart';
 import 'package:rillight/player/player_settings.dart';
 
@@ -401,6 +402,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   icon: Icons.chat_bubble_outline_rounded,
                   title: l10n.danmakuSettings,
                   trailing: TextButton.icon(
+                    key: DanmakuKeys.restoreDefaults,
                     onPressed: _loaded
                         ? () => _saveDanmakuDisplay(
                             const DanmakuDisplaySettings(),

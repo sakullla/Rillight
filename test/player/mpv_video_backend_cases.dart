@@ -264,6 +264,24 @@ void main() {
       expect(backend.isPlaying, isFalse);
     },
   );
+
+  test('cache-speed property is forwarded as bytes per second', () async {
+    await backend.open(request(1));
+    final events = <VideoBackendEvent>[];
+    backend.events.listen(events.add);
+    drivers.single.eventsController.add(
+      const MpvEvent('property', property: 'cache-speed', value: 2621440),
+    );
+    await _until(
+      () => events.any((event) => event.kind == VideoEventKind.cacheSpeed),
+    );
+    expect(
+      events
+          .lastWhere((event) => event.kind == VideoEventKind.cacheSpeed)
+          .value,
+      2621440,
+    );
+  });
 }
 
 Future<void> _until(bool Function() ready) async {

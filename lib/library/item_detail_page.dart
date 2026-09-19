@@ -2066,7 +2066,12 @@ class _DetailHeader extends StatelessWidget {
                       item: item,
                       preferBackdrop: !item.isEpisode,
                       preferParentBackdrop: item.isEpisode,
-                      maxWidth: 1920,
+                      maxWidth: mediaBackdropRequestWidth(
+                        layoutWidth: width,
+                        devicePixelRatio: MediaQuery.devicePixelRatioOf(
+                          context,
+                        ),
+                      ),
                     ),
                   ),
                 ),

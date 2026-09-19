@@ -301,6 +301,10 @@ class MpvVideoBackend implements VideoBackend {
               buffer = _seconds(value);
               _emit(session, VideoEventKind.buffer, buffer);
             }
+          case 'cache-speed':
+            if (value is num) {
+              _emit(session, VideoEventKind.cacheSpeed, value.toDouble());
+            }
           case 'pause':
             if (value is bool) {
               session.paused = value;

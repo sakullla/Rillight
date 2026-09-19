@@ -36,7 +36,7 @@ DanmakuEntry entryOf(
 
 double measure(String text, double fontSize) => text.length * fontSize * 0.6;
 
-int fontPxFor(Size size, {double fontScale = 1}) {
+int fontPxFor(Size size, {double fontScale = kDanmakuFontScaleDefault}) {
   final viewScale = (size.height / kDanmakuViewportReferenceHeight).clamp(
     kDanmakuViewportScaleMin,
     kDanmakuViewportScaleMax,
@@ -44,7 +44,11 @@ int fontPxFor(Size size, {double fontScale = 1}) {
   return (kDanmakuBaseFontSize * fontScale * viewScale).round();
 }
 
-int laneCountFor(Size size, {double areaFraction = 0.5, double fontScale = 1}) {
+int laneCountFor(
+  Size size, {
+  double areaFraction = 0.5,
+  double fontScale = kDanmakuFontScaleDefault,
+}) {
   final fontPx = fontPxFor(size, fontScale: fontScale);
   final lineHeight = fontPx * kDanmakuLineHeightFactor;
   return (size.height * areaFraction / lineHeight).floor();
@@ -386,7 +390,7 @@ void main() {
     short.update(const Duration(milliseconds: 1000), const Size(1280, 720));
     final tall = layoutWith(comments: comments);
     tall.update(const Duration(milliseconds: 1000), const Size(1920, 1080));
-    expect(tall.fontPx, 26);
+    expect(tall.fontPx, fontPxFor(const Size(1920, 1080)));
     expect(
       (short.fontPx - tall.fontPx * 720 / 1080).abs(),
       lessThanOrEqualTo(1),

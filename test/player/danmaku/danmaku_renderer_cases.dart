@@ -23,7 +23,7 @@ DanmakuComment comment(
   text: text ?? '弹幕$cid',
 );
 
-int fontPxFor(Size size, {double fontScale = 1}) {
+int fontPxFor(Size size, {double fontScale = kDanmakuFontScaleDefault}) {
   final viewScale = (size.height / kDanmakuViewportReferenceHeight).clamp(
     kDanmakuViewportScaleMin,
     kDanmakuViewportScaleMax,
@@ -324,4 +324,21 @@ void main() {
       expect(state.debugLastDrawParagraphCount, controller.layout.activeCount);
     },
   );
+
+  test('default font is large; steps stay on the original 26px scale', () {
+    expect(kDanmakuBaseFontSize, 26);
+    expect(kDanmakuFontScaleDefault, 1.25);
+    expect(kDanmakuFontScaleSteps, [0.75, 1.0, 1.25, 1.5]);
+    expect(danmakuGlyphStrokeWidth(50), closeTo(1.2, 0.01));
+    expect(danmakuGlyphStrokeWidth(25), greaterThanOrEqualTo(1.0));
+    expect(
+      danmakuFontFallbacks(TargetPlatform.windows).first,
+      'Microsoft YaHei',
+    );
+    expect(danmakuFontFallbacks(TargetPlatform.macOS).first, 'PingFang SC');
+    expect(
+      danmakuFontFallbacks(TargetPlatform.linux).first,
+      'Noto Sans CJK SC',
+    );
+  });
 }

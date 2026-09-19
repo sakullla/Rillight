@@ -3,6 +3,7 @@ import '../helpers/settle.dart';
 import 'dart:async';
 
 import 'package:dio/dio.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -19,8 +20,10 @@ import 'package:rillight/player/playback_models.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/danmaku/danmaku_display_settings.dart';
 import 'package:rillight/player/danmaku/danmaku_keys.dart';
+import 'package:rillight/player/danmaku/danmaku_renderer.dart';
 import 'package:rillight/player/danmaku/dandanplay_client.dart';
 import 'package:rillight/player/danmaku/dandanplay_models.dart';
+import 'package:rillight/player/network_throughput.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/player_controller.dart';
@@ -313,6 +316,36 @@ void main() {
       server.playbackEvents.map((event) => event.kind),
       contains('Playing'),
     );
+  }, tags: ['integration']);
+
+  testWidgets('player chrome shows live network throughput', (tester) async {
+    setPlayerLogicalSize(tester);
+    await pumpLoggedIn(tester);
+    await openPlayable(tester, 'movie-up');
+    await waitFor(tester, find.byKey(PlayerKeys.playPause));
+    expect(find.byKey(PlayerKeys.networkSpeed), findsOneWidget);
+    expect(find.text('0 KB/s'), findsOneWidget);
+
+    backend.emitEvent(VideoEventKind.cacheSpeed, 2.5 * 1024 * 1024);
+    await tester.pump();
+    expect(find.text('2.5 MB/s'), findsOneWidget);
+    expect(find.byTooltip('实时网速'), findsOneWidget);
+
+    final surface = tester.getRect(find.byKey(PlayerKeys.surface));
+    await tester.tapAt(
+      Offset(surface.center.dx, surface.top + surface.height * 0.4),
+    );
+    await tester.pump();
+    expect(controllerOf(tester).controlsVisible, isFalse);
+    final speedHit = tester.widget<IgnorePointer>(
+      find
+          .ancestor(
+            of: find.byKey(PlayerKeys.networkSpeed),
+            matching: find.byType(IgnorePointer),
+          )
+          .first,
+    );
+    expect(speedHit.ignoring, isTrue);
   }, tags: ['integration']);
 
   testWidgets('movie end shows replay card instead of a blank frame', (
@@ -725,16 +758,11 @@ void main() {
         expect(panel.overlaps(rect), isTrue);
       }
       expect(
-        tester
-            .state<ScrollableState>(
-              find.descendant(
-                of: find.byKey(DanmakuKeys.panel),
-                matching: find.byType(Scrollable),
-              ),
-            )
-            .position
-            .maxScrollExtent,
-        0,
+        find.descendant(
+          of: find.byKey(DanmakuKeys.panel),
+          matching: find.byType(Scrollable),
+        ),
+        findsNothing,
       );
 
       await tester.tap(find.byKey(DanmakuKeys.advancedToggle));
@@ -876,6 +904,44 @@ void main() {
     await tester.tap(find.byKey(PlayerKeys.surface));
     await tester.pump();
     expect(find.byKey(const Key('player-danmaku-panel')), findsNothing);
+  }, tags: ['integration']);
+
+  testWidgets('tapping surface hides controls while danmaku overlay is on', (
+    tester,
+  ) async {
+    setPlayerLogicalSize(tester);
+    await pumpLoggedIn(
+      tester,
+      settingsStore: MemoryPlayerSettingsStore(
+        const PlayerSettings(danmakuAppId: 'app', danmakuToken: 'secret'),
+      ),
+      danmakuClient: _MatchedDanmakuClient(
+        comments: const [
+          DanmakuComment(cid: 1, time: 0, mode: 1, color: 16777215, text: '弹幕'),
+        ],
+      ),
+    );
+    await openPlayable(tester, 'movie-up');
+    await waitFor(tester, find.byKey(PlayerKeys.playPause));
+    await waitFor(tester, find.byType(DanmakuView));
+    expect(controllerOf(tester).controlsVisible, isTrue);
+
+    final surface = tester.getRect(find.byKey(PlayerKeys.surface));
+    await tester.tapAt(
+      Offset(surface.center.dx, surface.top + surface.height * 0.4),
+    );
+    await tester.pump();
+    expect(controllerOf(tester).controlsVisible, isFalse);
+
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    addTearDown(mouse.removePointer);
+    await mouse.addPointer(
+      location: Offset(surface.center.dx, surface.top + surface.height * 0.4),
+    );
+    await tester.pump();
+    await mouse.moveBy(const Offset(6, 0));
+    await tester.pump();
+    expect(controllerOf(tester).controlsVisible, isFalse);
   }, tags: ['integration']);
 
   testWidgets('danmaku search field stays editable while results load', (
@@ -1053,16 +1119,18 @@ void main() {
     await waitForGone(tester, find.byType(PlayerPage));
   }, tags: ['integration']);
 
-  testWidgets('player chrome close still hits after OSD hides', (tester) async {
+  testWidgets('player chrome close hides with OSD', (tester) async {
     await pumpLoggedIn(tester, hideAfter: const Duration(milliseconds: 1));
     await openPlayable(tester, 'movie-up');
     await waitFor(tester, find.byKey(const Key('player-window-close')));
     await tester.pump(const Duration(milliseconds: 50));
     expect(controllerOf(tester).controlsVisible, isFalse);
-    await tester.tap(find.byKey(const Key('player-window-close')));
-    await tester.pump();
-    await tester.runAsync(() => Future<void>.delayed(Duration.zero));
-    await waitForGone(tester, find.byType(PlayerPage));
+    await tester.tap(
+      find.byKey(const Key('player-window-close')),
+      warnIfMissed: false,
+    );
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(find.byType(PlayerPage), findsOneWidget);
   }, tags: ['integration']);
 
   test('close still fires onClose if backend dispose hangs', () async {
@@ -1132,6 +1200,28 @@ void main() {
     expect(mpvVolumeForPercent(150), 150.0);
     expect(mpvVolumeForPercent(200), PlayerSettings.volumeMax.toDouble());
     expect(mpvVolumeForPercent(-5), 0.0);
+  });
+
+  test('volume wheel lands on 100 instead of skipping it', () {
+    expect(volumeAfterWheelNudge(91, 5), 95);
+    expect(volumeAfterWheelNudge(95, 5), 100);
+    expect(volumeAfterWheelNudge(96, 5), 100);
+    expect(volumeAfterWheelNudge(99, 5), 100);
+    expect(volumeAfterWheelNudge(100, 5), 105);
+    expect(volumeAfterWheelNudge(100, -5), 95);
+    expect(volumeAfterWheelNudge(91, -5), 90);
+    expect(volumeAfterWheelNudge(2, -5), 0);
+    expect(volumeAfterWheelNudge(148, 5), 150);
+    expect(volumeAfterWheelNudge(150, 5), 150);
+  });
+
+  test('network throughput uses 1024-based units', () {
+    expect(formatNetworkThroughput(0), '0 KB/s');
+    expect(formatNetworkThroughput(double.nan), '0 KB/s');
+    expect(formatNetworkThroughput(-8), '0 KB/s');
+    expect(formatNetworkThroughput(1024), '1 KB/s');
+    expect(formatNetworkThroughput(2.5 * 1024 * 1024), '2.5 MB/s');
+    expect(formatNetworkThroughput(12.4 * 1024 * 1024), '12 MB/s');
   });
 
   test('buffer fraction is cache end over duration', () {

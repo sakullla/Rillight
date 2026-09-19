@@ -458,6 +458,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get playerLoading => '正在打开播放…';
 
   @override
+  String get playerNetworkSpeedTooltip => '实时网速';
+
+  @override
   String get settings => '设置';
 
   @override
@@ -589,7 +592,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get danmakuUnlimited => '不限';
 
   @override
-  String get danmakuSearch => '手动搜索';
+  String get danmakuSearch => '搜索';
 
   @override
   String get danmakuSearchTitle => '搜索弹幕';

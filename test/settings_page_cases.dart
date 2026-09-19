@@ -331,6 +331,7 @@ void main() {
 
     expect(find.byKey(DanmakuKeys.keywordChip('剧透')), findsOneWidget);
     final restore = find.byKey(DanmakuKeys.restoreDefaults);
+    expect(restore, findsOneWidget);
     await tester.ensureVisible(restore);
     await tester.pump();
     await tester.tap(restore);

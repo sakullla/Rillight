@@ -28,6 +28,7 @@ enum VideoEventKind {
   buffering,
   completed,
   error,
+  cacheSpeed,
 }
 
 /// The backend preserves the originating open's identity, including late events.

@@ -68,21 +68,53 @@ class PlayerProcessProtocol {
     String kind, [
     Map<String, dynamic> data = const {},
   ]) async {
-    final target = _file(kind);
+    final payload = jsonEncode({...data, 'sessionId': sessionId, 'pid': pid});
+    await _replace(_file(kind), payload);
+  }
+
+  /// Windows 上 mailbox 文件常被子进程或杀毒软件短时间锁住,delete+rename
+  /// 会抛 errno 32,表现为第一次点播放失败、再点一次才行。
+  Future<void> _replace(File target, String payload) async {
+    FileSystemException? last;
+    for (var attempt = 0; attempt < 8; attempt++) {
+      try {
+        await _replaceOnce(target, payload);
+        return;
+      } on FileSystemException catch (error) {
+        last = error;
+        await Future<void>.delayed(Duration(milliseconds: 20 * (attempt + 1)));
+      }
+    }
+    throw last!;
+  }
+
+  Future<void> _replaceOnce(File target, String payload) async {
     final temporary = File('${target.path}.tmp');
-    await temporary.writeAsString(
-      jsonEncode({...data, 'sessionId': sessionId, 'pid': pid}),
-      flush: true,
-    );
-    if (await target.exists()) await target.delete();
-    await temporary.rename(target.path);
+    await temporary.writeAsString(payload, flush: true);
+    try {
+      if (await target.exists()) await target.delete();
+      await temporary.rename(target.path);
+    } on FileSystemException {
+      await target.writeAsString(payload, flush: true);
+      try {
+        if (await temporary.exists()) await temporary.delete();
+      } on FileSystemException {
+        // 下次写入会覆盖残留的 tmp。
+      }
+    }
   }
 
   Future<Map<String, dynamic>?> read(String kind, {bool consume = true}) async {
     final target = _file(kind);
     try {
       final decoded = jsonDecode(await target.readAsString());
-      if (consume) await target.delete();
+      if (consume) {
+        try {
+          await target.delete();
+        } on FileSystemException {
+          // 已读入内存;Windows 上文件可能仍被对方打开。
+        }
+      }
       if (decoded is! Map || decoded['sessionId'] != sessionId) return null;
       return Map<String, dynamic>.from(decoded);
     } on FileSystemException {

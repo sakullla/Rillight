@@ -182,7 +182,7 @@ void main() {
     test('const default equals the R7 default set', () {
       const defaults = DanmakuDisplaySettings();
       expect(defaults.opacity, 0.85);
-      expect(defaults.fontScale, 1.0);
+      expect(defaults.fontScale, kDanmakuFontScaleDefault);
       expect(defaults.speed, 1.0);
       expect(defaults.areaFraction, 0.5);
       expect(defaults.showScroll, isTrue);
@@ -255,7 +255,11 @@ void main() {
         // 新增项全部为默认。
         expect(
           migrated,
-          const DanmakuDisplaySettings(opacity: 0.7, blockedKeywords: ['a']),
+          const DanmakuDisplaySettings(
+            opacity: 0.7,
+            fontScale: 1.0,
+            blockedKeywords: ['a'],
+          ),
         );
       },
     );

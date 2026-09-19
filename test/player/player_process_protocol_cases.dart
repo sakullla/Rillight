@@ -52,6 +52,24 @@ void main() {
     },
   );
 
+  test('heartbeat write succeeds while the previous file is open', () async {
+    await first.heartbeat();
+    final file = File('${first.directory.path}/heartbeat.json');
+    RandomAccessFile? handle = await file.open(mode: FileMode.read);
+    try {
+      final write = first.heartbeat();
+      await Future<void>.delayed(const Duration(milliseconds: 40));
+      await handle.close();
+      handle = null;
+      await write;
+    } finally {
+      await handle?.close();
+    }
+    final decoded = jsonDecode(await file.readAsString()) as Map;
+    expect(decoded['sessionId'], first.sessionId);
+    expect(decoded['at'], isA<int>());
+  });
+
   test('heartbeat expiry detects a vanished host', () async {
     await first.heartbeat();
     expect(await first.parentExpired(), isFalse);

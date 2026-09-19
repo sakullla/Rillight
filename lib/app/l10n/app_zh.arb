@@ -632,6 +632,10 @@
   "@playerLoading": {
     "description": "Status shown while PlaybackInfo and the stream are loading."
   },
+  "playerNetworkSpeedTooltip": "实时网速",
+  "@playerNetworkSpeedTooltip": {
+    "description": "Tooltip for live stream download throughput on the player chrome."
+  },
   "settings": "设置",
   "@settings": {
     "description": "Top-bar entry and page title for app settings."
@@ -809,9 +813,9 @@
   "@danmakuUnlimited": {
     "description": "Option for unlimited danmaku density."
   },
-  "danmakuSearch": "手动搜索",
+  "danmakuSearch": "搜索",
   "@danmakuSearch": {
-    "description": "Open manual danmaku match search."
+    "description": "Open danmaku match search from the player overlay."
   },
   "danmakuSearchTitle": "搜索弹幕",
   "@danmakuSearchTitle": {

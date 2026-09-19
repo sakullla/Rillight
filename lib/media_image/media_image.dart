@@ -15,6 +15,43 @@ import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/emby/emby_models.dart';
 
+/// Flutter [ImageCache] 解码图条目上限。与 [MediaImageCache] 的 JPEG 字节层
+/// 分开计数,两边都按低配内存留余量,避免空闲时各吃 256 MiB。
+const int kPaintingImageCacheMaxEntries = 400;
+
+/// Flutter [ImageCache] 解码像素上限,约 64 MiB。
+const int kPaintingImageCacheMaxBytes = 64 * 1024 * 1024;
+
+/// 背景图请求宽度下限:窄窗口仍拉够一张能铺满的底图。
+const int kMediaBackdropMinRequestWidth = 640;
+
+/// 背景图请求宽度上限:按窗口像素取值,但不超过此解码预算。
+const int kMediaBackdropMaxRequestWidth = 1280;
+
+/// 把 Flutter 解码缓存收到低配可承受的上限。启动时调用一次。
+void configurePaintingImageCache() {
+  final cache = PaintingBinding.instance.imageCache;
+  cache.maximumSize = kPaintingImageCacheMaxEntries;
+  cache.maximumSizeBytes = kPaintingImageCacheMaxBytes;
+}
+
+/// 背景图按当前窗口逻辑宽 × DPR 取整,再夹在
+/// [kMediaBackdropMinRequestWidth]–[kMediaBackdropMaxRequestWidth]。
+/// 不按机型档位猜分辨率,只跟眼前这个窗口走。
+int mediaBackdropRequestWidth({
+  required double layoutWidth,
+  required double devicePixelRatio,
+}) {
+  final px = (layoutWidth * devicePixelRatio).round();
+  if (px < kMediaBackdropMinRequestWidth) {
+    return kMediaBackdropMinRequestWidth;
+  }
+  if (px > kMediaBackdropMaxRequestWidth) {
+    return kMediaBackdropMaxRequestWidth;
+  }
+  return px;
+}
+
 class MediaImage extends StatefulWidget {
   const MediaImage({
     super.key,
@@ -382,7 +419,7 @@ Future<Uint8List?> loadChapterImage(
 }
 
 /// 图片字节两级缓存:
-/// - 第一级为进程内 LRU,按字节量上限(默认约 256 MiB,可调)淘汰最久未用条目;
+/// - 第一级为进程内 LRU,按字节量上限(默认约 64 MiB,可调)淘汰最久未用条目;
 /// - 第二级为磁盘缓存,目录 `ApplicationSupport/rillight/image_cache/`,
 ///   总占用超过上限时按 LRU 回收;
 /// - 缓存 key 为 `serverId|itemId|type|tag|variant|maxWidth`,tag 变化即换 key,
@@ -396,8 +433,8 @@ class MediaImageCache {
 
   static final MediaImageCache instance = MediaImageCache._();
 
-  /// 内存层字节量上限,默认约 256 MiB。
-  static const int defaultMemoryLimitBytes = 256 * 1024 * 1024;
+  /// 内存层字节量上限,默认约 64 MiB。
+  static const int defaultMemoryLimitBytes = 64 * 1024 * 1024;
 
   /// 磁盘层总占用上限,默认约 512 MiB。
   static const int defaultDiskLimitBytes = 512 * 1024 * 1024;
@@ -732,8 +769,9 @@ class _DiskEntry {
   }
 }
 
-/// 默认磁盘缓存:文件名由缓存 key base64Url 编码而来,以文件修改时间
-/// 近似 LRU(读取时刷新 mtime),总占用超过上限时淘汰最久未使用的条目。
+/// 默认磁盘缓存:文件名由缓存 key base64Url 编码而来。会话内 LRU 用内存
+/// 索引的 lastUsed;进程重启后按文件写入时间近似。总占用超过上限时淘汰
+/// 最久未使用的条目。
 class FileMediaImageDiskStore implements MediaImageDiskStore {
   FileMediaImageDiskStore(
     this.directory, {
@@ -836,9 +874,9 @@ class FileMediaImageDiskStore implements MediaImageDiskStore {
   Future<Uint8List?> _readIndexed(String name, _DiskEntry entry) async {
     try {
       final bytes = await entry.file.readAsBytes();
-      final now = DateTime.now();
-      _index?[name] = entry.withLastUsed(now);
-      unawaited(entry.file.setLastModified(now).catchError((_) => now));
+      // 会话内 LRU 只改内存索引。每次命中都 setLastModified 会在 HDD 上
+      // 把首页海报读放大写成元数据风暴。
+      _index?[name] = entry.withLastUsed(DateTime.now());
       return bytes;
     } catch (_) {
       _index?.remove(name);

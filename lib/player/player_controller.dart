@@ -229,6 +229,9 @@ class PlayerController extends ChangeNotifier {
   Duration position = Duration.zero;
   Duration duration = Duration.zero;
   Duration buffer = Duration.zero;
+
+  /// mpv `cache-speed`,字节/秒。缓冲写满时为 0。
+  double cacheSpeedBytesPerSec = 0;
   PlayerErrorKind? error;
   EmbyException? loadFailure;
   SubtitleNoticeKind? subtitleNotice;
@@ -535,7 +538,7 @@ class PlayerController extends ChangeNotifier {
 
   Future<void> nudgeVolume(int delta) {
     onUserActivity();
-    return setVolume(volume + delta);
+    return setVolume(volumeAfterWheelNudge(volume, delta));
   }
 
   /// 设置倍速:阶梯内取值,立即下发 backend 并持久化(跨集/重启沿用)。
@@ -701,6 +704,8 @@ class PlayerController extends ChangeNotifier {
     await close();
   }
 
+  DateTime? _ignoreHoverUntil;
+
   void onUserActivity() {
     controlsVisible = true;
     if (activeSkipSegment != null) {
@@ -708,6 +713,15 @@ class PlayerController extends ChangeNotifier {
     }
     _scheduleHide();
     _emit();
+  }
+
+  /// 单击收起后,Windows 改光标常会再送一次 hover,不能立刻把 OSD 拉回来。
+  void onPointerHover() {
+    final until = _ignoreHoverUntil;
+    if (until != null && DateTime.now().isBefore(until)) {
+      return;
+    }
+    onUserActivity();
   }
 
   /// 剧集列表面板打开时钉住控制层,避免顶栏盖住关闭钮后又自动隐藏。
@@ -742,9 +756,11 @@ class PlayerController extends ChangeNotifier {
     if (controlsVisible) {
       _hideTimer?.cancel();
       controlsVisible = false;
+      _ignoreHoverUntil = DateTime.now().add(const Duration(milliseconds: 400));
       _emit();
       return;
     }
+    _ignoreHoverUntil = null;
     onUserActivity();
   }
 
@@ -1497,6 +1513,11 @@ class PlayerController extends ChangeNotifier {
           buffer = event.value as Duration;
           if (buffer < Duration.zero) buffer = Duration.zero;
           if (duration > Duration.zero && buffer > duration) buffer = duration;
+        case VideoEventKind.cacheSpeed:
+          final value = event.value;
+          cacheSpeedBytesPerSec = value is num && value.isFinite && value > 0
+              ? value.toDouble()
+              : 0;
         case VideoEventKind.buffering:
           state.buffering = event.value as bool;
           state.updatePlaying(isPlaying);
@@ -1552,6 +1573,7 @@ class PlayerController extends ChangeNotifier {
     disconnected = false;
     disconnectDetail = null;
     buffer = Duration.zero;
+    cacheSpeedBytesPerSec = 0;
     nextEpisode = null;
     playbackEnded = false;
     _nextUpOffered = false;
@@ -2290,6 +2312,24 @@ class PlayerController extends ChangeNotifier {
 /// 滑条旁显示的就是这个百分比,必须一对一交给 backend。
 double mpvVolumeForPercent(int percent) {
   return percent.clamp(0, PlayerSettings.volumeMax).toDouble();
+}
+
+/// 滚轮按 5% 一档对齐,从滑条上的 91 也能经过 100,而不是 96、101。
+@visibleForTesting
+int volumeAfterWheelNudge(int volume, int delta) {
+  const step = PlayerController.volumeWheelStep;
+  const max = PlayerSettings.volumeMax;
+  if (delta == 0) {
+    return volume.clamp(0, max);
+  }
+  if (delta > 0) {
+    final next = volume % step == 0
+        ? volume + step
+        : (volume ~/ step + 1) * step;
+    return next.clamp(0, max);
+  }
+  final previous = volume % step == 0 ? volume - step : (volume ~/ step) * step;
+  return previous.clamp(0, max);
 }
 
 /// 时间轴缓存带比例:mpv `demuxer-cache-time` / 片长。

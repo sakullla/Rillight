@@ -23,6 +23,7 @@ import 'package:rillight/player/danmaku/danmaku_panel.dart';
 import 'package:rillight/player/danmaku/danmaku_renderer.dart';
 import 'package:rillight/player/danmaku/dandanplay_models.dart';
 import 'package:rillight/player/mpv_video_backend.dart';
+import 'package:rillight/player/network_throughput.dart';
 import 'package:rillight/player/playback_models.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_controller.dart';
@@ -35,6 +36,9 @@ import 'package:rillight/player/video_backend.dart';
 /// 播放器顶栏命中高度:内边距 + 标题行。剧集面板从这之下铺开,避免挡住关闭/置顶。
 const double kPlayerChromeBarExtent =
     AppSpacing.sm + kWindowChromeHeight + AppSpacing.sm + AppSpacing.lg;
+
+/// 顶栏实时网速占用宽度,给标题右侧留空,避免叠到读数上。
+const double kPlayerNetworkSpeedExtent = 96;
 
 /// 剧集行固定高度,给 ListView 按 index 做 O(1) jumpTo。
 ///
@@ -457,7 +461,7 @@ class PlayerPageState extends State<PlayerPage> {
                 if (_pointerNearWindowEdge(event.localPosition)) {
                   return;
                 }
-                current.onUserActivity();
+                current.onPointerHover();
               },
               onExit: (_) {
                 current.hideControlsOnPointerExit();
@@ -481,6 +485,13 @@ class PlayerPageState extends State<PlayerPage> {
                       ),
                     ),
                   ),
+                  // 弹幕只绘制,叠在点击层下面,避免 CustomPaint 吃掉单击。
+                  if (_danmakuOverlayVisible(current))
+                    Positioned.fill(
+                      child: IgnorePointer(
+                        child: DanmakuView(controller: _danmaku!),
+                      ),
+                    ),
                   Positioned.fill(
                     child: GestureDetector(
                       key: PlayerKeys.surface,
@@ -492,14 +503,9 @@ class PlayerPageState extends State<PlayerPage> {
                         }
                         current.toggleControls();
                       },
+                      child: const SizedBox.expand(),
                     ),
                   ),
-                  if (_danmakuOverlayVisible(current))
-                    Positioned.fill(
-                      child: IgnorePointer(
-                        child: DanmakuView(controller: _danmaku!),
-                      ),
-                    ),
                   if (current.loading || current.isBuffering)
                     Center(
                       child: Column(
@@ -726,8 +732,8 @@ class _PlayerChromeBar extends StatelessWidget {
     final l10n = AppLocalizations.of(context);
     final scrim = theme.colorScheme.scrim;
     final title = controller.item?.displayName ?? '';
-    // 置顶/最小化/关闭始终可点:OSD 隐藏时不能 IgnorePointer,否则点击落到
-    // 铺满的拖拽层,窗口只会被拖走。标题和渐变仍随控制层淡出。
+    // 标题、网速、置顶/最小化/关闭随 OSD 一起淡出(IINA / uosc 同款)。
+    // 隐藏时 IgnorePointer,点击落到拖拽层或画面,而不是点到看不见的按钮。
     return Positioned(
       left: 0,
       right: 0,
@@ -760,7 +766,9 @@ class _PlayerChromeBar extends StatelessWidget {
                     padding: EdgeInsets.fromLTRB(
                       AppSpacing.md,
                       AppSpacing.sm,
-                      AppSpacing.sm + kTitleBarIconConstraints.maxWidth * 3,
+                      AppSpacing.sm +
+                          kTitleBarIconConstraints.maxWidth * 3 +
+                          kPlayerNetworkSpeedExtent,
                       AppSpacing.lg,
                     ),
                     child: Align(
@@ -783,43 +791,84 @@ class _PlayerChromeBar extends StatelessWidget {
             top: AppSpacing.sm,
             right: AppSpacing.sm,
             height: kWindowChromeHeight + AppSpacing.sm,
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _PlayerChromeIconButton(
-                  buttonKey: const Key('player-always-on-top'),
-                  tooltip: controller.isAlwaysOnTop
-                      ? l10n.alwaysOnTopOff
-                      : l10n.alwaysOnTop,
-                  color: controller.isAlwaysOnTop
-                      ? theme.colorScheme.primary
-                      : theme.colorScheme.onSurface,
-                  onPressed: () {
-                    unawaited(controller.toggleAlwaysOnTop());
-                  },
-                  icon: controller.isAlwaysOnTop
-                      ? Icons.push_pin_rounded
-                      : Icons.push_pin_outlined,
-                ),
-                _PlayerChromeIconButton(
-                  buttonKey: const Key('player-window-minimize'),
-                  tooltip: l10n.minimizeWindow,
-                  color: theme.colorScheme.onSurface,
-                  onPressed: () {
-                    unawaited(controller.minimize());
-                  },
-                  icon: Icons.remove_rounded,
-                ),
-                _PlayerChromeIconButton(
-                  buttonKey: const Key('player-window-close'),
-                  tooltip: MaterialLocalizations.of(context).closeButtonTooltip,
-                  color: theme.colorScheme.onSurface,
-                  onPressed: () {
-                    unawaited(controller.close());
-                  },
-                  icon: Icons.close_rounded,
-                ),
-              ],
+            child: _FadeThrough(
+              visible: visible,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (controller.resolved != null &&
+                      !controller.playbackEnded &&
+                      controller.error == null)
+                    Tooltip(
+                      message: l10n.playerNetworkSpeedTooltip,
+                      child: Padding(
+                        padding: const EdgeInsets.only(right: AppSpacing.sm),
+                        child: Row(
+                          key: PlayerKeys.networkSpeed,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.download_rounded,
+                              size: 14,
+                              color: theme.colorScheme.onSurface.withValues(
+                                alpha: 0.78,
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              formatNetworkThroughput(
+                                controller.cacheSpeedBytesPerSec,
+                              ),
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                fontFeatures: const [
+                                  FontFeature.tabularFigures(),
+                                ],
+                                color: theme.colorScheme.onSurface.withValues(
+                                  alpha: 0.86,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  _PlayerChromeIconButton(
+                    buttonKey: const Key('player-always-on-top'),
+                    tooltip: controller.isAlwaysOnTop
+                        ? l10n.alwaysOnTopOff
+                        : l10n.alwaysOnTop,
+                    color: controller.isAlwaysOnTop
+                        ? theme.colorScheme.primary
+                        : theme.colorScheme.onSurface,
+                    onPressed: () {
+                      unawaited(controller.toggleAlwaysOnTop());
+                    },
+                    icon: controller.isAlwaysOnTop
+                        ? Icons.push_pin_rounded
+                        : Icons.push_pin_outlined,
+                  ),
+                  _PlayerChromeIconButton(
+                    buttonKey: const Key('player-window-minimize'),
+                    tooltip: l10n.minimizeWindow,
+                    color: theme.colorScheme.onSurface,
+                    onPressed: () {
+                      unawaited(controller.minimize());
+                    },
+                    icon: Icons.remove_rounded,
+                  ),
+                  _PlayerChromeIconButton(
+                    buttonKey: const Key('player-window-close'),
+                    tooltip: MaterialLocalizations.of(
+                      context,
+                    ).closeButtonTooltip,
+                    color: theme.colorScheme.onSurface,
+                    onPressed: () {
+                      unawaited(controller.close());
+                    },
+                    icon: Icons.close_rounded,
+                  ),
+                ],
+              ),
             ),
           ),
         ],
@@ -2991,6 +3040,8 @@ class _VolumeControl extends StatelessWidget {
                   .toDouble(),
               min: 0,
               max: PlayerSettings.volumeMax.toDouble(),
+              divisions:
+                  PlayerSettings.volumeMax ~/ PlayerController.volumeWheelStep,
               label: l10n.volumePercent(controller.volume),
               onChanged: (value) {
                 controller.setVolume(value.round());
@@ -2999,10 +3050,11 @@ class _VolumeControl extends StatelessWidget {
           ),
         ),
         SizedBox(
-          width: 44,
+          width: 56,
           child: Text(
             key: PlayerKeys.volumePercent,
             l10n.volumePercent(controller.volume),
+            maxLines: 1,
             textAlign: TextAlign.end,
             style: _overlayTimeStyle(theme),
           ),
