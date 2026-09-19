@@ -247,6 +247,7 @@ void main() {
       danmakuServer: 'https://dan.example.com',
       danmakuAppId: 'app-id',
       danmakuToken: 'secret',
+      danmakuDisplay: DanmakuDisplaySettings(fontScale: 1.0),
     );
     final file = tempSettingsFile('font-scale');
     file.writeAsStringSync(
