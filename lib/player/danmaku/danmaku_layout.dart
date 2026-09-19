@@ -1,101 +1,9 @@
-import 'dart:math' as math;
-
 import 'package:flutter/widgets.dart';
 import 'package:rillight/player/danmaku/dandanplay_models.dart';
+import 'package:rillight/player/danmaku/danmaku_display_settings.dart';
 
-/// 弹幕显示参数(持久化于 PlayerSettings.danmakuDisplay)。
-///
-/// [copyWith]/[fromJson] 将字段收敛到合法区间;[blockedKeywords] 为基础
-/// 屏蔽项,弹幕文本包含任一关键词(不区分大小写)时整条不显示。
-class DanmakuDisplaySettings {
-  const DanmakuDisplaySettings({
-    this.opacity = 1,
-    this.fontScale = 1,
-    this.speed = 1,
-    this.areaFraction = 0.5,
-    this.maxVisibleCount,
-    this.blockedKeywords = const [],
-  });
-
-  /// 不透明度 0.1–1。
-  final double opacity;
-
-  /// 字号缩放 0.5–2。
-  final double fontScale;
-
-  /// 速度倍率 0.5–2(数值越大滚动越快)。
-  final double speed;
-
-  /// 显示区域:画面顶部起的高度占比 0.1–1。
-  final double areaFraction;
-
-  /// 密度:同屏弹幕上限;null 表示不限。
-  final int? maxVisibleCount;
-
-  /// 基础屏蔽关键词。
-  final List<String> blockedKeywords;
-
-  DanmakuDisplaySettings copyWith({
-    double? opacity,
-    double? fontScale,
-    double? speed,
-    double? areaFraction,
-    int? maxVisibleCount,
-    bool unlimitedDensity = false,
-    List<String>? blockedKeywords,
-  }) {
-    return DanmakuDisplaySettings(
-      opacity: _clamp(opacity ?? this.opacity, 0.1, 1),
-      fontScale: _clamp(fontScale ?? this.fontScale, 0.5, 2),
-      speed: _clamp(speed ?? this.speed, 0.5, 2),
-      areaFraction: _clamp(areaFraction ?? this.areaFraction, 0.1, 1),
-      maxVisibleCount: unlimitedDensity
-          ? null
-          : (maxVisibleCount ?? this.maxVisibleCount),
-      blockedKeywords: blockedKeywords ?? this.blockedKeywords,
-    );
-  }
-
-  Map<String, dynamic> toJson() => {
-    'opacity': opacity,
-    'fontScale': fontScale,
-    'speed': speed,
-    'areaFraction': areaFraction,
-    if (maxVisibleCount != null) 'maxVisibleCount': maxVisibleCount,
-    if (blockedKeywords.isNotEmpty) 'blockedKeywords': blockedKeywords,
-  };
-
-  factory DanmakuDisplaySettings.fromJson(Map<String, dynamic> json) {
-    return DanmakuDisplaySettings(
-      opacity: _clamp(_asDouble(json['opacity']) ?? 1, 0.1, 1),
-      fontScale: _clamp(_asDouble(json['fontScale']) ?? 1, 0.5, 2),
-      speed: _clamp(_asDouble(json['speed']) ?? 1, 0.5, 2),
-      areaFraction: _clamp(_asDouble(json['areaFraction']) ?? 0.5, 0.1, 1),
-      maxVisibleCount: _asInt(json['maxVisibleCount']),
-      blockedKeywords: [
-        for (final keyword in (json['blockedKeywords'] as List? ?? const []))
-          keyword.toString(),
-      ],
-    );
-  }
-
-  static double _clamp(double value, double min, double max) {
-    return math.min(math.max(value, min), max);
-  }
-}
-
-double? _asDouble(dynamic raw) =>
-    raw is num ? raw.toDouble() : double.tryParse(raw?.toString() ?? '');
-
-int? _asInt(dynamic raw) {
-  if (raw is int) {
-    return raw;
-  }
-  if (raw is num) {
-    return raw.toInt();
-  }
-  return int.tryParse(raw?.toString() ?? '');
-}
+// 显示参数已迁至独立文件;此处转出口以兼容仍从本文件导入的调用方。
+export 'package:rillight/player/danmaku/danmaku_display_settings.dart';
 
 /// 基础字号(逻辑像素),最终字号 = 基础字号 × fontScale。
 const double kDanmakuBaseFontSize = 24;
@@ -321,11 +229,16 @@ class DanmakuLayout {
     if (_isBlocked(comment)) {
       return;
     }
-    final cap = settings.maxVisibleCount;
-    if (cap != null && cap > 0 && _active.length >= cap) {
+    final fontSize = kDanmakuBaseFontSize * settings.fontScale;
+    final laneCount = _laneCount(fontSize);
+    if (laneCount <= 0) {
       return;
     }
-    final fontSize = kDanmakuBaseFontSize * settings.fontScale;
+    // 密度上限 = 档位倍数 × 车道数,作用于同屏总数;unlimited 不设上限。
+    final multiplier = settings.density.laneMultiplier;
+    if (multiplier != null && _active.length >= multiplier * laneCount) {
+      return;
+    }
     final width = _measure(comment.text, fontSize);
     final mode = comment.renderMode;
     final lifespan = Duration(
@@ -337,10 +250,6 @@ class DanmakuLayout {
                   1000)
               .round(),
     );
-    final laneCount = _laneCount(fontSize);
-    if (laneCount <= 0) {
-      return;
-    }
     final lanes = _laneLast.putIfAbsent(mode, () => <_ActiveEntry?>[]);
     while (lanes.length < laneCount) {
       lanes.add(null);

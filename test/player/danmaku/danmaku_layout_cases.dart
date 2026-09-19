@@ -1,6 +1,8 @@
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:rillight/player/danmaku/danmaku_layout.dart';
+import 'package:rillight/player/danmaku/danmaku_display_settings.dart';
+import 'package:rillight/player/danmaku/danmaku_layout.dart'
+    show DanmakuLayout, kDanmakuBaseFontSize;
 import 'package:rillight/player/danmaku/dandanplay_models.dart';
 
 DanmakuComment comment(
@@ -34,8 +36,9 @@ DanmakuLayout layoutWith({
 const size = Size(800, 400);
 
 void main() {
-  test('display settings clamp to legal ranges', () {
-    // 构造保留原值,copyWith/fromJson 收敛到合法区间。
+  test('display settings clamp opacity and snap steps to legal ranges', () {
+    // 构造保留原值,copyWith/fromJson 收敛:不透明度夹到 0.2–1,
+    // 字号/速度/区域吸附到最近档位。
     const raw = DanmakuDisplaySettings(
       opacity: 3,
       fontScale: 0.1,
@@ -44,11 +47,11 @@ void main() {
     );
     final clamped = raw.copyWith();
     expect(clamped.opacity, 1);
-    expect(clamped.fontScale, 0.5);
+    expect(clamped.fontScale, 0.75);
     expect(clamped.speed, 2);
-    expect(clamped.areaFraction, 0.1);
+    expect(clamped.areaFraction, 0.25);
     final parsed = DanmakuDisplaySettings.fromJson({'opacity': 0});
-    expect(parsed.opacity, 0.1);
+    expect(parsed.opacity, 0.2);
   });
 
   test(
@@ -163,14 +166,52 @@ void main() {
     expect(frames.map((f) => f.id), containsAll([1, 3]));
   });
 
-  test('density cap limits simultaneous comments', () {
-    final layout = layoutWith(
-      comments: [for (var i = 0; i < 8; i++) comment(i + 1, 1 + i * 0.05)],
-      settings: const DanmakuDisplaySettings(maxVisibleCount: 3),
-    );
-    final frames = layout.update(const Duration(seconds: 2), size);
-    expect(frames, hasLength(3));
-    expect(layout.activeCount, 3);
+  group('density cap = multiplier × lane count', () {
+    // 800×400、areaFraction 0.5、24px 字号:车道数 = floor(200 / 32.4) = 6。
+    // 相隔 1.2s 的短弹幕会复用同一车道(前一条已整段进入且同速),
+    // 因此 10 条在 12s 内全部同屏,只受密度上限约束。
+    const laneCount = 6;
+    List<DanmakuComment> stream() => [
+      for (var i = 0; i < 10; i++) comment(i + 1, 1 + i * 1.2),
+    ];
+
+    int visible(DanmakuDensity density) {
+      final layout = layoutWith(
+        comments: stream(),
+        settings: DanmakuDisplaySettings(density: density),
+      );
+      final frames = layout.update(const Duration(seconds: 12), size);
+      expect(layout.activeCount, frames.length);
+      return frames.length;
+    }
+
+    test('sparse never exceeds the lane count', () {
+      expect(visible(DanmakuDensity.sparse), laneCount);
+    });
+
+    test('auto allows up to twice the lane count', () {
+      expect(visible(DanmakuDensity.auto), 10);
+      final layout = layoutWith(
+        comments: [for (var i = 0; i < 30; i++) comment(i + 1, 1 + i * 0.3)],
+        settings: const DanmakuDisplaySettings(),
+      );
+      layout.update(const Duration(seconds: 10), size);
+      expect(layout.activeCount, lessThanOrEqualTo(laneCount * 2));
+    });
+
+    test('dense allows up to four times the lane count', () {
+      final layout = layoutWith(
+        comments: [for (var i = 0; i < 60; i++) comment(i + 1, 1 + i * 0.15)],
+        settings: const DanmakuDisplaySettings(density: DanmakuDensity.dense),
+      );
+      layout.update(const Duration(seconds: 10), size);
+      expect(layout.activeCount, lessThanOrEqualTo(laneCount * 4));
+      expect(layout.activeCount, greaterThan(laneCount * 2));
+    });
+
+    test('unlimited is not capped', () {
+      expect(visible(DanmakuDensity.unlimited), 10);
+    });
   });
 
   test('empty comments list is a no-op', () {

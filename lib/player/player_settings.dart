@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:path_provider/path_provider.dart';
-import 'package:rillight/player/danmaku/danmaku_layout.dart'
+import 'package:rillight/player/danmaku/danmaku_display_settings.dart'
     show DanmakuDisplaySettings;
 import 'package:rillight/player/danmaku/dandanplay_models.dart'
     show DanmakuSeriesMemory;
