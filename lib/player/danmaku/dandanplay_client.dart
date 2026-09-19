@@ -1,7 +1,103 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:isolate';
 
 import 'package:dio/dio.dart';
 import 'package:rillight/player/danmaku/dandanplay_models.dart';
+
+/// 评论包正文达到该长度(UTF-16 码元数,约 256 KiB)时改在 Isolate 中解析。
+const int kDanmakuIsolateParseThreshold = 256 * 1024;
+
+/// 响应不是 dandanplay 兼容结构([DanmakuApiFailureKind.incompatible])
+/// 或业务包 success=false([DanmakuApiFailureKind.http])。
+///
+/// 由纯函数 [parseDanmakuComments] 与业务包判定抛出,不含 HTTP 状态码;
+/// 调用方补上状态码映射为 [DanmakuApiException]。字段均可跨 Isolate 传递。
+class DanmakuResponseFormatException implements Exception {
+  const DanmakuResponseFormatException(this.kind, this.detail);
+
+  final DanmakuApiFailureKind kind;
+  final String detail;
+
+  @override
+  String toString() => 'DanmakuResponseFormatException(${kind.name}): $detail';
+}
+
+/// 解析 `/api/v2/comment/{id}` 的正文:`jsonDecode` → 业务包兼容判定 →
+/// 逐条解析 `p`(时间,模式,颜色,…)与 `m` → 按时间排序。
+///
+/// 纯函数,无外部依赖,可在 [Isolate.run] 中执行。非 JSON 对象或缺业务包
+/// 字段抛 [DanmakuResponseFormatException](incompatible);success=false 抛
+/// http 类别并携带 errorMessage。
+List<DanmakuComment> parseDanmakuComments(String body) {
+  Object? decoded;
+  try {
+    decoded = jsonDecode(body);
+  } on FormatException {
+    decoded = null;
+  }
+  final data = _unwrapEnvelope(decoded);
+  final comments = <DanmakuComment>[];
+  final rawComments = data['comments'];
+  if (rawComments is List) {
+    for (final entry in rawComments) {
+      if (entry is! Map) {
+        continue;
+      }
+      final p = entry['p']?.toString() ?? '';
+      final parts = p.split(',');
+      if (parts.length < 3) {
+        continue;
+      }
+      final time = double.tryParse(parts[0]);
+      final mode = int.tryParse(parts[1]);
+      final color = int.tryParse(parts[2]);
+      final text = entry['m']?.toString() ?? '';
+      if (time == null || mode == null || color == null || text.isEmpty) {
+        continue;
+      }
+      comments.add(
+        DanmakuComment(
+          cid: _asInt(entry['cid']) ?? 0,
+          time: time,
+          mode: mode,
+          color: color,
+          text: text,
+        ),
+      );
+    }
+  }
+  comments.sort(DanmakuComment.compareByTime);
+  return comments;
+}
+
+/// dandanplay 兼容判定:JSON 对象且带标准业务包字段
+/// (兼容源评论包常只有 count/comments,没有 success/errorCode)。
+Map<String, dynamic> _unwrapEnvelope(Object? data) {
+  if (data is! Map) {
+    throw const DanmakuResponseFormatException(
+      DanmakuApiFailureKind.incompatible,
+      '响应不是 JSON 对象',
+    );
+  }
+  final map = Map<String, dynamic>.from(data);
+  if (!map.containsKey('success') && !map.containsKey('errorCode')) {
+    if (map['comments'] is List) {
+      return map;
+    }
+    throw const DanmakuResponseFormatException(
+      DanmakuApiFailureKind.incompatible,
+      '响应缺少 dandanplay 业务包字段',
+    );
+  }
+  if (map['success'] == false) {
+    throw DanmakuResponseFormatException(
+      DanmakuApiFailureKind.http,
+      map['errorMessage']?.toString() ?? '',
+    );
+  }
+  return map;
+}
 
 /// dandanplay API 失败类别。
 enum DanmakuApiFailureKind {
@@ -123,19 +219,24 @@ class DandanplaySource {
 /// 网络一律经注入的 [Dio](生产为独立实例,不携带 Emby 会话头;
 /// 测试全部 fake,不真实拨号)。错误统一抛 [DanmakuApiException]。
 class DandanplayClient {
-  DandanplayClient({Dio? dio})
-    : _dio =
-          dio ??
-          Dio(
-            BaseOptions(
-              connectTimeout: const Duration(seconds: 10),
-              receiveTimeout: const Duration(seconds: 20),
-              sendTimeout: const Duration(seconds: 10),
-              headers: const {'Accept': 'application/json'},
-            ),
-          );
+  DandanplayClient({
+    Dio? dio,
+    this.isolateParseThreshold = kDanmakuIsolateParseThreshold,
+  }) : _dio =
+           dio ??
+           Dio(
+             BaseOptions(
+               connectTimeout: const Duration(seconds: 10),
+               receiveTimeout: const Duration(seconds: 20),
+               sendTimeout: const Duration(seconds: 10),
+               headers: const {'Accept': 'application/json'},
+             ),
+           );
 
   final Dio _dio;
+
+  /// 评论包正文长度达到该值时经 [Isolate.run] 解析(测试可置 0 强制分支)。
+  final int isolateParseThreshold;
 
   /// 匹配:POST /api/v2/match。
   ///
@@ -313,7 +414,9 @@ class DandanplayClient {
     int? serverTimestamp,
     CancelToken? cancelToken,
   }) async {
-    final data = await _requestJson(
+    // 以纯文本取回,解析(jsonDecode + 对象化 + 排序)集中在纯函数;
+    // 大包在 Isolate 中完成,避免万条级评论阻塞 UI isolate。
+    final response = await _request(
       source,
       'GET',
       '/api/v2/comment/$episodeId',
@@ -323,39 +426,34 @@ class DandanplayClient {
         if (serverTimestamp != null) 'ts': '$serverTimestamp',
       },
       cancelToken: cancelToken,
+      responseType: ResponseType.plain,
     );
-    final comments = <DanmakuComment>[];
-    final rawComments = data['comments'];
-    if (rawComments is List) {
-      for (final entry in rawComments) {
-        if (entry is! Map) {
-          continue;
-        }
-        final p = entry['p']?.toString() ?? '';
-        final parts = p.split(',');
-        if (parts.length < 3) {
-          continue;
-        }
-        final time = double.tryParse(parts[0]);
-        final mode = int.tryParse(parts[1]);
-        final color = int.tryParse(parts[2]);
-        final text = entry['m']?.toString() ?? '';
-        if (time == null || mode == null || color == null || text.isEmpty) {
-          continue;
-        }
-        comments.add(
-          DanmakuComment(
-            cid: _asInt(entry['cid']) ?? 0,
-            time: time,
-            mode: mode,
-            color: color,
-            text: text,
-          ),
-        );
+    final body = _bodyAsString(response.data);
+    try {
+      if (body.length >= isolateParseThreshold) {
+        return await Isolate.run(() => parseDanmakuComments(body));
       }
+      return parseDanmakuComments(body);
+    } on DanmakuResponseFormatException catch (failure) {
+      throw _mapFormat(failure, response.statusCode ?? 0);
     }
-    comments.sort(DanmakuComment.compareByTime);
-    return comments;
+  }
+
+  /// 兼容注入的 Dio 已做过解码的情况(Map/List/bytes),生产路径为 String。
+  static String _bodyAsString(Object? data) {
+    if (data == null) {
+      return '';
+    }
+    if (data is String) {
+      return data;
+    }
+    if (data is List<int>) {
+      return utf8.decode(data, allowMalformed: true);
+    }
+    if (data is Map || data is List) {
+      return jsonEncode(data);
+    }
+    return data.toString();
   }
 
   Future<Map<String, dynamic>> _requestJson(
@@ -365,6 +463,43 @@ class DandanplayClient {
     Object? body,
     Map<String, String>? queryParameters,
     CancelToken? cancelToken,
+  }) async {
+    final response = await _request(
+      source,
+      method,
+      apiPath,
+      body: body,
+      queryParameters: queryParameters,
+      cancelToken: cancelToken,
+    );
+    try {
+      return _unwrapEnvelope(response.data);
+    } on DanmakuResponseFormatException catch (failure) {
+      throw _mapFormat(failure, response.statusCode ?? 0);
+    }
+  }
+
+  /// 业务包判定失败 → API 异常:业务失败携带 HTTP 状态码,不兼容不带。
+  static DanmakuApiException _mapFormat(
+    DanmakuResponseFormatException failure,
+    int status,
+  ) {
+    return DanmakuApiException(
+      failure.kind,
+      statusCode: failure.kind == DanmakuApiFailureKind.http ? status : null,
+      detail: failure.detail,
+    );
+  }
+
+  /// 发请求并完成传输层/HTTP 状态映射,不解读业务包。
+  Future<Response<dynamic>> _request(
+    DandanplaySource source,
+    String method,
+    String apiPath, {
+    Object? body,
+    Map<String, String>? queryParameters,
+    CancelToken? cancelToken,
+    ResponseType? responseType,
   }) async {
     var uri = source.resolve(apiPath);
     if (queryParameters != null && queryParameters.isNotEmpty) {
@@ -380,6 +515,7 @@ class DandanplayClient {
         cancelToken: cancelToken,
         options: Options(
           method: method,
+          responseType: responseType,
           headers: {
             if (body != null) 'Content-Type': 'application/json',
             ...source.headers(),
@@ -397,33 +533,7 @@ class DandanplayClient {
         detail: 'HTTP $status',
       );
     }
-    // dandanplay 兼容判定:JSON 对象且带标准业务包字段。
-    final dynamic data = response.data;
-    if (data is! Map) {
-      throw const DanmakuApiException(
-        DanmakuApiFailureKind.incompatible,
-        detail: '响应不是 JSON 对象',
-      );
-    }
-    final map = Map<String, dynamic>.from(data);
-    if (!map.containsKey('success') && !map.containsKey('errorCode')) {
-      // 兼容源评论包常只有 count/comments，没有 success/errorCode。
-      if (map['comments'] is List) {
-        return map;
-      }
-      throw const DanmakuApiException(
-        DanmakuApiFailureKind.incompatible,
-        detail: '响应缺少 dandanplay 业务包字段',
-      );
-    }
-    if (map['success'] == false) {
-      throw DanmakuApiException(
-        DanmakuApiFailureKind.http,
-        statusCode: status,
-        detail: map['errorMessage']?.toString() ?? '',
-      );
-    }
-    return map;
+    return response;
   }
 
   DanmakuApiException _mapTransport(DioException error) {

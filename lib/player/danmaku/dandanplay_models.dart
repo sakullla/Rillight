@@ -22,6 +22,9 @@ class DanmakuComment {
   final int color;
   final String text;
 
+  /// 定位(7)/高级(8)弹幕:`m` 为 JSON 文本而非可读内容,渲染层不交付。
+  bool get isSpecial => mode == 7 || mode == 8;
+
   DanmakuMode get renderMode {
     switch (mode) {
       case 4:

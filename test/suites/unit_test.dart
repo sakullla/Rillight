@@ -79,6 +79,10 @@ void main() {
     caseEntrypoints['player/danmaku/danmaku_settings_cases.dart']!,
   );
   group(
+    'player/danmaku/danmaku_timeline_test.dart',
+    caseEntrypoints['player/danmaku/danmaku_timeline_cases.dart']!,
+  );
+  group(
     'player/device_profile_test.dart',
     caseEntrypoints['player/device_profile_cases.dart']!,
   );

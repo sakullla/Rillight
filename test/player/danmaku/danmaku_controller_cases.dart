@@ -555,6 +555,136 @@ void main() {
     expect((await store.read()).danmakuEnabled, isTrue);
   });
 
+  test(
+    'toggle off then on in the same session reuses cached comments',
+    () async {
+      client.matchResponse = const DanmakuMatchResponse(
+        isMatched: true,
+        matches: [
+          DanmakuMatchCandidate(
+            animeId: 7,
+            animeTitle: 'Show',
+            episodeId: 100,
+            episodeTitle: '第01话',
+          ),
+        ],
+      );
+      client.commentResponse = [comment(1, 5), comment(2, 9)];
+      final controller = makeController();
+      await controller.startSession(context());
+      expect(client.commentCalls, hasLength(1));
+      expect(controller.comments, hasLength(2));
+
+      await controller.toggleDanmaku();
+      expect(controller.status, DanmakuStatus.off);
+      expect(controller.comments, isEmpty);
+      expect(controller.timeline, isEmpty);
+      expect(controller.matchedTitle, isNull);
+
+      await controller.toggleDanmaku();
+      expect(controller.status, DanmakuStatus.active);
+      expect(controller.matchedTitle, 'Show');
+      expect(controller.comments.map((c) => c.cid), [1, 2]);
+      // 两条同文本 'hi' 在合并窗内折叠为一条时间轴条目。
+      expect(controller.timeline.single.displayText, 'hi ×2');
+      expect(controller.hasComments, isTrue);
+      // 同会话复用缓存:不再拉取、不再匹配。
+      expect(client.commentCalls, hasLength(1));
+      expect(client.matchCalls, hasLength(1));
+      expect(hasher.requested, hasLength(1));
+
+      // 换集后新会话重新请求。
+      await controller.startSession(context(itemId: 'item-2', index: 2));
+      expect(client.commentCalls, hasLength(2));
+      expect(client.commentCalls.last.$2, 100);
+    },
+  );
+
+  test(
+    'timeline is built from comments and rebuilt on relevant settings',
+    () async {
+      client.matchResponse = const DanmakuMatchResponse(
+        isMatched: true,
+        matches: [
+          DanmakuMatchCandidate(
+            animeId: 7,
+            animeTitle: 'Show',
+            episodeId: 100,
+            episodeTitle: '第01话',
+          ),
+        ],
+      );
+      client.commentResponse = [
+        comment(1, 5),
+        comment(2, 6),
+        comment(3, 7),
+        DanmakuComment(cid: 4, time: 8, mode: 5, color: 1, text: 'top'),
+        DanmakuComment(cid: 5, time: 9, mode: 7, color: 1, text: '[pos]'),
+      ];
+      final controller = makeController();
+      await controller.startSession(context());
+      // 原始计数保留 5 条;时间轴丢弃 mode 7、合并三条 'hi'。
+      expect(controller.comments, hasLength(5));
+      expect(controller.timeline.map((e) => e.cid), [1, 4]);
+      expect(controller.timeline.first.displayText, 'hi ×3');
+      expect(controller.layout.comments.map((c) => c.text), ['hi ×3', 'top']);
+      final built = controller.timeline;
+
+      // 不影响时间轴的参数:时间轴实例不变。
+      await controller.setDisplay(controller.display.copyWith(opacity: 0.5));
+      expect(identical(controller.timeline, built), isTrue);
+
+      await controller.setDisplay(
+        controller.display.copyWith(
+          mergeDuplicates: false,
+          showTop: false,
+          timeOffset: const Duration(seconds: 5),
+        ),
+      );
+      expect(controller.timeline.map((e) => e.cid), [1, 2, 3]);
+      expect(controller.timeline.first.time, 10);
+      expect(controller.layout.comments.first.time, 10);
+      expect(controller.comments, hasLength(5));
+    },
+  );
+
+  test(
+    'refreshFromStore applies external display changes and notifies',
+    () async {
+      final controller = makeController();
+      await controller.startSession(context());
+      var notifications = 0;
+      controller.addListener(() => notifications++);
+
+      // store 未变化:不通知、不改动。
+      await controller.refreshFromStore();
+      expect(notifications, 0);
+      expect(controller.display, const DanmakuDisplaySettings());
+
+      // 另一进程写入的显示参数:应用、通知,但不回写 store。
+      await store.write(
+        const PlayerSettings(
+          danmakuAppId: 'test-app',
+          danmakuToken: 'test-secret',
+          danmakuDisplay: DanmakuDisplaySettings(
+            fontScale: 1.5,
+            blockedKeywords: ['剧透'],
+          ),
+        ),
+      );
+      await controller.refreshFromStore();
+      expect(notifications, 1);
+      expect(controller.display.fontScale, 1.5);
+      expect(controller.display.blockedKeywords, ['剧透']);
+      expect(controller.layout.settings.fontScale, 1.5);
+      expect((await store.read()).danmakuEnabled, isNull);
+
+      // 再次刷新无变化:不再通知。
+      await controller.refreshFromStore();
+      expect(notifications, 1);
+    },
+  );
+
   test('display settings persist and apply to the layout', () async {
     final controller = makeController();
     await controller.setDisplay(

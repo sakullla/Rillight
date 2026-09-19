@@ -71,12 +71,32 @@ class _ScriptedAdapter implements HttpClientAdapter {
 }
 
 DandanplayClient clientFor(
-  FutureOr<Object?> Function(RequestOptions options) handler,
-) {
+  FutureOr<Object?> Function(RequestOptions options) handler, {
+  int isolateParseThreshold = kDanmakuIsolateParseThreshold,
+}) {
   final dio = Dio();
   dio.httpClientAdapter = _ScriptedAdapter(handler);
-  return DandanplayClient(dio: dio);
+  return DandanplayClient(
+    dio: dio,
+    isolateParseThreshold: isolateParseThreshold,
+  );
 }
+
+const _officialCommentBody = {
+  'count': 3,
+  'comments': [
+    {'cid': 2, 'p': '61.2,1,16711680,0,25,0,7b7b7b,0', 'm': 'scroll'},
+    {'cid': 1, 'p': '12.5,4,16777215,0,25,0,ffffff,0', 'm': 'bottom'},
+    {'cid': 3, 'p': '5.0,5,65280,0,25,0,ffffff,0', 'm': 'top'},
+    {'cid': 4, 'p': 'broken', 'm': 'skipped'},
+    {'cid': 5, 'p': '1,1,2,0,25,0,fff,0', 'm': ''},
+    'not-a-map',
+  ],
+};
+
+TypeMatcher<DanmakuResponseFormatException> _formatFailure(
+  DanmakuApiFailureKind kind,
+) => isA<DanmakuResponseFormatException>().having((e) => e.kind, 'kind', kind);
 
 void main() {
   test('match posts fileName/hash/duration to /api/v2/match', () async {
@@ -326,6 +346,119 @@ void main() {
     expect(comments[2].renderMode, DanmakuMode.scroll);
     expect(comments[2].color, 16711680);
   });
+
+  test('parseDanmakuComments parses the official success envelope', () {
+    final comments = parseDanmakuComments(
+      jsonEncode({'errorCode': 0, 'success': true, ..._officialCommentBody}),
+    );
+    expect(comments.map((c) => c.cid), [3, 1, 2]);
+    expect(comments[0].time, 5.0);
+    expect(comments[0].renderMode, DanmakuMode.top);
+    expect(comments[1].renderMode, DanmakuMode.bottom);
+    expect(comments[2].renderMode, DanmakuMode.scroll);
+    expect(comments[2].color, 16711680);
+    expect(comments[2].text, 'scroll');
+  });
+
+  test('parseDanmakuComments parses the count/comments envelope', () {
+    final comments = parseDanmakuComments(jsonEncode(_officialCommentBody));
+    expect(comments.map((c) => c.cid), [3, 1, 2]);
+    expect(comments.map((c) => c.time), [5.0, 12.5, 61.2]);
+  });
+
+  test('parseDanmakuComments rejects non-object or malformed bodies', () {
+    expect(
+      () => parseDanmakuComments('[1,2,3]'),
+      throwsA(_formatFailure(DanmakuApiFailureKind.incompatible)),
+    );
+    expect(
+      () => parseDanmakuComments('<html>not json</html>'),
+      throwsA(_formatFailure(DanmakuApiFailureKind.incompatible)),
+    );
+    expect(
+      () => parseDanmakuComments('{"unexpected":"shape"}'),
+      throwsA(_formatFailure(DanmakuApiFailureKind.incompatible)),
+    );
+    expect(
+      () => parseDanmakuComments(
+        '{"errorCode":1000,"success":false,"errorMessage":"not found"}',
+      ),
+      throwsA(
+        _formatFailure(
+          DanmakuApiFailureKind.http,
+        ).having((e) => e.detail, 'detail', 'not found'),
+      ),
+    );
+    expect(parseDanmakuComments('{"success":true}'), isEmpty);
+  });
+
+  test('fetchComments requests plain text and parses synchronously', () async {
+    late RequestOptions captured;
+    final client = clientFor((options) {
+      captured = options;
+      return _officialCommentBody;
+    });
+    final comments = await client.fetchComments(DandanplaySource.official, 100);
+    expect(captured.responseType, ResponseType.plain);
+    expect(comments.map((c) => c.cid), [3, 1, 2]);
+  });
+
+  test(
+    'fetchComments at or above the isolate threshold returns identical results',
+    () async {
+      final sync = await clientFor(
+        (options) => _officialCommentBody,
+      ).fetchComments(DandanplaySource.official, 100);
+      final viaIsolate = await clientFor(
+        (options) => _officialCommentBody,
+        isolateParseThreshold: 0,
+      ).fetchComments(DandanplaySource.official, 100);
+      expect(viaIsolate, hasLength(sync.length));
+      for (var i = 0; i < sync.length; i++) {
+        expect(viaIsolate[i].cid, sync[i].cid);
+        expect(viaIsolate[i].time, sync[i].time);
+        expect(viaIsolate[i].mode, sync[i].mode);
+        expect(viaIsolate[i].color, sync[i].color);
+        expect(viaIsolate[i].text, sync[i].text);
+      }
+      expect(kDanmakuIsolateParseThreshold, 256 * 1024);
+    },
+  );
+
+  test(
+    'fetchComments isolate branch keeps incompatible/http error semantics',
+    () async {
+      final incompatible = clientFor(
+        (options) => '<html>not json</html>',
+        isolateParseThreshold: 0,
+      );
+      await expectLater(
+        incompatible.fetchComments(DandanplaySource.official, 100),
+        throwsA(
+          isA<DanmakuApiException>()
+              .having((e) => e.kind, 'kind', DanmakuApiFailureKind.incompatible)
+              .having((e) => e.statusCode, 'statusCode', isNull),
+        ),
+      );
+      final business = clientFor(
+        (options) => {
+          'errorCode': 1000,
+          'success': false,
+          'errorMessage': 'not found',
+        },
+        isolateParseThreshold: 0,
+      );
+      await expectLater(
+        business.fetchComments(DandanplaySource.official, 100),
+        throwsA(
+          isA<DanmakuApiException>()
+              .having((e) => e.kind, 'kind', DanmakuApiFailureKind.http)
+              .having((e) => e.statusCode, 'statusCode', 200)
+              .having((e) => e.detail, 'detail', 'not found'),
+        ),
+      );
+    },
+  );
 
   test('cancelled request maps to cancelled not unreachable', () async {
     final client = clientFor((options) async {

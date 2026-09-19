@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/widgets.dart';
 import 'package:rillight/player/danmaku/danmaku_hash.dart';
 import 'package:rillight/player/danmaku/danmaku_layout.dart';
+import 'package:rillight/player/danmaku/danmaku_timeline.dart';
 import 'package:rillight/player/danmaku/dandanplay_client.dart';
 import 'package:rillight/player/danmaku/dandanplay_models.dart';
 import 'package:rillight/player/player_settings.dart';
@@ -104,8 +105,20 @@ class DanmakuController extends ChangeNotifier {
 
   DanmakuDisplaySettings display = const DanmakuDisplaySettings();
 
-  List<DanmakuComment> get comments => layout.comments;
+  List<DanmakuComment> _comments = const [];
+  List<DanmakuEntry> _timeline = const [];
 
+  /// 本会话最近一次成功落地的弹幕;同会话内开关重开直接复用,不发请求。
+  _LoadedComments? _loaded;
+
+  /// 已加载的原始评论(“已加载 N 条”计数依据,未经过滤/合并)。
+  List<DanmakuComment> get comments => _comments;
+
+  /// 时间轴视图:按 [display] 过滤/合并/偏移后的条目,渲染层消费。
+  /// 仅在评论落地或影响时间轴的设置变化时重建。
+  List<DanmakuEntry> get timeline => _timeline;
+
+  /// 时间轴上有可渲染条目(渲染层挂载与 ticker 判定依据)。
   bool get hasComments => layout.comments.isNotEmpty;
 
   /// 自定义兼容服务基地址(空表示官方直连)。
@@ -221,7 +234,7 @@ class DanmakuController extends ChangeNotifier {
     _context = context;
     _sessionKey = '${context.itemId}|${context.mediaSourceId}';
     layout.reset();
-    layout.comments = const [];
+    _setComments(const []);
     matchedTitle = null;
     statusDetail = null;
     // 先恢复持久化设置(开关/显示参数/记忆/来源)再决定是否加载。
@@ -238,7 +251,8 @@ class DanmakuController extends ChangeNotifier {
 
   bool get _canCallOfficialApi => usesCustomSource || hasOfficialCredentials;
 
-  /// 弹幕开关:关闭立即清屏;开启时对当前会话重新解析加载。
+  /// 弹幕开关:关闭立即清屏;开启时同会话内已加载过则直接复用缓存,
+  /// 否则对当前会话重新解析加载。
   Future<void> toggleDanmaku() async {
     await _ensureRestored();
     if (_disposed) {
@@ -247,20 +261,27 @@ class DanmakuController extends ChangeNotifier {
     danmakuOn = !danmakuOn;
     if (danmakuOn) {
       final context = _context;
-      if (context != null) {
+      final cached = _loaded;
+      if (context == null) {
+        status = DanmakuStatus.idle;
+        notifyListeners();
+      } else if (cached != null && cached.sessionKey == _sessionKey) {
+        _setComments(cached.comments);
+        matchedTitle = cached.title;
+        statusDetail = null;
+        status = DanmakuStatus.active;
+        notifyListeners();
+      } else {
         status = DanmakuStatus.loading;
         notifyListeners();
         await _resolveAndLoad(context);
-      } else {
-        status = DanmakuStatus.idle;
-        notifyListeners();
       }
     } else {
       status = DanmakuStatus.off;
       statusDetail = null;
       matchedTitle = null;
       layout.reset();
-      layout.comments = const [];
+      _setComments(const []);
       notifyListeners();
     }
     await _writeSettings();
@@ -272,11 +293,93 @@ class DanmakuController extends ChangeNotifier {
     if (_disposed) {
       return;
     }
-    display = next;
-    layout.settings = next;
-    layout.reset();
+    _applyDisplay(next);
     notifyListeners();
     await _writeSettings();
+  }
+
+  /// 重读设置文件:另一进程(主窗口设置页)改过弹幕显示参数时应用之,
+  /// 不回写;无变化不通知。面板打开前调用。
+  Future<void> refreshFromStore() async {
+    await _ensureRestored();
+    if (_disposed) {
+      return;
+    }
+    final PlayerSettings settings;
+    try {
+      settings = await (await _settings()).read();
+    } catch (_) {
+      return;
+    }
+    if (_disposed) {
+      return;
+    }
+    final next = settings.danmakuDisplay ?? const DanmakuDisplaySettings();
+    if (next == display) {
+      return;
+    }
+    _applyDisplay(next);
+    notifyListeners();
+  }
+
+  /// 应用显示参数:布局参数即时更新;仅时间轴相关项变化时重建时间轴。
+  void _applyDisplay(DanmakuDisplaySettings next) {
+    final previous = display;
+    display = next;
+    layout.settings = next;
+    if (DanmakuTimeline.affectsTimeline(previous, next)) {
+      _rebuildTimeline();
+    }
+    layout.reset();
+  }
+
+  /// 原始评论落地:重建时间轴并喂给布局引擎。
+  void _setComments(List<DanmakuComment> loaded) {
+    _comments = loaded;
+    if (loaded.isEmpty) {
+      _timeline = const [];
+      layout.comments = const [];
+      return;
+    }
+    _rebuildTimeline();
+  }
+
+  /// 以当前 [display] 重算时间轴。无已加载评论时只清空时间轴,
+  /// 不触碰布局输入(布局可能被直接喂入,如渲染层测试)。
+  void _rebuildTimeline() {
+    if (_comments.isEmpty) {
+      _timeline = const [];
+      return;
+    }
+    _timeline = DanmakuTimeline.build(_comments, display);
+    // 布局引擎尚以 DanmakuComment 为输入(T3 切换为 DanmakuEntry);
+    // 先把时间轴条目按 offset 后时刻与合并文本映射回去。
+    layout.comments = [
+      for (final entry in _timeline)
+        DanmakuComment(
+          cid: entry.cid,
+          time: entry.time,
+          mode: entry.comment.mode,
+          color: entry.color,
+          text: entry.displayText,
+        ),
+    ];
+  }
+
+  /// 成功拉取弹幕后落地并记入会话缓存。
+  void _commitLoaded(int episodeId, String title, List<DanmakuComment> loaded) {
+    final key = _sessionKey;
+    if (key != null) {
+      _loaded = _LoadedComments(
+        sessionKey: key,
+        episodeId: episodeId,
+        title: title,
+        comments: loaded,
+      );
+    }
+    _setComments(loaded);
+    matchedTitle = title;
+    status = DanmakuStatus.active;
   }
 
   /// 手动搜索(匹配错误时切换剧集入口)。失败返回空列表。
@@ -391,9 +494,7 @@ class DanmakuController extends ChangeNotifier {
         anime.animeTitle,
         episode.episodeId,
       );
-      layout.comments = loaded;
-      matchedTitle = anime.animeTitle;
-      status = DanmakuStatus.active;
+      _commitLoaded(episode.episodeId, anime.animeTitle, loaded);
       notifyListeners();
     } on DanmakuApiException catch (failure) {
       if (_requestDropped(
@@ -601,9 +702,7 @@ class DanmakuController extends ChangeNotifier {
         return;
       }
       await _remember(context, animeId, animeTitle, episodeId);
-      layout.comments = loaded;
-      matchedTitle = animeTitle;
-      status = DanmakuStatus.active;
+      _commitLoaded(episodeId, animeTitle, loaded);
       notifyListeners();
     } on DanmakuApiException catch (failure) {
       if (dropped(failure)) {
@@ -783,6 +882,7 @@ class DanmakuController extends ChangeNotifier {
       danmakuOn = settings.isDanmakuEnabled;
       display = settings.danmakuDisplay ?? const DanmakuDisplaySettings();
       layout.settings = display;
+      _rebuildTimeline();
       final server = settings.danmakuServer?.trim();
       customServerUrl = (server == null || server.isEmpty) ? null : server;
       final token = settings.danmakuToken?.trim();
@@ -825,6 +925,21 @@ class DanmakuController extends ChangeNotifier {
     )..layout();
     return painter.width;
   }
+}
+
+/// 会话内已加载弹幕的缓存记录(不落盘)。
+class _LoadedComments {
+  const _LoadedComments({
+    required this.sessionKey,
+    required this.episodeId,
+    required this.title,
+    required this.comments,
+  });
+
+  final String sessionKey;
+  final int episodeId;
+  final String title;
+  final List<DanmakuComment> comments;
 }
 
 /// 从剧集标题解析集号:第12话 / EP3 / 03.5 等常见形态。

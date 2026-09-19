@@ -27,6 +27,7 @@ const caseModules = <String>[
   'player/danmaku/danmaku_layout_cases.dart',
   'player/danmaku/danmaku_renderer_cases.dart',
   'player/danmaku/danmaku_settings_cases.dart',
+  'player/danmaku/danmaku_timeline_cases.dart',
   'player/desktop_player_window_host_cases.dart',
   'player/device_profile_cases.dart',
   'player/emby_playback_client_cases.dart',
