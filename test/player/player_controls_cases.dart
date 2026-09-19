@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
+import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/home/home_hero.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/credential_store.dart';
@@ -205,6 +206,13 @@ void main() {
     tester.view.physicalSize = size;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
+  }
+
+  double danmakuPanelMaxHeightCap(WidgetTester tester) {
+    return tester.view.physicalSize.height / tester.view.devicePixelRatio -
+        kPlayerChromeBarExtent -
+        112 -
+        AppSpacing.xl;
   }
 
   Future<void> openDanmakuSearch(WidgetTester tester) async {
@@ -703,6 +711,7 @@ void main() {
       expect(find.byKey(DanmakuKeys.timeOffset), findsNothing);
 
       final panel = tester.getRect(find.byKey(DanmakuKeys.panel));
+      expect(panel.height, lessThan(danmakuPanelMaxHeightCap(tester)));
       for (final key in [
         DanmakuKeys.opacity,
         DanmakuKeys.fontScale,
@@ -837,6 +846,8 @@ void main() {
     await openDanmakuPanel(tester);
     expect(find.byKey(DanmakuKeys.setupHint), findsOneWidget);
     expect(find.byKey(const Key('player-danmaku-search')), findsOneWidget);
+    final panel = tester.getRect(find.byKey(DanmakuKeys.panel));
+    expect(panel.height, lessThan(danmakuPanelMaxHeightCap(tester)));
     expect(find.byKey(DanmakuKeys.opacity), findsNothing);
     expect(find.byKey(DanmakuKeys.fontScale), findsNothing);
     expect(find.byKey(DanmakuKeys.speed), findsNothing);
