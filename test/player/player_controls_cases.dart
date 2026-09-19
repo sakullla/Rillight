@@ -115,6 +115,7 @@ void main() {
     void Function(String itemId, {String? seasonId})? onOpenItemDetail,
     Duration progressInterval = const Duration(seconds: 10),
     Duration stoppedTimeout = PlayerController.stoppedDeadline,
+    Duration disposeTimeout = PlayerController.stoppedDeadline,
     String itemId = 'movie-up',
     PlayerSettingsStore? settingsStore,
   }) async {
@@ -136,6 +137,7 @@ void main() {
       backend: backend,
       window: window,
       stoppedTimeout: stoppedTimeout,
+      disposeTimeout: disposeTimeout,
       progressInterval: progressInterval,
       settingsStore: settingsStore ?? MemoryPlayerSettingsStore(),
       snapshotStore: snapshots,
@@ -840,6 +842,50 @@ void main() {
     expect(stoppedEvents(), hasLength(1));
   });
 
+  testWidgets('tapping player chrome close closes the player', (tester) async {
+    await pumpLoggedIn(tester);
+    await openPlayable(tester, 'movie-up');
+    await waitFor(tester, find.byKey(const Key('player-window-close')));
+    await tester.tap(find.byKey(const Key('player-window-close')));
+    await tester.pump();
+    await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+    await waitForGone(tester, find.byType(PlayerPage));
+  }, tags: ['integration']);
+
+  testWidgets('player chrome close still hits after OSD hides', (tester) async {
+    await pumpLoggedIn(tester, hideAfter: const Duration(milliseconds: 1));
+    await openPlayable(tester, 'movie-up');
+    await waitFor(tester, find.byKey(const Key('player-window-close')));
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(controllerOf(tester).controlsVisible, isFalse);
+    await tester.tap(find.byKey(const Key('player-window-close')));
+    await tester.pump();
+    await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+    await waitForGone(tester, find.byType(PlayerPage));
+  }, tags: ['integration']);
+
+  test('close still fires onClose if backend dispose hangs', () async {
+    final gated = _GatedDisposeBackend();
+    backend = gated;
+    gated.disposeGate = Completer<void>();
+    addTearDown(() {
+      final gate = gated.disposeGate;
+      if (gate != null && !gate.isCompleted) {
+        gate.complete();
+      }
+    });
+    var closed = false;
+    final controller = await startStandaloneController(
+      onClose: () => closed = true,
+      disposeTimeout: const Duration(milliseconds: 20),
+    );
+    addTearDown(controller.dispose);
+
+    final closing = controller.close();
+    await closing.timeout(const Duration(seconds: 2));
+    expect(closed, isTrue);
+  });
+
   test('close waits for snapshot delete before onClose', () async {
     final gated = _GatedDeleteStore();
     snapshots = gated;
@@ -977,6 +1023,18 @@ void _withEpisodeStreams(
         isTextSubtitleStream: true,
       ),
     ];
+  }
+}
+
+class _GatedDisposeBackend extends FakeVideoBackend {
+  Completer<void>? disposeGate;
+
+  @override
+  Future<void> dispose() async {
+    final gate = disposeGate;
+    if (gate != null) {
+      await gate.future;
+    }
   }
 }
 

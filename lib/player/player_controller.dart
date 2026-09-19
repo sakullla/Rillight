@@ -103,6 +103,7 @@ class PlayerController extends ChangeNotifier {
     this.autoResume = true,
     this.progressInterval = const Duration(seconds: 10),
     this.stoppedTimeout = stoppedDeadline,
+    this.disposeTimeout = stoppedDeadline,
     this.progressFailBannerFor = const Duration(seconds: 4),
     this.controlsHideAfter = const Duration(seconds: 5),
     this.nextEpisodeCountdown = const Duration(seconds: 10),
@@ -134,6 +135,9 @@ class PlayerController extends ChangeNotifier {
   bool autoResume;
   final Duration progressInterval;
   final Duration stoppedTimeout;
+
+  /// Native stop/dispose hang budget; close still fires [onClose] after this.
+  final Duration disposeTimeout;
   final Duration progressFailBannerFor;
   final Duration controlsHideAfter;
   final Duration nextEpisodeCountdown;
@@ -1383,16 +1387,23 @@ class PlayerController extends ChangeNotifier {
     await _reopen(startTicks: startTicks);
   }
 
-  /// 关闭播放器:取消定时器 → 在 [stoppedDeadline] 内等待 Stopped 送达
-  /// (或失败/超时)→ 再回调 [onClose]。宿主据此在 onClose 后安全退出进程。
+  /// 关闭播放器:取消定时器 → 在 [stoppedTimeout] 内等待 Stopped 送达
+  /// (或失败/超时),并在 [disposeTimeout] 内结束 native dispose → 再回调
+  /// [onClose]。宿主据此在 onClose 后安全退出进程。
   /// 重复调用加入同一次关闭,只触发一次 [onClose]。
   Future<void> close() {
     return _closing ??= _close();
   }
 
   Future<void> _close() async {
-    await disposeAsync();
-    if (window.isFullScreen) await window.setFullScreen(false);
+    try {
+      await disposeAsync().timeout(disposeTimeout);
+    } catch (_) {
+      // mpv stop/dispose can hang on a live stream; the window must still close.
+    }
+    try {
+      if (window.isFullScreen) await window.setFullScreen(false);
+    } catch (_) {}
     onClose?.call();
   }
 

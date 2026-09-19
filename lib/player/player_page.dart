@@ -110,10 +110,9 @@ class PlayerPageState extends State<PlayerPage> {
   bool _pointerNearWindowEdge(Offset local) {
     final size = MediaQuery.sizeOf(context);
     const margin = 12.0;
-    return local.dx < margin ||
-        local.dy < margin ||
-        local.dx > size.width - margin ||
-        local.dy > size.height - margin;
+    // Close/minimize sit on the top-right. Treating that corner as an edge
+    // leaves the OSD hidden, so the click hits the drag layer instead.
+    return local.dx < margin || local.dy > size.height - margin;
   }
 
   @override
@@ -249,12 +248,12 @@ class PlayerPageState extends State<PlayerPage> {
   }
 
   void _leave() {
-    if (!mounted) {
-      return;
-    }
     final onClosed = widget.onClosed;
     if (onClosed != null) {
       onClosed();
+      return;
+    }
+    if (!mounted) {
       return;
     }
     final host = PlayerWindowScope.maybeOf(context);
@@ -720,8 +719,8 @@ class _PlayerChromeBar extends StatelessWidget {
     final l10n = AppLocalizations.of(context);
     final scrim = theme.colorScheme.scrim;
     final title = controller.item?.displayName ?? '';
-    // 拖拽铺满整条顶栏。渐变层 IgnorePointer,否则 DecoratedBox 会吃掉
-    // 标题外 padding 的命中,顶缘正中拖不动窗口。置顶/关闭叠在拖拽层之上。
+    // 置顶/最小化/关闭始终可点:OSD 隐藏时不能 IgnorePointer,否则点击落到
+    // 铺满的拖拽层,窗口只会被拖走。标题和渐变仍随控制层淡出。
     return Positioned(
       left: 0,
       right: 0,
@@ -730,7 +729,8 @@ class _PlayerChromeBar extends StatelessWidget {
       child: Stack(
         children: [
           Positioned.fill(
-            child: IgnorePointer(
+            child: WindowDragArea(
+              key: const Key('player-window-drag'),
               child: _FadeThrough(
                 visible: visible,
                 child: DecoratedBox(
@@ -749,82 +749,70 @@ class _PlayerChromeBar extends StatelessWidget {
                       ],
                     ),
                   ),
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(
+                      AppSpacing.md,
+                      AppSpacing.sm,
+                      AppSpacing.sm + kTitleBarIconConstraints.maxWidth * 3,
+                      AppSpacing.lg,
+                    ),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: title.isEmpty
+                          ? const SizedBox.shrink()
+                          : Text(
+                              title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.titleMedium,
+                            ),
+                    ),
+                  ),
                 ),
               ),
             ),
           ),
-          const Positioned.fill(
-            child: WindowDragArea(
-              key: Key('player-window-drag'),
-              child: SizedBox.expand(),
-            ),
-          ),
-          _FadeThrough(
-            visible: visible,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpacing.md,
-                AppSpacing.sm,
-                AppSpacing.sm,
-                AppSpacing.lg,
-              ),
-              child: SizedBox(
-                height: kWindowChromeHeight + AppSpacing.sm,
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: IgnorePointer(
-                        child: Align(
-                          alignment: Alignment.centerLeft,
-                          child: title.isEmpty
-                              ? const SizedBox.shrink()
-                              : Text(
-                                  title,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: theme.textTheme.titleMedium,
-                                ),
-                        ),
-                      ),
-                    ),
-                    _PlayerChromeIconButton(
-                      buttonKey: const Key('player-always-on-top'),
-                      tooltip: controller.isAlwaysOnTop
-                          ? l10n.alwaysOnTopOff
-                          : l10n.alwaysOnTop,
-                      color: controller.isAlwaysOnTop
-                          ? theme.colorScheme.primary
-                          : theme.colorScheme.onSurface,
-                      onPressed: () {
-                        unawaited(controller.toggleAlwaysOnTop());
-                      },
-                      icon: controller.isAlwaysOnTop
-                          ? Icons.push_pin_rounded
-                          : Icons.push_pin_outlined,
-                    ),
-                    _PlayerChromeIconButton(
-                      buttonKey: const Key('player-window-minimize'),
-                      tooltip: l10n.minimizeWindow,
-                      color: theme.colorScheme.onSurface,
-                      onPressed: () {
-                        unawaited(controller.minimize());
-                      },
-                      icon: Icons.remove_rounded,
-                    ),
-                    _PlayerChromeIconButton(
-                      buttonKey: const Key('player-window-close'),
-                      tooltip: MaterialLocalizations.of(
-                        context,
-                      ).closeButtonTooltip,
-                      color: theme.colorScheme.onSurface,
-                      onPressed: () {
-                        unawaited(controller.close());
-                      },
-                      icon: Icons.close_rounded,
-                    ),
-                  ],
+          Positioned(
+            top: AppSpacing.sm,
+            right: AppSpacing.sm,
+            height: kWindowChromeHeight + AppSpacing.sm,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _PlayerChromeIconButton(
+                  buttonKey: const Key('player-always-on-top'),
+                  tooltip: controller.isAlwaysOnTop
+                      ? l10n.alwaysOnTopOff
+                      : l10n.alwaysOnTop,
+                  color: controller.isAlwaysOnTop
+                      ? theme.colorScheme.primary
+                      : theme.colorScheme.onSurface,
+                  onPressed: () {
+                    unawaited(controller.toggleAlwaysOnTop());
+                  },
+                  icon: controller.isAlwaysOnTop
+                      ? Icons.push_pin_rounded
+                      : Icons.push_pin_outlined,
                 ),
-              ),
+                _PlayerChromeIconButton(
+                  buttonKey: const Key('player-window-minimize'),
+                  tooltip: l10n.minimizeWindow,
+                  color: theme.colorScheme.onSurface,
+                  onPressed: () {
+                    unawaited(controller.minimize());
+                  },
+                  icon: Icons.remove_rounded,
+                ),
+                _PlayerChromeIconButton(
+                  buttonKey: const Key('player-window-close'),
+                  tooltip: MaterialLocalizations.of(context).closeButtonTooltip,
+                  color: theme.colorScheme.onSurface,
+                  onPressed: () {
+                    unawaited(controller.close());
+                  },
+                  icon: Icons.close_rounded,
+                ),
+              ],
             ),
           ),
         ],

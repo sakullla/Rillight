@@ -17,6 +17,7 @@ import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/player/playback_models.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/player_bindings.dart';
+import 'package:rillight/player/player_controller.dart';
 import 'package:rillight/player/player_host_command.dart';
 import 'package:rillight/player/player_page.dart';
 import 'package:rillight/player/player_process_control.dart';
@@ -566,8 +567,11 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
 
   Future<void> _disposeAndExit() async {
     _commands?.cancel();
-    await _playerKey.currentState?.controller?.disposeAsync();
-    // Next playback already reclaims the cache. Do not block process exit.
+    try {
+      await _playerKey.currentState?.controller?.disposeAsync().timeout(
+        PlayerController.stoppedDeadline,
+      );
+    } catch (_) {}
     exit(0);
   }
 
