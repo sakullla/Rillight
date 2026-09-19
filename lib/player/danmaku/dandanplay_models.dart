@@ -36,9 +36,10 @@ class DanmakuComment {
     }
   }
 
-  /// 按时间升序排序用的比较器。
+  /// 按时间升序排序用的比较器;同一时刻按 cid 升序,保证排序结果确定。
   static int compareByTime(DanmakuComment a, DanmakuComment b) {
-    return a.time.compareTo(b.time);
+    final byTime = a.time.compareTo(b.time);
+    return byTime != 0 ? byTime : a.cid.compareTo(b.cid);
   }
 }
 

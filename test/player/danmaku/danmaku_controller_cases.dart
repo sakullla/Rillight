@@ -151,6 +151,34 @@ class FakeHasher extends DanmakuStreamHasher {
   }
 }
 
+/// 可控时序的设置存储:[writeGate] 非空时 write 挂起直到测试放行,
+/// 模拟文件锁写慢完成,复现“记忆落盘期间换集”的竞态。
+class GatedPlayerSettingsStore implements PlayerSettingsStore {
+  GatedPlayerSettingsStore([PlayerSettings initial = const PlayerSettings()])
+    : _inner = MemoryPlayerSettingsStore(initial);
+
+  final MemoryPlayerSettingsStore _inner;
+  Completer<void>? writeGate;
+  int pendingWrites = 0;
+
+  @override
+  Future<PlayerSettings> read() => _inner.read();
+
+  @override
+  Future<void> write(PlayerSettings settings) async {
+    final gate = writeGate;
+    if (gate != null) {
+      pendingWrites++;
+      try {
+        await gate.future;
+      } finally {
+        pendingWrites--;
+      }
+    }
+    await _inner.write(settings);
+  }
+}
+
 const unreachable = DanmakuApiException(
   DanmakuApiFailureKind.unreachable,
   detail: 'network down',
@@ -197,7 +225,7 @@ void main() {
   late FakeHasher hasher;
   late MemoryPlayerSettingsStore store;
 
-  DanmakuController makeController({MemoryPlayerSettingsStore? settings}) {
+  DanmakuController makeController({PlayerSettingsStore? settings}) {
     return DanmakuController(
       settingsStore: settings ?? store,
       client: client,
@@ -942,6 +970,150 @@ void main() {
     final memoryAfter = (await store.read()).danmakuSeriesMemories['series-1'];
     expect(memoryAfter!.episodeId, 200);
     expect(client.commentCalls, hasLength(2));
+  });
+
+  test('session switch while memory write is pending does not cache old '
+      'comments under the new session', () async {
+    DanmakuMatchResponse matched(int episodeId) => DanmakuMatchResponse(
+      isMatched: true,
+      matches: [
+        DanmakuMatchCandidate(
+          animeId: 7,
+          animeTitle: 'Show',
+          episodeId: episodeId,
+          episodeTitle: '第01话',
+        ),
+      ],
+    );
+    final gated = GatedPlayerSettingsStore(_testOfficialAuth);
+    final controller = makeController(settings: gated);
+
+    // 会话 A:拉取完成,进入 _remember 时设置写入被挂起。
+    client.matchResponse = matched(100);
+    client.commentResponse = [comment(1, 5)];
+    gated.writeGate = Completer<void>();
+    final sessionA = controller.startSession(context());
+    while (gated.pendingWrites == 0) {
+      await Future<void>.delayed(Duration.zero);
+    }
+    expect(client.commentCalls.single.$2, 100);
+
+    // 写入挂起期间换集到 B:B 命中第 200 集,拉取被门闩挂起。
+    client.matchResponse = matched(200);
+    client.commentGates[200] = Completer<void>();
+    final sessionB = controller.startSession(
+      context(itemId: 'item-2', index: 2),
+    );
+    while (client.commentCalls.length < 2) {
+      await Future<void>.delayed(Duration.zero);
+    }
+    expect(client.commentCalls.last.$2, 200);
+
+    // 放行 A 的写入:A 的弹幕不得以 B 的会话键落地。
+    gated.writeGate!.complete();
+    await sessionA;
+    expect(controller.status, DanmakuStatus.loading);
+    expect(controller.comments, isEmpty);
+    expect(controller.matchedTitle, isNull);
+
+    // B 的拉取失败:不能回退到 A 的弹幕。
+    client.commentError = unreachable;
+    client.commentGates[200]!.complete();
+    await sessionB;
+    expect(controller.status, DanmakuStatus.unreachable);
+    expect(controller.comments, isEmpty);
+
+    // 开关重开:B 无缓存,必须重新解析而不是复用 A 的弹幕。
+    await controller.toggleDanmaku();
+    expect(controller.status, DanmakuStatus.off);
+    await controller.toggleDanmaku();
+    expect(controller.status, isNot(DanmakuStatus.active));
+    expect(controller.comments, isEmpty);
+    expect(client.commentCalls, hasLength(3));
+    expect(client.commentCalls.last.$2, 200);
+
+    // B 重试成功后缓存归属 B:再次开关直接复用 B 的弹幕。
+    client.commentError = null;
+    client.commentResponse = [comment(2, 10)];
+    await controller.toggleDanmaku();
+    await controller.toggleDanmaku();
+    expect(controller.status, DanmakuStatus.active);
+    expect(controller.comments.single.cid, 2);
+    expect(client.commentCalls, hasLength(4));
+    await controller.toggleDanmaku();
+    await controller.toggleDanmaku();
+    expect(controller.status, DanmakuStatus.active);
+    expect(controller.comments.single.cid, 2);
+    expect(client.commentCalls, hasLength(4));
+  });
+
+  test('session switch while manual selection memory write is pending does '
+      'not cache old comments under the new session', () async {
+    final gated = GatedPlayerSettingsStore(_testOfficialAuth);
+    final controller = makeController(settings: gated);
+    await controller.startSession(context());
+    expect(controller.status, DanmakuStatus.noMatch);
+
+    const anime = DanmakuAnime(
+      animeId: 9,
+      animeTitle: 'Show',
+      type: 'tvseries',
+      episodes: [DanmakuEpisode(episodeId: 201, episodeTitle: '第02话')],
+    );
+    client.commentResponse = [comment(9, 3)];
+    gated.writeGate = Completer<void>();
+    final selection = controller.selectEpisode(anime, anime.episodes.single);
+    while (gated.pendingWrites == 0) {
+      await Future<void>.delayed(Duration.zero);
+    }
+
+    // 写入挂起期间换集:新会话无匹配,落在 noMatch。
+    client.commentResponse = const [];
+    final sessionB = controller.startSession(
+      context(itemId: 'item-2', index: 2),
+    );
+    gated.writeGate!.complete();
+    await selection;
+    await sessionB;
+    expect(controller.status, DanmakuStatus.noMatch);
+    expect(controller.comments, isEmpty);
+    expect(controller.matchedTitle, isNull);
+
+    // 开关重开不得复用旧选集的弹幕。
+    await controller.toggleDanmaku();
+    await controller.toggleDanmaku();
+    expect(controller.status, DanmakuStatus.noMatch);
+    expect(controller.comments, isEmpty);
+    expect(client.commentCalls.map((c) => c.$2), [201]);
+  });
+
+  test('switching sessions releases the previous cached comments', () async {
+    client.matchResponse = const DanmakuMatchResponse(
+      isMatched: true,
+      matches: [
+        DanmakuMatchCandidate(
+          animeId: 7,
+          animeTitle: 'Show',
+          episodeId: 100,
+          episodeTitle: '第01话',
+        ),
+      ],
+    );
+    client.commentResponse = [comment(1, 5)];
+    final controller = makeController();
+    await controller.startSession(context());
+    expect(controller.comments.single.cid, 1);
+
+    // 新会话拉取失败:不得回退显示上一集的弹幕,开关重开也不复用。
+    client.commentError = unreachable;
+    await controller.startSession(context(itemId: 'item-2', index: 2));
+    expect(controller.status, DanmakuStatus.unreachable);
+    expect(controller.comments, isEmpty);
+    await controller.toggleDanmaku();
+    await controller.toggleDanmaku();
+    expect(controller.status, DanmakuStatus.unreachable);
+    expect(controller.comments, isEmpty);
+    expect(client.commentCalls, hasLength(3));
   });
 
   test('stale manual selection does not land after a session switch', () async {

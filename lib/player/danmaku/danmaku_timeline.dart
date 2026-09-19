@@ -24,7 +24,7 @@ class DanmakuEntry {
 
   final DanmakuMode renderMode;
 
-  /// 渲染文本:[mergedCount] > 1 时为 `"$text ×N"`。
+  /// 渲染文本:原文去首尾空白;[mergedCount] > 1 时为 `"$text ×N"`。
   final String displayText;
 
   int get cid => comment.cid;
@@ -94,11 +94,14 @@ abstract final class DanmakuTimeline {
           time: group.head.time + offsetSeconds,
           mergedCount: group.count,
           renderMode: group.head.renderMode,
-          displayText: group.count > 1
-              ? '${group.head.text.trim()} ×${group.count}'
-              : group.head.text,
+          displayText: _displayText(group.head.text.trim(), group.count),
         ),
     ]);
+  }
+
+  /// 渲染文本统一按去空白后的文本生成(与合并键一致),合并组追加 `×N`。
+  static String _displayText(String text, int count) {
+    return count > 1 ? '$text ×$count' : text;
   }
 
   /// 两组设置之间的差异是否需要重建时间轴。

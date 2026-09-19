@@ -232,7 +232,12 @@ class DanmakuController extends ChangeNotifier {
     _sessionCancelToken = CancelToken();
     _cancelSearchRequests();
     _context = context;
-    _sessionKey = '${context.itemId}|${context.mediaSourceId}';
+    final key = '${context.itemId}|${context.mediaSourceId}';
+    if (key != _sessionKey) {
+      // 换集即释放旧缓存:新会话加载失败时不得回退到旧集弹幕。
+      _loaded = null;
+    }
+    _sessionKey = key;
     layout.reset();
     _setComments(const []);
     matchedTitle = null;
@@ -366,17 +371,20 @@ class DanmakuController extends ChangeNotifier {
     ];
   }
 
-  /// 成功拉取弹幕后落地并记入会话缓存。
-  void _commitLoaded(int episodeId, String title, List<DanmakuComment> loaded) {
-    final key = _sessionKey;
-    if (key != null) {
-      _loaded = _LoadedComments(
-        sessionKey: key,
-        episodeId: episodeId,
-        title: title,
-        comments: loaded,
-      );
-    }
+  /// 成功拉取弹幕后落地并记入会话缓存。[sessionKey] 为发起加载时捕获的
+  /// 会话键(而非当前值),保证缓存条目的弹幕与其会话键始终对应。
+  void _commitLoaded(
+    String sessionKey,
+    int episodeId,
+    String title,
+    List<DanmakuComment> loaded,
+  ) {
+    _loaded = _LoadedComments(
+      sessionKey: sessionKey,
+      episodeId: episodeId,
+      title: title,
+      comments: loaded,
+    );
     _setComments(loaded);
     matchedTitle = title;
     status = DanmakuStatus.active;
@@ -470,21 +478,20 @@ class DanmakuController extends ChangeNotifier {
       notifyListeners();
       return;
     }
-    final generation = _sessionGeneration;
-    final cancelToken = _sessionCancelToken;
+    final sessionKey = _sessionKey;
+    if (sessionKey == null) {
+      return;
+    }
+    final dropped = _sessionGuard(sessionKey);
     status = DanmakuStatus.loading;
     notifyListeners();
     try {
       final loaded = await _client.fetchComments(
         _source,
         episode.episodeId,
-        cancelToken: cancelToken,
+        cancelToken: _sessionCancelToken,
       );
-      if (_requestDropped(
-        generation: generation,
-        current: _sessionGeneration,
-        token: cancelToken,
-      )) {
+      if (dropped()) {
         // 与 _resolveAndLoad 同族保护:会话已切换,选择结果不落地。
         return;
       }
@@ -494,19 +501,36 @@ class DanmakuController extends ChangeNotifier {
         anime.animeTitle,
         episode.episodeId,
       );
-      _commitLoaded(episode.episodeId, anime.animeTitle, loaded);
+      if (dropped()) {
+        // 记忆落盘期间换集:旧选集不得挂到新会话键下。
+        return;
+      }
+      _commitLoaded(sessionKey, episode.episodeId, anime.animeTitle, loaded);
       notifyListeners();
     } on DanmakuApiException catch (failure) {
-      if (_requestDropped(
-        generation: generation,
-        current: _sessionGeneration,
-        token: cancelToken,
-        failure: failure,
-      )) {
+      if (dropped(failure)) {
         return;
       }
       _handleLoadFailure(failure);
     }
+  }
+
+  /// 捕获当前会话代际/取消令牌/会话键,返回判定“结果是否已过期”的闭包:
+  /// 每次 await 之后、落地任何状态之前都必须调用。
+  bool Function([DanmakuApiException? failure]) _sessionGuard(
+    String sessionKey,
+  ) {
+    final generation = _sessionGeneration;
+    final cancelToken = _sessionCancelToken;
+    return ([DanmakuApiException? failure]) {
+      return _sessionKey != sessionKey ||
+          _requestDropped(
+            generation: generation,
+            current: _sessionGeneration,
+            token: cancelToken,
+            failure: failure,
+          );
+    };
   }
 
   /// 自定义服务不可用时回退官方源并重试当前会话。
@@ -527,8 +551,12 @@ class DanmakuController extends ChangeNotifier {
   // -------------------------------------------------------------------
 
   Future<void> _resolveAndLoad(DanmakuEpisodeContext context) async {
-    final generation = _sessionGeneration;
+    final sessionKey = _sessionKey;
+    if (sessionKey == null) {
+      return;
+    }
     final cancelToken = _sessionCancelToken;
+    final dropped = _sessionGuard(sessionKey);
     if (!_canCallOfficialApi) {
       status = DanmakuStatus.unreachable;
       statusDetail = null;
@@ -541,15 +569,6 @@ class DanmakuController extends ChangeNotifier {
     var episodeId = 0;
     var resolved = false;
     DanmakuApiException? lookupFailure;
-
-    bool dropped([DanmakuApiException? failure]) {
-      return _requestDropped(
-        generation: generation,
-        current: _sessionGeneration,
-        token: cancelToken,
-        failure: failure,
-      );
-    }
 
     // 三步彼此隔离:一步 API 失败记入 lookupFailure 后继续,取消则丢弃整链。
     // 1. 按剧记忆:同集直接复用,同剧后续集沿用动画并按集号对位。
@@ -702,7 +721,12 @@ class DanmakuController extends ChangeNotifier {
         return;
       }
       await _remember(context, animeId, animeTitle, episodeId);
-      _commitLoaded(episodeId, animeTitle, loaded);
+      if (dropped()) {
+        // 记忆落盘(文件锁写)期间换集:旧集弹幕不得挂到新会话键下,
+        // 否则缓存会让错误弹幕在开关重开时被复用。
+        return;
+      }
+      _commitLoaded(sessionKey, episodeId, animeTitle, loaded);
       notifyListeners();
     } on DanmakuApiException catch (failure) {
       if (dropped(failure)) {

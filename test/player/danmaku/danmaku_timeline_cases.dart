@@ -135,6 +135,22 @@ void main() {
     expect(DanmakuTimeline.isBlocked('x', const []), isFalse);
   });
 
+  test('display text is trimmed for merged and single entries alike', () {
+    final timeline = DanmakuTimeline.build([
+      comment(1, 0, text: '  solo '),
+      comment(2, 1, text: ' dup'),
+      comment(3, 2, text: 'dup  '),
+    ], const DanmakuDisplaySettings());
+    expect(timeline.map((e) => e.displayText), ['solo', 'dup ×2']);
+    // 原始评论文本保持不变,仅渲染文本去空白。
+    expect(timeline.first.comment.text, '  solo ');
+
+    final unmerged = DanmakuTimeline.build([
+      comment(1, 0, text: '  solo '),
+    ], const DanmakuDisplaySettings(mergeDuplicates: false));
+    expect(unmerged.single.displayText, 'solo');
+  });
+
   test('unsorted input is sorted by time and the result is immutable', () {
     final timeline = DanmakuTimeline.build([
       comment(1, 9, text: 'c'),
@@ -142,6 +158,14 @@ void main() {
       comment(3, 5),
     ], const DanmakuDisplaySettings());
     expect(timeline.map((e) => e.cid), [2, 3, 1]);
+    // 同一时刻按 cid 升序,排序结果确定。
+    final tied = DanmakuTimeline.build([
+      comment(5, 3, text: 'e'),
+      comment(4, 3, text: 'd'),
+      comment(1, 0, text: 'a'),
+      comment(2, 3, text: 'b'),
+    ], const DanmakuDisplaySettings());
+    expect(tied.map((e) => e.cid), [1, 2, 4, 5]);
     expect(() => timeline.add(timeline.first), throwsUnsupportedError);
     expect(
       DanmakuTimeline.build(const [], const DanmakuDisplaySettings()),
