@@ -41,3 +41,61 @@ Validation recorded on 2026-09-18:
   not yet run. Hardware GPU behavior, end-to-end audio/display timing and the
   historical flicker still need separate evidence; package or core-image
   checks cannot establish those outcomes.
+
+## Danmaku redo validation (2026-09-19)
+
+This section records the danmaku redo (ADR-8). It does not change the native
+playback facts above. No DevTools timeline, CPU trace, or `debugGlyphCacheSize`
+log was found under `build/`, `docs/`, or `integration_test/`; frame times,
+cache peaks, and pause CPU figures are therefore not reported.
+
+### Automated tests (executed in T1–T6; not hardware)
+
+Unit/widget coverage via `flutter test` on the `*_cases.dart` modules listed
+below. These assert layout, timeline, parse, controller, renderer hooks, panel,
+and settings invariants. They are not 1080p profile measurements.
+
+| Area | Modules | What they cover |
+| --- | --- | --- |
+| Settings / density | `test/player/danmaku/danmaku_settings_cases.dart`, `danmaku_layout_cases.dart` | Full-field JSON, old-field snap, density vs lanes (T1) |
+| Timeline / load | `danmaku_timeline_cases.dart`, `dandanplay_client_cases.dart`, `danmaku_controller_cases.dart` | Filter/merge/offset, isolate parse ≥256 KiB, session cache, `refreshFromStore` (T2) |
+| Layout | `danmaku_layout_cases.dart` | Overlap, density, fontPx, resize, follow-rate lifespan (T3) |
+| Renderer | `danmaku_renderer_cases.dart` | `debugLayoutCallsDuringTick == 0` after warmup, ticker pause, split layers, glyph-cache generation (T4) |
+| Player panel | `test/player/player_controls_cases.dart` | 1280×720 basic row, status, keywords, unconfigured guide (T5) |
+| Settings page | `test/settings_page_cases.dart` | Display section writes `danmakuDisplay` only (T6) |
+
+T1–T6 task-runs record those module-level `flutter test` commands as passed.
+This task did not re-run them. `flutter test` remains the configured full-suite
+command; it is still not a hardware result.
+
+### Windows real-machine profile — configured / not executed
+
+Intended command and environment (not run in this workflow):
+
+```sh
+flutter run --profile -d windows
+```
+
+Open Flutter DevTools on that profile session. Checklist:
+
+- 1080p window
+- 10k-level comment load
+- 100+ on-screen scroll comments
+- DevTools frame time vs the display refresh period
+- `DanmakuViewState.debugGlyphCacheSize` peak (code LRU cap is 6000)
+- pause: CPU drop toward a no-danmaku idle
+
+No Windows profile session, screenshot, or numeric log exists in-repo for this
+redo. Do not treat debug-mode jank as an R6 result.
+
+### Linux Xvfb — functional only; no performance conclusion
+
+ADR-8 allows the existing Xvfb path (`linux/packaging/playback_smoke.sh`) only
+as a functional check. That 2026-09-18 run is native playback, not danmaku, and
+used software Mesa with substantial 1080p/4K drops. No danmaku functional
+screenshot was taken for this redo. Do not infer danmaku frame time from Xvfb.
+
+### macOS — no real-machine result
+
+macOS has no local native or danmaku profile run. Hardware GPU behavior and
+R6 metrics are not established there.
