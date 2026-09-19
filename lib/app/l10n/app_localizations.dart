@@ -1288,6 +1288,198 @@ abstract class AppLocalizations {
   /// **'本集无弹幕'**
   String get danmakuNoComments;
 
+  /// Danmaku status showing how many comments were loaded.
+  ///
+  /// In zh, this message translates to:
+  /// **'已加载 {count} 条'**
+  String danmakuLoadedCount(int count);
+
+  /// Small danmaku font scale step.
+  ///
+  /// In zh, this message translates to:
+  /// **'小'**
+  String get danmakuFontScaleSmall;
+
+  /// Medium danmaku font scale step.
+  ///
+  /// In zh, this message translates to:
+  /// **'中'**
+  String get danmakuFontScaleMedium;
+
+  /// Large danmaku font scale step.
+  ///
+  /// In zh, this message translates to:
+  /// **'大'**
+  String get danmakuFontScaleLarge;
+
+  /// Extra-large danmaku font scale step.
+  ///
+  /// In zh, this message translates to:
+  /// **'特大'**
+  String get danmakuFontScaleExtraLarge;
+
+  /// Slow danmaku speed step.
+  ///
+  /// In zh, this message translates to:
+  /// **'慢'**
+  String get danmakuSpeedSlow;
+
+  /// Normal danmaku speed step.
+  ///
+  /// In zh, this message translates to:
+  /// **'标准'**
+  String get danmakuSpeedNormal;
+
+  /// Fast danmaku speed step.
+  ///
+  /// In zh, this message translates to:
+  /// **'快'**
+  String get danmakuSpeedFast;
+
+  /// Very fast danmaku speed step.
+  ///
+  /// In zh, this message translates to:
+  /// **'极快'**
+  String get danmakuSpeedVeryFast;
+
+  /// Quarter-screen danmaku display area.
+  ///
+  /// In zh, this message translates to:
+  /// **'1/4屏'**
+  String get danmakuAreaQuarter;
+
+  /// Half-screen danmaku display area.
+  ///
+  /// In zh, this message translates to:
+  /// **'半屏'**
+  String get danmakuAreaHalf;
+
+  /// Three-quarter-screen danmaku display area.
+  ///
+  /// In zh, this message translates to:
+  /// **'3/4屏'**
+  String get danmakuAreaThreeQuarters;
+
+  /// Full-screen danmaku display area.
+  ///
+  /// In zh, this message translates to:
+  /// **'全屏'**
+  String get danmakuAreaFull;
+
+  /// Toggle scrolling danmaku.
+  ///
+  /// In zh, this message translates to:
+  /// **'滚动'**
+  String get danmakuTypeScroll;
+
+  /// Toggle top fixed danmaku.
+  ///
+  /// In zh, this message translates to:
+  /// **'顶部'**
+  String get danmakuTypeTop;
+
+  /// Toggle bottom fixed danmaku.
+  ///
+  /// In zh, this message translates to:
+  /// **'底部'**
+  String get danmakuTypeBottom;
+
+  /// Toggle colorful danmaku; off draws all comments white.
+  ///
+  /// In zh, this message translates to:
+  /// **'彩色'**
+  String get danmakuColorful;
+
+  /// Expands advanced danmaku display options in the player panel.
+  ///
+  /// In zh, this message translates to:
+  /// **'高级'**
+  String get danmakuAdvanced;
+
+  /// Prevent overlapping danmaku on the same lane.
+  ///
+  /// In zh, this message translates to:
+  /// **'防重叠'**
+  String get danmakuPreventOverlap;
+
+  /// Merge duplicate danmaku within the merge window.
+  ///
+  /// In zh, this message translates to:
+  /// **'合并重复'**
+  String get danmakuMergeDuplicates;
+
+  /// Draw an outline around danmaku text.
+  ///
+  /// In zh, this message translates to:
+  /// **'描边'**
+  String get danmakuOutline;
+
+  /// Whether danmaku lifetime follows playback rate.
+  ///
+  /// In zh, this message translates to:
+  /// **'跟随倍速'**
+  String get danmakuFollowPlaybackRate;
+
+  /// Automatic on-screen danmaku density.
+  ///
+  /// In zh, this message translates to:
+  /// **'自动'**
+  String get danmakuDensityAuto;
+
+  /// Sparse on-screen danmaku density.
+  ///
+  /// In zh, this message translates to:
+  /// **'稀疏'**
+  String get danmakuDensitySparse;
+
+  /// Dense on-screen danmaku density.
+  ///
+  /// In zh, this message translates to:
+  /// **'密集'**
+  String get danmakuDensityDense;
+
+  /// Danmaku time offset relative to playback.
+  ///
+  /// In zh, this message translates to:
+  /// **'时间偏移'**
+  String get danmakuTimeOffset;
+
+  /// Decrease danmaku time offset by half a second.
+  ///
+  /// In zh, this message translates to:
+  /// **'−0.5 秒'**
+  String get danmakuTimeOffsetStepDown;
+
+  /// Increase danmaku time offset by half a second.
+  ///
+  /// In zh, this message translates to:
+  /// **'+0.5 秒'**
+  String get danmakuTimeOffsetStepUp;
+
+  /// Reset danmaku time offset to zero.
+  ///
+  /// In zh, this message translates to:
+  /// **'归零'**
+  String get danmakuTimeOffsetZero;
+
+  /// Blocked danmaku keyword list.
+  ///
+  /// In zh, this message translates to:
+  /// **'屏蔽关键词'**
+  String get danmakuBlockedKeywords;
+
+  /// Hint for adding a blocked danmaku keyword.
+  ///
+  /// In zh, this message translates to:
+  /// **'输入关键词后回车'**
+  String get danmakuKeywordHint;
+
+  /// Restore danmaku display settings to defaults.
+  ///
+  /// In zh, this message translates to:
+  /// **'恢复默认'**
+  String get danmakuRestoreDefaults;
+
   /// Section header listing episodes of a searched anime.
   ///
   /// In zh, this message translates to:

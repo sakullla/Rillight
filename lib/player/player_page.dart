@@ -17,7 +17,9 @@ import 'package:rillight/home/catalog_failure.dart';
 import 'package:rillight/library/item_format.dart';
 import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/player/danmaku/danmaku_controller.dart';
+import 'package:rillight/player/danmaku/danmaku_keys.dart';
 import 'package:rillight/player/danmaku/danmaku_match_query.dart';
+import 'package:rillight/player/danmaku/danmaku_panel.dart';
 import 'package:rillight/player/danmaku/danmaku_renderer.dart';
 import 'package:rillight/player/danmaku/dandanplay_models.dart';
 import 'package:rillight/player/mpv_video_backend.dart';
@@ -292,8 +294,9 @@ class PlayerPageState extends State<PlayerPage> {
     setState(() => _episodesOpen = false);
   }
 
-  void _openDanmakuPanel() {
-    if (_danmaku == null || !_danmaku!.isConfigured) {
+  Future<void> _openDanmakuPanel() async {
+    final danmaku = _danmaku;
+    if (danmaku == null) {
       return;
     }
     if (_danmakuPanelOpen) {
@@ -305,6 +308,10 @@ class PlayerPageState extends State<PlayerPage> {
     }
     if (_danmakuSearchOpen) {
       _closeDanmakuSearch();
+    }
+    await danmaku.refreshFromStore();
+    if (!mounted) {
+      return;
     }
     controller?.setControlsPinned(true);
     setState(() => _danmakuPanelOpen = true);
@@ -360,7 +367,7 @@ class PlayerPageState extends State<PlayerPage> {
     return Focus(
       focusNode: _playerShortcuts,
       autofocus: true,
-      descendantsAreFocusable: _danmakuSearchOpen,
+      descendantsAreFocusable: _danmakuSearchOpen || _danmakuPanelOpen,
       onKeyEvent: (node, event) {
         if (event is! KeyDownEvent) {
           return KeyEventResult.ignored;
@@ -616,7 +623,7 @@ class PlayerPageState extends State<PlayerPage> {
                       (_danmaku!.status == DanmakuStatus.noMatch))
                     _DanmakuMatchChip(onSearch: _openDanmakuSearch),
                   if (_danmakuPanelOpen && _danmaku != null)
-                    _DanmakuPanel(
+                    DanmakuPanel(
                       danmaku: _danmaku!,
                       onClose: _closeDanmakuPanel,
                       onSearch: _openDanmakuSearch,
@@ -2247,7 +2254,7 @@ class _ControlsRow extends StatelessWidget {
         ),
         _VolumeControl(controller: controller),
         const Spacer(),
-        if (danmakuController != null && danmakuController.isConfigured)
+        if (danmakuController != null)
           _DanmakuButton(
             danmaku: danmakuController,
             onPressed: onDanmakuSearch,
@@ -2559,7 +2566,7 @@ class _DanmakuButton extends StatelessWidget {
     final l10n = AppLocalizations.of(context);
     final scheme = Theme.of(context).colorScheme;
     return _PlayerIconButton(
-      key: const Key('player-danmaku-menu'),
+      key: DanmakuKeys.menu,
       tooltip: l10n.danmaku,
       onPressed: onPressed,
       icon: danmaku.danmakuOn
@@ -2587,7 +2594,7 @@ class _DanmakuMatchChip extends StatelessWidget {
       child: LiquidGlass(
         kind: LiquidGlassKind.pill,
         child: Material(
-          key: const Key('player-danmaku-match-chip'),
+          key: DanmakuKeys.matchChip,
           type: MaterialType.transparency,
           child: InkWell(
             onTap: () {
@@ -2624,224 +2631,6 @@ class _DanmakuMatchChip extends StatelessWidget {
   }
 }
 
-/// 弹幕面板:开关、匹配状态、手动搜索、滑条式显示参数。
-class _DanmakuPanel extends StatelessWidget {
-  const _DanmakuPanel({
-    required this.danmaku,
-    required this.onClose,
-    required this.onSearch,
-  });
-
-  final DanmakuController danmaku;
-  final VoidCallback onClose;
-  final VoidCallback onSearch;
-
-  @override
-  Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context);
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    final display = danmaku.display;
-    final unreachable =
-        danmaku.status == DanmakuStatus.unreachable ||
-        danmaku.status == DanmakuStatus.customUnreachable;
-    // 播放器用 Texture,BackdropFilter 糊不住画面;玻璃面板在亮场里
-    // 「手动搜索」和说明会看不清。与剧集/搜索侧栏一样用实色。
-    return Positioned(
-      right: AppSpacing.xl,
-      bottom: 112,
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 360),
-        child: Material(
-          key: const Key('player-danmaku-panel'),
-          color: scheme.surfaceContainerHigh,
-          elevation: 8,
-          shadowColor: scheme.shadow,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(AppRadii.xl),
-          ),
-          clipBehavior: Clip.antiAlias,
-          child: Padding(
-            padding: const EdgeInsets.all(AppSpacing.md),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        l10n.danmaku,
-                        style: theme.textTheme.titleSmall,
-                      ),
-                    ),
-                    Switch.adaptive(
-                      key: const Key('player-danmaku-toggle'),
-                      value: danmaku.danmakuOn,
-                      onChanged: (_) => unawaited(danmaku.toggleDanmaku()),
-                    ),
-                    IconButton(
-                      tooltip: MaterialLocalizations.of(
-                        context,
-                      ).closeButtonTooltip,
-                      onPressed: onClose,
-                      icon: const Icon(Icons.close_rounded),
-                    ),
-                  ],
-                ),
-                Text(
-                  _danmakuStatusText(l10n, danmaku),
-                  key: const Key('player-danmaku-status'),
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: unreachable ? scheme.error : scheme.onSurfaceVariant,
-                  ),
-                ),
-                if (!danmaku.isConfigured) ...[
-                  const SizedBox(height: AppSpacing.sm),
-                  Text(
-                    l10n.danmakuOfficialSetupHint,
-                    key: const Key('player-danmaku-setup-hint'),
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: scheme.onSurfaceVariant,
-                    ),
-                  ),
-                ],
-                const SizedBox(height: AppSpacing.sm),
-                FilledButton.tonal(
-                  key: const Key('player-danmaku-search'),
-                  onPressed: () {
-                    WidgetsBinding.instance.addPostFrameCallback((_) {
-                      onSearch();
-                    });
-                  },
-                  child: Text(l10n.danmakuSearch),
-                ),
-                if (!unreachable) ...[
-                  const SizedBox(height: AppSpacing.md),
-                  _DanmakuSliderRow(
-                    label: l10n.danmakuOpacity,
-                    value: display.opacity,
-                    min: 0.1,
-                    max: 1,
-                    onChanged: (value) {
-                      unawaited(
-                        danmaku.setDisplay(display.copyWith(opacity: value)),
-                      );
-                    },
-                  ),
-                  _DanmakuSliderRow(
-                    label: l10n.danmakuFontSize,
-                    value: display.fontScale,
-                    min: 0.5,
-                    max: 2,
-                    onChanged: (value) {
-                      unawaited(
-                        danmaku.setDisplay(display.copyWith(fontScale: value)),
-                      );
-                    },
-                  ),
-                  _DanmakuSliderRow(
-                    label: l10n.danmakuSpeed,
-                    value: display.speed,
-                    min: 0.5,
-                    max: 2,
-                    onChanged: (value) {
-                      unawaited(
-                        danmaku.setDisplay(display.copyWith(speed: value)),
-                      );
-                    },
-                  ),
-                  _DanmakuSliderRow(
-                    label: l10n.danmakuDisplayArea,
-                    value: display.areaFraction,
-                    min: 0.1,
-                    max: 1,
-                    onChanged: (value) {
-                      unawaited(
-                        danmaku.setDisplay(
-                          display.copyWith(areaFraction: value),
-                        ),
-                      );
-                    },
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _DanmakuSliderRow extends StatelessWidget {
-  const _DanmakuSliderRow({
-    required this.label,
-    required this.value,
-    required this.min,
-    required this.max,
-    required this.onChanged,
-  });
-
-  final String label;
-  final double value;
-  final double min;
-  final double max;
-  final ValueChanged<double> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Row(
-          children: [
-            Expanded(child: Text(label, style: theme.textTheme.labelMedium)),
-            Text(
-              '${(value * 100).round()}%',
-              style: theme.textTheme.labelSmall,
-            ),
-          ],
-        ),
-        Slider(
-          value: value.clamp(min, max),
-          min: min,
-          max: max,
-          onChanged: onChanged,
-        ),
-      ],
-    );
-  }
-}
-
-String _danmakuStatusText(AppLocalizations l10n, DanmakuController danmaku) {
-  final source = danmaku.usesCustomSource
-      ? l10n.danmakuCustom
-      : l10n.danmakuOfficial;
-  final String state;
-  switch (danmaku.status) {
-    case DanmakuStatus.active:
-      state = danmaku.matchedTitle == null || danmaku.matchedTitle!.isEmpty
-          ? (danmaku.hasComments ? '' : l10n.danmakuNoComments)
-          : l10n.danmakuMatchedTo(danmaku.matchedTitle!);
-    case DanmakuStatus.loading:
-      state = l10n.danmakuMatching;
-    case DanmakuStatus.noMatch:
-      state = l10n.danmakuNoMatch;
-    case DanmakuStatus.customUnreachable:
-      state = l10n.danmakuCustomUnreachable;
-    case DanmakuStatus.unreachable:
-      state = danmaku.hasOfficialCredentials
-          ? l10n.danmakuOfficialUnreachable
-          : l10n.danmakuOfficialNeedsAuth;
-    case DanmakuStatus.off:
-    case DanmakuStatus.idle:
-      state = '';
-  }
-  return state.isEmpty ? source : '$source · $state';
-}
-
 /// 自定义弹幕服务不可用提示:明确提示并可一键回退官方源。
 class _DanmakuSourceBanner extends StatelessWidget {
   const _DanmakuSourceBanner({required this.controller});
@@ -2867,7 +2656,7 @@ class _DanmakuSourceBanner extends StatelessWidget {
               vertical: AppSpacing.sm,
             ),
             child: Material(
-              key: const Key('player-danmaku-source-banner'),
+              key: DanmakuKeys.sourceBanner,
               type: MaterialType.transparency,
               child: Row(
                 mainAxisSize: MainAxisSize.min,
@@ -2877,7 +2666,7 @@ class _DanmakuSourceBanner extends StatelessWidget {
                   Flexible(child: Text(l10n.danmakuCustomUnreachable)),
                   const SizedBox(width: AppSpacing.sm),
                   FilledButton.tonal(
-                    key: const Key('player-danmaku-use-official'),
+                    key: DanmakuKeys.useOfficial,
                     onPressed: () => unawaited(controller.useOfficialSource()),
                     child: Text(l10n.danmakuUseOfficial),
                   ),
@@ -2978,7 +2767,7 @@ class _DanmakuSearchPanelState extends State<_DanmakuSearchPanel> {
         children: [
           Positioned.fill(
             child: GestureDetector(
-              key: const Key('player-danmaku-search-dismiss'),
+              key: DanmakuKeys.searchDismiss,
               behavior: HitTestBehavior.opaque,
               onTap: widget.onClose,
               child: ColoredBox(
@@ -2994,7 +2783,7 @@ class _DanmakuSearchPanelState extends State<_DanmakuSearchPanel> {
             right: 0,
             width: panelWidth,
             child: Material(
-              key: const Key('player-danmaku-search-panel'),
+              key: DanmakuKeys.searchPanel,
               color: scheme.surfaceContainerHigh,
               elevation: 8,
               shadowColor: scheme.shadow,
@@ -3030,7 +2819,7 @@ class _DanmakuSearchPanelState extends State<_DanmakuSearchPanel> {
                     ),
                     const SizedBox(height: AppSpacing.sm),
                     TextField(
-                      key: const Key('player-danmaku-search-field'),
+                      key: DanmakuKeys.searchField,
                       controller: _field,
                       focusNode: _fieldFocus,
                       autofocus: true,
@@ -3044,7 +2833,7 @@ class _DanmakuSearchPanelState extends State<_DanmakuSearchPanel> {
                         fillColor: scheme.surfaceContainerHighest,
                         prefixIcon: const Icon(Icons.search_rounded, size: 20),
                         suffixIcon: IconButton(
-                          key: const Key('player-danmaku-search-submit'),
+                          key: DanmakuKeys.searchSubmit,
                           tooltip: l10n.danmakuSearch,
                           onPressed: () => unawaited(_runSearch()),
                           icon: const Icon(Icons.arrow_forward_rounded),
@@ -3086,7 +2875,7 @@ class _DanmakuSearchPanelState extends State<_DanmakuSearchPanel> {
     if (_loading) {
       return const Center(
         child: CircularProgressIndicator(
-          key: Key('player-danmaku-search-loading'),
+          key: DanmakuKeys.searchLoading,
           strokeWidth: 3,
         ),
       );
@@ -3118,7 +2907,7 @@ class _DanmakuSearchPanelState extends State<_DanmakuSearchPanel> {
         return Theme(
           data: theme.copyWith(dividerColor: Colors.transparent),
           child: ExpansionTile(
-            key: Key('player-danmaku-anime-${anime.animeId}'),
+            key: DanmakuKeys.searchAnime(anime.animeId),
             dense: true,
             initiallyExpanded: _animes.length == 1,
             tilePadding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
@@ -3150,7 +2939,7 @@ class _DanmakuSearchPanelState extends State<_DanmakuSearchPanel> {
                 for (final episode in anime.episodes)
                   ListTile(
                     dense: true,
-                    key: Key('player-danmaku-episode-${episode.episodeId}'),
+                    key: DanmakuKeys.searchEpisode(episode.episodeId),
                     title: Text(episode.episodeTitle),
                     onTap: () {
                       unawaited(widget.danmaku.selectEpisode(anime, episode));

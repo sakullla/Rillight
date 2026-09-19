@@ -16,6 +16,8 @@ import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/library/item_detail_page.dart';
 import 'package:rillight/player/playback_models.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
+import 'package:rillight/player/danmaku/danmaku_display_settings.dart';
+import 'package:rillight/player/danmaku/danmaku_keys.dart';
 import 'package:rillight/player/danmaku/dandanplay_client.dart';
 import 'package:rillight/player/danmaku/dandanplay_models.dart';
 import 'package:rillight/player/player_bindings.dart';
@@ -195,6 +197,16 @@ void main() {
     return tester.state<PlayerPageState>(find.byType(PlayerPage)).controller!;
   }
 
+  void setPlayerLogicalSize(
+    WidgetTester tester, {
+    Size size = const Size(1280, 720),
+  }) {
+    tester.view.devicePixelRatio = 1.0;
+    tester.view.physicalSize = size;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+  }
+
   Future<void> openDanmakuSearch(WidgetTester tester) async {
     await waitFor(tester, find.byKey(const Key('player-danmaku-menu')));
     await tester.tap(find.byKey(const Key('player-danmaku-menu')));
@@ -214,6 +226,14 @@ void main() {
           ),
         )
         .onPressed!();
+  }
+
+  Future<void> openDanmakuPanel(WidgetTester tester) async {
+    await waitFor(tester, find.byKey(const Key('player-danmaku-menu')));
+    pressPlayerIcon(tester, const Key('player-danmaku-menu'));
+    await tester.pump();
+    await tester.pump();
+    await waitFor(tester, find.byKey(const Key('player-danmaku-panel')));
   }
 
   Future<void> flushPlayerAsync(
@@ -654,9 +674,179 @@ void main() {
     tags: ['integration'],
   );
 
+  testWidgets(
+    'danmaku panel basic controls fit 1280x720 with advanced collapsed',
+    (tester) async {
+      setPlayerLogicalSize(tester);
+      await pumpLoggedIn(
+        tester,
+        settingsStore: MemoryPlayerSettingsStore(
+          const PlayerSettings(danmakuAppId: 'app', danmakuToken: 'secret'),
+        ),
+        danmakuClient: _SilentDanmakuClient(),
+      );
+      await openPlayable(tester, 'movie-up');
+      await waitFor(tester, find.byKey(PlayerKeys.playPause));
+      await openDanmakuPanel(tester);
+
+      expect(find.byKey(DanmakuKeys.opacity), findsOneWidget);
+      expect(find.byKey(DanmakuKeys.fontScale), findsOneWidget);
+      expect(find.byKey(DanmakuKeys.speed), findsOneWidget);
+      expect(find.byKey(DanmakuKeys.area), findsOneWidget);
+      expect(find.byKey(DanmakuKeys.typeScroll), findsOneWidget);
+      expect(find.byKey(DanmakuKeys.typeTop), findsOneWidget);
+      expect(find.byKey(DanmakuKeys.typeBottom), findsOneWidget);
+      expect(find.byKey(DanmakuKeys.typeColorful), findsOneWidget);
+      expect(find.byKey(DanmakuKeys.advancedToggle), findsOneWidget);
+      expect(find.byKey(DanmakuKeys.density), findsNothing);
+      expect(find.byKey(DanmakuKeys.preventOverlap), findsNothing);
+      expect(find.byKey(DanmakuKeys.timeOffset), findsNothing);
+
+      final panel = tester.getRect(find.byKey(DanmakuKeys.panel));
+      for (final key in [
+        DanmakuKeys.opacity,
+        DanmakuKeys.fontScale,
+        DanmakuKeys.speed,
+        DanmakuKeys.area,
+        DanmakuKeys.typeScroll,
+        DanmakuKeys.advancedToggle,
+      ]) {
+        final rect = tester.getRect(find.byKey(key));
+        expect(rect.height, greaterThan(0));
+        expect(panel.overlaps(rect), isTrue);
+      }
+      expect(
+        tester
+            .state<ScrollableState>(
+              find.descendant(
+                of: find.byKey(DanmakuKeys.panel),
+                matching: find.byType(Scrollable),
+              ),
+            )
+            .position
+            .maxScrollExtent,
+        0,
+      );
+
+      await tester.tap(find.byKey(DanmakuKeys.advancedToggle));
+      await tester.pump();
+      expect(find.byKey(DanmakuKeys.preventOverlap), findsOneWidget);
+      expect(find.byKey(DanmakuKeys.mergeDuplicates), findsOneWidget);
+      expect(find.byKey(DanmakuKeys.outline), findsOneWidget);
+      expect(find.byKey(DanmakuKeys.followPlaybackRate), findsOneWidget);
+      expect(find.byKey(DanmakuKeys.density), findsOneWidget);
+      expect(find.byKey(DanmakuKeys.timeOffset), findsOneWidget);
+    },
+    tags: ['integration'],
+  );
+
+  testWidgets('danmaku panel active status shows loaded count and title', (
+    tester,
+  ) async {
+    await pumpLoggedIn(
+      tester,
+      settingsStore: MemoryPlayerSettingsStore(
+        const PlayerSettings(danmakuAppId: 'app', danmakuToken: 'secret'),
+      ),
+      danmakuClient: _MatchedDanmakuClient(
+        title: '测试番剧',
+        comments: const [
+          DanmakuComment(cid: 1, time: 1, mode: 1, color: 16777215, text: 'a'),
+          DanmakuComment(cid: 2, time: 2, mode: 1, color: 16777215, text: 'b'),
+          DanmakuComment(cid: 3, time: 3, mode: 1, color: 16777215, text: 'c'),
+        ],
+      ),
+    );
+    await openPlayable(tester, 'movie-up');
+    await waitFor(tester, find.byKey(PlayerKeys.playPause));
+    await openDanmakuPanel(tester);
+    await waitFor(tester, find.textContaining('已加载 3 条'));
+    expect(find.textContaining('已匹配：测试番剧'), findsOneWidget);
+  }, tags: ['integration']);
+
+  testWidgets('danmaku panel active status with zero comments', (tester) async {
+    await pumpLoggedIn(
+      tester,
+      settingsStore: MemoryPlayerSettingsStore(
+        const PlayerSettings(danmakuAppId: 'app', danmakuToken: 'secret'),
+      ),
+      danmakuClient: _MatchedDanmakuClient(title: '测试番剧'),
+    );
+    await openPlayable(tester, 'movie-up');
+    await waitFor(tester, find.byKey(PlayerKeys.playPause));
+    await openDanmakuPanel(tester);
+    await waitFor(tester, find.textContaining('本集无弹幕'));
+  }, tags: ['integration']);
+
+  testWidgets('danmaku panel keywords persist and restore defaults', (
+    tester,
+  ) async {
+    setPlayerLogicalSize(tester);
+    final store = MemoryPlayerSettingsStore(
+      const PlayerSettings(danmakuAppId: 'app', danmakuToken: 'secret'),
+    );
+    await pumpLoggedIn(
+      tester,
+      settingsStore: store,
+      danmakuClient: _SilentDanmakuClient(),
+    );
+    await openPlayable(tester, 'movie-up');
+    await waitFor(tester, find.byKey(PlayerKeys.playPause));
+    await openDanmakuPanel(tester);
+    await tester.tap(find.byKey(DanmakuKeys.advancedToggle));
+    await tester.pump();
+    final field = find.byKey(DanmakuKeys.keywordInput);
+    await tester.ensureVisible(field);
+    await tester.pump();
+    await tester.tap(field);
+    await tester.pump();
+    await tester.enterText(field, '剧透');
+    await tester.pump();
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    FocusManager.instance.primaryFocus?.unfocus();
+    await tester.pump();
+    await flushPlayerAsync(tester);
+    expect(find.byKey(DanmakuKeys.keywordChip('剧透')), findsOneWidget);
+    expect((await store.read()).danmakuDisplay?.blockedKeywords, ['剧透']);
+
+    await tester.tap(field);
+    await tester.pump();
+    await tester.enterText(field, '   ');
+    await tester.pump();
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    FocusManager.instance.primaryFocus?.unfocus();
+    await tester.pump();
+    await flushPlayerAsync(tester);
+    expect((await store.read()).danmakuDisplay?.blockedKeywords, ['剧透']);
+
+    final restore = find.byKey(DanmakuKeys.restoreDefaults);
+    await tester.ensureVisible(restore);
+    await tester.tap(restore);
+    await tester.pump();
+    await tester.pump();
+    expect((await store.read()).danmakuDisplay, const DanmakuDisplaySettings());
+  }, tags: ['integration']);
+
+  testWidgets('unconfigured danmaku panel shows guide without form', (
+    tester,
+  ) async {
+    setPlayerLogicalSize(tester);
+    await pumpLoggedIn(tester, danmakuClient: _SilentDanmakuClient());
+    await openPlayable(tester, 'movie-up');
+    await waitFor(tester, find.byKey(PlayerKeys.playPause));
+    await openDanmakuPanel(tester);
+    expect(find.byKey(DanmakuKeys.setupHint), findsOneWidget);
+    expect(find.byKey(const Key('player-danmaku-search')), findsOneWidget);
+    expect(find.byKey(DanmakuKeys.opacity), findsNothing);
+    expect(find.byKey(DanmakuKeys.fontScale), findsNothing);
+    expect(find.byKey(DanmakuKeys.speed), findsNothing);
+    expect(find.byKey(DanmakuKeys.area), findsNothing);
+  }, tags: ['integration']);
+
   testWidgets('tapping empty player surface closes the danmaku panel', (
     tester,
   ) async {
+    setPlayerLogicalSize(tester);
     await pumpLoggedIn(
       tester,
       settingsStore: MemoryPlayerSettingsStore(
@@ -1094,6 +1284,66 @@ class _HangingSearchDanmakuClient extends DandanplayClient {
     CancelToken? cancelToken,
   }) {
     return Completer<List<DanmakuAnime>>().future;
+  }
+}
+
+class _MatchedDanmakuClient extends DandanplayClient {
+  _MatchedDanmakuClient({this.title = '测试番剧', this.comments = const []})
+    : super(dio: Dio());
+
+  final String title;
+  final List<DanmakuComment> comments;
+
+  @override
+  Future<DanmakuMatchResponse> match(
+    DandanplaySource source, {
+    required String fileName,
+    required String fileHash,
+    required int fileSize,
+    required int videoDuration,
+    String matchMode = 'hashAndFileName',
+    CancelToken? cancelToken,
+  }) async {
+    return DanmakuMatchResponse(
+      isMatched: true,
+      matches: [
+        DanmakuMatchCandidate(
+          animeId: 1,
+          animeTitle: title,
+          episodeId: 100,
+          episodeTitle: '第01话',
+        ),
+      ],
+    );
+  }
+
+  @override
+  Future<List<DanmakuComment>> fetchComments(
+    DandanplaySource source,
+    int episodeId, {
+    int? serverTimestamp,
+    CancelToken? cancelToken,
+  }) async {
+    return comments;
+  }
+
+  @override
+  Future<List<DanmakuAnime>> searchAnime(
+    DandanplaySource source,
+    String keyword, {
+    CancelToken? cancelToken,
+  }) async {
+    return const [];
+  }
+
+  @override
+  Future<List<DanmakuAnime>> searchEpisodes(
+    DandanplaySource source, {
+    required String anime,
+    int? episode,
+    CancelToken? cancelToken,
+  }) async {
+    return const [];
   }
 }
 

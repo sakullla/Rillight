@@ -637,6 +637,104 @@ class AppLocalizationsZh extends AppLocalizations {
   String get danmakuNoComments => '本集无弹幕';
 
   @override
+  String danmakuLoadedCount(int count) {
+    return '已加载 $count 条';
+  }
+
+  @override
+  String get danmakuFontScaleSmall => '小';
+
+  @override
+  String get danmakuFontScaleMedium => '中';
+
+  @override
+  String get danmakuFontScaleLarge => '大';
+
+  @override
+  String get danmakuFontScaleExtraLarge => '特大';
+
+  @override
+  String get danmakuSpeedSlow => '慢';
+
+  @override
+  String get danmakuSpeedNormal => '标准';
+
+  @override
+  String get danmakuSpeedFast => '快';
+
+  @override
+  String get danmakuSpeedVeryFast => '极快';
+
+  @override
+  String get danmakuAreaQuarter => '1/4屏';
+
+  @override
+  String get danmakuAreaHalf => '半屏';
+
+  @override
+  String get danmakuAreaThreeQuarters => '3/4屏';
+
+  @override
+  String get danmakuAreaFull => '全屏';
+
+  @override
+  String get danmakuTypeScroll => '滚动';
+
+  @override
+  String get danmakuTypeTop => '顶部';
+
+  @override
+  String get danmakuTypeBottom => '底部';
+
+  @override
+  String get danmakuColorful => '彩色';
+
+  @override
+  String get danmakuAdvanced => '高级';
+
+  @override
+  String get danmakuPreventOverlap => '防重叠';
+
+  @override
+  String get danmakuMergeDuplicates => '合并重复';
+
+  @override
+  String get danmakuOutline => '描边';
+
+  @override
+  String get danmakuFollowPlaybackRate => '跟随倍速';
+
+  @override
+  String get danmakuDensityAuto => '自动';
+
+  @override
+  String get danmakuDensitySparse => '稀疏';
+
+  @override
+  String get danmakuDensityDense => '密集';
+
+  @override
+  String get danmakuTimeOffset => '时间偏移';
+
+  @override
+  String get danmakuTimeOffsetStepDown => '−0.5 秒';
+
+  @override
+  String get danmakuTimeOffsetStepUp => '+0.5 秒';
+
+  @override
+  String get danmakuTimeOffsetZero => '归零';
+
+  @override
+  String get danmakuBlockedKeywords => '屏蔽关键词';
+
+  @override
+  String get danmakuKeywordHint => '输入关键词后回车';
+
+  @override
+  String get danmakuRestoreDefaults => '恢复默认';
+
+  @override
   String get danmakuEpisodes => '分集';
 
   @override

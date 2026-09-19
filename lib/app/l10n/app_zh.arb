@@ -874,6 +874,139 @@
   "@danmakuNoComments": {
     "description": "Danmaku status when the matched episode has no comments."
   },
+  "danmakuLoadedCount": "已加载 {count} 条",
+  "@danmakuLoadedCount": {
+    "description": "Danmaku status showing how many comments were loaded.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "danmakuFontScaleSmall": "小",
+  "@danmakuFontScaleSmall": {
+    "description": "Small danmaku font scale step."
+  },
+  "danmakuFontScaleMedium": "中",
+  "@danmakuFontScaleMedium": {
+    "description": "Medium danmaku font scale step."
+  },
+  "danmakuFontScaleLarge": "大",
+  "@danmakuFontScaleLarge": {
+    "description": "Large danmaku font scale step."
+  },
+  "danmakuFontScaleExtraLarge": "特大",
+  "@danmakuFontScaleExtraLarge": {
+    "description": "Extra-large danmaku font scale step."
+  },
+  "danmakuSpeedSlow": "慢",
+  "@danmakuSpeedSlow": {
+    "description": "Slow danmaku speed step."
+  },
+  "danmakuSpeedNormal": "标准",
+  "@danmakuSpeedNormal": {
+    "description": "Normal danmaku speed step."
+  },
+  "danmakuSpeedFast": "快",
+  "@danmakuSpeedFast": {
+    "description": "Fast danmaku speed step."
+  },
+  "danmakuSpeedVeryFast": "极快",
+  "@danmakuSpeedVeryFast": {
+    "description": "Very fast danmaku speed step."
+  },
+  "danmakuAreaQuarter": "1/4屏",
+  "@danmakuAreaQuarter": {
+    "description": "Quarter-screen danmaku display area."
+  },
+  "danmakuAreaHalf": "半屏",
+  "@danmakuAreaHalf": {
+    "description": "Half-screen danmaku display area."
+  },
+  "danmakuAreaThreeQuarters": "3/4屏",
+  "@danmakuAreaThreeQuarters": {
+    "description": "Three-quarter-screen danmaku display area."
+  },
+  "danmakuAreaFull": "全屏",
+  "@danmakuAreaFull": {
+    "description": "Full-screen danmaku display area."
+  },
+  "danmakuTypeScroll": "滚动",
+  "@danmakuTypeScroll": {
+    "description": "Toggle scrolling danmaku."
+  },
+  "danmakuTypeTop": "顶部",
+  "@danmakuTypeTop": {
+    "description": "Toggle top fixed danmaku."
+  },
+  "danmakuTypeBottom": "底部",
+  "@danmakuTypeBottom": {
+    "description": "Toggle bottom fixed danmaku."
+  },
+  "danmakuColorful": "彩色",
+  "@danmakuColorful": {
+    "description": "Toggle colorful danmaku; off draws all comments white."
+  },
+  "danmakuAdvanced": "高级",
+  "@danmakuAdvanced": {
+    "description": "Expands advanced danmaku display options in the player panel."
+  },
+  "danmakuPreventOverlap": "防重叠",
+  "@danmakuPreventOverlap": {
+    "description": "Prevent overlapping danmaku on the same lane."
+  },
+  "danmakuMergeDuplicates": "合并重复",
+  "@danmakuMergeDuplicates": {
+    "description": "Merge duplicate danmaku within the merge window."
+  },
+  "danmakuOutline": "描边",
+  "@danmakuOutline": {
+    "description": "Draw an outline around danmaku text."
+  },
+  "danmakuFollowPlaybackRate": "跟随倍速",
+  "@danmakuFollowPlaybackRate": {
+    "description": "Whether danmaku lifetime follows playback rate."
+  },
+  "danmakuDensityAuto": "自动",
+  "@danmakuDensityAuto": {
+    "description": "Automatic on-screen danmaku density."
+  },
+  "danmakuDensitySparse": "稀疏",
+  "@danmakuDensitySparse": {
+    "description": "Sparse on-screen danmaku density."
+  },
+  "danmakuDensityDense": "密集",
+  "@danmakuDensityDense": {
+    "description": "Dense on-screen danmaku density."
+  },
+  "danmakuTimeOffset": "时间偏移",
+  "@danmakuTimeOffset": {
+    "description": "Danmaku time offset relative to playback."
+  },
+  "danmakuTimeOffsetStepDown": "−0.5 秒",
+  "@danmakuTimeOffsetStepDown": {
+    "description": "Decrease danmaku time offset by half a second."
+  },
+  "danmakuTimeOffsetStepUp": "+0.5 秒",
+  "@danmakuTimeOffsetStepUp": {
+    "description": "Increase danmaku time offset by half a second."
+  },
+  "danmakuTimeOffsetZero": "归零",
+  "@danmakuTimeOffsetZero": {
+    "description": "Reset danmaku time offset to zero."
+  },
+  "danmakuBlockedKeywords": "屏蔽关键词",
+  "@danmakuBlockedKeywords": {
+    "description": "Blocked danmaku keyword list."
+  },
+  "danmakuKeywordHint": "输入关键词后回车",
+  "@danmakuKeywordHint": {
+    "description": "Hint for adding a blocked danmaku keyword."
+  },
+  "danmakuRestoreDefaults": "恢复默认",
+  "@danmakuRestoreDefaults": {
+    "description": "Restore danmaku display settings to defaults."
+  },
   "danmakuEpisodes": "分集",
   "@danmakuEpisodes": {
     "description": "Section header listing episodes of a searched anime."
