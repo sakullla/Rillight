@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/widgets.dart';
+import 'package:rillight/player/danmaku/danmaku_glyph_cache.dart';
 import 'package:rillight/player/danmaku/danmaku_hash.dart';
 import 'package:rillight/player/danmaku/danmaku_layout.dart';
 import 'package:rillight/player/danmaku/danmaku_timeline.dart';
@@ -80,8 +81,9 @@ class DanmakuController extends ChangeNotifier {
     DanmakuTextMeasurer? textMeasurer,
   }) : _injectedStore = settingsStore,
        _client = client ?? DandanplayClient(),
-       _hasher = hasher ?? DanmakuStreamHasher(),
-       layout = DanmakuLayout(measurer: textMeasurer ?? _defaultMeasure) {
+       _hasher = hasher ?? DanmakuStreamHasher() {
+    glyphCache = DanmakuGlyphCache(widthMeasurer: textMeasurer);
+    layout = DanmakuLayout(measurer: glyphCache.measure);
     unawaited(_primeSettings());
   }
 
@@ -89,8 +91,11 @@ class DanmakuController extends ChangeNotifier {
   final DandanplayClient _client;
   final DanmakuStreamHasher _hasher;
 
+  /// 字形缓存(兼布局测量器);渲染层与布局引擎共享。
+  late final DanmakuGlyphCache glyphCache;
+
   /// 时间轴布局引擎(渲染层直接驱动)。
-  final DanmakuLayout layout;
+  late final DanmakuLayout layout;
 
   DanmakuStatus status = DanmakuStatus.idle;
 
@@ -220,6 +225,7 @@ class DanmakuController extends ChangeNotifier {
     _anchorAt = DateTime.now();
     this.playing = playing;
     playbackRate = rate;
+    layout.playbackRate = rate;
     if (wasPlaying != playing || jumped) {
       notifyListeners();
     }
@@ -344,6 +350,8 @@ class DanmakuController extends ChangeNotifier {
     if (loaded.isEmpty) {
       _timeline = const [];
       layout.comments = const [];
+      layout.entries = const [];
+      glyphCache.clear();
       return;
     }
     _rebuildTimeline();
@@ -357,8 +365,7 @@ class DanmakuController extends ChangeNotifier {
       return;
     }
     _timeline = DanmakuTimeline.build(_comments, display);
-    // 布局引擎尚以 DanmakuComment 为输入(T3 切换为 DanmakuEntry);
-    // 先把时间轴条目按 offset 后时刻与合并文本映射回去。
+    // 布局引擎消费 DanmakuEntry;comments 仍写入兼容既有控制器用例。
     layout.comments = [
       for (final entry in _timeline)
         DanmakuComment(
@@ -369,6 +376,12 @@ class DanmakuController extends ChangeNotifier {
           text: entry.displayText,
         ),
     ];
+    layout.entries = _timeline;
+    glyphCache.prepare(_timeline, fromTime: _prepareFromTime());
+  }
+
+  double _prepareFromTime() {
+    return estimatePosition().inMilliseconds / 1000;
   }
 
   /// 成功拉取弹幕后落地并记入会话缓存。[sessionKey] 为发起加载时捕获的
@@ -897,6 +910,7 @@ class DanmakuController extends ChangeNotifier {
     _disposed = true;
     _cancelActiveToken(_sessionCancelToken);
     _cancelSearchRequests();
+    glyphCache.dispose();
     super.dispose();
   }
 
@@ -935,19 +949,6 @@ class DanmakuController extends ChangeNotifier {
     } catch (_) {
       // 持久化失败不影响运行时行为。
     }
-  }
-
-  /// 默认文本测量器:TextPainter 一次布局取宽度。
-  static double _defaultMeasure(String text, double fontSize) {
-    final painter = TextPainter(
-      text: TextSpan(
-        text: text,
-        style: TextStyle(fontSize: fontSize, fontWeight: FontWeight.w500),
-      ),
-      textDirection: TextDirection.ltr,
-      maxLines: 1,
-    )..layout();
-    return painter.width;
   }
 }
 

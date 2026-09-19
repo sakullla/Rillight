@@ -1,16 +1,20 @@
-import 'package:flutter/foundation.dart';
+import 'dart:async';
+
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
 import 'package:rillight/player/danmaku/danmaku_controller.dart';
+import 'package:rillight/player/danmaku/danmaku_glyph_cache.dart';
 import 'package:rillight/player/danmaku/danmaku_layout.dart';
+import 'package:rillight/player/danmaku/danmaku_timeline.dart';
 import 'package:rillight/player/danmaku/dandanplay_models.dart';
 
-/// 弹幕渲染层:CustomPainter 自绘滚动/固定弹幕。
+/// 窗口拖拽期间推迟样式代际切换,避免字形缓存抖动重建。
+const Duration kDanmakuResizeDebounce = Duration(milliseconds: 200);
+
+/// 弹幕渲染层:滚动层每帧重绘,固定层仅在集合变化时重绘。
 ///
-/// 按播放位置驱动 [DanmakuLayout](时间轴进入/退出/seek 重定位由布局引擎
-/// 完成);播放中用 ticker + 位置插值获得逐帧平滑滚动,暂停时冻结在
-/// 最后位置。上层在开关关闭或无弹幕时不挂载本 widget,实现零渲染开销;
-/// 挂载但无弹幕时 ticker 停止、每帧只遍历空列表。
+/// 按播放位置驱动 [DanmakuLayout];播放中用 ticker 推进滚动位置,
+/// 暂停时冻结。上层在开关关闭或无弹幕时不挂载本 widget。
 class DanmakuView extends StatefulWidget {
   const DanmakuView({super.key, required this.controller});
 
@@ -22,33 +26,58 @@ class DanmakuView extends StatefulWidget {
 
 class DanmakuViewState extends State<DanmakuView>
     with SingleTickerProviderStateMixin {
-  final ValueNotifier<List<DanmakuFrame>> _frames = ValueNotifier(const []);
-
-  /// 文本绘制缓存(换集/参数变化时整体失效),键含字号/颜色/不透明度。
-  final Map<String, TextPainter> _strokePainters = {};
-  final Map<String, TextPainter> _fillPainters = {};
-  List<DanmakuComment>? _cachedComments;
-  DanmakuDisplaySettings? _cachedDisplay;
+  final ValueNotifier<int> _scrollTick = ValueNotifier(0);
+  final ValueNotifier<int> _fixedTick = ValueNotifier(0);
+  late final _ScrollLayerPainter _scrollPainter;
+  late final _FixedLayerPainter _fixedPainter;
 
   Ticker? _ticker;
+  Timer? _resizeDebounce;
+  Size? _lastSize;
+  DanmakuGlyphStyle? _appliedStyle;
+  List<DanmakuEntry>? _preparedEntries;
+  int _fixedIdentity = Object.hash(0, 0);
 
   /// 当前 ticker 是否在转;暂停后再播必须重新 start。
   @visibleForTesting
   bool get debugTickerActive => _ticker?.isActive ?? false;
 
-  /// 最近一次绘制帧,供测试观察暂停冻结与恢复后位移。
+  /// 当前同屏活动条数。
   @visibleForTesting
-  List<DanmakuFrame> get debugFrames => _frames.value;
+  int get debugActiveCount => widget.controller.layout.activeCount;
 
-  /// 描边 painter 缓存条数;参数变化后不得残留旧键。
+  /// 字形缓存键数量。
   @visibleForTesting
-  int get debugStrokePainterCount => _strokePainters.length;
+  int get debugGlyphCacheSize => widget.controller.glyphCache.size;
+
+  /// ticker 回调内触发的同步文本 layout 次数。预热完成后应保持 0。
+  @visibleForTesting
+  int debugLayoutCallsDuringTick = 0;
+
+  /// 固定层 [CustomPainter.paint] 调用次数。
+  @visibleForTesting
+  int debugFixedLayerPaintCount = 0;
+
+  /// 最近一帧 [Canvas.drawParagraph] 次数。
+  @visibleForTesting
+  int debugLastDrawParagraphCount = 0;
+
+  int _drawsThisFrame = 0;
+
+  DanmakuGlyphCache get _cache => widget.controller.glyphCache;
 
   @override
   void initState() {
     super.initState();
     widget.controller.addListener(_onControllerChanged);
+    _scrollPainter = _ScrollLayerPainter(view: this, repaint: _scrollTick);
+    _fixedPainter = _FixedLayerPainter(view: this, repaint: _fixedTick);
     _syncTicker();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _advanceFrame();
+      }
+    });
   }
 
   @override
@@ -57,20 +86,20 @@ class DanmakuViewState extends State<DanmakuView>
     if (oldWidget.controller != widget.controller) {
       oldWidget.controller.removeListener(_onControllerChanged);
       widget.controller.addListener(_onControllerChanged);
-      _cachedComments = null;
-      _cachedDisplay = null;
-      _strokePainters.clear();
-      _fillPainters.clear();
-      _frames.value = const [];
+      _appliedStyle = null;
+      _preparedEntries = null;
+      _fixedIdentity = 0;
     }
     _syncTicker();
   }
 
   @override
   void dispose() {
+    _resizeDebounce?.cancel();
     _ticker?.dispose();
     widget.controller.removeListener(_onControllerChanged);
-    _frames.dispose();
+    _scrollTick.dispose();
+    _fixedTick.dispose();
     super.dispose();
   }
 
@@ -78,33 +107,16 @@ class DanmakuViewState extends State<DanmakuView>
     if (!mounted) {
       return;
     }
-    _invalidateStaleCache();
     _syncTicker();
-    // 状态/seek/暂停切换时立即重绘一帧(ticker 之外的更新路径)。
-    _paintFrame();
-  }
-
-  /// 换集或显示参数变化后清掉旧文本缓存,防止无限增长。
-  void _invalidateStaleCache() {
-    final comments = widget.controller.comments;
-    final display = widget.controller.display;
-    if (identical(_cachedComments, comments) &&
-        identical(_cachedDisplay, display)) {
-      return;
-    }
-    _cachedComments = comments;
-    _cachedDisplay = display;
-    _strokePainters.clear();
-    _fillPainters.clear();
+    _advanceFrame();
   }
 
   /// 仅在「有弹幕且播放中」运转 ticker;暂停/无弹幕时停止。
-  /// 已创建但被 stop 的 ticker 在恢复播放时必须再次 start。
   void _syncTicker() {
     final controller = widget.controller;
     final shouldTick = controller.hasComments && controller.playing;
     if (shouldTick) {
-      _ticker ??= createTicker((_) => _paintFrame());
+      _ticker ??= createTicker(_onTick);
       if (!_ticker!.isActive) {
         _ticker!.start();
       }
@@ -113,99 +125,166 @@ class DanmakuViewState extends State<DanmakuView>
     }
   }
 
-  void _paintFrame() {
+  void _onTick(Duration _) {
+    final before = _cache.debugSyncLayoutCount;
+    _advanceFrame();
+    debugLayoutCallsDuringTick += _cache.debugSyncLayoutCount - before;
+  }
+
+  void _advanceFrame() {
     final size = context.size;
-    if (size == null) {
+    if (size == null || size.isEmpty) {
       return;
     }
-    _frames.value = widget.controller.layout.update(
-      widget.controller.estimatePosition(),
-      size,
+    final sizeChanged = _lastSize != null && _lastSize != size;
+    _lastSize = size;
+    _syncGlyphCache(size, sizeChanged: sizeChanged);
+    widget.controller.layout.update(widget.controller.estimatePosition(), size);
+    _drawsThisFrame = 0;
+    _scrollTick.value++;
+    _syncFixedIdentity();
+  }
+
+  void _syncGlyphCache(Size size, {required bool sizeChanged}) {
+    final display = widget.controller.display;
+    final next = DanmakuGlyphStyle(
+      fontPx: _fontPxFor(size, display.fontScale),
+      opacity: display.opacity,
+      outline: display.outline,
+      colorful: display.colorful,
     );
+    final source = widget.controller.layout.entries;
+    final styleChanged = _appliedStyle != next;
+    final sourceChanged = !identical(_preparedEntries, source);
+
+    void apply({required bool clearForSource}) {
+      _resizeDebounce?.cancel();
+      if (styleChanged) {
+        _cache.applyStyle(next);
+      } else if (clearForSource) {
+        _cache.clear();
+      }
+      _appliedStyle = next;
+      _preparedEntries = source;
+      _cache.prepare(source, fromTime: _prepareFromTime());
+    }
+
+    if (!styleChanged && !sourceChanged) {
+      return;
+    }
+    if (styleChanged && sizeChanged && _appliedStyle != null) {
+      _resizeDebounce?.cancel();
+      _resizeDebounce = Timer(kDanmakuResizeDebounce, () {
+        if (!mounted) {
+          return;
+        }
+        apply(clearForSource: sourceChanged);
+      });
+      return;
+    }
+    apply(clearForSource: sourceChanged);
+  }
+
+  double _prepareFromTime() {
+    return widget.controller.estimatePosition().inMilliseconds / 1000;
+  }
+
+  static int _fontPxFor(Size size, double fontScale) {
+    final viewScale = (size.height / kDanmakuViewportReferenceHeight).clamp(
+      kDanmakuViewportScaleMin,
+      kDanmakuViewportScaleMax,
+    );
+    return (kDanmakuBaseFontSize * fontScale * viewScale).round();
+  }
+
+  void _syncFixedIdentity() {
+    var hash = 0;
+    var count = 0;
+    for (final item in widget.controller.layout.activeEntries) {
+      if (item.mode == DanmakuMode.scroll) {
+        continue;
+      }
+      hash ^= item.id;
+      count++;
+    }
+    final identity = Object.hash(hash, count);
+    if (identity != _fixedIdentity) {
+      _fixedIdentity = identity;
+      _fixedTick.value++;
+    }
+  }
+
+  void _noteDraws(int count) {
+    _drawsThisFrame += count;
+    debugLastDrawParagraphCount = _drawsThisFrame;
   }
 
   @override
   Widget build(BuildContext context) {
-    return CustomPaint(
-      size: Size.infinite,
-      painter: _DanmakuPainter(
-        frames: _frames,
-        strokePainters: _strokePainters,
-        fillPainters: _fillPainters,
-      ),
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        CustomPaint(size: Size.infinite, painter: _scrollPainter),
+        RepaintBoundary(
+          child: CustomPaint(size: Size.infinite, painter: _fixedPainter),
+        ),
+      ],
     );
   }
 }
 
-/// 弹幕画笔:每条弹幕以深色描边 + 彩色填充两次绘制保证任意背景可读。
-class _DanmakuPainter extends CustomPainter {
-  _DanmakuPainter({
-    required this.frames,
-    required this.strokePainters,
-    required this.fillPainters,
-  }) : super(repaint: frames);
+void _paintLayer({
+  required Canvas canvas,
+  required DanmakuViewState view,
+  required bool scroll,
+}) {
+  final cache = view.widget.controller.glyphCache;
+  final outline = cache.outline;
+  var draws = 0;
+  for (final item in view.widget.controller.layout.activeEntries) {
+    final isScroll = item.mode == DanmakuMode.scroll;
+    if (scroll != isScroll) {
+      continue;
+    }
+    final glyph = cache.get(cache.keyOf(item.entry));
+    final offset = Offset(item.left, item.top);
+    if (outline && glyph.stroke != null) {
+      canvas.drawParagraph(glyph.stroke!, offset);
+      draws++;
+    }
+    canvas.drawParagraph(glyph.fill, offset);
+    draws++;
+  }
+  view._noteDraws(draws);
+}
 
-  final ValueListenable<List<DanmakuFrame>> frames;
-  final Map<String, TextPainter> strokePainters;
-  final Map<String, TextPainter> fillPainters;
+class _ScrollLayerPainter extends CustomPainter {
+  _ScrollLayerPainter({required this.view, required Listenable repaint})
+    : super(repaint: repaint);
+
+  final DanmakuViewState view;
 
   @override
   void paint(Canvas canvas, Size size) {
-    for (final frame in frames.value) {
-      final key =
-          '${frame.id}|${frame.fontSize}|${frame.color}|${frame.opacity}';
-      var stroke = strokePainters[key];
-      var fill = fillPainters[key];
-      if (stroke == null || fill == null) {
-        stroke = _buildPainter(
-          frame,
-          foreground: Paint()
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = 3
-            ..strokeJoin = StrokeJoin.round
-            ..color = const Color(0xB0000000),
-        );
-        fill = _buildPainter(frame, color: _fillColor(frame));
-        strokePainters[key] = stroke;
-        fillPainters[key] = fill;
-      }
-      canvas.save();
-      canvas.translate(frame.left, frame.top);
-      stroke.paint(canvas, Offset.zero);
-      fill.paint(canvas, Offset.zero);
-      canvas.restore();
-    }
-  }
-
-  TextPainter _buildPainter(
-    DanmakuFrame frame, {
-    Paint? foreground,
-    Color? color,
-  }) {
-    return TextPainter(
-      text: TextSpan(
-        text: frame.text,
-        style: TextStyle(
-          fontSize: frame.fontSize,
-          fontWeight: FontWeight.w500,
-          color: color,
-          foreground: foreground,
-        ),
-      ),
-      textDirection: TextDirection.ltr,
-      maxLines: 1,
-    )..layout();
-  }
-
-  static Color _fillColor(DanmakuFrame frame) {
-    final rgb = frame.color & 0xFFFFFF;
-    final alpha = (frame.opacity * 0xFF).round().clamp(0, 255);
-    return Color((alpha << 24) | rgb);
+    _paintLayer(canvas: canvas, view: view, scroll: true);
   }
 
   @override
-  bool shouldRepaint(_DanmakuPainter oldDelegate) {
-    // 逐帧更新经 repaint listenable(_frames)驱动。
-    return true;
+  bool shouldRepaint(covariant _ScrollLayerPainter oldDelegate) => false;
+}
+
+class _FixedLayerPainter extends CustomPainter {
+  _FixedLayerPainter({required this.view, required Listenable repaint})
+    : super(repaint: repaint);
+
+  final DanmakuViewState view;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    view.debugFixedLayerPaintCount++;
+    _paintLayer(canvas: canvas, view: view, scroll: false);
   }
+
+  @override
+  bool shouldRepaint(covariant _FixedLayerPainter oldDelegate) => false;
 }
