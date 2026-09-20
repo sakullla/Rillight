@@ -154,6 +154,7 @@ class PlaybackMediaSource {
     this.supportsDirectPlay = false,
     this.supportsDirectStream = false,
     this.supportsTranscoding = false,
+    this.isInfiniteStream = false,
     this.directStreamUrl,
     this.transcodingUrl,
     this.runTimeTicks,
@@ -178,6 +179,7 @@ class PlaybackMediaSource {
   final bool supportsDirectPlay;
   final bool supportsDirectStream;
   final bool supportsTranscoding;
+  final bool isInfiniteStream;
   final String? directStreamUrl;
   final String? transcodingUrl;
   final int? runTimeTicks;
@@ -266,6 +268,7 @@ class PlaybackMediaSource {
       supportsDirectPlay: json['SupportsDirectPlay'] == true,
       supportsDirectStream: json['SupportsDirectStream'] == true,
       supportsTranscoding: json['SupportsTranscoding'] == true,
+      isInfiniteStream: json['IsInfiniteStream'] == true,
       directStreamUrl: json['DirectStreamUrl']?.toString(),
       transcodingUrl: json['TranscodingUrl']?.toString(),
       runTimeTicks: _asInt(json['RunTimeTicks']),

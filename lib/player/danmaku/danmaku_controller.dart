@@ -236,7 +236,7 @@ class DanmakuController extends ChangeNotifier {
     required double rate,
   }) {
     final wasPlaying = this.playing;
-    if (wasPlaying && playing && this.playbackRate != rate) {
+    if (wasPlaying && playing && playbackRate != rate) {
       _anchorPosition = estimatePosition();
       _anchorAt = DateTime.now();
     }

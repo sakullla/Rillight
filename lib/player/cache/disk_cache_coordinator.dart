@@ -56,6 +56,15 @@ class DiskCacheSession {
     return result?['bytes'] as Uint8List?;
   }
 
+  Future<void> setSessionLimit(int bytes) async {
+    await _call('resize', {'sessionLimit': bytes});
+  }
+
+  Future<bool> hasAny(List<String> tokens) async {
+    final result = await _call('available', {'tokens': tokens});
+    return result?['available'] == true;
+  }
+
   /// Verifies and protects a complete immutable range without retaining its
   /// media bytes in RAM. Pin metadata is charged to the ordinary disk quota.
   Future<String?> protect(List<String> tokens) async {
@@ -90,7 +99,9 @@ class DiskCacheSession {
       ),
     );
     try {
-      await operation.timeout(_timeout);
+      final result = await operation.timeout(_timeout);
+      final stats = result['stats'];
+      if (stats is Map) _stats.addAll(Map<String, Object?>.from(stats));
     } catch (_) {}
   }
 
@@ -254,7 +265,7 @@ class _Lease {
   final Directory directory;
   final RandomAccessFile lock;
   final int limit;
-  final int sessionLimit;
+  int sessionLimit;
 }
 
 class _DiskStore {
@@ -265,6 +276,10 @@ class _DiskStore {
   int _peak = 0;
   int _reservedPeak = 0;
   int _evictions = 0;
+  // Reused only while the global lock is held. Other processes can change the
+  // directory between operations, so no inventory survives a lock release.
+  final _entryInventory = <String, List<FileSystemEntity>>{};
+  final _statInventory = <String, FileStat>{};
 
   Future<Map<String, Object?>> handle(Map<String, Object?> message) async {
     if (message['op'] == 'shutdown') return {'ok': true};
@@ -293,6 +308,8 @@ class _DiskStore {
           sleep(const Duration(milliseconds: 5));
         }
       }
+      _entryInventory.clear();
+      _statInventory.clear();
       await _reap();
       // An earlier release may have encountered a foreign quota lock. Keep its
       // intent in the coordinator and remove the charged pin under this lock.
@@ -312,8 +329,27 @@ class _DiskStore {
           );
         case 'put':
           return _put(id, message['bytes'] as Uint8List);
+        case 'resize':
+          final lease = _leases[id];
+          if (lease == null) return {};
+          lease.sessionLimit = min(lease.limit, message['sessionLimit'] as int);
+          return _resize(lease);
         case 'read':
           return _read(id, message['token'] as String);
+        case 'available':
+          final lease = _leases[id];
+          final tokens = List<String>.from(message['tokens'] as List);
+          if (lease == null || tokens.length > 8192) return {};
+          for (final token in tokens) {
+            if (!_blockPattern.hasMatch(token)) continue;
+            final file = File(_join(lease.directory.path, token));
+            if (FileSystemEntity.typeSync(file.path, followLinks: false) ==
+                    FileSystemEntityType.file &&
+                file.lengthSync() == int.parse(token.split('-')[1])) {
+              return {'available': true};
+            }
+          }
+          return {'available': false};
         case 'protect':
           return _protect(
             id,
@@ -392,11 +428,23 @@ class _DiskStore {
       _candidateDirectories().where((dir) => _metadata(dir) != null).toList();
 
   List<FileSystemEntity> _entries(Directory directory) {
+    final cached = _entryInventory[directory.path];
+    if (cached != null) return cached;
     final entries = directory.listSync(followLinks: false);
     if (entries.length > _maxCacheFiles) {
       throw const FileSystemException('Cache file count limit');
     }
-    return entries;
+    return _entryInventory[directory.path] = entries;
+  }
+
+  FileStat _stat(File file) =>
+      _statInventory.putIfAbsent(file.path, file.statSync);
+
+  void _changed(File file) {
+    // Directory.path and File.parent differ in trailing separator spelling.
+    // Drop listings after mutation while retaining unchanged file statistics.
+    _entryInventory.clear();
+    _statInventory.remove(file.path);
   }
 
   List<File> _files(Directory directory) =>
@@ -405,7 +453,7 @@ class _DiskStore {
   // Unknown ownership prevents deletion, but does not make occupied bytes free.
   int _usage() => _candidateDirectories().fold(
     0,
-    (sum, dir) => sum + _files(dir).fold(0, (n, file) => n + file.lengthSync()),
+    (sum, dir) => sum + _files(dir).fold(0, (n, file) => n + _stat(file).size),
   );
 
   int _limit() => _sessions().fold(1 << 62, (limit, dir) {
@@ -472,11 +520,11 @@ class _DiskStore {
       for (final pin in _files(
         session,
       ).where((file) => _pinPattern.hasMatch(_name(file)))) {
-        if (pin.lengthSync() > 384 * 1024) {
+        if (pin.lengthSync() > 512 * 1024) {
           throw const FileSystemException('Invalid read protection');
         }
         final tokens = pin.readAsLinesSync();
-        if (tokens.length > 4096 ||
+        if (tokens.length > 8192 ||
             tokens.any((token) => !_blockPattern.hasMatch(token))) {
           throw const FileSystemException('Invalid read protection');
         }
@@ -508,7 +556,7 @@ class _DiskStore {
       occupiedFiles += entries.length;
       final owned = _metadata(directory) != null;
       for (final file in entries.whereType<File>()) {
-        final stat = file.statSync();
+        final stat = _stat(file);
         occupied += stat.size;
         if (owned &&
             _blockPattern.hasMatch(_name(file)) &&
@@ -531,12 +579,30 @@ class _DiskStore {
         break;
       }
       candidate.file.deleteSync();
+      _changed(candidate.file);
       occupied -= candidate.length;
       occupiedFiles--;
       _evictions++;
     }
     return occupied + required <= limit &&
         occupiedFiles + requiredFiles <= _maxCacheFiles;
+  }
+
+  Map<String, Object?> _resize(_Lease lease) {
+    final converged = _makeRoom(
+      0,
+      lease.sessionLimit,
+      only: lease.directory,
+      requiredFiles: 0,
+    );
+    return {
+      'ok': true,
+      'stats': {
+        ..._stats(),
+        'diskSessionTargetBytes': lease.sessionLimit,
+        'diskResizePending': !converged,
+      },
+    };
   }
 
   Map<String, Object?> _put(String id, Uint8List bytes) {
@@ -568,6 +634,7 @@ class _DiskStore {
     try {
       temporary.writeAsBytesSync(bytes, flush: true);
       temporary.renameSync(_join(lease.directory.path, token));
+      _changed(temporary);
     } catch (_) {
       if (temporary.existsSync()) {
         try {
@@ -593,17 +660,21 @@ class _DiskStore {
     final length = int.parse(parts[1]);
     if (length > 1024 * 1024 || length <= 0 || file.lengthSync() != length) {
       file.deleteSync();
+      _changed(file);
       return {'stats': _stats()};
     }
     final bytes = file.readAsBytesSync();
     final checksum = int.parse(parts[2].split('.').first, radix: 16);
     if (_crc32(bytes) != checksum) {
       file.deleteSync();
+      _changed(file);
       return {'stats': _stats()};
     }
     file.setLastModifiedSync(DateTime.now());
     // Immutable owned bytes are sent before another command can evict the file.
-    return {'bytes': bytes, 'stats': _stats()};
+    // Reads do not change quota. Avoid a full disk inventory on every 64 KiB
+    // consumer slice; allocation/deletion operations refresh usage diagnostics.
+    return {'bytes': bytes};
   }
 
   Map<String, Object?> _protect(
@@ -615,7 +686,7 @@ class _DiskStore {
     if (lease == null ||
         !_sessionPattern.hasMatch(protection) ||
         tokens.isEmpty ||
-        tokens.length > 4096 ||
+        tokens.length > 8192 ||
         tokens.any((token) => !_blockPattern.hasMatch(token))) {
       return {};
     }
@@ -626,8 +697,9 @@ class _DiskStore {
       return {};
     }
     final protecting = tokens.map((token) => '$id/$token').toSet();
-    // Validate every block under the same global lock used by eviction. Each
-    // iteration owns at most one block; no whole-response staging is needed.
+    // Pin identities and lengths under the eviction lock. CRC remains mandatory
+    // on each actual read; scanning all media bytes here would read the complete
+    // range twice and could time out before a single byte reached the consumer.
     for (final token in tokens) {
       final path = _join(lease.directory.path, token);
       if (FileSystemEntity.typeSync(path, followLinks: false) !=
@@ -638,10 +710,6 @@ class _DiskStore {
       final parts = token.split('-');
       final length = int.parse(parts[1]);
       if (length <= 0 || length > 1024 * 1024 || file.lengthSync() != length) {
-        return {};
-      }
-      final bytes = file.readAsBytesSync();
-      if (_crc32(bytes) != int.parse(parts[2].split('.').first, radix: 16)) {
         return {};
       }
     }
@@ -665,6 +733,7 @@ class _DiskStore {
     final file = File(_join(lease.directory.path, '$protection.pin'));
     _assertRegularOrAbsent(file.path);
     file.writeAsBytesSync(metadata, flush: true);
+    _changed(file);
     return {'ok': true, 'stats': _stats()};
   }
 
@@ -674,7 +743,8 @@ class _DiskStore {
     final file = File(_join(lease.directory.path, '$protection.pin'));
     _assertRegularOrAbsent(file.path);
     if (file.existsSync()) file.deleteSync();
-    return {'ok': true, 'stats': _stats()};
+    _changed(file);
+    return _resize(lease);
   }
 
   Future<Map<String, Object?>> _close(String id) async {
@@ -754,13 +824,20 @@ void _assertRegularOrAbsent(String path) {
   }
 }
 
-int _crc32(Uint8List bytes) {
-  var crc = 0xffffffff;
-  for (final byte in bytes) {
-    crc ^= byte;
+final _crcTable = Uint32List.fromList(
+  List.generate(256, (value) {
+    var crc = value;
     for (var bit = 0; bit < 8; bit++) {
       crc = (crc >> 1) ^ ((crc & 1) == 0 ? 0 : 0xedb88320);
     }
+    return crc;
+  }),
+);
+
+int _crc32(Uint8List bytes) {
+  var crc = 0xffffffff;
+  for (final byte in bytes) {
+    crc = (crc >> 8) ^ _crcTable[(crc ^ byte) & 0xff];
   }
   return (crc ^ 0xffffffff) & 0xffffffff;
 }

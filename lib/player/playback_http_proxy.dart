@@ -45,7 +45,7 @@ class PlaybackHttpProxy {
   final String _secret;
   final SessionByteCache? cache;
   final bool dynamicSource;
-  final void Function(PlaybackCacheStream)? onStreamChanged;
+  final FutureOr<void> Function(PlaybackCacheStream)? onStreamChanged;
   final _routes = SealedMediaRoutes();
   final _roles = <String, PlaybackResourceRole>{};
   final _representations = <String, _Representation>{};
@@ -86,7 +86,7 @@ class PlaybackHttpProxy {
     Map<String, String> headers = const {},
     SessionByteCache? cache,
     bool dynamicSource = false,
-    void Function(PlaybackCacheStream)? onStreamChanged,
+    FutureOr<void> Function(PlaybackCacheStream)? onStreamChanged,
   }) async => PlaybackHttpProxy._(
     await HttpServer.bind(InternetAddress.loopbackIPv4, 0),
     origin,
@@ -242,11 +242,11 @@ class PlaybackHttpProxy {
     }
   }
 
-  void _classify(PlaybackCacheStream value) {
+  Future<void> _classify(PlaybackCacheStream value) async {
     if (dynamicSource) value = PlaybackCacheStream.conservative;
     if (_stream == value) return;
     _stream = value;
-    onStreamChanged?.call(value);
+    await onStreamChanged?.call(value);
   }
 
   bool _cacheableRequest(HttpRequest incoming, String key) =>
@@ -529,6 +529,17 @@ class PlaybackHttpProxy {
       offset: range.start,
       length: range.length,
     );
+    Future<bool> hasAny() => cache!.hasAny(
+      resource: key,
+      generation: representation.generation,
+      offset: range.start,
+      length: range.length,
+    );
+    if (range.length > 256 * 1024 &&
+        missing == range.start &&
+        !await hasAny()) {
+      return false;
+    }
     Uint8List? prefetched;
     if (missing != null) {
       if (representation.policy.strongEtag == null) return false;
@@ -573,6 +584,12 @@ class PlaybackHttpProxy {
           read.check();
           var bytes = position == missing ? prefetched : hit?.bytes;
           if (bytes == null) {
+            if (range.length > 256 * 1024 &&
+                !sent &&
+                prefetched == null &&
+                !await hasAny()) {
+              return false;
+            }
             if (representation.policy.strongEtag == null) {
               if (!sent) return false;
               throw const HttpException('Cached range was evicted');
@@ -813,7 +830,18 @@ class PlaybackHttpProxy {
           if (_roles[key] == PlaybackResourceRole.media &&
               response.statusCode >= 200 &&
               response.statusCode < 300) {
-            _classify(PlaybackCacheStream.stable);
+            final finite =
+                response.contentLength > 0 &&
+                (response.statusCode != 206 ||
+                    MediaContentRange.parse(
+                          response.headers.value('content-range'),
+                        ) !=
+                        null);
+            await _classify(
+              finite
+                  ? PlaybackCacheStream.stable
+                  : PlaybackCacheStream.conservative,
+            );
           }
           final representation = _beginRepresentation(
             incoming,
@@ -823,6 +851,39 @@ class PlaybackHttpProxy {
           );
           var position = representation?.responseStart ?? 0;
           var received = 0;
+          // Coalesce socket fragments into bounded immutable blocks. Otherwise
+          // a fast 64 KiB socket exhausts file/index slots far below a GiB quota.
+          final blockSize = min(
+            min(
+              _stream == PlaybackCacheStream.stable ? 1024 * 1024 : 256 * 1024,
+              max(64 * 1024, cache?.memoryLimitBytes ?? 0),
+            ),
+            representation == null
+                ? 1
+                : representation.responseEnd - representation.responseStart + 1,
+          );
+          Uint8List? assembly = representation == null
+              ? null
+              : Uint8List(blockSize);
+          var assembled = 0;
+          var blockStart = position;
+          if (assembly != null) _charge(blockSize);
+          void retain(Uint8List part) {
+            var cursor = 0;
+            while (cursor < part.length) {
+              final length = min(blockSize - assembled, part.length - cursor);
+              assembly!.setRange(assembled, assembled + length, part, cursor);
+              assembled += length;
+              cursor += length;
+              if (assembled == blockSize) {
+                _store(key, representation!, blockStart, assembly!);
+                blockStart += assembled;
+                assembled = 0;
+                assembly = Uint8List(blockSize);
+              }
+            }
+          }
+
           Future<void> forward(List<int> bytes) async {
             // A socket chunk is never accumulated into a whole media response.
             for (var start = 0; start < bytes.length; start += 64 * 1024) {
@@ -840,7 +901,7 @@ class PlaybackHttpProxy {
                 }
                 if (representation != null &&
                     identical(_representations[key], representation)) {
-                  _store(key, representation, position, part);
+                  retain(part);
                 }
                 read.outputStarted = true;
                 output.add(part);
@@ -874,8 +935,20 @@ class PlaybackHttpProxy {
               throw const HttpException('Truncated media representation');
             }
             complete = true;
-            if (representation != null) representation.complete = true;
+            if (representation != null) {
+              if (assembled > 0 &&
+                  identical(_representations[key], representation)) {
+                _store(
+                  key,
+                  representation,
+                  blockStart,
+                  Uint8List.sublistView(assembly!, 0, assembled),
+                );
+              }
+              representation.complete = true;
+            }
           } finally {
+            if (assembly != null) _charge(-blockSize);
             if (!complete &&
                 representation != null &&
                 representation.policy.strongEtag == null) {
@@ -1000,7 +1073,7 @@ class PlaybackHttpProxy {
   ) async {
     var stable = false;
     var master = false;
-    _classify(PlaybackCacheStream.conservative);
+    await _classify(PlaybackCacheStream.conservative);
     var sequence = 0;
     var discontinuity = 0;
     var keyContext = '';
@@ -1057,7 +1130,7 @@ class PlaybackHttpProxy {
         output.add(utf8.encode('$rewritten\n'));
         await output.flush();
       }
-      _classify(
+      await _classify(
         stable && !master
             ? PlaybackCacheStream.stable
             : PlaybackCacheStream.conservative,

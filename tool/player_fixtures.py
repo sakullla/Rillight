@@ -72,6 +72,7 @@ Dialogue: 0,0:00:00.00,0:00:12.00,Default,,0,0,0,,Rillight ASS validation
 
 
 def serve(media, output):
+    conditions = {'offline': False}
     paths = {'baseline': 'baseline.mp4', 'tracks': 'tracks.mkv', 'hls': 'stream.m3u8',
              '1080p60': '1080p60.mp4', '4k-hevc': '4k-hevc.mkv', 'av1': 'av1.mkv',
              'vp9': 'vp9.webm', 'broken': 'missing.mkv'}
@@ -95,7 +96,10 @@ def serve(media, output):
             length = int(self.headers.get('Content-Length', 0))
             body = json.loads(self.rfile.read(length) or b'{}')
             path = urlsplit(self.path).path
-            if path.endswith('/AuthenticateByName'):
+            if path == '/validation/network':
+                conditions['offline'] = body.get('offline') is True
+                self.send_json(conditions)
+            elif path.endswith('/AuthenticateByName'):
                 self.send_json({'AccessToken': 'synthetic-validation-token', 'User': user, 'ServerId': 'validation-server'})
             elif path.endswith('/PlaybackInfo'):
                 identifier = path.split('/')[-2]
@@ -128,6 +132,9 @@ def serve(media, output):
             elif re.fullmatch(r'/Users/validation-user/Items/[^/]+', path) and path.split('/')[-1] in paths:
                 self.send_json(item(path.split('/')[-1]))
             elif path.startswith('/media/') or '/Subtitles/' in path:
+                if conditions['offline']:
+                    self.send_json({'error': 'synthetic outage'}, 503)
+                    return
                 filename = ('sample.' + path.split('.')[-1]) if '/Subtitles/' in path else path.removeprefix('/media/')
                 target = (media / filename).resolve()
                 if not target.is_relative_to(media) or not target.is_file():
@@ -141,6 +148,8 @@ def serve(media, output):
                 self.send_response(206 if match else 200)
                 self.send_header('Content-Type', 'application/vnd.apple.mpegurl' if target.suffix == '.m3u8' else mimetypes.guess_type(target)[0] or 'application/octet-stream')
                 self.send_header('Accept-Ranges', 'bytes')
+                self.send_header('ETag', f'"fixture-{size}-{target.stat().st_mtime_ns}"')
+                self.send_header('Cache-Control', 'max-age=600')
                 self.send_header('Content-Length', str(end - start + 1))
                 if match: self.send_header('Content-Range', f'bytes {start}-{end}/{size}')
                 self.end_headers()

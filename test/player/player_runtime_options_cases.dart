@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/player/player_runtime_options.dart';
@@ -22,12 +20,18 @@ void main() {
   }
 
   group('network buffering', () {
-    test('enables cache-on-disk with the dedicated cache directory', () {
-      final properties = build();
-      expect(properties['cache'], 'yes');
-      expect(properties['cache-on-disk'], 'yes');
-      expect(properties['demuxer-cache-dir'], cacheDir);
-    });
+    test(
+      'keeps native packets in bounded memory and starts without filling',
+      () {
+        final properties = build();
+        expect(properties['cache'], 'yes');
+        expect(properties['cache-on-disk'], 'no');
+        expect(properties.containsKey('demuxer-cache-dir'), isFalse);
+        expect(properties['cache-pause-initial'], 'no');
+        expect(properties['cache-pause-wait'], '1');
+        expect(properties['demuxer-readahead-secs'], '120');
+      },
+    );
 
     test('allows volume above 100 percent without clipping replaygain', () {
       final properties = build();
@@ -36,22 +40,19 @@ void main() {
       expect(properties['replaygain-clip'], 'no');
     });
 
-    test('converts the configured disk limit to demuxer byte budgets', () {
+    test('disk settings never increase native memory budgets', () {
       final properties = build(
         settings: const PlayerSettings(diskCacheLimitMiB: 1024),
       );
-      expect(properties['demuxer-max-bytes'], '${1024 * 1024 * 1024}');
-      expect(
-        properties['demuxer-max-back-bytes'],
-        '${(1024 * 1024 * 1024) ~/ 2}',
-      );
+      expect(properties['demuxer-max-bytes'], '${64 * 1024 * 1024}');
+      expect(properties['demuxer-max-back-bytes'], '${16 * 1024 * 1024}');
     });
 
     test('uses the default limit when unset', () {
       final properties = build();
       expect(
         properties['demuxer-max-bytes'],
-        '${PlayerRuntimeDefaults.diskCacheLimitMiB * PlayerRuntimeDefaults.bytesPerMiB}',
+        '${PlayerRuntimeDefaults.demuxerMaxBytes}',
       );
     });
 
@@ -83,9 +84,8 @@ void main() {
         properties['demuxer-max-back-bytes'],
         '${PlayerRuntimeDefaults.hlsDemuxerBackBytes}',
       );
-      // 缓冲目录与磁盘缓存仍开启。
-      expect(properties['cache-on-disk'], 'yes');
-      expect(properties['demuxer-cache-dir'], cacheDir);
+      expect(properties['cache-on-disk'], 'no');
+      expect(properties['demuxer-readahead-secs'], '10');
     });
 
     test('detects HLS manifest URLs', () {
@@ -179,76 +179,4 @@ void main() {
       expect(properties['audio-exclusive'], 'no');
     });
   });
-
-  group('disk cache reclaiming', () {
-    late Directory dir;
-
-    setUp(() async {
-      dir = Directory(
-        '${Directory.systemTemp.path}/rillight-disk-cache-test-'
-        '${DateTime.now().microsecondsSinceEpoch}',
-      );
-      await dir.create(recursive: true);
-    });
-
-    tearDown(() async {
-      if (dir.existsSync()) {
-        dir.deleteSync(recursive: true);
-      }
-    });
-
-    Future<File> seed(String name, int bytes, DateTime modified) async {
-      final file = File('${dir.path}${Platform.pathSeparator}$name');
-      await file.writeAsBytes(List.filled(bytes, 1));
-      await file.setLastModifiedSyncSafe(modified);
-      return file;
-    }
-
-    test('deletes oldest files until the limit is met', () async {
-      final oldest = await seed('a.bin', 600, DateTime(2026, 1, 1));
-      final middle = await seed('b.bin', 300, DateTime(2026, 1, 2));
-      final newest = await seed('c.bin', 300, DateTime(2026, 1, 3));
-
-      // 总占用 1200,上限 800:只删最旧的 a(600) 即回到 600 ≤ 800。
-      await PlayerDiskCache.reclaim(dir, 800);
-
-      expect(oldest.existsSync(), isFalse);
-      expect(middle.existsSync(), isTrue);
-      expect(newest.existsSync(), isTrue);
-    });
-
-    test('keeps deleting while still over the limit', () async {
-      final oldest = await seed('a.bin', 600, DateTime(2026, 1, 1));
-      final middle = await seed('b.bin', 300, DateTime(2026, 1, 2));
-      final newest = await seed('c.bin', 300, DateTime(2026, 1, 3));
-
-      // 上限 500:删 a 后仍 600 > 500,需继续删 b。
-      await PlayerDiskCache.reclaim(dir, 500);
-
-      expect(oldest.existsSync(), isFalse);
-      expect(middle.existsSync(), isFalse);
-      expect(newest.existsSync(), isTrue);
-    });
-
-    test('keeps everything when under the limit', () async {
-      final a = await seed('a.bin', 100, DateTime(2026, 1, 1));
-      await seed('b.bin', 100, DateTime(2026, 1, 2));
-      await PlayerDiskCache.reclaim(dir, 500);
-      expect(a.existsSync(), isTrue);
-    });
-
-    test('missing directory does not throw', () async {
-      final missing = Directory('${dir.path}/missing');
-      await PlayerDiskCache.reclaim(missing, 100);
-    });
-  });
-}
-
-extension on File {
-  /// setLastModified 在部分平台对过去时间有限制,失败时忽略(顺序仍由文件名稳定性保证测试)。
-  Future<void> setLastModifiedSyncSafe(DateTime value) async {
-    try {
-      await setLastModified(value);
-    } catch (_) {}
-  }
 }

@@ -1,7 +1,25 @@
-param([switch]$SkipBuild)
+param([switch]$SkipBuild, [ValidateRange(1, 20)][int]$Runs = 1)
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 Set-Location -LiteralPath $root
+if ($Runs -gt 1) {
+  if (-not $SkipBuild) {
+    flutter build windows --release --target tool/player_smoke.dart
+    if ($LASTEXITCODE -ne 0) { throw 'Smoke release build failed' }
+  }
+  try {
+    for ($run = 1; $run -le $Runs; $run++) {
+      & $PSCommandPath -SkipBuild
+      if ($LASTEXITCODE -ne 0) { throw "Smoke iteration $run failed" }
+    }
+  } finally {
+    if (-not $SkipBuild) {
+      flutter build windows --release
+      if ($LASTEXITCODE -ne 0) { throw 'Restoring production release build failed' }
+    }
+  }
+  return
+}
 $output = Join-Path $root ('build/player-validation/runs/' + (Get-Date -Format 'yyyyMMdd-HHmmss-fff'))
 New-Item -ItemType Directory -Force -Path $output | Out-Null
 $media = Join-Path $root 'build/player-validation/media'

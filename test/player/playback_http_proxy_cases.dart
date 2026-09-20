@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -7,6 +8,87 @@ import 'package:rillight/player/playback_resolver.dart';
 import 'package:rillight/player/cache/session_byte_cache.dart';
 
 void main() {
+  test(
+    'a wholly evicted range streams once instead of loading small gaps',
+    () async {
+      final fixture = await _CacheFixture.open(
+        memoryBytes: 256 * 1024,
+        disk: true,
+      );
+      fixture.body = 'x' * (2 * 1024 * 1024);
+      await fixture.read('bytes=0-1048575');
+      await fixture.settle();
+      await fixture.read('bytes=1048576-2097151');
+      await fixture.settle();
+      // Shrink below a published block, reproducing a real quota eviction while
+      // the proxy's range index still contains its old disk tokens.
+      await fixture.cache.resize(
+        memoryBytes: 0,
+        pendingBytes: 4 * 1024 * 1024,
+        diskBytes: 128,
+      );
+      final before = fixture.requests;
+      expect((await fixture.read('bytes=0-1048575')).$2, 'x' * 1048576);
+      expect(fixture.requests - before, 1);
+      expect(fixture.ranges.last, 'bytes=0-1048575');
+    },
+  );
+  test(
+    'stable socket fragments aggregate into MiB blocks without delaying output',
+    () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final client = HttpClient();
+      final cache = await SessionByteCache.open(
+        memoryLimitBytes: 32 * 1024 * 1024,
+      );
+      final proxy = await PlaybackHttpProxy.create(cache: cache);
+      final continueBody = Completer<void>();
+      const size = 2 * 1024 * 1024 + 32 * 1024;
+      server.listen((request) async {
+        request.response.headers.set('cache-control', 'max-age=600');
+        request.response.headers.set('etag', '"blocks"');
+        request.response.contentLength = size;
+        request.response.add(List.filled(64 * 1024, 7));
+        await request.response.flush();
+        await continueBody.future;
+        for (var position = 64 * 1024; position < size; position += 32 * 1024) {
+          request.response.add(List.filled(32 * 1024, 7));
+          await request.response.flush();
+        }
+        await request.response.close();
+      });
+      try {
+        final uri = proxy.register(
+          Uri.parse('http://127.0.0.1:${server.port}/media'),
+        );
+        final response = await (await client.getUrl(uri)).close();
+        var received = 0;
+        await for (final bytes in response) {
+          if (received == 0) {
+            expect(cache.diagnostics['indexEntries'], 0);
+            continueBody.complete();
+          }
+          received += bytes.length;
+        }
+        await Future<void>.delayed(Duration.zero);
+        expect(received, size);
+        expect(cache.diagnostics['indexEntries'], 3);
+        expect(cache.diagnostics['memoryBytes'], size);
+        expect(
+          proxy.diagnostics['proxyInFlightPeakBytes'],
+          lessThanOrEqualTo(2 * 1024 * 1024),
+        );
+        final before = proxy.upstreamBytes;
+        await (await (await client.getUrl(uri)).close()).drain<void>();
+        expect(proxy.upstreamBytes, before);
+      } finally {
+        if (!continueBody.isCompleted) continueBody.complete();
+        client.close(force: true);
+        await proxy.close();
+        await server.close(force: true);
+      }
+    },
+  );
   for (final tightened in ['no-cache', 'max-age=0']) {
     test(
       'same ETag gap immediately applies $tightened before its next hit',
@@ -43,7 +125,7 @@ void main() {
         await fixture.settle();
         expect(
           fixture.proxy.diagnostics['proxyInFlightPeakBytes'],
-          lessThanOrEqualTo(256 * 1024),
+          lessThanOrEqualTo(2 * 1024 * 1024),
         );
         expect(fixture.cache.diagnostics['protectedRanges'], 0);
       },

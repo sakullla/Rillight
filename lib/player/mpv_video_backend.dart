@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:rillight/app/product.dart';
+import 'package:rillight/player/cache/session_byte_cache.dart';
 import 'package:rillight/player/playback_http_proxy.dart';
 import 'package:rillight/player/playback_wake_lock.dart';
 import 'package:rillight/player/player_runtime_options.dart';
@@ -54,6 +55,8 @@ class _Session {
   Future<MpvSessionDriver>? creating;
   MpvSessionDriver? driver;
   PlaybackHttpProxy? proxy;
+  Timer? speedTimer;
+  Future<void> policyUpdate = Future<void>.value();
   StreamSubscription<MpvEvent>? subscription;
   Future<void>? retiring;
   bool cancelled = false;
@@ -96,10 +99,15 @@ class MpvVideoBackend implements VideoBackend {
   double _rate = 1;
   String? get nativeVersion => _active?.driver?.nativeVersion;
   Object? lastFailure;
+  Map<String, Object?>? _lastCacheDiagnostics;
 
   Future<Map<String, Object?>> diagnostics() async {
-    final driver = _driver;
-    final result = <String, Object?>{'wake-lock': _wakeLock.diagnostics};
+    final driver = _active?.driver;
+    final result = <String, Object?>{
+      'wake-lock': _wakeLock.diagnostics,
+      'cache': _active?.proxy?.diagnostics ?? _lastCacheDiagnostics,
+    };
+    if (driver == null) return result;
     for (final key in [
       'mpv-version',
       'ffmpeg-version',
@@ -114,6 +122,10 @@ class MpvVideoBackend implements VideoBackend {
       'decoder-frame-drop-count',
       'frame-drop-count',
       'mistimed-frame-count',
+      'demuxer-cache-state',
+      'demuxer-max-bytes',
+      'demuxer-max-back-bytes',
+      'demuxer-readahead-secs',
     ]) {
       try {
         result[key] = await driver.getProperty(key);
@@ -162,6 +174,7 @@ class MpvVideoBackend implements VideoBackend {
     if (_disposed || generation != _generation) return;
     final session = _Session(request.sessionId);
     _active = session;
+    _lastCacheDiagnostics = null;
     lastFailure = null;
     position = request.start;
     duration = buffer = Duration.zero;
@@ -170,17 +183,17 @@ class MpvVideoBackend implements VideoBackend {
       final store = _settingsStore ??= await openPlayerSettingsStore();
       final settings = await store.read();
       final cache = diskCacheDirectory ?? PlayerDiskCache.defaultDirectory();
-      await PlayerDiskCache.ensure(cache);
-      await PlayerDiskCache.reclaim(
-        cache,
-        PlayerRuntimeOptions.effectiveDiskCacheLimitBytes(settings),
-      );
       if (!_current(session)) return;
       final options = PlayerRuntimeOptions.build(
         settings: settings,
         cacheDir: cache.path,
         platform: defaultTargetPlatform,
-        liveOrHlsStream: PlayerRuntimeOptions.isLiveOrHlsStream(request.url),
+        // HTTP content type and HLS state are learned by the proxy. A missing
+        // duration is not a live-stream signal.
+        liveOrHlsStream:
+            request.dynamicSource ||
+            request.url.scheme == 'http' ||
+            request.url.scheme == 'https',
       );
       // Force lavf so ff-index is the actual FFmpeg stream index, not a guess
       // made by another container demuxer. Credentials stay in the proxy.
@@ -207,17 +220,73 @@ class MpvVideoBackend implements VideoBackend {
       if (url.scheme == 'http' ||
           url.scheme == 'https' ||
           request.credentialOrigin != null) {
-        final proxy = await PlaybackHttpProxy.create(
-          origin: request.credentialOrigin,
-          headers: request.credentialHeaders.isNotEmpty
-              ? request.credentialHeaders
-              : request.headers,
+        final byteCache = await SessionByteCache.open(
+          root: cache,
+          memoryLimitBytes: 8 * 1024 * 1024,
+          pendingLimitBytes: 2 * 1024 * 1024,
+          diskLimitBytes: PlayerRuntimeOptions.effectiveDiskCacheLimitBytes(
+            settings,
+          ),
+          diskSessionLimitBytes: 64 * 1024 * 1024,
         );
+        if (!_current(session)) {
+          await byteCache.close();
+          return;
+        }
+        late PlaybackHttpProxy proxy;
+        try {
+          proxy = await PlaybackHttpProxy.create(
+            origin: request.credentialOrigin,
+            headers: request.credentialHeaders.isNotEmpty
+                ? request.credentialHeaders
+                : request.headers,
+            cache: byteCache,
+            dynamicSource: request.dynamicSource,
+            onStreamChanged: (stream) {
+              session.policyUpdate = session.policyUpdate
+                  .then((_) async {
+                    if (!_current(session)) return;
+                    final conservative =
+                        stream == PlaybackCacheStream.conservative;
+                    await byteCache.resize(
+                      memoryBytes: (conservative ? 8 : 32) * 1024 * 1024,
+                      pendingBytes: (conservative ? 2 : 4) * 1024 * 1024,
+                      diskBytes: conservative
+                          ? 64 * 1024 * 1024
+                          : PlayerRuntimeOptions.effectiveDiskCacheLimitBytes(
+                              settings,
+                            ),
+                    );
+                    for (final property
+                        in PlayerRuntimeOptions.bufferProperties(
+                          conservative: conservative,
+                        ).entries) {
+                      if (!_current(session)) return;
+                      await driver.setProperty(property.key, property.value);
+                    }
+                  })
+                  .catchError((Object _) {});
+              return session.policyUpdate;
+            },
+          );
+        } catch (_) {
+          await byteCache.close();
+          rethrow;
+        }
         session.proxy = proxy;
         if (!_current(session)) {
           await proxy.close();
           return;
         }
+        session.speedTimer = Timer.periodic(const Duration(milliseconds: 250), (
+          _,
+        ) {
+          _emit(
+            session,
+            VideoEventKind.cacheSpeed,
+            proxy.upstreamBytesPerSecond,
+          );
+        });
         if (url.scheme == 'http' || url.scheme == 'https') {
           url = proxy.register(url);
         }
@@ -302,9 +371,12 @@ class MpvVideoBackend implements VideoBackend {
               _emit(session, VideoEventKind.buffer, buffer);
             }
           case 'cache-speed':
-            if (value is num) {
-              _emit(session, VideoEventKind.cacheSpeed, value.toDouble());
-            }
+            // mpv includes loopback cache hits here, so it is not a network rate.
+            _emit(
+              session,
+              VideoEventKind.cacheSpeed,
+              session.proxy?.upstreamBytesPerSecond ?? 0.0,
+            );
           case 'pause':
             if (value is bool) {
               session.paused = value;
@@ -390,11 +462,14 @@ class MpvVideoBackend implements VideoBackend {
       session.retiring ??= _retireResources(session);
   Future<void> _retireResources(_Session session) async {
     session.cancelled = true;
+    session.speedTimer?.cancel();
     if (!session.ready.isCompleted) {
       session.ready.completeError(StateError('Media open cancelled'));
     }
     await session.subscription?.cancel();
     await session.proxy?.close();
+    _lastCacheDiagnostics = session.proxy?.diagnostics;
+    await session.policyUpdate;
     final creating = session.creating;
     if (creating != null) {
       MpvSessionDriver driver;
@@ -416,11 +491,17 @@ class MpvVideoBackend implements VideoBackend {
   @override
   Future<void> playOrPause() => _driver.command(['cycle', 'pause']);
   @override
-  Future<void> seek(Duration position) => _driver.command([
-    'seek',
-    '${position.inMicroseconds / 1000000}',
-    'absolute+exact',
-  ]);
+  Future<void> seek(Duration position) async {
+    final session = _active;
+    final driver = _driver;
+    session?.proxy?.cancelPendingReads();
+    await driver.command([
+      'seek',
+      '${position.inMicroseconds / 1000000}',
+      'absolute+exact',
+    ]);
+  }
+
   @override
   Future<void> setVolume(double volume) async {
     _volume = volume;
@@ -462,7 +543,8 @@ class MpvVideoBackend implements VideoBackend {
     final session = _active;
     if (session == null) throw StateError('No active media');
     final url = uri.scheme == 'http' || uri.scheme == 'https'
-        ? session.proxy?.register(uri) ?? uri
+        ? session.proxy?.register(uri, role: PlaybackResourceRole.subtitle) ??
+              uri
         : uri;
     await _driver.command(['sub-add', url.toString(), 'select', title ?? '']);
   }

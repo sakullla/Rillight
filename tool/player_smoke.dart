@@ -226,8 +226,73 @@ Future<void> main(List<String> args) async {
         }),
       );
       await loaded('reopened-baseline');
+      final fixture =
+          jsonDecode(await File('${root.path}/server.json').readAsString())
+              as Map;
+      final source = Uri.parse(fixture['url'] as String);
+      final networkClient = HttpClient();
+      Future<void> network(bool offline) async {
+        final request = await networkClient.postUrl(
+          source.resolve('/validation/network'),
+        );
+        request.headers.contentType = ContentType.json;
+        final body = jsonEncode({'offline': offline});
+        request.contentLength = utf8.encode(body).length;
+        request.write(body);
+        await (await request.close()).drain<void>();
+      }
+
+      try {
+        await _until(
+          () =>
+              backend.buffer - controller.position > const Duration(seconds: 3),
+        );
+        await network(true);
+        final probe = await (await networkClient.getUrl(
+          source.resolve('/media/baseline.mp4'),
+        )).close();
+        final status = probe.statusCode;
+        await probe.drain<void>();
+        if (status != 503) throw StateError('Synthetic outage was not active');
+        final before = controller.position;
+        await Future<void>.delayed(const Duration(milliseconds: 900));
+        final advanced = controller.position - before;
+        if (!controller.isPlaying ||
+            advanced < const Duration(milliseconds: 500)) {
+          throw StateError('Buffered playback did not continue during outage');
+        }
+        await controller.togglePlay();
+        await _until(() => !controller.isPlaying);
+        final paused = controller.position;
+        await Future<void>.delayed(const Duration(milliseconds: 350));
+        if (controller.isPlaying ||
+            (controller.position - paused).abs() >
+                const Duration(milliseconds: 100)) {
+          throw StateError('Cache recovery overrode user pause');
+        }
+        await record('buffered-source-outage', {
+          'sourceStatus': status,
+          'advancedMs': advanced.inMilliseconds,
+          'pausePreserved': true,
+          ...await backend.diagnostics(),
+        });
+        await network(false);
+        await controller.togglePlay();
+      } finally {
+        await network(false);
+        networkClient.close(force: true);
+      }
+      final seekWatch = Stopwatch()..start();
       await controller.seekTo(const Duration(seconds: 3));
-      await record('seek-resume', controller.position.inMilliseconds);
+      await _until(
+        () =>
+            controller.position > const Duration(milliseconds: 3100) &&
+            controller.isPlaying,
+      );
+      await record('seek-resume', {
+        'positionMs': controller.position.inMilliseconds,
+        'positionAdvanceMs': seekWatch.elapsedMilliseconds,
+      });
       await controller.seekTo(
         controller.duration - const Duration(milliseconds: 500),
       );
@@ -237,6 +302,7 @@ Future<void> main(List<String> args) async {
       await loaded('replayed-for-power-check');
       await checkDisplayRequest('replayed', true);
       await controller.shutdownSession();
+      await record('cache-after-stop', await backend.diagnostics());
       await checkDisplayRequest('stopped', false);
       await controller.replay();
       await loaded('restarted-for-power-check');
@@ -262,7 +328,7 @@ Future<void> main(List<String> args) async {
       await checkDisplayRequest('disposed', false);
       await controller.disposeAsync();
       await checkDisplayRequest('disposed-again', false);
-      await record('disposed');
+      await record('disposed', await backend.diagnostics());
       await File(
         '${root.path}/player-result.json',
       ).writeAsString(jsonEncode({'passed': true}));

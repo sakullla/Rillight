@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/player/mpv_video_backend.dart';
+import 'package:rillight/player/playback_models.dart';
 import 'package:rillight/player/playback_wake_lock.dart';
 import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/video_backend.dart';
@@ -15,9 +16,11 @@ void main() {
   late List<_Driver> drivers;
   late ScreenWakeLockCoordinator wakeCoordinator;
   late List<bool> wakeRequests;
+  late List<Map<String, String>> options;
   setUp(() async {
     cache = await Directory.systemTemp.createTemp('rillight-backend-test-');
     drivers = [];
+    options = [];
     wakeRequests = [];
     wakeCoordinator = ScreenWakeLockCoordinator(
       toggle: (enabled) async {
@@ -28,7 +31,8 @@ void main() {
       wakeLock: PlaybackWakeLock(coordinator: wakeCoordinator),
       settingsStore: MemoryPlayerSettingsStore(),
       diskCacheDirectory: cache,
-      createSession: (options) async {
+      createSession: (values) async {
+        options.add(values);
         final driver = _Driver();
         drivers.add(driver);
         return driver;
@@ -41,6 +45,177 @@ void main() {
   });
   VideoOpenRequest request(int id) =>
       VideoOpenRequest(sessionId: id, url: Uri.file('sample.mkv'));
+
+  test(
+    'HTTP classification applies budgets, cache hits and close cleanup',
+    () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final client = HttpClient();
+      var downloads = 0;
+      server.listen((request) async {
+        downloads++;
+        request.response.headers.set('cache-control', 'max-age=600');
+        request.response.headers.set('etag', '"fixture"');
+        request.response.contentLength = 4;
+        request.response.add([1, 2, 3, 4]);
+        await request.response.close();
+      });
+      try {
+        await backend.open(
+          VideoOpenRequest(
+            sessionId: 1,
+            url: Uri.parse('http://127.0.0.1:${server.port}/media'),
+          ),
+        );
+        expect(options.single['cache-on-disk'], 'no');
+        expect(options.single['demuxer-max-bytes'], '${32 * 1024 * 1024}');
+        final uri = Uri.parse(drivers.single.commands.first[1]);
+        Future<List<int>> fetch(Uri url) async {
+          final response = await (await client.getUrl(url)).close();
+          return response.fold<List<int>>([], (a, b) => a..addAll(b));
+        }
+
+        expect(await fetch(uri), [1, 2, 3, 4]);
+        expect(await fetch(uri), [1, 2, 3, 4]);
+        expect(downloads, 1);
+        expect(
+          drivers.single.properties['demuxer-max-bytes'],
+          '${64 * 1024 * 1024}',
+        );
+        final stats = (await backend.diagnostics())['cache'] as Map;
+        expect(stats['memoryLimitBytes'], 32 * 1024 * 1024);
+        expect(stats['diskSessionLimitBytes'], 2048 * 1024 * 1024);
+        expect(stats['upstreamBytes'], 4);
+        expect(stats['memoryHitBytes'], 4);
+        await backend.pause();
+        await backend.seek(const Duration(seconds: 2));
+        expect(drivers.single.properties['pause'], 'yes');
+        await backend.setSubtitleUri(
+          Uri.parse('http://127.0.0.1:${server.port}/sub'),
+        );
+        final subtitle = Uri.parse(drivers.single.commands.last[1]);
+        await fetch(subtitle);
+        await fetch(subtitle);
+        expect(downloads, 3, reason: 'subtitles bypass media storage');
+        await backend.stop();
+        final closed = (await backend.diagnostics())['cache'] as Map;
+        expect(closed['closed'], isTrue);
+        expect(closed['cleanup'], 'complete');
+        expect(cache.listSync().whereType<Directory>(), isEmpty);
+      } finally {
+        client.close(force: true);
+        await server.close(force: true);
+      }
+    },
+  );
+
+  test(
+    'explicit transcode and infinite source facts keep small budgets',
+    () async {
+      final source = PlaybackMediaSource.fromJson({
+        'Id': 'live',
+        'IsInfiniteStream': true,
+      });
+      expect(source.isInfiniteStream, isTrue);
+      expect(
+        PlaybackMediaSource.fromJson({'Id': 'unknown'}).isInfiniteStream,
+        isFalse,
+      );
+      for (final request in [
+        VideoOpenRequest(
+          url: Uri.file('sample.mkv'),
+          playMethod: PlayMethod.transcode,
+        ),
+        VideoOpenRequest(
+          url: Uri.file('sample.mkv'),
+          isInfiniteStream: source.isInfiniteStream,
+        ),
+      ]) {
+        await backend.open(request);
+        expect(options.last['demuxer-readahead-secs'], '10');
+      }
+    },
+  );
+
+  test(
+    'extensionless HLS upgrades only after ENDLIST and can downgrade',
+    () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final client = HttpClient();
+      var ended = true;
+      server.listen((request) async {
+        request.response.headers.set(
+          'content-type',
+          'application/vnd.apple.mpegurl',
+        );
+        request.response.write(
+          '#EXTM3U\n#EXTINF:2,\npart.ts\n${ended ? '#EXT-X-ENDLIST\n' : ''}',
+        );
+        await request.response.close();
+      });
+      try {
+        await backend.open(
+          VideoOpenRequest(
+            url: Uri.parse('http://127.0.0.1:${server.port}/opaque'),
+          ),
+        );
+        final uri = Uri.parse(drivers.single.commands.first[1]);
+        Future<void> fetch() async =>
+            (await (await client.getUrl(uri)).close()).drain<void>();
+        await fetch();
+        expect(drivers.single.properties['demuxer-readahead-secs'], '120');
+        ended = false;
+        await fetch();
+        expect(drivers.single.properties['demuxer-readahead-secs'], '10');
+        final stats = (await backend.diagnostics())['cache'] as Map;
+        expect(stats['memoryLimitBytes'], 8 * 1024 * 1024);
+        expect(stats['pendingLimitBytes'], 2 * 1024 * 1024);
+        expect(stats['diskSessionLimitBytes'], 64 * 1024 * 1024);
+        ended = true;
+        await backend.open(
+          VideoOpenRequest(
+            url: Uri.parse('http://127.0.0.1:${server.port}/opaque'),
+            playMethod: PlayMethod.transcode,
+          ),
+        );
+        final dynamicUri = Uri.parse(drivers.last.commands.first[1]);
+        await (await (await client.getUrl(dynamicUri)).close()).drain<void>();
+        final dynamicStats = (await backend.diagnostics())['cache'] as Map;
+        expect(dynamicStats['streamPolicy'], 'conservative');
+        expect(dynamicStats['diskSessionLimitBytes'], 64 * 1024 * 1024);
+      } finally {
+        client.close(force: true);
+        await server.close(force: true);
+      }
+    },
+  );
+
+  test('unknown-length chunked media keeps conservative budgets', () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final client = HttpClient();
+    server.listen((request) async {
+      request.response.add([1, 2]);
+      await request.response.flush();
+      request.response.add([3, 4]);
+      await request.response.close();
+    });
+    try {
+      await backend.open(
+        VideoOpenRequest(
+          url: Uri.parse('http://127.0.0.1:${server.port}/unknown'),
+        ),
+      );
+      final uri = Uri.parse(drivers.single.commands.first[1]);
+      await (await (await client.getUrl(uri)).close()).drain<void>();
+      final stats = (await backend.diagnostics())['cache'] as Map;
+      expect(stats['streamPolicy'], 'conservative');
+      expect(stats['memoryLimitBytes'], 8 * 1024 * 1024);
+      expect(stats['diskSessionLimitBytes'], 64 * 1024 * 1024);
+    } finally {
+      client.close(force: true);
+      await server.close(force: true);
+    }
+  });
 
   test(
     'wake lock follows playback, pause, EOF, error and stopped sessions',
@@ -265,7 +440,7 @@ void main() {
     },
   );
 
-  test('cache-speed property is forwarded as bytes per second', () async {
+  test('local native reads do not appear as network throughput', () async {
     await backend.open(request(1));
     final events = <VideoBackendEvent>[];
     backend.events.listen(events.add);
@@ -279,7 +454,7 @@ void main() {
       events
           .lastWhere((event) => event.kind == VideoEventKind.cacheSpeed)
           .value,
-      2621440,
+      0,
     );
   });
 }

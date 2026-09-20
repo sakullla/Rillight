@@ -145,6 +145,63 @@ void main() {
     timeout: const Timeout(Duration(seconds: 60)),
   );
 
+  test('CRC32 remains compatible with the standard known vector', () async {
+    final cache = await open(memory: 0);
+    await put(cache, 0, utf8.encode('123456789'));
+    final block = root
+        .listSync(recursive: true)
+        .whereType<File>()
+        .singleWhere((file) => file.path.endsWith('.block'));
+    expect(block.path, endsWith('-9-cbf43926.block'));
+    expect((await read(cache, 0))!.bytes, utf8.encode('123456789'));
+  });
+
+  test(
+    'budget downgrade preserves protected reads and converges on release',
+    () async {
+      final cache = await open(memory: 16, disk: 4096);
+      await put(cache, 0, List.filled(16, 7));
+      final lease = await cache.protectRange(
+        resource: 'secret-url-not-on-disk',
+        generation: 1,
+        offset: 0,
+        length: 16,
+      );
+      expect(lease, isNotNull);
+      await cache.resize(memoryBytes: 4, pendingBytes: 2048, diskBytes: 256);
+      expect(cache.diagnostics['memoryResizePending'], isTrue);
+      expect((await lease!.read(0))!.bytes, List.filled(16, 7));
+      await lease.close();
+      expect(cache.diagnostics['memoryResizePending'], isFalse);
+      expect(cache.diagnostics['memoryBytes'], lessThanOrEqualTo(4));
+      await cache.resize(memoryBytes: 32, pendingBytes: 2048, diskBytes: 4096);
+      await put(cache, 16, List.filled(32, 8));
+      expect((await read(cache, 16))!.bytes, List.filled(32, 8));
+      expect(cache.diagnostics['memoryBytes'], 32);
+    },
+  );
+
+  test(
+    'disk downgrade preserves pinned blocks until release then evicts',
+    () async {
+      final cache = await open(memory: 0, disk: 4096);
+      await put(cache, 0, List.filled(600, 7));
+      final lease = await cache.protectRange(
+        resource: 'secret-url-not-on-disk',
+        generation: 1,
+        offset: 0,
+        length: 600,
+      );
+      expect(lease, isNotNull);
+      await cache.resize(memoryBytes: 0, pendingBytes: 2048, diskBytes: 128);
+      expect(cache.diagnostics['diskResizePending'], isTrue);
+      expect((await lease!.read(0))!.bytes, List.filled(600, 7));
+      await lease.close();
+      expect(cache.diagnostics['diskResizePending'], isFalse);
+      expect(_actualBytes(root), lessThanOrEqualTo(128));
+    },
+  );
+
   test(
     'full temporary file inventory skips writes without exceeding entry limit',
     () async {

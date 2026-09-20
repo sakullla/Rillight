@@ -13,6 +13,8 @@ abstract final class PlayerRuntimeDefaults {
   /// 直播/纯转码 HLS 流收敛为 mpv 默认量级的小缓冲。
   static const int hlsDemuxerMaxBytes = 32 * 1024 * 1024;
   static const int hlsDemuxerBackBytes = 10 * 1024 * 1024;
+  static const int demuxerMaxBytes = 64 * 1024 * 1024;
+  static const int demuxerBackBytes = 16 * 1024 * 1024;
 
   static const int bytesPerMiB = 1024 * 1024;
 }
@@ -20,7 +22,7 @@ abstract final class PlayerRuntimeDefaults {
 /// 播放器运行时选项:集中构造独立 libmpv 实例创建前注入的
 /// mpv 属性集。
 ///
-/// 属性来源三类(ADR-3):网络缓冲(cache-on-disk + 磁盘缓存目录)、
+/// 属性来源三类:有界内存缓冲、
 /// 解码/渲染平台默认(hwdec)、音质链路(audio-exclusive)。
 /// 注意不设置 `vo`:自有视频插件以 vo=libmpv 走渲染 API,
 /// 外部覆盖 vo 会使内嵌视频输出失效;等比缩放由 mpv 默认 keepaspect 保证。
@@ -44,14 +46,16 @@ class PlayerRuntimeOptions {
   /// 构造 open 前注入的 mpv 属性集。
   static Map<String, String> build({
     PlayerSettings settings = const PlayerSettings(),
-    required String cacheDir,
+    String? cacheDir,
     TargetPlatform platform = TargetPlatform.windows,
     bool liveOrHlsStream = false,
   }) {
     final properties = <String, String>{
       'cache': 'yes',
-      'cache-on-disk': 'yes',
-      'demuxer-cache-dir': cacheDir,
+      'cache-on-disk': 'no',
+      ...bufferProperties(conservative: liveOrHlsStream),
+      'cache-pause-initial': 'no',
+      'cache-pause-wait': '1',
       // 音质:维持共享模式;scaletempo 用 mpv 默认,不加劣化链路。
       'audio-exclusive': 'no',
       // 100 为原片 0 dB;volume-max 允许滑条超过 100 做增益(与 IINA 默认一致)。
@@ -60,22 +64,21 @@ class PlayerRuntimeOptions {
       'replaygain': 'track',
       'replaygain-clip': 'no',
     };
-    if (liveOrHlsStream) {
-      properties['demuxer-max-bytes'] =
-          '${PlayerRuntimeDefaults.hlsDemuxerMaxBytes}';
-      properties['demuxer-max-back-bytes'] =
-          '${PlayerRuntimeDefaults.hlsDemuxerBackBytes}';
-    } else {
-      final limit = effectiveDiskCacheLimitBytes(settings);
-      properties['demuxer-max-bytes'] = '$limit';
-      properties['demuxer-max-back-bytes'] = '${limit ~/ 2}';
-    }
     final hwdec = _hardwareDecodingValue(settings, platform);
     if (hwdec != null) {
       properties['hwdec'] = embedHwdec(hwdec);
     }
     return properties;
   }
+
+  static Map<String, String> bufferProperties({required bool conservative}) => {
+    'demuxer-max-bytes':
+        '${conservative ? PlayerRuntimeDefaults.hlsDemuxerMaxBytes : PlayerRuntimeDefaults.demuxerMaxBytes}',
+    'demuxer-max-back-bytes':
+        '${conservative ? PlayerRuntimeDefaults.hlsDemuxerBackBytes : PlayerRuntimeDefaults.demuxerBackBytes}',
+    'demuxer-readahead-secs': conservative ? '10' : '120',
+    'cache-secs': conservative ? '10' : '120',
+  };
 
   /// libmpv 嵌入渲染要把硬解表面 copy 回系统内存再上传纹理。
   static String embedHwdec(String hwdec) {
@@ -173,7 +176,7 @@ class PlayerRuntimeOptions {
   }
 }
 
-/// mpv 磁盘缓冲目录管理:定位、建目录、按容量上限从最旧文件开始回收。
+/// 会话缓存根目录。旧 mpv 文件没有归属记录，不能自动删除。
 class PlayerDiskCache {
   const PlayerDiskCache._();
 
@@ -184,47 +187,11 @@ class PlayerDiskCache {
       if (!Directory(validation).isAbsolute) {
         throw ArgumentError('Validation directory must be absolute');
       }
-      return Directory('$validation/cache');
+      return Directory('$validation/cache/session-v1');
     }
     return Directory(
       '${Directory.systemTemp.path}'
-      '${Platform.pathSeparator}rillight-player-cache',
+      '${Platform.pathSeparator}rillight-player-cache/session-v1',
     );
-  }
-
-  static Future<void> ensure(Directory dir) async {
-    try {
-      await dir.create(recursive: true);
-    } catch (_) {}
-  }
-
-  /// 按容量上限回收:总占用超限时从最旧文件开始删除,尽力而为、不抛错。
-  static Future<void> reclaim(Directory dir, int limitBytes) async {
-    try {
-      final files = <(File, int, DateTime)>[];
-      await for (final entity in dir.list(followLinks: false)) {
-        if (entity is! File) {
-          continue;
-        }
-        try {
-          final stat = await entity.stat();
-          files.add((entity, stat.size, stat.modified));
-        } catch (_) {}
-      }
-      var total = files.fold<int>(0, (sum, entry) => sum + entry.$2);
-      if (total <= limitBytes) {
-        return;
-      }
-      files.sort((a, b) => a.$3.compareTo(b.$3));
-      for (final entry in files) {
-        if (total <= limitBytes) {
-          break;
-        }
-        try {
-          await entry.$1.delete();
-          total -= entry.$2;
-        } catch (_) {}
-      }
-    } catch (_) {}
   }
 }

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/widgets.dart';
+import 'package:rillight/player/playback_models.dart';
 
 class VideoOpenRequest {
   const VideoOpenRequest({
@@ -10,6 +11,8 @@ class VideoOpenRequest {
     this.headers = const {},
     this.credentialOrigin,
     this.credentialHeaders = const {},
+    this.playMethod = PlayMethod.directStream,
+    this.isInfiniteStream = false,
   });
 
   final int sessionId;
@@ -18,6 +21,10 @@ class VideoOpenRequest {
   final Map<String, String> headers;
   final Uri? credentialOrigin;
   final Map<String, String> credentialHeaders;
+  final PlayMethod playMethod;
+  final bool isInfiniteStream;
+  bool get dynamicSource =>
+      isInfiniteStream || playMethod == PlayMethod.transcode;
 }
 
 enum VideoEventKind {

@@ -1668,6 +1668,8 @@ class PlayerController extends ChangeNotifier {
           VideoOpenRequest(
             sessionId: operation.id,
             url: next.streamUrl,
+            playMethod: next.playMethod,
+            isInfiniteStream: next.mediaSource.isInfiniteStream,
             start: durationFromTicks(startTicks),
             credentialOrigin: client.baseUrl,
             credentialHeaders: client.sessionHeaders,

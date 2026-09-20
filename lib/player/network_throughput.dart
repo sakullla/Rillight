@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 
-/// 把 mpv `cache-speed`(字节/秒,约 1 秒窗口)格式化成播放器网速文案。
+/// 把代理实际上游正文吞吐(字节/秒,约 1 秒窗口)格式化成播放器网速文案。
 ///
-/// 这是实际读入缓冲的吞吐,不是片源码率。缓冲写满后会落到 0,与 YouTube
-/// Network Activity、mpv stats 的 Speed 一致。单位用 1024 进制,和 mpv /
+/// 本地内存和磁盘命中不计入网络下载。缓冲写满后会落到 0。
+/// 单位用 1024 进制,和 mpv /
 /// 常见下载器相同。
 String formatNetworkThroughput(num bytesPerSecond) {
   final raw = bytesPerSecond.isFinite ? bytesPerSecond.toDouble() : 0.0;

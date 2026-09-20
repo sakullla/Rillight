@@ -75,6 +75,7 @@ class CacheRangeLease {
       }
     }
     if (_protection != null) await _cache._disk?.releaseProtection(_protection);
+    _cache._trimMemory();
   }
 }
 
@@ -97,7 +98,7 @@ class SessionByteCache {
     int diskLimitBytes = 2048 * 1024 * 1024,
     int? diskSessionLimitBytes,
     int pendingLimitBytes = 8 * 1024 * 1024,
-    int maxEntries = 4096,
+    int maxEntries = 8192,
     Duration diskTimeout = const Duration(milliseconds: 750),
   }) async {
     if (memoryLimitBytes < 0 ||
@@ -128,10 +129,10 @@ class SessionByteCache {
     return cache;
   }
 
-  final int memoryLimitBytes;
-  final int pendingLimitBytes;
+  int memoryLimitBytes;
+  int pendingLimitBytes;
   final int maxEntries;
-  final int diskSessionLimitBytes;
+  int diskSessionLimitBytes;
   final _entries = <_BlockKey, _Entry>{};
   final _memory = <_BlockKey, Uint8List>{};
   final _memoryPins = <_BlockKey, int>{};
@@ -152,6 +153,11 @@ class SessionByteCache {
   Future<void>? _closing;
 
   Map<String, Object?> get diagnostics => {
+    'memoryLimitBytes': memoryLimitBytes,
+    'pendingLimitBytes': pendingLimitBytes,
+    'diskSessionLimitBytes': diskSessionLimitBytes,
+    'memoryResizePending': _memoryBytes > memoryLimitBytes,
+    'pendingResizePending': _pendingBytes > pendingLimitBytes,
     'memoryBytes': _memoryBytes,
     'memoryPeakBytes': _memoryPeak,
     'pendingBytes': _pendingBytes,
@@ -167,6 +173,33 @@ class SessionByteCache {
     'closed': _closed,
     ...?_disk?.diagnostics,
   };
+
+  /// Existing protected reads remain valid. New writes honor the new target;
+  /// protected excess is released as consumers finish, never copied elsewhere.
+  Future<void> resize({
+    required int memoryBytes,
+    required int pendingBytes,
+    required int diskBytes,
+  }) async {
+    if (_closed) return;
+    if (memoryBytes < 0 || pendingBytes < 0 || diskBytes < 0) {
+      throw ArgumentError('Cache budgets must be nonnegative');
+    }
+    memoryLimitBytes = memoryBytes;
+    pendingLimitBytes = pendingBytes;
+    diskSessionLimitBytes = diskBytes;
+    _trimMemory();
+    await _disk?.setSessionLimit(diskBytes);
+  }
+
+  void _trimMemory() {
+    for (final key in _memory.keys.toList()) {
+      if (_memoryBytes <= memoryLimitBytes) break;
+      if (_memoryPins.containsKey(key)) continue;
+      _removeMemory(key);
+      _evictions++;
+    }
+  }
 
   /// Publishes only caller-validated, complete bytes. A producer must await this
   /// call or respect [pendingLimitBytes]; excess writes are skipped, never queued.
@@ -319,6 +352,41 @@ class SessionByteCache {
     return null;
   }
 
+  /// Used only after a miss, before committing a cached prefix. Fully evicted
+  /// ranges can use one ordinary streaming request instead of many tiny gaps.
+  /// Presence is a hint; every actual disk read still validates length and CRC.
+  Future<bool> hasAny({
+    required String resource,
+    required int generation,
+    required int offset,
+    required int length,
+  }) async {
+    if (_closed) return false;
+    final tokens = <String>[];
+    for (final item in _entries.entries) {
+      if (item.key.resource != resource ||
+          item.key.generation != generation ||
+          item.key.offset >= offset + length ||
+          item.key.offset + item.value.length <= offset) {
+        continue;
+      }
+      if (_memory.containsKey(item.key)) return true;
+      final token = item.value.diskToken;
+      if (token != null) tokens.add(token);
+    }
+    if (tokens.isEmpty) return false;
+    final cost = tokens.length * 128;
+    // Retain the conservative gap path if another operation owns this budget.
+    if (_pendingBytes + cost > pendingLimitBytes) return true;
+    _pendingBytes += cost;
+    if (_pendingBytes > _pendingPeak) _pendingPeak = _pendingBytes;
+    try {
+      return await _disk?.hasAny(tokens) ?? false;
+    } finally {
+      _releasePending(cost);
+    }
+  }
+
   Future<CacheRangeLease?> protectRange({
     required String resource,
     required int generation,
@@ -371,15 +439,9 @@ class SessionByteCache {
           .toSet()
           .toList();
       if (tokens.isNotEmpty) {
-        final largest = blocks
-            .where((b) => b.memory == null)
-            .fold<int>(
-              0,
-              (size, block) => block.length > size ? block.length : size,
-            );
-        // Acquisition checks one block at a time in the disk isolate. Include
-        // that working buffer and the bounded token message in pending credit.
-        final cost = largest * 2 + tokens.length * 128;
+        // Protection checks lengths and pins identities; media CRC is checked
+        // on actual reads. Charge the bounded token message, not a media copy.
+        final cost = tokens.length * 128;
         if (_pendingBytes + cost <= pendingLimitBytes) {
           _pendingBytes += cost;
           if (_pendingBytes > _pendingPeak) _pendingPeak = _pendingBytes;
