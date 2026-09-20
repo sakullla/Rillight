@@ -37,6 +37,13 @@ stalled native teardown reports a timeout; the process host owns escalation.
   black frames despite valid decoded input. This one-line patch preserves
   scaling quality, decoder direct rendering and automatic hardware decoding.
 
+On X11, the application runner must call `XInitThreads()` before GTK opens a
+display. GTK presentation and the mpv worker concurrently use Xlib/GLX; doing
+this at plugin registration is too late. Rillight's `linux/runner/main.cc`
+enforces this before creating the application. The call initializes Xlib
+locking only: it does not open a display or select X11 over Wayland.
+See the [Xlib threading contract](https://xorg.freedesktop.org/archive/current/doc/libX11/libX11/libX11.html#Using_Threads).
+
 All surfaces disable libmpv's internal target-time sleep. The control isolate
 therefore enforces `video-timing-offset=0`, including when a caller supplies an
 alternative creation option. This follows the Render API's documented timing
@@ -147,6 +154,9 @@ for the actual result. No container run substitutes for macOS validation.
 library and `RILLIGHT_TEST_MEDIA` to a local video to include native core tests
 (creation failure, correlated replies, tracks, failed open, EOF, cancellation,
 repeat disposal). No private server or credentials are required.
+The native-core tests explicitly select the host desktop target because
+Flutter's test runner otherwise defaults to Android, bypassing Linux's
+detach/raster-barrier path even while loading the real Linux libmpv.
 
 On Windows configure `native/tests` with CMake, set `FLUTTER_ENGINE` to the
 Flutter engine artifacts/windows-x64 directory and optionally

@@ -1,11 +1,25 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight_player/rillight_player.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  // flutter test defaults to Android, even when it loads the host's real mpv.
+  // Exercise the same retirement contract as the actual desktop application.
+  setUp(() {
+    debugDefaultTargetPlatformOverride = switch (Platform.operatingSystem) {
+      'linux' => TargetPlatform.linux,
+      'windows' => TargetPlatform.windows,
+      'macos' => TargetPlatform.macOS,
+      _ => throw UnsupportedError(
+        'Native desktop test requires a desktop host',
+      ),
+    };
+  });
+  tearDown(() => debugDefaultTargetPlatformOverride = null);
   final library = Platform.environment['RILLIGHT_TEST_MPV'];
   final media = Platform.environment['RILLIGHT_TEST_MEDIA'];
   final unavailable = library == null || media == null;

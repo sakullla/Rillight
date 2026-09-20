@@ -32,6 +32,25 @@ The audio stream must belong to that child PID. Both the app result and this
 independent window check must pass. Restore the ordinary `lib/main.dart` target
 before producing a release package. The reusable Linux CI runs both targets.
 
+From Windows, a prepared Docker container can validate an exact snapshot of
+the current working tree, including uncommitted source edits:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tool/linux_playback_validation.ps1 -Container rillight-cache-validation-20260920
+```
+
+The container needs the pinned Flutter SDK at `/cache/flutter`, package cache
+at `/cache/pub`, pinned media prefix at `/cache/native`, build tools and the
+window-smoke dependencies above. Mount this repository read-only at `/source`
+with generated fixtures at `/source/build/player-validation/media`. The
+wrapper copies sources to a new `/work/rillight-validation-*` directory,
+builds both production and smoke targets, audits their ELF/RUNPATH resolution,
+runs the native package tests with the bundled real libmpv, and runs the
+unchanged window-pixel checks. Evidence, including the source archive hash and
+Git base, is copied to `build/player-validation/linux-current-*/`, including
+on failure. It does not rebuild media libraries, alter the host build, or
+claim an Ubuntu 24.04 install check from an Ubuntu 22.04 container.
+
 This catches the scaler-padding regression found during integration: mpv
 0.41.0 allocated a six-tap LUT in eight-channel rows without initializing the
 last two channels. Observed NaN padding contaminated GL linear filtering.

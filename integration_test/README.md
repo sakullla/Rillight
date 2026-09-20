@@ -254,3 +254,61 @@ No Linux actual-window playback success or macOS native result is claimed by
 these measurements. Final production Linux build and full-suite results remain
 separate delivery checks; a successful build cannot substitute for failed
 actual-window evidence.
+
+### Linux X11 process-exit fix — 2026-09-20
+
+The current-source pre-fix reproduction is preserved in
+`build/player-validation/linux-current-20260920-222900/` (app and capture both
+failed). The diagnostic `linux-exit-stack.trace` locates the child exit in
+GDK's fatal X IO handler, reached through XGetGeometry/GLX presentation;
+`linux-xio-debug/app.stdout.log` records errno 11 (EAGAIN). These paths are
+under `build/player-validation/`. A startup GDB trace with breakpoints on both
+XInitThreads and XOpenDisplay (`linux-before-xinit.log`) first stops in GTK's
+XOpenDisplay: Xlib threading was not initialized before opening the display.
+The runner now initializes it before creating the GTK application. The
+corresponding `linux-after-xinit.log` stops in main's XInitThreads first and
+only then GTK's XOpenDisplay. This fixes the reproduced XIO early exit in the
+tested X11 path; it is not a diagnosis of every historical flicker report.
+XInitThreads does not open a display or force GTK to select X11 over Wayland.
+
+The first fixed run (`linux-current-20260920-223300/`) passed all four actual
+window/color/motion and virtual-audio checks, then failed the new outage test.
+Its resumed position was already 2000 ms and mpv reported 9.633 seconds of
+buffered data, but the test started measuring before confirming clock progress.
+The original failure did not record the exact before/after position; it must
+not be presented as a measured cache starvation event. The outage test now
+first requires 500 ms of real progression and more than three seconds of
+buffer, then retains its original 900 ms outage / at least 500 ms progression
+assertion. Initial loaded/openMs measurements and all window thresholds remain
+unchanged. It now records before/after positions even when the assertion fails.
+
+The complete subsequent run in `build/player-validation/linux-window-progress/`
+passed: main/child control, H.264/HEVC/AV1/VP9 changing colored window frames,
+virtual audio output, subtitles, seek, media switching, replay/restart, failed
+open, repeated disposal and parent-confirmed child shutdown. The synthetic
+upstream returned 503 while playback advanced 900 ms; user pause remained
+preserved. The five core subtitle PNGs were visually inspected (PGS's synthetic
+white bitmap and text for ASS/SRT/VTT/SSA); these are separate from the Flutter
+window captures. Both production and smoke builds passed their 32-ELF/runtime
+checks. The real bundled Linux libmpv package suite passed 45 tests; the changed
+native-core tests also passed all eight cases on Windows with real libmpv.
+The cleanup tests now explicitly choose the host desktop target, rather than
+Flutter test's default Android target, retaining Linux's detach/dispose checks.
+
+The complete current-source wrapper was then rerun successfully in
+`build/player-validation/linux-current-20260920-224037/`: production build,
+32-ELF audit, 45 real-libmpv package tests, smoke build, a second 32-ELF audit,
+and actual-window smoke all passed. `source.json` identifies the archived
+working-tree snapshot based on `88f7d2639632177bc3e14a32f87019506167d375`;
+`sdk.log`, `compiler.log`, `cmake.log`, `os-release.log` and
+`native-versions.json` record Flutter 3.47.4, Clang 14, CMake 3.22.1, Ubuntu
+22.04.5 and the actual mpv 0.41.0 / FFmpeg 9.0.1 / client API 2.5. Compiler,
+OS and native-version metadata were collected alongside that run; the wrapper
+now collects those metadata automatically on future runs.
+
+Repeat from current source with `tool/linux_playback_validation.ps1 -Container
+rillight-cache-validation-20260920` (see `linux/packaging/README.md`). This local
+environment is Docker Ubuntu 22.04, Xvfb/software Mesa and a virtual PulseAudio
+sink. It does not establish Ubuntu 24.04 installation results for this change,
+Wayland runtime behavior, physical audio, hardware decode/GPU stability,
+real-time 1080p/4K performance or macOS playback. Those remain distinct checks.

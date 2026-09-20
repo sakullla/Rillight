@@ -243,6 +243,16 @@ Future<void> main(List<String> args) async {
       }
 
       try {
+        // A resumed position and pause=no can arrive before the audio clock
+        // starts. Establish actual progression before measuring an outage;
+        // otherwise Linux's output startup is counted as a network stall.
+        final resumedPosition = controller.position;
+        await _until(
+          () =>
+              controller.isPlaying &&
+              controller.position - resumedPosition >=
+                  const Duration(milliseconds: 500),
+        );
         await _until(
           () =>
               backend.buffer - controller.position > const Duration(seconds: 3),
@@ -257,6 +267,14 @@ Future<void> main(List<String> args) async {
         final before = controller.position;
         await Future<void>.delayed(const Duration(milliseconds: 900));
         final advanced = controller.position - before;
+        await record('source-outage-progress', {
+          'sourceStatus': status,
+          'beforeMs': before.inMilliseconds,
+          'afterMs': controller.position.inMilliseconds,
+          'advancedMs': advanced.inMilliseconds,
+          'playing': controller.isPlaying,
+          'bufferMs': backend.buffer.inMilliseconds,
+        });
         if (!controller.isPlaying ||
             advanced < const Duration(milliseconds: 500)) {
           throw StateError('Buffered playback did not continue during outage');
