@@ -77,6 +77,183 @@ void main() {
   );
 
   test(
+    'file slot reservation counts protected blocks pins and temporary files',
+    () async {
+      final child = await _Child.start(root, 1024 * 1024, diskTimeoutMs: 10000);
+      try {
+        await child.command({
+          'op': 'put',
+          'offset': 0,
+          'length': 1,
+          'value': 7,
+        });
+        await child.command({
+          'op': 'seed-files',
+          'entries': 8191,
+          'kind': 'block',
+        });
+        final protected = await child.command({
+          'op': 'protect',
+          'offset': 0,
+          'length': 1,
+        });
+        expect(protected['protected'], isTrue, reason: '$protected');
+        expect(_actualFileCount(root), lessThanOrEqualTo(8192));
+        final pin = root
+            .listSync(recursive: true)
+            .whereType<File>()
+            .singleWhere((file) => file.path.endsWith('.pin'));
+        final pinnedToken = pin.readAsStringSync();
+        expect(
+          File('${pin.parent.path}/$pinnedToken').existsSync(),
+          isTrue,
+          reason: 'protected block missing immediately after pin',
+        );
+        final after = await child.command({
+          'op': 'put',
+          'offset': 1,
+          'length': 1,
+          'value': 8,
+        });
+        expect(after['degradation'], isNull);
+        expect(_actualFileCount(root), lessThanOrEqualTo(8192));
+        expect(
+          File('${pin.parent.path}/$pinnedToken').existsSync(),
+          isTrue,
+          reason:
+              'protected block evicted by a write; token=$pinnedToken pin=${pin.path}',
+        );
+        expect(
+          (await child.command({'op': 'protected-read', 'offset': 0}))['bytes'],
+          [7],
+        );
+        expect((await child.command({'op': 'read', 'offset': 1}))['bytes'], [
+          8,
+        ]);
+        await child.command({'op': 'unprotect'});
+        expect(
+          root
+              .listSync(recursive: true)
+              .whereType<File>()
+              .where((f) => f.path.endsWith('.pin')),
+          isEmpty,
+        );
+      } finally {
+        await child.stop();
+      }
+    },
+    timeout: const Timeout(Duration(seconds: 60)),
+  );
+
+  test(
+    'full temporary file inventory skips writes without exceeding entry limit',
+    () async {
+      final child = await _Child.start(root, 1024 * 1024, diskTimeoutMs: 10000);
+      try {
+        await child.command({
+          'op': 'seed-files',
+          'entries': 8191,
+          'kind': 'partial',
+        });
+        final result = await child.command({
+          'op': 'put',
+          'offset': 0,
+          'length': 1,
+          'value': 7,
+        });
+        expect(result['degradation'], isNull);
+        expect(_actualFileCount(root), 8192);
+        expect(
+          (await child.command({'op': 'read', 'offset': 0}))['bytes'],
+          isNull,
+        );
+        expect(
+          root
+              .listSync(recursive: true)
+              .whereType<File>()
+              .where((f) => f.path.endsWith('.block')),
+          isEmpty,
+        );
+      } finally {
+        await child.stop();
+      }
+    },
+    timeout: const Timeout(Duration(seconds: 60)),
+  );
+
+  test(
+    'killed oversized owned session is reclaimed without harming an unrelated file',
+    () async {
+      final child = await _Child.start(root, 1024 * 1024, diskTimeoutMs: 10000);
+      addTearDown(child.stop);
+      await child.command({'op': 'put', 'offset': 0, 'length': 1, 'value': 7});
+      expect(
+        (await child.command({
+          'op': 'protect',
+          'offset': 0,
+          'length': 1,
+        }))['protected'],
+        isTrue,
+      );
+      // Reproduce the historical count violation, including a live pin, then
+      // force process death before normal unprotect/close could reduce it.
+      await child.command({
+        'op': 'seed-files',
+        'entries': 8193,
+        'kind': 'partial',
+      });
+      final deadDirectory = root.listSync().whereType<Directory>().single;
+      final unrelated = File('${deadDirectory.path}/user-note.txt')
+        ..writeAsStringSync('preserve');
+      final peer = await _Child.start(
+        root,
+        1024 * 1024,
+        diskTimeoutMs: 10000,
+        expectHealthy: false,
+      );
+      // The oversized live session cannot be removed while its owner still holds
+      // the lifecycle lock. The new peer safely falls back instead.
+      await peer.stop();
+      expect(unrelated.existsSync(), isTrue);
+      expect(deadDirectory.listSync().length, greaterThan(8192));
+      child.process.kill(ProcessSignal.sigkill);
+      await child.process.exitCode.timeout(const Duration(seconds: 10));
+      await child.output.cancel();
+      final recovered = await _Child.start(
+        root,
+        1024 * 1024,
+        diskTimeoutMs: 10000,
+      );
+      try {
+        expect(unrelated.readAsStringSync(), 'preserve');
+        expect(
+          deadDirectory.listSync().whereType<File>().where(
+            (f) =>
+                f.path.endsWith('.partial') ||
+                f.path.endsWith('.block') ||
+                f.path.endsWith('.pin'),
+          ),
+          isEmpty,
+        );
+        final result = await recovered.command({
+          'op': 'put',
+          'offset': 0,
+          'length': 4,
+          'value': 9,
+        });
+        expect(result['degradation'], isNull);
+        expect(
+          (await recovered.command({'op': 'read', 'offset': 0}))['bytes'],
+          [9, 9, 9, 9],
+        );
+      } finally {
+        await recovered.stop();
+      }
+    },
+    timeout: const Timeout(Duration(seconds: 60)),
+  );
+
+  test(
     'range lease keeps memory bytes within budget during competing writes',
     () async {
       final cache = await open(memory: 768, disk: 0);
@@ -568,6 +745,9 @@ int _actualBytes(Directory root) => root
     .whereType<File>()
     .fold(0, (sum, file) => sum + file.lengthSync());
 
+int _actualFileCount(Directory root) =>
+    root.listSync(recursive: true, followLinks: false).whereType<File>().length;
+
 String get _dart {
   final executable = File(Platform.resolvedExecutable);
   if (!executable.path.contains('flutter_tester')) return executable.path;
@@ -609,11 +789,17 @@ class _Child {
   final StreamIterator<String> output;
   bool _stopped = false;
 
-  static Future<_Child> start(Directory root, int limit) async {
+  static Future<_Child> start(
+    Directory root,
+    int limit, {
+    int diskTimeoutMs = 750,
+    bool expectHealthy = true,
+  }) async {
     final process = await Process.start(_dart, [
       'test/player/cache/cache_process_fixture.dart',
       root.path,
       '$limit',
+      '$diskTimeoutMs',
     ]);
     final output = StreamIterator(
       process.stdout.transform(utf8.decoder).transform(const LineSplitter()),
@@ -623,14 +809,14 @@ class _Child {
       throw StateError('Child failed to start');
     }
     final diagnostics = jsonDecode(output.current) as Map;
-    expect(diagnostics['degradation'], isNull);
+    if (expectHealthy) expect(diagnostics['degradation'], isNull);
     return _Child(process, output);
   }
 
   Future<Map> command(Map<String, Object?> command) async {
     process.stdin.writeln(jsonEncode(command));
     await process.stdin.flush();
-    if (!await output.moveNext().timeout(const Duration(seconds: 5))) {
+    if (!await output.moveNext().timeout(const Duration(seconds: 20))) {
       throw StateError('Missing child response');
     }
     return jsonDecode(output.current) as Map;

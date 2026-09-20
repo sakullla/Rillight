@@ -203,16 +203,16 @@ class _Coordinator {
   }
 }
 
-void _diskMain(List<Object> startup) {
+void _diskMain(List<Object> startup) async {
   final responses = startup[1] as SendPort;
   final requests = ReceivePort();
   final store = _DiskStore(startup[0] as String);
   responses.send(requests.sendPort);
-  requests.listen((dynamic envelope) {
+  await for (final envelope in requests) {
     final message = Map<String, Object?>.from(envelope[1] as Map);
     Map<String, Object?> result;
     try {
-      result = store.handle(message);
+      result = await store.handle(message);
     } catch (_) {
       result = {'error': 'disk-io'};
     }
@@ -227,10 +227,11 @@ void _diskMain(List<Object> startup) {
       }
     }
     responses.send([envelope[0], result]);
-  });
+  }
 }
 
 const _marker = 'rillight-session-byte-cache-v1';
+const _maxCacheFiles = 8192;
 final _sessionPattern = RegExp(r'^[a-f0-9]{32}$');
 final _blockPattern = RegExp(r'^[a-f0-9]{32}-[0-9]+-[a-f0-9]{8}\.block$');
 final _tempPattern = RegExp(r'^[a-f0-9]{32}\.partial$');
@@ -265,7 +266,7 @@ class _DiskStore {
   int _reservedPeak = 0;
   int _evictions = 0;
 
-  Map<String, Object?> handle(Map<String, Object?> message) {
+  Future<Map<String, Object?>> handle(Map<String, Object?> message) async {
     if (message['op'] == 'shutdown') return {'ok': true};
     if (message['op'] == 'unprotect') {
       final id = message['id'] as String;
@@ -292,7 +293,7 @@ class _DiskStore {
           sleep(const Duration(milliseconds: 5));
         }
       }
-      _reap();
+      await _reap();
       // An earlier release may have encountered a foreign quota lock. Keep its
       // intent in the coordinator and remove the charged pin under this lock.
       for (final entry in _releasedProtections.entries.toList()) {
@@ -322,7 +323,7 @@ class _DiskStore {
         case 'unprotect':
           return _unprotect(id, message['protection'] as String);
         case 'close':
-          return _close(id);
+          return await _close(id);
         default:
           return {'error': 'unknown-operation'};
       }
@@ -390,17 +391,16 @@ class _DiskStore {
   List<Directory> _sessions() =>
       _candidateDirectories().where((dir) => _metadata(dir) != null).toList();
 
-  List<File> _files(Directory directory) {
-    final result = <File>[];
-    var count = 0;
-    for (final entity in directory.listSync(followLinks: false)) {
-      if (++count > 8192) {
-        throw const FileSystemException('Cache file count limit');
-      }
-      if (entity is File) result.add(entity);
+  List<FileSystemEntity> _entries(Directory directory) {
+    final entries = directory.listSync(followLinks: false);
+    if (entries.length > _maxCacheFiles) {
+      throw const FileSystemException('Cache file count limit');
     }
-    return result;
+    return entries;
   }
+
+  List<File> _files(Directory directory) =>
+      _entries(directory).whereType<File>().toList();
 
   // Unknown ownership prevents deletion, but does not make occupied bytes free.
   int _usage() => _candidateDirectories().fold(
@@ -413,7 +413,7 @@ class _DiskStore {
     return metadata == null ? limit : min(limit, metadata['limit'] as int);
   });
 
-  void _reap() {
+  Future<void> _reap() async {
     for (final directory in _sessions()) {
       final id = _name(directory);
       if (_leases.containsKey(id)) continue;
@@ -428,12 +428,12 @@ class _DiskStore {
         } on FileSystemException {
           continue;
         }
-        _removeData(directory);
+        await _removeData(directory);
       } finally {
         if (acquired) lease.unlockSync();
         lease.closeSync();
       }
-      if (acquired) _removeShell(directory);
+      if (acquired) await _removeShell(directory);
     }
   }
 
@@ -445,7 +445,8 @@ class _DiskStore {
       jsonEncode({'format': _marker, 'limit': limit}),
     );
     final effectiveLimit = min(limit, _limit());
-    if (!_makeRoom(metadata.length, effectiveLimit)) {
+    // lease.lock and owner.pending (renamed to owner.json) both need slots.
+    if (!_makeRoom(metadata.length, effectiveLimit, requiredFiles: 2)) {
       return {'error': 'disk-quota'};
     }
     final directory = Directory(_join(root.path, id))..createSync();
@@ -465,8 +466,8 @@ class _DiskStore {
     return {'ok': true, 'stats': _stats()};
   }
 
-  Set<String> _protectedPaths() {
-    final paths = <String>{};
+  Set<String> _protectedBlocks() {
+    final blocks = <String>{};
     for (final session in _sessions()) {
       for (final pin in _files(
         session,
@@ -479,50 +480,63 @@ class _DiskStore {
             tokens.any((token) => !_blockPattern.hasMatch(token))) {
           throw const FileSystemException('Invalid read protection');
         }
-        paths.addAll(tokens.map((token) => _join(session.path, token)));
+        blocks.addAll(tokens.map((token) => '${_name(session)}/$token'));
       }
     }
-    return paths;
+    return blocks;
   }
 
   bool _makeRoom(
     int required,
     int limit, {
+    required int requiredFiles,
     Directory? only,
     Set<String> protecting = const {},
   }) {
-    final protected = _protectedPaths()..addAll(protecting);
-    final sessions = only == null ? _sessions() : [only];
-    final candidates = <File>[];
+    // Protection uses the owned session/block identity, not filesystem spelling
+    // (Windows permits equivalent paths with different separators/casing).
+    final protected = _protectedBlocks()..addAll(protecting);
+    final sessions = only == null ? _candidateDirectories() : [only];
+    final candidates = <({File file, int length, DateTime modified})>[];
+    // Include every entry, not just evictable blocks. Protected blocks, pin
+    // records, partial writes, ownership files and unknown entries all consume
+    // slots. The global inventory also includes the root's quota.lock.
+    var occupiedFiles = only == null ? 1 : 0;
+    var occupied = 0;
     for (final directory in sessions) {
-      candidates.addAll(
-        _files(directory).where(
-          (file) =>
-              _blockPattern.hasMatch(_name(file)) &&
-              !protected.contains(file.path),
-        ),
-      );
-      if (candidates.length > 8190) {
-        throw const FileSystemException('Global cache entry limit');
+      final entries = _entries(directory);
+      occupiedFiles += entries.length;
+      final owned = _metadata(directory) != null;
+      for (final file in entries.whereType<File>()) {
+        final stat = file.statSync();
+        occupied += stat.size;
+        if (owned &&
+            _blockPattern.hasMatch(_name(file)) &&
+            !protected.contains('${_name(directory)}/${_name(file)}') &&
+            candidates.length < _maxCacheFiles) {
+          candidates.add((
+            file: file,
+            length: stat.size,
+            modified: stat.modified,
+          ));
+        }
       }
     }
-    candidates.sort(
-      (a, b) => a.lastModifiedSync().compareTo(b.lastModifiedSync()),
-    );
-    int used() => only == null
-        ? _usage()
-        : _files(only).fold(0, (sum, file) => sum + file.lengthSync());
-    var occupied = used();
-    var remaining = candidates.length;
-    for (final file in candidates) {
-      if (occupied + required <= limit && remaining < 8190) break;
-      final length = file.lengthSync();
-      file.deleteSync();
-      occupied -= length;
-      remaining--;
+    // Sorting must not turn a bounded directory scan into O(n log n) filesystem
+    // calls while holding the global quota lock.
+    candidates.sort((a, b) => a.modified.compareTo(b.modified));
+    for (final candidate in candidates) {
+      if (occupied + required <= limit &&
+          occupiedFiles + requiredFiles <= _maxCacheFiles) {
+        break;
+      }
+      candidate.file.deleteSync();
+      occupied -= candidate.length;
+      occupiedFiles--;
       _evictions++;
     }
-    return occupied + required <= limit;
+    return occupied + required <= limit &&
+        occupiedFiles + requiredFiles <= _maxCacheFiles;
   }
 
   Map<String, Object?> _put(String id, Uint8List bytes) {
@@ -530,8 +544,15 @@ class _DiskStore {
     if (lease == null || bytes.isEmpty || bytes.length > 1024 * 1024) {
       return {'error': 'invalid-write'};
     }
-    if (!_makeRoom(bytes.length, lease.sessionLimit, only: lease.directory) ||
-        !_makeRoom(bytes.length, _limit())) {
+    // A partial file becomes its immutable block through rename, so exactly one
+    // slot is reserved for the entire write, including failure leftovers.
+    if (!_makeRoom(
+          bytes.length,
+          lease.sessionLimit,
+          only: lease.directory,
+          requiredFiles: 1,
+        ) ||
+        !_makeRoom(bytes.length, _limit(), requiredFiles: 1)) {
       return {'stats': _stats()};
     }
     // The reservation is protected by the global lock for the entire operation.
@@ -604,9 +625,7 @@ class _DiskStore {
         2) {
       return {};
     }
-    final protecting = tokens
-        .map((token) => _join(lease.directory.path, token))
-        .toSet();
+    final protecting = tokens.map((token) => '$id/$token').toSet();
     // Validate every block under the same global lock used by eviction. Each
     // iteration owns at most one block; no whole-response staging is needed.
     for (final token in tokens) {
@@ -632,8 +651,14 @@ class _DiskStore {
           lease.sessionLimit,
           only: lease.directory,
           protecting: protecting,
+          requiredFiles: 1,
         ) ||
-        !_makeRoom(metadata.length, _limit(), protecting: protecting)) {
+        !_makeRoom(
+          metadata.length,
+          _limit(),
+          protecting: protecting,
+          requiredFiles: 1,
+        )) {
       return {};
     }
     _peak = max(_peak, _usage() + metadata.length);
@@ -652,16 +677,16 @@ class _DiskStore {
     return {'ok': true, 'stats': _stats()};
   }
 
-  Map<String, Object?> _close(String id) {
+  Future<Map<String, Object?>> _close(String id) async {
     final lease = _leases.remove(id);
     if (lease == null) return {'ok': true};
     try {
-      _removeData(lease.directory);
+      await _removeData(lease.directory);
     } finally {
       lease.lock.unlockSync();
       lease.lock.closeSync();
     }
-    _removeShell(lease.directory);
+    await _removeShell(lease.directory);
     return {'ok': !lease.directory.existsSync(), 'stats': _stats()};
   }
 
@@ -676,31 +701,36 @@ class _DiskStore {
     }
   }
 
-  void _removeData(Directory directory) {
-    for (final file in _files(directory)) {
+  Future<void> _removeData(Directory directory) async {
+    // This path runs only for an owned session with its lifecycle lock held.
+    // Recovery must not use the normal operational scan ceiling: an older
+    // process may have crashed with more than that many entries. Stream the
+    // directory so cleanup remains bounded and never follows child links.
+    await for (final file in directory.list(followLinks: false)) {
+      if (file is! File) continue;
       final name = _name(file);
       if (_blockPattern.hasMatch(name) ||
           _tempPattern.hasMatch(name) ||
           _pinPattern.hasMatch(name)) {
-        file.deleteSync();
+        await file.delete();
       }
     }
   }
 
-  void _removeShell(Directory directory) {
-    final entries = directory.listSync(followLinks: false);
+  Future<void> _removeShell(Directory directory) async {
     // Unknown files or links preserve the ownership record for later inspection.
-    if (entries.any(
-      (entry) =>
-          entry is! File ||
-          !{'lease.lock', 'owner.json'}.contains(_name(entry)),
-    )) {
-      return;
+    await for (final entry in directory.list(followLinks: false)) {
+      if (entry is! File ||
+          !{'lease.lock', 'owner.json'}.contains(_name(entry))) {
+        return;
+      }
     }
-    for (final entry in entries) {
-      entry.deleteSync();
+    for (final name in ['lease.lock', 'owner.json']) {
+      final file = File(_join(directory.path, name));
+      _assertRegularOrAbsent(file.path);
+      if (await file.exists()) await file.delete();
     }
-    directory.deleteSync();
+    await directory.delete();
   }
 
   Map<String, Object?> _stats() {
