@@ -1,6 +1,7 @@
 import '../helpers/image_cache_fixture.dart';
 import '../helpers/settle.dart';
 import 'dart:typed_data';
+import 'dart:convert';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
@@ -15,6 +16,7 @@ import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/home_hero.dart';
 import 'package:rillight/library/item_detail_page.dart';
+import 'package:rillight/library/poster_card.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_window_host.dart';
 
@@ -34,6 +36,7 @@ const _season1 = 'season-friends-1';
 /// 可为 `/Items/{id}` 一类请求注入延迟的假服务端,用来抓住骨架屏帧。
 class _DelayedEmbyServer extends FakeEmbyServer {
   Duration itemDelay = Duration.zero;
+  final hiddenEpisodeIds = <String>{};
 
   @override
   Future<ResponseBody> handle(
@@ -43,7 +46,31 @@ class _DelayedEmbyServer extends FakeEmbyServer {
     if (itemDelay > Duration.zero && options.uri.path.contains('/Items/')) {
       await Future<void>.delayed(itemDelay);
     }
-    return super.handle(options, requestStream);
+    final response = await super.handle(options, requestStream);
+    if (hiddenEpisodeIds.isNotEmpty &&
+        options.uri.path.endsWith('/Items') &&
+        options.uri.queryParameters['IncludeItemTypes'] == 'Episode') {
+      final text = await response.stream
+          .cast<List<int>>()
+          .transform(utf8.decoder)
+          .join();
+      final json = jsonDecode(text) as Map<String, dynamic>;
+      final items = json['Items'] as List;
+      final filtered = items
+          .where((item) => !hiddenEpisodeIds.contains(item['Id']))
+          .toList();
+      json['Items'] = filtered;
+      json['TotalRecordCount'] =
+          (json['TotalRecordCount'] as int) - (items.length - filtered.length);
+      return ResponseBody.fromString(
+        jsonEncode(json),
+        response.statusCode,
+        headers: {
+          Headers.contentTypeHeader: ['application/json'],
+        },
+      );
+    }
+    return response;
   }
 }
 
@@ -109,6 +136,76 @@ void main() {
     expect(find.byType(ItemDetailPage), findsOneWidget);
     expect(find.byKey(ItemDetailPage.headerKey), findsOneWidget);
   }
+
+  testWidgets('reentering episode detail replaces its alternate catalog id', (
+    tester,
+  ) async {
+    server.setEpisodes(_series, [
+      const FakeEpisode(
+        id: 'catalog-e8',
+        name: '第 8 集',
+        seasonId: _season1,
+        indexNumber: 8,
+      ),
+      const FakeEpisode(
+        id: 'current-e8',
+        name: '第 8 集',
+        seasonId: _season1,
+        indexNumber: 8,
+      ),
+      const FakeEpisode(
+        id: 'episode-e9',
+        name: '第 9 集',
+        seasonId: _season1,
+        indexNumber: 9,
+      ),
+    ]);
+    server.hiddenEpisodeIds.add('current-e8');
+    final app = await pumpApp(tester);
+    for (var attempt = 0; attempt < 2; attempt++) {
+      await openItem(tester, app, 'current-e8');
+      final cards = tester
+          .widgetList<EpisodeThumbCard>(find.byType(EpisodeThumbCard))
+          .toList();
+      expect(cards.where((card) => card.item.indexNumber == 8), hasLength(1));
+      expect(cards.where((card) => card.selected).map((card) => card.item.id), [
+        'current-e8',
+      ]);
+      expect(cards.map((card) => card.item.id), contains('episode-e9'));
+      await openItem(tester, app, 'movie-up');
+    }
+  }, tags: ['integration']);
+
+  testWidgets('actual distinct episode versions are not all highlighted', (
+    tester,
+  ) async {
+    server.setEpisodes(_series, [
+      const FakeEpisode(
+        id: 'version-a',
+        name: '第 8 集',
+        seasonId: _season1,
+        indexNumber: 8,
+      ),
+      const FakeEpisode(
+        id: 'version-b',
+        name: '第 8 集',
+        seasonId: _season1,
+        indexNumber: 8,
+      ),
+    ]);
+    final app = await pumpApp(tester);
+    await openItem(tester, app, 'version-b');
+    final cards = tester
+        .widgetList<EpisodeThumbCard>(find.byType(EpisodeThumbCard))
+        .toList();
+    expect(
+      cards.map((card) => card.item.id),
+      containsAll(['version-a', 'version-b']),
+    );
+    expect(cards.where((card) => card.selected).map((card) => card.item.id), [
+      'version-b',
+    ]);
+  }, tags: ['integration']);
 
   testWidgets('episode card play button starts playback', (tester) async {
     final host = _SilentPlayerHost();

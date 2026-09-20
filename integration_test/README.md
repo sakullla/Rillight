@@ -139,6 +139,20 @@ flutter test test/player/cache/session_byte_cache_test.dart
 flutter test test/player/playback_http_proxy_cases.dart
 ```
 
+Filesystem/process pressure checks are deliberately outside automatic `flutter
+test` discovery. Run them explicitly, with the player closed:
+
+```powershell
+pwsh -NoProfile -File tool/player_cache_stress.ps1
+```
+
+The wrapper invokes `flutter test tool/player_cache_stress.dart` (also usable
+directly on other platforms). It refuses to run alongside Rillight unless
+`-AllowRunningPlayer` is explicitly provided. These ten checks cover thousands
+of files, killed processes, competing writers and deliberately blocked disk
+queues. Small storage/HTTP regressions remain in the normal suite; benchmarks
+and pressure checks are not invoked by that suite.
+
 The benchmark alternates passthrough and cache modes five times for each scenario,
 uses deterministic bytes and verifies every returned byte. It writes `raw.jsonl`,
 `summary.json` and `large-protection.json` under a fresh
@@ -312,3 +326,92 @@ environment is Docker Ubuntu 22.04, Xvfb/software Mesa and a virtual PulseAudio
 sink. It does not establish Ubuntu 24.04 installation results for this change,
 Wayland runtime behavior, physical audio, hardware decode/GPU stability,
 real-time 1080p/4K performance or macOS playback. Those remain distinct checks.
+
+### Windows HTTP tail-probe regression (2026-09-20)
+
+A real remote Matroska resume failed after file-loaded, before first frame:
+two long-lived HTTP responses occupied the proxy's two response-lifetime slots,
+while a required tail/index range waited for a slot until the 45-second open
+timeout. A local HTTP regression reproduces the deadlock without credentials.
+The proxy now separates bounded transport concurrency from nonblocking cache
+workspace reservations; cache pressure bypasses cache work rather than queuing
+an index probe behind an open media body. Overload fails promptly, and cancelled
+transports release both connection capacity and workspace.
+
+The same remote item and resume point then played in the Windows debug native
+child: loading cleared, position advanced from 723.640 to 800.341 seconds, and
+no playback error occurred during that observation. A later repeat also played;
+one intervening attempt failed loading item information before backend creation.
+Temporary diagnostics contained only byte ranges, lengths, status and policy
+flags (no media URLs or credentials), and were removed from production code.
+
+That upstream returns `Cache-Control: no-store`; the initial 62 disk bytes were
+session metadata, not video. The user subsequently explicitly requested temporary
+disk buffering for this source. The backend now opts into playback-only session
+storage, retaining validation before reuse even if max-age is present. Generic
+proxy users still respect no-store unless explicitly opted in. Unknown Vary,
+keys, subtitles and manifests remain excluded. A native Windows repeat wrote
+371,236,265 physical bytes across 358 session files; playback advanced from
+723.640 to 798.840 seconds without an error or disk degradation. Proxy memory
+stayed within 32 MiB. This verifies writing, not real-source disk reuse: observed
+diskHitBytes remained zero, and that intermediate version had no independent
+forward prefetcher. It was not accepted as a working hybrid read-ahead cache.
+
+A second local regression found that repeated HttpResponse.add/flush calls can
+continue after a downstream broken pipe, downloading all 32 MiB of an abandoned
+response. Streaming the body with a single addStream propagates cancellation;
+the same test now verifies upstream download stops below 8 MiB. This change is
+covered by local tests, separately from the earlier native observation.
+Dedicated tests verify opt-in no-store disk hits, changed-validator rejection,
+upstream-speed exclusion and close cleanup. Linux/macOS native windows have not
+been rerun for these changes; earlier platform smoke results are separate.
+
+### Session read-ahead and seek revalidation follow-up (2026-09-21)
+
+The playback backend now opts into a bounded, single-producer sliding window
+for stable, strongly validated HTTP range media. It feeds mpv from the same
+memory/disk store that the producer fills, even while mpv stops reading at its
+short packet-buffer limit. The window is at most 512 MiB and half the session's
+disk allowance. Transfers are at most 4 MiB, published as at most 1 MiB blocks;
+producer workspace participates in the existing proxy budget. HLS, dynamic,
+unvalidated, unsupported-range and unavailable-disk sources retain their bounded
+ordinary transport path. Cache readers now wait for an in-flight disk publication
+if another read evicts its RAM copy, instead of orphaning the pending disk block.
+
+Real seek diagnostics found two false invalidations: this source can return 502
+to HEAD while GET works, and signed CDN redirect URLs rotate while the strong
+ETag is unchanged. Playback-only session buffering now verifies a one-byte
+conditional GET before accepting such revalidation. It verifies the strong ETag,
+total length, response range, encoding and storage policy for the original sealed
+resource, without sending credentials to another origin. Changed content still
+invalidates the representation; a changed signed location alone does not.
+
+With these validation fixes, a Windows native forward seek to 1000 seconds and
+backward seek to 740 seconds increased diskHitBytes from 4,521,984 to 20,905,984
+and then 34,078,720; invalidations stayed zero and playback continued. Downloads
+also continued for independent forward prefetch, so these samples must not be
+reported as zero-network measurements. Concurrent filesystem tests caused one
+disk-timeout degradation in this intermediate 256 KiB-block run; later native
+checks are separated from pressure scripts, and the producer uses fewer 1 MiB
+files. Tiny HTTP regressions separately assert that cached seek targets do not
+download their media bytes again (a one-byte validation probe may be needed).
+
+Temporary on-screen cache-size/status labels were removed at the user's request.
+The UI retains network speed and mpv's timestamp-based buffer bar; arbitrary
+cached byte ranges are not converted into invented buffered timestamps. Cache
+occupancy, disk-hit counts, read-ahead state and validation failures are available
+only through backend diagnostics. No diagnostic logging is added to production.
+
+Final Windows native check (without concurrent pressure scripts): the current
+1 MiB-block producer reached 362,758,138 physical disk bytes in 348 files, then
+stopped prefetching; memory peaked at 33,554,432 bytes. From that warmed session,
+a seek to 1000 seconds increased disk-hit bytes by 5,308,416 and upstream bytes
+by exactly 1. A following seek back to 740 seconds increased disk-hit bytes by
+5,373,952 and upstream bytes by exactly 1. These two upstream bytes were content
+validation probes, not re-downloaded video bodies. Playback position advanced
+after both seeks, with zero invalidations, no playback error and no disk
+degradation. Sanitized snapshots are in the ignored local validation artifact
+`build/player-validation/cache-seek-proof.json`. Disk-hit accounting describes
+returned bytes; subsequent reads from a block promoted into RAM count as memory
+hits rather than additional disk hits. The ordinary suite passed 583 tests;
+the separate manual pressure script passed its 10 checks, and analysis passed.

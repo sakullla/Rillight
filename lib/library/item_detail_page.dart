@@ -482,10 +482,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
       limit: _episodeDetailSeasonLimit,
     );
     final total = page.totalRecordCount ?? page.items.length;
-    final items = _dedupeById(page.items);
-    final merged = items.any((episode) => episode.id == current.id)
-        ? items
-        : _sortedByIndex([...items, current]);
+    final merged = _mergeCurrentEpisode(page.items, current);
     if (total > page.items.length) {
       // 超大季:退回当前集窗口,行为同旧实现。
       return _loadEpisodeWindow(client, seasonId: seasonId, current: current);
@@ -494,7 +491,8 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
   }
 
   /// 以当前集(或给定集号)前 4 条为起点拉一窗分集;结果按 id 去重,
-  /// 当前集仍不在窗口内时才追加。同号不同 id 的多版本是合法数据,保留。
+  /// 当前集缺席但存在唯一同季同集条目时替换目录别名，不补出重复卡片。
+  /// 服务端实际返回的多个版本仍保留。
   Future<_EpisodeWindow> _loadEpisodeWindow(
     EmbyClient client, {
     required String seasonId,
@@ -516,10 +514,9 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
       page = await _queryEpisodes(client, seasonId, start);
     }
     final total = page.totalRecordCount ?? page.items.length;
-    var items = _dedupeById(page.items);
-    if (wantsCurrent && items.every((episode) => episode.id != current.id)) {
-      items = _sortedByIndex([...items, current]);
-    }
+    final items = wantsCurrent
+        ? _mergeCurrentEpisode(page.items, current)
+        : _dedupeById(page.items);
     return _EpisodeWindow(
       items: items,
       total: total,
@@ -1128,13 +1125,9 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                             ),
                           ),
                     itemBuilder: (context, episode) {
-                      // 同一集被重复入库为多个条目时 id 不同,
-                      // 按 季+集号 兜底判定当前集。
-                      final isCurrent =
-                          episode.id == item.id ||
-                          (episode.indexNumber == item.indexNumber &&
-                              item.seasonId != null &&
-                              episode.seasonId == item.seasonId);
+                      // The merge inserts/replaces the exact current item.
+                      // Do not highlight every distinct version of its number.
+                      final isCurrent = episode.id == item.id;
                       return EpisodeThumbCard(
                         item: episode,
                         width: wideCardWidth,
@@ -1970,6 +1963,31 @@ List<EmbyItem> _dedupeById(Iterable<EmbyItem> items) {
     for (final item in items)
       if (seen.add(item.id)) item,
   ];
+}
+
+List<EmbyItem> _mergeCurrentEpisode(
+  Iterable<EmbyItem> entries,
+  EmbyItem current,
+) {
+  final items = _dedupeById(entries);
+  if (items.any((entry) => entry.id == current.id)) return items;
+  final equivalents = [
+    for (var i = 0; i < items.length; i++)
+      if (current.indexNumber != null &&
+          current.seasonId != null &&
+          current.seasonId!.isNotEmpty &&
+          items[i].seasonId == current.seasonId &&
+          items[i].indexNumber == current.indexNumber &&
+          (current.seriesId == null || items[i].seriesId == current.seriesId))
+        i,
+  ];
+  if (equivalents.length == 1) {
+    items[equivalents.single] = current;
+    return items;
+  }
+  // No unambiguous equivalent: preserve legitimate variants and unnumbered
+  // extras rather than discarding a different playable item.
+  return _sortedByIndex([...items, current]);
 }
 
 /// 按集号稳定排序:同号多版本保持原有相对顺序,无集号者排最后。

@@ -232,7 +232,7 @@ class PlayerController extends ChangeNotifier {
   Duration duration = Duration.zero;
   Duration buffer = Duration.zero;
 
-  /// mpv `cache-speed`,字节/秒。缓冲写满时为 0。
+  /// HTTP 代理的上游接收速度，字节/秒；本地缓存命中不计入，无下载时为 0。
   double cacheSpeedBytesPerSec = 0;
   DateTime _lastPlaybackUi = DateTime.fromMillisecondsSinceEpoch(0);
   PlayerErrorKind? error;

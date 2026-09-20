@@ -67,6 +67,8 @@ class _Session {
   bool hasVideo = true;
   bool paused = false;
   bool idle = true;
+  Duration demuxerBuffer = Duration.zero;
+  int bufferTicks = 0;
 }
 
 class MpvVideoBackend implements VideoBackend {
@@ -241,6 +243,12 @@ class MpvVideoBackend implements VideoBackend {
                 ? request.credentialHeaders
                 : request.headers,
             cache: byteCache,
+            // Session-owned media buffering is cleared on stop/dispose. This
+            // explicitly allows no-store media to use temporary disk space;
+            // reuse still requires upstream validation, with no account/session
+            // sharing. Keys, subtitles and manifests remain outside the cache.
+            sessionBuffering: true,
+            readAheadBytes: 512 * 1024 * 1024,
             dynamicSource: request.dynamicSource,
             onStreamChanged: (stream) {
               session.policyUpdate = session.policyUpdate
@@ -281,11 +289,19 @@ class MpvVideoBackend implements VideoBackend {
         session.speedTimer = Timer.periodic(const Duration(milliseconds: 250), (
           _,
         ) {
+          proxy.resumeAfterDiskRecovery();
           _emit(
             session,
             VideoEventKind.cacheSpeed,
             proxy.upstreamBytesPerSecond,
           );
+          if (++session.bufferTicks % 4 == 0) {
+            unawaited(
+              proxy.refreshTimeline(duration).then((_) {
+                if (_current(session)) _publishBuffer(session);
+              }),
+            );
+          }
         });
         if (url.scheme == 'http' || url.scheme == 'https') {
           url = proxy.register(url);
@@ -367,8 +383,8 @@ class MpvVideoBackend implements VideoBackend {
             }
           case 'demuxer-cache-time':
             if (value is num) {
-              buffer = _seconds(value);
-              _emit(session, VideoEventKind.buffer, buffer);
+              session.demuxerBuffer = _seconds(value);
+              _publishBuffer(session);
             }
           case 'cache-speed':
             // mpv includes loopback cache hits here, so it is not a network rate.
@@ -397,6 +413,14 @@ class MpvVideoBackend implements VideoBackend {
             }
         }
     }
+  }
+
+  void _publishBuffer(_Session session) {
+    buffer =
+        session.proxy?.bufferedEnd(position, session.demuxerBuffer) ??
+        session.demuxerBuffer;
+    if (duration > Duration.zero && buffer > duration) buffer = duration;
+    _emit(session, VideoEventKind.buffer, buffer);
   }
 
   Future<void> _loaded(_Session session) async {
@@ -493,6 +517,11 @@ class MpvVideoBackend implements VideoBackend {
   @override
   Future<void> seek(Duration position) async {
     final session = _active;
+    if (session != null) {
+      session.demuxerBuffer = position;
+      this.position = position;
+      _publishBuffer(session);
+    }
     final driver = _driver;
     session?.proxy?.cancelPendingReads();
     await driver.command([

@@ -58,10 +58,15 @@ class MediaContentRange {
 
 /// Private session cache: request headers are fixed per origin, never persisted.
 class MediaCachePolicy {
-  MediaCachePolicy(HttpHeaders headers, {DateTime? now}) {
+  MediaCachePolicy(
+    HttpHeaders headers, {
+    DateTime? now,
+    bool allowSessionBuffering = false,
+  }) {
     final current = now ?? DateTime.now();
     final control = headers.value('cache-control')?.toLowerCase() ?? '';
     final directives = control.split(',').map((s) => s.trim()).toList();
+    final noStore = directives.contains('no-store');
     final vary = headers.value('vary')?.toLowerCase().split(',') ?? [];
     // Unknown Vary fields are bypassed, including conditional/range fields.
     const fixedHeaders = {
@@ -72,7 +77,7 @@ class MediaCachePolicy {
       'host',
     };
     storable =
-        !directives.contains('no-store') &&
+        (!noStore || allowSessionBuffering) &&
         vary.every((name) => fixedHeaders.contains(name.trim())) &&
         (headers.value('content-encoding') ?? 'identity').toLowerCase() ==
             'identity';
@@ -104,7 +109,10 @@ class MediaCachePolicy {
         ).difference(date ?? current).inSeconds;
       } catch (_) {}
     }
-    if (directives.any((d) => d == 'no-cache' || d.startsWith('no-cache='))) {
+    // The playback-only opt-in permits temporary buffering, not a fresh HTTP
+    // cache entry. Every subsequent request must still validate its content.
+    if (noStore ||
+        directives.any((d) => d == 'no-cache' || d.startsWith('no-cache='))) {
       lifetime = 0;
     }
     final remaining = lifetime - (age > apparentAge ? age : apparentAge);

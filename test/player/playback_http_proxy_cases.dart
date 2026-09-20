@@ -9,6 +9,416 @@ import 'package:rillight/player/cache/session_byte_cache.dart';
 
 void main() {
   test(
+    'busy timeline snapshot does not shrink buffer or degrade disk',
+    () async {
+      final fixture = await _CacheFixture.open(
+        disk: true,
+        sessionBuffering: true,
+        readAheadBytes: 2 * 1024 * 1024,
+      );
+      fixture.body = 'x' * (2 * 1024 * 1024);
+      await fixture.read('bytes=0-2097151');
+      await fixture.settle();
+      const duration = Duration(seconds: 30);
+      await fixture.proxy.refreshTimeline(duration);
+      expect(
+        fixture.proxy.bufferedEnd(
+          const Duration(seconds: 5),
+          const Duration(seconds: 10),
+        ),
+        duration,
+      );
+      await fixture.cache.resize(
+        memoryBytes: 1024 * 1024,
+        pendingBytes: 0,
+        diskBytes: 64 * 1024 * 1024,
+      );
+      await fixture.proxy.refreshTimeline(duration);
+      expect(
+        fixture.proxy.bufferedEnd(
+          const Duration(seconds: 5),
+          const Duration(seconds: 10),
+        ),
+        duration,
+      );
+      expect(fixture.cache.diagnostics['degradation'], null);
+      await fixture.cache.close();
+      await fixture.proxy.refreshTimeline(duration);
+      expect(
+        fixture.proxy.bufferedEnd(
+          const Duration(seconds: 5),
+          const Duration(seconds: 10),
+        ),
+        const Duration(seconds: 10),
+      );
+    },
+  );
+
+  test(
+    'unsupported conditional ranges fall back before committing output',
+    () async {
+      final fixture = await _CacheFixture.open(
+        disk: true,
+        sessionBuffering: true,
+        readAheadBytes: 2 * 1024 * 1024,
+      );
+      fixture.body = 'x' * (2 * 1024 * 1024);
+      fixture.ignoreConditionalRange = true;
+      expect((await fixture.read('bytes=0-1048575')).$2, 'x' * 1024 * 1024);
+      expect(fixture.proxy.diagnostics['readAheadBypassedResources'], 1);
+    },
+  );
+
+  test('disconnect also cancels the cached-prefix gap producer', () async {
+    final fixture = await _CacheFixture.open();
+    fixture.body = 'x' * (8 * 1024 * 1024);
+    await fixture.read('bytes=0-262143');
+    await fixture.settle();
+    final before = fixture.proxy.upstreamBytes;
+    final client = HttpClient();
+    try {
+      final response = await (await client.getUrl(fixture.url)).close();
+      final first = Completer<void>();
+      response.listen((_) {
+        if (!first.isCompleted) first.complete();
+      }, onError: (Object _) {});
+      await first.future.timeout(const Duration(seconds: 3));
+      client.close(force: true);
+      final deadline = DateTime.now().add(const Duration(seconds: 3));
+      while (fixture.proxy.diagnostics['activeRequests'] != 0 &&
+          DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      expect(fixture.proxy.diagnostics['activeRequests'], 0);
+      expect(fixture.proxy.upstreamBytes - before, lessThan(2 * 1024 * 1024));
+    } finally {
+      client.close(force: true);
+    }
+  });
+
+  test(
+    'rotating signed redirect revalidates bytes instead of discarding disk',
+    () async {
+      final fixture = await _CacheFixture.open(
+        memoryBytes: 4,
+        disk: true,
+        sessionBuffering: true,
+      );
+      fixture.control = 'no-store';
+      fixture.redirectVersion = 1;
+      expect((await fixture.read('bytes=0-7')).$2, 'abcdefgh');
+      await fixture.settle();
+      fixture.redirectVersion = 2;
+      final before = fixture.proxy.upstreamBytes;
+      expect((await fixture.read('bytes=0-7')).$2, 'abcdefgh');
+      expect(fixture.proxy.upstreamBytes - before, 1);
+      expect(fixture.cache.diagnostics['diskHitBytes'], 8);
+      expect(fixture.cache.diagnostics['invalidations'], 0);
+      fixture.redirectVersion = 3;
+      fixture.etag = '"other-content"';
+      fixture.body = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+      expect((await fixture.read('bytes=0-7')).$2, 'ABCDEFGH');
+    },
+  );
+
+  test(
+    'HEAD failure validates a tiny range without discarding disk cache',
+    () async {
+      final fixture = await _CacheFixture.open(
+        memoryBytes: 4,
+        disk: true,
+        sessionBuffering: true,
+      );
+      fixture.control = 'no-store';
+      fixture.headStatus = 502;
+      expect((await fixture.read('bytes=0-7')).$2, 'abcdefgh');
+      await fixture.settle();
+      final before = fixture.proxy.upstreamBytes;
+      expect((await fixture.read('bytes=0-7')).$2, 'abcdefgh');
+      expect(fixture.proxy.upstreamBytes - before, 1);
+      expect(fixture.cache.diagnostics['diskHitBytes'], 8);
+      expect(fixture.cache.diagnostics['invalidations'], 0);
+      expect(fixture.methods, ['GET', 'HEAD', 'GET']);
+      expect(fixture.ranges.last, 'bytes=0-0');
+      fixture.etag = '"new-version"';
+      fixture.body = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+      expect((await fixture.read('bytes=0-7')).$2, 'ABCDEFGH');
+    },
+  );
+
+  test(
+    'read-ahead HTTP path serves disk bytes and does not redownload a seek',
+    () async {
+      final fixture = await _CacheFixture.open(
+        memoryBytes: 256 * 1024,
+        disk: true,
+        sessionBuffering: true,
+        readAheadBytes: 2 * 1024 * 1024,
+      );
+      fixture.body = 'x' * (8 * 1024 * 1024);
+      fixture.control = 'no-store';
+      expect(
+        (await fixture.read('bytes=0-4194303')).$2,
+        'x' * (4 * 1024 * 1024),
+      );
+      await fixture.settle();
+      final deadline = DateTime.now().add(const Duration(seconds: 3));
+      while (fixture.proxy.diagnostics['readAheadWorkerActive'] == true &&
+          DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      expect(fixture.proxy.diagnostics['readAheadWorkerActive'], false);
+      expect(
+        fixture.cache.diagnostics['diskBytes'],
+        greaterThan(4 * 1024 * 1024),
+      );
+      final before = fixture.proxy.upstreamBytes;
+      expect((await fixture.read('bytes=0-1048575')).$2, 'x' * 1024 * 1024);
+      expect(fixture.cache.diagnostics['diskHitBytes'], greaterThan(0));
+      expect(fixture.proxy.upstreamBytes, before);
+      final rangeCount = fixture.ranges.length;
+      expect(
+        (await fixture.read('bytes=2097152-3145727')).$2,
+        'x' * 1024 * 1024,
+      );
+      // The shifted window may prefetch new bytes beyond the original 4 MiB;
+      // it must not download the already-cached forward-seek target again.
+      for (final range in fixture.ranges.skip(rangeCount).whereType<String>()) {
+        expect(
+          int.parse(RegExp(r'^bytes=(\d+)-').firstMatch(range)![1]!),
+          greaterThanOrEqualTo(4 * 1024 * 1024),
+        );
+      }
+      await fixture.settle();
+      final settled = DateTime.now().add(const Duration(seconds: 3));
+      while (fixture.proxy.diagnostics['readAheadWorkerActive'] == true &&
+          DateTime.now().isBefore(settled)) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      final beforeBack = fixture.proxy.upstreamBytes;
+      expect(
+        (await fixture.read('bytes=1048576-2097151')).$2,
+        'x' * 1024 * 1024,
+      );
+      expect(fixture.proxy.upstreamBytes, beforeBack);
+    },
+  );
+
+  test(
+    'read-ahead revalidates changed content and bypasses unavailable disk',
+    () async {
+      final fixture = await _CacheFixture.open(
+        memoryBytes: 256 * 1024,
+        disk: true,
+        sessionBuffering: true,
+        readAheadBytes: 2 * 1024 * 1024,
+      );
+      fixture.body = 'a' * (4 * 1024 * 1024);
+      fixture.control = 'no-store';
+      expect((await fixture.read('bytes=0-1048575')).$2, 'a' * 1024 * 1024);
+      fixture.etag = '"changed"';
+      fixture.body = 'b' * (4 * 1024 * 1024);
+      expect((await fixture.read('bytes=0-1048575')).$2, 'b' * 1024 * 1024);
+      await fixture.proxy.close();
+      expect(fixture.cache.diagnostics['diskBytes'], 0);
+      final memoryOnly = await _CacheFixture.open(
+        sessionBuffering: true,
+        readAheadBytes: 2 * 1024 * 1024,
+      );
+      memoryOnly.body = 'c' * (2 * 1024 * 1024);
+      expect((await memoryOnly.read('bytes=0-1048575')).$2, 'c' * 1024 * 1024);
+      expect(memoryOnly.proxy.diagnostics['readAheadActive'], null);
+    },
+  );
+
+  test(
+    'disconnected player stops its upstream body instead of draining it',
+    () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final proxy = await PlaybackHttpProxy.create();
+      final client = HttpClient();
+      final release = Completer<void>();
+      server.listen((request) async {
+        request.response.contentLength = 32 * 1024 * 1024;
+        try {
+          request.response.add(List.filled(64 * 1024, 1));
+          await request.response.flush();
+          await release.future;
+          for (var i = 1; i < 512; i++) {
+            request.response.add(List.filled(64 * 1024, 1));
+            await request.response.flush();
+            await Future<void>.delayed(Duration.zero);
+          }
+        } catch (_) {
+        } finally {
+          try {
+            await request.response.close();
+          } catch (_) {}
+        }
+      });
+      try {
+        final response = await (await client.getUrl(
+          proxy.register(Uri.parse('http://127.0.0.1:${server.port}/media')),
+        )).close();
+        final first = Completer<void>();
+        response.listen((_) {
+          if (!first.isCompleted) first.complete();
+        }, onError: (Object _) {});
+        await first.future.timeout(const Duration(seconds: 3));
+        client.close(force: true);
+        release.complete();
+        final deadline = DateTime.now().add(const Duration(seconds: 3));
+        while (proxy.diagnostics['activeRequests'] != 0 &&
+            DateTime.now().isBefore(deadline)) {
+          await Future<void>.delayed(const Duration(milliseconds: 10));
+        }
+        expect(proxy.diagnostics['activeRequests'], 0);
+        expect(
+          proxy.upstreamBytes,
+          lessThan(8 * 1024 * 1024),
+          reason: 'a disconnected probe must not download the remaining movie',
+        );
+      } finally {
+        if (!release.isCompleted) release.complete();
+        client.close(force: true);
+        await proxy.close();
+        await server.close(force: true);
+      }
+    },
+  );
+
+  test('cache pressure bypasses caching and transport slots recover', () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final cache = await SessionByteCache.open(
+      memoryLimitBytes: 32 * 1024 * 1024,
+    );
+    final proxy = await PlaybackHttpProxy.create(cache: cache);
+    final client = HttpClient();
+    final release = Completer<void>();
+    server.listen((request) async {
+      final tail = request.uri.path == '/tail';
+      request.response.headers.set('etag', '"${request.uri.path}"');
+      request.response.headers.set('cache-control', 'max-age=600');
+      request.response.contentLength = tail ? 16 : 4 * 1024 * 1024;
+      try {
+        request.response.add(List.filled(tail ? 16 : 64 * 1024, 7));
+        await request.response.flush();
+        if (!tail) await release.future;
+      } catch (_) {
+      } finally {
+        try {
+          await request.response.close();
+        } catch (_) {}
+      }
+    });
+    Uri route(String path) =>
+        proxy.register(Uri.parse('http://127.0.0.1:${server.port}/$path'));
+    try {
+      for (var i = 0; i < 8; i++) {
+        final response = await (await client.getUrl(
+          route('movie$i'),
+        )).close().timeout(const Duration(seconds: 2));
+        expect(response.statusCode, 200);
+        final received = Completer<void>();
+        response.listen((bytes) {
+          if (!received.isCompleted) received.complete();
+        }, onError: (Object _) {});
+        await received.future.timeout(const Duration(seconds: 2));
+      }
+      expect(proxy.diagnostics['cacheWorkspaceBytes'], 3 * 1024 * 1024);
+      expect(
+        proxy.diagnostics['proxyInFlightPeakBytes'],
+        lessThanOrEqualTo(4 * 1024 * 1024),
+      );
+      final overloaded = await (await client.getUrl(
+        route('tail'),
+      )).close().timeout(const Duration(seconds: 2));
+      expect(overloaded.statusCode, HttpStatus.serviceUnavailable);
+      await overloaded.drain<void>();
+      proxy.cancelPendingReads();
+      final deadline = DateTime.now().add(const Duration(seconds: 2));
+      while (proxy.diagnostics['activeRequests'] != 0 &&
+          DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      expect(proxy.diagnostics['activeRequests'], 0);
+      expect(proxy.diagnostics['cacheWorkspaceBytes'], 0);
+      final tail = await (await client.getUrl(
+        route('tail'),
+      )).close().timeout(const Duration(seconds: 2));
+      expect(tail.statusCode, 200);
+      expect(
+        await tail.fold<int>(0, (total, bytes) => total + bytes.length),
+        16,
+      );
+    } finally {
+      release.complete();
+      client.close(force: true);
+      await proxy.close();
+      await server.close(force: true);
+    }
+  });
+
+  test('tail probe is not queued behind two open media responses', () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final proxy = await PlaybackHttpProxy.create();
+    final client = HttpClient();
+    final release = Completer<void>();
+    final opened = Completer<void>();
+    var streams = 0;
+    server.listen((request) async {
+      final tail = request.headers.value('range') == 'bytes=1048560-';
+      final start = tail ? 1048560 : 0;
+      request.response.statusCode = 206;
+      request.response.headers.set(
+        'content-range',
+        'bytes $start-1048575/1048576',
+      );
+      request.response.contentLength = 1048576 - start;
+      try {
+        request.response.add(List.filled(tail ? 16 : 64 * 1024, 7));
+        await request.response.flush();
+        if (!tail) {
+          if (++streams == 2) opened.complete();
+          await release.future;
+        }
+      } catch (_) {
+      } finally {
+        try {
+          await request.response.close();
+        } catch (_) {}
+      }
+    });
+    try {
+      final url = proxy.register(
+        Uri.parse('http://127.0.0.1:${server.port}/movie.mkv'),
+      );
+      for (var i = 0; i < 2; i++) {
+        final request = await client.getUrl(url);
+        request.headers.set('range', 'bytes=0-');
+        final response = await request.close();
+        response.listen((_) {}, onError: (Object _) {});
+      }
+      await opened.future;
+      final request = await client.getUrl(url);
+      request.headers.set('range', 'bytes=1048560-');
+      final response = await request.close().timeout(
+        const Duration(seconds: 2),
+      );
+      expect(response.statusCode, 206);
+      expect(
+        await response.fold<int>(0, (count, bytes) => count + bytes.length),
+        16,
+      );
+    } finally {
+      release.complete();
+      client.close(force: true);
+      await proxy.close();
+      await server.close(force: true);
+    }
+  });
+
+  test(
     'a wholly evicted range streams once instead of loading small gaps',
     () async {
       final fixture = await _CacheFixture.open(
@@ -369,6 +779,52 @@ void main() {
   });
 
   test(
+    'opt-in no-store session buffer writes disk and validates reuse',
+    () async {
+      final fixture = await _CacheFixture.open(
+        memoryBytes: 4,
+        disk: true,
+        sessionBuffering: true,
+      );
+      fixture.control = 'no-store, max-age=3600';
+      expect((await fixture.read('bytes=0-7')).$2, 'abcdefgh');
+      await fixture.settle();
+      expect(fixture.cache.diagnostics['diskBytes'], greaterThan(8));
+      final before = fixture.proxy.upstreamBytes;
+      expect((await fixture.read('bytes=0-7')).$2, 'abcdefgh');
+      expect(fixture.methods, ['GET', 'HEAD']);
+      expect(fixture.cache.diagnostics['diskHitBytes'], 8);
+      expect(fixture.proxy.upstreamBytes, before);
+      fixture.etag = '"changed"';
+      fixture.body = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+      expect((await fixture.read('bytes=0-7')).$2, 'ABCDEFGH');
+      expect(fixture.proxy.upstreamBytes, before + 8);
+      await fixture.proxy.close();
+      expect(fixture.cache.diagnostics['closed'], true);
+      expect(fixture.cache.diagnostics['diskBytes'], 0);
+    },
+  );
+
+  test(
+    'session buffering still rejects unknown Vary and unvalidated reuse',
+    () async {
+      final fixture = await _CacheFixture.open(sessionBuffering: true);
+      fixture.control = 'no-store, max-age=3600';
+      fixture.vary = '*';
+      await fixture.read('bytes=0-7');
+      await fixture.settle();
+      expect(fixture.cache.diagnostics['indexEntries'], 0);
+      fixture.vary = null;
+      fixture.etag = null;
+      await fixture.read('bytes=0-7');
+      final before = fixture.proxy.upstreamBytes;
+      fixture.body = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+      expect((await fixture.read('bytes=0-7')).$2, 'ABCDEFGH');
+      expect(fixture.proxy.upstreamBytes, before + 8);
+    },
+  );
+
+  test(
     'no-cache validates with HEAD 304 and transfers no duplicate body',
     () async {
       final fixture = await _CacheFixture.open();
@@ -693,6 +1149,9 @@ class _CacheFixture {
   String control = 'max-age=3600';
   String? vary;
   bool ignoreRange = false;
+  bool ignoreConditionalRange = false;
+  int? headStatus;
+  int? redirectVersion;
   Duration delay = Duration.zero;
   int requests = 0;
   final ranges = <String?>[];
@@ -701,6 +1160,8 @@ class _CacheFixture {
   static Future<_CacheFixture> open({
     int memoryBytes = 1024 * 1024,
     bool disk = false,
+    bool sessionBuffering = false,
+    int readAheadBytes = 0,
   }) async {
     final root = disk
         ? await Directory.systemTemp.createTemp('rillight-proxy-test-')
@@ -717,6 +1178,8 @@ class _CacheFixture {
     fixture.proxy = await PlaybackHttpProxy.create(
       origin: fixture.origin,
       cache: cache,
+      sessionBuffering: sessionBuffering,
+      readAheadBytes: readAheadBytes,
     );
     addTearDown(() async {
       fixture.client.close(force: true);
@@ -750,6 +1213,17 @@ class _CacheFixture {
     ranges.add(request.headers.value('range'));
     if (delay != Duration.zero) await Future<void>.delayed(delay);
     final output = request.response;
+    if (request.uri.path == '/video' && redirectVersion != null) {
+      output.statusCode = 307;
+      output.headers.set('location', '/content?version=$redirectVersion');
+      await output.close();
+      return;
+    }
+    if (request.method == 'HEAD' && headStatus != null) {
+      output.statusCode = headStatus!;
+      await output.close();
+      return;
+    }
     output.headers.set('cache-control', control);
     if (etag != null) output.headers.set('etag', etag!);
     if (vary != null) output.headers.set('vary', vary!);
@@ -763,7 +1237,10 @@ class _CacheFixture {
     ).firstMatch(request.headers.value('range') ?? '');
     final ifRange = request.headers.value('if-range');
     var bytes = utf8.encode(body);
-    if (!ignoreRange && range != null && (ifRange == null || ifRange == etag)) {
+    if (!ignoreRange &&
+        !(ignoreConditionalRange && ifRange != null) &&
+        range != null &&
+        (ifRange == null || ifRange == etag)) {
       final start = int.parse(range[1]!);
       final end = int.tryParse(range[2]!) ?? bytes.length - 1;
       output.statusCode = 206;

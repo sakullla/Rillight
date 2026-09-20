@@ -39,6 +39,7 @@ class DiskCacheSession {
   Future<void>? _closing;
   final Map<String, Object?> _stats = {};
   final _operations = <Future<Map<String, Object?>>>{};
+  Future<Map<String, Object?>>? _timedOutOperation;
   Map<String, Object?> get diagnostics => Map.unmodifiable(_stats);
 
   /// Finishes only when timed-out work has actually released its buffers.
@@ -46,13 +47,21 @@ class DiskCacheSession {
     await Future.wait(_operations);
   }
 
-  Future<String?> put(Uint8List bytes) async {
-    final result = await _call('put', {'bytes': bytes});
+  Future<String?> put(
+    Uint8List bytes, {
+    void Function(String?)? onPublished,
+  }) async {
+    final result = await _call('put', {
+      'bytes': bytes,
+    }, onSettled: (result) => onPublished?.call(result['token'] as String?));
     return result?['token'] as String?;
   }
 
-  Future<Uint8List?> read(String token) async {
+  Future<Uint8List?> read(String token, {void Function()? onMissing}) async {
     final result = await _call('read', {'token': token});
+    if (result != null && result['error'] == null && result['bytes'] == null) {
+      onMissing?.call();
+    }
     return result?['bytes'] as Uint8List?;
   }
 
@@ -63,6 +72,17 @@ class DiskCacheSession {
   Future<bool> hasAny(List<String> tokens) async {
     final result = await _call('available', {'tokens': tokens});
     return result?['available'] == true;
+  }
+
+  Future<Set<String>?> availableTokens(List<String> tokens) async {
+    final result = await _call('available', {
+      'tokens': tokens,
+      'allResults': true,
+    }, optional: true);
+    if (result == null || result['error'] != null || result['busy'] == true) {
+      return null;
+    }
+    return Set<String>.from(result['present'] as List? ?? const []);
   }
 
   /// Verifies and protects a complete immutable range without retaining its
@@ -107,34 +127,74 @@ class DiskCacheSession {
 
   Future<Map<String, Object?>?> _call(
     String operation,
-    Map<String, Object?> args,
-  ) async {
+    Map<String, Object?> args, {
+    bool optional = false,
+    void Function(Map<String, Object?>)? onSettled,
+  }) async {
     if (_closed || degradation != null) return null;
+    Future<Map<String, Object?>>? operationFuture;
     try {
-      final operationFuture = _coordinator.request({
+      operationFuture = _coordinator.request({
         'op': operation,
         'id': _id,
         ...args,
+        'optional': optional,
       });
       _operations.add(operationFuture);
       unawaited(
-        operationFuture.then((_) {
-          _operations.remove(operationFuture);
-        }),
+        operationFuture.then(
+          (result) {
+            _operations.remove(operationFuture);
+            onSettled?.call(result);
+            if (!_closed &&
+                identical(_timedOutOperation, operationFuture) &&
+                degradation == 'disk-timeout') {
+              final stats = result['stats'];
+              if (stats is Map) _stats.addAll(Map<String, Object?>.from(stats));
+              _timedOutOperation = null;
+              if (result['error'] == null) {
+                degradation = null;
+                _stats.remove('degradationOperation');
+                _stats['diskRecoveries'] =
+                    (_stats['diskRecoveries'] as int? ?? 0) + 1;
+              } else {
+                degradation = result['error'] as String;
+              }
+            }
+          },
+          onError: (Object _, StackTrace _) {
+            _operations.remove(operationFuture);
+            if (!_closed && identical(_timedOutOperation, operationFuture)) {
+              _timedOutOperation = null;
+              degradation = 'disk-unavailable';
+            }
+          },
+        ),
       );
       final result = await operationFuture.timeout(_timeout);
       final stats = result['stats'];
       if (stats is Map) _stats.addAll(Map<String, Object?>.from(stats));
-      if (result['error'] != null) degradation = result['error'] as String;
+      if (!optional && result['error'] != null) {
+        degradation = result['error'] as String;
+        _stats['degradationOperation'] = operation;
+      }
       return result;
     } on TimeoutException {
       // Do not kill a filesystem operation or refund its reservation. The
       // coordinator retains the global lock until it stops, and close is queued
       // behind it. The media path immediately continues with bounded memory.
-      degradation = 'disk-timeout';
+      if (!optional) {
+        degradation = 'disk-timeout';
+        _timedOutOperation = operationFuture;
+        _stats['diskTimeouts'] = (_stats['diskTimeouts'] as int? ?? 0) + 1;
+        _stats['degradationOperation'] = operation;
+      }
       return null;
     } catch (_) {
-      degradation = 'disk-unavailable';
+      if (!optional) {
+        degradation = 'disk-unavailable';
+        _stats['degradationOperation'] = operation;
+      }
       return null;
     }
   }
@@ -302,6 +362,7 @@ class _DiskStore {
           lock.lockSync(FileLock.exclusive);
           locked = true;
         } on FileSystemException {
+          if (message['optional'] == true) return {'busy': true};
           if (DateTime.now().isAfter(deadline)) {
             return {'error': 'disk-lock-timeout'};
           }
@@ -340,6 +401,20 @@ class _DiskStore {
           final lease = _leases[id];
           final tokens = List<String>.from(message['tokens'] as List);
           if (lease == null || tokens.length > 8192) return {};
+          final allResults = message['allResults'] == true;
+          if (allResults) {
+            // Published blocks are immutable and their names encode identity.
+            // One directory inventory avoids thousands of synchronous stat
+            // calls for an optional UI refresh. Actual reads verify size/CRC.
+            final names = _files(lease.directory).map(_name).toSet();
+            return {
+              'present': [
+                for (final token in tokens)
+                  if (_blockPattern.hasMatch(token) && names.contains(token))
+                    token,
+              ],
+            };
+          }
           for (final token in tokens) {
             if (!_blockPattern.hasMatch(token)) continue;
             final file = File(_join(lease.directory.path, token));

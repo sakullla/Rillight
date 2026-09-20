@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'disk_cache_coordinator.dart';
+import 'matroska_cache_index.dart';
 
 enum CacheReadSource { memory, disk }
 
@@ -238,11 +239,26 @@ class SessionByteCache {
     if (_pendingBytes + pendingCost > pendingLimitBytes) return true;
     _pendingBytes += pendingCost;
     if (_pendingBytes > _pendingPeak) _pendingPeak = _pendingBytes;
+    final publication = Completer<void>();
+    entry.publication = publication.future;
     try {
-      final token = await disk.put(bytes);
-      if (!_closed && identical(_entries[key], entry)) entry.diskToken = token;
+      final token = await disk.put(
+        bytes,
+        onPublished: (token) {
+          // A bounded wait can expire while the actual write still succeeds.
+          // Publish that late result only into the same live representation.
+          if (!_closed && identical(_entries[key], entry)) {
+            entry.diskToken = token;
+          }
+        },
+      );
+      if (token != null && !_closed && identical(_entries[key], entry)) {
+        entry.diskToken = token;
+      }
     } finally {
       _releasePending(pendingCost);
+      entry.publication = null;
+      publication.complete();
     }
     return true;
   }
@@ -254,6 +270,7 @@ class SessionByteCache {
     required int generation,
     required int offset,
     int maxLength = maxBlockBytes,
+    bool countHit = true,
   }) async {
     if (_closed || maxLength <= 0) return null;
     _BlockKey? key;
@@ -273,6 +290,13 @@ class SessionByteCache {
     if (key == null || entry == null) return null;
     var bytes = _memory.remove(key);
     var source = CacheReadSource.memory;
+    var confirmedMissing = entry.diskToken == null && entry.publication == null;
+    if (bytes == null && entry.diskToken == null && entry.publication != null) {
+      // A concurrent cache read can evict the RAM copy while its disk write is
+      // still pending. Do not forget that entry and orphan the published block.
+      await entry.publication;
+      if (_closed || !identical(_entries[key], entry)) return null;
+    }
     if (bytes != null) {
       _memory[key] = bytes;
     } else if (entry.diskToken != null) {
@@ -281,7 +305,10 @@ class SessionByteCache {
       _pendingBytes += pendingCost;
       if (_pendingBytes > _pendingPeak) _pendingPeak = _pendingBytes;
       try {
-        bytes = await _disk?.read(entry.diskToken!);
+        bytes = await _disk?.read(
+          entry.diskToken!,
+          onMissing: () => confirmedMissing = true,
+        );
       } finally {
         _releasePending(pendingCost);
       }
@@ -290,7 +317,9 @@ class SessionByteCache {
       if (bytes != null) _retain(key, bytes);
     }
     if (bytes == null) {
-      _forget(key);
+      if (confirmedMissing && _disk?.degradation != 'disk-timeout') {
+        _forget(key);
+      }
       return null;
     }
     _entries.remove(key);
@@ -298,12 +327,92 @@ class SessionByteCache {
     final start = offset - key.offset;
     final end = (start + maxLength).clamp(start, bytes.length);
     final result = Uint8List.fromList(Uint8List.sublistView(bytes, start, end));
-    if (source == CacheReadSource.memory) {
+    if (countHit && source == CacheReadSource.memory) {
       _memoryHits += result.length;
-    } else {
+    } else if (countHit) {
       _diskHits += result.length;
     }
     return CacheRead(offset, result, source);
+  }
+
+  /// A physical availability snapshot, not a checksum verification. Null means
+  /// the optional query is busy; it must not be mistaken for lost cache data.
+  Future<List<CachedByteRange>?> availableRanges({
+    required String resource,
+    required int generation,
+  }) async {
+    if (_closed) return const [];
+    if (diagnostics['degradation'] == 'disk-timeout') return null;
+    if (diagnostics['degradation'] != null) return const [];
+    final entries = _entries.entries
+        .where(
+          (entry) =>
+              entry.key.resource == resource &&
+              entry.key.generation == generation,
+        )
+        .toList();
+    final tokens = entries
+        .map((entry) => entry.value.diskToken)
+        .whereType<String>()
+        .toSet();
+    final cost = tokens.length * 128;
+    if (_pendingBytes + cost > pendingLimitBytes) return null;
+    _pendingBytes += cost;
+    if (_pendingBytes > _pendingPeak) _pendingPeak = _pendingBytes;
+    Set<String>? present;
+    try {
+      present = tokens.isEmpty
+          ? {}
+          : await _disk?.availableTokens(tokens.toList());
+    } finally {
+      // Optional queries may time out without degrading the disk. Keep their
+      // reservation until outstanding filesystem work actually settles.
+      final disk = _disk;
+      if (disk != null) {
+        unawaited(disk.settled.then((_) => _pendingBytes -= cost));
+      } else {
+        _pendingBytes -= cost;
+      }
+    }
+    if (_closed) return const [];
+    if (diagnostics['degradation'] == 'disk-timeout') return null;
+    if (diagnostics['degradation'] != null) return const [];
+    if (present == null) return null;
+    if (entries.any(
+      (entry) =>
+          identical(_entries[entry.key], entry.value) &&
+          !_memory.containsKey(entry.key) &&
+          entry.value.diskToken != null &&
+          !tokens.contains(entry.value.diskToken),
+    )) {
+      return null;
+    }
+    final ranges = [
+      for (final entry in entries)
+        if (identical(_entries[entry.key], entry.value) &&
+            (_memory.containsKey(entry.key) ||
+                entry.value.publication != null ||
+                present.contains(entry.value.diskToken)))
+          CachedByteRange(
+            entry.key.offset,
+            entry.key.offset + entry.value.length,
+          ),
+    ]..sort((a, b) => a.start.compareTo(b.start));
+    final merged = <CachedByteRange>[];
+    for (final range in ranges) {
+      if (merged.isNotEmpty && range.start <= merged.last.end) {
+        final previous = merged.removeLast();
+        merged.add(
+          CachedByteRange(
+            previous.start,
+            range.end > previous.end ? range.end : previous.end,
+          ),
+        );
+      } else {
+        merged.add(range);
+      }
+    }
+    return merged;
   }
 
   /// The next possible hit lets the proxy limit an upstream gap request.
@@ -342,7 +451,9 @@ class SessionByteCache {
             entry.key.generation == generation &&
             entry.key.offset <= position &&
             entry.key.offset + entry.value.length > coveredUntil &&
-            (_memory.containsKey(entry.key) || entry.value.diskToken != null)) {
+            (_memory.containsKey(entry.key) ||
+                (entry.value.diskToken != null && _disk?.degradation == null) ||
+                entry.value.publication != null)) {
           coveredUntil = entry.key.offset + entry.value.length;
         }
       }
@@ -548,6 +659,7 @@ class _Entry {
   _Entry(this.length);
   final int length;
   String? diskToken;
+  Future<void>? publication;
 }
 
 class _BlockKey {
