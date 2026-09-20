@@ -180,7 +180,7 @@ void main() {
           resource: 'x',
           generation: 1,
           offset: 0,
-          bytes: Uint8List(5),
+          bytes: Uint8List(SessionByteCache.maxBlockBytes + 1),
         ),
         isFalse,
       );
@@ -277,6 +277,117 @@ void main() {
     }
   }, timeout: const Timeout(Duration(seconds: 30)));
 
+  test(
+    'closing under a foreign lock releases ownership for later reclamation',
+    () async {
+      final first = await open(memory: 0, disk: 800);
+      final second = await open(memory: 0, disk: 4096);
+      await put(first, 0, List.filled(300, 1));
+      await put(second, 0, List.filled(300, 2));
+      final locker = await _Locker.start(root);
+      try {
+        await first.close();
+        expect(first.diagnostics['cleanup'], 'pending');
+      } finally {
+        await locker.stop();
+      }
+      // The surviving coordinator must no longer retain the departed session's
+      // lease or its lower snapshot. Its next operation reclaims those bytes.
+      await put(second, 300, List.filled(900, 3));
+      expect(root.listSync().whereType<Directory>().length, 1);
+      expect(
+        (await read(second, 300, length: 900))?.bytes,
+        List.filled(900, 3),
+      );
+      expect(second.diagnostics['diskLimitBytes'], 4096);
+    },
+  );
+
+  test(
+    'damaged ownership records are preserved and do not poison valid sessions',
+    () async {
+      final cache = await open(memory: 0, disk: 4096);
+      for (final entry in {
+        'a': '',
+        'b': '{',
+        'c': '{"format":false}',
+      }.entries) {
+        final directory = Directory('${root.path}/${entry.key * 32}')
+          ..createSync();
+        File('${directory.path}/owner.json').writeAsStringSync(entry.value);
+        File(
+          '${directory.path}/preserve.bin',
+        ).writeAsBytesSync(List.filled(100, 9));
+      }
+      final second = await open(memory: 0, disk: 4096);
+      expect(second.diagnostics['degradation'], isNull);
+      await put(cache, 0, [1, 2, 3]);
+      expect((await read(cache, 0))?.bytes, [1, 2, 3]);
+      expect(cache.diagnostics['diskBytes'], _actualBytes(root));
+      await cache.close();
+      await second.close();
+      expect(cache.diagnostics['cleanup'], 'complete');
+      expect(second.diagnostics['cleanup'], 'complete');
+      expect(root.listSync().whereType<Directory>().length, 3);
+      expect(
+        File('${root.path}/${'b' * 32}/owner.json').readAsStringSync(),
+        '{',
+      );
+    },
+  );
+
+  test(
+    'timed-out full disk queue still accepts fresh bounded memory data',
+    () async {
+      const mib = 1024 * 1024;
+      final cache = await SessionByteCache.open(
+        root: root,
+        memoryLimitBytes: mib,
+        diskLimitBytes: 16 * mib,
+        pendingLimitBytes: 8 * mib,
+        diskTimeout: const Duration(milliseconds: 50),
+      );
+      caches.add(cache);
+      expect(cache.diagnostics['degradation'], isNull);
+      final locker = await _Locker.start(root);
+      try {
+        await Future.wait(
+          List.generate(
+            4,
+            (i) => cache.put(
+              resource: 'queue',
+              generation: 1,
+              offset: i * mib,
+              bytes: Uint8List(mib),
+            ),
+          ),
+        );
+        expect(cache.diagnostics['degradation'], 'disk-timeout');
+        expect(cache.diagnostics['pendingBytes'], 8 * mib);
+        expect(
+          await cache.put(
+            resource: 'latest',
+            generation: 1,
+            offset: 0,
+            bytes: Uint8List.fromList([7, 8, 9]),
+          ),
+          isTrue,
+        );
+        final hit = await cache.read(
+          resource: 'latest',
+          generation: 1,
+          offset: 0,
+        );
+        expect(hit?.bytes, [7, 8, 9]);
+        expect(hit?.source, CacheReadSource.memory);
+        expect(cache.diagnostics['memoryPeakBytes'], lessThanOrEqualTo(mib));
+      } finally {
+        await locker.stop();
+      }
+      await cache.close();
+    },
+  );
+
   test('simultaneous real writers stay within shared physical quota', () async {
     final first = await _Child.start(root, 4096);
     final second = await _Child.start(root, 4096);
@@ -318,6 +429,35 @@ String get _dart {
   final executable = File(Platform.resolvedExecutable);
   if (!executable.path.contains('flutter_tester')) return executable.path;
   return '${executable.parent.path}/../../../dart-sdk/bin/dart${Platform.isWindows ? '.exe' : ''}';
+}
+
+class _Locker {
+  _Locker(this.process, this.output);
+  final Process process;
+  final StreamIterator<String> output;
+
+  static Future<_Locker> start(Directory root) async {
+    final process = await Process.start(_dart, [
+      'test/player/cache/cache_process_fixture.dart',
+      'lock',
+      root.path,
+    ]);
+    final output = StreamIterator(
+      process.stdout.transform(utf8.decoder).transform(const LineSplitter()),
+    );
+    process.stderr.drain<void>();
+    if (!await output.moveNext().timeout(const Duration(seconds: 15))) {
+      throw StateError('Lock child did not start');
+    }
+    return _Locker(process, output);
+  }
+
+  Future<void> stop() async {
+    process.stdin.writeln('release');
+    await process.stdin.flush();
+    await process.exitCode.timeout(const Duration(seconds: 5));
+    await output.cancel();
+  }
 }
 
 class _Child {

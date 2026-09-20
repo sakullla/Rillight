@@ -178,6 +178,16 @@ void _diskMain(List<Object> startup) {
     } catch (_) {
       result = {'error': 'disk-io'};
     }
+    if (message['op'] == 'close') {
+      // Even when the quota lock is unavailable, surrender the lifecycle lock.
+      // All earlier operations have finished in this serialized worker. Bytes
+      // stay charged on disk until the next lock holder actually reclaims them.
+      try {
+        store.abandon(message['id'] as String);
+      } catch (_) {
+        result = {'error': 'disk-close'};
+      }
+    }
     responses.send([envelope[0], result]);
   });
 }
@@ -274,7 +284,7 @@ class _DiskStore {
     root.createSync(recursive: true);
   }
 
-  List<Directory> _sessions() {
+  List<Directory> _candidateDirectories() {
     final result = <Directory>[];
     var scanned = 0;
     for (final entity in root.listSync(followLinks: false)) {
@@ -284,19 +294,38 @@ class _DiskStore {
       if (entity is! Directory || !_sessionPattern.hasMatch(_name(entity))) {
         continue;
       }
-      final owner = File(_join(entity.path, 'owner.json'));
-      if (FileSystemEntity.typeSync(owner.path, followLinks: false) !=
-          FileSystemEntityType.file) {
-        continue;
-      }
-      if (owner.lengthSync() > 256) continue;
-      final data = jsonDecode(owner.readAsStringSync());
-      if (data is Map && data['format'] == _marker && data['limit'] is int) {
-        result.add(entity);
-      }
+      result.add(entity);
     }
     return result;
   }
+
+  Map<String, Object?>? _metadata(Directory directory) {
+    try {
+      final owner = File(_join(directory.path, 'owner.json'));
+      if (FileSystemEntity.typeSync(owner.path, followLinks: false) !=
+          FileSystemEntityType.file) {
+        return null;
+      }
+      if (owner.lengthSync() > 256) return null;
+      final data = jsonDecode(owner.readAsStringSync());
+      if (data is Map &&
+          data['format'] == _marker &&
+          data['limit'] is int &&
+          (data['limit'] as int) >= 0) {
+        return Map<String, Object?>.from(data);
+      }
+    } on FormatException {
+      // A partially published or damaged ownership record is not authority to
+      // delete its directory, nor a reason to reject unrelated valid sessions.
+      return null;
+    } on FileSystemException {
+      return null;
+    }
+    return null;
+  }
+
+  List<Directory> _sessions() =>
+      _candidateDirectories().where((dir) => _metadata(dir) != null).toList();
 
   List<File> _files(Directory directory) {
     final result = <File>[];
@@ -310,16 +339,15 @@ class _DiskStore {
     return result;
   }
 
-  int _usage() => _sessions().fold(
+  // Unknown ownership prevents deletion, but does not make occupied bytes free.
+  int _usage() => _candidateDirectories().fold(
     0,
     (sum, dir) => sum + _files(dir).fold(0, (n, file) => n + file.lengthSync()),
   );
 
   int _limit() => _sessions().fold(1 << 62, (limit, dir) {
-    final metadata =
-        jsonDecode(File(_join(dir.path, 'owner.json')).readAsStringSync())
-            as Map;
-    return min(limit, metadata['limit'] as int);
+    final metadata = _metadata(dir);
+    return metadata == null ? limit : min(limit, metadata['limit'] as int);
   });
 
   void _reap() {
@@ -363,9 +391,9 @@ class _DiskStore {
     ).openSync(mode: FileMode.append);
     try {
       lock.lockSync(FileLock.exclusive);
-      File(
-        _join(directory.path, 'owner.json'),
-      ).writeAsBytesSync(metadata, flush: true);
+      final pendingOwner = File(_join(directory.path, 'owner.pending'));
+      pendingOwner.writeAsBytesSync(metadata, flush: true);
+      pendingOwner.renameSync(_join(directory.path, 'owner.json'));
       _leases[id] = _Lease(directory, lock, limit, sessionLimit);
     } catch (_) {
       lock.closeSync();
@@ -475,6 +503,16 @@ class _DiskStore {
     }
     _removeShell(lease.directory);
     return {'ok': !lease.directory.existsSync(), 'stats': _stats()};
+  }
+
+  void abandon(String id) {
+    final lease = _leases.remove(id);
+    if (lease == null) return;
+    try {
+      lease.lock.unlockSync();
+    } finally {
+      lease.lock.closeSync();
+    }
   }
 
   void _removeData(Directory directory) {

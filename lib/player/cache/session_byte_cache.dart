@@ -113,8 +113,7 @@ class SessionByteCache {
         offset < 0 ||
         resource.length > 1024 ||
         bytes.isEmpty ||
-        bytes.length > maxBlockBytes ||
-        _pendingBytes + bytes.length > pendingLimitBytes) {
+        bytes.length > maxBlockBytes) {
       return false;
     }
     final key = _BlockKey(resource, generation, offset);
