@@ -482,7 +482,6 @@ class MediaImageCache {
   final Map<String, Future<Uint8List?>> _inflight = {};
   int _activeFetches = 0;
   final List<Completer<void>> _waiters = [];
-  DateTime _scrollUntil = DateTime.fromMillisecondsSinceEpoch(0);
   Timer? _scrollIdleTimer;
   final List<Completer<void>> _scrollIdleWaiters = [];
   final Map<String, Uint8List> _pendingDiskWrites = {};
@@ -526,13 +525,15 @@ class MediaImageCache {
   }
 
   /// 货架/网格正在滚:推迟未命中加载与磁盘写入。
+  ///
+  /// 忙碌窗口只跟 [Timer] 走。墙钟截止时间在 FakeAsync 测试里几乎不动,
+  /// 按剩余墙钟再排 Timer 会在 `pumpAndSettle` 之后留下 pending timer。
   void markScrollActivity() {
-    _scrollUntil = clock().add(defaultScrollIdle);
     _scrollIdleTimer?.cancel();
     _scrollIdleTimer = Timer(defaultScrollIdle, _completeScrollIdleIfQuiet);
   }
 
-  bool get isScrollBusy => clock().isBefore(_scrollUntil);
+  bool get isScrollBusy => _scrollIdleTimer != null;
 
   Future<void> waitForScrollIdle() async {
     if (!isScrollBusy) {
@@ -545,21 +546,12 @@ class MediaImageCache {
 
   void _completeScrollIdleIfQuiet() {
     _scrollIdleTimer = null;
-    if (isScrollBusy) {
-      final wait = _scrollUntil.difference(clock());
-      _scrollIdleTimer = Timer(
-        wait.isNegative || wait == Duration.zero ? defaultScrollIdle : wait,
-        _completeScrollIdleIfQuiet,
-      );
-      return;
-    }
     _releaseScrollIdleWaiters();
   }
 
   void _resetScrollIdle() {
     _scrollIdleTimer?.cancel();
     _scrollIdleTimer = null;
-    _scrollUntil = DateTime.fromMillisecondsSinceEpoch(0);
     _releaseScrollIdleWaiters();
   }
 

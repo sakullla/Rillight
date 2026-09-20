@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:fake_async/fake_async.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -618,6 +619,16 @@ void main() {
     expect(MediaImageCache.instance.isScrollBusy, isFalse);
   });
 
+  test('scroll idle follows the timer when wall clock is behind', () {
+    FakeAsync().run((async) {
+      MediaImageCache.instance.markScrollActivity();
+      expect(MediaImageCache.instance.isScrollBusy, isTrue);
+      async.elapse(MediaImageCache.defaultScrollIdle);
+      expect(MediaImageCache.instance.isScrollBusy, isFalse);
+      expect(async.pendingTimers, isEmpty);
+    });
+  });
+
   test('disk writes wait until scrolling stops', () async {
     final disk = _FakeDiskStore();
     MediaImageCache.instance.debugSetDiskStore(disk);
@@ -655,7 +666,8 @@ void main() {
     await tester.drag(find.byType(ListView), const Offset(0, -120));
     await tester.pump();
     expect(MediaImageCache.instance.isScrollBusy, isTrue);
-    MediaImage.debugResetCacheConfiguration();
+    await tester.pump(MediaImageCache.defaultScrollIdle);
+    expect(MediaImageCache.instance.isScrollBusy, isFalse);
   });
 
   testWidgets('uncached posters wait for scroll idle before fetching', (
