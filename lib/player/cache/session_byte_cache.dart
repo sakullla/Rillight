@@ -224,6 +224,33 @@ class SessionByteCache {
     return next;
   }
 
+  /// A planning hint only: another process may evict a disk block after this
+  /// check. Consumers still validate each read and must handle a miss.
+  int? firstMissingOffset({
+    required String resource,
+    required int generation,
+    required int offset,
+    required int length,
+  }) {
+    var position = offset;
+    final end = offset + length;
+    while (position < end) {
+      var coveredUntil = position;
+      for (final entry in _entries.entries) {
+        if (entry.key.resource == resource &&
+            entry.key.generation == generation &&
+            entry.key.offset <= position &&
+            entry.key.offset + entry.value.length > coveredUntil &&
+            (_memory.containsKey(entry.key) || entry.value.diskToken != null)) {
+          coveredUntil = entry.key.offset + entry.value.length;
+        }
+      }
+      if (coveredUntil == position) return position;
+      position = coveredUntil;
+    }
+    return null;
+  }
+
   void invalidate(String resource, {int? generation}) {
     final keys = _entries.keys.where(
       (key) =>
