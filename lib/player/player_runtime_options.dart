@@ -189,8 +189,20 @@ class PlayerDiskCache {
       }
       return Directory('$validation/cache/session-v1');
     }
+    final temporary = Directory.systemTemp;
+    var base = temporary.path;
+    try {
+      // The OS temporary base is trusted (for example /var -> /private/var on
+      // macOS). Resolve only that base, before appending our owned namespace.
+      // Links inserted in rillight-player-cache/session-v1 must still be rejected
+      // by the disk coordinator, rather than silently followed here.
+      base = temporary.resolveSymbolicLinksSync();
+    } on FileSystemException {
+      // Preserve the ordinary bounded disk-unavailable fallback when the system
+      // directory cannot be resolved. Do not make cache failure an open failure.
+    }
     return Directory(
-      '${Directory.systemTemp.path}'
+      '$base'
       '${Platform.pathSeparator}rillight-player-cache/session-v1',
     );
   }

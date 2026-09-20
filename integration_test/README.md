@@ -118,6 +118,17 @@ at most 1 MiB (256 KiB for conservative content). This avoids exhausting 8192
 file/index slots on 64 KiB socket fragments. Metadata and read-protection files
 also consume quota/slots. No next-episode fetch, offline download or cross-session
 reuse is added. The new `session-v1` root does not delete unowned legacy mpv files.
+Only the trusted OS temporary base is canonicalized before appending that
+namespace, so system aliases such as macOS `/var` remain usable. Links in either
+`rillight-player-cache` or `session-v1` are still rejected; regression tests verify
+disk hits and owned cleanup through a linked system base, and memory fallback
+without modifying a linked cache target.
+
+Upstream throughput counts response bytes delivered by Dart's HTTP client.
+Requests prefer identity encoding; if an upstream nevertheless sends gzip,
+automatic decompression means the counter measures decoded response body bytes,
+not encoded wire bytes. Such compressed bodies bypass the byte-range cache;
+local memory/disk hits remain excluded from the network counter.
 
 ### Reproduce transport and storage measurements
 

@@ -373,11 +373,19 @@ class _DiskStore {
     // Never follow a symlink in the configured root or its ancestors.
     var current = root.absolute;
     while (true) {
-      if (FileSystemEntity.typeSync(current.path, followLinks: false) ==
+      final parent = current.parent;
+      var checkedPath = current.path;
+      // A trailing separator asks the OS to resolve a directory link even for
+      // lstat/typeSync(followLinks: false). Directory URIs introduce that suffix.
+      // Keep the separator on filesystem roots themselves ("/", "C:\\").
+      if (parent.path != current.path &&
+          (checkedPath.endsWith('/') || checkedPath.endsWith('\\'))) {
+        checkedPath = checkedPath.substring(0, checkedPath.length - 1);
+      }
+      if (FileSystemEntity.typeSync(checkedPath, followLinks: false) ==
           FileSystemEntityType.link) {
         throw const FileSystemException('Linked cache root');
       }
-      final parent = current.parent;
       if (parent.path == current.path) break;
       current = parent;
     }
