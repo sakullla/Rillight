@@ -56,6 +56,44 @@ class DiskCacheSession {
     return result?['bytes'] as Uint8List?;
   }
 
+  /// Verifies and protects a complete immutable range without retaining its
+  /// media bytes in RAM. Pin metadata is charged to the ordinary disk quota.
+  Future<String?> protect(List<String> tokens) async {
+    final protection = _nonce();
+    final result = await _call('protect', {
+      'tokens': tokens,
+      'protection': protection,
+    });
+    if (result?['ok'] == true) return protection;
+    // Also queued after a timed-out operation: a late successful pin must not
+    // survive an abandoned acquisition, even after the session degraded.
+    await releaseProtection(protection);
+    return null;
+  }
+
+  Future<void> releaseProtection(String protection) async {
+    if (_closed) return;
+    final operation = _coordinator.request({
+      'op': 'unprotect',
+      'id': _id,
+      'protection': protection,
+    });
+    _operations.add(operation);
+    unawaited(
+      operation.then(
+        (_) {
+          _operations.remove(operation);
+        },
+        onError: (Object _) {
+          _operations.remove(operation);
+        },
+      ),
+    );
+    try {
+      await operation.timeout(_timeout);
+    } catch (_) {}
+  }
+
   Future<Map<String, Object?>?> _call(
     String operation,
     Map<String, Object?> args,
@@ -196,6 +234,7 @@ const _marker = 'rillight-session-byte-cache-v1';
 final _sessionPattern = RegExp(r'^[a-f0-9]{32}$');
 final _blockPattern = RegExp(r'^[a-f0-9]{32}-[0-9]+-[a-f0-9]{8}\.block$');
 final _tempPattern = RegExp(r'^[a-f0-9]{32}\.partial$');
+final _pinPattern = RegExp(r'^[a-f0-9]{32}\.pin$');
 String _nonce() {
   final random = Random.secure();
   return List.generate(
@@ -221,12 +260,20 @@ class _DiskStore {
   _DiskStore(String path) : root = Directory(path);
   final Directory root;
   final _leases = <String, _Lease>{};
+  final _releasedProtections = <String, Set<String>>{};
   int _peak = 0;
   int _reservedPeak = 0;
   int _evictions = 0;
 
   Map<String, Object?> handle(Map<String, Object?> message) {
     if (message['op'] == 'shutdown') return {'ok': true};
+    if (message['op'] == 'unprotect') {
+      final id = message['id'] as String;
+      final protection = message['protection'] as String;
+      if (_leases.containsKey(id) && _sessionPattern.hasMatch(protection)) {
+        (_releasedProtections[id] ??= {}).add(protection);
+      }
+    }
     _prepareRoot();
     final lockPath = _join(root.path, 'quota.lock');
     _assertRegularOrAbsent(lockPath);
@@ -246,6 +293,14 @@ class _DiskStore {
         }
       }
       _reap();
+      // An earlier release may have encountered a foreign quota lock. Keep its
+      // intent in the coordinator and remove the charged pin under this lock.
+      for (final entry in _releasedProtections.entries.toList()) {
+        for (final protection in entry.value) {
+          _unprotect(entry.key, protection);
+        }
+        _releasedProtections.remove(entry.key);
+      }
       final id = message['id'] as String;
       switch (message['op']) {
         case 'open':
@@ -258,6 +313,14 @@ class _DiskStore {
           return _put(id, message['bytes'] as Uint8List);
         case 'read':
           return _read(id, message['token'] as String);
+        case 'protect':
+          return _protect(
+            id,
+            List<String>.from(message['tokens'] as List),
+            message['protection'] as String,
+          );
+        case 'unprotect':
+          return _unprotect(id, message['protection'] as String);
         case 'close':
           return _close(id);
         default:
@@ -402,12 +465,42 @@ class _DiskStore {
     return {'ok': true, 'stats': _stats()};
   }
 
-  bool _makeRoom(int required, int limit, {Directory? only}) {
+  Set<String> _protectedPaths() {
+    final paths = <String>{};
+    for (final session in _sessions()) {
+      for (final pin in _files(
+        session,
+      ).where((file) => _pinPattern.hasMatch(_name(file)))) {
+        if (pin.lengthSync() > 384 * 1024) {
+          throw const FileSystemException('Invalid read protection');
+        }
+        final tokens = pin.readAsLinesSync();
+        if (tokens.length > 4096 ||
+            tokens.any((token) => !_blockPattern.hasMatch(token))) {
+          throw const FileSystemException('Invalid read protection');
+        }
+        paths.addAll(tokens.map((token) => _join(session.path, token)));
+      }
+    }
+    return paths;
+  }
+
+  bool _makeRoom(
+    int required,
+    int limit, {
+    Directory? only,
+    Set<String> protecting = const {},
+  }) {
+    final protected = _protectedPaths()..addAll(protecting);
     final sessions = only == null ? _sessions() : [only];
     final candidates = <File>[];
     for (final directory in sessions) {
       candidates.addAll(
-        _files(directory).where((file) => _blockPattern.hasMatch(_name(file))),
+        _files(directory).where(
+          (file) =>
+              _blockPattern.hasMatch(_name(file)) &&
+              !protected.contains(file.path),
+        ),
       );
       if (candidates.length > 8190) {
         throw const FileSystemException('Global cache entry limit');
@@ -492,6 +585,73 @@ class _DiskStore {
     return {'bytes': bytes, 'stats': _stats()};
   }
 
+  Map<String, Object?> _protect(
+    String id,
+    List<String> tokens,
+    String protection,
+  ) {
+    final lease = _leases[id];
+    if (lease == null ||
+        !_sessionPattern.hasMatch(protection) ||
+        tokens.isEmpty ||
+        tokens.length > 4096 ||
+        tokens.any((token) => !_blockPattern.hasMatch(token))) {
+      return {};
+    }
+    if (_files(
+          lease.directory,
+        ).where((file) => _pinPattern.hasMatch(_name(file))).length >=
+        2) {
+      return {};
+    }
+    final protecting = tokens
+        .map((token) => _join(lease.directory.path, token))
+        .toSet();
+    // Validate every block under the same global lock used by eviction. Each
+    // iteration owns at most one block; no whole-response staging is needed.
+    for (final token in tokens) {
+      final path = _join(lease.directory.path, token);
+      if (FileSystemEntity.typeSync(path, followLinks: false) !=
+          FileSystemEntityType.file) {
+        return {};
+      }
+      final file = File(path);
+      final parts = token.split('-');
+      final length = int.parse(parts[1]);
+      if (length <= 0 || length > 1024 * 1024 || file.lengthSync() != length) {
+        return {};
+      }
+      final bytes = file.readAsBytesSync();
+      if (_crc32(bytes) != int.parse(parts[2].split('.').first, radix: 16)) {
+        return {};
+      }
+    }
+    final metadata = utf8.encode(tokens.join('\n'));
+    if (!_makeRoom(
+          metadata.length,
+          lease.sessionLimit,
+          only: lease.directory,
+          protecting: protecting,
+        ) ||
+        !_makeRoom(metadata.length, _limit(), protecting: protecting)) {
+      return {};
+    }
+    _peak = max(_peak, _usage() + metadata.length);
+    final file = File(_join(lease.directory.path, '$protection.pin'));
+    _assertRegularOrAbsent(file.path);
+    file.writeAsBytesSync(metadata, flush: true);
+    return {'ok': true, 'stats': _stats()};
+  }
+
+  Map<String, Object?> _unprotect(String id, String protection) {
+    final lease = _leases[id];
+    if (lease == null || !_sessionPattern.hasMatch(protection)) return {};
+    final file = File(_join(lease.directory.path, '$protection.pin'));
+    _assertRegularOrAbsent(file.path);
+    if (file.existsSync()) file.deleteSync();
+    return {'ok': true, 'stats': _stats()};
+  }
+
   Map<String, Object?> _close(String id) {
     final lease = _leases.remove(id);
     if (lease == null) return {'ok': true};
@@ -506,6 +666,7 @@ class _DiskStore {
   }
 
   void abandon(String id) {
+    _releasedProtections.remove(id);
     final lease = _leases.remove(id);
     if (lease == null) return;
     try {
@@ -518,7 +679,9 @@ class _DiskStore {
   void _removeData(Directory directory) {
     for (final file in _files(directory)) {
       final name = _name(file);
-      if (_blockPattern.hasMatch(name) || _tempPattern.hasMatch(name)) {
+      if (_blockPattern.hasMatch(name) ||
+          _tempPattern.hasMatch(name) ||
+          _pinPattern.hasMatch(name)) {
         file.deleteSync();
       }
     }

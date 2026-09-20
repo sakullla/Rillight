@@ -77,6 +77,149 @@ void main() {
   );
 
   test(
+    'range lease keeps memory bytes within budget during competing writes',
+    () async {
+      final cache = await open(memory: 768, disk: 0);
+      await put(cache, 0, List.filled(256, 1));
+      await put(cache, 256, List.filled(256, 2));
+      await put(cache, 512, List.filled(256, 3));
+      final lease = await cache.protectRange(
+        resource: 'secret-url-not-on-disk',
+        generation: 1,
+        offset: 0,
+        length: 512,
+      );
+      expect(lease, isNotNull);
+      await put(cache, 1024, List.filled(512, 4));
+      expect((await lease!.read(0))!.bytes, List.filled(256, 1));
+      expect((await lease.read(256))!.bytes, List.filled(256, 2));
+      expect(cache.diagnostics['memoryBytes'], lessThanOrEqualTo(768));
+      await lease.close();
+      await put(cache, 2048, List.filled(768, 5));
+      expect((await read(cache, 2048))!.bytes, List.filled(768, 5));
+    },
+  );
+
+  test(
+    'disk range lease survives a real foreign writer and releases quota protection',
+    () async {
+      final cache = await open(memory: 0, disk: 4096, pending: 4096);
+      for (var i = 0; i < 6; i++) {
+        await put(cache, i * 512, List.filled(512, i));
+      }
+      final child = await _Child.start(root, 4096);
+      try {
+        final lease = await cache.protectRange(
+          resource: 'secret-url-not-on-disk',
+          generation: 1,
+          offset: 0,
+          length: 3072,
+        );
+        expect(lease, isNotNull);
+        final stats = await child.command({
+          'op': 'put',
+          'offset': 0,
+          'length': 2048,
+          'value': 9,
+        });
+        expect(stats['diskBytes'], lessThanOrEqualTo(4096));
+        for (var i = 0; i < 6; i++) {
+          expect((await lease!.read(i * 512))!.bytes, List.filled(512, i));
+        }
+        await lease!.close();
+        await child.command({
+          'op': 'put',
+          'offset': 0,
+          'length': 2048,
+          'value': 9,
+        });
+        expect(
+          (await child.command({'op': 'read', 'offset': 0}))['bytes'],
+          List.filled(2048, 9),
+        );
+        expect(await read(cache, 0), isNull);
+        expect(
+          root
+              .listSync(recursive: true)
+              .whereType<File>()
+              .where((f) => f.path.endsWith('.pin')),
+          isEmpty,
+        );
+      } finally {
+        await child.stop();
+      }
+    },
+  );
+
+  test(
+    'range acquisition detects an already missing disk block without pin leaks',
+    () async {
+      final cache = await open(memory: 0);
+      await put(cache, 0, [1, 2, 3, 4]);
+      await put(cache, 4, [5, 6, 7, 8]);
+      final block = root
+          .listSync(recursive: true)
+          .whereType<File>()
+          .firstWhere((f) => f.path.endsWith('.block'));
+      await block.delete();
+      expect(
+        await cache.protectRange(
+          resource: 'secret-url-not-on-disk',
+          generation: 1,
+          offset: 0,
+          length: 8,
+        ),
+        isNull,
+      );
+      expect(cache.diagnostics['protectedRanges'], 0);
+      expect(
+        root
+            .listSync(recursive: true)
+            .whereType<File>()
+            .where((f) => f.path.endsWith('.pin')),
+        isEmpty,
+      );
+    },
+  );
+
+  test(
+    'read protection release survives a foreign lock and is retried under the next lock',
+    () async {
+      final cache = await open(memory: 0);
+      await put(cache, 0, [1, 2, 3, 4]);
+      final lease = await cache.protectRange(
+        resource: 'secret-url-not-on-disk',
+        generation: 1,
+        offset: 0,
+        length: 4,
+      );
+      expect(lease, isNotNull);
+      final locker = await _Locker.start(root);
+      try {
+        await lease!.close();
+        expect(
+          root
+              .listSync(recursive: true)
+              .whereType<File>()
+              .where((f) => f.path.endsWith('.pin')),
+          hasLength(1),
+        );
+      } finally {
+        await locker.stop();
+      }
+      await put(cache, 4, [5, 6, 7, 8]);
+      expect(
+        root
+            .listSync(recursive: true)
+            .whereType<File>()
+            .where((f) => f.path.endsWith('.pin')),
+        isEmpty,
+      );
+      expect(cache.diagnostics['degradation'], isNull);
+    },
+  );
+
+  test(
     'partial memory and disk hits preserve bytes and generation isolation',
     () async {
       final cache = await open(memory: 4);

@@ -6,6 +6,7 @@ import 'dart:typed_data';
 
 import 'cache/http_cache_policy.dart';
 import 'cache/session_byte_cache.dart';
+import 'cache/sealed_media_route.dart';
 
 enum PlaybackResourceRole {
   media,
@@ -45,8 +46,7 @@ class PlaybackHttpProxy {
   final SessionByteCache? cache;
   final bool dynamicSource;
   final void Function(PlaybackCacheStream)? onStreamChanged;
-  final _urls = <String, Uri>{};
-  final _ids = <String, String>{};
+  final _routes = SealedMediaRoutes();
   final _roles = <String, PlaybackResourceRole>{};
   final _representations = <String, _Representation>{};
   final _reads = <_ProxyRead>{};
@@ -54,9 +54,7 @@ class PlaybackHttpProxy {
   final _slots = <Completer<void>>[];
   final _writes = <Future<bool>>{};
   int _active = 0;
-  int _nextId = 0;
   int _nextRepresentation = 0;
-  int _registryBytes = 0;
   int _upstreamBytes = 0;
   int _cancelled = 0;
   int _inFlight = 0;
@@ -78,8 +76,8 @@ class PlaybackHttpProxy {
     'cancelledReads': _cancelled,
     'proxyInFlightBytes': _inFlight,
     'proxyInFlightPeakBytes': _inFlightPeak,
-    'registeredResources': _urls.length,
-    'registryBudgetBytes': _registryBytes,
+    'registeredResources': _roles.length,
+    'registryBudgetBytes': _roles.length * 4096,
     'streamPolicy': _stream.name,
   };
 
@@ -109,37 +107,11 @@ class PlaybackHttpProxy {
     if (url.toString().length > 16384 || context.length > 4096) {
       throw ArgumentError('Media resource identifier is too large');
     }
-    final identity = '$role|$context|$url';
-    final id = _ids.putIfAbsent(identity, () {
-      // Representation headers have a separate bounded table. Route accounting
-      // includes URL/context copies and map overhead; manifests have a size cap.
-      while (_urls.length >= 4096 ||
-          _registryBytes + identity.length * 4 + 256 > 2 * 1024 * 1024) {
-        final oldest = _ids.keys
-            .where(
-              (k) => ![
-                PlaybackResourceRole.media,
-                PlaybackResourceRole.playlist,
-              ].contains(_roles[_ids[k]]),
-            )
-            .firstOrNull;
-        if (oldest == null) throw StateError('Media resource registry is full');
-        final removed = _ids.remove(oldest)!;
-        _urls.remove(removed);
-        _roles.remove(removed);
-        _representations.remove(removed);
-        cache?.invalidate(removed);
-        _registryBytes -= oldest.length * 4 + 256;
-      }
-      final suffix = url.path.split('/').last;
-      final id =
-          '${_nextId++}/${Uri.encodeComponent(suffix.substring(0, min(suffix.length, 128)))}';
-      _urls[id] = url;
-      _roles[id] = role;
-      _registryBytes += identity.length * 4 + 256;
-      return id;
-    });
-    return Uri.parse('http://127.0.0.1:${_server.port}/$_secret/$id');
+    final token = _routes.seal(url, role.index, context);
+    final suffix = url.path.split('/').last;
+    return Uri.parse(
+      'http://127.0.0.1:${_server.port}/$_secret/$token/${Uri.encodeComponent(suffix.substring(0, min(suffix.length, 128)))}',
+    );
   }
 
   Uri _withoutForeignCredentials(Uri url) {
@@ -418,6 +390,10 @@ class PlaybackHttpProxy {
           _invalidate(key, representation);
           return null;
         }
+        // A validator identifies bytes, not their current reuse policy. Apply
+        // the latest response's freshness/Vary constraints even for the same
+        // strong ETag before publishing any newly downloaded interval.
+        representation.policy = policy;
         final bytes = BytesBuilder(copy: false);
         final iterator = StreamIterator(response);
         producer.iterators.add(iterator);
@@ -498,42 +474,51 @@ class PlaybackHttpProxy {
       return false;
     }
     if (representation.policy.strongEtag == null) {
-      // An unvalidated response cannot safely fill a hole from another request.
-      // Stage a bounded complete hit before sending any bytes so eviction or a
-      // damaged disk block can fall back to an ordinary upstream response.
-      if (range.length > 256 * 1024) return false;
-      _charge(range.length * 2 + min(range.length, 64 * 1024));
+      // Acquire a complete snapshot before sending any bytes. Existing blocks
+      // stay within their budgets and cannot be evicted during this response.
+      final lease = await cache!.protectRange(
+        resource: key,
+        generation: representation.generation,
+        offset: range.start,
+        length: range.length,
+      );
+      if (lease == null) return false;
+      _charge(64 * 1024);
       try {
-        final builder = BytesBuilder(copy: false);
-        while (builder.length < range.length) {
-          final hit = await cache!.read(
-            resource: key,
-            generation: representation.generation,
-            offset: range.start + builder.length,
-            maxLength: min(64 * 1024, range.length - builder.length),
+        var position = range.start;
+        while (position <= range.end) {
+          final hit = await lease.read(
+            position,
+            maxLength: min(64 * 1024, range.end - position + 1),
           );
           read.check();
-          if (hit == null) return false;
-          builder.add(hit.bytes);
+          if (hit == null) {
+            if (!read.outputStarted) return false;
+            throw const HttpException('Protected media data unavailable');
+          }
+          if (!read.outputStarted) {
+            incoming.response.statusCode = rangeValue == null ? 200 : 206;
+            for (final header in representation.headers.entries) {
+              incoming.response.headers.set(header.key, header.value);
+            }
+            incoming.response.headers.set('accept-ranges', 'bytes');
+            if (rangeValue != null) {
+              incoming.response.headers.set(
+                'content-range',
+                'bytes ${range.start}-${range.end}/${representation.total}',
+              );
+            }
+            incoming.response.contentLength = range.length;
+          }
+          read.outputStarted = true;
+          incoming.response.add(hit.bytes);
+          await incoming.response.flush();
+          position += hit.bytes.length;
         }
-        incoming.response.statusCode = rangeValue == null ? 200 : 206;
-        for (final header in representation.headers.entries) {
-          incoming.response.headers.set(header.key, header.value);
-        }
-        incoming.response.headers.set('accept-ranges', 'bytes');
-        if (rangeValue != null) {
-          incoming.response.headers.set(
-            'content-range',
-            'bytes ${range.start}-${range.end}/${representation.total}',
-          );
-        }
-        incoming.response.contentLength = range.length;
-        read.outputStarted = true;
-        incoming.response.add(builder.takeBytes());
-        await incoming.response.flush();
         return true;
       } finally {
-        _charge(-range.length * 2 - min(range.length, 64 * 1024));
+        _charge(-64 * 1024);
+        await lease.close();
       }
     }
     var position = range.start;
@@ -699,23 +684,30 @@ class PlaybackHttpProxy {
     final output = incoming.response;
     try {
       final prefix = '/$_secret/';
-      var key = incoming.uri.path.startsWith(prefix)
-          ? incoming.uri.path.substring(prefix.length)
+      final token = incoming.uri.path.startsWith(prefix)
+          ? incoming.uri.path.substring(prefix.length).split('/').first
           : '';
-      // URI.path is decoded; generated keys may retain escaped filename chars.
-      if (!_urls.containsKey(key)) {
-        key =
-            _urls.keys
-                .where((k) => Uri.decodeComponent(k) == key)
-                .firstOrNull ??
-            '';
-      }
-      final url = _urls[key];
-      if (_closed ||
-          url == null ||
+      final route = _closed ? null : _routes.open(token);
+      if (route == null ||
+          route.role < 0 ||
+          route.role >= PlaybackResourceRole.values.length ||
           !['GET', 'HEAD'].contains(incoming.method)) {
         output.statusCode = HttpStatus.notFound;
         return;
+      }
+      final key = route.identity;
+      final url = route.url;
+      read.resourceKey = key;
+      if (!_roles.containsKey(key)) {
+        while (_roles.length >= 256) {
+          final oldest = _roles.keys.firstWhere(
+            (candidate) => !_reads.any((r) => r.resourceKey == candidate),
+          );
+          _roles.remove(oldest);
+          final previous = _representations[oldest];
+          if (previous != null) _invalidate(oldest, previous);
+        }
+        _roles[key] = PlaybackResourceRole.values[route.role];
       }
       if (allowRange && await _tryCached(incoming, key, url, read)) return;
       final (response, effective) = await _fetch(
@@ -782,27 +774,6 @@ class PlaybackHttpProxy {
             rangeTotal = int.parse(range[2]!);
           }
           _roles[key] = PlaybackResourceRole.playlist;
-          final bytes = BytesBuilder(copy: false)..add(prefixBytes);
-          while (await chunks.moveNext()) {
-            read.check();
-            _received(chunks.current.length);
-            bytes.add(chunks.current);
-            if (bytes.length > 512 * 1024) {
-              throw StateError('Media playlist is too large');
-            }
-          }
-          if (rangeTotal != null && bytes.length != rangeTotal) {
-            throw StateError('Truncated HLS manifest');
-          }
-          if (bytes.length > 512 * 1024) {
-            throw StateError('Media playlist is too large');
-          }
-          final rewritten = _playlist(
-            utf8.decode(bytes.takeBytes()),
-            effective,
-            key,
-          );
-          final body = utf8.encode(rewritten);
           output.statusCode = HttpStatus.ok;
           output.headers.removeAll('content-range');
           output.headers.set('accept-ranges', 'none');
@@ -810,9 +781,34 @@ class PlaybackHttpProxy {
             'application',
             'vnd.apple.mpegurl',
           );
-          output.contentLength = body.length;
-          read.outputStarted = true;
-          output.add(body);
+          output.contentLength = -1;
+          Stream<List<int>> source() async* {
+            var count = 0;
+            var lineBytes = 0;
+            var bytes = prefixBytes;
+            while (true) {
+              read.check();
+              count += bytes.length;
+              if (count > 4 * 1024 * 1024) {
+                throw StateError('Media playlist is too large');
+              }
+              for (final byte in bytes) {
+                lineBytes = byte == 10 ? 0 : lineBytes + 1;
+                if (lineBytes > 64 * 1024) {
+                  throw StateError('Media playlist line is too large');
+                }
+              }
+              yield bytes;
+              if (!await chunks.moveNext()) break;
+              bytes = chunks.current;
+              _received(bytes.length);
+            }
+            if (rangeTotal != null && count != rangeTotal) {
+              throw StateError('Truncated HLS manifest');
+            }
+          }
+
+          await _playlist(source(), effective, key, output, read);
         } else {
           if (_roles[key] == PlaybackResourceRole.media &&
               response.statusCode >= 200 &&
@@ -958,6 +954,22 @@ class PlaybackHttpProxy {
       final value = response.headers.value(name);
       if (value != null && value.length <= 1024) safeHeaders[name] = value;
     }
+    final metadataCost =
+        512 +
+        2 *
+            (effective.toString().length +
+                safeHeaders.values.fold<int>(
+                  0,
+                  (sum, value) => sum + value.length,
+                ) +
+                (policy.etag?.length ?? 0) +
+                (policy.lastModified?.length ?? 0));
+    // Sealed routing remains available even when a resource's cache metadata
+    // would exceed its reserved share of the management budget.
+    if (metadataCost > 4096) {
+      if (previous != null) _invalidate(key, previous);
+      return null;
+    }
     final representation = _Representation(
       generation: same ? previous.generation : _nextRepresentation++,
       policy: policy,
@@ -979,68 +991,80 @@ class PlaybackHttpProxy {
     return representation;
   }
 
-  String _playlist(String text, Uri base, String parent) {
-    final lines = text.split('\n');
-    final stable = lines.any((l) => l.trim() == '#EXT-X-ENDLIST');
-    final master = lines.any((l) => l.startsWith('#EXT-X-STREAM-INF:'));
-    _classify(
-      stable && !master
-          ? PlaybackCacheStream.stable
-          : PlaybackCacheStream.conservative,
-    );
+  Future<void> _playlist(
+    Stream<List<int>> source,
+    Uri base,
+    String parent,
+    HttpResponse output,
+    _ProxyRead read,
+  ) async {
+    var stable = false;
+    var master = false;
+    _classify(PlaybackCacheStream.conservative);
     var sequence = 0;
     var discontinuity = 0;
     var keyContext = '';
     var playlistNext = false;
-    final referenced = <String>[];
     String child(Uri url, PlaybackResourceRole role, String context) {
       final result = register(url, role: role, context: context);
-      referenced.add(result.path.substring('/$_secret/'.length));
       return result.toString();
     }
 
-    final result = lines
-        .map((line) {
-          final trimmed = line.trim();
-          if (trimmed.isEmpty) return line;
-          if (trimmed.startsWith('#EXT-X-MEDIA-SEQUENCE:')) {
-            sequence = int.tryParse(trimmed.split(':').last) ?? 0;
-          }
-          if (trimmed.startsWith('#EXT-X-DISCONTINUITY-SEQUENCE:')) {
-            discontinuity = int.tryParse(trimmed.split(':').last) ?? 0;
-          }
-          if (trimmed == '#EXT-X-DISCONTINUITY') discontinuity++;
-          if (trimmed.startsWith('#EXT-X-KEY:')) keyContext = trimmed;
-          if (trimmed.startsWith('#EXT-X-STREAM-INF:')) playlistNext = true;
-          final context = '$parent:$sequence:$discontinuity:$keyContext';
-          if (!trimmed.startsWith('#')) {
-            final role = playlistNext
-                ? PlaybackResourceRole.playlist
-                : PlaybackResourceRole.segment;
-            playlistNext = false;
-            sequence++;
-            return child(base.resolve(trimmed), role, context);
-          }
-          return line.replaceAllMapped(RegExp(r'URI="([^"]*)"'), (match) {
-            final role =
-                trimmed.startsWith('#EXT-X-KEY:') ||
-                    trimmed.startsWith('#EXT-X-SESSION-KEY:')
-                ? PlaybackResourceRole.key
-                : trimmed.startsWith('#EXT-X-MAP:')
-                ? PlaybackResourceRole.initialization
-                : PlaybackResourceRole.playlist;
-            return 'URI="${child(base.resolve(match[1]!), role, context)}"';
-          });
-        })
-        .join('\n');
-    if (referenced.any(
-      (key) =>
-          !_urls.containsKey(key) &&
-          !_urls.keys.any((k) => Uri.decodeComponent(k) == key),
-    )) {
-      throw StateError('Media playlist exceeds the route budget');
+    String rewrite(String line) {
+      final trimmed = line.trim();
+      if (trimmed.isEmpty) return line;
+      if (trimmed == '#EXT-X-ENDLIST') stable = true;
+      if (trimmed.startsWith('#EXT-X-STREAM-INF:')) master = true;
+      if (trimmed.startsWith('#EXT-X-MEDIA-SEQUENCE:')) {
+        sequence = int.tryParse(trimmed.split(':').last) ?? 0;
+      }
+      if (trimmed.startsWith('#EXT-X-DISCONTINUITY-SEQUENCE:')) {
+        discontinuity = int.tryParse(trimmed.split(':').last) ?? 0;
+      }
+      if (trimmed == '#EXT-X-DISCONTINUITY') discontinuity++;
+      if (trimmed.startsWith('#EXT-X-KEY:')) keyContext = trimmed;
+      if (trimmed.startsWith('#EXT-X-STREAM-INF:')) playlistNext = true;
+      final context = '$parent:$sequence:$discontinuity:$keyContext';
+      if (!trimmed.startsWith('#')) {
+        final role = playlistNext
+            ? PlaybackResourceRole.playlist
+            : PlaybackResourceRole.segment;
+        playlistNext = false;
+        sequence++;
+        return child(base.resolve(trimmed), role, context);
+      }
+      return line.replaceAllMapped(RegExp(r'URI="([^"]*)"'), (match) {
+        final role =
+            trimmed.startsWith('#EXT-X-KEY:') ||
+                trimmed.startsWith('#EXT-X-SESSION-KEY:')
+            ? PlaybackResourceRole.key
+            : trimmed.startsWith('#EXT-X-MAP:')
+            ? PlaybackResourceRole.initialization
+            : PlaybackResourceRole.playlist;
+        return 'URI="${child(base.resolve(match[1]!), role, context)}"';
+      });
     }
-    return result;
+
+    // Only one bounded input line and its sealed output are retained. A long
+    // manifest does not accumulate a route registry or rewritten document.
+    _charge(512 * 1024);
+    try {
+      await for (final line
+          in source.transform(utf8.decoder).transform(const LineSplitter())) {
+        read.check();
+        final rewritten = rewrite(line);
+        read.outputStarted = true;
+        output.add(utf8.encode('$rewritten\n'));
+        await output.flush();
+      }
+      _classify(
+        stable && !master
+            ? PlaybackCacheStream.stable
+            : PlaybackCacheStream.conservative,
+      );
+    } finally {
+      _charge(-512 * 1024);
+    }
   }
 
   Future<void> close() async {
@@ -1054,11 +1078,9 @@ class PlaybackHttpProxy {
     await _server.close(force: true);
     await cache?.close();
     await Future.wait(_writes.toList());
-    _urls.clear();
-    _ids.clear();
+    _routes.close();
     _representations.clear();
     _roles.clear();
-    _registryBytes = 0;
   }
 }
 
@@ -1083,6 +1105,7 @@ class _Representation {
 }
 
 class _ProxyRead {
+  String? resourceKey;
   bool cancelled = false;
   bool outputStarted = false;
   final requests = <HttpClientRequest>{};

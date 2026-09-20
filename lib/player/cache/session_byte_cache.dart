@@ -14,6 +14,70 @@ class CacheRead {
   final CacheReadSource source;
 }
 
+/// A snapshot of one cached representation. Pins refer to existing storage;
+/// they never grow the memory budget or hold the global lock during playback.
+class CacheRangeLease {
+  CacheRangeLease._(this._cache, this._blocks, this._protection);
+  final SessionByteCache _cache;
+  final List<_ProtectedBlock> _blocks;
+  final String? _protection;
+  bool _closed = false;
+
+  Future<CacheRead?> read(int offset, {int maxLength = 64 * 1024}) async {
+    if (_closed || _cache._closed) return null;
+    final block = _blocks
+        .where(
+          (b) => b.key.offset <= offset && offset < b.key.offset + b.length,
+        )
+        .firstOrNull;
+    if (block == null) return null;
+    var bytes = block.memory;
+    var source = CacheReadSource.memory;
+    if (bytes == null) {
+      final cost = block.length * 2;
+      if (_cache._pendingBytes + cost > _cache.pendingLimitBytes) return null;
+      _cache._pendingBytes += cost;
+      if (_cache._pendingBytes > _cache._pendingPeak) {
+        _cache._pendingPeak = _cache._pendingBytes;
+      }
+      try {
+        bytes = await _cache._disk?.read(block.token!);
+      } finally {
+        _cache._releasePending(cost);
+      }
+      source = CacheReadSource.disk;
+    }
+    if (_closed || bytes == null) return null;
+    final start = offset - block.key.offset;
+    final end = (start + maxLength).clamp(start, bytes.length);
+    final result = Uint8List.fromList(Uint8List.sublistView(bytes, start, end));
+    if (source == CacheReadSource.memory) {
+      _cache._memoryHits += result.length;
+    } else {
+      _cache._diskHits += result.length;
+    }
+    return CacheRead(offset, result, source);
+  }
+
+  Future<void> close() async {
+    if (_closed) return;
+    _closed = true;
+    _cache._rangeLeases.remove(this);
+    for (final block in _blocks.where((b) => b.memory != null)) {
+      final count = _cache._memoryPins[block.key]! - 1;
+      if (count == 0) {
+        _cache._memoryPins.remove(block.key);
+        if (!_cache._entries.containsKey(block.key)) {
+          _cache._removeMemory(block.key);
+        }
+      } else {
+        _cache._memoryPins[block.key] = count;
+      }
+    }
+    if (_protection != null) await _cache._disk?.releaseProtection(_protection);
+  }
+}
+
 /// Session-only media byte storage. HTTP freshness and representation validation
 /// belong to the caller; [generation] must change when the representation does.
 /// Reads return owned copies so eviction cannot alter an in-flight response.
@@ -70,6 +134,9 @@ class SessionByteCache {
   final int diskSessionLimitBytes;
   final _entries = <_BlockKey, _Entry>{};
   final _memory = <_BlockKey, Uint8List>{};
+  final _memoryPins = <_BlockKey, int>{};
+  final _rangeLeases = <CacheRangeLease>{};
+  int _acquiringLeases = 0;
   DiskCacheSession? _disk;
   String? _degradation;
   bool _closed = false;
@@ -95,6 +162,7 @@ class SessionByteCache {
     'diskHitBytes': _diskHits,
     'evictions': _evictions,
     'invalidations': _invalidations,
+    'protectedRanges': _rangeLeases.length,
     'degradation': _degradation ?? _disk?.degradation,
     'closed': _closed,
     ...?_disk?.diagnostics,
@@ -251,6 +319,92 @@ class SessionByteCache {
     return null;
   }
 
+  Future<CacheRangeLease?> protectRange({
+    required String resource,
+    required int generation,
+    required int offset,
+    required int length,
+  }) async {
+    if (_closed || length <= 0 || _rangeLeases.length + _acquiringLeases >= 2) {
+      return null;
+    }
+    final blocks = <_ProtectedBlock>[];
+    var position = offset;
+    while (position < offset + length) {
+      _ProtectedBlock? selected;
+      for (final item in _entries.entries) {
+        if (item.key.resource != resource ||
+            item.key.generation != generation ||
+            item.key.offset > position ||
+            item.key.offset + item.value.length <= position) {
+          continue;
+        }
+        final memory = _memory[item.key];
+        if (memory == null && item.value.diskToken == null) continue;
+        if (selected == null ||
+            item.key.offset + item.value.length >
+                selected.key.offset + selected.length) {
+          selected = _ProtectedBlock(
+            item.key,
+            item.value.length,
+            memory,
+            item.value.diskToken,
+          );
+        }
+      }
+      if (selected == null) return null;
+      blocks.add(selected);
+      position = selected.key.offset + selected.length;
+    }
+    // Pin before the first await. Concurrent writers may skip retention rather
+    // than displace these existing bytes or exceed memoryLimitBytes.
+    for (final block in blocks.where((b) => b.memory != null)) {
+      _memoryPins[block.key] = (_memoryPins[block.key] ?? 0) + 1;
+    }
+    _acquiringLeases++;
+    String? protection;
+    CacheRangeLease? lease;
+    try {
+      final tokens = blocks
+          .where((b) => b.memory == null)
+          .map((b) => b.token!)
+          .toSet()
+          .toList();
+      if (tokens.isNotEmpty) {
+        final largest = blocks
+            .where((b) => b.memory == null)
+            .fold<int>(
+              0,
+              (size, block) => block.length > size ? block.length : size,
+            );
+        // Acquisition checks one block at a time in the disk isolate. Include
+        // that working buffer and the bounded token message in pending credit.
+        final cost = largest * 2 + tokens.length * 128;
+        if (_pendingBytes + cost <= pendingLimitBytes) {
+          _pendingBytes += cost;
+          if (_pendingBytes > _pendingPeak) _pendingPeak = _pendingBytes;
+          try {
+            protection = await _disk?.protect(tokens);
+          } finally {
+            _releasePending(cost);
+          }
+        }
+      }
+      lease = CacheRangeLease._(this, blocks, protection);
+      if (_closed || tokens.isNotEmpty && protection == null) {
+        await lease.close();
+        return null;
+      }
+      _rangeLeases.add(lease);
+      return lease;
+    } finally {
+      _acquiringLeases--;
+      if (lease == null) {
+        await CacheRangeLease._(this, blocks, protection).close();
+      }
+    }
+  }
+
   void invalidate(String resource, {int? generation}) {
     final keys = _entries.keys.where(
       (key) =>
@@ -269,6 +423,7 @@ class SessionByteCache {
 
   Future<void> _close() async {
     _closed = true;
+    await Future.wait(_rangeLeases.toList().map((lease) => lease.close()));
     _entries.clear();
     _indexBytes = 0;
     _memory.clear();
@@ -277,10 +432,15 @@ class SessionByteCache {
   }
 
   void _retain(_BlockKey key, Uint8List bytes) {
+    if (_memoryPins.containsKey(key)) return;
     _removeMemory(key);
     if (bytes.length > memoryLimitBytes) return;
     while (_memoryBytes + bytes.length > memoryLimitBytes) {
-      _removeMemory(_memory.keys.first);
+      final oldest = _memory.keys
+          .where((candidate) => !_memoryPins.containsKey(candidate))
+          .firstOrNull;
+      if (oldest == null) return;
+      _removeMemory(oldest);
       _evictions++;
     }
     _memory[key] = Uint8List.fromList(bytes);
@@ -289,6 +449,7 @@ class SessionByteCache {
   }
 
   void _removeMemory(_BlockKey key) {
+    if (_memoryPins.containsKey(key)) return;
     final bytes = _memory.remove(key);
     if (bytes != null) _memoryBytes -= bytes.length;
   }
@@ -311,6 +472,14 @@ class SessionByteCache {
   void _forget(_BlockKey key) {
     if (_entries.remove(key) != null) _indexBytes -= _indexCost(key);
   }
+}
+
+class _ProtectedBlock {
+  _ProtectedBlock(this.key, this.length, this.memory, this.token);
+  final _BlockKey key;
+  final int length;
+  final Uint8List? memory;
+  final String? token;
 }
 
 class _Entry {
