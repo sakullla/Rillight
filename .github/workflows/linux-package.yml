@@ -29,7 +29,7 @@ jobs:
           flutter-version: '3.47.4'
           channel: stable
           cache: true
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         with:
           path: ${{ runner.temp }}/rillight-native
           key: mpv-ubuntu22-${{ hashFiles('packages/rillight_player/native/build_linux.sh', 'packages/rillight_player/native/dependencies.json') }}
