@@ -1445,90 +1445,8 @@ class _EpisodeRow extends StatefulWidget {
 }
 
 class _EpisodeRowState extends State<_EpisodeRow> {
-  OverlayEntry? _hoverEntry;
-  Timer? _showTimer;
-  Timer? _hideTimer;
-
   bool get _isCurrent => widget.isCurrent;
   EmbyItem get episode => widget.episode;
-
-  @override
-  void dispose() {
-    _showTimer?.cancel();
-    _hideTimer?.cancel();
-    _hoverEntry?.remove();
-    _hoverEntry = null;
-    super.dispose();
-  }
-
-  void _onEnter() {
-    _hideTimer?.cancel();
-    _showTimer ??= Timer(const Duration(milliseconds: 350), _showCard);
-  }
-
-  void _onExit() {
-    _showTimer?.cancel();
-    _showTimer = null;
-    _scheduleHide();
-  }
-
-  void _scheduleHide() {
-    _hideTimer?.cancel();
-    _hideTimer = Timer(const Duration(milliseconds: 300), _removeCard);
-  }
-
-  void _cancelHide() {
-    _hideTimer?.cancel();
-    _hideTimer = null;
-  }
-
-  void _removeCard() {
-    _hoverEntry?.remove();
-    _hoverEntry = null;
-  }
-
-  void _showCard() {
-    _showTimer = null;
-    if (!mounted || _hoverEntry != null) {
-      return;
-    }
-    final overlay = Overlay.maybeOf(context);
-    final box = context.findRenderObject();
-    if (overlay == null || box is! RenderBox || !box.attached) {
-      return;
-    }
-    final target = box.localToGlobal(Offset.zero);
-    final rowSize = box.size;
-    final screen = MediaQuery.sizeOf(context);
-    const cardWidth = 320.0;
-    const gap = 12.0;
-    // 面板在窗口右侧,卡片优先弹到行左侧(视频区上方),空间不足再弹右侧。
-    var left = target.dx - cardWidth - gap;
-    if (left < 8) {
-      left = target.dx + rowSize.width + gap;
-    }
-    if (left + cardWidth > screen.width - 8) {
-      left = (screen.width - cardWidth - 8).clamp(8.0, double.infinity);
-    }
-    // 卡片估算高:缩略图 + 文本区(简介上限 148 + 标题/元信息/按钮)。
-    final cardHeight = (cardWidth * 9 / 16) + 320;
-    var top = target.dy;
-    if (top + cardHeight > screen.height - 8) {
-      top = (screen.height - cardHeight - 8).clamp(8.0, double.infinity);
-    }
-    _hoverEntry = OverlayEntry(
-      builder: (context) => _EpisodeHoverCard(
-        episode: episode,
-        left: left,
-        top: top,
-        width: cardWidth,
-        onPlay: widget.onTap,
-        onEnter: _cancelHide,
-        onExit: _scheduleHide,
-      ),
-    );
-    overlay.insert(_hoverEntry!);
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -1546,8 +1464,6 @@ class _EpisodeRowState extends State<_EpisodeRow> {
         l10n.playbackProgress((widget.progress * 100).round()),
     ];
     return MouseRegion(
-      onEnter: (_) => _onEnter(),
-      onExit: (_) => _onExit(),
       child: DecoratedBox(
         decoration: BoxDecoration(
           border: Border(
@@ -1635,8 +1551,8 @@ class _EpisodeRowState extends State<_EpisodeRow> {
   }
 }
 
-/// 悬停详情卡:鼠标悬停剧集行 350ms 后弹出(Netflix 式 hover card),
-/// 大图 + 标题 + 元信息 + 完整简介 + 播放按钮;移入卡片可交互,移出消失。
+// 保留为兼容旧测试构造的详情卡；剧集行不再挂载此悬停浮层。
+// ignore: unused_element
 class _EpisodeHoverCard extends StatelessWidget {
   const _EpisodeHoverCard({
     required this.episode,
@@ -3230,9 +3146,7 @@ class _ControlMenu<T> extends StatelessWidget {
       return PopupMenuButton<T>(
         tooltip: tooltip,
         onSelected: (value) {
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            onSelected(value);
-          });
+          onSelected(value);
         },
         constraints: _controlMenuConstraints,
         padding: EdgeInsets.zero,
@@ -3244,9 +3158,7 @@ class _ControlMenu<T> extends StatelessWidget {
     return PopupMenuButton<T>(
       tooltip: tooltip,
       onSelected: (value) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          onSelected(value);
-        });
+        onSelected(value);
       },
       constraints: _controlMenuConstraints,
       padding: EdgeInsets.zero,
