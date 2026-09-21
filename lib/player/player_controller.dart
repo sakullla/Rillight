@@ -1731,14 +1731,15 @@ class PlayerController extends ChangeNotifier {
       _emit();
     } on EmbyException catch (failure) {
       await _failOpen(operation, failure: failure);
-    } catch (_) {
-      await _failOpen(operation);
+    } catch (error) {
+      await _failOpen(operation, detail: error.toString());
     }
   }
 
   Future<void> _failOpen(
     PlaybackOperation operation, {
     EmbyException? failure,
+    String? detail,
   }) async {
     if (!_accepts(operation)) return;
     try {
@@ -1751,6 +1752,9 @@ class PlayerController extends ChangeNotifier {
         state.buffering = false;
         error = PlayerErrorKind.load;
         loadFailure = failure;
+        if (detail != null && detail.trim().isNotEmpty) {
+          disconnectDetail = detail.trim();
+        }
         state.phase = PlaybackPhase.failed;
         loading = false;
         _emit();

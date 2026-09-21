@@ -1,5 +1,10 @@
 # Linux package and playback regression
 
+Ubuntu's ffmpeg links `libjpeg.so.8`. Debian 13 only ships `libjpeg.so.62`, so
+`dpkg-shlibdeps` would otherwise emit an uninstallable `libjpeg8` Depends.
+`tool/linux_release_checks.py` copies that SONAME into the private `lib/`
+directory before packaging.
+
 `desktop_smoke.sh` launches the installed desktop entry, checks its actual
 process/window, closes it, removes only the private `libmpv.so.2` temporarily,
 then requires a visible diagnostic with the missing dependency and log path.

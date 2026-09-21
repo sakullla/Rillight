@@ -729,9 +729,14 @@ class PlayerPageState extends State<PlayerPage> {
       case PlayerErrorKind.noStream:
         return l10n.noPlayableStream;
       case PlayerErrorKind.load:
-        return current.loadFailure == null
-            ? l10n.playbackFailed
-            : catalogFailureMessage(l10n, current.loadFailure!);
+        if (current.loadFailure != null) {
+          return catalogFailureMessage(l10n, current.loadFailure!);
+        }
+        final detail = current.disconnectDetail?.trim();
+        if (detail != null && detail.isNotEmpty) {
+          return '${l10n.playbackFailed}\n$detail';
+        }
+        return l10n.playbackFailed;
       case null:
         return null;
     }

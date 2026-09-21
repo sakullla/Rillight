@@ -90,6 +90,21 @@ class LinuxReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'unbundled media dependency'):
             checks.verify_bundle(self.bundle, runtime=False)
 
+    def test_ubuntu_libjpeg_must_be_vendored_for_debian(self):
+        write_elf(self.mpv, ['libjpeg.so.8', 'libc.so.6'], 'libmpv.so.2')
+        with self.assertRaisesRegex(ValueError, 'unbundled media dependency'):
+            checks.verify_bundle(self.bundle, runtime=False)
+        write_elf(self.bundle / 'lib/libjpeg.so.8', ['libc.so.6'], 'libjpeg.so.8')
+        checks.verify_bundle(self.bundle, runtime=False)
+
+    def test_vendor_sonames_copies_host_libjpeg_next_to_libmpv(self):
+        write_elf(self.mpv, ['libjpeg.so.8', 'libc.so.6'], 'libmpv.so.2')
+        host = self.bundle / 'host/libjpeg.so.8.2.2'
+        write_elf(host, ['libc.so.6'], 'libjpeg.so.8')
+        checks.vendor_sonames(self.bundle, resolver=lambda name, files: host)
+        self.assertTrue((self.bundle / 'lib/libjpeg.so.8').is_file())
+        self.assertTrue((self.bundle / 'lib/libjpeg.so.8.2.2').is_file())
+
     def test_system_mpv_resolution_is_rejected(self):
         resolved = {path.name: str(path) for path in self.bundle.rglob('*.so*')}
         resolved.update({'libmpv.so.2': '/usr/lib/libmpv.so.2', 'libc.so.6': '/lib/libc.so.6'})
@@ -145,10 +160,12 @@ class LinuxReleaseTests(unittest.TestCase):
             checks.prepare_bundle(prefix, self.bundle)
 
     def test_dpkg_shlibdeps_maps_private_libraries_and_retains_real_system_depends(self):
+        write_elf(self.bundle / 'lib/libjpeg.so.8', ['libc.so.6'], 'libjpeg.so.8')
         def shlibdeps(command, **kwargs):
             local = (Path(kwargs['cwd']) / 'debian/shlibs.local').read_text()
             self.assertIn('libmpv 2 rillight', local)
             self.assertIn('libavcodec 62 rillight', local)
+            self.assertIn('libjpeg 8 rillight', local)
             self.assertIn('-xrillight', command)
             self.assertNotIn('--ignore-missing-info', command)
             return 'shlibs:Depends=libc6 (>= 2.34), libgtk-3-0 (>= 3.24)\n'

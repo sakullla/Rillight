@@ -64,6 +64,11 @@ class PlayerRuntimeOptions {
       'replaygain': 'track',
       'replaygain-clip': 'no',
     };
+    if (platform == TargetPlatform.linux) {
+      // VNC/xrdp and sessions without Pulse/PipeWire have no sound server.
+      // mpv treats ao init failure as a failed open, which shows 无法播放.
+      properties['audio-fallback-to-null'] = 'yes';
+    }
     final hwdec = _hardwareDecodingValue(settings, platform);
     if (hwdec != null) {
       properties['hwdec'] = embedHwdec(hwdec);
@@ -103,6 +108,10 @@ class PlayerRuntimeOptions {
         return 'd3d11va';
       case TargetPlatform.macOS:
         return 'videotoolbox';
+      case TargetPlatform.linux:
+        // libmpv's embed path needs a copy-back surface. Leave this as auto so
+        // embedHwdec turns it into auto-copy (vaapi-copy on Intel, etc.).
+        return 'auto';
       default:
         return null;
     }
@@ -154,7 +163,6 @@ class PlayerRuntimeOptions {
     if (fallback != null) {
       return fallback;
     }
-    // 平台无既定默认(如 Linux):auto 维持 mpv 默认,显式开启交给 mpv 自选。
     return mode == HardwareDecodingMode.on ? 'auto' : null;
   }
 

@@ -1,25 +1,49 @@
 #include "include/rillight_player/rillight_player_plugin.h"
 #include <epoxy/gl.h>
 #include <epoxy/egl.h>
-#include <epoxy/glx.h>
 #include <mpv/client.h>
-#include <mpv/render_gl.h>
+#include <mpv/render.h>
 #include <algorithm>
+#include <cstdint>
+#include <cstdio>
+#include <cstdarg>
+#include <clocale>
 #include <condition_variable>
 #include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
-#include <set>
 #include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
+#include <time.h>
 
 struct Surface;
 typedef struct _RillightTexture { FlPixelBufferTexture parent_instance; std::shared_ptr<Surface>* surface; } RillightTexture;
 typedef struct _RillightTextureClass { FlPixelBufferTextureClass parent_class; } RillightTextureClass;
 G_DEFINE_TYPE(RillightTexture, rillight_texture, fl_pixel_buffer_texture_get_type())
+
+// Flutter 3.47 Linux Impeller already owns EGL on the GTK view. A second
+// gdk_window_create_gl_context / eglInitialize from this plugin hangs or
+// fails on Intel/Mesa/VNC before the HTTP proxy even listens. The published
+// texture is already a CPU FlPixelBufferTexture, so libmpv's software
+// renderer (MPV_RENDER_API_TYPE_SW) is the matching embed path.
+
+static void PlayerLog(const char* fmt, ...) {
+  FILE* log = fopen("/tmp/rillight-gl.log", "a");
+  if (!log) return;
+  struct timespec ts {};
+  clock_gettime(CLOCK_REALTIME, &ts);
+  fprintf(log, "%ld.%03ld ", static_cast<long>(ts.tv_sec), ts.tv_nsec / 1000000L);
+  va_list ap;
+  va_start(ap, fmt);
+  vfprintf(log, fmt, ap);
+  va_end(ap);
+  fputc('\n', log);
+  fflush(log);
+  fclose(log);
+}
 
 // Unlike g_main_context_invoke, attaching a source never executes inline on
 // the calling worker. GTK owns and dispatches the default main loop.
@@ -43,7 +67,6 @@ struct Surface : std::enable_shared_from_this<Surface> {
   mpv_handle* player;
   FlTextureRegistrar* registrar;
   RillightTexture* texture = nullptr;
-  GdkGLContext* context;
   mpv_render_context* render = nullptr;
   std::thread worker;
   std::mutex mutex;
@@ -54,6 +77,7 @@ struct Surface : std::enable_shared_from_this<Surface> {
   bool notification_pending = false;
   uint64_t generation = 0;
   int width = 1280, height = 720;
+  int rendered_width = 0, rendered_height = 0;
   // Immutable CPU frames cross the GDK/Flutter context boundary. At most the
   // latest frame, the raster callback's borrowed frame, and one producer exist.
   std::shared_ptr<const Frame> latest, displayed;
@@ -63,19 +87,15 @@ struct Surface : std::enable_shared_from_this<Surface> {
   EGLContext cleanup_context = EGL_NO_CONTEXT;
   EGLenum cleanup_api = EGL_OPENGL_ES_API;
   std::string retirement_error;
-  // These GL targets are worker-only and never handed to Flutter.
-  std::set<GLuint> allocated;
-  GLuint target_fbo = 0;
-  int target_width = 0, target_height = 0;
   int64_t frames = 0;
   std::string error;
   std::vector<std::function<void()>> release_callbacks;
 
-  Surface(mpv_handle* p, FlTextureRegistrar* r, GdkGLContext* c)
-      : player(p), registrar(FL_TEXTURE_REGISTRAR(g_object_ref(r))), context(c) {}
+  Surface(mpv_handle* p, FlTextureRegistrar* r)
+      : player(p), registrar(FL_TEXTURE_REGISTRAR(g_object_ref(r))) {}
   ~Surface() {
     if (worker.joinable()) worker.join();
-    g_object_unref(context); g_object_unref(registrar);
+    g_object_unref(registrar);
   }
   static void Update(void* data) {
     auto self = static_cast<Surface*>(data);
@@ -97,72 +117,39 @@ struct Surface : std::enable_shared_from_this<Surface> {
       fl_texture_registrar_mark_texture_frame_available(self->registrar, FL_TEXTURE(self->texture));
     });
   }
-  GLuint Allocate(int w, int h) {
-    GLuint image = 0;
-    glGenTextures(1, &image); allocated.insert(image);
-    glActiveTexture(GL_TEXTURE0);
-    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-    glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-    glPixelStorei(GL_UNPACK_SKIP_ROWS, 0);
-    glPixelStorei(GL_UNPACK_SKIP_PIXELS, 0);
-    glBindTexture(GL_TEXTURE_2D, image);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
-    return image;
-  }
   void Render(int w, int h, bool frame_requested) {
-    // This target is never exported to Flutter. Preserve it across frame drops
-    // and redraws, just as the Render API's fixed-FBO client does. Only complete
-    // immutable CPU snapshots are published to the consumer.
-    if (!target_fbo || target_width != w || target_height != h) {
-      if (target_fbo) glDeleteFramebuffers(1, &target_fbo);
-      for (auto image : allocated) glDeleteTextures(1, &image);
-      allocated.clear();
-      const GLuint image = Allocate(w, h);
-      glGenFramebuffers(1, &target_fbo);
-      glBindFramebuffer(GL_FRAMEBUFFER, target_fbo);
-      glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, image, 0);
-      if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
-        throw std::runtime_error("Incomplete video framebuffer");
-      target_width = w; target_height = h;
-    }
-    // The Render API expects standard GL bindings on entry.
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, 0);
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    mpv_opengl_fbo target{static_cast<int>(target_fbo), w, h, 0};
-    // control.dart enforces video-timing-offset=0 for the nonblocking renderer.
-    int flip = 0, block = 0;
+    auto frame = std::make_shared<Frame>();
+    frame->width = w;
+    frame->height = h;
+    const size_t stride = static_cast<size_t>(w) * 4;
+    const size_t bytes = stride * static_cast<size_t>(h);
+    std::vector<uint8_t> storage(bytes + 64);
+    const auto raw = reinterpret_cast<uintptr_t>(storage.data());
+    const size_t pad = (64 - (raw % 64)) % 64;
+    auto* pixels = storage.data() + pad;
+    int size[2] = {w, h};
+    char format[] = "rgb0";
+    int block = 0;
+    size_t stride_value = stride;
     mpv_render_frame_info info{};
     mpv_render_context_get_info(render, {MPV_RENDER_PARAM_NEXT_FRAME_INFO, &info});
-    mpv_render_param params[] = {{MPV_RENDER_PARAM_OPENGL_FBO, &target}, {MPV_RENDER_PARAM_FLIP_Y, &flip}, {MPV_RENDER_PARAM_BLOCK_FOR_TARGET_TIME, &block}, {MPV_RENDER_PARAM_INVALID, nullptr}};
+    mpv_render_param params[] = {
+        {MPV_RENDER_PARAM_SW_SIZE, size},
+        {MPV_RENDER_PARAM_SW_FORMAT, format},
+        {MPV_RENDER_PARAM_SW_STRIDE, &stride_value},
+        {MPV_RENDER_PARAM_SW_POINTER, pixels},
+        {MPV_RENDER_PARAM_BLOCK_FOR_TARGET_TIME, &block},
+        {MPV_RENDER_PARAM_INVALID, nullptr}};
     const int result = mpv_render_context_render(render, params);
-    glFinish();
     if (result < 0) throw std::runtime_error(mpv_error_string(result));
-    auto frame = std::make_shared<Frame>();
-    frame->width = w; frame->height = h;
-    frame->pixels.resize(static_cast<size_t>(w) * h * 4);
-    // libmpv may change GL bindings; read our completed FBO into client memory,
-    // never an inherited pack buffer or a padded row layout.
-    glBindFramebuffer(GL_FRAMEBUFFER, target_fbo);
-    glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
-    glReadBuffer(GL_COLOR_ATTACHMENT0);
-    glPixelStorei(GL_PACK_ALIGNMENT, 1);
-    glPixelStorei(GL_PACK_ROW_LENGTH, 0);
-    glPixelStorei(GL_PACK_SKIP_ROWS, 0);
-    glPixelStorei(GL_PACK_SKIP_PIXELS, 0);
-    glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, frame->pixels.data());
-    glPixelStorei(GL_PACK_ALIGNMENT, 4);
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    if (glGetError() != GL_NO_ERROR) throw std::runtime_error("Video framebuffer readback failed");
+    for (size_t i = 3; i < bytes; i += 4) pixels[i] = 255;
+    frame->pixels.assign(pixels, pixels + bytes);
     {
       std::lock_guard<std::mutex> lock(mutex);
       if (stopped) return;
       latest = std::move(frame);
+      rendered_width = w;
+      rendered_height = h;
       if (frame_requested && (info.flags & MPV_RENDER_FRAME_INFO_PRESENT)) ++frames;
     }
     Notify();
@@ -172,17 +159,16 @@ struct Surface : std::enable_shared_from_this<Surface> {
     worker = std::thread([this, ready] {
       bool announced = false;
       try {
-        gdk_gl_context_make_current(context);
-        mpv_opengl_init_params gl{[](void*, const char* name) -> void* {
-          if (eglGetCurrentContext() != EGL_NO_CONTEXT) return reinterpret_cast<void*>(eglGetProcAddress(name));
-          return reinterpret_cast<void*>(glXGetProcAddressARB(reinterpret_cast<const GLubyte*>(name)));
-        }, nullptr};
+        setlocale(LC_NUMERIC, "C");
+        PlayerLog("sw-render start");
         int advanced = 1;
-        mpv_render_param init[] = {{MPV_RENDER_PARAM_API_TYPE, const_cast<char*>(MPV_RENDER_API_TYPE_OPENGL)}, {MPV_RENDER_PARAM_OPENGL_INIT_PARAMS, &gl}, {MPV_RENDER_PARAM_ADVANCED_CONTROL, &advanced}, {MPV_RENDER_PARAM_INVALID, nullptr}};
+        mpv_render_param init[] = {
+            {MPV_RENDER_PARAM_API_TYPE, const_cast<char*>(MPV_RENDER_API_TYPE_SW)},
+            {MPV_RENDER_PARAM_ADVANCED_CONTROL, &advanced},
+            {MPV_RENDER_PARAM_INVALID, nullptr}};
         const int status = mpv_render_context_create(&render, player, init);
+        PlayerLog("sw-render create status=%d", status);
         if (status < 0) throw std::runtime_error(mpv_error_string(status));
-        // First import is valid even before video decode, without requiring
-        // Flutter to share GDK's GL/GLX texture names.
         { std::lock_guard<std::mutex> lock(mutex); latest = std::make_shared<Frame>(); }
         mpv_render_context_set_update_callback(render, Update, this);
         announced = true; ready("");
@@ -194,37 +180,28 @@ struct Surface : std::enable_shared_from_this<Surface> {
             if (stopped) break;
             dirty = false; w = width; h = height;
           }
-          // Always service advanced-control work, including callbacks that do
-          // not request a frame. Resize also redraws paused content. Empty
-          // notifications never perform readback or inflate the health count.
           const auto updates = mpv_render_context_update(render);
           const bool frame_requested = updates & MPV_RENDER_UPDATE_FRAME;
-          if (frame_requested || target_width != w || target_height != h)
+          if (frame_requested || rendered_width != w || rendered_height != h)
             Render(w, h, frame_requested);
         }
       } catch (const std::exception& e) {
+        PlayerLog("sw-render error %s", e.what());
         { std::lock_guard<std::mutex> lock(mutex); error = e.what(); stopped = true; ++generation; }
         if (!announced) ready(e.what());
       }
       if (render) {
         mpv_render_context_set_update_callback(render, nullptr, nullptr);
       }
-      // Includes errors during initialization/render. Neither stopping nor
-      // queuing unregister authorizes deletion of consumer-owned resources.
       {
         std::unique_lock<std::mutex> lock(mutex);
         wake.wait(lock, [this] { return retired; });
       }
-      // The consumer barrier has completed. Destroy the renderer before the
-      // control isolate is allowed to destroy the core, outside the mutex.
       if (render) { mpv_render_context_free(render); render = nullptr; }
       {
         std::lock_guard<std::mutex> lock(mutex);
-        if (target_fbo) { glDeleteFramebuffers(1, &target_fbo); target_fbo = 0; }
-        for (auto image : allocated) glDeleteTextures(1, &image);
-        allocated.clear(); latest.reset(); displayed.reset();
+        latest.reset(); displayed.reset();
       }
-      gdk_gl_context_clear_current();
       ReleasePixelTexture();
     });
   }
@@ -320,11 +297,10 @@ static gboolean CopyPixels(FlPixelBufferTexture* base, const uint8_t** buffer, u
     g_set_error_literal(error, g_quark_from_static_string("rillight-texture"), 1, "Video texture is not initialized");
     return FALSE;
   }
-  if (!self->PrepareCleanupContext()) {
-    self->error = "Cannot retain Flutter's EGL share group for texture cleanup";
-    g_set_error_literal(error, g_quark_from_static_string("rillight-texture"), 2, self->error.c_str());
-    return FALSE;
-  }
+  // Cleanup context is only required at retirement. The upload itself uses
+  // Flutter's current raster EGL context; a missing share-group clone must
+  // not hide an otherwise valid software frame.
+  self->PrepareCleanupContext();
   // An import which started before detach may finish afterward. Its immutable
   // image is retained until the explicit raster barrier authorizes retirement.
   self->displayed = self->latest;
@@ -358,21 +334,15 @@ static void Handle(FlMethodChannel*, FlMethodCall* call, gpointer data) {
   const std::string method = fl_method_call_get_name(call);
   if (plugin->closed) { fl_method_call_respond_error(call, "closed", "Plugin is closing", nullptr, nullptr); return; }
   if (method == "create") {
+    PlayerLog("create handle=%lld", static_cast<long long>(handle));
     if (plugin->surfaces.count(handle)) { fl_method_call_respond_error(call, "duplicate", "Surface already exists", nullptr, nullptr); return; }
-    auto view = fl_plugin_registrar_get_view(plugin->registrar);
-    if (!view || !gtk_widget_get_realized(GTK_WIDGET(view)) ||
-        !gtk_widget_get_window(GTK_WIDGET(view))) {
-      fl_method_call_respond_error(call, "gl-context", "Player GTK view is not realized", nullptr, nullptr);
+    auto registrar = fl_plugin_registrar_get_texture_registrar(plugin->registrar);
+    if (!registrar) {
+      PlayerLog("create missing texture registrar");
+      fl_method_call_respond_error(call, "texture", "Texture registrar unavailable", nullptr, nullptr);
       return;
     }
-    GError* error = nullptr;
-    auto context = gdk_window_create_gl_context(gtk_widget_get_window(GTK_WIDGET(view)), &error);
-    if (!context || !gdk_gl_context_realize(context, &error)) {
-      fl_method_call_respond_error(call, "gl-context", error ? error->message : "No GL context", nullptr, nullptr);
-      g_clear_error(&error); if (context) g_object_unref(context); return;
-    }
-    auto registrar = fl_plugin_registrar_get_texture_registrar(plugin->registrar);
-    auto surface = std::make_shared<Surface>(reinterpret_cast<mpv_handle*>(handle), registrar, context);
+    auto surface = std::make_shared<Surface>(reinterpret_cast<mpv_handle*>(handle), registrar);
     auto texture = reinterpret_cast<RillightTexture*>(g_object_new(rillight_texture_get_type(), nullptr));
     texture->surface = new std::shared_ptr<Surface>(surface); surface->texture = texture;
     if (!fl_texture_registrar_register_texture(registrar, FL_TEXTURE(texture))) {
@@ -385,9 +355,12 @@ static void Handle(FlMethodChannel*, FlMethodCall* call, gpointer data) {
       Main([plugin, call, surface, error] {
         if (!plugin->closed) {
           if (error.empty() && surface->texture && !surface->detached) {
+            PlayerLog("create ready texture=%lld",
+                      static_cast<long long>(fl_texture_get_id(FL_TEXTURE(surface->texture))));
             g_autoptr(FlValue) id = fl_value_new_int(fl_texture_get_id(FL_TEXTURE(surface->texture)));
             RespondSuccess(call, id);
           } else {
+            PlayerLog("create failed %s", error.empty() ? "cancelled" : error.c_str());
             // Dart's create-error cleanup follows detach / fence / retire too.
             fl_method_call_respond_error(call, "render", error.empty() ? "Surface creation cancelled" : error.c_str(), nullptr, nullptr);
           }
@@ -438,6 +411,10 @@ static void Handle(FlMethodChannel*, FlMethodCall* call, gpointer data) {
   } else fl_method_call_respond_not_implemented(call, nullptr);
 }
 void rillight_player_plugin_register_with_registrar(FlPluginRegistrar* registrar) {
+  // libmpv refuses mpv_create() when LC_NUMERIC is not C. Flutter/GTK set a
+  // UTF-8 UI locale (zh_CN.UTF-8), so pin numeric formatting for this process.
+  setlocale(LC_NUMERIC, "C");
+  PlayerLog("plugin registered LC_NUMERIC=%s", setlocale(LC_NUMERIC, nullptr));
   auto plugin = std::make_shared<Plugin>();
   // The generated registrar is a temporary g_autoptr, released immediately
   // after plugin registration. Keep its weak-view/messenger accessors alive.

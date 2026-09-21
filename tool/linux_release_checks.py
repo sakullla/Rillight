@@ -20,6 +20,10 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 MEDIA = ('libmpv.so', 'libavcodec.so', 'libavformat.so', 'libavutil.so',
          'libavfilter.so', 'libswresample.so', 'libswscale.so', 'libplacebo.so')
+# Ubuntu's ffmpeg links libjpeg.so.8; Debian 13 only ships libjpeg.so.62.
+# The installer then depends on the Ubuntu-only libjpeg8 package and cannot
+# be installed. Vendor the SONAME into the private lib directory.
+VENDORED_SONAMES = ('libjpeg.so.8',)
 
 def clean_environment():
     return {**{key: value for key, value in os.environ.items()
@@ -89,6 +93,10 @@ def elf_files(bundle):
                 files[path] = dynamic
     return files
 
+def _must_bundle(name):
+    return name.startswith(MEDIA) or name in VENDORED_SONAMES
+
+
 def expected_runpath(path, bundle):
     relative = os.path.relpath(Path(bundle) / 'lib', path.parent).replace(os.sep, '/')
     return '$ORIGIN' if relative == '.' else '$ORIGIN/' + relative
@@ -127,7 +135,7 @@ def verify_bundle(bundle, *, runtime=True, desktop=None):
         if (meta['needed'] or meta['soname']) and (meta['runpath'] != [expected] or meta['rpath']):
             raise ValueError(f'{path.name}: RUNPATH must be {expected}; found {meta["runpath"]}/{meta["rpath"]}')
         for name in meta['needed']:
-            if name.startswith(MEDIA) and bundle / 'lib' / name not in files:
+            if _must_bundle(name) and bundle / 'lib' / name not in files:
                 raise ValueError(f'{path.name}: unbundled media dependency {name}')
             if name == 'libjvm.so' or name.startswith('libjawt.so'):
                 raise ValueError(f'{path.name}: desktop bundle must not link a JVM')
@@ -153,6 +161,43 @@ def verify_bundle(bundle, *, runtime=True, desktop=None):
     verify_entrypoints(bundle, desktop)
     return files
 
+def _host_library(name, files):
+    for path, meta in files.items():
+        if name not in meta['needed']:
+            continue
+        found = parse_ldd(run(['ldd', path])).get(name)
+        if found:
+            return found
+    return None
+
+
+def vendor_sonames(bundle, resolver=None):
+    """Copy Ubuntu-only SONAMEs next to libmpv so Debian can install the deb."""
+    bundle = Path(bundle).resolve()
+    libdir = bundle / 'lib'
+    libdir.mkdir(parents=True, exist_ok=True)
+    files = elf_files(bundle)
+    needed = {name for meta in files.values() for name in meta['needed']}
+    resolve = resolver or _host_library
+    for name in VENDORED_SONAMES:
+        if name not in needed or (libdir / name).is_file():
+            continue
+        source = resolve(name, files)
+        if not source:
+            raise ValueError(f'Cannot vendor {name}: not found on the build host')
+        source = Path(source).resolve()
+        if not source.is_file():
+            raise ValueError(f'Cannot vendor {name}: {source} is missing')
+        copied = libdir / source.name
+        shutil.copyfile(source, copied)
+        if copied.name != name:
+            link = libdir / name
+            if link.exists() or link.is_symlink():
+                link.unlink()
+            os.symlink(copied.name, link)
+    return bundle
+
+
 def prepare_bundle(prefix, bundle):
     prefix, bundle = Path(prefix).resolve(), Path(bundle).resolve()
     if not (prefix / 'rillight-source-versions.txt').is_file():
@@ -168,6 +213,7 @@ def prepare_bundle(prefix, bundle):
     run([sys.executable, ROOT / 'packages/rillight_player/native/bundle_linux.py', prefix, bundle])
     shutil.copytree(ROOT / 'packages/rillight_player/native/patches',
                     bundle / 'data/rillight_player/patches', dirs_exist_ok=True)
+    vendor_sonames(bundle)
     for path, meta in elf_files(bundle).items():
         if meta['needed'] or meta['soname']:
             run(['patchelf', '--set-rpath', expected_runpath(path, bundle), path])

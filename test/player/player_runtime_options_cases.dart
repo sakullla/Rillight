@@ -226,9 +226,9 @@ void main() {
       expect(properties['hwdec'], 'videotoolbox-copy');
     });
 
-    test('linux auto leaves hwdec to mpv defaults', () {
+    test('linux auto uses auto-copy for the embedded libmpv surface', () {
       final properties = build(platform: TargetPlatform.linux);
-      expect(properties.containsKey('hwdec'), isFalse);
+      expect(properties['hwdec'], 'auto-copy');
     });
 
     test('explicit off forces hwdec=no on every platform', () {
@@ -286,6 +286,25 @@ void main() {
     test('keeps shared-mode audio output', () {
       final properties = build();
       expect(properties['audio-exclusive'], 'no');
+    });
+
+    test('linux falls back to null audio without a sound server', () {
+      expect(
+        build(platform: TargetPlatform.linux)['audio-fallback-to-null'],
+        'yes',
+      );
+      expect(
+        build(
+          platform: TargetPlatform.windows,
+        ).containsKey('audio-fallback-to-null'),
+        isFalse,
+      );
+      expect(
+        build(
+          platform: TargetPlatform.macOS,
+        ).containsKey('audio-fallback-to-null'),
+        isFalse,
+      );
     });
   });
 }
