@@ -10,6 +10,7 @@ import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/emby/emby_errors.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_keys.dart';
+import 'package:rillight/home/catalog_failure.dart';
 import 'package:rillight/library/poster_card.dart';
 import 'package:rillight/media_image/media_image.dart';
 
@@ -219,6 +220,9 @@ class _MediaShelfState extends State<MediaShelf> {
         : MediaShelf.posterWidthFor(screenWidth);
     final pitch = cardWidth + MediaShelf.cardGap;
     final position = _controller.position;
+    if (!position.hasContentDimensions || !position.hasViewportDimension) {
+      return;
+    }
     final cardStart = AppSpacing.page + index * pitch;
     final target = (cardStart - (position.viewportDimension - cardWidth) / 2)
         .clamp(position.minScrollExtent, position.maxScrollExtent);
@@ -246,6 +250,10 @@ class _MediaShelfState extends State<MediaShelf> {
       return;
     }
     final position = _controller.position;
+    // Offstage 首页重建时 ScrollPosition 已 attach,但尚未完成布局。
+    if (!position.hasContentDimensions || !position.hasPixels) {
+      return;
+    }
     final overflowing = position.maxScrollExtent > 0.5;
     final canLeft = overflowing && position.pixels > 0.5;
     final canRight =
@@ -289,6 +297,9 @@ class _MediaShelfState extends State<MediaShelf> {
       return;
     }
     final position = _controller.position;
+    if (!position.hasContentDimensions || !position.hasViewportDimension) {
+      return;
+    }
     final delta = position.viewportDimension * 0.9 * direction;
     _controller.animateTo(
       (position.pixels + delta).clamp(0.0, position.maxScrollExtent),
@@ -334,7 +345,27 @@ class _MediaShelfState extends State<MediaShelf> {
             ),
           ),
           const SizedBox(height: AppSpacing.sm),
-          if (widget.loading)
+          if (widget.error != null && widget.items.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.page),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      catalogFailureMessage(l10n, widget.error!),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  if (widget.onRetry != null)
+                    TextButton(
+                      onPressed: widget.onRetry,
+                      child: Text(l10n.retry),
+                    ),
+                ],
+              ),
+            ),
+          if (widget.loading && widget.items.isEmpty)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: AppSpacing.page),
               child: SkeletonShelfRow(
@@ -344,7 +375,7 @@ class _MediaShelfState extends State<MediaShelf> {
                 posterAspectRatio: widget.wide ? 16 / 9 : 2 / 3,
               ),
             )
-          else if (widget.error != null)
+          else if (widget.error != null && widget.items.isEmpty)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: AppSpacing.page),
               child: widget.onRetry == null
@@ -383,6 +414,7 @@ class _MediaShelfState extends State<MediaShelf> {
                           onPointerSignal: _onVerticalWheelToParent,
                           child: MediaImageScrollListener(
                             child: ListView.separated(
+                              key: PageStorageKey('shelf-${widget.shelfId}'),
                               controller: _controller,
                               scrollCacheExtent:
                                   const ScrollCacheExtent.viewport(0.5),

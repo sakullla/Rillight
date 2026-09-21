@@ -460,6 +460,11 @@
   "@details": {
     "description": "Opens the detail page for the featured home hero item."
   },
+  "browseEmpty": "暂无可浏览的内容，请刷新或从片库开始浏览。",
+  "browseLoaded": "已载入 {count} 项",
+  "@browseLoaded": {"placeholders": {"count": {"type": "int"}}},
+  "pauseCarousel": "暂停轮播",
+  "resumeCarousel": "恢复轮播",
   "pause": "暂停",
   "@pause": {
     "description": "Pause playback."

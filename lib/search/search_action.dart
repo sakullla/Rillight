@@ -7,7 +7,9 @@ import 'package:rillight/auth/auth_scope.dart';
 ///
 /// 点击行为与 [openSearch] 一致:打开覆盖层,不 push `/search` 页壳。
 class SearchAction extends StatelessWidget {
-  const SearchAction({super.key});
+  const SearchAction({super.key, this.focusNode});
+
+  final FocusNode? focusNode;
 
   @override
   Widget build(BuildContext context) {
@@ -23,6 +25,7 @@ class SearchAction extends StatelessWidget {
         }
         final l10n = AppLocalizations.of(context);
         return IconButton(
+          focusNode: focusNode,
           tooltip: l10n.search,
           onPressed: () => openSearch(context),
           padding: EdgeInsets.zero,

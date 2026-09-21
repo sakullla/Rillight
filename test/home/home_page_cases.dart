@@ -1,6 +1,12 @@
+import 'dart:io';
+import 'dart:ui' as ui;
+
 import '../helpers/image_cache_fixture.dart';
 import '../helpers/settle.dart';
 import 'package:flutter/material.dart';
+import 'package:dio/dio.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
 import 'package:rillight/app/app_shell.dart';
@@ -16,6 +22,14 @@ import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/home_hero.dart';
 import 'package:rillight/home/home_page.dart';
+import 'package:rillight/home/catalog_scope.dart';
+import 'package:rillight/home/media_shelf.dart';
+import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/app/theme.dart';
+import 'package:rillight/library/library_page.dart';
+import 'package:rillight/library/shelf_grid_page.dart';
+import 'package:rillight/app/routes.dart';
 
 import '../emby/fake_emby_server.dart';
 
@@ -271,10 +285,386 @@ void main() {
       await tester.pump(const Duration(milliseconds: 50));
       await tester.pump(const Duration(milliseconds: 50));
       expect(retry(), findsNothing);
+      await scrollBelowTopBar(tester, find.byKey(row));
+      await settle(tester);
       expect(inRow(row, find.text('飞屋环游记')), findsOneWidget);
       await tester.pump(const Duration(milliseconds: 50));
       await tester.pump(const Duration(milliseconds: 50));
     },
     tags: ['integration'],
   );
+
+  testWidgets(
+    'home background rebuild retains scroll and compact navigation returns home',
+    (tester) async {
+      final auth = await connect(tester);
+      final app = RillightApp(auth: auth);
+      await tester.pumpWidget(app);
+      await settle(tester);
+      expect(find.byKey(CatalogKeys.librariesMenu), findsNothing);
+      final home = tester.element(find.byType(HomePage));
+      final catalog = CatalogScope.of(home);
+      await scrollBelowTopBar(tester, find.byKey(CatalogKeys.latestMoviesRow));
+      final position = Scrollable.of(
+        tester.element(find.byType(HomeHero)),
+      ).position;
+      final offset = position.pixels;
+      await tester.tap(find.byKey(AppShell.libraryNavKey('view-movies')));
+      await settle(tester);
+      expect(find.byKey(AppShell.homeNavKey), findsNothing);
+      final reload = catalog.reloadHomeRows();
+      await settle(tester);
+      await reload;
+      expect(tester.takeException(), isNull);
+      await tester.tap(find.byKey(CatalogKeys.back));
+      await settle(tester);
+      expect(position.pixels, closeTo(offset, 1));
+      app.router.go(AppRoutes.library('view-movies'));
+      await settle(tester);
+      expect(find.byTooltip('首页'), findsOneWidget);
+      await tester.tap(find.byKey(CatalogKeys.back));
+      await settle(tester);
+      expect(find.byType(HomePage), findsOneWidget);
+    },
+    tags: ['integration'],
+  );
+
+  testWidgets('offstage shelf attachment waits for content dimensions', (
+    tester,
+  ) async {
+    final hidden = ValueNotifier(true);
+    addTearDown(hidden.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        locale: const Locale('zh', 'CN'),
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        theme: AppTheme.dark(),
+        home: ValueListenableBuilder<bool>(
+          valueListenable: hidden,
+          builder: (context, value, _) => Offstage(
+            offstage: value,
+            child: MediaShelf(
+              shelfId: 'offstage',
+              title: '后台重建',
+              focusItemId: 'item-8',
+              items: List.generate(
+                12,
+                (i) => EmbyItem(id: 'item-$i', name: '电影 $i', type: 'Movie'),
+              ),
+              onTap: (_) {},
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    hidden.value = false;
+    await settle(tester);
+    expect(find.text('后台重建'), findsOneWidget);
+    expect(
+      find.byKey(CatalogKeys.shelfScrollRight('offstage')),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'carousel pauses explicitly, on focus, offstage and reduced motion',
+    (tester) async {
+      HomeHero.autoAdvanceEnabled = true;
+      final auth = await connect(tester);
+      final app = RillightApp(auth: auth);
+      await tester.pumpWidget(app);
+      await settle(tester);
+      String index() => tester
+          .widgetList<KeyedSubtree>(
+            find.descendant(
+              of: find.byType(HomeHero),
+              matching: find.byType(KeyedSubtree),
+            ),
+          )
+          .map((widget) => widget.key.toString())
+          .firstWhere((key) => key.contains('movie-'));
+      final first = index();
+      await tester.pump(HomeHero.autoAdvanceInterval);
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(index(), isNot(first));
+      await tester.tap(find.byKey(const Key('catalog-hero-pause')));
+      await tester.pump();
+      final paused = index();
+      await tester.pump(const Duration(seconds: 21));
+      expect(index(), paused);
+      await tester.tap(find.byKey(const Key('catalog-hero-pause')));
+      FocusManager.instance.primaryFocus?.unfocus();
+      await tester.pump();
+      await tester.pump(HomeHero.autoAdvanceInterval);
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(index(), isNot(paused));
+      Focus.of(
+        tester.element(
+          find
+              .descendant(
+                of: find.byKey(CatalogKeys.heroPlay),
+                matching: find.byType(Text),
+              )
+              .first,
+        ),
+      ).requestFocus();
+      await tester.pump();
+      final focused = index();
+      FocusManager.instance.primaryFocus?.unfocus();
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 21));
+      expect(index(), focused);
+      expect(find.byTooltip('恢复轮播'), findsOneWidget);
+      // An explicitly running carousel must stop while another route covers home.
+      await tester.tap(find.byKey(const Key('catalog-hero-pause')));
+      FocusManager.instance.primaryFocus?.unfocus();
+      app.router.push(AppRoutes.library('view-movies'));
+      await settle(tester);
+      await tester.pump(const Duration(seconds: 21));
+      app.router.pop();
+      await settle(tester);
+      expect(index(), focused);
+      tester.platformDispatcher.accessibilityFeaturesTestValue =
+          const FakeAccessibilityFeatures(disableAnimations: true);
+      addTearDown(
+        tester.platformDispatcher.clearAccessibilityFeaturesTestValue,
+      );
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 21));
+      expect(index(), focused);
+      expect(tester.takeException(), isNull);
+    },
+    tags: ['integration'],
+  );
+
+  testWidgets(
+    'home refresh failure preserves visible cards and offers local retry',
+    (tester) async {
+      await pumpLoggedIn(tester);
+      final catalog = CatalogScope.of(tester.element(find.byType(HomePage)));
+      server.latestMovieStatus = 500;
+      final reload = catalog.reloadHomeRows();
+      await settle(tester);
+      await reload;
+      await tester.pump(const Duration(seconds: 28));
+      await settle(tester);
+      expect(catalog.latestMovies.notice, isNotNull);
+      await scrollBelowTopBar(tester, find.byKey(CatalogKeys.latestMoviesRow));
+      expect(
+        inRow(CatalogKeys.latestMoviesRow, find.text('飞屋环游记')),
+        findsOneWidget,
+      );
+      expect(
+        inRow(CatalogKeys.latestMoviesRow, find.text('重试')),
+        findsOneWidget,
+      );
+      server.latestMovieStatus = null;
+      await tester.tap(inRow(CatalogKeys.latestMoviesRow, find.text('重试')));
+      await settle(tester);
+      expect(catalog.latestMovies.error, isNull);
+    },
+    tags: ['integration'],
+  );
+
+  testWidgets(
+    'browse layouts render at desktop and enlarged narrow window sizes',
+    (tester) async {
+      const capture = bool.fromEnvironment('BROWSE_SCREENSHOTS');
+      if (capture) {
+        await tester.runAsync(() async {
+          final fontPath =
+              Platform.environment['BROWSE_FONT'] ??
+              'C:/Windows/Fonts/msyh.ttc';
+          final bytes = ByteData.sublistView(
+            await File(fontPath).readAsBytes(),
+          );
+          for (final family in ['Segoe UI', 'Microsoft YaHei UI', 'Roboto']) {
+            await (FontLoader(family)..addFont(Future.value(bytes))).load();
+          }
+          await (FontLoader('MaterialIcons')
+                ..addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf')))
+              .load();
+        });
+      }
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+      if (capture) {
+        final artwork = await tester.runAsync(_renderFixtureArtwork);
+        server = _VisualEmbyServer(artwork!);
+        adapter = FakeEmbyAdapter([server]);
+      }
+      server.items.firstWhere((item) => item.id == 'movie-inception')
+        ..name = '星际漫游：在漫长的旅途中寻找遥远故乡与失落的记忆'
+        ..overview = '跨越群星与时间，一段关于相遇、告别与重逢的旅程。长篇简介在这里保持清晰的阅读层次，让播放与详情始终触手可及。'
+        ..backdropImageTag = 'fixture-backdrop';
+      server.views.firstWhere((view) => view.id == 'view-movies').name =
+          '精选电影 · 环球光影与珍藏放映室';
+      for (var i = 0; i < 18; i++) {
+        server.items.add(
+          FakeEmbyItem(
+            id: 'visual-$i',
+            name: ['山海之间', '最后一班夜行列车', '与你一起走过四季的漫长旅行'][i % 3],
+            type: 'Movie',
+            parentId: 'view-movies',
+            productionYear: 2020 + i % 6,
+            primaryImageTag: i % 4 == 0 ? null : 'fixture-poster-$i',
+          ),
+        );
+      }
+      final auth = await connect(tester);
+      final app = RillightApp(auth: auth);
+      final boundaryKey = GlobalKey();
+      for (final scenario in [
+        (size: const Size(1280, 720), scale: 1.0, name: '1280x720'),
+        (size: const Size(1920, 1080), scale: 1.0, name: '1920x1080'),
+        (size: const Size(1439, 900), scale: 1.0, name: '1439x900'),
+        (size: const Size(1440, 900), scale: 1.0, name: '1440x900'),
+        (size: const Size(1280, 720), scale: 1.5, name: '1280x720-150pct'),
+        (size: const Size(960, 540), scale: 1.5, name: '960x540-150pct'),
+        (size: const Size(800, 600), scale: 1.5, name: '800x600-150pct'),
+        (size: const Size(1280, 720), scale: 1.0, name: '1280x720-noimage'),
+      ]) {
+        tester.view.physicalSize = scenario.size;
+        tester.platformDispatcher.textScaleFactorTestValue = scenario.scale;
+        app.router.go(AppRoutes.home);
+        await tester.pumpWidget(RepaintBoundary(key: boundaryKey, child: app));
+        await settle(tester);
+        if (scenario.name.endsWith('noimage')) {
+          server.items.firstWhere((item) => item.id == 'movie-inception')
+            ..primaryImageTag = null
+            ..backdropImageTag = null;
+          final reload = CatalogScope.of(
+            tester.element(find.byType(HomePage)),
+          ).reloadHomeRows();
+          await settle(tester);
+          await reload;
+        }
+        for (final page in ['home', 'library']) {
+          if (page == 'library') {
+            app.router.push(AppRoutes.library('view-movies'));
+            await settle(tester);
+            expect(find.byType(LibraryPage), findsOneWidget);
+            expect(find.byKey(gridFilterMenuKey).hitTestable(), findsOneWidget);
+          } else {
+            expect(
+              find.byKey(CatalogKeys.heroPlay).hitTestable(),
+              findsOneWidget,
+            );
+            expect(
+              tester.getTopLeft(find.byKey(CatalogKeys.resumeRow)).dy,
+              lessThan(scenario.size.height),
+            );
+          }
+          expect(tester.takeException(), isNull);
+          if (capture) {
+            // Decode images on the real event loop before capturing rendered pixels.
+            await tester.runAsync(
+              () => Future<void>.delayed(const Duration(milliseconds: 100)),
+            );
+            await tester.pump(const Duration(milliseconds: 500));
+            final boundary =
+                boundaryKey.currentContext!.findRenderObject()!
+                    as RenderRepaintBoundary;
+            await tester.runAsync(() async {
+              final image = await boundary.toImage();
+              final png = await image.toByteData(
+                format: ui.ImageByteFormat.png,
+              );
+              final file = File(
+                'build/browse-experience/$page-${scenario.name}.png',
+              );
+              await file.parent.create(recursive: true);
+              await file.writeAsBytes(png!.buffer.asUint8List());
+              image.dispose();
+            });
+          }
+        }
+      }
+    },
+    tags: ['integration'],
+  );
+}
+
+// Deterministic synthetic artwork, never a network/downloaded poster.
+Future<List<Uint8List>> _renderFixtureArtwork() async {
+  final result = <Uint8List>[];
+  for (final color in [
+    const Color(0xff3d697c),
+    const Color(0xff8a564d),
+    const Color(0xff526746),
+  ]) {
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    const bounds = Rect.fromLTWH(0, 0, 960, 540);
+    canvas.drawRect(
+      bounds,
+      Paint()
+        ..shader = LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [color, const Color(0xff101820)],
+        ).createShader(bounds),
+    );
+    canvas.drawCircle(
+      const Offset(720, 130),
+      65,
+      Paint()..color = const Color(0xffecd5a6),
+    );
+    for (var layer = 0; layer < 3; layer++) {
+      final path = Path()..moveTo(0, 310.0 + layer * 55);
+      for (var x = 0; x <= 960; x += 120) {
+        path.lineTo(x.toDouble(), 230.0 + layer * 90 + ((x ~/ 120) % 2) * 90);
+      }
+      path
+        ..lineTo(960, 540)
+        ..lineTo(0, 540)
+        ..close();
+      canvas.drawPath(
+        path,
+        Paint()
+          ..color = Color.lerp(
+            color,
+            const Color(0xff0c1520),
+            0.35 + layer * 0.2,
+          )!,
+      );
+    }
+    final picture = recorder.endRecording();
+    final image = await picture.toImage(960, 540);
+    final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+    result.add(bytes!.buffer.asUint8List());
+    image.dispose();
+    picture.dispose();
+  }
+  return result;
+}
+
+class _VisualEmbyServer extends FakeEmbyServer {
+  _VisualEmbyServer(this.artwork);
+  final List<Uint8List> artwork;
+
+  @override
+  Future<ResponseBody> handle(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+  ) async {
+    final response = await super.handle(options, requestStream);
+    if (response.statusCode == 200 && options.uri.path.contains('/Images/')) {
+      final seed = options.uri.path.codeUnits.fold(0, (a, b) => a + b);
+      return ResponseBody.fromBytes(
+        artwork[seed % artwork.length],
+        200,
+        headers: {
+          Headers.contentTypeHeader: ['image/png'],
+        },
+      );
+    }
+    return response;
+  }
 }

@@ -20,6 +20,7 @@ import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_failure.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/catalog_scope.dart';
+import 'package:rillight/home/media_shelf.dart';
 import 'package:rillight/library/poster_card.dart';
 import 'package:rillight/library/shelf_sort.dart';
 import 'package:rillight/media_image/media_image.dart';
@@ -121,11 +122,11 @@ class ShelfGridPage extends StatefulWidget {
     required double availableWidth,
     bool episodes = false,
     bool wide = false,
+    double labelExtent = 38.0,
   }) {
     const spacing = AppSpacing.md;
     // PosterCard 非 wide 布局文字行占位:xs 间距 + 标题行,
     // 与 MediaShelf 行高口径一致。横图分集/继续观看用 16:9。
-    const labelExtent = 38.0;
     final landscape = episodes || wide;
     final maxExtent = landscape
         ? maxEpisodeExtentFor(screenWidth)
@@ -214,6 +215,7 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
   bool _refreshing = false;
   bool _hasMore = false;
   EmbyException? _error;
+  EmbyException? _pageError;
   late CatalogSort _sort = _defaultSort;
 
   /// 片库组合筛选:类型/年份/流派/已看,与排序叠加生效。
@@ -322,13 +324,19 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
   }
 
   void _maybeLoadMore() {
-    if (!_paged || !_hasMore || _loading || _loadingMore || _refreshing) {
+    if (!_paged ||
+        !_hasMore ||
+        _loading ||
+        _loadingMore ||
+        _refreshing ||
+        _pageError != null) {
       return;
     }
     if (!_scrollController.hasClients) {
       return;
     }
     final position = _scrollController.position;
+    if (!position.hasContentDimensions) return;
     if (position.pixels >=
         position.maxScrollExtent - ShelfGridPage.loadMoreThreshold) {
       _loadMore();
@@ -350,6 +358,7 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
       });
       return;
     }
+    if (!_scrollController.position.hasContentDimensions) return;
     if (_scrollController.position.maxScrollExtent >
         ShelfGridPage.loadMoreThreshold) {
       return;
@@ -369,6 +378,7 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
     final gen = ++_loadGen;
     // 切排序/手动刷新保留已有内容增量刷新,不清空整页骨架屏重来。
     setState(() {
+      _pageError = null;
       if (preserveContent) {
         _refreshing = true;
         _error = null;
@@ -436,9 +446,7 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
         _loading = false;
         _refreshing = false;
         // 先显缓存内容时保留显示,可经手动刷新重试;否则展示错误。
-        if (preserveContent || _items.isEmpty) {
-          _error = error;
-        }
+        _error = error;
       });
     }
   }
@@ -457,7 +465,10 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
     }
     final gen = _loadGen;
     final start = _fetched;
-    setState(() => _loadingMore = true);
+    setState(() {
+      _loadingMore = true;
+      _pageError = null;
+    });
     try {
       final page = await _fetch(
         AuthScope.of(context).client,
@@ -481,12 +492,15 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
           _fillViewportIfNeeded();
         }
       });
-    } on EmbyException {
+    } on EmbyException catch (error) {
       if (!mounted || gen != _loadGen) {
         return;
       }
       // 分页追加失败不打断已有内容,保留重试机会(再次滚动到底部重试)。
-      setState(() => _loadingMore = false);
+      setState(() {
+        _loadingMore = false;
+        _pageError = error;
+      });
     } finally {
       if (mounted && gen == _loadGen && _loadingMore) {
         setState(() => _loadingMore = false);
@@ -651,7 +665,7 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
         ],
       );
     }
-    if (_error != null) {
+    if (_error != null && _items.isEmpty) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -699,6 +713,15 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
               ),
               episodes: _episodes,
               wide: _wideGrid,
+              labelExtent: _wideGrid
+                  ? MediaShelf.wideLabelExtentFor(
+                      context,
+                      customCard: _episodes,
+                    )
+                  : MediaShelf.posterLabelExtentFor(
+                      context,
+                      showProgress: false,
+                    ),
             );
             return MediaImageScrollListener(
               child: CustomScrollView(
@@ -717,6 +740,7 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
                       showSort: _items.isNotEmpty,
                       onRefresh: _manualRefresh,
                       refreshing: _refreshing,
+                      loadedCount: _items.length,
                       filters: _filterable ? _filters : null,
                       typeFilterable: _typeFilterable,
                       yearOptions: _yearOptions,
@@ -724,6 +748,20 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
                       onFiltersChanged: _filterable ? _selectFilters : null,
                     ),
                   ),
+                  if (_error != null)
+                    SliverToBoxAdapter(
+                      child: _failureNotice(_error!, _manualRefresh),
+                    ),
+                  if (_items.isEmpty)
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.all(AppSpacing.page),
+                        child: Text(
+                          l10n.browseEmpty,
+                          style: Theme.of(context).textTheme.bodyLarge,
+                        ),
+                      ),
+                    ),
                   SliverPadding(
                     padding: const EdgeInsets.fromLTRB(
                       AppSpacing.page,
@@ -773,11 +811,43 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
                         child: Center(child: CircularProgressIndicator()),
                       ),
                     ),
+                  if (_pageError != null)
+                    SliverToBoxAdapter(
+                      child: _failureNotice(_pageError!, _loadMore),
+                    ),
                 ],
               ),
             );
           },
         ),
+      ),
+    );
+  }
+
+  Widget _failureNotice(EmbyException error, VoidCallback retry) {
+    final l10n = AppLocalizations.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.page,
+        vertical: AppSpacing.xs,
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.info_outline),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Text(
+              catalogFailureMessage(l10n, error),
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          TextButton(
+            key: const Key('catalog-grid-page-retry'),
+            onPressed: retry,
+            child: Text(l10n.retry),
+          ),
+        ],
       ),
     );
   }
@@ -830,6 +900,7 @@ class _Header extends StatelessWidget {
     required this.showSort,
     this.onRefresh,
     this.refreshing = false,
+    this.loadedCount,
     this.filters,
     this.typeFilterable = false,
     this.yearOptions = const [],
@@ -848,6 +919,7 @@ class _Header extends StatelessWidget {
   /// 手动刷新入口:绕过缓存立即重拉。null 时不显示刷新按钮。
   final VoidCallback? onRefresh;
   final bool refreshing;
+  final int? loadedCount;
 
   /// 当前筛选状态;null 时不显示筛选控件(非片库来源)。
   final ShelfFilters? filters;
@@ -868,7 +940,12 @@ class _Header extends StatelessWidget {
     final heading =
         titleOverride ??
         (showTitle && title.isNotEmpty
-            ? Text(title, style: textTheme.headlineSmall)
+            ? Text(
+                title,
+                style: textTheme.headlineMedium,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              )
             : null);
     return Padding(
       padding: EdgeInsets.fromLTRB(
@@ -877,80 +954,95 @@ class _Header extends StatelessWidget {
         AppSpacing.page,
         AppSpacing.sm,
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (onRefresh != null) ...[
-            IconButton(
-              key: gridRefreshKey,
-              tooltip: l10n.retry,
-              visualDensity: VisualDensity.compact,
-              onPressed: refreshing ? null : onRefresh,
-              icon: refreshing
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.refresh),
-            ),
-            const SizedBox(width: AppSpacing.sm),
-          ],
-          if (filters != null && onFiltersChanged != null) ...[
-            Flexible(
-              child: _FilterBar(
-                filters: filters!,
-                typeFilterable: typeFilterable,
-                yearOptions: yearOptions,
-                genreOptions: genreOptions,
-                onChanged: onFiltersChanged!,
+          ?heading,
+          if (loadedCount != null) ...[
+            const SizedBox(height: AppSpacing.xxs),
+            Text(
+              l10n.browseLoaded(loadedCount!),
+              style: textTheme.bodySmall?.copyWith(
+                color: colorScheme.onSurfaceVariant,
               ),
             ),
-            const SizedBox(width: AppSpacing.sm),
           ],
-          if (showSort) ...[
-            PopupMenuButton<CatalogSort>(
-              key: CatalogKeys.sortBy,
-              tooltip: l10n.sortBy,
-              initialValue: sort,
-              onSelected: onSort,
-              itemBuilder: (context) => [
-                for (final option in options)
-                  CheckedPopupMenuItem<CatalogSort>(
-                    key: CatalogKeys.sortOption(option.sortBy),
-                    value: option,
-                    checked: option == sort,
-                    child: Text(option.label(l10n)),
-                  ),
+          const SizedBox(height: AppSpacing.sm),
+          Wrap(
+            spacing: AppSpacing.sm,
+            runSpacing: AppSpacing.xs,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              if (onRefresh != null) ...[
+                IconButton(
+                  key: gridRefreshKey,
+                  tooltip: l10n.retry,
+                  visualDensity: VisualDensity.compact,
+                  onPressed: refreshing ? null : onRefresh,
+                  icon: refreshing
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.refresh),
+                ),
+                const SizedBox(width: AppSpacing.sm),
               ],
-              child: _HeaderChip(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: AppSpacing.sm,
-                    vertical: AppSpacing.xs,
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.sort,
-                        size: 18,
-                        color: colorScheme.onSurfaceVariant,
+              if (filters != null && onFiltersChanged != null) ...[
+                _FilterBar(
+                  filters: filters!,
+                  typeFilterable: typeFilterable,
+                  yearOptions: yearOptions,
+                  genreOptions: genreOptions,
+                  onChanged: onFiltersChanged!,
+                ),
+                const SizedBox(width: AppSpacing.sm),
+              ],
+              if (showSort) ...[
+                PopupMenuButton<CatalogSort>(
+                  key: CatalogKeys.sortBy,
+                  tooltip: l10n.sortBy,
+                  initialValue: sort,
+                  onSelected: onSort,
+                  itemBuilder: (context) => [
+                    for (final option in options)
+                      CheckedPopupMenuItem<CatalogSort>(
+                        key: CatalogKeys.sortOption(option.sortBy),
+                        value: option,
+                        checked: option == sort,
+                        child: Text(option.label(l10n)),
                       ),
-                      const SizedBox(width: AppSpacing.xs),
-                      Text(sort.label(l10n), style: textTheme.labelLarge),
-                      const SizedBox(width: AppSpacing.xxs),
-                      Icon(
-                        Icons.arrow_drop_down,
-                        color: colorScheme.onSurfaceVariant,
+                  ],
+                  child: _HeaderChip(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.sm,
+                        vertical: AppSpacing.xs,
                       ),
-                    ],
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.sort,
+                            size: 18,
+                            color: colorScheme.onSurfaceVariant,
+                          ),
+                          const SizedBox(width: AppSpacing.xs),
+                          Text(sort.label(l10n), style: textTheme.labelLarge),
+                          const SizedBox(width: AppSpacing.xxs),
+                          Icon(
+                            Icons.arrow_drop_down,
+                            color: colorScheme.onSurfaceVariant,
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
-              ),
-            ),
-            if (heading != null) const SizedBox(width: AppSpacing.md),
-          ],
-          if (heading != null) Expanded(child: heading),
+              ],
+            ],
+          ),
         ],
       ),
     );

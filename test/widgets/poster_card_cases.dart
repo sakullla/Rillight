@@ -1,5 +1,6 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/theme.dart';
@@ -106,4 +107,27 @@ void main() {
     expect(taps, 1);
     expect(host.current, isNull);
   });
+
+  testWidgets(
+    'keyboard focus reveals play and Enter activates only that action',
+    (tester) async {
+      var detailTaps = 0;
+      await tester.pumpWidget(
+        _wrap(
+          host: host,
+          child: PosterCard(item: _movie, onTap: () => detailTaps++),
+        ),
+      );
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pump();
+      expect(find.byKey(PosterCard.playButtonKey(_movie.id)), findsOneWidget);
+      expect(host.current, isNull);
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pump();
+      expect(host.current?.itemId, _movie.id);
+      expect(detailTaps, 0);
+    },
+  );
 }

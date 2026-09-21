@@ -86,7 +86,7 @@ abstract final class AppTheme {
       letterSpacing: 0,
     );
 
-    const textTheme = TextTheme(
+    const baseTextTheme = TextTheme(
       displayLarge: TextStyle(
         fontSize: 44,
         fontWeight: FontWeight.w700,
@@ -155,22 +155,23 @@ abstract final class AppTheme {
     final buttonShape = RoundedRectangleBorder(
       borderRadius: BorderRadius.circular(AppRadii.md),
     );
+    final textTheme = baseTextTheme.apply(
+      bodyColor: _onSurface,
+      displayColor: _onSurface,
+      fontFamily: 'Segoe UI',
+      fontFamilyFallback: const [
+        'Microsoft YaHei UI',
+        'PingFang SC',
+        'Noto Sans SC',
+        'Noto Sans CJK SC',
+      ],
+    );
 
     return ThemeData(
       useMaterial3: true,
       brightness: Brightness.dark,
       colorScheme: scheme,
-      textTheme: textTheme.apply(
-        bodyColor: _onSurface,
-        displayColor: _onSurface,
-        fontFamily: 'Segoe UI',
-        fontFamilyFallback: const [
-          'Microsoft YaHei UI',
-          'PingFang SC',
-          'Noto Sans SC',
-          'Noto Sans CJK SC',
-        ],
-      ),
+      textTheme: textTheme,
       scaffoldBackgroundColor: _base,
       canvasColor: _base,
       dividerColor: _outlineVariant,

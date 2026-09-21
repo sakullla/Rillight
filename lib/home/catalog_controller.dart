@@ -13,12 +13,16 @@ class CatalogRowState {
     this.loading = false,
     this.hidden = false,
     this.error,
+    this.notice,
   });
 
   final List<EmbyItem> items;
   final bool loading;
   final bool hidden;
   final EmbyException? error;
+
+  /// 已有内容仍可用时的局部刷新提示;不改变 [error] 的失败态契约。
+  final EmbyException? notice;
 }
 
 class CatalogController extends ChangeNotifier {
@@ -64,13 +68,19 @@ class CatalogController extends ChangeNotifier {
     }
     final gen = ++_loadGen;
     _clearRetries();
+    final sameSession = _sessionKey == _currentSessionKey;
     _sessionKey = _currentSessionKey;
     _syncCacheSession();
-    resume = const CatalogRowState(loading: true);
-    nextUp = const CatalogRowState(loading: true);
-    latestMovies = const CatalogRowState(loading: true);
-    latestSeries = const CatalogRowState(loading: true);
+    CatalogRowState refreshing(CatalogRowState current) =>
+        !sameSession || current.items.isEmpty
+        ? const CatalogRowState(loading: true)
+        : CatalogRowState(items: current.items);
+    resume = refreshing(resume);
+    nextUp = refreshing(nextUp);
+    latestMovies = refreshing(latestMovies);
+    latestSeries = refreshing(latestSeries);
     if (includeLibraries) {
+      if (!sameSession) libraries = const [];
       librariesLoading = true;
       librariesError = null;
     }
@@ -443,7 +453,7 @@ class CatalogController extends ChangeNotifier {
   ) {
     final scheduled = _scheduleRetry(key, load);
     if (_rowHasContent(current)) {
-      return current;
+      return CatalogRowState(items: current.items, notice: _asEmby(error));
     }
     if (scheduled) {
       return const CatalogRowState(loading: true);

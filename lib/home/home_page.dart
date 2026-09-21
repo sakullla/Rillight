@@ -73,7 +73,10 @@ class _HomePageState extends State<HomePage> {
     }
     setState(() => _refreshing = true);
     try {
-      await catalog.reloadHomeRows();
+      await catalog.reload(
+        includeLibraries: catalog.libraries.isEmpty,
+        showCachedFirst: false,
+      );
     } finally {
       if (mounted) {
         setState(() => _refreshing = false);
@@ -99,7 +102,7 @@ class _HomePageState extends State<HomePage> {
     if (firstVisible != null) {
       return firstVisible;
     }
-    return catalog.libraries.isEmpty ? null : _RefreshSlot.libraries;
+    return _RefreshSlot.libraries;
   }
 
   Widget? _refreshAction(
@@ -138,93 +141,130 @@ class _HomePageState extends State<HomePage> {
       builder: (context, _) {
         final overlap = HomePage.heroTopOverlap(context);
         final refreshHost = _refreshHost(catalog);
-        return MediaImageScrollListener(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.only(bottom: AppSpacing.xxl),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                RepaintBoundary(
-                  child: HomeHero(catalog: catalog, topOverlap: overlap),
-                ),
-                RepaintBoundary(
-                  child: HomeMediaRow(
-                    rowKey: CatalogKeys.resumeRow,
-                    shelfId: CatalogKeys.shelfResume,
-                    title: l10n.resumeRow,
-                    state: catalog.resume,
-                    showProgress: true,
-                    wide: true,
-                    headerAction: _refreshAction(
-                      l10n,
-                      refreshHost,
-                      _RefreshSlot.resume,
-                    ),
-                    onTap: (item) => context.push(AppRoutes.item(item.id)),
-                    onRetry: catalog.reloadHomeRows,
-                    onMore: () => context.push(AppRoutes.shelfResume),
-                    onRemoveFromResume: catalog.hideFromResume,
+        final heroVisible = [
+          catalog.resume,
+          catalog.latestMovies,
+          catalog.latestSeries,
+        ].any((row) => row.loading || row.items.isNotEmpty);
+        return NotificationListener<ScrollNotification>(
+          onNotification: (notification) {
+            if (notification.depth == 0 &&
+                notification.metrics.axis == Axis.vertical) {
+              HomeScrollNotification(
+                notification.metrics.pixels > 24,
+              ).dispatch(context);
+            }
+            return false;
+          },
+          child: MediaImageScrollListener(
+            child: SingleChildScrollView(
+              key: const PageStorageKey('home-scroll'),
+              padding: EdgeInsets.only(
+                bottom: AppSpacing.xxl,
+                top: !heroVisible ? overlap + AppSpacing.xl : 0,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  RepaintBoundary(
+                    child: HomeHero(catalog: catalog, topOverlap: overlap),
                   ),
-                ),
-                RepaintBoundary(
-                  child: LibraryTiles(
-                    libraries: catalog.libraries,
-                    headerAction: _refreshAction(
-                      l10n,
-                      refreshHost,
-                      _RefreshSlot.libraries,
+                  RepaintBoundary(
+                    child: HomeMediaRow(
+                      rowKey: CatalogKeys.resumeRow,
+                      shelfId: CatalogKeys.shelfResume,
+                      title: l10n.resumeRow,
+                      state: catalog.resume,
+                      showProgress: true,
+                      wide: true,
+                      headerAction: _refreshAction(
+                        l10n,
+                        refreshHost,
+                        _RefreshSlot.resume,
+                      ),
+                      onTap: (item) => context.push(AppRoutes.item(item.id)),
+                      onRetry: catalog.reloadHomeRows,
+                      onMore: () => context.push(AppRoutes.shelfResume),
+                      onRemoveFromResume: catalog.hideFromResume,
                     ),
                   ),
-                ),
-                RepaintBoundary(
-                  child: HomeMediaRow(
-                    rowKey: CatalogKeys.nextUpRow,
-                    shelfId: CatalogKeys.shelfNextUp,
-                    title: l10n.nextUpRow,
-                    state: catalog.nextUp,
-                    headerAction: _refreshAction(
-                      l10n,
-                      refreshHost,
-                      _RefreshSlot.nextUp,
+                  if (refreshHost == _RefreshSlot.libraries &&
+                      catalog.libraries.isNotEmpty)
+                    RepaintBoundary(
+                      child: LibraryTiles(
+                        libraries: catalog.libraries,
+                        headerAction: _refreshAction(
+                          l10n,
+                          refreshHost,
+                          _RefreshSlot.libraries,
+                        ),
+                      ),
                     ),
-                    onTap: (item) => context.push(AppRoutes.item(item.id)),
-                    onRetry: catalog.reloadHomeRows,
-                    onMore: () => context.push(AppRoutes.shelfNextUp),
-                  ),
-                ),
-                RepaintBoundary(
-                  child: HomeMediaRow(
-                    rowKey: CatalogKeys.latestMoviesRow,
-                    shelfId: CatalogKeys.shelfLatestMovies,
-                    title: l10n.latestMoviesRow,
-                    state: catalog.latestMovies,
-                    headerAction: _refreshAction(
-                      l10n,
-                      refreshHost,
-                      _RefreshSlot.latestMovies,
+                  if (refreshHost == _RefreshSlot.libraries &&
+                      catalog.libraries.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.all(AppSpacing.page),
+                      child: Row(
+                        children: [
+                          Expanded(child: Text(l10n.browseEmpty)),
+                          _refreshAction(
+                            l10n,
+                            refreshHost,
+                            _RefreshSlot.libraries,
+                          )!,
+                        ],
+                      ),
                     ),
-                    onTap: (item) => context.push(AppRoutes.item(item.id)),
-                    onRetry: catalog.reloadHomeRows,
-                    onMore: () => context.push(AppRoutes.shelfLatestMovies),
-                  ),
-                ),
-                RepaintBoundary(
-                  child: HomeMediaRow(
-                    rowKey: CatalogKeys.latestSeriesRow,
-                    shelfId: CatalogKeys.shelfLatestSeries,
-                    title: l10n.latestSeriesRow,
-                    state: catalog.latestSeries,
-                    headerAction: _refreshAction(
-                      l10n,
-                      refreshHost,
-                      _RefreshSlot.latestSeries,
+                  RepaintBoundary(
+                    child: HomeMediaRow(
+                      rowKey: CatalogKeys.nextUpRow,
+                      shelfId: CatalogKeys.shelfNextUp,
+                      title: l10n.nextUpRow,
+                      state: catalog.nextUp,
+                      headerAction: _refreshAction(
+                        l10n,
+                        refreshHost,
+                        _RefreshSlot.nextUp,
+                      ),
+                      onTap: (item) => context.push(AppRoutes.item(item.id)),
+                      onRetry: catalog.reloadHomeRows,
+                      onMore: () => context.push(AppRoutes.shelfNextUp),
                     ),
-                    onTap: (item) => context.push(AppRoutes.item(item.id)),
-                    onRetry: catalog.reloadHomeRows,
-                    onMore: () => context.push(AppRoutes.shelfLatestSeries),
                   ),
-                ),
-              ],
+                  RepaintBoundary(
+                    child: HomeMediaRow(
+                      rowKey: CatalogKeys.latestMoviesRow,
+                      shelfId: CatalogKeys.shelfLatestMovies,
+                      title: l10n.latestMoviesRow,
+                      state: catalog.latestMovies,
+                      headerAction: _refreshAction(
+                        l10n,
+                        refreshHost,
+                        _RefreshSlot.latestMovies,
+                      ),
+                      onTap: (item) => context.push(AppRoutes.item(item.id)),
+                      onRetry: catalog.reloadHomeRows,
+                      onMore: () => context.push(AppRoutes.shelfLatestMovies),
+                    ),
+                  ),
+                  RepaintBoundary(
+                    child: HomeMediaRow(
+                      rowKey: CatalogKeys.latestSeriesRow,
+                      shelfId: CatalogKeys.shelfLatestSeries,
+                      title: l10n.latestSeriesRow,
+                      state: catalog.latestSeries,
+                      headerAction: _refreshAction(
+                        l10n,
+                        refreshHost,
+                        _RefreshSlot.latestSeries,
+                      ),
+                      onTap: (item) => context.push(AppRoutes.item(item.id)),
+                      onRetry: catalog.reloadHomeRows,
+                      onMore: () => context.push(AppRoutes.shelfLatestSeries),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         );

@@ -154,7 +154,7 @@ void main() {
       await tester.tap(homeTitle);
       await settle(tester);
     }
-    final movies = find.byKey(CatalogKeys.library('view-movies'));
+    final movies = find.byKey(AppShell.libraryNavKey('view-movies'));
     await tester.ensureVisible(movies);
     await tester.tap(movies);
     await settle(tester);

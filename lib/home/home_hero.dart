@@ -30,20 +30,20 @@ class HomeHero extends StatefulWidget {
   /// 向上叠过 [AppShell] 顶栏的高度;由首页传入,本组件只增加画面高度。
   final double topOverlap;
 
-  /// hero 高度:桌面流媒体首页约 2:1 画幅、视口 68%,顶栏叠在画面上缘。
+  /// 总高度约占视口 60%,给第一条内容行留出首屏空间。
   static double heightFor(double width, {double? viewportHeight}) {
     final fromWidth = width * 0.50;
     final fromViewport = viewportHeight == null
         ? fromWidth
-        : viewportHeight * 0.68;
+        : viewportHeight * 0.60;
     final base = math.min(fromWidth, fromViewport);
     if (width < AppBreakpoints.compact) {
-      return base.clamp(380.0, 560.0);
+      return base.clamp(320.0, 560.0);
     }
     if (width < AppBreakpoints.large) {
-      return base.clamp(460.0, 680.0);
+      return base.clamp(360.0, 640.0);
     }
-    return base.clamp(520.0, 780.0);
+    return base.clamp(400.0, 680.0);
   }
 
   /// 高度足够时才放得下简介。
@@ -62,7 +62,10 @@ class HomeHero extends StatefulWidget {
 
   /// 文字块最大宽度:不超过 60% 视口且 ≤ 640,与 [AppScrim.textBandWidthFactor]
   /// 的文字带对齐。
-  static double textBlockWidthFor(double width) => math.min(width * 0.6, 640);
+  static double textBlockWidthFor(double width) =>
+      width < AppBreakpoints.compact
+      ? width - AppSpacing.page * 2
+      : math.min(width * 0.6, 640);
 
   /// 自动轮换开关;flutter test 环境默认关闭,保证 pumpAndSettle 期间内容确定
   /// (本应用仅桌面平台,Platform 可用)。
@@ -77,6 +80,7 @@ class _HomeHeroState extends State<HomeHero> {
   int _index = 0;
   bool _hovering = false;
   bool _focused = false;
+  bool _paused = false;
   Timer? _autoAdvance;
 
   /// featured 候选:继续观看(可播/剧集)优先,其次最新电影、最新剧集,
@@ -86,6 +90,7 @@ class _HomeHeroState extends State<HomeHero> {
     final items = <EmbyItem>[];
     void addAll(Iterable<EmbyItem> source, {bool playableOnly = false}) {
       for (final item in source) {
+        if (items.length >= HomeHero.maxFeatured) return;
         if (playableOnly && !item.isPlayable && !item.isSeries) {
           continue;
         }
@@ -130,11 +135,13 @@ class _HomeHeroState extends State<HomeHero> {
     return HomeHero.autoAdvanceEnabled &&
         !_hovering &&
         !_focused &&
+        !_paused &&
+        TickerMode.valuesOf(context).enabled &&
         !_reduceMotion;
   }
 
   void _syncAutoAdvanceTimer() {
-    final wantTimer = HomeHero.autoAdvanceEnabled && !_reduceMotion;
+    final wantTimer = _canAutoAdvance && _featuredItems.length > 1;
     if (wantTimer) {
       _autoAdvance ??= Timer.periodic(HomeHero.autoAdvanceInterval, (_) {
         _tick();
@@ -169,7 +176,10 @@ class _HomeHeroState extends State<HomeHero> {
     if (count < 2) {
       return;
     }
-    setState(() => _index = (index % count + count) % count);
+    setState(() {
+      _index = (index % count + count) % count;
+      _paused = true;
+    });
     _autoAdvance?.cancel();
     _autoAdvance = null;
   }
@@ -180,12 +190,31 @@ class _HomeHeroState extends State<HomeHero> {
     final items = _featuredItems;
     return LayoutBuilder(
       builder: (context, constraints) {
-        final height =
-            HomeHero.heightFor(
-              constraints.maxWidth,
-              viewportHeight: MediaQuery.sizeOf(context).height,
-            ) +
-            widget.topOverlap;
+        final index = items.isEmpty ? 0 : _index % items.length;
+        final item = items.isEmpty ? null : items[index];
+        final hasImage =
+            item != null &&
+            (item.backdropImageTag != null ||
+                item.primaryImageTag != null ||
+                item.parentBackdropImageTag != null);
+        final scale = MediaQuery.textScalerOf(context).scale(14) / 14;
+        final height = math.max(
+          hasImage
+              ? HomeHero.heightFor(
+                  constraints.maxWidth,
+                  viewportHeight: MediaQuery.sizeOf(context).height,
+                )
+              : 0.0,
+          (HomeHero.showsOverview(
+                        constraints.maxWidth,
+                        viewportHeight: MediaQuery.sizeOf(context).height,
+                      )
+                      ? 280
+                      : 200) *
+                  scale +
+              widget.topOverlap +
+              64,
+        );
         if (items.isEmpty) {
           if (!_loading) {
             return const SizedBox.shrink();
@@ -196,8 +225,7 @@ class _HomeHeroState extends State<HomeHero> {
             borderRadius: BorderRadius.zero,
           );
         }
-        final index = _index % items.length;
-        final item = items[index];
+        final featured = item!;
         return SizedBox(
           height: height,
           width: double.infinity,
@@ -208,7 +236,10 @@ class _HomeHeroState extends State<HomeHero> {
               if (_focused == focused) {
                 return;
               }
-              setState(() => _focused = focused);
+              setState(() {
+                _focused = focused;
+                if (focused) _paused = true;
+              });
             },
             child: MouseRegion(
               onEnter: (_) {
@@ -227,7 +258,7 @@ class _HomeHeroState extends State<HomeHero> {
                   AnimatedSwitcher(
                     duration: AppMotion.durationOf(context, AppMotion.slow),
                     child: KeyedSubtree(
-                      key: ValueKey(item.id),
+                      key: ValueKey(featured.id),
                       child: Stack(
                         fit: StackFit.expand,
                         children: [
@@ -236,27 +267,30 @@ class _HomeHeroState extends State<HomeHero> {
                               AppScrim.topBandHeight,
                               widget.topOverlap + HomeHero.topBandFade,
                             ),
-                            backdrop: MediaImage(
-                              item: item,
-                              height: height,
-                              preferBackdrop: true,
-                              maxWidth: mediaBackdropRequestWidth(
-                                layoutWidth: constraints.maxWidth,
-                                devicePixelRatio: MediaQuery.devicePixelRatioOf(
-                                  context,
-                                ),
-                              ),
-                            ),
+                            backdrop: !hasImage
+                                ? const SizedBox.expand()
+                                : MediaImage(
+                                    item: featured,
+                                    height: height,
+                                    preferBackdrop: true,
+                                    maxWidth: mediaBackdropRequestWidth(
+                                      layoutWidth: constraints.maxWidth,
+                                      devicePixelRatio:
+                                          MediaQuery.devicePixelRatioOf(
+                                            context,
+                                          ),
+                                    ),
+                                  ),
                           ),
                           Padding(
                             padding: EdgeInsets.fromLTRB(
                               AppSpacing.page,
                               math.max(AppSpacing.xl, widget.topOverlap),
                               AppSpacing.page,
-                              AppSpacing.xl,
+                              items.length > 1 ? 64 : AppSpacing.xl,
                             ),
                             child: _HeroContent(
-                              item: item,
+                              item: featured,
                               width: constraints.maxWidth,
                             ),
                           ),
@@ -266,9 +300,8 @@ class _HomeHeroState extends State<HomeHero> {
                   ),
                   if (items.length > 1) ...[
                     Positioned(
-                      left: AppSpacing.sm,
-                      top: 0,
-                      bottom: 0,
+                      right: AppSpacing.page + 96,
+                      bottom: AppSpacing.xs,
                       child: Center(
                         child: ScrimIconButton(
                           key: CatalogKeys.heroPrev,
@@ -280,9 +313,8 @@ class _HomeHeroState extends State<HomeHero> {
                       ),
                     ),
                     Positioned(
-                      right: AppSpacing.sm,
-                      top: 0,
-                      bottom: 0,
+                      right: AppSpacing.page,
+                      bottom: AppSpacing.xs,
                       child: Center(
                         child: ScrimIconButton(
                           key: CatalogKeys.heroNext,
@@ -294,13 +326,32 @@ class _HomeHeroState extends State<HomeHero> {
                       ),
                     ),
                     Positioned(
-                      right: AppSpacing.page,
-                      bottom: AppSpacing.md,
+                      left: AppSpacing.page,
+                      bottom: AppSpacing.xs,
                       child: _HeroIndicators(
                         key: Key('catalog-hero-index-$index'),
                         count: items.length,
                         index: index,
                         onSelect: _goTo,
+                      ),
+                    ),
+                    Positioned(
+                      right: AppSpacing.page + 48,
+                      bottom: AppSpacing.xs,
+                      child: ScrimIconButton(
+                        key: const Key('catalog-hero-pause'),
+                        tooltip: _paused || _reduceMotion
+                            ? AppLocalizations.of(context).resumeCarousel
+                            : AppLocalizations.of(context).pauseCarousel,
+                        icon: Icon(
+                          _paused || _reduceMotion
+                              ? Icons.play_arrow
+                              : Icons.pause,
+                        ),
+                        size: ScrimIconButtonSize.large,
+                        onPressed: _reduceMotion
+                            ? null
+                            : () => setState(() => _paused = !_paused),
                       ),
                     ),
                   ],
@@ -335,17 +386,15 @@ class _HeroIndicators extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         for (var i = 0; i < count; i++)
-          MouseRegion(
-            cursor: SystemMouseCursors.click,
-            child: GestureDetector(
+          SizedBox(
+            width: 40,
+            height: 40,
+            child: IconButton(
               key: CatalogKeys.heroDot(i),
-              behavior: HitTestBehavior.opaque,
-              onTap: () => onSelect(i),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: AppSpacing.xxs,
-                  vertical: AppSpacing.sm,
-                ),
+              tooltip: '${i + 1} / $count',
+              isSelected: i == index,
+              onPressed: () => onSelect(i),
+              icon: Center(
                 child: AnimatedContainer(
                   duration: AppMotion.durationOf(context, AppMotion.fast),
                   curve: AppMotion.standard,

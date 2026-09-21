@@ -712,6 +712,30 @@ abstract class AppLocalizations {
   /// **'详情'**
   String get details;
 
+  /// No description provided for @browseEmpty.
+  ///
+  /// In zh, this message translates to:
+  /// **'暂无可浏览的内容，请刷新或从片库开始浏览。'**
+  String get browseEmpty;
+
+  /// No description provided for @browseLoaded.
+  ///
+  /// In zh, this message translates to:
+  /// **'已载入 {count} 项'**
+  String browseLoaded(int count);
+
+  /// No description provided for @pauseCarousel.
+  ///
+  /// In zh, this message translates to:
+  /// **'暂停轮播'**
+  String get pauseCarousel;
+
+  /// No description provided for @resumeCarousel.
+  ///
+  /// In zh, this message translates to:
+  /// **'恢复轮播'**
+  String get resumeCarousel;
+
   /// Pause playback.
   ///
   /// In zh, this message translates to:

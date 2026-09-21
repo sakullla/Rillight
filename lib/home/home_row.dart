@@ -46,7 +46,7 @@ class HomeMediaRow extends StatelessWidget {
       title: title,
       items: state.items,
       loading: state.loading,
-      error: state.error,
+      error: state.notice ?? state.error,
       onRetry: onRetry,
       onMore: onMore,
       onTap: onTap,

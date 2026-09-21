@@ -3,7 +3,7 @@ import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/library/shelf_grid_page.dart';
 
-/// 库网格下钻页。换库由顶栏库名承担,页内不再放切换器或重复库名。
+/// 库网格下钻页,页头展示库名与当前筛选结果。
 class LibraryPage extends StatelessWidget {
   const LibraryPage({super.key, required this.viewId});
 
@@ -26,7 +26,7 @@ class LibraryPage extends StatelessWidget {
       includeItemTypes: 'Movie,Series',
       recursive: true,
       title: current?.name ?? '',
-      showTitle: false,
+      showTitle: true,
     );
   }
 }

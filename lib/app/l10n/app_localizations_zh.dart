@@ -336,6 +336,20 @@ class AppLocalizationsZh extends AppLocalizations {
   String get details => '详情';
 
   @override
+  String get browseEmpty => '暂无可浏览的内容，请刷新或从片库开始浏览。';
+
+  @override
+  String browseLoaded(int count) {
+    return '已载入 $count 项';
+  }
+
+  @override
+  String get pauseCarousel => '暂停轮播';
+
+  @override
+  String get resumeCarousel => '恢复轮播';
+
+  @override
   String get pause => '暂停';
 
   @override

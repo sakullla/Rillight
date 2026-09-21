@@ -474,29 +474,24 @@ class _PosterRevealOverlay extends StatelessWidget {
                       ),
                     if (item.isPlayable)
                       Center(
-                        child: ExcludeFocus(
-                          child: IconButton(
-                            key: playKey,
-                            tooltip: l10n.play,
-                            onPressed: () {
-                              unawaited(
-                                PlayerWindowScope.of(
-                                  context,
-                                ).open(PlayerOpenRequest(itemId: item.id)),
-                              );
-                            },
-                            style: IconButton.styleFrom(
-                              backgroundColor: Colors.white,
-                              foregroundColor: Colors.black,
-                              padding: const EdgeInsets.all(AppSpacing.sm),
-                              minimumSize: const Size(52, 52),
-                              elevation: 4,
-                            ),
-                            icon: const Icon(
-                              Icons.play_arrow_rounded,
-                              size: 32,
-                            ),
+                        child: IconButton(
+                          key: playKey,
+                          tooltip: l10n.play,
+                          onPressed: () {
+                            unawaited(
+                              PlayerWindowScope.of(
+                                context,
+                              ).open(PlayerOpenRequest(itemId: item.id)),
+                            );
+                          },
+                          style: IconButton.styleFrom(
+                            backgroundColor: Colors.white,
+                            foregroundColor: Colors.black,
+                            padding: const EdgeInsets.all(AppSpacing.sm),
+                            minimumSize: const Size(52, 52),
+                            elevation: 4,
                           ),
+                          icon: const Icon(Icons.play_arrow_rounded, size: 32),
                         ),
                       ),
                     if (showTitle || showMeta || overview != null)

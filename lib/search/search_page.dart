@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/app/app_shell.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/app_empty_view.dart';
@@ -14,6 +15,7 @@ import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_failure.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/catalog_scope.dart';
+import 'package:rillight/home/media_shelf.dart';
 import 'package:rillight/library/shelf_grid_page.dart';
 import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/search/search_action.dart';
@@ -246,7 +248,12 @@ class _SearchPageState extends State<SearchPage> {
         Padding(
           padding: EdgeInsets.fromLTRB(
             embedded ? 0 : AppSpacing.md,
-            embedded ? AppSpacing.xs : AppSpacing.xl,
+            embedded
+                ? AppSpacing.xs
+                : AppSpacing.xl +
+                      (context.findAncestorWidgetOfExactType<AppShell>() != null
+                          ? AppShell.topBarHeight
+                          : 0),
             embedded ? 0 : AppSpacing.md,
             AppSpacing.md,
           ),
@@ -308,6 +315,10 @@ class _SearchPageState extends State<SearchPage> {
             gridDelegate: ShelfGridPage.gridDelegateFor(
               screenWidth: screenWidth,
               availableWidth: constraints.maxWidth - AppSpacing.page * 2,
+              labelExtent: MediaShelf.posterLabelExtentFor(
+                context,
+                showProgress: false,
+              ),
             ),
             itemCount: _items.length + (_loadingMore ? 1 : 0),
             itemBuilder: (context, index) {

@@ -17,6 +17,11 @@ import 'package:rillight/home/library_nav_prefs.dart';
 import 'package:rillight/search/search_action.dart';
 import 'package:rillight/search/search_overlay.dart';
 
+class HomeScrollNotification extends Notification {
+  const HomeScrollNotification(this.scrolled);
+  final bool scrolled;
+}
+
 /// 全局外壳:半透明顶栏叠在全幅内容上,无常驻左栏。
 ///
 /// 已登录时 [child] 铺满窗口,顶栏 Positioned 叠在上缘,hero/backdrop 可贴到窗口顶。
@@ -61,10 +66,14 @@ class AppShell extends StatefulWidget {
 class _AppShellState extends State<AppShell> {
   bool _searchOpen = false;
   final FocusNode _searchQueryFocus = FocusNode();
+  final FocusNode _searchButtonFocus = FocusNode();
+  FocusNode? _searchReturnFocus;
+  bool _homeScrolled = false;
 
   @override
   void dispose() {
     _searchQueryFocus.dispose();
+    _searchButtonFocus.dispose();
     super.dispose();
   }
 
@@ -73,6 +82,7 @@ class _AppShellState extends State<AppShell> {
       _searchQueryFocus.requestFocus();
       return;
     }
+    _searchReturnFocus = _searchButtonFocus;
     setState(() => _searchOpen = true);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
@@ -86,6 +96,15 @@ class _AppShellState extends State<AppShell> {
       return;
     }
     setState(() => _searchOpen = false);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final target = _searchReturnFocus;
+      if (target != null && target.context != null && target.canRequestFocus) {
+        target.requestFocus();
+      } else {
+        _searchButtonFocus.requestFocus();
+      }
+    });
   }
 
   @override
@@ -115,12 +134,24 @@ class _AppShellState extends State<AppShell> {
             body: Stack(
               fit: StackFit.expand,
               children: [
-                widget.child,
+                NotificationListener<HomeScrollNotification>(
+                  onNotification: (notification) {
+                    if (_homeScrolled != notification.scrolled) {
+                      setState(() => _homeScrolled = notification.scrolled);
+                    }
+                    return true;
+                  },
+                  child: widget.child,
+                ),
                 Positioned(
                   top: 0,
                   left: 0,
                   right: 0,
-                  child: _TopBar(location: location),
+                  child: _TopBar(
+                    location: location,
+                    opaque: location != AppRoutes.home || _homeScrolled,
+                    searchFocus: _searchButtonFocus,
+                  ),
                 ),
                 // 遮罩在顶栏之上、覆盖层之下:压暗整个背景并拦截穿透
                 // 覆盖层非交互区域的点击,点击等同关闭;关闭后立即恢复。
@@ -143,9 +174,15 @@ class _AppShellState extends State<AppShell> {
 }
 
 class _TopBar extends StatelessWidget {
-  const _TopBar({required this.location});
+  const _TopBar({
+    required this.location,
+    required this.opaque,
+    required this.searchFocus,
+  });
 
   final String location;
+  final bool opaque;
+  final FocusNode searchFocus;
 
   @override
   Widget build(BuildContext context) {
@@ -171,6 +208,21 @@ class _TopBar extends StatelessWidget {
         : AppShell.topBarHeight;
 
     final canPop = GoRouter.of(context).canPop();
+    final l10n = AppLocalizations.of(context);
+    final library = libraries
+        .where((entry) => AppRoutes.library(entry.id) == location)
+        .firstOrNull;
+    final title =
+        library?.name ??
+        switch (location) {
+          AppRoutes.settings => l10n.settings,
+          AppRoutes.search => l10n.search,
+          AppRoutes.shelfResume => l10n.resumeRow,
+          AppRoutes.shelfNextUp => l10n.nextUpRow,
+          AppRoutes.shelfLatestMovies => l10n.latestMoviesRow,
+          AppRoutes.shelfLatestSeries => l10n.latestSeriesRow,
+          _ => l10n.details,
+        };
     final scrim = Theme.of(context).colorScheme.scrim;
     final overlayHeight = height + AppShell.topFadeHeight;
     return SizedBox(
@@ -192,10 +244,14 @@ class _TopBar extends StatelessWidget {
                     stops: AppScrim.topBarStops,
                     colors: [
                       scrim.withValues(
-                        alpha: AppScrim.of(context, AppScrim.topBar),
+                        alpha: opaque
+                            ? 0.98
+                            : AppScrim.of(context, AppScrim.topBar),
                       ),
                       scrim.withValues(
-                        alpha: AppScrim.of(context, AppScrim.topBarMid),
+                        alpha: opaque
+                            ? 0.94
+                            : AppScrim.of(context, AppScrim.topBarMid),
                       ),
                       scrim.withValues(alpha: 0),
                     ],
@@ -212,18 +268,25 @@ class _TopBar extends StatelessWidget {
               padding: EdgeInsets.only(left: leading, right: trailing),
               child: Row(
                 children: [
-                  if (canPop)
+                  if (canPop || location != AppRoutes.home)
                     Padding(
                       padding: const EdgeInsets.symmetric(
                         horizontal: AppSpacing.xs,
                       ),
                       child: ScrimIconButton(
                         key: CatalogKeys.back,
-                        tooltip: MaterialLocalizations.of(
-                          context,
-                        ).backButtonTooltip,
-                        onPressed: () => context.pop(),
-                        icon: const Icon(Icons.arrow_back_rounded),
+                        tooltip: !canPop
+                            ? l10n.home
+                            : MaterialLocalizations.of(
+                                context,
+                              ).backButtonTooltip,
+                        onPressed: () =>
+                            canPop ? context.pop() : context.go(AppRoutes.home),
+                        icon: Icon(
+                          canPop
+                              ? Icons.arrow_back_rounded
+                              : Icons.home_outlined,
+                        ),
                       ),
                     ),
                   if (AppRoutes.showsBrowseNav(location)) ...[
@@ -235,23 +298,25 @@ class _TopBar extends StatelessWidget {
                       ),
                     ),
                   ] else ...[
-                    if (location == AppRoutes.settings)
-                      Text(
-                        AppLocalizations.of(context).settings,
+                    Expanded(
+                      child: Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: Theme.of(context).textTheme.titleMedium,
                       ),
-                    const Spacer(),
+                    ),
                   ],
                   SizedBox(
                     height: kWindowChromeHeight,
                     child: IconTheme(
                       data: IconTheme.of(context).copyWith(size: 18),
-                      child: const Row(
+                      child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          SearchAction(),
-                          SessionActions(),
-                          SizedBox(width: kWindowChromeActionGap),
+                          SearchAction(focusNode: searchFocus),
+                          const SessionActions(),
+                          const SizedBox(width: kWindowChromeActionGap),
                         ],
                       ),
                     ),
@@ -354,7 +419,7 @@ class _LibraryNav extends StatelessWidget {
                             onPressed: () {
                               if (GoRouterState.of(context).uri.path !=
                                   AppRoutes.library(library.id)) {
-                                context.go(AppRoutes.library(library.id));
+                                context.push(AppRoutes.library(library.id));
                               }
                             },
                           ),
@@ -407,14 +472,14 @@ class _LibraryNav extends StatelessWidget {
                         }
                         if (GoRouterState.of(context).uri.path !=
                             AppRoutes.library(picked)) {
-                          context.go(AppRoutes.library(picked));
+                          context.push(AppRoutes.library(picked));
                         }
                       }());
                       return;
                     }
                     if (GoRouterState.of(context).uri.path !=
                         AppRoutes.library(id)) {
-                      context.go(AppRoutes.library(id));
+                      context.push(AppRoutes.library(id));
                     }
                   },
                   itemBuilder: (context) => [
@@ -501,9 +566,12 @@ double _navLabelWidth(BuildContext context, String label, TextStyle? style) {
   final painter = TextPainter(
     text: TextSpan(text: label, style: style),
     textDirection: Directionality.of(context),
+    textScaler: MediaQuery.textScalerOf(context),
     maxLines: 1,
   )..layout();
-  return painter.width + AppSpacing.xl + AppSpacing.md;
+  final width = painter.width + AppSpacing.xl + AppSpacing.md;
+  painter.dispose();
+  return width;
 }
 
 class _IgnoredListenable extends ChangeNotifier {}

@@ -81,7 +81,7 @@ void main() {
 
   Future<void> openLibrary(WidgetTester tester, String viewId) async {
     await goHome(tester);
-    final tile = find.byKey(CatalogKeys.library(viewId));
+    final tile = find.byKey(AppShell.libraryNavKey(viewId));
     await tester.ensureVisible(tile);
     await tester.tap(tile);
     await settle(tester);
@@ -139,10 +139,10 @@ void main() {
           of: find.byKey(CatalogKeys.librariesMenu),
           matching: find.text('片库'),
         ),
-        findsOneWidget,
+        findsNothing,
       );
-      expect(find.byKey(CatalogKeys.library('view-movies')), findsOneWidget);
-      expect(find.byKey(CatalogKeys.library('view-tv')), findsOneWidget);
+      expect(find.byKey(CatalogKeys.library('view-movies')), findsNothing);
+      expect(find.byKey(CatalogKeys.library('view-tv')), findsNothing);
       expect(find.text('音乐'), findsNothing);
       expect(find.text('相册'), findsNothing);
       expect(find.text('混合媒体'), findsNothing);
@@ -151,7 +151,7 @@ void main() {
           of: find.byKey(CatalogKeys.librariesMenu),
           matching: find.text('未分类影视'),
         ),
-        findsOneWidget,
+        findsNothing,
       );
       expect(
         find.byKey(AppShell.libraryNavKey('view-untyped')),
@@ -159,13 +159,13 @@ void main() {
       );
 
       await openLibrary(tester, 'view-movies');
-      expect(find.byKey(AppShell.libraryNavKey('view-movies')), findsOneWidget);
+      expect(find.byKey(AppShell.libraryNavKey('view-movies')), findsNothing);
       expect(
         find.descendant(
           of: find.byType(CustomScrollView),
           matching: find.text('电影'),
         ),
-        findsNothing,
+        findsOneWidget,
       );
       expect(find.byKey(CatalogKeys.item('movie-inception')), findsOneWidget);
       expect(find.byKey(CatalogKeys.item('movie-up')), findsOneWidget);

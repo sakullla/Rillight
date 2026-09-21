@@ -137,10 +137,7 @@ void main() {
         expect(find.byKey(SessionActions.serverMenuKey), findsOneWidget);
         expect(find.text('第二台电影'), findsWidgets);
 
-        await tester.ensureVisible(
-          find.byKey(CatalogKeys.library('view-movies')),
-        );
-        await tester.tap(find.byKey(CatalogKeys.library('view-movies')));
+        await tester.tap(find.byKey(AppShell.libraryNavKey('view-movies')));
         await settle(tester);
 
         bool isHomeCatalog(String request) {
@@ -191,6 +188,8 @@ void main() {
         await tester.tap(find.byKey(AppShell.libraryNavKey('view-movies')));
         await settle(tester);
         expect(find.byType(LibraryPage), findsOneWidget);
+        expect(find.byKey(AppShell.libraryNavKey('view-movies')), findsNothing);
+        expect(find.byKey(AppShell.homeNavKey), findsNothing);
         expect(
           GoRouter.of(tester.element(find.byType(LibraryPage))).state.uri.path,
           AppRoutes.library('view-movies'),
@@ -212,6 +211,13 @@ void main() {
         await settle(tester);
         expect(find.byType(SearchOverlay), findsNothing);
         expect(find.byType(LibraryPage), findsOneWidget);
+        expect(
+          tester
+              .widget<IconButton>(find.widgetWithIcon(IconButton, Icons.search))
+              .focusNode
+              ?.hasFocus,
+          isTrue,
+        );
 
         await tester.tap(find.byTooltip('搜索'));
         await settle(tester);
@@ -221,7 +227,7 @@ void main() {
         await settle(tester);
         expect(find.byType(SearchOverlay), findsNothing);
 
-        await tester.tap(find.byKey(AppShell.homeNavKey));
+        await tester.tap(find.byKey(CatalogKeys.back));
         await settle(tester);
         expect(find.byType(HomePage), findsOneWidget);
 
