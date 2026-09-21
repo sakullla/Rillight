@@ -218,9 +218,9 @@ void main() {
       expect(storeFor(firstPid).deleteCount, 1);
     });
 
-    for (final reopen in [false, true]) {
-      test('cancelled late spawn reconciles after exit and before release '
-          'when ${reopen ? 'reopening' : 'closing'}', () async {
+    test('cancelled late spawn reconciles after exit and before release '
+        'when closing or reopening', () async {
+      for (final reopen in [false, true]) {
         final auth = await loggedInAuth();
         final host = newHost(auth);
         addTearDown(() {
@@ -229,17 +229,23 @@ void main() {
         });
         control.spawnHold = Completer<void>();
         control.killHold = Completer<void>();
+        final spawnsBefore = control.spawnedArguments.length;
         final opening = host.open(const PlayerOpenRequest(itemId: 'movie-up'));
-        for (var i = 0; i < 50 && control.spawnedArguments.isEmpty; i++) {
+        for (
+          var i = 0;
+          i < 50 && control.spawnedArguments.length == spawnsBefore;
+          i++
+        ) {
           await Future<void>.delayed(Duration.zero);
         }
         final pid = control.lastPid;
+        final stoppedBefore = stoppedEvents().length;
         await storeFor(pid).write(snapshotFor(auth));
         var released = false;
         control.onRelease = (releasedPid) {
           if (releasedPid != pid) return;
           expect(control.isAlive(pid), isFalse);
-          expect(stoppedEvents(), hasLength(1));
+          expect(stoppedEvents().length, stoppedBefore + 1);
           expect(storeFor(pid).snapshot, isNull);
           released = true;
         };
@@ -251,35 +257,47 @@ void main() {
           await Future<void>.delayed(Duration.zero);
         }
         expect(calls, contains('kill:$pid'));
-        expect(stoppedEvents(), isEmpty);
+        expect(stoppedEvents().length, stoppedBefore);
         expect(released, isFalse);
         control.killHold!.complete();
         await Future.wait([opening, next]);
         expect(released, isTrue);
-        expect(stoppedEvents().single.body['PlaySessionId'], 'play-host-1');
-        expect(host.current?.itemId, reopen ? 'movie-inception' : null);
+        expect(
+          stoppedEvents().elementAt(stoppedBefore).body['PlaySessionId'],
+          'play-host-1',
+        );
+        expect(
+          host.current?.itemId,
+          reopen ? 'movie-inception' : null,
+          reason: reopen ? 'reopening' : 'closing',
+        );
         control.onRelease = null;
         await host.close();
-      });
-    }
+      }
+    });
 
-    for (final foreignSnapshot in [false, true]) {
-      test(
-        'cancelled late spawn retains ${foreignSnapshot ? 'foreign' : 'failed'} '
-        'Stopped snapshot',
-        () async {
+    test(
+      'cancelled late spawn retains foreign and failed Stopped snapshots',
+      () async {
+        server.stoppedStatus = 500;
+        // foreign 先行:快照属于其他用户时不重发;failed 随后:重发失败保留快照。
+        for (final foreignSnapshot in [true, false]) {
           final auth = await loggedInAuth();
           final host = newHost(auth);
           addTearDown(() {
             host.dispose();
             auth.dispose();
           });
-          server.stoppedStatus = 500;
           control.spawnHold = Completer<void>();
+          final spawnsBefore = control.spawnedArguments.length;
           final opening = host.open(
             const PlayerOpenRequest(itemId: 'movie-up'),
           );
-          for (var i = 0; i < 50 && control.spawnedArguments.isEmpty; i++) {
+          for (
+            var i = 0;
+            i < 50 && control.spawnedArguments.length == spawnsBefore;
+            i++
+          ) {
             await Future<void>.delayed(Duration.zero);
           }
           final pid = control.lastPid;
@@ -289,12 +307,16 @@ void main() {
           final closing = host.close();
           control.spawnHold!.complete();
           await Future.wait([opening, closing]);
-          expect(stoppedEvents(), hasLength(foreignSnapshot ? 0 : 1));
+          expect(
+            stoppedEvents(),
+            hasLength(foreignSnapshot ? 0 : 1),
+            reason: foreignSnapshot ? 'foreign' : 'failed',
+          );
           expect(storeFor(pid).snapshot, isNotNull);
           expect(storeFor(pid).deleteCount, 0);
-        },
-      );
-    }
+        }
+      },
+    );
 
     test('watch delivers an open-item command to the main window', () async {
       final auth = await loggedInAuth();

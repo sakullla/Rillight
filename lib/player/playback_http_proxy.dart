@@ -38,6 +38,10 @@ class PlaybackHttpProxy {
         (_) => Random.secure().nextInt(256).toRadixString(16).padLeft(2, '0'),
       ).join() {
     _client.autoUncompress = true;
+    // HttpClient defaults to a smaller per-host pool than the proxy's request
+    // budget. Match the pool to the bounded scheduler so HLS manifests,
+    // segments and subtitle resources do not queue behind the default pool.
+    _client.maxConnectionsPerHost = _maxRequests;
     _client.connectionTimeout = const Duration(seconds: 15);
     _server.listen((request) => unawaited(_serve(request)));
   }

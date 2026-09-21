@@ -31,26 +31,6 @@ void main() {
     expect(result['diskCacheLimitMiB'], 147);
     expect(result['futureField'], isTrue);
   });
-  test('memory store keeps the last written volume', () async {
-    final store = MemoryPlayerSettingsStore();
-    await store.write(const PlayerSettings(volume: 42));
-    expect((await store.read()).volume, 42);
-  });
-
-  test('file store round-trips volume', () async {
-    final file = File(
-      '${Directory.systemTemp.path}/rillight-player-settings-test.json',
-    );
-    addTearDown(() {
-      if (file.existsSync()) {
-        file.deleteSync();
-      }
-    });
-    final store = FilePlayerSettingsStore(file);
-    await store.write(const PlayerSettings(volume: 7));
-    expect((await FilePlayerSettingsStore(file).read()).volume, 7);
-  });
-
   test('series preference keeps missing subtitle as unspecified, not off', () {
     final preference = PlayerSeriesPreference.fromJson(const {
       'maxStreamingBitrate': 4000000,
@@ -124,6 +104,10 @@ void main() {
     expect(settings.diskCacheLimitMiB, 4096);
     expect(settings.hardwareDecoding, HardwareDecodingMode.on);
     expect(settings.hardwareDecoder, HardwareDecoderBackend.nvdec);
+
+    // 音量单独写入也经文件往返保留。
+    await FilePlayerSettingsStore(file).write(const PlayerSettings(volume: 7));
+    expect((await FilePlayerSettingsStore(file).read()).volume, 7);
   });
 
   test('fromJson tolerates invalid playback fields', () {
@@ -164,85 +148,66 @@ void main() {
     expect(PlayerSettings.fromJson(const <String, dynamic>{}).volume, isNull);
   });
 
-  test('danmaku partial write does not clear stored volume', () async {
-    final file = File(
-      '${Directory.systemTemp.path}/rillight-player-settings-danmaku.json',
-    );
-    addTearDown(() {
-      if (file.existsSync()) {
-        file.deleteSync();
-      }
-    });
-    final store = FilePlayerSettingsStore(file);
-    await store.write(const PlayerSettings(volume: 42));
-    // 弹幕控制器的部分写:只携带弹幕字段,音量不清。
-    await store.write(
-      const PlayerSettings(danmakuEnabled: false, danmakuToken: 'secret'),
-    );
-    final settings = await store.read();
-    expect(settings.volume, 42);
-    expect(settings.danmakuEnabled, isFalse);
-    expect(settings.danmakuToken, 'secret');
-  });
+  test(
+    'merged writes keep unrelated stored fields across partial updates',
+    () async {
+      final file = File(
+        '${Directory.systemTemp.path}/rillight-player-settings-merge.json',
+      );
+      addTearDown(() {
+        if (file.existsSync()) {
+          file.deleteSync();
+        }
+      });
+      final store = FilePlayerSettingsStore(file);
 
-  test('volume write does not clear stored danmaku config', () async {
-    final file = File(
-      '${Directory.systemTemp.path}/rillight-player-settings-volume.json',
-    );
-    addTearDown(() {
-      if (file.existsSync()) {
-        file.deleteSync();
-      }
-    });
-    final store = FilePlayerSettingsStore(file);
-    await store.write(
-      const PlayerSettings(
-        danmakuEnabled: true,
-        danmakuServer: 'https://dan.example.com',
-        danmakuToken: 'secret',
-      ),
-    );
-    // 播放器控制器只写音量/倍速:弹幕配置不清。
-    await store.write(const PlayerSettings(volume: 61, playbackRate: 1.5));
-    final settings = await store.read();
-    expect(settings.volume, 61);
-    expect(settings.playbackRate, 1.5);
-    expect(settings.danmakuEnabled, isTrue);
-    expect(settings.danmakuServer, 'https://dan.example.com');
-    expect(settings.danmakuToken, 'secret');
-  });
+      // 弹幕控制器的部分写:只携带弹幕字段,音量不清。
+      await store.write(const PlayerSettings(volume: 42));
+      await store.write(
+        const PlayerSettings(danmakuEnabled: false, danmakuToken: 'secret'),
+      );
+      var settings = await store.read();
+      expect(settings.volume, 42);
+      expect(settings.danmakuEnabled, isFalse);
+      expect(settings.danmakuToken, 'secret');
 
-  test('volume-only write keeps other stored fields (merged write)', () async {
-    final file = File(
-      '${Directory.systemTemp.path}/rillight-player-settings-merge.json',
-    );
-    addTearDown(() {
-      if (file.existsSync()) {
-        file.deleteSync();
-      }
-    });
-    final store = FilePlayerSettingsStore(file);
-    await store.write(
-      const PlayerSettings(
-        volume: 60,
-        diskCacheLimitMiB: 8192,
-        hardwareDecoding: HardwareDecodingMode.off,
-        hardwareDecoder: HardwareDecoderBackend.d3d11va,
-      ),
-    );
-    // 播放进程只持久化音量:不得清掉其他字段与未知字段。
-    await store.write(const PlayerSettings(volume: 61));
+      // 播放器控制器只写音量/倍速:弹幕配置不清。
+      await store.write(
+        const PlayerSettings(
+          danmakuEnabled: true,
+          danmakuServer: 'https://dan.example.com',
+          danmakuToken: 'secret',
+        ),
+      );
+      await store.write(const PlayerSettings(volume: 61, playbackRate: 1.5));
+      settings = await store.read();
+      expect(settings.volume, 61);
+      expect(settings.playbackRate, 1.5);
+      expect(settings.danmakuEnabled, isTrue);
+      expect(settings.danmakuServer, 'https://dan.example.com');
+      expect(settings.danmakuToken, 'secret');
 
-    final settings = await store.read();
-    expect(settings.volume, 61);
-    expect(settings.diskCacheLimitMiB, 8192);
-    expect(settings.hardwareDecoding, HardwareDecodingMode.off);
-    expect(settings.hardwareDecoder, HardwareDecoderBackend.d3d11va);
+      // 播放进程只持久化音量:不得清掉其他字段。
+      await store.write(
+        const PlayerSettings(
+          volume: 60,
+          diskCacheLimitMiB: 8192,
+          hardwareDecoding: HardwareDecodingMode.off,
+          hardwareDecoder: HardwareDecoderBackend.d3d11va,
+        ),
+      );
+      await store.write(const PlayerSettings(volume: 61));
+      settings = await store.read();
+      expect(settings.volume, 61);
+      expect(settings.diskCacheLimitMiB, 8192);
+      expect(settings.hardwareDecoding, HardwareDecodingMode.off);
+      expect(settings.hardwareDecoder, HardwareDecoderBackend.d3d11va);
 
-    final raw = jsonDecode(await file.readAsString()) as Map<String, dynamic>;
-    expect(raw['volume'], 61);
-    expect(raw['diskCacheLimitMiB'], 8192);
-  });
+      final raw = jsonDecode(await file.readAsString()) as Map<String, dynamic>;
+      expect(raw['volume'], 61);
+      expect(raw['diskCacheLimitMiB'], 8192);
+    },
+  );
 
   test('merged write keeps unknown fields for future readers', () async {
     final file = File(

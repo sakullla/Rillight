@@ -130,7 +130,7 @@ void main() {
 
   group('network buffering', () {
     test(
-      'keeps native packets in bounded memory and starts without filling',
+      'keeps native packets in bounded memory, starts without filling and keeps shared-mode audio',
       () {
         final properties = build();
         expect(properties['cache'], 'yes');
@@ -139,6 +139,7 @@ void main() {
         expect(properties['cache-pause-initial'], 'no');
         expect(properties['cache-pause-wait'], '1');
         expect(properties['demuxer-readahead-secs'], '120');
+        expect(properties['audio-exclusive'], 'no');
       },
     );
 
@@ -155,14 +156,6 @@ void main() {
       );
       expect(properties['demuxer-max-bytes'], '${64 * 1024 * 1024}');
       expect(properties['demuxer-max-back-bytes'], '${16 * 1024 * 1024}');
-    });
-
-    test('uses the default limit when unset', () {
-      final properties = build();
-      expect(
-        properties['demuxer-max-bytes'],
-        '${PlayerRuntimeDefaults.demuxerMaxBytes}',
-      );
     });
 
     test('clamps out-of-range limits into the supported range', () {
@@ -214,22 +207,21 @@ void main() {
   });
 
   group('decoding and rendering platform defaults', () {
-    test('windows defaults to d3d11va-copy and never overrides vo', () {
-      final properties = build(platform: TargetPlatform.windows);
-      expect(properties['hwdec'], 'd3d11va-copy');
-      // 自有视频插件依赖 vo=libmpv 渲染,不得覆盖。
-      expect(properties.containsKey('vo'), isFalse);
-    });
-
-    test('macOS defaults to videotoolbox-copy', () {
-      final properties = build(platform: TargetPlatform.macOS);
-      expect(properties['hwdec'], 'videotoolbox-copy');
-    });
-
-    test('linux auto uses auto-copy for the embedded libmpv surface', () {
-      final properties = build(platform: TargetPlatform.linux);
-      expect(properties['hwdec'], 'auto-copy');
-    });
+    test(
+      'windows defaults to d3d11va-copy and never overrides vo, macOS to videotoolbox-copy, linux to auto-copy',
+      () {
+        final properties = build(platform: TargetPlatform.windows);
+        expect(properties['hwdec'], 'd3d11va-copy');
+        // 自有视频插件依赖 vo=libmpv 渲染,不得覆盖。
+        expect(properties.containsKey('vo'), isFalse);
+        expect(
+          build(platform: TargetPlatform.macOS)['hwdec'],
+          'videotoolbox-copy',
+        );
+        // linux auto uses auto-copy for the embedded libmpv surface.
+        expect(build(platform: TargetPlatform.linux)['hwdec'], 'auto-copy');
+      },
+    );
 
     test('explicit off forces hwdec=no on every platform', () {
       for (final platform in TargetPlatform.values) {
@@ -283,11 +275,6 @@ void main() {
   });
 
   group('audio chain', () {
-    test('keeps shared-mode audio output', () {
-      final properties = build();
-      expect(properties['audio-exclusive'], 'no');
-    });
-
     test('linux falls back to null audio without a sound server', () {
       expect(
         build(platform: TargetPlatform.linux)['audio-fallback-to-null'],

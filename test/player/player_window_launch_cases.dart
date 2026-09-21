@@ -97,49 +97,51 @@ void main() {
 
     tearDown(() => auth.dispose());
 
-    test('takes the userAgent from client.customUserAgent', () async {
-      await auth.connect(
-        address: server.baseUrl.toString(),
-        username: 'alice',
-        password: 'correct-horse',
-        userAgent: '  CustomUA/1.0  ',
-      );
-      expect(auth.isLoggedIn, isTrue);
-      expect(auth.client.customUserAgent, 'CustomUA/1.0');
-
-      final launch = PlayerWindowLaunch.fromAuth(
-        auth: auth,
-        request: const PlayerOpenRequest(itemId: 'movie-up'),
-      );
-      expect(launch.userAgent, auth.client.customUserAgent);
-      expect(launch.baseUrl, auth.client.baseUrl.toString());
-      expect(launch.userId, auth.client.userId);
-      expect(launch.accessToken, auth.client.accessToken);
-
-      // 载荷跟随 client 的实际请求头,而非登录时的线路模型。
-      auth.client.setUserAgent('Direct/2.0');
-      expect(
-        PlayerWindowLaunch.fromAuth(
+    test(
+      'takes the userAgent from client.customUserAgent and yields null without one',
+      () async {
+        // 未配置自定义 UA 时载荷为 null,且序列化省略该字段。
+        await auth.connect(
+          address: server.baseUrl.toString(),
+          username: 'alice',
+          password: 'correct-horse',
+        );
+        final plain = PlayerWindowLaunch.fromAuth(
           auth: auth,
           request: const PlayerOpenRequest(itemId: 'movie-up'),
-        ).userAgent,
-        'Direct/2.0',
-      );
-    });
+        );
+        expect(plain.userAgent, isNull);
+        expect(plain.toJson().containsKey('userAgent'), isFalse);
 
-    test('no custom userAgent yields null', () async {
-      await auth.connect(
-        address: server.baseUrl.toString(),
-        username: 'alice',
-        password: 'correct-horse',
-      );
-      final launch = PlayerWindowLaunch.fromAuth(
-        auth: auth,
-        request: const PlayerOpenRequest(itemId: 'movie-up'),
-      );
-      expect(launch.userAgent, isNull);
-      expect(launch.toJson().containsKey('userAgent'), isFalse);
-    });
+        await auth.connect(
+          address: server.baseUrl.toString(),
+          username: 'alice',
+          password: 'correct-horse',
+          userAgent: '  CustomUA/1.0  ',
+        );
+        expect(auth.isLoggedIn, isTrue);
+        expect(auth.client.customUserAgent, 'CustomUA/1.0');
+
+        final launch = PlayerWindowLaunch.fromAuth(
+          auth: auth,
+          request: const PlayerOpenRequest(itemId: 'movie-up'),
+        );
+        expect(launch.userAgent, auth.client.customUserAgent);
+        expect(launch.baseUrl, auth.client.baseUrl.toString());
+        expect(launch.userId, auth.client.userId);
+        expect(launch.accessToken, auth.client.accessToken);
+
+        // 载荷跟随 client 的实际请求头,而非登录时的线路模型。
+        auth.client.setUserAgent('Direct/2.0');
+        expect(
+          PlayerWindowLaunch.fromAuth(
+            auth: auth,
+            request: const PlayerOpenRequest(itemId: 'movie-up'),
+          ).userAgent,
+          'Direct/2.0',
+        );
+      },
+    );
 
     test('throws without a session', () {
       expect(

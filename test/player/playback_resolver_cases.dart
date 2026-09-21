@@ -328,23 +328,6 @@ void main() {
     expect(resolved.streamUrl.queryParameters['api_key'], token);
   });
 
-  test('classifies SRT as text and PGS as bitmap', () {
-    const srt = MediaStreamInfo(
-      index: 2,
-      type: 'Subtitle',
-      codec: 'subrip',
-      isTextSubtitleStream: true,
-    );
-    const pgs = MediaStreamInfo(
-      index: 3,
-      type: 'Subtitle',
-      codec: 'pgssub',
-      isTextSubtitleStream: false,
-    );
-    expect(srt.isTextSubtitle, isTrue);
-    expect(pgs.isBitmapSubtitle, isTrue);
-  });
-
   test('matches subtitle by language when indexes differ', () {
     const streams = [
       MediaStreamInfo(

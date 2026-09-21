@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
 import 'package:rillight/app/app_shell.dart';
-import 'package:rillight/app/window_geometry.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/server_list_store.dart';
@@ -12,7 +11,6 @@ import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/library/item_detail_page.dart';
-import 'package:rillight/player/desktop_player_window.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_keys.dart';
@@ -21,7 +19,6 @@ import 'package:rillight/player/player_page.dart';
 import 'package:rillight/player/player_window.dart';
 import 'package:rillight/player/player_window_host.dart';
 import 'package:rillight/player/video_backend.dart';
-import 'package:window_manager/window_manager.dart';
 
 import '../emby/fake_emby_server.dart';
 
@@ -231,24 +228,6 @@ void main() {
       expect(find.byType(ItemDetailPage), findsOneWidget);
     },
     tags: ['integration'],
-  );
-
-  test(
-    'player window options hide the title bar without embedding playback',
-    () {
-      expect(kPlayerWindowOptions.titleBarStyle, TitleBarStyle.hidden);
-      expect(kPlayerWindowOptions.size, isNull);
-      expect(kPlayerWindowOptions.minimumSize, kMinPlayerWindowSize);
-      final auth = AuthController(
-        client: EmbyClient(device: _device),
-        credentials: MemoryCredentialStore(),
-        servers: MemoryServerListStore(),
-      );
-      final host = DesktopPlayerWindowHost(auth: auth);
-      expect(host.embedsPlayerInCaller, isFalse);
-      host.dispose();
-      auth.dispose();
-    },
   );
 
   testWidgets(

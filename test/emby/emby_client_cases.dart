@@ -152,15 +152,24 @@ void main() {
     );
   });
 
-  test('connection errors map to unreachable', () {
-    final mapped = EmbyException.fromDio(
+  test('connection errors and certificate failures map from Dio', () {
+    final unreachable = EmbyException.fromDio(
       DioException(
         requestOptions: RequestOptions(path: '/'),
         type: DioExceptionType.connectionError,
         error: const SocketException('Connection refused'),
       ),
     );
-    expect(mapped.kind, EmbyFailureKind.unreachable);
+    expect(unreachable.kind, EmbyFailureKind.unreachable);
+
+    final certificate = EmbyException.fromDio(
+      DioException(
+        requestOptions: RequestOptions(path: '/'),
+        type: DioExceptionType.connectionError,
+        error: const HandshakeException('CERTIFICATE_VERIFY_FAILED'),
+      ),
+    );
+    expect(certificate.kind, EmbyFailureKind.certificate);
   });
 
   test('unknown host stays unreachable', () async {
@@ -178,17 +187,6 @@ void main() {
       ).getPublicInfo(server.baseUrl),
       throwsA(_kind(EmbyFailureKind.timeout)),
     );
-  });
-
-  test('maps certificate failures from Dio', () {
-    final mapped = EmbyException.fromDio(
-      DioException(
-        requestOptions: RequestOptions(path: '/'),
-        type: DioExceptionType.connectionError,
-        error: const HandshakeException('CERTIFICATE_VERIFY_FAILED'),
-      ),
-    );
-    expect(mapped.kind, EmbyFailureKind.certificate);
   });
 
   test('AuthenticateByName returns token for correct password', () async {
@@ -293,32 +291,15 @@ void main() {
     expect(emby.accessToken, isNot(first.accessToken));
   });
 
-  test('customUserAgent returns the normalized custom value or null', () {
+  test('custom User-Agent is set, sent on headers, blank falls back, '
+      'attachSession resets', () async {
     final emby = client();
     expect(emby.customUserAgent, isNull);
 
+    // 设置:规范化空白并作为 API 与会话头的 User-Agent 发送。
     emby.setUserAgent('  LineUA/9  ');
     expect(emby.customUserAgent, 'LineUA/9');
     expect(emby.userAgent, 'LineUA/9');
-
-    emby.setUserAgent('  ');
-    expect(emby.customUserAgent, isNull);
-    expect(emby.userAgent, 'Rillight/0.1.0');
-
-    emby.setUserAgent('Keep/1');
-    emby.attachSession(
-      baseUrl: server.baseUrl,
-      accessToken: 'tok',
-      userId: 'u',
-    );
-    expect(emby.customUserAgent, isNull);
-    expect(emby.userAgent, 'Rillight/0.1.0');
-  });
-
-  test('custom User-Agent is sent on API and stream headers', () async {
-    final emby = client();
-    emby.setUserAgent('LineUA/9');
-    expect(emby.customUserAgent, 'LineUA/9');
     await emby.getPublicInfo(server.baseUrl);
     expect(server.lastUserAgent, 'LineUA/9');
     expect(server.lastAuthorization, contains('Client="Rillight"'));
@@ -340,15 +321,23 @@ void main() {
     expect(emby.sessionHeaders['Authorization'], contains('Client="Rillight"'));
     await emby.getJson('/System/Info');
     expect(server.lastUserAgent, 'LineUA/9');
-  });
 
-  test('blank User-Agent falls back to Rillight/version', () async {
-    final emby = client();
+    // 置空:回落到 Rillight/version。
     emby.setUserAgent('  ');
     expect(emby.customUserAgent, isNull);
     await emby.getPublicInfo(server.baseUrl);
     expect(server.lastUserAgent, 'Rillight/0.1.0');
     expect(emby.sessionHeaders['User-Agent'], 'Rillight/0.1.0');
+
+    // attachSession 未携带 userAgent 时重置自定义值。
+    emby.setUserAgent('Keep/1');
+    emby.attachSession(
+      baseUrl: server.baseUrl,
+      accessToken: 'tok',
+      userId: 'u',
+    );
+    expect(emby.customUserAgent, isNull);
+    expect(emby.userAgent, 'Rillight/0.1.0');
   });
 
   test('logout revokes the current token', () async {
@@ -587,31 +576,30 @@ void main() {
     expect(item.people[1].type, 'Director');
   });
 
-  test('getItem defaults to itemFields without People', () async {
-    final emby = await signedInClient();
+  test(
+    'getItem and season window queries never request People by default',
+    () async {
+      final emby = await signedInClient();
 
-    await emby.getItem('movie-inception');
-    final request = server.requests.last;
-    expect(request, contains('Fields='));
-    expect(request, contains('MediaSources'));
-    expect(request, isNot(contains('People')));
-  });
+      await emby.getItem('movie-inception');
+      var request = server.requests.last;
+      expect(request, contains('Fields='));
+      expect(request, contains('MediaSources'));
+      expect(request, isNot(contains('People')));
 
-  test('season window queryItems never requests People', () async {
-    final emby = await signedInClient();
+      // 默认网格字段。
+      await emby.queryItems(parentId: 'season-friends-1');
+      expect(server.requests.last, isNot(contains('People')));
 
-    // 默认网格字段。
-    await emby.queryItems(parentId: 'season-friends-1');
-    expect(server.requests.last, isNot(contains('People')));
-
-    // 季列表窗口显式传 itemFields 时同样不含 People。
-    await emby.queryItems(
-      parentId: 'season-friends-1',
-      includeItemTypes: 'Episode',
-      fields: EmbyClient.itemFields,
-    );
-    final request = server.requests.last;
-    expect(request, contains('PremiereDate'));
-    expect(request, isNot(contains('People')));
-  });
+      // 季列表窗口显式传 itemFields 时同样不含 People。
+      await emby.queryItems(
+        parentId: 'season-friends-1',
+        includeItemTypes: 'Episode',
+        fields: EmbyClient.itemFields,
+      );
+      request = server.requests.last;
+      expect(request, contains('PremiereDate'));
+      expect(request, isNot(contains('People')));
+    },
+  );
 }

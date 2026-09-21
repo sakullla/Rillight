@@ -1076,61 +1076,96 @@ class _NextEpisodeBanner extends StatelessWidget {
     return Positioned(
       right: AppSpacing.xl,
       bottom: controller.controlsVisible ? 112 : AppSpacing.xl,
-      child: LiquidGlass(
-        kind: LiquidGlassKind.control,
-        padding: const EdgeInsets.all(AppSpacing.lg),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 360),
         child: Material(
           key: PlayerKeys.nextEpisode,
-          type: MaterialType.transparency,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    Icons.skip_next_rounded,
-                    size: 20,
-                    color: scheme.primary,
-                  ),
-                  const SizedBox(width: AppSpacing.xs),
-                  Text(
-                    seconds == null
-                        ? l10n.playNextEpisode
-                        : l10n.nextEpisodeIn(seconds),
-                    style: theme.textTheme.titleMedium,
-                  ),
-                  const SizedBox(width: AppSpacing.sm),
-                  // 无论是否倒计时,都可以点击关闭本次推荐。
-                  IconButton(
-                    key: PlayerKeys.nextEpisodeCancel,
-                    tooltip: l10n.cancelNextEpisode,
-                    onPressed: controller.cancelNextEpisode,
-                    visualDensity: VisualDensity.compact,
-                    icon: const Icon(Icons.close_rounded, size: 18),
-                  ),
-                ],
-              ),
-              const SizedBox(height: AppSpacing.xxs),
-              ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 280),
-                child: Text(
-                  offer.item.displayName,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: scheme.onSurfaceVariant,
+          color: scheme.surface.withValues(alpha: 0.94),
+          elevation: 10,
+          shadowColor: Colors.black.withValues(alpha: 0.42),
+          borderRadius: BorderRadius.circular(AppRadii.lg),
+          clipBehavior: Clip.antiAlias,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(
+              AppSpacing.md,
+              AppSpacing.md,
+              AppSpacing.sm,
+              AppSpacing.md,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: scheme.primary.withValues(alpha: 0.16),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.all(AppSpacing.xs),
+                        child: Icon(
+                          Icons.skip_next_rounded,
+                          size: 20,
+                          color: scheme.primary,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: AppSpacing.sm),
+                    Expanded(
+                      child: Text(
+                        seconds == null
+                            ? l10n.playNextEpisode
+                            : l10n.nextEpisodeIn(seconds),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    // 无论是否倒计时,都可以点击关闭本次推荐。
+                    IconButton(
+                      key: PlayerKeys.nextEpisodeCancel,
+                      tooltip: l10n.cancelNextEpisode,
+                      onPressed: controller.cancelNextEpisode,
+                      visualDensity: VisualDensity.compact,
+                      icon: const Icon(Icons.close_rounded, size: 18),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: AppSpacing.xs),
+                Padding(
+                  padding: const EdgeInsets.only(left: 40),
+                  child: Text(
+                    offer.item.displayName,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                      height: 1.35,
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(height: AppSpacing.sm),
-              FilledButton(
-                key: PlayerKeys.nextEpisodePlay,
-                onPressed: controller.playNextEpisode,
-                child: Text(l10n.playNextEpisode),
-              ),
-            ],
+                const SizedBox(height: AppSpacing.md),
+                Padding(
+                  padding: const EdgeInsets.only(left: 40),
+                  child: FilledButton.icon(
+                    key: PlayerKeys.nextEpisodePlay,
+                    onPressed: controller.playNextEpisode,
+                    icon: const Icon(Icons.play_arrow_rounded, size: 20),
+                    label: Text(l10n.playNextEpisode),
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size(0, 42),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.md,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -1153,37 +1188,39 @@ class _SkipSegmentButton extends StatelessWidget {
     final segment = controller.activeSkipSegment!;
     return Positioned(
       right: AppSpacing.xl,
-      bottom: 112,
-      child: LiquidGlass(
-        kind: LiquidGlassKind.pill,
-        child: Material(
-          key: const Key('player-skip-segment'),
-          type: MaterialType.transparency,
-          child: InkWell(
-            onTap: () => unawaited(controller.skipCurrentSegment()),
-            borderRadius: BorderRadius.circular(999),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: AppSpacing.md,
-                vertical: AppSpacing.xs,
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    Icons.fast_forward_rounded,
-                    size: 18,
-                    color: scheme.onSurface,
+      bottom: controller.controlsVisible ? 112 : AppSpacing.xl,
+      child: Material(
+        key: const Key('player-skip-segment'),
+        color: scheme.surface.withValues(alpha: 0.94),
+        elevation: 8,
+        shadowColor: Colors.black.withValues(alpha: 0.38),
+        borderRadius: BorderRadius.circular(999),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: () => unawaited(controller.skipCurrentSegment()),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.md,
+              vertical: AppSpacing.xs,
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.fast_forward_rounded,
+                  size: 18,
+                  color: scheme.primary,
+                ),
+                const SizedBox(width: AppSpacing.xs),
+                Text(
+                  segment.kind == PlayerSkipKind.outro
+                      ? l10n.skipOutro
+                      : l10n.skipIntro,
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    fontWeight: FontWeight.w700,
                   ),
-                  const SizedBox(width: AppSpacing.xs),
-                  Text(
-                    segment.kind == PlayerSkipKind.outro
-                        ? l10n.skipOutro
-                        : l10n.skipIntro,
-                    style: theme.textTheme.labelLarge,
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
         ),

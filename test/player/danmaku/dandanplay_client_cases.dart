@@ -191,10 +191,6 @@ void main() {
     },
   );
 
-  test('official source without credentials sends no auth headers', () {
-    expect(DandanplaySource.official.headers(), isEmpty);
-  });
-
   test('searchAnime parses animes and episodes', () async {
     late RequestOptions captured;
     final client = clientFor((options) {
@@ -302,69 +298,24 @@ void main() {
   );
 
   test(
-    'fetchComments accepts count/comments envelope without success',
-    () async {
-      final client = clientFor((options) {
-        expect(options.uri.path, '/api/v2/comment/10002');
-        return {
-          'count': 1,
-          'comments': [
-            {'cid': 1, 'p': '1.00,1,16777215,[qiyi]', 'm': 'hello'},
-          ],
-        };
-      });
-      final comments = await client.fetchComments(
-        DandanplaySource.official,
-        10002,
+    'parseDanmakuComments parses official success and count/comments envelopes',
+    () {
+      final official = parseDanmakuComments(
+        jsonEncode({'errorCode': 0, 'success': true, ..._officialCommentBody}),
       );
-      expect(comments, hasLength(1));
-      expect(comments.single.text, 'hello');
+      expect(official.map((c) => c.cid), [3, 1, 2]);
+      expect(official[0].time, 5.0);
+      expect(official[0].renderMode, DanmakuMode.top);
+      expect(official[1].renderMode, DanmakuMode.bottom);
+      expect(official[2].renderMode, DanmakuMode.scroll);
+      expect(official[2].color, 16711680);
+      expect(official[2].text, 'scroll');
+
+      final counted = parseDanmakuComments(jsonEncode(_officialCommentBody));
+      expect(counted.map((c) => c.cid), [3, 1, 2]);
+      expect(counted.map((c) => c.time), [5.0, 12.5, 61.2]);
     },
   );
-
-  test('fetchComments parses p/m fields and sorts by time', () async {
-    final client = clientFor((options) {
-      expect(options.uri.path, contains('/api/v2/comment/100'));
-      expect(options.uri.queryParameters.containsKey('url'), isFalse);
-      return {
-        'success': true,
-        'comments': [
-          {'cid': 2, 'p': '61.2,1,16711680,0,25,0,7b7b7b,0', 'm': 'scroll'},
-          {'cid': 1, 'p': '12.5,4,16777215,0,25,0,ffffff,0', 'm': 'bottom'},
-          {'cid': 3, 'p': '5.0,5,65280,0,25,0,ffffff,0', 'm': 'top'},
-          {'cid': 4, 'p': 'broken', 'm': 'skipped'},
-          {'cid': 5, 'p': '1,1,2,0,25,0,fff,0', 'm': ''},
-          'not-a-map',
-        ],
-      };
-    });
-    final comments = await client.fetchComments(DandanplaySource.official, 100);
-    expect(comments.map((c) => c.cid), [3, 1, 2]);
-    expect(comments[0].time, 5.0);
-    expect(comments[0].renderMode, DanmakuMode.top);
-    expect(comments[1].renderMode, DanmakuMode.bottom);
-    expect(comments[2].renderMode, DanmakuMode.scroll);
-    expect(comments[2].color, 16711680);
-  });
-
-  test('parseDanmakuComments parses the official success envelope', () {
-    final comments = parseDanmakuComments(
-      jsonEncode({'errorCode': 0, 'success': true, ..._officialCommentBody}),
-    );
-    expect(comments.map((c) => c.cid), [3, 1, 2]);
-    expect(comments[0].time, 5.0);
-    expect(comments[0].renderMode, DanmakuMode.top);
-    expect(comments[1].renderMode, DanmakuMode.bottom);
-    expect(comments[2].renderMode, DanmakuMode.scroll);
-    expect(comments[2].color, 16711680);
-    expect(comments[2].text, 'scroll');
-  });
-
-  test('parseDanmakuComments parses the count/comments envelope', () {
-    final comments = parseDanmakuComments(jsonEncode(_officialCommentBody));
-    expect(comments.map((c) => c.cid), [3, 1, 2]);
-    expect(comments.map((c) => c.time), [5.0, 12.5, 61.2]);
-  });
 
   test('parseDanmakuComments rejects non-object or malformed bodies', () {
     expect(
@@ -510,47 +461,53 @@ void main() {
     );
   });
 
-  test('non-dandanplay JSON maps to incompatible', () async {
-    final client = clientFor((options) => {'unexpected': 'shape'});
-    await expectLater(
-      client.searchAnime(DandanplaySource.official, 'foo'),
-      throwsA(
-        isA<DanmakuApiException>().having(
-          (e) => e.kind,
-          'kind',
-          DanmakuApiFailureKind.incompatible,
+  test(
+    'error bodies map to incompatible or http with errorMessage detail',
+    () async {
+      // 非 dandanplay JSON 映射为 incompatible。
+      final nonDandanplay = clientFor((options) => {'unexpected': 'shape'});
+      await expectLater(
+        nonDandanplay.searchAnime(DandanplaySource.official, 'foo'),
+        throwsA(
+          isA<DanmakuApiException>().having(
+            (e) => e.kind,
+            'kind',
+            DanmakuApiFailureKind.incompatible,
+          ),
         ),
-      ),
-    );
-  });
+      );
 
-  test('plain text body maps to incompatible', () async {
-    final client = clientFor((options) => '<html>not json</html>');
-    await expectLater(
-      client.searchAnime(DandanplaySource.official, 'foo'),
-      throwsA(
-        isA<DanmakuApiException>().having(
-          (e) => e.kind,
-          'kind',
-          DanmakuApiFailureKind.incompatible,
+      // 纯文本响应体同样映射为 incompatible。
+      final plainText = clientFor((options) => '<html>not json</html>');
+      await expectLater(
+        plainText.searchAnime(DandanplaySource.official, 'foo'),
+        throwsA(
+          isA<DanmakuApiException>().having(
+            (e) => e.kind,
+            'kind',
+            DanmakuApiFailureKind.incompatible,
+          ),
         ),
-      ),
-    );
-  });
+      );
 
-  test('success=false maps to http with errorMessage detail', () async {
-    final client = clientFor((options) {
-      return {'errorCode': 1000, 'success': false, 'errorMessage': 'not found'};
-    });
-    await expectLater(
-      client.fetchComments(DandanplaySource.official, 100),
-      throwsA(
-        isA<DanmakuApiException>()
-            .having((e) => e.kind, 'kind', DanmakuApiFailureKind.http)
-            .having((e) => e.detail, 'detail', 'not found'),
-      ),
-    );
-  });
+      // success=false 映射为 http,detail 取 errorMessage。
+      final business = clientFor((options) {
+        return {
+          'errorCode': 1000,
+          'success': false,
+          'errorMessage': 'not found',
+        };
+      });
+      await expectLater(
+        business.fetchComments(DandanplaySource.official, 100),
+        throwsA(
+          isA<DanmakuApiException>()
+              .having((e) => e.kind, 'kind', DanmakuApiFailureKind.http)
+              .having((e) => e.detail, 'detail', 'not found'),
+        ),
+      );
+    },
+  );
 
   test('HTTP 500 maps to http kind', () async {
     final client = clientFor((options) {

@@ -300,28 +300,62 @@ class _HomeHeroState extends State<HomeHero> {
                   ),
                   if (items.length > 1) ...[
                     Positioned(
-                      right: AppSpacing.page + 96,
-                      bottom: AppSpacing.xs,
-                      child: Center(
-                        child: ScrimIconButton(
-                          key: CatalogKeys.heroPrev,
-                          tooltip: AppLocalizations.of(context).scrollLeft,
-                          icon: const Icon(Icons.chevron_left),
-                          size: ScrimIconButtonSize.large,
-                          onPressed: () => _go(-1),
-                        ),
-                      ),
-                    ),
-                    Positioned(
                       right: AppSpacing.page,
                       bottom: AppSpacing.xs,
-                      child: Center(
-                        child: ScrimIconButton(
-                          key: CatalogKeys.heroNext,
-                          tooltip: AppLocalizations.of(context).scrollRight,
-                          icon: const Icon(Icons.chevron_right),
-                          size: ScrimIconButtonSize.large,
-                          onPressed: () => _go(1),
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.scrim.withValues(alpha: 0.34),
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.12),
+                          ),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.all(AppSpacing.xxs),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              ScrimIconButton(
+                                key: CatalogKeys.heroPrev,
+                                tooltip: AppLocalizations.of(
+                                  context,
+                                ).scrollLeft,
+                                icon: const Icon(Icons.chevron_left),
+                                size: ScrimIconButtonSize.regular,
+                                onPressed: () => _go(-1),
+                              ),
+                              ScrimIconButton(
+                                key: const Key('catalog-hero-pause'),
+                                tooltip: _paused || _reduceMotion
+                                    ? AppLocalizations.of(
+                                        context,
+                                      ).resumeCarousel
+                                    : AppLocalizations.of(
+                                        context,
+                                      ).pauseCarousel,
+                                icon: Icon(
+                                  _paused || _reduceMotion
+                                      ? Icons.play_arrow
+                                      : Icons.pause,
+                                ),
+                                size: ScrimIconButtonSize.regular,
+                                onPressed: _reduceMotion
+                                    ? null
+                                    : () => setState(() => _paused = !_paused),
+                              ),
+                              ScrimIconButton(
+                                key: CatalogKeys.heroNext,
+                                tooltip: AppLocalizations.of(
+                                  context,
+                                ).scrollRight,
+                                icon: const Icon(Icons.chevron_right),
+                                size: ScrimIconButtonSize.regular,
+                                onPressed: () => _go(1),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ),
@@ -333,25 +367,6 @@ class _HomeHeroState extends State<HomeHero> {
                         count: items.length,
                         index: index,
                         onSelect: _goTo,
-                      ),
-                    ),
-                    Positioned(
-                      right: AppSpacing.page + 48,
-                      bottom: AppSpacing.xs,
-                      child: ScrimIconButton(
-                        key: const Key('catalog-hero-pause'),
-                        tooltip: _paused || _reduceMotion
-                            ? AppLocalizations.of(context).resumeCarousel
-                            : AppLocalizations.of(context).pauseCarousel,
-                        icon: Icon(
-                          _paused || _reduceMotion
-                              ? Icons.play_arrow
-                              : Icons.pause,
-                        ),
-                        size: ScrimIconButtonSize.large,
-                        onPressed: _reduceMotion
-                            ? null
-                            : () => setState(() => _paused = !_paused),
                       ),
                     ),
                   ],
@@ -387,12 +402,14 @@ class _HeroIndicators extends StatelessWidget {
       children: [
         for (var i = 0; i < count; i++)
           SizedBox(
-            width: 40,
-            height: 40,
+            width: 24,
+            height: 32,
             child: IconButton(
               key: CatalogKeys.heroDot(i),
               tooltip: '${i + 1} / $count',
               isSelected: i == index,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints.tightFor(width: 24, height: 32),
               onPressed: () => onSelect(i),
               icon: Center(
                 child: AnimatedContainer(
@@ -432,7 +449,9 @@ class _HeroContent extends StatelessWidget {
     final title = item.isEpisode && (item.seriesName?.isNotEmpty ?? false)
         ? item.seriesName!
         : item.name;
-    final episodeLine = item.isEpisode ? continueWatchingSubtitle(item) : '';
+    // Episode names often contain release-group/codec filenames. The series
+    // title is already the hero title; keep only the useful episode code here.
+    final episodeLine = item.isEpisode ? seasonEpisodeCode(item) ?? '' : '';
     final meta = <String>[
       if (!item.isEpisode &&
           item.productionYear != null &&

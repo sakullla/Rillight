@@ -157,7 +157,7 @@ void main() {
   );
 
   test(
-    'UserDataChanged 失效会话前缀缓存并触发首页行刷新',
+    'UserDataChanged 与 LibraryChanged 分别失效会话缓存并触发对应刷新',
     () => withFakeTime(() async {
       final store = _RecordingDiskStore();
       final cache = _cacheWithStore(store);
@@ -165,40 +165,6 @@ void main() {
       final request = catalogViewsRequest(userId: 'user-alice');
       await cache.write(request, {'Items': [], 'TotalRecordCount': 0});
       expect(await cache.lookup(request), isNotNull);
-
-      final connection = _FakeConnection();
-      var refreshes = 0;
-      final socket = _buildSocket(
-        connector: (uri) async => connection,
-        cache: cache,
-        onUserDataChanged: () async => refreshes++,
-      );
-      socket.start();
-      await Future<void>.delayed(Duration.zero);
-
-      connection.emit(
-        '{"MessageName":"UserDataChanged","Data":"{\\"UserId\\":\\"user-alice\\"}"}',
-      );
-      await Future<void>.delayed(const Duration(milliseconds: 50));
-
-      expect(refreshes, 1);
-      expect(await cache.lookup(request), isNull, reason: '会话前缀缓存已失效');
-      expect(store.removedPrefixes, contains('server-id-1|user-alice|'));
-      expect(store.data, isEmpty);
-      await socket.stop();
-    }),
-  );
-
-  test(
-    'LibraryChanged 失效缓存并触发全量刷新回调',
-    () => withFakeTime(() async {
-      final store = _RecordingDiskStore();
-      final cache = _cacheWithStore(store);
-      cache.attachSession(serverId: 'server-id-1', userId: 'user-alice');
-      await cache.write(catalogViewsRequest(userId: 'user-alice'), {
-        'Items': [],
-        'TotalRecordCount': 0,
-      });
 
       final connection = _FakeConnection();
       var rowRefreshes = 0;
@@ -212,10 +178,24 @@ void main() {
       socket.start();
       await Future<void>.delayed(Duration.zero);
 
+      // UserDataChanged:会话前缀缓存失效并触发首页行刷新。
+      connection.emit(
+        '{"MessageName":"UserDataChanged","Data":"{\\"UserId\\":\\"user-alice\\"}"}',
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+
+      expect(rowRefreshes, 1);
+      expect(fullRefreshes, 0);
+      expect(await cache.lookup(request), isNull, reason: '会话前缀缓存已失效');
+      expect(store.removedPrefixes, contains('server-id-1|user-alice|'));
+      expect(store.data, isEmpty);
+
+      // LibraryChanged:重建缓存后再触发,走全量刷新并再次失效。
+      await cache.write(request, {'Items': [], 'TotalRecordCount': 0});
       connection.emit('{"MessageName":"LibraryChanged","Data":"{}"}');
       await Future<void>.delayed(const Duration(milliseconds: 50));
 
-      expect(rowRefreshes, 0);
+      expect(rowRefreshes, 1);
       expect(fullRefreshes, 1);
       expect(store.removedPrefixes, contains('server-id-1|user-alice|'));
       await socket.stop();
@@ -292,10 +272,11 @@ void main() {
   );
 
   test(
-    '连接失败静默指数退避,达上限后放弃',
+    '连接失败与反复闪断都静默退避,达到重连上限后放弃',
     () => withFakeTime(() async {
+      // 阶段一:连接器直接抛错。
       var attempts = 0;
-      final socket = _buildSocket(
+      var socket = _buildSocket(
         connector: (uri) async {
           attempts++;
           throw StateError('server unreachable');
@@ -312,14 +293,10 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 50));
       expect(attempts, 4, reason: '放弃后不再尝试');
       await socket.stop();
-    }),
-  );
 
-  test(
-    '连接反复闪断累计失败,达到重连上限后放弃',
-    () => withFakeTime(() async {
-      var attempts = 0;
-      final socket = _buildSocket(
+      // 阶段二:连接成功但立即被服务器关闭。
+      attempts = 0;
+      socket = _buildSocket(
         connector: (uri) async {
           attempts++;
           final connection = _FakeConnection();

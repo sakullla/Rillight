@@ -637,6 +637,13 @@ class PlayerController extends ChangeNotifier {
             index: index!,
             format: stream.externalSubtitleFormat,
           );
+    final previous = subtitleStreamIndex;
+    // External subtitle downloads can take longer than a native control
+    // reply. Reflect the click immediately; rollback only if the backend
+    // reports a real failure.
+    subtitleStreamIndex = index;
+    _clearSubtitleNotice();
+    _emit();
     await _selectTrack(
       () => index == null
           ? backend.setSubtitleOff()
@@ -649,6 +656,10 @@ class PlayerController extends ChangeNotifier {
       },
       'SubtitleTrackChange',
       serialized: false,
+      onFailure: () {
+        subtitleStreamIndex = previous;
+        _emit();
+      },
     );
   }
 
@@ -657,6 +668,7 @@ class PlayerController extends ChangeNotifier {
     VoidCallback commit,
     String event, {
     bool serialized = true,
+    VoidCallback? onFailure,
   }) async {
     final operation = _operations.current;
     if (operation == null || !_accepts(operation)) return;
@@ -688,6 +700,7 @@ class PlayerController extends ChangeNotifier {
       await _reportProgress(eventName: event);
     } catch (failure) {
       if (!_accepts(operation) || revision != _trackRevisions[event]) return;
+      onFailure?.call();
       trackFailure = failure.toString();
       _emit();
     }

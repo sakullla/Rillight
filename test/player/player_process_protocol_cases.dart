@@ -31,15 +31,14 @@ void main() {
       expect(await second.read('close'), isNull);
       expect(await first.read('close'), isNotNull);
       expect(await first.read('close'), isNull);
+
+      // 另一会话的消息被拒绝。
+      await File(
+        '${first.directory.path}/ready.json',
+      ).writeAsString(jsonEncode({'sessionId': second.sessionId, 'pid': pid}));
+      expect(await first.read('ready'), isNull);
     },
   );
-
-  test('a message from another session is rejected', () async {
-    await File(
-      '${first.directory.path}/ready.json',
-    ).writeAsString(jsonEncode({'sessionId': second.sessionId, 'pid': pid}));
-    expect(await first.read('ready'), isNull);
-  });
 
   test(
     'a child can use its endpoint but cannot delete the host directory',

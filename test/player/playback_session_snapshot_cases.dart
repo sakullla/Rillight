@@ -126,6 +126,12 @@ void main() {
         await store.write(_snapshot(positionTicks: 100));
         expect((await store.read())!.positionTicks, 100);
 
+        // 损坏内容读取为 null,而不是抛出。
+        await store.file.writeAsString('not json');
+        expect(await store.read(), isNull);
+        await store.file.writeAsString('[1, 2, 3]');
+        expect(await store.read(), isNull);
+
         await store.delete();
         expect(await store.file.exists(), isFalse);
         expect(await store.read(), isNull);
@@ -135,16 +141,5 @@ void main() {
         expect(await store.file.exists(), isFalse);
       },
     );
-
-    test('corrupt content reads as null instead of throwing', () async {
-      final store = FilePlaybackSessionSnapshotStore.forPid(
-        7,
-        directory: directory,
-      );
-      await store.file.writeAsString('not json');
-      expect(await store.read(), isNull);
-      await store.file.writeAsString('[1, 2, 3]');
-      expect(await store.read(), isNull);
-    });
   });
 }

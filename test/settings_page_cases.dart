@@ -80,7 +80,8 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('shows the stored settings', (tester) async {
+  testWidgets('shows the stored settings and changing the disk cache limit '
+      'persists and echoes', (tester) async {
     final store = MemoryPlayerSettingsStore(
       const PlayerSettings(
         volume: 40,
@@ -90,6 +91,7 @@ void main() {
     );
     await pumpPage(tester, store: store);
 
+    // 读:控件回显已存设置。
     expect(
       tester
           .widget<DropdownButton<int>>(
@@ -114,20 +116,8 @@ void main() {
           .value,
       HardwareDecoderBackend.auto,
     );
-  }, tags: ['integration']);
 
-  testWidgets('changing the disk cache limit persists and echoes', (
-    tester,
-  ) async {
-    final store = MemoryPlayerSettingsStore(
-      const PlayerSettings(
-        volume: 40,
-        diskCacheLimitMiB: 4096,
-        hardwareDecoding: HardwareDecodingMode.off,
-      ),
-    );
-    await pumpPage(tester, store: store);
-
+    // 写:切换磁盘缓冲上限并落盘回显。
     await tester.tap(find.byKey(SettingsPage.diskCacheLimitKey));
     await tester.pumpAndSettle();
     await tester.tap(find.text('1.0 GB').last);
@@ -169,9 +159,13 @@ void main() {
     expect(settings.volume, 40);
   }, tags: ['integration']);
 
-  testWidgets('shows stored danmaku service fields', (tester) async {
+  testWidgets('shows stored danmaku service fields and changes persist', (
+    tester,
+  ) async {
     final store = MemoryPlayerSettingsStore(
       const PlayerSettings(
+        volume: 40,
+        diskCacheLimitMiB: 4096,
         danmakuServer: 'https://dan.example.com',
         danmakuAppId: 'app-id',
         danmakuToken: 'secret',
@@ -179,6 +173,7 @@ void main() {
     );
     await pumpPage(tester, store: store);
 
+    // 读:输入框回显已存服务字段。
     expect(
       tester
           .widget<TextField>(find.byKey(SettingsPage.danmakuServerFieldKey))
@@ -200,20 +195,8 @@ void main() {
           ?.text,
       'secret',
     );
-  }, tags: ['integration']);
 
-  testWidgets('changing danmaku service fields persists', (tester) async {
-    final store = MemoryPlayerSettingsStore(
-      const PlayerSettings(
-        volume: 40,
-        diskCacheLimitMiB: 4096,
-        danmakuServer: 'https://dan.example.com',
-        danmakuAppId: 'app-id',
-        danmakuToken: 'secret',
-      ),
-    );
-    await pumpPage(tester, store: store);
-
+    // 写:修改服务字段后落盘,且不清掉无关字段。
     await tester.enterText(
       find.byKey(SettingsPage.danmakuServerFieldKey),
       'https://custom.example',

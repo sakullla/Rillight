@@ -556,10 +556,10 @@ void main() {
       }
     },
   );
-  for (final tightened in ['no-cache', 'max-age=0']) {
-    test(
-      'same ETag gap immediately applies $tightened before its next hit',
-      () async {
+  test(
+    'same ETag gap immediately applies tightened control before its next hit',
+    () async {
+      for (final tightened in ['no-cache', 'max-age=0']) {
         final fixture = await _CacheFixture.open();
         await fixture.read('bytes=0-7');
         await fixture.settle();
@@ -569,14 +569,14 @@ void main() {
         expect((await fixture.read('bytes=8-11')).$2, 'ijkl');
         expect(fixture.methods, ['GET', 'GET', 'HEAD']);
         expect(fixture.proxy.upstreamBytes, before);
-      },
-    );
-  }
+      }
+    },
+  );
 
-  for (final disk in [false, true]) {
-    test(
-      'complete 512KiB no-validator response reuses bounded ${disk ? 'disk' : 'memory'} reads',
-      () async {
+  test(
+    'complete 512KiB no-validator response reuses bounded disk and memory reads',
+    () async {
+      for (final disk in [false, true]) {
         final fixture = await _CacheFixture.open(
           memoryBytes: disk ? 0 : 1024 * 1024,
           disk: disk,
@@ -595,86 +595,80 @@ void main() {
           lessThanOrEqualTo(2 * 1024 * 1024),
         );
         expect(fixture.cache.diagnostics['protectedRanges'], 0);
-      },
-    );
-  }
+      }
+    },
+  );
 
-  for (final caching in [false, true]) {
-    test(
-      '4096-entry >512KiB HLS keeps sealed first last and rewind routes with cache=$caching',
-      () async {
-        final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-        final origin = Uri.parse('http://127.0.0.1:${server.port}');
-        var requests = 0;
-        final manifest =
-            '#EXTM3U\n${List.filled(9000, '# ${'x' * 60}\n').join()}${List.generate(4096, (i) => '#EXTINF:2,\nsegment$i.ts?api_key=secret\n').join()}#EXT-X-ENDLIST\n';
-        expect(utf8.encode(manifest).length, greaterThan(512 * 1024));
-        server.listen((request) async {
-          requests++;
-          final text = request.uri.path == '/index.m3u8'
-              ? manifest
-              : request.uri.path;
-          final bytes = utf8.encode(text);
-          request.response.contentLength = bytes.length;
-          request.response.headers.set('cache-control', 'max-age=3600');
-          request.response.add(bytes);
-          await request.response.close();
-        });
-        final cache = caching ? await SessionByteCache.open() : null;
-        final proxy = await PlaybackHttpProxy.create(
-          origin: origin,
-          cache: cache,
-          headers: {'X-Emby-Token': 'secret'},
+  // cache=false 与 cache=true 走同一份路由封印/淘汰代码,生产恒带
+  // SessionByteCache,这里只保留带缓存的完整路径。
+  test(
+    '4096-entry >512KiB HLS keeps sealed first last and rewind routes',
+    () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final origin = Uri.parse('http://127.0.0.1:${server.port}');
+      var requests = 0;
+      final manifest =
+          '#EXTM3U\n${List.filled(9000, '# ${'x' * 60}\n').join()}${List.generate(4096, (i) => '#EXTINF:2,\nsegment$i.ts?api_key=secret\n').join()}#EXT-X-ENDLIST\n';
+      expect(utf8.encode(manifest).length, greaterThan(512 * 1024));
+      server.listen((request) async {
+        requests++;
+        final text = request.uri.path == '/index.m3u8'
+            ? manifest
+            : request.uri.path;
+        final bytes = utf8.encode(text);
+        request.response.contentLength = bytes.length;
+        request.response.headers.set('cache-control', 'max-age=3600');
+        request.response.add(bytes);
+        await request.response.close();
+      });
+      final cache = await SessionByteCache.open();
+      final proxy = await PlaybackHttpProxy.create(
+        origin: origin,
+        cache: cache,
+        headers: {'X-Emby-Token': 'secret'},
+      );
+      final client = HttpClient();
+      addTearDown(() async {
+        client.close(force: true);
+        await proxy.close();
+        await server.close(force: true);
+      });
+      Future<(int, String)> get(Uri url) async {
+        final response = await (await client.getUrl(url)).close();
+        return (
+          response.statusCode,
+          await response.transform(utf8.decoder).join(),
         );
-        final client = HttpClient();
-        addTearDown(() async {
-          client.close(force: true);
-          await proxy.close();
-          await server.close(force: true);
-        });
-        Future<(int, String)> get(Uri url) async {
-          final response = await (await client.getUrl(url)).close();
-          return (
-            response.statusCode,
-            await response.transform(utf8.decoder).join(),
-          );
-        }
+      }
 
-        final result = await get(proxy.register(origin.resolve('/index.m3u8')));
-        expect(result.$1, 200);
-        expect(result.$2, isNot(contains('secret')));
-        final routes = result.$2
-            .split('\n')
-            .where((line) => line.startsWith('http'))
-            .map(Uri.parse)
-            .toList();
-        expect(routes, hasLength(4096));
-        expect((await get(routes.first)).$2, '/segment0.ts');
-        expect((await get(routes.last)).$2, '/segment4095.ts');
-        // Distinct admitted resources evict cache metadata, never issued routes.
-        for (final route in routes.skip(1).take(260)) {
-          expect((await get(route)).$1, 200);
-        }
-        expect((await get(routes.first)).$2, '/segment0.ts');
-        expect(
-          proxy.diagnostics['registeredResources'],
-          lessThanOrEqualTo(256),
-        );
-        final before = requests;
-        final segments = routes.first.pathSegments.toList();
-        final token = segments[1];
-        segments[1] = '${token[0] == 'A' ? 'B' : 'A'}${token.substring(1)}';
-        expect(
-          (await get(routes.first.replace(pathSegments: segments))).$1,
-          404,
-        );
-        expect(requests, before);
-        // Registration creates fresh nonces but keeps the canonical cache identity.
-        final same = proxy.register(origin.resolve('/index.m3u8'));
-        expect((await get(same)).$1, 200);
-      },
-    );
-  }
+      final result = await get(proxy.register(origin.resolve('/index.m3u8')));
+      expect(result.$1, 200);
+      expect(result.$2, isNot(contains('secret')));
+      final routes = result.$2
+          .split('\n')
+          .where((line) => line.startsWith('http'))
+          .map(Uri.parse)
+          .toList();
+      expect(routes, hasLength(4096));
+      expect((await get(routes.first)).$2, '/segment0.ts');
+      expect((await get(routes.last)).$2, '/segment4095.ts');
+      // Distinct admitted resources evict cache metadata, never issued routes.
+      for (final route in routes.skip(1).take(260)) {
+        expect((await get(route)).$1, 200);
+      }
+      expect((await get(routes.first)).$2, '/segment0.ts');
+      expect(proxy.diagnostics['registeredResources'], lessThanOrEqualTo(256));
+      final before = requests;
+      final segments = routes.first.pathSegments.toList();
+      final token = segments[1];
+      segments[1] = '${token[0] == 'A' ? 'B' : 'A'}${token.substring(1)}';
+      expect((await get(routes.first.replace(pathSegments: segments))).$1, 404);
+      expect(requests, before);
+      // Registration creates fresh nonces but keeps the canonical cache identity.
+      final same = proxy.register(origin.resolve('/index.m3u8'));
+      expect((await get(same)).$1, 200);
+    },
+  );
 
   test('If-Range change before a gap replaces the entire old range', () async {
     final fixture = await _CacheFixture.open();

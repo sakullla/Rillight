@@ -193,6 +193,7 @@ class MpvVideoBackend implements VideoBackend {
     duration = buffer = Duration.zero;
     isPlaying = false;
     selectedAudioIndex = selectedSubtitleIndex = null;
+    Future<SessionByteCache?>? openingCache;
     try {
       final store = _settingsStore ??= await openPlayerSettingsStore();
       final settings = await store.read();
@@ -219,6 +220,31 @@ class MpvVideoBackend implements VideoBackend {
         'speed': '$_rate',
         'network-timeout': '20',
       });
+      final usesProxy =
+          request.url.scheme == 'http' ||
+          request.url.scheme == 'https' ||
+          request.credentialOrigin != null;
+      // Disk-cache startup is independent from libmpv initialization. Start
+      // both together so a cold cache directory does not add another serial
+      // wait before loadfile can begin.
+      if (usesProxy) {
+        openingCache =
+            SessionByteCache.open(
+              root: cache,
+              memoryLimitBytes: 8 * 1024 * 1024,
+              pendingLimitBytes: 2 * 1024 * 1024,
+              diskLimitBytes: PlayerRuntimeOptions.effectiveDiskCacheLimitBytes(
+                settings,
+              ),
+              diskSessionLimitBytes: 64 * 1024 * 1024,
+            ).then((opened) async {
+              if (!_current(session)) {
+                await opened.close();
+                return null;
+              }
+              return opened;
+            });
+      }
       session.creating = _createSession(options);
       final driver = await session.creating!;
       session.driver = driver;
@@ -231,18 +257,9 @@ class MpvVideoBackend implements VideoBackend {
         (event) => _onEvent(session, event),
       );
       var url = request.url;
-      if (url.scheme == 'http' ||
-          url.scheme == 'https' ||
-          request.credentialOrigin != null) {
-        final byteCache = await SessionByteCache.open(
-          root: cache,
-          memoryLimitBytes: 8 * 1024 * 1024,
-          pendingLimitBytes: 2 * 1024 * 1024,
-          diskLimitBytes: PlayerRuntimeOptions.effectiveDiskCacheLimitBytes(
-            settings,
-          ),
-          diskSessionLimitBytes: 64 * 1024 * 1024,
-        );
+      if (usesProxy) {
+        final byteCache = await openingCache!;
+        if (byteCache == null) return;
         if (!_current(session)) {
           await byteCache.close();
           return;
@@ -330,6 +347,12 @@ class MpvVideoBackend implements VideoBackend {
       await driver.command(['loadfile', url.toString(), 'replace']);
       await session.ready.future.timeout(openTimeout);
     } catch (failure) {
+      // If libmpv failed before the parallel cache future was consumed, make
+      // sure a successfully opened cache is still closed.
+      try {
+        final opened = await openingCache;
+        await opened?.close();
+      } catch (_) {}
       if (_current(session)) {
         lastFailure = failure;
         await _stopActive();
@@ -648,30 +671,33 @@ class MpvVideoBackend implements VideoBackend {
         ? session.proxy?.register(uri, role: PlaybackResourceRole.subtitle) ??
               uri
         : uri;
-    // Pin the actual selection before loading. 'auto' adds without selecting;
-    // an explicit sid also prevents mpv's default selection from taking over
-    // if the download finishes after our deadline or a newer user choice.
+    // Pin the current selection before loading. `select` makes this user
+    // action explicit; relying on `auto` leaves the old subtitle selected
+    // whenever another subtitle is already active.
     final selected = await driver.getProperty('sid');
     if (!current()) return;
     await driver.setProperty('sid', selected is num ? '$selected' : 'no');
     if (!current()) return;
+    final loading = driver.command([
+      'sub-add',
+      url.toString(),
+      'select',
+      title ?? '',
+    ]);
     try {
-      await driver.command(['sub-add', url.toString(), 'auto', title ?? '']);
+      await loading;
     } on TimeoutException {
       if (!current()) return;
       _trace(session, 'subtitle-load-timeout');
-      // This command downloads an optional resource. A fresh successful
-      // request and the session's ongoing surface watchdog distinguish it
-      // from loss of the control transport or renderer.
+      // mpv waits for the external subtitle body before completing sub-add.
+      // Keep the player responsive and let the operation finish in the
+      // background when the native control channel is still healthy.
       try {
-        final actual = await driver
-            .getProperty('sid')
-            .timeout(const Duration(seconds: 2));
+        await driver.getProperty('sid').timeout(const Duration(seconds: 2));
         if (!current()) return;
         if (!session.loaded ||
             (session.hasVideo && !session.firstFrame) ||
-            session.failed ||
-            actual != selected) {
+            session.failed) {
           throw StateError('Unable to confirm subtitle selection');
         }
       } catch (_) {
@@ -688,13 +714,28 @@ class MpvVideoBackend implements VideoBackend {
         rethrow;
       }
       _trace(session, 'subtitle-timeout-control-responsive');
-      throw StateError(
-        'External subtitle loading timed out; playback continues',
+      unawaited(
+        loading.then<void>((_) async {
+          if (!current()) return;
+          try {
+            await _selectExternalSubtitle(session, driver, url, revision);
+          } catch (_) {}
+        }, onError: (Object error, StackTrace stack) {}),
       );
+      return;
     }
-    if (!current()) return;
+    await _selectExternalSubtitle(session, driver, url, revision);
+  }
+
+  Future<void> _selectExternalSubtitle(
+    _Session session,
+    MpvSessionDriver driver,
+    Uri url,
+    int revision,
+  ) async {
+    if (!_current(session) || revision != session.subtitleRevision) return;
     final tracks = await driver.getProperty('track-list');
-    if (!current()) return;
+    if (!_current(session) || revision != session.subtitleRevision) return;
     final matches = tracks is List
         ? tracks
               .where(

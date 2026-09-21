@@ -51,6 +51,7 @@ class AppHoverCard extends StatefulWidget {
 class _AppHoverCardState extends State<AppHoverCard> {
   bool _hovering = false;
   bool _focused = false;
+  bool _hoverResetScheduled = false;
   ScrollPosition? _position;
 
   bool get _highlighted => _hovering || _focused;
@@ -74,9 +75,19 @@ class _AppHoverCardState extends State<AppHoverCard> {
   }
 
   void _onScrollChanged() {
-    if (_position?.isScrollingNotifier.value == true && _hovering) {
-      _setHovering(false);
+    if (_position?.isScrollingNotifier.value != true ||
+        !_hovering ||
+        _hoverResetScheduled) {
+      return;
     }
+    // ScrollPosition can notify while the viewport is laying out. Defer the
+    // state change so hover cleanup never schedules a build inside a frame.
+    _hoverResetScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _hoverResetScheduled = false;
+      if (!mounted || _position?.isScrollingNotifier.value != true) return;
+      _setHovering(false);
+    });
   }
 
   void _setHovering(bool value) {

@@ -25,10 +25,10 @@ void main() {
     },
   );
 
-  for (final close in [false, true]) {
-    test(
-      'pending enable follows the latest ${close ? 'dispose' : 'pause'} even after a wait timeout',
-      () async {
+  test(
+    'pending enable follows the latest pause or dispose even after a wait timeout',
+    () async {
+      for (final close in [false, true]) {
         final pending = Completer<void>();
         final calls = <bool>[];
         var nativeEnabled = false;
@@ -42,24 +42,24 @@ void main() {
         );
         final lease = PlaybackWakeLock(coordinator: coordinator)..update(true);
         await (close ? lease.dispose() : lease.release());
-        expect(coordinator.pending, isTrue);
+        expect(coordinator.pending, isTrue, reason: '$close');
         expect(coordinator.lastError, isA<TimeoutException>());
         expect(calls, [
           true,
         ], reason: 'No parallel off may overtake the pending on');
         pending.complete();
         await coordinator.settle();
-        expect(calls, [true, false]);
-        expect(nativeEnabled, isFalse);
-        expect(coordinator.confirmed, isFalse);
+        expect(calls, [true, false], reason: '$close');
+        expect(nativeEnabled, isFalse, reason: '$close');
+        expect(coordinator.confirmed, isFalse, reason: '$close');
         if (close) {
           lease.update(true);
           await coordinator.settle();
           expect(calls, [true, false]);
         }
-      },
-    );
-  }
+      }
+    },
+  );
 
   test('rapid on off on collapses to the latest desired state', () async {
     final pending = Completer<void>();

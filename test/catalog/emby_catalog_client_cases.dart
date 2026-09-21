@@ -103,32 +103,28 @@ void main() {
     expect(item.userData.played, isTrue);
   });
 
-  test(
-    'hideFromResume sends Hide=true and drops the item from Resume',
-    () async {
-      expect(await client.getResumeItems(), isNotEmpty);
-      await client.hideFromResume('movie-inception');
-      expect(
-        server.requests.any(
-          (request) =>
-              request.startsWith(
-                'POST /Users/user-alice/Items/movie-inception/HideFromResume',
-              ) &&
-              request.contains('Hide=true'),
-        ),
-        isTrue,
-      );
-      expect(await client.getResumeItems(), isEmpty);
-    },
-  );
-
-  test('HideFromResume without Hide=true leaves the item on Resume', () async {
-    final before = await client.getResumeItems();
-    expect(before, isNotEmpty);
+  test('hideFromResume sends Hide=true and drops the item; without Hide=true '
+      'the item stays on Resume', () async {
+    // 反例:不带 Hide=true 的裸调用不改变 Resume。
+    expect(await client.getResumeItems(), isNotEmpty);
     await client.postJson(
       '/Users/user-alice/Items/movie-inception/HideFromResume',
     );
     expect(await client.getResumeItems(), isNotEmpty);
+
+    // hideFromResume 携带 Hide=true,把条目从 Resume 移除。
+    await client.hideFromResume('movie-inception');
+    expect(
+      server.requests.any(
+        (request) =>
+            request.startsWith(
+              'POST /Users/user-alice/Items/movie-inception/HideFromResume',
+            ) &&
+            request.contains('Hide=true'),
+      ),
+      isTrue,
+    );
+    expect(await client.getResumeItems(), isEmpty);
   });
 
   test('getItems SortBy DateCreated and SortName change order', () async {

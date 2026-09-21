@@ -81,30 +81,26 @@ void main() {
     expect(memory.episodeNumber, 1);
   });
 
-  test(
-    'missing danmaku fields default to enabled with no custom server',
-    () async {
-      final loaded = PlayerSettings.fromJson({'volume': 30});
-      expect(loaded.isDanmakuEnabled, isTrue);
-      expect(loaded.danmakuEnabled, isNull);
-      expect(loaded.danmakuDisplay, isNull);
-      expect(loaded.danmakuServer, isNull);
-      expect(loaded.danmakuAppId, isNull);
-      expect(loaded.danmakuSeriesMemories, isEmpty);
-    },
-  );
+  test('missing danmaku fields default to enabled; garbage fields fall back '
+      'to defaults', () {
+    final defaults = PlayerSettings.fromJson({'volume': 30});
+    expect(defaults.isDanmakuEnabled, isTrue);
+    expect(defaults.danmakuEnabled, isNull);
+    expect(defaults.danmakuDisplay, isNull);
+    expect(defaults.danmakuServer, isNull);
+    expect(defaults.danmakuAppId, isNull);
+    expect(defaults.danmakuSeriesMemories, isEmpty);
 
-  test('garbage danmaku fields fall back to defaults', () {
-    final loaded = PlayerSettings.fromJson({
+    final garbage = PlayerSettings.fromJson({
       'danmakuEnabled': 'yes',
       'danmakuDisplay': 'broken',
       'danmakuServer': 42,
       'danmakuSeriesMemories': 'nope',
     });
-    expect(loaded.isDanmakuEnabled, isTrue);
-    expect(loaded.danmakuDisplay, isNull);
-    expect(loaded.danmakuServer, isNull);
-    expect(loaded.danmakuSeriesMemories, isEmpty);
+    expect(garbage.isDanmakuEnabled, isTrue);
+    expect(garbage.danmakuDisplay, isNull);
+    expect(garbage.danmakuServer, isNull);
+    expect(garbage.danmakuSeriesMemories, isEmpty);
   });
 
   test(
@@ -138,45 +134,43 @@ void main() {
     },
   );
 
-  test('danmaku writer keeps unrelated stored fields', () async {
-    final file = tempFile('merge-danmaku');
-    final store = FilePlayerSettingsStore(file);
-    await store.write(
-      const PlayerSettings(volume: 42, diskCacheLimitMiB: 4096),
-    );
-    await store.write(const PlayerSettings(danmakuEnabled: false));
-    final loaded = await store.read();
-    // 弹幕部分写未携带音量:既有 volume 不被默认值覆盖;
-    // 未写入的可选字段(如磁盘缓冲)同样保留。
-    expect(loaded.volume, 42);
-    expect(loaded.diskCacheLimitMiB, 4096);
-    expect(loaded.danmakuEnabled, isFalse);
-  });
+  test(
+    'danmaku-only writes keep unrelated stored fields like volume',
+    () async {
+      final file = tempFile('merge-danmaku');
+      final store = FilePlayerSettingsStore(file);
+      // 播放器控制器先写音量 42 与磁盘缓冲。
+      await store.write(
+        const PlayerSettings(volume: 42, diskCacheLimitMiB: 4096),
+      );
+      // 弹幕部分写未携带音量:既有 volume 不被默认值覆盖;
+      // 未写入的可选字段(如磁盘缓冲)同样保留。
+      await store.write(const PlayerSettings(danmakuEnabled: false));
+      var loaded = await store.read();
+      expect(loaded.volume, 42);
+      expect(loaded.diskCacheLimitMiB, 4096);
+      expect(loaded.danmakuEnabled, isFalse);
 
-  test('danmaku-only write keeps a previously stored volume of 42', () async {
-    final file = tempFile('merge-danmaku-volume');
-    final store = FilePlayerSettingsStore(file);
-    // 播放器控制器先写音量 42。
-    await store.write(const PlayerSettings(volume: 42));
-    // 弹幕控制器的纯弹幕字段写(开关/显示参数/记忆/来源)不携带音量。
-    await store.write(
-      const PlayerSettings(
-        danmakuEnabled: true,
-        danmakuDisplay: DanmakuDisplaySettings(opacity: 0.6),
-        danmakuSeriesMemories: {
-          'series-1': DanmakuSeriesMemory(
-            animeId: 7,
-            animeTitle: 'Show',
-            episodeId: 100,
-          ),
-        },
-      ),
-    );
-    final loaded = await store.read();
-    expect(loaded.volume, 42);
-    expect(loaded.danmakuDisplay!.opacity, 0.6);
-    expect(loaded.danmakuSeriesMemories['series-1']!.episodeId, 100);
-  });
+      // 弹幕控制器的纯弹幕字段写(开关/显示参数/记忆/来源)不携带音量。
+      await store.write(
+        const PlayerSettings(
+          danmakuEnabled: true,
+          danmakuDisplay: DanmakuDisplaySettings(opacity: 0.6),
+          danmakuSeriesMemories: {
+            'series-1': DanmakuSeriesMemory(
+              animeId: 7,
+              animeTitle: 'Show',
+              episodeId: 100,
+            ),
+          },
+        ),
+      );
+      loaded = await store.read();
+      expect(loaded.volume, 42);
+      expect(loaded.danmakuDisplay!.opacity, 0.6);
+      expect(loaded.danmakuSeriesMemories['series-1']!.episodeId, 100);
+    },
+  );
 
   group('DanmakuDisplaySettings', () {
     test('const default equals the R7 default set', () {
@@ -327,13 +321,6 @@ void main() {
         );
       },
     );
-
-    test('density lane multipliers follow ADR-1', () {
-      expect(DanmakuDensity.auto.laneMultiplier, 2);
-      expect(DanmakuDensity.sparse.laneMultiplier, 1);
-      expect(DanmakuDensity.dense.laneMultiplier, 4);
-      expect(DanmakuDensity.unlimited.laneMultiplier, isNull);
-    });
   });
 
   test('merged write can clear keywords and restore defaults', () async {

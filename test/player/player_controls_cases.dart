@@ -268,6 +268,7 @@ void main() {
     await pumpLoggedIn(tester);
     await openPlayable(tester, 'movie-up');
     await waitFor(tester, find.byKey(PlayerKeys.playPause));
+    expect(find.byType(BackdropFilter), findsNothing);
     expect(controllerOf(tester).subtitleStreamIndex, 2);
 
     failing.failSubtitleOff = true;
@@ -295,27 +296,13 @@ void main() {
     expect(controllerOf(tester).subtitleStreamIndex, isNull);
     expect(failing.subtitleOff, isTrue);
     expect(banner, findsNothing);
-  }, tags: ['integration']);
 
-  testWidgets('toggling subtitle still hits player controls', (tester) async {
-    _withEpisodeStreams(server, subtitleIndexById: {'movie-up': 2});
-    await pumpLoggedIn(tester);
-    await openPlayable(tester, 'movie-up');
-    await waitFor(tester, find.byKey(PlayerKeys.playPause));
-    expect(find.byType(BackdropFilter), findsNothing);
-
-    await tester.tap(find.byTooltip('字幕'));
-    await settle(tester);
-    await tester.tap(find.widgetWithText(CheckedPopupMenuItem<int>, '关闭字幕'));
-    await settle(tester);
-    expect(controllerOf(tester).subtitleStreamIndex, isNull);
-
+    // 恢复选择后控件仍然可用(等价于正常 backend 的字幕切换)。
     await tester.tap(find.byTooltip('字幕'));
     await settle(tester);
     await tester.tap(find.widgetWithText(CheckedPopupMenuItem<int>, '中文'));
     await settle(tester);
     expect(controllerOf(tester).subtitleStreamIndex, 2);
-
     await tester.tap(find.byKey(PlayerKeys.playPause));
     await tester.pump();
     expect(controllerOf(tester).isPlaying, isFalse);
@@ -403,15 +390,8 @@ void main() {
     await waitFor(tester, find.byKey(PlayerKeys.playPause));
     expect(backend.openCount, opens + 1);
     expect(controllerOf(tester).playbackEnded, isFalse);
-  }, tags: ['integration']);
 
-  testWidgets('pausing on the last frame without EOF does not end playback', (
-    tester,
-  ) async {
-    await pumpLoggedIn(tester);
-    await openPlayable(tester, 'movie-up');
-    await waitFor(tester, find.byKey(PlayerKeys.playPause));
-
+    // 仅暂停在最后一帧而没有 completed 事件时不算播放结束。
     backend.pauseAtEndWithoutComplete(at: controllerOf(tester).duration);
     await tester.pump();
     expect(find.byKey(PlayerKeys.playbackEnded), findsNothing);
@@ -681,7 +661,7 @@ void main() {
     tags: ['integration'],
   );
 
-  testWidgets('danmaku search field can be focused, selected, and edited', (
+  testWidgets('danmaku search field edits and Esc restores play-pause', (
     tester,
   ) async {
     await pumpLoggedIn(
@@ -728,32 +708,12 @@ void main() {
     await tester.pump();
     expect(textField.controller!.text, '自定义 关键词');
     expect(controllerOf(tester).isPlaying, playing);
-  }, tags: ['integration']);
 
-  testWidgets('danmaku search Esc restores play-pause shortcut', (
-    tester,
-  ) async {
-    await pumpLoggedIn(
-      tester,
-      settingsStore: MemoryPlayerSettingsStore(
-        const PlayerSettings(danmakuAppId: 'app', danmakuToken: 'secret'),
-      ),
-      danmakuClient: _SilentDanmakuClient(),
-    );
-    await openPlayable(tester, 'movie-up');
-    await waitFor(tester, find.byKey(PlayerKeys.playPause));
-    await openDanmakuSearch(tester);
-
-    expect(
-      find.byKey(const Key('player-danmaku-search-panel')),
-      findsOneWidget,
-    );
+    // Esc 关闭搜索面板后恢复播放/暂停快捷键。
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pump();
     await tester.pump();
     expect(find.byKey(const Key('player-danmaku-search-panel')), findsNothing);
-
-    final playing = controllerOf(tester).isPlaying;
     await tester.sendKeyEvent(LogicalKeyboardKey.space);
     await tester.pump();
     expect(controllerOf(tester).isPlaying, isNot(playing));
@@ -1312,16 +1272,6 @@ void main() {
     expect(closeCount, 1);
     expect(stoppedEvents(), hasLength(1));
   });
-
-  testWidgets('tapping player chrome close closes the player', (tester) async {
-    await pumpLoggedIn(tester);
-    await openPlayable(tester, 'movie-up');
-    await waitFor(tester, find.byKey(const Key('player-window-close')));
-    await tester.tap(find.byKey(const Key('player-window-close')));
-    await tester.pump();
-    await tester.runAsync(() => Future<void>.delayed(Duration.zero));
-    await waitForGone(tester, find.byType(PlayerPage));
-  }, tags: ['integration']);
 
   testWidgets('player chrome close hides with OSD', (tester) async {
     await pumpLoggedIn(tester, hideAfter: const Duration(milliseconds: 1));

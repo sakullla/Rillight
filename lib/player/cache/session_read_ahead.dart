@@ -31,7 +31,9 @@ class SessionReadAhead {
   // Match the store's bounded immutable block size. Tiny disk files multiply
   // quota/index filesystem work and can throttle playback on Windows.
   static const blockBytes = SessionByteCache.maxBlockBytes;
-  static const requestBytes = 4 * 1024 * 1024;
+  // Keep one bounded range request large enough to amortize WAN round trips,
+  // while still yielding at each 1 MiB cache block for playback reads.
+  static const requestBytes = 8 * 1024 * 1024;
   final SessionByteCache cache;
   final String resource;
   final int generation;

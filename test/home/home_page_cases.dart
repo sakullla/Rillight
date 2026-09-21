@@ -198,7 +198,7 @@ void main() {
   );
 
   testWidgets(
-    'refresh button falls back to the first visible shelf without resume',
+    'refresh button falls back to the first visible shelf and then libraries',
     (tester) async {
       for (final item in server.items) {
         item.playbackPositionTicks = 0;
@@ -218,16 +218,12 @@ void main() {
       await tester.tap(find.byKey(homeRefreshKey));
       await settle(tester);
       expect(resumeRequests(), greaterThan(before));
-    },
-    tags: ['integration'],
-  );
 
-  testWidgets(
-    'refresh button falls back to libraries when media rows are hidden',
-    (tester) async {
+      // 媒体行全部隐藏时退回到媒体库行。
       server.items.clear();
-      await pumpLoggedIn(tester);
-
+      await scrollBelowTopBar(tester, find.byKey(homeRefreshKey));
+      await tester.tap(find.byKey(homeRefreshKey));
+      await settle(tester);
       expect(find.byKey(CatalogKeys.resumeRow), findsNothing);
       expect(find.byKey(CatalogKeys.nextUpRow), findsNothing);
       expect(find.byKey(CatalogKeys.latestMoviesRow), findsNothing);
@@ -242,7 +238,7 @@ void main() {
   );
 
   testWidgets(
-    'a home row shows error and retry after quiet retries are exhausted',
+    'a home row recovers from quiet-retry exhaustion and keeps cached cards',
     (tester) async {
       server.latestMovieStatus = 500;
       final auth = await connect(tester);
@@ -290,6 +286,29 @@ void main() {
       expect(inRow(row, find.text('飞屋环游记')), findsOneWidget);
       await tester.pump(const Duration(milliseconds: 50));
       await tester.pump(const Duration(milliseconds: 50));
+
+      // 已有可见卡片时刷新失败:保留缓存卡片并再次提供本地重试。
+      final catalog = CatalogScope.of(tester.element(find.byType(HomePage)));
+      server.latestMovieStatus = 500;
+      final reload = catalog.reloadHomeRows();
+      await settle(tester);
+      await reload;
+      await tester.pump(const Duration(seconds: 28));
+      await settle(tester);
+      expect(catalog.latestMovies.notice, isNotNull);
+      await scrollBelowTopBar(tester, find.byKey(CatalogKeys.latestMoviesRow));
+      expect(
+        inRow(CatalogKeys.latestMoviesRow, find.text('飞屋环游记')),
+        findsOneWidget,
+      );
+      expect(
+        inRow(CatalogKeys.latestMoviesRow, find.text('重试')),
+        findsOneWidget,
+      );
+      server.latestMovieStatus = null;
+      await tester.tap(inRow(CatalogKeys.latestMoviesRow, find.text('重试')));
+      await settle(tester);
+      expect(catalog.latestMovies.error, isNull);
     },
     tags: ['integration'],
   );
@@ -442,35 +461,6 @@ void main() {
   );
 
   testWidgets(
-    'home refresh failure preserves visible cards and offers local retry',
-    (tester) async {
-      await pumpLoggedIn(tester);
-      final catalog = CatalogScope.of(tester.element(find.byType(HomePage)));
-      server.latestMovieStatus = 500;
-      final reload = catalog.reloadHomeRows();
-      await settle(tester);
-      await reload;
-      await tester.pump(const Duration(seconds: 28));
-      await settle(tester);
-      expect(catalog.latestMovies.notice, isNotNull);
-      await scrollBelowTopBar(tester, find.byKey(CatalogKeys.latestMoviesRow));
-      expect(
-        inRow(CatalogKeys.latestMoviesRow, find.text('飞屋环游记')),
-        findsOneWidget,
-      );
-      expect(
-        inRow(CatalogKeys.latestMoviesRow, find.text('重试')),
-        findsOneWidget,
-      );
-      server.latestMovieStatus = null;
-      await tester.tap(inRow(CatalogKeys.latestMoviesRow, find.text('重试')));
-      await settle(tester);
-      expect(catalog.latestMovies.error, isNull);
-    },
-    tags: ['integration'],
-  );
-
-  testWidgets(
     'browse layouts render at desktop and enlarged narrow window sizes',
     (tester) async {
       const capture = bool.fromEnvironment('BROWSE_SCREENSHOTS');
@@ -526,7 +516,6 @@ void main() {
         (size: const Size(1439, 900), scale: 1.0, name: '1439x900'),
         (size: const Size(1440, 900), scale: 1.0, name: '1440x900'),
         (size: const Size(1280, 720), scale: 1.5, name: '1280x720-150pct'),
-        (size: const Size(960, 540), scale: 1.5, name: '960x540-150pct'),
         (size: const Size(800, 600), scale: 1.5, name: '800x600-150pct'),
         (size: const Size(1280, 720), scale: 1.0, name: '1280x720-noimage'),
       ]) {

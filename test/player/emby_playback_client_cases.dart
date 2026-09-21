@@ -41,13 +41,8 @@ void main() {
       expect(info.playSessionId, isNotEmpty);
       expect(info.primarySource?.supportsDirectStream, isTrue);
       expect(info.primarySource?.directStreamUrl, contains('static=true'));
+      // DirectPlayProfiles 的编解码内容细节由 device_profile_cases 覆盖。
       expect(server.lastDeviceProfile, isNotNull);
-      final direct =
-          (server.lastDeviceProfile!['DirectPlayProfiles'] as List).first
-              as Map;
-      expect(direct['Container'].toString(), contains('mkv'));
-      expect(direct['VideoCodec'].toString(), contains('hevc'));
-      expect(direct['AudioCodec'].toString(), contains('ac3'));
     },
   );
 
@@ -67,16 +62,7 @@ void main() {
     expect(info.primarySource?.supportsDirectStream, isTrue);
     expect(info.primarySource?.transcodingUrl, isNull);
     expect(info.primarySource?.directStreamUrl, isNotNull);
-    final subs = (server.lastDeviceProfile!['SubtitleProfiles'] as List).map(
-      (item) => Map<String, dynamic>.from(item as Map),
-    );
-    expect(
-      subs.any(
-        (item) => item['Format'] == 'pgssub' && item['Method'] == 'Embed',
-      ),
-      isTrue,
-    );
-    expect(subs.any((item) => item['Method'] == 'Embedded'), isFalse);
+    // SubtitleProfiles 的声明内容细节由 device_profile_cases 覆盖。
   });
 
   test('dvdsub bitmap subtitle still burns in via transcode', () async {
@@ -135,32 +121,8 @@ void main() {
     expect(await client.getNextEpisode(next!), isNull);
   });
 
-  test('Playing Progress Stopped payloads include PlayMethod', () async {
-    const report = PlaybackReport(
-      itemId: 'movie-inception',
-      mediaSourceId: 'movie-inception',
-      playSessionId: 'play-1',
-      playMethod: PlayMethod.directStream,
-      positionTicks: 10000000,
-    );
-    await client.reportPlaying(report);
-    await client.reportProgress(report.copyWith(eventName: 'TimeUpdate'));
-    await client.reportStopped(report);
-    expect(server.playbackEvents.map((event) => event.kind), [
-      'Playing',
-      'Progress',
-      'Stopped',
-    ]);
-    expect(server.playbackEvents.first.body['PlayMethod'], 'DirectStream');
-    expect(server.playbackEvents.map((event) => event.userAgent).toList(), [
-      'Rillight/0.1.0',
-      'Rillight/0.1.0',
-      'Rillight/0.1.0',
-    ]);
-  });
-
   test(
-    'Playing Progress Stopped events carry the configured User-Agent',
+    'Playing Progress Stopped payloads include PlayMethod and carry the configured User-Agent',
     () async {
       client.setUserAgent('PlaybackUA/3');
       expect(client.customUserAgent, 'PlaybackUA/3');
@@ -174,6 +136,12 @@ void main() {
       await client.reportPlaying(report);
       await client.reportProgress(report.copyWith(eventName: 'TimeUpdate'));
       await client.reportStopped(report);
+      expect(server.playbackEvents.map((event) => event.kind), [
+        'Playing',
+        'Progress',
+        'Stopped',
+      ]);
+      expect(server.playbackEvents.first.body['PlayMethod'], 'DirectStream');
       expect(server.playbackEvents.map((event) => event.userAgent).toList(), [
         'PlaybackUA/3',
         'PlaybackUA/3',

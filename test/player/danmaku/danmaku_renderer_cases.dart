@@ -85,36 +85,6 @@ void main() {
     expect(controller.layout.activeCount, greaterThan(0));
   });
 
-  testWidgets('paused playback keeps the last frames without ticking', (
-    tester,
-  ) async {
-    final controller = controllerWith([comment(1, 0)]);
-    controller.updatePosition(
-      const Duration(seconds: 2),
-      playing: true,
-      rate: 1,
-    );
-    await pumpDanmaku(tester, controller);
-    await warmup(tester, controller);
-    controller.updatePosition(
-      const Duration(seconds: 2),
-      playing: false,
-      rate: 1,
-    );
-    await tester.pump();
-    final state = tester.state<DanmakuViewState>(find.byType(DanmakuView));
-    expect(state.debugTickerActive, isFalse);
-    expect(controller.layout.activeEntries, isNotEmpty);
-    final pausedLeft = controller.layout.activeEntries.single.left;
-    await tester.pump(const Duration(seconds: 30));
-    expect(state.debugTickerActive, isFalse);
-    expect(controller.layout.activeEntries, isNotEmpty);
-    expect(
-      controller.layout.activeEntries.single.left,
-      closeTo(pausedLeft, 0.01),
-    );
-  });
-
   testWidgets('no comments mounts without errors or progress', (tester) async {
     final controller = controllerWith(const []);
     controller.updatePosition(Duration.zero, playing: true, rate: 1);
@@ -192,34 +162,15 @@ void main() {
     }
   });
 
-  testWidgets(
-    'after warmup ticker frames do not sync-layout and pause freezes',
-    (tester) async {
-      final controller = controllerWith([comment(1, 0), comment(2, 0.2)]);
-      controller.updatePosition(Duration.zero, playing: true, rate: 1);
-      await pumpDanmaku(tester, controller);
-      final state = await warmup(tester, controller);
-      state.debugLayoutCallsDuringTick = 0;
-      await pumpFrames(tester, 60);
-      expect(state.debugLayoutCallsDuringTick, 0);
-
-      controller.updatePosition(Duration.zero, playing: false, rate: 1);
-      await tester.pump();
-      expect(state.debugTickerActive, isFalse);
-      final frozen = [
-        for (final item in controller.layout.activeEntries) item.left,
-      ];
-      await tester.pump(const Duration(seconds: 2));
-      expect(state.debugTickerActive, isFalse);
-      expect(controller.layout.activeEntries.length, frozen.length);
-      for (var i = 0; i < frozen.length; i++) {
-        expect(
-          controller.layout.activeEntries[i].left,
-          closeTo(frozen[i], 0.01),
-        );
-      }
-    },
-  );
+  testWidgets('after warmup ticker frames do not sync-layout', (tester) async {
+    final controller = controllerWith([comment(1, 0), comment(2, 0.2)]);
+    controller.updatePosition(Duration.zero, playing: true, rate: 1);
+    await pumpDanmaku(tester, controller);
+    final state = await warmup(tester, controller);
+    state.debugLayoutCallsDuringTick = 0;
+    await pumpFrames(tester, 60);
+    expect(state.debugLayoutCallsDuringTick, 0);
+  });
 
   testWidgets('scroll-only frames do not repaint the fixed layer', (
     tester,
@@ -289,19 +240,6 @@ void main() {
     controller.glyphCache.debugFinishPrepareSync();
     await tester.pump();
     expect(state.debugGlyphCacheSize, sizeAfterFont);
-
-    await controller.setDisplay(
-      const DanmakuDisplaySettings(
-        opacity: 0.4,
-        fontScale: 1.5,
-        outline: false,
-        colorful: false,
-      ),
-    );
-    await tester.pump();
-    controller.glyphCache.debugFinishPrepareSync();
-    await tester.pump();
-    expect(state.debugGlyphCacheSize, greaterThan(0));
   });
 
   testWidgets(

@@ -297,24 +297,35 @@ void main() {
     },
   );
 
-  for (final stage in ['volume', 'rate', 'audio', 'subtitle']) {
-    test('rejected $stage restoration keeps ready media and warns', () async {
-      backend.failInitialization = stage;
-      await controller.start();
-      expect(backend.openCount, 1);
-      expect(backend.isPlaying, isTrue);
-      expect(controller.isPlaying, isTrue);
-      expect(controller.loading, isFalse);
-      expect(controller.error, isNull);
-      expect(controller.state.phase, PlaybackPhase.playing);
-      expect(controller.trackFailure, contains('$stage failed'));
-      expect(client.reports.where((e) => e.$1 == 'Playing'), hasLength(1));
-      backend.failInitialization = null;
-      await controller.start();
-      expect(controller.error, isNull);
-      expect(backend.isPlaying, isTrue);
-    });
-  }
+  test(
+    'rejected volume, rate, audio and subtitle restoration keeps ready media and warns',
+    () async {
+      for (final stage in ['volume', 'rate', 'audio', 'subtitle']) {
+        final opensBefore = backend.openCount;
+        final playingBefore = client.reports
+            .where((e) => e.$1 == 'Playing')
+            .length;
+        backend.failInitialization = stage;
+        await controller.start();
+        expect(backend.openCount, opensBefore + 1, reason: stage);
+        expect(backend.isPlaying, isTrue, reason: stage);
+        expect(controller.isPlaying, isTrue, reason: stage);
+        expect(controller.loading, isFalse, reason: stage);
+        expect(controller.error, isNull, reason: stage);
+        expect(controller.state.phase, PlaybackPhase.playing, reason: stage);
+        expect(controller.trackFailure, contains('$stage failed'));
+        expect(
+          client.reports.where((e) => e.$1 == 'Playing').length,
+          playingBefore + 1,
+          reason: stage,
+        );
+        backend.failInitialization = null;
+        await controller.start();
+        expect(controller.error, isNull, reason: stage);
+        expect(backend.isPlaying, isTrue, reason: stage);
+      }
+    },
+  );
 
   test('stale initialization failure cannot stop the newer open', () async {
     final gate = backend.rateGate = Completer<void>();
@@ -376,45 +387,38 @@ void main() {
     },
   );
 
-  for (final initial in [true, false]) {
-    for (final failsLate in [false, true]) {
-      test(
-        'pending ${initial ? 'restored' : 'selected'} subtitle allows controls and ignores late ${failsLate ? 'failure' : 'success'} after off',
-        () async {
-          controller.itemId = 'movie-inception';
-          if (!initial) await controller.start();
-          final gate = backend.subtitleGate = Completer<void>();
-          final pending = initial
-              ? controller.start()
-              : controller.setSubtitle(2);
-          await _until(() => backend.subtitleWaiting);
-          expect(controller.loading, isFalse);
-          await controller.togglePlay().timeout(const Duration(seconds: 1));
-          expect(backend.isPlaying, isFalse);
-          await controller
-              .seekTo(const Duration(seconds: 5))
-              .timeout(const Duration(seconds: 1));
-          expect(backend.position, const Duration(seconds: 5));
-          await controller.setVolume(35).timeout(const Duration(seconds: 1));
-          expect(backend.volume, 35);
-          await controller
-              .setSubtitle(null)
-              .timeout(const Duration(seconds: 1));
-          expect(gate.isCompleted, isFalse);
-          expect(controller.subtitleStreamIndex, isNull);
-          if (failsLate) {
-            gate.completeError(TimeoutException('superseded subtitle'));
-          } else {
-            gate.complete();
-          }
-          await pending;
-          expect(controller.subtitleStreamIndex, isNull);
-          expect(controller.trackFailure, isNull);
-          expect(controller.error, isNull);
-          expect(backend.isPlaying, isFalse);
-        },
-      );
-    }
+  for (final failsLate in [false, true]) {
+    test(
+      'pending restored subtitle allows controls and ignores late ${failsLate ? 'failure' : 'success'} after off',
+      () async {
+        controller.itemId = 'movie-inception';
+        final gate = backend.subtitleGate = Completer<void>();
+        final pending = controller.start();
+        await _until(() => backend.subtitleWaiting);
+        expect(controller.loading, isFalse);
+        await controller.togglePlay().timeout(const Duration(seconds: 1));
+        expect(backend.isPlaying, isFalse);
+        await controller
+            .seekTo(const Duration(seconds: 5))
+            .timeout(const Duration(seconds: 1));
+        expect(backend.position, const Duration(seconds: 5));
+        await controller.setVolume(35).timeout(const Duration(seconds: 1));
+        expect(backend.volume, 35);
+        await controller.setSubtitle(null).timeout(const Duration(seconds: 1));
+        expect(gate.isCompleted, isFalse);
+        expect(controller.subtitleStreamIndex, isNull);
+        if (failsLate) {
+          gate.completeError(TimeoutException('superseded subtitle'));
+        } else {
+          gate.complete();
+        }
+        await pending;
+        expect(controller.subtitleStreamIndex, isNull);
+        expect(controller.trackFailure, isNull);
+        expect(controller.error, isNull);
+        expect(backend.isPlaying, isFalse);
+      },
+    );
   }
 
   test(
@@ -496,7 +500,7 @@ void main() {
         settingsStore: settings,
         snapshotStore: snapshots,
         stoppedTimeout: const Duration(minutes: 1),
-        nextEpisodeCountdown: const Duration(seconds: 1),
+        nextEpisodeCountdown: const Duration(milliseconds: 100),
       );
       await controller.start();
       client.stoppedGate = Completer<void>();
@@ -506,7 +510,7 @@ void main() {
       final switching = controller.playEpisode(episode('movie-up')).then((_) {
         switched = true;
       });
-      await Future<void>.delayed(const Duration(milliseconds: 1100));
+      await Future<void>.delayed(const Duration(milliseconds: 300));
       expect(switched, isFalse);
       client.stoppedGate!.complete();
       await switching;
@@ -515,39 +519,42 @@ void main() {
     },
   );
 
-  for (final direction in ['list', 'more', 'earlier']) {
-    test('superseding $direction loading releases its busy flag', () async {
+  test(
+    'superseding list, more and earlier loading releases its busy flag',
+    () async {
       await controller.playEpisode(episode('episode-friends-s1e1'));
-      if (direction != 'list') {
-        await controller.loadEpisodeList();
-        controller.episodeWindowStart = 80;
-        controller.episodeWindowEnd = 160;
-        controller.episodeTotal = 200;
+      for (final direction in ['list', 'more', 'earlier']) {
+        if (direction != 'list') {
+          await controller.loadEpisodeList();
+          controller.episodeWindowStart = 80;
+          controller.episodeWindowEnd = 160;
+          controller.episodeTotal = 200;
+        }
+        Future<void> load() => switch (direction) {
+          'more' => controller.loadMoreEpisodes(),
+          'earlier' => controller.loadEarlierEpisodes(),
+          _ => controller.loadEpisodeList(),
+        };
+        final gate = client.queryGate = Completer<void>();
+        final count = client.queryCount;
+        final pending = load();
+        await _until(() => client.queryCount > count);
+        final starting = controller.start();
+        expect(controller.episodeListLoading, isFalse, reason: direction);
+        expect(controller.episodeLoadingMore, isFalse, reason: direction);
+        expect(controller.episodeLoadingEarlier, isFalse, reason: direction);
+        await starting;
+        gate.complete();
+        await pending;
+        final beforeRetry = client.queryCount;
+        await load();
+        expect(client.queryCount, greaterThan(beforeRetry), reason: direction);
+        expect(controller.episodeListLoading, isFalse, reason: direction);
+        expect(controller.episodeLoadingMore, isFalse, reason: direction);
+        expect(controller.episodeLoadingEarlier, isFalse, reason: direction);
       }
-      Future<void> load() => switch (direction) {
-        'more' => controller.loadMoreEpisodes(),
-        'earlier' => controller.loadEarlierEpisodes(),
-        _ => controller.loadEpisodeList(),
-      };
-      final gate = client.queryGate = Completer<void>();
-      final count = client.queryCount;
-      final pending = load();
-      await _until(() => client.queryCount > count);
-      final starting = controller.start();
-      expect(controller.episodeListLoading, isFalse);
-      expect(controller.episodeLoadingMore, isFalse);
-      expect(controller.episodeLoadingEarlier, isFalse);
-      await starting;
-      gate.complete();
-      await pending;
-      final beforeRetry = client.queryCount;
-      await load();
-      expect(client.queryCount, greaterThan(beforeRetry));
-      expect(controller.episodeListLoading, isFalse);
-      expect(controller.episodeLoadingMore, isFalse);
-      expect(controller.episodeLoadingEarlier, isFalse);
-    });
-  }
+    },
+  );
 
   test(
     'a late Progress response cannot resurrect the stopped session snapshot',

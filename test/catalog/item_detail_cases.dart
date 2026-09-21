@@ -207,7 +207,9 @@ void main() {
     ]);
   }, tags: ['integration']);
 
-  testWidgets('episode card play button starts playback', (tester) async {
+  testWidgets('episode card play and check keep the detail flow intact', (
+    tester,
+  ) async {
     final host = _SilentPlayerHost();
     final app = await pumpApp(tester, host: host);
     await openItem(tester, app, _series);
@@ -221,13 +223,7 @@ void main() {
 
     expect(app.router.state.uri.path, AppRoutes.item(_series));
     expect(host.current?.itemId, id);
-  }, tags: ['integration']);
 
-  testWidgets('episode card check marks the episode played', (tester) async {
-    final app = await pumpApp(tester);
-    await openItem(tester, app, _series);
-
-    const id = 'episode-friends-s1e2';
     final toggle = find.byKey(CatalogKeys.episodePlayed(id));
     await tester.ensureVisible(toggle);
     await tester.pump();
@@ -248,6 +244,19 @@ void main() {
           .widget<IconButton>(find.byKey(CatalogKeys.episodePlayed(id)))
           .tooltip,
       '标记未看',
+    );
+
+    // 分集详情请求必须带 People 字段(fake server 无条件序列化 People,
+    // 只有钉住请求侧的 Fields 才能防止详情链路退回不带 People 的请求)。
+    server.requests.clear();
+    await openItem(tester, app, 'episode-friends-s1e2');
+    final detailRequests = server.requests
+        .where((request) => request.contains('/Items/episode-friends-s1e2?'))
+        .toList();
+    expect(detailRequests, isNotEmpty);
+    expect(
+      detailRequests.every((request) => request.contains('People')),
+      isTrue,
     );
   }, tags: ['integration']);
 
@@ -340,25 +349,6 @@ void main() {
     expect(
       find.byKey(CatalogKeys.episode('episode-friends-s1e1')),
       findsNothing,
-    );
-  }, tags: ['integration']);
-
-  testWidgets('episode detail request asks for the People field', (
-    tester,
-  ) async {
-    final app = await pumpApp(tester);
-    server.requests.clear();
-    await openItem(tester, app, 'episode-friends-s1e2');
-
-    // fake server 对 People 无条件序列化,必须钉住请求侧的 Fields,
-    // 防止详情链路退回不带 People 的请求而测试假绿。
-    final detailRequests = server.requests
-        .where((request) => request.contains('/Items/episode-friends-s1e2?'))
-        .toList();
-    expect(detailRequests, isNotEmpty);
-    expect(
-      detailRequests.every((request) => request.contains('People')),
-      isTrue,
     );
   }, tags: ['integration']);
 

@@ -112,12 +112,6 @@ void main() {
     primaryImageTag: 'tag-img',
   );
 
-  test('image cache budgets stay well below the old 256 MiB dual cap', () {
-    expect(kPaintingImageCacheMaxBytes, 64 * 1024 * 1024);
-    expect(kPaintingImageCacheMaxEntries, 400);
-    expect(MediaImageCache.defaultMemoryLimitBytes, 64 * 1024 * 1024);
-  });
-
   test('backdrop request width follows the window pixels and clamps', () {
     expect(
       mediaBackdropRequestWidth(layoutWidth: 960, devicePixelRatio: 1),
@@ -137,34 +131,39 @@ void main() {
     );
   });
 
-  test('configurePaintingImageCache applies the decode budget', () {
-    configurePaintingImageCache();
-    expect(
-      PaintingBinding.instance.imageCache.maximumSize,
-      kPaintingImageCacheMaxEntries,
-    );
-    expect(
-      PaintingBinding.instance.imageCache.maximumSizeBytes,
-      kPaintingImageCacheMaxBytes,
-    );
-  });
+  test(
+    'painting image cache budgets apply and shrink for the player process',
+    () {
+      expect(kPaintingImageCacheMaxBytes, 64 * 1024 * 1024);
+      expect(kPaintingImageCacheMaxEntries, 400);
+      expect(MediaImageCache.defaultMemoryLimitBytes, 64 * 1024 * 1024);
 
-  test('player process uses a smaller decode budget', () {
-    configurePaintingImageCache(playerProcess: true);
-    expect(
-      PaintingBinding.instance.imageCache.maximumSize,
-      kPlayerProcessImageCacheMaxEntries,
-    );
-    expect(
-      PaintingBinding.instance.imageCache.maximumSizeBytes,
-      kPlayerProcessImageCacheMaxBytes,
-    );
-    expect(
-      MediaImageCache.instance.memoryLimitBytes,
-      kPlayerProcessImageCacheMaxBytes,
-    );
-    configurePaintingImageCache();
-  });
+      configurePaintingImageCache();
+      expect(
+        PaintingBinding.instance.imageCache.maximumSize,
+        kPaintingImageCacheMaxEntries,
+      );
+      expect(
+        PaintingBinding.instance.imageCache.maximumSizeBytes,
+        kPaintingImageCacheMaxBytes,
+      );
+
+      configurePaintingImageCache(playerProcess: true);
+      expect(
+        PaintingBinding.instance.imageCache.maximumSize,
+        kPlayerProcessImageCacheMaxEntries,
+      );
+      expect(
+        PaintingBinding.instance.imageCache.maximumSizeBytes,
+        kPlayerProcessImageCacheMaxBytes,
+      );
+      expect(
+        MediaImageCache.instance.memoryLimitBytes,
+        kPlayerProcessImageCacheMaxBytes,
+      );
+      configurePaintingImageCache();
+    },
+  );
 
   testWidgets('shows a skeleton placeholder while loading', (tester) async {
     final auth = await connect(tester);
@@ -415,8 +414,10 @@ void main() {
     expect(fetches, 2);
   });
 
-  test('hung fetches time out and release concurrency slots', () async {
+  test('fetch timeouts release slots, abort, and stay retryable', () async {
     MediaImageCache.instance.fetchTimeout = const Duration(milliseconds: 40);
+
+    // 超时释放并发槽位,后续加载不受影响。
     final hung = Completer<Uint8List?>();
     addTearDown(() {
       if (!hung.isCompleted) {
@@ -446,18 +447,10 @@ void main() {
     expect(await missed, isNull);
     expect(await extra, isNotNull);
     expect(extraFetches, 1);
-  });
 
-  test('timeout abort is invoked so HTTP can be cancelled', () async {
-    MediaImageCache.instance.fetchTimeout = const Duration(milliseconds: 40);
-    final hung = Completer<Uint8List?>();
-    addTearDown(() {
-      if (!hung.isCompleted) {
-        hung.complete(null);
-      }
-    });
+    // 超时调用 onAbort 以便取消 HTTP,且不进入负缓存。
     var aborted = false;
-    final missed = await MediaImageCache.instance.load(
+    final abortedLoad = await MediaImageCache.instance.load(
       serverId: 'server-1',
       itemId: 'abort',
       type: 'Primary',
@@ -466,7 +459,7 @@ void main() {
       fetch: () => hung.future,
       onAbort: () => aborted = true,
     );
-    expect(missed, isNull);
+    expect(abortedLoad, isNull);
     expect(aborted, isTrue);
     expect(
       MediaImageCache.instance.isNegativeCached(
@@ -478,10 +471,8 @@ void main() {
       ),
       isFalse,
     );
-  });
 
-  test('timeouts are not negatively cached and can retry', () async {
-    MediaImageCache.instance.fetchTimeout = const Duration(milliseconds: 40);
+    // 慢 fetch 超时后重试可以成功。
     var fetches = 0;
     Future<Uint8List?> fetch() async {
       fetches++;

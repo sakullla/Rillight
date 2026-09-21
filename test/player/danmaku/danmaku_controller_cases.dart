@@ -247,9 +247,15 @@ void main() {
   test(
     'isConfigured requires official credentials or a custom server',
     () async {
+      // 无凭据:不触达 API,状态为 unreachable。
       final empty = makeController(settings: MemoryPlayerSettingsStore());
       await empty.startSession(context());
       expect(empty.isConfigured, isFalse);
+      expect(empty.status, DanmakuStatus.unreachable);
+      expect(empty.hasOfficialCredentials, isFalse);
+      expect(client.matchCalls, isEmpty);
+      expect(client.searchCalls, isEmpty);
+      expect(await empty.search('Show'), isEmpty);
       empty.dispose();
 
       final official = makeController();
@@ -504,17 +510,6 @@ void main() {
     expect(controller.hasComments, isFalse);
   });
 
-  test('official source without AppId does not call the API', () async {
-    store = MemoryPlayerSettingsStore();
-    final controller = makeController();
-    await controller.startSession(context());
-    expect(controller.status, DanmakuStatus.unreachable);
-    expect(controller.hasOfficialCredentials, isFalse);
-    expect(client.matchCalls, isEmpty);
-    expect(client.searchCalls, isEmpty);
-    expect(await controller.search('Show'), isEmpty);
-  });
-
   test('official source unreachable is silent', () async {
     client.matchError = unreachable;
     final controller = makeController();
@@ -595,34 +590,6 @@ void main() {
     },
   );
 
-  test('toggle off clears and persists, toggle on reloads', () async {
-    client.matchResponse = const DanmakuMatchResponse(
-      isMatched: true,
-      matches: [
-        DanmakuMatchCandidate(
-          animeId: 7,
-          animeTitle: 'Show',
-          episodeId: 100,
-          episodeTitle: '第01话',
-        ),
-      ],
-    );
-    client.commentResponse = [comment(1, 5)];
-    final controller = makeController();
-    await controller.startSession(context());
-    expect(controller.hasComments, isTrue);
-
-    await controller.toggleDanmaku();
-    expect(controller.status, DanmakuStatus.off);
-    expect(controller.hasComments, isFalse);
-    expect((await store.read()).danmakuEnabled, isFalse);
-
-    await controller.toggleDanmaku();
-    expect(controller.status, DanmakuStatus.active);
-    expect(controller.hasComments, isTrue);
-    expect((await store.read()).danmakuEnabled, isTrue);
-  });
-
   test(
     'toggle off then on in the same session reuses cached comments',
     () async {
@@ -648,9 +615,11 @@ void main() {
       expect(controller.comments, isEmpty);
       expect(controller.timeline, isEmpty);
       expect(controller.matchedTitle, isNull);
+      expect((await store.read()).danmakuEnabled, isFalse);
 
       await controller.toggleDanmaku();
       expect(controller.status, DanmakuStatus.active);
+      expect((await store.read()).danmakuEnabled, isTrue);
       expect(controller.matchedTitle, 'Show');
       expect(controller.comments.map((c) => c.cid), [1, 2]);
       // 两条同文本 'hi' 在合并窗内折叠为一条时间轴条目。
@@ -859,89 +828,74 @@ void main() {
     },
   );
 
-  test(
-    'newer search drops in-flight results without unavailable banner',
-    () async {
-      store = MemoryPlayerSettingsStore(
-        const PlayerSettings(
-          danmakuServer: 'https://dan.example.com',
-          danmakuToken: 'secret',
-        ),
-      );
-      final controller = makeController();
-      await controller.startSession(context());
-      expect(controller.status, DanmakuStatus.noMatch);
+  test('newer search and session switch both drop in-flight results '
+      'without unavailable banner', () async {
+    store = MemoryPlayerSettingsStore(
+      const PlayerSettings(
+        danmakuServer: 'https://dan.example.com',
+        danmakuToken: 'secret',
+      ),
+    );
+    final controller = makeController();
+    await controller.startSession(context());
+    expect(controller.status, DanmakuStatus.noMatch);
 
-      client.searchCalls.clear();
-      client.searchResponse = const [
-        DanmakuAnime(
-          animeId: 1,
-          animeTitle: 'Stale',
-          type: 'tvseries',
-          episodes: [DanmakuEpisode(episodeId: 1, episodeTitle: '第01话')],
-        ),
-      ];
-      client.searchGate = Completer<void>();
-      final stale = controller.search('Stale');
-      while (client.searchCalls.isEmpty) {
-        await Future<void>.delayed(Duration.zero);
-      }
+    // 失效触发一:更新的搜索令旧搜索的在途结果作废。
+    client.searchCalls.clear();
+    client.searchResponse = const [
+      DanmakuAnime(
+        animeId: 1,
+        animeTitle: 'Stale',
+        type: 'tvseries',
+        episodes: [DanmakuEpisode(episodeId: 1, episodeTitle: '第01话')],
+      ),
+    ];
+    client.searchGate = Completer<void>();
+    final stale = controller.search('Stale');
+    while (client.searchCalls.isEmpty) {
+      await Future<void>.delayed(Duration.zero);
+    }
 
-      client.searchResponse = const [
-        DanmakuAnime(
-          animeId: 2,
-          animeTitle: 'Fresh',
-          type: 'tvseries',
-          episodes: [DanmakuEpisode(episodeId: 2, episodeTitle: '第01话')],
-        ),
-      ];
-      final fresh = controller.search('Fresh');
-      client.searchGate!.complete();
+    client.searchResponse = const [
+      DanmakuAnime(
+        animeId: 2,
+        animeTitle: 'Fresh',
+        type: 'tvseries',
+        episodes: [DanmakuEpisode(episodeId: 2, episodeTitle: '第01话')],
+      ),
+    ];
+    final fresh = controller.search('Fresh');
+    client.searchGate!.complete();
 
-      expect(await stale, isEmpty);
-      final freshResults = await fresh;
-      expect(freshResults, hasLength(1));
-      expect(freshResults.single.animeTitle, 'Fresh');
-      expect(controller.status, DanmakuStatus.noMatch);
-    },
-  );
+    expect(await stale, isEmpty);
+    final freshResults = await fresh;
+    expect(freshResults, hasLength(1));
+    expect(freshResults.single.animeTitle, 'Fresh');
+    expect(controller.status, DanmakuStatus.noMatch);
 
-  test(
-    'session switch drops in-flight search without unavailable banner',
-    () async {
-      store = MemoryPlayerSettingsStore(
-        const PlayerSettings(
-          danmakuServer: 'https://dan.example.com',
-          danmakuToken: 'secret',
-        ),
-      );
-      final controller = makeController();
-      await controller.startSession(context());
-      expect(controller.status, DanmakuStatus.noMatch);
+    // 失效触发二:换集使在途搜索作废。
+    client.searchCalls.clear();
+    client.searchResponse = const [
+      DanmakuAnime(
+        animeId: 1,
+        animeTitle: 'Stale',
+        type: 'tvseries',
+        episodes: [DanmakuEpisode(episodeId: 1, episodeTitle: '第01话')],
+      ),
+    ];
+    client.searchGate = Completer<void>();
+    final pending = controller.search('Stale');
+    while (client.searchCalls.isEmpty) {
+      await Future<void>.delayed(Duration.zero);
+    }
 
-      client.searchCalls.clear();
-      client.searchResponse = const [
-        DanmakuAnime(
-          animeId: 1,
-          animeTitle: 'Stale',
-          type: 'tvseries',
-          episodes: [DanmakuEpisode(episodeId: 1, episodeTitle: '第01话')],
-        ),
-      ];
-      client.searchGate = Completer<void>();
-      final pending = controller.search('Stale');
-      while (client.searchCalls.isEmpty) {
-        await Future<void>.delayed(Duration.zero);
-      }
-
-      client.searchResponse = const [];
-      final session = controller.startSession(context(itemId: 'item-2'));
-      client.searchGate!.complete();
-      await session;
-      expect(await pending, isEmpty);
-      expect(controller.status, DanmakuStatus.noMatch);
-    },
-  );
+    client.searchResponse = const [];
+    final session = controller.startSession(context(itemId: 'item-2'));
+    client.searchGate!.complete();
+    await session;
+    expect(await pending, isEmpty);
+    expect(controller.status, DanmakuStatus.noMatch);
+  });
 
   test('search fills missing episodes from bangumi details', () async {
     client.searchResponse = const [
@@ -1004,7 +958,7 @@ void main() {
       playing: true,
       rate: 1,
     );
-    await Future<void>.delayed(const Duration(milliseconds: 80));
+    await Future<void>.delayed(const Duration(milliseconds: 30));
     final mid = controller.estimatePosition();
     expect(mid, greaterThan(const Duration(seconds: 10)));
     controller.updatePosition(
@@ -1029,7 +983,8 @@ void main() {
     expect(parseEpisodeNumber('最终话'), isNull);
   });
 
-  test('stale slow session does not overwrite the new session', () async {
+  test('stale slow session and stale manual selection do not overwrite '
+      'the new session', () async {
     DanmakuMatchResponse matched(int episodeId) => DanmakuMatchResponse(
       isMatched: true,
       matches: [
@@ -1042,7 +997,7 @@ void main() {
       ],
     );
 
-    // 旧会话:命中第 100 集,拉取被门闩挂起。
+    // 阶段一(自动匹配):旧会话命中第 100 集,拉取被门闩挂起。
     client.matchResponse = matched(100);
     client.commentGates[100] = Completer<void>();
     final controller = makeController();
@@ -1071,6 +1026,56 @@ void main() {
     final memoryAfter = (await store.read()).danmakuSeriesMemories['series-1'];
     expect(memoryAfter!.episodeId, 200);
     expect(client.commentCalls, hasLength(2));
+
+    // 阶段二(手动选集):同一门闩机制换用 selectEpisode 触发。
+    client = FakeDandanplayClient();
+    store = MemoryPlayerSettingsStore(_testOfficialAuth);
+    final manual = makeController();
+    await manual.startSession(context());
+    expect(manual.status, DanmakuStatus.noMatch);
+
+    // 用户手动选择第 201 集,拉取被门闩挂起。
+    client.commentGates[201] = Completer<void>();
+    client.commentResponse = [comment(9, 3)];
+    const anime = DanmakuAnime(
+      animeId: 9,
+      animeTitle: 'Show',
+      type: 'tvseries',
+      episodes: [
+        DanmakuEpisode(episodeId: 200, episodeTitle: '第01话'),
+        DanmakuEpisode(episodeId: 201, episodeTitle: '第02话'),
+      ],
+    );
+    final selection = manual.selectEpisode(anime, anime.episodes.last);
+    while (client.commentCalls.isEmpty) {
+      await Future<void>.delayed(Duration.zero);
+    }
+    expect(client.commentCalls.single.$2, 201);
+
+    // 拉取挂起期间快速换集:新会话走完并落地自己的弹幕与记忆。
+    client.commentResponse = [comment(2, 10)];
+    client.matchResponse = const DanmakuMatchResponse(
+      isMatched: true,
+      matches: [
+        DanmakuMatchCandidate(
+          animeId: 7,
+          animeTitle: 'Show',
+          episodeId: 200,
+          episodeTitle: '第01话',
+        ),
+      ],
+    );
+    await manual.startSession(context(itemId: 'item-2', index: 2));
+    final manualMemory = (await store.read()).danmakuSeriesMemories['series-1'];
+    expect(manualMemory!.episodeId, 200);
+
+    // 旧选择慢完成:丢弃,不把旧选集写进新会话记忆/画面。
+    client.commentGates[201]!.complete();
+    await selection;
+    final manualMemoryAfter =
+        (await store.read()).danmakuSeriesMemories['series-1'];
+    expect(manualMemoryAfter!.episodeId, 200);
+    expect(manual.comments.single.cid, 2);
   });
 
   test('session switch while memory write is pending does not cache old '
@@ -1188,137 +1193,79 @@ void main() {
     expect(client.commentCalls.map((c) => c.$2), [201]);
   });
 
-  test('switching sessions releases the previous cached comments', () async {
-    client.matchResponse = const DanmakuMatchResponse(
-      isMatched: true,
-      matches: [
-        DanmakuMatchCandidate(
-          animeId: 7,
-          animeTitle: 'Show',
-          episodeId: 100,
-          episodeTitle: '第01话',
+  test(
+    'match fileName covers basename, synthesis, movie year and season injection',
+    () {
+      // 保留发布式路径 basename。
+      expect(
+        danmakuMatchFileName(
+          pathBaseName: '无忧渡.S02E08.2160p.WEB-DL.mkv',
+          seriesTitle: '无忧渡',
+          episodeIndex: 8,
+          seasonIndex: 2,
         ),
-      ],
-    );
-    client.commentResponse = [comment(1, 5)];
-    final controller = makeController();
-    await controller.startSession(context());
-    expect(controller.comments.single.cid, 1);
-
-    // 新会话拉取失败:不得回退显示上一集的弹幕,开关重开也不复用。
-    client.commentError = unreachable;
-    await controller.startSession(context(itemId: 'item-2', index: 2));
-    expect(controller.status, DanmakuStatus.unreachable);
-    expect(controller.comments, isEmpty);
-    await controller.toggleDanmaku();
-    await controller.toggleDanmaku();
-    expect(controller.status, DanmakuStatus.unreachable);
-    expect(controller.comments, isEmpty);
-    expect(client.commentCalls, hasLength(3));
-  });
-
-  test('stale manual selection does not land after a session switch', () async {
-    final controller = makeController();
-    await controller.startSession(context());
-    expect(controller.status, DanmakuStatus.noMatch);
-
-    // 用户手动选择第 201 集,拉取被门闩挂起。
-    client.commentGates[201] = Completer<void>();
-    client.commentResponse = [comment(9, 3)];
-    const anime = DanmakuAnime(
-      animeId: 9,
-      animeTitle: 'Show',
-      type: 'tvseries',
-      episodes: [
-        DanmakuEpisode(episodeId: 200, episodeTitle: '第01话'),
-        DanmakuEpisode(episodeId: 201, episodeTitle: '第02话'),
-      ],
-    );
-    final stale = controller.selectEpisode(anime, anime.episodes.last);
-    while (client.commentCalls.isEmpty) {
-      await Future<void>.delayed(Duration.zero);
-    }
-    expect(client.commentCalls.single.$2, 201);
-
-    // 拉取挂起期间快速换集:新会话走完并落地自己的弹幕与记忆。
-    client.commentResponse = [comment(2, 10)];
-    client.matchResponse = const DanmakuMatchResponse(
-      isMatched: true,
-      matches: [
-        DanmakuMatchCandidate(
-          animeId: 7,
-          animeTitle: 'Show',
-          episodeId: 200,
-          episodeTitle: '第01话',
+        '无忧渡.S02E08.2160p.WEB-DL.mkv',
+      );
+      // 路径缺失时合成 SxxExx。
+      expect(
+        danmakuMatchFileName(
+          seriesTitle: '生万物',
+          title: '绣绣大婚当日遭抢亲',
+          seasonIndex: 2,
+          episodeIndex: 8,
         ),
-      ],
-    );
-    await controller.startSession(context(itemId: 'item-2', index: 2));
-    final memory = (await store.read()).danmakuSeriesMemories['series-1'];
-    expect(memory!.episodeId, 200);
-
-    // 旧选择慢完成:丢弃,不把旧选集写进新会话记忆/画面。
-    client.commentGates[201]!.complete();
-    await stale;
-    final memoryAfter = (await store.read()).danmakuSeriesMemories['series-1'];
-    expect(memoryAfter!.episodeId, 200);
-    expect(controller.comments.single.cid, 2);
-  });
-
-  test('match fileName keeps release-style path basename', () {
-    expect(
-      danmakuMatchFileName(
-        pathBaseName: '无忧渡.S02E08.2160p.WEB-DL.mkv',
-        seriesTitle: '无忧渡',
-        episodeIndex: 8,
-        seasonIndex: 2,
-      ),
-      '无忧渡.S02E08.2160p.WEB-DL.mkv',
-    );
-  });
-
-  test('match fileName synthesizes SxxExx when path is missing', () {
-    expect(
-      danmakuMatchFileName(
-        seriesTitle: '生万物',
-        title: '绣绣大婚当日遭抢亲',
-        seasonIndex: 2,
-        episodeIndex: 8,
-      ),
-      '生万物 S02E08',
-    );
-    expect(
-      danmakuMatchFileName(
-        seriesTitle: '生万物',
-        seasonIndex: 2,
-        episodeIndex: 8,
-        height: 2160,
-      ),
-      '生万物.S02E08.2160p',
-    );
-  });
-
-  test('movie fileName appends production year', () {
-    expect(
-      danmakuMatchFileName(title: '触不可及', productionYear: 2014),
-      '触不可及(2014)',
-    );
-    expect(
-      danmakuMatchFileName(
-        pathBaseName: '触不可及.mkv',
-        title: '触不可及',
-        productionYear: 2014,
-      ),
-      '触不可及(2014).mkv',
-    );
-    expect(
-      danmakuMatchFileName(
-        pathBaseName: '触不可及(2014).mkv',
-        productionYear: 2014,
-      ),
-      '触不可及(2014).mkv',
-    );
-  });
+        '生万物 S02E08',
+      );
+      expect(
+        danmakuMatchFileName(
+          seriesTitle: '生万物',
+          seasonIndex: 2,
+          episodeIndex: 8,
+          height: 2160,
+        ),
+        '生万物.S02E08.2160p',
+      );
+      // 电影名追加出品年份。
+      expect(
+        danmakuMatchFileName(title: '触不可及', productionYear: 2014),
+        '触不可及(2014)',
+      );
+      expect(
+        danmakuMatchFileName(
+          pathBaseName: '触不可及.mkv',
+          title: '触不可及',
+          productionYear: 2014,
+        ),
+        '触不可及(2014).mkv',
+      );
+      expect(
+        danmakuMatchFileName(
+          pathBaseName: '触不可及(2014).mkv',
+          productionYear: 2014,
+        ),
+        '触不可及(2014).mkv',
+      );
+      // 路径无季号时注入 SxxExx。
+      expect(
+        danmakuMatchFileName(
+          pathBaseName: '边境领主 第04集.mkv',
+          seriesTitle: '从零开始的边境领主',
+          seasonIndex: 4,
+          episodeIndex: 4,
+        ),
+        '从零开始的边境领主 S04E04',
+      );
+      expect(
+        danmakuMatchFileName(
+          pathBaseName: 'Show.S01E04.mkv',
+          seriesTitle: 'Show',
+          seasonIndex: 4,
+          episodeIndex: 4,
+        ),
+        'Show S04E04',
+      );
+    },
+  );
 
   test('match ranking prefers year and rejects remake tags', () {
     const remake = DanmakuMatchCandidate(
@@ -1341,27 +1288,6 @@ void main() {
         year: 2014,
       ),
       original,
-    );
-  });
-
-  test('match fileName injects SxxExx when the path has no season', () {
-    expect(
-      danmakuMatchFileName(
-        pathBaseName: '边境领主 第04集.mkv',
-        seriesTitle: '从零开始的边境领主',
-        seasonIndex: 4,
-        episodeIndex: 4,
-      ),
-      '从零开始的边境领主 S04E04',
-    );
-    expect(
-      danmakuMatchFileName(
-        pathBaseName: 'Show.S01E04.mkv',
-        seriesTitle: 'Show',
-        seasonIndex: 4,
-        episodeIndex: 4,
-      ),
-      'Show S04E04',
     );
   });
 

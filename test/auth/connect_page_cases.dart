@@ -189,10 +189,10 @@ void main() {
     );
   }
 
-  for (final edit in ['replace', 'clear', 'new server']) {
-    testWidgets('late saved password cannot replace a changed draft ($edit)', (
-      tester,
-    ) async {
+  testWidgets('late saved password cannot replace a changed draft', (
+    tester,
+  ) async {
+    for (final edit in ['replace', 'clear', 'new server']) {
       final credentials = _DelayedCredentials();
       final saved = SavedServer(
         id: server.serverId,
@@ -238,8 +238,8 @@ void main() {
       await tester.pumpWidget(const SizedBox.shrink());
       app.router.dispose();
       auth.dispose();
-    }, tags: ['integration']);
-  }
+    }
+  }, tags: ['integration']);
 
   for (final exit in ['go', 'pop', 'pop-home']) {
     testWidgets('leaving add-server flow releases its password draft ($exit)', (

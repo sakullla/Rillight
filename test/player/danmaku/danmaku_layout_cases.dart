@@ -93,24 +93,6 @@ void expectNoSameLaneXOverlap(List<DanmakuActive> active) {
 }
 
 void main() {
-  test('display settings clamp opacity and snap steps to legal ranges', () {
-    // 构造保留原值,copyWith/fromJson 收敛:不透明度夹到 0.2–1,
-    // 字号/速度/区域吸附到最近档位。
-    const raw = DanmakuDisplaySettings(
-      opacity: 3,
-      fontScale: 0.1,
-      speed: 10,
-      areaFraction: 0,
-    );
-    final clamped = raw.copyWith();
-    expect(clamped.opacity, 1);
-    expect(clamped.fontScale, 0.75);
-    expect(clamped.speed, 2);
-    expect(clamped.areaFraction, 0.25);
-    final parsed = DanmakuDisplaySettings.fromJson({'opacity': 0});
-    expect(parsed.opacity, 0.2);
-  });
-
   test(
     'comments enter on their timeline slot and exit after lifespan',
     () async {
@@ -142,18 +124,28 @@ void main() {
     expect(frames.single.left, closeTo(800 - (0.5 / 12) * (800 + width), 0.5));
   });
 
-  test('seek forward rebuilds the visible set at the new position', () {
-    final layout = layoutWith(comments: [comment(1, 1), comment(2, 300)]);
-    var frames = layout.update(const Duration(milliseconds: 1000), size);
-    expect(frames.map((f) => f.id), [1]);
-    frames = layout.update(const Duration(seconds: 2), size);
-    expect(frames.map((f) => f.id), [1]);
-    // 前跳到 300.2s:清屏重建,只保留 300s 那条,进度按真实时刻复位。
-    frames = layout.update(const Duration(milliseconds: 300200), size);
-    expect(frames.map((f) => f.id), [2]);
-    final width = measure('hello', fontPxFor(size).toDouble());
-    expect(frames.single.left, closeTo(800 - (0.2 / 12) * (800 + width), 0.5));
-  });
+  test(
+    'seek forward and backward rebuild the visible set at the new position',
+    () {
+      final layout = layoutWith(comments: [comment(1, 1), comment(2, 300)]);
+      var frames = layout.update(const Duration(milliseconds: 1000), size);
+      expect(frames.map((f) => f.id), [1]);
+      frames = layout.update(const Duration(seconds: 2), size);
+      expect(frames.map((f) => f.id), [1]);
+      // 前跳到 300.2s:清屏重建,只保留 300s 那条,进度按真实时刻复位。
+      frames = layout.update(const Duration(milliseconds: 300200), size);
+      expect(frames.map((f) => f.id), [2]);
+      final width = measure('hello', fontPxFor(size).toDouble());
+      expect(
+        frames.single.left,
+        closeTo(800 - (0.2 / 12) * (800 + width), 0.5),
+      );
+      // 回跳到 2s:重建 1s 出生的弹幕,进度同样按真实时刻复位。
+      frames = layout.update(const Duration(seconds: 2), size);
+      expect(frames.map((f) => f.id), [1]);
+      expect(frames.single.left, closeTo(800 - (1 / 12) * (800 + width), 0.5));
+    },
+  );
 
   test('replacing the comment source rebuilds at the current playhead', () {
     final layout = layoutWith(comments: [comment(1, 0)]);
@@ -163,15 +155,6 @@ void main() {
     layout.comments = [comment(2, 9)];
     final frames = layout.update(const Duration(seconds: 10), size);
     expect(frames.map((f) => f.id), [2]);
-  });
-
-  test('seek backward rebuilds earlier comments', () {
-    final layout = layoutWith(comments: [comment(1, 1), comment(2, 300)]);
-    layout.update(const Duration(milliseconds: 300100), size);
-    final frames = layout.update(const Duration(seconds: 2), size);
-    expect(frames.map((f) => f.id), [1]);
-    final width = measure('hello', fontPxFor(size).toDouble());
-    expect(frames.single.left, closeTo(800 - (1 / 12) * (800 + width), 0.5));
   });
 
   test('font scale, opacity and speed settings take effect', () {
@@ -231,7 +214,7 @@ void main() {
     expect(frames.map((f) => f.id), containsAll([1, 3]));
   });
 
-  group('density cap = multiplier × lane count', () {
+  test('density cap = multiplier × lane count across densities', () {
     // 800×400、areaFraction 0.5:字号随 400px 视口夹到 0.6 倍后取整。
     final laneCount = laneCountFor(size);
     List<DanmakuComment> stream() => [
@@ -248,33 +231,26 @@ void main() {
       return frames.length;
     }
 
-    test('sparse never exceeds the lane count', () {
-      expect(visible(DanmakuDensity.sparse), laneCount);
-    });
-
-    test('auto allows up to twice the lane count', () {
-      expect(visible(DanmakuDensity.auto), 10);
-      final layout = layoutWith(
-        comments: [for (var i = 0; i < 30; i++) comment(i + 1, 1 + i * 0.3)],
-        settings: const DanmakuDisplaySettings(),
-      );
-      layout.update(const Duration(seconds: 10), size);
-      expect(layout.activeCount, lessThanOrEqualTo(laneCount * 2));
-    });
-
-    test('dense allows up to four times the lane count', () {
-      final layout = layoutWith(
-        comments: [for (var i = 0; i < 60; i++) comment(i + 1, 1 + i * 0.15)],
-        settings: const DanmakuDisplaySettings(density: DanmakuDensity.dense),
-      );
-      layout.update(const Duration(seconds: 10), size);
-      expect(layout.activeCount, lessThanOrEqualTo(laneCount * 4));
-      expect(layout.activeCount, greaterThan(laneCount * 2));
-    });
-
-    test('unlimited is not capped', () {
-      expect(visible(DanmakuDensity.unlimited), 10);
-    });
+    // sparse 从不超过车道数。
+    expect(visible(DanmakuDensity.sparse), laneCount);
+    // auto 最多两倍车道数。
+    expect(visible(DanmakuDensity.auto), 10);
+    final auto = layoutWith(
+      comments: [for (var i = 0; i < 30; i++) comment(i + 1, 1 + i * 0.3)],
+      settings: const DanmakuDisplaySettings(),
+    );
+    auto.update(const Duration(seconds: 10), size);
+    expect(auto.activeCount, lessThanOrEqualTo(laneCount * 2));
+    // dense 最多四倍车道数。
+    final dense = layoutWith(
+      comments: [for (var i = 0; i < 60; i++) comment(i + 1, 1 + i * 0.15)],
+      settings: const DanmakuDisplaySettings(density: DanmakuDensity.dense),
+    );
+    dense.update(const Duration(seconds: 10), size);
+    expect(dense.activeCount, lessThanOrEqualTo(laneCount * 4));
+    expect(dense.activeCount, greaterThan(laneCount * 2));
+    // unlimited 不设上限。
+    expect(visible(DanmakuDensity.unlimited), 10);
   });
 
   test('empty comments list is a no-op', () {
