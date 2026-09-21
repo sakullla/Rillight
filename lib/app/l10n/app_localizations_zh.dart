@@ -372,6 +372,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get nextEpisode => '下一集';
 
   @override
+  String get previousEpisode => '上一集';
+
+  @override
   String get locateEpisode => '跳转到此集';
 
   @override

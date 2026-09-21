@@ -17,6 +17,7 @@ abstract final class CatalogKeys {
   static const viewEpisode = Key('catalog-view-episode');
   static const playTarget = Key('catalog-play-target');
   static const nextEpisode = Key('catalog-next-episode');
+  static const previousEpisode = Key('catalog-previous-episode');
   static const seasonPicker = Key('catalog-season-picker');
   static const locateEpisode = Key('catalog-locate-episode');
   static const episodeRange = Key('catalog-episode-range');

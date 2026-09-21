@@ -496,6 +496,7 @@
     "description": "Open the parent series from an episode detail page."
   },
   "nextEpisode": "下一集",
+  "previousEpisode": "上一集",
   "@nextEpisode": {
     "description": "Open the next episode from an episode detail page."
   },

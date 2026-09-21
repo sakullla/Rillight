@@ -83,6 +83,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
   String? _seriesId;
   String? _seriesOverview;
   String? _focusedEpisodeId;
+  EmbyItem? _previousEpisode;
   EmbyItem? _nextEpisode;
   bool _loading = true;
   bool _busyPlayed = false;
@@ -184,6 +185,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
       setState(() {
         _item = shown;
         _episodeReveal++;
+        _previousEpisode = _siblingBefore(shown, _episodes);
         _nextEpisode = _siblingAfter(shown, _episodes);
         _mediaSourceId = shown.mediaSources.isEmpty
             ? null
@@ -217,6 +219,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
         _seriesId = null;
         _seriesOverview = null;
         _focusedEpisodeId = null;
+        _previousEpisode = null;
         _nextEpisode = null;
         _mediaSourceId = null;
         _pickedMediaSource = false;
@@ -263,6 +266,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
       var episodeWindowEnd = 0;
       String? seasonId;
       String? seriesId;
+      EmbyItem? previousEpisode;
       EmbyItem? nextEpisode;
       final reuseCatalog =
           keep &&
@@ -333,6 +337,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
           return;
         }
         if (item.isEpisode) {
+          previousEpisode = _siblingBefore(item, episodes);
           nextEpisode = _siblingAfter(item, episodes);
           if (nextEpisode == null) {
             try {
@@ -382,6 +387,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
             _focusedEpisodeId = _playTarget(item)?.id;
           }
         }
+        _previousEpisode = previousEpisode;
         _nextEpisode = nextEpisode;
         _similar = similar;
         _similarError = similarError;
@@ -934,6 +940,21 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     return _nextEpisode ?? _siblingAfter(item, _episodes);
   }
 
+  EmbyItem? _previousEpisodeBefore(EmbyItem item) {
+    if (!item.isEpisode) {
+      return null;
+    }
+    return _previousEpisode ?? _siblingBefore(item, _episodes);
+  }
+
+  EmbyItem? _siblingBefore(EmbyItem item, List<EmbyItem> episodes) {
+    final index = episodes.indexWhere((episode) => episode.id == item.id);
+    if (index <= 0) {
+      return null;
+    }
+    return episodes[index - 1];
+  }
+
   EmbyItem? _siblingAfter(EmbyItem item, List<EmbyItem> episodes) {
     final index = episodes.indexWhere((episode) => episode.id == item.id);
     if (index < 0 || index + 1 >= episodes.length) {
@@ -1026,13 +1047,8 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     final runtime = runtimeLabel(l10n, item);
     final showSimilar = _similar.isNotEmpty || _similarError != null;
     final playTarget = _playTarget(item);
-    final continueWatching = [
-      for (final episode in _episodes)
-        if (episode.canResume) episode,
-    ];
     final screenWidth = MediaQuery.sizeOf(context).width;
     final wideCardWidth = MediaShelf.wideCardWidthFor(screenWidth);
-    final posterWidth = MediaShelf.posterWidthFor(screenWidth);
     return Stack(
       fit: StackFit.expand,
       children: [
@@ -1048,7 +1064,17 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                 topOverlap: topOverlap,
                 seasonCount: _seasons.length,
                 seriesId: _seriesId,
+                previousEpisode: _previousEpisodeBefore(item),
                 nextEpisode: item.isSeries ? playTarget : null,
+                onOpenPreviousEpisode: _previousEpisodeBefore(item) == null
+                    ? null
+                    : () {
+                        final previous = _previousEpisodeBefore(item);
+                        if (previous == null) {
+                          return;
+                        }
+                        _showItem(previous.id);
+                      },
                 onOpenNextEpisode: _nextEpisodeAfter(item) == null
                     ? null
                     : () {
@@ -1173,38 +1199,6 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                   },
                 ),
               if (item.isSeries) ...[
-                if (continueWatching.isNotEmpty)
-                  MediaShelf(
-                    rowKey: CatalogKeys.resumeRow,
-                    shelfId: '${CatalogKeys.shelfEpisodes}-resume',
-                    title: l10n.resumeRow,
-                    items: continueWatching,
-                    wide: true,
-                    onTap: (episode) => _openEpisodeDetails(episode.id),
-                    itemBuilder: (context, episode) {
-                      return EpisodeThumbCard(
-                        item: episode,
-                        width: wideCardWidth,
-                        selected: episode.id == playTarget?.id,
-                        onTap: () => _openEpisodeDetails(episode.id),
-                      );
-                    },
-                  ),
-                if (_seasons.length > 1)
-                  MediaShelf(
-                    shelfId: 'seasons',
-                    title: l10n.seasons,
-                    items: _seasons,
-                    onTap: (season) => _openSeason(season),
-                    itemBuilder: (context, season) {
-                      return SeasonPosterCard(
-                        item: season,
-                        width: posterWidth,
-                        selected: season.id == _seasonId,
-                        onTap: () => _openSeason(season),
-                      );
-                    },
-                  ),
                 EpisodeList(
                   episodes: _episodes,
                   currentId: _focusedEpisodeId ?? playTarget?.id,
@@ -2022,7 +2016,9 @@ class _DetailHeader extends StatelessWidget {
     this.topOverlap = 0,
     this.seasonCount = 0,
     this.seriesId,
+    this.previousEpisode,
     this.nextEpisode,
+    this.onOpenPreviousEpisode,
     this.onOpenNextEpisode,
     this.onViewSeries,
     this.mediaSourceId,
@@ -2045,7 +2041,9 @@ class _DetailHeader extends StatelessWidget {
   final double topOverlap;
   final int seasonCount;
   final String? seriesId;
+  final EmbyItem? previousEpisode;
   final EmbyItem? nextEpisode;
+  final VoidCallback? onOpenPreviousEpisode;
   final VoidCallback? onOpenNextEpisode;
   final VoidCallback? onViewSeries;
   final String? mediaSourceId;
@@ -2130,8 +2128,16 @@ class _DetailHeader extends StatelessWidget {
                     AppSpacing.page,
                     AppSpacing.xl,
                   ),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.end,
+                  // At narrow desktop widths the poster and action stack must
+                  // remain readable; keeping them in a row squeezes the
+                  // primary play button behind long Chinese titles.
+                  child: Flex(
+                    direction: width < AppBreakpoints.compact
+                        ? Axis.vertical
+                        : Axis.horizontal,
+                    crossAxisAlignment: width < AppBreakpoints.compact
+                        ? CrossAxisAlignment.start
+                        : CrossAxisAlignment.end,
                     children: [
                       _DetailPoster(item: item, layoutWidth: width),
                       const SizedBox(width: AppSpacing.xl),
@@ -2151,6 +2157,7 @@ class _DetailHeader extends StatelessWidget {
                             busyPlayed: busyPlayed,
                             onPlay: onPlay,
                             onPlayFromStart: onPlayFromStart,
+                            onOpenPreviousEpisode: onOpenPreviousEpisode,
                             onOpenNextEpisode: onOpenNextEpisode,
                             onViewSeries: onViewSeries,
                             onPlayedChanged: onPlayedChanged,
@@ -2457,6 +2464,7 @@ class _DetailActions extends StatelessWidget {
     required this.onPlayedChanged,
     this.onPlay,
     this.onPlayFromStart,
+    this.onOpenPreviousEpisode,
     this.onOpenNextEpisode,
     this.onViewSeries,
     this.playEpisode,
@@ -2473,6 +2481,7 @@ class _DetailActions extends StatelessWidget {
   final ValueChanged<bool> onPlayedChanged;
   final VoidCallback? onPlay;
   final VoidCallback? onPlayFromStart;
+  final VoidCallback? onOpenPreviousEpisode;
   final VoidCallback? onOpenNextEpisode;
   final VoidCallback? onViewSeries;
   final EmbyItem? playEpisode;
@@ -2548,6 +2557,14 @@ class _DetailActions extends StatelessWidget {
           onPressed: onPlayFromStart,
           style: ghost,
           child: Text(l10n.playFromStart),
+        ),
+      if (onOpenPreviousEpisode != null)
+        OutlinedButton.icon(
+          key: CatalogKeys.previousEpisode,
+          onPressed: onOpenPreviousEpisode,
+          style: ghost,
+          icon: const Icon(Icons.skip_previous_rounded),
+          label: Text(l10n.previousEpisode),
         ),
       if (onOpenNextEpisode != null)
         OutlinedButton.icon(

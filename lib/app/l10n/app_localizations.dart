@@ -772,6 +772,12 @@ abstract class AppLocalizations {
   /// **'下一集'**
   String get nextEpisode;
 
+  /// No description provided for @previousEpisode.
+  ///
+  /// In zh, this message translates to:
+  /// **'上一集'**
+  String get previousEpisode;
+
   /// Scroll the episode shelf so the current episode is visible.
   ///
   /// In zh, this message translates to:
