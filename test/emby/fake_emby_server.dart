@@ -453,6 +453,8 @@ class FakeEmbyServer {
   bool publicInfoHtml = false;
   int? publicInfoStatus;
   String? publicInfoRawBody;
+  int? authenticationStatus;
+  String? authenticationRawBody;
   bool expireAuthenticatedRequests = false;
   int? nextUpStatus;
   int? resumeStatus;
@@ -1444,6 +1446,12 @@ class FakeEmbyServer {
   }
 
   ResponseBody _handleAuthenticate(String raw) {
+    if (authenticationStatus != null) {
+      return ResponseBody.fromString(
+        authenticationRawBody ?? '',
+        authenticationStatus!,
+      );
+    }
     Map<String, dynamic> body = const {};
     if (raw.isNotEmpty) {
       final decoded = jsonDecode(raw);

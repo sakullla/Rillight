@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:rillight/auth/connect_draft.dart';
 import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/emby/emby_client.dart';
@@ -50,6 +51,8 @@ class AuthController extends ChangeNotifier {
   final EmbyClient client;
   final CredentialStore credentials;
   final ServerListStore servers;
+
+  ConnectDraft? connectDraft;
 
   AuthSession? _session;
   List<SavedServer> _savedServers = const [];
@@ -130,6 +133,7 @@ class AuthController extends ChangeNotifier {
       await _upsertServer(server);
       _activate(server, stored);
       _prefill = null;
+      connectDraft = null;
     } on EmbyException catch (error) {
       _failure = error;
       _session = null;
@@ -163,6 +167,7 @@ class AuthController extends ChangeNotifier {
       client.clearSession();
       _session = null;
       _failure = null;
+      connectDraft = null;
       if (current != null) {
         await credentials.delete(current.server.id);
       }
@@ -227,6 +232,7 @@ class AuthController extends ChangeNotifier {
       _failure = null;
       await _upsertServer(server);
       _activate(server, stored);
+      connectDraft = null;
       notifyListeners();
       return;
     }
@@ -496,5 +502,11 @@ class AuthController extends ChangeNotifier {
     _failure = const EmbyException(EmbyFailureKind.sessionExpired);
     notifyListeners();
     _handlingExpiry = false;
+  }
+
+  @override
+  void dispose() {
+    connectDraft = null;
+    super.dispose();
   }
 }

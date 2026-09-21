@@ -1,7 +1,12 @@
+import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rillight/app/l10n/app_localizations_zh.dart';
+import 'package:rillight/auth/failure_message.dart';
+import 'package:rillight/home/catalog_failure.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/emby/emby_errors.dart';
@@ -20,6 +25,87 @@ Matcher _kind(EmbyFailureKind kind) =>
     isA<EmbyException>().having((error) => error.kind, 'kind', kind);
 
 void main() {
+  EmbyException responseFailure(
+    Object data, {
+    String? contentType,
+    int status = 403,
+  }) {
+    final request = RequestOptions(path: '/');
+    return EmbyException.fromDio(
+      DioException(
+        requestOptions: request,
+        type: DioExceptionType.badResponse,
+        response: Response<Object>(
+          requestOptions: request,
+          statusCode: status,
+          data: data,
+          headers: Headers.fromMap({
+            if (contentType != null) Headers.contentTypeHeader: [contentType],
+          }),
+        ),
+      ),
+      authenticating: true,
+    );
+  }
+
+  test(
+    'HTML response strings, bytes, JSON messages and MIME types are suppressed',
+    () {
+      for (final body in <Object>[
+        '<!DOCTYPE HTML><HTML><body>Denied</body></HTML>',
+        utf8.encode('<html>Denied</html>'),
+        Uint8List.fromList(utf8.encode('<h1>Denied</h1>')),
+        {'Message': '<div>Denied</div>'},
+      ]) {
+        final error = responseFailure(body);
+        expect(error.statusCode, 403);
+        expect(error.kind, EmbyFailureKind.unknown);
+        expect(error.detail, 'HTTP 403');
+      }
+      for (final mime in [
+        'text/html; charset=utf-8',
+        'application/xhtml+xml',
+      ]) {
+        expect(
+          responseFailure('unmarked page', contentType: mime).detail,
+          'HTTP 403',
+        );
+      }
+      final message = embyFailureMessage(
+        AppLocalizationsZh(),
+        responseFailure('<html>Denied</html>'),
+      );
+      expect(message, contains('HTTP 403'));
+      expect(message, contains('检查地址或线路'));
+      expect(message, isNot(contains('密码错误')));
+    },
+  );
+
+  test('plain text stays bounded, without controls or broken Unicode', () {
+    final error = responseFailure('线路\u0000禁用\n${'😀' * 300}');
+    expect(error.detail, startsWith('HTTP 403: 线路 禁用 '));
+    expect(error.detail!.runes.length, lessThanOrEqualTo(251));
+    expect(error.detail, endsWith('…'));
+    expect(error.detail, isNot(contains('\ufffd')));
+    expect(error.detail, isNot(contains('\n')));
+  });
+
+  test(
+    'catalog, search and player load feedback retain status and short server text',
+    () {
+      final l10n = AppLocalizationsZh();
+      for (final status in [403, 500, 503]) {
+        final error = responseFailure({'Message': '该线路已被禁用'}, status: status);
+        final expected = 'HTTP $status: 该线路已被禁用';
+        expect(error.statusCode, status);
+        expect(embyFailureMessage(l10n, error), expected);
+        // PlayerPage uses catalogFailureMessage for its Emby loadFailure.
+        expect(catalogFailureMessage(l10n, error), expected);
+        expect(searchFailureMessage(l10n, error), expected);
+      }
+    },
+  );
+
   late FakeEmbyServer server;
   late FakeEmbyAdapter adapter;
 

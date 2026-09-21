@@ -20,6 +20,10 @@ GoRouter createAppRouter({required AuthController auth}) {
     redirect: (context, state) {
       final loggedIn = auth.isLoggedIn;
       final onConnect = state.matchedLocation == AppRoutes.connect;
+      if (loggedIn && !onConnect && !auth.isBusy) {
+        // Leaving an optional add-server flow releases its in-memory password.
+        auth.connectDraft = null;
+      }
       if (!loggedIn && !onConnect) {
         return AppRoutes.connect;
       }

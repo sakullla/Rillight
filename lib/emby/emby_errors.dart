@@ -60,7 +60,7 @@ class EmbyException implements Exception {
         );
       case DioExceptionType.badResponse:
         final code = error.response?.statusCode;
-        if (authenticating && (code == 401 || code == 400 || code == 403)) {
+        if (authenticating && (code == 401 || code == 400)) {
           return EmbyException(
             EmbyFailureKind.invalidCredentials,
             statusCode: code,
@@ -137,7 +137,13 @@ bool _isCertificateFailure(DioException error) {
 }
 
 String? _detailFromDio(DioException error) {
-  final body = _bodyText(error.response?.data);
+  final contentType = error.response?.headers
+      .value(Headers.contentTypeHeader)
+      ?.toLowerCase();
+  final html =
+      contentType?.contains('text/html') == true ||
+      contentType?.contains('application/xhtml+xml') == true;
+  final body = html ? null : _safeDetail(_bodyText(error.response?.data));
   final code = error.response?.statusCode;
   if (body != null && body.isNotEmpty) {
     return code == null ? body : 'HTTP $code: $body';
@@ -151,25 +157,49 @@ String? _detailFromDio(DioException error) {
     if (osError != null) {
       final os = osError.message.trim();
       if (os.isNotEmpty) {
-        return os;
+        return _safeDetail(os);
       }
     }
     final message = inner.message.trim();
-    return message.isEmpty ? inner.toString() : message;
+    return _safeDetail(message.isEmpty ? inner.toString() : message);
   }
   if (inner is HandshakeException ||
       inner is TlsException ||
       inner is CertificateException) {
-    return inner.toString();
+    return _safeDetail(inner.toString());
   }
   final message = error.message?.trim();
   if (message != null && message.isNotEmpty) {
-    return message;
+    return _safeDetail(message);
   }
   if (inner != null) {
-    return inner.toString();
+    return _safeDetail(inner.toString());
   }
   return null;
+}
+
+String? _safeDetail(String? text) {
+  if (text == null) return null;
+  // Proxy error pages are not useful form feedback, even with a wrong MIME type.
+  if (RegExp(
+    r'<\s*(?:!doctype\s+html|/?[a-z][\w:-]*(?:\s[^<>]*)?/?>)',
+    caseSensitive: false,
+  ).hasMatch(text)) {
+    return null;
+  }
+  final clean = text
+      .replaceAll(
+        RegExp(r'[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]'),
+        ' ',
+      )
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+  if (clean.isEmpty) return null;
+  const limit = 240;
+  final runes = clean.runes.take(limit + 1).toList();
+  return runes.length > limit
+      ? '${String.fromCharCodes(runes.take(limit))}…'
+      : clean;
 }
 
 String? _bodyText(Object? data) {

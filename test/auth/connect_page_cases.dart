@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import '../helpers/image_cache_fixture.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -83,6 +85,198 @@ void main() {
       servers: servers ?? MemoryServerListStore(),
     );
   }
+
+  for (final savedServer in [false, true]) {
+    testWidgets(
+      'HTML 403 preserves the complete draft through retry and route recreation (saved=$savedServer)',
+      (tester) async {
+        final auth = controller();
+        if (savedServer) {
+          await tester.runAsync(() async {
+            await auth.connect(
+              address: server.baseUrl.toString(),
+              username: 'alice',
+              password: 'correct-horse',
+            );
+            await auth.logout();
+            await auth.selectSavedServer(server.serverId);
+          });
+        }
+        var app = RillightApp(auth: auth);
+        await tester.pumpWidget(app);
+        await _settle(tester);
+        await _enter(
+          tester,
+          address: 'http://emby.test:8096',
+          username: 'alice',
+          password: 'draft-password',
+        );
+        await _expandMore(tester);
+        await tester.enterText(find.byKey(ConnectFormKeys.path), '/emby');
+        await tester.enterText(
+          find.byKey(ConnectFormKeys.userAgent),
+          'DraftUA/1',
+        );
+        await _tapVisible(tester, find.byKey(ConnectFormKeys.addLine));
+        await tester.enterText(
+          find.byKey(ConnectFormKeys.extraLine(0)),
+          'http://backup.test:8096',
+        );
+        final html =
+            '<!DOCTYPE html><html><body>${'blocked ' * 500}</body></html>';
+        if (savedServer) {
+          server.authenticationStatus = 403;
+          server.authenticationRawBody = html;
+        } else {
+          server.publicInfoStatus = 403;
+          server.publicInfoRawBody = html;
+        }
+        await _tapVisible(tester, find.byKey(ConnectFormKeys.submit));
+        expect(auth.isLoggedIn, isFalse);
+        expect(auth.failure?.detail, 'HTTP 403');
+        expect(find.textContaining('<html>'), findsNothing);
+        expect(find.text('重试'), findsOneWidget);
+        final errorView = find.byType(AppErrorView);
+        expect(tester.getSize(errorView).height, lessThan(100));
+        final draftState = tester.state(find.byType(ConnectPage));
+        app.router.refresh();
+        await _settle(tester);
+        expect(tester.state(find.byType(ConnectPage)), same(draftState));
+
+        // Replace the route tree while retaining this connection flow.
+        await tester.pumpWidget(const SizedBox.shrink());
+        app.router.dispose();
+        app = RillightApp(auth: auth);
+        await tester.pumpWidget(app);
+        await _settle(tester);
+        final expected = <Key, String>{
+          ConnectFormKeys.address: 'http://emby.test:8096',
+          ConnectFormKeys.username: 'alice',
+          ConnectFormKeys.password: 'draft-password',
+          ConnectFormKeys.path: '/emby',
+          ConnectFormKeys.userAgent: 'DraftUA/1',
+          ConnectFormKeys.extraLine(0): 'http://backup.test:8096',
+        };
+        for (final entry in expected.entries) {
+          expect(
+            tester.widget<TextField>(find.byKey(entry.key)).controller!.text,
+            entry.value,
+          );
+        }
+        await tester.enterText(
+          find.byKey(ConnectFormKeys.password),
+          'correct-horse',
+        );
+        await _tapVisible(tester, find.byKey(ConnectFormKeys.submit));
+        expect(auth.isLoggedIn, isFalse);
+        expect(await auth.credentials.read(server.serverId), isNull);
+        server.publicInfoStatus = null;
+        server.authenticationStatus = null;
+        await _tapVisible(tester, find.byKey(ConnectFormKeys.submit));
+        expect(auth.isLoggedIn, isTrue);
+        expect(auth.savedServers.single.baseUrl, 'http://emby.test:8096/emby');
+        expect(
+          auth.savedServers.single.lines.map((line) => line.address),
+          contains('http://backup.test:8096'),
+        );
+        expect(server.lastUserAgent, 'DraftUA/1');
+        expect(auth.connectDraft, isNull);
+        await tester.pumpWidget(const SizedBox.shrink());
+        app.router.dispose();
+        auth.dispose();
+      },
+      tags: ['integration'],
+    );
+  }
+
+  for (final edit in ['replace', 'clear', 'new server']) {
+    testWidgets('late saved password cannot replace a changed draft ($edit)', (
+      tester,
+    ) async {
+      final credentials = _DelayedCredentials();
+      final saved = SavedServer(
+        id: server.serverId,
+        name: 'saved',
+        username: 'alice',
+        lines: [ServerLine(id: 'line', address: server.baseUrl.toString())],
+        activeLineId: 'line',
+      );
+      final auth = controller(
+        credentials: credentials,
+        servers: MemoryServerListStore(ServerListSnapshot(servers: [saved])),
+      );
+      await auth.restore();
+      await auth.selectSavedServer(saved.id);
+      final app = RillightApp(auth: auth);
+      await tester.pumpWidget(app);
+      await _settle(tester);
+      await tester.enterText(
+        find.byKey(ConnectFormKeys.password),
+        'new-password',
+      );
+      if (edit == 'clear') {
+        await tester.enterText(find.byKey(ConnectFormKeys.password), '');
+      } else if (edit == 'new server') {
+        await _tapVisible(tester, find.byKey(ConnectFormKeys.addServer));
+      }
+      credentials.pending.complete(
+        const StoredCredentials(
+          accessToken: '',
+          userId: '',
+          username: 'alice',
+          password: 'old-password',
+        ),
+      );
+      await _settle(tester);
+      expect(
+        tester
+            .widget<TextField>(find.byKey(ConnectFormKeys.password))
+            .controller!
+            .text,
+        edit == 'replace' ? 'new-password' : '',
+      );
+      await tester.pumpWidget(const SizedBox.shrink());
+      app.router.dispose();
+      auth.dispose();
+    }, tags: ['integration']);
+  }
+
+  testWidgets('leaving add-server flow releases its password draft', (
+    tester,
+  ) async {
+    final auth = controller();
+    await tester.runAsync(
+      () => auth.connect(
+        address: server.baseUrl.toString(),
+        username: 'alice',
+        password: 'correct-horse',
+      ),
+    );
+    final app = RillightApp(auth: auth);
+    app.router.go('/connect?add=1');
+    await tester.pumpWidget(app);
+    await _settle(tester);
+    await tester.enterText(
+      find.byKey(ConnectFormKeys.password),
+      'temporary-password',
+    );
+    expect(auth.connectDraft?.password, 'temporary-password');
+    app.router.go('/');
+    await _settle(tester);
+    expect(auth.connectDraft, isNull);
+    app.router.go('/connect?add=1');
+    await _settle(tester);
+    expect(
+      tester
+          .widget<TextField>(find.byKey(ConnectFormKeys.password))
+          .controller!
+          .text,
+      '',
+    );
+    await tester.pumpWidget(const SizedBox.shrink());
+    app.router.dispose();
+    auth.dispose();
+  }, tags: ['integration']);
 
   testWidgets(
     'wrong password, successful login, logout, and saved server fill',
@@ -254,4 +448,11 @@ void main() {
     expect(auth.client.sessionHeaders['User-Agent'], 'CustomUA/1.0');
     expect(auth.savedServers.single.baseUrl, 'http://emby.test:8096/emby');
   }, tags: ['integration']);
+}
+
+class _DelayedCredentials extends MemoryCredentialStore {
+  final pending = Completer<StoredCredentials?>();
+
+  @override
+  Future<StoredCredentials?> read(String serverId) => pending.future;
 }

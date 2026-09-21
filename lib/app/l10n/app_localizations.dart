@@ -310,6 +310,12 @@ abstract class AppLocalizations {
   /// **'用户名或密码错误'**
   String get errorInvalidCredentials;
 
+  /// 403 without a useful plain-text response; does not imply invalid credentials.
+  ///
+  /// In zh, this message translates to:
+  /// **'服务器或访问防护拒绝了请求，请检查地址或线路后重试'**
+  String get errorForbidden;
+
   /// Visible failure when an Emby token is rejected with 401.
   ///
   /// In zh, this message translates to:

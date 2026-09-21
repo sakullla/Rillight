@@ -3,6 +3,10 @@ import 'package:rillight/emby/emby_errors.dart';
 
 String embyFailureMessage(AppLocalizations l10n, EmbyException error) {
   final detail = error.detail?.trim();
+  if (error.statusCode == 403 &&
+      (detail == null || detail.isEmpty || detail == 'HTTP 403')) {
+    return 'HTTP 403: ${l10n.errorForbidden}';
+  }
   if (detail != null && detail.isNotEmpty) {
     return detail;
   }

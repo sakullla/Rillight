@@ -151,6 +151,10 @@
     "description": "Visible failure when Public Info is not an Emby server."
   },
   "errorInvalidCredentials": "用户名或密码错误",
+  "errorForbidden": "服务器或访问防护拒绝了请求，请检查地址或线路后重试",
+  "@errorForbidden": {
+    "description": "403 without a useful plain-text response; does not imply invalid credentials."
+  },
   "@errorInvalidCredentials": {
     "description": "Visible failure for a rejected Emby login."
   },

@@ -85,6 +85,40 @@ void main() {
     expect(auth.failure?.kind, EmbyFailureKind.certificate);
   });
 
+  for (final duringAuthentication in [false, true]) {
+    test(
+      'HTML 403 leaves credentials and server store untouched (auth=$duringAuthentication)',
+      () async {
+        const html = '<html><body>Access denied</body></html>';
+        if (duringAuthentication) {
+          server.authenticationStatus = 403;
+          server.authenticationRawBody = html;
+        } else {
+          server.publicInfoStatus = 403;
+          server.publicInfoRawBody = html;
+        }
+        final auth = controller();
+        await auth.connect(
+          address: server.baseUrl.toString(),
+          username: 'alice',
+          password: 'unpersisted-password',
+        );
+        expect(auth.isLoggedIn, isFalse);
+        expect(auth.client.baseUrl, isNull);
+        expect(auth.failure?.kind, EmbyFailureKind.unknown);
+        expect(auth.failure?.statusCode, 403);
+        expect(auth.failure?.detail, 'HTTP 403');
+        expect(
+          auth.failure.toString(),
+          isNot(contains('unpersisted-password')),
+        );
+        expect(await auth.credentials.read(server.serverId), isNull);
+        expect((await auth.servers.load()).servers, isEmpty);
+        auth.dispose();
+      },
+    );
+  }
+
   test('unreachable address stays signed out with a reason', () async {
     final auth = controller();
     await auth.connect(

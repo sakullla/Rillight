@@ -9,6 +9,7 @@ import 'package:rillight/app/widgets/emby_mark.dart';
 import 'package:rillight/app/widgets/liquid_glass.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
+import 'package:rillight/auth/connect_draft.dart';
 import 'package:rillight/auth/failure_message.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/emby/emby_errors.dart';
@@ -50,19 +51,70 @@ class _ConnectPageState extends State<ConnectPage> {
   bool _passwordVisible = false;
   String _serverQuery = '';
   final List<TextEditingController> _extraLines = [];
+  ConnectDraft? _draft;
+  int _passwordRevision = 0;
+  int _passwordRequest = 0;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (GoRouterState.of(context).uri.queryParameters['add'] == '1') {
+    if (_draft != null) {
       return;
     }
-    final prefill = AuthScope.of(context).prefill;
+    final auth = AuthScope.of(context);
+    final previous = auth.connectDraft;
+    final restoring =
+        previous != null && previous.addingAnother == _addingAnother;
+    final draft = restoring
+        ? previous
+        : ConnectDraft(addingAnother: _addingAnother);
+    auth.connectDraft = _draft = draft;
+    _address.text = draft.address;
+    _path.text = draft.path;
+    _userAgent.text = draft.userAgent;
+    _username.text = draft.username;
+    _password.text = draft.password;
+    _selectedServerId = draft.selectedServerId;
+    _selectedLineId = draft.selectedLineId;
+    _appliedPrefillId = draft.appliedPrefillId;
+    _moreExpanded = draft.moreExpanded;
+    for (final text in draft.extraLines) {
+      _extraLines.add(
+        TextEditingController(text: text)..addListener(_saveDraft),
+      );
+    }
+    for (final controller in [
+      _address,
+      _path,
+      _userAgent,
+      _username,
+      _password,
+    ]) {
+      controller.addListener(_saveDraft);
+    }
+    _password.addListener(() => _passwordRevision++);
+    if (restoring || _addingAnother) return;
+    final prefill = auth.prefill;
     if (prefill != null && prefill.id != _appliedPrefillId) {
       _appliedPrefillId = prefill.id;
       _fillServer(prefill);
       _loadPassword(prefill.id);
     }
+  }
+
+  void _saveDraft() {
+    final draft = _draft;
+    if (draft == null) return;
+    draft.address = _address.text;
+    draft.path = _path.text;
+    draft.userAgent = _userAgent.text;
+    draft.username = _username.text;
+    draft.password = _password.text;
+    draft.selectedServerId = _selectedServerId;
+    draft.selectedLineId = _selectedLineId;
+    draft.appliedPrefillId = _appliedPrefillId;
+    draft.moreExpanded = _moreExpanded;
+    draft.extraLines = [for (final extra in _extraLines) extra.text];
   }
 
   void _fillServer(SavedServer server) {
@@ -72,11 +124,21 @@ class _ConnectPageState extends State<ConnectPage> {
     _path.clear();
     _userAgent.text = server.activeLine?.normalizedUserAgent ?? '';
     _username.text = server.username;
+    _password.clear();
+    _saveDraft();
   }
 
   Future<void> _loadPassword(String serverId) async {
-    final password = await AuthScope.of(context).savedPassword(serverId);
-    if (!mounted || password == null) {
+    final auth = AuthScope.of(context);
+    final request = ++_passwordRequest;
+    final revision = _passwordRevision;
+    final password = await auth.savedPassword(serverId);
+    if (!mounted ||
+        password == null ||
+        request != _passwordRequest ||
+        revision != _passwordRevision ||
+        _selectedServerId != serverId ||
+        !identical(auth.connectDraft, _draft)) {
       return;
     }
     _password.text = password;
@@ -114,6 +176,9 @@ class _ConnectPageState extends State<ConnectPage> {
 
   Future<void> _submit() async {
     final auth = AuthScope.of(context);
+    if (auth.isBusy) return;
+    // A credential read started before submit must not change this attempt.
+    _passwordRequest++;
     final adding = _addingAnother;
     await auth.connect(
       address: _composedAddress(),
@@ -152,8 +217,9 @@ class _ConnectPageState extends State<ConnectPage> {
 
   void _addExtraLine() {
     setState(() {
-      _extraLines.add(TextEditingController());
+      _extraLines.add(TextEditingController()..addListener(_saveDraft));
       _moreExpanded = true;
+      _saveDraft();
     });
   }
 
@@ -163,10 +229,12 @@ class _ConnectPageState extends State<ConnectPage> {
     }
     setState(() {
       _extraLines.removeLast().dispose();
+      _saveDraft();
     });
   }
 
   void _startNewServer() {
+    _passwordRequest++;
     setState(() {
       _selectedServerId = null;
       _selectedLineId = null;
@@ -179,6 +247,7 @@ class _ConnectPageState extends State<ConnectPage> {
         extra.dispose();
       }
       _extraLines.clear();
+      _saveDraft();
     });
     AuthScope.of(context).clearFailure();
   }
@@ -280,7 +349,7 @@ class _ConnectPageState extends State<ConnectPage> {
             if (auth.failure != null) ...[
               AppErrorView(
                 message: embyFailureMessage(l10n, auth.failure!),
-                onRetry: auth.isBusy ? null : _submit,
+                compact: true,
               ),
               const SizedBox(height: AppSpacing.lg),
             ],
@@ -355,7 +424,7 @@ class _ConnectPageState extends State<ConnectPage> {
                         Text(l10n.connecting),
                       ],
                     )
-                  : Text(l10n.connect),
+                  : Text(auth.failure == null ? l10n.connect : l10n.retry),
             ),
             const SizedBox(height: AppSpacing.sm),
             _buildMoreSection(context, l10n, auth),
@@ -373,6 +442,7 @@ class _ConnectPageState extends State<ConnectPage> {
     final selectedServer = _selectedServer(auth);
     return ExpansionTile(
       key: ConnectFormKeys.more,
+      initiallyExpanded: _moreExpanded,
       title: Text(l10n.more),
       tilePadding: EdgeInsets.zero,
       childrenPadding: const EdgeInsets.only(bottom: AppSpacing.sm),
@@ -380,6 +450,7 @@ class _ConnectPageState extends State<ConnectPage> {
       collapsedShape: const Border(),
       onExpansionChanged: (expanded) {
         setState(() => _moreExpanded = expanded);
+        _saveDraft();
       },
       children: [
         if (_moreExpanded) ...[
@@ -688,6 +759,8 @@ class _ConnectPageState extends State<ConnectPage> {
       _path.clear();
       _userAgent.text = line.normalizedUserAgent ?? '';
       _username.text = server.username;
+      _password.clear();
+      _saveDraft();
     });
     _loadPassword(server.id);
   }

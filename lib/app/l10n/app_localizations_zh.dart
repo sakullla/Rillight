@@ -121,6 +121,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get errorInvalidCredentials => '用户名或密码错误';
 
   @override
+  String get errorForbidden => '服务器或访问防护拒绝了请求，请检查地址或线路后重试';
+
+  @override
   String get errorSessionExpired => '会话已失效，请重新登录';
 
   @override
