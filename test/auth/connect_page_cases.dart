@@ -241,42 +241,70 @@ void main() {
     }, tags: ['integration']);
   }
 
-  testWidgets('leaving add-server flow releases its password draft', (
-    tester,
-  ) async {
-    final auth = controller();
-    await tester.runAsync(
-      () => auth.connect(
-        address: server.baseUrl.toString(),
-        username: 'alice',
-        password: 'correct-horse',
-      ),
-    );
-    final app = RillightApp(auth: auth);
-    app.router.go('/connect?add=1');
-    await tester.pumpWidget(app);
-    await _settle(tester);
-    await tester.enterText(
-      find.byKey(ConnectFormKeys.password),
-      'temporary-password',
-    );
-    expect(auth.connectDraft?.password, 'temporary-password');
-    app.router.go('/');
-    await _settle(tester);
-    expect(auth.connectDraft, isNull);
-    app.router.go('/connect?add=1');
-    await _settle(tester);
-    expect(
-      tester
-          .widget<TextField>(find.byKey(ConnectFormKeys.password))
-          .controller!
-          .text,
-      '',
-    );
-    await tester.pumpWidget(const SizedBox.shrink());
-    app.router.dispose();
-    auth.dispose();
-  }, tags: ['integration']);
+  for (final exit in ['go', 'pop', 'pop-home']) {
+    testWidgets('leaving add-server flow releases its password draft ($exit)', (
+      tester,
+    ) async {
+      final auth = controller();
+      await tester.runAsync(
+        () => auth.connect(
+          address: server.baseUrl.toString(),
+          username: 'alice',
+          password: 'correct-horse',
+        ),
+      );
+      final app = RillightApp(auth: auth);
+      // Keep a real back stack without unrelated offstage home shelf layout.
+      if (exit != 'pop-home') app.router.go('/settings');
+      await tester.pumpWidget(app);
+      await _settle(tester);
+      await _tapVisible(tester, find.byKey(SessionActions.serverMenuKey));
+      await _tapVisible(tester, find.byKey(SessionActions.addServerKey));
+      await tester.enterText(
+        find.byKey(ConnectFormKeys.password),
+        'temporary-password',
+      );
+      expect(auth.connectDraft?.password, 'temporary-password');
+      final draft = auth.connectDraft;
+      app.router.refresh();
+      await _settle(tester);
+      expect(find.byType(ConnectPage), findsOneWidget);
+      expect(auth.connectDraft, same(draft));
+      // Recreate the widget tree without navigating out of this flow.
+      if (exit != 'pop-home') {
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pumpWidget(RillightApp(auth: auth, router: app.router));
+        await _settle(tester);
+      }
+      expect(auth.connectDraft, same(draft));
+      expect(
+        tester
+            .widget<TextField>(find.byKey(ConnectFormKeys.password))
+            .controller!
+            .text,
+        'temporary-password',
+      );
+      if (exit.startsWith('pop')) {
+        app.router.pop();
+      } else {
+        app.router.go('/');
+      }
+      await _settle(tester);
+      expect(auth.connectDraft, isNull);
+      await _tapVisible(tester, find.byKey(SessionActions.serverMenuKey));
+      await _tapVisible(tester, find.byKey(SessionActions.addServerKey));
+      expect(
+        tester
+            .widget<TextField>(find.byKey(ConnectFormKeys.password))
+            .controller!
+            .text,
+        '',
+      );
+      await tester.pumpWidget(const SizedBox.shrink());
+      app.router.dispose();
+      auth.dispose();
+    }, tags: ['integration']);
+  }
 
   testWidgets(
     'wrong password, successful login, logout, and saved server fill',

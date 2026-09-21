@@ -1,3 +1,4 @@
+import 'package:flutter/widgets.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/app_shell.dart';
 import 'package:rillight/app/routes.dart';
@@ -20,10 +21,6 @@ GoRouter createAppRouter({required AuthController auth}) {
     redirect: (context, state) {
       final loggedIn = auth.isLoggedIn;
       final onConnect = state.matchedLocation == AppRoutes.connect;
-      if (loggedIn && !onConnect && !auth.isBusy) {
-        // Leaving an optional add-server flow releases its in-memory password.
-        auth.connectDraft = null;
-      }
       if (!loggedIn && !onConnect) {
         return AppRoutes.connect;
       }
@@ -34,6 +31,7 @@ GoRouter createAppRouter({required AuthController auth}) {
     },
     routes: [
       ShellRoute(
+        observers: [_ConnectFlowObserver(auth)],
         builder: (context, state, child) {
           return CatalogShell(
             auth: auth,
@@ -77,4 +75,27 @@ GoRouter createAppRouter({required AuthController auth}) {
       ),
     ],
   );
+}
+
+/// Navigator removals end a connection flow; refreshes and widget rebuilds do not.
+class _ConnectFlowObserver extends NavigatorObserver {
+  _ConnectFlowObserver(this.auth);
+
+  final AuthController auth;
+
+  void _endFlow(Route<dynamic> route) {
+    if (route.settings.name == AppRoutes.connect) {
+      auth.connectDraft = null;
+    }
+  }
+
+  @override
+  void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    _endFlow(route);
+  }
+
+  @override
+  void didRemove(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    _endFlow(route);
+  }
 }
