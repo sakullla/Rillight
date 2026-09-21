@@ -353,11 +353,15 @@ class PlaybackHttpProxy {
     }
   }
 
-  /// The backend calls this before seek. Published representation bytes survive;
-  /// outstanding consumers and the last consumer's upstream work do not.
-  void cancelPendingReads() {
+  /// Published representation bytes survive cancellation. Seek preserves
+  /// position-independent subtitle loads; close cancels every outstanding read.
+  void cancelPendingReads({bool preserveSubtitles = false}) {
     _readAhead?.stop();
     for (final read in _reads.toList()) {
+      if (preserveSubtitles &&
+          _roles[read.resourceKey] == PlaybackResourceRole.subtitle) {
+        continue;
+      }
       if (!read.cancelled) {
         _cancelled++;
         read.cancel();

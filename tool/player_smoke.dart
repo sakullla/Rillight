@@ -164,6 +164,15 @@ Future<void> main(List<String> args) async {
       });
       await controller.setRate(1);
       final switchWatch = Stopwatch()..start();
+      var sawReportFailure = false;
+      void observeReportFailure() {
+        if (controller.itemId == 'delayed-report' &&
+            controller.progressSyncFailed) {
+          sawReportFailure = true;
+        }
+      }
+
+      controller.addListener(observeReportFailure);
       final delayedSwitch = controller.playEpisode(
         EmbyItem.fromJson({
           'Id': 'delayed-report',
@@ -182,11 +191,21 @@ Future<void> main(List<String> args) async {
       final readyPosition = controller.position;
       await delayedSwitch;
       await _until(() => switchWatch.elapsedMilliseconds >= 16000);
+      controller.removeListener(observeReportFailure);
+      await record('delayed-report-state', {
+        'sawReportFailure': sawReportFailure,
+        'syncFailed': controller.progressSyncFailed,
+        'loading': controller.loading,
+        'error': controller.error?.name,
+        'disconnected': controller.disconnected,
+        'playing': controller.isPlaying,
+        'advancedMs': (controller.position - readyPosition).inMilliseconds,
+      });
       if (controller.loading ||
           controller.error != null ||
           controller.disconnected ||
           !controller.isPlaying ||
-          !controller.progressSyncFailed ||
+          !sawReportFailure ||
           controller.position - readyPosition < const Duration(seconds: 10)) {
         throw StateError('Playing timeout interrupted healthy media');
       }
@@ -195,18 +214,77 @@ Future<void> main(List<String> args) async {
         'readyMs': readyMs,
         'positionMs': controller.position.inMilliseconds,
         'syncFailed': controller.progressSyncFailed,
+        'sawReportFailure': sawReportFailure,
         ...await backend.diagnostics(),
       });
       switchWatch.reset();
-      final subtitleSwitch = controller.playEpisode(
-        EmbyItem.fromJson({
-          'Id': 'delayed-subtitle',
-          'Type': 'Movie',
-          'Name': 'delayed-subtitle',
-        }),
-      );
+      var subtitleFinished = false;
+      final subtitleSwitch = controller
+          .playEpisode(
+            EmbyItem.fromJson({
+              'Id': 'delayed-subtitle',
+              'Type': 'Movie',
+              'Name': 'delayed-subtitle',
+            }),
+          )
+          .whenComplete(() => subtitleFinished = true);
       await _until(() => !controller.loading && controller.isPlaying);
       final subtitleReadyMs = switchWatch.elapsedMilliseconds;
+      Future<void> waitForSubtitleRequest() async {
+        final watch = Stopwatch()..start();
+        while (watch.elapsed < const Duration(seconds: 2)) {
+          final diagnostics = await backend.diagnostics();
+          final trace = diagnostics['openTrace'] as List;
+          if (trace.any(
+            (row) =>
+                row['request'] is Map &&
+                row['request']['request'] == 'command:sub-add' &&
+                row['request']['outcome'] == 'sent',
+          )) {
+            return;
+          }
+          await Future<void>.delayed(const Duration(milliseconds: 25));
+        }
+        throw StateError('No pending native sub-add observed');
+      }
+
+      await waitForSubtitleRequest();
+      final pendingCommands = <Map<String, Object>>[];
+      Future<void> whileSubtitlePending(
+        String command,
+        Future<void> Function() run,
+      ) async {
+        if (subtitleFinished) {
+          throw StateError('Subtitle finished before $command');
+        }
+        final watch = Stopwatch()..start();
+        await run().timeout(const Duration(seconds: 2));
+        if (subtitleFinished) throw StateError('$command waited for subtitle');
+        pendingCommands.add({
+          'command': command,
+          'elapsedMs': watch.elapsedMilliseconds,
+        });
+      }
+
+      await whileSubtitlePending('pause', controller.togglePlay);
+      await _until(() => !controller.isPlaying);
+      await whileSubtitlePending(
+        'seek',
+        () => controller.seekTo(const Duration(seconds: 2)),
+      );
+      await whileSubtitlePending('volume', () => controller.setVolume(35));
+      await whileSubtitlePending(
+        'restore-volume',
+        () => controller.setVolume(15),
+      );
+      await whileSubtitlePending('resume', controller.togglePlay);
+      await _until(() => controller.isPlaying);
+      await record('controls-during-subtitle-load', {
+        'commandCount': pendingCommands.length,
+        'commands': pendingCommands,
+        'subtitleFinished': subtitleFinished,
+        ...await backend.diagnostics(),
+      });
       await subtitleSwitch;
       if (controller.error != null ||
           controller.disconnected ||
@@ -245,6 +323,57 @@ Future<void> main(List<String> args) async {
         'elapsedMs': switchWatch.elapsedMilliseconds,
         'sid': lateSid,
         'positionMs': controller.position.inMilliseconds,
+      });
+      // A newer explicit choice must supersede restoration while the resource
+      // is still pending; the old timeout must not warn or stop this session.
+      // playEpisode intentionally ignores the current item, so leave it first.
+      await controller.playEpisode(
+        EmbyItem.fromJson({
+          'Id': 'baseline',
+          'Type': 'Movie',
+          'Name': 'baseline',
+        }),
+      );
+      switchWatch.reset();
+      subtitleFinished = false;
+      final supersededSubtitle = controller
+          .playEpisode(
+            EmbyItem.fromJson({
+              'Id': 'delayed-subtitle',
+              'Type': 'Movie',
+              'Name': 'delayed-subtitle',
+            }),
+          )
+          .whenComplete(() => subtitleFinished = true);
+      await _until(() => !controller.loading && controller.isPlaying);
+      await waitForSubtitleRequest();
+      await whileSubtitlePending(
+        'subtitles-off',
+        () => controller.setSubtitle(null),
+      );
+      await supersededSubtitle;
+      await _until(() => switchWatch.elapsedMilliseconds >= 20000);
+      final currentView = _find<MpvVideoView>(
+        (element) => element.widget is MpvVideoView
+            ? element.widget as MpvVideoView
+            : null,
+      )!;
+      final supersededSid = await currentView.player.getProperty('sid');
+      if (supersededSid != false ||
+          controller.subtitleStreamIndex != null ||
+          controller.trackFailure != null ||
+          controller.error != null ||
+          !controller.isPlaying) {
+        throw StateError(
+          'Superseded subtitle changed the current selection or failure state',
+        );
+      }
+      await record('superseded-subtitle-remained-off', {
+        'elapsedMs': switchWatch.elapsedMilliseconds,
+        'sid': supersededSid,
+        'commandCount': pendingCommands.length,
+        'commands': pendingCommands,
+        ...await backend.diagnostics(),
       });
       for (final item in [
         'tracks',

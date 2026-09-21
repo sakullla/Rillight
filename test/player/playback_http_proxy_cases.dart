@@ -9,6 +9,63 @@ import 'package:rillight/player/cache/session_byte_cache.dart';
 
 void main() {
   test(
+    'seek cancellation preserves a pending subtitle but close cancels it',
+    () async {
+      final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final proxy = await PlaybackHttpProxy.create();
+      final client = HttpClient();
+      final pending = <String, HttpRequest>{};
+      upstream.listen((request) => pending[request.uri.path] = request);
+      Future<String> read(String path, PlaybackResourceRole role) async {
+        final url = proxy.register(
+          Uri.parse('http://127.0.0.1:${upstream.port}/$path'),
+          role: role,
+        );
+        final response = await (await client.getUrl(url)).close();
+        return response.transform(utf8.decoder).join();
+      }
+
+      Future<void> waitFor(bool Function() ready) async {
+        final watch = Stopwatch()..start();
+        while (!ready() && watch.elapsed < const Duration(seconds: 2)) {
+          await Future<void>.delayed(const Duration(milliseconds: 1));
+        }
+        expect(ready(), isTrue);
+      }
+
+      try {
+        final media = read(
+          'media',
+          PlaybackResourceRole.media,
+        ).catchError((Object _) => 'cancelled');
+        var subtitleFinished = false;
+        final subtitle = read(
+          'subtitle',
+          PlaybackResourceRole.subtitle,
+        ).whenComplete(() => subtitleFinished = true);
+        await waitFor(() => pending.length == 2);
+        proxy.cancelPendingReads(preserveSubtitles: true);
+        await media.timeout(const Duration(seconds: 2));
+        expect(subtitleFinished, isFalse);
+        pending['/subtitle']!.response.write('subtitle still available');
+        await pending['/subtitle']!.response.close();
+        expect(await subtitle, 'subtitle still available');
+        final abandoned = read(
+          'abandoned',
+          PlaybackResourceRole.subtitle,
+        ).catchError((Object _) => 'cancelled');
+        await waitFor(() => pending.containsKey('/abandoned'));
+        await proxy.close().timeout(const Duration(seconds: 2));
+        await abandoned.timeout(const Duration(seconds: 2));
+      } finally {
+        client.close(force: true);
+        await proxy.close();
+        await upstream.close(force: true);
+      }
+    },
+  );
+
+  test(
     'busy timeline snapshot does not shrink buffer or degrade disk',
     () async {
       final fixture = await _CacheFixture.open(

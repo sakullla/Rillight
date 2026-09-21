@@ -69,6 +69,7 @@ class _Session {
   bool idle = true;
   Duration demuxerBuffer = Duration.zero;
   int bufferTicks = 0;
+  int subtitleRevision = 0;
   final trace = <Map<String, Object?>>[];
   final clock = Stopwatch()..start();
 }
@@ -570,7 +571,7 @@ class MpvVideoBackend implements VideoBackend {
       _publishBuffer(session);
     }
     final driver = _driver;
-    session?.proxy?.cancelPendingReads();
+    session?.proxy?.cancelPendingReads(preserveSubtitles: true);
     await driver.command([
       'seek',
       '${position.inMicroseconds / 1000000}',
@@ -593,10 +594,32 @@ class MpvVideoBackend implements VideoBackend {
   @override
   Future<void> setAudioIndex(int index) => _select('audio', 'aid', index);
   @override
-  Future<void> setSubtitleIndex(int index) => _select('sub', 'sid', index);
-  Future<void> _select(String type, String property, int index) async {
-    final driver = _driver;
+  Future<void> setSubtitleIndex(int index) {
+    final session = _active;
+    if (session == null) throw StateError('No active media');
+    return _select(
+      'sub',
+      'sid',
+      index,
+      subtitleRevision: ++session.subtitleRevision,
+    );
+  }
+
+  Future<void> _select(
+    String type,
+    String property,
+    int index, {
+    int? subtitleRevision,
+  }) async {
+    final session = _active;
+    if (session == null) throw StateError('No active media');
+    final driver = session.driver!;
     final tracks = await driver.getProperty('track-list');
+    if (!_current(session) ||
+        (subtitleRevision != null &&
+            subtitleRevision != session.subtitleRevision)) {
+      return;
+    }
     final matches = tracks is List
         ? tracks
               .where(
@@ -618,6 +641,8 @@ class MpvVideoBackend implements VideoBackend {
   Future<void> setSubtitleUri(Uri uri, {String? title}) async {
     final session = _active;
     if (session == null) throw StateError('No active media');
+    final revision = ++session.subtitleRevision;
+    bool current() => _current(session) && revision == session.subtitleRevision;
     final driver = session.driver!;
     final url = uri.scheme == 'http' || uri.scheme == 'https'
         ? session.proxy?.register(uri, role: PlaybackResourceRole.subtitle) ??
@@ -627,13 +652,13 @@ class MpvVideoBackend implements VideoBackend {
     // an explicit sid also prevents mpv's default selection from taking over
     // if the download finishes after our deadline or a newer user choice.
     final selected = await driver.getProperty('sid');
-    if (!_current(session)) return;
+    if (!current()) return;
     await driver.setProperty('sid', selected is num ? '$selected' : 'no');
-    if (!_current(session)) return;
+    if (!current()) return;
     try {
       await driver.command(['sub-add', url.toString(), 'auto', title ?? '']);
     } on TimeoutException {
-      if (!_current(session)) rethrow;
+      if (!current()) return;
       _trace(session, 'subtitle-load-timeout');
       // This command downloads an optional resource. A fresh successful
       // request and the session's ongoing surface watchdog distinguish it
@@ -642,7 +667,7 @@ class MpvVideoBackend implements VideoBackend {
         final actual = await driver
             .getProperty('sid')
             .timeout(const Duration(seconds: 2));
-        if (!_current(session)) rethrow;
+        if (!current()) return;
         if (!session.loaded ||
             (session.hasVideo && !session.firstFrame) ||
             session.failed ||
@@ -650,6 +675,7 @@ class MpvVideoBackend implements VideoBackend {
           throw StateError('Unable to confirm subtitle selection');
         }
       } catch (_) {
+        if (!current()) return;
         if (_current(session)) {
           _onEvent(
             session,
@@ -666,9 +692,9 @@ class MpvVideoBackend implements VideoBackend {
         'External subtitle loading timed out; playback continues',
       );
     }
-    if (!_current(session)) return;
+    if (!current()) return;
     final tracks = await driver.getProperty('track-list');
-    if (!_current(session)) return;
+    if (!current()) return;
     final matches = tracks is List
         ? tracks
               .where(
@@ -684,7 +710,13 @@ class MpvVideoBackend implements VideoBackend {
   }
 
   @override
-  Future<void> setSubtitleOff() => _driver.setProperty('sid', 'no');
+  Future<void> setSubtitleOff() {
+    final session = _active;
+    if (session == null) throw StateError('No active media');
+    ++session.subtitleRevision;
+    return session.driver!.setProperty('sid', 'no');
+  }
+
   @override
   Future<void> dispose() => _disposing ??= _dispose();
   Future<void> _dispose() async {

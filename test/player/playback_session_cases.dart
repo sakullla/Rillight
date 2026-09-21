@@ -376,6 +376,68 @@ void main() {
     },
   );
 
+  for (final initial in [true, false]) {
+    for (final failsLate in [false, true]) {
+      test(
+        'pending ${initial ? 'restored' : 'selected'} subtitle allows controls and ignores late ${failsLate ? 'failure' : 'success'} after off',
+        () async {
+          controller.itemId = 'movie-inception';
+          if (!initial) await controller.start();
+          final gate = backend.subtitleGate = Completer<void>();
+          final pending = initial
+              ? controller.start()
+              : controller.setSubtitle(2);
+          await _until(() => backend.subtitleWaiting);
+          expect(controller.loading, isFalse);
+          await controller.togglePlay().timeout(const Duration(seconds: 1));
+          expect(backend.isPlaying, isFalse);
+          await controller
+              .seekTo(const Duration(seconds: 5))
+              .timeout(const Duration(seconds: 1));
+          expect(backend.position, const Duration(seconds: 5));
+          await controller.setVolume(35).timeout(const Duration(seconds: 1));
+          expect(backend.volume, 35);
+          await controller
+              .setSubtitle(null)
+              .timeout(const Duration(seconds: 1));
+          expect(gate.isCompleted, isFalse);
+          expect(controller.subtitleStreamIndex, isNull);
+          if (failsLate) {
+            gate.completeError(TimeoutException('superseded subtitle'));
+          } else {
+            gate.complete();
+          }
+          await pending;
+          expect(controller.subtitleStreamIndex, isNull);
+          expect(controller.trackFailure, isNull);
+          expect(controller.error, isNull);
+          expect(backend.isPlaying, isFalse);
+        },
+      );
+    }
+  }
+
+  test(
+    'switch and close do not wait for a previous subtitle resource',
+    () async {
+      controller.itemId = 'movie-inception';
+      final gate = backend.subtitleGate = Completer<void>();
+      final starting = controller.start();
+      await _until(() => backend.subtitleWaiting);
+      await controller
+          .playEpisode(episode('episode-friends-s1e1'))
+          .timeout(const Duration(seconds: 1));
+      expect(controller.itemId, 'episode-friends-s1e1');
+      expect(controller.isPlaying, isTrue);
+      await controller.close().timeout(const Duration(seconds: 1));
+      expect(gate.isCompleted, isFalse);
+      gate.completeError(TimeoutException('retired subtitle'));
+      await starting;
+      expect(controller.state.phase, PlaybackPhase.closed);
+      expect(controller.trackFailure, isNull);
+    },
+  );
+
   test(
     'a native reply timeout remains fatal after readiness and can retry',
     () async {
@@ -555,6 +617,8 @@ class _ControlledBackend extends FakeVideoBackend {
   String? failInitialization;
   Completer<void>? rateGate;
   bool rateStarted = false;
+  Completer<void>? subtitleGate;
+  bool subtitleWaiting = false;
   int disposeCount = 0;
 
   @override
@@ -604,6 +668,14 @@ class _ControlledBackend extends FakeVideoBackend {
   }
 
   @override
+  Future<void> setSubtitleUri(Uri uri, {String? title}) async {
+    await super.setSubtitleUri(uri, title: title);
+    final gate = subtitleGate;
+    subtitleWaiting = gate != null;
+    await gate?.future;
+  }
+
+  @override
   Future<void> setSubtitleOff() async {
     if (failInitialization == 'subtitle') throw StateError('subtitle failed');
     await super.setSubtitleOff();
@@ -616,7 +688,7 @@ class _ControlledBackend extends FakeVideoBackend {
   }
 
   void release() {
-    for (final gate in [...audioGates.values, ?rateGate]) {
+    for (final gate in [...audioGates.values, ?rateGate, ?subtitleGate]) {
       if (!gate.isCompleted) gate.complete();
     }
     if (openGate != null && !openGate!.isCompleted) openGate!.complete();

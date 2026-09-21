@@ -411,6 +411,50 @@ void main() {
     expect(backend.isPlaying, isFalse);
   });
 
+  for (final selection in ['off', 'embedded', 'external', 'new-session']) {
+    test('late subtitle cannot replace $selection selection', () async {
+      await backend.open(request(1));
+      final driver = drivers.single;
+      final uri = Uri.file('pending.srt');
+      final gate = driver.subtitleGates[uri.toString()] = Completer<void>();
+      final pending = backend.setSubtitleUri(uri);
+      await _until(() => driver.subtitleRequested);
+      switch (selection) {
+        case 'off':
+          await backend.setSubtitleOff();
+        case 'embedded':
+          await backend.setSubtitleIndex(5);
+        case 'external':
+          await backend.setSubtitleUri(Uri.file('new.srt'));
+        case 'new-session':
+          await backend.open(request(2));
+      }
+      final before = Map.of(drivers.last.properties);
+      gate.complete();
+      await pending;
+      expect(drivers.last.properties, before);
+      expect(backend.isPlaying, isTrue);
+    });
+  }
+
+  test(
+    'superseded subtitle timeout does not probe or stop a newer selection',
+    () async {
+      await backend.open(request(1));
+      final driver = drivers.single;
+      final uri = Uri.file('pending.srt');
+      final gate = driver.subtitleGates[uri.toString()] = Completer<void>();
+      final pending = backend.setSubtitleUri(uri);
+      await _until(() => driver.subtitleRequested);
+      await backend.setSubtitleIndex(5);
+      gate.completeError(TimeoutException('old sub-add'));
+      await pending;
+      expect(driver.properties['sid'], '30');
+      expect(driver.disposed, 0);
+      expect(backend.isPlaying, isTrue);
+    },
+  );
+
   test(
     'stop cancels open while creation is pending and awaits disposal',
     () async {
@@ -539,6 +583,7 @@ class _Driver implements MpvSessionDriver {
   bool subtitleTimeout = false;
   bool loseControl = false;
   bool subtitleRequested = false;
+  final subtitleGates = <String, Completer<void>>{};
   int disposed = 0;
   @override
   Stream<MpvEvent> get events => eventsController.stream;
@@ -549,6 +594,7 @@ class _Driver implements MpvSessionDriver {
     commands.add(arguments);
     if (arguments.first == 'sub-add') {
       subtitleRequested = true;
+      await subtitleGates[arguments[1]]?.future;
       if (subtitleTimeout) throw TimeoutException('sub-add timed out');
       tracks.add({'type': 'sub', 'id': 99, 'external-filename': arguments[1]});
     }

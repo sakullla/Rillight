@@ -616,6 +616,7 @@ class PlayerController extends ChangeNotifier {
 
   Future<void> setSubtitle(int? index) async {
     if (loading || _operations.isClosed) return;
+    _subtitleReassertDue = null;
     final source = resolved?.mediaSource;
     if (source == null) return;
     final stream = index == null ? null : source.streamByIndex(index);
@@ -647,30 +648,42 @@ class PlayerController extends ChangeNotifier {
         _clearSubtitleNotice();
       },
       'SubtitleTrackChange',
+      serialized: false,
     );
   }
 
   Future<void> _selectTrack(
     Future<void> Function() apply,
     VoidCallback commit,
-    String event,
-  ) async {
+    String event, {
+    bool serialized = true,
+  }) async {
     final operation = _operations.current;
     if (operation == null || !_accepts(operation)) return;
     final revision = ++_trackRevision;
     _trackRevisions[event] = revision;
     try {
-      await _operations.run(operation, () async {
-        if (revision != _trackRevisions[event]) return;
+      Future<void> select() async {
+        if (!_accepts(operation) || revision != _trackRevisions[event]) return;
         await apply();
-        if (!_accepts(operation)) return;
+        if (!_accepts(operation) ||
+            (!serialized && revision != _trackRevisions[event])) {
+          return;
+        }
         // A newer selection may already be queued. This successful mutation is
         // still the actual backend state until that next selection succeeds.
         commit();
         trackFailure = null;
         _emit();
         await _persistSeriesPreference();
-      });
+      }
+
+      if (serialized) {
+        await _operations.run(operation, select);
+      } else {
+        // Optional subtitle downloads must not block pause, seek or volume.
+        await select();
+      }
       if (!_accepts(operation) || revision != _trackRevisions[event]) return;
       await _reportProgress(eventName: event);
     } catch (failure) {
@@ -1672,11 +1685,13 @@ class PlayerController extends ChangeNotifier {
             // 转码:服务器烧录进流。
             _showSubtitleNotice(SubtitleNoticeKind.bitmapBurnIn);
           }
-          // 直连:保留选择,_applyTracks 直接选内嵌轨道本地渲染。
+          // 直连:保留选择,_applySubtitle 直接选内嵌轨道本地渲染。
         }
       }
 
       Future<void>? started;
+      final subtitleRevision = ++_trackRevision;
+      _trackRevisions['SubtitleTrackChange'] = subtitleRevision;
       await _operations.run(operation, () async {
         await backend.open(
           VideoOpenRequest(
@@ -1731,20 +1746,20 @@ class PlayerController extends ChangeNotifier {
           }
           if (_accepts(operation)) audioStreamIndex = selectedAudio;
         });
-        await _restoreParameter(operation, () async {
-          await _applyTracks(
-            next,
-            operation,
-            audio: null,
-            subtitle: selectedSubtitle,
-          );
-          if (_accepts(operation)) subtitleStreamIndex = selectedSubtitle;
-        });
       });
+      if (!_accepts(operation) || disconnected) return;
+      bool ownsSubtitle() =>
+          subtitleRevision == _trackRevisions['SubtitleTrackChange'];
+      await _restoreParameter(operation, () async {
+        await _applySubtitle(next, operation, subtitle: selectedSubtitle);
+        if (_accepts(operation) && ownsSubtitle()) {
+          subtitleStreamIndex = selectedSubtitle;
+        }
+      }, accepts: ownsSubtitle);
       if (!_accepts(operation) || disconnected) return;
       // 换源/重开后部分后端会丢外挂字幕选择(字幕要等一会儿才出现),
       // 起流片刻后重断言一次,字幕晚显的问题即消失。
-      _scheduleSubtitleReassert();
+      if (ownsSubtitle()) _scheduleSubtitleReassert();
       await started;
       if (!_accepts(operation) || disconnected) return;
       error = null;
@@ -1766,16 +1781,19 @@ class PlayerController extends ChangeNotifier {
 
   Future<void> _restoreParameter(
     PlaybackOperation operation,
-    Future<void> Function() apply,
-  ) async {
-    if (!_accepts(operation) || disconnected) return;
+    Future<void> Function() apply, {
+    bool Function()? accepts,
+  }) async {
+    bool current() =>
+        _accepts(operation) && !disconnected && (accepts?.call() ?? true);
+    if (!current()) return;
     try {
       await apply();
     } on TimeoutException {
       // A missing native reply does not establish a healthy control channel.
-      rethrow;
+      if (current()) rethrow;
     } catch (failure) {
-      if (_accepts(operation) && !disconnected) {
+      if (current()) {
         trackFailure = failure.toString();
         _emit();
       }
@@ -1812,17 +1830,12 @@ class PlayerController extends ChangeNotifier {
     }
   }
 
-  Future<void> _applyTracks(
+  Future<void> _applySubtitle(
     ResolvedPlayback next,
     PlaybackOperation operation, {
-    required int? audio,
     required int? subtitle,
   }) async {
     if (!_accepts(operation)) return;
-    if (audio != null && !next.isTranscode) {
-      await backend.setAudioIndex(audio);
-      if (!_accepts(operation)) return;
-    }
     if (subtitle == null) {
       await backend.setSubtitleOff();
       return;
@@ -1876,17 +1889,11 @@ class PlayerController extends ChangeNotifier {
     final operation = _operations.current;
     if (operation == null || loading) return;
     unawaited(
-      _operations
-          .run(
-            operation,
-            () => _applyTracks(
-              current,
-              operation,
-              audio: audioStreamIndex,
-              subtitle: subtitleStreamIndex,
-            ),
-          )
-          .catchError((Object _) {}),
+      _applySubtitle(
+        current,
+        operation,
+        subtitle: index,
+      ).catchError((Object _) {}),
     );
   }
 
@@ -2025,13 +2032,13 @@ class PlayerController extends ChangeNotifier {
     } on EmbyException catch (failure) {
       if (_session == null &&
           session.ownsCredentials &&
-          _operations.current?.id == session.id) {
+          (_operations.current?.id == session.id || _operations.isClosed)) {
         _onReportFailed(failure);
       }
     } catch (_) {
       if (_session == null &&
           session.ownsCredentials &&
-          _operations.current?.id == session.id) {
+          (_operations.current?.id == session.id || _operations.isClosed)) {
         _onReportFailed(null);
       }
     }

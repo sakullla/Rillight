@@ -466,3 +466,76 @@ wait for diagnostic delivery before checking replies. The full adapter suite
 passed after these corrections.
 macOS/Linux native checks and full Delivery verification remain unexecuted for
 this change.
+
+### Pending subtitle controls repair (2026-09-21, PlaybackState A2)
+
+The first implementation still held the controller command queue while awaiting
+optional subtitle restoration. Subtitle loading/selection now runs outside that
+queue, with operation and track revisions guarding late success and failure.
+The backend also guards each subtitle selection across asynchronous replies, so
+off, embedded/external replacement and a new session supersede an older load.
+Real surface failures and a failed subtitle-timeout control probe remain fatal.
+
+The expanded native scenario exposed an adjacent product defect: seek cancelled
+all proxy consumers, including the pending subtitle download. Seek now preserves
+subtitle reads while cancelling media reads; close still cancels both. This
+requires the direct-consumer changes in `lib/player/playback_http_proxy.dart` and
+`test/player/playback_http_proxy_cases.dart`, beyond the original task paths.
+The new loopback HTTP regression tests both seek preservation and close cleanup.
+
+Development commands executed for this repair:
+
+- `flutter test test/player/playback_http_proxy_cases.dart test/player/playback_session_cases.dart test/player/mpv_video_backend_cases.dart`: 97 passed.
+- `flutter test test/player/player_controls_cases.dart`: 44 passed after fixing
+  the closed-controller Stopped failure guard (the earlier focused check failed).
+- `dart analyze lib/player/player_controller.dart lib/player/mpv_video_backend.dart lib/player/playback_http_proxy.dart test/player/playback_session_cases.dart test/player/mpv_video_backend_cases.dart test/player/playback_http_proxy_cases.dart tool/player_smoke.dart`: no issues.
+
+The intermediate `flutter test test/suites/player_test.dart` run was not a pass:
+66 passed and three failed. The closed-controller failure above was repaired;
+two window tests still used the old home library entry at
+`test/player/player_window_cases.dart:158` during concurrent BrowseExperience
+changes. These consumers were reported to the Owner, not edited by this worker.
+An earlier suite attempt could not compile while that sibling's localization
+source and generated getters were temporarily out of sync. Neither failure is
+counted as a successful suite run. Full Delivery verification remains separate.
+
+The native command was run four times in this repair:
+`powershell -NoProfile -ExecutionPolicy Bypass -File tool/player_smoke.ps1`.
+All evidence directories below are under `build/player-validation/runs/`:
+
+- `20260921-212823-210`: failed `Playing timeout interrupted healthy media`.
+  The assertion required the transient report-failure banner to remain visible
+  after a subsequent successful Unpause report. The smoke now records that the
+  failure was observed, alongside continued playback, instead of that final
+  banner state. The original failed result is retained.
+- `20260921-213225-987`: failed `seek waited for subtitle`. The subtitle future
+  had actually completed during seek because the proxy cancelled its request;
+  this led to the product fix and HTTP regression above.
+- `20260921-213520-212`: passed the first pending-controls/timeout scenario but
+  failed `No pending native sub-add observed` in the second. The smoke called
+  `playEpisode` for the already-current item, which intentionally does nothing.
+  It now switches away before starting the second delayed-subtitle scenario.
+- `20260921-213920-496`: `result.json` and `player-result.json` passed. In
+  `player.jsonl`, `controls-during-subtitle-load` records five completed commands
+  with the subtitle still pending: pause 0 ms, seek 2 ms, volume 1 ms,
+  restore-volume 0 ms and resume 0 ms. `superseded-subtitle-remained-off` adds
+  the sixth command, subtitles-off at 1 ms, in the second pending-load scenario.
+  Both native sub-add requests timed out after 15,001 ms. The first retained
+  healthy playback; the second's stale timeout did not overwrite the new off
+  selection or show a warning. Both were checked again after 20 seconds.
+
+The fourth command exited 0, verified native dependencies, and restored the
+ordinary production release build successfully. Targeted seven-file formatting
+and `git diff --check` also passed (Git emitted line-ending warnings only).
+
+These timings are observed command-future latency, not a performance guarantee.
+The nested `openTrace` records native request IDs, names and replies, including
+the sub-add timeouts and the responsive health probe. The six control commands
+are additional assertions, not a count of every native request in the smoke.
+The actual Windows main/child smoke also exercised the existing codec, subtitle,
+EOF, failed-open and disposal scenarios. It is not a mocked surface test, but
+neither core screenshots nor these diagnostics independently establish displayed
+pixel stability or physical audio. No macOS/Linux run or new human audiovisual
+inspection was performed. The user's original server source remains unconfirmed;
+the verified repair is for the synthetic delayed-subtitle reproduction and its
+control/selection boundaries. User process PID 21104 was left running.
