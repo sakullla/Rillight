@@ -69,6 +69,8 @@ class _Session {
   bool idle = true;
   Duration demuxerBuffer = Duration.zero;
   int bufferTicks = 0;
+  final trace = <Map<String, Object?>>[];
+  final clock = Stopwatch()..start();
 }
 
 class MpvVideoBackend implements VideoBackend {
@@ -102,12 +104,16 @@ class MpvVideoBackend implements VideoBackend {
   String? get nativeVersion => _active?.driver?.nativeVersion;
   Object? lastFailure;
   Map<String, Object?>? _lastCacheDiagnostics;
+  List<Map<String, Object?>>? _lastOpenTrace;
+  int? _lastSessionId;
 
   Future<Map<String, Object?>> diagnostics() async {
     final driver = _active?.driver;
     final result = <String, Object?>{
       'wake-lock': _wakeLock.diagnostics,
       'cache': _active?.proxy?.diagnostics ?? _lastCacheDiagnostics,
+      'sessionId': _active?.id ?? _lastSessionId,
+      'openTrace': _active?.trace.toList() ?? _lastOpenTrace,
     };
     if (driver == null) return result;
     for (final key in [
@@ -145,6 +151,10 @@ class MpvVideoBackend implements VideoBackend {
   @override
   bool isPlaying = false;
   @override
+  int? selectedAudioIndex;
+  @override
+  int? selectedSubtitleIndex;
+  @override
   Stream<VideoBackendEvent> get events => _events.stream;
   Stream<T> _stream<T>(VideoEventKind kind) =>
       events.where((e) => e.kind == kind).map((e) => e.value as T);
@@ -181,6 +191,7 @@ class MpvVideoBackend implements VideoBackend {
     position = request.start;
     duration = buffer = Duration.zero;
     isPlaying = false;
+    selectedAudioIndex = selectedSubtitleIndex = null;
     try {
       final store = _settingsStore ??= await openPlayerSettingsStore();
       final settings = await store.read();
@@ -331,6 +342,7 @@ class MpvVideoBackend implements VideoBackend {
     if (session.loaded &&
         (!session.hasVideo || session.firstFrame) &&
         !session.ready.isCompleted) {
+      _trace(session, 'ready');
       session.ready.complete();
     }
   }
@@ -338,13 +350,18 @@ class MpvVideoBackend implements VideoBackend {
   void _onEvent(_Session session, MpvEvent event) {
     if (!_current(session)) return;
     switch (event.type) {
+      case 'request':
+        _trace(session, 'request', event.value);
       case 'file-loaded':
+        _trace(session, 'file-loaded');
         unawaited(_loaded(session));
       case 'first-frame':
+        _trace(session, 'first-frame');
         session.firstFrame = true;
         _ready(session);
       case 'error':
       case 'queue-overflow':
+        _trace(session, 'engine-failure');
         final failure = StateError('Playback engine failed');
         session.failed = true;
         lastFailure = failure;
@@ -415,6 +432,16 @@ class MpvVideoBackend implements VideoBackend {
     }
   }
 
+  void _trace(_Session session, String event, [Object? request]) {
+    if (session.trace.length == 48) session.trace.removeAt(0);
+    session.trace.add({
+      'sessionId': session.id,
+      'elapsedMs': session.clock.elapsedMilliseconds,
+      'event': event,
+      'request': ?request,
+    });
+  }
+
   void _publishBuffer(_Session session) {
     buffer =
         session.proxy?.bufferedEnd(position, session.demuxerBuffer) ??
@@ -427,11 +454,27 @@ class MpvVideoBackend implements VideoBackend {
     try {
       final tracks = await session.driver!.getProperty('track-list');
       if (!_current(session)) return;
-      session.hasVideo =
-          tracks is List &&
-          tracks.any(
-            (t) => t is Map && t['type'] == 'video' && t['albumart'] != true,
-          );
+      if (tracks is! List ||
+          !tracks.any(
+            (t) => t is Map && (t['type'] == 'audio' || t['type'] == 'video'),
+          )) {
+        throw StateError('No playable media tracks');
+      }
+      session.hasVideo = tracks.any(
+        (t) => t is Map && t['type'] == 'video' && t['albumart'] != true,
+      );
+      for (final track in tracks) {
+        if (track is Map &&
+            track['selected'] == true &&
+            track['ff-index'] is int) {
+          if (track['type'] == 'audio') {
+            selectedAudioIndex = track['ff-index'] as int;
+          }
+          if (track['type'] == 'sub') {
+            selectedSubtitleIndex = track['ff-index'] as int;
+          }
+        }
+      }
       session.loaded = true;
       _ready(session);
       _playing(session);
@@ -470,6 +513,10 @@ class MpvVideoBackend implements VideoBackend {
   Future<void> _stopActive() async {
     final releasingWakeLock = _wakeLock.release();
     final session = _active;
+    if (session != null) {
+      _lastSessionId = session.id;
+      _lastOpenTrace = session.trace.toList();
+    }
     _active = null;
     isPlaying = false;
     _view.value = null;
@@ -571,11 +618,69 @@ class MpvVideoBackend implements VideoBackend {
   Future<void> setSubtitleUri(Uri uri, {String? title}) async {
     final session = _active;
     if (session == null) throw StateError('No active media');
+    final driver = session.driver!;
     final url = uri.scheme == 'http' || uri.scheme == 'https'
         ? session.proxy?.register(uri, role: PlaybackResourceRole.subtitle) ??
               uri
         : uri;
-    await _driver.command(['sub-add', url.toString(), 'select', title ?? '']);
+    // Pin the actual selection before loading. 'auto' adds without selecting;
+    // an explicit sid also prevents mpv's default selection from taking over
+    // if the download finishes after our deadline or a newer user choice.
+    final selected = await driver.getProperty('sid');
+    if (!_current(session)) return;
+    await driver.setProperty('sid', selected is num ? '$selected' : 'no');
+    if (!_current(session)) return;
+    try {
+      await driver.command(['sub-add', url.toString(), 'auto', title ?? '']);
+    } on TimeoutException {
+      if (!_current(session)) rethrow;
+      _trace(session, 'subtitle-load-timeout');
+      // This command downloads an optional resource. A fresh successful
+      // request and the session's ongoing surface watchdog distinguish it
+      // from loss of the control transport or renderer.
+      try {
+        final actual = await driver
+            .getProperty('sid')
+            .timeout(const Duration(seconds: 2));
+        if (!_current(session)) rethrow;
+        if (!session.loaded ||
+            (session.hasVideo && !session.firstFrame) ||
+            session.failed ||
+            actual != selected) {
+          throw StateError('Unable to confirm subtitle selection');
+        }
+      } catch (_) {
+        if (_current(session)) {
+          _onEvent(
+            session,
+            const MpvEvent(
+              'error',
+              error: 'Subtitle timeout health check failed',
+            ),
+          );
+        }
+        rethrow;
+      }
+      _trace(session, 'subtitle-timeout-control-responsive');
+      throw StateError(
+        'External subtitle loading timed out; playback continues',
+      );
+    }
+    if (!_current(session)) return;
+    final tracks = await driver.getProperty('track-list');
+    if (!_current(session)) return;
+    final matches = tracks is List
+        ? tracks
+              .where(
+                (track) =>
+                    track is Map &&
+                    track['type'] == 'sub' &&
+                    track['external-filename'] == url.toString(),
+              )
+              .toList()
+        : const [];
+    if (matches.isEmpty) throw StateError('External subtitle is unavailable');
+    await driver.setProperty('sid', '${(matches.last as Map)['id']}');
   }
 
   @override

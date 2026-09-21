@@ -63,6 +63,10 @@ abstract class VideoBackend {
   Duration get buffer;
   bool get isPlaying;
 
+  /// Actual selected container stream indices, independent of server defaults.
+  int? get selectedAudioIndex;
+  int? get selectedSubtitleIndex;
+
   Future<void> open(VideoOpenRequest request);
   Future<void> play();
   Future<void> pause();
@@ -106,6 +110,10 @@ class FakeVideoBackend implements VideoBackend {
   int? audioIndex;
   Uri? subtitleUri;
   int? subtitleIndex;
+  @override
+  int? get selectedAudioIndex => audioIndex;
+  @override
+  int? get selectedSubtitleIndex => subtitleIndex;
   bool subtitleOff = false;
   double volume = 100;
   double rate = 1.0;

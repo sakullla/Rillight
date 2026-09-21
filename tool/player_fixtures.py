@@ -6,6 +6,7 @@ from pathlib import Path
 import re
 import subprocess
 import struct
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 
@@ -28,13 +29,14 @@ def generate(directory, ffmpeg):
             + segment(0x14, pds) + segment(0x15, ods) + segment(0x80, b'')
             + segment(0x16, clear, 900000) + segment(0x80, b'', 900000))
     for name, size, fps, codec in [('baseline.mp4', '1280x720', 30, 'libx264'),
+                                  ('timeout.mp4', '640x360', 30, 'libx264'),
                                   ('1080p60.mp4', '1920x1080', 60, 'libx264'),
                                   ('4k-hevc.mkv', '3840x2160', 30, 'libx265')]:
         if (directory / name).exists():
             continue
         subprocess.run([ffmpeg, '-y', '-f', 'lavfi', '-i', f'testsrc2=size={size}:rate={fps}',
                         '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000',
-                        '-t', '12', '-c:v', codec, '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
+                        '-t', '30' if name == 'timeout.mp4' else '12', '-c:v', codec, '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
                         '-c:a', 'aac', str(directory / name)], check=True)
     (directory / 'sample.ass').write_text('''[Script Info]
 ScriptType: v4.00+
@@ -73,12 +75,12 @@ Dialogue: 0,0:00:00.00,0:00:12.00,Default,,0,0,0,,Rillight ASS validation
 
 def serve(media, output):
     conditions = {'offline': False}
-    paths = {'baseline': 'baseline.mp4', 'tracks': 'tracks.mkv', 'hls': 'stream.m3u8',
+    paths = {'baseline': 'baseline.mp4', 'delayed-report': 'timeout.mp4', 'delayed-subtitle': 'timeout.mp4', 'tracks': 'tracks.mkv', 'hls': 'stream.m3u8',
              '1080p60': '1080p60.mp4', '4k-hevc': '4k-hevc.mkv', 'av1': 'av1.mkv',
              'vp9': 'vp9.webm', 'broken': 'missing.mkv'}
     user = {'Id': 'validation-user', 'Name': 'validation', 'Configuration': {'EnableNextEpisodeAutoPlay': False}}
     def item(identifier):
-        return {'Id': identifier, 'Name': identifier, 'Type': 'Movie', 'RunTimeTicks': 120000000,
+        return {'Id': identifier, 'Name': identifier, 'Type': 'Movie', 'RunTimeTicks': 300000000 if identifier.startswith('delayed-') else 120000000,
                 'UserData': {'PlaybackPositionTicks': 20000000 if identifier == 'baseline' else 0}, 'MediaType': 'Video'}
 
     class Handler(BaseHTTPRequestHandler):
@@ -112,15 +114,24 @@ def serve(media, output):
                                 *[{'Index': i, 'Type': 'Subtitle', 'Codec': codec, 'IsTextSubtitleStream': True}
                                   for i, codec in [(5, 'srt'), (6, 'vtt'), (7, 'ssa')]]]
                 source = {'Id': identifier, 'Container': 'mkv' if identifier == 'tracks' else 'mp4',
-                          'Name': identifier, 'RunTimeTicks': 120000000,
+                          'Name': identifier, 'RunTimeTicks': item(identifier)['RunTimeTicks'],
                           'SupportsDirectPlay': identifier != 'hls', 'SupportsDirectStream': identifier != 'hls',
                           'DefaultAudioStreamIndex': 1, 'MediaStreams': streams,
                           'TranscodingUrl' if identifier == 'hls' else 'DirectStreamUrl': '/media/' + paths[identifier]}
+                if identifier == 'delayed-subtitle':
+                    streams.append({'Index': 8, 'Type': 'Subtitle', 'Codec': 'srt', 'IsTextSubtitleStream': True})
+                    source['DefaultSubtitleStreamIndex'] = 8
                 self.send_json({'PlaySessionId': identifier + '-session', 'MediaSources': [source]})
             elif path.startswith('/Sessions/'):
                 with (output / 'reports.jsonl').open('a', encoding='utf-8') as log:
                     log.write(json.dumps({'path': path, 'body': body}) + '\n')
-                self.send_json({})
+                if path == '/Sessions/Playing' and body.get('ItemId') == 'delayed-report':
+                    # Exercise the client's real 15-second receive deadline.
+                    time.sleep(18)
+                try:
+                    self.send_json({})
+                except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                    pass
             else:
                 self.send_json({})
         def do_GET(self):
@@ -132,6 +143,8 @@ def serve(media, output):
             elif re.fullmatch(r'/Users/validation-user/Items/[^/]+', path) and path.split('/')[-1] in paths:
                 self.send_json(item(path.split('/')[-1]))
             elif path.startswith('/media/') or '/Subtitles/' in path:
+                if '/delayed-subtitle/' in path and '/Subtitles/' in path:
+                    time.sleep(18)
                 if conditions['offline']:
                     self.send_json({'error': 'synthetic outage'}, 503)
                     return

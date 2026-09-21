@@ -415,3 +415,54 @@ degradation. Sanitized snapshots are in the ignored local validation artifact
 returned bytes; subsequent reads from a block promoted into RAM count as memory
 hits rather than additional disk hits. The ordinary suite passed 583 tests;
 the separate manual pressure script passed its 10 checks, and analysis passed.
+
+### Optional subtitle timeout and readiness (2026-09-21)
+
+The PlaybackState regression reproduced a specific 15-second failure with the
+bundled Windows libmpv: a stalled HTTP `sub-add` hits the adapter's reply deadline,
+while a subsequent `pause` property request still succeeds. Previously that
+exception escaped track restoration into `PlayerController._failOpen`, stopping
+already-ready media. This synthetic reproduction is not confirmation that the
+user's original server failed for exactly the same reason.
+
+External subtitles now load with `auto` after pinning the actual sid, then select
+only after successful completion. On timeout the backend checks the current
+session, readiness/surface failure state and a fresh sid reply within two seconds.
+A responsive session retains its selection and shows a track warning; a failed
+health check still retires playback. Late completion can add an unselected track
+without changing the user's selection. The existing surface watchdog remains
+active. Media readiness is published before optional restoration and Playing
+reporting; report failures stay in the ordered session queue. Request traces are
+bounded in memory and contain IDs, request names, timing and outcome, not arguments
+or credentials. No production log file is introduced.
+
+Executed `powershell -NoProfile -ExecutionPolicy Bypass -File tool/player_smoke.ps1`:
+the pre-change run is `build/player-validation/runs/20260921-204806-050`; the
+extended run is `build/player-validation/runs/20260921-210043-429` (both ignored
+local evidence). In the extended run, `player.jsonl` records readiness at 473 ms
+with Playing delayed, then continued playback at 16,050 ms. The slow-subtitle
+case was ready at 392 ms; native `command:sub-add` timed out after 15,015 ms,
+followed by a successful control check. Playback continued, and after the delayed
+subtitle arrived its sid remained false at about 20 seconds with position 19,666
+ms. `result.json` and `player-result.json` passed; the script restored the ordinary
+production release build afterward. Pause/resume, EOF, failed media, replay,
+subtitle selection, power requests and disposal were also exercised.
+
+This launches the actual Windows main and child windows with the native renderer.
+The recorded first-frame/watchdog and core screenshots do not independently
+verify Flutter's displayed pixels, absence of flicker or physical audio output.
+No new desktop pixel capture or human visual/audio inspection was performed.
+The native package tests use real libmpv when `RILLIGHT_TEST_MPV` points to
+`build/windows/x64/runner/Release/libmpv-2.dll` and `RILLIGHT_TEST_MEDIA` to
+`build/player-validation/media/baseline.mp4`; their surface method channel is
+mocked or video output is null. These tests are distinct from the window smoke.
+Development checks passed: the two session/backend case files (45 tests),
+`flutter test test/suites/player_test.dart` (69 tests), and
+`flutter test packages/rillight_player/test` with the above native variables
+(47 tests, including the real 15-second subtitle timeout). Targeted Dart analysis
+and changed-source formatting passed. An initial trace implementation triggered
+synchronous stream reentrancy; trace delivery now uses a microtask, and its tests
+wait for diagnostic delivery before checking replies. The full adapter suite
+passed after these corrections.
+macOS/Linux native checks and full Delivery verification remain unexecuted for
+this change.

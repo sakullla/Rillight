@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -184,6 +185,42 @@ void main() {
   );
 
   test(
+    'native request diagnostics correlate replies without media arguments',
+    () async {
+      final player = await create();
+      addTearDown(player.dispose);
+      final records = <Map>[];
+      final subscription = player.events
+          .where((e) => e.type == 'request')
+          .listen((e) => records.add(e.value as Map));
+      addTearDown(subscription.cancel);
+      await player.command(['loadfile', media!, 'replace']);
+      await Future.wait(List.generate(140, (_) => player.getProperty('pause')));
+      await expectLater(
+        player.setProperty('not-a-real-property', 'private-value'),
+        throwsStateError,
+      );
+      await Future<void>.delayed(Duration.zero);
+      final sent = records.where((e) => e['outcome'] == 'sent').toList();
+      final completed = records
+          .where(
+            (e) =>
+                e['outcome'] == 'completed' &&
+                sent.any((s) => s['id'] == e['id']),
+          )
+          .toList();
+      expect(sent, hasLength(142));
+      expect(completed, hasLength(141));
+      expect(records.where((e) => e['outcome'] == 'rejected'), hasLength(1));
+      expect(sent.map((e) => e['id']).toSet(), hasLength(142));
+      expect(records.toString(), isNot(contains(media)));
+      expect(records.toString(), isNot(contains('private-value')));
+      expect(completed.every((e) => e['elapsedMs'] is int), isTrue);
+    },
+    skip: unavailable,
+  );
+
+  test(
     'natural EOF differs from stop and repeated disposal is awaitable',
     () async {
       final player = await create();
@@ -201,6 +238,47 @@ void main() {
       expect(identical(first, player.dispose()), true);
       await first;
       await expectLater(player.getProperty('duration'), throwsStateError);
+    },
+    skip: unavailable,
+  );
+
+  test(
+    'slow external subtitle times out while native controls remain responsive',
+    () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final requests = <HttpRequest>[];
+      final subscription = server.listen(requests.add);
+      addTearDown(() async {
+        await subscription.cancel();
+        await server.close(force: true);
+      });
+      final player = await create();
+      addTearDown(player.dispose);
+      final loaded = player.events.firstWhere((e) => e.type == 'file-loaded');
+      await player.command(['loadfile', media!, 'replace']);
+      await loaded;
+      await player.setProperty('pause', 'yes');
+      final watch = Stopwatch()..start();
+      await expectLater(
+        player.command([
+          'sub-add',
+          'http://127.0.0.1:${server.port}/slow.srt',
+          'select',
+        ]),
+        throwsA(isA<TimeoutException>()),
+      );
+      expect(watch.elapsed, greaterThanOrEqualTo(const Duration(seconds: 15)));
+      expect(requests, isNotEmpty);
+      expect(
+        await player.getProperty('pause').timeout(const Duration(seconds: 2)),
+        true,
+      );
+      for (final request in requests) {
+        request.response.write(
+          '1\n00:00:00,000 --> 00:00:30,000\nLate subtitle\n',
+        );
+        await request.response.close();
+      }
     },
     skip: unavailable,
   );

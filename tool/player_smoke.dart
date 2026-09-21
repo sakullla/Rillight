@@ -162,6 +162,90 @@ Future<void> main(List<String> args) async {
         'position': controller.position.inMilliseconds,
         'playing': controller.isPlaying,
       });
+      await controller.setRate(1);
+      final switchWatch = Stopwatch()..start();
+      final delayedSwitch = controller.playEpisode(
+        EmbyItem.fromJson({
+          'Id': 'delayed-report',
+          'Type': 'Movie',
+          'Name': 'delayed-report',
+        }),
+      );
+      await _until(() => !controller.loading && controller.isPlaying);
+      final readyMs = switchWatch.elapsedMilliseconds;
+      await record('delayed-report-ready', {
+        'readyMs': readyMs,
+        'itemId': controller.itemId,
+        ...await backend.diagnostics(),
+      });
+      if (readyMs >= 15000) throw StateError('Readiness waited for Playing');
+      final readyPosition = controller.position;
+      await delayedSwitch;
+      await _until(() => switchWatch.elapsedMilliseconds >= 16000);
+      if (controller.loading ||
+          controller.error != null ||
+          controller.disconnected ||
+          !controller.isPlaying ||
+          !controller.progressSyncFailed ||
+          controller.position - readyPosition < const Duration(seconds: 10)) {
+        throw StateError('Playing timeout interrupted healthy media');
+      }
+      await record('delayed-report-timeout-survived', {
+        'elapsedMs': switchWatch.elapsedMilliseconds,
+        'readyMs': readyMs,
+        'positionMs': controller.position.inMilliseconds,
+        'syncFailed': controller.progressSyncFailed,
+        ...await backend.diagnostics(),
+      });
+      switchWatch.reset();
+      final subtitleSwitch = controller.playEpisode(
+        EmbyItem.fromJson({
+          'Id': 'delayed-subtitle',
+          'Type': 'Movie',
+          'Name': 'delayed-subtitle',
+        }),
+      );
+      await _until(() => !controller.loading && controller.isPlaying);
+      final subtitleReadyMs = switchWatch.elapsedMilliseconds;
+      await subtitleSwitch;
+      if (controller.error != null ||
+          controller.disconnected ||
+          !controller.isPlaying ||
+          controller.trackFailure == null ||
+          controller.subtitleStreamIndex != null) {
+        throw StateError(
+          'Optional subtitle timeout stopped media or committed selection',
+        );
+      }
+      await record('subtitle-timeout-survived', {
+        'readyMs': subtitleReadyMs,
+        'elapsedMs': switchWatch.elapsedMilliseconds,
+        'positionMs': controller.position.inMilliseconds,
+        ...await backend.diagnostics(),
+      });
+      // The fixture releases the subtitle at 18 seconds. It must remain
+      // unselected even after the timed-out command finally completes.
+      await _until(() => switchWatch.elapsedMilliseconds >= 20000);
+      final nativeView = _find<MpvVideoView>(
+        (element) => element.widget is MpvVideoView
+            ? element.widget as MpvVideoView
+            : null,
+      )!;
+      final lateSid = await nativeView.player.getProperty('sid');
+      final lateTracks =
+          await nativeView.player.getProperty('track-list') as List;
+      if (lateSid != false ||
+          controller.subtitleStreamIndex != null ||
+          !controller.isPlaying ||
+          controller.position < const Duration(seconds: 18) ||
+          !lateTracks.any((track) => track is Map && track['type'] == 'sub')) {
+        throw StateError('Late subtitle changed selection or media stopped');
+      }
+      await record('late-subtitle-remained-unselected', {
+        'elapsedMs': switchWatch.elapsedMilliseconds,
+        'sid': lateSid,
+        'positionMs': controller.position.inMilliseconds,
+      });
       for (final item in [
         'tracks',
         'hls',

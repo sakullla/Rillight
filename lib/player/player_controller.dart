@@ -812,10 +812,18 @@ class PlayerController extends ChangeNotifier {
     final operation = _beginOperation();
     if (operation == null || _disposed) return;
     final stopped = _stopSession();
+    itemId = targetId;
+    item = null;
+    resolved = null;
+    position = duration = buffer = Duration.zero;
+    isPlaying = false;
+    loading = true;
+    state.phase = PlaybackPhase.loading;
+    state.buffering = false;
+    _emit();
     await _operations.interrupt(backend.stop);
     await stopped;
     if (!_accepts(operation)) return;
-    itemId = targetId;
     activeMediaSourceId = null;
     preferredMediaSourceId = null;
     preferredAudioStreamIndex = null;
@@ -1518,10 +1526,12 @@ class PlayerController extends ChangeNotifier {
               : 0;
         case VideoEventKind.buffering:
           state.buffering = event.value as bool;
-          state.updatePlaying(isPlaying);
+          if (!loading) state.updatePlaying(isPlaying);
         case VideoEventKind.playing:
+          if (state.phase == PlaybackPhase.failed) return;
+          final changed = isPlaying != event.value;
           isPlaying = event.value as bool;
-          state.updatePlaying(isPlaying);
+          if (!loading) state.updatePlaying(isPlaying);
           if (isPlaying) {
             disconnected = false;
             disconnectDetail = null;
@@ -1530,7 +1540,7 @@ class PlayerController extends ChangeNotifier {
             controlsVisible = true;
             _hideTimer?.cancel();
           }
-          if (_sessionStarted && !disconnected) {
+          if (changed && _sessionStarted && !disconnected) {
             unawaited(
               _reportProgress(eventName: isPlaying ? 'Unpause' : 'Pause'),
             );
@@ -1547,6 +1557,8 @@ class PlayerController extends ChangeNotifier {
           final message = event.value as String;
           if (!isFatalPlaybackError(message, playing: isPlaying)) return;
           disconnected = true;
+          isPlaying = false;
+          loading = false;
           disconnectDetail = message.trim().isEmpty ? null : message.trim();
           controlsVisible = true;
           state.phase = PlaybackPhase.failed;
@@ -1621,6 +1633,7 @@ class PlayerController extends ChangeNotifier {
       if (next == null) {
         error = PlayerErrorKind.noStream;
         loading = false;
+        state.phase = PlaybackPhase.failed;
         _emit();
         return;
       }
@@ -1663,6 +1676,7 @@ class PlayerController extends ChangeNotifier {
         }
       }
 
+      Future<void>? started;
       await _operations.run(operation, () async {
         await backend.open(
           VideoOpenRequest(
@@ -1683,45 +1697,59 @@ class PlayerController extends ChangeNotifier {
           ),
         );
         if (!_accepts(operation)) return;
-        await backend.setVolume(mpvVolumeForPercent(volume));
-        // 换集/重开不重置倍速:mpv 重新起流后显式恢复当前倍速。
-        if (!_accepts(operation)) return;
-        await backend.setRate(playbackRate);
-        if (!_accepts(operation)) return;
         final runtime =
             next.mediaSource.runTimeTicks ?? item?.runTimeTicks ?? 0;
         if (runtime > 0) {
           duration = durationFromTicks(runtime);
         }
-        _setPosition(durationFromTicks(startTicks));
+        _setPosition(backend.position);
         _rebuildSkipSegments();
         isPlaying = backend.isPlaying;
-
-        await _applyTracks(
-          next,
+        audioStreamIndex = next.isTranscode
+            ? selectedAudio
+            : backend.selectedAudioIndex;
+        subtitleStreamIndex = next.isTranscode
+            ? selectedSubtitle
+            : backend.selectedSubtitleIndex;
+        loading = false;
+        state.updatePlaying(isPlaying);
+        // Publish readiness before optional commands or Playing can block.
+        _emit();
+        started = _beginSession(operation, startTicks: startTicks);
+        if (_pendingCompletion) {
+          _pendingCompletion = false;
+          unawaited(_handleCompleted());
+        }
+        await _restoreParameter(
           operation,
-          audio: selectedAudio,
-          subtitle: selectedSubtitle,
+          () => backend.setVolume(mpvVolumeForPercent(volume)),
         );
+        await _restoreParameter(operation, () => backend.setRate(playbackRate));
+        await _restoreParameter(operation, () async {
+          if (selectedAudio != null && !next.isTranscode) {
+            await backend.setAudioIndex(selectedAudio);
+          }
+          if (_accepts(operation)) audioStreamIndex = selectedAudio;
+        });
+        await _restoreParameter(operation, () async {
+          await _applyTracks(
+            next,
+            operation,
+            audio: null,
+            subtitle: selectedSubtitle,
+          );
+          if (_accepts(operation)) subtitleStreamIndex = selectedSubtitle;
+        });
       });
-      if (!_accepts(operation)) return;
-      audioStreamIndex = selectedAudio;
-      subtitleStreamIndex = selectedSubtitle;
+      if (!_accepts(operation) || disconnected) return;
       // 换源/重开后部分后端会丢外挂字幕选择(字幕要等一会儿才出现),
       // 起流片刻后重断言一次,字幕晚显的问题即消失。
       _scheduleSubtitleReassert();
-      loading = false;
-      state.updatePlaying(isPlaying);
-      final started = _beginSession(operation, startTicks: startTicks);
-      if (_pendingCompletion) {
-        _pendingCompletion = false;
-        unawaited(_handleCompleted());
-      }
       await started;
-      if (!_accepts(operation)) return;
+      if (!_accepts(operation) || disconnected) return;
       error = null;
       _preferredSourceName = _sourceFingerprint(next.mediaSource);
-      await _persistSeriesPreference();
+      if (trackFailure == null) await _persistSeriesPreference();
       if (!_accepts(operation)) return;
       // 续播落在片头/片尾或最后几分钟时,loading 期间的 position 不会弹出
       // 跳过/下一集;开流完成后再判一次。
@@ -1736,16 +1764,38 @@ class PlayerController extends ChangeNotifier {
     }
   }
 
+  Future<void> _restoreParameter(
+    PlaybackOperation operation,
+    Future<void> Function() apply,
+  ) async {
+    if (!_accepts(operation) || disconnected) return;
+    try {
+      await apply();
+    } on TimeoutException {
+      // A missing native reply does not establish a healthy control channel.
+      rethrow;
+    } catch (failure) {
+      if (_accepts(operation) && !disconnected) {
+        trackFailure = failure.toString();
+        _emit();
+      }
+    }
+  }
+
   Future<void> _failOpen(
     PlaybackOperation operation, {
     EmbyException? failure,
     String? detail,
   }) async {
     if (!_accepts(operation)) return;
+    final stopped = _session?.id == operation.id
+        ? _stopSession()
+        : Future<void>.value();
     try {
       // Queue cleanup with the failed open's identity. A new operation can
       // supersede it while queued, and must never be stopped by stale cleanup.
       await _operations.run(operation, backend.stop);
+      await stopped;
     } finally {
       if (_accepts(operation)) {
         isPlaying = false;
@@ -1893,6 +1943,9 @@ class PlayerController extends ChangeNotifier {
     } on EmbyException catch (failure) {
       if (!_ownsSession(session) || !_accepts(operation)) return;
       _onReportFailed(failure);
+    } catch (_) {
+      if (!_ownsSession(session) || !_accepts(operation)) return;
+      _onReportFailed(null);
     }
     if (!_ownsSession(session)) return;
     _progressTimer?.cancel();
@@ -1916,6 +1969,8 @@ class PlayerController extends ChangeNotifier {
       _writeSnapshot(session, report);
     } on EmbyException catch (failure) {
       if (_ownsSession(session)) _onReportFailed(failure);
+    } catch (_) {
+      if (_ownsSession(session)) _onReportFailed(null);
     }
   }
 
@@ -1954,7 +2009,9 @@ class PlayerController extends ChangeNotifier {
           .enqueue(() => client.reportStopped(report))
           .timeout(stoppedTimeout);
       if (!session.ownsCredentials) return;
-      if (_session == null) _onReportSucceeded();
+      if (_session == null && _operations.current?.id == session.id) {
+        _onReportSucceeded();
+      }
       await _enqueueSnapshot(() async {
         final snapshot = await snapshotStore.read();
         if (_snapshotOwner == session.id &&
@@ -1966,9 +2023,17 @@ class PlayerController extends ChangeNotifier {
         }
       });
     } on EmbyException catch (failure) {
-      if (_session == null && session.ownsCredentials) _onReportFailed(failure);
-    } on TimeoutException {
-      if (_session == null) _onReportFailed(null);
+      if (_session == null &&
+          session.ownsCredentials &&
+          _operations.current?.id == session.id) {
+        _onReportFailed(failure);
+      }
+    } catch (_) {
+      if (_session == null &&
+          session.ownsCredentials &&
+          _operations.current?.id == session.id) {
+        _onReportFailed(null);
+      }
     }
   }
 

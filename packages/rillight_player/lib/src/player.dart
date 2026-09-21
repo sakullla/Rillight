@@ -204,21 +204,57 @@ class MpvPlayer {
   Future<Object?> _request(
     String op, [
     Map<String, Object?> arguments = const {},
-  ]) {
+  ]) async {
     if (_closing && op != 'dispose') {
       return Future.error(StateError('Player is closing'));
     }
     final id = ++_nextId;
+    final watch = Stopwatch()..start();
+    // Only operation names, never arguments, URLs, paths or property values.
+    final kind = op == 'command'
+        ? (arguments['args'] as List<String>).first
+        : arguments['name'] as String?;
+    final label = kind != null && RegExp(r'^[a-z][a-z0-9-]*$').hasMatch(kind)
+        ? '$op:$kind'
+        : op;
+    void trace(String outcome) {
+      final event = MpvEvent(
+        'request',
+        value: {
+          'id': id,
+          'request': label,
+          'elapsedMs': watch.elapsedMilliseconds,
+          'outcome': outcome,
+        },
+      );
+      // Requests can originate inside a synchronous file-loaded listener.
+      scheduleMicrotask(() {
+        if (!_closing && !_closed) _events.add(event);
+      });
+    }
+
     final completer = Completer<Object?>();
     _pending[id] = completer;
     _commands!.send({'id': id, 'op': op, ...arguments});
-    return completer.future.timeout(
-      const Duration(seconds: 15),
-      onTimeout: () {
-        _pending.remove(id);
-        throw TimeoutException('libmpv $op reply timed out');
-      },
-    );
+    trace('sent');
+    try {
+      final result = await completer.future.timeout(
+        const Duration(seconds: 15),
+      );
+      trace('completed');
+      return result;
+    } on TimeoutException {
+      _pending.remove(id);
+      trace('timeout');
+      final error = TimeoutException(
+        'libmpv $label reply timed out',
+        const Duration(seconds: 15),
+      );
+      throw error;
+    } catch (_) {
+      trace('rejected');
+      rethrow;
+    }
   }
 
   Future<void> command(List<String> arguments) async {

@@ -333,11 +333,34 @@ void main() {
     var opened = false;
     final opening = backend.open(request(1)).then((_) => opened = true);
     await _until(() => driver.commands.isNotEmpty);
+    for (final seconds in [300, 301, 302]) {
+      driver.eventsController.add(
+        MpvEvent('property', property: 'time-pos', value: seconds),
+      );
+    }
+    await Future<void>.delayed(Duration.zero);
+    // Seek/resume and an advancing audio clock cannot replace video evidence.
     expect(opened, isFalse);
     driver.eventsController.add(const MpvEvent('first-frame'));
     await opening;
     expect(opened, isTrue);
   });
+
+  test(
+    'missing track metadata cannot masquerade as ready audio-only media',
+    () async {
+      await backend.dispose();
+      final driver = _Driver()..tracks.clear();
+      backend = MpvVideoBackend(
+        wakeLock: PlaybackWakeLock(coordinator: wakeCoordinator),
+        settingsStore: MemoryPlayerSettingsStore(),
+        diskCacheDirectory: cache,
+        createSession: (_) async => driver,
+      );
+      await expectLater(backend.open(request(1)), throwsStateError);
+      expect(driver.disposed, 1);
+    },
+  );
 
   test('audio-only media never waits for a video frame', () async {
     await backend.dispose();
@@ -351,6 +374,41 @@ void main() {
     );
     await backend.open(request(1));
     expect(backend.isPlaying, isTrue);
+  });
+
+  test(
+    'optional subtitle timeout retains selection and healthy media',
+    () async {
+      await backend.open(request(1));
+      final driver = drivers.single;
+      await backend.setSubtitleIndex(5);
+      driver.subtitleTimeout = true;
+      await expectLater(
+        backend.setSubtitleUri(Uri.file('slow.srt')),
+        throwsStateError,
+      );
+      expect(driver.commands.last[2], 'auto');
+      expect(driver.properties['sid'], '30');
+      expect(backend.isPlaying, isTrue);
+      expect(driver.disposed, 0);
+      expect(
+        (await backend.diagnostics())['openTrace'].toString(),
+        contains('subtitle-timeout-control-responsive'),
+      );
+    },
+  );
+
+  test('subtitle timeout with lost control still retires the media', () async {
+    await backend.open(request(1));
+    final driver = drivers.single;
+    driver.subtitleTimeout = true;
+    driver.loseControl = true;
+    await expectLater(
+      backend.setSubtitleUri(Uri.file('slow.srt')),
+      throwsStateError,
+    );
+    await _until(() => driver.disposed == 1);
+    expect(backend.isPlaying, isFalse);
   });
 
   test(
@@ -478,6 +536,9 @@ class _Driver implements MpvSessionDriver {
   bool firstFrame = true;
   bool failOpen = false;
   bool failSurface = false;
+  bool subtitleTimeout = false;
+  bool loseControl = false;
+  bool subtitleRequested = false;
   int disposed = 0;
   @override
   Stream<MpvEvent> get events => eventsController.stream;
@@ -486,6 +547,11 @@ class _Driver implements MpvSessionDriver {
   @override
   Future<void> command(List<String> arguments) async {
     commands.add(arguments);
+    if (arguments.first == 'sub-add') {
+      subtitleRequested = true;
+      if (subtitleTimeout) throw TimeoutException('sub-add timed out');
+      tracks.add({'type': 'sub', 'id': 99, 'external-filename': arguments[1]});
+    }
     if (arguments.first == 'loadfile') {
       if (failOpen) throw StateError('open failed');
       eventsController.add(const MpvEvent('file-loaded'));
@@ -501,8 +567,12 @@ class _Driver implements MpvSessionDriver {
   }
 
   @override
-  Future<Object?> getProperty(String name) async =>
-      name == 'track-list' ? tracks : null;
+  Future<Object?> getProperty(String name) async {
+    if (loseControl && subtitleRequested) throw StateError('Control lost');
+    if (name == 'sid') return int.tryParse(properties['sid'] ?? '') ?? false;
+    return name == 'track-list' ? tracks : null;
+  }
+
   @override
   Future<void> setProperty(String name, String value) async {
     properties[name] = value;

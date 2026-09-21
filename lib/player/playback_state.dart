@@ -18,6 +18,7 @@ class PlaybackState {
   void updatePlaying(bool playing) {
     if (phase == PlaybackPhase.closing ||
         phase == PlaybackPhase.closed ||
+        phase == PlaybackPhase.failed ||
         phase == PlaybackPhase.ended) {
       return;
     }

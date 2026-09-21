@@ -298,16 +298,17 @@ void main() {
   );
 
   for (final stage in ['volume', 'rate', 'audio', 'subtitle']) {
-    test('failed $stage initialization stops the opened media', () async {
+    test('rejected $stage restoration keeps ready media and warns', () async {
       backend.failInitialization = stage;
       await controller.start();
       expect(backend.openCount, 1);
-      expect(backend.isPlaying, isFalse);
-      expect(controller.isPlaying, isFalse);
+      expect(backend.isPlaying, isTrue);
+      expect(controller.isPlaying, isTrue);
       expect(controller.loading, isFalse);
-      expect(controller.error, PlayerErrorKind.load);
-      expect(controller.state.phase, PlaybackPhase.failed);
-      expect(client.reports, isEmpty);
+      expect(controller.error, isNull);
+      expect(controller.state.phase, PlaybackPhase.playing);
+      expect(controller.trackFailure, contains('$stage failed'));
+      expect(client.reports.where((e) => e.$1 == 'Playing'), hasLength(1));
       backend.failInitialization = null;
       await controller.start();
       expect(controller.error, isNull);
@@ -327,8 +328,96 @@ void main() {
     expect(controller.error, isNull);
     expect(backend.isPlaying, isTrue);
     expect(
-      client.reports.where((e) => e.$1 == 'Playing').single.$2.itemId,
+      client.reports.where((e) => e.$1 == 'Playing').last.$2.itemId,
       'episode-friends-s1e1',
+    );
+  });
+
+  test(
+    'readiness notifies before parameter restoration or reporting',
+    () async {
+      final gate = backend.rateGate = Completer<void>();
+      client.playingGate = Completer<void>();
+      var notifiedReady = false;
+      controller.addListener(() {
+        if (!controller.loading && controller.isPlaying) notifiedReady = true;
+      });
+      final starting = controller.start();
+      await _until(() => backend.rateStarted);
+      expect(notifiedReady, isTrue);
+      expect(controller.state.phase, PlaybackPhase.playing);
+      backend.emitBuffering(true);
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.state.phase, PlaybackPhase.buffering);
+      gate.complete();
+      client.playingGate!.complete();
+      await starting;
+      expect(controller.state.phase, PlaybackPhase.buffering);
+    },
+  );
+
+  test(
+    'Playing timeout cannot stop ready media or poison report ordering',
+    () async {
+      final gate = client.playingGate = Completer<void>();
+      final starting = controller.start();
+      await _until(() => client.reports.any((e) => e.$1 == 'Playing'));
+      expect(controller.loading, isFalse);
+      gate.completeError(
+        TimeoutException('Playing timed out', const Duration(seconds: 15)),
+      );
+      await starting;
+      expect(controller.progressSyncFailed, isTrue);
+      expect(controller.error, isNull);
+      expect(backend.isPlaying, isTrue);
+      await controller.seekTo(const Duration(seconds: 5));
+      expect(client.reports.map((e) => e.$1), ['Playing', 'Progress']);
+      expect(controller.progressSyncFailed, isFalse);
+    },
+  );
+
+  test(
+    'a native reply timeout remains fatal after readiness and can retry',
+    () async {
+      backend.rateGate = Completer<void>();
+      final starting = controller.start();
+      await _until(() => backend.rateStarted);
+      expect(controller.loading, isFalse);
+      backend.rateGate!.completeError(
+        TimeoutException(
+          'libmpv set:speed reply timed out',
+          const Duration(seconds: 15),
+        ),
+      );
+      await starting;
+      expect(controller.error, PlayerErrorKind.load);
+      expect(backend.isPlaying, isFalse);
+      backend.emitEvent(VideoEventKind.playing, false);
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.state.phase, PlaybackPhase.failed);
+      backend.rateGate = null;
+      await controller.start();
+      expect(controller.error, isNull);
+      expect(controller.isPlaying, isTrue);
+    },
+  );
+
+  test('rapid A B C exposes only C while old metadata finishes late', () async {
+    await controller.start();
+    final gate = client.itemGates['episode-friends-s1e1'] = Completer<void>();
+    final second = controller.playEpisode(episode('episode-friends-s1e1'));
+    expect(controller.itemId, 'episode-friends-s1e1');
+    expect(controller.loading, isTrue);
+    expect(controller.item, isNull);
+    await _until(() => client.requestedItems.contains('episode-friends-s1e1'));
+    await controller.playEpisode(episode('episode-friends-s1e2'));
+    gate.complete();
+    await second;
+    expect(controller.itemId, 'episode-friends-s1e2');
+    expect(controller.item?.id, controller.itemId);
+    expect(
+      client.reports.where((e) => e.$1 == 'Playing').map((e) => e.$2.itemId),
+      ['movie-up', 'episode-friends-s1e2'],
     );
   });
 
