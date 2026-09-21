@@ -739,17 +739,6 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     );
   }
 
-  void _openSeason(EmbyItem season) {
-    unawaited(_selectSeason(season.id));
-    context.push(
-      AppRoutes.shelfItems(
-        parentId: season.id,
-        includeItemTypes: 'Episode',
-        title: season.name,
-      ),
-    );
-  }
-
   Future<void> _openPlayer(
     String itemId, {
     int? startTimeTicks,
@@ -2138,10 +2127,16 @@ class _DetailHeader extends StatelessWidget {
                     crossAxisAlignment: width < AppBreakpoints.compact
                         ? CrossAxisAlignment.start
                         : CrossAxisAlignment.end,
+                    mainAxisSize: width < AppBreakpoints.compact
+                        ? MainAxisSize.min
+                        : MainAxisSize.max,
                     children: [
                       _DetailPoster(item: item, layoutWidth: width),
                       const SizedBox(width: AppSpacing.xl),
-                      Expanded(
+                      Flexible(
+                        fit: width < AppBreakpoints.compact
+                            ? FlexFit.loose
+                            : FlexFit.tight,
                         child: _DetailInfo(
                           item: item,
                           runtime: runtime,
