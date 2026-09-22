@@ -39,6 +39,8 @@ class MediaStreamInfo {
     this.isDefault = false,
     this.isExternal = false,
     this.isTextSubtitleStream,
+    this.deliveryMethod,
+    this.deliveryUrl,
     this.channels,
     this.width,
     this.height,
@@ -57,6 +59,10 @@ class MediaStreamInfo {
   /// 服务器标记的外挂字幕文件。缺省按容器内嵌处理。
   final bool isExternal;
   final bool? isTextSubtitleStream;
+
+  /// PlaybackInfo's selected subtitle delivery, independent of container origin.
+  final String? deliveryMethod;
+  final String? deliveryUrl;
   final int? channels;
   final int? width;
   final int? height;
@@ -136,6 +142,8 @@ class MediaStreamInfo {
       displayTitle: json['DisplayTitle']?.toString(),
       isDefault: json['IsDefault'] == true,
       isExternal: json['IsExternal'] == true,
+      deliveryMethod: json['DeliveryMethod']?.toString(),
+      deliveryUrl: json['DeliveryUrl']?.toString(),
       isTextSubtitleStream: json['IsTextSubtitleStream'] is bool
           ? json['IsTextSubtitleStream'] as bool
           : null,

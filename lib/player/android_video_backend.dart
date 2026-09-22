@@ -2,12 +2,13 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:rillight/emby/device_profile.dart';
+import 'package:rillight/player/playback_models.dart';
 import 'package:rillight/player/video_backend.dart';
 import 'package:rillight_android_player/rillight_android_player.dart';
 
 /// Media3 owns media resources; this adapter preserves controller identities.
 class AndroidVideoBackend extends VideoBackend
-    implements VideoBackendCapabilities {
+    implements VideoBackendCapabilities, VideoBackendTranscodeSubtitles {
   AndroidVideoBackend({AndroidPlayer? player})
     : _player = player ?? AndroidPlayer() {
     _subscription = _player.events.listen(_onEvent);
@@ -19,7 +20,7 @@ class AndroidVideoBackend extends VideoBackend
 
   /// Includes ready, firstFrame and interruption; useful to hosts and smoke tools.
   Stream<Map<String, dynamic>> get nativeEvents => _native.stream;
-  int _session = 0;
+  (String, int)? _identity;
   bool _disposed = false;
   bool _stopped = true;
   @override
@@ -52,7 +53,16 @@ class AndroidVideoBackend extends VideoBackend
   Stream<String> get errorStream => _values(VideoEventKind.error);
 
   void _onEvent(Map<String, dynamic> event) {
-    if (_disposed || _stopped) return;
+    // AndroidPlayer's broadcast is asynchronous: a new open can start after
+    // its first filter but before this listener consumes the queued event.
+    final identity = _identity;
+    if (_disposed ||
+        _stopped ||
+        identity == null ||
+        event['sessionId'] != identity.$1 ||
+        _player.session != identity.$1) {
+      return;
+    }
     _native.add(event);
     final kind = VideoEventKind.values
         .where((k) => k.name == event['kind'])
@@ -80,7 +90,30 @@ class AndroidVideoBackend extends VideoBackend
       default:
         break;
     }
-    _events.add(VideoBackendEvent(_session, kind, value));
+    _events.add(VideoBackendEvent(identity.$2, kind, value));
+  }
+
+  @override
+  TranscodeSubtitleDelivery transcodeSubtitleDelivery(MediaStreamInfo stream) {
+    switch (stream.deliveryMethod?.toLowerCase()) {
+      case 'encode':
+        return TranscodeSubtitleDelivery.burnIn;
+      case 'external':
+        return TranscodeSubtitleDelivery.external;
+      case 'hls':
+      case 'embed':
+        return TranscodeSubtitleDelivery.manifest;
+    }
+    // Older servers omit DeliveryMethod. Match our advertised profile, not
+    // IsExternal (which describes where the original subtitle was stored).
+    return const {
+          'srt',
+          'subrip',
+          'vtt',
+          'webvtt',
+        }.contains(stream.codec?.toLowerCase())
+        ? TranscodeSubtitleDelivery.external
+        : TranscodeSubtitleDelivery.burnIn;
   }
 
   @override
@@ -95,14 +128,14 @@ class AndroidVideoBackend extends VideoBackend
 
   @override
   Future<void> open(VideoOpenRequest request) async {
-    _session = request.sessionId;
+    _identity = null;
     _stopped = false;
     position = request.start;
     duration = buffer = Duration.zero;
     isPlaying = false;
     selectedAudioIndex = selectedSubtitleIndex = null;
     try {
-      final result = await _player.open({
+      final opening = _player.open({
         'url': request.url.toString(),
         'start': request.start.inMilliseconds,
         'paused': request.startPaused,
@@ -115,10 +148,17 @@ class AndroidVideoBackend extends VideoBackend
               'index': s.index,
               'type': s.type,
               'language': s.language,
-              'external': s.isExternal,
+              'external': request.playMethod == PlayMethod.transcode
+                  ? transcodeSubtitleDelivery(s) !=
+                        TranscodeSubtitleDelivery.manifest
+                  : s.isExternal,
             },
         ],
       });
+      final identity = (_player.session, request.sessionId);
+      _identity = identity;
+      final result = await opening;
+      if (_identity != identity) throw StateError('Superseded Android open');
       selectedAudioIndex = result['audioIndex'] as int?;
       selectedSubtitleIndex = result['subtitleIndex'] as int?;
     } on PlatformException catch (error) {
@@ -134,8 +174,10 @@ class AndroidVideoBackend extends VideoBackend
     String method, [
     Map<String, dynamic> args = const {},
   ]) async {
+    final identity = _identity;
     try {
       final result = await _player.command(method, args);
+      if (_identity != identity) throw StateError('Superseded Android command');
       selectedAudioIndex = result['audioIndex'] as int?;
       selectedSubtitleIndex = result['subtitleIndex'] as int?;
     } on PlatformException catch (error) {

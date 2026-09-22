@@ -22,6 +22,13 @@ files must be inside application-private storage; PlayerController downloads
 them with origin-scoped authorization and bounded redirects. Malformed or
 unsupported subtitles fail independently of video playback.
 
+For HLS transcodes, `MediaStreamInfo.deliveryMethod` and `deliveryUrl` preserve
+PlaybackInfo's delivery contract: External downloads and awaits native selection,
+Hls/Embed maps the manifest track, and Encode keeps server burn-in. Missing
+delivery metadata follows the Android advertised SRT/WebVTT External profile.
+Only confirmed selections update controller state and playback reports. Desktop
+backends keep their existing server burn-in behavior.
+
 `VideoBackendCapabilities.deviceProfile` injects runtime H.264/AAC availability,
 8-bit/1080p/stereo constraints and a 20 Mbps ceiling into PlaybackInfo. Unsupported
 decoders are not advertised. A direct decoder/container failure permits one HLS
@@ -85,3 +92,13 @@ virtual audio. Native callbacks and position alone do not prove displayed frames
 or audible output. An emulator result does not establish physical speaker output,
 hardware decode performance or long-running GPU stability. After smoke, rebuild
 the normal app with `flutter build apk --debug` before installing for normal use.
+
+To isolate the shared-controller HLS/external-subtitle regression, place
+`sample.srt` and `sample.vtt` beside the HLS fixture with visible synthetic text
+covering the entire clip, leave `missing-subtitle.srt` absent, and build with
+`--dart-define=ANDROID_SMOKE_HLS_SUBTITLES_ONLY=true`. This branch uses synthetic
+PlaybackInfo metadata with real authenticated HTTP downloads and real Media3;
+it checks SRT, WebVTT, failed switching preserving the selected subtitle, and
+subtitles off. Capture the `hls-controller-external-srt`,
+`hls-controller-external-vtt`, and `hls-controller-failure-preserved-vtt` stages.
+Require the same PASS marker and inspect the actual subtitle pixels separately.

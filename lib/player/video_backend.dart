@@ -36,6 +36,13 @@ abstract interface class VideoBackendCapabilities {
   Future<Map<String, dynamic>> deviceProfile(int maxStreamingBitrate);
 }
 
+enum TranscodeSubtitleDelivery { burnIn, external, manifest }
+
+/// Optional: desktop retains its existing server-burned transcode behavior.
+abstract interface class VideoBackendTranscodeSubtitles {
+  TranscodeSubtitleDelivery transcodeSubtitleDelivery(MediaStreamInfo stream);
+}
+
 class VideoCompatibilityException implements Exception {
   const VideoCompatibilityException(this.message);
   final String message;

@@ -697,7 +697,18 @@ class PlayerController extends ChangeNotifier {
     if (source == null) return;
     final stream = index == null ? null : source.streamByIndex(index);
     if (index != null && (stream == null || !stream.isSubtitle)) return;
-    if (isTranscode) {
+    final next = resolved!;
+    bool burned(int? selected) {
+      final candidate = selected == null
+          ? null
+          : source.streamByIndex(selected);
+      return next.isTranscode &&
+          candidate != null &&
+          _transcodeSubtitleDelivery(candidate) ==
+              TranscodeSubtitleDelivery.burnIn;
+    }
+
+    if (burned(index) || burned(subtitleStreamIndex)) {
       await _reopen(
         startTicks: ticksFromDuration(position),
         subtitle: index,
@@ -707,7 +718,7 @@ class PlayerController extends ChangeNotifier {
     }
     final previous = subtitleStreamIndex;
     await _selectTrack(
-      () => _activateSubtitle(source, index),
+      () => _activatePlaybackSubtitle(next, index),
       () {
         subtitleStreamIndex = index;
         _clearSubtitleNotice();
@@ -1795,7 +1806,12 @@ class PlayerController extends ChangeNotifier {
             playMethod: next.playMethod,
             isInfiniteStream: next.mediaSource.isInfiniteStream,
             mediaStreams: next.isTranscode
-                ? const []
+                ? [
+                    for (final stream in next.mediaSource.subtitleStreams)
+                      if (_transcodeSubtitleDelivery(stream) ==
+                          TranscodeSubtitleDelivery.manifest)
+                        stream,
+                  ]
                 : next.mediaSource.mediaStreams,
             startPaused: startPaused,
             start: durationFromTicks(startTicks),
@@ -1823,7 +1839,13 @@ class PlayerController extends ChangeNotifier {
         audioStreamIndex = next.isTranscode
             ? selectedAudio
             : backend.selectedAudioIndex;
-        subtitleStreamIndex = next.isTranscode
+        subtitleStreamIndex =
+            next.isTranscode &&
+                selectedSubtitle != null &&
+                _transcodeSubtitleDelivery(
+                      next.mediaSource.streamByIndex(selectedSubtitle)!,
+                    ) ==
+                    TranscodeSubtitleDelivery.burnIn
             ? selectedSubtitle
             : backend.selectedSubtitleIndex;
         loading = false;
@@ -1951,24 +1973,56 @@ class PlayerController extends ChangeNotifier {
     required int? subtitle,
   }) async {
     if (!_accepts(operation)) return;
+    await _activatePlaybackSubtitle(next, subtitle);
+  }
+
+  TranscodeSubtitleDelivery _transcodeSubtitleDelivery(
+    MediaStreamInfo stream,
+  ) => backend is VideoBackendTranscodeSubtitles
+      ? (backend as VideoBackendTranscodeSubtitles).transcodeSubtitleDelivery(
+          stream,
+        )
+      : TranscodeSubtitleDelivery.burnIn;
+
+  Future<void> _activatePlaybackSubtitle(
+    ResolvedPlayback next,
+    int? subtitle,
+  ) async {
     if (subtitle == null) {
       await backend.setSubtitleOff();
       return;
     }
     final stream = next.mediaSource.streamByIndex(subtitle);
     if (stream == null || !stream.isSubtitle) {
-      return;
+      throw StateError('Subtitle track is unavailable');
     }
     if (next.isTranscode) {
-      // 转码:字幕由服务器烧录进流,不另选择轨道。
-      return;
+      switch (_transcodeSubtitleDelivery(stream)) {
+        case TranscodeSubtitleDelivery.burnIn:
+          // Preserve desktop/server Encode behavior.
+          return;
+        case TranscodeSubtitleDelivery.external:
+          await _activateSubtitle(
+            next.mediaSource,
+            subtitle,
+            forceExternal: true,
+          );
+          return;
+        case TranscodeSubtitleDelivery.manifest:
+          await backend.setSubtitleIndex(subtitle);
+          return;
+      }
     }
     await _activateSubtitle(next.mediaSource, subtitle);
   }
 
   /// 内嵌文本按容器流索引切换。外挂文本先整文件下载到本地,再交给 mpv。
   /// 菜单勾选只在调用方确认这次选择已经生效后更新。
-  Future<void> _activateSubtitle(PlaybackMediaSource source, int? index) async {
+  Future<void> _activateSubtitle(
+    PlaybackMediaSource source,
+    int? index, {
+    bool forceExternal = false,
+  }) async {
     if (index == null) {
       await backend.setSubtitleOff();
       return;
@@ -1977,11 +2031,11 @@ class PlayerController extends ChangeNotifier {
     if (stream == null || !stream.isSubtitle) {
       throw StateError('Subtitle track is unavailable');
     }
-    if (stream.isBitmapSubtitle) {
+    if (!forceExternal && stream.isBitmapSubtitle) {
       await backend.setSubtitleIndex(index);
       return;
     }
-    if (!stream.isExternal) {
+    if (!forceExternal && !stream.isExternal) {
       try {
         // 内嵌文本(ASS 等)已在直连容器里。按流索引选择,避免再向
         // 服务器提取一份外挂文件(该请求会超时或选不中,字幕就不出现)。
@@ -1992,16 +2046,21 @@ class PlayerController extends ChangeNotifier {
       }
     }
     final previous = _activeSubtitleFile;
-    final local = await _downloadSubtitleFile(
-      client.subtitleStreamUrl(
-        itemId: itemId,
-        mediaSourceId: source.id,
-        index: index,
-        format: stream.externalSubtitleFormat,
-      ),
-      index,
-      stream.externalSubtitleFormat,
-    );
+    final deliveryUrl = stream.deliveryUrl;
+    final remote = deliveryUrl != null && deliveryUrl.isNotEmpty
+        ? embyResourceUri(client.baseUrl!, deliveryUrl, client.accessToken!)
+        : client.subtitleStreamUrl(
+            itemId: itemId,
+            mediaSourceId: source.id,
+            index: index,
+            format: stream.externalSubtitleFormat,
+          );
+    final format = remote.path.toLowerCase().endsWith('.vtt')
+        ? 'vtt'
+        : remote.path.toLowerCase().endsWith('.srt')
+        ? 'srt'
+        : stream.externalSubtitleFormat;
+    final local = await _downloadSubtitleFile(remote, index, format);
     final applied = await backend.setSubtitleUri(local, title: stream.label);
     if (!applied) {
       throw StateError('External subtitle was not selected');

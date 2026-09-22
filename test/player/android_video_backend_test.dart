@@ -11,6 +11,56 @@ void main() {
   const channel = MethodChannel('android-backend-test');
   final messenger =
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+  for (final stale in {
+    'position': 90000,
+    'playing': true,
+    'error': 'old media failed',
+    'authenticationRequired': 401,
+  }.entries) {
+    test(
+      'queued ${stale.key} cannot cross the adapter microtask handoff',
+      () async {
+        final source = StreamController<dynamic>.broadcast();
+        final player = AndroidPlayer(channel: channel, events: source.stream);
+        final backend = AndroidVideoBackend(player: player);
+        messenger.setMockMethodCallHandler(
+          channel,
+          (call) async => {'sessionId': (call.arguments as Map)['sessionId']},
+        );
+        final received = <VideoBackendEvent>[];
+        final sub = backend.events.listen(received.add);
+        await backend.open(
+          VideoOpenRequest(sessionId: 1, url: Uri.parse('https://test/old')),
+        );
+        source.add({
+          'owner': player.owner,
+          'sessionId': player.session,
+          'kind': stale.key,
+          'value': stale.value,
+        });
+        final next = Completer<void>();
+        scheduleMicrotask(() {
+          backend
+              .open(
+                VideoOpenRequest(
+                  sessionId: 2,
+                  url: Uri.parse('https://test/new'),
+                  start: const Duration(seconds: 5),
+                ),
+              )
+              .then(next.complete, onError: next.completeError);
+        });
+        await next.future;
+        await Future<void>.delayed(Duration.zero);
+        expect(received, isEmpty);
+        expect(backend.position, const Duration(seconds: 5));
+        expect(backend.isPlaying, isFalse);
+        await backend.dispose();
+        await sub.cancel();
+        await source.close();
+      },
+    );
+  }
   test(
     'open remains unready until native reply; maps tracks and stops late events',
     () async {

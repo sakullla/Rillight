@@ -5,8 +5,15 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:rillight/emby/emby_client.dart';
+import 'package:rillight/emby/emby_device.dart';
+import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/player/android_video_backend.dart';
 import 'package:rillight/player/playback_models.dart';
+import 'package:rillight/player/playback_session_snapshot.dart';
+import 'package:rillight/player/player_controller.dart';
+import 'package:rillight/player/player_settings.dart';
+import 'package:rillight/player/player_window.dart';
 import 'package:rillight/player/video_backend.dart';
 
 void main() {
@@ -92,6 +99,10 @@ class _SmokeState extends State<_Smoke> {
 
   Future<void> run() async {
     try {
+      if (const bool.fromEnvironment('ANDROID_SMOKE_HLS_SUBTITLES_ONLY')) {
+        await runHlsSubtitles();
+        return;
+      }
       if (const bool.fromEnvironment('ANDROID_SMOKE_LOCAL')) {
         final http = HttpClient();
         final download = await http.getUrl(base.resolve('android-tracks.mkv'));
@@ -261,6 +272,67 @@ class _SmokeState extends State<_Smoke> {
     }
   }
 
+  Future<void> runHlsSubtitles() async {
+    // Only Emby metadata/reporting is synthetic. The shared controller fetches
+    // subtitle bytes over real authenticated HTTP and awaits real Media3 tracks.
+    final client = _HlsSubtitleClient()
+      ..attachSession(
+        baseUrl: base,
+        accessToken: 'synthetic-android-smoke',
+        userId: 'synthetic-user',
+      );
+    final controller = PlayerController(
+      client: client,
+      itemId: 'synthetic-hls',
+      backend: backend,
+      window: PlayerWindow(),
+      settingsStore: MemoryPlayerSettingsStore(),
+      snapshotStore: MemoryPlaybackSessionSnapshotStore(),
+    );
+    try {
+      await controller.start();
+      check(controller.error == null, 'HLS open failed: ${controller.error}');
+      check(controller.isTranscode, 'Expected HLS transcode path');
+      check(
+        controller.subtitleStreamIndex == 27 && controller.trackFailure == null,
+        'HLS SRT was not confirmed: ${controller.trackFailure}',
+      );
+      record('hls-controller-external-srt');
+      await Future<void>.delayed(const Duration(seconds: 4));
+      await controller.seekTo(Duration.zero);
+      await controller.setSubtitle(28);
+      check(
+        controller.subtitleStreamIndex == 28 && controller.trackFailure == null,
+        'HLS VTT was not confirmed: ${controller.trackFailure}',
+      );
+      record('hls-controller-external-vtt');
+      await Future<void>.delayed(const Duration(seconds: 4));
+      await controller.setSubtitle(29);
+      check(
+        controller.subtitleStreamIndex == 28 && controller.trackFailure != null,
+        'Failed HLS subtitle switch falsely committed',
+      );
+      check(
+        controller.error == null && backend.isPlaying,
+        'Subtitle failure poisoned video',
+      );
+      record('hls-controller-failure-preserved-vtt');
+      await Future<void>.delayed(const Duration(seconds: 2));
+      await controller.setSubtitle(null);
+      check(
+        controller.subtitleStreamIndex == null &&
+            controller.trackFailure == null,
+        'HLS subtitles off failed',
+      );
+      record('hls-controller-subtitles-off');
+      await Future<void>.delayed(const Duration(seconds: 1));
+    } finally {
+      await controller.disposeAsync();
+      controller.dispose();
+    }
+    record('RILLIGHT_ANDROID_SMOKE_PASS');
+  }
+
   @override
   Widget build(BuildContext context) => Scaffold(
     backgroundColor: Colors.black,
@@ -288,4 +360,69 @@ class _SmokeState extends State<_Smoke> {
     unawaited(backend.dispose());
     super.dispose();
   }
+}
+
+class _HlsSubtitleClient extends EmbyClient {
+  _HlsSubtitleClient()
+    : super(
+        device: const EmbyDeviceInfo(
+          clientName: 'Rillight smoke',
+          deviceName: 'synthetic',
+          deviceId: 'synthetic-hls',
+          version: '1',
+        ),
+      );
+
+  @override
+  Future<EmbyItem> getItem(String itemId, {String? fields}) async =>
+      EmbyItem.fromJson({
+        'Id': itemId,
+        'Name': 'Synthetic HLS',
+        'Type': 'Movie',
+        'RunTimeTicks': 120000000,
+      });
+
+  @override
+  Future<PlaybackInfo> getPlaybackInfo({
+    required String itemId,
+    int? maxStreamingBitrate,
+    int? startTimeTicks,
+    int? audioStreamIndex,
+    int? subtitleStreamIndex,
+    String? mediaSourceId,
+    Map<String, dynamic>? deviceProfile,
+    bool forceTranscode = false,
+  }) async => PlaybackInfo.fromJson({
+    'PlaySessionId': 'synthetic-hls-session',
+    'MediaSources': [
+      {
+        'Id': 'synthetic-hls-source',
+        'SupportsTranscoding': true,
+        'TranscodingUrl': '/stream.m3u8',
+        'DefaultSubtitleStreamIndex': 27,
+        'MediaStreams': [
+          for (final (index, codec, file) in [
+            (27, 'srt', 'sample.srt'),
+            (28, 'vtt', 'sample.vtt'),
+            (29, 'srt', 'missing-subtitle.srt'),
+          ])
+            {
+              'Index': index,
+              'Type': 'Subtitle',
+              'Codec': codec,
+              'IsExternal': true,
+              'DeliveryMethod': 'External',
+              'DeliveryUrl': '/$file',
+            },
+        ],
+      },
+    ],
+  });
+
+  @override
+  Future<void> reportPlaying(PlaybackReport report) async {}
+  @override
+  Future<void> reportProgress(PlaybackReport report) async {}
+  @override
+  Future<void> reportStopped(PlaybackReport report) async {}
 }
