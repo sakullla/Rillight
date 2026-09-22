@@ -21,6 +21,7 @@ class _TvShellState extends State<TvShell> with WidgetsBindingObserver {
   int _index = 0;
   bool _initialized = false, _recovering = false, _failed = false;
   final _home = FocusNode();
+  final _recoveryRetry = FocusNode();
   final _panes = List.generate(
     4,
     (_) => FocusScopeNode(
@@ -48,6 +49,7 @@ class _TvShellState extends State<TvShell> with WidgetsBindingObserver {
   Future<void> _recover() async {
     final store = PlayerScope.of(context).snapshotStore;
     if (store == null || _recovering) return;
+    final retrying = _failed;
     setState(() {
       _recovering = true;
       _failed = false;
@@ -57,7 +59,30 @@ class _TvShellState extends State<TvShell> with WidgetsBindingObserver {
     } catch (_) {
       if (mounted) setState(() => _failed = true);
     } finally {
-      if (mounted) setState(() => _recovering = false);
+      if (mounted) {
+        setState(() => _recovering = false);
+        if (_failed || retrying) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted && ModalRoute.of(context)?.isCurrent == true) {
+              _enterPane(_index);
+            }
+          });
+        }
+      }
+    }
+  }
+
+  void _enterPane(int index) {
+    if (_recovering) return;
+    // Recovery replaces the destination panes, so only target mounted content.
+    if (_failed) {
+      if (_recoveryRetry.context != null && _recoveryRetry.canRequestFocus) {
+        _recoveryRetry.requestFocus();
+      }
+    } else if (_panes[index].context != null) {
+      ReadingOrderTraversalPolicy()
+          .findFirstFocus(_panes[index])
+          ?.requestFocus();
     }
   }
 
@@ -80,6 +105,7 @@ class _TvShellState extends State<TvShell> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _home.dispose();
+    _recoveryRetry.dispose();
     for (final pane in _panes) {
       pane.dispose();
     }
@@ -118,9 +144,7 @@ class _TvShellState extends State<TvShell> with WidgetsBindingObserver {
                           if (event is KeyDownEvent &&
                               event.logicalKey ==
                                   LogicalKeyboardKey.arrowRight) {
-                            void enter() => ReadingOrderTraversalPolicy()
-                                .findFirstFocus(_panes[i])
-                                ?.requestFocus();
+                            void enter() => _enterPane(i);
                             if (_index == i) {
                               enter();
                             } else {
@@ -159,6 +183,7 @@ class _TvShellState extends State<TvShell> with WidgetsBindingObserver {
                         Text(l.mobileRecoveryFailed),
                         TvAction(
                           autofocus: true,
+                          focusNode: _recoveryRetry,
                           onPressed: _recover,
                           child: Text(l.retry),
                         ),

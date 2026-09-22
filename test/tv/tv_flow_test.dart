@@ -24,8 +24,9 @@ void main() {
   setUp(isolateImageCache);
   Future<(RillightApp, FakeVideoBackend)> start(
     WidgetTester tester,
-    FakeEmbyServer server,
-  ) async {
+    FakeEmbyServer server, {
+    PlaybackSessionSnapshotStore? snapshotStore,
+  }) async {
     tester.view.physicalSize = const Size(960, 540);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -47,7 +48,7 @@ void main() {
       environment: PresentationEnvironment.tv,
       playerBindings: PlayerBindings(
         createBackend: () => backend,
-        snapshotStore: MemoryPlaybackSessionSnapshotStore(),
+        snapshotStore: snapshotStore ?? MemoryPlaybackSessionSnapshotStore(),
         settingsStore: MemoryPlayerSettingsStore(),
       ),
     );
@@ -117,6 +118,46 @@ void main() {
       )
       .map((t) => t.data)
       .join(' ');
+
+  testWidgets('snapshot recovery retry is reachable from navigation', (
+    tester,
+  ) async {
+    final server = FakeEmbyServer(), store = _FailingRecoveryStore();
+    await start(tester, server, snapshotStore: store);
+    await login(tester, server);
+    expect(find.text('上次播放进度同步失败，请重试。'), findsOneWidget);
+    expect(focusedLabel(tester), '重试');
+    await key(tester, LogicalKeyboardKey.arrowLeft);
+    expect(focusedLabel(tester), isNot('重试'));
+    await key(tester, LogicalKeyboardKey.arrowRight);
+    expect(focusedLabel(tester), '重试');
+    store.fail = false;
+    await key(tester, LogicalKeyboardKey.select);
+    expect(store.reads, 2);
+    expect(find.text('上次播放进度同步失败，请重试。'), findsNothing);
+    expect(focusedAction(), findsOneWidget);
+    expect(focusedLabel(tester), isNotEmpty);
+    expect(tester.takeException(), isNull);
+  }, tags: ['integration']);
+
+  testWidgets('snapshot recovery repeated failure allows remote reconnection', (
+    tester,
+  ) async {
+    final server = FakeEmbyServer(), store = _FailingRecoveryStore();
+    final (app, _) = await start(tester, server, snapshotStore: store);
+    await login(tester, server);
+    expect(focusedLabel(tester), '重试');
+    await key(tester, LogicalKeyboardKey.select);
+    expect(store.reads, 2);
+    expect(focusedLabel(tester), '重试');
+    await key(tester, LogicalKeyboardKey.arrowDown);
+    expect(focusedLabel(tester), '连接');
+    await key(tester, LogicalKeyboardKey.select);
+    expect(app.auth.isLoggedIn, isFalse);
+    expect(find.byKey(const Key('tv-connect-address')), findsOneWidget);
+    expect(focusedAction(), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  }, tags: ['integration']);
 
   testWidgets(
     'remote login browse play seek tracks back restores exact source card',
@@ -446,4 +487,19 @@ void main() {
     },
     tags: ['integration'],
   );
+}
+
+class _FailingRecoveryStore extends MemoryPlaybackSessionSnapshotStore {
+  bool fail = true;
+  int reads = 0;
+
+  @override
+  Future<PlaybackSessionSnapshot?> read() async {
+    reads++;
+    // Let the navigation acquire focus before recovery fails, as a delayed
+    // snapshot read or interrupted-session report can do in production.
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    if (fail) throw StateError('Synthetic recovery failure');
+    return null;
+  }
 }
