@@ -383,8 +383,11 @@ void main() {
       final driver = drivers.single;
       await backend.setSubtitleIndex(5);
       driver.subtitleTimeout = true;
-      await backend.setSubtitleUri(Uri.file('slow.srt'));
-      expect(driver.commands.last[2], 'select');
+      await expectLater(
+        backend.setSubtitleUri(Uri.file('slow.srt')),
+        throwsStateError,
+      );
+      expect(driver.commands.last[2], 'auto');
       expect(driver.properties['sid'], '30');
       expect(backend.isPlaying, isTrue);
       expect(driver.disposed, 0);
