@@ -3,6 +3,7 @@ import 'package:rillight/app/theme/tokens.dart';
 
 /// hover/焦点卡片包装:指针悬停与键盘焦点显示同一套焦点环,
 /// 悬停时按倍率放大并叠加阴影。动画时长与曲线取自 [AppMotion]。
+/// [MediaQuery.disableAnimations] 为真时不放大,焦点环仍随高亮显示。
 ///
 /// 纯呈现组件,不持有业务数据;点击、焦点语义经 [onTap] 透传。
 class AppHoverCard extends StatefulWidget {
@@ -168,7 +169,7 @@ class _AppHoverCardState extends State<AppHoverCard> {
         ),
       ),
     );
-    if (widget.hoverScale == 1) {
+    if (widget.hoverScale == 1 || MediaQuery.disableAnimationsOf(context)) {
       return card;
     }
     return AnimatedScale(

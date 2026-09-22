@@ -93,6 +93,31 @@ void main() {
     expect(_ring(tester).top.width, 2);
   });
 
+  testWidgets(
+    'reduced motion keeps a default-scale card at scale 1 with the focus ring',
+    (tester) async {
+      final theme = AppTheme.dark();
+      await tester.pumpWidget(
+        MediaQuery(
+          data: const MediaQueryData(disableAnimations: true),
+          child: _wrap(
+            AppHoverCard(
+              onTap: () {},
+              child: const SizedBox(width: 120, height: 180),
+            ),
+          ),
+        ),
+      );
+      expect(find.byType(AnimatedScale), findsNothing);
+
+      await _hoverCard(tester);
+
+      expect(find.byType(AnimatedScale), findsNothing);
+      expect(tester.getSize(find.byType(AppHoverCard)), const Size(120, 180));
+      expect(_ring(tester).top.color, theme.colorScheme.primary);
+    },
+  );
+
   testWidgets('hoverScale of 1 shows the ring without enlarging', (
     tester,
   ) async {
