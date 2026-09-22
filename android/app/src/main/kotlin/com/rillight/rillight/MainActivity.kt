@@ -1,0 +1,31 @@
+package com.rillight.rillight
+
+import io.flutter.embedding.android.FlutterActivity
+import android.app.UiModeManager
+import android.content.Context
+import android.content.pm.PackageManager
+import android.content.res.Configuration
+import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.MethodChannel
+
+class MainActivity : FlutterActivity() {
+    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+        super.configureFlutterEngine(flutterEngine)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.rillight/environment")
+            .setMethodCallHandler { call, result ->
+                if (call.method != "isTelevision") {
+                    result.notImplemented()
+                    return@setMethodCallHandler
+                }
+                try {
+                    val mode = getSystemService(Context.UI_MODE_SERVICE) as UiModeManager
+                    result.success(
+                        mode.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION ||
+                            packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK)
+                    )
+                } catch (_: Exception) {
+                    result.error("device_detection", "Unable to identify device type", null)
+                }
+            }
+    }
+}

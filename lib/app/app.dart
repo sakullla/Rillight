@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/product.dart';
+import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/router.dart';
 import 'package:rillight/app/theme.dart';
 import 'package:rillight/auth/auth_controller.dart';
@@ -18,19 +19,49 @@ class RillightApp extends StatelessWidget {
     super.key,
     AuthController? auth,
     GoRouter? router,
+    this.environment = PresentationEnvironment.desktop,
     this.playerBindings = const PlayerBindings(),
   }) : auth = auth ?? AuthController.memory(),
        windowHost = playerBindings.windowHost ?? OverlayPlayerWindowHost() {
-    this.router = router ?? createAppRouter(auth: this.auth);
+    this.router =
+        router ?? createAppRouter(auth: this.auth, environment: environment);
   }
 
   final AuthController auth;
+  final PresentationEnvironment environment;
   final PlayerBindings playerBindings;
   final PlayerWindowHost windowHost;
   late final GoRouter router;
 
   @override
   Widget build(BuildContext context) {
+    if (!environment.isDesktop) {
+      return PresentationScope(
+        environment: environment,
+        child: AuthScope(
+          controller: auth,
+          child: PlayerScope(
+            bindings: playerBindings,
+            child: MaterialApp.router(
+              title: kProductName,
+              debugShowCheckedModeBanner: false,
+              locale: const Locale('zh', 'CN'),
+              supportedLocales: AppLocalizations.supportedLocales,
+              localizationsDelegates: AppLocalizations.localizationsDelegates,
+              theme: AppTheme.dark(),
+              routerConfig: router,
+            ),
+          ),
+        ),
+      );
+    }
+    return PresentationScope(
+      environment: environment,
+      child: _buildDesktop(context),
+    );
+  }
+
+  Widget _buildDesktop(BuildContext context) {
     return AuthScope(
       controller: auth,
       child: PlayerScope(

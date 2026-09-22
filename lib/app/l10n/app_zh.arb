@@ -1,5 +1,8 @@
 {
   "@@locale": "zh",
+  "deviceDetectionFailed": "无法识别设备类型，请重试或以手机模式继续。",
+  "appInitializationFailed": "无法初始化应用，请重试。",
+  "continueAsPhone": "以手机模式继续",
   "appName": "灯川 Rillight",
   "@appName": {
     "description": "Product name shown in the window, menus, and UI."

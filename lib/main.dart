@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/widgets.dart';
 import 'package:rillight/app/app.dart';
+import 'package:rillight/app/android_bootstrap.dart';
 import 'package:rillight/app/router.dart';
 import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/auth/auth_bootstrap.dart';
@@ -12,6 +14,11 @@ import 'package:window_manager/window_manager.dart';
 
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
+  if (Platform.isAndroid) {
+    configurePaintingImageCache(playerProcess: false);
+    runApp(const AndroidBootstrap());
+    return;
+  }
   final playerProcess = args.isNotEmpty && args.first == 'player';
   configurePaintingImageCache(playerProcess: playerProcess);
   if (playerProcess) {

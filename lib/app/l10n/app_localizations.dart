@@ -94,6 +94,24 @@ abstract class AppLocalizations {
   /// A list of this localizations delegate's supported locales.
   static const List<Locale> supportedLocales = <Locale>[Locale('zh')];
 
+  /// No description provided for @deviceDetectionFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'无法识别设备类型，请重试或以手机模式继续。'**
+  String get deviceDetectionFailed;
+
+  /// No description provided for @appInitializationFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'无法初始化应用，请重试。'**
+  String get appInitializationFailed;
+
+  /// No description provided for @continueAsPhone.
+  ///
+  /// In zh, this message translates to:
+  /// **'以手机模式继续'**
+  String get continueAsPhone;
+
   /// Product name shown in the window, menus, and UI.
   ///
   /// In zh, this message translates to:

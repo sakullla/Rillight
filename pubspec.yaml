@@ -1,5 +1,5 @@
 name: rillight
-description: "灯川 Rillight desktop Emby client"
+description: "灯川 Rillight Emby client for desktop and Android"
 publish_to: 'none'
 version: 0.1.26+27
 
@@ -26,7 +26,7 @@ dependencies:
 
 # 2.3+ depends on package:jni, an FFI plugin for Linux/Windows that links
 # libjvm.so whenever a JDK is present (GitHub-hosted runners). This app is
-# desktop-only and must not ship a JVM helper in the Linux bundle.
+# built for desktop and Android and must not ship a JVM helper in the Linux bundle.
 dependency_overrides:
   path_provider_android: 2.2.23
 

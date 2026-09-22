@@ -2,6 +2,8 @@ import 'package:flutter/widgets.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/app_shell.dart';
 import 'package:rillight/app/routes.dart';
+import 'package:rillight/app/presentation_environment.dart';
+import 'package:rillight/auth/android_connect_page.dart';
 import 'package:rillight/app/settings/settings_page.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/connect_page.dart';
@@ -14,7 +16,10 @@ import 'package:rillight/search/search_page.dart';
 
 export 'package:rillight/app/routes.dart';
 
-GoRouter createAppRouter({required AuthController auth}) {
+GoRouter createAppRouter({
+  required AuthController auth,
+  PresentationEnvironment environment = PresentationEnvironment.desktop,
+}) {
   return GoRouter(
     initialLocation: AppRoutes.home,
     refreshListenable: auth,
@@ -30,49 +35,61 @@ GoRouter createAppRouter({required AuthController auth}) {
       return null;
     },
     routes: [
-      ShellRoute(
-        observers: [_ConnectFlowObserver(auth)],
-        builder: (context, state, child) {
-          return CatalogShell(
-            auth: auth,
-            child: AppShell(child: child),
-          );
-        },
-        routes: [
-          GoRoute(
-            path: AppRoutes.connect,
-            builder: (context, state) => const ConnectPage(),
-          ),
-          GoRoute(
-            path: AppRoutes.home,
-            builder: (context, state) => const HomePage(),
-          ),
-          GoRoute(
-            path: '/library/:viewId',
-            builder: (context, state) =>
-                LibraryPage(viewId: state.pathParameters['viewId'] ?? ''),
-          ),
-          GoRoute(
-            path: '/shelf/:source',
-            builder: (context, state) => ShelfGridPage.fromState(state),
-          ),
-          GoRoute(
-            path: '/item/:itemId',
-            builder: (context, state) => ItemDetailPage(
-              itemId: state.pathParameters['itemId'] ?? '',
-              initialSeasonId: state.uri.queryParameters['season'],
+      if (!environment.isDesktop) ...[
+        GoRoute(
+          path: AppRoutes.connect,
+          name: AppRoutes.connect,
+          builder: (context, state) => const AndroidConnectPage(),
+        ),
+        GoRoute(
+          path: AppRoutes.home,
+          builder: (context, state) => const AndroidSessionPage(),
+        ),
+      ],
+      if (environment.isDesktop)
+        ShellRoute(
+          observers: [_ConnectFlowObserver(auth)],
+          builder: (context, state, child) {
+            return CatalogShell(
+              auth: auth,
+              child: AppShell(child: child),
+            );
+          },
+          routes: [
+            GoRoute(
+              path: AppRoutes.connect,
+              builder: (context, state) => const ConnectPage(),
             ),
-          ),
-          GoRoute(
-            path: AppRoutes.search,
-            builder: (context, state) => const SearchPage(),
-          ),
-          GoRoute(
-            path: AppRoutes.settings,
-            builder: (context, state) => const SettingsPage(),
-          ),
-        ],
-      ),
+            GoRoute(
+              path: AppRoutes.home,
+              builder: (context, state) => const HomePage(),
+            ),
+            GoRoute(
+              path: '/library/:viewId',
+              builder: (context, state) =>
+                  LibraryPage(viewId: state.pathParameters['viewId'] ?? ''),
+            ),
+            GoRoute(
+              path: '/shelf/:source',
+              builder: (context, state) => ShelfGridPage.fromState(state),
+            ),
+            GoRoute(
+              path: '/item/:itemId',
+              builder: (context, state) => ItemDetailPage(
+                itemId: state.pathParameters['itemId'] ?? '',
+                initialSeasonId: state.uri.queryParameters['season'],
+              ),
+            ),
+            GoRoute(
+              path: AppRoutes.search,
+              builder: (context, state) => const SearchPage(),
+            ),
+            GoRoute(
+              path: AppRoutes.settings,
+              builder: (context, state) => const SettingsPage(),
+            ),
+          ],
+        ),
     ],
   );
 }

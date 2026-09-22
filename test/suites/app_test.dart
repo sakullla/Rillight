@@ -6,6 +6,10 @@ import 'modules.dart';
 
 void main() {
   verifySuiteManifest();
+  group(
+    'app/android_bootstrap_test.dart',
+    caseEntrypoints['app/android_bootstrap_cases.dart']!,
+  );
   group('app_shell_test.dart', caseEntrypoints['app_shell_cases.dart']!);
   group(
     'auth/connect_page_test.dart',

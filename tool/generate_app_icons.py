@@ -65,6 +65,10 @@ def fail(message: str) -> None:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
+        "--android-only", action="store_true",
+        help="Build Android launcher icons/banner from the committed macOS brand icon, offline.",
+    )
+    parser.add_argument(
         "--config",
         type=Path,
         default=Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex")))
@@ -371,8 +375,35 @@ def write_icon_set(
             os.replace(staged, target)
 
 
+def write_android_icons() -> None:
+    """Derive Android resources from the existing brand without an API call."""
+    Image, _ = require_pillow()
+    from PIL import ImageDraw, ImageFont
+
+    resource_dir = REPO_ROOT / "android/app/src/main/res"
+    with Image.open(MAC_ICON_DIR / "app_icon_1024.png") as source:
+        source = source.convert("RGBA")
+        for density, size in [("mdpi", 48), ("hdpi", 72), ("xhdpi", 96),
+                              ("xxhdpi", 144), ("xxxhdpi", 192)]:
+            target = resource_dir / f"mipmap-{density}/ic_launcher.png"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            source.resize((size, size), Image.Resampling.LANCZOS).save(target)
+        banner = Image.new("RGB", (320, 180), (16, 25, 30))
+        mark = source.resize((104, 104), Image.Resampling.LANCZOS)
+        banner.paste(mark, (16, 38), mark)
+        draw = ImageDraw.Draw(banner)
+        draw.text((132, 70), "Rillight", font=ImageFont.load_default(size=38),
+                  fill=BRAND_PRIMARY)
+        target = resource_dir / "drawable-xhdpi/tv_banner.png"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        banner.save(target)
+
+
 def main() -> None:
     args = parse_args()
+    if args.android_only:
+        write_android_icons()
+        return
     provider_name, base_url, bearer_token, response_model = load_provider(args.config)
     payload = {
         "model": response_model,

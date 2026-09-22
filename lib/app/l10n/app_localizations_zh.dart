@@ -9,6 +9,15 @@ class AppLocalizationsZh extends AppLocalizations {
   AppLocalizationsZh([String locale = 'zh']) : super(locale);
 
   @override
+  String get deviceDetectionFailed => '无法识别设备类型，请重试或以手机模式继续。';
+
+  @override
+  String get appInitializationFailed => '无法初始化应用，请重试。';
+
+  @override
+  String get continueAsPhone => '以手机模式继续';
+
+  @override
   String get appName => '灯川 Rillight';
 
   @override
