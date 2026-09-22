@@ -462,7 +462,7 @@ class PlayerController extends ChangeNotifier {
   }
 
   Future<void> togglePlay() async {
-    if (loading || error != null) {
+    if (loading || error != null || _backgroundReleased) {
       return;
     }
     if (playbackEnded) {
@@ -473,6 +473,64 @@ class PlayerController extends ChangeNotifier {
     if (operation != null) {
       await _operations.run(operation, backend.playOrPause);
     }
+  }
+
+  bool _backgroundReleased = false;
+  Uri? _suspendedServer;
+  String? _suspendedUser;
+  String? _suspendedToken;
+  int _suspendedTicks = 0;
+  Future<void>? _suspending;
+  bool get backgroundReleased => _backgroundReleased;
+
+  /// Android hosts call this on a real background transition, not rotation.
+  /// Release media promptly; the existing session owns bounded Stopped/reporting.
+  Future<void> suspendPlayback() =>
+      _suspending ??= _suspendPlayback().whenComplete(() => _suspending = null);
+
+  Future<void> _suspendPlayback() async {
+    if (_disposed || _backgroundReleased) return;
+    _backgroundReleased = true;
+    _suspendedServer = client.baseUrl;
+    _suspendedUser = client.userId;
+    _suspendedToken = client.accessToken;
+    _suspendedTicks = ticksFromDuration(position);
+    isPlaying = false;
+    final stopped = _stopSession();
+    _beginOperation();
+    try {
+      await _operations.interrupt(backend.stop).timeout(disposeTimeout);
+    } finally {
+      await stopped;
+      loading = false;
+      state.updatePlaying(false);
+      _emit();
+    }
+  }
+
+  /// Recreate a released native session at its saved position, always paused.
+  /// A changed identity must re-enter through the authentication/player host.
+  Future<void> restorePlayback() async {
+    await _suspending;
+    if (_disposed || !_backgroundReleased) return;
+    if (client.baseUrl != _suspendedServer ||
+        client.userId != _suspendedUser ||
+        client.accessToken != _suspendedToken) {
+      sessionExpired = true;
+      _emit();
+      return;
+    }
+    _backgroundReleased = false;
+    final operation = _beginOperation();
+    if (operation == null) return;
+    await _open(
+      operation: operation,
+      startTicks: _suspendedTicks,
+      audio: audioStreamIndex,
+      subtitle: subtitleStreamIndex,
+      subtitleOff: subtitleStreamIndex == null,
+      startPaused: true,
+    );
   }
 
   Future<void> replay() async {
@@ -1593,6 +1651,17 @@ class PlayerController extends ChangeNotifier {
           controlsVisible = true;
           state.phase = PlaybackPhase.failed;
           _hideTimer?.cancel();
+        case VideoEventKind.authenticationRequired:
+          sessionExpired = true;
+          disconnected = true;
+          loading = false;
+          isPlaying = false;
+          controlsVisible = true;
+          state.phase = PlaybackPhase.failed;
+          disconnectDetail = 'Media HTTP ${event.value}';
+          _hideTimer?.cancel();
+          _progressTimer?.cancel();
+          unawaited(backend.stop().catchError((Object _) {}));
       }
       _lastPlaybackUi = DateTime.now();
       _emit();
@@ -1609,6 +1678,8 @@ class PlayerController extends ChangeNotifier {
     int? audio,
     int? subtitle,
     bool subtitleOff = false,
+    bool forceTranscode = false,
+    bool startPaused = false,
   }) async {
     if (!_accepts(operation)) return;
     loading = true;
@@ -1640,6 +1711,12 @@ class PlayerController extends ChangeNotifier {
         subtitleStreamIndex: subtitleOff
             ? null
             : (subtitle ?? preferredSubtitleStreamIndex),
+        deviceProfile: backend is VideoBackendCapabilities
+            ? await (backend as VideoBackendCapabilities).deviceProfile(
+                maxStreamingBitrate,
+              )
+            : null,
+        forceTranscode: forceTranscode,
       );
       if (!_accepts(operation)) {
         return;
@@ -1659,6 +1736,7 @@ class PlayerController extends ChangeNotifier {
         accessToken: client.accessToken!,
         itemId: itemId,
         mediaSourceId: chosenId,
+        forceTranscode: forceTranscode,
       );
       if (next == null) {
         error = PlayerErrorKind.noStream;
@@ -1716,6 +1794,10 @@ class PlayerController extends ChangeNotifier {
             url: next.streamUrl,
             playMethod: next.playMethod,
             isInfiniteStream: next.mediaSource.isInfiniteStream,
+            mediaStreams: next.isTranscode
+                ? const []
+                : next.mediaSource.mediaStreams,
+            startPaused: startPaused,
             start: durationFromTicks(startTicks),
             credentialOrigin: client.baseUrl,
             credentialHeaders: client.sessionHeaders,
@@ -1790,6 +1872,21 @@ class PlayerController extends ChangeNotifier {
       _maybeOfferNextUp();
       onUserActivity();
       _emit();
+    } on VideoCompatibilityException catch (failure) {
+      if (!forceTranscode && _accepts(operation)) {
+        await backend.stop();
+        await _open(
+          operation: operation,
+          startTicks: startTicks,
+          audio: audio,
+          subtitle: subtitle,
+          subtitleOff: subtitleOff,
+          forceTranscode: true,
+          startPaused: startPaused,
+        );
+      } else {
+        await _failOpen(operation, detail: failure.toString());
+      }
     } on EmbyException catch (failure) {
       await _failOpen(operation, failure: failure);
     } catch (error) {
@@ -2121,7 +2218,8 @@ class PlayerController extends ChangeNotifier {
           .enqueue(() => client.reportStopped(report))
           .timeout(stoppedTimeout);
       if (!session.ownsCredentials) return;
-      if (_session == null && _operations.current?.id == session.id) {
+      if (_session == null &&
+          (_operations.current?.id == session.id || _backgroundReleased)) {
         _onReportSucceeded();
       }
       await _enqueueSnapshot(() async {
@@ -2137,13 +2235,17 @@ class PlayerController extends ChangeNotifier {
     } on EmbyException catch (failure) {
       if (_session == null &&
           session.ownsCredentials &&
-          (_operations.current?.id == session.id || _operations.isClosed)) {
+          (_operations.current?.id == session.id ||
+              _operations.isClosed ||
+              _backgroundReleased)) {
         _onReportFailed(failure);
       }
     } catch (_) {
       if (_session == null &&
           session.ownsCredentials &&
-          (_operations.current?.id == session.id || _operations.isClosed)) {
+          (_operations.current?.id == session.id ||
+              _operations.isClosed ||
+              _backgroundReleased)) {
         _onReportFailed(null);
       }
     }

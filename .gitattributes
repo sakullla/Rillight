@@ -1,4 +1,5 @@
 * text=auto eol=lf
+.metadata linguist-generated=true sakullla-review=generated
 pubspec.lock linguist-generated=true sakullla-review=generated
 lib/app/l10n/app_localizations.dart linguist-generated=true sakullla-review=generated
 lib/app/l10n/app_localizations_zh.dart linguist-generated=true sakullla-review=generated

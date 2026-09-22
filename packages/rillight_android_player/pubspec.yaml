@@ -1,0 +1,18 @@
+name: rillight_android_player
+description: Owned Media3 Android playback and platform view bridge.
+version: 0.1.0
+publish_to: none
+environment:
+  sdk: ^3.11.5
+dependencies:
+  flutter:
+    sdk: flutter
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: com.rillight.android_player
+        pluginClass: RillightAndroidPlayerPlugin

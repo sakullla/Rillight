@@ -25,6 +25,58 @@ Matcher _kind(EmbyFailureKind kind) =>
     isA<EmbyException>().having((error) => error.kind, 'kind', kind);
 
 void main() {
+  test(
+    'subtitle redirects strip credentials at every cross-origin hop',
+    () async {
+      final origin = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final remote = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final originUrl = Uri.parse('http://127.0.0.1:${origin.port}');
+      final remoteUrl = Uri.parse('http://127.0.0.1:${remote.port}');
+      final requests = <HttpRequest>[];
+      final localSub = origin.listen((request) async {
+        requests.add(request);
+        request.response.statusCode = 302;
+        request.response.headers.set(
+          'location',
+          '$remoteUrl/sub.srt?api_key=synthetic-secret&custom=synthetic-secret',
+        );
+        await request.response.close();
+      });
+      final remoteSub = remote.listen((request) async {
+        requests.add(request);
+        request.response.write('1\n00:00:00,000 --> 00:00:01,000\nSubtitle\n');
+        await request.response.close();
+      });
+      final client = EmbyClient(device: _device)
+        ..attachSession(
+          baseUrl: originUrl,
+          accessToken: 'synthetic-secret',
+          userId: 'test',
+        );
+      try {
+        expect(
+          await client.readAuthorizedBytes(originUrl.resolve('/sub.srt')),
+          isNotEmpty,
+        );
+        expect(requests, hasLength(2));
+        expect(
+          requests.first.headers.value('x-emby-token'),
+          'synthetic-secret',
+        );
+        expect(requests.last.headers.value('x-emby-token'), isNull);
+        expect(requests.last.headers.value('authorization'), isNull);
+        expect(
+          requests.last.uri.toString(),
+          isNot(contains('synthetic-secret')),
+        );
+      } finally {
+        await localSub.cancel();
+        await remoteSub.cancel();
+        await origin.close(force: true);
+        await remote.close(force: true);
+      }
+    },
+  );
   EmbyException responseFailure(
     Object data, {
     String? contentType,

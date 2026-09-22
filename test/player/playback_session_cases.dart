@@ -88,6 +88,53 @@ void main() {
       EmbyItem.fromJson({'Id': id, 'Type': 'Episode', 'Name': id});
 
   test(
+    'background release stops once and restores a new paused session',
+    () async {
+      await controller.start();
+      await controller.seekTo(const Duration(seconds: 20));
+      final oldSession = backend.sessionId;
+      await controller.suspendPlayback();
+      await controller.suspendPlayback();
+      expect(controller.backgroundReleased, isTrue);
+      expect(backend.isPlaying, isFalse);
+      expect(client.reports.where((r) => r.$1 == 'Stopped'), hasLength(1));
+      await controller.restorePlayback();
+      expect(backend.sessionId, isNot(oldSession));
+      expect(backend.openedStart, const Duration(seconds: 20));
+      expect(backend.openedPaused, isTrue);
+      expect(controller.isPlaying, isFalse);
+      expect(client.reports.where((r) => r.$1 == 'Playing'), hasLength(2));
+    },
+  );
+
+  test('background restore refuses a changed credential identity', () async {
+    await controller.start();
+    await controller.suspendPlayback();
+    final count = backend.openCount;
+    client.attachSession(
+      baseUrl: client.baseUrl!,
+      accessToken: 'new-user-token',
+      userId: 'different-user',
+    );
+    await controller.restorePlayback();
+    expect(controller.sessionExpired, isTrue);
+    expect(backend.openCount, count);
+  });
+
+  test(
+    'native authentication failure stops media and exposes reconnect state',
+    () async {
+      await controller.start();
+      backend.emitEvent(VideoEventKind.authenticationRequired, 401);
+      await _until(() => controller.sessionExpired);
+      expect(controller.disconnected, isTrue);
+      expect(controller.controlsVisible, isTrue);
+      expect(controller.loading, isFalse);
+      expect(backend.isPlaying, isFalse);
+    },
+  );
+
+  test(
     'immediate item switch preserves debounced volume and rate changes',
     () async {
       await settings.write(

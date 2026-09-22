@@ -147,6 +147,7 @@ ResolvedPlayback? resolvePlayback({
   required String accessToken,
   required String itemId,
   String? mediaSourceId,
+  bool forceTranscode = false,
 }) {
   PlaybackMediaSource? source = info.primarySource;
   if (mediaSourceId != null && mediaSourceId.isNotEmpty) {
@@ -160,7 +161,7 @@ ResolvedPlayback? resolvePlayback({
   }
 
   final canDirect = source.supportsDirectPlay || source.supportsDirectStream;
-  if (canDirect) {
+  if (canDirect && !forceTranscode) {
     final directStreamUrl = source.directStreamUrl;
     if (directStreamUrl != null && directStreamUrl.isNotEmpty) {
       return _direct(

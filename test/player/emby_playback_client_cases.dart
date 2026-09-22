@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
+import 'package:rillight/emby/device_profile.dart';
 import 'package:rillight/player/playback_models.dart';
 
 import '../emby/fake_emby_server.dart';
@@ -51,6 +52,24 @@ void main() {
     expect(info.primarySource?.supportsDirectStream, isFalse);
     expect(info.primarySource?.transcodingUrl, contains('master.m3u8'));
   });
+
+  test(
+    'PlaybackInfo accepts the current backend profile without mutating desktop defaults',
+    () async {
+      final profile = androidDeviceProfile(h264: true, aac: true);
+      await client.getPlaybackInfo(
+        itemId: 'movie-inception',
+        deviceProfile: profile,
+        forceTranscode: true,
+      );
+      expect(server.lastDeviceProfile!['Name'], 'Rillight Android Media3');
+      await client.getPlaybackInfo(itemId: 'movie-inception');
+      expect(
+        server.lastDeviceProfile!['DirectPlayProfiles'].toString(),
+        contains('hevc'),
+      );
+    },
+  );
 
   test('PGS subtitle request stays direct with Embed declaration', () async {
     // 设备声明 pgs/pgssub 为文档值 Embed 后,直连场景服务端不强制烧录,

@@ -381,6 +381,13 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "0.6.0"
+  rillight_android_player:
+    dependency: "direct main"
+    description:
+      path: "packages/rillight_android_player"
+      relative: true
+    source: path
+    version: "0.1.0"
   rillight_player:
     dependency: "direct main"
     description:

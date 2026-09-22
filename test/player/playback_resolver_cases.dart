@@ -6,6 +6,45 @@ void main() {
   const base = 'http://emby.test:8096';
   const token = 'token-1';
 
+  test(
+    'explicit compatibility fallback cannot silently choose direct again',
+    () {
+      final info = PlaybackInfo.fromJson({
+        'PlaySessionId': 'fallback',
+        'MediaSources': [
+          {
+            'Id': 's',
+            'SupportsDirectPlay': true,
+            'TranscodingUrl': '/hls/master.m3u8',
+          },
+        ],
+      });
+      final result = resolvePlayback(
+        info: info,
+        baseUrl: Uri.parse(base),
+        accessToken: token,
+        itemId: 'movie',
+        forceTranscode: true,
+      );
+      expect(result!.playMethod, PlayMethod.transcode);
+      final unavailable = PlaybackInfo.fromJson({
+        'MediaSources': [
+          {'Id': 's', 'SupportsDirectPlay': true},
+        ],
+      });
+      expect(
+        resolvePlayback(
+          info: unavailable,
+          baseUrl: Uri.parse(base),
+          accessToken: token,
+          itemId: 'movie',
+          forceTranscode: true,
+        ),
+        isNull,
+      );
+    },
+  );
+
   test('prefers Direct Stream over transcode when the server allows it', () {
     final resolved = resolvePlayback(
       info: PlaybackInfo.fromJson({

@@ -2,6 +2,26 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/emby/device_profile.dart';
 
 void main() {
+  test(
+    'Android profile gates the verified baseline and offers HLS fallback',
+    () {
+      final profile = androidDeviceProfile(h264: true, aac: true);
+      final direct = (profile['DirectPlayProfiles'] as List).single as Map;
+      expect(direct['VideoCodec'], 'h264');
+      expect(direct['AudioCodec'], 'aac');
+      final fallback = (profile['TranscodingProfiles'] as List).single as Map;
+      expect(fallback['Protocol'], 'hls');
+      expect(fallback['MaxAudioChannels'], '2');
+      expect(
+        androidDeviceProfile(h264: false, aac: true)['DirectPlayProfiles'],
+        isEmpty,
+      );
+      expect(
+        androidDeviceProfile(h264: true, aac: false)['TranscodingProfiles'],
+        isEmpty,
+      );
+    },
+  );
   test('mpv DeviceProfile declares honest Direct Play codecs', () {
     final profile = mpvDeviceProfile();
     final direct = profile['DirectPlayProfiles'] as List<dynamic>;

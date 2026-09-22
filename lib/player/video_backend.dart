@@ -13,6 +13,8 @@ class VideoOpenRequest {
     this.credentialHeaders = const {},
     this.playMethod = PlayMethod.directStream,
     this.isInfiniteStream = false,
+    this.mediaStreams = const [],
+    this.startPaused = false,
   });
 
   final int sessionId;
@@ -23,8 +25,22 @@ class VideoOpenRequest {
   final Map<String, String> credentialHeaders;
   final PlayMethod playMethod;
   final bool isInfiniteStream;
+  final List<MediaStreamInfo> mediaStreams;
+  final bool startPaused;
   bool get dynamicSource =>
       isInfiniteStream || playMethod == PlayMethod.transcode;
+}
+
+/// Optional backend contract; existing desktop and fake defaults are unchanged.
+abstract interface class VideoBackendCapabilities {
+  Future<Map<String, dynamic>> deviceProfile(int maxStreamingBitrate);
+}
+
+class VideoCompatibilityException implements Exception {
+  const VideoCompatibilityException(this.message);
+  final String message;
+  @override
+  String toString() => message;
 }
 
 enum VideoEventKind {
@@ -36,6 +52,7 @@ enum VideoEventKind {
   completed,
   error,
   cacheSpeed,
+  authenticationRequired,
 }
 
 /// The backend preserves the originating open's identity, including late events.
@@ -107,6 +124,7 @@ class FakeVideoBackend implements VideoBackend {
   bool isPlaying = false;
 
   Uri? openedUrl;
+  bool openedPaused = false;
   Duration? openedStart;
   Map<String, String> openedHeaders = const {};
   int openCount = 0;
@@ -164,10 +182,11 @@ class FakeVideoBackend implements VideoBackend {
     openCount += 1;
     openedUrl = request.url;
     openedStart = request.start;
+    openedPaused = request.startPaused;
     openedHeaders = request.headers;
     position = request.start;
     buffer = Duration.zero;
-    isPlaying = true;
+    isPlaying = !request.startPaused;
     subtitleOff = false;
     subtitleUri = null;
     subtitleIndex = null;
@@ -177,8 +196,8 @@ class FakeVideoBackend implements VideoBackend {
     emitEvent(VideoEventKind.position, position);
     _buffer.add(buffer);
     emitEvent(VideoEventKind.buffer, buffer);
-    _playing.add(true);
-    emitEvent(VideoEventKind.playing, true);
+    _playing.add(isPlaying);
+    emitEvent(VideoEventKind.playing, isPlaying);
     _completed.add(false);
     emitEvent(VideoEventKind.completed, false);
   }

@@ -446,19 +446,25 @@ class EmbyClient {
     int? audioStreamIndex,
     int? subtitleStreamIndex,
     String? mediaSourceId,
+    Map<String, dynamic>? deviceProfile,
+    bool forceTranscode = false,
   }) async {
-    final bitrate = maxStreamingBitrate ?? kMpvMaxStreamingBitrate;
+    final bitrate =
+        deviceProfile?['MaxStreamingBitrate'] as int? ??
+        maxStreamingBitrate ??
+        kMpvMaxStreamingBitrate;
     final data = await postJson(
       '/Items/$itemId/PlaybackInfo',
       queryParameters: {'UserId': _requireUserId()},
       body: {
         'UserId': _requireUserId(),
-        'DeviceProfile': mpvDeviceProfile(maxStreamingBitrate: bitrate),
+        'DeviceProfile':
+            deviceProfile ?? mpvDeviceProfile(maxStreamingBitrate: bitrate),
         'MaxStreamingBitrate': bitrate,
         'StartTimeTicks': ?startTimeTicks,
         'AutoOpenLiveStream': true,
-        'EnableDirectPlay': true,
-        'EnableDirectStream': true,
+        'EnableDirectPlay': !forceTranscode,
+        'EnableDirectStream': !forceTranscode,
         'EnableTranscoding': true,
         'AudioStreamIndex': ?audioStreamIndex,
         'SubtitleStreamIndex': ?subtitleStreamIndex,
@@ -538,20 +544,67 @@ class EmbyClient {
     for (var attempt = 0; attempt < attempts; attempt++) {
       try {
         return await _withAuthRetry(() async {
-          final response = await _dio.requestUri<List<int>>(
-            uri,
-            options: Options(
-              method: 'GET',
-              responseType: ResponseType.bytes,
-              receiveTimeout: receiveTimeout,
-              headers: {...sessionHeaders, 'Accept': '*/*'},
-            ),
-          );
-          final data = response.data;
-          if (data == null || data.isEmpty) {
-            throw StateError('Empty response');
+          final origin = _baseUrl!;
+          final token = _accessToken!;
+          final authorizedHeaders = sessionHeaders;
+          var target = uri;
+          for (var redirects = 0; redirects <= 5; redirects++) {
+            final sameOrigin = target.origin == origin.origin;
+            if (!sameOrigin) {
+              target = target.replace(
+                queryParameters: {
+                  for (final entry in target.queryParameters.entries)
+                    if (!{
+                          'api_key',
+                          'apikey',
+                          'access_token',
+                          'x-emby-token',
+                        }.contains(entry.key.toLowerCase()) &&
+                        !entry.value.contains(token))
+                      entry.key: entry.value,
+                },
+              );
+            }
+            if (!{'http', 'https'}.contains(target.scheme) ||
+                target.userInfo.isNotEmpty) {
+              throw StateError('Unsupported subtitle URL');
+            }
+            final response = await _dio.requestUri<List<int>>(
+              target,
+              options: Options(
+                method: 'GET',
+                responseType: ResponseType.bytes,
+                receiveTimeout: receiveTimeout,
+                followRedirects: false,
+                validateStatus: (status) =>
+                    status != null &&
+                    ((status >= 200 && status < 300) ||
+                        {301, 302, 303, 307, 308}.contains(status)),
+                headers: {
+                  if (sameOrigin) ...authorizedHeaders,
+                  'Accept': '*/*',
+                },
+              ),
+            );
+            if ({301, 302, 303, 307, 308}.contains(response.statusCode)) {
+              final location = response.headers.value('location');
+              if (location == null) {
+                throw StateError('Subtitle redirect has no destination');
+              }
+              final next = target.resolve(location);
+              if (target.scheme == 'https' && next.scheme != 'https') {
+                throw StateError('Insecure subtitle redirect');
+              }
+              target = next;
+              continue;
+            }
+            final data = response.data;
+            if (data == null || data.isEmpty) {
+              throw StateError('Empty response');
+            }
+            return data;
           }
-          return data;
+          throw StateError('Too many subtitle redirects');
         });
       } on EmbyException catch (error) {
         last = error;
