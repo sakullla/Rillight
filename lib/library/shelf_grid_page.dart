@@ -753,6 +753,10 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
                     SliverToBoxAdapter(
                       child: _failureNotice(_error!, _manualRefresh),
                     ),
+                  if (_pageError != null)
+                    SliverToBoxAdapter(
+                      child: _failureNotice(_pageError!, _loadMore),
+                    ),
                   if (_items.isEmpty)
                     SliverFillRemaining(
                       hasScrollBody: false,
@@ -808,10 +812,6 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
                         padding: EdgeInsets.only(bottom: AppSpacing.xxl),
                         child: Center(child: CircularProgressIndicator()),
                       ),
-                    ),
-                  if (_pageError != null)
-                    SliverToBoxAdapter(
-                      child: _failureNotice(_pageError!, _loadMore),
                     ),
                 ],
               ),

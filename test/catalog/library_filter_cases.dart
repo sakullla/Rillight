@@ -419,8 +419,6 @@ void main() {
       await settle(tester);
       scroll.jumpTo(scroll.position.maxScrollExtent);
       await settle(tester);
-      final pageRetry = find.byKey(const Key('catalog-grid-page-retry'));
-      expect(pageRetry, findsOneWidget);
       expect(find.byType(PosterCard), findsWidgets);
       expect(
         server.requests
@@ -431,6 +429,16 @@ void main() {
             )
             .length,
         1,
+      );
+      scroll.jumpTo(0);
+      await settle(tester);
+      final pageRetry = find.byKey(const Key('catalog-grid-page-retry'));
+      expect(pageRetry, findsOneWidget);
+      expect(
+        tester.getBottomLeft(pageRetry).dy,
+        lessThanOrEqualTo(
+          tester.getTopLeft(find.byType(PosterCard).first).dy + 1,
+        ),
       );
       server.itemsStatus = null;
       await tester.ensureVisible(pageRetry);

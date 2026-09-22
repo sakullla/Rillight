@@ -472,6 +472,96 @@ void main() {
   );
 
   testWidgets(
+    'library load-more failure keeps cards and offers retry above them',
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      server.items = [
+        for (var i = 0; i < 80; i++)
+          FakeEmbyItem(
+            id: 'page-${i.toString().padLeft(2, '0')}',
+            name: 'Page ${i.toString().padLeft(2, '0')}',
+            type: 'Movie',
+            parentId: 'view-pages',
+          ),
+      ];
+      final auth = await _connect(tester, adapter, server);
+      await tester.pumpWidget(
+        _host(
+          auth,
+          const ShelfGridPage(
+            source: 'items',
+            parentId: 'view-pages',
+            includeItemTypes: 'Movie',
+            recursive: true,
+            title: '分页片库',
+          ),
+        ),
+      );
+      await settle(tester);
+      expect(find.byKey(CatalogKeys.item('page-00')), findsOneWidget);
+      expect(find.byKey(CatalogKeys.item('page-60')), findsNothing);
+
+      server.itemsStatus = 500;
+      final scrollable = _verticalScrollable(find.byType(ShelfGridPage));
+      var position = tester.state<ScrollableState>(scrollable).position;
+      position.jumpTo(position.maxScrollExtent);
+      await tester.pump();
+      await settle(tester);
+      position = tester.state<ScrollableState>(scrollable).position;
+      position.jumpTo(position.maxScrollExtent);
+      await tester.pump();
+      await settle(tester);
+
+      expect(
+        find.byWidgetPredicate(
+          (widget) =>
+              widget.key is ValueKey<String> &&
+              (widget.key! as ValueKey<String>).value.startsWith(
+                'catalog-item-',
+              ),
+        ),
+        findsWidgets,
+      );
+
+      position.jumpTo(0);
+      await tester.pump();
+      const message = 'HTTP 500: items failed';
+      expect(find.text(message), findsOneWidget);
+      expect(find.byType(AppErrorView), findsNothing);
+      final notice = find.text(message);
+      final firstCard = find.byKey(CatalogKeys.item('page-00'));
+      expect(firstCard, findsOneWidget);
+      expect(
+        tester.getBottomLeft(notice).dy,
+        lessThanOrEqualTo(tester.getTopLeft(firstCard).dy + 1),
+      );
+      expect(find.byKey(CatalogKeys.item('page-60')), findsNothing);
+
+      server.itemsStatus = null;
+      await tester.tap(find.byKey(const Key('catalog-grid-page-retry')));
+      await tester.pump();
+      await settle(tester);
+      expect(find.text(message), findsNothing);
+      await tester.scrollUntilVisible(
+        find.byKey(CatalogKeys.item('page-60')),
+        400,
+        scrollable: scrollable,
+      );
+      expect(find.byKey(CatalogKeys.item('page-60')), findsOneWidget);
+      position = tester.state<ScrollableState>(scrollable).position;
+      position.jumpTo(0);
+      await tester.pump();
+      expect(find.byKey(CatalogKeys.item('page-00')), findsOneWidget);
+      await tester.pump(const Duration(milliseconds: 100));
+    },
+    tags: ['integration'],
+  );
+
+  testWidgets(
     'stale search load-more does not apply after a new search or a cleared query',
     (tester) async {
       tester.view.physicalSize = const Size(1280, 800);
