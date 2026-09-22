@@ -57,6 +57,26 @@ class SearchPage extends StatefulWidget {
     return 800;
   }
 
+  /// 搜索结果分页状态,供过期继续加载的回归读取。
+  @visibleForTesting
+  static ({
+    List<String> itemIds,
+    int fetched,
+    bool hasMore,
+    bool loadingMore,
+    bool pageError,
+  })
+  debugLoadState(BuildContext context) {
+    final state = (context as StatefulElement).state as _SearchPageState;
+    return (
+      itemIds: [for (final item in state._items) item.id],
+      fetched: state._fetched,
+      hasMore: state._hasMore,
+      loadingMore: state._loadingMore,
+      pageError: state._pageError != null,
+    );
+  }
+
   @override
   State<SearchPage> createState() => _SearchPageState();
 }
@@ -72,6 +92,7 @@ class _SearchPageState extends State<SearchPage> {
   EmbyException? _pageError;
   String _term = '';
   int _fetched = 0;
+  int _loadGen = 0;
   final ScrollController _scrollController = ScrollController();
 
   CatalogCache? _scopeCache;
@@ -113,6 +134,7 @@ class _SearchPageState extends State<SearchPage> {
   }
 
   Future<void> _submit([String? raw]) async {
+    final gen = ++_loadGen;
     final term = (raw ?? _query.text).trim();
     if (term.isEmpty) {
       setState(() {
@@ -144,7 +166,7 @@ class _SearchPageState extends State<SearchPage> {
     );
     // 先显:命中缓存立即渲染上一轮结果,后台重拉完成后无感更新。
     final hit = await _cache.lookup(request);
-    if (!mounted) {
+    if (!mounted || gen != _loadGen) {
       return;
     }
     if (hit != null) {
@@ -158,7 +180,7 @@ class _SearchPageState extends State<SearchPage> {
     }
     try {
       final raw = parseCatalogPage(await _cache.fetch(client, request)).items;
-      if (!mounted) {
+      if (!mounted || gen != _loadGen) {
         return;
       }
       setState(() {
@@ -168,7 +190,7 @@ class _SearchPageState extends State<SearchPage> {
         _loading = false;
       });
     } on EmbyException catch (error) {
-      if (!mounted) {
+      if (!mounted || gen != _loadGen) {
         return;
       }
       setState(() {
@@ -183,6 +205,9 @@ class _SearchPageState extends State<SearchPage> {
     if (!_hasMore || _loading || _loadingMore || _term.isEmpty) {
       return;
     }
+    final gen = _loadGen;
+    final start = _fetched;
+    final term = _term;
     setState(() {
       _loadingMore = true;
       _pageError = null;
@@ -194,12 +219,12 @@ class _SearchPageState extends State<SearchPage> {
           client,
           catalogSearchRequest(
             userId: client.userId ?? '',
-            searchTerm: _term,
-            startIndex: _fetched,
+            searchTerm: term,
+            startIndex: start,
           ),
         ),
       ).items;
-      if (!mounted) {
+      if (!mounted || gen != _loadGen) {
         return;
       }
       setState(() {
@@ -208,12 +233,12 @@ class _SearchPageState extends State<SearchPage> {
           _items,
           raw.where((item) => item.isMovieOrSeries),
         );
-        _fetched += raw.length;
+        _fetched = start + raw.length;
         _hasMore = raw.length >= SearchPage.pageSize;
         _loadingMore = false;
       });
     } on EmbyException catch (error) {
-      if (!mounted) {
+      if (!mounted || gen != _loadGen) {
         return;
       }
       // 追加失败保留已有结果,在结果上方说明并提供重试。
@@ -221,6 +246,10 @@ class _SearchPageState extends State<SearchPage> {
         _loadingMore = false;
         _pageError = error;
       });
+    } finally {
+      if (mounted && gen == _loadGen && _loadingMore) {
+        setState(() => _loadingMore = false);
+      }
     }
   }
 

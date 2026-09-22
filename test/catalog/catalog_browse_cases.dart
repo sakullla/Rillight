@@ -1,5 +1,6 @@
-import '../helpers/image_cache_fixture.dart';
-import '../helpers/settle.dart';
+import 'dart:async';
+
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -24,6 +25,8 @@ import 'package:rillight/search/search_overlay.dart';
 import 'package:rillight/search/search_page.dart';
 
 import '../emby/fake_emby_server.dart';
+import '../helpers/image_cache_fixture.dart';
+import '../helpers/settle.dart';
 import '../helpers/top_bar_hit.dart';
 
 const _device = EmbyDeviceInfo(
@@ -469,6 +472,146 @@ void main() {
     tags: ['integration'],
   );
 
+  testWidgets(
+    'stale search load-more does not apply after a new search or a cleared query',
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final held = _HoldingSearchServer();
+      final gates = <Completer<void>>[];
+      addTearDown(() {
+        for (final gate in gates) {
+          if (!gate.isCompleted) {
+            gate.complete();
+          }
+        }
+      });
+      held.items = [
+        for (var i = 0; i < 55; i++)
+          FakeEmbyItem(
+            id: 'alpha-${i.toString().padLeft(2, '0')}',
+            name: 'Alpha ${i.toString().padLeft(2, '0')}',
+            type: 'Movie',
+          ),
+        FakeEmbyItem(id: 'beta-00', name: 'Beta', type: 'Movie'),
+      ];
+      final auth = await _connect(tester, FakeEmbyAdapter([held]), held);
+      await tester.pumpWidget(_host(auth, const SearchPage()));
+
+      Future<void> search(String term) async {
+        await tester.enterText(find.byKey(CatalogKeys.searchField), term);
+        await tester.tap(find.byKey(CatalogKeys.searchSubmit));
+        await settle(tester);
+      }
+
+      Future<Completer<void>> armLoadMore() async {
+        final gate = Completer<void>();
+        gates.add(gate);
+        held.holdLoadMore = gate;
+        final scrollable = _verticalScrollable(find.byType(SearchPage));
+        final position = tester.state<ScrollableState>(scrollable).position;
+        position.jumpTo(position.maxScrollExtent);
+        for (var i = 0; i < 20 && held.loadMoreHolds < gates.length; i++) {
+          await tester.pump(const Duration(milliseconds: 1));
+        }
+        expect(held.loadMoreHolds, gates.length);
+        expect(find.byType(CircularProgressIndicator), findsOneWidget);
+        return gate;
+      }
+
+      void expectLoad(
+        List<String> itemIds, {
+        required int fetched,
+        required bool hasMore,
+        required bool loadingMore,
+        required bool pageError,
+      }) {
+        final state = SearchPage.debugLoadState(
+          tester.element(find.byType(SearchPage)),
+        );
+        expect(state.itemIds, itemIds);
+        expect(state.fetched, fetched);
+        expect(state.hasMore, hasMore);
+        expect(state.loadingMore, loadingMore);
+        expect(state.pageError, pageError);
+      }
+
+      await search('Alpha');
+      expect(find.byKey(CatalogKeys.item('alpha-00')), findsOneWidget);
+      expect(find.byKey(CatalogKeys.item('alpha-50')), findsNothing);
+      final firstPage = [
+        for (var i = 0; i < 50; i++) 'alpha-${i.toString().padLeft(2, '0')}',
+      ];
+      expectLoad(
+        firstPage,
+        fetched: 50,
+        hasMore: true,
+        loadingMore: false,
+        pageError: false,
+      );
+
+      final newerSearch = await armLoadMore();
+      await search('Beta');
+      expect(find.byKey(CatalogKeys.item('beta-00')), findsOneWidget);
+      expect(find.byKey(CatalogKeys.item('alpha-50')), findsNothing);
+      expectLoad(
+        const ['beta-00'],
+        fetched: 1,
+        hasMore: false,
+        loadingMore: false,
+        pageError: false,
+      );
+      newerSearch.complete();
+      await tester.pump();
+      await settle(tester);
+      expect(find.byKey(CatalogKeys.item('beta-00')), findsOneWidget);
+      expect(find.byKey(CatalogKeys.item('alpha-00')), findsNothing);
+      expect(find.byKey(CatalogKeys.item('alpha-50')), findsNothing);
+      expect(find.text('HTTP 500: search failed'), findsNothing);
+      expectLoad(
+        const ['beta-00'],
+        fetched: 1,
+        hasMore: false,
+        loadingMore: false,
+        pageError: false,
+      );
+
+      await search('Alpha');
+      final cleared = await armLoadMore();
+      await tester.enterText(find.byKey(CatalogKeys.searchField), '');
+      await tester.tap(find.byKey(CatalogKeys.searchSubmit));
+      await tester.pump();
+      expect(find.text('输入片名后搜索'), findsOneWidget);
+      expect(find.byKey(CatalogKeys.item('alpha-00')), findsNothing);
+      expectLoad(
+        const [],
+        fetched: 0,
+        hasMore: false,
+        loadingMore: false,
+        pageError: false,
+      );
+      held.searchStatus = 500;
+      cleared.complete();
+      await tester.pump();
+      await settle(tester);
+      expect(find.text('输入片名后搜索'), findsOneWidget);
+      expect(find.byKey(CatalogKeys.item('alpha-00')), findsNothing);
+      expect(find.byKey(CatalogKeys.item('alpha-50')), findsNothing);
+      expect(find.text('HTTP 500: search failed'), findsNothing);
+      expectLoad(
+        const [],
+        fetched: 0,
+        hasMore: false,
+        loadingMore: false,
+        pageError: false,
+      );
+    },
+    tags: ['integration'],
+  );
+
   test('grid column max extent is at least 180/200/220', () {
     expect(
       ShelfGridPage.maxCrossAxisExtentFor(AppBreakpoints.compact - 1),
@@ -538,6 +681,28 @@ void _expectCenteredEmpty(WidgetTester tester) {
   expect(iconRect.bottom, lessThanOrEqualTo(textRect.top));
   final clusterCenterY = (iconRect.top + textRect.bottom) / 2;
   expect(clusterCenterY, closeTo(page.center.dy, page.height * 0.22));
+}
+
+class _HoldingSearchServer extends FakeEmbyServer {
+  Completer<void>? holdLoadMore;
+  int loadMoreHolds = 0;
+
+  @override
+  Future<ResponseBody> handle(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+  ) async {
+    final search = options.uri.queryParameters['SearchTerm'];
+    final start =
+        int.tryParse(options.uri.queryParameters['StartIndex'] ?? '') ?? 0;
+    final gate = holdLoadMore;
+    if (search != null && start > 0 && gate != null) {
+      holdLoadMore = null;
+      loadMoreHolds++;
+      await gate.future;
+    }
+    return super.handle(options, requestStream);
+  }
 }
 
 Finder _verticalScrollable(Finder scope) {
