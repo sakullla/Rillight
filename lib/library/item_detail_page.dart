@@ -94,8 +94,14 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
   /// 季切换/重试失败时分集分区内联显示的错误;成功后清空。
   EmbyException? _episodeError;
 
-  /// 已有剧集时继续加载下一窗失败;列表保留,分区内说明并重试。
+  /// 已有剧集时，继续加载下一窗或跳到未加载集数失败；列表保留，分区内说明并重试。
   EmbyException? _episodeLoadMoreError;
+
+  /// 跳转窗口失败时要重试的集号。为空表示 [_episodeLoadMoreError] 来自继续加载。
+  int? _pendingJumpNumber;
+
+  /// 作废进行中的选集跳转，避免切季或继续加载之后写入过期失败。
+  int _jumpSerial = 0;
   int _episodeReveal = 0;
   bool _episodesLoading = false;
   bool _loadingMore = false;
@@ -206,6 +212,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     bool refreshCatalog = false,
   }) async {
     final gen = ++_loadGen;
+    _jumpSerial++;
     final keep = keepChrome && _item != null && _error == null;
     if (!keep) {
       setState(() {
@@ -214,6 +221,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
         _similarError = null;
         _episodeError = null;
         _episodeLoadMoreError = null;
+        _pendingJumpNumber = null;
         _episodesLoading = false;
         _loadingMore = false;
         _seasons = const [];
@@ -383,6 +391,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
         _episodeWindowEnd = episodeWindowEnd;
         _episodeError = null;
         _episodeLoadMoreError = null;
+        _pendingJumpNumber = null;
         _episodesLoading = false;
         _seasonId = seasonId;
         _seriesId = seriesId;
@@ -552,9 +561,11 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     }
     final gen = _loadGen;
     final startIndex = _episodeWindowEnd;
+    final serial = ++_jumpSerial;
     setState(() {
       _loadingMore = true;
       _episodeLoadMoreError = null;
+      _pendingJumpNumber = null;
     });
     try {
       final page = await _queryEpisodes(
@@ -562,7 +573,10 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
         seasonId,
         startIndex,
       );
-      if (!mounted || gen != _loadGen || _seasonId != seasonId) {
+      if (!mounted ||
+          gen != _loadGen ||
+          serial != _jumpSerial ||
+          _seasonId != seasonId) {
         return;
       }
       setState(() {
@@ -575,12 +589,16 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
         _episodeLoadMoreError = null;
       });
     } on EmbyException catch (error) {
-      if (!mounted || gen != _loadGen || _seasonId != seasonId) {
+      if (!mounted ||
+          gen != _loadGen ||
+          serial != _jumpSerial ||
+          _seasonId != seasonId) {
         return;
       }
       setState(() {
         _loadingMore = false;
         _episodeLoadMoreError = error;
+        _pendingJumpNumber = null;
       });
     }
   }
@@ -633,19 +651,34 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     if (seasonId == null) {
       return;
     }
+    final serial = ++_jumpSerial;
     for (final episode in _episodes) {
       if (episode.indexNumber == number) {
+        if (_loadingMore || _pendingJumpNumber != null) {
+          setState(() {
+            _loadingMore = false;
+            if (_pendingJumpNumber != null) {
+              _pendingJumpNumber = null;
+              _episodeLoadMoreError = null;
+            }
+          });
+        }
         _openOrRevealEpisode(episode.id);
         return;
       }
     }
+    setState(() {
+      _loadingMore = false;
+      _episodeLoadMoreError = null;
+      _pendingJumpNumber = null;
+    });
     try {
       final window = await _loadEpisodeWindow(
         AuthScope.of(context).client,
         seasonId: seasonId,
         aroundNumber: number,
       );
-      if (!mounted) {
+      if (!mounted || serial != _jumpSerial || _seasonId != seasonId) {
         return;
       }
       EmbyItem? target;
@@ -659,14 +692,30 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
       if (target == null) {
         return;
       }
-      setState(() => _applyWindow(window));
+      setState(() {
+        _applyWindow(window);
+        _episodeLoadMoreError = null;
+        _pendingJumpNumber = null;
+      });
       _openOrRevealEpisode(target.id);
     } on EmbyException catch (error) {
-      if (!mounted) {
+      if (!mounted || serial != _jumpSerial || _seasonId != seasonId) {
         return;
       }
-      setState(() => _episodeError = error);
+      setState(() {
+        _episodeLoadMoreError = error;
+        _pendingJumpNumber = number;
+      });
     }
+  }
+
+  void _retryEpisodeContinuation() {
+    final number = _pendingJumpNumber;
+    if (number != null) {
+      unawaited(_jumpToEpisodeNumber(number));
+      return;
+    }
+    unawaited(_loadMoreEpisodes());
   }
 
   void _revealEpisode(String id) {
@@ -702,12 +751,14 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
 
   /// 切季:失败时分区内联显示错误与重试,而不是静默留下空列表。
   Future<void> _selectSeason(String seasonId) async {
+    _jumpSerial++;
     setState(() {
       _seasonId = seasonId;
       _focusedEpisodeId = null;
       _episodes = const [];
       _episodeError = null;
       _episodeLoadMoreError = null;
+      _pendingJumpNumber = null;
       _episodesLoading = true;
       _loadingMore = false;
       _episodeTotal = 0;
@@ -1208,7 +1259,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                   hasMore: _episodeWindowEnd < _episodeTotal,
                   loadingMore: _loadingMore,
                   loadMoreError: _episodeLoadMoreError,
-                  onRetryLoadMore: () => unawaited(_loadMoreEpisodes()),
+                  onRetryLoadMore: _retryEpisodeContinuation,
                   onLoadMore: () => unawaited(_loadMoreEpisodes()),
                   headerAction: _EpisodeShelfActions(
                     seasons: _seasons,

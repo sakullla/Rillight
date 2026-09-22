@@ -96,7 +96,7 @@ class EpisodeList extends StatelessWidget {
             ),
           ),
           const SizedBox(height: AppSpacing.sm),
-          if (error != null)
+          if (error != null && episodes.isEmpty)
             AppErrorView(
               message: catalogFailureMessage(l10n, error),
               onRetry: onRetry,

@@ -608,6 +608,76 @@ void main() {
     expect(find.byKey(ItemDetailPage.headerKey), findsOneWidget);
     expect(tester.takeException(), isNull);
   }, tags: ['integration']);
+
+  testWidgets('failed episode jump keeps the loaded window under the notice', (
+    tester,
+  ) async {
+    server.failEpisodeWindowsAfterStart = true;
+    server.setEpisodes(_series, [
+      for (var i = 1; i <= 100; i++)
+        FakeEpisode(
+          id: 'bulk-e$i',
+          name: 'Episode $i',
+          seasonId: _season1,
+          indexNumber: i,
+        ),
+    ]);
+    final app = await pumpApp(tester);
+    await openItem(tester, app, _series);
+    expect(_episodeCardIds(tester), hasLength(80));
+
+    final locate = find.byKey(CatalogKeys.locateEpisode);
+    await ensureVisibleBelowTopBar(tester, locate);
+    await tapBelowTopBar(tester, locate);
+    await settle(tester);
+    final dialog = find.byType(AlertDialog);
+    expect(dialog, findsOneWidget);
+    await tester.enterText(
+      find.descendant(of: dialog, matching: find.byType(TextField)),
+      '90',
+    );
+    await tester.testTextInput.receiveAction(TextInputAction.go);
+    await settle(tester);
+
+    final row = find.byKey(CatalogKeys.episodesRow);
+    final notice = find.descendant(
+      of: row,
+      matching: find.textContaining('episode-window-failed'),
+    );
+    final first = find.byKey(CatalogKeys.episode('bulk-e1'));
+    expect(find.byType(AlertDialog), findsNothing);
+    expect(_episodeCardIds(tester), hasLength(80));
+    expect(_episodeCardIds(tester).first, 'bulk-e1');
+    expect(find.byKey(CatalogKeys.episode('bulk-e90')), findsNothing);
+    expect(notice, findsOneWidget);
+    expect(
+      find.descendant(of: row, matching: find.text('重试')),
+      findsOneWidget,
+    );
+    expect(tester.getRect(notice).bottom, lessThanOrEqualTo(tester.getRect(first).top));
+    expect(find.byKey(ItemDetailPage.headerKey), findsOneWidget);
+    expect(find.byType(SnackBar), findsNothing);
+
+    server.failEpisodeWindowsAfterStart = false;
+    final retry = find.descendant(of: row, matching: find.text('重试'));
+    await ensureVisibleBelowTopBar(tester, retry);
+    await tapBelowTopBar(tester, retry);
+    await settle(tester);
+
+    final ids = _episodeCardIds(tester);
+    expect(ids.first, 'bulk-e86');
+    expect(ids, contains('bulk-e90'));
+    expect(ids, isNot(contains('bulk-e1')));
+    expect(
+      find.descendant(
+        of: find.byKey(CatalogKeys.episodesRow),
+        matching: find.textContaining('episode-window-failed'),
+      ),
+      findsNothing,
+    );
+    expect(find.byKey(ItemDetailPage.headerKey), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  }, tags: ['integration']);
 }
 
 Axis _headerDirection(WidgetTester tester) {
