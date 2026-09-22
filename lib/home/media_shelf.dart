@@ -5,6 +5,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/theme/tokens.dart';
+import 'package:rillight/app/widgets/app_error_view.dart';
 import 'package:rillight/app/widgets/scrim_icon_button.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/emby/emby_errors.dart';
@@ -70,6 +71,57 @@ class MediaShelf extends StatefulWidget {
   /// 打开第 10 集时不该停在第 1 集)。卡片节距按默认卡宽 + [cardGap] 估算,
   /// 自定义 [itemBuilder] 需使用同档卡宽。
   final String? focusItemId;
+
+  /// 内容超出时,静止右缘至少切进下一张卡片的宽度。
+  static const double peek = AppSpacing.page;
+
+  /// 第一条可见货架在海报下方占用的高度:标题、间距和一张宽卡。
+  static double heroClearanceFor(BuildContext context, double screenWidth) {
+    final title = lineHeightOf(
+      context,
+      Theme.of(context).textTheme.titleMedium,
+    );
+    final image = wideCardWidthFor(screenWidth) * 9 / 16;
+    final labels = wideLabelExtentFor(context, customCard: false);
+    return title + AppSpacing.sm + (image + labels) * hoverScale;
+  }
+
+  /// 未超出时返回 [maxWidth]。超出时把静止可见宽度收到下一张卡片内部。
+  static double restingViewportWidth({
+    required double maxWidth,
+    required double cardWidth,
+    required int itemCount,
+  }) {
+    if (itemCount <= 0 ||
+        cardWidth <= 0 ||
+        !maxWidth.isFinite ||
+        maxWidth <= 0) {
+      return maxWidth;
+    }
+    final lastCardRight =
+        AppSpacing.page + itemCount * cardWidth + (itemCount - 1) * cardGap;
+    if (lastCardRight <= maxWidth + 0.5) {
+      return maxWidth;
+    }
+    final span = maxWidth - AppSpacing.page;
+    final pitch = cardWidth + cardGap;
+    if (span <= 0 || pitch <= 0) {
+      return maxWidth;
+    }
+    var remainder = span % pitch;
+    if (remainder == 0) {
+      remainder = pitch;
+    }
+    if (remainder < cardWidth) {
+      return maxWidth;
+    }
+    final minPeek = cardWidth / 2 < peek ? cardWidth / 2 : peek;
+    final clipped = maxWidth - ((remainder - cardWidth) + minPeek);
+    if (clipped <= AppSpacing.page + minPeek) {
+      return maxWidth;
+    }
+    return clipped;
+  }
 
   /// 竖版海报卡宽,随 [AppBreakpoints] 缩放。
   static double posterWidthFor(double screenWidth) {
@@ -385,133 +437,147 @@ class _MediaShelfState extends State<MediaShelf> {
                           : MediaShelf.posterWidthFor(screenWidth),
                       posterAspectRatio: widget.wide ? 16 / 9 : 2 / 3,
                     )
-                  : widget.headerAction != null
-                  ? const SizedBox.shrink()
-                  : Align(
-                      alignment: Alignment.centerLeft,
-                      child: TextButton.icon(
-                        onPressed: widget.onRetry,
-                        icon: const Icon(Icons.refresh_rounded),
-                        label: Text(l10n.retry),
-                      ),
+                  : AppErrorView(
+                      message: catalogFailureMessage(l10n, widget.error!),
+                      onRetry: widget.onRetry,
                     ),
             )
           else
-            SizedBox(
-              height: _rowHeight,
-              child: Stack(
-                children: [
-                  NotificationListener<ScrollMetricsNotification>(
-                    onNotification: (notification) {
-                      _updateScrollButtons();
-                      return false;
-                    },
-                    child: FocusTraversalGroup(
-                      policy: ReadingOrderTraversalPolicy(),
-                      child: ScrollConfiguration(
-                        behavior: const _ShelfScrollBehavior(),
-                        child: Listener(
-                          onPointerSignal: _onVerticalWheelToParent,
-                          child: MediaImageScrollListener(
-                            child: ListView.separated(
-                              key: PageStorageKey('shelf-${widget.shelfId}'),
-                              controller: _controller,
-                              scrollCacheExtent:
-                                  const ScrollCacheExtent.viewport(0.5),
-                              // 首张卡片外缘仍落在 AppSpacing.page 竖线上。
-                              padding: const EdgeInsets.symmetric(
-                                horizontal:
-                                    AppSpacing.page - MediaShelf.hoverGutter,
-                              ),
-                              scrollDirection: Axis.horizontal,
-                              itemBuilder: (context, index) {
-                                final item = widget.items[index];
-                                final child =
-                                    widget.itemBuilder?.call(context, item) ??
-                                    PosterCard(
-                                      item: item,
-                                      showProgress: widget.showProgress,
-                                      wide: widget.wide,
-                                      width: widget.wide
-                                          ? MediaShelf.wideCardWidthFor(
-                                              screenWidth,
-                                            )
-                                          : MediaShelf.posterWidthFor(
-                                              screenWidth,
-                                            ),
-                                      onTap: () => widget.onTap(item),
-                                      onRemoveFromResume:
-                                          widget.onRemoveFromResume,
-                                    );
-                                return Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: MediaShelf.hoverGutter,
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final cardWidth = widget.wide
+                    ? MediaShelf.wideCardWidthFor(screenWidth)
+                    : MediaShelf.posterWidthFor(screenWidth);
+                final viewWidth = MediaShelf.restingViewportWidth(
+                  maxWidth: constraints.maxWidth,
+                  cardWidth: cardWidth,
+                  itemCount: widget.items.length,
+                );
+                return SizedBox(
+                  height: _rowHeight,
+                  width: viewWidth,
+                  child: Stack(
+                    children: [
+                      NotificationListener<ScrollMetricsNotification>(
+                        onNotification: (notification) {
+                          _updateScrollButtons();
+                          return false;
+                        },
+                        child: FocusTraversalGroup(
+                          policy: ReadingOrderTraversalPolicy(),
+                          child: ScrollConfiguration(
+                            behavior: const _ShelfScrollBehavior(),
+                            child: Listener(
+                              onPointerSignal: _onVerticalWheelToParent,
+                              child: MediaImageScrollListener(
+                                child: ListView.separated(
+                                  key: PageStorageKey(
+                                    'shelf-${widget.shelfId}',
                                   ),
-                                  child: Align(
-                                    alignment: Alignment.center,
-                                    child: Listener(
-                                      onPointerSignal: _onVerticalWheelToParent,
-                                      child: Shortcuts(
-                                        shortcuts: _kShelfArrowShortcuts,
-                                        child: _EnsureVisibleOnFocus(
-                                          child: child,
+                                  controller: _controller,
+                                  scrollCacheExtent:
+                                      const ScrollCacheExtent.viewport(0.5),
+                                  // 首张卡片外缘仍落在 AppSpacing.page 竖线上。
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal:
+                                        AppSpacing.page -
+                                        MediaShelf.hoverGutter,
+                                  ),
+                                  scrollDirection: Axis.horizontal,
+                                  itemBuilder: (context, index) {
+                                    final item = widget.items[index];
+                                    final child =
+                                        widget.itemBuilder?.call(
+                                          context,
+                                          item,
+                                        ) ??
+                                        PosterCard(
+                                          item: item,
+                                          showProgress: widget.showProgress,
+                                          wide: widget.wide,
+                                          width: widget.wide
+                                              ? MediaShelf.wideCardWidthFor(
+                                                  screenWidth,
+                                                )
+                                              : MediaShelf.posterWidthFor(
+                                                  screenWidth,
+                                                ),
+                                          onTap: () => widget.onTap(item),
+                                          onRemoveFromResume:
+                                              widget.onRemoveFromResume,
+                                        );
+                                    return Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: MediaShelf.hoverGutter,
+                                      ),
+                                      child: Align(
+                                        alignment: Alignment.center,
+                                        child: Listener(
+                                          onPointerSignal:
+                                              _onVerticalWheelToParent,
+                                          child: Shortcuts(
+                                            shortcuts: _kShelfArrowShortcuts,
+                                            child: _EnsureVisibleOnFocus(
+                                              child: child,
+                                            ),
+                                          ),
                                         ),
                                       ),
-                                    ),
-                                  ),
-                                );
-                              },
-                              separatorBuilder: (context, index) =>
-                                  const SizedBox(
-                                    width:
-                                        MediaShelf.cardGap -
-                                        2 * MediaShelf.hoverGutter,
-                                  ),
-                              itemCount: widget.items.length,
+                                    );
+                                  },
+                                  separatorBuilder: (context, index) =>
+                                      const SizedBox(
+                                        width:
+                                            MediaShelf.cardGap -
+                                            2 * MediaShelf.hoverGutter,
+                                      ),
+                                  itemCount: widget.items.length,
+                                ),
+                              ),
                             ),
                           ),
                         ),
                       ),
-                    ),
+                      if (_canScrollLeft)
+                        Positioned(
+                          left: AppSpacing.xs,
+                          top: 0,
+                          bottom: 0,
+                          child: Center(
+                            child: ExcludeFocus(
+                              child: _ScrollButton(
+                                buttonKey: CatalogKeys.shelfScrollLeft(
+                                  widget.shelfId,
+                                ),
+                                tooltip: l10n.scrollLeft,
+                                icon: Icons.chevron_left,
+                                onPressed: () => _page(-1),
+                              ),
+                            ),
+                          ),
+                        ),
+                      if (_canScrollRight)
+                        Positioned(
+                          right: AppSpacing.xs,
+                          top: 0,
+                          bottom: 0,
+                          child: Center(
+                            child: ExcludeFocus(
+                              child: _ScrollButton(
+                                buttonKey: CatalogKeys.shelfScrollRight(
+                                  widget.shelfId,
+                                ),
+                                tooltip: l10n.scrollRight,
+                                icon: Icons.chevron_right,
+                                onPressed: () => _page(1),
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
-                  if (_canScrollLeft)
-                    Positioned(
-                      left: AppSpacing.xs,
-                      top: 0,
-                      bottom: 0,
-                      child: Center(
-                        child: ExcludeFocus(
-                          child: _ScrollButton(
-                            buttonKey: CatalogKeys.shelfScrollLeft(
-                              widget.shelfId,
-                            ),
-                            tooltip: l10n.scrollLeft,
-                            icon: Icons.chevron_left,
-                            onPressed: () => _page(-1),
-                          ),
-                        ),
-                      ),
-                    ),
-                  if (_canScrollRight)
-                    Positioned(
-                      right: AppSpacing.xs,
-                      top: 0,
-                      bottom: 0,
-                      child: Center(
-                        child: ExcludeFocus(
-                          child: _ScrollButton(
-                            buttonKey: CatalogKeys.shelfScrollRight(
-                              widget.shelfId,
-                            ),
-                            tooltip: l10n.scrollRight,
-                            icon: Icons.chevron_right,
-                            onPressed: () => _page(1),
-                          ),
-                        ),
-                      ),
-                    ),
-                ],
-              ),
+                );
+              },
             ),
         ],
       ),

@@ -4,6 +4,7 @@ import 'package:rillight/app/app_shell.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme/tokens.dart';
+import 'package:rillight/app/widgets/app_empty_view.dart';
 import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/home/catalog_controller.dart';
 import 'package:rillight/home/catalog_keys.dart';
@@ -202,17 +203,15 @@ class _HomePageState extends State<HomePage> {
                     ),
                   if (refreshHost == _RefreshSlot.libraries &&
                       catalog.libraries.isEmpty)
-                    Padding(
-                      padding: const EdgeInsets.all(AppSpacing.page),
-                      child: Row(
-                        children: [
-                          Expanded(child: Text(l10n.browseEmpty)),
-                          _refreshAction(
-                            l10n,
-                            refreshHost,
-                            _RefreshSlot.libraries,
-                          )!,
-                        ],
+                    SizedBox(
+                      width: double.infinity,
+                      child: AppEmptyView(
+                        message: l10n.browseEmpty,
+                        action: _refreshAction(
+                          l10n,
+                          refreshHost,
+                          _RefreshSlot.libraries,
+                        ),
                       ),
                     ),
                   RepaintBoundary(

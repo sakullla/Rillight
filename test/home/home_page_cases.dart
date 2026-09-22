@@ -3,6 +3,7 @@ import 'dart:ui' as ui;
 
 import '../helpers/image_cache_fixture.dart';
 import '../helpers/settle.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/rendering.dart';
@@ -10,6 +11,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
 import 'package:rillight/app/app_shell.dart';
+import 'package:rillight/app/widgets/app_empty_view.dart';
+import 'package:rillight/app/widgets/app_error_view.dart';
 import 'package:rillight/app/widgets/backdrop_scrim.dart';
 import 'package:rillight/app/widgets/liquid_glass.dart';
 import 'package:rillight/app/widgets/scrim_icon_button.dart';
@@ -19,6 +22,7 @@ import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
+import 'package:rillight/emby/emby_errors.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/home_hero.dart';
 import 'package:rillight/home/home_page.dart';
@@ -28,6 +32,7 @@ import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/theme.dart';
 import 'package:rillight/library/library_page.dart';
+import 'package:rillight/library/poster_card.dart';
 import 'package:rillight/library/shelf_grid_page.dart';
 import 'package:rillight/app/routes.dart';
 
@@ -161,6 +166,23 @@ void main() {
         tester.widget(find.byKey(CatalogKeys.heroNext)),
         isA<ScrimIconButton>(),
       );
+      expect(find.byKey(CatalogKeys.heroDot(4)), findsOneWidget);
+      expect(find.byKey(CatalogKeys.heroDot(5)), findsNothing);
+      const featuredOrder = ['Inception', '飞屋环游记', '封面失败片', '未分类型电影', '混合库电影'];
+      for (final title in featuredOrder) {
+        if (title != featuredOrder.first) {
+          await tester.tap(find.byKey(CatalogKeys.heroNext));
+          await tester.pump();
+        }
+        expect(
+          find.descendant(
+            of: find.byType(HomeHero),
+            matching: find.text(title),
+          ),
+          findsOneWidget,
+        );
+        expect(find.text(title), findsWidgets);
+      }
 
       expect(find.byKey(homeRefreshKey), findsOneWidget);
       expect(
@@ -406,21 +428,61 @@ void main() {
           )
           .map((widget) => widget.key.toString())
           .firstWhere((key) => key.contains('movie-'));
+      double progress() => tester
+          .widget<HomeHeroProgress>(find.byType(HomeHeroProgress))
+          .progress
+          .value;
       final first = index();
       await tester.pump(HomeHero.autoAdvanceInterval);
       await tester.pump(const Duration(milliseconds: 400));
       expect(index(), isNot(first));
-      await tester.tap(find.byKey(const Key('catalog-hero-pause')));
+
+      await tester.tap(find.byKey(CatalogKeys.heroNext));
       await tester.pump();
-      final paused = index();
-      await tester.pump(const Duration(seconds: 21));
-      expect(index(), paused);
+      FocusManager.instance.primaryFocus?.unfocus();
+      await tester.pump(const Duration(milliseconds: 400));
+      final manual = index();
+      expect(progress(), 0);
+      expect(find.byTooltip('恢复轮播'), findsOneWidget);
+      await tester.pump(const Duration(seconds: 13));
+      expect(index(), manual);
+      expect(progress(), 0);
+
       await tester.tap(find.byKey(const Key('catalog-hero-pause')));
       FocusManager.instance.primaryFocus?.unfocus();
       await tester.pump();
-      await tester.pump(HomeHero.autoAdvanceInterval);
+      await tester.pump(const Duration(seconds: 3));
+      expect(index(), manual);
+      expect(progress(), closeTo(0.5, 0.05));
+      final hovering = index();
+      final hover = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await hover.addPointer(location: Offset.zero);
+      addTearDown(hover.removePointer);
+      await hover.moveTo(tester.getCenter(find.byType(HomeHero)));
+      await tester.pump();
+      final held = progress();
+      await tester.pump(const Duration(seconds: 3));
+      expect(index(), hovering);
+      expect(progress(), held);
+      final hero = tester.getRect(find.byType(HomeHero));
+      await hover.moveTo(Offset(hero.center.dx, hero.bottom + 48));
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 3));
+      final afterHover = progress();
       await tester.pump(const Duration(milliseconds: 400));
-      expect(index(), isNot(paused));
+      expect(index(), isNot(hovering));
+      expect(afterHover, closeTo(0, 0.05));
+
+      final resumed = index();
+      await tester.tap(find.byKey(const Key('catalog-hero-pause')));
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 13));
+      expect(index(), resumed);
+      expect(find.byTooltip('恢复轮播'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('catalog-hero-pause')));
+      FocusManager.instance.primaryFocus?.unfocus();
+      await tester.pump();
+
       Focus.of(
         tester.element(
           find
@@ -433,28 +495,43 @@ void main() {
       ).requestFocus();
       await tester.pump();
       final focused = index();
+      final focusedProgress = progress();
+      await tester.pump(const Duration(seconds: 7));
+      expect(index(), focused);
+      expect(progress(), focusedProgress);
       FocusManager.instance.primaryFocus?.unfocus();
       await tester.pump();
-      await tester.pump(const Duration(seconds: 21));
-      expect(index(), focused);
-      expect(find.byTooltip('恢复轮播'), findsOneWidget);
-      // An explicitly running carousel must stop while another route covers home.
-      await tester.tap(find.byKey(const Key('catalog-hero-pause')));
-      FocusManager.instance.primaryFocus?.unfocus();
+      await tester.pump(HomeHero.autoAdvanceInterval);
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(index(), isNot(focused));
+      expect(find.byTooltip('暂停轮播'), findsOneWidget);
+
+      final running = index();
       app.router.push(AppRoutes.library('view-movies'));
       await settle(tester);
-      await tester.pump(const Duration(seconds: 21));
+      await tester.pump(const Duration(seconds: 13));
       app.router.pop();
       await settle(tester);
-      expect(index(), focused);
+      expect(index(), running);
+
       tester.platformDispatcher.accessibilityFeaturesTestValue =
           const FakeAccessibilityFeatures(disableAnimations: true);
       addTearDown(
         tester.platformDispatcher.clearAccessibilityFeaturesTestValue,
       );
       await tester.pump();
-      await tester.pump(const Duration(seconds: 21));
-      expect(index(), focused);
+      final reduced = progress();
+      await tester.pump(const Duration(seconds: 13));
+      expect(index(), running);
+      expect(progress(), reduced);
+      expect(
+        tester
+            .widget<ScrimIconButton>(
+              find.byKey(const Key('catalog-hero-pause')),
+            )
+            .onPressed,
+        isNull,
+      );
       expect(tester.takeException(), isNull);
     },
     tags: ['integration'],
@@ -549,6 +626,23 @@ void main() {
               tester.getTopLeft(find.byKey(CatalogKeys.resumeRow)).dy,
               lessThan(scenario.size.height),
             );
+            if (scenario.name == '1440x900') {
+              final play = tester.getRect(find.byKey(CatalogKeys.heroPlay));
+              expect(play.top, greaterThanOrEqualTo(0));
+              expect(play.bottom, lessThanOrEqualTo(scenario.size.height));
+              final shelfTitle = tester.getRect(
+                inRow(CatalogKeys.resumeRow, find.text('继续观看')),
+              );
+              expect(
+                shelfTitle.bottom,
+                lessThanOrEqualTo(scenario.size.height),
+              );
+              final card = tester.getRect(
+                inRow(CatalogKeys.resumeRow, find.byType(PosterCard)).first,
+              );
+              expect(card.top, lessThan(scenario.size.height));
+              expect(card.bottom, lessThanOrEqualTo(scenario.size.height));
+            }
           }
           expect(tester.takeException(), isNull);
           if (capture) {
@@ -578,7 +672,148 @@ void main() {
     },
     tags: ['integration'],
   );
+
+  testWidgets('empty home shows an icon, centered copy and refresh', (
+    tester,
+  ) async {
+    server.items.clear();
+    server.views.clear();
+    await pumpLoggedIn(tester);
+
+    expect(find.byType(AppEmptyView), findsOneWidget);
+    expect(find.byType(AppErrorView), findsNothing);
+    expect(find.byIcon(Icons.inbox_outlined), findsOneWidget);
+    expect(find.byIcon(Icons.error_outline), findsNothing);
+    final message = tester.getRect(find.text('暂无可浏览的内容，请刷新或从片库开始浏览。'));
+    final width = tester.view.physicalSize.width / tester.view.devicePixelRatio;
+    expect(message.center.dx, closeTo(width / 2, 16));
+    expect(
+      tester.widget<Text>(find.text('暂无可浏览的内容，请刷新或从片库开始浏览。')).textAlign,
+      TextAlign.center,
+    );
+    final icon = tester.getRect(find.byIcon(Icons.inbox_outlined));
+    expect(icon.center.dx, closeTo(message.center.dx, 16));
+    expect(icon.bottom, lessThan(message.top));
+    expect(find.byKey(homeRefreshKey), findsOneWidget);
+    expect(find.byIcon(Icons.refresh), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  }, tags: ['integration']);
+
+  testWidgets('failed empty shelf keeps the explanation beside refresh', (
+    tester,
+  ) async {
+    var retried = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        locale: const Locale('zh', 'CN'),
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        theme: AppTheme.dark(),
+        home: Scaffold(
+          body: MediaShelf(
+            shelfId: 'latest-movies',
+            title: '最近电影',
+            items: const [],
+            error: const EmbyException(
+              EmbyFailureKind.unknown,
+              detail: '货架加载失败',
+            ),
+            onRetry: () => retried += 1,
+            headerAction: const Icon(Icons.refresh, key: homeRefreshKey),
+            onTap: _ignoreItem,
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.byType(AppErrorView), findsOneWidget);
+    expect(find.byType(AppEmptyView), findsNothing);
+    expect(find.text('货架加载失败'), findsOneWidget);
+    expect(find.byIcon(Icons.error_outline), findsOneWidget);
+    expect(find.byIcon(Icons.inbox_outlined), findsNothing);
+    expect(find.text('重试'), findsOneWidget);
+    expect(find.byKey(homeRefreshKey), findsOneWidget);
+    await tester.tap(find.text('重试'));
+    await tester.pump();
+    expect(retried, 1);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'overflowing shelf peeks the next card without cropping a short row',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetPhysicalSize);
+
+      Future<void> pumpShelf(Size size, int count) async {
+        tester.view.physicalSize = size;
+        await tester.pumpWidget(
+          MaterialApp(
+            locale: const Locale('zh', 'CN'),
+            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            supportedLocales: AppLocalizations.supportedLocales,
+            theme: AppTheme.dark(),
+            home: Scaffold(
+              body: MediaShelf(
+                shelfId: 'peek',
+                title: '最近电影',
+                wide: true,
+                items: [
+                  for (var i = 0; i < count; i++)
+                    EmbyItem(id: 'peek-$i', name: '电影 $i', type: 'Movie'),
+                ],
+                onTap: _ignoreItem,
+              ),
+            ),
+          ),
+        );
+        await tester.pump();
+      }
+
+      bool cardIsCut(Rect card, double right) =>
+          card.left < right - 1 && card.right > right + 1;
+
+      await pumpShelf(const Size(744, 600), 6);
+      final clipped = tester.getRect(
+        find.descendant(
+          of: find.byType(MediaShelf),
+          matching: find.byType(Scrollable),
+        ),
+      );
+      final clippedFinder = find.descendant(
+        of: find.byType(MediaShelf),
+        matching: find.byType(PosterCard),
+      );
+      final clippedCards = [
+        for (var i = 0; i < clippedFinder.evaluate().length; i++)
+          tester.getRect(clippedFinder.at(i)),
+      ];
+      expect(clipped.width, lessThan(744));
+      expect(
+        clippedCards.any((card) => cardIsCut(card, clipped.right)),
+        isTrue,
+      );
+      expect(clippedCards.first.left, closeTo(24, 1));
+
+      await pumpShelf(const Size(800, 600), 1);
+      final full = tester.getRect(
+        find.descendant(
+          of: find.byType(MediaShelf),
+          matching: find.byType(Scrollable),
+        ),
+      );
+      final only = tester.getRect(find.byType(PosterCard));
+      expect(full.width, closeTo(800, 1));
+      expect(only.right, lessThanOrEqualTo(full.right + 1));
+      expect(only.right, closeTo(24 + 232, 1));
+      expect(tester.takeException(), isNull);
+    },
+  );
 }
+
+void _ignoreItem(EmbyItem item) {}
 
 // Deterministic synthetic artwork, never a network/downloaded poster.
 Future<List<Uint8List>> _renderFixtureArtwork() async {

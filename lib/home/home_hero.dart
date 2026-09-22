@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io' show Platform;
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
@@ -13,14 +14,16 @@ import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_controller.dart';
 import 'package:rillight/home/catalog_keys.dart';
+import 'package:rillight/home/media_shelf.dart';
 import 'package:rillight/library/item_format.dart';
 import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/player/player_window_host.dart';
 
 /// 首页全宽沉浸式 hero 轮播:多条 featured 内容(继续观看优先,其次最新
-/// 电影/剧集),支持左右箭头与指示点手动切换,并每 10 秒自动轮换。
-/// 悬停、焦点在 hero 内、或 [MediaQuery.disableAnimations] /
-/// [AppMotion.durationOf] 为零时停止自动轮换(WCAG 2.2.2)。
+/// 电影/剧集),支持左右箭头与指示点手动切换,并约每 6 秒自动轮换。
+/// 悬停或焦点只暂停计时与进度,离开后继续。手动切换或暂停会锁住,直到再次播放。
+/// [MediaQuery.disableAnimations] 或 [AppMotion.durationOf] 为零时不切换、
+/// 进度不走,暂停控制不可用(WCAG 2.2.2)。
 /// backdrop 顶到内容区边缘,[BackdropScrim] 三段遮罩上叠大标题、元信息与主操作。
 class HomeHero extends StatefulWidget {
   const HomeHero({super.key, required this.catalog, this.topOverlap = 0});
@@ -51,10 +54,13 @@ class HomeHero extends StatefulWidget {
       heightFor(width, viewportHeight: viewportHeight) >= 400;
 
   /// 轮播候选上限,避免指示点过多。
-  static const maxFeatured = 10;
+  static const maxFeatured = 5;
 
-  /// 自动轮换间隔。
-  static const autoAdvanceInterval = Duration(seconds: 10);
+  /// 自动轮换间隔。当前指示在这一整段里显示进度。
+  static const autoAdvanceInterval = Duration(seconds: 6);
+
+  /// 进度刷新步长。长于测试里 pumpAndSettle 的单步,避免空转占满帧调度。
+  static const progressTick = Duration(milliseconds: 200);
 
   /// 顶带在顶栏下方继续溶入的高度;与 [AppScrim.topBandHeight] 的默认
   /// 构成(顶栏 56 + 溶入 36)一致。
@@ -81,7 +87,9 @@ class _HomeHeroState extends State<HomeHero> {
   bool _hovering = false;
   bool _focused = false;
   bool _paused = false;
-  Timer? _autoAdvance;
+  Timer? _progressTimer;
+  int _elapsedMs = 0;
+  final ValueNotifier<double> _progress = ValueNotifier<double>(0);
 
   /// featured 候选:继续观看(可播/剧集)优先,其次最新电影、最新剧集,
   /// 按 id 去重并截断到 [HomeHero.maxFeatured]。
@@ -122,7 +130,8 @@ class _HomeHeroState extends State<HomeHero> {
 
   @override
   void dispose() {
-    _autoAdvance?.cancel();
+    _progressTimer?.cancel();
+    _progress.dispose();
     super.dispose();
   }
 
@@ -143,24 +152,34 @@ class _HomeHeroState extends State<HomeHero> {
   void _syncAutoAdvanceTimer() {
     final wantTimer = _canAutoAdvance && _featuredItems.length > 1;
     if (wantTimer) {
-      _autoAdvance ??= Timer.periodic(HomeHero.autoAdvanceInterval, (_) {
-        _tick();
+      _progressTimer ??= Timer.periodic(HomeHero.progressTick, (_) {
+        _onProgressTick();
       });
     } else {
-      _autoAdvance?.cancel();
-      _autoAdvance = null;
+      _progressTimer?.cancel();
+      _progressTimer = null;
     }
   }
 
-  void _tick() {
-    if (!mounted || !_canAutoAdvance) {
+  void _onProgressTick() {
+    if (!mounted || !_canAutoAdvance || _featuredItems.length < 2) {
       return;
     }
-    final count = _featuredItems.length;
-    if (count < 2) {
+    _elapsedMs += HomeHero.progressTick.inMilliseconds;
+    final intervalMs = HomeHero.autoAdvanceInterval.inMilliseconds;
+    if (_elapsedMs >= intervalMs) {
+      final count = _featuredItems.length;
+      _elapsedMs = 0;
+      _progress.value = 0;
+      setState(() => _index = (_index + 1) % count);
       return;
     }
-    setState(() => _index = (_index + 1) % count);
+    _progress.value = _elapsedMs / intervalMs;
+  }
+
+  void _resetProgress() {
+    _elapsedMs = 0;
+    _progress.value = 0;
   }
 
   void _go(int delta) {
@@ -179,9 +198,8 @@ class _HomeHeroState extends State<HomeHero> {
     setState(() {
       _index = (index % count + count) % count;
       _paused = true;
+      _resetProgress();
     });
-    _autoAdvance?.cancel();
-    _autoAdvance = null;
   }
 
   @override
@@ -198,23 +216,28 @@ class _HomeHeroState extends State<HomeHero> {
                 item.primaryImageTag != null ||
                 item.parentBackdropImageTag != null);
         final scale = MediaQuery.textScalerOf(context).scale(14) / 14;
-        final height = math.max(
-          hasImage
-              ? HomeHero.heightFor(
-                  constraints.maxWidth,
-                  viewportHeight: MediaQuery.sizeOf(context).height,
-                )
-              : 0.0,
-          (HomeHero.showsOverview(
-                        constraints.maxWidth,
-                        viewportHeight: MediaQuery.sizeOf(context).height,
-                      )
-                      ? 280
-                      : 200) *
-                  scale +
-              widget.topOverlap +
-              64,
-        );
+        final viewportHeight = MediaQuery.sizeOf(context).height;
+        final ratioHeight = hasImage
+            ? HomeHero.heightFor(
+                constraints.maxWidth,
+                viewportHeight: viewportHeight,
+              )
+            : 0.0;
+        final textFloor =
+            (HomeHero.showsOverview(
+                      constraints.maxWidth,
+                      viewportHeight: viewportHeight,
+                    )
+                    ? 280
+                    : 200) *
+                scale +
+            widget.topOverlap +
+            64;
+        final preferred = math.max(ratioHeight, textFloor);
+        final cap =
+            viewportHeight -
+            MediaShelf.heroClearanceFor(context, constraints.maxWidth);
+        final height = cap >= textFloor ? math.min(preferred, cap) : preferred;
         if (items.isEmpty) {
           if (!_loading) {
             return const SizedBox.shrink();
@@ -233,13 +256,13 @@ class _HomeHeroState extends State<HomeHero> {
             canRequestFocus: false,
             skipTraversal: true,
             onFocusChange: (focused) {
-              if (_focused == focused) {
+              if (!mounted || _focused == focused) {
                 return;
               }
-              setState(() {
-                _focused = focused;
-                if (focused) _paused = true;
-              });
+              // pump(duration) elapses before drawing a frame scheduled from
+              // this callback, so the timer has to start or stop here.
+              _focused = focused;
+              _syncAutoAdvanceTimer();
             },
             child: MouseRegion(
               onEnter: (_) {
@@ -366,6 +389,7 @@ class _HomeHeroState extends State<HomeHero> {
                         key: Key('catalog-hero-index-$index'),
                         count: items.length,
                         index: index,
+                        progress: _progress,
                         onSelect: _goTo,
                       ),
                     ),
@@ -385,17 +409,18 @@ class _HeroIndicators extends StatelessWidget {
     super.key,
     required this.count,
     required this.index,
+    required this.progress,
     required this.onSelect,
   });
 
   final int count;
   final int index;
+  final ValueListenable<double> progress;
   final ValueChanged<int> onSelect;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    const activeAlpha = 1.0;
     const inactiveAlpha = 0.35;
     return Row(
       mainAxisSize: MainAxisSize.min,
@@ -412,22 +437,65 @@ class _HeroIndicators extends StatelessWidget {
               constraints: const BoxConstraints.tightFor(width: 24, height: 32),
               onPressed: () => onSelect(i),
               icon: Center(
-                child: AnimatedContainer(
-                  duration: AppMotion.durationOf(context, AppMotion.fast),
-                  curve: AppMotion.standard,
-                  width: i == index ? 18 : 6,
-                  height: 6,
-                  decoration: BoxDecoration(
-                    color: scheme.onSurface.withValues(
-                      alpha: i == index ? activeAlpha : inactiveAlpha,
-                    ),
-                    borderRadius: BorderRadius.circular(AppRadii.sm / 2),
-                  ),
-                ),
+                child: i == index
+                    ? HomeHeroProgress(progress: progress)
+                    : AnimatedContainer(
+                        duration: AppMotion.durationOf(context, AppMotion.fast),
+                        curve: AppMotion.standard,
+                        width: 6,
+                        height: 6,
+                        decoration: BoxDecoration(
+                          color: scheme.onSurface.withValues(
+                            alpha: inactiveAlpha,
+                          ),
+                          borderRadius: BorderRadius.circular(AppRadii.sm / 2),
+                        ),
+                      ),
               ),
             ),
           ),
       ],
+    );
+  }
+}
+
+/// 当前海报指示上的间隔进度,取值 0 到 1。
+class HomeHeroProgress extends StatelessWidget {
+  const HomeHeroProgress({super.key, required this.progress});
+
+  static const progressKey = Key('catalog-hero-progress');
+
+  final ValueListenable<double> progress;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = Theme.of(context).colorScheme.onSurface;
+    return ValueListenableBuilder<double>(
+      valueListenable: progress,
+      builder: (context, value, _) {
+        final progress = value.clamp(0.0, 1.0);
+        return SizedBox(
+          key: HomeHeroProgress.progressKey,
+          width: 18,
+          height: 6,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(AppRadii.sm / 2),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                ColoredBox(color: color.withValues(alpha: 0.35)),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: FractionallySizedBox(
+                    widthFactor: progress,
+                    child: ColoredBox(color: color),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }
