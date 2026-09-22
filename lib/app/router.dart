@@ -19,6 +19,12 @@ import 'package:rillight/library/mobile_library_page.dart';
 import 'package:rillight/player/mobile_player_page.dart';
 import 'package:rillight/player/player_window_host.dart';
 
+import 'package:rillight/app/tv_shell.dart';
+import 'package:rillight/auth/tv_connect_page.dart';
+import 'package:rillight/library/tv_detail_page.dart';
+import 'package:rillight/library/tv_library_page.dart';
+import 'package:rillight/player/tv_player_page.dart';
+
 export 'package:rillight/app/routes.dart';
 
 GoRouter createAppRouter({
@@ -94,11 +100,47 @@ GoRouter createAppRouter({
         GoRoute(
           path: AppRoutes.connect,
           name: AppRoutes.connect,
-          builder: (context, state) => const AndroidConnectPage(),
+          builder: (context, state) => TvConnectPage(
+            addingAnother: state.uri.queryParameters['add'] == '1',
+          ),
         ),
-        GoRoute(
-          path: AppRoutes.home,
-          builder: (context, state) => const AndroidSessionPage(),
+        ShellRoute(
+          builder: (context, state, child) => CatalogShell(
+            key: ValueKey(
+              '${auth.session?.server.id}|${auth.session?.userId}|${auth.session?.server.activeLine?.id}',
+            ),
+            auth: auth,
+            child: child,
+          ),
+          routes: [
+            GoRoute(
+              path: AppRoutes.home,
+              builder: (context, state) => const TvShell(),
+            ),
+            GoRoute(
+              path: '/library/:viewId',
+              builder: (context, state) =>
+                  TvLibraryPage(viewId: state.pathParameters['viewId']!),
+            ),
+            GoRoute(
+              path: '/item/:itemId',
+              builder: (context, state) => TvDetailPage(
+                itemId: state.pathParameters['itemId']!,
+                initialSeasonId: state.uri.queryParameters['season'],
+              ),
+            ),
+            GoRoute(
+              path: '/play/:itemId',
+              builder: (context, state) {
+                final request = state.extra as PlayerOpenRequest?;
+                return TvPlayerPage(
+                  itemId: state.pathParameters['itemId']!,
+                  mediaSourceId: request?.mediaSourceId,
+                  autoResume: request?.autoResume ?? true,
+                );
+              },
+            ),
+          ],
         ),
       ],
       if (environment.isDesktop)

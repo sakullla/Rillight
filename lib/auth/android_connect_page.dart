@@ -199,31 +199,3 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
     );
   }
 }
-
-/// Temporary authenticated landing until phone/TV catalog routes are assembled.
-class AndroidSessionPage extends StatelessWidget {
-  const AndroidSessionPage({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    final auth = AuthScope.of(context);
-    final l10n = AppLocalizations.of(context);
-    return Scaffold(
-      appBar: AppBar(title: Text(l10n.appName)),
-      body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.all(24),
-          children: [
-            Text(auth.session?.server.name ?? ''),
-            Text(auth.session?.username ?? ''),
-            const SizedBox(height: 24),
-            FilledButton(
-              onPressed: auth.isBusy ? null : auth.logout,
-              child: Text(l10n.logout),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
