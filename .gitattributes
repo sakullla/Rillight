@@ -8,3 +8,7 @@ lib/app/l10n/app_localizations_zh.dart linguist-generated=true sakullla-review=g
 **/GeneratedPluginRegistrant.swift linguist-generated=true sakullla-review=generated
 macos/Runner/Assets.xcassets/AppIcon.appiconset/** linguist-generated=true sakullla-review=generated
 windows/runner/resources/app_icon.ico linguist-generated=true sakullla-review=generated
+test/suites/*.dart linguist-generated=true sakullla-review=generated
+test/helpers/suite_manifest.dart linguist-generated=true sakullla-review=generated
+android/app/src/main/res/mipmap-*/ic_launcher.png linguist-generated=true sakullla-review=generated
+android/app/src/main/res/drawable-xhdpi/tv_banner.png linguist-generated=true sakullla-review=generated
