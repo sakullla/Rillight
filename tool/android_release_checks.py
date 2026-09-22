@@ -40,6 +40,21 @@ def faults(**values):
         return json.load(response)
 
 
+def fixture_state():
+    with urllib.request.urlopen('http://127.0.0.1:8784/__state', timeout=5) as response:
+        return json.load(response)
+
+
+def playback_reports(state, after_sequence):
+    # __state exposes a rolling window, so use the fixture's monotonic sequence,
+    # never an index into that truncated list or an earlier device's success.
+    reports = [r for r in state['reports'] if r['sequence'] > after_sequence]
+    accepted = {r['path'] for r in reports if r['accepted']}
+    return {'passed': {'/Sessions/Playing', '/Sessions/Playing/Stopped'} <= accepted,
+            'after_sequence': after_sequence, 'through_sequence': state['report_count'],
+            'reports': reports}
+
+
 def focused_labels(state):
     focused = [r['rect'] for r in state['rows'] if r['focused']]
     if not focused:
@@ -192,6 +207,12 @@ class Device:
             time.sleep(.4)
         self.wait(lambda s: not any(r['key'] == 'tv-input-editor' for r in s['rows']), 'remote input dialog closed')
 
+    def hide_ime(self):
+        # A hardware-keyboard AVD may accept text without showing an IME.
+        # Sending Back unconditionally would then exit the connection page.
+        if b'mInputShown=true' in self.adb('shell', 'dumpsys', 'input_method'):
+            self.key(4)
+
     def tv_destination(self, label):
         navigation = ['首页', '片库', '搜索', '设置']
         # Directional focus chooses the geometrically nearest rail entry; a
@@ -234,8 +255,22 @@ class Device:
 
     def tap(self, key=None, label=None):
         state, row = self.row(key, label)
+        # Display metrics change before the route finishes laying out after
+        # rotation. Wait for a stable target before dispatching the one tap.
+        for _ in range(20):
+            time.sleep(.2)
+            current_state, current_row = self.row(key, label)
+            stable = current_row['rect'] == row['rect'] and current_state['size'] == state['size']
+            state, row = current_state, current_row
+            if stable:
+                break
+        else:
+            raise RuntimeError('Tap target did not settle: ' + str(key or label))
         x1, y1, x2, y2 = row['rect']
-        self.adb('shell', 'input', 'tap', round((x1+x2)/2*state['scale']), round((y1+y2)/2*state['scale']))
+        point = [round((x1+x2)/2*state['scale']), round((y1+y2)/2*state['scale'])]
+        with (self.output / 'inputs.jsonl').open('a', encoding='utf-8') as stream:
+            stream.write(json.dumps({'tap': point, 'key': key, 'label': label}, ensure_ascii=False) + '\n')
+        self.adb('shell', 'input', 'tap', *point)
         time.sleep(.35)
 
     def text(self, value):
@@ -286,7 +321,7 @@ def app_flow(device, tv):
         for name, value in [('address', 'http://127.0.0.1:8784'), ('username', 'mobile'), ('password', 'test-only')]:
             d.tap(key='android-connect-' + name)
             d.text(value)
-            d.key(4)
+            d.hide_ime()
         d.tap(key='android-connect-submit')
     d.wait(lambda s: s['authenticated'] is True, 'real HTTP authentication')
     d.row(label='Rillight 流光验证 01')
@@ -384,7 +419,7 @@ def app_flow(device, tv):
             d.tap(label='搜索')
             d.tap(key='mobile-search-field')
             d.text('Rillight')
-            d.key(4)
+            d.hide_ime()
         d.row(label='重试')
         d.screenshot('search-offline')
     finally:
@@ -482,6 +517,7 @@ def main():
                         'dirty': bool(run(['git', '-C', ROOT, 'status', '--porcelain']).strip())}
     server = None
     native_server = None
+    server_log = native_log = None
     try:
         if args.apk:
             result['apk'] = apk_check(args.apk)
@@ -539,10 +575,15 @@ def main():
                     d.adb('reverse', 'tcp:8865', 'tcp:8865')
                     d.adb('reverse', 'tcp:8866', 'tcp:8866')
                     d.adb('forward', 'tcp:18799', 'tcp:8799')
+                    report_start = fixture_state()['report_count']
                     d.launch(app)
                     row.update(app_flow(d, tv))
+                    row['playback_reports'] = playback_reports(fixture_state(), report_start)
+                    save(d.output / 'playback-reports.json', row['playback_reports'])
                     row['native'] = native_flow(d, native, tv)
-                    row['passed'] = row['virtual_audio']['passed']
+                    row['passed'] = row['virtual_audio']['passed'] and row['playback_reports']['passed']
+                    if not row['playback_reports']['passed']:
+                        row['error'] = 'This device has no accepted Playing/Stopped report pair'
                 except Exception as error:
                     row['error'] = str(error)
                 finally:
@@ -558,11 +599,7 @@ def main():
                             cleanup()
                         except Exception as error:
                             row.setdefault('cleanup_errors', []).append(str(error))
-            with urllib.request.urlopen('http://127.0.0.1:8784/__state') as response:
-                fixture = json.load(response)
-            save(output / 'fixture-final.json', fixture)
-            if not any(r['path'].endswith('/Stopped') and r['accepted'] for r in fixture['reports']):
-                raise RuntimeError('No accepted playback stop report')
+            save(output / 'fixture-final.json', fixture_state())
         result['passed'] = bool(args.apk) or bool(result['devices']) and all(row['passed'] for row in result['devices'])
         if not result['passed']:
             result['error'] = 'One or more devices failed; inspect individual evidence'
@@ -575,6 +612,9 @@ def main():
         if native_server:
             native_server.terminate()
             native_server.wait(timeout=10)
+        for log in (server_log, native_log):
+            if log is not None:
+                log.close()
         if not args.apk and (not args.app_apk or not args.native_apk):
             try:
                 build('lib/main.dart', output / 'rillight-debug.apk', False)

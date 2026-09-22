@@ -234,8 +234,10 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         path, query = self.parsed()
         if path == '/__state':
-            self.reply({'conditions': conditions, 'request_count': len(requests),
-                        'reports': reports[-40:], 'requests': requests[-80:]})
+            with lock:
+                state = {'conditions': dict(conditions), 'request_count': len(requests),
+                         'report_count': len(reports), 'reports': reports[-40:], 'requests': requests[-80:]}
+            self.reply(state)
             return
         if path == '/System/Info/Public':
             self.reply({'Id': f'mobile-fixture-server-{args.port}', 'ServerName': 'Rillight 合成服务器', 'Version': '4.9.0'})
@@ -306,6 +308,7 @@ class Handler(BaseHTTPRequestHandler):
         elif path.startswith('/Sessions/Playing'):
             event = {'path': path, 'body': body, 'time': time.time(), 'accepted': not conditions['report_fail']}
             with lock:
+                event['sequence'] = len(reports) + 1
                 reports.append(event)
                 with (output / 'reports.jsonl').open('a', encoding='utf-8') as stream:
                     stream.write(json.dumps(event) + '\n')

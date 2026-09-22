@@ -64,6 +64,11 @@ subtitles, surface recreation, HLS, redirect credential isolation, 401, missing
 media and retry. Both produce screenshots; the application flow separately
 captures virtual audio. Black/static frames,
 silent/truncated audio, missing terminal markers and unavailable devices fail.
+Each device must have its own accepted Playing and Stopped reports. A monotonic
+fixture sequence bounds that device's run even when the report window rolls;
+earlier devices cannot supply its success. Its report interval and raw events
+are saved in `playback-reports.json`. Phone input dismisses only a visible IME,
+and taps wait for stable widget coordinates after layout/rotation changes.
 
 `build/android-validation/runs/TIMESTAMP/` retains immutable APK copies/hashes,
 build logs, device input events, screenshots, native logs, PCM and `result.json`.
