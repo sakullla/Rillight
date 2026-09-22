@@ -11,6 +11,9 @@ abstract final class AppRoutes {
   /// 完整库导航只在首页显示。
   static bool showsBrowseNav(String path) => path == home;
 
+  /// 条目详情:顶栏浮在 backdrop 上,不占一条实心底。
+  static bool isItem(String path) => path.startsWith('/item/');
+
   static String library(String viewId) => '/library/$viewId';
   static String item(String itemId, {String? seasonId}) {
     final season = seasonId?.trim() ?? '';

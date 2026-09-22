@@ -331,11 +331,14 @@ class _MediaImageState extends State<MediaImage> {
     double? width,
     double? height,
   ) {
-    // 拉取时已按 maxWidth 缩小,这里不再用 cacheWidth 二次解码;
-    // 单元格宽度差 1px 时 cacheWidth 还会把同一张图解成不同尺寸。
+    // 按请求宽度解码,避免服务端返回原图时在片库滚动里整屏解码。
     // ImageCache 用字符串 key,避免每帧对整段 JPEG 做 ==/hashCode。
     return Image(
-      image: _MediaMemoryImage(cacheKey: loaded.cacheKey, bytes: loaded.bytes),
+      image: _MediaMemoryImage(
+        cacheKey: loaded.cacheKey,
+        bytes: loaded.bytes,
+        targetWidth: widget.maxWidth,
+      ),
       width: width,
       height: height,
       fit: BoxFit.cover,
@@ -359,12 +362,43 @@ class _MediaImageState extends State<MediaImage> {
   }
 }
 
+/// 同时只解码两张海报,避免片库快滑时一帧里塞进整屏解码。
+class _DecodeGate {
+  static const int _limit = 2;
+  static int _active = 0;
+  static final List<Completer<void>> _waiters = [];
+
+  static Future<void> acquire() {
+    if (_active < _limit) {
+      _active++;
+      return Future<void>.value();
+    }
+    final waiter = Completer<void>();
+    _waiters.add(waiter);
+    return waiter.future;
+  }
+
+  static void release() {
+    if (_waiters.isNotEmpty) {
+      final next = _waiters.removeAt(0);
+      if (!next.isCompleted) next.complete();
+      return;
+    }
+    if (_active > 0) _active--;
+  }
+}
+
 /// [ImageCache] 按字符串 key 命中,避免 [MemoryImage] 每帧扫描整段字节。
 class _MediaMemoryImage extends ImageProvider<_MediaMemoryImage> {
-  const _MediaMemoryImage({required this.cacheKey, required this.bytes});
+  const _MediaMemoryImage({
+    required this.cacheKey,
+    required this.bytes,
+    this.targetWidth,
+  });
 
   final String cacheKey;
   final Uint8List bytes;
+  final int? targetWidth;
 
   @override
   Future<_MediaMemoryImage> obtainKey(ImageConfiguration configuration) {
@@ -386,8 +420,22 @@ class _MediaMemoryImage extends ImageProvider<_MediaMemoryImage> {
   Future<ui.Codec> _loadAsync(
     _MediaMemoryImage key,
     ImageDecoderCallback decode,
-  ) {
-    return ui.ImmutableBuffer.fromUint8List(key.bytes).then(decode);
+  ) async {
+    await _DecodeGate.acquire();
+    try {
+      final buffer = await ui.ImmutableBuffer.fromUint8List(key.bytes);
+      final target = key.targetWidth;
+      if (target == null || target <= 0) {
+        return await decode(buffer);
+      }
+      return await ui.instantiateImageCodecFromBuffer(
+        buffer,
+        targetWidth: target,
+        allowUpscaling: false,
+      );
+    } finally {
+      _DecodeGate.release();
+    }
   }
 
   @override

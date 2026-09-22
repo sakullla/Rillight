@@ -1,6 +1,7 @@
 import '../helpers/image_cache_fixture.dart';
 import '../helpers/settle.dart';
 import 'dart:async';
+import 'dart:io';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/gestures.dart';
@@ -124,6 +125,7 @@ void main() {
     Duration disposeTimeout = PlayerController.stoppedDeadline,
     String itemId = 'movie-up',
     PlayerSettingsStore? settingsStore,
+    String? userAgent,
   }) async {
     final client = EmbyClient(device: _device, dio: dioForFakeEmby(adapter));
     final auth = AuthController(
@@ -137,6 +139,7 @@ void main() {
       password: 'correct-horse',
     );
     expect(auth.isLoggedIn, isTrue);
+    if (userAgent != null) client.setUserAgent(userAgent);
     final controller = PlayerController(
       client: client,
       itemId: itemId,
@@ -258,6 +261,83 @@ void main() {
       await tester.pump(Duration.zero);
     }
   }
+
+  test('embedded text subtitles select the container track', () async {
+    _withEpisodeStreams(server, subtitleIndexById: {'movie-up': 2});
+    final controller = await startStandaloneController();
+    addTearDown(controller.dispose);
+    expect(backend.subtitleIndex, 2);
+    expect(backend.subtitleUri, isNull);
+    expect(controller.trackFailure, isNull);
+    expect(controller.subtitleStreamIndex, 2);
+  });
+
+  test('external text subtitles still load from the subtitle url', () async {
+    _withEpisodeStreams(
+      server,
+      subtitleIndexById: {'movie-up': 2},
+      subtitleExternal: true,
+    );
+    final controller = await startStandaloneController(
+      userAgent: 'LineUA/subs',
+    );
+    addTearDown(controller.dispose);
+    expect(backend.subtitleIndex, isNull);
+    expect(backend.subtitleUri?.scheme, 'file');
+    final subtitleRequest = server.requests.indexWhere(
+      (request) => request.contains('/Subtitles/2/0/Stream.ass'),
+    );
+    expect(subtitleRequest, isNonNegative);
+    expect(server.requestUserAgents[subtitleRequest], 'LineUA/subs');
+    expect(controller.trackFailure, isNull);
+    expect(controller.subtitleStreamIndex, 2);
+    final path = backend.subtitleUri!.toFilePath();
+    expect(File(path).existsSync(), isTrue);
+    await controller.disposeAsync();
+    expect(File(path).existsSync(), isFalse);
+  });
+
+  test(
+    'failed external subtitle download does not keep the clicked track',
+    () async {
+      server.subtitleStatus = 500;
+      addTearDown(() => server.subtitleStatus = null);
+      _withEpisodeStreams(
+        server,
+        subtitleIndexById: {'movie-up': 2},
+        subtitleExternal: true,
+      );
+      final controller = await startStandaloneController();
+      addTearDown(controller.dispose);
+      expect(controller.subtitleStreamIndex, isNull);
+      expect(controller.trackFailure, isNotNull);
+
+      controller.dismissTrackFailure();
+      await controller.setSubtitle(2);
+      expect(controller.subtitleStreamIndex, isNull);
+      expect(backend.subtitleUri, isNull);
+      expect(controller.trackFailure, isNotNull);
+    },
+  );
+
+  test(
+    'missing container track falls back to the extracted subtitle',
+    () async {
+      backend = _IndexMissBackend();
+      _withEpisodeStreams(server, subtitleIndexById: {'movie-up': 2});
+      final controller = await startStandaloneController();
+      addTearDown(controller.dispose);
+      expect(backend.subtitleUri?.scheme, 'file');
+      expect(
+        server.requests.any(
+          (request) => request.contains('/Subtitles/2/0/Stream.ass'),
+        ),
+        isTrue,
+      );
+      expect(controller.trackFailure, isNull);
+      expect(controller.subtitleStreamIndex, 2);
+    },
+  );
 
   testWidgets('failed subtitle selection shows a dismissible player banner', (
     tester,
@@ -483,6 +563,81 @@ void main() {
         await Future<void>.delayed(Duration.zero);
       }
       expect(controller.nextEpisode?.item.id, 'episode-friends-s1e2');
+      expect(controller.playbackEnded, isFalse);
+    },
+  );
+
+  test('early end of file does not skip an unfinished episode', () async {
+    final controller = await startStandaloneController(
+      itemId: 'episode-friends-s1e1',
+    );
+    addTearDown(controller.dispose);
+    expect(controller.duration, const Duration(minutes: 22));
+
+    backend.emitEvent(
+      VideoEventKind.position,
+      const Duration(minutes: 2, seconds: 5),
+    );
+    backend.emitEvent(VideoEventKind.completed, true);
+    for (var i = 0; i < 20; i++) {
+      await Future<void>.delayed(Duration.zero);
+    }
+
+    expect(controller.itemId, 'episode-friends-s1e1');
+    expect(controller.nextEpisode, isNull);
+    expect(controller.playbackEnded, isFalse);
+  });
+
+  test(
+    'a short probed duration does not make an early eof look finished',
+    () async {
+      final controller = await startStandaloneController(
+        itemId: 'episode-friends-s1e1',
+      );
+      addTearDown(controller.dispose);
+
+      backend.emitEvent(VideoEventKind.duration, const Duration(minutes: 2));
+      backend.emitEvent(
+        VideoEventKind.position,
+        const Duration(minutes: 2, seconds: 5),
+      );
+      backend.emitEvent(VideoEventKind.completed, true);
+      for (var i = 0; i < 20; i++) {
+        await Future<void>.delayed(Duration.zero);
+      }
+
+      expect(controller.itemId, 'episode-friends-s1e1');
+      expect(controller.nextEpisode, isNull);
+      expect(controller.playbackEnded, isFalse);
+    },
+  );
+
+  test(
+    'an opening chapter named as credits does not offer the next episode',
+    () async {
+      const minute = 10000000 * 60;
+      final episode = server.items.firstWhere(
+        (item) => item.id == 'episode-friends-s1e1',
+      );
+      final previous = episode.chapters;
+      episode.chapters = const [
+        FakeChapter(name: '片尾', startPositionTicks: 2 * minute),
+      ];
+      addTearDown(() => episode.chapters = previous);
+      final controller = await startStandaloneController(
+        itemId: 'episode-friends-s1e1',
+      );
+      addTearDown(controller.dispose);
+
+      backend.emitEvent(
+        VideoEventKind.position,
+        const Duration(minutes: 2, seconds: 5),
+      );
+      for (var i = 0; i < 20; i++) {
+        await Future<void>.delayed(Duration.zero);
+      }
+
+      expect(controller.nextEpisode, isNull);
       expect(controller.playbackEnded, isFalse);
     },
   );
@@ -1479,6 +1634,7 @@ void main() {
 void _withEpisodeStreams(
   FakeEmbyServer server, {
   required Map<String, int> subtitleIndexById,
+  bool subtitleExternal = false,
 }) {
   for (final item in server.items) {
     final subtitleIndex = subtitleIndexById[item.id];
@@ -1502,6 +1658,7 @@ void _withEpisodeStreams(
         language: 'chi',
         displayTitle: '中文',
         isDefault: true,
+        isExternal: subtitleExternal,
         isTextSubtitleStream: true,
       ),
     ];
@@ -1530,6 +1687,13 @@ class _GatedDeleteStore extends MemoryPlaybackSessionSnapshotStore {
       await gate.future;
     }
     await super.delete();
+  }
+}
+
+class _IndexMissBackend extends FakeVideoBackend {
+  @override
+  Future<void> setSubtitleIndex(int index) async {
+    throw StateError('Requested sub track is unavailable');
   }
 }
 

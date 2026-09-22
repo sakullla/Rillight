@@ -37,6 +37,7 @@ class MediaStreamInfo {
     this.language,
     this.displayTitle,
     this.isDefault = false,
+    this.isExternal = false,
     this.isTextSubtitleStream,
     this.channels,
     this.width,
@@ -52,6 +53,9 @@ class MediaStreamInfo {
   final String? language;
   final String? displayTitle;
   final bool isDefault;
+
+  /// 服务器标记的外挂字幕文件。缺省按容器内嵌处理。
+  final bool isExternal;
   final bool? isTextSubtitleStream;
   final int? channels;
   final int? width;
@@ -131,6 +135,7 @@ class MediaStreamInfo {
       language: json['Language']?.toString(),
       displayTitle: json['DisplayTitle']?.toString(),
       isDefault: json['IsDefault'] == true,
+      isExternal: json['IsExternal'] == true,
       isTextSubtitleStream: json['IsTextSubtitleStream'] is bool
           ? json['IsTextSubtitleStream'] as bool
           : null,

@@ -650,7 +650,7 @@ class MpvVideoBackend implements VideoBackend {
                     t is Map &&
                     t['type'] == type &&
                     t['external'] != true &&
-                    t['ff-index'] == index,
+                    _sameStreamIndex(t['ff-index'], index),
               )
               .toList()
         : const [];
@@ -661,7 +661,7 @@ class MpvVideoBackend implements VideoBackend {
   }
 
   @override
-  Future<void> setSubtitleUri(Uri uri, {String? title}) async {
+  Future<bool> setSubtitleUri(Uri uri, {String? title}) async {
     final session = _active;
     if (session == null) throw StateError('No active media');
     final revision = ++session.subtitleRevision;
@@ -675,9 +675,11 @@ class MpvVideoBackend implements VideoBackend {
     // without selecting it, so a late completion cannot replace a newer
     // choice or turn a timed-out optional load into a committed selection.
     final selected = await driver.getProperty('sid');
-    if (!current()) return;
+    if (!current()) return false;
+    final previousSubtitleIds = await _subtitleIds(driver);
+    if (!current()) return false;
     await driver.setProperty('sid', selected is num ? '$selected' : 'no');
-    if (!current()) return;
+    if (!current()) return false;
     final loading = driver.command([
       'sub-add',
       url.toString(),
@@ -687,7 +689,7 @@ class MpvVideoBackend implements VideoBackend {
     try {
       await loading;
     } on TimeoutException {
-      if (!current()) return;
+      if (!current()) return false;
       _trace(session, 'subtitle-load-timeout');
       // mpv waits for the external subtitle body before completing sub-add.
       // Keep the player responsive and let the operation finish in the
@@ -696,7 +698,7 @@ class MpvVideoBackend implements VideoBackend {
         final actual = await driver
             .getProperty('sid')
             .timeout(const Duration(seconds: 2));
-        if (!current()) return;
+        if (!current()) return false;
         if (!session.loaded ||
             (session.hasVideo && !session.firstFrame) ||
             session.failed ||
@@ -704,7 +706,7 @@ class MpvVideoBackend implements VideoBackend {
           throw StateError('Unable to confirm subtitle selection');
         }
       } catch (_) {
-        if (!current()) return;
+        if (!current()) return false;
         if (_current(session)) {
           _onEvent(
             session,
@@ -721,7 +723,13 @@ class MpvVideoBackend implements VideoBackend {
         loading.then<void>((_) async {
           if (!current()) return;
           try {
-            await _selectExternalSubtitle(session, driver, url, revision);
+            await _selectExternalSubtitle(
+              session,
+              driver,
+              url,
+              revision,
+              previousSubtitleIds,
+            );
           } catch (_) {}
         }, onError: (Object error, StackTrace stack) {}),
       );
@@ -729,30 +737,75 @@ class MpvVideoBackend implements VideoBackend {
         'External subtitle loading timed out; playback continues',
       );
     }
-    await _selectExternalSubtitle(session, driver, url, revision);
+    return _selectExternalSubtitle(
+      session,
+      driver,
+      url,
+      revision,
+      previousSubtitleIds,
+    );
   }
 
-  Future<void> _selectExternalSubtitle(
+  Future<Set<Object>> _subtitleIds(MpvSessionDriver driver) async {
+    final tracks = await driver.getProperty('track-list');
+    if (tracks is! List) return const {};
+    return {
+      for (final track in tracks)
+        if (track is Map && track['type'] == 'sub' && track['id'] != null)
+          track['id'] as Object,
+    };
+  }
+
+  /// 返回 true 表示当前 sid 已经是这次新增的外挂轨。
+  Future<bool> _selectExternalSubtitle(
     _Session session,
     MpvSessionDriver driver,
     Uri url,
     int revision,
+    Set<Object> previousSubtitleIds,
   ) async {
-    if (!_current(session) || revision != session.subtitleRevision) return;
+    if (!_current(session) || revision != session.subtitleRevision) {
+      return false;
+    }
     final tracks = await driver.getProperty('track-list');
-    if (!_current(session) || revision != session.subtitleRevision) return;
-    final matches = tracks is List
-        ? tracks
+    if (!_current(session) || revision != session.subtitleRevision) {
+      return false;
+    }
+    final subtitles = tracks is List
+        ? tracks.whereType<Map>().where((track) => track['type'] == 'sub')
+        : const Iterable<Map>.empty();
+    final named = subtitles
+        .where((track) => track['external-filename'] == url.toString())
+        .toList();
+    // mpv 经常改写外挂地址(解码、补全路径),文件名对不上时
+    // 仍选中这次 sub-add 新出现的外挂轨。不按标题去碰已经在播的内嵌轨。
+    final added = named.isNotEmpty
+        ? named
+        : subtitles
               .where(
                 (track) =>
-                    track is Map &&
-                    track['type'] == 'sub' &&
-                    track['external-filename'] == url.toString(),
+                    !previousSubtitleIds.contains(track['id']) &&
+                    (track['external'] == true ||
+                        track['external-filename'] != null),
               )
-              .toList()
-        : const [];
-    if (matches.isEmpty) throw StateError('External subtitle is unavailable');
-    await driver.setProperty('sid', '${(matches.last as Map)['id']}');
+              .toList();
+    if (added.isEmpty) throw StateError('External subtitle is unavailable');
+    final id = '${added.last['id']}';
+    await driver.setProperty('sid', id);
+    if (!_current(session) || revision != session.subtitleRevision) {
+      return false;
+    }
+    final actual = await driver.getProperty('sid');
+    if ('$actual' != id) {
+      throw StateError('External subtitle was not selected');
+    }
+    return true;
+  }
+
+  static bool _sameStreamIndex(Object? value, int index) {
+    if (value is int) return value == index;
+    if (value is num) return value.toInt() == index;
+    return false;
   }
 
   @override

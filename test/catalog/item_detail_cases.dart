@@ -650,11 +650,11 @@ void main() {
     expect(_episodeCardIds(tester).first, 'bulk-e1');
     expect(find.byKey(CatalogKeys.episode('bulk-e90')), findsNothing);
     expect(notice, findsOneWidget);
+    expect(find.descendant(of: row, matching: find.text('重试')), findsOneWidget);
     expect(
-      find.descendant(of: row, matching: find.text('重试')),
-      findsOneWidget,
+      tester.getRect(notice).bottom,
+      lessThanOrEqualTo(tester.getRect(first).top),
     );
-    expect(tester.getRect(notice).bottom, lessThanOrEqualTo(tester.getRect(first).top));
     expect(find.byKey(ItemDetailPage.headerKey), findsOneWidget);
     expect(find.byType(SnackBar), findsNothing);
 

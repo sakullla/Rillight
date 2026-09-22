@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
@@ -53,6 +55,14 @@ const Duration kNextUpLead = Duration(minutes: 3);
 
 /// 过短的剧集不提前弹出下一集,避免开场就出现。
 const Duration kMinRuntimeForEarlyNextUp = Duration(minutes: 6);
+
+/// 片尾标记只有落在结局附近才用来提前下一集。
+/// 开场附近的「片尾」章节是错误标记,不能当成看完。
+const Duration kTrustedOutroWindow = Duration(minutes: 8);
+
+/// 距已知片长不超过此时长,才把 eof 当成这一集播完。
+/// 更早的结束是断流或缓存误报,不能倒计时切下一集。
+const Duration kNaturalEndTolerance = Duration(seconds: 45);
 
 /// 播放器剧集面板一窗条数,与详情页分集窗口对齐。
 const int kPlayerEpisodePageSize = 80;
@@ -230,6 +240,9 @@ class PlayerController extends ChangeNotifier {
   int? subtitleStreamIndex;
   Duration position = Duration.zero;
   Duration duration = Duration.zero;
+
+  /// 条目或媒体源上的片长。进度条可能被更短的探测时长盖掉,切集仍以它为准。
+  Duration _catalogRuntime = Duration.zero;
   Duration buffer = Duration.zero;
 
   /// HTTP 代理的上游接收速度，字节/秒；本地缓存命中不计入，无下载时为 0。
@@ -307,6 +320,10 @@ class PlayerController extends ChangeNotifier {
   /// 换源/重开后重断言外挂字幕的到期时刻;挂在进度上报节拍上,
   /// 不新增独立定时器(避免测试与dispose遗漏时残留挂起定时器)。
   DateTime? _subtitleReassertDue;
+
+  /// 本次播放下载的外挂字幕。停播后整目录删除,不留在系统临时目录。
+  Directory? _subtitleCache;
+  File? _activeSubtitleFile;
 
   /// 在途 Stopped(_handleCompleted / _stopSession / close 共用);
   /// 后续 close()/shutdown 先等它,避免 exit(0) 截断上报。
@@ -392,7 +409,8 @@ class PlayerController extends ChangeNotifier {
         if (!_accepts(operation)) return;
         user = null;
       }
-      duration = durationFromTicks(item!.runTimeTicks ?? 0);
+      _catalogRuntime = durationFromTicks(item!.runTimeTicks ?? 0);
+      duration = _catalogRuntime;
       _applyRememberedPreference();
       final memory = _rememberedPreference;
       final memorySubtitleOff = memory?.subtitleOff ?? false;
@@ -629,27 +647,9 @@ class PlayerController extends ChangeNotifier {
       );
       return;
     }
-    final uri = stream == null || stream.isBitmapSubtitle
-        ? null
-        : client.subtitleStreamUrl(
-            itemId: itemId,
-            mediaSourceId: source.id,
-            index: index!,
-            format: stream.externalSubtitleFormat,
-          );
     final previous = subtitleStreamIndex;
-    // External subtitle downloads can take longer than a native control
-    // reply. Reflect the click immediately; rollback only if the backend
-    // reports a real failure.
-    subtitleStreamIndex = index;
-    _clearSubtitleNotice();
-    _emit();
     await _selectTrack(
-      () => index == null
-          ? backend.setSubtitleOff()
-          : stream!.isBitmapSubtitle
-          ? backend.setSubtitleIndex(index)
-          : backend.setSubtitleUri(uri!, title: stream.label),
+      () => _activateSubtitle(source, index),
       () {
         subtitleStreamIndex = index;
         _clearSubtitleNotice();
@@ -1322,10 +1322,10 @@ class PlayerController extends ChangeNotifier {
     }
     Duration? threshold;
     for (final segment in _skipSegments) {
-      if (segment.kind == PlayerSkipKind.outro) {
-        threshold = segment.start;
-        break;
-      }
+      if (segment.kind != PlayerSkipKind.outro) continue;
+      if (segment.start < duration - kTrustedOutroWindow) continue;
+      threshold = segment.start;
+      break;
     }
     if (threshold == null) {
       if (duration < kMinRuntimeForEarlyNextUp) {
@@ -1497,7 +1497,11 @@ class PlayerController extends ChangeNotifier {
       await _operations.interrupt(backend.stop);
     } finally {
       await _operations.drained;
-      await backend.dispose();
+      try {
+        await backend.dispose();
+      } finally {
+        await _deleteSubtitleCache();
+      }
     }
     isPlaying = false;
     state.buffering = false;
@@ -1727,8 +1731,9 @@ class PlayerController extends ChangeNotifier {
         if (!_accepts(operation)) return;
         final runtime =
             next.mediaSource.runTimeTicks ?? item?.runTimeTicks ?? 0;
+        _catalogRuntime = durationFromTicks(runtime);
         if (runtime > 0) {
-          duration = durationFromTicks(runtime);
+          duration = _catalogRuntime;
         }
         _setPosition(backend.position);
         _rebuildSkipSegments();
@@ -1861,20 +1866,107 @@ class PlayerController extends ChangeNotifier {
       // 转码:字幕由服务器烧录进流,不另选择轨道。
       return;
     }
-    if (stream.isBitmapSubtitle) {
-      // 直连:mpv 直接渲染容器内嵌位图轨道(PGS 等)。
-      await backend.setSubtitleIndex(subtitle);
+    await _activateSubtitle(next.mediaSource, subtitle);
+  }
+
+  /// 内嵌文本按容器流索引切换。外挂文本先整文件下载到本地,再交给 mpv。
+  /// 菜单勾选只在调用方确认这次选择已经生效后更新。
+  Future<void> _activateSubtitle(PlaybackMediaSource source, int? index) async {
+    if (index == null) {
+      await backend.setSubtitleOff();
       return;
     }
-    await backend.setSubtitleUri(
+    final stream = source.streamByIndex(index);
+    if (stream == null || !stream.isSubtitle) {
+      throw StateError('Subtitle track is unavailable');
+    }
+    if (stream.isBitmapSubtitle) {
+      await backend.setSubtitleIndex(index);
+      return;
+    }
+    if (!stream.isExternal) {
+      try {
+        // 内嵌文本(ASS 等)已在直连容器里。按流索引选择,避免再向
+        // 服务器提取一份外挂文件(该请求会超时或选不中,字幕就不出现)。
+        await backend.setSubtitleIndex(index);
+        return;
+      } on StateError {
+        // 容器里没有对应轨道时,再走外挂地址。
+      }
+    }
+    final previous = _activeSubtitleFile;
+    final local = await _downloadSubtitleFile(
       client.subtitleStreamUrl(
         itemId: itemId,
-        mediaSourceId: next.mediaSource.id,
-        index: subtitle,
+        mediaSourceId: source.id,
+        index: index,
         format: stream.externalSubtitleFormat,
       ),
-      title: stream.label,
+      index,
+      stream.externalSubtitleFormat,
     );
+    final applied = await backend.setSubtitleUri(local, title: stream.label);
+    if (!applied) {
+      throw StateError('External subtitle was not selected');
+    }
+    final current = File(local.toFilePath());
+    _activeSubtitleFile = current;
+    if (previous != null && previous.path != current.path) {
+      await _deleteSubtitleFile(previous);
+    }
+  }
+
+  Future<Uri> _downloadSubtitleFile(
+    Uri remote,
+    int index,
+    String format,
+  ) async {
+    final safeFormat = format.replaceAll(RegExp(r'[^a-z0-9]'), '');
+    final ext = safeFormat.isEmpty ? 'srt' : safeFormat;
+    final safeId = itemId.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_');
+    final cache = _subtitleCache ??= await Directory.systemTemp.createTemp(
+      'rillight-subtitles-',
+    );
+    final file = File(
+      '${cache.path}${Platform.pathSeparator}$safeId-$index.$ext',
+    );
+    if (_activeSubtitleFile?.path == file.path &&
+        await file.exists() &&
+        await file.length() > 0) {
+      return file.uri;
+    }
+    final bytes = await client.readAuthorizedBytes(remote);
+    final sample = utf8
+        .decode(
+          bytes.take(math.min(bytes.length, 256)).toList(),
+          allowMalformed: true,
+        )
+        .trimLeft()
+        .toLowerCase();
+    if (sample.isEmpty ||
+        sample.startsWith('<!doctype') ||
+        sample.startsWith('<html') ||
+        sample.startsWith('{')) {
+      throw StateError('Subtitle response was not a subtitle file');
+    }
+    await file.writeAsBytes(bytes, flush: true);
+    return file.uri;
+  }
+
+  Future<void> _deleteSubtitleFile(File file) async {
+    try {
+      if (await file.exists()) await file.delete();
+    } catch (_) {}
+  }
+
+  Future<void> _deleteSubtitleCache() async {
+    final cache = _subtitleCache;
+    _subtitleCache = null;
+    _activeSubtitleFile = null;
+    if (cache == null) return;
+    try {
+      if (await cache.exists()) await cache.delete(recursive: true);
+    } catch (_) {}
   }
 
   /// 起流 2 秒后重断言外挂字幕选择:直接播放的外挂文本字幕在重开
@@ -2215,12 +2307,21 @@ class PlayerController extends ChangeNotifier {
     );
   }
 
+  /// 进度必须接近目录片长或当前片长里更长的那个。
+  /// 解复用器把截断流报成很短的 duration 时,不能把开场 eof 当成播完。
+  bool _reachedEpisodeEnd() {
+    final known = duration > _catalogRuntime ? duration : _catalogRuntime;
+    if (known <= Duration.zero) return false;
+    return known - position <= kNaturalEndTolerance;
+  }
+
   Future<void> _handleCompleted() async {
     final operation = _operations.current;
     if (!_accepts(operation)) return;
     if (_disposed || _handlingCompleted || playbackEnded) {
       return;
     }
+    if (!_reachedEpisodeEnd()) return;
     _handlingCompleted = true;
     state.phase = PlaybackPhase.ended;
     state.buffering = false;

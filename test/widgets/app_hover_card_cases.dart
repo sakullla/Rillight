@@ -64,7 +64,7 @@ void main() {
     expect(_scale(tester).scale, 1.04);
     expect((_decoration(tester).boxShadow!.single.color.a), greaterThan(0));
     expect(_ring(tester).top.color, theme.colorScheme.primary);
-    expect(_ring(tester).top.width, 2);
+    expect(_ring(tester).top.width, 1);
 
     await gesture.moveTo(Offset.zero);
     await tester.pump();
@@ -90,7 +90,7 @@ void main() {
 
     expect(_scale(tester).scale, 1.0);
     expect(_ring(tester).top.color, theme.colorScheme.primary);
-    expect(_ring(tester).top.width, 2);
+    expect(_ring(tester).top.width, 1);
   });
 
   testWidgets(
@@ -137,7 +137,7 @@ void main() {
 
     expect(find.byType(AnimatedScale), findsNothing);
     expect(_ring(tester).top.color, theme.colorScheme.primary);
-    expect(_ring(tester).top.width, 2);
+    expect(_ring(tester).top.width, 1);
   });
 
   testWidgets('hover and focus notify onHighlighted', (tester) async {

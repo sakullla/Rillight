@@ -75,7 +75,6 @@ class PosterCard extends StatelessWidget {
                       ),
                       _PosterRevealOverlay(
                         item: item,
-                        title: title,
                         revealed: highlighted,
                         showMeta: !wide,
                         playKey: PosterCard.playButtonKey(item.id),
@@ -179,7 +178,6 @@ class EpisodeThumbCard extends StatelessWidget {
                       ),
                       _PosterRevealOverlay(
                         item: item,
-                        title: title,
                         revealed: highlighted,
                         showMeta: false,
                         playKey: PosterCard.playButtonKey(item.id),
@@ -275,7 +273,6 @@ class SeasonPosterCard extends StatelessWidget {
                           ),
                           _PosterRevealOverlay(
                             item: item,
-                            title: item.name,
                             revealed: highlighted,
                           ),
                           if (item.childCount != null && item.childCount! > 0)
@@ -413,7 +410,6 @@ class _HoverHighlightState extends State<_HoverHighlight> {
 class _PosterRevealOverlay extends StatelessWidget {
   const _PosterRevealOverlay({
     required this.item,
-    required this.title,
     required this.revealed,
     this.showMeta = true,
     this.playKey,
@@ -421,7 +417,6 @@ class _PosterRevealOverlay extends StatelessWidget {
   });
 
   final EmbyItem item;
-  final String title;
   final bool revealed;
   final bool showMeta;
   final Key? playKey;
@@ -438,7 +433,7 @@ class _PosterRevealOverlay extends StatelessWidget {
       ?runtimeLabel(l10n, item),
     ];
     final overview = plainOverview(item.overview);
-    final showTitle = showMeta && overview == null;
+    // 标题已经写在海报下方,浮层里不再叠一遍。
     return IgnorePointer(
       ignoring: !revealed,
       child: AnimatedOpacity(
@@ -494,7 +489,7 @@ class _PosterRevealOverlay extends StatelessWidget {
                           icon: const Icon(Icons.play_arrow_rounded, size: 32),
                         ),
                       ),
-                    if (showTitle || showMeta || overview != null)
+                    if (showMeta || overview != null)
                       Align(
                         alignment: Alignment.bottomCenter,
                         child: Padding(
@@ -507,19 +502,7 @@ class _PosterRevealOverlay extends StatelessWidget {
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              if (showTitle)
-                                Text(
-                                  title,
-                                  maxLines: 3,
-                                  overflow: TextOverflow.ellipsis,
-                                  textAlign: TextAlign.center,
-                                  style: theme.textTheme.labelLarge?.copyWith(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
                               if (showMeta && meta.isNotEmpty) ...[
-                                if (showTitle) const SizedBox(height: 2),
                                 Text(
                                   meta.join(' · '),
                                   maxLines: 1,

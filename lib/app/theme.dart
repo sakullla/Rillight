@@ -332,15 +332,12 @@ abstract final class AppTheme {
       // 弹出菜单的唯一样式来源;页面内 PopupMenuButton 不再覆盖
       // color/shape/surfaceTintColor。
       popupMenuTheme: PopupMenuThemeData(
-        color: _surfaceHigh.withValues(alpha: 0.94),
+        color: _surfaceHigh,
         surfaceTintColor: Colors.transparent,
-        elevation: 12,
-        shadowColor: Colors.black.withValues(alpha: 0.45),
+        elevation: 6,
+        shadowColor: Colors.black.withValues(alpha: 0.36),
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(AppRadii.md),
-          side: BorderSide(
-            color: Colors.white.withValues(alpha: AppGlass.edgeLight),
-          ),
+          borderRadius: BorderRadius.circular(AppRadii.sm),
         ),
         labelTextStyle: WidgetStatePropertyAll(textTheme.bodyMedium),
       ),

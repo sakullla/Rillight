@@ -167,7 +167,10 @@ void main() {
         isA<ScrimIconButton>(),
       );
       expect(find.byKey(CatalogKeys.heroDot(4)), findsOneWidget);
-      expect(find.byKey(CatalogKeys.heroDot(5)), findsNothing);
+      expect(
+        find.byKey(CatalogKeys.heroDot(HomeHero.maxFeatured)),
+        findsNothing,
+      );
       const featuredOrder = ['Inception', '飞屋环游记', '封面失败片', '未分类型电影', '混合库电影'];
       for (final title in featuredOrder) {
         if (title != featuredOrder.first) {
@@ -448,10 +451,13 @@ void main() {
       expect(index(), manual);
       expect(progress(), 0);
 
+      final half = Duration(
+        milliseconds: HomeHero.autoAdvanceInterval.inMilliseconds ~/ 2,
+      );
       await tester.tap(find.byKey(const Key('catalog-hero-pause')));
       FocusManager.instance.primaryFocus?.unfocus();
       await tester.pump();
-      await tester.pump(const Duration(seconds: 3));
+      await tester.pump(half);
       expect(index(), manual);
       expect(progress(), closeTo(0.5, 0.05));
       final hovering = index();
@@ -461,13 +467,13 @@ void main() {
       await hover.moveTo(tester.getCenter(find.byType(HomeHero)));
       await tester.pump();
       final held = progress();
-      await tester.pump(const Duration(seconds: 3));
+      await tester.pump(half);
       expect(index(), hovering);
       expect(progress(), held);
       final hero = tester.getRect(find.byType(HomeHero));
       await hover.moveTo(Offset(hero.center.dx, hero.bottom + 48));
       await tester.pump();
-      await tester.pump(const Duration(seconds: 3));
+      await tester.pump(half);
       final afterHover = progress();
       await tester.pump(const Duration(milliseconds: 400));
       expect(index(), isNot(hovering));
@@ -496,7 +502,9 @@ void main() {
       await tester.pump();
       final focused = index();
       final focusedProgress = progress();
-      await tester.pump(const Duration(seconds: 7));
+      await tester.pump(
+        HomeHero.autoAdvanceInterval + const Duration(seconds: 1),
+      );
       expect(index(), focused);
       expect(progress(), focusedProgress);
       FocusManager.instance.primaryFocus?.unfocus();

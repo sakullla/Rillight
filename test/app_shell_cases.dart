@@ -255,6 +255,13 @@ void main() {
           findsOneWidget,
         );
         expect(tester.getSize(back), const Size(40, 40));
+        expect(
+          find.descendant(
+            of: find.byKey(AppShell.topBarKey),
+            matching: find.text('详情'),
+          ),
+          findsNothing,
+        );
 
         await tester.tap(back);
         await settle(tester);

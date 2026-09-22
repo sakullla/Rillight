@@ -377,6 +377,15 @@ void main() {
       ],
     });
     expect(fallbackSubtitleStreamIndex(source), 3);
+    expect(source.streamByIndex(2)!.isExternal, isFalse);
+    expect(
+      MediaStreamInfo.fromJson({
+        'Index': 4,
+        'Type': 'Subtitle',
+        'IsExternal': true,
+      }).isExternal,
+      isTrue,
+    );
     expect(
       fallbackSubtitleStreamIndex(
         PlaybackMediaSource.fromJson({

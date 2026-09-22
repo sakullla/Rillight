@@ -15,7 +15,7 @@ class AppHoverCard extends StatefulWidget {
     this.inkKey,
     this.borderRadius,
     this.hoverScale = 1.04,
-    this.focusRingWidth = 2,
+    this.focusRingWidth = 1,
     this.shadowBlurRadius = 16,
     this.focusNode,
     this.autofocus = false,

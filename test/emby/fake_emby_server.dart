@@ -29,6 +29,7 @@ class FakeMediaStream {
     this.language,
     this.displayTitle,
     this.isDefault = false,
+    this.isExternal = false,
     this.isTextSubtitleStream,
     this.channels,
   });
@@ -39,6 +40,7 @@ class FakeMediaStream {
   final String? language;
   final String? displayTitle;
   final bool isDefault;
+  final bool isExternal;
   final bool? isTextSubtitleStream;
   final int? channels;
 
@@ -50,6 +52,7 @@ class FakeMediaStream {
       if (language != null) 'Language': language,
       if (displayTitle != null) 'DisplayTitle': displayTitle,
       'IsDefault': isDefault,
+      if (isExternal) 'IsExternal': true,
       if (isTextSubtitleStream != null)
         'IsTextSubtitleStream': isTextSubtitleStream,
       if (channels != null) 'Channels': channels,
@@ -476,6 +479,9 @@ class FakeEmbyServer {
   Map<String, dynamic>? lastDeviceProfile;
   Map<String, dynamic>? lastPlaybackInfoBody;
   int? progressStatus;
+
+  /// 字幕提取接口的状态码;为 null 时返回一段文本字幕。
+  int? subtitleStatus;
 
   /// /Sessions/Playing/Stopped 的响应状态码;为 null 时返回 200。
   int? stoppedStatus;
@@ -927,9 +933,10 @@ class FakeEmbyServer {
     if (segments.length >= 6 &&
         segments[2] != 'Subtitles' &&
         segments[3] == 'Subtitles') {
+      final status = subtitleStatus ?? 200;
       return ResponseBody.fromString(
-        '1\n00:00:00,000 --> 00:00:02,000\nhello\n',
-        200,
+        status == 200 ? '1\n00:00:00,000 --> 00:00:02,000\nhello\n' : 'error',
+        status,
         headers: {
           Headers.contentTypeHeader: ['text/plain'],
         },
@@ -1609,6 +1616,7 @@ List<FakeEmbyItem> defaultCatalogItems() {
           language: 'chi',
           displayTitle: '中文',
           isDefault: true,
+          isExternal: true,
           isTextSubtitleStream: true,
         ),
       ],

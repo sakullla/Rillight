@@ -19,7 +19,7 @@ import 'package:rillight/library/item_format.dart';
 import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/player/player_window_host.dart';
 
-/// 首页全宽沉浸式 hero 轮播:多条 featured 内容(继续观看优先,其次最新
+/// 首页全宽 hero 轮播:最多 5 条 featured 内容(继续观看优先,其次最新
 /// 电影/剧集),支持左右箭头与指示点手动切换,并约每 6 秒自动轮换。
 /// 悬停或焦点只暂停计时与进度,离开后继续。手动切换或暂停会锁住,直到再次播放。
 /// [MediaQuery.disableAnimations] 或 [AppMotion.durationOf] 为零时不切换、

@@ -68,7 +68,8 @@ class _AppShellState extends State<AppShell> {
   final FocusNode _searchQueryFocus = FocusNode();
   final FocusNode _searchButtonFocus = FocusNode();
   FocusNode? _searchReturnFocus;
-  bool _homeScrolled = false;
+  bool _contentScrolled = false;
+  String _scrollPath = '';
 
   @override
   void dispose() {
@@ -107,6 +108,16 @@ class _AppShellState extends State<AppShell> {
     });
   }
 
+  /// 首页和详情的画面贴到窗口顶,顶栏用轻遮罩;其它页保持实心条。
+  bool _immersiveTopBar(String location) {
+    return location == AppRoutes.home || AppRoutes.isItem(location);
+  }
+
+  /// 只采纳当前路由发出的滚动;从已滚动的首页进入详情时顶栏先透出画面。
+  bool _barScrolled(String location) {
+    return _scrollPath == location && _contentScrolled;
+  }
+
   @override
   Widget build(BuildContext context) {
     // 注意:ShellRoute builder 的 context 上 GoRouterState.matchedLocation
@@ -136,8 +147,12 @@ class _AppShellState extends State<AppShell> {
               children: [
                 NotificationListener<HomeScrollNotification>(
                   onNotification: (notification) {
-                    if (_homeScrolled != notification.scrolled) {
-                      setState(() => _homeScrolled = notification.scrolled);
+                    if (_scrollPath != location ||
+                        _contentScrolled != notification.scrolled) {
+                      setState(() {
+                        _scrollPath = location;
+                        _contentScrolled = notification.scrolled;
+                      });
                     }
                     return true;
                   },
@@ -149,7 +164,8 @@ class _AppShellState extends State<AppShell> {
                   right: 0,
                   child: _TopBar(
                     location: location,
-                    opaque: location != AppRoutes.home || _homeScrolled,
+                    opaque:
+                        !_immersiveTopBar(location) || _barScrolled(location),
                     searchFocus: _searchButtonFocus,
                   ),
                 ),
@@ -299,12 +315,14 @@ class _TopBar extends StatelessWidget {
                     ),
                   ] else ...[
                     Expanded(
-                      child: Text(
-                        title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.titleMedium,
-                      ),
+                      child: AppRoutes.isItem(location)
+                          ? const SizedBox.shrink()
+                          : Text(
+                              title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.titleMedium,
+                            ),
                     ),
                   ],
                   SizedBox(

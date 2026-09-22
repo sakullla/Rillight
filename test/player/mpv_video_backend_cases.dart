@@ -491,6 +491,19 @@ void main() {
   );
 
   test(
+    'rewritten external subtitle filename still selects the added track',
+    () async {
+      await backend.open(request(1));
+      final driver = drivers.single..mismatchExternalFilename = true;
+      await backend.setSubtitleUri(
+        Uri.parse('http://127.0.0.1/sub.ass'),
+        title: '中文',
+      );
+      expect(driver.properties['sid'], '99');
+    },
+  );
+
+  test(
     'track selection uses unique FFmpeg index rather than mpv id or offset',
     () async {
       await backend.open(request(1));
@@ -586,6 +599,7 @@ class _Driver implements MpvSessionDriver {
   bool failOpen = false;
   bool failSurface = false;
   bool subtitleTimeout = false;
+  bool mismatchExternalFilename = false;
   bool loseControl = false;
   bool subtitleRequested = false;
   final subtitleGates = <String, Completer<void>>{};
@@ -601,7 +615,14 @@ class _Driver implements MpvSessionDriver {
       subtitleRequested = true;
       await subtitleGates[arguments[1]]?.future;
       if (subtitleTimeout) throw TimeoutException('sub-add timed out');
-      tracks.add({'type': 'sub', 'id': 99, 'external-filename': arguments[1]});
+      tracks.add({
+        'type': 'sub',
+        'id': 99,
+        'external': true,
+        'external-filename': mismatchExternalFilename
+            ? 'http://rewritten.example/sub'
+            : arguments[1],
+      });
     }
     if (arguments.first == 'loadfile') {
       if (failOpen) throw StateError('open failed');

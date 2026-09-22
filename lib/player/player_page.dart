@@ -2042,7 +2042,7 @@ class _EpisodeListViewState extends State<_EpisodeListView> {
   }
 }
 
-/// 顶部提示横幅;[onDismiss] 非空时(持续显示态)附带关闭钮。
+/// 画面底部的一行提示,避开画面中部;[onDismiss] 非空时附带关闭钮。
 class _Banner extends StatelessWidget {
   const _Banner({super.key, required this.text, this.onDismiss});
 
@@ -2055,47 +2055,43 @@ class _Banner extends StatelessWidget {
     final scheme = theme.colorScheme;
     final dismiss = onDismiss;
     return Positioned(
-      left: 0,
-      right: 0,
-      top: kWindowChromeHeight + AppSpacing.xxl,
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 560),
-          child: LiquidGlass(
-            kind: LiquidGlassKind.control,
+      left: AppSpacing.page,
+      bottom: 88,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 420),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: scheme.surface.withValues(alpha: 0.94),
+            borderRadius: BorderRadius.circular(AppRadii.sm),
+          ),
+          child: Padding(
             padding: const EdgeInsets.symmetric(
-              horizontal: AppSpacing.md,
-              vertical: AppSpacing.sm,
+              horizontal: AppSpacing.sm,
+              vertical: AppSpacing.xs,
             ),
-            child: Material(
-              type: MaterialType.transparency,
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    Icons.info_outline_rounded,
-                    size: 18,
-                    color: scheme.primary,
-                  ),
-                  const SizedBox(width: AppSpacing.xs),
-                  Flexible(
-                    child: Text(text, style: theme.textTheme.bodyMedium),
-                  ),
-                  if (dismiss != null) ...[
-                    const SizedBox(width: AppSpacing.xs),
-                    IconButton(
-                      key: const Key('player-progress-sync-dismiss'),
-                      tooltip: MaterialLocalizations.of(
-                        context,
-                      ).closeButtonTooltip,
-                      onPressed: dismiss,
-                      iconSize: 18,
-                      visualDensity: VisualDensity.compact,
-                      icon: const Icon(Icons.close_rounded),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Flexible(child: Text(text, style: theme.textTheme.bodyMedium)),
+                if (dismiss != null) ...[
+                  const SizedBox(width: AppSpacing.xxs),
+                  IconButton(
+                    key: const Key('player-progress-sync-dismiss'),
+                    tooltip: MaterialLocalizations.of(
+                      context,
+                    ).closeButtonTooltip,
+                    onPressed: dismiss,
+                    iconSize: 16,
+                    visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints.tightFor(
+                      width: 28,
+                      height: 28,
                     ),
-                  ],
+                    icon: const Icon(Icons.close_rounded),
+                  ),
                 ],
-              ),
+              ],
             ),
           ),
         ),

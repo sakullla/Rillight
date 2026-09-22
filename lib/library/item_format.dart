@@ -52,17 +52,28 @@ String episodeLabel(EmbyItem item) {
   return name.isEmpty ? code : '$code $name';
 }
 
-/// 继续观看副标题:S1E2 · 集名。
+/// 继续观看副标题:有正常集名时为 S1E2 · 集名。
+/// 集名经常是发行文件名(分辨率、音轨、来源),那种只保留季集编号。
 String continueWatchingSubtitle(EmbyItem item) {
   if (!item.isEpisode) {
     return '';
   }
   final code = seasonEpisodeCode(item);
   final name = item.name.trim();
-  if (code != null && name.isNotEmpty) {
+  if (name.isNotEmpty && !_looksLikeReleaseName(name)) {
+    if (code == null || name.toLowerCase().startsWith(code.toLowerCase())) {
+      return name;
+    }
     return '$code · $name';
   }
-  return code ?? name;
+  return code ?? '';
+}
+
+bool _looksLikeReleaseName(String name) {
+  return RegExp(
+    r'1080p|720p|2160p|480p|\b4k\b|x26[45]|h\.?26[45]|hevc|flac|aac|bdrip|bluray|web-?dl|webrip|10bit',
+    caseSensitive: false,
+  ).hasMatch(name);
 }
 
 /// 去掉简介里的 HTML/实体,供海报叠字与列表展示共用。

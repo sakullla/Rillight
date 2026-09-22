@@ -31,6 +31,14 @@ Future<void> _until(bool Function() ready) async {
   expect(ready(), isTrue, reason: 'Expected controlled operation to start');
 }
 
+Future<void> _untilElapsed(bool Function() ready) async {
+  final deadline = DateTime.now().add(const Duration(seconds: 2));
+  while (!ready() && DateTime.now().isBefore(deadline)) {
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+  }
+  expect(ready(), isTrue, reason: 'Expected controlled operation to start');
+}
+
 void main() {
   late _ControlledClient client;
   late _ControlledBackend backend;
@@ -394,7 +402,7 @@ void main() {
         controller.itemId = 'movie-inception';
         final gate = backend.subtitleGate = Completer<void>();
         final pending = controller.start();
-        await _until(() => backend.subtitleWaiting);
+        await _untilElapsed(() => backend.subtitleWaiting);
         expect(controller.loading, isFalse);
         await controller.togglePlay().timeout(const Duration(seconds: 1));
         expect(backend.isPlaying, isFalse);
@@ -427,7 +435,7 @@ void main() {
       controller.itemId = 'movie-inception';
       final gate = backend.subtitleGate = Completer<void>();
       final starting = controller.start();
-      await _until(() => backend.subtitleWaiting);
+      await _untilElapsed(() => backend.subtitleWaiting);
       await controller
           .playEpisode(episode('episode-friends-s1e1'))
           .timeout(const Duration(seconds: 1));
@@ -675,11 +683,12 @@ class _ControlledBackend extends FakeVideoBackend {
   }
 
   @override
-  Future<void> setSubtitleUri(Uri uri, {String? title}) async {
-    await super.setSubtitleUri(uri, title: title);
+  Future<bool> setSubtitleUri(Uri uri, {String? title}) async {
+    final applied = await super.setSubtitleUri(uri, title: title);
     final gate = subtitleGate;
     subtitleWaiting = gate != null;
     await gate?.future;
+    return applied;
   }
 
   @override

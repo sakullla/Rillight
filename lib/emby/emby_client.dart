@@ -30,6 +30,8 @@ Dio _createEmbyDio({
   if (adapter is IOHttpClientAdapter) {
     adapter.createHttpClient = () {
       return HttpClient()
+        // 关掉 Dart 默认的 Dart/x.y，只保留会话里配置的 User-Agent。
+        ..userAgent = null
         ..idleTimeout = const Duration(seconds: 3)
         ..maxConnectionsPerHost = _maxConnectionsPerHost;
     };
@@ -513,11 +515,55 @@ class EmbyClient {
     required int index,
     String format = 'srt',
   }) {
+    // StartPositionTicks 用 0,与 Emby 播放器同一条提取地址。
     return embyResourceUri(
       _baseUrl!,
-      '/Videos/$itemId/$mediaSourceId/Subtitles/$index/Stream.$format',
+      '/Videos/$itemId/$mediaSourceId/Subtitles/$index/0/Stream.$format',
       _accessToken ?? '',
     );
+  }
+
+  /// 整文件下载。字幕提取不走播放代理,避免 Range 和短超时把转换请求掐掉。
+  /// 请求头用 [sessionHeaders],其中 User-Agent 是这条服务器线路上配置的值。
+  /// 服务器第一次提取会跑 ffmpeg,失败后缓存往往已就绪,因此超时和 5xx 再试。
+  Future<List<int>> readAuthorizedBytes(
+    Uri uri, {
+    Duration receiveTimeout = const Duration(seconds: 60),
+    int attempts = 3,
+  }) async {
+    if (!hasSession) {
+      throw const EmbyException(EmbyFailureKind.sessionExpired);
+    }
+    Object? last;
+    for (var attempt = 0; attempt < attempts; attempt++) {
+      try {
+        return await _withAuthRetry(() async {
+          final response = await _dio.requestUri<List<int>>(
+            uri,
+            options: Options(
+              method: 'GET',
+              responseType: ResponseType.bytes,
+              receiveTimeout: receiveTimeout,
+              headers: {...sessionHeaders, 'Accept': '*/*'},
+            ),
+          );
+          final data = response.data;
+          if (data == null || data.isEmpty) {
+            throw StateError('Empty response');
+          }
+          return data;
+        });
+      } on EmbyException catch (error) {
+        last = error;
+        final retry =
+            error.kind == EmbyFailureKind.timeout ||
+            (error.statusCode != null && error.statusCode! >= 500);
+        if (!retry || attempt == attempts - 1) {
+          rethrow;
+        }
+      }
+    }
+    throw last ?? StateError('Unread response');
   }
 
   Future<List<int>> getPrimaryImage(
