@@ -9,6 +9,7 @@ import 'package:rillight/app/app_shell.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme/tokens.dart';
+import 'package:rillight/app/widgets/app_empty_view.dart';
 import 'package:rillight/app/widgets/app_error_view.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/app/window_chrome.dart';
@@ -25,7 +26,7 @@ import 'package:rillight/library/poster_card.dart';
 import 'package:rillight/library/shelf_sort.dart';
 import 'package:rillight/media_image/media_image.dart';
 
-const Map<ShortcutActivator, Intent> _kGridArrowShortcuts = {
+const Map<ShortcutActivator, Intent> catalogGridArrowShortcuts = {
   SingleActivator(LogicalKeyboardKey.arrowLeft): DirectionalFocusIntent(
     TraversalDirection.left,
   ),
@@ -697,7 +698,7 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
 
     final options = CatalogSort.optionsFor(_items);
     return Shortcuts(
-      shortcuts: _kGridArrowShortcuts,
+      shortcuts: catalogGridArrowShortcuts,
       child: FocusTraversalGroup(
         policy: ReadingOrderTraversalPolicy(),
         // 列数只依赖页面盒约束宽度,用 box LayoutBuilder 在滚动视图外算一次。
@@ -753,57 +754,54 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
                       child: _failureNotice(_error!, _manualRefresh),
                     ),
                   if (_items.isEmpty)
-                    SliverToBoxAdapter(
-                      child: Padding(
-                        padding: const EdgeInsets.all(AppSpacing.page),
-                        child: Text(
-                          l10n.browseEmpty,
-                          style: Theme.of(context).textTheme.bodyLarge,
+                    SliverFillRemaining(
+                      hasScrollBody: false,
+                      child: AppEmptyView(message: l10n.browseEmpty),
+                    )
+                  else
+                    SliverPadding(
+                      padding: const EdgeInsets.fromLTRB(
+                        AppSpacing.page,
+                        AppSpacing.xs,
+                        AppSpacing.page,
+                        AppSpacing.xxl,
+                      ),
+                      sliver: SliverGrid(
+                        gridDelegate: gridDelegate,
+                        delegate: _ShelfChildDelegate(
+                          items: _items,
+                          wide: _wideGrid,
+                          builder: (context, index) {
+                            final item = _items[index];
+                            return CatalogEnsureVisibleOnFocus(
+                              child: ShelfGridPage.gridCard(
+                                context,
+                                item,
+                                wide: _wideGrid,
+                                onTap: () =>
+                                    context.push(AppRoutes.item(item.id)),
+                                onRemoveFromResume: widget.source == 'resume'
+                                    ? (entry) {
+                                        unawaited(
+                                          CatalogScope.of(
+                                            context,
+                                          ).hideFromResume(entry),
+                                        );
+                                        setState(() {
+                                          _items = [
+                                            for (final current in _items)
+                                              if (current.id != entry.id)
+                                                current,
+                                          ];
+                                        });
+                                      }
+                                    : null,
+                              ),
+                            );
+                          },
                         ),
                       ),
                     ),
-                  SliverPadding(
-                    padding: const EdgeInsets.fromLTRB(
-                      AppSpacing.page,
-                      AppSpacing.xs,
-                      AppSpacing.page,
-                      AppSpacing.xxl,
-                    ),
-                    sliver: SliverGrid(
-                      gridDelegate: gridDelegate,
-                      delegate: _ShelfChildDelegate(
-                        items: _items,
-                        wide: _wideGrid,
-                        builder: (context, index) {
-                          final item = _items[index];
-                          return _EnsureVisibleOnFocus(
-                            child: ShelfGridPage.gridCard(
-                              context,
-                              item,
-                              wide: _wideGrid,
-                              onTap: () =>
-                                  context.push(AppRoutes.item(item.id)),
-                              onRemoveFromResume: widget.source == 'resume'
-                                  ? (entry) {
-                                      unawaited(
-                                        CatalogScope.of(
-                                          context,
-                                        ).hideFromResume(entry),
-                                      );
-                                      setState(() {
-                                        _items = [
-                                          for (final current in _items)
-                                            if (current.id != entry.id) current,
-                                        ];
-                                      });
-                                    }
-                                  : null,
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                  ),
                   if (_loadingMore)
                     const SliverToBoxAdapter(
                       child: Padding(
@@ -826,6 +824,30 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
 
   Widget _failureNotice(EmbyException error, VoidCallback retry) {
     final l10n = AppLocalizations.of(context);
+    return CatalogInlineFailure(
+      message: catalogFailureMessage(l10n, error),
+      onRetry: retry,
+      retryKey: const Key('catalog-grid-page-retry'),
+    );
+  }
+}
+
+/// 已有条目时的失败说明：保留列表，在区块内给出说明和重试。
+class CatalogInlineFailure extends StatelessWidget {
+  const CatalogInlineFailure({
+    super.key,
+    required this.message,
+    required this.onRetry,
+    this.retryKey,
+  });
+
+  final String message;
+  final VoidCallback onRetry;
+  final Key? retryKey;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return Padding(
       padding: const EdgeInsets.symmetric(
         horizontal: AppSpacing.page,
@@ -836,15 +858,11 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
           const Icon(Icons.info_outline),
           const SizedBox(width: AppSpacing.sm),
           Expanded(
-            child: Text(
-              catalogFailureMessage(l10n, error),
-              maxLines: 3,
-              overflow: TextOverflow.ellipsis,
-            ),
+            child: Text(message, maxLines: 3, overflow: TextOverflow.ellipsis),
           ),
           TextButton(
-            key: const Key('catalog-grid-page-retry'),
-            onPressed: retry,
+            key: retryKey,
+            onPressed: onRetry,
             child: Text(l10n.retry),
           ),
         ],
@@ -1388,8 +1406,8 @@ class _FilterBar extends StatelessWidget {
   }
 }
 
-class _EnsureVisibleOnFocus extends StatelessWidget {
-  const _EnsureVisibleOnFocus({required this.child});
+class CatalogEnsureVisibleOnFocus extends StatelessWidget {
+  const CatalogEnsureVisibleOnFocus({super.key, required this.child});
 
   final Widget child;
 

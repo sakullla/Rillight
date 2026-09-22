@@ -43,6 +43,9 @@ class SearchPage extends StatefulWidget {
   /// 滚动距底部不足该像素时预取下一页。
   static const double loadMoreThreshold = 600;
 
+  /// 继续加载失败后的重试按钮。
+  static const loadMoreRetryKey = Key('search-load-more-retry');
+
   /// 搜索输入区最大宽度,随 [AppBreakpoints] 舒展。
   static double fieldWidthFor(double screenWidth) {
     if (screenWidth < AppBreakpoints.compact) {
@@ -66,6 +69,7 @@ class _SearchPageState extends State<SearchPage> {
   bool _hasMore = false;
   bool _searched = false;
   EmbyException? _error;
+  EmbyException? _pageError;
   String _term = '';
   int _fetched = 0;
   final ScrollController _scrollController = ScrollController();
@@ -91,7 +95,11 @@ class _SearchPageState extends State<SearchPage> {
   }
 
   void _maybeLoadMore() {
-    if (!_hasMore || _loading || _loadingMore || _term.isEmpty) {
+    if (!_hasMore ||
+        _loading ||
+        _loadingMore ||
+        _pageError != null ||
+        _term.isEmpty) {
       return;
     }
     if (!_scrollController.hasClients) {
@@ -111,7 +119,9 @@ class _SearchPageState extends State<SearchPage> {
         _searched = false;
         _items = const [];
         _error = null;
+        _pageError = null;
         _loading = false;
+        _loadingMore = false;
         _hasMore = false;
         _term = '';
         _fetched = 0;
@@ -120,7 +130,9 @@ class _SearchPageState extends State<SearchPage> {
     }
     setState(() {
       _loading = true;
+      _loadingMore = false;
       _error = null;
+      _pageError = null;
       _searched = true;
       _term = term;
     });
@@ -168,7 +180,13 @@ class _SearchPageState extends State<SearchPage> {
   }
 
   Future<void> _loadMore() async {
-    setState(() => _loadingMore = true);
+    if (!_hasMore || _loading || _loadingMore || _term.isEmpty) {
+      return;
+    }
+    setState(() {
+      _loadingMore = true;
+      _pageError = null;
+    });
     try {
       final client = AuthScope.of(context).client;
       final raw = parseCatalogPage(
@@ -194,12 +212,15 @@ class _SearchPageState extends State<SearchPage> {
         _hasMore = raw.length >= SearchPage.pageSize;
         _loadingMore = false;
       });
-    } on EmbyException {
+    } on EmbyException catch (error) {
       if (!mounted) {
         return;
       }
-      // 追加失败保留已有结果,滚动到底部可重试。
-      setState(() => _loadingMore = false);
+      // 追加失败保留已有结果,在结果上方说明并提供重试。
+      setState(() {
+        _loadingMore = false;
+        _pageError = error;
+      });
     }
   }
 
@@ -300,44 +321,68 @@ class _SearchPageState extends State<SearchPage> {
         message: l10n.searchNoResults,
       );
     }
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        return MediaImageScrollListener(
-          child: GridView.builder(
-            controller: _scrollController,
-            scrollCacheExtent: const ScrollCacheExtent.viewport(0.5),
-            padding: const EdgeInsets.fromLTRB(
-              AppSpacing.page,
-              AppSpacing.xs,
-              AppSpacing.page,
-              AppSpacing.xxl,
-            ),
-            gridDelegate: ShelfGridPage.gridDelegateFor(
-              screenWidth: screenWidth,
-              availableWidth: constraints.maxWidth - AppSpacing.page * 2,
-              labelExtent: MediaShelf.posterLabelExtentFor(
-                context,
-                showProgress: false,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (_pageError != null)
+          CatalogInlineFailure(
+            message: searchFailureMessage(l10n, _pageError!),
+            onRetry: _loadMore,
+            retryKey: SearchPage.loadMoreRetryKey,
+          ),
+        Expanded(
+          child: Shortcuts(
+            shortcuts: catalogGridArrowShortcuts,
+            child: FocusTraversalGroup(
+              policy: ReadingOrderTraversalPolicy(),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  return MediaImageScrollListener(
+                    child: GridView.builder(
+                      controller: _scrollController,
+                      scrollCacheExtent: const ScrollCacheExtent.viewport(0.5),
+                      padding: const EdgeInsets.fromLTRB(
+                        AppSpacing.page,
+                        AppSpacing.xs,
+                        AppSpacing.page,
+                        AppSpacing.xxl,
+                      ),
+                      gridDelegate: ShelfGridPage.gridDelegateFor(
+                        screenWidth: screenWidth,
+                        availableWidth:
+                            constraints.maxWidth - AppSpacing.page * 2,
+                        labelExtent: MediaShelf.posterLabelExtentFor(
+                          context,
+                          showProgress: false,
+                        ),
+                      ),
+                      itemCount: _items.length + (_loadingMore ? 1 : 0),
+                      itemBuilder: (context, index) {
+                        if (index >= _items.length) {
+                          return const Center(
+                            child: CircularProgressIndicator(),
+                          );
+                        }
+                        final item = _items[index];
+                        return CatalogEnsureVisibleOnFocus(
+                          child: ShelfGridPage.gridCard(
+                            context,
+                            item,
+                            onTap: () {
+                              closeSearch(context);
+                              context.push(AppRoutes.item(item.id));
+                            },
+                          ),
+                        );
+                      },
+                    ),
+                  );
+                },
               ),
             ),
-            itemCount: _items.length + (_loadingMore ? 1 : 0),
-            itemBuilder: (context, index) {
-              if (index >= _items.length) {
-                return const Center(child: CircularProgressIndicator());
-              }
-              final item = _items[index];
-              return ShelfGridPage.gridCard(
-                context,
-                item,
-                onTap: () {
-                  closeSearch(context);
-                  context.push(AppRoutes.item(item.id));
-                },
-              );
-            },
           ),
-        );
-      },
+        ),
+      ],
     );
   }
 }

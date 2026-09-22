@@ -1,11 +1,15 @@
 import '../helpers/image_cache_fixture.dart';
 import '../helpers/settle.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
 import 'package:rillight/app/app_shell.dart';
+import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/app/theme.dart';
 import 'package:rillight/app/widgets/app_error_view.dart';
 import 'package:rillight/auth/auth_controller.dart';
+import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/emby/emby_client.dart';
@@ -17,6 +21,7 @@ import 'package:rillight/library/episode_detail_sections.dart';
 import 'package:rillight/library/item_detail_page.dart';
 import 'package:rillight/library/shelf_grid_page.dart';
 import 'package:rillight/search/search_overlay.dart';
+import 'package:rillight/search/search_page.dart';
 
 import '../emby/fake_emby_server.dart';
 import '../helpers/top_bar_hit.dart';
@@ -316,6 +321,154 @@ void main() {
     tags: ['integration'],
   );
 
+  testWidgets('library and shelf grids center an empty icon and message', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    server.items = [FakeEmbyItem(id: 'loose', name: '未入库', type: 'Movie')];
+    final auth = await _connect(tester, adapter, server);
+    await tester.pumpWidget(
+      _host(
+        auth,
+        const ShelfGridPage(
+          source: 'items',
+          parentId: 'view-empty',
+          includeItemTypes: 'Movie,Series',
+          recursive: true,
+          title: '空片库',
+        ),
+      ),
+    );
+    await settle(tester);
+    _expectCenteredEmpty(tester);
+
+    await tester.pumpWidget(
+      _host(auth, const ShelfGridPage(source: 'resume', title: '继续观看')),
+    );
+    await settle(tester);
+    _expectCenteredEmpty(tester);
+  }, tags: ['integration']);
+
+  testWidgets('search arrow keys move focus and bring the card into view', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(800, 360);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    server.items = [
+      for (var i = 0; i < 16; i++)
+        FakeEmbyItem(
+          id: 'focus-${i.toString().padLeft(2, '0')}',
+          name: 'Focus ${i.toString().padLeft(2, '0')}',
+          type: 'Movie',
+        ),
+    ];
+    final auth = await _connect(tester, adapter, server);
+    await tester.pumpWidget(_host(auth, const SearchPage()));
+    await tester.enterText(find.byKey(CatalogKeys.searchField), 'Focus');
+    await tester.tap(find.byKey(CatalogKeys.searchSubmit));
+    await settle(tester);
+
+    final scrollable = _verticalScrollable(find.byType(SearchPage));
+    _requestItemFocus(tester, 'focus-00');
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+
+    expect(_focusedCatalogItemId(), 'focus-00');
+    final offscreenId = _firstOffscreenItemId(tester, scrollable);
+    expect(offscreenId, isNotNull);
+    final targetId = offscreenId!;
+    final before = tester.getRect(find.byKey(CatalogKeys.item(targetId)));
+    expect(before.bottom, greaterThan(tester.getRect(scrollable).bottom + 1));
+
+    String? focused;
+    for (var step = 0; step < 8; step++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+      focused = _focusedCatalogItemId();
+      if (focused == targetId) {
+        break;
+      }
+    }
+    expect(focused, targetId);
+    final revealed = tester.getRect(find.byKey(CatalogKeys.item(targetId)));
+    final view = tester.getRect(scrollable);
+    expect(revealed.top, greaterThanOrEqualTo(view.top - 1));
+    expect(revealed.bottom, lessThanOrEqualTo(view.bottom + 1));
+  }, tags: ['integration']);
+
+  testWidgets(
+    'search load-more failure keeps results and offers retry above them',
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      server.items = [
+        for (var i = 0; i < 55; i++)
+          FakeEmbyItem(
+            id: 'alpha-${i.toString().padLeft(2, '0')}',
+            name: 'Alpha ${i.toString().padLeft(2, '0')}',
+            type: 'Movie',
+          ),
+      ];
+      final auth = await _connect(tester, adapter, server);
+      await tester.pumpWidget(_host(auth, const SearchPage()));
+      await tester.enterText(find.byKey(CatalogKeys.searchField), 'Alpha');
+      await tester.tap(find.byKey(CatalogKeys.searchSubmit));
+      await settle(tester);
+      expect(find.byKey(CatalogKeys.item('alpha-00')), findsOneWidget);
+      expect(find.byKey(CatalogKeys.item('alpha-50')), findsNothing);
+
+      server.searchStatus = 500;
+      final scrollable = _verticalScrollable(find.byType(SearchPage));
+      var position = tester.state<ScrollableState>(scrollable).position;
+      position.jumpTo(position.maxScrollExtent);
+      await tester.pump();
+      await tester.pump();
+      await settle(tester);
+
+      expect(find.text('HTTP 500: search failed'), findsOneWidget);
+      expect(find.byType(AppErrorView), findsNothing);
+      final notice = find.text('HTTP 500: search failed');
+      final grid = find.byType(GridView);
+      expect(
+        tester.getBottomLeft(notice).dy,
+        lessThanOrEqualTo(tester.getTopLeft(grid).dy + 1),
+      );
+      expect(find.descendant(of: grid, matching: notice), findsNothing);
+      position = tester.state<ScrollableState>(scrollable).position;
+      position.jumpTo(0);
+      await tester.pump();
+      expect(find.byKey(CatalogKeys.item('alpha-00')), findsOneWidget);
+      expect(find.byKey(CatalogKeys.item('alpha-50')), findsNothing);
+
+      server.searchStatus = null;
+      await tester.tap(find.byKey(SearchPage.loadMoreRetryKey));
+      await tester.pump();
+      await tester.pump();
+      await settle(tester);
+      expect(find.text('HTTP 500: search failed'), findsNothing);
+      position = tester.state<ScrollableState>(scrollable).position;
+      position.jumpTo(position.maxScrollExtent);
+      await tester.pump();
+      expect(find.byKey(CatalogKeys.item('alpha-50')), findsOneWidget);
+      position.jumpTo(0);
+      await tester.pump();
+      expect(find.byKey(CatalogKeys.item('alpha-00')), findsOneWidget);
+      await tester.pump(const Duration(milliseconds: 100));
+    },
+    tags: ['integration'],
+  );
+
   test('grid column max extent is at least 180/200/220', () {
     expect(
       ShelfGridPage.maxCrossAxisExtentFor(AppBreakpoints.compact - 1),
@@ -334,6 +487,126 @@ void main() {
       greaterThanOrEqualTo(220),
     );
   });
+}
+
+Future<AuthController> _connect(
+  WidgetTester tester,
+  FakeEmbyAdapter adapter,
+  FakeEmbyServer server,
+) async {
+  final auth = AuthController(
+    client: EmbyClient(device: _device, dio: dioForFakeEmby(adapter)),
+    credentials: MemoryCredentialStore(),
+    servers: MemoryServerListStore(),
+  );
+  await tester.runAsync(() {
+    return auth.connect(
+      address: server.baseUrl.toString(),
+      username: 'alice',
+      password: 'correct-horse',
+    );
+  });
+  expect(auth.isLoggedIn, isTrue);
+  return auth;
+}
+
+Widget _host(AuthController auth, Widget child) {
+  return MaterialApp(
+    theme: AppTheme.dark(),
+    locale: const Locale('zh', 'CN'),
+    localizationsDelegates: AppLocalizations.localizationsDelegates,
+    supportedLocales: AppLocalizations.supportedLocales,
+    home: AuthScope(
+      controller: auth,
+      child: Scaffold(body: child),
+    ),
+  );
+}
+
+void _expectCenteredEmpty(WidgetTester tester) {
+  const message = '暂无可浏览的内容，请刷新或从片库开始浏览。';
+  final icon = find.byIcon(Icons.inbox_outlined);
+  final text = find.text(message);
+  expect(icon, findsOneWidget);
+  expect(text, findsOneWidget);
+  expect(tester.widget<Text>(text).textAlign, TextAlign.center);
+  final page = tester.getRect(find.byType(ShelfGridPage));
+  final iconRect = tester.getRect(icon);
+  final textRect = tester.getRect(text);
+  expect(iconRect.center.dx, closeTo(page.center.dx, 12));
+  expect(textRect.center.dx, closeTo(page.center.dx, 12));
+  expect(iconRect.bottom, lessThanOrEqualTo(textRect.top));
+  final clusterCenterY = (iconRect.top + textRect.bottom) / 2;
+  expect(clusterCenterY, closeTo(page.center.dy, page.height * 0.22));
+}
+
+Finder _verticalScrollable(Finder scope) {
+  return find.descendant(
+    of: scope,
+    matching: find.byWidgetPredicate(
+      (widget) =>
+          widget is Scrollable && widget.axisDirection == AxisDirection.down,
+    ),
+  );
+}
+
+String? _firstOffscreenItemId(WidgetTester tester, Finder scrollable) {
+  final viewport = tester.getRect(scrollable);
+  String? offscreenId;
+  for (final element in find.byType(InkWell).evaluate()) {
+    final key = element.widget.key;
+    if (key is! ValueKey<String> || !key.value.startsWith('catalog-item-')) {
+      continue;
+    }
+    final box = element.renderObject! as RenderBox;
+    final rect = box.localToGlobal(Offset.zero) & box.size;
+    if (rect.bottom > viewport.bottom + 1) {
+      offscreenId = key.value.substring('catalog-item-'.length);
+      break;
+    }
+  }
+  return offscreenId;
+}
+
+void _requestItemFocus(WidgetTester tester, String id) {
+  final element = tester.element(find.byKey(CatalogKeys.item(id)));
+  Element? focusElement;
+  void visit(Element child) {
+    if (focusElement != null) {
+      return;
+    }
+    if (child.widget is Focus) {
+      focusElement = child;
+      return;
+    }
+    child.visitChildren(visit);
+  }
+
+  visit(element);
+  expect(focusElement, isNotNull);
+  final focusNode =
+      ((focusElement! as StatefulElement).state as dynamic).focusNode
+          as FocusNode;
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    focusNode.requestFocus();
+  });
+}
+
+String? _focusedCatalogItemId() {
+  final context = FocusManager.instance.primaryFocus?.context;
+  if (context == null) {
+    return null;
+  }
+  String? id;
+  context.visitAncestorElements((element) {
+    final key = element.widget.key;
+    if (key is ValueKey<String> && key.value.startsWith('catalog-item-')) {
+      id = key.value.substring('catalog-item-'.length);
+      return false;
+    }
+    return true;
+  });
+  return id;
 }
 
 /// 返回钮在顶栏内,与首页导航并列。
