@@ -575,7 +575,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
         _episodeLoadMoreError = null;
       });
     } on EmbyException catch (error) {
-      if (!mounted || gen != _loadGen) {
+      if (!mounted || gen != _loadGen || _seasonId != seasonId) {
         return;
       }
       setState(() {

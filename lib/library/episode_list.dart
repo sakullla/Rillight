@@ -17,8 +17,8 @@ import 'package:rillight/media_image/media_image.dart';
 ///
 /// 操作控件(播放/已看)平时隐藏、悬停或选中时淡入,保持桌面端
 /// 「平时干净、悬停浮现」的惯例;控件仍在组件树中,键盘与测试可达。
-/// [error] 非空时在分区内显示错误与重试;[hasMore] 时列表末尾提供
-/// 「加载更多」追加下一窗。
+/// [error] 非空且没有剧集时,分区换成说明与重试。已有剧集时 [loadMoreError]
+/// 留在列表上方,条目保持可见;[hasMore] 时列表末尾提供「加载更多」。
 class EpisodeList extends StatelessWidget {
   const EpisodeList({
     super.key,
@@ -37,6 +37,8 @@ class EpisodeList extends StatelessWidget {
     required this.onTogglePlayed,
     required this.busyPlayedIds,
     required this.onMore,
+    this.loadMoreError,
+    this.onRetryLoadMore,
   });
 
   final List<EmbyItem> episodes;
@@ -48,6 +50,8 @@ class EpisodeList extends StatelessWidget {
   final bool hasMore;
   final bool loadingMore;
   final VoidCallback onLoadMore;
+  final EmbyException? loadMoreError;
+  final VoidCallback? onRetryLoadMore;
   final Widget headerAction;
   final ValueChanged<EmbyItem> onTap;
   final ValueChanged<EmbyItem> onPlay;
@@ -60,6 +64,7 @@ class EpisodeList extends StatelessWidget {
     final l10n = AppLocalizations.of(context);
     final theme = Theme.of(context);
     final error = this.error;
+    final loadMoreError = this.loadMoreError;
     return Padding(
       key: CatalogKeys.episodesRow,
       padding: const EdgeInsets.only(top: AppSpacing.md, bottom: AppSpacing.md),
@@ -107,6 +112,25 @@ class EpisodeList extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  if (loadMoreError != null) ...[
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            catalogFailureMessage(l10n, loadMoreError),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        if (onRetryLoadMore != null)
+                          TextButton(
+                            onPressed: loadingMore ? null : onRetryLoadMore,
+                            child: Text(l10n.retry),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                  ],
                   for (final episode in episodes)
                     _EnsureVisibleWhenSelected(
                       selected: episode.id == currentId,

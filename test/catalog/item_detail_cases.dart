@@ -1,5 +1,6 @@
 import '../helpers/image_cache_fixture.dart';
 import '../helpers/settle.dart';
+import 'dart:async';
 import 'dart:typed_data';
 import 'dart:convert';
 
@@ -41,6 +42,9 @@ class _DelayedEmbyServer extends FakeEmbyServer {
   /// StartIndex 大于 0 的分集窗口返回 500,用来验收继续加载失败。
   bool failEpisodeWindowsAfterStart = false;
 
+  /// 非空时,失败的后续分集窗口先停在这里,便于切季后再放行。
+  Completer<void>? episodeWindowGate;
+
   @override
   Future<ResponseBody> handle(
     RequestOptions options,
@@ -55,6 +59,10 @@ class _DelayedEmbyServer extends FakeEmbyServer {
       final start =
           int.tryParse(options.uri.queryParameters['StartIndex'] ?? '') ?? 0;
       if (start > 0) {
+        final gate = episodeWindowGate;
+        if (gate != null) {
+          await gate.future;
+        }
         return ResponseBody.fromString(
           'episode-window-failed',
           500,
@@ -512,6 +520,84 @@ void main() {
     await settle(tester);
 
     expect(_episodeCardIds(tester), hasLength(100));
+    expect(
+      find.descendant(
+        of: find.byKey(CatalogKeys.episodesRow),
+        matching: find.textContaining('episode-window-failed'),
+      ),
+      findsNothing,
+    );
+    expect(find.byKey(ItemDetailPage.headerKey), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  }, tags: ['integration']);
+
+  testWidgets('stale episode load-more failure does not mark the new season', (
+    tester,
+  ) async {
+    final gate = Completer<void>();
+    server.episodeWindowGate = gate;
+    server.failEpisodeWindowsAfterStart = true;
+    server.setSeasons(_series, const [
+      FakeSeason(id: _season1, name: '第 1 季', indexNumber: 1),
+      FakeSeason(id: 'season-friends-2', name: '第 2 季', indexNumber: 2),
+    ]);
+    server.setEpisodes(_series, [
+      for (var i = 1; i <= 100; i++)
+        FakeEpisode(
+          id: 'bulk-e$i',
+          name: 'Episode $i',
+          seasonId: _season1,
+          indexNumber: i,
+        ),
+      const FakeEpisode(
+        id: 'season-two-e1',
+        name: 'Second Season Pilot',
+        seasonId: 'season-friends-2',
+        indexNumber: 1,
+      ),
+    ]);
+    final app = await pumpApp(tester);
+    await openItem(tester, app, _series);
+
+    final more = find.byKey(CatalogKeys.episodesLoadMore);
+    await ensureVisibleBelowTopBar(tester, more);
+    await tapBelowTopBar(tester, more);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 1));
+    expect(
+      find.descendant(
+        of: more,
+        matching: find.byType(CircularProgressIndicator),
+      ),
+      findsOneWidget,
+    );
+
+    final picker = find.byKey(CatalogKeys.seasonPicker);
+    await Scrollable.ensureVisible(
+      tester.element(picker),
+      alignment: 0.3,
+      duration: Duration.zero,
+    );
+    await tester.pump();
+    await tapBelowTopBar(tester, picker);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.widgetWithText(PopupMenuItem<String>, '第 2 季'));
+
+    final seasonTwo = find.byKey(CatalogKeys.episode('season-two-e1'));
+    for (var i = 0; i < 30 && seasonTwo.evaluate().isEmpty; i++) {
+      await tester.pump(const Duration(milliseconds: 1));
+    }
+    expect(seasonTwo, findsOneWidget);
+    expect(_episodeCardIds(tester), ['season-two-e1']);
+
+    gate.complete();
+    for (var i = 0; i < 8; i++) {
+      await tester.pump(const Duration(milliseconds: 1));
+    }
+    await settle(tester);
+
+    expect(_episodeCardIds(tester), ['season-two-e1']);
     expect(
       find.descendant(
         of: find.byKey(CatalogKeys.episodesRow),
