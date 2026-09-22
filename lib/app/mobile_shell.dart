@@ -282,7 +282,7 @@ class _MobileLibraries extends StatelessWidget {
           padding: const EdgeInsets.all(16),
           children: [
             if (c.librariesLoading) const LinearProgressIndicator(),
-            if (c.librariesError != null)
+            if (c.librariesError != null || c.librariesNotice != null)
               MobileFailure(
                 error: (c.librariesError ?? c.librariesNotice)!,
                 retry: c.reload,

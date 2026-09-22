@@ -9,7 +9,10 @@ class BrowseController extends ChangeNotifier {
     required this.auth,
     required this.cache,
     required this.parentId,
-  });
+  }) {
+    _identity = _currentIdentity;
+    auth.addListener(_onAuth);
+  }
   final AuthController auth;
   final CatalogCache cache;
   final String parentId;
@@ -20,15 +23,30 @@ class BrowseController extends ChangeNotifier {
   EmbyException? error;
   int _revision = 0, _offset = 0;
   bool _disposed = false;
+  late Object _identity;
+  Object get _currentIdentity =>
+      (auth.session?.server.id, auth.client.baseUrl, auth.client.userId);
+  void _onAuth() {
+    if (_identity == _currentIdentity) return;
+    _identity = _currentIdentity;
+    _revision++;
+    items = const [];
+    _offset = 0;
+    loading = hasMore = false;
+    error = null;
+    notifyListeners();
+  }
+
+  bool _owns(int revision) =>
+      !_disposed && revision == _revision && _identity == _currentIdentity;
   Future<void> load({bool more = false}) async {
     if (more && (loading || !hasMore)) return;
     final revision = more ? _revision : ++_revision;
-    final identity = (
-      auth.client.baseUrl,
-      auth.client.userId,
-      auth.client.accessToken,
-    );
     final offset = more ? _offset : 0;
+    if (!more) {
+      _offset = 0;
+      hasMore = false;
+    }
     loading = true;
     error = null;
     notifyListeners();
@@ -49,16 +67,7 @@ class BrowseController extends ChangeNotifier {
           ),
         ),
       );
-      if (_disposed ||
-          revision != _revision ||
-          identity !=
-              (
-                auth.client.baseUrl,
-                auth.client.userId,
-                auth.client.accessToken,
-              )) {
-        return;
-      }
+      if (!_owns(revision)) return;
       items = {
         for (final item in [...(more ? items : <EmbyItem>[]), ...page.items])
           item.id: item,
@@ -68,12 +77,12 @@ class BrowseController extends ChangeNotifier {
           ? page.items.length == 50
           : _offset < page.totalRecordCount!;
     } catch (failure) {
-      if (_disposed || revision != _revision) return;
+      if (!_owns(revision)) return;
       error = failure is EmbyException
           ? failure
           : EmbyException(EmbyFailureKind.unknown, cause: failure);
     }
-    if (_disposed || revision != _revision) return;
+    if (!_owns(revision)) return;
     loading = false;
     notifyListeners();
   }
@@ -90,6 +99,7 @@ class BrowseController extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _revision++;
+    auth.removeListener(_onAuth);
     super.dispose();
   }
 }

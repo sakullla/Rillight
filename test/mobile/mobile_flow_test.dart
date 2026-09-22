@@ -188,6 +188,59 @@ void main() {
       tags: ['integration'],
     );
   }
+  testWidgets('token renewal with tracks open exits the owned player route', (
+    tester,
+  ) async {
+    final server = FakeEmbyServer();
+    final (app, _) = await start(tester, server);
+    await login(tester, server);
+    unawaited(app.router.push('/item/movie-inception'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('mobile-detail-play')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('音轨与字幕'));
+    await tester.pumpAndSettle();
+    expect(find.byType(BottomSheet), findsOneWidget);
+    final token = app.auth.client.accessToken;
+    server.issuedTokens.clear();
+    unawaited(app.auth.client.getUser());
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pumpAndSettle();
+    expect(app.auth.client.accessToken, isNot(token));
+    expect(find.byType(BottomSheet), findsNothing);
+    expect(find.byType(MobilePlayerPage), findsNothing);
+    expect(find.byType(MobileDetailPage), findsOneWidget);
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.byType(MobileShell), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  }, tags: ['integration']);
+  testWidgets('cached library refresh failure is visible and retryable', (
+    tester,
+  ) async {
+    final server = FakeEmbyServer();
+    await start(tester, server);
+    await login(tester, server);
+    await tester.tap(find.text('片库').last);
+    await tester.pumpAndSettle();
+    final library = server.views.first.name;
+    expect(find.text(library), findsOneWidget);
+    server.viewsStatus = 503;
+    await tester.drag(
+      find.byKey(const PageStorageKey('mobile-libraries-scroll')),
+      const Offset(0, 350),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text(library), findsOneWidget);
+    expect(find.text('重试'), findsOneWidget);
+    server.viewsStatus = null;
+    await tester.tap(find.text('重试'));
+    await tester.pumpAndSettle();
+    expect(find.text('重试'), findsNothing);
+    expect(find.text(library), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  }, tags: ['integration']);
   testWidgets(
     'connection draft survives keyboard, enlarged text and rotation',
     (tester) async {

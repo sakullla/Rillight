@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/emby/catalog_cache.dart';
@@ -13,8 +15,27 @@ void main() {
   late FakeEmbyServer server;
   late AuthController auth;
   late CatalogCache cache;
+  late Dio dio;
+  late FakeEmbyServer alternate;
   setUp(() async {
-    server = FakeEmbyServer();
+    server = FakeEmbyServer(
+      users: const [
+        FakeEmbyUser(
+          username: 'alice',
+          password: 'correct-horse',
+          userId: 'user-alice',
+        ),
+        FakeEmbyUser(
+          username: 'bob',
+          password: 'bob-password',
+          userId: 'user-bob',
+        ),
+      ],
+    );
+    alternate = FakeEmbyServer(
+      baseUrl: Uri.parse('http://alternate.test:8096'),
+    );
+    dio = dioForFakeEmby(FakeEmbyAdapter([server, alternate]));
     auth = AuthController.memory(
       client: EmbyClient(
         device: const EmbyDeviceInfo(
@@ -23,7 +44,7 @@ void main() {
           deviceId: 'mobile-catalog',
           version: '1',
         ),
-        dio: dioForFakeEmby(FakeEmbyAdapter([server])),
+        dio: dio,
       ),
     );
     await auth.connect(
@@ -36,6 +57,194 @@ void main() {
   });
   tearDown(() {
     auth.dispose();
+  });
+  test('browse accepts same-user automatic token renewal', () async {
+    final browse = BrowseController(
+      auth: auth,
+      cache: cache,
+      parentId: 'view-movies',
+    );
+    addTearDown(browse.dispose);
+    final token = auth.client.accessToken;
+    server.issuedTokens.clear();
+    await browse.load();
+    expect(auth.client.accessToken, isNot(token));
+    expect(browse.loading, isFalse);
+    expect(browse.items, isNotEmpty);
+    expect(browse.error, isNull);
+  });
+  test('detail and season accept same-user automatic token renewal', () async {
+    final detail = DetailController(
+      auth: auth,
+      cache: cache,
+      itemId: 'series-friends',
+    );
+    addTearDown(detail.dispose);
+    server.issuedTokens.clear();
+    await detail.load();
+    expect(detail.loading, isFalse);
+    expect(detail.item?.id, 'series-friends');
+    expect(detail.episodes, isNotEmpty);
+    server.issuedTokens.clear();
+    await detail.selectSeason(detail.seasonId!);
+    expect(detail.episodesLoading, isFalse);
+    expect(detail.episodeError, isNull);
+    expect(detail.episodes, isNotEmpty);
+  });
+  test('search accepts same-user automatic token renewal', () async {
+    final search = SearchController(auth: auth, cache: cache);
+    addTearDown(search.dispose);
+    server.issuedTokens.clear();
+    await search.submit('Inception');
+    expect(search.searched, isTrue);
+    expect(search.loading, isFalse);
+    expect(search.items.map((i) => i.name), contains('Inception'));
+    expect(search.error, isNull);
+  });
+  test('season request completes after its own token renewal', () async {
+    final detail = DetailController(
+      auth: auth,
+      cache: cache,
+      itemId: 'series-friends',
+    );
+    addTearDown(detail.dispose);
+    await detail.load();
+    final token = auth.client.accessToken;
+    server.issuedTokens.clear();
+    await detail.selectSeason(detail.seasonId!);
+    expect(auth.client.accessToken, isNot(token));
+    expect(detail.episodesLoading, isFalse);
+    expect(detail.episodes, isNotEmpty);
+    expect(detail.episodeError, isNull);
+  });
+  for (final operation in ['browse', 'detail', 'season', 'search']) {
+    for (final change in ['logout', 'user', 'line']) {
+      test(
+        '$operation rejects delayed data after $change and ends loading',
+        () async {
+          final browse = BrowseController(
+            auth: auth,
+            cache: cache,
+            parentId: 'view-movies',
+          );
+          final detail = DetailController(
+            auth: auth,
+            cache: cache,
+            itemId: 'series-friends',
+          );
+          final search = SearchController(auth: auth, cache: cache);
+          addTearDown(browse.dispose);
+          addTearDown(detail.dispose);
+          addTearDown(search.dispose);
+          await detail.load();
+          final entered = Completer<void>(), release = Completer<void>();
+          dio.interceptors.add(
+            InterceptorsWrapper(
+              onResponse: (response, handler) async {
+                if (!entered.isCompleted &&
+                    response.requestOptions.path.contains('/Items')) {
+                  entered.complete();
+                  await release.future;
+                }
+                handler.next(response);
+              },
+            ),
+          );
+          final pending = switch (operation) {
+            'browse' => browse.load(),
+            'detail' => detail.load(),
+            'season' => detail.selectSeason(detail.seasonId!),
+            _ => search.submit('Inception'),
+          };
+          await entered.future;
+          if (change == 'logout') {
+            await auth.logout();
+          } else {
+            await auth.connect(
+              address: (change == 'line' ? alternate : server).baseUrl
+                  .toString(),
+              username: change == 'user' ? 'bob' : 'alice',
+              password: change == 'user' ? 'bob-password' : 'correct-horse',
+            );
+          }
+          release.complete();
+          await pending;
+          expect(browse.items, isEmpty);
+          expect(browse.loading, isFalse);
+          expect(browse.error, isNull);
+          expect(detail.item, isNull);
+          expect(detail.episodes, isEmpty);
+          expect(detail.loading, isFalse);
+          expect(detail.episodesLoading, isFalse);
+          expect(detail.error, isNull);
+          expect(search.items, isEmpty);
+          expect(search.loading, isFalse);
+          expect(search.error, isNull);
+        },
+      );
+    }
+  }
+  test('failed new library query cannot use previous paging offset', () async {
+    server.items = [
+      for (var i = 0; i < 65; i++)
+        FakeEmbyItem(
+          id: 'movie-$i',
+          name: 'Film $i',
+          type: 'Movie',
+          parentId: 'view-movies',
+        ),
+    ];
+    final browse = BrowseController(
+      auth: auth,
+      cache: cache,
+      parentId: 'view-movies',
+    );
+    addTearDown(browse.dispose);
+    await browse.load();
+    expect(browse.hasMore, isTrue);
+    server.itemsStatus = 503;
+    await browse.filter(watch: 'IsPlayed', sortBy: 'SortName');
+    expect(browse.error, isNotNull);
+    expect(browse.hasMore, isFalse);
+    server.itemsStatus = null;
+    final count = server.requests.length;
+    await browse.load(more: true);
+    expect(server.requests, hasLength(count));
+    await browse.load();
+    expect(server.requests.last, contains('StartIndex=0'));
+    expect(browse.items, hasLength(50));
+  });
+  test('failed new season cannot use previous paging offset', () async {
+    server.setEpisodes('series-friends', [
+      for (var s = 1; s <= 2; s++)
+        for (var i = 0; i < 65; i++)
+          FakeEpisode(
+            id: 's$s-e$i',
+            name: 'Episode $i',
+            seasonId: 'season-friends-$s',
+            indexNumber: i + 1,
+          ),
+    ]);
+    final detail = DetailController(
+      auth: auth,
+      cache: cache,
+      itemId: 'series-friends',
+    );
+    addTearDown(detail.dispose);
+    await detail.load();
+    expect(detail.hasMore, isTrue);
+    server.itemsStatus = 503;
+    await detail.selectSeason('season-friends-2');
+    expect(detail.episodeError, isNotNull);
+    expect(detail.hasMore, isFalse);
+    server.itemsStatus = null;
+    final count = server.requests.length;
+    await detail.selectSeason('season-friends-2', more: true);
+    expect(server.requests, hasLength(count));
+    await detail.selectSeason('season-friends-2');
+    expect(server.requests.last, contains('StartIndex=0'));
+    expect(detail.episodes, hasLength(50));
+    expect(detail.episodes.every((e) => e.id.startsWith('s2-')), isTrue);
   });
   test(
     'search pagination retains first page on failure and clears across logout',

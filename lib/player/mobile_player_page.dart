@@ -70,9 +70,11 @@ class MobilePlayerPageState extends State<MobilePlayerPage> {
   Future<void> _close() async {
     if (_closing) return;
     _closing = true;
+    final route = ModalRoute.of(context);
+    final navigator = Navigator.of(context);
     _lifecycle?.dispose();
     await controller?.close();
-    if (!mounted) return;
+    if (!mounted || route == null || !route.isActive) return;
     final failed = controller?.progressSyncFailed == true;
     if (failed) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -83,7 +85,10 @@ class MobilePlayerPageState extends State<MobilePlayerPage> {
     }
     // Keep system back blocked during cleanup. Enabling it before an explicit
     // pop can let a predictive back gesture pop the following detail route.
-    Navigator.of(context).pop();
+    // A tracks sheet may cover this route when authentication changes. Remove
+    // its overlays first, then pop the route whose session we actually closed.
+    navigator.popUntil((candidate) => identical(candidate, route));
+    navigator.pop();
   }
 
   Future<void> _tracks() async {

@@ -11,7 +11,10 @@ class DetailController extends ChangeNotifier {
     required CatalogCache cache,
     required this.itemId,
     this.seasonId,
-  }) : repository = DetailRepository(auth.client, cache);
+  }) : repository = DetailRepository(auth.client, cache) {
+    _identity = _currentIdentity;
+    auth.addListener(_onAuth);
+  }
   final AuthController auth;
   final DetailRepository repository;
   final String itemId;
@@ -22,10 +25,27 @@ class DetailController extends ChangeNotifier {
   bool loading = true, episodesLoading = false, hasMore = false;
   int _revision = 0, _seasonRevision = 0, _offset = 0;
   bool _disposed = false;
-  Object get _identity =>
-      (auth.client.baseUrl, auth.client.userId, auth.client.accessToken);
+  late Object _identity;
+  Object get _currentIdentity =>
+      (auth.session?.server.id, auth.client.baseUrl, auth.client.userId);
+  void _onAuth() {
+    if (_identity == _currentIdentity) return;
+    _identity = _currentIdentity;
+    _revision++;
+    _seasonRevision++;
+    item = null;
+    seasons = episodes = const [];
+    seasonId = mediaSourceId = null;
+    error = episodeError = null;
+    loading = episodesLoading = hasMore = false;
+    _offset = 0;
+    notifyListeners();
+  }
+
   Future<void> load() async {
     final revision = ++_revision;
+    _seasonRevision++;
+    episodesLoading = false;
     final identity = _identity;
     loading = true;
     error = null;
@@ -58,6 +78,10 @@ class DetailController extends ChangeNotifier {
     final revision = ++_seasonRevision;
     final identity = _identity;
     final start = more ? _offset : 0;
+    if (!more) {
+      _offset = 0;
+      hasMore = false;
+    }
     if (seasonId != id) episodes = const [];
     seasonId = id;
     episodesLoading = true;
@@ -108,6 +132,7 @@ class DetailController extends ChangeNotifier {
     _disposed = true;
     _revision++;
     _seasonRevision++;
+    auth.removeListener(_onAuth);
     super.dispose();
   }
 }

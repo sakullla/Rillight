@@ -20,9 +20,11 @@ class SearchController extends ChangeNotifier {
   EmbyException? error, pageError;
   int _revision = 0;
   bool _disposed = false;
-  late String _identity;
-  String get _currentIdentity =>
-      '${auth.client.baseUrl}|${auth.client.userId}|${auth.client.accessToken}';
+  late Object _identity;
+  // A renewed credential still owns the same catalog request. User/server/line
+  // changes invalidate it, including logout followed by the same user's login.
+  Object get _currentIdentity =>
+      (auth.session?.server.id, auth.client.baseUrl, auth.client.userId);
   void _onAuth() {
     if (_identity == _currentIdentity) return;
     _identity = _currentIdentity;
