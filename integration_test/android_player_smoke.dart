@@ -139,6 +139,10 @@ class _SmokeState extends State<_Smoke> {
       await Future<void>.delayed(const Duration(seconds: 3));
       await backend.pause();
       await waitFor(() => !backend.isPlaying, 'Pause did not settle');
+      // Native isPlaying confirmation can precede the next 250 ms position
+      // publication. Take the baseline after a fresh sample, retaining the
+      // original 300 ms drift limit instead of measuring a stale playing value.
+      await backend.positionStream.first.timeout(const Duration(seconds: 2));
       final paused = backend.position;
       await Future<void>.delayed(const Duration(milliseconds: 600));
       check(

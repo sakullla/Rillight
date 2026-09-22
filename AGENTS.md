@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-Rillight is a Flutter desktop Emby client for Windows, macOS, and Linux, with a Simplified Chinese interface.
+Rillight is a Flutter Emby client for Windows, macOS, Linux, Android phones and Android TV, with a Simplified Chinese interface.
 
 - `lib/main.dart` is the entry point; `lib/app/` contains app setup, routing, theme, shared widgets, and localization.
 - Feature modules live in `lib/auth/`, `lib/home/`, `lib/library/`, `lib/search/`, and `lib/player/`. Emby API integration lives in `lib/emby/`; image rendering lives in `lib/media_image/`.
@@ -17,6 +17,8 @@ Use Flutter 3.47.4 with desktop support enabled (Dart constraint `^3.11.5`).
 - `flutter run -d macos` — launch the native macOS desktop window locally (macOS 12+).
 - `flutter run -d windows` — launch locally; use `linux` on the corresponding host.
 - `flutter build windows` — create a release build; substitute the host desktop target as appropriate.
+- `flutter build apk --debug` — build the ordinary Android phone/TV APK (API 24+).
+- `python tool/android_release_checks.py --all-targets` — isolated 360dp/412dp/TV device checks; see `integration_test/android/README.md` for prerequisites and evidence boundaries.
 - `flutter analyze` — run static analysis and configured lints.
 - `dart format lib test` — format Dart source and tests.
 - `flutter test` — run the full `test/` suite.
@@ -26,6 +28,8 @@ Use Flutter 3.47.4 with desktop support enabled (Dart constraint `^3.11.5`).
 Playback uses the owned `packages/rillight_player` libmpv adapter and independent player processes on all desktop platforms. Release packages bundle pinned native media libraries. Linux packages require a clean ELF/RUNPATH check and Ubuntu 24.04 install/desktop-launch regression (`tool/linux_release_checks.py`); do not create ABI-spoofing libmpv symlinks. Windows native playback validation uses `tool/player_smoke.ps1` with isolated synthetic credentials/settings/cache. macOS requires 12+ with the pinned Flutter SDK. See the package README for source builds, library hashes and licensing.
 
 Linux actual-window validation uses `linux/packaging/playback_smoke.sh`: H.264/HEVC/AV1/VP9 must produce changing colored frames, in addition to passing control checks. The recorded Docker run uses Xvfb/software Mesa and a virtual audio sink; its substantial 1080p/4K drops do not establish hardware performance or physical audio output.
+
+Android uses `packages/rillight_android_player` (Media3 1.11.1) in-process. Phone/TV pages share controllers but have separate interaction trees. Keep the native view mounted while loading; Android Activity TextureView rendering with Impeller is a tested surface-transition workaround. Recheck playback exit followed by gesture navigation and screen lock/wake when changing it. Device validation uses the disposable `.validation` package and synthetic credentials. Generated tracked files must be marked in `.gitattributes`; generated validation media/protobuf clients stay under ignored `build/`.
 
 ## Coding Style & Naming Conventions
 

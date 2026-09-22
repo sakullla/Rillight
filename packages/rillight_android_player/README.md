@@ -69,7 +69,12 @@ cd android
 ./gradlew :rillight_android_player:testDebugUnitTest
 ```
 
-The real-device entrypoint is `integration_test/android_player_smoke.dart`.
+The reproducible isolated wrapper is `python tool/android_release_checks.py
+--all-targets`; prerequisites and evidence interpretation are in
+[`integration_test/android/README.md`](../../integration_test/android/README.md).
+It uses a disposable `.validation` package and restores the normal APK. Generated
+protobuf clients/media/evidence stay in ignored `build/`. The real-device
+entrypoint is `integration_test/android_player_smoke.dart`.
 Prepare `android-tracks.mkv` (H.264, two AAC tracks tagged eng/zho, one SRT track
 tagged eng, at least 60 seconds) and `stream.m3u8` plus its H.264/AAC TS segments
 in an isolated directory. It does not use a real account or media collection.
@@ -79,11 +84,11 @@ For example, use FFmpeg testsrc2 and two sine inputs; mux a synthetic SRT file.
 python packages/rillight_android_player/tool/smoke_server.py build/player-validation/media
 adb -s emulator-5554 reverse tcp:8765 tcp:8765
 adb -s emulator-5554 reverse tcp:8766 tcp:8766
-flutter build apk --debug -t integration_test/android_player_smoke.dart --dart-define=ANDROID_SMOKE_HOLD_SECONDS=30
+flutter build apk --debug -t integration_test/android_player_smoke.dart --android-project-arg=rillightValidation=true --dart-define=ANDROID_SMOKE_HOLD_SECONDS=30
 adb -s emulator-5554 install --no-streaming -r build/app/outputs/flutter-apk/app-debug.apk
 adb -s emulator-5554 logcat -c
-adb -s emulator-5554 shell am force-stop com.rillight.rillight
-adb -s emulator-5554 shell am start -n com.rillight.rillight/.MainActivity
+adb -s emulator-5554 shell am force-stop com.rillight.rillight.validation
+adb -s emulator-5554 shell am start -n com.rillight.rillight.validation/com.rillight.rillight.MainActivity
 adb -s emulator-5554 logcat -s flutter
 ```
 

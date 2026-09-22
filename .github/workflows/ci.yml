@@ -34,7 +34,7 @@ jobs:
         run: flutter pub get
 
       - name: Check formatting
-        run: dart format --output=none --set-exit-if-changed lib test packages/rillight_player/lib packages/rillight_player/test
+        run: dart format --output=none --set-exit-if-changed lib test packages/rillight_player/lib packages/rillight_player/test packages/rillight_android_player/lib packages/rillight_android_player/test integration_test/android_app_probe.dart integration_test/android_player_smoke.dart
 
       - name: Check test collection
         run: python3 tool/test_execution/generate_suites.py --check
@@ -48,6 +48,7 @@ jobs:
       - name: Native package and Linux installer contracts
         run: |
           flutter test packages/rillight_player/test
+          flutter test packages/rillight_android_player/test
           python3 tool/linux_release_checks_test.py
           python3 macos/verify_bundle_test.py
           bash linux/packaging/launcher_contract_test.sh
@@ -57,3 +58,38 @@ jobs:
 
   macos-package:
     uses: ./.github/workflows/macos-package.yml
+
+  android:
+    name: Android APK and native contracts
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.4'
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - name: Build ordinary application
+        run: flutter build apk --debug
+      - name: Native plugin tests
+        working-directory: android
+        run: ./gradlew :rillight_android_player:testDebugUnitTest
+      - name: Host verifier regression and APK contract
+        run: |
+          python3 -m pip install Pillow==12.1.1
+          python3 tool/android_release_checks_test.py
+          python3 tool/android_release_checks.py --apk build/app/outputs/flutter-apk/app-debug.apk
+      - name: Upload installable development APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: rillight-android-debug
+          path: |
+            build/app/outputs/flutter-apk/app-debug.apk
+            build/android-validation/runs/**/result.json
+          if-no-files-found: error

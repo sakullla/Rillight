@@ -268,6 +268,19 @@ void main() {
     tags: ['integration'],
   );
 
+  testWidgets('remote can return from home card to navigation', (tester) async {
+    final server = FakeEmbyServer();
+    await start(tester, server);
+    await login(tester, server);
+    await key(tester, LogicalKeyboardKey.arrowRight);
+    await key(tester, LogicalKeyboardKey.select);
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    await key(tester, LogicalKeyboardKey.arrowLeft);
+    expect(focusedLabel(tester), anyOf('首页', '片库', '搜索', '设置'));
+    expect(tester.takeException(), isNull);
+  }, tags: ['integration']);
+
   testWidgets(
     'remote offline search retry and empty results retain an escape path',
     (tester) async {

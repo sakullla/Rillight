@@ -219,6 +219,7 @@ Future<void> main(List<String> args) async {
       });
       switchWatch.reset();
       var subtitleFinished = false;
+      var observedSubtitleRequests = 0;
       final subtitleSwitch = controller
           .playEpisode(
             EmbyItem.fromJson({
@@ -232,20 +233,18 @@ Future<void> main(List<String> args) async {
       final subtitleReadyMs = switchWatch.elapsedMilliseconds;
       Future<void> waitForSubtitleRequest() async {
         final watch = Stopwatch()..start();
+        final requests = File('${root.path}/subtitle-requests.jsonl');
         while (watch.elapsed < const Duration(seconds: 2)) {
-          final diagnostics = await backend.diagnostics();
-          final trace = diagnostics['openTrace'] as List;
-          if (trace.any(
-            (row) =>
-                row['request'] is Map &&
-                row['request']['request'] == 'command:sub-add' &&
-                row['request']['outcome'] == 'sent',
-          )) {
-            return;
+          if (await requests.exists()) {
+            final count = (await requests.readAsLines()).length;
+            if (count > observedSubtitleRequests) {
+              observedSubtitleRequests = count;
+              return;
+            }
           }
           await Future<void>.delayed(const Duration(milliseconds: 25));
         }
-        throw StateError('No pending native sub-add observed');
+        throw StateError('No pending external subtitle download observed');
       }
 
       await waitForSubtitleRequest();
@@ -292,17 +291,17 @@ Future<void> main(List<String> args) async {
           controller.trackFailure == null ||
           controller.subtitleStreamIndex != null) {
         throw StateError(
-          'Optional subtitle timeout stopped media or committed selection',
+          'Optional subtitle download failure stopped media or committed selection',
         );
       }
-      await record('subtitle-timeout-survived', {
+      await record('subtitle-download-failure-survived', {
         'readyMs': subtitleReadyMs,
         'elapsedMs': switchWatch.elapsedMilliseconds,
         'positionMs': controller.position.inMilliseconds,
         ...await backend.diagnostics(),
       });
-      // The fixture releases the subtitle at 18 seconds. It must remain
-      // unselected even after the timed-out command finally completes.
+      // The fixture returns an invalid subtitle at 18 seconds. A rejected
+      // download must never reach native sub-add or change the selected track.
       await _until(() => switchWatch.elapsedMilliseconds >= 20000);
       final nativeView = _find<MpvVideoView>(
         (element) => element.widget is MpvVideoView
@@ -316,7 +315,7 @@ Future<void> main(List<String> args) async {
           controller.subtitleStreamIndex != null ||
           !controller.isPlaying ||
           controller.position < const Duration(seconds: 18) ||
-          !lateTracks.any((track) => track is Map && track['type'] == 'sub')) {
+          lateTracks.any((track) => track is Map && track['type'] == 'sub')) {
         throw StateError('Late subtitle changed selection or media stopped');
       }
       await record('late-subtitle-remained-unselected', {
@@ -325,7 +324,7 @@ Future<void> main(List<String> args) async {
         'positionMs': controller.position.inMilliseconds,
       });
       // A newer explicit choice must supersede restoration while the resource
-      // is still pending; the old timeout must not warn or stop this session.
+      // is still pending; its later failure must not warn or stop this session.
       // playEpisode intentionally ignores the current item, so leave it first.
       await controller.playEpisode(
         EmbyItem.fromJson({

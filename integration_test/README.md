@@ -1,5 +1,9 @@
 # Native desktop playback validation
 
+Android phone/TV uses a separate Media3 harness and isolated package; see
+[`android/README.md`](android/README.md). Desktop evidence below remains tied
+to its stated source/date and does not establish Android playback.
+
 Run `powershell -NoProfile -ExecutionPolicy Bypass -File tool/player_smoke.ps1`
 on Windows. The release-mode wrapper in `tool/player_smoke.dart` invokes the
 production `lib/main.dart` entry in both main and player processes and drives the

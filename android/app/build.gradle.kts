@@ -16,6 +16,10 @@ android {
 
     defaultConfig {
         applicationId = "com.rillight.rillight"
+        // Opt-in validation builds have private accounts, settings and snapshots.
+        if (providers.gradleProperty("rillightValidation").orNull == "true") {
+            applicationIdSuffix = ".validation"
+        }
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = 24

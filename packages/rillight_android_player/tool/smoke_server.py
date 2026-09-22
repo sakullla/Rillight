@@ -24,7 +24,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     def do_GET(self):
         parsed = urllib.parse.urlsplit(self.path)
-        remote = self.server.server_port == 8766
+        remote = self.server.server_port == self.server.remote_port
         if parsed.path == "/__checks":
             self.reply(200, json.dumps(counts).encode(), "application/json")
             return
@@ -48,14 +48,14 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return
         if parsed.path == "/redirect.mkv":
             self.send_response(302)
-            self.send_header("Location", f"http://127.0.0.1:8766/android-tracks.mkv?api_key={TOKEN}")
+            self.send_header("Location", f"http://127.0.0.1:{self.server.remote_port}/android-tracks.mkv?api_key={TOKEN}")
             self.send_header("Content-Length", "0")
             self.end_headers()
             return
         if parsed.path == "/cross-origin.m3u8":
             content = (pathlib.Path(self.directory) / "stream.m3u8").read_text()
             content = "\n".join(
-                f"http://127.0.0.1:8766/{line}?api_key={TOKEN}" if line and not line.startswith("#") else line
+                f"http://127.0.0.1:{self.server.remote_port}/{line}?api_key={TOKEN}" if line and not line.startswith("#") else line
                 for line in content.splitlines()
             )
             self.reply(200, content.encode(), "application/vnd.apple.mpegurl")
@@ -106,12 +106,16 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("media_dir", type=pathlib.Path)
+    parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--remote-port", type=int, default=8766)
     args = parser.parse_args()
     handler = functools.partial(Handler, directory=str(args.media_dir.resolve()))
-    remote = http.server.ThreadingHTTPServer(("127.0.0.1", 8766), handler)
+    remote = http.server.ThreadingHTTPServer(("127.0.0.1", args.remote_port), handler)
+    remote.remote_port = args.remote_port
     threading.Thread(target=remote.serve_forever, daemon=True).start()
-    origin = http.server.ThreadingHTTPServer(("127.0.0.1", 8765), handler)
-    print("Synthetic media origins ready on 8765/8766", flush=True)
+    origin = http.server.ThreadingHTTPServer(("127.0.0.1", args.port), handler)
+    origin.remote_port = args.remote_port
+    print(f"Synthetic media origins ready on {args.port}/{args.remote_port}", flush=True)
     try:
         origin.serve_forever()
     finally:

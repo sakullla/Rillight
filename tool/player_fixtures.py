@@ -144,7 +144,15 @@ def serve(media, output):
                 self.send_json(item(path.split('/')[-1]))
             elif path.startswith('/media/') or '/Subtitles/' in path:
                 if '/delayed-subtitle/' in path and '/Subtitles/' in path:
+                    with (output / 'subtitle-requests.jsonl').open('a', encoding='utf-8') as log:
+                        log.write(json.dumps({'path': path, 'started': time.time()}) + '\n')
                     time.sleep(18)
+                    # The controller downloads before native sub-add and uses
+                    # a 60 s HTTP deadline. Deliver an invalid subtitle to test
+                    # a bounded optional-track failure without changing that
+                    # production policy or waiting through three HTTP retries.
+                    self.send_json({'error': 'synthetic invalid subtitle'})
+                    return
                 if conditions['offline']:
                     self.send_json({'error': 'synthetic outage'}, 503)
                     return
