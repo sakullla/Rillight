@@ -9,6 +9,7 @@ class AppEmptyView extends StatelessWidget {
     this.icon = Icons.inbox_outlined,
     this.actionLabel,
     this.onAction,
+    this.action,
   });
 
   final String message;
@@ -17,6 +18,9 @@ class AppEmptyView extends StatelessWidget {
   /// 可选主操作文案;[onAction] 为空时不渲染按钮。
   final String? actionLabel;
   final VoidCallback? onAction;
+
+  /// 自定义主操作。设置后不再使用 [actionLabel]。
+  final Widget? action;
 
   @override
   Widget build(BuildContext context) {
@@ -39,7 +43,10 @@ class AppEmptyView extends StatelessWidget {
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.bodyLarge,
             ),
-            if (actionLabel != null && onAction != null) ...[
+            if (action != null) ...[
+              const SizedBox(height: AppSpacing.md),
+              action!,
+            ] else if (actionLabel != null && onAction != null) ...[
               const SizedBox(height: AppSpacing.md),
               OutlinedButton(onPressed: onAction, child: Text(actionLabel!)),
             ],
