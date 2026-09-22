@@ -1,4 +1,8 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:rillight/player/player_bindings.dart';
+import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/app/app.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/presentation_environment.dart';
@@ -51,7 +55,24 @@ class _AndroidBootstrapState extends State<AndroidBootstrap> {
         auth.dispose();
         return;
       }
-      setState(() => _app = RillightApp(auth: auth, environment: environment));
+      final snapshotStore = widget.createAuth != null
+          ? MemoryPlaybackSessionSnapshotStore()
+          : FilePlaybackSessionSnapshotStore(
+              File(
+                '${(await getApplicationSupportDirectory()).path}/rillight/playback-session.json',
+              ),
+            );
+      if (!mounted) {
+        auth.dispose();
+        return;
+      }
+      setState(
+        () => _app = RillightApp(
+          auth: auth,
+          environment: environment,
+          playerBindings: PlayerBindings(snapshotStore: snapshotStore),
+        ),
+      );
     } catch (_) {
       // Startup failures can contain private paths or credentials. Present a
       // recoverable message without dumping exception text into the UI.

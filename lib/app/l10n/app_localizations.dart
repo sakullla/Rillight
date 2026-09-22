@@ -1635,6 +1635,150 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'{channels} 声道'**
   String audioChannels(int channels);
+
+  /// No description provided for @mobileMine.
+  ///
+  /// In zh, this message translates to:
+  /// **'我的'**
+  String get mobileMine;
+
+  /// No description provided for @mobileEmpty.
+  ///
+  /// In zh, this message translates to:
+  /// **'暂无内容'**
+  String get mobileEmpty;
+
+  /// No description provided for @mobileLoadMore.
+  ///
+  /// In zh, this message translates to:
+  /// **'加载更多'**
+  String get mobileLoadMore;
+
+  /// No description provided for @mobileAllLoaded.
+  ///
+  /// In zh, this message translates to:
+  /// **'已显示全部内容'**
+  String get mobileAllLoaded;
+
+  /// No description provided for @mobileConnectionHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'连接你的 Emby 服务器。重启后会恢复已保存的会话；未提交的密码需要重新输入。'**
+  String get mobileConnectionHint;
+
+  /// No description provided for @mobileBackgroundPaused.
+  ///
+  /// In zh, this message translates to:
+  /// **'已暂停，点击播放继续'**
+  String get mobileBackgroundPaused;
+
+  /// No description provided for @mobilePreviousSession.
+  ///
+  /// In zh, this message translates to:
+  /// **'上次播放已中断，可从详情页继续观看。'**
+  String get mobilePreviousSession;
+
+  /// No description provided for @mobileRecoveryFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'上次播放进度同步失败，请重试。'**
+  String get mobileRecoveryFailed;
+
+  /// No description provided for @mobileRefresh.
+  ///
+  /// In zh, this message translates to:
+  /// **'刷新'**
+  String get mobileRefresh;
+
+  /// No description provided for @mobileBack.
+  ///
+  /// In zh, this message translates to:
+  /// **'返回'**
+  String get mobileBack;
+
+  /// No description provided for @mobileTracks.
+  ///
+  /// In zh, this message translates to:
+  /// **'音轨与字幕'**
+  String get mobileTracks;
+
+  /// No description provided for @mobilePause.
+  ///
+  /// In zh, this message translates to:
+  /// **'暂停'**
+  String get mobilePause;
+
+  /// No description provided for @mobileForward.
+  ///
+  /// In zh, this message translates to:
+  /// **'快进 10 秒'**
+  String get mobileForward;
+
+  /// No description provided for @mobileRewind.
+  ///
+  /// In zh, this message translates to:
+  /// **'后退 10 秒'**
+  String get mobileRewind;
+
+  /// No description provided for @mobileSpeed.
+  ///
+  /// In zh, this message translates to:
+  /// **'播放速度'**
+  String get mobileSpeed;
+
+  /// No description provided for @mobileLine.
+  ///
+  /// In zh, this message translates to:
+  /// **'服务器线路'**
+  String get mobileLine;
+
+  /// No description provided for @mobileAddServer.
+  ///
+  /// In zh, this message translates to:
+  /// **'连接其他服务器'**
+  String get mobileAddServer;
+
+  /// No description provided for @mobileSort.
+  ///
+  /// In zh, this message translates to:
+  /// **'排序'**
+  String get mobileSort;
+
+  /// No description provided for @mobileNameSort.
+  ///
+  /// In zh, this message translates to:
+  /// **'名称'**
+  String get mobileNameSort;
+
+  /// No description provided for @mobileDateSort.
+  ///
+  /// In zh, this message translates to:
+  /// **'最近添加'**
+  String get mobileDateSort;
+
+  /// No description provided for @mobileWatched.
+  ///
+  /// In zh, this message translates to:
+  /// **'已看'**
+  String get mobileWatched;
+
+  /// No description provided for @mobileUnwatched.
+  ///
+  /// In zh, this message translates to:
+  /// **'未看'**
+  String get mobileUnwatched;
+
+  /// No description provided for @mobileMovies.
+  ///
+  /// In zh, this message translates to:
+  /// **'电影'**
+  String get mobileMovies;
+
+  /// No description provided for @mobileSeries.
+  ///
+  /// In zh, this message translates to:
+  /// **'剧集'**
+  String get mobileSeries;
 }
 
 class _AppLocalizationsDelegate

@@ -44,6 +44,7 @@ class CatalogController extends ChangeNotifier {
   CatalogRowState latestSeries = const CatalogRowState(loading: true);
   List<EmbyItem> libraries = const [];
   EmbyException? librariesError;
+  EmbyException? librariesNotice;
   bool librariesLoading = true;
 
   int _loadGen = 0;
@@ -83,6 +84,7 @@ class CatalogController extends ChangeNotifier {
       if (!sameSession) libraries = const [];
       librariesLoading = true;
       librariesError = null;
+      librariesNotice = null;
     }
     _notify();
 
@@ -380,6 +382,7 @@ class CatalogController extends ChangeNotifier {
       }
       this.libraries = libraries;
       librariesError = null;
+      librariesNotice = null;
       librariesLoading = false;
     } catch (error) {
       if (gen != _loadGen) {
@@ -387,6 +390,9 @@ class CatalogController extends ChangeNotifier {
       }
       if (libraries.isEmpty) {
         librariesError = _asEmby(error);
+        librariesLoading = false;
+      } else {
+        librariesNotice = _asEmby(error);
         librariesLoading = false;
       }
       // 已有缓存内容时保留显示,不打断导航。

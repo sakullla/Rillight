@@ -465,7 +465,13 @@
   },
   "browseEmpty": "暂无可浏览的内容，请刷新或从片库开始浏览。",
   "browseLoaded": "已载入 {count} 项",
-  "@browseLoaded": {"placeholders": {"count": {"type": "int"}}},
+  "@browseLoaded": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "pauseCarousel": "暂停轮播",
   "resumeCarousel": "恢复轮播",
   "pause": "暂停",
@@ -1102,5 +1108,29 @@
         "type": "int"
       }
     }
-  }
+  },
+  "mobileMine": "我的",
+  "mobileEmpty": "暂无内容",
+  "mobileLoadMore": "加载更多",
+  "mobileAllLoaded": "已显示全部内容",
+  "mobileConnectionHint": "连接你的 Emby 服务器。重启后会恢复已保存的会话；未提交的密码需要重新输入。",
+  "mobileBackgroundPaused": "已暂停，点击播放继续",
+  "mobilePreviousSession": "上次播放已中断，可从详情页继续观看。",
+  "mobileRecoveryFailed": "上次播放进度同步失败，请重试。",
+  "mobileRefresh": "刷新",
+  "mobileBack": "返回",
+  "mobileTracks": "音轨与字幕",
+  "mobilePause": "暂停",
+  "mobileForward": "快进 10 秒",
+  "mobileRewind": "后退 10 秒",
+  "mobileSpeed": "播放速度",
+  "mobileLine": "服务器线路",
+  "mobileAddServer": "连接其他服务器",
+  "mobileSort": "排序",
+  "mobileNameSort": "名称",
+  "mobileDateSort": "最近添加",
+  "mobileWatched": "已看",
+  "mobileUnwatched": "未看",
+  "mobileMovies": "电影",
+  "mobileSeries": "剧集"
 }

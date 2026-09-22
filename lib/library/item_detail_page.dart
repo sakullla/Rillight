@@ -25,6 +25,7 @@ import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/home/media_shelf.dart';
 import 'package:rillight/library/episode_detail_sections.dart';
+import 'package:rillight/library/detail_repository.dart';
 import 'package:rillight/library/episode_list.dart';
 import 'package:rillight/library/item_format.dart';
 import 'package:rillight/library/poster_card.dart';
@@ -303,12 +304,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
         if (reuseCatalog && _seasons.isNotEmpty) {
           seasons = _seasons;
         } else if (seriesId != null && seriesId.isNotEmpty) {
-          seasons = await client.getItems(
-            parentId: seriesId,
-            includeItemTypes: 'Season',
-            sortBy: 'IndexNumber',
-            sortOrder: 'Ascending',
-          );
+          seasons = await DetailRepository(client, _cache).seasons(seriesId);
           if (!mounted || gen != _loadGen) {
             return;
           }
@@ -431,18 +427,8 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
       _scopeCache ??= CatalogScope.maybeOf(context)?.cache ?? CatalogCache();
 
   /// 经缓存层拉取单条详情(总是走网络并写穿缓存)。
-  Future<EmbyItem> _fetchItem(EmbyClient client, String itemId) async {
-    return parseCatalogItem(
-      await _cache.fetch(
-        client,
-        catalogItemRequest(
-          userId: client.userId ?? '',
-          itemId: itemId,
-          fields: _detailFields,
-        ),
-      ),
-    );
-  }
+  Future<EmbyItem> _fetchItem(EmbyClient client, String itemId) =>
+      DetailRepository(client, _cache).item(itemId);
 
   /// 剧集页预选季:路由 `season` 有值则用之,缺省仍是第一季。
   String? _requestedSeasonId() {
@@ -477,15 +463,10 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     int startIndex, {
     int? limit,
   }) {
-    return client.queryItems(
-      parentId: seasonId,
-      includeItemTypes: 'Episode',
-      sortBy: 'IndexNumber',
-      sortOrder: 'Ascending',
-      startIndex: startIndex,
-      limit: limit ?? _episodePageSize,
-      fields: EmbyClient.itemFields,
-    );
+    return DetailRepository(
+      client,
+      _cache,
+    ).episodes(seasonId, start: startIndex, limit: limit ?? _episodePageSize);
   }
 
   /// 集详情页一次拉整季(上限 [_episodeDetailSeasonLimit]):本季分集
@@ -2806,7 +2787,7 @@ class _DetailMenuButton<T> extends StatelessWidget {
 
 /// 详情路径字段:在 [EmbyClient.itemFields] 之上加 People,单条目详情
 /// 开销可忽略(ADR-2);季列表等 /Items 高频路径不带 People。
-const _detailFields = '${EmbyClient.itemFields},People';
+const _detailFields = DetailRepository.fields;
 
 /// 详情页加载骨架:头部占位块(与真实头部同高)+ 文本行 + 分集网格占位。
 class _DetailSkeleton extends StatelessWidget {

@@ -539,6 +539,17 @@ class PlayerController extends ChangeNotifier {
     await _reopen(startTicks: 0);
   }
 
+  /// A transport/decoder retry keeps the last observed position and tracks.
+  /// Initial catalog failures still need the full startup sequence.
+  Future<void> retryPlayback() async {
+    if (_disposed || _operations.isClosed || sessionExpired) return;
+    if (item == null || resolved == null) {
+      await start();
+    } else {
+      await _reopen(startTicks: ticksFromDuration(position));
+    }
+  }
+
   void openEndedSeries() {
     final seriesId = item?.seriesId;
     if (seriesId != null && seriesId.isNotEmpty) {

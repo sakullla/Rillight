@@ -14,6 +14,16 @@ waiting until loading finishes to mount the view would prevent readiness.
 The platform view explicitly uses hybrid composition, disables native controls
 and does not accept TV focus. Keep the backend instance stable across rebuilds.
 
+The application Activity uses `RenderMode.texture` with its normal opaque
+background; Impeller remains enabled. With Flutter 3.47.4, API 36 x86_64
+SwiftShader phone emulators reproduced `EGL_BAD_ACCESS (12290)` and a black
+Flutter screen after playback route exit followed by screen lock/unlock when
+the host used the default SurfaceView. A minimal native view with a Flutter
+overlay reproduced it independently of authentication and PlayerController.
+TextureView avoids that host surface transition. This is a compatibility
+workaround, not a proven engine root-cause fix; physical-device GPU stability
+and performance still need separate validation before changing this policy.
+
 `VideoOpenRequest.mediaStreams` supplies server stream metadata. Native mapping
 uses media type, unique language and container order; differing track counts
 fail explicitly. Server indices never directly address Media3 groups. A track

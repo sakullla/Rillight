@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide SearchController;
 import 'package:flutter/rendering.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
@@ -19,6 +19,7 @@ import 'package:rillight/home/media_shelf.dart';
 import 'package:rillight/library/shelf_grid_page.dart';
 import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/search/search_action.dart';
+import 'package:rillight/search/search_controller.dart';
 
 class SearchPage extends StatefulWidget {
   const SearchPage({
@@ -83,23 +84,31 @@ class SearchPage extends StatefulWidget {
 
 class _SearchPageState extends State<SearchPage> {
   final _query = TextEditingController();
-  List<EmbyItem> _items = const [];
-  bool _loading = false;
-  bool _loadingMore = false;
-  bool _hasMore = false;
-  bool _searched = false;
-  EmbyException? _error;
-  EmbyException? _pageError;
-  String _term = '';
-  int _fetched = 0;
-  int _loadGen = 0;
+  SearchController? _controller;
+  SearchController get _search => _controller!;
+  List<EmbyItem> get _items => _search.items;
+  bool get _loading => _search.loading;
+  bool get _loadingMore => _search.loadingMore;
+  bool get _hasMore => _search.hasMore;
+  bool get _searched => _search.searched;
+  EmbyException? get _error => _search.error;
+  EmbyException? get _pageError => _search.pageError;
+  String get _term => _search.term;
+  int get _fetched => _search.fetched;
   final ScrollController _scrollController = ScrollController();
 
-  CatalogCache? _scopeCache;
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _controller ??= SearchController(
+      auth: AuthScope.of(context),
+      cache: CatalogScope.maybeOf(context)?.cache ?? CatalogCache(),
+    )..addListener(_changed);
+  }
 
-  /// 目录缓存:无 CatalogScope 时用无会话实例降级直连。
-  CatalogCache get _cache =>
-      _scopeCache ??= CatalogScope.maybeOf(context)?.cache ?? CatalogCache();
+  void _changed() {
+    if (mounted) setState(() {});
+  }
 
   @override
   void initState() {
@@ -112,6 +121,8 @@ class _SearchPageState extends State<SearchPage> {
     _scrollController.removeListener(_maybeLoadMore);
     _scrollController.dispose();
     _query.dispose();
+    _controller?.removeListener(_changed);
+    _controller?.dispose();
     super.dispose();
   }
 
@@ -133,125 +144,8 @@ class _SearchPageState extends State<SearchPage> {
     }
   }
 
-  Future<void> _submit([String? raw]) async {
-    final gen = ++_loadGen;
-    final term = (raw ?? _query.text).trim();
-    if (term.isEmpty) {
-      setState(() {
-        _searched = false;
-        _items = const [];
-        _error = null;
-        _pageError = null;
-        _loading = false;
-        _loadingMore = false;
-        _hasMore = false;
-        _term = '';
-        _fetched = 0;
-      });
-      return;
-    }
-    setState(() {
-      _loading = true;
-      _loadingMore = false;
-      _error = null;
-      _pageError = null;
-      _searched = true;
-      _term = term;
-    });
-    final client = AuthScope.of(context).client;
-    final request = catalogSearchRequest(
-      userId: client.userId ?? '',
-      searchTerm: term,
-      startIndex: 0,
-    );
-    // 先显:命中缓存立即渲染上一轮结果,后台重拉完成后无感更新。
-    final hit = await _cache.lookup(request);
-    if (!mounted || gen != _loadGen) {
-      return;
-    }
-    if (hit != null) {
-      final raw = parseCatalogPage(hit.json).items;
-      setState(() {
-        _items = raw.where((item) => item.isMovieOrSeries).toList();
-        _fetched = raw.length;
-        _hasMore = raw.length >= SearchPage.pageSize;
-        _loading = false;
-      });
-    }
-    try {
-      final raw = parseCatalogPage(await _cache.fetch(client, request)).items;
-      if (!mounted || gen != _loadGen) {
-        return;
-      }
-      setState(() {
-        _items = raw.where((item) => item.isMovieOrSeries).toList();
-        _fetched = raw.length;
-        _hasMore = raw.length >= SearchPage.pageSize;
-        _loading = false;
-      });
-    } on EmbyException catch (error) {
-      if (!mounted || gen != _loadGen) {
-        return;
-      }
-      setState(() {
-        _error = error;
-        _items = const [];
-        _loading = false;
-      });
-    }
-  }
-
-  Future<void> _loadMore() async {
-    if (!_hasMore || _loading || _loadingMore || _term.isEmpty) {
-      return;
-    }
-    final gen = _loadGen;
-    final start = _fetched;
-    final term = _term;
-    setState(() {
-      _loadingMore = true;
-      _pageError = null;
-    });
-    try {
-      final client = AuthScope.of(context).client;
-      final raw = parseCatalogPage(
-        await _cache.fetch(
-          client,
-          catalogSearchRequest(
-            userId: client.userId ?? '',
-            searchTerm: term,
-            startIndex: start,
-          ),
-        ),
-      ).items;
-      if (!mounted || gen != _loadGen) {
-        return;
-      }
-      setState(() {
-        // 分页追加按 itemId 去重,排序窗口重叠不产生重复条目。
-        _items = ShelfGridPage.mergeItemsById(
-          _items,
-          raw.where((item) => item.isMovieOrSeries),
-        );
-        _fetched = start + raw.length;
-        _hasMore = raw.length >= SearchPage.pageSize;
-        _loadingMore = false;
-      });
-    } on EmbyException catch (error) {
-      if (!mounted || gen != _loadGen) {
-        return;
-      }
-      // 追加失败保留已有结果,在结果上方说明并提供重试。
-      setState(() {
-        _loadingMore = false;
-        _pageError = error;
-      });
-    } finally {
-      if (mounted && gen == _loadGen && _loadingMore) {
-        setState(() => _loadingMore = false);
-      }
-    }
-  }
+  Future<void> _submit([String? raw]) => _search.submit(raw ?? _query.text);
+  Future<void> _loadMore() => _search.loadMore();
 
   @override
   Widget build(BuildContext context) {

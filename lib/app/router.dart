@@ -13,6 +13,11 @@ import 'package:rillight/library/item_detail_page.dart';
 import 'package:rillight/library/library_page.dart';
 import 'package:rillight/library/shelf_grid_page.dart';
 import 'package:rillight/search/search_page.dart';
+import 'package:rillight/app/mobile_shell.dart';
+import 'package:rillight/library/mobile_detail_page.dart';
+import 'package:rillight/library/mobile_library_page.dart';
+import 'package:rillight/player/mobile_player_page.dart';
+import 'package:rillight/player/player_window_host.dart';
 
 export 'package:rillight/app/routes.dart';
 
@@ -22,6 +27,7 @@ GoRouter createAppRouter({
 }) {
   return GoRouter(
     initialLocation: AppRoutes.home,
+    observers: [_ConnectFlowObserver(auth)],
     refreshListenable: auth,
     redirect: (context, state) {
       final loggedIn = auth.isLoggedIn;
@@ -35,7 +41,56 @@ GoRouter createAppRouter({
       return null;
     },
     routes: [
-      if (!environment.isDesktop) ...[
+      if (!environment.isDesktop && !environment.isTv) ...[
+        GoRoute(
+          path: AppRoutes.connect,
+          name: AppRoutes.connect,
+          builder: (context, state) => AndroidConnectPage(
+            addingAnother: state.uri.queryParameters['add'] == '1',
+          ),
+        ),
+        ShellRoute(
+          builder: (context, state, child) => CatalogShell(
+            key: ValueKey(
+              '${auth.session?.server.id}|${auth.session?.userId}|${auth.session?.server.activeLine?.id}',
+            ),
+            auth: auth,
+            child: child,
+          ),
+          routes: [
+            // Keep detail and playback on one Navigator: an underlying shell
+            // route otherwise remains current for Android predictive back.
+            GoRoute(
+              path: '/play/:itemId',
+              builder: (context, state) {
+                final request = state.extra as PlayerOpenRequest?;
+                return MobilePlayerPage(
+                  itemId: state.pathParameters['itemId']!,
+                  mediaSourceId: request?.mediaSourceId,
+                  autoResume: request?.autoResume ?? true,
+                );
+              },
+            ),
+            GoRoute(
+              path: AppRoutes.home,
+              builder: (context, state) => const MobileShell(),
+            ),
+            GoRoute(
+              path: '/library/:viewId',
+              builder: (context, state) =>
+                  MobileLibraryPage(viewId: state.pathParameters['viewId']!),
+            ),
+            GoRoute(
+              path: '/item/:itemId',
+              builder: (context, state) => MobileDetailPage(
+                itemId: state.pathParameters['itemId']!,
+                initialSeasonId: state.uri.queryParameters['season'],
+              ),
+            ),
+          ],
+        ),
+      ],
+      if (environment.isTv) ...[
         GoRoute(
           path: AppRoutes.connect,
           name: AppRoutes.connect,

@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/android_bootstrap.dart';
 import 'package:rillight/app/app.dart';
 import 'package:rillight/app/app_shell.dart';
+import 'package:rillight/app/mobile_shell.dart';
 import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/auth/android_connect_page.dart';
 import 'package:rillight/auth/auth_controller.dart';
@@ -128,8 +129,28 @@ void main() {
         await tester.tap(submit);
         await tester.pumpAndSettle();
         expect(auth.isLoggedIn, isTrue);
-        expect(find.byType(AndroidSessionPage), findsOneWidget);
+        expect(
+          find.byType(environment.isTv ? AndroidSessionPage : MobileShell),
+          findsOneWidget,
+        );
+        if (!environment.isTv) {
+          await tester.tap(find.text('我的'));
+          await tester.pumpAndSettle();
+        }
         expect(auth.savedServers, hasLength(1));
+        if (!environment.isTv) {
+          await tester.scrollUntilVisible(
+            find.text('退出登录'),
+            150,
+            scrollable: find
+                .descendant(
+                  of: find.byType(MobileShell),
+                  matching: find.byType(Scrollable),
+                )
+                .last,
+          );
+        }
+        await tester.pumpAndSettle();
         await tester.tap(find.text('退出登录'));
         await tester.pumpAndSettle();
         expect(find.byType(AndroidConnectPage), findsOneWidget);

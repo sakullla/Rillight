@@ -819,4 +819,76 @@ class AppLocalizationsZh extends AppLocalizations {
   String audioChannels(int channels) {
     return '$channels 声道';
   }
+
+  @override
+  String get mobileMine => '我的';
+
+  @override
+  String get mobileEmpty => '暂无内容';
+
+  @override
+  String get mobileLoadMore => '加载更多';
+
+  @override
+  String get mobileAllLoaded => '已显示全部内容';
+
+  @override
+  String get mobileConnectionHint => '连接你的 Emby 服务器。重启后会恢复已保存的会话；未提交的密码需要重新输入。';
+
+  @override
+  String get mobileBackgroundPaused => '已暂停，点击播放继续';
+
+  @override
+  String get mobilePreviousSession => '上次播放已中断，可从详情页继续观看。';
+
+  @override
+  String get mobileRecoveryFailed => '上次播放进度同步失败，请重试。';
+
+  @override
+  String get mobileRefresh => '刷新';
+
+  @override
+  String get mobileBack => '返回';
+
+  @override
+  String get mobileTracks => '音轨与字幕';
+
+  @override
+  String get mobilePause => '暂停';
+
+  @override
+  String get mobileForward => '快进 10 秒';
+
+  @override
+  String get mobileRewind => '后退 10 秒';
+
+  @override
+  String get mobileSpeed => '播放速度';
+
+  @override
+  String get mobileLine => '服务器线路';
+
+  @override
+  String get mobileAddServer => '连接其他服务器';
+
+  @override
+  String get mobileSort => '排序';
+
+  @override
+  String get mobileNameSort => '名称';
+
+  @override
+  String get mobileDateSort => '最近添加';
+
+  @override
+  String get mobileWatched => '已看';
+
+  @override
+  String get mobileUnwatched => '未看';
+
+  @override
+  String get mobileMovies => '电影';
+
+  @override
+  String get mobileSeries => '剧集';
 }
