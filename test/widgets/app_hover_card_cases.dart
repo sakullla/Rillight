@@ -29,8 +29,24 @@ BoxDecoration _foregroundDecoration(WidgetTester tester) {
       as BoxDecoration;
 }
 
+Border _ring(WidgetTester tester) {
+  return _foregroundDecoration(tester).border! as Border;
+}
+
+Future<TestGesture> _hoverCard(WidgetTester tester) async {
+  final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
+  await gesture.addPointer(location: Offset.zero);
+  addTearDown(gesture.removePointer);
+  await gesture.moveTo(tester.getCenter(find.byType(AppHoverCard)));
+  await tester.pump();
+  return gesture;
+}
+
 void main() {
-  testWidgets('hover scales the card up and shows a shadow', (tester) async {
+  testWidgets('hover scales the card up and shows the focus ring', (
+    tester,
+  ) async {
+    final theme = AppTheme.dark();
     await tester.pumpWidget(
       _wrap(
         AppHoverCard(
@@ -41,23 +57,25 @@ void main() {
     );
     expect(_scale(tester).scale, 1.0);
     expect((_decoration(tester).boxShadow!.single.color.a), 0);
+    expect(_ring(tester).top.color, Colors.transparent);
 
-    final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
-    await gesture.addPointer(location: Offset.zero);
-    addTearDown(gesture.removePointer);
-    await gesture.moveTo(tester.getCenter(find.byType(AppHoverCard)));
-    await tester.pump();
+    final gesture = await _hoverCard(tester);
 
     expect(_scale(tester).scale, 1.04);
     expect((_decoration(tester).boxShadow!.single.color.a), greaterThan(0));
+    expect(_ring(tester).top.color, theme.colorScheme.primary);
+    expect(_ring(tester).top.width, 2);
 
     await gesture.moveTo(Offset.zero);
     await tester.pump();
 
     expect(_scale(tester).scale, 1.0);
+    expect(_ring(tester).top.color, Colors.transparent);
   });
 
-  testWidgets('keyboard focus shows a focus ring', (tester) async {
+  testWidgets('keyboard focus shows the same focus ring without scaling', (
+    tester,
+  ) async {
     final theme = AppTheme.dark();
     await tester.pumpWidget(
       _wrap(
@@ -70,8 +88,31 @@ void main() {
     );
     await tester.pump();
 
-    final border = _foregroundDecoration(tester).border! as Border;
-    expect(border.top.color, theme.colorScheme.primary);
+    expect(_scale(tester).scale, 1.0);
+    expect(_ring(tester).top.color, theme.colorScheme.primary);
+    expect(_ring(tester).top.width, 2);
+  });
+
+  testWidgets('hoverScale of 1 shows the ring without enlarging', (
+    tester,
+  ) async {
+    final theme = AppTheme.dark();
+    await tester.pumpWidget(
+      _wrap(
+        AppHoverCard(
+          onTap: () {},
+          hoverScale: 1,
+          child: const SizedBox(width: 120, height: 180),
+        ),
+      ),
+    );
+    expect(find.byType(AnimatedScale), findsNothing);
+
+    await _hoverCard(tester);
+
+    expect(find.byType(AnimatedScale), findsNothing);
+    expect(_ring(tester).top.color, theme.colorScheme.primary);
+    expect(_ring(tester).top.width, 2);
   });
 
   testWidgets('hover and focus notify onHighlighted', (tester) async {

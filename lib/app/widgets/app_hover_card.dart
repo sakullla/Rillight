@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:rillight/app/theme/tokens.dart';
 
-/// hover/焦点卡片包装:鼠标悬停时放大并叠加阴影高亮,
-/// 键盘焦点时显示焦点环。动画时长与曲线取自 [AppMotion]。
+/// hover/焦点卡片包装:指针悬停与键盘焦点显示同一套焦点环,
+/// 悬停时按倍率放大并叠加阴影。动画时长与曲线取自 [AppMotion]。
 ///
 /// 纯呈现组件,不持有业务数据;点击、焦点语义经 [onTap] 透传。
 class AppHoverCard extends StatefulWidget {
@@ -147,7 +147,7 @@ class _AppHoverCardState extends State<AppHoverCard> {
       foregroundDecoration: BoxDecoration(
         borderRadius: radius,
         border: Border.all(
-          color: _focused ? colorScheme.primary : Colors.transparent,
+          color: highlighted ? colorScheme.primary : Colors.transparent,
           width: widget.focusRingWidth,
         ),
       ),
