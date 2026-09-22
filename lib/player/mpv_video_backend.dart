@@ -671,9 +671,9 @@ class MpvVideoBackend implements VideoBackend {
         ? session.proxy?.register(uri, role: PlaybackResourceRole.subtitle) ??
               uri
         : uri;
-    // Pin the current selection before loading. `select` makes this user
-    // action explicit; relying on `auto` leaves the old subtitle selected
-    // whenever another subtitle is already active.
+    // Pin the actual selection before loading. `auto` adds the external track
+    // without selecting it, so a late completion cannot replace a newer
+    // choice or turn a timed-out optional load into a committed selection.
     final selected = await driver.getProperty('sid');
     if (!current()) return;
     await driver.setProperty('sid', selected is num ? '$selected' : 'no');
@@ -681,7 +681,7 @@ class MpvVideoBackend implements VideoBackend {
     final loading = driver.command([
       'sub-add',
       url.toString(),
-      'select',
+      'auto',
       title ?? '',
     ]);
     try {
@@ -693,11 +693,14 @@ class MpvVideoBackend implements VideoBackend {
       // Keep the player responsive and let the operation finish in the
       // background when the native control channel is still healthy.
       try {
-        await driver.getProperty('sid').timeout(const Duration(seconds: 2));
+        final actual = await driver
+            .getProperty('sid')
+            .timeout(const Duration(seconds: 2));
         if (!current()) return;
         if (!session.loaded ||
             (session.hasVideo && !session.firstFrame) ||
-            session.failed) {
+            session.failed ||
+            actual != selected) {
           throw StateError('Unable to confirm subtitle selection');
         }
       } catch (_) {
@@ -722,7 +725,9 @@ class MpvVideoBackend implements VideoBackend {
           } catch (_) {}
         }, onError: (Object error, StackTrace stack) {}),
       );
-      return;
+      throw StateError(
+        'External subtitle loading timed out; playback continues',
+      );
     }
     await _selectExternalSubtitle(session, driver, url, revision);
   }

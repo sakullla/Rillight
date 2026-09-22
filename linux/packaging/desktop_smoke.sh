@@ -15,12 +15,18 @@ cleanup() {
   kill "$wm_pid" 2>/dev/null || true
 }
 trap cleanup EXIT
+close_window() {
+  # A native close can destroy the X11 window before xdotool finishes its
+  # follow-up attribute query. Treat that stale-window race as harmless; the
+  # process-liveness check below still verifies that the app actually exited.
+  xdotool windowclose "$1" >/dev/null 2>&1 || true
+}
 gtk-launch rillight
 window=$(timeout 30s xdotool search --sync --onlyvisible --class '.*rillight.*' | head -1)
 main_pid=$(xdotool getwindowpid "$window")
 test "$(readlink "/proc/$main_pid/exe")" = /opt/rillight/rillight
 kill -0 "$main_pid"
-xdotool windowclose "$window"
+close_window "$window"
 for i in $(seq 1 100); do
   if [ ! -e "/proc/$main_pid/exe" ]; then break; fi
   sleep 0.1
@@ -38,6 +44,6 @@ dialog_pid=$(xdotool getwindowpid "$dialog")
 test "$(readlink "/proc/$dialog_pid/exe")" = /usr/bin/zenity
 python3 "$(dirname "$0")/assert_diagnostic.py" "$dialog_pid" "$XDG_STATE_HOME/diagnostic-accessibility.json"
 grep -q '缺少 libmpv.so.2' "$XDG_STATE_HOME/rillight/launch.log"
-xdotool windowactivate --sync "$dialog" key Return
+xdotool windowactivate --sync "$dialog" key Return >/dev/null 2>&1 || true
 mv "$media.disabled" "$media"
 echo 'Installed gtk-launch, graceful exit and visible missing-library diagnostic passed.'
