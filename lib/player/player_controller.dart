@@ -324,6 +324,7 @@ class PlayerController extends ChangeNotifier {
   /// 本次播放下载的外挂字幕。停播后整目录删除,不留在系统临时目录。
   Directory? _subtitleCache;
   File? _activeSubtitleFile;
+  int _subtitleFileSequence = 0;
 
   /// 在途 Stopped(_handleCompleted / _stopSession / close 共用);
   /// 后续 close()/shutdown 先等它,避免 exit(0) 截断上报。
@@ -684,7 +685,7 @@ class PlayerController extends ChangeNotifier {
       return;
     }
     await _selectTrack(
-      () => backend.setAudioIndex(index),
+      (_) => backend.setAudioIndex(index),
       () => audioStreamIndex = index,
       'AudioTrackChange',
     );
@@ -718,7 +719,7 @@ class PlayerController extends ChangeNotifier {
     }
     final previous = subtitleStreamIndex;
     await _selectTrack(
-      () => _activatePlaybackSubtitle(next, index),
+      (current) => _activatePlaybackSubtitle(next, index, current: current),
       () {
         subtitleStreamIndex = index;
         _clearSubtitleNotice();
@@ -733,7 +734,7 @@ class PlayerController extends ChangeNotifier {
   }
 
   Future<void> _selectTrack(
-    Future<void> Function() apply,
+    Future<void> Function(bool Function() current) apply,
     VoidCallback commit,
     String event, {
     bool serialized = true,
@@ -743,11 +744,15 @@ class PlayerController extends ChangeNotifier {
     if (operation == null || !_accepts(operation)) return;
     final revision = ++_trackRevision;
     _trackRevisions[event] = revision;
+    final session = _session;
+    bool sessionCurrent() =>
+        _accepts(operation) && identical(session, _session) && !disconnected;
+    bool current() => sessionCurrent() && revision == _trackRevisions[event];
     try {
       Future<void> select() async {
-        if (!_accepts(operation) || revision != _trackRevisions[event]) return;
-        await apply();
-        if (!_accepts(operation) ||
+        if (!current()) return;
+        await apply(current);
+        if (!sessionCurrent() ||
             (!serialized && revision != _trackRevisions[event])) {
           return;
         }
@@ -765,10 +770,10 @@ class PlayerController extends ChangeNotifier {
         // Optional subtitle downloads must not block pause, seek or volume.
         await select();
       }
-      if (!_accepts(operation) || revision != _trackRevisions[event]) return;
+      if (!current()) return;
       await _reportProgress(eventName: event);
     } catch (failure) {
-      if (!_accepts(operation) || revision != _trackRevisions[event]) return;
+      if (!current()) return;
       onFailure?.call();
       trackFailure = failure.toString();
       _emit();
@@ -1870,10 +1875,17 @@ class PlayerController extends ChangeNotifier {
         });
       });
       if (!_accepts(operation) || disconnected) return;
+      final subtitleSession = _session;
       bool ownsSubtitle() =>
+          identical(subtitleSession, _session) &&
           subtitleRevision == _trackRevisions['SubtitleTrackChange'];
       await _restoreParameter(operation, () async {
-        await _applySubtitle(next, operation, subtitle: selectedSubtitle);
+        await _applySubtitle(
+          next,
+          operation,
+          subtitle: selectedSubtitle,
+          revision: subtitleRevision,
+        );
         if (_accepts(operation) && ownsSubtitle()) {
           subtitleStreamIndex = selectedSubtitle;
         }
@@ -1971,9 +1983,15 @@ class PlayerController extends ChangeNotifier {
     ResolvedPlayback next,
     PlaybackOperation operation, {
     required int? subtitle,
+    required int? revision,
   }) async {
-    if (!_accepts(operation)) return;
-    await _activatePlaybackSubtitle(next, subtitle);
+    final session = _session;
+    bool current() =>
+        _accepts(operation) &&
+        identical(session, _session) &&
+        !disconnected &&
+        revision == _trackRevisions['SubtitleTrackChange'];
+    await _activatePlaybackSubtitle(next, subtitle, current: current);
   }
 
   TranscodeSubtitleDelivery _transcodeSubtitleDelivery(
@@ -1986,8 +2004,10 @@ class PlayerController extends ChangeNotifier {
 
   Future<void> _activatePlaybackSubtitle(
     ResolvedPlayback next,
-    int? subtitle,
-  ) async {
+    int? subtitle, {
+    required bool Function() current,
+  }) async {
+    if (!current()) return;
     if (subtitle == null) {
       await backend.setSubtitleOff();
       return;
@@ -2006,6 +2026,7 @@ class PlayerController extends ChangeNotifier {
             next.mediaSource,
             subtitle,
             forceExternal: true,
+            current: current,
           );
           return;
         case TranscodeSubtitleDelivery.manifest:
@@ -2013,7 +2034,7 @@ class PlayerController extends ChangeNotifier {
           return;
       }
     }
-    await _activateSubtitle(next.mediaSource, subtitle);
+    await _activateSubtitle(next.mediaSource, subtitle, current: current);
   }
 
   /// 内嵌文本按容器流索引切换。外挂文本先整文件下载到本地,再交给 mpv。
@@ -2022,7 +2043,9 @@ class PlayerController extends ChangeNotifier {
     PlaybackMediaSource source,
     int? index, {
     bool forceExternal = false,
+    required bool Function() current,
   }) async {
+    if (!current()) return;
     if (index == null) {
       await backend.setSubtitleOff();
       return;
@@ -2045,7 +2068,7 @@ class PlayerController extends ChangeNotifier {
         // 容器里没有对应轨道时,再走外挂地址。
       }
     }
-    final previous = _activeSubtitleFile;
+    if (!current()) return;
     final deliveryUrl = stream.deliveryUrl;
     final remote = deliveryUrl != null && deliveryUrl.isNotEmpty
         ? embyResourceUri(client.baseUrl!, deliveryUrl, client.accessToken!)
@@ -2060,38 +2083,42 @@ class PlayerController extends ChangeNotifier {
         : remote.path.toLowerCase().endsWith('.srt')
         ? 'srt'
         : stream.externalSubtitleFormat;
-    final local = await _downloadSubtitleFile(remote, index, format);
-    final applied = await backend.setSubtitleUri(local, title: stream.label);
-    if (!applied) {
-      throw StateError('External subtitle was not selected');
-    }
-    final current = File(local.toFilePath());
-    _activeSubtitleFile = current;
-    if (previous != null && previous.path != current.path) {
-      await _deleteSubtitleFile(previous);
+    final file = await _downloadSubtitleFile(remote, index, format, current);
+    if (file == null) return;
+    var retained = false;
+    try {
+      if (!current()) return;
+      final applied = await backend.setSubtitleUri(
+        file.uri,
+        title: stream.label,
+      );
+      if (!current()) return;
+      if (!applied) {
+        throw StateError('External subtitle was not selected');
+      }
+      // Capture the prior owner only at commit. Every download has a unique
+      // path, so a superseded completion can only delete its own candidate.
+      final previous = _activeSubtitleFile;
+      _activeSubtitleFile = file;
+      retained = true;
+      if (previous != null) await _deleteSubtitleFile(previous);
+    } finally {
+      if (!retained) await _deleteSubtitleFile(file);
     }
   }
 
-  Future<Uri> _downloadSubtitleFile(
+  Future<File?> _downloadSubtitleFile(
     Uri remote,
     int index,
     String format,
+    bool Function() current,
   ) async {
+    if (!current()) return null;
     final safeFormat = format.replaceAll(RegExp(r'[^a-z0-9]'), '');
     final ext = safeFormat.isEmpty ? 'srt' : safeFormat;
     final safeId = itemId.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_');
-    final cache = _subtitleCache ??= await Directory.systemTemp.createTemp(
-      'rillight-subtitles-',
-    );
-    final file = File(
-      '${cache.path}${Platform.pathSeparator}$safeId-$index.$ext',
-    );
-    if (_activeSubtitleFile?.path == file.path &&
-        await file.exists() &&
-        await file.length() > 0) {
-      return file.uri;
-    }
     final bytes = await client.readAuthorizedBytes(remote);
+    if (!current()) return null;
     final sample = utf8
         .decode(
           bytes.take(math.min(bytes.length, 256)).toList(),
@@ -2105,8 +2132,35 @@ class PlayerController extends ChangeNotifier {
         sample.startsWith('{')) {
       throw StateError('Subtitle response was not a subtitle file');
     }
-    await file.writeAsBytes(bytes, flush: true);
-    return file.uri;
+    var cache = _subtitleCache;
+    if (cache == null) {
+      final created = await Directory.systemTemp.createTemp(
+        'rillight-subtitles-',
+      );
+      if (!current()) {
+        await created.delete(recursive: true);
+        return null;
+      }
+      cache = _subtitleCache;
+      if (cache == null) {
+        _subtitleCache = cache = created;
+      } else {
+        await created.delete(recursive: true);
+        if (!current()) return null;
+      }
+    }
+    final file = File(
+      '${cache.path}${Platform.pathSeparator}$safeId-$index-${++_subtitleFileSequence}.$ext',
+    );
+    var completed = false;
+    try {
+      await file.writeAsBytes(bytes, flush: true);
+      if (!current()) return null;
+      completed = true;
+      return file;
+    } finally {
+      if (!completed) await _deleteSubtitleFile(file);
+    }
   }
 
   Future<void> _deleteSubtitleFile(File file) async {
@@ -2154,6 +2208,7 @@ class PlayerController extends ChangeNotifier {
         current,
         operation,
         subtitle: index,
+        revision: _trackRevisions['SubtitleTrackChange'],
       ).catchError((Object _) {}),
     );
   }
