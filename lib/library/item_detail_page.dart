@@ -93,6 +93,9 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
 
   /// 季切换/重试失败时分集分区内联显示的错误;成功后清空。
   EmbyException? _episodeError;
+
+  /// 已有剧集时继续加载下一窗失败;列表保留,分区内说明并重试。
+  EmbyException? _episodeLoadMoreError;
   int _episodeReveal = 0;
   bool _episodesLoading = false;
   bool _loadingMore = false;
@@ -210,6 +213,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
         _error = null;
         _similarError = null;
         _episodeError = null;
+        _episodeLoadMoreError = null;
         _episodesLoading = false;
         _loadingMore = false;
         _seasons = const [];
@@ -378,6 +382,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
         _episodeTotal = episodeTotal;
         _episodeWindowEnd = episodeWindowEnd;
         _episodeError = null;
+        _episodeLoadMoreError = null;
         _episodesLoading = false;
         _seasonId = seasonId;
         _seriesId = seriesId;
@@ -547,9 +552,10 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     }
     final gen = _loadGen;
     final startIndex = _episodeWindowEnd;
-    setState(() => _loadingMore = true);
-    final l10n = AppLocalizations.of(context);
-    final messenger = ScaffoldMessenger.maybeOf(context);
+    setState(() {
+      _loadingMore = true;
+      _episodeLoadMoreError = null;
+    });
     try {
       final page = await _queryEpisodes(
         AuthScope.of(context).client,
@@ -566,15 +572,16 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
             ? _episodeTotal
             : startIndex + page.items.length;
         _loadingMore = false;
+        _episodeLoadMoreError = null;
       });
     } on EmbyException catch (error) {
       if (!mounted || gen != _loadGen) {
         return;
       }
-      setState(() => _loadingMore = false);
-      messenger?.showSnackBar(
-        SnackBar(content: Text(catalogFailureMessage(l10n, error))),
-      );
+      setState(() {
+        _loadingMore = false;
+        _episodeLoadMoreError = error;
+      });
     }
   }
 
@@ -700,6 +707,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
       _focusedEpisodeId = null;
       _episodes = const [];
       _episodeError = null;
+      _episodeLoadMoreError = null;
       _episodesLoading = true;
       _loadingMore = false;
       _episodeTotal = 0;
@@ -1199,6 +1207,8 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                       : () => unawaited(_selectSeason(_seasonId!)),
                   hasMore: _episodeWindowEnd < _episodeTotal,
                   loadingMore: _loadingMore,
+                  loadMoreError: _episodeLoadMoreError,
+                  onRetryLoadMore: () => unawaited(_loadMoreEpisodes()),
                   onLoadMore: () => unawaited(_loadMoreEpisodes()),
                   headerAction: _EpisodeShelfActions(
                     seasons: _seasons,
@@ -1317,12 +1327,19 @@ class _ChapterStripState extends State<_ChapterStrip> {
       return;
     }
     final position = _controller.position;
+    final target =
+        (position.pixels + position.viewportDimension * 0.9 * direction).clamp(
+          0.0,
+          position.maxScrollExtent,
+        );
+    final duration = AppMotion.durationOf(context);
+    if (duration == Duration.zero) {
+      _controller.jumpTo(target);
+      return;
+    }
     _controller.animateTo(
-      (position.pixels + position.viewportDimension * 0.9 * direction).clamp(
-        0.0,
-        position.maxScrollExtent,
-      ),
-      duration: AppMotion.normal,
+      target,
+      duration: duration,
       curve: AppMotion.standard,
     );
   }

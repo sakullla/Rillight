@@ -38,6 +38,9 @@ class _DelayedEmbyServer extends FakeEmbyServer {
   Duration itemDelay = Duration.zero;
   final hiddenEpisodeIds = <String>{};
 
+  /// StartIndex 大于 0 的分集窗口返回 500,用来验收继续加载失败。
+  bool failEpisodeWindowsAfterStart = false;
+
   @override
   Future<ResponseBody> handle(
     RequestOptions options,
@@ -45,6 +48,21 @@ class _DelayedEmbyServer extends FakeEmbyServer {
   ) async {
     if (itemDelay > Duration.zero && options.uri.path.contains('/Items/')) {
       await Future<void>.delayed(itemDelay);
+    }
+    if (failEpisodeWindowsAfterStart &&
+        options.uri.path.endsWith('/Items') &&
+        options.uri.queryParameters['IncludeItemTypes'] == 'Episode') {
+      final start =
+          int.tryParse(options.uri.queryParameters['StartIndex'] ?? '') ?? 0;
+      if (start > 0) {
+        return ResponseBody.fromString(
+          'episode-window-failed',
+          500,
+          headers: {
+            Headers.contentTypeHeader: ['text/plain'],
+          },
+        );
+      }
     }
     final response = await super.handle(options, requestStream);
     if (hiddenEpisodeIds.isNotEmpty &&
@@ -367,6 +385,196 @@ void main() {
     },
     tags: ['integration'],
   );
+
+  testWidgets('reduced motion pages the chapter strip without sliding', (
+    tester,
+  ) async {
+    server.items.firstWhere((item) => item.id == 'movie-inception').chapters = [
+      for (var i = 0; i < 24; i++)
+        FakeChapter(name: 'Chapter $i', startPositionTicks: i * 600000000),
+    ];
+    final app = await pumpApp(tester);
+    await openItem(tester, app, 'movie-inception');
+    final right = find.byKey(
+      CatalogKeys.shelfScrollRight(CatalogKeys.shelfChapters),
+    );
+    expect(right, findsOneWidget);
+    await ensureVisibleBelowTopBar(tester, right);
+
+    final position = _chapterPosition(tester);
+    final start = position.pixels;
+    await tapBelowTopBar(tester, right);
+    expect(position.activity, isA<DrivenScrollActivity>());
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    final mid = position.pixels;
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(mid, greaterThan(start));
+    expect(position.pixels, greaterThan(mid));
+    expect(position.activity, isA<IdleScrollActivity>());
+
+    tester.platformDispatcher.accessibilityFeaturesTestValue =
+        const FakeAccessibilityFeatures(disableAnimations: true);
+    addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
+    await tester.pump();
+    final before = position.pixels;
+    await tapBelowTopBar(tester, right);
+    final jumped = position.pixels;
+    expect(jumped, greaterThan(before));
+    expect(position.activity, isA<IdleScrollActivity>());
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(position.pixels, jumped);
+    expect(position.activity, isA<IdleScrollActivity>());
+    expect(tester.takeException(), isNull);
+  }, tags: ['integration']);
+
+  testWidgets('detail header axis follows 960 and module order stays', (
+    tester,
+  ) async {
+    final app = await pumpApp(tester, viewSize: const Size(960, 800));
+    await openItem(tester, app, 'movie-inception');
+    expect(_headerDirection(tester), Axis.horizontal);
+    _expectPosterBesideTitle(tester);
+    _expectTopToBottom(tester, [
+      find.byKey(ItemDetailPage.headerKey),
+      find.text('章节'),
+      find.byKey(CatalogKeys.similarRow),
+    ]);
+
+    tester.view.physicalSize = const Size(959, 800);
+    await tester.pump();
+    await settle(tester);
+    expect(_headerDirection(tester), Axis.vertical);
+    _expectPosterAboveTitle(tester);
+    _expectTopToBottom(tester, [
+      find.byKey(ItemDetailPage.headerKey),
+      find.text('章节'),
+      find.byKey(CatalogKeys.similarRow),
+    ]);
+
+    tester.view.physicalSize = const Size(1200, 800);
+    await tester.pump();
+    await openItem(tester, app, _series);
+    _expectTopToBottom(tester, [
+      find.byKey(ItemDetailPage.headerKey),
+      find.byKey(CatalogKeys.episodesRow),
+    ]);
+    expect(find.text('章节'), findsNothing);
+
+    await openItem(tester, app, 'episode-friends-s1e1');
+    _expectTopToBottom(tester, [
+      find.byKey(ItemDetailPage.headerKey),
+      find.text('本季分集'),
+    ]);
+    expect(tester.takeException(), isNull);
+  }, tags: ['integration']);
+
+  testWidgets('episode load-more failure stays inside the episode section', (
+    tester,
+  ) async {
+    server.failEpisodeWindowsAfterStart = true;
+    server.setEpisodes(_series, [
+      for (var i = 1; i <= 100; i++)
+        FakeEpisode(
+          id: 'bulk-e$i',
+          name: 'Episode $i',
+          seasonId: _season1,
+          indexNumber: i,
+        ),
+    ]);
+    final app = await pumpApp(tester);
+    await openItem(tester, app, _series);
+
+    final more = find.byKey(CatalogKeys.episodesLoadMore);
+    await ensureVisibleBelowTopBar(tester, more);
+    await tapBelowTopBar(tester, more);
+    await settle(tester);
+
+    final row = find.byKey(CatalogKeys.episodesRow);
+    final ids = _episodeCardIds(tester);
+    expect(ids, hasLength(80));
+    expect(ids.first, 'bulk-e1');
+    expect(
+      find.descendant(
+        of: row,
+        matching: find.textContaining('episode-window-failed'),
+      ),
+      findsOneWidget,
+    );
+    expect(find.descendant(of: row, matching: find.text('重试')), findsOneWidget);
+    expect(find.byKey(ItemDetailPage.headerKey), findsOneWidget);
+    expect(find.byType(SnackBar), findsNothing);
+
+    server.failEpisodeWindowsAfterStart = false;
+    final retry = find.descendant(of: row, matching: find.text('重试'));
+    await ensureVisibleBelowTopBar(tester, retry);
+    await tapBelowTopBar(tester, retry);
+    await settle(tester);
+
+    expect(_episodeCardIds(tester), hasLength(100));
+    expect(
+      find.descendant(
+        of: find.byKey(CatalogKeys.episodesRow),
+        matching: find.textContaining('episode-window-failed'),
+      ),
+      findsNothing,
+    );
+    expect(find.byKey(ItemDetailPage.headerKey), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  }, tags: ['integration']);
+}
+
+Axis _headerDirection(WidgetTester tester) {
+  return tester
+      .widget<Flex>(
+        find
+            .ancestor(
+              of: find.byKey(ItemDetailPage.posterKey),
+              matching: find.byType(Flex),
+            )
+            .first,
+      )
+      .direction;
+}
+
+void _expectPosterBesideTitle(WidgetTester tester) {
+  final poster = tester.getRect(find.byKey(ItemDetailPage.posterKey));
+  final title = tester.getRect(find.text('Inception (2010)'));
+  expect(poster.right, lessThanOrEqualTo(title.left));
+  expect(poster.top, lessThan(title.bottom));
+  expect(title.top, lessThan(poster.bottom));
+}
+
+void _expectPosterAboveTitle(WidgetTester tester) {
+  final poster = tester.getRect(find.byKey(ItemDetailPage.posterKey));
+  final title = tester.getRect(find.text('Inception (2010)'));
+  expect(title.top, greaterThanOrEqualTo(poster.bottom - 1));
+}
+
+void _expectTopToBottom(WidgetTester tester, List<Finder> finders) {
+  var previous = double.negativeInfinity;
+  for (final finder in finders) {
+    expect(finder, findsOneWidget);
+    final top = tester.getRect(finder).top;
+    expect(top, greaterThan(previous));
+    previous = top;
+  }
+}
+
+ScrollPosition _chapterPosition(WidgetTester tester) {
+  final tile = tester.allElements.firstWhere(
+    (element) => element.widget.key == CatalogKeys.chapter(0),
+  );
+  ScrollableState? scrollable;
+  tile.visitAncestorElements((ancestor) {
+    final state = ancestor is StatefulElement ? ancestor.state : null;
+    if (state is ScrollableState && state.position.axis == Axis.horizontal) {
+      scrollable = state;
+      return false;
+    }
+    return true;
+  });
+  return scrollable!.position;
 }
 
 const _episodeKeyPrefix = 'catalog-episode-';
