@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_motion.dart';
+import 'package:rillight/app/mobile_widgets.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme.dart';
 import 'package:rillight/auth/auth_controller.dart';
@@ -41,6 +42,108 @@ const _device = EmbyDeviceInfo(
 
 void main() {
   setUp(isolateImageCache);
+
+  test('dark theme exposes the mobile navigation bar theme from tokens', () {
+    final theme = AppTheme.dark();
+    final nav = theme.navigationBarTheme;
+    expect(nav.elevation, 0);
+    expect(nav.surfaceTintColor, Colors.transparent);
+    expect(nav.backgroundColor!.a, closeTo(AppMobileNav.backgroundAlpha, 1e-6));
+    expect(nav.indicatorShape, isA<StadiumBorder>());
+    expect(nav.indicatorColor, isNotNull);
+    // 选中 pill 动效档位对齐 AppMotion。
+    expect(AppMobileNav.pillDuration, AppMotion.normal);
+    expect(AppMobileCard.pressDuration, AppMotion.fast);
+    // 控制层渐变 token 与 AppScrim 对齐(R8:不再散落 black54/black87)。
+    expect(AppMobileControls.bottomAlpha, AppScrim.playerBar);
+    expect(AppMobileControls.bottomSoftAlpha, AppScrim.playerBarSoft);
+    // 桌面 NavigationRail 主题保持原样,不受手机 token 影响。
+    expect(theme.navigationRailTheme, isNotNull);
+  });
+
+  testWidgets('MobilePressable scales and brightens while pressed', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.dark(),
+        home: Scaffold(
+          body: Center(
+            child: MobilePressable(
+              onTap: () {},
+              child: const SizedBox(width: 100, height: 100),
+            ),
+          ),
+        ),
+      ),
+    );
+    final pressable = find.byType(MobilePressable);
+    expect(pressable, findsOneWidget);
+    final gesture = find.descendant(
+      of: pressable,
+      matching: find.byType(GestureDetector),
+    );
+    expect(gesture, findsOneWidget);
+
+    // 未按压:缩放 1、无提亮遮罩。
+    AnimatedScale scaleOf() => tester.widget(
+      find.descendant(of: pressable, matching: find.byType(AnimatedScale)),
+    );
+    expect(scaleOf().scale, 1);
+    expect(
+      tester
+          .widget<ColorFiltered>(
+            find.descendant(
+              of: pressable,
+              matching: find.byType(ColorFiltered),
+            ),
+          )
+          .colorFilter,
+      const ColorFilter.mode(Colors.transparent, BlendMode.plus),
+    );
+
+    final pointer = await tester.startGesture(tester.getCenter(gesture));
+    await tester.pump();
+    expect(scaleOf().scale, AppMobileCard.pressScale);
+    expect(scaleOf().duration, AppMotion.fast);
+    await pointer.up();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 150));
+    expect(scaleOf().scale, 1);
+  });
+
+  testWidgets('MobilePressable collapses motion under reduced animation', (
+    tester,
+  ) async {
+    tester.platformDispatcher.accessibilityFeaturesTestValue =
+        const FakeAccessibilityFeatures(disableAnimations: true);
+    addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.dark(),
+        home: Scaffold(
+          body: Center(
+            child: MobilePressable(
+              onTap: () {},
+              child: const SizedBox(width: 100, height: 100),
+            ),
+          ),
+        ),
+      ),
+    );
+    final pressable = find.byType(MobilePressable);
+    final gesture = find.descendant(
+      of: pressable,
+      matching: find.byType(GestureDetector),
+    );
+    await tester.startGesture(tester.getCenter(gesture));
+    await tester.pump();
+    final scale = tester.widget<AnimatedScale>(
+      find.descendant(of: pressable, matching: find.byType(AnimatedScale)),
+    );
+    expect(scale.duration, Duration.zero);
+    expect(scale.scale, AppMobileCard.pressScale);
+  });
 
   testWidgets('poster flies to the top as the same image', (tester) async {
     await _pumpHome(tester);

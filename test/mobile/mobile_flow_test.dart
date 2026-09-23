@@ -770,6 +770,56 @@ void main() {
     expect(find.text('重试'), findsNothing);
     expect(tester.takeException(), isNull);
   }, tags: ['integration']);
+
+  testWidgets('the shell navigation bar follows the mobile nav theme', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.dark(),
+        home: Scaffold(
+          bottomNavigationBar: NavigationBar(
+            animationDuration: AppMobileNav.pillDuration,
+            destinations: const [
+              NavigationDestination(icon: Icon(Icons.home), label: '首页'),
+              NavigationDestination(
+                icon: Icon(Icons.video_library),
+                label: '片库',
+              ),
+            ],
+          ),
+          body: Builder(
+            builder: (context) {
+              final theme = NavigationBarTheme.of(context);
+              return Column(
+                children: [
+                  Text('bg-alpha:${theme.backgroundColor?.a ?? -1}'),
+                  Text('indicator:${theme.indicatorShape.runtimeType}'),
+                ],
+              );
+            },
+          ),
+        ),
+      ),
+    );
+    expect(find.byType(NavigationBar), findsOneWidget);
+    // 透明底(R3):内容可从导航栏背后透出。
+    expect(
+      find.textContaining('bg-alpha:${AppMobileNav.backgroundAlpha}'),
+      findsOneWidget,
+    );
+    // 选中 pill 指示器。
+    expect(find.textContaining('indicator:StadiumBorder'), findsOneWidget);
+    // 选中动效走 AppMotion 时长档,而非 M3 默认 500ms。
+    expect(
+      tester
+          .widget<NavigationBar>(find.byType(NavigationBar))
+          .animationDuration,
+      AppMobileNav.pillDuration,
+    );
+    expect(AppMobileNav.pillDuration, AppMotion.normal);
+    expect(tester.takeException(), isNull);
+  });
 }
 
 class _ScriptedCatalog extends CatalogController {

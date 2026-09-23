@@ -121,6 +121,78 @@ abstract final class AppScrim {
   }
 }
 
+/// 手机端专用 token(R8):海报卡阴影、按压反馈档位与导航栏模糊。
+///
+/// 仅 Android 手机布局引用;桌面/TV 组件不得依赖本段。
+abstract final class AppMobileCard {
+  /// 静止态投影:抬高海报卡,与页面底色分层。
+  static const double shadowBlur = 16;
+  static const double shadowSpread = 0;
+  static const double shadowOffsetY = 6;
+  static const double shadowAlpha = 0.42;
+
+  /// 按压亮度增幅(BlendMode.plus 白色遮罩的 alpha)。
+  static const double pressBrighten = 0.07;
+
+  /// 按压缩放档位:海报卡等可点卡片用 [pressScale],主播放按钮等
+  /// 强调控件用 [pressScaleStrong]。
+  static const double pressScale = 0.96;
+  static const double pressScaleStrong = 0.94;
+
+  /// 按压回弹时长档,与 [AppMotion.fast] 对齐。
+  static const Duration pressDuration = AppMotion.fast;
+}
+
+/// 手机端 hero 区渐变端点(R8):背图向页面底色/顶栏的溶入位置。
+abstract final class AppMobileHero {
+  /// 顶部不溶(0),向下溶到透明/底色。
+  static const double topStart = 0;
+  static const double topEnd = 0.40;
+
+  /// 底部文字带上缘:文字带从 [bottomStart] 处开始抬升底色。
+  static const double bottomStart = 0.45;
+  static const double bottomEnd = 1;
+
+  /// hero 渐变默认 stops,与 [AppScrim.textStops] 节奏一致。
+  static const List<double> stops = [0, 0.45, 1];
+}
+
+/// 手机端控制层渐变(R8):顶栏与底栏向播放画面的溶入端点。
+///
+/// alpha 值与 [AppScrim.playerBar] 系对齐,页面不得再写死 black54/black87。
+abstract final class AppMobileControls {
+  /// 顶栏渐变:从 [AppScrim.topBar] 开始向下溶到透明。
+  static const double topAlpha = AppScrim.topBar;
+  static const double topMidAlpha = AppScrim.topBarMid;
+
+  /// 底栏渐变:透明起,经软段到 [AppScrim.playerBar]。
+  static const double bottomSoftAlpha = AppScrim.playerBarSoft;
+  static const double bottomAlpha = AppScrim.playerBar;
+
+  /// 底栏渐变起止位置(相对底栏高度)。
+  static const double bottomStart = 0;
+  static const double bottomEnd = 1;
+}
+
+/// 手机端底部导航 token(R3/R8):模糊开关与选中 pill 动效档位。
+abstract final class AppMobileNav {
+  /// 导航栏毛玻璃模糊开关;关闭时导航栏退回纯色底。
+  static const bool blurEnabled = true;
+
+  /// 模糊强度,复用 [AppGlass.barBlur]。
+  static const double blur = AppGlass.barBlur;
+
+  /// 选中 pill 指示器动效时长档,与 [AppMotion] 对齐;
+  /// NavigationBar 通过 `animationDuration` 引用。
+  static const Duration pillDuration = AppMotion.normal;
+
+  /// 选中 pill 指示器圆角(胶囊)。
+  static const double pillRadius = AppRadii.md;
+
+  /// 导航栏底色 alpha(透明底,内容可从背后透出)。
+  static const double backgroundAlpha = 0.0;
+}
+
 /// Liquid Glass 浮层材质:只用于顶栏/面板/控件,不铺在海报内容上。
 abstract final class AppGlass {
   static const double barBlur = 26;

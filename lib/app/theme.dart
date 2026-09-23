@@ -351,6 +351,22 @@ abstract final class AppTheme {
           color: _onSurfaceVariant,
         ),
       ),
+      // 手机底部导航:透明底 + 胶囊选中指示器;动效时长档走
+      // AppMobileNav.pillDuration(NavigationBar.animationDuration 引用)。
+      // 桌面 NavigationRail 样式见上方 navigationRailTheme,互不影响。
+      navigationBarTheme: NavigationBarThemeData(
+        backgroundColor: _base.withValues(alpha: AppMobileNav.backgroundAlpha),
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        height: 64,
+        indicatorColor: _surfaceHigh,
+        indicatorShape: const StadiumBorder(),
+        labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+        labelTextStyle: WidgetStatePropertyAll(labelMedium),
+        iconTheme: const WidgetStatePropertyAll(
+          IconThemeData(color: _onSurfaceVariant),
+        ),
+      ),
       progressIndicatorTheme: const ProgressIndicatorThemeData(
         color: _accent,
         linearTrackColor: _surfaceHighest,
