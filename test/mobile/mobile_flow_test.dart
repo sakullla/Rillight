@@ -15,6 +15,7 @@ import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/emby/emby_errors.dart';
 import 'package:rillight/home/catalog_controller.dart';
 import 'package:rillight/home/catalog_scope.dart';
+import 'package:rillight/home/phone_hero.dart';
 import 'package:rillight/home/phone_home.dart';
 import 'package:rillight/library/mobile_detail_page.dart';
 import 'package:rillight/library/mobile_library_page.dart';
@@ -667,8 +668,8 @@ void main() {
             .length,
         4,
       );
-      await tester.ensureVisible(find.text('Inception').first);
-      await tester.tap(find.text('Inception').first);
+      await tester.ensureVisible(find.byKey(PhoneHero.openKey));
+      await tester.tap(find.byKey(PhoneHero.openKey));
       await tester.pumpAndSettle();
       expect(find.byType(MobileDetailPage), findsOneWidget);
       await tester.binding.handlePopRoute();
