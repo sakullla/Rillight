@@ -15,6 +15,7 @@ import 'package:rillight/home/phone_shelf_page.dart';
 import 'package:rillight/library/shelf_grid_page.dart';
 import 'package:rillight/search/search_page.dart';
 import 'package:rillight/app/mobile_shell.dart';
+import 'package:rillight/app/phone_mine_page.dart';
 import 'package:rillight/library/mobile_detail_page.dart';
 import 'package:rillight/library/mobile_library_page.dart';
 import 'package:rillight/player/mobile_player_page.dart';
@@ -83,6 +84,10 @@ GoRouter createAppRouter({
             GoRoute(
               path: AppRoutes.home,
               builder: (context, state) => const MobileShell(),
+            ),
+            GoRoute(
+              path: AppRoutes.mine,
+              builder: (context, state) => const PhoneMinePage(),
             ),
             GoRoute(
               path: '/library/:viewId',

@@ -1,10 +1,12 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/phone_libraries_tab.dart';
-import 'package:rillight/app/phone_mine_page.dart';
+import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme.dart';
+import 'package:rillight/app/widgets/liquid_glass.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/home/phone_home.dart';
@@ -87,7 +89,7 @@ class _MobileShellState extends State<MobileShell> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context), auth = AuthScope.of(context);
-    final titles = [l.home, l.libraries, l.search, l.mobileMine];
+    final titles = [l.home, l.libraries, l.search];
     const hit = Size(AppSpacing.huge, AppSpacing.huge);
     return PopScope(
       canPop: _index == 0,
@@ -96,18 +98,19 @@ class _MobileShellState extends State<MobileShell> with WidgetsBindingObserver {
       },
       child: Scaffold(
         appBar: AppBar(
-          title: Text(titles[_index]),
-          bottom: PreferredSize(
-            preferredSize: const Size.fromHeight(24),
-            child: Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Text(
-                auth.session?.server.name ?? '',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
+          title: Padding(
+            padding: const EdgeInsets.only(bottom: AppSpacing.xs),
+            child: Text(titles[_index]),
           ),
+          titleTextStyle: Theme.of(context).textTheme.headlineMedium,
+          actions: [
+            IconButton(
+              key: const Key('mobile-shell-mine-entry'),
+              tooltip: l.mobileMine,
+              icon: const Icon(Icons.account_circle_outlined),
+              onPressed: () => context.push(AppRoutes.mine),
+            ),
+          ],
         ),
         body: SafeArea(
           child: Column(
@@ -146,7 +149,6 @@ class _MobileShellState extends State<MobileShell> with WidgetsBindingObserver {
                       PhoneHome(),
                       PhoneLibrariesTab(),
                       MobileSearchPage(),
-                      PhoneMinePage(),
                     ],
                   ),
                 ),
@@ -156,33 +158,32 @@ class _MobileShellState extends State<MobileShell> with WidgetsBindingObserver {
         ),
         bottomNavigationBar: MediaQuery.viewInsetsOf(context).bottom > 0
             ? null
-            : NavigationBar(
-                selectedIndex: _index,
-                onDestinationSelected: (index) {
-                  FocusScope.of(context).unfocus();
-                  setState(() => _index = index);
-                },
-                destinations: [
-                  NavigationDestination(
-                    icon: const Icon(Icons.home_outlined),
-                    selectedIcon: const Icon(Icons.home),
-                    label: l.home,
-                  ),
-                  NavigationDestination(
-                    icon: const Icon(Icons.video_library_outlined),
-                    selectedIcon: const Icon(Icons.video_library),
-                    label: l.libraries,
-                  ),
-                  NavigationDestination(
-                    icon: const Icon(Icons.search),
-                    label: l.search,
-                  ),
-                  NavigationDestination(
-                    icon: const Icon(Icons.person_outline),
-                    selectedIcon: const Icon(Icons.person),
-                    label: l.mobileMine,
-                  ),
-                ],
+            : LiquidGlass(
+                kind: LiquidGlassKind.bar,
+                child: NavigationBar(
+                  animationDuration: AppMobileNav.pillDuration,
+                  selectedIndex: _index,
+                  onDestinationSelected: (index) {
+                    FocusScope.of(context).unfocus();
+                    setState(() => _index = index);
+                  },
+                  destinations: [
+                    NavigationDestination(
+                      icon: const Icon(Icons.home_outlined),
+                      selectedIcon: const Icon(Icons.home),
+                      label: l.home,
+                    ),
+                    NavigationDestination(
+                      icon: const Icon(Icons.video_library_outlined),
+                      selectedIcon: const Icon(Icons.video_library),
+                      label: l.libraries,
+                    ),
+                    NavigationDestination(
+                      icon: const Icon(Icons.search),
+                      label: l.search,
+                    ),
+                  ],
+                ),
               ),
       ),
     );

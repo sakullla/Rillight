@@ -58,6 +58,9 @@ void main() {
     expect(find.text('alice'), findsOneWidget);
     expect(find.text('家庭影院'), findsOneWidget);
     expect(find.text('line-b.test:8096'), findsOneWidget);
+    expect(find.text('账户与服务器'), findsOneWidget);
+    expect(find.text('播放设置'), findsOneWidget);
+    expect(find.text('我的'), findsWidgets);
     expect(
       tester.getTopLeft(find.byKey(PhoneMinePage.userKey)).dy,
       lessThan(tester.getTopLeft(find.byKey(PhoneMinePage.serverKey)).dy),
@@ -87,6 +90,7 @@ void main() {
     expect(auth.client.baseUrl, lineA.baseUrl);
     expect(_itemRequests(lineA), greaterThan(before));
     expect(catalog.latestMovies.items.map((item) => item.name), ['甲线电影']);
+    await _scrollToTop(tester);
     expect(find.text('line-a.test:8096'), findsOneWidget);
     expect(find.text('line-b.test:8096'), findsNothing);
     await _tap(tester, find.byKey(PhoneMinePage.lineKey));
@@ -131,6 +135,8 @@ void main() {
     await _tap(tester, find.byKey(PhoneMinePage.lineKey));
     await _tap(tester, find.byKey(PhoneMinePage.lineOptionKey(target.id)));
 
+    // 失败提示在头部下方:先滚回列表顶部。
+    await _scrollToTop(tester);
     expect(find.text('HTTP 500: upstream timeout'), findsOneWidget);
     expect(auth.session, isNull);
     expect(
@@ -164,8 +170,10 @@ void main() {
     await _pump(tester, auth: auth, store: store);
 
     expect(find.text('解码后端'), findsNothing);
-    expect(find.text('磁盘缓冲上限'), findsNothing);
     expect(find.text('硬件解码'), findsNothing);
+    // 磁盘缓冲上限已收进"我的-缓存"分组,只读当前值、不暴露桌面解码项。
+    await _scrollTo(tester, find.text('磁盘缓冲上限'));
+    expect(find.text('磁盘缓冲上限'), findsOneWidget);
     await _tap(tester, find.byKey(PhoneMinePage.rateKey(1.5)));
 
     final saved = await store.read();
@@ -203,6 +211,50 @@ void main() {
     expect(backend.volume, 40);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets(
+    'disk cache limit switches from the mine cache group and merges',
+    (tester) async {
+      final server = FakeEmbyServer();
+      final auth = _auth([server]);
+      addTearDown(auth.dispose);
+      await _connect(tester, auth, server.baseUrl.toString());
+      final store = MemoryPlayerSettingsStore(
+        const PlayerSettings(
+          volume: 40,
+          playbackRate: 1.5,
+          danmakuAppId: 'app-keep',
+        ),
+      );
+      await _pump(tester, auth: auth, store: store);
+
+      // "关于"在列表最底部;滚到它时缓存分组已在视口/缓存区内。
+      await _scrollTo(tester, find.text('关于'));
+      expect(find.text('缓存'), findsOneWidget);
+      expect(find.text('关于'), findsOneWidget);
+      await _scrollTo(tester, find.byKey(PhoneMinePage.cacheLimitKey(2048)));
+      expect(
+        tester
+            .widget<ChoiceChip>(find.byKey(PhoneMinePage.cacheLimitKey(2048)))
+            .selected,
+        isTrue,
+      );
+      await _tap(tester, find.byKey(PhoneMinePage.cacheLimitKey(1024)));
+
+      final saved = await store.read();
+      expect(saved.diskCacheLimitMiB, 1024);
+      expect(saved.volume, 40);
+      expect(saved.playbackRate, 1.5);
+      expect(saved.danmakuAppId, 'app-keep');
+      expect(
+        tester
+            .widget<ChoiceChip>(find.byKey(PhoneMinePage.cacheLimitKey(1024)))
+            .selected,
+        isTrue,
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets('custom danmaku address can be filled and cleared to official', (
     tester,
@@ -354,6 +406,33 @@ Future<void> _pump(
 Future<void> _settle(WidgetTester tester) async {
   await tester.pump();
   await tester.pump(const Duration(milliseconds: 400));
+}
+
+Finder _mineScrollable(WidgetTester tester) {
+  // 首个为 ListView 自身纵向 Scrollable;其后是 TextField 横向滚动条。
+  return find
+      .descendant(
+        of: find.byKey(const PageStorageKey('mobile-mine-scroll')),
+        matching: find.byType(Scrollable),
+      )
+      .first;
+}
+
+/// 向下滚动"我的"列表,直到 [finder] 出现(懒加载 build)。
+Future<void> _scrollTo(WidgetTester tester, Finder finder) async {
+  for (var i = 0; i < 25 && finder.evaluate().isEmpty; i++) {
+    await tester.drag(_mineScrollable(tester), const Offset(0, -250));
+    await _settle(tester);
+  }
+  expect(finder, findsWidgets);
+}
+
+/// 滚回列表顶部(头部信息在首屏之上时懒加载不可见)。
+Future<void> _scrollToTop(WidgetTester tester) async {
+  for (var i = 0; i < 6; i++) {
+    await tester.drag(_mineScrollable(tester), const Offset(0, 400));
+    await _settle(tester);
+  }
 }
 
 Future<void> _tap(WidgetTester tester, Finder finder) async {

@@ -3,7 +3,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/app/product.dart';
 import 'package:rillight/app/routes.dart';
+import 'package:rillight/app/settings/settings_page.dart';
 import 'package:rillight/app/theme.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
@@ -11,6 +13,7 @@ import 'package:rillight/auth/failure_message.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/player/player_bindings.dart';
+import 'package:rillight/player/player_runtime_options.dart';
 import 'package:rillight/player/player_settings.dart';
 
 /// 手机「我的」：当前身份、线路、倍速和弹幕来源。
@@ -32,6 +35,9 @@ class PhoneMinePage extends StatefulWidget {
   static Key lineOptionKey(String lineId) => Key('phone-mine-line-$lineId');
 
   static Key rateKey(double rate) => Key('phone-mine-rate-$rate');
+
+  static Key cacheLimitKey(int limitMiB) =>
+      Key('phone-mine-cache-limit-$limitMiB');
 
   @override
   State<PhoneMinePage> createState() => _PhoneMinePageState();
@@ -178,6 +184,21 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
     } catch (_) {}
   }
 
+  Future<void> _saveCacheLimit(int limitMiB) async {
+    final store = _store;
+    if (store == null) {
+      return;
+    }
+    try {
+      await store.write(PlayerSettings(diskCacheLimitMiB: limitMiB));
+      final settings = await store.read();
+      if (!mounted) {
+        return;
+      }
+      setState(() => _settings = settings);
+    } catch (_) {}
+  }
+
   Future<void> _switchLine(String serverId, String lineId) async {
     final auth = AuthScope.of(context);
     await auth.switchTo(serverId, lineId: lineId);
@@ -239,6 +260,41 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
     );
   }
 
+  Widget _group(
+    BuildContext context, {
+    required String title,
+    required List<Widget> children,
+  }) {
+    final scheme = Theme.of(context).colorScheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: Theme.of(
+            context,
+          ).textTheme.titleSmall?.copyWith(color: scheme.onSurfaceVariant),
+        ),
+        const SizedBox(height: AppSpacing.xs),
+        Card(
+          margin: EdgeInsets.zero,
+          clipBehavior: Clip.antiAlias,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+            child: Column(children: children),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _fieldLabel(BuildContext context, String label) {
+    return Padding(
+      padding: const EdgeInsets.only(top: AppSpacing.md),
+      child: Align(alignment: Alignment.centerLeft, child: Text(label)),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final auth = AuthScope.of(context);
@@ -247,156 +303,277 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
     final session = auth.session;
     final lineLabel = session?.server.activeLine?.hostLabel ?? '';
     final failure = auth.failure;
-    return ListView(
-      key: const PageStorageKey('mobile-mine-scroll'),
-      padding: const EdgeInsets.all(AppSpacing.md),
-      children: [
-        Text(
-          session?.username ?? '',
-          key: PhoneMinePage.userKey,
-          style: Theme.of(context).textTheme.headlineSmall,
-        ),
-        const SizedBox(height: AppSpacing.xs),
-        Text(
-          session?.server.name ?? '',
-          key: PhoneMinePage.serverKey,
-          style: Theme.of(context).textTheme.titleMedium,
-        ),
-        if (lineLabel.isNotEmpty) ...[
-          const SizedBox(height: AppSpacing.xxs),
-          Text(
-            lineLabel,
-            key: PhoneMinePage.currentLineKey,
-            style: Theme.of(
-              context,
-            ).textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
-          ),
-        ],
-        if (failure != null) ...[
-          const SizedBox(height: AppSpacing.sm),
-          Text(
-            embyFailureMessage(l10n, failure),
-            key: PhoneMinePage.failureKey,
-            style: Theme.of(
-              context,
-            ).textTheme.bodyMedium?.copyWith(color: scheme.error),
-          ),
-        ],
-        const SizedBox(height: AppSpacing.lg),
-        ListTile(
-          key: PhoneMinePage.lineKey,
-          minTileHeight: AppSpacing.huge,
-          contentPadding: EdgeInsets.zero,
-          leading: const Icon(Icons.dns_outlined),
-          title: Text(l10n.mobileLine),
-          onTap: _lines,
-        ),
-        ListTile(
-          minTileHeight: AppSpacing.huge,
-          contentPadding: EdgeInsets.zero,
-          leading: const Icon(Icons.add),
-          title: Text(l10n.mobileAddServer),
-          onTap: () => context.push('${AppRoutes.connect}?add=1'),
-        ),
-        const SizedBox(height: AppSpacing.md),
-        OutlinedButton(
-          style: OutlinedButton.styleFrom(
-            minimumSize: const Size.fromHeight(AppSpacing.huge),
-          ),
-          onPressed: auth.isBusy ? null : auth.logout,
-          child: Text(l10n.logout),
-        ),
-        const SizedBox(height: AppSpacing.xl),
-        Text(l10n.mobileSpeed, style: Theme.of(context).textTheme.titleMedium),
-        const SizedBox(height: AppSpacing.xxs),
-        Text(
-          l10n.settingsAppliesToNewPlayback,
-          style: Theme.of(
-            context,
-          ).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
-        ),
-        const SizedBox(height: AppSpacing.sm),
-        Wrap(
-          spacing: AppSpacing.xs,
-          runSpacing: AppSpacing.xs,
-          children: [
-            for (final rate in PhoneMinePage.playbackRates)
-              ChoiceChip(
-                key: PhoneMinePage.rateKey(rate),
-                label: Text('${rate}x'),
-                selected: _rate == rate,
-                materialTapTargetSize: MaterialTapTargetSize.padded,
-                onSelected: _store == null
-                    ? null
-                    : (_) => unawaited(_saveRate(rate)),
+    final cacheLimit =
+        _settings.diskCacheLimitMiB ?? PlayerRuntimeDefaults.diskCacheLimitMiB;
+    return Scaffold(
+      appBar: AppBar(title: Text(l10n.mobileMine)),
+      body: ListView(
+        key: const PageStorageKey('mobile-mine-scroll'),
+        padding: const EdgeInsets.all(AppSpacing.md),
+        children: [
+          Row(
+            children: [
+              CircleAvatar(
+                radius: 28,
+                backgroundColor: scheme.surfaceContainerHighest,
+                child: Icon(
+                  Icons.person,
+                  size: 32,
+                  color: scheme.onSurfaceVariant,
+                ),
               ),
-          ],
-        ),
-        const SizedBox(height: AppSpacing.xl),
-        Text(
-          l10n.settingsDanmakuService,
-          style: Theme.of(context).textTheme.titleMedium,
-        ),
-        const SizedBox(height: AppSpacing.xxs),
-        Text(
-          l10n.settingsDanmakuServiceHint,
-          style: Theme.of(
-            context,
-          ).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
-        ),
-        const SizedBox(height: AppSpacing.md),
-        Text(l10n.settingsDanmakuServer),
-        const SizedBox(height: AppSpacing.xs),
-        TextField(
-          key: PhoneMinePage.danmakuServerKey,
-          controller: _danmakuServer,
-          focusNode: _danmakuServerFocus,
-          enabled: _store != null,
-          keyboardType: TextInputType.url,
-          textInputAction: TextInputAction.next,
-          onSubmitted: (_) => unawaited(_commitDanmaku()),
-          decoration: InputDecoration(hintText: l10n.settingsDanmakuServerHint),
-        ),
-        const SizedBox(height: AppSpacing.md),
-        Text(l10n.settingsDanmakuAppId),
-        const SizedBox(height: AppSpacing.xs),
-        TextField(
-          key: PhoneMinePage.danmakuAppIdKey,
-          controller: _danmakuAppId,
-          focusNode: _danmakuAppIdFocus,
-          enabled: _store != null,
-          textInputAction: TextInputAction.next,
-          onSubmitted: (_) => unawaited(_commitDanmaku()),
-          decoration: InputDecoration(hintText: l10n.settingsDanmakuAppIdHint),
-        ),
-        const SizedBox(height: AppSpacing.md),
-        Text(l10n.settingsDanmakuToken),
-        const SizedBox(height: AppSpacing.xs),
-        TextField(
-          key: PhoneMinePage.danmakuTokenKey,
-          controller: _danmakuToken,
-          focusNode: _danmakuTokenFocus,
-          enabled: _store != null,
-          obscureText: !_tokenVisible,
-          textInputAction: TextInputAction.done,
-          onSubmitted: (_) => unawaited(_commitDanmaku()),
-          decoration: InputDecoration(
-            hintText: l10n.settingsDanmakuTokenHint,
-            suffixIcon: IconButton(
-              key: PhoneMinePage.tokenVisibilityKey,
-              tooltip: _tokenVisible
-                  ? l10n.settingsHideToken
-                  : l10n.settingsShowToken,
-              onPressed: () => setState(() => _tokenVisible = !_tokenVisible),
-              icon: Icon(
-                _tokenVisible
-                    ? Icons.visibility_off_outlined
-                    : Icons.visibility_outlined,
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      session?.username ?? '',
+                      key: PhoneMinePage.userKey,
+                      style: Theme.of(context).textTheme.headlineSmall,
+                    ),
+                    const SizedBox(height: AppSpacing.xxs),
+                    Text(
+                      session?.server.name ?? '',
+                      key: PhoneMinePage.serverKey,
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    if (lineLabel.isNotEmpty) ...[
+                      const SizedBox(height: AppSpacing.xxs),
+                      Text(
+                        lineLabel,
+                        key: PhoneMinePage.currentLineKey,
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
               ),
+            ],
+          ),
+          if (failure != null) ...[
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              embyFailureMessage(l10n, failure),
+              key: PhoneMinePage.failureKey,
+              style: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(color: scheme.error),
             ),
+          ],
+          const SizedBox(height: AppSpacing.lg),
+          _group(
+            context,
+            title: l10n.mobileAccountServerGroup,
+            children: [
+              ListTile(
+                key: PhoneMinePage.lineKey,
+                minTileHeight: AppSpacing.huge,
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.dns_outlined),
+                title: Text(l10n.mobileLine),
+                onTap: _lines,
+              ),
+              ListTile(
+                minTileHeight: AppSpacing.huge,
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.add),
+                title: Text(l10n.mobileAddServer),
+                onTap: () => context.push('${AppRoutes.connect}?add=1'),
+              ),
+              const SizedBox(height: AppSpacing.sm),
+              OutlinedButton(
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size.fromHeight(AppSpacing.huge),
+                ),
+                onPressed: auth.isBusy ? null : auth.logout,
+                child: Text(l10n.logout),
+              ),
+              const SizedBox(height: AppSpacing.md),
+            ],
           ),
-        ),
-      ],
+          const SizedBox(height: AppSpacing.lg),
+          _group(
+            context,
+            title: l10n.mobilePlaybackGroup,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(top: AppSpacing.sm),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    l10n.mobileSpeed,
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                ),
+              ),
+              const SizedBox(height: AppSpacing.xxs),
+              Text(
+                l10n.settingsAppliesToNewPlayback,
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+              ),
+              const SizedBox(height: AppSpacing.sm),
+              Wrap(
+                spacing: AppSpacing.xs,
+                runSpacing: AppSpacing.xs,
+                children: [
+                  for (final rate in PhoneMinePage.playbackRates)
+                    ChoiceChip(
+                      key: PhoneMinePage.rateKey(rate),
+                      label: Text('${rate}x'),
+                      selected: _rate == rate,
+                      materialTapTargetSize: MaterialTapTargetSize.padded,
+                      onSelected: _store == null
+                          ? null
+                          : (_) => unawaited(_saveRate(rate)),
+                    ),
+                ],
+              ),
+              const SizedBox(height: AppSpacing.md),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  l10n.settingsDanmakuService,
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+              ),
+              const SizedBox(height: AppSpacing.xxs),
+              Text(
+                l10n.settingsDanmakuServiceHint,
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+              ),
+              _fieldLabel(context, l10n.settingsDanmakuServer),
+              const SizedBox(height: AppSpacing.xs),
+              TextField(
+                key: PhoneMinePage.danmakuServerKey,
+                controller: _danmakuServer,
+                focusNode: _danmakuServerFocus,
+                enabled: _store != null,
+                keyboardType: TextInputType.url,
+                textInputAction: TextInputAction.next,
+                onSubmitted: (_) => unawaited(_commitDanmaku()),
+                decoration: InputDecoration(
+                  hintText: l10n.settingsDanmakuServerHint,
+                ),
+              ),
+              _fieldLabel(context, l10n.settingsDanmakuAppId),
+              const SizedBox(height: AppSpacing.xs),
+              TextField(
+                key: PhoneMinePage.danmakuAppIdKey,
+                controller: _danmakuAppId,
+                focusNode: _danmakuAppIdFocus,
+                enabled: _store != null,
+                textInputAction: TextInputAction.next,
+                onSubmitted: (_) => unawaited(_commitDanmaku()),
+                decoration: InputDecoration(
+                  hintText: l10n.settingsDanmakuAppIdHint,
+                ),
+              ),
+              _fieldLabel(context, l10n.settingsDanmakuToken),
+              const SizedBox(height: AppSpacing.xs),
+              TextField(
+                key: PhoneMinePage.danmakuTokenKey,
+                controller: _danmakuToken,
+                focusNode: _danmakuTokenFocus,
+                enabled: _store != null,
+                obscureText: !_tokenVisible,
+                textInputAction: TextInputAction.done,
+                onSubmitted: (_) => unawaited(_commitDanmaku()),
+                decoration: InputDecoration(
+                  hintText: l10n.settingsDanmakuTokenHint,
+                  suffixIcon: IconButton(
+                    key: PhoneMinePage.tokenVisibilityKey,
+                    tooltip: _tokenVisible
+                        ? l10n.settingsHideToken
+                        : l10n.settingsShowToken,
+                    onPressed: () =>
+                        setState(() => _tokenVisible = !_tokenVisible),
+                    icon: Icon(
+                      _tokenVisible
+                          ? Icons.visibility_off_outlined
+                          : Icons.visibility_outlined,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: AppSpacing.md),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.lg),
+          _group(
+            context,
+            title: l10n.mobileCacheGroup,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(top: AppSpacing.sm),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    l10n.settingsDiskCacheLimit,
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                ),
+              ),
+              const SizedBox(height: AppSpacing.xxs),
+              Text(
+                l10n.settingsDiskCacheLimitHint,
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+              ),
+              const SizedBox(height: AppSpacing.sm),
+              Wrap(
+                spacing: AppSpacing.xs,
+                runSpacing: AppSpacing.xs,
+                children: [
+                  for (final limit in SettingsPage.diskCacheLimitChoices)
+                    ChoiceChip(
+                      key: PhoneMinePage.cacheLimitKey(limit),
+                      label: Text(l10n.settingsCacheSize(limit / 1024)),
+                      selected: cacheLimit == limit,
+                      materialTapTargetSize: MaterialTapTargetSize.padded,
+                      onSelected: _store == null
+                          ? null
+                          : (_) => unawaited(_saveCacheLimit(limit)),
+                    ),
+                ],
+              ),
+              const SizedBox(height: AppSpacing.md),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.lg),
+          _group(
+            context,
+            title: l10n.mobileAboutGroup,
+            children: [
+              const SizedBox(height: AppSpacing.sm),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      l10n.appName,
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                  ),
+                  Text(
+                    l10n.mobileVersion(kAppVersion),
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: AppSpacing.md),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }

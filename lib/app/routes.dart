@@ -3,6 +3,9 @@ abstract final class AppRoutes {
   static const connect = '/connect';
   static const search = '/search';
   static const settings = '/settings';
+
+  /// 手机端"我的"页:底部 tab 移除后经顶栏头像入口进入(仅 phone 路由树注册)。
+  static const mine = '/mine';
   static const shelfResume = '/shelf/resume';
   static const shelfNextUp = '/shelf/nextup';
   static const shelfLatestMovies = '/shelf/latest-movies';

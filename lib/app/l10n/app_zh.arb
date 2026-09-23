@@ -1126,6 +1126,31 @@
   "mobileSpeed": "播放速度",
   "mobileLine": "服务器线路",
   "mobileAddServer": "连接其他服务器",
+  "mobileAccountServerGroup": "账户与服务器",
+  "@mobileAccountServerGroup": {
+    "description": "Mine page group header for account and server rows."
+  },
+  "mobilePlaybackGroup": "播放设置",
+  "@mobilePlaybackGroup": {
+    "description": "Mine page group header for playback and danmaku settings."
+  },
+  "mobileCacheGroup": "缓存",
+  "@mobileCacheGroup": {
+    "description": "Mine page group header for the disk cache limit."
+  },
+  "mobileAboutGroup": "关于",
+  "@mobileAboutGroup": {
+    "description": "Mine page group header for app name and version."
+  },
+  "mobileVersion": "版本 {version}",
+  "@mobileVersion": {
+    "description": "App version row on the phone mine page.",
+    "placeholders": {
+      "version": {
+        "type": "String"
+      }
+    }
+  },
   "mobileSort": "排序",
   "mobileNameSort": "名称",
   "mobileDateSort": "最近添加",

@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
 import 'package:rillight/app/app_shell.dart';
 import 'package:rillight/app/mobile_shell.dart';
+import 'package:rillight/app/phone_mine_page.dart';
 import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/tv_shell.dart';
 import 'package:rillight/auth/auth_controller.dart';
@@ -153,6 +154,18 @@ void main() {
       expect(find.byType(MobileShell), findsOneWidget);
       expect(find.text('已看 40%'), findsWidgets);
       expectPhoneOnly(tester);
+
+      // 三 tab 之外,"我的"经顶栏头像入口进入 /mine,返回回到 shell。
+      await tester.tap(find.byKey(const Key('mobile-shell-mine-entry')));
+      await tester.pumpAndSettle();
+      expect(find.byType(PhoneMinePage), findsOneWidget);
+      // /mine 与 MobileShell 平级,进入后 shell 被顶离路由栈。
+      expect(find.byType(MobileShell), findsNothing);
+      expect(find.text('alice'), findsOneWidget);
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(find.byType(PhoneMinePage), findsNothing);
+      expect(find.byType(MobileShell), findsOneWidget);
 
       await tester.tap(find.text('片库').last);
       await tester.pumpAndSettle();

@@ -6,6 +6,8 @@ import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_chrome.dart';
 import 'package:rillight/app/mobile_shell.dart';
 import 'package:rillight/app/phone_libraries_tab.dart';
+import 'package:rillight/app/phone_mine_page.dart';
+import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/theme.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
@@ -469,7 +471,8 @@ void main() {
           .position;
       final before = position().pixels;
       expect(before, greaterThan(100));
-      await tester.tap(find.text('我的').last);
+      // 离开搜索 tab 再回来:滚动位置保持(IndexedStack 状态保持)。
+      await tester.tap(find.text('首页').last);
       await tester.pumpAndSettle();
       await tester.tap(find.text('搜索').last);
       await tester.pumpAndSettle();
@@ -659,15 +662,29 @@ void main() {
     'split home, libraries and mine keep navigation, back and keyboard inset',
     (tester) async {
       final server = FakeEmbyServer();
-      await start(tester, server);
+      final (app, _) = await start(tester, server);
       await login(tester, server);
       expect(
         tester
             .widget<NavigationBar>(find.byType(NavigationBar))
             .destinations
             .length,
-        4,
+        3,
       );
+      expect(find.text('我的'), findsNothing);
+      await tester.tap(find.byKey(const Key('mobile-shell-mine-entry')));
+      await tester.pumpAndSettle();
+      expect(find.byType(PhoneMinePage), findsOneWidget);
+      expect(
+        app.router.routerDelegate.currentConfiguration.last.matchedLocation,
+        AppRoutes.mine,
+      );
+      // /mine 与 MobileShell 平级,进入后 shell 被顶离路由栈。
+      expect(find.byType(MobileShell), findsNothing);
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(find.byType(MobileShell), findsOneWidget);
+      expect(find.byType(PhoneMinePage), findsNothing);
       await tester.ensureVisible(find.byKey(PhoneHero.openKey));
       await tester.tap(find.byKey(PhoneHero.openKey));
       await tester.pumpAndSettle();
@@ -687,12 +704,15 @@ void main() {
         find.byKey(const PageStorageKey('mobile-home-scroll')),
         findsOneWidget,
       );
-      await tester.tap(find.text('我的').last);
+      // 头像入口进入 /mine,返回先回 shell 首页。
+      await tester.tap(find.byKey(const Key('mobile-shell-mine-entry')));
       await tester.pumpAndSettle();
       expect(find.text('alice'), findsOneWidget);
       expect(find.text('播放速度'), findsOneWidget);
+      expect(find.byType(PhoneMinePage), findsOneWidget);
       await tester.binding.handlePopRoute();
       await tester.pumpAndSettle();
+      expect(find.byType(PhoneMinePage), findsNothing);
       expect(
         find.byKey(const PageStorageKey('mobile-home-scroll')),
         findsOneWidget,
