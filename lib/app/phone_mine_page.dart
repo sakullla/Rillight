@@ -5,22 +5,59 @@ import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme.dart';
+import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
+import 'package:rillight/auth/failure_message.dart';
+import 'package:rillight/auth/server_list_store.dart';
+import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_settings.dart';
 
-/// 手机「我的」：线路、添加服务器、倍速和退出。
+/// 手机「我的」：当前身份、线路、倍速和弹幕来源。
 class PhoneMinePage extends StatefulWidget {
   const PhoneMinePage({super.key});
+
+  static const userKey = Key('phone-mine-user');
+  static const serverKey = Key('phone-mine-server');
+  static const currentLineKey = Key('phone-mine-current-line');
+  static const lineKey = Key('phone-mine-line');
+  static const failureKey = Key('phone-mine-line-failure');
+  static const danmakuServerKey = Key('phone-mine-danmaku-server');
+  static const danmakuAppIdKey = Key('phone-mine-danmaku-app-id');
+  static const danmakuTokenKey = Key('phone-mine-danmaku-token');
+  static const tokenVisibilityKey = Key('phone-mine-token-visibility');
+
+  static const playbackRates = <double>[0.5, 1.0, 1.25, 1.5, 2.0];
+
+  static Key lineOptionKey(String lineId) => Key('phone-mine-line-$lineId');
+
+  static Key rateKey(double rate) => Key('phone-mine-rate-$rate');
 
   @override
   State<PhoneMinePage> createState() => _PhoneMinePageState();
 }
 
 class _PhoneMinePageState extends State<PhoneMinePage> {
+  final _danmakuServer = TextEditingController();
+  final _danmakuAppId = TextEditingController();
+  final _danmakuToken = TextEditingController();
+  final _danmakuServerFocus = FocusNode();
+  final _danmakuAppIdFocus = FocusNode();
+  final _danmakuTokenFocus = FocusNode();
+
   PlayerSettingsStore? _store;
+  PlayerSettings _settings = const PlayerSettings();
   double _rate = 1;
   bool _loaded = false;
+  bool _tokenVisible = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _danmakuServerFocus.addListener(_onDanmakuServerFocus);
+    _danmakuAppIdFocus.addListener(_onDanmakuAppIdFocus);
+    _danmakuTokenFocus.addListener(_onDanmakuTokenFocus);
+  }
 
   @override
   void didChangeDependencies() {
@@ -29,15 +66,129 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
       return;
     }
     _loaded = true;
-    unawaited(() async {
-      _store =
-          PlayerScope.of(context).settingsStore ??
-          await openPlayerSettingsStore();
-      final settings = await _store!.read();
-      if (mounted) {
-        setState(() => _rate = settings.playbackRate ?? 1);
+    unawaited(_load());
+  }
+
+  @override
+  void dispose() {
+    _danmakuServerFocus.removeListener(_onDanmakuServerFocus);
+    _danmakuAppIdFocus.removeListener(_onDanmakuAppIdFocus);
+    _danmakuTokenFocus.removeListener(_onDanmakuTokenFocus);
+    _danmakuServerFocus.dispose();
+    _danmakuAppIdFocus.dispose();
+    _danmakuTokenFocus.dispose();
+    _danmakuServer.dispose();
+    _danmakuAppId.dispose();
+    _danmakuToken.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    final injected = PlayerScope.of(context).settingsStore;
+    final inner = injected ?? await openPlayerSettingsStore();
+    final store = _MergingPlayerSettingsStore(inner);
+    final settings = await store.read();
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _store = store;
+      _settings = settings;
+      _rate = settings.effectivePlaybackRate;
+    });
+    _syncDanmakuFields();
+  }
+
+  void _onDanmakuServerFocus() {
+    if (!_danmakuServerFocus.hasFocus) {
+      unawaited(_commitDanmaku());
+    }
+  }
+
+  void _onDanmakuAppIdFocus() {
+    if (!_danmakuAppIdFocus.hasFocus) {
+      unawaited(_commitDanmaku());
+    }
+  }
+
+  void _onDanmakuTokenFocus() {
+    if (!_danmakuTokenFocus.hasFocus) {
+      unawaited(_commitDanmaku());
+    }
+  }
+
+  void _syncDanmakuFields() {
+    if (!_danmakuServerFocus.hasFocus) {
+      final server = _settings.danmakuServer ?? '';
+      if (_danmakuServer.text != server) {
+        _danmakuServer.text = server;
       }
-    }());
+    }
+    if (!_danmakuAppIdFocus.hasFocus) {
+      final appId = _settings.danmakuAppId ?? '';
+      if (_danmakuAppId.text != appId) {
+        _danmakuAppId.text = appId;
+      }
+    }
+    if (!_danmakuTokenFocus.hasFocus) {
+      final token = _settings.danmakuToken ?? '';
+      if (_danmakuToken.text != token) {
+        _danmakuToken.text = token;
+      }
+    }
+  }
+
+  /// 空地址写入空串，读取时表示继续用官方源。
+  Future<void> _commitDanmaku() async {
+    final store = _store;
+    if (store == null) {
+      return;
+    }
+    final server = _danmakuServer.text.trim();
+    final appId = _danmakuAppId.text.trim();
+    final token = _danmakuToken.text.trim();
+    if (server == (_settings.danmakuServer ?? '') &&
+        appId == (_settings.danmakuAppId ?? '') &&
+        token == (_settings.danmakuToken ?? '')) {
+      return;
+    }
+    try {
+      await store.write(
+        PlayerSettings(
+          danmakuServer: server,
+          danmakuAppId: appId,
+          danmakuToken: token,
+        ),
+      );
+      _settings = await store.read();
+    } catch (_) {}
+  }
+
+  Future<void> _saveRate(double rate) async {
+    final store = _store;
+    if (store == null) {
+      return;
+    }
+    try {
+      await store.write(PlayerSettings(playbackRate: rate));
+      if (!mounted) {
+        return;
+      }
+      setState(() => _rate = rate);
+    } catch (_) {}
+  }
+
+  Future<void> _switchLine(String serverId, String lineId) async {
+    final auth = AuthScope.of(context);
+    await auth.switchTo(serverId, lineId: lineId);
+    if (!mounted || !auth.isLoggedIn) {
+      return;
+    }
+    final catalog = CatalogScope.maybeOf(context);
+    if (catalog == null) {
+      return;
+    }
+    await catalog.reload();
   }
 
   Future<void> _lines() async {
@@ -47,31 +198,22 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
       context: context,
       useSafeArea: true,
       isScrollControlled: true,
-      builder: (context) => FractionallySizedBox(
+      builder: (sheetContext) => FractionallySizedBox(
         heightFactor: .65,
         child: ListView(
-          padding: const EdgeInsets.all(20),
+          padding: const EdgeInsets.all(AppSpacing.lg),
           children: [
             Text(
               l10n.mobileLine,
-              style: Theme.of(context).textTheme.titleLarge,
+              style: Theme.of(sheetContext).textTheme.titleLarge,
             ),
             for (final server in auth.savedServers) ...[
               Padding(
-                padding: const EdgeInsets.symmetric(vertical: 12),
+                padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
                 child: Text('${server.name} · ${server.username}'),
               ),
               for (final line in server.lines)
-                ListTile(
-                  title: Text(line.hostLabel),
-                  selected:
-                      auth.session?.server.id == server.id &&
-                      auth.session?.server.activeLine?.id == line.id,
-                  onTap: () async {
-                    Navigator.pop(context);
-                    await auth.switchTo(server.id, lineId: line.id);
-                  },
-                ),
+                _lineOption(auth, server.id, line),
             ],
           ],
         ),
@@ -79,60 +221,208 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
     );
   }
 
+  Widget _lineOption(AuthController auth, String serverId, ServerLine line) {
+    final selected =
+        auth.session?.server.id == serverId &&
+        auth.session?.server.activeLine?.id == line.id;
+    return ListTile(
+      key: PhoneMinePage.lineOptionKey(line.id),
+      minTileHeight: AppSpacing.huge,
+      contentPadding: EdgeInsets.zero,
+      title: Text(line.hostLabel),
+      selected: selected,
+      trailing: selected ? const Icon(Icons.check) : null,
+      onTap: () {
+        Navigator.pop(context);
+        unawaited(_switchLine(serverId, line.id));
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final auth = AuthScope.of(context);
     final l10n = AppLocalizations.of(context);
+    final scheme = Theme.of(context).colorScheme;
+    final session = auth.session;
+    final lineLabel = session?.server.activeLine?.hostLabel ?? '';
+    final failure = auth.failure;
     return ListView(
       key: const PageStorageKey('mobile-mine-scroll'),
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(AppSpacing.md),
       children: [
         Text(
-          auth.session?.username ?? '',
+          session?.username ?? '',
+          key: PhoneMinePage.userKey,
           style: Theme.of(context).textTheme.headlineSmall,
         ),
-        const SizedBox(height: 8),
-        Text(auth.session?.server.name ?? ''),
-        const SizedBox(height: 20),
+        const SizedBox(height: AppSpacing.xs),
+        Text(
+          session?.server.name ?? '',
+          key: PhoneMinePage.serverKey,
+          style: Theme.of(context).textTheme.titleMedium,
+        ),
+        if (lineLabel.isNotEmpty) ...[
+          const SizedBox(height: AppSpacing.xxs),
+          Text(
+            lineLabel,
+            key: PhoneMinePage.currentLineKey,
+            style: Theme.of(
+              context,
+            ).textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
+          ),
+        ],
+        if (failure != null) ...[
+          const SizedBox(height: AppSpacing.sm),
+          Text(
+            embyFailureMessage(l10n, failure),
+            key: PhoneMinePage.failureKey,
+            style: Theme.of(
+              context,
+            ).textTheme.bodyMedium?.copyWith(color: scheme.error),
+          ),
+        ],
+        const SizedBox(height: AppSpacing.lg),
         ListTile(
+          key: PhoneMinePage.lineKey,
+          minTileHeight: AppSpacing.huge,
           contentPadding: EdgeInsets.zero,
           leading: const Icon(Icons.dns_outlined),
           title: Text(l10n.mobileLine),
           onTap: _lines,
         ),
         ListTile(
+          minTileHeight: AppSpacing.huge,
           contentPadding: EdgeInsets.zero,
           leading: const Icon(Icons.add),
           title: Text(l10n.mobileAddServer),
           onTap: () => context.push('${AppRoutes.connect}?add=1'),
         ),
-        const Divider(),
-        Text(l10n.mobileSpeed),
-        Wrap(
-          spacing: 8,
-          children: [
-            for (final rate in [.5, 1.0, 1.25, 1.5, 2.0])
-              ChoiceChip(
-                label: Text('${rate}x'),
-                selected: _rate == rate,
-                onSelected: (_) async {
-                  await _store?.write(PlayerSettings(playbackRate: rate));
-                  if (mounted) {
-                    setState(() => _rate = rate);
-                  }
-                },
-              ),
-          ],
-        ),
-        const SizedBox(height: 24),
+        const SizedBox(height: AppSpacing.md),
         OutlinedButton(
           style: OutlinedButton.styleFrom(
-            minimumSize: const Size(AppSpacing.huge, AppSpacing.huge),
+            minimumSize: const Size.fromHeight(AppSpacing.huge),
           ),
           onPressed: auth.isBusy ? null : auth.logout,
           child: Text(l10n.logout),
         ),
+        const SizedBox(height: AppSpacing.xl),
+        Text(l10n.mobileSpeed, style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: AppSpacing.xxs),
+        Text(
+          l10n.settingsAppliesToNewPlayback,
+          style: Theme.of(
+            context,
+          ).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+        ),
+        const SizedBox(height: AppSpacing.sm),
+        Wrap(
+          spacing: AppSpacing.xs,
+          runSpacing: AppSpacing.xs,
+          children: [
+            for (final rate in PhoneMinePage.playbackRates)
+              ChoiceChip(
+                key: PhoneMinePage.rateKey(rate),
+                label: Text('${rate}x'),
+                selected: _rate == rate,
+                materialTapTargetSize: MaterialTapTargetSize.padded,
+                onSelected: _store == null
+                    ? null
+                    : (_) => unawaited(_saveRate(rate)),
+              ),
+          ],
+        ),
+        const SizedBox(height: AppSpacing.xl),
+        Text(
+          l10n.settingsDanmakuService,
+          style: Theme.of(context).textTheme.titleMedium,
+        ),
+        const SizedBox(height: AppSpacing.xxs),
+        Text(
+          l10n.settingsDanmakuServiceHint,
+          style: Theme.of(
+            context,
+          ).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+        ),
+        const SizedBox(height: AppSpacing.md),
+        Text(l10n.settingsDanmakuServer),
+        const SizedBox(height: AppSpacing.xs),
+        TextField(
+          key: PhoneMinePage.danmakuServerKey,
+          controller: _danmakuServer,
+          focusNode: _danmakuServerFocus,
+          enabled: _store != null,
+          keyboardType: TextInputType.url,
+          textInputAction: TextInputAction.next,
+          onSubmitted: (_) => unawaited(_commitDanmaku()),
+          decoration: InputDecoration(hintText: l10n.settingsDanmakuServerHint),
+        ),
+        const SizedBox(height: AppSpacing.md),
+        Text(l10n.settingsDanmakuAppId),
+        const SizedBox(height: AppSpacing.xs),
+        TextField(
+          key: PhoneMinePage.danmakuAppIdKey,
+          controller: _danmakuAppId,
+          focusNode: _danmakuAppIdFocus,
+          enabled: _store != null,
+          textInputAction: TextInputAction.next,
+          onSubmitted: (_) => unawaited(_commitDanmaku()),
+          decoration: InputDecoration(hintText: l10n.settingsDanmakuAppIdHint),
+        ),
+        const SizedBox(height: AppSpacing.md),
+        Text(l10n.settingsDanmakuToken),
+        const SizedBox(height: AppSpacing.xs),
+        TextField(
+          key: PhoneMinePage.danmakuTokenKey,
+          controller: _danmakuToken,
+          focusNode: _danmakuTokenFocus,
+          enabled: _store != null,
+          obscureText: !_tokenVisible,
+          textInputAction: TextInputAction.done,
+          onSubmitted: (_) => unawaited(_commitDanmaku()),
+          decoration: InputDecoration(
+            hintText: l10n.settingsDanmakuTokenHint,
+            suffixIcon: IconButton(
+              key: PhoneMinePage.tokenVisibilityKey,
+              tooltip: _tokenVisible
+                  ? l10n.settingsHideToken
+                  : l10n.settingsShowToken,
+              onPressed: () => setState(() => _tokenVisible = !_tokenVisible),
+              icon: Icon(
+                _tokenVisible
+                    ? Icons.visibility_off_outlined
+                    : Icons.visibility_outlined,
+              ),
+            ),
+          ),
+        ),
       ],
     );
+  }
+}
+
+/// 注入的内存存储会整份替换。先合并再写，只改倍速或弹幕地址时保留其它字段。
+class _MergingPlayerSettingsStore implements PlayerSettingsStore {
+  _MergingPlayerSettingsStore(this._inner);
+
+  final PlayerSettingsStore _inner;
+
+  @override
+  Future<PlayerSettings> read() => _inner.read();
+
+  @override
+  Future<void> write(PlayerSettings settings) async {
+    final current = await _inner.read();
+    final merged = Map<String, dynamic>.from(current.toJson());
+    for (final entry in settings.toJson().entries) {
+      final existing = merged[entry.key];
+      merged[entry.key] = existing is Map && entry.value is Map
+          ? <String, dynamic>{
+              ...Map<String, dynamic>.from(existing),
+              ...Map<String, dynamic>.from(entry.value as Map),
+            }
+          : entry.value;
+    }
+    await _inner.write(PlayerSettings.fromJson(merged));
   }
 }
