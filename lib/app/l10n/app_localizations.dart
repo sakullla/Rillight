@@ -1809,6 +1809,42 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'剧集'**
   String get mobileSeries;
+
+  /// Player top-bar tooltip that locks the screen against gestures.
+  ///
+  /// In zh, this message translates to:
+  /// **'锁定屏幕'**
+  String get mobileLock;
+
+  /// Tooltip of the only visible control while the player screen is locked.
+  ///
+  /// In zh, this message translates to:
+  /// **'解锁屏幕'**
+  String get mobileUnlock;
+
+  /// Player top-bar tooltip opening the bottom panel with danmaku, tracks, speed and volume.
+  ///
+  /// In zh, this message translates to:
+  /// **'更多'**
+  String get mobileMore;
+
+  /// Player top-bar tooltip toggling portrait preview while playback keeps the orientation lock.
+  ///
+  /// In zh, this message translates to:
+  /// **'切换竖屏预览'**
+  String get mobileRotate;
+
+  /// More-panel entry that opens the danmaku settings panel.
+  ///
+  /// In zh, this message translates to:
+  /// **'弹幕设置'**
+  String get mobileDanmakuPanel;
+
+  /// More-panel section header for the in-app volume slider and mute.
+  ///
+  /// In zh, this message translates to:
+  /// **'应用内音量'**
+  String get mobileAppVolume;
 }
 
 class _AppLocalizationsDelegate

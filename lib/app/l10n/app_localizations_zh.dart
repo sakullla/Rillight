@@ -908,4 +908,22 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get mobileSeries => '剧集';
+
+  @override
+  String get mobileLock => '锁定屏幕';
+
+  @override
+  String get mobileUnlock => '解锁屏幕';
+
+  @override
+  String get mobileMore => '更多';
+
+  @override
+  String get mobileRotate => '切换竖屏预览';
+
+  @override
+  String get mobileDanmakuPanel => '弹幕设置';
+
+  @override
+  String get mobileAppVolume => '应用内音量';
 }
