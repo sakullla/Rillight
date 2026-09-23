@@ -75,6 +75,8 @@ GoRouter createAppRouter({
                   itemId: state.pathParameters['itemId']!,
                   mediaSourceId: request?.mediaSourceId,
                   autoResume: request?.autoResume ?? true,
+                  audioStreamIndex: request?.audioStreamIndex,
+                  subtitleStreamIndex: request?.subtitleStreamIndex,
                 );
               },
             ),

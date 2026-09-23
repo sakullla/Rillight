@@ -77,6 +77,8 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
     if (!mounted) return;
     await controller.load();
     if (!mounted) return;
+    await controller.retainOffPageResume();
+    if (!mounted) return;
     await _loadExtras();
   }
 
@@ -85,7 +87,17 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
     if (controller == null) return;
     await controller.load();
     if (!mounted) return;
+    await controller.retainOffPageResume();
+    if (!mounted) return;
     await _loadExtras();
+  }
+
+  Future<void> _changeSeason(String id, {bool more = false}) async {
+    final controller = _controller;
+    if (controller == null) return;
+    await controller.selectSeason(id, more: more);
+    if (!mounted) return;
+    await controller.retainOffPageResume();
   }
 
   /// 续播季优先，否则第一条未看所在季，再否则第一季。
@@ -201,8 +213,21 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
     if (!mounted || !AuthScope.of(context).isLoggedIn) return;
     await controller.load();
     if (!mounted || !AuthScope.of(context).isLoggedIn) return;
+    await controller.retainOffPageResume();
+    if (!mounted || !AuthScope.of(context).isLoggedIn) return;
     CatalogScope.of(context).reloadHomeRows();
     await _loadExtras();
+  }
+
+  void _openSimilarShelf() {
+    final item = _controller?.item;
+    if (item == null) return;
+    context.push(
+      AppRoutes.shelfSimilar(
+        item.id,
+        title: AppLocalizations.of(context).similarRow,
+      ),
+    );
   }
 
   void _deliverStartTicks(BuildContext context, int ticks) {
@@ -399,11 +424,11 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
                     hasMore: controller.hasMore,
                     playTargetId: target?.id,
                     similar: _similar,
-                    onSelectSeason: controller.selectSeason,
+                    onSelectSeason: _changeSeason,
                     onOpenEpisode: _openItem,
                     onRetryEpisodes: controller.seasonId == null
                         ? null
-                        : () => controller.selectSeason(
+                        : () => _changeSeason(
                             controller.seasonId!,
                             more:
                                 controller.episodes.isNotEmpty &&
@@ -411,11 +436,9 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
                           ),
                     onLoadMore: controller.seasonId == null
                         ? null
-                        : () => controller.selectSeason(
-                            controller.seasonId!,
-                            more: true,
-                          ),
+                        : () => _changeSeason(controller.seasonId!, more: true),
                     onOpenItem: _openItem,
+                    onOpenSimilar: _openSimilarShelf,
                   ),
                 if (item != null && !item.isSeries)
                   _PhoneItemDetail(
@@ -435,6 +458,7 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
                         : null,
                     onTogglePlayed: _togglePlayed,
                     onOpenTracks: () => _openTracks(item),
+                    onOpenSimilar: _openSimilarShelf,
                   ),
               ],
             ),
@@ -508,6 +532,7 @@ class _PhoneItemDetail extends StatelessWidget {
     required this.onChapter,
     required this.onTogglePlayed,
     required this.onOpenTracks,
+    required this.onOpenSimilar,
   });
 
   final EmbyItem item;
@@ -521,6 +546,7 @@ class _PhoneItemDetail extends StatelessWidget {
   final ValueChanged<ItemChapter>? onChapter;
   final VoidCallback onTogglePlayed;
   final VoidCallback onOpenTracks;
+  final VoidCallback onOpenSimilar;
 
   @override
   Widget build(BuildContext context) {
@@ -588,7 +614,11 @@ class _PhoneItemDetail extends StatelessWidget {
           ),
         EpisodePeopleSection(people: item.people),
         if (similar.isNotEmpty)
-          _DetailSimilar(items: similar, onOpenItem: onOpenItem),
+          _DetailSimilar(
+            items: similar,
+            onOpenItem: onOpenItem,
+            onOpenSimilar: onOpenSimilar,
+          ),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
           child: Align(
@@ -789,10 +819,15 @@ class _ChapterStillState extends State<_ChapterStill> {
 }
 
 class _DetailSimilar extends StatelessWidget {
-  const _DetailSimilar({required this.items, required this.onOpenItem});
+  const _DetailSimilar({
+    required this.items,
+    required this.onOpenItem,
+    required this.onOpenSimilar,
+  });
 
   final List<EmbyItem> items;
   final ValueChanged<String> onOpenItem;
+  final VoidCallback onOpenSimilar;
 
   @override
   Widget build(BuildContext context) {
@@ -804,12 +839,24 @@ class _DetailSimilar extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(
             AppSpacing.md,
             AppSpacing.lg,
-            AppSpacing.md,
+            AppSpacing.xs,
             AppSpacing.sm,
           ),
-          child: Text(
-            l.similarRow,
-            style: Theme.of(context).textTheme.titleMedium,
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  l.similarRow,
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+              ),
+              TextButton(
+                key: CatalogKeys.shelfMore(CatalogKeys.shelfSimilar),
+                style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+                onPressed: onOpenSimilar,
+                child: Text(l.more),
+              ),
+            ],
           ),
         ),
         SizedBox(

@@ -15,6 +15,7 @@ import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/home/catalog_controller.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/catalog_scope.dart';
+import 'package:rillight/home/phone_shelf_page.dart';
 import 'package:rillight/library/mobile_detail_page.dart';
 import 'package:rillight/library/mobile_library_page.dart';
 import 'package:rillight/library/mobile_series_page.dart';
@@ -86,8 +87,14 @@ void main() {
               itemId: state.pathParameters['itemId']!,
               mediaSourceId: request?.mediaSourceId,
               autoResume: request?.autoResume ?? true,
+              audioStreamIndex: request?.audioStreamIndex,
+              subtitleStreamIndex: request?.subtitleStreamIndex,
             );
           },
+        ),
+        GoRoute(
+          path: '/shelf/:source',
+          builder: (context, state) => PhoneShelfPage.fromState(state),
         ),
         GoRoute(
           path: '/library/:viewId',
@@ -352,6 +359,179 @@ void main() {
     await tester.pumpAndSettle();
     await _filterUnwatched(tester);
     expect(find.text('Inception'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  }, tags: ['integration']);
+
+  testWidgets('chosen audio and subtitle are used when phone playback starts', (
+    tester,
+  ) async {
+    final server = FakeEmbyServer();
+    final movie = server.items.firstWhere(
+      (item) => item.id == 'movie-inception',
+    );
+    movie.mediaStreams = [
+      ...movie.mediaStreams,
+      const FakeMediaStream(
+        index: 3,
+        type: 'Audio',
+        codec: 'aac',
+        language: 'jpn',
+        displayTitle: '日语音轨',
+      ),
+      const FakeMediaStream(
+        index: 4,
+        type: 'Subtitle',
+        codec: 'subrip',
+        language: 'eng',
+        displayTitle: '英文字幕',
+        isTextSubtitleStream: true,
+      ),
+    ];
+    final (router, backend) = await start(
+      tester,
+      server,
+      width: 412,
+      height: 2000,
+    );
+    await openItem(tester, router, 'movie-inception');
+
+    await tester.ensureVisible(find.byKey(CatalogKeys.mediaSource));
+    await tester.tap(find.byKey(CatalogKeys.mediaSource));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('日语音轨'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(CatalogKeys.mediaSource));
+    await tester.tap(find.byKey(CatalogKeys.mediaSource));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('英文字幕'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('mobile-detail-play')));
+    await tester.pumpAndSettle();
+    final page = tester.widget<MobilePlayerPage>(find.byType(MobilePlayerPage));
+    final player = tester.state<MobilePlayerPageState>(
+      find.byType(MobilePlayerPage),
+    );
+    expect(page.audioStreamIndex, 3);
+    expect(page.subtitleStreamIndex, 4);
+    expect(player.controller?.audioStreamIndex, 3);
+    expect(player.controller?.subtitleStreamIndex, 4);
+    expect(backend.audioIndex, 3);
+    expect(backend.subtitleIndex, 4);
+    expect(server.lastPlaybackInfoBody?['AudioStreamIndex'], 3);
+    expect(server.lastPlaybackInfoBody?['SubtitleStreamIndex'], 4);
+    await closePlayer(tester);
+    expect(tester.takeException(), isNull);
+  }, tags: ['integration']);
+
+  testWidgets('movie and series similar rows open that item shelf', (
+    tester,
+  ) async {
+    final server = FakeEmbyServer();
+    server.items.add(
+      FakeEmbyItem(
+        id: 'series-other',
+        name: '另一部剧',
+        type: 'Series',
+        parentId: 'view-tv',
+        primaryImageTag: 'tag-other',
+      ),
+    );
+    final (router, _) = await start(tester, server, height: 1200);
+    await openItem(tester, router, 'movie-inception');
+    final more = find.byKey(CatalogKeys.shelfMore(CatalogKeys.shelfSimilar));
+    await tester.ensureVisible(more);
+    final beforeMovie = server.requests.length;
+    await tester.tap(more);
+    await tester.pumpAndSettle();
+    expect(find.byType(PhoneShelfPage), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byType(PhoneShelfPage),
+        matching: find.text('飞屋环游记'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      server.requests
+          .skip(beforeMovie)
+          .any(
+            (request) =>
+                request.contains('/Items/movie-inception/Similar') &&
+                request.contains('Limit=${PhoneShelfPage.pageSize}'),
+          ),
+      isTrue,
+    );
+
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    await openItem(tester, router, 'series-friends');
+    await tester.ensureVisible(more);
+    final beforeSeries = server.requests.length;
+    await tester.tap(more);
+    await tester.pumpAndSettle();
+    expect(find.byType(PhoneShelfPage), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byType(PhoneShelfPage),
+        matching: find.text('另一部剧'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      server.requests
+          .skip(beforeSeries)
+          .any(
+            (request) =>
+                request.contains('/Items/series-friends/Similar') &&
+                request.contains('Limit=${PhoneShelfPage.pageSize}'),
+          ),
+      isTrue,
+    );
+    expect(tester.takeException(), isNull);
+  }, tags: ['integration']);
+
+  testWidgets('resume past the loaded season page stays the play action', (
+    tester,
+  ) async {
+    const minute = 10000000 * 60;
+    final server = FakeEmbyServer();
+    server.setEpisodes('series-friends', [
+      for (var i = 0; i < 51; i++)
+        FakeEpisode(
+          id: 'episode-$i',
+          name: i == 50 ? 'Far Resume' : 'Episode ${i + 1}',
+          seasonId: 'season-friends-1',
+          indexNumber: i + 1,
+          parentIndexNumber: 1,
+          played: i < 50,
+          playbackPositionTicks: i == 50 ? minute * 3 : 0,
+          runTimeTicks: minute * 22,
+        ),
+    ]);
+    final (router, backend) = await start(tester, server);
+    await openItem(tester, router, 'series-friends');
+
+    final play = find.byKey(const Key('mobile-detail-play'));
+    expect(
+      tester
+          .widget<Text>(find.descendant(of: play, matching: find.byType(Text)))
+          .data,
+      contains('Far Resume'),
+    );
+    expect(find.text('Episode 1'), findsOneWidget);
+    expect(find.text('Far Resume'), findsNothing);
+
+    await tester.tap(play);
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<MobilePlayerPage>(find.byType(MobilePlayerPage)).itemId,
+      'episode-50',
+    );
+    expect(backend.position, const Duration(minutes: 3));
+    await closePlayer(tester);
     expect(tester.takeException(), isNull);
   }, tags: ['integration']);
 }

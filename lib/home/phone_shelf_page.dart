@@ -22,6 +22,7 @@ class PhoneShelfPage extends StatefulWidget {
     required this.source,
     this.parentId,
     this.includeItemTypes,
+    this.itemId,
     this.title = '',
     this.recursive = false,
   });
@@ -29,6 +30,7 @@ class PhoneShelfPage extends StatefulWidget {
   final String source;
   final String? parentId;
   final String? includeItemTypes;
+  final String? itemId;
   final String title;
   final bool recursive;
 
@@ -43,6 +45,7 @@ class PhoneShelfPage extends StatefulWidget {
       source: state.pathParameters['source'] ?? '',
       parentId: query['parentId'],
       includeItemTypes: query['includeItemTypes'],
+      itemId: query['itemId'],
       title: query['title'] ?? '',
       recursive: query['recursive'] == '1',
     );
@@ -79,6 +82,7 @@ class _PhoneShelfPageState extends State<PhoneShelfPage> {
     if (oldWidget.source != widget.source ||
         oldWidget.parentId != widget.parentId ||
         oldWidget.includeItemTypes != widget.includeItemTypes ||
+        oldWidget.itemId != widget.itemId ||
         oldWidget.recursive != widget.recursive) {
       unawaited(_load());
     }
@@ -143,6 +147,14 @@ class _PhoneShelfPageState extends State<PhoneShelfPage> {
           sortBy: sort.sortBy,
           sortOrder: sort.sortOrder,
         );
+      case 'similar':
+        return catalogSimilarRequest(
+          userId: userId,
+          itemId: widget.itemId?.trim() ?? '',
+          limit: limit,
+          sortBy: sort.sortBy,
+          sortOrder: sort.sortOrder,
+        );
       default:
         return catalogItemsRequest(
           userId: userId,
@@ -157,7 +169,14 @@ class _PhoneShelfPageState extends State<PhoneShelfPage> {
     }
   }
 
+  /// similar 接口不支持 StartIndex，只取这一页。
+  bool get _paged => widget.source != 'similar';
+
   Future<EmbyItemPage> _fetch(int startIndex) async {
+    final similarId = widget.itemId?.trim() ?? '';
+    if (widget.source == 'similar' && similarId.isEmpty) {
+      return const EmbyItemPage(items: []);
+    }
     final client = AuthScope.of(context).client;
     final json = await _cache.fetch(
       client,
@@ -185,10 +204,9 @@ class _PhoneShelfPageState extends State<PhoneShelfPage> {
       setState(() {
         _items = page.items;
         _fetched = page.items.length;
-        _hasMore = page.hasMore(
-          fetched: _fetched,
-          pageSize: PhoneShelfPage.pageSize,
-        );
+        _hasMore =
+            _paged &&
+            page.hasMore(fetched: _fetched, pageSize: PhoneShelfPage.pageSize);
         _loading = false;
       });
     } catch (error) {
@@ -220,10 +238,9 @@ class _PhoneShelfPageState extends State<PhoneShelfPage> {
       setState(() {
         _items = _merge(_items, page.items);
         _fetched = start + page.items.length;
-        _hasMore = page.hasMore(
-          fetched: _fetched,
-          pageSize: PhoneShelfPage.pageSize,
-        );
+        _hasMore =
+            _paged &&
+            page.hasMore(fetched: _fetched, pageSize: PhoneShelfPage.pageSize);
         _loadingMore = false;
       });
     } catch (error) {

@@ -97,6 +97,7 @@ class MobileSeriesPage extends StatelessWidget {
     required this.onRetryEpisodes,
     required this.onLoadMore,
     required this.onOpenItem,
+    required this.onOpenSimilar,
   });
 
   final EmbyItem item;
@@ -113,6 +114,7 @@ class MobileSeriesPage extends StatelessWidget {
   final VoidCallback? onRetryEpisodes;
   final VoidCallback? onLoadMore;
   final ValueChanged<String> onOpenItem;
+  final VoidCallback onOpenSimilar;
 
   @override
   Widget build(BuildContext context) {
@@ -190,7 +192,11 @@ class MobileSeriesPage extends StatelessWidget {
           EpisodeOverviewSection(overview: item.overview),
         EpisodePeopleSection(people: item.people),
         if (similar.isNotEmpty)
-          _SimilarRow(items: similar, onOpenItem: onOpenItem),
+          _SimilarRow(
+            items: similar,
+            onOpenItem: onOpenItem,
+            onOpenSimilar: onOpenSimilar,
+          ),
         const SizedBox(height: AppSpacing.lg),
       ],
     );
@@ -318,10 +324,15 @@ class _EpisodeRow extends StatelessWidget {
 }
 
 class _SimilarRow extends StatelessWidget {
-  const _SimilarRow({required this.items, required this.onOpenItem});
+  const _SimilarRow({
+    required this.items,
+    required this.onOpenItem,
+    required this.onOpenSimilar,
+  });
 
   final List<EmbyItem> items;
   final ValueChanged<String> onOpenItem;
+  final VoidCallback onOpenSimilar;
 
   @override
   Widget build(BuildContext context) {
@@ -333,12 +344,24 @@ class _SimilarRow extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(
             AppSpacing.md,
             AppSpacing.lg,
-            AppSpacing.md,
+            AppSpacing.xs,
             AppSpacing.sm,
           ),
-          child: Text(
-            l.similarRow,
-            style: Theme.of(context).textTheme.titleMedium,
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  l.similarRow,
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+              ),
+              TextButton(
+                key: CatalogKeys.shelfMore(CatalogKeys.shelfSimilar),
+                style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+                onPressed: onOpenSimilar,
+                child: Text(l.more),
+              ),
+            ],
           ),
         ),
         SizedBox(
