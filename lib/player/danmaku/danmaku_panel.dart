@@ -6,8 +6,12 @@ import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/liquid_glass.dart';
 import 'package:rillight/player/danmaku/danmaku_controller.dart';
 import 'package:rillight/player/danmaku/danmaku_display_form.dart';
+import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/player/danmaku/danmaku_keys.dart';
-import 'package:rillight/player/player_page.dart' show kPlayerChromeBarExtent;
+
+/// 桌面播放页窗口顶栏占用。手机等没有窗口铬的宿主传 0，或用 [DanmakuPanel.embedded]。
+const double kDanmakuPanelDefaultTopChrome =
+    AppSpacing.sm + kWindowChromeHeight + AppSpacing.sm + AppSpacing.lg;
 
 /// 播放器弹幕 HUD:开关、单行状态、搜索、常用/高级显示参数。
 class DanmakuPanel extends StatefulWidget {
@@ -16,11 +20,19 @@ class DanmakuPanel extends StatefulWidget {
     required this.danmaku,
     required this.onClose,
     required this.onSearch,
+    this.topChromeExtent = kDanmakuPanelDefaultTopChrome,
+    this.embedded = false,
   });
 
   final DanmakuController danmaku;
   final VoidCallback onClose;
   final VoidCallback onSearch;
+
+  /// 宿主顶栏已经占用的高度。默认与桌面窗口铬一致，调用方可不传。
+  final double topChromeExtent;
+
+  /// 为 true 时铺满父级，而不是按桌面窗口右下角定位。
+  final bool embedded;
 
   static const double panelWidth = 320;
 
@@ -35,7 +47,11 @@ class _DanmakuPanelState extends State<DanmakuPanel> {
   Widget build(BuildContext context) {
     return ListenableBuilder(
       listenable: widget.danmaku,
-      builder: (context, _) => _buildCard(context),
+      builder: (context, _) {
+        final card = _buildCard(context);
+        if (widget.embedded) return card;
+        return Positioned(right: AppSpacing.xl, bottom: 112, child: card);
+      },
     );
   }
 
@@ -48,12 +64,15 @@ class _DanmakuPanelState extends State<DanmakuPanel> {
     final unreachable =
         danmaku.status == DanmakuStatus.unreachable ||
         danmaku.status == DanmakuStatus.customUnreachable;
-    final maxHeight =
-        MediaQuery.sizeOf(context).height -
-        kPlayerChromeBarExtent -
-        112 -
-        AppSpacing.xl;
+    final mediaHeight = MediaQuery.sizeOf(context).height;
+    final available = widget.embedded
+        ? mediaHeight
+        : mediaHeight - widget.topChromeExtent - 112 - AppSpacing.xl;
+    final maxHeight = available > 0 ? available : mediaHeight;
     final expandAdvanced = configured && _advancedExpanded;
+    final width = widget.embedded
+        ? MediaQuery.sizeOf(context).width
+        : DanmakuPanel.panelWidth;
 
     final chrome = _chrome(
       context,
@@ -65,52 +84,54 @@ class _DanmakuPanelState extends State<DanmakuPanel> {
       configured: configured,
     );
 
-    return Positioned(
-      right: AppSpacing.xl,
-      bottom: 112,
-      child: Listener(
-        behavior: HitTestBehavior.opaque,
-        child: ConstrainedBox(
-          constraints: BoxConstraints(
-            maxWidth: DanmakuPanel.panelWidth,
-            maxHeight: maxHeight,
-          ),
-          child: LiquidGlass(
-            kind: LiquidGlassKind.panel,
-            width: DanmakuPanel.panelWidth,
-            child: Material(
-              key: DanmakuKeys.panel,
-              type: MaterialType.transparency,
-              child: expandAdvanced
-                  ? SizedBox(
-                      height: maxHeight,
-                      width: DanmakuPanel.panelWidth,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          Padding(
-                            padding: const EdgeInsets.fromLTRB(16, 12, 8, 0),
-                            child: chrome,
-                          ),
-                          Expanded(
-                            child: SingleChildScrollView(
-                              padding: const EdgeInsets.fromLTRB(16, 4, 16, 14),
-                              child: DanmakuDisplayForm(
-                                value: danmaku.display,
-                                onChanged: (next) =>
-                                    unawaited(danmaku.setDisplay(next)),
-                                layout: DanmakuFormLayout.playerAdvanced,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    )
-                  : Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 12, 8, 14),
-                      child: chrome,
-                    ),
+    final Widget body;
+    if (expandAdvanced) {
+      body = SizedBox(
+        height: maxHeight,
+        width: width,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 8, 0),
+              child: chrome,
             ),
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 14),
+                child: DanmakuDisplayForm(
+                  value: danmaku.display,
+                  onChanged: (next) => unawaited(danmaku.setDisplay(next)),
+                  layout: DanmakuFormLayout.playerAdvanced,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    } else if (widget.embedded) {
+      body = SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(16, 12, 8, 14),
+        child: chrome,
+      );
+    } else {
+      body = Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 8, 14),
+        child: chrome,
+      );
+    }
+
+    return Listener(
+      behavior: HitTestBehavior.opaque,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: width, maxHeight: maxHeight),
+        child: LiquidGlass(
+          kind: LiquidGlassKind.panel,
+          width: width,
+          child: Material(
+            key: DanmakuKeys.panel,
+            type: MaterialType.transparency,
+            child: body,
           ),
         ),
       ),
