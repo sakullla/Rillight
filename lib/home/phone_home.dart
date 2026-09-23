@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_chrome.dart';
+import 'package:rillight/app/mobile_motion.dart';
 import 'package:rillight/app/mobile_widgets.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme.dart';
@@ -91,6 +92,7 @@ class PhoneHome extends StatelessWidget {
             },
           );
         } else {
+          final sharedPosterIds = <String>{};
           body = Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -102,6 +104,7 @@ class PhoneHome extends StatelessWidget {
                     catalog.reloadHomeRows();
                   },
                   onRemoveFromResume: catalog.hideFromResume,
+                  sharePoster: sharedPosterIds.add,
                 ),
               TextButton.icon(
                 style: TextButton.styleFrom(minimumSize: _refreshHit),
@@ -153,11 +156,15 @@ class _PhoneHomeRow extends StatelessWidget {
     required this.section,
     required this.retry,
     required this.onRemoveFromResume,
+    required this.sharePoster,
   });
 
   final _HomeSection section;
   final VoidCallback retry;
   final Future<void> Function(EmbyItem item) onRemoveFromResume;
+
+  /// 同一条目只让第一张海报参与飞行，避免同一路由里标签重复。
+  final bool Function(String id) sharePoster;
 
   @override
   Widget build(BuildContext context) {
@@ -210,15 +217,17 @@ class _PhoneHomeRow extends StatelessWidget {
               itemCount: state.items.length,
               itemBuilder: (context, index) {
                 final item = state.items[index];
+                final shared = sharePoster(item.id);
                 if (section.resume) {
                   return _ResumePoster(
                     item: item,
+                    shared: shared,
                     onRemove: () {
                       unawaited(onRemoveFromResume(item));
                     },
                   );
                 }
-                return SizedBox(width: 148, child: MobilePoster(item: item));
+                return _PhonePoster(item: item, shared: shared);
               },
             ),
           ),
@@ -228,9 +237,14 @@ class _PhoneHomeRow extends StatelessWidget {
 }
 
 class _ResumePoster extends StatelessWidget {
-  const _ResumePoster({required this.item, required this.onRemove});
+  const _ResumePoster({
+    required this.item,
+    required this.shared,
+    required this.onRemove,
+  });
 
   final EmbyItem item;
+  final bool shared;
   final VoidCallback onRemove;
 
   @override
@@ -252,8 +266,8 @@ class _ResumePoster extends StatelessWidget {
                     color: Colors.transparent,
                     child: InkWell(
                       key: CatalogKeys.item(item.id),
-                      onTap: () => context.push(AppRoutes.item(item.id)),
-                      child: MediaImage(item: item, maxWidth: 400),
+                      onTap: () => PhoneMotion.openItem(context, item),
+                      child: _sharedPosterImage(item, shared),
                     ),
                   ),
                   if (item.canResume)
@@ -290,4 +304,54 @@ class _ResumePoster extends StatelessWidget {
       ),
     );
   }
+}
+
+class _PhonePoster extends StatelessWidget {
+  const _PhonePoster({required this.item, required this.shared});
+
+  final EmbyItem item;
+  final bool shared;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 148,
+      child: Card(
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          key: shared ? CatalogKeys.item(item.id) : null,
+          onTap: () => PhoneMotion.openItem(context, item),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(child: _sharedPosterImage(item, shared)),
+              Padding(
+                padding: const EdgeInsets.all(8),
+                child: Text(
+                  item.name,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+Widget _sharedPosterImage(EmbyItem item, bool shared) {
+  final image = MediaImage(
+    item: item,
+    maxWidth: PhoneMotion.posterRequestWidth,
+  );
+  if (!shared) {
+    return image;
+  }
+  return PhoneMotion.sharedImage(
+    itemId: item.id,
+    preferBackdrop: false,
+    child: image,
+  );
 }

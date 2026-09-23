@@ -3,9 +3,8 @@ import 'dart:io' show Platform;
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
-import 'package:rillight/app/routes.dart';
+import 'package:rillight/app/mobile_motion.dart';
 import 'package:rillight/app/theme.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_controller.dart';
@@ -155,10 +154,14 @@ class _PhoneHeroState extends State<PhoneHero> {
                 children: [
                   KeyedSubtree(
                     key: PhoneHero.itemKey(item.id),
-                    child: MediaImage(
-                      item: item,
+                    child: PhoneMotion.sharedImage(
+                      itemId: item.id,
                       preferBackdrop: true,
-                      maxWidth: 800,
+                      child: MediaImage(
+                        item: item,
+                        preferBackdrop: true,
+                        maxWidth: PhoneMotion.heroRequestWidth,
+                      ),
                     ),
                   ),
                   DecoratedBox(
@@ -253,8 +256,12 @@ class _PhoneHeroState extends State<PhoneHero> {
                           style: FilledButton.styleFrom(
                             minimumSize: const Size(48, 48),
                           ),
-                          onPressed: () =>
-                              context.push(AppRoutes.item(item.id)),
+                          onPressed: () => PhoneMotion.openItem(
+                            context,
+                            item,
+                            preferBackdrop: true,
+                            maxWidth: PhoneMotion.heroRequestWidth,
+                          ),
                           icon: const Icon(Icons.play_arrow),
                           label: Text(
                             item.canResume ? l10n.resumePlay : l10n.play,

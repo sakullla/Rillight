@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/app/mobile_motion.dart';
 import 'package:rillight/app/mobile_widgets.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/emby/emby_errors.dart';
@@ -16,6 +17,8 @@ class PhoneItemBanner extends StatelessWidget {
     required this.item,
     required this.title,
     this.subtitle,
+    this.preferBackdrop = true,
+    this.maxWidth = PhoneMotion.pageRequestWidth,
   });
 
   static const bannerKey = Key('phone-detail-banner');
@@ -23,6 +26,8 @@ class PhoneItemBanner extends StatelessWidget {
   final EmbyItem item;
   final String title;
   final String? subtitle;
+  final bool preferBackdrop;
+  final int maxWidth;
 
   @override
   Widget build(BuildContext context) {
@@ -33,7 +38,15 @@ class PhoneItemBanner extends StatelessWidget {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          MediaImage(item: item, preferBackdrop: true, maxWidth: 1280),
+          PhoneMotion.sharedImage(
+            itemId: item.id,
+            preferBackdrop: preferBackdrop,
+            child: MediaImage(
+              item: item,
+              preferBackdrop: preferBackdrop,
+              maxWidth: maxWidth,
+            ),
+          ),
           const DecoratedBox(
             decoration: BoxDecoration(
               gradient: LinearGradient(
@@ -119,20 +132,10 @@ class MobileSeriesPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context);
-    final meta = [
-      if (item.productionYear != null) '${item.productionYear}',
-      if (seasons.isNotEmpty) l.seasonCount(seasons.length),
-      if (item.childCount != null) l.episodeCount(item.childCount!),
-    ].where((part) => part.isNotEmpty).join(' · ');
     final showSeasons = seasons.isNotEmpty;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        PhoneItemBanner(
-          item: item,
-          title: item.name,
-          subtitle: meta.isEmpty ? null : meta,
-        ),
         if (showSeasons)
           SizedBox(
             height: 72,

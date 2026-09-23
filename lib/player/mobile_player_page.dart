@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/app/mobile_motion.dart';
 import 'package:rillight/app/widgets/liquid_glass.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
@@ -270,7 +271,7 @@ class MobilePlayerPageState extends State<MobilePlayerPage> {
   Future<void> _tracks() async {
     final c = controller!, l = AppLocalizations.of(context);
     c.setControlsPinned(true);
-    await showModalBottomSheet<void>(
+    await PhoneMotion.showBottomPanel<void>(
       context: context,
       useSafeArea: true,
       isScrollControlled: true,
@@ -507,271 +508,270 @@ class MobilePlayerPageState extends State<MobilePlayerPage> {
               ),
               ListenableBuilder(
                 listenable: c,
-                builder: (context, _) =>
-                    !c.controlsVisible &&
-                        !c.loading &&
-                        c.error == null &&
-                        !c.disconnected &&
-                        !c.sessionExpired &&
-                        !c.progressSyncFailed &&
-                        c.trackFailure == null
-                    ? const SizedBox.shrink()
-                    : SafeArea(
-                        child: Column(
-                          children: [
-                            ColoredBox(
-                              color: Colors.black54,
-                              child: Row(
-                                children: [
-                                  IconButton(
-                                    tooltip: l.closePlayer,
-                                    onPressed: _close,
-                                    icon: const Icon(Icons.arrow_back),
+                builder: (context, _) {
+                  final showControls =
+                      c.controlsVisible ||
+                      c.loading ||
+                      c.error != null ||
+                      c.disconnected ||
+                      c.sessionExpired ||
+                      c.progressSyncFailed ||
+                      c.trackFailure != null;
+                  return PhoneMotion.reveal(
+                    context: context,
+                    visible: showControls,
+                    child: SafeArea(
+                      child: Column(
+                        children: [
+                          ColoredBox(
+                            color: Colors.black54,
+                            child: Row(
+                              children: [
+                                IconButton(
+                                  tooltip: l.closePlayer,
+                                  onPressed: _close,
+                                  icon: const Icon(Icons.arrow_back),
+                                ),
+                                Expanded(
+                                  child: Text(
+                                    c.item?.name ?? l.playerLoading,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
                                   ),
-                                  Expanded(
-                                    child: Text(
-                                      c.item?.name ?? l.playerLoading,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
+                                ),
+                                IconButton(
+                                  key: const Key('mobile-player-danmaku'),
+                                  tooltip: l.danmaku,
+                                  onPressed: c.loading
+                                      ? null
+                                      : _openDanmakuPanel,
+                                  icon: Icon(
+                                    danmaku != null && danmaku.danmakuOn
+                                        ? Icons.subtitles
+                                        : Icons.subtitles_outlined,
                                   ),
-                                  IconButton(
-                                    key: const Key('mobile-player-danmaku'),
-                                    tooltip: l.danmaku,
-                                    onPressed: c.loading
-                                        ? null
-                                        : _openDanmakuPanel,
-                                    icon: Icon(
-                                      danmaku != null && danmaku.danmakuOn
-                                          ? Icons.subtitles
-                                          : Icons.subtitles_outlined,
-                                    ),
-                                  ),
-                                  IconButton(
-                                    tooltip: l.mobileTracks,
-                                    onPressed: c.loading ? null : _tracks,
-                                    icon: const Icon(Icons.tune),
-                                  ),
-                                ],
-                              ),
+                                ),
+                                IconButton(
+                                  tooltip: l.mobileTracks,
+                                  onPressed: c.loading ? null : _tracks,
+                                  icon: const Icon(Icons.tune),
+                                ),
+                              ],
                             ),
-                            Expanded(
-                              child: Center(
-                                child: c.loading
-                                    ? const CircularProgressIndicator()
-                                    : c.error != null ||
-                                          c.sessionExpired ||
-                                          c.disconnected
-                                    ? SingleChildScrollView(
-                                        padding: const EdgeInsets.all(24),
-                                        child: Column(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            Text(
+                          ),
+                          Expanded(
+                            child: Center(
+                              child: c.loading
+                                  ? const CircularProgressIndicator()
+                                  : c.error != null ||
+                                        c.sessionExpired ||
+                                        c.disconnected
+                                  ? SingleChildScrollView(
+                                      padding: const EdgeInsets.all(24),
+                                      child: Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Text(
+                                            c.sessionExpired
+                                                ? l.playbackSessionExpired
+                                                : c.disconnected
+                                                ? l.playbackDisconnected
+                                                : c.error ==
+                                                      PlayerErrorKind.noStream
+                                                ? l.noPlayableStream
+                                                : l.playbackFailed,
+                                            textAlign: TextAlign.center,
+                                          ),
+                                          const SizedBox(height: 16),
+                                          FilledButton(
+                                            onPressed: c.sessionExpired
+                                                ? () async {
+                                                    await _close();
+                                                    await _auth?.logout();
+                                                  }
+                                                : c.retryPlayback,
+                                            child: Text(
                                               c.sessionExpired
-                                                  ? l.playbackSessionExpired
-                                                  : c.disconnected
-                                                  ? l.playbackDisconnected
-                                                  : c.error ==
-                                                        PlayerErrorKind.noStream
-                                                  ? l.noPlayableStream
-                                                  : l.playbackFailed,
-                                              textAlign: TextAlign.center,
+                                                  ? l.connect
+                                                  : l.retry,
                                             ),
-                                            const SizedBox(height: 16),
-                                            FilledButton(
-                                              onPressed: c.sessionExpired
-                                                  ? () async {
-                                                      await _close();
-                                                      await _auth?.logout();
-                                                    }
-                                                  : c.retryPlayback,
-                                              child: Text(
-                                                c.sessionExpired
-                                                    ? l.connect
-                                                    : l.retry,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      )
-                                    : const SizedBox.shrink(),
-                              ),
+                                          ),
+                                        ],
+                                      ),
+                                    )
+                                  : const SizedBox.shrink(),
                             ),
-                            ColoredBox(
-                              color: Colors.black87,
-                              child: ConstrainedBox(
-                                constraints: BoxConstraints(
-                                  maxHeight:
-                                      MediaQuery.sizeOf(context).height * .48,
+                          ),
+                          ColoredBox(
+                            color: Colors.black87,
+                            child: ConstrainedBox(
+                              constraints: BoxConstraints(
+                                maxHeight:
+                                    MediaQuery.sizeOf(context).height * .48,
+                              ),
+                              child: SingleChildScrollView(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
                                 ),
-                                child: SingleChildScrollView(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 12,
-                                  ),
-                                  child: Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      if (c.progressSyncFailed)
-                                        Text(l.progressSyncFailed),
-                                      if (c.trackFailure != null)
-                                        Text(c.trackFailure!),
-                                      if (c.backgroundReleased)
-                                        Text(l.mobileBackgroundPaused),
-                                      if (c.playbackEnded)
-                                        Text(l.playbackEnded),
-                                      if (c.isBuffering && !c.loading)
-                                        const LinearProgressIndicator(),
-                                      Row(
-                                        children: [
-                                          Text(_clock(c.position)),
-                                          Expanded(
-                                            child: Slider(
-                                              key: const Key(
-                                                'mobile-player-seek',
-                                              ),
-                                              value:
-                                                  (_seek ??
-                                                          c
-                                                              .position
-                                                              .inMilliseconds
-                                                              .toDouble())
-                                                      .clamp(
-                                                        0,
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    if (c.progressSyncFailed)
+                                      Text(l.progressSyncFailed),
+                                    if (c.trackFailure != null)
+                                      Text(c.trackFailure!),
+                                    if (c.backgroundReleased)
+                                      Text(l.mobileBackgroundPaused),
+                                    if (c.playbackEnded) Text(l.playbackEnded),
+                                    if (c.isBuffering && !c.loading)
+                                      const LinearProgressIndicator(),
+                                    Row(
+                                      children: [
+                                        Text(_clock(c.position)),
+                                        Expanded(
+                                          child: Slider(
+                                            key: const Key(
+                                              'mobile-player-seek',
+                                            ),
+                                            value:
+                                                (_seek ??
                                                         c
-                                                            .duration
+                                                            .position
                                                             .inMilliseconds
-                                                            .toDouble()
-                                                            .clamp(
-                                                              1,
-                                                              double.infinity,
-                                                            ),
-                                                      ),
-                                              max: c.duration.inMilliseconds
-                                                  .toDouble()
-                                                  .clamp(1, double.infinity),
-                                              onChanged:
-                                                  c.loading ||
-                                                      c.error != null ||
-                                                      c.disconnected ||
-                                                      c.sessionExpired
-                                                  ? null
-                                                  : (v) => setState(
-                                                      () => _seek = v,
+                                                            .toDouble())
+                                                    .clamp(
+                                                      0,
+                                                      c.duration.inMilliseconds
+                                                          .toDouble()
+                                                          .clamp(
+                                                            1,
+                                                            double.infinity,
+                                                          ),
                                                     ),
-                                              onChangeEnd: (v) {
-                                                setState(() => _seek = null);
-                                                c.seekTo(
-                                                  Duration(
-                                                    milliseconds: v.round(),
+                                            max: c.duration.inMilliseconds
+                                                .toDouble()
+                                                .clamp(1, double.infinity),
+                                            onChanged:
+                                                c.loading ||
+                                                    c.error != null ||
+                                                    c.disconnected ||
+                                                    c.sessionExpired
+                                                ? null
+                                                : (v) =>
+                                                      setState(() => _seek = v),
+                                            onChangeEnd: (v) {
+                                              setState(() => _seek = null);
+                                              c.seekTo(
+                                                Duration(
+                                                  milliseconds: v.round(),
+                                                ),
+                                              );
+                                            },
+                                          ),
+                                        ),
+                                        Text(_clock(c.duration)),
+                                      ],
+                                    ),
+                                    Row(
+                                      children: [
+                                        IconButton(
+                                          key: const Key('mobile-player-mute'),
+                                          tooltip: c.volume <= 0
+                                              ? l.unmute
+                                              : l.mute,
+                                          onPressed:
+                                              c.loading ||
+                                                  c.error != null ||
+                                                  c.disconnected ||
+                                                  c.sessionExpired
+                                              ? null
+                                              : () => c.toggleMute(),
+                                          icon: Icon(
+                                            c.volume <= 0
+                                                ? Icons.volume_off
+                                                : Icons.volume_up,
+                                          ),
+                                        ),
+                                        Expanded(
+                                          child: Slider(
+                                            key: const Key(
+                                              'mobile-player-volume',
+                                            ),
+                                            value: c.volume
+                                                .clamp(
+                                                  0,
+                                                  PlayerSettings.volumeMax,
+                                                )
+                                                .toDouble(),
+                                            max: PlayerSettings.volumeMax
+                                                .toDouble(),
+                                            onChanged:
+                                                c.loading ||
+                                                    c.error != null ||
+                                                    c.disconnected ||
+                                                    c.sessionExpired
+                                                ? null
+                                                : (value) => c.setVolume(
+                                                    value.round(),
                                                   ),
-                                                );
-                                              },
-                                            ),
                                           ),
-                                          Text(_clock(c.duration)),
-                                        ],
-                                      ),
-                                      Row(
-                                        children: [
-                                          IconButton(
-                                            key: const Key(
-                                              'mobile-player-mute',
-                                            ),
-                                            tooltip: c.volume <= 0
-                                                ? l.unmute
-                                                : l.mute,
-                                            onPressed:
-                                                c.loading ||
-                                                    c.error != null ||
-                                                    c.disconnected ||
-                                                    c.sessionExpired
-                                                ? null
-                                                : () => c.toggleMute(),
-                                            icon: Icon(
-                                              c.volume <= 0
-                                                  ? Icons.volume_off
-                                                  : Icons.volume_up,
-                                            ),
+                                        ),
+                                        Text(l.volumePercent(c.volume)),
+                                      ],
+                                    ),
+                                    Row(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      children: [
+                                        IconButton(
+                                          tooltip: l.mobileRewind,
+                                          onPressed: () => c.seekRelative(
+                                            const Duration(seconds: -10),
                                           ),
-                                          Expanded(
-                                            child: Slider(
-                                              key: const Key(
-                                                'mobile-player-volume',
-                                              ),
-                                              value: c.volume
-                                                  .clamp(
-                                                    0,
-                                                    PlayerSettings.volumeMax,
-                                                  )
-                                                  .toDouble(),
-                                              max: PlayerSettings.volumeMax
-                                                  .toDouble(),
-                                              onChanged:
-                                                  c.loading ||
-                                                      c.error != null ||
-                                                      c.disconnected ||
-                                                      c.sessionExpired
-                                                  ? null
-                                                  : (value) => c.setVolume(
-                                                      value.round(),
-                                                    ),
-                                            ),
+                                          icon: const Icon(Icons.replay_10),
+                                          iconSize: 32,
+                                        ),
+                                        IconButton(
+                                          key: const Key(
+                                            'mobile-player-toggle',
                                           ),
-                                          Text(l.volumePercent(c.volume)),
-                                        ],
-                                      ),
-                                      Row(
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.center,
-                                        children: [
-                                          IconButton(
-                                            tooltip: l.mobileRewind,
-                                            onPressed: () => c.seekRelative(
-                                              const Duration(seconds: -10),
-                                            ),
-                                            icon: const Icon(Icons.replay_10),
-                                            iconSize: 32,
+                                          tooltip: c.isPlaying
+                                              ? l.pause
+                                              : l.play,
+                                          onPressed:
+                                              c.loading ||
+                                                  c.error != null ||
+                                                  c.disconnected ||
+                                                  c.sessionExpired
+                                              ? null
+                                              : c.togglePlay,
+                                          icon: Icon(
+                                            c.isPlaying
+                                                ? Icons.pause_circle
+                                                : Icons.play_circle,
                                           ),
-                                          IconButton(
-                                            key: const Key(
-                                              'mobile-player-toggle',
-                                            ),
-                                            tooltip: c.isPlaying
-                                                ? l.pause
-                                                : l.play,
-                                            onPressed:
-                                                c.loading ||
-                                                    c.error != null ||
-                                                    c.disconnected ||
-                                                    c.sessionExpired
-                                                ? null
-                                                : c.togglePlay,
-                                            icon: Icon(
-                                              c.isPlaying
-                                                  ? Icons.pause_circle
-                                                  : Icons.play_circle,
-                                            ),
-                                            iconSize: 48,
+                                          iconSize: 48,
+                                        ),
+                                        IconButton(
+                                          tooltip: l.mobileForward,
+                                          onPressed: () => c.seekRelative(
+                                            const Duration(seconds: 10),
                                           ),
-                                          IconButton(
-                                            tooltip: l.mobileForward,
-                                            onPressed: () => c.seekRelative(
-                                              const Duration(seconds: 10),
-                                            ),
-                                            icon: const Icon(Icons.forward_10),
-                                            iconSize: 32,
-                                          ),
-                                        ],
-                                      ),
-                                    ],
-                                  ),
+                                          icon: const Icon(Icons.forward_10),
+                                          iconSize: 32,
+                                        ),
+                                      ],
+                                    ),
+                                  ],
                                 ),
                               ),
                             ),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
+                    ),
+                  );
+                },
               ),
               if (c.nextEpisode != null && c.error == null && !c.sessionExpired)
                 Positioned(

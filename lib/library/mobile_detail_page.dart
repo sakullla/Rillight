@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/app/mobile_motion.dart';
 import 'package:rillight/app/mobile_widgets.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme/tokens.dart';
@@ -310,7 +311,7 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
 
   Future<void> _openTracks(EmbyItem item) async {
     final source = _source(item);
-    await showModalBottomSheet<void>(
+    await PhoneMotion.showBottomPanel<void>(
       context: context,
       showDragHandle: true,
       useSafeArea: true,
@@ -365,6 +366,35 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
     );
   }
 
+  PhoneImageHandoff? _imageHandoff(BuildContext context) {
+    final extra = GoRouterState.of(context).extra;
+    if (extra is! PhoneImageHandoff || extra.item.id != widget.itemId) {
+      return null;
+    }
+    return extra;
+  }
+
+  String? _bannerSubtitle(AppLocalizations l, EmbyItem item) {
+    if (item.isSeries) {
+      final seasons = _controller?.seasons ?? const <EmbyItem>[];
+      final meta = [
+        if (item.productionYear != null) '${item.productionYear}',
+        if (seasons.isNotEmpty) l.seasonCount(seasons.length),
+        if (item.childCount != null) l.episodeCount(item.childCount!),
+      ].where((part) => part.isNotEmpty).join(' · ');
+      return meta.isEmpty ? null : meta;
+    }
+    final meta = [
+      if (item.isEpisode) ?seasonEpisodeCode(item),
+      if (item.productionYear != null) '${item.productionYear}',
+      ?runtimeLabel(l, item),
+      if (item.communityRating != null)
+        item.communityRating!.toStringAsFixed(1),
+      ...item.genres,
+    ].where((part) => part.isNotEmpty).join(' · ');
+    return meta.isEmpty ? null : meta;
+  }
+
   String _playLabel(AppLocalizations l, EmbyItem item, EmbyItem? target) {
     if (target == null || !target.isPlayable) return l.noPlayableStream;
     if (item.isSeries) {
@@ -383,14 +413,16 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
       builder: (context, _) {
         final item = controller.item;
         final target = controller.playTarget;
+        final handoff = _imageHandoff(context);
+        final imageSource = handoff?.item ?? item;
         return Scaffold(
-          extendBodyBehindAppBar: item != null,
+          extendBodyBehindAppBar: imageSource != null,
           appBar: AppBar(
-            backgroundColor: item == null ? null : Colors.transparent,
+            backgroundColor: imageSource == null ? null : Colors.transparent,
             surfaceTintColor: Colors.transparent,
             elevation: 0,
-            foregroundColor: item == null ? null : Colors.white,
-            title: item == null ? Text(l.playerLoading) : null,
+            foregroundColor: imageSource == null ? null : Colors.white,
+            title: imageSource == null ? Text(l.playerLoading) : null,
           ),
           bottomNavigationBar: item == null
               ? null
@@ -410,6 +442,14 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
               physics: const AlwaysScrollableScrollPhysics(),
               padding: EdgeInsets.zero,
               children: [
+                if (imageSource != null)
+                  PhoneItemBanner(
+                    item: imageSource,
+                    title: (item ?? imageSource).name,
+                    subtitle: item == null ? null : _bannerSubtitle(l, item),
+                    preferBackdrop: handoff?.preferBackdrop ?? true,
+                    maxWidth: handoff?.maxWidth ?? PhoneMotion.pageRequestWidth,
+                  ),
                 if (controller.loading) const LinearProgressIndicator(),
                 if (controller.error != null && item == null)
                   MobileFailure(error: controller.error!, retry: _refresh),
@@ -552,23 +592,10 @@ class _PhoneItemDetail extends StatelessWidget {
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context);
     final theme = Theme.of(context);
-    final meta = [
-      if (item.isEpisode) ?seasonEpisodeCode(item),
-      if (item.productionYear != null) '${item.productionYear}',
-      ?runtimeLabel(l, item),
-      if (item.communityRating != null)
-        item.communityRating!.toStringAsFixed(1),
-      ...item.genres,
-    ].join(' · ');
     final neighbors = [?previousEpisode, ?nextEpisode];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        PhoneItemBanner(
-          item: item,
-          title: item.name,
-          subtitle: meta.isEmpty ? null : meta,
-        ),
         if (item.isEpisode &&
             item.seriesName != null &&
             item.seriesName!.isNotEmpty &&
