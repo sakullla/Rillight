@@ -148,25 +148,56 @@ void main() {
     expect(find.byType(MobilePlayerPage), findsNothing);
   }
 
+  testWidgets('exit stays on the entry direction until that viewport is back', (
+    tester,
+  ) async {
+    final orientation = PhoneOrientation(
+      restoreTo: const [DeviceOrientation.portraitUp],
+      request: (orientations) async {},
+    );
+    final current = await showPlayer(
+      tester,
+      itemId: 'movie-inception',
+      orientation: orientation,
+      wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
+    );
+    expect(current.error, isNull);
+    expect(orientation.calls.first, PhoneOrientation.landscape);
+    await closePlayer(tester);
+    await orientation.settled;
+    expect(find.byType(MobilePlayerPage), findsNothing);
+    // The surface is still landscape. A trailing unlock would follow the
+    // sensor and leave playback's landscape hold in place.
+    expect(orientation.calls, hasLength(2));
+    expect(orientation.calls[1], const [DeviceOrientation.portraitUp]);
+    expect(orientation.calls.last, isNot(PhoneOrientation.unlocked));
+
+    tester.view.physicalSize = const Size(360, 800);
+    await orientation.settled;
+    expect(orientation.calls[1], const [DeviceOrientation.portraitUp]);
+    expect(orientation.calls.last, PhoneOrientation.unlocked);
+  });
+
   testWidgets(
-    'landscape request restores the entry direction and survives failure',
+    'landscape entry is restored before a later rotation is released',
     (tester) async {
       final orientation = PhoneOrientation(
-        restoreTo: const [DeviceOrientation.portraitUp],
-        request: (orientations) async {},
+        restoreTo: PhoneOrientation.landscape,
+        request: (_) async {},
       );
-      final current = await showPlayer(
-        tester,
-        itemId: 'movie-inception',
-        orientation: orientation,
-        wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
-      );
-      expect(current.error, isNull);
-      expect(orientation.calls.first, PhoneOrientation.landscape);
-      await closePlayer(tester);
+      tester.view.physicalSize = const Size(800, 360);
+      addTearDown(tester.view.resetPhysicalSize);
+      await orientation.enterPlayback();
+      await orientation.leavePlayback();
+      expect(orientation.calls, hasLength(2));
+      expect(orientation.calls.last, PhoneOrientation.landscape);
+      await tester.pump();
       await orientation.settled;
-      expect(find.byType(MobilePlayerPage), findsNothing);
-      expect(orientation.calls[1], const [DeviceOrientation.portraitUp]);
+      expect(
+        orientation.calls[1],
+        PhoneOrientation.landscape,
+        reason: 'restore success is the entry direction, not a trailing unlock',
+      );
       expect(orientation.calls.last, PhoneOrientation.unlocked);
     },
   );
@@ -190,6 +221,10 @@ void main() {
     expect(denied.lastError, isA<StateError>());
     expect(find.byType(MobilePlayerPage), findsOneWidget);
     await closePlayer(tester);
+    await denied.settled;
+    expect(find.byType(MobilePlayerPage), findsNothing);
+    expect(denied.calls[1], const [DeviceOrientation.portraitUp]);
+    expect(denied.calls.last, isNot(PhoneOrientation.unlocked));
   });
 
   testWidgets('turning back to portrait keeps the phone player usable', (

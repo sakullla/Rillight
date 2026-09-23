@@ -10,7 +10,12 @@ typedef PhoneOrientationRequest =
 /// [request] is replaceable so tests can observe the calls without rotating
 /// a device. A failed request is recorded and swallowed; playback continues.
 /// This never writes an activity-wide manifest lock.
-class PhoneOrientation {
+///
+/// Exit leaves [restoreTo] in place. Android treats all four orientations as
+/// sensor follow, so requesting them in the same step replaces the entry
+/// direction before the activity has turned back. A later rotation is released
+/// only after the viewport is observed on that entry direction.
+class PhoneOrientation with WidgetsBindingObserver {
   PhoneOrientation({
     PhoneOrientationRequest? request,
     List<DeviceOrientation>? restoreTo,
@@ -25,6 +30,7 @@ class PhoneOrientation {
   ];
 
   /// Browsing default: every orientation, so a later rotation is not locked.
+  /// Not requested until the viewport is already back on [restoreTo].
   static const unlocked = <DeviceOrientation>[
     DeviceOrientation.portraitUp,
     DeviceOrientation.portraitDown,
@@ -44,6 +50,8 @@ class PhoneOrientation {
   final List<List<DeviceOrientation>> calls = [];
   Object? lastError;
   bool _entered = false;
+  bool _awaitingReturn = false;
+  bool _observing = false;
   Future<void> _queue = Future<void>.value();
 
   Future<void> get settled => _queue;
@@ -51,22 +59,96 @@ class PhoneOrientation {
   Future<void> enterPlayback() {
     if (_entered) return _queue;
     _entered = true;
+    _awaitingReturn = false;
+    _stopObserving();
     return _enqueue(() => _send(landscape));
   }
 
   Future<void> leavePlayback() {
     if (!_entered) return _queue;
     _entered = false;
-    final restore = restoreTo;
     return _enqueue(() async {
-      await _send(restore);
-      // Landscape must not remain the activity preference after exit, or
-      // portrait browsing stays locked. The entry direction is still requested
-      // first so the platform can turn back.
-      if (!_same(restore, unlocked)) {
-        await _send(unlocked);
+      final releaseLater = !_same(restoreTo, unlocked);
+      if (releaseLater) {
+        _awaitingReturn = true;
+        _startObserving();
+      }
+      await _send(restoreTo);
+      if (lastError != null || !releaseLater) {
+        _awaitingReturn = false;
+        _stopObserving();
+        return;
+      }
+      // A metrics callback during [restoreTo] may already have released.
+      if (!_awaitingReturn) return;
+      final current = _viewportOrientation();
+      if (current != null && _isEntry(current)) {
+        // Already on the entry direction, so nothing still has to turn back.
+        // Wait until after this callback so the four-direction request cannot
+        // share the restore step.
+        _releaseOnNextFrame();
       }
     });
+  }
+
+  @override
+  void didChangeMetrics() {
+    if (!_awaitingReturn) return;
+    final current = _viewportOrientation();
+    if (current == null || !_isEntry(current)) return;
+    _release();
+  }
+
+  void _releaseOnNextFrame() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_awaitingReturn) return;
+      final current = _viewportOrientation();
+      if (current == null || !_isEntry(current)) return;
+      _release();
+    });
+    WidgetsBinding.instance.scheduleFrame();
+  }
+
+  void _release() {
+    if (!_awaitingReturn) return;
+    _awaitingReturn = false;
+    _stopObserving();
+    _enqueue(() => _send(unlocked));
+  }
+
+  void _startObserving() {
+    if (_observing) return;
+    _observing = true;
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  void _stopObserving() {
+    if (!_observing) return;
+    _observing = false;
+    WidgetsBinding.instance.removeObserver(this);
+  }
+
+  /// Viewport axis, or null when the window has no size yet.
+  Orientation? _viewportOrientation() {
+    final view = WidgetsBinding.instance.platformDispatcher.implicitView;
+    if (view == null) return null;
+    final size = view.physicalSize;
+    if (size.isEmpty) return null;
+    return size.width > size.height
+        ? Orientation.landscape
+        : Orientation.portrait;
+  }
+
+  bool _isEntry(Orientation orientation) {
+    if (restoreTo.isEmpty) return false;
+    final portrait = orientation == Orientation.portrait;
+    for (final direction in restoreTo) {
+      final directionIsPortrait =
+          direction == DeviceOrientation.portraitUp ||
+          direction == DeviceOrientation.portraitDown;
+      if (directionIsPortrait != portrait) return false;
+    }
+    return true;
   }
 
   Future<void> _enqueue(Future<void> Function() action) {
