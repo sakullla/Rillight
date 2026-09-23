@@ -3,6 +3,7 @@ import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/emby/catalog_cache.dart';
 import 'package:rillight/emby/emby_errors.dart';
 import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/library/shelf_sort.dart';
 
 class BrowseController extends ChangeNotifier {
   BrowseController({
@@ -18,7 +19,8 @@ class BrowseController extends ChangeNotifier {
   final String parentId;
   List<EmbyItem> items = const [];
   bool loading = false, hasMore = false;
-  String? type, watch;
+  String? type, watch, genre;
+  int? year;
   String sortBy = 'SortName';
   EmbyException? error;
   int _revision = 0, _offset = 0;
@@ -62,8 +64,10 @@ class BrowseController extends ChangeNotifier {
             limit: 50,
             startIndex: offset,
             sortBy: sortBy,
-            sortOrder: sortBy == 'SortName' ? 'Ascending' : 'Descending',
+            sortOrder: _sortOrder,
             filters: watch == null ? null : [watch!],
+            genres: genre == null ? null : [genre!],
+            years: year == null ? null : [year!],
           ),
         ),
       );
@@ -87,12 +91,31 @@ class BrowseController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> filter({String? type, String? watch, required String sortBy}) {
+  /// 年份、流派省略或为 null 时清除。二者可选，电视片库可以不传。
+  /// 失败的新查询保留已有条目，避免把海报清成空白。
+  Future<void> filter({
+    String? type,
+    String? watch,
+    required String sortBy,
+    int? year,
+    String? genre,
+  }) {
     this.type = type;
     this.watch = watch;
+    this.year = year;
+    final trimmed = genre?.trim();
+    this.genre = (trimmed == null || trimmed.isEmpty) ? null : trimmed;
     this.sortBy = sortBy;
-    items = const [];
     return load();
+  }
+
+  String get _sortOrder {
+    for (final sort in CatalogSort.values) {
+      if (sort.sortBy == sortBy) {
+        return sort.sortOrder;
+      }
+    }
+    return sortBy == 'SortName' ? 'Ascending' : 'Descending';
   }
 
   @override

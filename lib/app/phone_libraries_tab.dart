@@ -4,10 +4,12 @@ import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_chrome.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme.dart';
+import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_failure.dart';
 import 'package:rillight/home/catalog_scope.dart';
+import 'package:rillight/media_image/media_image.dart';
 
-/// 手机片库列表。点库名仍进入该库。
+/// 手机片库列表。每个库是带库名的图片块；没有库图时用库名占满整块。
 class PhoneLibrariesTab extends StatelessWidget {
   const PhoneLibrariesTab({super.key});
 
@@ -40,7 +42,7 @@ class PhoneLibrariesTab extends StatelessWidget {
             },
           );
         } else if (error != null || notice != null) {
-          // 已有库名时刷新失败仍留下列表，只附加失败和重试。
+          // 已有库时刷新失败仍留下图片块，只附加失败和重试。
           status = MobileFailureState(
             message: catalogFailureMessage(l10n, (error ?? notice)!),
             onRetry: () {
@@ -59,19 +61,125 @@ class PhoneLibrariesTab extends StatelessWidget {
             children: [
               if (status != null) status,
               for (final library in catalog.libraries)
-                Card(
-                  child: ListTile(
-                    minVerticalPadding: 20,
-                    leading: const Icon(Icons.video_library),
-                    title: Text(library.name),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () => context.push(AppRoutes.library(library.id)),
-                  ),
+                _LibraryBlock(
+                  library: library,
+                  onTap: () => context.push(AppRoutes.library(library.id)),
                 ),
             ],
           ),
         );
       },
+    );
+  }
+}
+
+class _LibraryBlock extends StatelessWidget {
+  const _LibraryBlock({required this.library, required this.onTap});
+
+  final EmbyItem library;
+  final VoidCallback onTap;
+
+  bool get _hasImage {
+    bool tagged(String? tag) => tag != null && tag.isNotEmpty;
+    return tagged(library.primaryImageTag) ||
+        tagged(library.backdropImageTag) ||
+        tagged(library.thumbImageTag);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final hasImage = _hasImage;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+      child: Material(
+        color: scheme.surfaceContainerHigh,
+        borderRadius: BorderRadius.circular(AppRadii.md),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          key: Key('phone-library-block-${library.id}'),
+          onTap: onTap,
+          child: AspectRatio(
+            aspectRatio: 16 / 9,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                if (hasImage)
+                  MediaImage(
+                    key: Key('phone-library-image-${library.id}'),
+                    item: library,
+                    preferBackdrop: true,
+                    maxWidth: 480,
+                  )
+                else
+                  _LibraryNamePlaceholder(
+                    key: Key('phone-library-placeholder-${library.id}'),
+                    name: library.name,
+                  ),
+                if (hasImage) ...[
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        stops: const [0.45, 1],
+                        colors: [
+                          scheme.scrim.withValues(alpha: 0),
+                          scheme.scrim.withValues(
+                            alpha: AppScrim.of(context, AppScrim.textStart),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  Align(
+                    alignment: Alignment.bottomCenter,
+                    child: Padding(
+                      padding: const EdgeInsets.all(AppSpacing.md),
+                      child: Text(
+                        library.name,
+                        textAlign: TextAlign.center,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleLarge?.copyWith(
+                          color: scheme.onSurface,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _LibraryNamePlaceholder extends StatelessWidget {
+  const _LibraryNamePlaceholder({super.key, required this.name});
+
+  final String name;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return ColoredBox(
+      color: theme.colorScheme.surfaceContainerHighest,
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(AppSpacing.md),
+          child: Text(
+            name,
+            textAlign: TextAlign.center,
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.titleLarge,
+          ),
+        ),
+      ),
     );
   }
 }
