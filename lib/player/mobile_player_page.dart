@@ -28,6 +28,8 @@ class MobilePlayerPage extends StatefulWidget {
     required this.itemId,
     this.mediaSourceId,
     this.autoResume = true,
+    this.audioStreamIndex,
+    this.subtitleStreamIndex,
     this.orientation,
     this.wakeLock,
     this.danmakuHasher,
@@ -35,6 +37,10 @@ class MobilePlayerPage extends StatefulWidget {
   final String itemId;
   final String? mediaSourceId;
   final bool autoResume;
+
+  /// 详情页选出的音轨/字幕。只作用于本次起播。
+  final int? audioStreamIndex;
+  final int? subtitleStreamIndex;
 
   /// Replaceable landscape request. Null uses [SystemChrome] and the viewport
   /// direction captured on entry.
@@ -124,6 +130,8 @@ class MobilePlayerPageState extends State<MobilePlayerPage> {
       window: bindings.window ?? PlayerWindow(),
       autoResume: widget.autoResume,
       preferredMediaSourceId: widget.mediaSourceId,
+      preferredAudioStreamIndex: widget.audioStreamIndex,
+      preferredSubtitleStreamIndex: widget.subtitleStreamIndex,
       progressInterval: bindings.progressInterval,
       controlsHideAfter: bindings.controlsHideAfter,
       nextEpisodeCountdown: bindings.nextEpisodeCountdown,

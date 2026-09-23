@@ -23,6 +23,9 @@ class DetailController extends ChangeNotifier {
   String? seasonId, mediaSourceId;
   EmbyException? error, episodeError;
   bool loading = true, episodesLoading = false, hasMore = false;
+
+  /// 续播集在已加载页之外时记住它。列表仍停在当前页，主操作不退回第一条。
+  EmbyItem? resumeBeyondPage;
   int _revision = 0, _seasonRevision = 0, _offset = 0;
   bool _disposed = false;
   late Object _identity;
@@ -36,6 +39,7 @@ class DetailController extends ChangeNotifier {
     item = null;
     seasons = episodes = const [];
     seasonId = mediaSourceId = null;
+    resumeBeyondPage = null;
     error = episodeError = null;
     loading = episodesLoading = hasMore = false;
     _offset = 0;
@@ -82,7 +86,10 @@ class DetailController extends ChangeNotifier {
       _offset = 0;
       hasMore = false;
     }
-    if (seasonId != id) episodes = const [];
+    if (seasonId != id) {
+      episodes = const [];
+      resumeBeyondPage = null;
+    }
     seasonId = id;
     episodesLoading = true;
     episodeError = null;
@@ -114,11 +121,66 @@ class DetailController extends ChangeNotifier {
     notifyListeners();
   }
 
-  EmbyItem? get playTarget => item?.isSeries == true
-      ? (episodes.where((e) => e.canResume).firstOrNull ??
-            episodes.where((e) => !e.userData.played).firstOrNull ??
-            episodes.firstOrNull)
-      : item;
+  EmbyItem? get playTarget {
+    final current = item;
+    if (current == null) return null;
+    if (!current.isSeries) return current;
+    for (final episode in episodes) {
+      if (episode.canResume) return episode;
+    }
+    final beyond = resumeBeyondPage;
+    if (beyond != null &&
+        beyond.canResume &&
+        _inSelectedSeason(beyond) &&
+        episodes.every((episode) => episode.id != beyond.id)) {
+      return beyond;
+    }
+    return episodes.where((e) => !e.userData.played).firstOrNull ??
+        episodes.firstOrNull;
+  }
+
+  bool _inSelectedSeason(EmbyItem episode) {
+    final season = seasonId;
+    if (season == null || season.isEmpty) return false;
+    return episode.seasonId == season || episode.parentId == season;
+  }
+
+  /// 当前页没有续播集、且后面还有分集时，向后查找并记住那一集。
+  /// 不把后续页并进 [episodes]。
+  Future<void> retainOffPageResume() async {
+    final season = seasonId;
+    if (_disposed || season == null || item?.isSeries != true) return;
+    if (episodes.any((episode) => episode.canResume) || !hasMore) {
+      if (resumeBeyondPage != null) {
+        resumeBeyondPage = null;
+        notifyListeners();
+      }
+      return;
+    }
+    final revision = _seasonRevision;
+    final identity = _identity;
+    var start = _offset;
+    EmbyItem? found;
+    while (found == null) {
+      final page = await repository.episodes(season, start: start);
+      if (_disposed || revision != _seasonRevision || identity != _identity) {
+        return;
+      }
+      found = page.items.where((episode) => episode.canResume).firstOrNull;
+      final loaded = page.items.length;
+      if (found != null || loaded == 0) break;
+      start += loaded;
+      final total = page.totalRecordCount;
+      final more = total == null ? loaded == 50 : start < total;
+      if (!more) break;
+    }
+    if (_disposed || revision != _seasonRevision || identity != _identity) {
+      return;
+    }
+    resumeBeyondPage = found;
+    notifyListeners();
+  }
+
   void selectSource(String id) {
     mediaSourceId = id;
     notifyListeners();
