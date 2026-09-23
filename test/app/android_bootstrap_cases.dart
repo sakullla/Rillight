@@ -7,6 +7,7 @@ import 'package:rillight/app/android_bootstrap.dart';
 import 'package:rillight/app/app.dart';
 import 'package:rillight/app/app_shell.dart';
 import 'package:rillight/app/mobile_shell.dart';
+import 'package:rillight/app/phone_mine_page.dart';
 import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/auth/android_connect_page.dart';
 import 'package:rillight/auth/auth_controller.dart';
@@ -157,7 +158,8 @@ void main() {
           findsOneWidget,
         );
         if (!environment.isTv) {
-          await tester.tap(find.text('我的'));
+          // "我的"已迁为顶栏头像入口的 /mine 路由。
+          await tester.tap(find.byKey(const Key('mobile-shell-mine-entry')));
           await tester.pumpAndSettle();
         }
         if (environment.isTv) {
@@ -171,10 +173,10 @@ void main() {
             150,
             scrollable: find
                 .descendant(
-                  of: find.byType(MobileShell),
+                  of: find.byType(PhoneMinePage),
                   matching: find.byType(Scrollable),
                 )
-                .last,
+                .first,
           );
         }
         await tester.pumpAndSettle();

@@ -1738,6 +1738,36 @@ abstract class AppLocalizations {
   /// **'连接其他服务器'**
   String get mobileAddServer;
 
+  /// Mine page group header for account and server rows.
+  ///
+  /// In zh, this message translates to:
+  /// **'账户与服务器'**
+  String get mobileAccountServerGroup;
+
+  /// Mine page group header for playback and danmaku settings.
+  ///
+  /// In zh, this message translates to:
+  /// **'播放设置'**
+  String get mobilePlaybackGroup;
+
+  /// Mine page group header for the disk cache limit.
+  ///
+  /// In zh, this message translates to:
+  /// **'缓存'**
+  String get mobileCacheGroup;
+
+  /// Mine page group header for app name and version.
+  ///
+  /// In zh, this message translates to:
+  /// **'关于'**
+  String get mobileAboutGroup;
+
+  /// App version row on the phone mine page.
+  ///
+  /// In zh, this message translates to:
+  /// **'版本 {version}'**
+  String mobileVersion(String version);
+
   /// No description provided for @mobileSort.
   ///
   /// In zh, this message translates to:

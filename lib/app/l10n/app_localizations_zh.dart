@@ -872,6 +872,23 @@ class AppLocalizationsZh extends AppLocalizations {
   String get mobileAddServer => '连接其他服务器';
 
   @override
+  String get mobileAccountServerGroup => '账户与服务器';
+
+  @override
+  String get mobilePlaybackGroup => '播放设置';
+
+  @override
+  String get mobileCacheGroup => '缓存';
+
+  @override
+  String get mobileAboutGroup => '关于';
+
+  @override
+  String mobileVersion(String version) {
+    return '版本 $version';
+  }
+
+  @override
   String get mobileSort => '排序';
 
   @override
