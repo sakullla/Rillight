@@ -133,6 +133,19 @@ class PhoneHome extends StatelessWidget {
 
 const Size _refreshHit = Size(AppSpacing.huge, AppSpacing.huge);
 
+/// 海报卡宽:按屏宽留一页约 2.6 张,不再写死;窄屏收敛到 2 张上下。
+double _cardWidthOf(BuildContext context) {
+  final available = MediaQuery.sizeOf(context).width - AppSpacing.md * 2;
+  return (available / 2.6).clamp(120.0, 180.0);
+}
+
+/// 行高 = 2:3 海报区 + 卡下标题块(继续观看卡的信息叠在图内,不占行高)。
+double _rowHeightOf(BuildContext context, bool resume) {
+  final textScale = MediaQuery.textScalerOf(context).scale(14) / 14;
+  final titleBlock = AppSpacing.sm + 2 * 20 * textScale + AppSpacing.sm;
+  return _cardWidthOf(context) * 1.5 + (resume ? 0 : titleBlock);
+}
+
 class _HomeSection {
   const _HomeSection({
     required this.title,
@@ -209,8 +222,7 @@ class _PhoneHomeRow extends StatelessWidget {
           ),
         if (state.items.isNotEmpty)
           SizedBox(
-            height:
-                250 + 35 * (MediaQuery.textScalerOf(context).scale(14) / 14),
+            height: _rowHeightOf(context, section.resume),
             child: ListView.builder(
               key: PageStorageKey('row-${section.title}'),
               scrollDirection: Axis.horizontal,
@@ -218,16 +230,22 @@ class _PhoneHomeRow extends StatelessWidget {
               itemBuilder: (context, index) {
                 final item = state.items[index];
                 final shared = sharePoster(item.id);
+                final cardWidth = _cardWidthOf(context);
                 if (section.resume) {
                   return _ResumePoster(
                     item: item,
                     shared: shared,
+                    width: cardWidth,
                     onRemove: () {
                       unawaited(onRemoveFromResume(item));
                     },
                   );
                 }
-                return _PhonePoster(item: item, shared: shared);
+                return _PhonePoster(
+                  item: item,
+                  shared: shared,
+                  width: cardWidth,
+                );
               },
             ),
           ),
@@ -240,100 +258,207 @@ class _ResumePoster extends StatelessWidget {
   const _ResumePoster({
     required this.item,
     required this.shared,
+    required this.width,
     required this.onRemove,
   });
 
   final EmbyItem item;
   final bool shared;
+  final double width;
   final VoidCallback onRemove;
 
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
+    final theme = Theme.of(context);
     final progress = item.playbackProgress;
-    return SizedBox(
-      width: 148,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Expanded(
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(AppRadii.md),
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  Material(
-                    color: Colors.transparent,
-                    child: InkWell(
-                      key: CatalogKeys.item(item.id),
-                      onTap: () => PhoneMotion.openItem(context, item),
-                      child: _sharedPosterImage(item, shared),
+    return Padding(
+      padding: const EdgeInsets.only(right: AppSpacing.sm),
+      child: SizedBox(
+        width: width,
+        child: _PosterCard(
+          pressKey: CatalogKeys.item(item.id),
+          item: item,
+          shared: shared,
+          image: Stack(
+            fit: StackFit.expand,
+            children: [
+              _sharedPosterImage(item, shared),
+              // 渐变信息区:标题/进度压在图片下缘,叠在 AppScrim token 渐变上。
+              Align(
+                alignment: Alignment.bottomCenter,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        theme.colorScheme.scrim.withValues(alpha: 0),
+                        theme.colorScheme.scrim.withValues(
+                          alpha: AppScrim.of(context, AppScrim.textStart),
+                        ),
+                      ],
+                      stops: const [
+                        AppMobileHero.bottomStart,
+                        AppMobileHero.bottomEnd,
+                      ],
                     ),
                   ),
-                  if (item.canResume)
-                    Align(
-                      alignment: Alignment.bottomCenter,
-                      child: LinearProgressIndicator(
-                        key: CatalogKeys.resumeProgress,
-                        value: progress,
-                        minHeight: 4,
-                      ),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                      AppSpacing.sm,
+                      AppSpacing.xl,
+                      AppSpacing.sm,
+                      AppSpacing.xs,
                     ),
-                  Align(
-                    alignment: Alignment.topRight,
-                    child: IconButton(
-                      key: CatalogKeys.removeFromResume(item.id),
-                      tooltip: l10n.removeFromResume,
-                      onPressed: onRemove,
-                      icon: const Icon(Icons.close),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Text(
+                          item.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: theme.colorScheme.onSurface,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        if (item.canResume) ...[
+                          const SizedBox(height: AppSpacing.xxs),
+                          Text(
+                            l10n.playbackProgress((progress * 100).round()),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: theme.colorScheme.onSurface.withValues(
+                                alpha: 0.85,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: AppSpacing.xxs),
+                          LinearProgressIndicator(
+                            key: CatalogKeys.resumeProgress,
+                            value: progress,
+                            minHeight: 3,
+                          ),
+                        ],
+                      ],
                     ),
                   ),
-                ],
+                ),
               ),
-            ),
+              Align(
+                alignment: Alignment.topRight,
+                child: IconButton(
+                  key: CatalogKeys.removeFromResume(item.id),
+                  tooltip: l10n.removeFromResume,
+                  onPressed: onRemove,
+                  icon: const Icon(Icons.close),
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: AppSpacing.xs),
-          Text(item.name, maxLines: 2, overflow: TextOverflow.ellipsis),
-          if (item.canResume)
-            Text(
-              l10n.playbackProgress((progress * 100).round()),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-        ],
+        ),
       ),
     );
   }
 }
 
 class _PhonePoster extends StatelessWidget {
-  const _PhonePoster({required this.item, required this.shared});
+  const _PhonePoster({
+    required this.item,
+    required this.shared,
+    required this.width,
+  });
 
   final EmbyItem item;
   final bool shared;
+  final double width;
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: 148,
-      child: Card(
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          key: shared ? CatalogKeys.item(item.id) : null,
-          onTap: () => PhoneMotion.openItem(context, item),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Expanded(child: _sharedPosterImage(item, shared)),
-              Padding(
-                padding: const EdgeInsets.all(8),
-                child: Text(
-                  item.name,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(right: AppSpacing.sm),
+      child: SizedBox(
+        width: width,
+        child: _PosterCard(
+          pressKey: shared ? CatalogKeys.item(item.id) : null,
+          item: item,
+          shared: shared,
+          image: _sharedPosterImage(item, shared),
+          footer: Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.sm,
+              vertical: AppSpacing.xs,
+            ),
+            child: Text(
+              item.name,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w500,
               ),
-            ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 海报卡外壳:AppRadii 圆角 + AppMobileCard 阴影 + MobilePressable 按压反馈。
+/// [footer] 为空时 [image] 铺满整卡(继续观看卡),否则占上方 2:3 区。
+class _PosterCard extends StatelessWidget {
+  const _PosterCard({
+    required this.item,
+    required this.shared,
+    required this.image,
+    this.footer,
+    this.pressKey,
+  });
+
+  final EmbyItem item;
+  final bool shared;
+  final Widget image;
+  final Widget? footer;
+  final Key? pressKey;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return MobilePressable(
+      key: pressKey,
+      onTap: () => PhoneMotion.openItem(context, item),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(AppRadii.md),
+          boxShadow: [
+            BoxShadow(
+              color: theme.colorScheme.scrim.withValues(
+                alpha: AppMobileCard.shadowAlpha,
+              ),
+              blurRadius: AppMobileCard.shadowBlur,
+              spreadRadius: AppMobileCard.shadowSpread,
+              offset: const Offset(0, AppMobileCard.shadowOffsetY),
+            ),
+          ],
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(AppRadii.md),
+          // 图缺失时 MediaImage 落主题化占位,底衬与页面分层。
+          child: ColoredBox(
+            color: theme.colorScheme.surfaceContainerLow,
+            child: footer == null
+                ? image
+                : Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      AspectRatio(aspectRatio: 2 / 3, child: image),
+                      footer!,
+                    ],
+                  ),
           ),
         ),
       ),

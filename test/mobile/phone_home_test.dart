@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/app/mobile_widgets.dart';
 import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/router.dart';
 import 'package:rillight/app/theme.dart';
@@ -155,6 +156,112 @@ void main() {
       await tester.tap(find.text('示例剧全集'));
       await _settle(tester);
       expect(find.text('剧集页 series-h'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('poster cards are pressable 2:3 cards sized by screen width', (
+    tester,
+  ) async {
+    _usePhoneSurface(tester);
+    final catalog = _catalog(
+      resume: [_item('movie-b', '乙电影', 'Movie', percent: 10)],
+      movies: [_item('movie-c', '示例电影', 'Movie')],
+      series: [_item('series-h', '示例剧全集', 'Series')],
+    );
+    addTearDown(catalog.auth.dispose);
+    addTearDown(catalog.dispose);
+    final router = _router(catalog);
+    addTearDown(router.dispose);
+    await tester.pumpWidget(_scriptedApp(catalog, router: router));
+    await tester.pump();
+
+    // 行结构仍在:继续观看/最新电影/最新剧集三行 + Hero。
+    expect(find.text('继续观看'), findsOneWidget);
+    expect(find.text('最近更新的电影'), findsOneWidget);
+    expect(find.text('最近更新的剧集'), findsOneWidget);
+
+    // 每张海报卡都是 MobilePressable,按压档位取 AppMobileCard token。
+    final pressables = tester.widgetList<MobilePressable>(
+      find.byType(MobilePressable),
+    );
+    expect(pressables.length, 3);
+    for (final pressable in pressables) {
+      expect(pressable.scale, AppMobileCard.pressScale);
+      expect(pressable.brighten, AppMobileCard.pressBrighten);
+      expect(pressable.duration, AppMobileCard.pressDuration);
+    }
+
+    // 海报区保持 2:3 竖版。
+    final ratios = tester.widgetList<AspectRatio>(find.byType(AspectRatio));
+    expect(ratios.where((widget) => widget.aspectRatio == 2 / 3), isNotEmpty);
+
+    // 卡宽随屏宽伸缩,不再是写死的 148。
+    final width360 = tester
+        .getRect(find.byKey(CatalogKeys.item('movie-c')))
+        .width;
+    expect(width360, closeTo((360 - AppSpacing.md * 2) / 2.6, 0.5));
+    expect(width360, isNot(148));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('card width tracks a wider phone and text scale grows the row', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(412, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    tester.platformDispatcher.accessibilityFeaturesTestValue =
+        const FakeAccessibilityFeatures(disableAnimations: true);
+    addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
+    final catalog = _catalog(
+      resume: const [],
+      movies: [_item('movie-c', '示例电影', 'Movie')],
+      series: const [],
+    );
+    addTearDown(catalog.auth.dispose);
+    addTearDown(catalog.dispose);
+    final router = _router(catalog);
+    addTearDown(router.dispose);
+    await tester.pumpWidget(_scriptedApp(catalog, router: router));
+    await tester.pump();
+
+    final width412 = tester
+        .getRect(find.byKey(CatalogKeys.item('movie-c')))
+        .width;
+    expect(width412, closeTo((412 - AppSpacing.md * 2) / 2.6, 0.5));
+    expect(width412, greaterThan(140));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'resume card overlays title, progress and remove control in the card',
+    (tester) async {
+      _usePhoneSurface(tester);
+      final catalog = _catalog(
+        resume: [_item('movie-b', '乙电影', 'Movie', percent: 10)],
+        movies: [_item('movie-c', '示例电影', 'Movie')],
+        series: const [],
+      );
+      addTearDown(catalog.auth.dispose);
+      addTearDown(catalog.dispose);
+      final router = _router(catalog);
+      addTearDown(router.dispose);
+      await tester.pumpWidget(_scriptedApp(catalog, router: router));
+      await tester.pump();
+
+      // 进度条与单条移除都保留,并落在继续观看卡内(Hero 也有一条进度条)。
+      final card = tester.getRect(find.byKey(CatalogKeys.item('movie-b')));
+      expect(
+        _inside(
+          tester.getRect(find.byKey(CatalogKeys.removeFromResume('movie-b'))),
+          card,
+        ),
+        isTrue,
+      );
+      expect(find.byKey(CatalogKeys.resumeProgress), findsWidgets);
+      expect(_inside(tester.getRect(find.text('已看 10%').last), card), isTrue);
       expect(tester.takeException(), isNull);
     },
   );
@@ -405,7 +512,8 @@ Future<void> _showOnHome(WidgetTester tester, Finder finder) async {
   final list = find.byKey(const PageStorageKey('mobile-home-scroll'));
   for (var i = 0; i < 8; i++) {
     final top = tester.getTopLeft(finder).dy;
-    if (top >= 0 && top < 640) {
+    // 顶栏/AppBar 会压住滚动区上缘,留出余量再停。
+    if (top >= 96 && top < 640) {
       return;
     }
     await tester.drag(list, Offset(0, top > 640 ? -350 : 350));
@@ -478,6 +586,13 @@ EmbyItem? _findItem(CatalogController catalog, String id) {
     }
   }
   return null;
+}
+
+bool _inside(Rect inner, Rect outer) {
+  return inner.left >= outer.left - 0.5 &&
+      inner.top >= outer.top - 0.5 &&
+      inner.right <= outer.right + 0.5 &&
+      inner.bottom <= outer.bottom + 0.5;
 }
 
 void _addShelfMovies(FakeEmbyServer server) {

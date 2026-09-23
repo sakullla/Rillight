@@ -139,7 +139,8 @@ class _PhoneHeroState extends State<PhoneHero> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final width = constraints.maxWidth;
-        final height = math.max(width * 9 / 16, 260.0);
+        // 大封面:比 16:9 更高一档,文字带落在图片下缘的渐变里。
+        final height = math.max(width * 0.66, 300.0);
         return ClipRRect(
           key: PhoneHero.bannerKey,
           borderRadius: BorderRadius.circular(AppRadii.lg),
@@ -171,7 +172,15 @@ class _PhoneHeroState extends State<PhoneHero> {
                         end: Alignment.bottomCenter,
                         colors: [
                           theme.colorScheme.scrim.withValues(alpha: 0),
-                          theme.colorScheme.scrim.withValues(alpha: 0.72),
+                          theme.colorScheme.scrim.withValues(alpha: 0),
+                          theme.colorScheme.scrim.withValues(
+                            alpha: AppScrim.of(context, AppScrim.textStart),
+                          ),
+                        ],
+                        stops: const [
+                          AppMobileHero.topStart,
+                          AppMobileHero.bottomStart,
+                          AppMobileHero.bottomEnd,
                         ],
                       ),
                     ),
