@@ -107,16 +107,35 @@ class MobilePoster extends StatelessWidget {
   const MobilePoster({super.key, required this.item});
   final EmbyItem item;
   @override
-  Widget build(BuildContext context) => Card(
-    clipBehavior: Clip.antiAlias,
-    child: InkWell(
+  Widget build(BuildContext context) {
+    return MobilePressable(
       onTap: () => context.push(AppRoutes.item(item.id)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Expanded(child: MediaImage(item: item, maxWidth: 400)),
+          Expanded(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(AppRadii.md),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Color.fromRGBO(0, 0, 0, AppMobileCard.shadowAlpha),
+                    blurRadius: AppMobileCard.shadowBlur,
+                    spreadRadius: AppMobileCard.shadowSpread,
+                    offset: Offset(0, AppMobileCard.shadowOffsetY),
+                  ),
+                ],
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(AppRadii.md),
+                clipBehavior: Clip.antiAlias,
+                child: MediaImage(item: item, maxWidth: 400),
+              ),
+            ),
+          ),
+          const SizedBox(height: AppSpacing.xs),
           Padding(
-            padding: const EdgeInsets.all(8),
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xxs),
             child: Text(
               item.name,
               maxLines: 2,
@@ -125,28 +144,56 @@ class MobilePoster extends StatelessWidget {
           ),
         ],
       ),
-    ),
-  );
+    );
+  }
 }
 
+/// 手机网格列数标定(T5):按内容宽度约 95dp 一格,360dp→3 列、
+/// 412dp→4 列,随宽度自适应并 clamp 在 2–6 列。
+int mobileGridColumnCount(double width) => (width / 95).floor().clamp(2, 6);
+
+/// 手机端海报网格(T5):Wrap 换 GridView,列数走 [mobileGridColumnCount],
+/// 间距走 [AppSpacing];图片懒加载沿用 media_image。
+///
+/// 默认嵌套在可滚动页内:shrinkWrap + 禁用自身滚动,滚动由外层负责。
 class MobileGrid extends StatelessWidget {
-  const MobileGrid({super.key, required this.items});
+  const MobileGrid({
+    super.key,
+    required this.items,
+    this.itemBuilder,
+    this.padding = EdgeInsets.zero,
+  });
+
   final List<EmbyItem> items;
+
+  /// 自定义卡片构建;null 时用 [MobilePoster]。调用方负责条目 key。
+  final Widget Function(BuildContext context, EmbyItem item)? itemBuilder;
+
+  final EdgeInsetsGeometry padding;
+
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
-      final columns = (constraints.maxWidth / 165).floor().clamp(2, 6);
-      final width = constraints.maxWidth / columns;
+      const spacing = AppSpacing.md;
+      final columns = mobileGridColumnCount(constraints.maxWidth);
+      final cellWidth =
+          (constraints.maxWidth - spacing * (columns - 1)) / columns;
       final textScale = MediaQuery.textScalerOf(context).scale(14) / 14;
-      return Wrap(
-        children: [
-          for (final item in items)
-            SizedBox(
-              width: width,
-              height: width * 1.5 + 52 * textScale,
-              child: MobilePoster(item: item),
-            ),
-        ],
+      return GridView.builder(
+        padding: padding,
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: columns,
+          mainAxisSpacing: spacing,
+          crossAxisSpacing: spacing,
+          childAspectRatio: cellWidth / (cellWidth * 1.5 + 52 * textScale),
+        ),
+        itemCount: items.length,
+        itemBuilder: (context, index) {
+          final item = items[index];
+          return itemBuilder?.call(context, item) ?? MobilePoster(item: item);
+        },
       );
     },
   );

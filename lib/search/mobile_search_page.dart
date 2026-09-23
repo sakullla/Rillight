@@ -4,6 +4,7 @@ import 'package:flutter/material.dart' hide SearchController;
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_chrome.dart';
+import 'package:rillight/app/mobile_widgets.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme.dart';
 import 'package:rillight/auth/auth_scope.dart';
@@ -97,7 +98,7 @@ class _MobileSearchPageState extends State<MobileSearchPage> {
     return Column(
       children: [
         Padding(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(AppSpacing.md),
           child: TextField(
             key: const Key('mobile-search-field'),
             controller: _text,
@@ -181,7 +182,7 @@ class _SearchBody extends StatelessWidget {
       child: ListView(
         key: const PageStorageKey<String>('mobile-search-scroll'),
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(AppSpacing.md),
         children: [
           if (c.loading || c.loadingMore) const LinearProgressIndicator(),
           _ResultGrid(items: c.items),
@@ -247,28 +248,16 @@ class _ResultGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final columns = (constraints.maxWidth / 165).floor().clamp(2, 6);
-        final width = constraints.maxWidth / columns;
-        final textScale = MediaQuery.textScalerOf(context).scale(14) / 14;
-        return Wrap(
-          children: [
-            for (final item in items)
-              SizedBox(
-                width: width,
-                height: width * 1.5 + 52 * textScale,
-                child: _ResultPoster(item: item),
-              ),
-          ],
-        );
-      },
+    return MobileGrid(
+      items: items,
+      itemBuilder: (context, item) =>
+          _ResultPoster(key: Key('mobile-search-item-${item.id}'), item: item),
     );
   }
 }
 
 class _ResultPoster extends StatelessWidget {
-  const _ResultPoster({required this.item});
+  const _ResultPoster({super.key, required this.item});
 
   final EmbyItem item;
 
@@ -277,60 +266,74 @@ class _ResultPoster extends StatelessWidget {
     final l = AppLocalizations.of(context);
     final progress = item.playbackProgress;
     final showProgress = item.canResume && progress > 0;
-    return Card(
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        key: Key('mobile-search-item-${item.id}'),
-        onTap: () => context.push(AppRoutes.item(item.id)),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Expanded(
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  MediaImage(item: item, maxWidth: 400),
-                  if (showProgress)
-                    Align(
-                      alignment: Alignment.bottomCenter,
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          LinearProgressIndicator(
-                            value: progress,
-                            minHeight: 4,
-                          ),
-                          ColoredBox(
-                            color: Theme.of(
-                              context,
-                            ).colorScheme.surface.withValues(alpha: 0.84),
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 4,
-                                vertical: 2,
-                              ),
-                              child: Text(
-                                l.playbackProgress((progress * 100).round()),
-                                style: Theme.of(context).textTheme.labelSmall,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
+    return MobilePressable(
+      onTap: () => context.push(AppRoutes.item(item.id)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(AppRadii.md),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Color.fromRGBO(0, 0, 0, AppMobileCard.shadowAlpha),
+                    blurRadius: AppMobileCard.shadowBlur,
+                    spreadRadius: AppMobileCard.shadowSpread,
+                    offset: Offset(0, AppMobileCard.shadowOffsetY),
+                  ),
                 ],
               ),
-            ),
-            Padding(
-              padding: const EdgeInsets.all(8),
-              child: Text(
-                item.name,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(AppRadii.md),
+                clipBehavior: Clip.antiAlias,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    MediaImage(item: item, maxWidth: 400),
+                    if (showProgress)
+                      Align(
+                        alignment: Alignment.bottomCenter,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            LinearProgressIndicator(
+                              value: progress,
+                              minHeight: 4,
+                            ),
+                            ColoredBox(
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.surface.withValues(alpha: 0.84),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: AppSpacing.xxs,
+                                  vertical: 2,
+                                ),
+                                child: Text(
+                                  l.playbackProgress((progress * 100).round()),
+                                  style: Theme.of(context).textTheme.labelSmall,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                  ],
+                ),
               ),
             ),
-          ],
-        ),
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xxs),
+            child: Text(
+              item.name,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
       ),
     );
   }

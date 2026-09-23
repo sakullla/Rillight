@@ -59,7 +59,7 @@ class PhoneLibrariesTab extends StatelessWidget {
             physics: const AlwaysScrollableScrollPhysics(),
             padding: const EdgeInsets.all(AppSpacing.md),
             children: [
-              if (status != null) status,
+              ?status,
               for (final library in catalog.libraries)
                 _LibraryBlock(
                   library: library,

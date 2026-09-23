@@ -94,8 +94,12 @@ class ShelfGridPage extends StatefulWidget {
   /// 滚动距底部不足该像素时预取下一页。
   static const double loadMoreThreshold = 600;
 
-  /// 海报网格列宽上限,随 [AppBreakpoints] 缩放:紧凑 180、中等 200、宽松 220。
+  /// 海报网格列宽上限,随宽度缩放:手机(360–412dp)110、紧凑 180、
+  /// 中等 200、宽松 220。手机档让 360dp 得 3 列、412dp 得 4 列。
   static double maxCrossAxisExtentFor(double screenWidth) {
+    if (screenWidth < 600) {
+      return 110;
+    }
     if (screenWidth < AppBreakpoints.compact) {
       return 180;
     }

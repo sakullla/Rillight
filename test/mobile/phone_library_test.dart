@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_chrome.dart';
+import 'package:rillight/app/mobile_widgets.dart';
 import 'package:rillight/app/phone_libraries_tab.dart';
 import 'package:rillight/app/theme.dart';
 import 'package:rillight/auth/auth_controller.dart';
@@ -185,9 +186,9 @@ void main() {
             }),
           )
           .toList();
-      expect(arts.length, greaterThanOrEqualTo(2));
+      expect(arts.length, greaterThanOrEqualTo(3));
       final width = arts.first.size.width;
-      expect(width, closeTo((360 - 32) / 2, 1));
+      expect(width, closeTo((360 - 32 - 2 * 16) / 3, 1));
       expect(arts.every((box) => (box.size.width - width).abs() < 0.5), isTrue);
       expect(
         arts.every((box) => (box.size.height - width * 1.5).abs() < 0.5),
@@ -196,7 +197,23 @@ void main() {
       final columns = arts
           .map((box) => box.localToGlobal(Offset.zero).dx.round())
           .toSet();
-      expect(columns.length, 2);
+      expect(columns.length, 3);
+      // T5:网格卡片统一为按压反馈 + 阴影形态。
+      expect(find.byType(MobileGrid), findsOneWidget);
+      expect(find.byType(MobilePressable), findsWidgets);
+      final poster = tester.widget<DecoratedBox>(
+        find
+            .descendant(
+              of: find.byKey(
+                const ValueKey('phone-library-art-movie-inception'),
+              ),
+              matching: find.byType(DecoratedBox),
+            )
+            .first,
+      );
+      final shadow = poster.decoration as BoxDecoration;
+      expect(shadow.boxShadow!.single.blurRadius, AppMobileCard.shadowBlur);
+      expect(shadow.borderRadius, BorderRadius.circular(AppRadii.md));
       final progress = tester.widget<LinearProgressIndicator>(
         find.byKey(const ValueKey('phone-library-progress-movie-inception')),
       );
@@ -403,7 +420,15 @@ void main() {
       findsNothing,
     );
     harness.server.itemsStatus = 503;
-    final scrollable = tester.state<ScrollableState>(find.byType(Scrollable));
+    // GridView 自带内层 Scrollable,外层 ListView 的在树序中最先出现。
+    final scrollable = tester.state<ScrollableState>(
+      find
+          .descendant(
+            of: find.byKey(const PageStorageKey('library-view-movies')),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
     scrollable.position.jumpTo(scrollable.position.maxScrollExtent);
     await tester.pumpAndSettle();
     scrollable.position.jumpTo(0);
@@ -430,6 +455,36 @@ void main() {
       findsOneWidget,
     );
     expect(find.byType(MobileFailureState), findsNothing);
+    expect(tester.takeException(), isNull);
+  }, tags: ['integration']);
+
+  testWidgets('the poster grid recalibrates to four columns at 412dp', (
+    tester,
+  ) async {
+    await _start(tester);
+    tester.view.physicalSize = const Size(412, 800);
+    await tester.pumpAndSettle();
+    await _openMovies(tester);
+    final arts = tester
+        .renderObjectList<RenderBox>(
+          find.byWidgetPredicate((widget) {
+            final key = widget.key;
+            return key is ValueKey<String> &&
+                key.value.startsWith('phone-library-art-');
+          }),
+        )
+        .toList();
+    expect(arts.length, greaterThanOrEqualTo(4));
+    final columns = arts
+        .map((box) => box.localToGlobal(Offset.zero).dx.round())
+        .toSet();
+    expect(columns.length, 4);
+    final width = arts.first.size.width;
+    expect(width, closeTo((412 - 32 - 3 * 16) / 4, 1));
+    expect(
+      arts.every((box) => (box.size.height - width * 1.5).abs() < 0.5),
+      isTrue,
+    );
     expect(tester.takeException(), isNull);
   }, tags: ['integration']);
 }

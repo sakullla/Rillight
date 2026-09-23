@@ -3,7 +3,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
 import 'package:rillight/app/mobile_chrome.dart';
 import 'package:rillight/app/mobile_shell.dart';
+import 'package:rillight/app/mobile_widgets.dart';
 import 'package:rillight/app/presentation_environment.dart';
+import 'package:rillight/app/theme.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
@@ -332,4 +334,49 @@ void main() {
     },
     tags: ['integration'],
   );
+
+  testWidgets('results render as a calibrated grid of pressable poster cards', (
+    tester,
+  ) async {
+    final server = FakeEmbyServer(
+      items: [
+        for (var i = 0; i < 8; i++)
+          FakeEmbyItem(
+            id: 'grid-$i',
+            name: 'Grid ${i.toString().padLeft(2, '0')}',
+            type: 'Movie',
+            parentId: 'view-movies',
+          ),
+      ],
+    );
+    await start(tester, server);
+    await login(tester, server);
+    await openSearch(tester);
+
+    // 空态与搜索栏入口保持清晰层级。
+    expect(find.byKey(_idle), findsOneWidget);
+    expect(find.text('输入片名后搜索'), findsOneWidget);
+    expect(find.byIcon(Icons.search), findsWidgets);
+
+    await tester.enterText(find.byKey(_field), 'Grid');
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pumpAndSettle();
+
+    // T5:结果区为 GridView 网格,360dp 下列数标定为 3。
+    expect(find.byKey(_empty), findsNothing);
+    final grid = tester.widget<GridView>(find.byType(GridView));
+    final delegate =
+        grid.gridDelegate as SliverGridDelegateWithFixedCrossAxisCount;
+    expect(delegate.crossAxisCount, 3);
+    expect(delegate.crossAxisSpacing, AppSpacing.md);
+    expect(delegate.mainAxisSpacing, AppSpacing.md);
+    expect(find.byType(MobileGrid), findsOneWidget);
+    expect(find.byType(MobilePressable), findsWidgets);
+    expect(find.byKey(const Key('mobile-search-item-grid-0')), findsOneWidget);
+    final art = tester.getSize(
+      find.byKey(const Key('mobile-search-item-grid-0')),
+    );
+    expect(art.width, closeTo((360 - 32 - 2 * 16) / 3, 1));
+    expect(tester.takeException(), isNull);
+  }, tags: ['integration']);
 }
