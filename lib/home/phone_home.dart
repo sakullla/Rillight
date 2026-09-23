@@ -1,14 +1,25 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_chrome.dart';
 import 'package:rillight/app/mobile_widgets.dart';
+import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme.dart';
 import 'package:rillight/emby/emby_errors.dart';
+import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_controller.dart';
 import 'package:rillight/home/catalog_failure.dart';
+import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/catalog_scope.dart';
+import 'package:rillight/home/phone_hero.dart';
+import 'package:rillight/media_image/media_image.dart';
 
-/// 手机首页：行数据从壳中拆出，加载、空、失败各用一种画面。
+/// 首页行请求的 Limit。满这一页说明货架查询后面还有条目。
+const int phoneHomeRowLimit = 24;
+
+/// 手机首页：横幅、四行，以及行后还有内容时的货架入口。
 class PhoneHome extends StatelessWidget {
   const PhoneHome({super.key});
 
@@ -20,12 +31,37 @@ class PhoneHome extends StatelessWidget {
       listenable: catalog,
       builder: (context, _) {
         final sections = [
-          (l10n.resumeRow, catalog.resume),
-          (l10n.nextUpRow, catalog.nextUp),
-          (l10n.latestMoviesRow, catalog.latestMovies),
-          (l10n.latestSeriesRow, catalog.latestSeries),
+          _HomeSection(
+            title: l10n.resumeRow,
+            state: catalog.resume,
+            shelfId: CatalogKeys.shelfResume,
+            location: AppRoutes.shelfResume,
+            rowKey: CatalogKeys.resumeRow,
+            resume: true,
+          ),
+          _HomeSection(
+            title: l10n.nextUpRow,
+            state: catalog.nextUp,
+            shelfId: CatalogKeys.shelfNextUp,
+            location: AppRoutes.shelfNextUp,
+            rowKey: CatalogKeys.nextUpRow,
+          ),
+          _HomeSection(
+            title: l10n.latestMoviesRow,
+            state: catalog.latestMovies,
+            shelfId: CatalogKeys.shelfLatestMovies,
+            location: AppRoutes.shelfLatestMovies,
+            rowKey: CatalogKeys.latestMoviesRow,
+          ),
+          _HomeSection(
+            title: l10n.latestSeriesRow,
+            state: catalog.latestSeries,
+            shelfId: CatalogKeys.shelfLatestSeries,
+            location: AppRoutes.shelfLatestSeries,
+            rowKey: CatalogKeys.latestSeriesRow,
+          ),
         ];
-        final states = [for (final section in sections) section.$2];
+        final states = [for (final section in sections) section.state];
         final hasItems = states.any((state) => state.items.isNotEmpty);
         final loading = states.any((state) => state.loading);
         EmbyException? firstError;
@@ -58,13 +94,14 @@ class PhoneHome extends StatelessWidget {
           body = Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              PhoneHero(catalog: catalog),
               for (final section in sections)
                 _PhoneHomeRow(
-                  title: section.$1,
-                  state: section.$2,
+                  section: section,
                   retry: () {
                     catalog.reloadHomeRows();
                   },
+                  onRemoveFromResume: catalog.hideFromResume,
                 ),
               TextButton.icon(
                 style: TextButton.styleFrom(minimumSize: _refreshHit),
@@ -93,30 +130,68 @@ class PhoneHome extends StatelessWidget {
 
 const Size _refreshHit = Size(AppSpacing.huge, AppSpacing.huge);
 
-class _PhoneHomeRow extends StatelessWidget {
-  const _PhoneHomeRow({
+class _HomeSection {
+  const _HomeSection({
     required this.title,
     required this.state,
-    required this.retry,
+    required this.shelfId,
+    required this.location,
+    required this.rowKey,
+    this.resume = false,
   });
 
   final String title;
   final CatalogRowState state;
+  final String shelfId;
+  final String location;
+  final Key rowKey;
+  final bool resume;
+}
+
+class _PhoneHomeRow extends StatelessWidget {
+  const _PhoneHomeRow({
+    required this.section,
+    required this.retry,
+    required this.onRemoveFromResume,
+  });
+
+  final _HomeSection section;
   final VoidCallback retry;
+  final Future<void> Function(EmbyItem item) onRemoveFromResume;
 
   @override
   Widget build(BuildContext context) {
+    final state = section.state;
     if (state.hidden) {
       return const SizedBox.shrink();
     }
     final l10n = AppLocalizations.of(context);
     final problem = state.error ?? state.notice;
+    final hasMore =
+        state.error == null && state.items.length >= phoneHomeRowLimit;
     return Column(
+      key: section.rowKey,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
           padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
-          child: Text(title, style: Theme.of(context).textTheme.titleLarge),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  section.title,
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+              ),
+              if (hasMore)
+                TextButton(
+                  key: CatalogKeys.shelfMore(section.shelfId),
+                  style: TextButton.styleFrom(minimumSize: _refreshHit),
+                  onPressed: () => context.push(section.location),
+                  child: Text(l10n.more),
+                ),
+            ],
+          ),
         ),
         if (state.loading && state.items.isEmpty)
           const MobileLoadingPlaceholder.row(),
@@ -130,16 +205,89 @@ class _PhoneHomeRow extends StatelessWidget {
             height:
                 250 + 35 * (MediaQuery.textScalerOf(context).scale(14) / 14),
             child: ListView.builder(
-              key: PageStorageKey('row-$title'),
+              key: PageStorageKey('row-${section.title}'),
               scrollDirection: Axis.horizontal,
               itemCount: state.items.length,
-              itemBuilder: (context, index) => SizedBox(
-                width: 148,
-                child: MobilePoster(item: state.items[index]),
-              ),
+              itemBuilder: (context, index) {
+                final item = state.items[index];
+                if (section.resume) {
+                  return _ResumePoster(
+                    item: item,
+                    onRemove: () {
+                      unawaited(onRemoveFromResume(item));
+                    },
+                  );
+                }
+                return SizedBox(width: 148, child: MobilePoster(item: item));
+              },
             ),
           ),
       ],
+    );
+  }
+}
+
+class _ResumePoster extends StatelessWidget {
+  const _ResumePoster({required this.item, required this.onRemove});
+
+  final EmbyItem item;
+  final VoidCallback onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final progress = item.playbackProgress;
+    return SizedBox(
+      width: 148,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(AppRadii.md),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      key: CatalogKeys.item(item.id),
+                      onTap: () => context.push(AppRoutes.item(item.id)),
+                      child: MediaImage(item: item, maxWidth: 400),
+                    ),
+                  ),
+                  if (item.canResume)
+                    Align(
+                      alignment: Alignment.bottomCenter,
+                      child: LinearProgressIndicator(
+                        key: CatalogKeys.resumeProgress,
+                        value: progress,
+                        minHeight: 4,
+                      ),
+                    ),
+                  Align(
+                    alignment: Alignment.topRight,
+                    child: IconButton(
+                      key: CatalogKeys.removeFromResume(item.id),
+                      tooltip: l10n.removeFromResume,
+                      onPressed: onRemove,
+                      icon: const Icon(Icons.close),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          Text(item.name, maxLines: 2, overflow: TextOverflow.ellipsis),
+          if (item.canResume)
+            Text(
+              l10n.playbackProgress((progress * 100).round()),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+        ],
+      ),
     );
   }
 }

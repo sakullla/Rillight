@@ -11,6 +11,7 @@ import 'package:rillight/home/catalog_shell.dart';
 import 'package:rillight/home/home_page.dart';
 import 'package:rillight/library/item_detail_page.dart';
 import 'package:rillight/library/library_page.dart';
+import 'package:rillight/home/phone_shelf_page.dart';
 import 'package:rillight/library/shelf_grid_page.dart';
 import 'package:rillight/search/search_page.dart';
 import 'package:rillight/app/mobile_shell.dart';
@@ -92,6 +93,10 @@ GoRouter createAppRouter({
                 itemId: state.pathParameters['itemId']!,
                 initialSeasonId: state.uri.queryParameters['season'],
               ),
+            ),
+            GoRoute(
+              path: '/shelf/:source',
+              builder: (context, state) => PhoneShelfPage.fromState(state),
             ),
           ],
         ),
