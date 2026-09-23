@@ -10,83 +10,165 @@ import 'package:rillight/library/episode_detail_sections.dart';
 import 'package:rillight/library/item_format.dart';
 import 'package:rillight/media_image/media_image.dart';
 
-/// 铺到状态栏后方的 16:9 横幅。剧名叠在画面上，不另占一条顶栏标题。
+/// 头部元数据条目:年份/时长/评级/季集数等,以胶囊形式排在标题下方。
+/// [highlight] 用于评级等需要强调的值。
+class PhoneMetaEntry {
+  const PhoneMetaEntry(this.label, {this.highlight = false});
+
+  final String label;
+  final bool highlight;
+}
+
+/// 沉浸头部:全宽 16:9 背图 + 顶带/底带渐变(收敛到 [AppScrim]/[AppMobileHero]
+/// token),标题、元数据胶囊与主操作排在图片下方的衔接带上,不再叠字压图。
+/// 背图缺失时以占位底色兜底,不出现空白区。
 class PhoneItemBanner extends StatelessWidget {
   const PhoneItemBanner({
     super.key,
     required this.item,
     required this.title,
-    this.subtitle,
+    this.meta = const [],
+    this.actions,
     this.preferBackdrop = true,
     this.maxWidth = PhoneMotion.pageRequestWidth,
   });
 
   static const bannerKey = Key('phone-detail-banner');
+  static const metaKey = Key('phone-detail-meta');
 
   final EmbyItem item;
   final String title;
-  final String? subtitle;
+  final List<PhoneMetaEntry> meta;
+  final Widget? actions;
   final bool preferBackdrop;
   final int maxWidth;
+
+  /// 背图高度上限(相对屏高):横屏/矮窗里 16:9 全宽会超过半屏,
+  /// 压住标题与主操作,这里封顶保证头部信息首屏可达。
+  static const double _maxHeightFactor = 0.5;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return AspectRatio(
+    final size = MediaQuery.sizeOf(context);
+    final byWidth = size.width * 9 / 16;
+    final heightCap = size.height * _maxHeightFactor;
+    final imageHeight = byWidth < heightCap ? byWidth : heightCap;
+    return Column(
       key: bannerKey,
-      aspectRatio: 16 / 9,
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          PhoneMotion.sharedImage(
-            itemId: item.id,
-            preferBackdrop: preferBackdrop,
-            child: MediaImage(
-              item: item,
-              preferBackdrop: preferBackdrop,
-              maxWidth: maxWidth,
-            ),
-          ),
-          const DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  Color(0x99000000),
-                  Color(0x00000000),
-                  Color(0xCC000000),
-                ],
-                stops: [0, 0.45, 1],
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SizedBox(
+          height: imageHeight,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              ColoredBox(color: theme.colorScheme.surfaceContainerHigh),
+              PhoneMotion.sharedImage(
+                itemId: item.id,
+                preferBackdrop: preferBackdrop,
+                child: MediaImage(
+                  item: item,
+                  preferBackdrop: preferBackdrop,
+                  maxWidth: maxWidth,
+                ),
               ),
-            ),
-          ),
-          Positioned(
-            left: AppSpacing.md,
-            right: AppSpacing.md,
-            bottom: AppSpacing.md,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: theme.textTheme.headlineSmall?.copyWith(
-                    color: Colors.white,
+              // 顶带:保护透明顶栏与返回钮,向下溶到透明。
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.black.withValues(
+                        alpha: AppScrim.of(context, AppScrim.top),
+                      ),
+                      Colors.transparent,
+                    ],
                   ),
                 ),
-                if (subtitle != null && subtitle!.isNotEmpty) ...[
-                  const SizedBox(height: AppSpacing.xxs),
-                  Text(
-                    subtitle!,
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: Colors.white,
-                    ),
+              ),
+              // 底带:画面溶入页面底色,与下方信息块无缝衔接。
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.transparent,
+                      Colors.transparent,
+                      theme.colorScheme.surface,
+                    ],
+                    stops: const [
+                      0,
+                      AppMobileHero.bottomStart,
+                      AppMobileHero.bottomEnd,
+                    ],
                   ),
-                ],
-              ],
-            ),
+                ),
+              ),
+            ],
           ),
-        ],
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.md,
+            AppSpacing.sm,
+            AppSpacing.md,
+            AppSpacing.md,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title, style: theme.textTheme.headlineSmall),
+              if (meta.isNotEmpty) ...[
+                const SizedBox(height: AppSpacing.xs),
+                Wrap(
+                  key: metaKey,
+                  spacing: AppSpacing.xs,
+                  runSpacing: AppSpacing.xxs,
+                  children: [for (final entry in meta) _MetaChip(entry: entry)],
+                ),
+              ],
+              if (actions != null) ...[
+                const SizedBox(height: AppSpacing.sm),
+                actions!,
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _MetaChip extends StatelessWidget {
+  const _MetaChip({required this.entry});
+
+  final PhoneMetaEntry entry;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final highlight = entry.highlight;
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.sm,
+        vertical: AppSpacing.xxs,
+      ),
+      decoration: BoxDecoration(
+        color: highlight
+            ? theme.colorScheme.primary.withValues(alpha: 0.16)
+            : theme.colorScheme.surfaceContainerHigh,
+        borderRadius: BorderRadius.circular(AppRadii.md),
+      ),
+      child: Text(
+        entry.label,
+        style: theme.textTheme.labelSmall?.copyWith(
+          color: highlight
+              ? theme.colorScheme.primary
+              : theme.colorScheme.onSurfaceVariant,
+        ),
       ),
     );
   }
@@ -284,7 +366,7 @@ class _EpisodeRow extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(episode.name),
+                      Text(episode.name, style: theme.textTheme.titleSmall),
                       if (runtime != null)
                         Text(
                           runtime,
@@ -292,11 +374,18 @@ class _EpisodeRow extends StatelessWidget {
                             color: theme.colorScheme.onSurfaceVariant,
                           ),
                         ),
+                      // 该集简介:EmbyItem.overview 缺失(无字段/纯空白/HTML 残迹)
+                      // 时整行隐藏,卡片优雅降级为标题+时长。
                       if (overview != null)
                         Text(
                           overview,
+                          key: const Key('phone-episode-overview'),
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                            height: 1.4,
+                          ),
                         ),
                       if (progress > 0 && !episode.userData.played)
                         Padding(

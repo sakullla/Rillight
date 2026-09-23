@@ -374,25 +374,31 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
     return extra;
   }
 
-  String? _bannerSubtitle(AppLocalizations l, EmbyItem item) {
+  /// 头部元数据胶囊:年份/季集数/时长/评级/类型,评级高亮突出层级。
+  List<PhoneMetaEntry> _bannerMeta(AppLocalizations l, EmbyItem item) {
     if (item.isSeries) {
       final seasons = _controller?.seasons ?? const <EmbyItem>[];
-      final meta = [
-        if (item.productionYear != null) '${item.productionYear}',
-        if (seasons.isNotEmpty) l.seasonCount(seasons.length),
-        if (item.childCount != null) l.episodeCount(item.childCount!),
-      ].where((part) => part.isNotEmpty).join(' · ');
-      return meta.isEmpty ? null : meta;
+      return [
+        if (item.productionYear != null)
+          PhoneMetaEntry('${item.productionYear}'),
+        if (seasons.isNotEmpty) PhoneMetaEntry(l.seasonCount(seasons.length)),
+        if (item.childCount != null)
+          PhoneMetaEntry(l.episodeCount(item.childCount!)),
+      ];
     }
-    final meta = [
-      if (item.isEpisode) ?seasonEpisodeCode(item),
-      if (item.productionYear != null) '${item.productionYear}',
-      ?runtimeLabel(l, item),
+    final code = item.isEpisode ? seasonEpisodeCode(item) : null;
+    final runtime = runtimeLabel(l, item);
+    return [
+      if (code != null) PhoneMetaEntry(code),
+      if (item.productionYear != null) PhoneMetaEntry('${item.productionYear}'),
+      if (runtime != null) PhoneMetaEntry(runtime),
       if (item.communityRating != null)
-        item.communityRating!.toStringAsFixed(1),
-      ...item.genres,
-    ].where((part) => part.isNotEmpty).join(' · ');
-    return meta.isEmpty ? null : meta;
+        PhoneMetaEntry(
+          item.communityRating!.toStringAsFixed(1),
+          highlight: true,
+        ),
+      for (final genre in item.genres) PhoneMetaEntry(genre),
+    ];
   }
 
   String _playLabel(AppLocalizations l, EmbyItem item, EmbyItem? target) {
@@ -424,17 +430,6 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
             foregroundColor: imageSource == null ? null : Colors.white,
             title: imageSource == null ? Text(l.playerLoading) : null,
           ),
-          bottomNavigationBar: item == null
-              ? null
-              : _PlayBar(
-                  label: _playLabel(l, item, target),
-                  enabled: target != null && target.isPlayable,
-                  showRestart: !item.isSeries && target?.canResume == true,
-                  onPlay: target == null ? null : () => _openPlayer(target.id),
-                  onRestart: target == null
-                      ? null
-                      : () => _openPlayer(target.id, fromStart: true),
-                ),
           body: RefreshIndicator(
             onRefresh: _refresh,
             child: ListView(
@@ -446,7 +441,23 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
                   PhoneItemBanner(
                     item: imageSource,
                     title: (item ?? imageSource).name,
-                    subtitle: item == null ? null : _bannerSubtitle(l, item),
+                    meta: item == null ? const [] : _bannerMeta(l, item),
+                    actions: item == null
+                        ? null
+                        : _DetailPlayActions(
+                            label: target == null
+                                ? l.noPlayableStream
+                                : _playLabel(l, item, target),
+                            enabled: target != null && target.isPlayable,
+                            showRestart:
+                                !item.isSeries && target?.canResume == true,
+                            onPlay: target == null
+                                ? null
+                                : () => _openPlayer(target.id),
+                            onRestart: target == null
+                                ? null
+                                : () => _openPlayer(target.id, fromStart: true),
+                          ),
                     preferBackdrop: handoff?.preferBackdrop ?? true,
                     maxWidth: handoff?.maxWidth ?? PhoneMotion.pageRequestWidth,
                   ),
@@ -509,8 +520,10 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
   }
 }
 
-class _PlayBar extends StatelessWidget {
-  const _PlayBar({
+/// 头部主操作:主播放按钮融入沉浸头部(`mobile-detail-play`),可续播的非剧集
+/// 条目附"从头播放"次级按钮(`phone-detail-play-start`),key 与行为保持不变。
+class _DetailPlayActions extends StatelessWidget {
+  const _DetailPlayActions({
     required this.label,
     required this.enabled,
     required this.showRestart,
@@ -527,34 +540,28 @@ class _PlayBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context);
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.all(AppSpacing.sm),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            FilledButton.icon(
-              key: const Key('mobile-detail-play'),
-              style: FilledButton.styleFrom(minimumSize: const Size(48, 52)),
-              onPressed: enabled ? onPlay : null,
-              icon: const Icon(Icons.play_arrow),
-              label: Text(label, textAlign: TextAlign.center),
-            ),
-            if (showRestart) ...[
-              const SizedBox(height: AppSpacing.xs),
-              OutlinedButton(
-                key: const Key('phone-detail-play-start'),
-                style: OutlinedButton.styleFrom(
-                  minimumSize: const Size(48, 52),
-                ),
-                onPressed: onRestart,
-                child: Text(l.playFromStart),
-              ),
-            ],
-          ],
+    return Row(
+      children: [
+        Expanded(
+          child: FilledButton.icon(
+            key: const Key('mobile-detail-play'),
+            style: FilledButton.styleFrom(minimumSize: const Size(48, 48)),
+            onPressed: enabled ? onPlay : null,
+            icon: const Icon(Icons.play_arrow),
+            label: Text(label, textAlign: TextAlign.center),
+          ),
         ),
-      ),
+        if (showRestart) ...[
+          const SizedBox(width: AppSpacing.sm),
+          OutlinedButton.icon(
+            key: const Key('phone-detail-play-start'),
+            style: OutlinedButton.styleFrom(minimumSize: const Size(48, 48)),
+            onPressed: onRestart,
+            icon: const Icon(Icons.replay),
+            label: Text(l.playFromStart),
+          ),
+        ],
+      ],
     );
   }
 }
