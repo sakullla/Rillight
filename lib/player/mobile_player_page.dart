@@ -15,11 +15,12 @@ import 'package:rillight/player/danmaku/danmaku_panel.dart';
 import 'package:rillight/player/danmaku/danmaku_renderer.dart';
 import 'package:rillight/player/danmaku/dandanplay_models.dart';
 import 'package:rillight/player/phone_orientation.dart';
+import 'package:rillight/player/phone_player_controls.dart';
+import 'package:rillight/player/phone_player_gestures.dart';
 import 'package:rillight/player/playback_models.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_controller.dart';
 import 'package:rillight/player/player_keys.dart';
-import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/player_window.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
@@ -34,6 +35,7 @@ class MobilePlayerPage extends StatefulWidget {
     this.orientation,
     this.wakeLock,
     this.danmakuHasher,
+    this.displayControl,
   });
   final String itemId;
   final String? mediaSourceId;
@@ -53,6 +55,10 @@ class MobilePlayerPage extends StatefulWidget {
   /// Optional hash reader. Null uses the danmaku default, which never blocks
   /// playback when the stream head cannot be read.
   final DanmakuStreamHasher? danmakuHasher;
+
+  /// Optional system brightness / volume access for the gesture layer.
+  /// Null uses the MethodChannel backed by `RillightAndroidPlayerPlugin`.
+  final PhoneDisplayControl? displayControl;
   @override
   State<MobilePlayerPage> createState() => MobilePlayerPageState();
 }
@@ -99,12 +105,13 @@ class MobilePlayerPageState extends State<MobilePlayerPage> {
   AuthController? _auth;
   Object? _identity;
   bool _closing = false;
-  double? _seek;
   PhoneOrientation? _orientation;
   PhonePlaybackWakeLock? _wake;
   DanmakuController? _danmaku;
   bool _danmakuLayerPinned = false;
   String? _danmakuLayerItemId;
+  PhoneDisplayControl? _display;
+  bool _controlsLocked = false;
 
   @override
   void didChangeDependencies() {
@@ -124,6 +131,7 @@ class MobilePlayerPageState extends State<MobilePlayerPage> {
           restoreTo: phoneOrientationsFor(MediaQuery.orientationOf(context)),
         );
     _wake = widget.wakeLock ?? PhonePlaybackWakeLock();
+    _display = widget.displayControl ?? MethodChannelPhoneDisplayControl();
     final created = PlayerController(
       client: auth.client,
       itemId: widget.itemId,
@@ -134,7 +142,8 @@ class MobilePlayerPageState extends State<MobilePlayerPage> {
       preferredAudioStreamIndex: widget.audioStreamIndex,
       preferredSubtitleStreamIndex: widget.subtitleStreamIndex,
       progressInterval: bindings.progressInterval,
-      controlsHideAfter: bindings.controlsHideAfter,
+      // 手机控制层自动隐藏 4s(T6);桌面/TV 仍用 bindings 档。
+      controlsHideAfter: const Duration(seconds: 4),
       nextEpisodeCountdown: bindings.nextEpisodeCountdown,
       settingsStore: bindings.settingsStore,
       snapshotStore: bindings.snapshotStore,
@@ -268,94 +277,6 @@ class MobilePlayerPageState extends State<MobilePlayerPage> {
     navigator.pop();
   }
 
-  Future<void> _tracks() async {
-    final c = controller!, l = AppLocalizations.of(context);
-    c.setControlsPinned(true);
-    await PhoneMotion.showBottomPanel<void>(
-      context: context,
-      useSafeArea: true,
-      isScrollControlled: true,
-      builder: (context) => FractionallySizedBox(
-        heightFactor: .8,
-        child: ListenableBuilder(
-          listenable: c,
-          builder: (context, _) => ListView(
-            padding: const EdgeInsets.all(20),
-            children: [
-              Text(
-                l.mobileTracks,
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
-              const SizedBox(height: 16),
-              Text(l.audioTrack),
-              for (final track in c.audioTracks)
-                ListTile(
-                  selected: c.audioStreamIndex == track.index,
-                  leading: Icon(
-                    c.audioStreamIndex == track.index
-                        ? Icons.check_circle
-                        : Icons.radio_button_unchecked,
-                  ),
-                  title: Text(track.label),
-                  onTap: () => c.setAudio(track.index),
-                ),
-              const Divider(),
-              Text(l.subtitleTrack),
-              ListTile(
-                selected: c.subtitleStreamIndex == null,
-                leading: Icon(
-                  c.subtitleStreamIndex == null
-                      ? Icons.check_circle
-                      : Icons.radio_button_unchecked,
-                ),
-                title: Text(l.subtitleOff),
-                onTap: () => c.setSubtitle(null),
-              ),
-              for (final track in c.subtitleTracks)
-                ListTile(
-                  selected: c.subtitleStreamIndex == track.index,
-                  leading: Icon(
-                    c.subtitleStreamIndex == track.index
-                        ? Icons.check_circle
-                        : Icons.radio_button_unchecked,
-                  ),
-                  title: Text(track.label),
-                  onTap: () => c.setSubtitle(track.index),
-                ),
-              if (c.trackFailure != null) Text(c.trackFailure!),
-              const Divider(),
-              Text(l.mediaSource),
-              for (final source in c.mediaSources)
-                ListTile(
-                  selected: source.id == c.activeMediaSourceId,
-                  title: Text(source.name ?? source.id),
-                  onTap: () => c.switchMediaSource(source.id),
-                ),
-              const Divider(),
-              Text(l.mobileSpeed),
-              Wrap(
-                spacing: 8,
-                children: [
-                  for (final rate in [.5, 1.0, 1.25, 1.5, 2.0])
-                    ChoiceChip(
-                      label: Text('${rate}x'),
-                      selected: c.playbackRate == rate,
-                      onSelected: (_) => c.setRate(rate),
-                    ),
-                ],
-              ),
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: Text(l.mobileBack),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-    if (mounted && !_closing) c.setControlsPinned(false);
-  }
-
   Future<void> _openDanmakuPanel() async {
     final danmaku = _danmaku;
     final current = controller;
@@ -472,17 +393,56 @@ class MobilePlayerPageState extends State<MobilePlayerPage> {
     super.dispose();
   }
 
-  String _clock(Duration value) {
-    final hours = value.inHours;
-    final minutes = value.inMinutes.remainder(60).toString().padLeft(2, '0');
-    final seconds = (value.inSeconds % 60).toString().padLeft(2, '0');
-    if (hours > 0) return '$hours:$minutes:$seconds';
-    return '$minutes:$seconds';
+  void _onLockChanged(bool locked) {
+    setState(() => _controlsLocked = locked);
+  }
+
+  void _unlock() {
+    setState(() => _controlsLocked = false);
+    controller?.onUserActivity();
+  }
+
+  Widget _centerStatus(PlayerController c) {
+    final l = AppLocalizations.of(context);
+    return Center(
+      child: c.loading
+          ? const CircularProgressIndicator()
+          : c.error != null || c.sessionExpired || c.disconnected
+          ? SingleChildScrollView(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    c.sessionExpired
+                        ? l.playbackSessionExpired
+                        : c.disconnected
+                        ? l.playbackDisconnected
+                        : c.error == PlayerErrorKind.noStream
+                        ? l.noPlayableStream
+                        : l.playbackFailed,
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 16),
+                  FilledButton(
+                    onPressed: c.sessionExpired
+                        ? () async {
+                            await _close();
+                            await _auth?.logout();
+                          }
+                        : c.retryPlayback,
+                    child: Text(c.sessionExpired ? l.connect : l.retry),
+                  ),
+                ],
+              ),
+            )
+          : const SizedBox.shrink(),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final c = controller!, l = AppLocalizations.of(context);
+    final c = controller!;
     final danmaku = _danmaku;
     return PopScope(
       canPop: false,
@@ -501,10 +461,11 @@ class MobilePlayerPageState extends State<MobilePlayerPage> {
                 Positioned.fill(
                   child: IgnorePointer(child: DanmakuView(controller: danmaku)),
                 ),
-              GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: c.toggleControls,
-                child: const SizedBox.expand(),
+              PhonePlayerGestures(
+                controller: c,
+                display: _display!,
+                locked: _controlsLocked,
+                onUnlock: _unlock,
               ),
               ListenableBuilder(
                 listenable: c,
@@ -519,256 +480,17 @@ class MobilePlayerPageState extends State<MobilePlayerPage> {
                       c.trackFailure != null;
                   return PhoneMotion.reveal(
                     context: context,
-                    visible: showControls,
-                    child: SafeArea(
-                      child: Column(
-                        children: [
-                          ColoredBox(
-                            color: Colors.black54,
-                            child: Row(
-                              children: [
-                                IconButton(
-                                  tooltip: l.closePlayer,
-                                  onPressed: _close,
-                                  icon: const Icon(Icons.arrow_back),
-                                ),
-                                Expanded(
-                                  child: Text(
-                                    c.item?.name ?? l.playerLoading,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                                IconButton(
-                                  key: const Key('mobile-player-danmaku'),
-                                  tooltip: l.danmaku,
-                                  onPressed: c.loading
-                                      ? null
-                                      : _openDanmakuPanel,
-                                  icon: Icon(
-                                    danmaku != null && danmaku.danmakuOn
-                                        ? Icons.subtitles
-                                        : Icons.subtitles_outlined,
-                                  ),
-                                ),
-                                IconButton(
-                                  tooltip: l.mobileTracks,
-                                  onPressed: c.loading ? null : _tracks,
-                                  icon: const Icon(Icons.tune),
-                                ),
-                              ],
-                            ),
-                          ),
-                          Expanded(
-                            child: Center(
-                              child: c.loading
-                                  ? const CircularProgressIndicator()
-                                  : c.error != null ||
-                                        c.sessionExpired ||
-                                        c.disconnected
-                                  ? SingleChildScrollView(
-                                      padding: const EdgeInsets.all(24),
-                                      child: Column(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Text(
-                                            c.sessionExpired
-                                                ? l.playbackSessionExpired
-                                                : c.disconnected
-                                                ? l.playbackDisconnected
-                                                : c.error ==
-                                                      PlayerErrorKind.noStream
-                                                ? l.noPlayableStream
-                                                : l.playbackFailed,
-                                            textAlign: TextAlign.center,
-                                          ),
-                                          const SizedBox(height: 16),
-                                          FilledButton(
-                                            onPressed: c.sessionExpired
-                                                ? () async {
-                                                    await _close();
-                                                    await _auth?.logout();
-                                                  }
-                                                : c.retryPlayback,
-                                            child: Text(
-                                              c.sessionExpired
-                                                  ? l.connect
-                                                  : l.retry,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    )
-                                  : const SizedBox.shrink(),
-                            ),
-                          ),
-                          ColoredBox(
-                            color: Colors.black87,
-                            child: ConstrainedBox(
-                              constraints: BoxConstraints(
-                                maxHeight:
-                                    MediaQuery.sizeOf(context).height * .48,
-                              ),
-                              child: SingleChildScrollView(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                ),
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    if (c.progressSyncFailed)
-                                      Text(l.progressSyncFailed),
-                                    if (c.trackFailure != null)
-                                      Text(c.trackFailure!),
-                                    if (c.backgroundReleased)
-                                      Text(l.mobileBackgroundPaused),
-                                    if (c.playbackEnded) Text(l.playbackEnded),
-                                    if (c.isBuffering && !c.loading)
-                                      const LinearProgressIndicator(),
-                                    Row(
-                                      children: [
-                                        Text(_clock(c.position)),
-                                        Expanded(
-                                          child: Slider(
-                                            key: const Key(
-                                              'mobile-player-seek',
-                                            ),
-                                            value:
-                                                (_seek ??
-                                                        c
-                                                            .position
-                                                            .inMilliseconds
-                                                            .toDouble())
-                                                    .clamp(
-                                                      0,
-                                                      c.duration.inMilliseconds
-                                                          .toDouble()
-                                                          .clamp(
-                                                            1,
-                                                            double.infinity,
-                                                          ),
-                                                    ),
-                                            max: c.duration.inMilliseconds
-                                                .toDouble()
-                                                .clamp(1, double.infinity),
-                                            onChanged:
-                                                c.loading ||
-                                                    c.error != null ||
-                                                    c.disconnected ||
-                                                    c.sessionExpired
-                                                ? null
-                                                : (v) =>
-                                                      setState(() => _seek = v),
-                                            onChangeEnd: (v) {
-                                              setState(() => _seek = null);
-                                              c.seekTo(
-                                                Duration(
-                                                  milliseconds: v.round(),
-                                                ),
-                                              );
-                                            },
-                                          ),
-                                        ),
-                                        Text(_clock(c.duration)),
-                                      ],
-                                    ),
-                                    Row(
-                                      children: [
-                                        IconButton(
-                                          key: const Key('mobile-player-mute'),
-                                          tooltip: c.volume <= 0
-                                              ? l.unmute
-                                              : l.mute,
-                                          onPressed:
-                                              c.loading ||
-                                                  c.error != null ||
-                                                  c.disconnected ||
-                                                  c.sessionExpired
-                                              ? null
-                                              : () => c.toggleMute(),
-                                          icon: Icon(
-                                            c.volume <= 0
-                                                ? Icons.volume_off
-                                                : Icons.volume_up,
-                                          ),
-                                        ),
-                                        Expanded(
-                                          child: Slider(
-                                            key: const Key(
-                                              'mobile-player-volume',
-                                            ),
-                                            value: c.volume
-                                                .clamp(
-                                                  0,
-                                                  PlayerSettings.volumeMax,
-                                                )
-                                                .toDouble(),
-                                            max: PlayerSettings.volumeMax
-                                                .toDouble(),
-                                            onChanged:
-                                                c.loading ||
-                                                    c.error != null ||
-                                                    c.disconnected ||
-                                                    c.sessionExpired
-                                                ? null
-                                                : (value) => c.setVolume(
-                                                    value.round(),
-                                                  ),
-                                          ),
-                                        ),
-                                        Text(l.volumePercent(c.volume)),
-                                      ],
-                                    ),
-                                    Row(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.center,
-                                      children: [
-                                        IconButton(
-                                          tooltip: l.mobileRewind,
-                                          onPressed: () => c.seekRelative(
-                                            const Duration(seconds: -10),
-                                          ),
-                                          icon: const Icon(Icons.replay_10),
-                                          iconSize: 32,
-                                        ),
-                                        IconButton(
-                                          key: const Key(
-                                            'mobile-player-toggle',
-                                          ),
-                                          tooltip: c.isPlaying
-                                              ? l.pause
-                                              : l.play,
-                                          onPressed:
-                                              c.loading ||
-                                                  c.error != null ||
-                                                  c.disconnected ||
-                                                  c.sessionExpired
-                                              ? null
-                                              : c.togglePlay,
-                                          icon: Icon(
-                                            c.isPlaying
-                                                ? Icons.pause_circle
-                                                : Icons.play_circle,
-                                          ),
-                                          iconSize: 48,
-                                        ),
-                                        IconButton(
-                                          tooltip: l.mobileForward,
-                                          onPressed: () => c.seekRelative(
-                                            const Duration(seconds: 10),
-                                          ),
-                                          icon: const Icon(Icons.forward_10),
-                                          iconSize: 32,
-                                        ),
-                                      ],
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
+                    visible: showControls || _controlsLocked,
+                    child: PhonePlayerControls(
+                      controller: c,
+                      danmaku: danmaku,
+                      orientation: _orientation!,
+                      onClose: _close,
+                      onOpenDanmakuPanel: _openDanmakuPanel,
+                      onOpenDanmakuSearch: _openDanmakuSearch,
+                      center: _centerStatus(c),
+                      locked: _controlsLocked,
+                      onLockChanged: _onLockChanged,
                     ),
                   );
                 },

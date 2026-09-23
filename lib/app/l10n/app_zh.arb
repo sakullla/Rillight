@@ -1157,5 +1157,29 @@
   "mobileWatched": "已看",
   "mobileUnwatched": "未看",
   "mobileMovies": "电影",
-  "mobileSeries": "剧集"
+  "mobileSeries": "剧集",
+  "mobileLock": "锁定屏幕",
+  "@mobileLock": {
+    "description": "Player top-bar tooltip that locks the screen against gestures."
+  },
+  "mobileUnlock": "解锁屏幕",
+  "@mobileUnlock": {
+    "description": "Tooltip of the only visible control while the player screen is locked."
+  },
+  "mobileMore": "更多",
+  "@mobileMore": {
+    "description": "Player top-bar tooltip opening the bottom panel with danmaku, tracks, speed and volume."
+  },
+  "mobileRotate": "切换竖屏预览",
+  "@mobileRotate": {
+    "description": "Player top-bar tooltip toggling portrait preview while playback keeps the orientation lock."
+  },
+  "mobileDanmakuPanel": "弹幕设置",
+  "@mobileDanmakuPanel": {
+    "description": "More-panel entry that opens the danmaku settings panel."
+  },
+  "mobileAppVolume": "应用内音量",
+  "@mobileAppVolume": {
+    "description": "More-panel section header for the in-app volume slider and mute."
+  }
 }

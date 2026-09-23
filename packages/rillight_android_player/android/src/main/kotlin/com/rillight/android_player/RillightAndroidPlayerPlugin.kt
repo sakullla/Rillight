@@ -1,6 +1,8 @@
 package com.rillight.android_player
 
+import android.app.Activity
 import android.content.Context
+import android.media.AudioManager
 import android.media.MediaCodecList
 import android.os.Handler
 import android.os.Looper
@@ -17,12 +19,13 @@ import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
 import io.flutter.plugin.common.*
 import io.flutter.plugin.platform.*
-
+import kotlin.math.roundToInt
 class RillightAndroidPlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChannel.StreamHandler, ActivityAware {
     private lateinit var context: Context
     private lateinit var channel: MethodChannel
     private lateinit var eventChannel: EventChannel
     private var sink: EventChannel.EventSink? = null
+    private var activity: Activity? = null
     private val handler = Handler(Looper.getMainLooper())
     private val owners = mutableMapOf<String, Owner>()
 
@@ -56,10 +59,10 @@ class RillightAndroidPlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandl
         owners.values.forEach { it.release() }; owners.clear()
         channel.setMethodCallHandler(null); eventChannel.setStreamHandler(null); sink = null
     }
-    override fun onAttachedToActivity(binding: ActivityPluginBinding) {}
-    override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {}
-    override fun onDetachedFromActivityForConfigChanges() { owners.values.forEach { it.player?.pause() } }
-    override fun onDetachedFromActivity() { owners.values.forEach { it.release() } }
+    override fun onAttachedToActivity(binding: ActivityPluginBinding) { activity = binding.activity }
+    override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) { activity = binding.activity }
+    override fun onDetachedFromActivityForConfigChanges() { activity = null; owners.values.forEach { it.player?.pause() } }
+    override fun onDetachedFromActivity() { activity = null; owners.values.forEach { it.release() } }
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         val args = call.arguments as? Map<*, *> ?: run { result.error("arguments", "Missing playback identity", null); return }
@@ -69,6 +72,11 @@ class RillightAndroidPlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandl
             if (call.method == "capabilities") {
                 val types = MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos.filter { !it.isEncoder }.flatMap { it.supportedTypes.toList() }
                 result.success(mapOf("sessionId" to session, "h264" to types.contains("video/avc"), "aac" to types.contains("audio/mp4a-latm"))); return
+            }
+            // System brightness / volume are activity-scoped, not session-scoped.
+            if (call.method == "setSystemBrightness" || call.method == "getSystemBrightness" ||
+                call.method == "setSystemVolume" || call.method == "getSystemVolume") {
+                display(call, result); return
             }
             val owner = owners.getOrPut(id) { Owner(id) }
             if (call.method == "open") { owner.open(session, args, result); return }
@@ -91,6 +99,32 @@ class RillightAndroidPlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandl
             }
             owner.success(result)
         } catch (error: Exception) { result.error("control", error.message ?: "Native playback command failed", mapOf("sessionId" to session)) }
+    }
+
+    private fun display(call: MethodCall, result: MethodChannel.Result) {
+        when (call.method) {
+            "setSystemBrightness" -> {
+                val window = activity?.window ?: run { result.error("control", "No activity", null); return }
+                val attrs = window.attributes
+                attrs.screenBrightness = ((call.arguments as? Map<*, *>)?.get("value") as? Number)?.toFloat()?.coerceIn(0f, 1f) ?: -1f
+                window.attributes = attrs
+                result.success(null)
+            }
+            "getSystemBrightness" -> result.success(activity?.window?.attributes?.screenBrightness ?: -1f)
+            "setSystemVolume" -> {
+                val audio = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                val max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+                val value = ((call.arguments as? Map<*, *>)?.get("value") as? Number)?.toFloat()?.coerceIn(0f, 1f) ?: 0f
+                audio.setStreamVolume(AudioManager.STREAM_MUSIC, (value * max).roundToInt(), 0)
+                result.success(null)
+            }
+            "getSystemVolume" -> {
+                val audio = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                val max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+                result.success(if (max > 0) audio.getStreamVolume(AudioManager.STREAM_MUSIC).toFloat() / max else 0f)
+            }
+            else -> result.notImplemented()
+        }
     }
 
     private inner class Owner(val id: String) {

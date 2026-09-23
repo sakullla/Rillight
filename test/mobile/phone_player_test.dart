@@ -17,6 +17,7 @@ import 'package:rillight/player/danmaku/danmaku_renderer.dart';
 import 'package:rillight/player/danmaku/dandanplay_client.dart';
 import 'package:rillight/player/danmaku/dandanplay_models.dart';
 import 'package:rillight/player/mobile_player_page.dart';
+import 'package:rillight/player/phone_player_gestures.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/phone_orientation.dart';
 import 'package:rillight/player/player_bindings.dart';
@@ -62,6 +63,7 @@ void main() {
     PhoneOrientation? orientation,
     PhonePlaybackWakeLock? wakeLock,
     DanmakuStreamHasher? hasher,
+    PhoneDisplayControl? display,
     Size size = const Size(800, 360),
     Duration? mediaDuration,
   }) async {
@@ -105,6 +107,7 @@ void main() {
                           orientation: orientation,
                           wakeLock: wakeLock,
                           danmakuHasher: hasher,
+                          displayControl: display,
                         ),
                       ),
                     );
@@ -351,8 +354,13 @@ void main() {
     expect(view.controller.comments.single.text, '滚动评论');
     expect(backend.isPlaying, isTrue);
     expect(current.error, isNull);
-    await tester.ensureVisible(find.byKey(const Key('mobile-player-danmaku')));
-    await tester.tap(find.byKey(const Key('mobile-player-danmaku')));
+    // 顶栏不再有弹幕按钮；弹幕入口迁入"更多"面板（R11）。
+    expect(find.byKey(const Key('mobile-player-danmaku')), findsNothing);
+    await tester.tap(find.byKey(const Key('mobile-player-more')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.byKey(DanmakuKeys.toggle), findsOneWidget);
+    await tester.tap(find.byKey(DanmakuKeys.panel));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
     expect(find.byKey(DanmakuKeys.opacity), findsOneWidget);
@@ -438,6 +446,10 @@ void main() {
         '0',
       );
       expect(find.text('$hours:$minutes:$seconds'), findsOneWidget);
+      // 应用内音量 Slider 已移出控制层，收入"更多"面板（R10 能力不减）。
+      await tester.tap(find.byKey(const Key('mobile-player-more')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
       final slider = tester.widget<Slider>(
         find.byKey(const Key('mobile-player-volume')),
       );
@@ -445,6 +457,12 @@ void main() {
       await tester.pump();
       expect(current.volume, 40);
       expect(backend.volume, 40);
+      final closeSheet = find.widgetWithText(TextButton, '返回');
+      await tester.ensureVisible(closeSheet);
+      await tester.pump();
+      await tester.tap(closeSheet);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
 
       await tester.tap(find.byKey(const Key('mobile-player-toggle')));
       await tester.pump();
@@ -474,6 +492,226 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets('double-tap on the right and left half seeks ±10 seconds', (
+    tester,
+  ) async {
+    final backend = FakeVideoBackend(duration: const Duration(hours: 2));
+    await showPlayer(
+      tester,
+      itemId: 'movie-inception',
+      backend: backend,
+      mediaDuration: const Duration(hours: 2),
+      wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
+    );
+    // 详情页 resume 点(59:00)会自动续播;手势断言全部用相对量。
+    final initial = backend.position;
+    expect(initial, greaterThan(Duration.zero));
+    await tester.tapAt(const Offset(600, 150));
+    await tester.pump(const Duration(milliseconds: 60));
+    await tester.tapAt(const Offset(600, 150));
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(backend.position, initial + const Duration(seconds: 10));
+    await tester.tapAt(const Offset(200, 150));
+    await tester.pump(const Duration(milliseconds: 60));
+    await tester.tapAt(const Offset(200, 150));
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(backend.position, initial);
+    await closePlayer(tester);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'vertical drags on the left and right half drive brightness and volume',
+    (tester) async {
+      final display = _FakeDisplayControl();
+      final backend = FakeVideoBackend();
+      await showPlayer(
+        tester,
+        itemId: 'movie-inception',
+        backend: backend,
+        display: display,
+        wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
+      );
+      final brightness = await tester.startGesture(const Offset(200, 170));
+      await brightness.moveBy(const Offset(0, -20));
+      await brightness.moveBy(const Offset(0, -40));
+      await brightness.moveBy(const Offset(0, -40));
+      await tester.pump();
+      expect(
+        find.byKey(const Key('mobile-player-gesture-overlay')),
+        findsOneWidget,
+      );
+      // 浮层实时反映亮度通道值。
+      final shownBrightness = tester
+          .widget<Text>(find.byKey(const Key('mobile-player-gesture-value')))
+          .data;
+      expect(display.brightnessValue, greaterThan(0.5));
+      expect(shownBrightness, '${(display.brightnessValue * 100).round()}%');
+      await brightness.up();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(
+        find.byKey(const Key('mobile-player-gesture-overlay')),
+        findsNothing,
+      );
+
+      final volume = await tester.startGesture(const Offset(600, 170));
+      await volume.moveBy(const Offset(0, -25));
+      await volume.moveBy(const Offset(0, -25));
+      await tester.pump();
+      final shownVolume = tester
+          .widget<Text>(find.byKey(const Key('mobile-player-gesture-value')))
+          .data;
+      expect(display.volumeValue, greaterThan(0.5));
+      expect(shownVolume, '${(display.volumeValue * 100).round()}%');
+      await volume.up();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(backend.isPlaying, isTrue);
+      await closePlayer(tester);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('horizontal drag previews the target and seeks on release', (
+    tester,
+  ) async {
+    final backend = FakeVideoBackend();
+    await showPlayer(
+      tester,
+      itemId: 'movie-inception',
+      backend: backend,
+      mediaDuration: const Duration(hours: 1, minutes: 5),
+      wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
+    );
+    final initial = backend.position;
+    final gesture = await tester.startGesture(const Offset(300, 120));
+    await gesture.moveBy(const Offset(50, 0));
+    await gesture.moveBy(const Offset(50, 0));
+    await gesture.moveBy(const Offset(50, 0));
+    await gesture.moveBy(const Offset(50, 0));
+    await tester.pump();
+    expect(find.byKey(const Key('mobile-player-gesture-seek')), findsOneWidget);
+    // 浮层预览目标时间;松手后实际 seek 与预览一致。
+    final preview = tester
+        .widget<Text>(find.byKey(const Key('mobile-player-gesture-seek')))
+        .data!;
+    final parts = preview.split(':').map(int.parse).toList();
+    final target = parts.length == 3
+        ? Duration(hours: parts[0], minutes: parts[1], seconds: parts[2])
+        : Duration(minutes: parts[0], seconds: parts[1]);
+    expect(target, greaterThan(initial));
+    await gesture.up();
+    await tester.pump();
+    expect(backend.position, target);
+    await closePlayer(tester);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('locked screen hides controls and gestures; tap unlocks', (
+    tester,
+  ) async {
+    final backend = FakeVideoBackend(duration: const Duration(hours: 2));
+    await showPlayer(
+      tester,
+      itemId: 'movie-inception',
+      backend: backend,
+      mediaDuration: const Duration(hours: 2),
+      wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
+    );
+    await tester.tap(find.byKey(const Key('mobile-player-lock')));
+    await tester.pump();
+    expect(find.byKey(const Key('mobile-player-toggle')), findsNothing);
+    expect(find.byKey(const Key('mobile-player-more')), findsNothing);
+    expect(find.byKey(const Key('mobile-player-unlock')), findsOneWidget);
+
+    // Gestures are inert while locked: dragging must not seek or show
+    // gesture feedback (single tap is the unlock affordance).
+    final initial = backend.position;
+    final drag = await tester.startGesture(const Offset(600, 150));
+    await drag.moveBy(const Offset(0, -40));
+    await drag.moveBy(const Offset(0, -40));
+    await tester.pump();
+    await drag.up();
+    expect(
+      find.byKey(const Key('mobile-player-gesture-overlay')),
+      findsNothing,
+    );
+    expect(backend.position, initial);
+    // 锁定态不隐藏锁钮。
+    expect(find.byKey(const Key('mobile-player-unlock')), findsOneWidget);
+
+    // A single tap unlocks and reveals the controls again. The tap callback
+    // fires after the double-tap timeout, so pump past it.
+    await tester.tapAt(const Offset(400, 150));
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.byKey(const Key('mobile-player-unlock')), findsNothing);
+    expect(find.byKey(const Key('mobile-player-toggle')), findsOneWidget);
+    await closePlayer(tester);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'more panel hosts danmaku, tracks, speed, source, mute and volume',
+    (tester) async {
+      final backend = FakeVideoBackend();
+      await showPlayer(
+        tester,
+        itemId: 'movie-inception',
+        backend: backend,
+        wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
+      );
+      // 顶栏不再出现弹幕按钮（R11）。
+      expect(find.byKey(const Key('mobile-player-danmaku')), findsNothing);
+      await tester.tap(find.byKey(const Key('mobile-player-more')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.byKey(DanmakuKeys.toggle), findsOneWidget);
+      expect(find.byKey(DanmakuKeys.search), findsOneWidget);
+      expect(find.byKey(DanmakuKeys.panel), findsOneWidget);
+      expect(find.text('音轨与字幕'), findsOneWidget);
+      expect(find.text('字幕'), findsOneWidget);
+      expect(find.text('播放速度'), findsOneWidget);
+      expect(find.text('片源'), findsOneWidget);
+      expect(find.byKey(const Key('mobile-player-mute')), findsOneWidget);
+      expect(find.byKey(const Key('mobile-player-volume')), findsOneWidget);
+      // Mute from the more panel keeps the ability (R10).
+      final mute = find.byKey(const Key('mobile-player-mute'));
+      await tester.ensureVisible(mute);
+      await tester.pump();
+      await tester.tap(mute);
+      await tester.pump();
+      expect(backend.volume, 0);
+      final closeSheet = find.widgetWithText(TextButton, '返回');
+      await tester.ensureVisible(closeSheet);
+      await tester.pump();
+      await tester.tap(closeSheet);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.byType(BottomSheet), findsNothing);
+      await closePlayer(tester);
+      expect(tester.takeException(), isNull);
+    },
+  );
+}
+
+class _FakeDisplayControl implements PhoneDisplayControl {
+  double _brightness = 0.5;
+  double _volume = 0.5;
+
+  double get brightnessValue => _brightness;
+  double get volumeValue => _volume;
+
+  @override
+  Future<double> brightness() async => _brightness;
+
+  @override
+  Future<void> setBrightness(double value) async => _brightness = value;
+
+  @override
+  Future<double> volume() async => _volume;
+
+  @override
+  Future<void> setVolume(double value) async => _volume = value;
 }
 
 class _NullHasher extends DanmakuStreamHasher {

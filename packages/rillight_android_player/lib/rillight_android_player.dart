@@ -36,6 +36,31 @@ class AndroidPlayer {
   Future<Map<String, dynamic>> capabilities() =>
       command('capabilities', const {});
 
+  /// System brightness / volume (ADR-6). These are activity-scoped rather
+  /// than bound to a playback session, so they bypass [command] session
+  /// gating and stay usable after playback closes. Brightness writes the
+  /// window `screenBrightness`; volume drives `AudioManager` STREAM_MUSIC,
+  /// alongside the in-app ExoPlayer volume.
+  Future<void> setSystemBrightness(double value) async {
+    await _channel.invokeMethod<void>('setSystemBrightness', {
+      'value': value.clamp(0.0, 1.0),
+    });
+  }
+
+  Future<double> getSystemBrightness() async {
+    return (await _channel.invokeMethod<double>('getSystemBrightness')) ?? -1;
+  }
+
+  Future<void> setSystemVolume(double value) async {
+    await _channel.invokeMethod<void>('setSystemVolume', {
+      'value': value.clamp(0.0, 1.0),
+    });
+  }
+
+  Future<double> getSystemVolume() async {
+    return (await _channel.invokeMethod<double>('getSystemVolume')) ?? 0;
+  }
+
   Future<Map<String, dynamic>> open(Map<String, dynamic> request) async {
     _session = '$owner-${++_revision}';
     return command('open', request, timeout: const Duration(seconds: 25));
