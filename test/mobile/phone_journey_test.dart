@@ -248,9 +248,13 @@ void main() {
       await tester.pumpAndSettle();
       expect(backend.position, greaterThan(const Duration(minutes: 70)));
 
-      await tester.ensureVisible(find.byTooltip('音轨与字幕'));
-      await tester.tap(find.byTooltip('音轨与字幕'));
+      // 音轨/字幕入口已收入"更多"底部面板(fca9712),不再有顶层 Tooltip。
+      final more = find.byKey(const Key('mobile-player-more'));
+      await tester.ensureVisible(more);
       await tester.pumpAndSettle();
+      await tester.tap(more);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
       expect(find.byType(BottomSheet), findsOneWidget);
       await tapSheetText(tester, '英文字幕');
       expect(player.controller!.subtitleStreamIndex, 4);

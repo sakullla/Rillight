@@ -180,8 +180,11 @@ void main() {
         await tester.pumpAndSettle();
         expect(backend.openCount, 2);
         expect(backend.openedPaused, isTrue);
-        await tester.tap(find.byTooltip('音轨与字幕'));
-        await tester.pumpAndSettle();
+        // 音轨/字幕入口已收入"更多"底部面板(fca9712),不再有顶层 Tooltip。
+        await tester.tap(find.byKey(const Key('mobile-player-more')));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
+        expect(find.byType(BottomSheet), findsOneWidget);
         await tester.binding.handlePopRoute();
         await tester.pumpAndSettle();
         expect(find.byType(MobilePlayerPage), findsOneWidget);
@@ -211,13 +214,19 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('mobile-detail-play')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('音轨与字幕'));
-    await tester.pumpAndSettle();
+    // 音轨/字幕入口已收入"更多"底部面板(fca9712),不再有顶层 Tooltip。
+    await tester.tap(find.byKey(const Key('mobile-player-more')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
     expect(find.byType(BottomSheet), findsOneWidget);
     final token = app.auth.client.accessToken;
     server.issuedTokens.clear();
     unawaited(app.auth.client.getUser());
     await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pumpAndSettle();
+    // 面板随会话过期的路由收起后,控制层会再排一个 4s 隐藏计时器,
+    // 需要再推进一段虚拟时间冲掉,否则 teardown 报 pending timer。
     await tester.pump(const Duration(seconds: 4));
     await tester.pumpAndSettle();
     expect(app.auth.client.accessToken, isNot(token));
