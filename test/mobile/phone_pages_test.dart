@@ -22,6 +22,7 @@ import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/emby/catalog_cache.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
+import 'package:rillight/emby/emby_errors.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_controller.dart';
 import 'package:rillight/home/catalog_keys.dart';
@@ -754,6 +755,184 @@ void main() {
               .hideFromResume,
           isTrue,
         );
+        expect(tester.takeException(), isNull);
+      },
+      tags: ['integration'],
+    );
+
+    testWidgets('home rows carry episode, count, watched and progress badges', (
+      tester,
+    ) async {
+      _usePhoneSurface(tester);
+      final catalog = _catalog(
+        resume: [
+          const EmbyItem(
+            id: 'episode-resume',
+            name: '第二集',
+            type: 'Episode',
+            seriesName: '示例剧',
+            seriesId: 'series-demo',
+            parentIndexNumber: 1,
+            indexNumber: 2,
+            userData: EmbyUserData(
+              playbackPositionTicks: 1,
+              playedPercentage: 40,
+            ),
+          ),
+        ],
+        movies: [
+          const EmbyItem(
+            id: 'movie-progress',
+            name: '进度电影',
+            type: 'Movie',
+            productionYear: 2024,
+            userData: EmbyUserData(
+              playbackPositionTicks: 1,
+              playedPercentage: 10,
+            ),
+          ),
+          const EmbyItem(
+            id: 'movie-played',
+            name: '已看电影',
+            type: 'Movie',
+            productionYear: 2023,
+            userData: EmbyUserData(played: true),
+          ),
+        ],
+        series: [
+          const EmbyItem(
+            id: 'series-long',
+            name: '长剧集',
+            type: 'Series',
+            productionYear: 2022,
+            childCount: 24,
+          ),
+        ],
+      );
+      addTearDown(catalog.auth.dispose);
+      addTearDown(catalog.dispose);
+      final router = _router(catalog);
+      addTearDown(router.dispose);
+      await tester.pumpWidget(_scriptedApp(catalog, router: router));
+      await tester.pump();
+
+      // 继续观看横卡:季集编号与进度角标都落在卡内,底部进度条保留。
+      final wideBadges = find.byKey(phoneHomeBadgesKey('episode-resume'));
+      expect(wideBadges, findsOneWidget);
+      final wideCard = tester.getRect(
+        find.byKey(CatalogKeys.item('episode-resume')),
+      );
+      expect(_inside(tester.getRect(wideBadges), wideCard), isTrue);
+      expect(
+        find.descendant(of: wideBadges, matching: find.text('S1E2')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: wideBadges, matching: find.text('已看 40%')),
+        findsOneWidget,
+      );
+      expect(find.byKey(CatalogKeys.resumeProgress), findsWidgets);
+
+      // 电影海报:可续播给进度角标,已看只给已看角标、不带百分比。
+      expect(
+        find.descendant(
+          of: find.byKey(phoneHomeBadgesKey('movie-progress')),
+          matching: find.text('已看 10%'),
+        ),
+        findsOneWidget,
+      );
+      final playedBadges = find.byKey(phoneHomeBadgesKey('movie-played'));
+      expect(
+        find.descendant(of: playedBadges, matching: find.text('已看')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: playedBadges, matching: find.textContaining('%')),
+        findsNothing,
+      );
+
+      // 剧集海报:集数角标。
+      expect(
+        find.descendant(
+          of: find.byKey(phoneHomeBadgesKey('series-long')),
+          matching: find.text('24 集'),
+        ),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+    }, tags: ['integration']);
+
+    testWidgets('a failed home row retries inline while the other rows stay', (
+      tester,
+    ) async {
+      _usePhoneSurface(tester);
+      final catalog = _catalog(
+        resume: [_item('movie-b', '乙电影', 'Movie', percent: 10)],
+        movies: const [],
+        series: const [],
+      );
+      catalog.latestMovies = const CatalogRowState(
+        error: EmbyException(EmbyFailureKind.unknown, statusCode: 503),
+      );
+      addTearDown(catalog.auth.dispose);
+      addTearDown(catalog.dispose);
+      final router = _router(catalog);
+      addTearDown(router.dispose);
+      await tester.pumpWidget(_scriptedApp(catalog, router: router));
+      await tester.pump();
+
+      // 失败行内给重试,继续观看行不受影响,失败行不出现货架入口。
+      expect(find.byKey(CatalogKeys.item('movie-b')), findsOneWidget);
+      final failedRow = find.byKey(CatalogKeys.latestMoviesRow);
+      expect(
+        find.descendant(
+          of: failedRow,
+          matching: find.byType(MobileFailureState),
+        ),
+        findsOneWidget,
+      );
+      final retry = find.descendant(
+        of: failedRow,
+        matching: find.byKey(MobileFailureState.retryKey),
+      );
+      expect(retry, findsOneWidget);
+      expect(
+        find.byKey(CatalogKeys.shelfMore(CatalogKeys.shelfLatestMovies)),
+        findsNothing,
+      );
+
+      await tester.tap(retry);
+      await tester.pump();
+      expect(find.byKey(CatalogKeys.item('movie-b')), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    }, tags: ['integration']);
+
+    testWidgets(
+      'an all-empty home shows the empty state with a refresh entry',
+      (tester) async {
+        _usePhoneSurface(tester);
+        final catalog = _catalog(
+          resume: const [],
+          movies: const [],
+          series: const [],
+        );
+        addTearDown(catalog.auth.dispose);
+        addTearDown(catalog.dispose);
+        final router = _router(catalog);
+        addTearDown(router.dispose);
+        await tester.pumpWidget(_scriptedApp(catalog, router: router));
+        await tester.pump();
+
+        expect(find.byType(MobileEmptyState), findsOneWidget);
+        expect(find.text('暂无内容'), findsOneWidget);
+        expect(find.text('刷新'), findsOneWidget);
+        expect(find.byType(MobileFailureState), findsNothing);
+        // 下拉刷新容器保留。
+        expect(find.byType(RefreshIndicator), findsOneWidget);
+
+        await tester.tap(find.byKey(MobileEmptyState.actionKey));
+        await tester.pump();
+        expect(find.byType(MobileEmptyState), findsOneWidget);
         expect(tester.takeException(), isNull);
       },
       tags: ['integration'],
