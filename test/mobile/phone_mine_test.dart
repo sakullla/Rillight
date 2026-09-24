@@ -8,8 +8,10 @@ import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
+import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_controller.dart';
 import 'package:rillight/home/catalog_scope.dart';
+import 'package:rillight/home/phone_home_sections.dart';
 import 'package:rillight/player/danmaku/dandanplay_client.dart';
 import 'package:rillight/player/danmaku/dandanplay_models.dart';
 import 'package:rillight/player/danmaku/danmaku_controller.dart';
@@ -30,6 +32,8 @@ const _device = EmbyDeviceInfo(
 );
 
 void main() {
+  setUp(PhoneHomeSectionController.debugResetApp);
+
   testWidgets('current identity stays visible and a new line reloads catalog', (
     tester,
   ) async {
@@ -330,6 +334,84 @@ void main() {
     expect(official.source?.baseUri.host, 'api.dandanplay.net');
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('home sections can be hidden, reordered and read back', (
+    tester,
+  ) async {
+    final server = FakeEmbyServer();
+    final auth = _auth([server]);
+    addTearDown(auth.dispose);
+    await _connect(tester, auth, server.baseUrl.toString());
+    final catalog = CatalogController(auth: auth)
+      ..cache.debugSetDiskStore(null);
+    addTearDown(catalog.dispose);
+    catalog.libraries = const [
+      EmbyItem(
+        id: 'view-movies',
+        name: '电影',
+        type: 'CollectionFolder',
+        collectionType: 'movies',
+      ),
+    ];
+    catalog.librariesLoading = false;
+    final store = MemoryPhoneHomeSectionStore();
+    final sections = PhoneHomeSectionController(store: store);
+    addTearDown(sections.dispose);
+    await _pump(tester, auth: auth, catalog: catalog, sections: sections);
+
+    final l10n = AppLocalizations.of(
+      tester.element(find.byType(PhoneMinePage)),
+    );
+    expect(l10n.playerFit, '适应');
+    expect(l10n.playerFill, '填充');
+
+    final movies = PhoneHomeSectionId.latestMovies;
+    final libraryLatest = PhoneHomeSectionId.libraryLatest('view-movies');
+    await _scrollTo(
+      tester,
+      find.byKey(PhoneHomeSectionEditor.visibleKey(movies)),
+    );
+    expect(
+      tester
+          .widget<Switch>(find.byKey(PhoneHomeSectionEditor.visibleKey(movies)))
+          .value,
+      isTrue,
+    );
+    await _tap(tester, find.byKey(PhoneHomeSectionEditor.visibleKey(movies)));
+    expect(sections.isHidden(movies), isTrue);
+
+    await _scrollTo(
+      tester,
+      find.byKey(PhoneHomeSectionEditor.moveUpKey(libraryLatest)),
+    );
+    while (sections.orderedIds(catalog.libraries).indexOf(libraryLatest) >
+        sections
+            .orderedIds(catalog.libraries)
+            .indexOf(PhoneHomeSectionId.resume)) {
+      await _tap(
+        tester,
+        find.byKey(PhoneHomeSectionEditor.moveUpKey(libraryLatest)),
+      );
+    }
+    expect(
+      tester.getTopLeft(find.text('电影 · 最近添加')).dy,
+      lessThan(tester.getTopLeft(find.text('继续观看')).dy),
+    );
+
+    final reopened = PhoneHomeSectionController(store: store);
+    addTearDown(reopened.dispose);
+    await reopened.load(auth.session!.server.id);
+    expect(reopened.isHidden(movies), isTrue);
+    expect(
+      reopened.orderedIds(catalog.libraries).indexOf(libraryLatest),
+      lessThan(
+        reopened
+            .orderedIds(catalog.libraries)
+            .indexOf(PhoneHomeSectionId.resume),
+      ),
+    );
+    expect(tester.takeException(), isNull);
+  });
 }
 
 FakeEmbyItem _movie(String id, String name) {
@@ -375,14 +457,16 @@ Future<void> _pump(
   required AuthController auth,
   PlayerSettingsStore? store,
   CatalogController? catalog,
+  PhoneHomeSectionController? sections,
 }) async {
   tester.view.physicalSize = const Size(360, 900);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.resetPhysicalSize);
   addTearDown(tester.view.resetDevicePixelRatio);
+  final mine = PhoneMinePage(sections: sections);
   final page = catalog == null
-      ? const PhoneMinePage()
-      : CatalogScope(controller: catalog, child: const PhoneMinePage());
+      ? mine
+      : CatalogScope(controller: catalog, child: mine);
   await tester.pumpWidget(
     AuthScope(
       controller: auth,

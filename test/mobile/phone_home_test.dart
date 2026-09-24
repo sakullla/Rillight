@@ -6,6 +6,7 @@ import 'package:rillight/app/mobile_widgets.dart';
 import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/router.dart';
 import 'package:rillight/app/theme.dart';
+import 'package:rillight/app/phone_libraries_tab.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/emby/emby_client.dart';
@@ -17,6 +18,7 @@ import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/home/home_hero.dart';
 import 'package:rillight/home/phone_hero.dart';
 import 'package:rillight/home/phone_home.dart';
+import 'package:rillight/home/phone_home_sections.dart';
 import 'package:rillight/home/phone_shelf_page.dart';
 import 'package:rillight/library/mobile_detail_page.dart';
 import 'package:rillight/library/shelf_grid_page.dart';
@@ -33,7 +35,10 @@ const _device = EmbyDeviceInfo(
 );
 
 void main() {
-  setUp(isolateImageCache);
+  setUp(() {
+    isolateImageCache();
+    PhoneHomeSectionController.debugResetApp();
+  });
 
   testWidgets(
     'banner prefers resume, pauses from the button, and stops at five',
@@ -418,8 +423,12 @@ void main() {
     router.pop();
     await _settle(tester);
 
-    await _showOnHome(tester, find.text('老友记'));
-    await tester.tap(find.text('老友记'));
+    final seriesCard = find.descendant(
+      of: find.byKey(CatalogKeys.latestSeriesRow),
+      matching: find.text('老友记'),
+    );
+    await _showOnHome(tester, seriesCard);
+    await tester.tap(seriesCard);
     await _settle(tester);
     expect(
       tester.widget<MobileDetailPage>(find.byType(MobileDetailPage)).itemId,
@@ -590,6 +599,128 @@ void main() {
     expect(find.byType(ShelfGridPage), findsNothing);
     expect(tester.takeException(), isNull);
   }, tags: ['integration']);
+
+  testWidgets('hidden and reordered sections stay on the next home open', (
+    tester,
+  ) async {
+    _usePhoneSurface(tester);
+    final server = FakeEmbyServer();
+    server.items.add(
+      FakeEmbyItem(
+        id: 'lib-movie',
+        name: '库内新片',
+        type: 'Movie',
+        parentId: 'view-movies',
+        dateCreated: DateTime.utc(2024, 6, 1),
+      ),
+    );
+    final auth = AuthController.memory(
+      client: EmbyClient(
+        device: _device,
+        dio: dioForFakeEmby(FakeEmbyAdapter([server])),
+      ),
+    );
+    addTearDown(auth.dispose);
+    await tester.runAsync(
+      () => auth.connect(
+        address: server.baseUrl.toString(),
+        username: 'alice',
+        password: 'correct-horse',
+      ),
+    );
+    final serverId = auth.session!.server.id;
+    final libraries = [
+      const EmbyItem(
+        id: 'view-movies',
+        name: '电影',
+        type: 'CollectionFolder',
+        collectionType: 'movies',
+      ),
+      const EmbyItem(
+        id: 'view-tv',
+        name: '剧集',
+        type: 'CollectionFolder',
+        collectionType: 'tvshows',
+      ),
+    ];
+    final store = MemoryPhoneHomeSectionStore();
+    final sections = PhoneHomeSectionController(store: store);
+    addTearDown(sections.dispose);
+    await sections.load(serverId);
+    await sections.setVisible(PhoneHomeSectionId.latestMovies, false);
+    await sections.setVisible(PhoneHomeSectionId.libraries, false);
+    final libraryLatest = PhoneHomeSectionId.libraryLatest('view-movies');
+    while (sections.orderedIds(libraries).indexOf(libraryLatest) >
+        sections.orderedIds(libraries).indexOf(PhoneHomeSectionId.resume)) {
+      await sections.move(libraryLatest, -1, libraries);
+    }
+    final catalog = CatalogController(auth: auth)
+      ..cache.debugSetDiskStore(null);
+    addTearDown(catalog.dispose);
+    catalog.resume = CatalogRowState(
+      items: [_item('movie-b', '乙电影', 'Movie', percent: 10)],
+    );
+    catalog.nextUp = const CatalogRowState(hidden: true);
+    catalog.latestMovies = CatalogRowState(
+      items: [_item('movie-c', '示例电影', 'Movie')],
+    );
+    catalog.latestSeries = const CatalogRowState(hidden: true);
+    catalog.libraries = libraries;
+    catalog.librariesLoading = false;
+
+    await tester.pumpWidget(
+      _sectionedHome(auth: auth, catalog: catalog, sections: sections),
+    );
+    await _settle(tester);
+
+    expect(find.text('最近更新的电影'), findsNothing);
+    expect(find.text('即将播放'), findsNothing);
+    expect(find.byKey(const Key('phone-home-libraries')), findsNothing);
+    expect(find.text('库内新片'), findsOneWidget);
+    expect(
+      tester.getTopLeft(find.text('电影 · 最近添加')).dy,
+      lessThan(tester.getTopLeft(find.text('继续观看')).dy),
+    );
+
+    final reopened = PhoneHomeSectionController(store: store);
+    addTearDown(reopened.dispose);
+    await reopened.load(serverId);
+    await tester.pumpWidget(
+      _sectionedHome(auth: auth, catalog: catalog, sections: reopened),
+    );
+    await _settle(tester);
+    expect(find.text('最近更新的电影'), findsNothing);
+    expect(
+      tester.getTopLeft(find.text('电影 · 最近添加')).dy,
+      lessThan(tester.getTopLeft(find.text('继续观看')).dy),
+    );
+
+    await tester.pumpWidget(
+      AuthScope(
+        controller: auth,
+        child: CatalogScope(
+          controller: catalog,
+          child: MaterialApp(
+            theme: AppTheme.dark(),
+            locale: const Locale('zh'),
+            supportedLocales: AppLocalizations.supportedLocales,
+            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            home: const PhoneLibrariesTab(),
+          ),
+        ),
+      ),
+    );
+    await _settle(tester);
+    expect(
+      find.byKey(const Key('phone-library-block-view-movies')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const Key('phone-library-block-view-tv')),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+  });
 }
 
 double _heroPageLeft(WidgetTester tester, String id) {
@@ -662,6 +793,26 @@ void _usePhoneSurface(WidgetTester tester) {
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.resetPhysicalSize);
   addTearDown(tester.view.resetDevicePixelRatio);
+}
+
+Widget _sectionedHome({
+  required AuthController auth,
+  required CatalogController catalog,
+  required PhoneHomeSectionController sections,
+}) {
+  return AuthScope(
+    controller: auth,
+    child: CatalogScope(
+      controller: catalog,
+      child: MaterialApp(
+        theme: AppTheme.dark(),
+        locale: const Locale('zh'),
+        supportedLocales: AppLocalizations.supportedLocales,
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        home: PhoneHome(sections: sections),
+      ),
+    ),
+  );
 }
 
 Widget _scriptedApp(CatalogController catalog, {required GoRouter router}) {

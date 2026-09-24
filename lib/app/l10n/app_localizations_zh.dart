@@ -926,4 +926,44 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get mobileAppVolume => '应用内音量';
+
+  @override
+  String get phoneHomeSections => '首页区块';
+
+  @override
+  String get phoneHomeSectionBanner => '横幅';
+
+  @override
+  String get phoneHomeSectionNextUp => '下一集';
+
+  @override
+  String get phoneHomeSectionLatestMovies => '最近电影';
+
+  @override
+  String get phoneHomeSectionLatestSeries => '最近剧集';
+
+  @override
+  String get phoneHomeSectionLibraries => '片库入口';
+
+  @override
+  String phoneHomeLibraryLatest(String name) {
+    return '$name · 最近添加';
+  }
+
+  @override
+  String get phoneHomeSectionMoveUp => '上移';
+
+  @override
+  String get phoneHomeSectionMoveDown => '下移';
+
+  @override
+  String phoneHomeSectionVisible(String name) {
+    return '显示$name';
+  }
+
+  @override
+  String get playerFit => '适应';
+
+  @override
+  String get playerFill => '填充';
 }

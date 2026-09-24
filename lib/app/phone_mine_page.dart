@@ -12,13 +12,16 @@ import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/auth/failure_message.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/home/catalog_scope.dart';
+import 'package:rillight/home/phone_home_sections.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_runtime_options.dart';
 import 'package:rillight/player/player_settings.dart';
 
 /// 手机「我的」：当前身份、线路、倍速和弹幕来源。
 class PhoneMinePage extends StatefulWidget {
-  const PhoneMinePage({super.key});
+  const PhoneMinePage({super.key, this.sections});
+
+  final PhoneHomeSectionController? sections;
 
   static const userKey = Key('phone-mine-user');
   static const serverKey = Key('phone-mine-server');
@@ -44,6 +47,8 @@ class PhoneMinePage extends StatefulWidget {
 }
 
 class _PhoneMinePageState extends State<PhoneMinePage> {
+  PhoneHomeSectionController? _sections;
+  var _loadedSectionServerId = '';
   final _danmakuServer = TextEditingController();
   final _danmakuAppId = TextEditingController();
   final _danmakuToken = TextEditingController();
@@ -65,9 +70,22 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
     _danmakuTokenFocus.addListener(_onDanmakuTokenFocus);
   }
 
+  PhoneHomeSectionController get _sectionController =>
+      _sections ?? PhoneHomeSectionController.app();
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    final next = widget.sections ?? PhoneHomeSectionController.app();
+    if (!identical(next, _sections)) {
+      _sections = next;
+      _loadedSectionServerId = '';
+    }
+    final serverId = AuthScope.of(context).session?.server.id ?? '';
+    if (_loadedSectionServerId != serverId) {
+      _loadedSectionServerId = serverId;
+      unawaited(_sectionController.load(serverId));
+    }
     if (_loaded) {
       return;
     }
@@ -299,6 +317,7 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
   Widget build(BuildContext context) {
     final auth = AuthScope.of(context);
     final l10n = AppLocalizations.of(context);
+    final catalog = CatalogScope.maybeOf(context);
     final scheme = Theme.of(context).colorScheme;
     final session = auth.session;
     final lineLabel = session?.server.activeLine?.hostLabel ?? '';
@@ -546,6 +565,27 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
               ),
               const SizedBox(height: AppSpacing.md),
             ],
+          ),
+          const SizedBox(height: AppSpacing.lg),
+          ListenableBuilder(
+            listenable: catalog == null
+                ? _sectionController
+                : Listenable.merge([_sectionController, catalog]),
+            builder: (context, _) {
+              return _group(
+                context,
+                title: l10n.phoneHomeSections,
+                children: [
+                  Padding(
+                    padding: phoneHomeSectionEditorPadding,
+                    child: PhoneHomeSectionEditor(
+                      controller: _sectionController,
+                      libraries: catalog?.libraries ?? const [],
+                    ),
+                  ),
+                ],
+              );
+            },
           ),
           const SizedBox(height: AppSpacing.lg),
           _group(

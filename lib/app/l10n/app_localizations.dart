@@ -1845,6 +1845,78 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'应用内音量'**
   String get mobileAppVolume;
+
+  /// Mine page group for showing, hiding and ordering phone home sections.
+  ///
+  /// In zh, this message translates to:
+  /// **'首页区块'**
+  String get phoneHomeSections;
+
+  /// Phone home section label for the featured banner.
+  ///
+  /// In zh, this message translates to:
+  /// **'横幅'**
+  String get phoneHomeSectionBanner;
+
+  /// Phone home section label for the next-up row.
+  ///
+  /// In zh, this message translates to:
+  /// **'下一集'**
+  String get phoneHomeSectionNextUp;
+
+  /// Phone home section label for the latest movies row.
+  ///
+  /// In zh, this message translates to:
+  /// **'最近电影'**
+  String get phoneHomeSectionLatestMovies;
+
+  /// Phone home section label for the latest series row.
+  ///
+  /// In zh, this message translates to:
+  /// **'最近剧集'**
+  String get phoneHomeSectionLatestSeries;
+
+  /// Phone home section label for the library shortcut row.
+  ///
+  /// In zh, this message translates to:
+  /// **'片库入口'**
+  String get phoneHomeSectionLibraries;
+
+  /// Phone home row and mine label for one library's recently added items.
+  ///
+  /// In zh, this message translates to:
+  /// **'{name} · 最近添加'**
+  String phoneHomeLibraryLatest(String name);
+
+  /// Tooltip for moving a phone home section earlier.
+  ///
+  /// In zh, this message translates to:
+  /// **'上移'**
+  String get phoneHomeSectionMoveUp;
+
+  /// Tooltip for moving a phone home section later.
+  ///
+  /// In zh, this message translates to:
+  /// **'下移'**
+  String get phoneHomeSectionMoveDown;
+
+  /// Switch tooltip for showing or hiding a phone home section.
+  ///
+  /// In zh, this message translates to:
+  /// **'显示{name}'**
+  String phoneHomeSectionVisible(String name);
+
+  /// Player scale mode that shows the whole frame and only the black bars the aspect ratio needs.
+  ///
+  /// In zh, this message translates to:
+  /// **'适应'**
+  String get playerFit;
+
+  /// Player scale mode that crops the frame so aspect-ratio black bars are gone.
+  ///
+  /// In zh, this message translates to:
+  /// **'填充'**
+  String get playerFill;
 }
 
 class _AppLocalizationsDelegate

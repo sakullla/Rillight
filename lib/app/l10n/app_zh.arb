@@ -1181,5 +1181,63 @@
   "mobileAppVolume": "应用内音量",
   "@mobileAppVolume": {
     "description": "More-panel section header for the in-app volume slider and mute."
+  },
+  "phoneHomeSections": "首页区块",
+  "@phoneHomeSections": {
+    "description": "Mine page group for showing, hiding and ordering phone home sections."
+  },
+  "phoneHomeSectionBanner": "横幅",
+  "@phoneHomeSectionBanner": {
+    "description": "Phone home section label for the featured banner."
+  },
+  "phoneHomeSectionNextUp": "下一集",
+  "@phoneHomeSectionNextUp": {
+    "description": "Phone home section label for the next-up row."
+  },
+  "phoneHomeSectionLatestMovies": "最近电影",
+  "@phoneHomeSectionLatestMovies": {
+    "description": "Phone home section label for the latest movies row."
+  },
+  "phoneHomeSectionLatestSeries": "最近剧集",
+  "@phoneHomeSectionLatestSeries": {
+    "description": "Phone home section label for the latest series row."
+  },
+  "phoneHomeSectionLibraries": "片库入口",
+  "@phoneHomeSectionLibraries": {
+    "description": "Phone home section label for the library shortcut row."
+  },
+  "phoneHomeLibraryLatest": "{name} · 最近添加",
+  "@phoneHomeLibraryLatest": {
+    "description": "Phone home row and mine label for one library's recently added items.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "phoneHomeSectionMoveUp": "上移",
+  "@phoneHomeSectionMoveUp": {
+    "description": "Tooltip for moving a phone home section earlier."
+  },
+  "phoneHomeSectionMoveDown": "下移",
+  "@phoneHomeSectionMoveDown": {
+    "description": "Tooltip for moving a phone home section later."
+  },
+  "phoneHomeSectionVisible": "显示{name}",
+  "@phoneHomeSectionVisible": {
+    "description": "Switch tooltip for showing or hiding a phone home section.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "playerFit": "适应",
+  "@playerFit": {
+    "description": "Player scale mode that shows the whole frame and only the black bars the aspect ratio needs."
+  },
+  "playerFill": "填充",
+  "@playerFill": {
+    "description": "Player scale mode that crops the frame so aspect-ratio black bars are gone."
   }
 }
