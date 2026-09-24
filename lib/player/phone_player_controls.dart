@@ -12,8 +12,8 @@ import 'package:rillight/player/player_controller.dart';
 import 'package:rillight/player/player_settings.dart';
 
 /// Control layer of the phone player: top bar (back / title / lock / more),
-/// bottom bar (progress, ±10s, play) and the "more" bottom panel that hosts
-/// danmaku, tracks, speed, media source, mute and the in-app volume slider.
+/// a bottom-edge transport (play, progress, time) and the "more" panel that
+/// hosts picture scale, danmaku, tracks, speed, media source, mute and volume.
 ///
 /// The lock state is a state-machine field of this layer; the page mirrors
 /// it through [onLockChanged] to disable the gesture layer. `PlayerController`
@@ -30,6 +30,8 @@ class PhonePlayerControls extends StatefulWidget {
     this.center = const SizedBox.shrink(),
     this.locked = false,
     this.onLockChanged,
+    this.fillFrame = false,
+    this.onFillFrame,
   });
 
   final PlayerController controller;
@@ -44,6 +46,10 @@ class PhonePlayerControls extends StatefulWidget {
 
   final bool locked;
   final ValueChanged<bool>? onLockChanged;
+
+  /// True when the picture is cropped to remove aspect-ratio black bars.
+  final bool fillFrame;
+  final ValueChanged<bool>? onFillFrame;
 
   @override
   State<PhonePlayerControls> createState() => PhonePlayerControlsState();
@@ -197,81 +203,69 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
           stops: const [0, 0.55, 1],
         ),
       ),
-      child: ConstrainedBox(
-        constraints: BoxConstraints(
-          maxHeight: MediaQuery.sizeOf(context).height * .48,
-        ),
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (c.progressSyncFailed) Text(l.progressSyncFailed),
-              if (c.trackFailure != null) Text(c.trackFailure!),
-              if (c.backgroundReleased) Text(l.mobileBackgroundPaused),
-              if (c.playbackEnded) Text(l.playbackEnded),
-              if (c.isBuffering && !c.loading) const LinearProgressIndicator(),
-              Row(
-                children: [
-                  Text(phonePlayerClock(c.position)),
-                  Expanded(
-                    child: Slider(
-                      key: const Key('mobile-player-seek'),
-                      value: (_seek ?? c.position.inMilliseconds.toDouble())
-                          .clamp(0, durationMs),
-                      max: durationMs.clamp(1, double.infinity),
-                      onChanged:
-                          c.loading ||
-                              c.error != null ||
-                              c.disconnected ||
-                              c.sessionExpired
-                          ? null
-                          : (v) => setState(() => _seek = v),
-                      onChangeEnd: (v) {
-                        setState(() => _seek = null);
-                        c.seekTo(Duration(milliseconds: v.round()));
-                      },
-                    ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(4, 0, 8, 0),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (c.progressSyncFailed) Text(l.progressSyncFailed),
+            if (c.trackFailure != null) Text(c.trackFailure!),
+            if (c.backgroundReleased) Text(l.mobileBackgroundPaused),
+            if (c.playbackEnded) Text(l.playbackEnded),
+            if (c.isBuffering && !c.loading) const LinearProgressIndicator(),
+            Row(
+              children: [
+                IconButton(
+                  tooltip: l.mobileRewind,
+                  visualDensity: VisualDensity.compact,
+                  onPressed: () => c.seekRelative(const Duration(seconds: -10)),
+                  icon: const Icon(Icons.replay_10),
+                ),
+                IconButton(
+                  key: const Key('mobile-player-toggle'),
+                  tooltip: c.isPlaying ? l.pause : l.play,
+                  visualDensity: VisualDensity.compact,
+                  onPressed:
+                      c.loading ||
+                          c.error != null ||
+                          c.disconnected ||
+                          c.sessionExpired
+                      ? null
+                      : c.togglePlay,
+                  icon: Icon(
+                    c.isPlaying ? Icons.pause_circle : Icons.play_circle,
                   ),
-                  Text(phonePlayerClock(c.duration)),
-                ],
-              ),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  IconButton(
-                    tooltip: l.mobileRewind,
-                    onPressed: () =>
-                        c.seekRelative(const Duration(seconds: -10)),
-                    icon: const Icon(Icons.replay_10),
-                    iconSize: 32,
-                  ),
-                  IconButton(
-                    key: const Key('mobile-player-toggle'),
-                    tooltip: c.isPlaying ? l.pause : l.play,
-                    onPressed:
+                ),
+                IconButton(
+                  tooltip: l.mobileForward,
+                  visualDensity: VisualDensity.compact,
+                  onPressed: () => c.seekRelative(const Duration(seconds: 10)),
+                  icon: const Icon(Icons.forward_10),
+                ),
+                Text(phonePlayerClock(c.position)),
+                Expanded(
+                  child: Slider(
+                    key: const Key('mobile-player-seek'),
+                    value: (_seek ?? c.position.inMilliseconds.toDouble())
+                        .clamp(0, durationMs),
+                    max: durationMs.clamp(1, double.infinity),
+                    onChanged:
                         c.loading ||
                             c.error != null ||
                             c.disconnected ||
                             c.sessionExpired
                         ? null
-                        : c.togglePlay,
-                    icon: Icon(
-                      c.isPlaying ? Icons.pause_circle : Icons.play_circle,
-                    ),
-                    iconSize: 48,
+                        : (v) => setState(() => _seek = v),
+                    onChangeEnd: (v) {
+                      setState(() => _seek = null);
+                      c.seekTo(Duration(milliseconds: v.round()));
+                    },
                   ),
-                  IconButton(
-                    tooltip: l.mobileForward,
-                    onPressed: () =>
-                        c.seekRelative(const Duration(seconds: 10)),
-                    icon: const Icon(Icons.forward_10),
-                    iconSize: 32,
-                  ),
-                ],
-              ),
-            ],
-          ),
+                ),
+                Text(phonePlayerClock(c.duration)),
+              ],
+            ),
+          ],
         ),
       ),
     );
@@ -300,6 +294,11 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                   style: Theme.of(context).textTheme.titleLarge,
                 ),
                 const SizedBox(height: 16),
+                _VideoScaleChoices(
+                  fill: widget.fillFrame,
+                  onChanged: (fill) => widget.onFillFrame?.call(fill),
+                ),
+                const SizedBox(height: 8),
                 if (danmaku != null) ...[
                   Row(
                     children: [
@@ -447,5 +446,52 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
       ),
     );
     if (mounted) _controller.setControlsPinned(false);
+  }
+}
+
+class _VideoScaleChoices extends StatefulWidget {
+  const _VideoScaleChoices({required this.fill, required this.onChanged});
+
+  final bool fill;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  State<_VideoScaleChoices> createState() => _VideoScaleChoicesState();
+}
+
+class _VideoScaleChoicesState extends State<_VideoScaleChoices> {
+  late bool _fill = widget.fill;
+
+  @override
+  void didUpdateWidget(covariant _VideoScaleChoices oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.fill != widget.fill) _fill = widget.fill;
+  }
+
+  void _select(bool fill) {
+    setState(() => _fill = fill);
+    widget.onChanged(fill);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
+    return Wrap(
+      spacing: 8,
+      children: [
+        ChoiceChip(
+          key: const Key('mobile-player-scale-fit'),
+          label: Text(l.playerFit),
+          selected: !_fill,
+          onSelected: (_) => _select(false),
+        ),
+        ChoiceChip(
+          key: const Key('mobile-player-scale-fill'),
+          label: Text(l.playerFill),
+          selected: _fill,
+          onSelected: (_) => _select(true),
+        ),
+      ],
+    );
   }
 }

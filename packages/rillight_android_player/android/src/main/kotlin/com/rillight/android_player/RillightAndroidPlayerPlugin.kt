@@ -13,6 +13,7 @@ import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
@@ -40,6 +41,8 @@ class RillightAndroidPlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandl
                 val owner = owners.getOrPut((args as Map<*, *>)["owner"] as String) { Owner(args["owner"] as String) }
                 val view = PlayerView(context).apply {
                     useController = false
+                    // 显式适应：完整画面，只留比例所需黑边。不使用 PlayerView 未赋值时的缩放。
+                    resizeMode = owner.resizeMode
                     isFocusable = false; isFocusableInTouchMode = false
                     descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
                 }
@@ -79,6 +82,11 @@ class RillightAndroidPlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandl
                 display(call, result); return
             }
             val owner = owners.getOrPut(id) { Owner(id) }
+            if (call.method == "setVideoScale") {
+                owner.applyScale(args["mode"] as? String)
+                result.success(mapOf("sessionId" to session))
+                return
+            }
             if (call.method == "open") { owner.open(session, args, result); return }
             if (session != owner.session && owner.session.isNotEmpty()) { result.error("stale", "Expired playback session", mapOf("sessionId" to session)); return }
             if (call.method == "dispose" || call.method == "stop") {
@@ -131,6 +139,16 @@ class RillightAndroidPlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandl
         var session = ""
         var player: ExoPlayer? = null
         var view: PlayerView? = null
+        var resizeMode: Int = AspectRatioFrameLayout.RESIZE_MODE_FIT
+
+        fun applyScale(mode: String?) {
+            resizeMode = if (mode == "fill") {
+                AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+            } else {
+                AspectRatioFrameLayout.RESIZE_MODE_FIT
+            }
+            view?.resizeMode = resizeMode
+        }
         private var pendingOpen: MethodChannel.Result? = null
         private var pendingTrack: MethodChannel.Result? = null
         private var desiredTrack: String? = null

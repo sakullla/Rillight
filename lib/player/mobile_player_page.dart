@@ -22,6 +22,7 @@ import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_controller.dart';
 import 'package:rillight/player/player_keys.dart';
 import 'package:rillight/player/player_window.dart';
+import 'package:rillight_android_player/rillight_android_player.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 class MobilePlayerPage extends StatefulWidget {
@@ -112,6 +113,7 @@ class MobilePlayerPageState extends State<MobilePlayerPage> {
   String? _danmakuLayerItemId;
   PhoneDisplayControl? _display;
   bool _controlsLocked = false;
+  bool _fillFrame = false;
 
   @override
   void didChangeDependencies() {
@@ -453,72 +455,84 @@ class MobilePlayerPageState extends State<MobilePlayerPage> {
         enabled: false,
         child: Scaffold(
           backgroundColor: Colors.black,
-          body: Stack(
-            fit: StackFit.expand,
-            children: [
-              c.backend.buildView(),
-              if (danmaku != null && _showDanmakuLayer(c))
-                Positioned.fill(
-                  child: IgnorePointer(child: DanmakuView(controller: danmaku)),
-                ),
-              PhonePlayerGestures(
-                controller: c,
-                display: _display!,
-                locked: _controlsLocked,
-                onUnlock: _unlock,
-              ),
-              ListenableBuilder(
-                listenable: c,
-                builder: (context, _) {
-                  final showControls =
-                      c.controlsVisible ||
-                      c.loading ||
-                      c.error != null ||
-                      c.disconnected ||
-                      c.sessionExpired ||
-                      c.progressSyncFailed ||
-                      c.trackFailure != null;
-                  return PhoneMotion.reveal(
-                    context: context,
-                    visible: showControls || _controlsLocked,
-                    child: PhonePlayerControls(
-                      controller: c,
-                      danmaku: danmaku,
-                      orientation: _orientation!,
-                      onClose: _close,
-                      onOpenDanmakuPanel: _openDanmakuPanel,
-                      onOpenDanmakuSearch: _openDanmakuSearch,
-                      center: _centerStatus(c),
-                      locked: _controlsLocked,
-                      onLockChanged: _onLockChanged,
-                    ),
-                  );
-                },
-              ),
-              if (c.nextEpisode != null && c.error == null && !c.sessionExpired)
-                Positioned(
-                  left: 12,
-                  right: 12,
-                  bottom: 12,
-                  child: SafeArea(child: _PhoneNextEpisode(controller: c)),
-                ),
-              if (danmaku != null &&
-                  c.error == null &&
-                  !c.loading &&
-                  _danmakuNeedsAttention(danmaku))
-                Positioned(
-                  top: c.nextEpisode != null ? 148 : 8,
-                  left: 12,
-                  right: 12,
-                  child: SafeArea(
-                    child: _PhoneDanmakuFailure(
-                      danmaku: danmaku,
-                      onRetry: _retryDanmaku,
-                      onDisable: () => unawaited(danmaku.toggleDanmaku()),
+          body: AndroidVideoScaleScope(
+            scale: _fillFrame ? AndroidVideoScale.fill : AndroidVideoScale.fit,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                c.backend.buildView(),
+                if (danmaku != null && _showDanmakuLayer(c))
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: DanmakuView(controller: danmaku),
                     ),
                   ),
+                PhonePlayerGestures(
+                  controller: c,
+                  display: _display!,
+                  locked: _controlsLocked,
+                  onUnlock: _unlock,
                 ),
-            ],
+                ListenableBuilder(
+                  listenable: c,
+                  builder: (context, _) {
+                    final showControls =
+                        c.controlsVisible ||
+                        c.loading ||
+                        c.error != null ||
+                        c.disconnected ||
+                        c.sessionExpired ||
+                        c.progressSyncFailed ||
+                        c.trackFailure != null;
+                    return PhoneMotion.reveal(
+                      context: context,
+                      visible: showControls || _controlsLocked,
+                      child: PhonePlayerControls(
+                        controller: c,
+                        danmaku: danmaku,
+                        orientation: _orientation!,
+                        onClose: _close,
+                        onOpenDanmakuPanel: _openDanmakuPanel,
+                        onOpenDanmakuSearch: _openDanmakuSearch,
+                        center: _centerStatus(c),
+                        locked: _controlsLocked,
+                        onLockChanged: _onLockChanged,
+                        fillFrame: _fillFrame,
+                        onFillFrame: (fill) {
+                          if (_fillFrame == fill) return;
+                          setState(() => _fillFrame = fill);
+                        },
+                      ),
+                    );
+                  },
+                ),
+                if (c.nextEpisode != null &&
+                    c.error == null &&
+                    !c.sessionExpired)
+                  Positioned(
+                    left: 12,
+                    right: 12,
+                    bottom: 12,
+                    child: SafeArea(child: _PhoneNextEpisode(controller: c)),
+                  ),
+                if (danmaku != null &&
+                    c.error == null &&
+                    !c.loading &&
+                    _danmakuNeedsAttention(danmaku))
+                  Positioned(
+                    top: c.nextEpisode != null ? 148 : 8,
+                    left: 12,
+                    right: 12,
+                    child: SafeArea(
+                      child: _PhoneDanmakuFailure(
+                        danmaku: danmaku,
+                        onRetry: _retryDanmaku,
+                        onDisable: () => unawaited(danmaku.toggleDanmaku()),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           ),
         ),
       ),

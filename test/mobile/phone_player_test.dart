@@ -692,6 +692,73 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets(
+    'fit is the default scale and transport sits on the bottom edge',
+    (tester) async {
+      final backend = FakeVideoBackend(
+        duration: const Duration(hours: 1, minutes: 5),
+      );
+      await showPlayer(
+        tester,
+        itemId: 'movie-inception',
+        backend: backend,
+        mediaDuration: const Duration(hours: 1, minutes: 5),
+        wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
+        size: const Size(800, 360),
+      );
+      final toggle = tester.getRect(
+        find.byKey(const Key('mobile-player-toggle')),
+      );
+      final seek = tester.getRect(find.byKey(const Key('mobile-player-seek')));
+      expect(360 - toggle.bottom, lessThan(24));
+      expect((toggle.center.dy - seek.center.dy).abs(), lessThan(28));
+
+      await tester.tap(find.byKey(const Key('mobile-player-more')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(
+        tester
+            .widget<ChoiceChip>(
+              find.byKey(const Key('mobile-player-scale-fit')),
+            )
+            .selected,
+        isTrue,
+      );
+      expect(find.text('适应'), findsOneWidget);
+      expect(find.text('填充'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('mobile-player-scale-fill')));
+      await tester.pump();
+      expect(
+        tester
+            .widget<ChoiceChip>(
+              find.byKey(const Key('mobile-player-scale-fill')),
+            )
+            .selected,
+        isTrue,
+      );
+      final closeSheet = find.widgetWithText(TextButton, '返回');
+      await tester.ensureVisible(closeSheet);
+      await tester.pump();
+      await tester.tap(closeSheet);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+
+      await tester.pump(const Duration(seconds: 5));
+      expect(
+        find.byKey(const Key('mobile-player-toggle')).hitTestable(),
+        findsNothing,
+      );
+      await tester.tapAt(const Offset(400, 80));
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(
+        find.byKey(const Key('mobile-player-toggle')).hitTestable(),
+        findsOneWidget,
+      );
+      await closePlayer(tester);
+      expect(tester.takeException(), isNull);
+    },
+  );
 }
 
 class _FakeDisplayControl implements PhoneDisplayControl {

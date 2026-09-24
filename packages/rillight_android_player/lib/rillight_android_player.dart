@@ -5,6 +5,32 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
+/// Whole frame with only the black bars the aspect ratio needs.
+/// Cropped frame that removes those bars.
+enum AndroidVideoScale { fit, fill }
+
+/// Ancestor for the phone player. Absent readers stay on [AndroidVideoScale.fit].
+class AndroidVideoScaleScope extends InheritedWidget {
+  const AndroidVideoScaleScope({
+    super.key,
+    required this.scale,
+    required super.child,
+  });
+
+  final AndroidVideoScale scale;
+
+  static AndroidVideoScale maybeOf(BuildContext context) {
+    return context
+            .dependOnInheritedWidgetOfExactType<AndroidVideoScaleScope>()
+            ?.scale ??
+        AndroidVideoScale.fit;
+  }
+
+  @override
+  bool updateShouldNotify(AndroidVideoScaleScope oldWidget) =>
+      scale != oldWidget.scale;
+}
+
 /// An engine-local owner. Session tokens are never reused, including retries.
 class AndroidPlayer {
   AndroidPlayer({MethodChannel? channel, Stream<dynamic>? events})
@@ -99,8 +125,24 @@ class AndroidPlayer {
     return Map<String, dynamic>.from(response!);
   }
 
-  Widget buildView({Key? key}) => PlatformViewLink(
-    key: key,
+  /// Asks Media3 for fit (letterbox) or fill (crop). Safe when the view
+  /// does not exist yet: the owner keeps the mode for the next `PlayerView`.
+  Future<void> setVideoScale(AndroidVideoScale scale) async {
+    if (_disposed) return;
+    try {
+      await _channel.invokeMethod<void>('setVideoScale', {
+        'owner': owner,
+        'sessionId': _session,
+        'mode': scale.name,
+      });
+    } on PlatformException {
+      // Widget tests and non-Android embeds have no Media3 view.
+    }
+  }
+
+  Widget buildView({Key? key}) => _ScaleBoundPlayerView(key: key, player: this);
+
+  Widget _platformView() => PlatformViewLink(
     viewType: 'rillight/android_player/view',
     surfaceFactory: (context, controller) => AndroidViewSurface(
       controller: controller as AndroidViewController,
@@ -133,4 +175,29 @@ class AndroidPlayer {
       await _events.close();
     }
   }
+}
+
+class _ScaleBoundPlayerView extends StatefulWidget {
+  const _ScaleBoundPlayerView({super.key, required this.player});
+
+  final AndroidPlayer player;
+
+  @override
+  State<_ScaleBoundPlayerView> createState() => _ScaleBoundPlayerViewState();
+}
+
+class _ScaleBoundPlayerViewState extends State<_ScaleBoundPlayerView> {
+  AndroidVideoScale? _applied;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final scale = AndroidVideoScaleScope.maybeOf(context);
+    if (_applied == scale) return;
+    _applied = scale;
+    unawaited(widget.player.setVideoScale(scale));
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.player._platformView();
 }
