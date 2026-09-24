@@ -137,13 +137,21 @@ void main() {
     },
   );
 
+  // 同一分类面(HLS 升降级 / 未知长度保守预算)共用一次 server 生命周期。
   test(
-    'extensionless HLS upgrades only after ENDLIST and can downgrade',
+    'extensionless HLS upgrades and downgrades; unknown length stays conservative',
     () async {
       final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
       final client = HttpClient();
       var ended = true;
       server.listen((request) async {
+        if (request.uri.path == '/unknown') {
+          request.response.add([1, 2]);
+          await request.response.flush();
+          request.response.add([3, 4]);
+          await request.response.close();
+          return;
+        }
         request.response.headers.set(
           'content-type',
           'application/vnd.apple.mpegurl',
@@ -183,39 +191,24 @@ void main() {
         final dynamicStats = (await backend.diagnostics())['cache'] as Map;
         expect(dynamicStats['streamPolicy'], 'conservative');
         expect(dynamicStats['diskSessionLimitBytes'], 64 * 1024 * 1024);
+
+        await backend.open(
+          VideoOpenRequest(
+            url: Uri.parse('http://127.0.0.1:${server.port}/unknown'),
+          ),
+        );
+        final chunkedUri = Uri.parse(drivers.last.commands.first[1]);
+        await (await (await client.getUrl(chunkedUri)).close()).drain<void>();
+        final chunkedStats = (await backend.diagnostics())['cache'] as Map;
+        expect(chunkedStats['streamPolicy'], 'conservative');
+        expect(chunkedStats['memoryLimitBytes'], 8 * 1024 * 1024);
+        expect(chunkedStats['diskSessionLimitBytes'], 64 * 1024 * 1024);
       } finally {
         client.close(force: true);
         await server.close(force: true);
       }
     },
   );
-
-  test('unknown-length chunked media keeps conservative budgets', () async {
-    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-    final client = HttpClient();
-    server.listen((request) async {
-      request.response.add([1, 2]);
-      await request.response.flush();
-      request.response.add([3, 4]);
-      await request.response.close();
-    });
-    try {
-      await backend.open(
-        VideoOpenRequest(
-          url: Uri.parse('http://127.0.0.1:${server.port}/unknown'),
-        ),
-      );
-      final uri = Uri.parse(drivers.single.commands.first[1]);
-      await (await (await client.getUrl(uri)).close()).drain<void>();
-      final stats = (await backend.diagnostics())['cache'] as Map;
-      expect(stats['streamPolicy'], 'conservative');
-      expect(stats['memoryLimitBytes'], 8 * 1024 * 1024);
-      expect(stats['diskSessionLimitBytes'], 64 * 1024 * 1024);
-    } finally {
-      client.close(force: true);
-      await server.close(force: true);
-    }
-  });
 
   test(
     'wake lock follows playback, pause, EOF, error and stopped sessions',

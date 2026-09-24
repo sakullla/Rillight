@@ -87,8 +87,10 @@ void main() {
   EmbyItem episode(String id) =>
       EmbyItem.fromJson({'Id': id, 'Type': 'Episode', 'Name': id});
 
+  // 同一后台释放/恢复旅程的两个断言面合并:先验证正常恢复,
+  // 再在同一控制器上验证换凭据后恢复被拒绝。
   test(
-    'background release stops once and restores a new paused session',
+    'background release stops once, restores paused, and refuses new credentials',
     () async {
       await controller.start();
       await controller.seekTo(const Duration(seconds: 20));
@@ -104,22 +106,19 @@ void main() {
       expect(backend.openedPaused, isTrue);
       expect(controller.isPlaying, isFalse);
       expect(client.reports.where((r) => r.$1 == 'Playing'), hasLength(2));
+
+      await controller.suspendPlayback();
+      final count = backend.openCount;
+      client.attachSession(
+        baseUrl: client.baseUrl!,
+        accessToken: 'new-user-token',
+        userId: 'different-user',
+      );
+      await controller.restorePlayback();
+      expect(controller.sessionExpired, isTrue);
+      expect(backend.openCount, count);
     },
   );
-
-  test('background restore refuses a changed credential identity', () async {
-    await controller.start();
-    await controller.suspendPlayback();
-    final count = backend.openCount;
-    client.attachSession(
-      baseUrl: client.baseUrl!,
-      accessToken: 'new-user-token',
-      userId: 'different-user',
-    );
-    await controller.restorePlayback();
-    expect(controller.sessionExpired, isTrue);
-    expect(backend.openCount, count);
-  });
 
   test(
     'native authentication failure stops media and exposes reconnect state',
