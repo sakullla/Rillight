@@ -34,6 +34,7 @@ class DetailController extends ChangeNotifier {
 
   /// 续播集在已加载页之外时记住它。列表仍停在当前页，主操作不退回第一条。
   EmbyItem? resumeBeyondPage;
+  bool playedBusy = false;
   int _revision = 0, _seasonRevision = 0, _offset = 0;
   bool _disposed = false;
   late Object _identity;
@@ -198,6 +199,52 @@ class DetailController extends ChangeNotifier {
   void selectSource(String id) {
     mediaSourceId = id;
     notifyListeners();
+  }
+
+  /// 乐观更新已看状态:本地立即生效,失败回滚。手机与 TV 详情共用。
+  void applyPlayed(EmbyItem target, {required bool played}) {
+    applyItem(
+      target.copyWith(
+        userData: target.userData.copyWith(
+          played: played,
+          playbackPositionTicks: 0,
+          playedPercentage: played ? 100 : 0,
+        ),
+      ),
+    );
+  }
+
+  /// 切换当前条目已看状态。成功返回 true(调用方给可见反馈),失败回滚并返回 false。
+  Future<bool> togglePlayed() async {
+    final current = item;
+    if (current == null || playedBusy) return false;
+    final next = !current.userData.played;
+    playedBusy = true;
+    applyPlayed(current, played: next);
+    try {
+      if (next) {
+        await auth.client.markPlayed(current.id);
+      } else {
+        await auth.client.markUnplayed(current.id);
+      }
+      await load();
+      final reloaded = item;
+      if (reloaded != null &&
+          reloaded.id == current.id &&
+          reloaded.userData.played != next) {
+        applyPlayed(reloaded, played: next);
+      }
+      return true;
+    } catch (_) {
+      final reloaded = item;
+      if (reloaded != null && reloaded.id == current.id) {
+        applyPlayed(reloaded, played: current.userData.played);
+      }
+      return false;
+    } finally {
+      playedBusy = false;
+      notifyListeners();
+    }
   }
 
   EmbyException _failure(Object value) => value is EmbyException

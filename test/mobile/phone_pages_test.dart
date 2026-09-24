@@ -1299,6 +1299,8 @@ void main() {
         await tester.tap(find.text('第 1 季'));
         await tester.pumpAndSettle();
         expect(find.text('The Pilot'), findsWidgets);
+        // 已看集的缩略图带已看角标,未看集没有。
+        expect(find.byKey(const Key('phone-episode-watched')), findsOneWidget);
         expect(find.text('The One with the Resume'), findsNothing);
         await tester.tap(find.text('第 2 季'));
         await tester.pumpAndSettle();

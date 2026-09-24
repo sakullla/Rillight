@@ -561,6 +561,26 @@ class _EpisodeRow extends StatelessWidget {
                                 ),
                               ),
                             ),
+                          if (episode.userData.played)
+                            Positioned(
+                              right: 6,
+                              top: 6,
+                              child: DecoratedBox(
+                                decoration: BoxDecoration(
+                                  color: Colors.black.withValues(alpha: 0.55),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: Padding(
+                                  padding: const EdgeInsets.all(2),
+                                  child: Icon(
+                                    Icons.check_circle,
+                                    key: const Key('phone-episode-watched'),
+                                    size: 18,
+                                    color: Colors.white.withValues(alpha: 0.92),
+                                  ),
+                                ),
+                              ),
+                            ),
                           if (current)
                             Center(
                               child: Icon(

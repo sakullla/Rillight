@@ -46,7 +46,6 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
   EmbyItem? _previousEpisode;
   int? _audioStreamIndex;
   int? _subtitleStreamIndex;
-  bool _playedBusy = false;
   final _scroll = ScrollController();
   var _barSolid = false;
 
@@ -300,53 +299,18 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
     return found;
   }
 
-  void _showPlayed(EmbyItem item, {required bool played}) {
-    final controller = _controller;
-    if (controller == null) {
-      return;
-    }
-    controller.applyItem(
-      item.copyWith(
-        userData: item.userData.copyWith(
-          played: played,
-          playbackPositionTicks: 0,
-          playedPercentage: played ? 100 : 0,
-        ),
-      ),
-    );
-  }
-
+  /// 已看切换走 DetailController 的乐观更新(与 TV 端共用),成功后给可见反馈。
   Future<void> _togglePlayed() async {
-    final item = _controller?.item;
-    if (item == null || _playedBusy) return;
+    final controller = _controller;
+    final item = controller?.item;
+    if (controller == null || item == null) return;
     final next = !item.userData.played;
-    setState(() => _playedBusy = true);
-    _showPlayed(item, played: next);
-    try {
-      final client = AuthScope.of(context).client;
-      if (next) {
-        await client.markPlayed(item.id);
-      } else {
-        await client.markUnplayed(item.id);
-      }
-      if (!mounted) return;
-      await _controller!.load();
-      final current = _controller?.item;
-      if (current != null &&
-          current.id == item.id &&
-          current.userData.played != next) {
-        _showPlayed(current, played: next);
-      }
-      if (!mounted) return;
-      final l = AppLocalizations.of(context);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(next ? l.markPlayed : l.markUnplayed)),
-      );
-    } catch (_) {
-      if (mounted) _showPlayed(item, played: item.userData.played);
-    } finally {
-      if (mounted) setState(() => _playedBusy = false);
-    }
+    final ok = await controller.togglePlayed();
+    if (!mounted || !ok) return;
+    final l = AppLocalizations.of(context);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(next ? l.markPlayed : l.markUnplayed)),
+    );
   }
 
   void _openItem(String itemId) {
@@ -547,7 +511,7 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
                     tooltip: item.userData.played
                         ? l.markUnplayed
                         : l.markPlayed,
-                    onPressed: _playedBusy ? null : _togglePlayed,
+                    onPressed: controller.playedBusy ? null : _togglePlayed,
                     icon: Icon(
                       item.userData.played
                           ? Icons.check_circle

@@ -213,6 +213,9 @@ void main() {
       expect(find.byType(MobileSeriesPage), findsOneWidget);
       expect(find.byKey(const Key('phone-season-list')), findsOneWidget);
       expect(find.text('The Pilot'), findsWidgets);
+      // 已看集在分集列表有"已看"文字与缩略图角标。
+      expect(find.text('已看'), findsOneWidget);
+      expect(find.byKey(const Key('phone-episode-watched')), findsOneWidget);
       expectPhoneOnly(tester);
 
       await tester.binding.handlePopRoute();
