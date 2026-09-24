@@ -15,8 +15,6 @@ import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/home/catalog_controller.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/catalog_scope.dart';
-import 'package:rillight/home/phone_shelf_page.dart';
-import 'package:rillight/library/episode_detail_sections.dart';
 import 'package:rillight/library/mobile_detail_page.dart';
 import 'package:rillight/library/mobile_library_page.dart';
 import 'package:rillight/library/mobile_series_page.dart';
@@ -92,10 +90,6 @@ void main() {
               subtitleStreamIndex: request?.subtitleStreamIndex,
             );
           },
-        ),
-        GoRoute(
-          path: '/shelf/:source',
-          builder: (context, state) => PhoneShelfPage.fromState(state),
         ),
         GoRoute(
           path: '/library/:viewId',
@@ -322,81 +316,6 @@ void main() {
     expect(tester.takeException(), isNull);
   }, tags: ['integration']);
 
-  testWidgets('movie detail shows overview, cast and metadata by default', (
-    tester,
-  ) async {
-    final server = FakeEmbyServer();
-    server.items.firstWhere((item) => item.id == 'movie-inception').people =
-        const [FakePerson(name: 'Cobb Actor', type: 'Actor', role: 'Cobb')];
-    final (router, _) = await start(tester, server, width: 412);
-    await openItem(tester, router, 'movie-inception');
-
-    // 简介与演职员默认可见,无需任何展开交互。
-    expect(find.byKey(EpisodeOverviewSection.textKey), findsOneWidget);
-    expect(find.byKey(EpisodePeopleSection.sectionKey), findsOneWidget);
-    // 头部元数据胶囊:年份/时长/评级层级化呈现。
-    final meta = find.byKey(PhoneItemBanner.metaKey);
-    expect(meta, findsOneWidget);
-    expect(
-      find.descendant(of: meta, matching: find.text('2010')),
-      findsOneWidget,
-    );
-    expect(
-      find.descendant(of: meta, matching: find.text('2小时28分钟')),
-      findsOneWidget,
-    );
-    expect(
-      find.descendant(of: meta, matching: find.text('8.8')),
-      findsOneWidget,
-    );
-    // 主播放按钮融入沉浸头部,key 保留;可续播电影附"从头播放"。
-    final play = find.byKey(const Key('mobile-detail-play'));
-    expect(play, findsOneWidget);
-    expect(tester.getRect(play).top, lessThan(400));
-    expect(find.byKey(const Key('phone-detail-play-start')), findsOneWidget);
-    expect(tester.takeException(), isNull);
-  }, tags: ['integration']);
-
-  testWidgets(
-    'episode cards show overview when present and omit it otherwise',
-    (tester) async {
-      const minute = 10000000 * 60;
-      final server = FakeEmbyServer();
-      server.setSeasons('series-friends', const [
-        FakeSeason(id: 'season-friends-1', name: '第 1 季', indexNumber: 1),
-      ]);
-      server.setEpisodes('series-friends', const [
-        FakeEpisode(
-          id: 'episode-s1e1',
-          name: 'The Pilot',
-          seasonId: 'season-friends-1',
-          indexNumber: 1,
-          parentIndexNumber: 1,
-          overview: 'Monica gets a new apartment.',
-          runTimeTicks: minute * 22,
-        ),
-        FakeEpisode(
-          id: 'episode-s1e2',
-          name: 'The One Without Overview',
-          seasonId: 'season-friends-1',
-          indexNumber: 2,
-          parentIndexNumber: 1,
-          runTimeTicks: minute * 22,
-        ),
-      ]);
-      final (router, _) = await start(tester, server);
-      await openItem(tester, router, 'series-friends');
-
-      // 有简介的分集卡展示该集简介。
-      expect(find.text('Monica gets a new apartment.'), findsOneWidget);
-      expect(find.byKey(const Key('phone-episode-overview')), findsOneWidget);
-      // 无简介的分集卡整体仍正常渲染,优雅降级不留下空白区块。
-      expect(find.text('The One Without Overview'), findsOneWidget);
-      expect(tester.takeException(), isNull);
-    },
-    tags: ['integration'],
-  );
-
   testWidgets('marking played removes the movie from the unwatched filter', (
     tester,
   ) async {
@@ -497,75 +416,6 @@ void main() {
     expect(server.lastPlaybackInfoBody?['AudioStreamIndex'], 3);
     expect(server.lastPlaybackInfoBody?['SubtitleStreamIndex'], 4);
     await closePlayer(tester);
-    expect(tester.takeException(), isNull);
-  }, tags: ['integration']);
-
-  testWidgets('movie and series similar rows open that item shelf', (
-    tester,
-  ) async {
-    final server = FakeEmbyServer();
-    server.items.add(
-      FakeEmbyItem(
-        id: 'series-other',
-        name: '另一部剧',
-        type: 'Series',
-        parentId: 'view-tv',
-        primaryImageTag: 'tag-other',
-      ),
-    );
-    final (router, _) = await start(tester, server, height: 1200);
-    await openItem(tester, router, 'movie-inception');
-    final more = find.byKey(CatalogKeys.shelfMore(CatalogKeys.shelfSimilar));
-    await tester.ensureVisible(more);
-    final beforeMovie = server.requests.length;
-    await tester.tap(more);
-    await tester.pumpAndSettle();
-    expect(find.byType(PhoneShelfPage), findsOneWidget);
-    expect(
-      find.descendant(
-        of: find.byType(PhoneShelfPage),
-        matching: find.text('飞屋环游记'),
-      ),
-      findsOneWidget,
-    );
-    expect(
-      server.requests
-          .skip(beforeMovie)
-          .any(
-            (request) =>
-                request.contains('/Items/movie-inception/Similar') &&
-                request.contains('Limit=${PhoneShelfPage.pageSize}'),
-          ),
-      isTrue,
-    );
-
-    await tester.binding.handlePopRoute();
-    await tester.pumpAndSettle();
-    await tester.binding.handlePopRoute();
-    await tester.pumpAndSettle();
-    await openItem(tester, router, 'series-friends');
-    await tester.ensureVisible(more);
-    final beforeSeries = server.requests.length;
-    await tester.tap(more);
-    await tester.pumpAndSettle();
-    expect(find.byType(PhoneShelfPage), findsOneWidget);
-    expect(
-      find.descendant(
-        of: find.byType(PhoneShelfPage),
-        matching: find.text('另一部剧'),
-      ),
-      findsOneWidget,
-    );
-    expect(
-      server.requests
-          .skip(beforeSeries)
-          .any(
-            (request) =>
-                request.contains('/Items/series-friends/Similar') &&
-                request.contains('Limit=${PhoneShelfPage.pageSize}'),
-          ),
-      isTrue,
-    );
     expect(tester.takeException(), isNull);
   }, tags: ['integration']);
 

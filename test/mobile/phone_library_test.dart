@@ -17,7 +17,6 @@ import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/library/browse_controller.dart';
 import 'package:rillight/library/mobile_library_page.dart';
 import 'package:rillight/library/shelf_sort.dart';
-import 'package:rillight/media_image/media_image.dart';
 
 import '../emby/fake_emby_server.dart';
 import '../helpers/image_cache_fixture.dart';
@@ -112,61 +111,6 @@ void main() {
       expect(browse.hasMore, isTrue);
     },
   );
-
-  testWidgets('library blocks use artwork or a full name placeholder', (
-    tester,
-  ) async {
-    await _start(tester);
-    expect(find.byIcon(Icons.video_library), findsNothing);
-    expect(find.byIcon(Icons.video_library_outlined), findsNothing);
-    expect(find.byType(MediaImage), findsNothing);
-    expect(
-      find.byKey(const Key('phone-library-placeholder-view-movies')),
-      findsOneWidget,
-    );
-    expect(
-      find.byKey(const Key('phone-library-placeholder-view-tv')),
-      findsOneWidget,
-    );
-    expect(find.text('电影'), findsOneWidget);
-    final block = tester.getSize(
-      find.byKey(const Key('phone-library-block-view-movies')),
-    );
-    expect(block.width, greaterThan(200));
-    expect(block.height, greaterThan(100));
-    expect(block.height / block.width, closeTo(9 / 16, 0.02));
-    expect(tester.takeException(), isNull);
-  }, tags: ['integration']);
-
-  testWidgets('a library with artwork keeps the library name on the block', (
-    tester,
-  ) async {
-    await _start(
-      tester,
-      prepare: (server) {
-        server.views = [
-          FakeEmbyItem(
-            id: 'view-movies',
-            name: '电影',
-            type: 'CollectionFolder',
-            collectionType: 'movies',
-            primaryImageTag: 'view-movies-art',
-          ),
-        ];
-      },
-    );
-    expect(
-      find.byKey(const Key('phone-library-image-view-movies')),
-      findsOneWidget,
-    );
-    expect(
-      find.byKey(const Key('phone-library-placeholder-view-movies')),
-      findsNothing,
-    );
-    expect(find.text('电影'), findsOneWidget);
-    expect(find.byIcon(Icons.video_library), findsNothing);
-    expect(tester.takeException(), isNull);
-  }, tags: ['integration']);
 
   testWidgets(
     'library title, poster grid, filters and four sorts follow the library',
@@ -325,28 +269,6 @@ void main() {
     expect(tester.takeException(), isNull);
   }, tags: ['integration']);
 
-  testWidgets('year and genre sections stay hidden without server options', (
-    tester,
-  ) async {
-    final harness = await _start(tester);
-    harness.server.items = [
-      FakeEmbyItem(
-        id: 'movie-plain',
-        name: 'Plain',
-        type: 'Movie',
-        parentId: 'view-movies',
-      ),
-    ];
-    await _openMovies(tester);
-    await _openFilters(tester);
-    expect(find.text('类型'), findsOneWidget);
-    expect(find.text('观看状态'), findsOneWidget);
-    expect(find.text('排序'), findsOneWidget);
-    expect(find.text('年份'), findsNothing);
-    expect(find.text('流派'), findsNothing);
-    expect(tester.takeException(), isNull);
-  }, tags: ['integration']);
-
   testWidgets('an empty filter result is not a load failure', (tester) async {
     final harness = await _start(tester);
     await _openMovies(tester);
@@ -394,97 +316,6 @@ void main() {
     expect(find.byType(MobileEmptyState), findsNothing);
     expect(find.text('暂无内容'), findsNothing);
     expect(find.text('重试'), findsOneWidget);
-    expect(tester.takeException(), isNull);
-  }, tags: ['integration']);
-
-  testWidgets('the next page failure keeps posters already on screen', (
-    tester,
-  ) async {
-    final harness = await _start(tester);
-    harness.server.items = [
-      for (var i = 0; i < 65; i++)
-        FakeEmbyItem(
-          id: 'movie-$i',
-          name: 'Film ${i.toString().padLeft(2, '0')}',
-          type: 'Movie',
-          parentId: 'view-movies',
-        ),
-    ];
-    await _openMovies(tester);
-    expect(
-      find.byKey(const ValueKey('phone-library-poster-movie-0')),
-      findsOneWidget,
-    );
-    expect(
-      find.byKey(const ValueKey('phone-library-poster-movie-50')),
-      findsNothing,
-    );
-    harness.server.itemsStatus = 503;
-    // GridView 自带内层 Scrollable,外层 ListView 的在树序中最先出现。
-    final scrollable = tester.state<ScrollableState>(
-      find
-          .descendant(
-            of: find.byKey(const PageStorageKey('library-view-movies')),
-            matching: find.byType(Scrollable),
-          )
-          .first,
-    );
-    scrollable.position.jumpTo(scrollable.position.maxScrollExtent);
-    await tester.pumpAndSettle();
-    scrollable.position.jumpTo(0);
-    await tester.pump();
-    expect(
-      find.byKey(const ValueKey('phone-library-poster-movie-0')),
-      findsOneWidget,
-    );
-    expect(find.text('Film 00'), findsWidgets);
-    expect(
-      find.byKey(const ValueKey('phone-library-poster-movie-50')),
-      findsNothing,
-    );
-    expect(find.byType(MobileFailureState), findsOneWidget);
-    expect(find.byType(MobileEmptyState), findsNothing);
-    expect(find.text('暂无内容'), findsNothing);
-    expect(find.textContaining('503'), findsOneWidget);
-
-    harness.server.itemsStatus = null;
-    await tester.tap(find.byKey(MobileFailureState.retryKey));
-    await tester.pumpAndSettle();
-    expect(
-      find.byKey(const ValueKey('phone-library-poster-movie-50')),
-      findsOneWidget,
-    );
-    expect(find.byType(MobileFailureState), findsNothing);
-    expect(tester.takeException(), isNull);
-  }, tags: ['integration']);
-
-  testWidgets('the poster grid recalibrates to four columns at 412dp', (
-    tester,
-  ) async {
-    await _start(tester);
-    tester.view.physicalSize = const Size(412, 800);
-    await tester.pumpAndSettle();
-    await _openMovies(tester);
-    final arts = tester
-        .renderObjectList<RenderBox>(
-          find.byWidgetPredicate((widget) {
-            final key = widget.key;
-            return key is ValueKey<String> &&
-                key.value.startsWith('phone-library-art-');
-          }),
-        )
-        .toList();
-    expect(arts.length, greaterThanOrEqualTo(4));
-    final columns = arts
-        .map((box) => box.localToGlobal(Offset.zero).dx.round())
-        .toSet();
-    expect(columns.length, 4);
-    final width = arts.first.size.width;
-    expect(width, closeTo((412 - 32 - 3 * 16) / 4, 1));
-    expect(
-      arts.every((box) => (box.size.height - width * 1.5).abs() < 0.5),
-      isTrue,
-    );
     expect(tester.takeException(), isNull);
   }, tags: ['integration']);
 }

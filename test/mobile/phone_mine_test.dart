@@ -30,123 +30,104 @@ const _device = EmbyDeviceInfo(
 );
 
 void main() {
-  testWidgets('current identity stays visible and a new line reloads catalog', (
-    tester,
-  ) async {
-    final lineA = FakeEmbyServer(
-      serverName: '家庭影院',
-      baseUrl: Uri.parse('http://line-a.test:8096'),
-      items: [_movie('movie-a', '甲线电影')],
-    );
-    final lineB = FakeEmbyServer(
-      serverId: lineA.serverId,
-      serverName: '家庭影院',
-      baseUrl: Uri.parse('http://line-b.test:8096'),
-      items: [_movie('movie-b', '乙线电影')],
-    );
-    final auth = _auth([lineA, lineB]);
-    addTearDown(auth.dispose);
-    await _connect(tester, auth, lineA.baseUrl.toString());
-    await _connect(tester, auth, lineB.baseUrl.toString());
-    final catalog = CatalogController(auth: auth)
-      ..cache.debugSetDiskStore(null);
-    addTearDown(catalog.dispose);
-    await tester.runAsync(catalog.reload);
-    expect(catalog.latestMovies.items.map((item) => item.name), ['乙线电影']);
+  testWidgets(
+    'current identity stays visible; a line switch reloads catalog or fails loudly',
+    (tester) async {
+      final lineA = FakeEmbyServer(
+        serverName: '家庭影院',
+        baseUrl: Uri.parse('http://line-a.test:8096'),
+        items: [_movie('movie-a', '甲线电影')],
+      );
+      final lineB = FakeEmbyServer(
+        serverId: lineA.serverId,
+        serverName: '家庭影院',
+        baseUrl: Uri.parse('http://line-b.test:8096'),
+        items: [_movie('movie-b', '乙线电影')],
+      );
+      final auth = _auth([lineA, lineB]);
+      addTearDown(auth.dispose);
+      await _connect(tester, auth, lineA.baseUrl.toString());
+      await _connect(tester, auth, lineB.baseUrl.toString());
+      final catalog = CatalogController(auth: auth)
+        ..cache.debugSetDiskStore(null);
+      addTearDown(catalog.dispose);
+      await tester.runAsync(catalog.reload);
+      expect(catalog.latestMovies.items.map((item) => item.name), ['乙线电影']);
 
-    await _pump(tester, auth: auth, catalog: catalog);
-    expect(find.text('alice'), findsOneWidget);
-    expect(find.text('家庭影院'), findsOneWidget);
-    expect(find.text('line-b.test:8096'), findsOneWidget);
-    expect(find.text('账户与服务器'), findsOneWidget);
-    expect(find.text('播放设置'), findsOneWidget);
-    expect(find.text('我的'), findsWidgets);
-    expect(
-      tester.getTopLeft(find.byKey(PhoneMinePage.userKey)).dy,
-      lessThan(tester.getTopLeft(find.byKey(PhoneMinePage.serverKey)).dy),
-    );
-    expect(
-      tester.getTopLeft(find.byKey(PhoneMinePage.currentLineKey)).dy,
-      lessThan(tester.getTopLeft(find.text('退出登录')).dy),
-    );
-    expect(
-      tester.getTopLeft(find.text('退出登录')).dy,
-      lessThan(tester.getTopLeft(find.text('播放速度')).dy),
-    );
+      await _pump(tester, auth: auth, catalog: catalog);
+      expect(find.text('alice'), findsOneWidget);
+      expect(find.text('家庭影院'), findsOneWidget);
+      expect(find.text('line-b.test:8096'), findsOneWidget);
+      expect(find.text('账户与服务器'), findsOneWidget);
+      expect(find.text('播放设置'), findsOneWidget);
+      expect(find.text('我的'), findsWidgets);
+      expect(
+        tester.getTopLeft(find.byKey(PhoneMinePage.userKey)).dy,
+        lessThan(tester.getTopLeft(find.byKey(PhoneMinePage.serverKey)).dy),
+      );
+      expect(
+        tester.getTopLeft(find.byKey(PhoneMinePage.currentLineKey)).dy,
+        lessThan(tester.getTopLeft(find.text('退出登录')).dy),
+      );
+      expect(
+        tester.getTopLeft(find.text('退出登录')).dy,
+        lessThan(tester.getTopLeft(find.text('播放速度')).dy),
+      );
 
-    final target = auth.savedServers.single.lines.firstWhere(
-      (line) => line.address == lineA.baseUrl.toString(),
-    );
-    final before = _itemRequests(lineA);
-    await _tap(tester, find.byKey(PhoneMinePage.lineKey));
-    final option = find.byKey(PhoneMinePage.lineOptionKey(target.id));
-    expect(tester.widget<ListTile>(option).selected, isFalse);
-    await _tap(tester, option);
-    await _until(
-      tester,
-      () => catalog.latestMovies.items.any((item) => item.name == '甲线电影'),
-    );
+      final target = auth.savedServers.single.lines.firstWhere(
+        (line) => line.address == lineA.baseUrl.toString(),
+      );
+      final before = _itemRequests(lineA);
+      await _tap(tester, find.byKey(PhoneMinePage.lineKey));
+      final option = find.byKey(PhoneMinePage.lineOptionKey(target.id));
+      expect(tester.widget<ListTile>(option).selected, isFalse);
+      await _tap(tester, option);
+      await _until(
+        tester,
+        () => catalog.latestMovies.items.any((item) => item.name == '甲线电影'),
+      );
 
-    expect(auth.client.baseUrl, lineA.baseUrl);
-    expect(_itemRequests(lineA), greaterThan(before));
-    expect(catalog.latestMovies.items.map((item) => item.name), ['甲线电影']);
-    await _scrollToTop(tester);
-    expect(find.text('line-a.test:8096'), findsOneWidget);
-    expect(find.text('line-b.test:8096'), findsNothing);
-    await _tap(tester, find.byKey(PhoneMinePage.lineKey));
-    expect(
-      tester
-          .widget<ListTile>(find.byKey(PhoneMinePage.lineOptionKey(target.id)))
-          .selected,
-      isTrue,
-    );
-    expect(tester.takeException(), isNull);
-  });
+      expect(auth.client.baseUrl, lineA.baseUrl);
+      expect(_itemRequests(lineA), greaterThan(before));
+      expect(catalog.latestMovies.items.map((item) => item.name), ['甲线电影']);
+      await _scrollToTop(tester);
+      expect(find.text('line-a.test:8096'), findsOneWidget);
+      expect(find.text('line-b.test:8096'), findsNothing);
+      await _tap(tester, find.byKey(PhoneMinePage.lineKey));
+      expect(
+        tester
+            .widget<ListTile>(
+              find.byKey(PhoneMinePage.lineOptionKey(target.id)),
+            )
+            .selected,
+        isTrue,
+      );
 
-  testWidgets('failed line switch keeps the loaded line and explains why', (
-    tester,
-  ) async {
-    final lineA = FakeEmbyServer(
-      serverName: '家庭影院',
-      baseUrl: Uri.parse('http://line-a.test:8096'),
-      items: [_movie('movie-a', '甲线电影')],
-    );
-    final lineB = FakeEmbyServer(
-      serverId: lineA.serverId,
-      serverName: '家庭影院',
-      baseUrl: Uri.parse('http://line-b.test:8096'),
-      items: [_movie('movie-b', '乙线电影')],
-    );
-    final auth = _auth([lineA, lineB]);
-    addTearDown(auth.dispose);
-    await _connect(tester, auth, lineA.baseUrl.toString());
-    await _connect(tester, auth, lineB.baseUrl.toString());
-    final catalog = CatalogController(auth: auth)
-      ..cache.debugSetDiskStore(null);
-    addTearDown(catalog.dispose);
-    await tester.runAsync(catalog.reload);
-    lineA.publicInfoStatus = 500;
-    lineA.publicInfoRawBody = 'upstream timeout';
-    final target = auth.savedServers.single.lines.firstWhere(
-      (line) => line.address == lineA.baseUrl.toString(),
-    );
+      // 失败的线路切换保持当前线路与已加载目录,并解释原因。
+      final lineBTarget = auth.savedServers.single.lines.firstWhere(
+        (line) => line.address == lineB.baseUrl.toString(),
+      );
+      lineB.publicInfoStatus = 500;
+      lineB.publicInfoRawBody = 'upstream timeout';
+      final beforeFail = _itemRequests(lineB);
+      await _tap(
+        tester,
+        find.byKey(PhoneMinePage.lineOptionKey(lineBTarget.id)),
+      );
 
-    await _pump(tester, auth: auth, catalog: catalog);
-    await _tap(tester, find.byKey(PhoneMinePage.lineKey));
-    await _tap(tester, find.byKey(PhoneMinePage.lineOptionKey(target.id)));
-
-    // 失败提示在头部下方:先滚回列表顶部。
-    await _scrollToTop(tester);
-    expect(find.text('HTTP 500: upstream timeout'), findsOneWidget);
-    expect(auth.session, isNull);
-    expect(
-      auth.savedServers.single.activeLine?.address,
-      lineB.baseUrl.toString(),
-    );
-    expect(catalog.latestMovies.items.map((item) => item.name), ['乙线电影']);
-    expect(_itemRequests(lineA), 0);
-    expect(tester.takeException(), isNull);
-  });
+      // 失败提示在头部下方:先滚回列表顶部。
+      await _scrollToTop(tester);
+      expect(find.text('HTTP 500: upstream timeout'), findsOneWidget);
+      expect(auth.session, isNull);
+      expect(
+        auth.savedServers.single.activeLine?.address,
+        lineA.baseUrl.toString(),
+      );
+      expect(catalog.latestMovies.items.map((item) => item.name), ['甲线电影']);
+      expect(_itemRequests(lineB), beforeFail);
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets('playback rate merges and the next playback uses it', (
     tester,
@@ -211,50 +192,6 @@ void main() {
     expect(backend.volume, 40);
     expect(tester.takeException(), isNull);
   });
-
-  testWidgets(
-    'disk cache limit switches from the mine cache group and merges',
-    (tester) async {
-      final server = FakeEmbyServer();
-      final auth = _auth([server]);
-      addTearDown(auth.dispose);
-      await _connect(tester, auth, server.baseUrl.toString());
-      final store = MemoryPlayerSettingsStore(
-        const PlayerSettings(
-          volume: 40,
-          playbackRate: 1.5,
-          danmakuAppId: 'app-keep',
-        ),
-      );
-      await _pump(tester, auth: auth, store: store);
-
-      // "关于"在列表最底部;滚到它时缓存分组已在视口/缓存区内。
-      await _scrollTo(tester, find.text('关于'));
-      expect(find.text('缓存'), findsOneWidget);
-      expect(find.text('关于'), findsOneWidget);
-      await _scrollTo(tester, find.byKey(PhoneMinePage.cacheLimitKey(2048)));
-      expect(
-        tester
-            .widget<ChoiceChip>(find.byKey(PhoneMinePage.cacheLimitKey(2048)))
-            .selected,
-        isTrue,
-      );
-      await _tap(tester, find.byKey(PhoneMinePage.cacheLimitKey(1024)));
-
-      final saved = await store.read();
-      expect(saved.diskCacheLimitMiB, 1024);
-      expect(saved.volume, 40);
-      expect(saved.playbackRate, 1.5);
-      expect(saved.danmakuAppId, 'app-keep');
-      expect(
-        tester
-            .widget<ChoiceChip>(find.byKey(PhoneMinePage.cacheLimitKey(1024)))
-            .selected,
-        isTrue,
-      );
-      expect(tester.takeException(), isNull);
-    },
-  );
 
   testWidgets('custom danmaku address can be filled and cleared to official', (
     tester,

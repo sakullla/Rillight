@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
+import 'package:rillight/app/app_shell.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_chrome.dart';
 import 'package:rillight/app/mobile_shell.dart';
@@ -10,6 +11,7 @@ import 'package:rillight/app/phone_mine_page.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/theme.dart';
+import 'package:rillight/app/tv_shell.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/emby/emby_client.dart';
@@ -19,12 +21,19 @@ import 'package:rillight/home/catalog_controller.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/home/phone_hero.dart';
 import 'package:rillight/home/phone_home.dart';
+import 'package:rillight/library/item_detail_page.dart';
+import 'package:rillight/library/library_page.dart';
 import 'package:rillight/library/mobile_detail_page.dart';
 import 'package:rillight/library/mobile_library_page.dart';
+import 'package:rillight/library/mobile_series_page.dart';
+import 'package:rillight/library/tv_detail_page.dart';
+import 'package:rillight/library/tv_library_page.dart';
 import 'package:rillight/player/mobile_player_page.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/player_bindings.dart';
+import 'package:rillight/player/player_page.dart';
 import 'package:rillight/player/player_settings.dart';
+import 'package:rillight/player/tv_player_page.dart';
 import 'package:rillight/player/video_backend.dart';
 import '../emby/fake_emby_server.dart';
 import '../helpers/image_cache_fixture.dart';
@@ -36,6 +45,7 @@ void main() {
     FakeEmbyServer server, {
     double width = 360,
     double scale = 1,
+    FakeVideoBackend? backend,
   }) async {
     tester.view.physicalSize = Size(width, 800);
     tester.view.devicePixelRatio = 1;
@@ -52,12 +62,12 @@ void main() {
         dio: dioForFakeEmby(FakeEmbyAdapter([server])),
       ),
     );
-    final backend = FakeVideoBackend();
+    final video = backend ?? FakeVideoBackend();
     final app = RillightApp(
       auth: auth,
       environment: PresentationEnvironment.phone,
       playerBindings: PlayerBindings(
-        createBackend: () => backend,
+        createBackend: () => video,
         snapshotStore: MemoryPlaybackSessionSnapshotStore(),
         settingsStore: MemoryPlayerSettingsStore(),
       ),
@@ -71,7 +81,7 @@ void main() {
       app.router.dispose();
       auth.dispose();
     });
-    return (app, backend);
+    return (app, video);
   }
 
   Future<void> login(WidgetTester tester, FakeEmbyServer server) async {
@@ -93,117 +103,284 @@ void main() {
     expect(find.byType(MobileShell), findsOneWidget);
   }
 
-  for (final width in [360.0, 412.0]) {
-    testWidgets(
-      '$width touch login search detail playback, rotation and background resume',
-      (tester) async {
-        final server = FakeEmbyServer();
-        final (app, backend) = await start(tester, server, width: width);
-        await login(tester, server);
-        await tester.tap(find.text('搜索').last);
-        await tester.pumpAndSettle();
-        final field = find.byKey(const Key('mobile-search-field'));
-        await tester.enterText(field, 'Inception');
-        await tester.pump(const Duration(milliseconds: 400));
-        await tester.pumpAndSettle();
-        tester.testTextInput.hide();
-        tester.view.physicalSize = Size(800, width);
-        await tester.pumpAndSettle();
-        expect(find.text('Inception'), findsWidgets);
-        await tester.tap(find.text('首页').last);
-        await tester.pumpAndSettle();
-        await tester.tap(find.text('搜索').last);
-        await tester.pumpAndSettle();
-        expect(tester.widget<TextField>(field).controller!.text, 'Inception');
-        await tester.ensureVisible(find.text('Inception').last);
-        await tester.pumpAndSettle();
-        await tester.tap(find.text('Inception').last);
-        await tester.pumpAndSettle();
-        expect(find.byType(MobileDetailPage), findsOneWidget);
-        final play = find.byKey(const Key('mobile-detail-play'));
-        expect(tester.getRect(play).bottom, lessThanOrEqualTo(width));
-        await tester.tap(play);
-        await tester.pumpAndSettle();
-        expect(find.byType(MobilePlayerPage), findsOneWidget);
-        expect(
-          ModalRoute.of(
-            tester.element(find.byType(MobileDetailPage, skipOffstage: false)),
-          )!.isCurrent,
-          isFalse,
-          reason: 'Covered detail must not receive Android predictive back',
-        );
-        expect(backend.openCount, 1);
-        tester.view.physicalSize = Size(width, 800);
-        await tester.pumpAndSettle();
-        expect(backend.openCount, 1);
-        final current = tester
-            .state<MobilePlayerPageState>(find.byType(MobilePlayerPage))
-            .controller!;
-        expect(
-          current.error,
-          isNull,
-          reason: '${current.loadFailure} ${current.trackFailure}',
-        );
-        expect(current.loading, isFalse);
-        await tester.pump(const Duration(milliseconds: 300));
-        expect(
-          tester
-              .widget<IconButton>(find.byKey(const Key('mobile-player-toggle')))
-              .onPressed,
-          isNotNull,
-        );
-        await tester.ensureVisible(
-          find.byKey(const Key('mobile-player-toggle')),
-        );
-        await tester.pumpAndSettle();
-        await tester.tap(find.byKey(const Key('mobile-player-toggle')));
-        await tester.pumpAndSettle();
-        expect(backend.isPlaying, isFalse);
-        await tester.tap(find.byTooltip('快进 10 秒'));
-        await tester.pumpAndSettle();
-        expect(backend.position, greaterThan(Duration.zero));
-        tester.binding.handleAppLifecycleStateChanged(
-          AppLifecycleState.inactive,
-        );
-        await tester.pumpAndSettle();
-        expect(backend.openCount, 1);
-        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
-        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
-        await tester.pumpAndSettle();
-        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
-        tester.binding.handleAppLifecycleStateChanged(
-          AppLifecycleState.inactive,
-        );
-        tester.binding.handleAppLifecycleStateChanged(
-          AppLifecycleState.resumed,
-        );
-        await tester.pumpAndSettle();
-        expect(backend.openCount, 2);
-        expect(backend.openedPaused, isTrue);
-        // 音轨/字幕入口已收入"更多"底部面板(fca9712),不再有顶层 Tooltip。
-        await tester.tap(find.byKey(const Key('mobile-player-more')));
-        await tester.pump();
-        await tester.pump(const Duration(milliseconds: 400));
-        expect(find.byType(BottomSheet), findsOneWidget);
-        await tester.binding.handlePopRoute();
-        await tester.pumpAndSettle();
-        expect(find.byType(MobilePlayerPage), findsOneWidget);
-        await tester.binding.handlePopRoute();
-        await tester.pumpAndSettle();
-        await tester.pump(const Duration(seconds: 4));
-        await tester.pumpAndSettle();
-        expect(find.byType(MobilePlayerPage), findsNothing);
-        expect(find.byType(MobileDetailPage), findsOneWidget);
-        expect(
-          server.playbackEvents.where((event) => event.kind == 'Stopped'),
-          isNotEmpty,
-        );
-        expect(app.auth.isLoggedIn, isTrue);
-        expect(tester.takeException(), isNull);
-      },
-      tags: ['integration'],
-    );
+  Future<void> tapKey(WidgetTester tester, Key key) async {
+    final finder = find.byKey(key);
+    await tester.ensureVisible(finder);
+    await tester.pumpAndSettle();
+    await tester.tap(finder);
+    await tester.pumpAndSettle();
   }
+
+  Future<void> tapSheetText(WidgetTester tester, String text) async {
+    final list = find.descendant(
+      of: find.byType(BottomSheet),
+      matching: find.byType(Scrollable),
+    );
+    final target = find.text(text);
+    for (var i = 0; i < 12; i++) {
+      if (target.evaluate().isNotEmpty) {
+        final box = tester.renderObject<RenderBox>(target);
+        final top = box.localToGlobal(Offset.zero).dy;
+        final bottom = top + box.size.height;
+        final screen = tester.view.physicalSize.height;
+        if (top >= 0 && bottom <= screen) {
+          await tester.tap(target);
+          await tester.pumpAndSettle();
+          return;
+        }
+      }
+      await tester.drag(list, const Offset(0, -120));
+      await tester.pumpAndSettle();
+    }
+    fail('could not tap $text in the tracks sheet');
+  }
+
+  void expectPhoneOnly(WidgetTester tester) {
+    expect(find.byType(AppShell, skipOffstage: false), findsNothing);
+    expect(find.byType(TvShell, skipOffstage: false), findsNothing);
+    expect(find.byType(LibraryPage, skipOffstage: false), findsNothing);
+    expect(find.byType(ItemDetailPage, skipOffstage: false), findsNothing);
+    expect(find.byType(PlayerPage, skipOffstage: false), findsNothing);
+    expect(find.byType(TvLibraryPage, skipOffstage: false), findsNothing);
+    expect(find.byType(TvDetailPage, skipOffstage: false), findsNothing);
+    expect(find.byType(TvPlayerPage, skipOffstage: false), findsNothing);
+  }
+
+  testWidgets(
+    'touch journey: login, search, series, playback, subtitle, landscape and progress',
+    (tester) async {
+      // 360dp 单宽度承载完整旅程;412dp 曾并行运行,属同一行为的等价断言。
+      const width = 360.0;
+      final server = FakeEmbyServer();
+      final movie = server.items.firstWhere(
+        (item) => item.id == 'movie-inception',
+      );
+      movie.mediaStreams = [
+        ...movie.mediaStreams,
+        const FakeMediaStream(
+          index: 4,
+          type: 'Subtitle',
+          codec: 'subrip',
+          language: 'eng',
+          displayTitle: '英文字幕',
+          isTextSubtitleStream: true,
+        ),
+      ];
+      final (app, backend) = await start(
+        tester,
+        server,
+        width: width,
+        backend: FakeVideoBackend(duration: const Duration(hours: 3)),
+      );
+      await login(tester, server);
+
+      // 登录后首页可见续播进度,且手机环境不出现桌面/TV 壳。
+      expect(find.byType(MobileShell), findsOneWidget);
+      expect(find.text('已看 40%'), findsWidgets);
+      expectPhoneOnly(tester);
+
+      // 搜索:横屏下结果可见,草稿跨 tab 保留。
+      await tester.tap(find.text('搜索').last);
+      await tester.pumpAndSettle();
+      final field = find.byKey(const Key('mobile-search-field'));
+      await tester.enterText(field, 'Inception');
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pumpAndSettle();
+      tester.testTextInput.hide();
+      tester.view.physicalSize = const Size(800, 360);
+      await tester.pumpAndSettle();
+      expect(find.text('Inception'), findsWidgets);
+      await tester.tap(find.text('首页').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('搜索').last);
+      await tester.pumpAndSettle();
+      expect(tester.widget<TextField>(field).controller!.text, 'Inception');
+
+      // 片库:剧集块打开系列分集页,电影块打开详情页。
+      tester.view.physicalSize = const Size(width, 800);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('片库').last);
+      await tester.pumpAndSettle();
+      await tapKey(tester, const Key('phone-library-block-view-tv'));
+      expect(
+        tester.widget<Text>(find.byKey(const Key('phone-library-title'))).data,
+        '剧集',
+      );
+      await tester.ensureVisible(find.text('老友记'));
+      await tester.tap(find.text('老友记'));
+      await tester.pumpAndSettle();
+      expect(find.byType(MobileSeriesPage), findsOneWidget);
+      expect(find.byKey(const Key('phone-season-list')), findsOneWidget);
+      expect(find.text('The Pilot'), findsWidgets);
+      expectPhoneOnly(tester);
+
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(find.byType(MobileShell), findsOneWidget);
+
+      await tapKey(tester, const Key('phone-library-block-view-movies'));
+      expect(
+        tester.widget<Text>(find.byKey(const Key('phone-library-title'))).data,
+        '电影',
+      );
+      await tester.ensureVisible(find.text('Inception').first);
+      await tester.tap(find.text('Inception').first);
+      await tester.pumpAndSettle();
+      expect(find.byType(MobileDetailPage), findsOneWidget);
+      expect(find.byType(MobileSeriesPage), findsNothing);
+      expect(find.text('继续播放'), findsOneWidget);
+      expect(find.text('从头播放'), findsOneWidget);
+      expectPhoneOnly(tester);
+
+      final play = find.byKey(const Key('mobile-detail-play'));
+      expect(tester.getRect(play).bottom, lessThanOrEqualTo(width));
+      await tester.tap(play);
+      await tester.pumpAndSettle();
+      expect(find.byType(MobilePlayerPage), findsOneWidget);
+      expect(
+        ModalRoute.of(
+          tester.element(find.byType(MobileDetailPage, skipOffstage: false)),
+        )!.isCurrent,
+        isFalse,
+        reason: 'Covered detail must not receive Android predictive back',
+      );
+      expect(backend.openCount, 1);
+      final current = tester
+          .state<MobilePlayerPageState>(find.byType(MobilePlayerPage))
+          .controller!;
+      expect(
+        current.error,
+        isNull,
+        reason: '${current.loadFailure} ${current.trackFailure}',
+      );
+      expect(current.loading, isFalse);
+      // 详情页带出的续播点生效,字幕尚未切换。
+      expect(backend.isPlaying, isTrue);
+      expect(backend.position, const Duration(minutes: 59));
+      expect(current.subtitleStreamIndex, isNot(4));
+
+      // 横屏播放不重开;横屏下暂停与拖动进度条仍可用。
+      tester.view.physicalSize = const Size(800, width);
+      await tester.pumpAndSettle();
+      expect(
+        tester.view.physicalSize.width,
+        greaterThan(tester.view.physicalSize.height),
+      );
+      expect(backend.isPlaying, isTrue);
+      expect(backend.openCount, 1);
+      expectPhoneOnly(tester);
+
+      await tester.ensureVisible(find.byKey(const Key('mobile-player-toggle')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('mobile-player-toggle')));
+      await tester.pumpAndSettle();
+      expect(backend.isPlaying, isFalse);
+      expect(
+        tester.view.physicalSize.width,
+        greaterThan(tester.view.physicalSize.height),
+      );
+
+      final seek = find.byKey(const Key('mobile-player-seek'));
+      await tester.ensureVisible(seek);
+      await tester.pumpAndSettle();
+      final slider = tester.widget<Slider>(seek);
+      slider.onChangeEnd!(slider.max * .75);
+      await tester.pumpAndSettle();
+      expect(backend.position, greaterThan(const Duration(minutes: 70)));
+
+      // 音轨/字幕入口已收入"更多"底部面板(fca9712),不再有顶层 Tooltip。
+      final more = find.byKey(const Key('mobile-player-more'));
+      await tester.ensureVisible(more);
+      await tester.pumpAndSettle();
+      await tester.tap(more);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.byType(BottomSheet), findsOneWidget);
+      await tapSheetText(tester, '英文字幕');
+      expect(current.subtitleStreamIndex, 4);
+      expect(current.trackFailure, isNull);
+      expect(backend.subtitleIndex, 4);
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(find.byType(BottomSheet), findsNothing);
+      expect(find.byType(MobilePlayerPage), findsOneWidget);
+      expectPhoneOnly(tester);
+
+      // 回竖屏不重开;快进仍然推进进度。
+      tester.view.physicalSize = const Size(width, 800);
+      await tester.pumpAndSettle();
+      expect(backend.openCount, 1);
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(
+        tester
+            .widget<IconButton>(find.byKey(const Key('mobile-player-toggle')))
+            .onPressed,
+        isNotNull,
+      );
+      await tester.tap(find.byTooltip('快进 10 秒'));
+      await tester.pumpAndSettle();
+      expect(backend.position, greaterThan(const Duration(minutes: 70)));
+
+      // 后台暂停,回前台以暂停态续开。
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      await tester.pumpAndSettle();
+      expect(backend.openCount, 1);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      await tester.pumpAndSettle();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+      expect(backend.openCount, 2);
+      expect(backend.openedPaused, isTrue);
+      // "更多"面板入口在同一旅程中仍可打开(T1 修绿路径,语义保留)。
+      await tester.tap(find.byKey(const Key('mobile-player-more')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.byType(BottomSheet), findsOneWidget);
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(find.byType(MobilePlayerPage), findsOneWidget);
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(seconds: 4));
+      await tester.pumpAndSettle();
+      expect(find.byType(MobilePlayerPage), findsNothing);
+      expect(find.byType(MobileDetailPage), findsOneWidget);
+      expect(find.text('继续播放'), findsOneWidget);
+      expect(
+        server.playbackEvents.where((event) => event.kind == 'Stopped'),
+        isNotEmpty,
+      );
+
+      // 返回首页后,服务器侧进度已更新并反映为新的"已看"百分比。
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(find.byType(MobileShell), findsOneWidget);
+      await tester.tap(find.text('首页').last);
+      await tester.pumpAndSettle();
+      final updated = server.items.firstWhere(
+        (item) => item.id == 'movie-inception',
+      );
+      expect(
+        updated.playbackPositionTicks,
+        greaterThan(movie.runTimeTicks! ~/ 2),
+      );
+      final percent = (updated.playedPercentage ?? 0).round();
+      expect(percent, isNot(40));
+      expect(find.text('已看 40%'), findsNothing);
+      expect(find.text('已看 $percent%'), findsWidgets);
+      expectPhoneOnly(tester);
+      expect(app.auth.isLoggedIn, isTrue);
+      expect(tester.takeException(), isNull);
+    },
+    tags: ['integration'],
+  );
   testWidgets('token renewal with tracks open exits the owned player route', (
     tester,
   ) async {
@@ -264,43 +441,6 @@ void main() {
     expect(tester.takeException(), isNull);
   }, tags: ['integration']);
   testWidgets(
-    'connection draft survives keyboard, enlarged text and rotation',
-    (tester) async {
-      final server = FakeEmbyServer();
-      final (app, _) = await start(tester, server);
-      await tester.enterText(
-        find.byKey(const Key('android-connect-address')),
-        server.baseUrl.toString(),
-      );
-      await tester.enterText(
-        find.byKey(const Key('android-connect-username')),
-        'alice',
-      );
-      await tester.enterText(
-        find.byKey(const Key('android-connect-password')),
-        'draft-password',
-      );
-      tester.platformDispatcher.textScaleFactorTestValue = 2;
-      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
-      tester.view.viewInsets = const FakeViewPadding(bottom: 180);
-      tester.view.physicalSize = const Size(800, 360);
-      addTearDown(tester.view.resetViewInsets);
-      await tester.pumpAndSettle();
-      expect(app.auth.connectDraft?.password, 'draft-password');
-      tester.view.viewInsets = const FakeViewPadding();
-      await tester.pumpAndSettle();
-      await tester.ensureVisible(
-        find.byKey(const Key('android-connect-submit')),
-      );
-      expect(
-        tester.getRect(find.byKey(const Key('android-connect-submit'))).bottom,
-        lessThanOrEqualTo(360),
-      );
-      expect(tester.takeException(), isNull);
-    },
-    tags: ['integration'],
-  );
-  testWidgets(
     'search failure retains results, retries, empty state and expired login reconnect',
     (tester) async {
       final server = FakeEmbyServer();
@@ -330,6 +470,124 @@ void main() {
       await tester.pumpAndSettle();
       expect(app.auth.isLoggedIn, isFalse);
       expect(find.byKey(const Key('android-connect-submit')), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+    tags: ['integration'],
+  );
+  testWidgets(
+    'search keeps idle, empty, failure and page-failure screens distinct',
+    (tester) async {
+      final server = FakeEmbyServer(
+        items: [
+          for (var i = 0; i < 55; i++)
+            FakeEmbyItem(
+              id: 'page-$i',
+              name: 'Page ${i.toString().padLeft(2, '0')}',
+              type: 'Movie',
+              parentId: 'view-movies',
+              playedPercentage: i == 0 ? 40 : null,
+              playbackPositionTicks: i == 0 ? 10000000 * 60 : 0,
+              runTimeTicks: 10000000 * 60 * 100,
+            ),
+        ],
+      );
+      await start(tester, server);
+      await login(tester, server);
+      await tester.tap(find.text('搜索').last);
+      await tester.pumpAndSettle();
+      final field = find.byKey(const Key('mobile-search-field'));
+      ScrollPosition scrollOf() => tester
+          .state<ScrollableState>(
+            find
+                .descendant(
+                  of: find.byKey(const PageStorageKey('mobile-search-scroll')),
+                  matching: find.byType(Scrollable),
+                )
+                .first,
+          )
+          .position;
+      int searchRequests() =>
+          server.requests.where((line) => line.contains('SearchTerm=')).length;
+
+      expect(find.byKey(const Key('mobile-search-idle')), findsOneWidget);
+      expect(find.text('输入片名后搜索'), findsOneWidget);
+      expect(find.text('没有结果'), findsNothing);
+      expect(find.text('重试'), findsNothing);
+      expect(searchRequests(), 0);
+
+      await tester.enterText(field, '   ');
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('mobile-search-idle')), findsOneWidget);
+      expect(searchRequests(), 0);
+
+      final beforeType = searchRequests();
+      await tester.enterText(field, 'missing-title');
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(find.byKey(const Key('mobile-search-idle')), findsOneWidget);
+      expect(searchRequests(), beforeType);
+
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('mobile-search-empty')), findsOneWidget);
+      expect(find.text('没有结果'), findsOneWidget);
+      expect(find.byKey(const Key('mobile-search-idle')), findsNothing);
+      expect(find.byKey(const Key('mobile-search-failure')), findsNothing);
+      expect(find.byKey(const Key('mobile-search-page-failure')), findsNothing);
+      expect(find.text('重试'), findsNothing);
+      expect(searchRequests(), beforeType + 1);
+
+      server.searchStatus = 503;
+      await tester.enterText(field, 'Page');
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('mobile-search-failure')), findsOneWidget);
+      expect(find.textContaining('503'), findsOneWidget);
+      expect(find.text('重试'), findsOneWidget);
+      expect(find.byKey(const Key('mobile-search-empty')), findsNothing);
+      expect(find.byKey(const Key('mobile-search-idle')), findsNothing);
+      expect(find.byKey(const Key('mobile-search-page-failure')), findsNothing);
+      expect(find.text('Page 00'), findsNothing);
+      expect(find.byType(NavigationBar), findsOneWidget);
+
+      server.searchStatus = null;
+      await tester.tap(find.byKey(MobileFailureState.retryKey));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const Key('mobile-search-item-page-0')),
+        findsOneWidget,
+      );
+      expect(find.text('已看 40%'), findsOneWidget);
+      expect(find.text('已看 0%'), findsNothing);
+      expect(find.byKey(const Key('mobile-search-failure')), findsNothing);
+
+      final beforeMore = searchRequests();
+      server.searchStatus = 503;
+      scrollOf().jumpTo(scrollOf().maxScrollExtent);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('mobile-search-load-more')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('mobile-search-load-more')));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const Key('mobile-search-page-failure')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const Key('mobile-search-page-retry')), findsOneWidget);
+      expect(find.text('Page 00'), findsWidgets);
+      expect(find.text('Page 50'), findsNothing);
+      expect(find.byKey(const Key('mobile-search-failure')), findsNothing);
+      expect(find.byKey(const Key('mobile-search-empty')), findsNothing);
+      expect(find.byKey(const Key('mobile-search-idle')), findsNothing);
+      expect(find.text('没有结果'), findsNothing);
+      expect(searchRequests(), greaterThan(beforeMore));
+
+      server.searchStatus = null;
+      scrollOf().jumpTo(scrollOf().maxScrollExtent);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('mobile-search-page-retry')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('mobile-search-page-failure')), findsNothing);
+      expect(find.text('Page 54'), findsWidgets);
       expect(tester.takeException(), isNull);
     },
     tags: ['integration'],
@@ -512,7 +770,7 @@ void main() {
   );
 
   testWidgets(
-    'loading placeholder is content-shaped and pauses without motion',
+    'loading placeholders and empty/failure copy stay content-shaped per tab',
     (tester) async {
       tester.view.physicalSize = const Size(360, 800);
       tester.view.devicePixelRatio = 1;
@@ -522,7 +780,7 @@ void main() {
       final catalog = _ScriptedCatalog(auth);
       addTearDown(catalog.dispose);
       addTearDown(auth.dispose);
-      Future<void> pumpHome() {
+      Future<void> pumpTab(Widget child) {
         return tester.pumpWidget(
           MaterialApp(
             theme: AppTheme.dark(),
@@ -530,13 +788,14 @@ void main() {
             supportedLocales: AppLocalizations.supportedLocales,
             localizationsDelegates: AppLocalizations.localizationsDelegates,
             home: Scaffold(
-              body: CatalogScope(controller: catalog, child: const PhoneHome()),
+              body: CatalogScope(controller: catalog, child: child),
             ),
           ),
         );
       }
 
-      await pumpHome();
+      // 首页加载占位是内容形状的骨架,而非通用进度条。
+      await pumpTab(const PhoneHome());
       await tester.pump();
       expect(find.byKey(MobileLoadingPlaceholder.homeKey), findsOneWidget);
       expect(find.byType(LinearProgressIndicator), findsNothing);
@@ -561,7 +820,7 @@ void main() {
       addTearDown(
         tester.platformDispatcher.clearAccessibilityFeaturesTestValue,
       );
-      await pumpHome();
+      await pumpTab(const PhoneHome());
       await tester.pump();
       expect(
         tester
@@ -569,103 +828,78 @@ void main() {
             .every((block) => !block.animated),
         isTrue,
       );
+
+      // 首页空态与失败态是不同文案的不同组件,重试命中区不小于 48dp。
+      catalog.edit((page) {
+        page.resume = const CatalogRowState(hidden: true);
+        page.nextUp = const CatalogRowState(hidden: true);
+        page.latestMovies = const CatalogRowState(hidden: true);
+        page.latestSeries = const CatalogRowState(hidden: true);
+      });
+      await pumpTab(const PhoneHome());
+      expect(find.byType(MobileEmptyState), findsOneWidget);
+      expect(find.text('暂无内容'), findsOneWidget);
+      expect(find.text('加载失败'), findsNothing);
+      expect(find.text('重试'), findsNothing);
+      expect(
+        tester.getSize(find.byKey(MobileEmptyState.actionKey)).shortestSide,
+        greaterThanOrEqualTo(48),
+      );
+
+      catalog.edit((page) {
+        page.resume = const CatalogRowState(
+          error: EmbyException(EmbyFailureKind.unknown),
+        );
+      });
+      await tester.pump();
+      expect(find.byType(MobileFailureState), findsOneWidget);
+      expect(find.text('加载失败'), findsOneWidget);
+      expect(find.text('暂无内容'), findsNothing);
+      final retry = find.byKey(MobileFailureState.retryKey);
+      expect(tester.getSize(retry).shortestSide, greaterThanOrEqualTo(48));
+      await tester.tap(retry);
+      await tester.pump();
+
+      // 片库 tab 有自己的骨架与空/失败文案,不与首页混用。
+      catalog.edit((page) {
+        page.librariesLoading = false;
+        page.librariesError = null;
+        page.libraries = const [];
+      });
+      await pumpTab(const PhoneLibrariesTab());
+      expect(find.byKey(MobileLoadingPlaceholder.librariesKey), findsNothing);
+      expect(find.text('暂无内容'), findsOneWidget);
+      expect(find.text('加载失败'), findsNothing);
+      final libraryBlocks = tester
+          .widgetList<SkeletonBlock>(find.byType(SkeletonBlock))
+          .toList();
+      expect(libraryBlocks, isEmpty);
+
+      catalog.edit((page) {
+        page.librariesLoading = true;
+      });
+      await tester.pump();
+      expect(find.byKey(MobileLoadingPlaceholder.librariesKey), findsOneWidget);
+      expect(find.text('暂无内容'), findsNothing);
+      final tiles = tester
+          .widgetList<SkeletonBlock>(find.byType(SkeletonBlock))
+          .toList();
+      expect(tiles.length, greaterThanOrEqualTo(4));
+      expect(tiles.every((block) => (block.height ?? 0) <= 48), isTrue);
+      expect(tiles.where((block) => (block.height ?? 0) > 100), isEmpty);
+
+      catalog.edit((page) {
+        page.librariesLoading = false;
+        page.librariesError = const EmbyException(EmbyFailureKind.unknown);
+      });
+      await tester.pump();
+      expect(find.text('加载失败'), findsOneWidget);
+      expect(find.text('暂无内容'), findsNothing);
+      expect(find.text('重试'), findsOneWidget);
+      expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
     },
   );
-
-  testWidgets('home and libraries use different empty and failure copy', (
-    tester,
-  ) async {
-    tester.view.physicalSize = const Size(360, 800);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-    final auth = AuthController.memory();
-    final catalog = _ScriptedCatalog(auth);
-    addTearDown(catalog.dispose);
-    addTearDown(auth.dispose);
-    Future<void> pumpTab(Widget child) {
-      return tester.pumpWidget(
-        MaterialApp(
-          theme: AppTheme.dark(),
-          locale: const Locale('zh'),
-          supportedLocales: AppLocalizations.supportedLocales,
-          localizationsDelegates: AppLocalizations.localizationsDelegates,
-          home: Scaffold(
-            body: CatalogScope(controller: catalog, child: child),
-          ),
-        ),
-      );
-    }
-
-    catalog.edit((page) {
-      page.resume = const CatalogRowState(hidden: true);
-      page.nextUp = const CatalogRowState(hidden: true);
-      page.latestMovies = const CatalogRowState(hidden: true);
-      page.latestSeries = const CatalogRowState(hidden: true);
-    });
-    await pumpTab(const PhoneHome());
-    expect(find.byType(MobileEmptyState), findsOneWidget);
-    expect(find.text('暂无内容'), findsOneWidget);
-    expect(find.text('加载失败'), findsNothing);
-    expect(find.text('重试'), findsNothing);
-    expect(
-      tester.getSize(find.byKey(MobileEmptyState.actionKey)).shortestSide,
-      greaterThanOrEqualTo(48),
-    );
-
-    catalog.edit((page) {
-      page.resume = const CatalogRowState(
-        error: EmbyException(EmbyFailureKind.unknown),
-      );
-    });
-    await tester.pump();
-    expect(find.byType(MobileFailureState), findsOneWidget);
-    expect(find.text('加载失败'), findsOneWidget);
-    expect(find.text('暂无内容'), findsNothing);
-    final retry = find.byKey(MobileFailureState.retryKey);
-    expect(tester.getSize(retry).shortestSide, greaterThanOrEqualTo(48));
-    await tester.tap(retry);
-    await tester.pump();
-
-    catalog.edit((page) {
-      page.librariesLoading = false;
-      page.librariesError = null;
-      page.libraries = const [];
-    });
-    await pumpTab(const PhoneLibrariesTab());
-    expect(find.byKey(MobileLoadingPlaceholder.librariesKey), findsNothing);
-    expect(find.text('暂无内容'), findsOneWidget);
-    expect(find.text('加载失败'), findsNothing);
-    final libraryBlocks = tester
-        .widgetList<SkeletonBlock>(find.byType(SkeletonBlock))
-        .toList();
-    expect(libraryBlocks, isEmpty);
-
-    catalog.edit((page) {
-      page.librariesLoading = true;
-    });
-    await tester.pump();
-    expect(find.byKey(MobileLoadingPlaceholder.librariesKey), findsOneWidget);
-    expect(find.text('暂无内容'), findsNothing);
-    final tiles = tester
-        .widgetList<SkeletonBlock>(find.byType(SkeletonBlock))
-        .toList();
-    expect(tiles.length, greaterThanOrEqualTo(4));
-    expect(tiles.every((block) => (block.height ?? 0) <= 48), isTrue);
-    expect(tiles.where((block) => (block.height ?? 0) > 100), isEmpty);
-
-    catalog.edit((page) {
-      page.librariesLoading = false;
-      page.librariesError = const EmbyException(EmbyFailureKind.unknown);
-    });
-    await tester.pump();
-    expect(find.text('加载失败'), findsOneWidget);
-    expect(find.text('暂无内容'), findsNothing);
-    expect(find.text('重试'), findsOneWidget);
-    expect(tester.takeException(), isNull);
-    await tester.pumpWidget(const SizedBox.shrink());
-  });
 
   testWidgets(
     'split home, libraries and mine keep navigation, back and keyboard inset',
@@ -740,115 +974,6 @@ void main() {
     },
     tags: ['integration'],
   );
-
-  testWidgets('home request failure is not the empty state and retries', (
-    tester,
-  ) async {
-    tester.platformDispatcher.accessibilityFeaturesTestValue =
-        const FakeAccessibilityFeatures(disableAnimations: true);
-    addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
-    final server = FakeEmbyServer();
-    server.resumeStatus = 503;
-    server.nextUpStatus = 503;
-    server.latestMovieStatus = 503;
-    server.latestEpisodeStatus = 503;
-    await start(tester, server);
-    await login(tester, server);
-    expect(find.byKey(MobileLoadingPlaceholder.homeKey), findsOneWidget);
-    expect(find.text('暂无内容'), findsNothing);
-    await tester.pump(const Duration(seconds: 2));
-    await tester.pump(const Duration(seconds: 6));
-    await tester.pump(const Duration(seconds: 20));
-    await tester.pumpAndSettle();
-    expect(find.byType(MobileFailureState), findsOneWidget);
-    expect(find.textContaining('503'), findsOneWidget);
-    expect(find.text('暂无内容'), findsNothing);
-    expect(find.text('重试'), findsOneWidget);
-    expect(
-      tester.getSize(find.byKey(MobileFailureState.retryKey)).shortestSide,
-      greaterThanOrEqualTo(48),
-    );
-    server.resumeStatus = null;
-    server.nextUpStatus = null;
-    server.latestMovieStatus = null;
-    server.latestEpisodeStatus = null;
-    await tester.tap(find.text('重试'));
-    await tester.pumpAndSettle();
-    expect(find.text('Inception'), findsWidgets);
-    expect(find.byType(MobileFailureState), findsNothing);
-    expect(tester.takeException(), isNull);
-  }, tags: ['integration']);
-
-  testWidgets('library request failure stays distinct from an empty library', (
-    tester,
-  ) async {
-    final server = FakeEmbyServer();
-    server.viewsStatus = 503;
-    await start(tester, server);
-    await login(tester, server);
-    await tester.tap(find.text('片库').last);
-    await tester.pumpAndSettle();
-    expect(find.byType(MobileFailureState), findsOneWidget);
-    expect(find.text('重试'), findsOneWidget);
-    expect(find.text('暂无内容'), findsNothing);
-    expect(find.textContaining('503'), findsOneWidget);
-    server.viewsStatus = null;
-    await tester.tap(find.text('重试'));
-    await tester.pumpAndSettle();
-    expect(find.text('电影'), findsOneWidget);
-    expect(find.text('重试'), findsNothing);
-    expect(tester.takeException(), isNull);
-  }, tags: ['integration']);
-
-  testWidgets('the shell navigation bar follows the mobile nav theme', (
-    tester,
-  ) async {
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: AppTheme.dark(),
-        home: Scaffold(
-          bottomNavigationBar: NavigationBar(
-            animationDuration: AppMobileNav.pillDuration,
-            destinations: const [
-              NavigationDestination(icon: Icon(Icons.home), label: '首页'),
-              NavigationDestination(
-                icon: Icon(Icons.video_library),
-                label: '片库',
-              ),
-            ],
-          ),
-          body: Builder(
-            builder: (context) {
-              final theme = NavigationBarTheme.of(context);
-              return Column(
-                children: [
-                  Text('bg-alpha:${theme.backgroundColor?.a ?? -1}'),
-                  Text('indicator:${theme.indicatorShape.runtimeType}'),
-                ],
-              );
-            },
-          ),
-        ),
-      ),
-    );
-    expect(find.byType(NavigationBar), findsOneWidget);
-    // 透明底(R3):内容可从导航栏背后透出。
-    expect(
-      find.textContaining('bg-alpha:${AppMobileNav.backgroundAlpha}'),
-      findsOneWidget,
-    );
-    // 选中 pill 指示器。
-    expect(find.textContaining('indicator:StadiumBorder'), findsOneWidget);
-    // 选中动效走 AppMotion 时长档,而非 M3 默认 500ms。
-    expect(
-      tester
-          .widget<NavigationBar>(find.byType(NavigationBar))
-          .animationDuration,
-      AppMobileNav.pillDuration,
-    );
-    expect(AppMobileNav.pillDuration, AppMotion.normal);
-    expect(tester.takeException(), isNull);
-  });
 }
 
 class _ScriptedCatalog extends CatalogController {

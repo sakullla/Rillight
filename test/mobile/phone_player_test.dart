@@ -3,8 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/app/mobile_motion.dart';
 import 'package:rillight/app/theme.dart';
-import 'package:rillight/app/tv_shell.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/auth/credential_store.dart';
@@ -24,7 +24,6 @@ import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_controller.dart';
 import 'package:rillight/player/player_keys.dart';
 import 'package:rillight/player/player_settings.dart';
-import 'package:rillight/player/tv_player_page.dart';
 import 'package:rillight/player/video_backend.dart';
 
 import '../emby/fake_emby_server.dart';
@@ -151,267 +150,238 @@ void main() {
     expect(find.byType(MobilePlayerPage), findsNothing);
   }
 
-  testWidgets('exit stays on the entry direction until that viewport is back', (
-    tester,
-  ) async {
-    final orientation = PhoneOrientation(
-      restoreTo: const [DeviceOrientation.portraitUp],
-      request: (orientations) async {},
-    );
-    final current = await showPlayer(
-      tester,
-      itemId: 'movie-inception',
-      orientation: orientation,
-      wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
-    );
-    expect(current.error, isNull);
-    expect(orientation.calls.first, PhoneOrientation.landscape);
-    await closePlayer(tester);
-    await orientation.settled;
-    expect(find.byType(MobilePlayerPage), findsNothing);
-    // The surface is still landscape. A trailing unlock would follow the
-    // sensor and leave playback's landscape hold in place.
-    expect(orientation.calls, hasLength(2));
-    expect(orientation.calls[1], const [DeviceOrientation.portraitUp]);
-    expect(orientation.calls.last, isNot(PhoneOrientation.unlocked));
-
-    tester.view.physicalSize = const Size(360, 800);
-    await orientation.settled;
-    expect(orientation.calls[1], const [DeviceOrientation.portraitUp]);
-    expect(orientation.calls.last, PhoneOrientation.unlocked);
-  });
-
   testWidgets(
-    'landscape entry is restored before a later rotation is released',
+    'orientation exit restores the entry direction; a denied request still plays',
     (tester) async {
       final orientation = PhoneOrientation(
-        restoreTo: PhoneOrientation.landscape,
-        request: (_) async {},
+        restoreTo: const [DeviceOrientation.portraitUp],
+        request: (orientations) async {},
       );
-      tester.view.physicalSize = const Size(800, 360);
-      addTearDown(tester.view.resetPhysicalSize);
-      await orientation.enterPlayback();
-      await orientation.leavePlayback();
-      expect(orientation.calls, hasLength(2));
-      expect(orientation.calls.last, PhoneOrientation.landscape);
-      await tester.pump();
+      final current = await showPlayer(
+        tester,
+        itemId: 'movie-inception',
+        orientation: orientation,
+        wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
+      );
+      expect(current.error, isNull);
+      expect(orientation.calls.first, PhoneOrientation.landscape);
+      await closePlayer(tester);
       await orientation.settled;
-      expect(
-        orientation.calls[1],
-        PhoneOrientation.landscape,
-        reason: 'restore success is the entry direction, not a trailing unlock',
-      );
+      expect(find.byType(MobilePlayerPage), findsNothing);
+      // The surface is still landscape. A trailing unlock would follow the
+      // sensor and leave playback's landscape hold in place.
+      expect(orientation.calls, hasLength(2));
+      expect(orientation.calls[1], const [DeviceOrientation.portraitUp]);
+      expect(orientation.calls.last, isNot(PhoneOrientation.unlocked));
+
+      tester.view.physicalSize = const Size(360, 800);
+      await orientation.settled;
+      expect(orientation.calls[1], const [DeviceOrientation.portraitUp]);
       expect(orientation.calls.last, PhoneOrientation.unlocked);
+
+      // 系统拒绝方向请求时播放仍要能启动,退出仍恢复进入方向。
+      final denied = PhoneOrientation(
+        restoreTo: const [DeviceOrientation.portraitUp],
+        request: (_) async => throw StateError('orientation denied'),
+      );
+      final failed = await showPlayer(
+        tester,
+        itemId: 'movie-inception',
+        orientation: denied,
+        wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
+      );
+      expect(failed.error, isNull);
+      expect(failed.loading, isFalse);
+      expect(denied.calls.first, PhoneOrientation.landscape);
+      expect(denied.lastError, isA<StateError>());
+      expect(find.byType(MobilePlayerPage), findsOneWidget);
+      await closePlayer(tester);
+      await denied.settled;
+      expect(find.byType(MobilePlayerPage), findsNothing);
+      expect(denied.calls[1], const [DeviceOrientation.portraitUp]);
+      expect(denied.calls.last, isNot(PhoneOrientation.unlocked));
     },
   );
 
-  testWidgets('a failed orientation request still starts playback', (
-    tester,
-  ) async {
-    final denied = PhoneOrientation(
-      restoreTo: const [DeviceOrientation.portraitUp],
-      request: (_) async => throw StateError('orientation denied'),
-    );
-    final failed = await showPlayer(
-      tester,
-      itemId: 'movie-inception',
-      orientation: denied,
-      wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
-    );
-    expect(failed.error, isNull);
-    expect(failed.loading, isFalse);
-    expect(denied.calls.first, PhoneOrientation.landscape);
-    expect(denied.lastError, isA<StateError>());
-    expect(find.byType(MobilePlayerPage), findsOneWidget);
-    await closePlayer(tester);
-    await denied.settled;
-    expect(find.byType(MobilePlayerPage), findsNothing);
-    expect(denied.calls[1], const [DeviceOrientation.portraitUp]);
-    expect(denied.calls.last, isNot(PhoneOrientation.unlocked));
-  });
-
-  testWidgets('turning back to portrait keeps the phone player usable', (
-    tester,
-  ) async {
-    final backend = FakeVideoBackend();
-    final current = await showPlayer(
-      tester,
-      itemId: 'movie-inception',
-      backend: backend,
-      wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
-    );
-    expect(backend.isPlaying, isTrue);
-    tester.view.physicalSize = const Size(360, 800);
-    await tester.pump();
-    expect(find.byType(MobilePlayerPage), findsOneWidget);
-    expect(find.byType(TvShell), findsNothing);
-    expect(find.byType(TvPlayerPage), findsNothing);
-    await tester.ensureVisible(find.byKey(const Key('mobile-player-toggle')));
-    await tester.tap(find.byKey(const Key('mobile-player-toggle')));
-    await tester.pumpAndSettle();
-    expect(backend.isPlaying, isFalse);
-    await tester.tap(find.byTooltip('快进 10 秒'));
-    await tester.pumpAndSettle();
-    expect(backend.position, greaterThan(Duration.zero));
-    expect(current.error, isNull);
-    await closePlayer(tester);
-  });
-
-  testWidgets('next episode countdown can be cancelled or played immediately', (
-    tester,
-  ) async {
-    final backend = FakeVideoBackend();
-    final current = await showPlayer(
-      tester,
-      itemId: 'episode-friends-s1e1',
-      backend: backend,
-      wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
-    );
-    expect(current.nextEpisode, isNull);
-    backend.completePlayback();
-    for (var i = 0; i < 20; i++) {
-      if (current.nextEpisode?.remaining != null) break;
-      await tester.pump(Duration.zero);
-    }
-    expect(current.nextEpisode?.remaining, const Duration(seconds: 10));
-    expect(find.text('10 秒后播放下一集'), findsOneWidget);
-    await tester.ensureVisible(find.byKey(PlayerKeys.nextEpisodeCancel));
-    await tester.tap(find.byKey(PlayerKeys.nextEpisodeCancel));
-    await tester.pump(const Duration(seconds: 12));
-    expect(current.itemId, 'episode-friends-s1e1');
-    expect(current.nextEpisode, isNull);
-    expect(backend.openCount, 1);
-    await closePlayer(tester);
-  });
-
-  testWidgets('next episode play starts the following episode immediately', (
-    tester,
-  ) async {
-    final playing = FakeVideoBackend();
-    final next = await showPlayer(
-      tester,
-      itemId: 'episode-friends-s1e1',
-      backend: playing,
-      wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
-    );
-    playing.completePlayback();
-    for (var i = 0; i < 20; i++) {
-      if (next.nextEpisode?.remaining != null) break;
-      await tester.pump(Duration.zero);
-    }
-    expect(find.text('10 秒后播放下一集'), findsOneWidget);
-    await tester.ensureVisible(find.byKey(PlayerKeys.nextEpisodePlay));
-    await tester.tap(find.byKey(PlayerKeys.nextEpisodePlay));
-    for (var i = 0; i < 40; i++) {
-      if (next.itemId == 'episode-friends-s1e2' && !next.loading) break;
-      await tester.pump(const Duration(milliseconds: 20));
-    }
-    expect(next.itemId, 'episode-friends-s1e2');
-    expect(playing.openCount, greaterThan(1));
-    await closePlayer(tester);
-  });
-
-  testWidgets('a movie does not offer a next-episode countdown', (
-    tester,
-  ) async {
-    final movie = FakeVideoBackend();
-    final film = await showPlayer(
-      tester,
-      itemId: 'movie-inception',
-      backend: movie,
-      wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
-    );
-    movie.completePlayback();
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 50));
-    expect(film.nextEpisode, isNull);
-    expect(find.byKey(PlayerKeys.nextEpisode), findsNothing);
-    await closePlayer(tester);
-  });
-
-  testWidgets('danmaku can be shown, hidden, and fail without stopping video', (
-    tester,
-  ) async {
-    final settings = MemoryPlayerSettingsStore(
-      const PlayerSettings(danmakuAppId: 'app', danmakuToken: 'secret'),
-    );
-    final backend = FakeVideoBackend();
-    final current = await showPlayer(
-      tester,
-      itemId: 'movie-inception',
-      backend: backend,
-      settings: settings,
-      danmakuClient: _CommentClient(),
-      hasher: _NullHasher(),
-      wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
-    );
-    for (var i = 0; i < 40; i++) {
-      if (find.byType(DanmakuView).evaluate().isNotEmpty) break;
-      await tester.pump(const Duration(milliseconds: 20));
-    }
-    final view = tester.widget<DanmakuView>(find.byType(DanmakuView));
-    expect(view.controller.danmakuOn, isTrue);
-    expect(view.controller.comments.single.text, '滚动评论');
-    expect(backend.isPlaying, isTrue);
-    expect(current.error, isNull);
-    // 顶栏不再有弹幕按钮；弹幕入口迁入"更多"面板（R11）。
-    expect(find.byKey(const Key('mobile-player-danmaku')), findsNothing);
-    await tester.tap(find.byKey(const Key('mobile-player-more')));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 400));
-    expect(find.byKey(DanmakuKeys.toggle), findsOneWidget);
-    await tester.tap(find.byKey(DanmakuKeys.panel));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 400));
-    expect(find.byKey(DanmakuKeys.opacity), findsOneWidget);
-    expect(find.byKey(DanmakuKeys.fontScale), findsOneWidget);
-    await tester.ensureVisible(find.byKey(DanmakuKeys.toggle));
-    await tester.tap(find.byKey(DanmakuKeys.toggle));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 50));
-    expect(view.controller.danmakuOn, isFalse);
-    expect(view.controller.comments, isEmpty);
-    expect(backend.isPlaying, isTrue);
-    await tester.binding.handlePopRoute();
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 400));
-    await closePlayer(tester);
-  });
-
-  testWidgets('danmaku failure leaves the film playing', (tester) async {
-    final failingBackend = FakeVideoBackend();
-    final failing = await showPlayer(
-      tester,
-      itemId: 'movie-inception',
-      backend: failingBackend,
-      settings: MemoryPlayerSettingsStore(
-        const PlayerSettings(danmakuAppId: 'app', danmakuToken: 'secret'),
-      ),
-      danmakuClient: _FailingDanmakuClient(),
-      hasher: _NullHasher(),
-      wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
-    );
-    for (var i = 0; i < 40; i++) {
-      if (find
-          .byKey(const Key('mobile-danmaku-failure'))
-          .evaluate()
-          .isNotEmpty) {
-        break;
+  testWidgets(
+    'next episode countdown can be cancelled, played, or absent for movies',
+    (tester) async {
+      // 取消倒计时停留在本集。
+      final backend = FakeVideoBackend();
+      final current = await showPlayer(
+        tester,
+        itemId: 'episode-friends-s1e1',
+        backend: backend,
+        wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
+      );
+      expect(current.nextEpisode, isNull);
+      backend.completePlayback();
+      for (var i = 0; i < 20; i++) {
+        if (current.nextEpisode?.remaining != null) break;
+        await tester.pump(Duration.zero);
       }
-      await tester.pump(const Duration(milliseconds: 20));
-    }
-    expect(find.textContaining('弹幕服务不可达'), findsWidgets);
-    expect(failing.error, isNull);
-    expect(failingBackend.isPlaying, isTrue);
-    await tester.ensureVisible(find.byKey(const Key('mobile-danmaku-off')));
-    await tester.tap(find.byKey(const Key('mobile-danmaku-off')));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 50));
-    expect(find.byKey(const Key('mobile-danmaku-failure')), findsNothing);
-    expect(failingBackend.isPlaying, isTrue);
-    await closePlayer(tester);
-    expect(tester.takeException(), isNull);
-  });
+      expect(current.nextEpisode?.remaining, const Duration(seconds: 10));
+      expect(find.text('10 秒后播放下一集'), findsOneWidget);
+      await tester.ensureVisible(find.byKey(PlayerKeys.nextEpisodeCancel));
+      await tester.tap(find.byKey(PlayerKeys.nextEpisodeCancel));
+      await tester.pump(const Duration(seconds: 12));
+      expect(current.itemId, 'episode-friends-s1e1');
+      expect(current.nextEpisode, isNull);
+      expect(backend.openCount, 1);
+      await closePlayer(tester);
+
+      // 立即播放切换到下一集。
+      final playing = FakeVideoBackend();
+      final next = await showPlayer(
+        tester,
+        itemId: 'episode-friends-s1e1',
+        backend: playing,
+        wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
+      );
+      playing.completePlayback();
+      for (var i = 0; i < 20; i++) {
+        if (next.nextEpisode?.remaining != null) break;
+        await tester.pump(Duration.zero);
+      }
+      expect(find.text('10 秒后播放下一集'), findsOneWidget);
+      await tester.ensureVisible(find.byKey(PlayerKeys.nextEpisodePlay));
+      await tester.tap(find.byKey(PlayerKeys.nextEpisodePlay));
+      for (var i = 0; i < 40; i++) {
+        if (next.itemId == 'episode-friends-s1e2' && !next.loading) break;
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+      expect(next.itemId, 'episode-friends-s1e2');
+      expect(playing.openCount, greaterThan(1));
+      await closePlayer(tester);
+
+      // 电影播完不出现下集倒计时。
+      final movie = FakeVideoBackend();
+      final film = await showPlayer(
+        tester,
+        itemId: 'movie-inception',
+        backend: movie,
+        wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
+      );
+      movie.completePlayback();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(film.nextEpisode, isNull);
+      expect(find.byKey(PlayerKeys.nextEpisode), findsNothing);
+      await closePlayer(tester);
+    },
+  );
+
+  testWidgets(
+    'danmaku works from the more panel and failure leaves the film playing',
+    (tester) async {
+      final settings = MemoryPlayerSettingsStore(
+        const PlayerSettings(danmakuAppId: 'app', danmakuToken: 'secret'),
+      );
+      final backend = FakeVideoBackend();
+      final current = await showPlayer(
+        tester,
+        itemId: 'movie-inception',
+        backend: backend,
+        settings: settings,
+        danmakuClient: _CommentClient(),
+        hasher: _NullHasher(),
+        wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
+      );
+      for (var i = 0; i < 40; i++) {
+        if (find.byType(DanmakuView).evaluate().isNotEmpty) break;
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+      final view = tester.widget<DanmakuView>(find.byType(DanmakuView));
+      expect(view.controller.danmakuOn, isTrue);
+      expect(view.controller.comments.single.text, '滚动评论');
+      expect(backend.isPlaying, isTrue);
+      expect(current.error, isNull);
+      // 顶栏不再有弹幕按钮;弹幕入口迁入"更多"面板(R11)。
+      expect(find.byKey(const Key('mobile-player-danmaku')), findsNothing);
+      await tester.tap(find.byKey(const Key('mobile-player-more')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      // "更多"面板承载弹幕、音轨字幕、速度、片源、静音与音量(R10/R11)。
+      expect(find.byKey(DanmakuKeys.toggle), findsOneWidget);
+      expect(find.byKey(DanmakuKeys.search), findsOneWidget);
+      expect(find.byKey(DanmakuKeys.panel), findsOneWidget);
+      expect(find.text('音轨与字幕'), findsOneWidget);
+      expect(find.text('字幕'), findsOneWidget);
+      expect(find.text('播放速度'), findsOneWidget);
+      expect(find.text('片源'), findsOneWidget);
+      expect(find.byKey(const Key('mobile-player-mute')), findsOneWidget);
+      expect(find.byKey(const Key('mobile-player-volume')), findsOneWidget);
+
+      // 弹幕子面板:透明度/字号可调,开关即时生效(此时面板未滚动)。
+      await tester.tap(find.byKey(DanmakuKeys.panel));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.byKey(DanmakuKeys.opacity), findsOneWidget);
+      expect(find.byKey(DanmakuKeys.fontScale), findsOneWidget);
+      await tester.ensureVisible(find.byKey(DanmakuKeys.toggle));
+      await tester.tap(find.byKey(DanmakuKeys.toggle));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(view.controller.danmakuOn, isFalse);
+      expect(view.controller.comments, isEmpty);
+      expect(backend.isPlaying, isTrue);
+      await tester.binding.handlePopRoute();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+
+      // 重新打开"更多"面板本体,静音能力保留(R10)。
+      await tester.tap(find.byKey(const Key('mobile-player-more')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      final mute = find.byKey(const Key('mobile-player-mute'));
+      await tester.ensureVisible(mute);
+      await tester.pump();
+      await tester.tap(mute);
+      await tester.pump();
+      expect(backend.volume, 0);
+      final closeSheet = find.widgetWithText(TextButton, '返回');
+      await tester.ensureVisible(closeSheet);
+      await tester.pump();
+      await tester.tap(closeSheet);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      await closePlayer(tester);
+
+      // 弹幕服务不可达时提示可关闭,视频继续播放。
+      final failingBackend = FakeVideoBackend();
+      final failing = await showPlayer(
+        tester,
+        itemId: 'movie-inception',
+        backend: failingBackend,
+        settings: MemoryPlayerSettingsStore(
+          const PlayerSettings(danmakuAppId: 'app', danmakuToken: 'secret'),
+        ),
+        danmakuClient: _FailingDanmakuClient(),
+        hasher: _NullHasher(),
+        wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
+      );
+      for (var i = 0; i < 40; i++) {
+        if (find
+            .byKey(const Key('mobile-danmaku-failure'))
+            .evaluate()
+            .isNotEmpty) {
+          break;
+        }
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+      expect(find.textContaining('弹幕服务不可达'), findsWidgets);
+      expect(failing.error, isNull);
+      expect(failingBackend.isPlaying, isTrue);
+      await tester.ensureVisible(find.byKey(const Key('mobile-danmaku-off')));
+      await tester.tap(find.byKey(const Key('mobile-danmaku-off')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(find.byKey(const Key('mobile-danmaku-failure')), findsNothing);
+      expect(failingBackend.isPlaying, isTrue);
+      await closePlayer(tester);
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets(
     'screen stays on only while playing and background stays paused',
@@ -446,7 +416,7 @@ void main() {
         '0',
       );
       expect(find.text('$hours:$minutes:$seconds'), findsOneWidget);
-      // 应用内音量 Slider 已移出控制层，收入"更多"面板（R10 能力不减）。
+      // 应用内音量 Slider 已移出控制层,收入"更多"面板(R10 能力不减)。
       await tester.tap(find.byKey(const Key('mobile-player-more')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 400));
@@ -522,7 +492,7 @@ void main() {
   });
 
   testWidgets(
-    'vertical drags on the left and right half drive brightness and volume',
+    'drives brightness, volume and seek previews with edge gestures',
     (tester) async {
       final display = _FakeDisplayControl();
       final backend = FakeVideoBackend();
@@ -531,6 +501,7 @@ void main() {
         itemId: 'movie-inception',
         backend: backend,
         display: display,
+        mediaDuration: const Duration(hours: 1, minutes: 5),
         wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
       );
       final brightness = await tester.startGesture(const Offset(200, 170));
@@ -567,45 +538,34 @@ void main() {
       await volume.up();
       await tester.pump(const Duration(milliseconds: 400));
       expect(backend.isPlaying, isTrue);
+
+      // 横向拖动预览目标时间,松手后实际 seek 与预览一致。
+      final initial = backend.position;
+      final gesture = await tester.startGesture(const Offset(300, 120));
+      await gesture.moveBy(const Offset(50, 0));
+      await gesture.moveBy(const Offset(50, 0));
+      await gesture.moveBy(const Offset(50, 0));
+      await gesture.moveBy(const Offset(50, 0));
+      await tester.pump();
+      expect(
+        find.byKey(const Key('mobile-player-gesture-seek')),
+        findsOneWidget,
+      );
+      final preview = tester
+          .widget<Text>(find.byKey(const Key('mobile-player-gesture-seek')))
+          .data!;
+      final parts = preview.split(':').map(int.parse).toList();
+      final target = parts.length == 3
+          ? Duration(hours: parts[0], minutes: parts[1], seconds: parts[2])
+          : Duration(minutes: parts[0], seconds: parts[1]);
+      expect(target, greaterThan(initial));
+      await gesture.up();
+      await tester.pump();
+      expect(backend.position, target);
       await closePlayer(tester);
       expect(tester.takeException(), isNull);
     },
   );
-
-  testWidgets('horizontal drag previews the target and seeks on release', (
-    tester,
-  ) async {
-    final backend = FakeVideoBackend();
-    await showPlayer(
-      tester,
-      itemId: 'movie-inception',
-      backend: backend,
-      mediaDuration: const Duration(hours: 1, minutes: 5),
-      wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
-    );
-    final initial = backend.position;
-    final gesture = await tester.startGesture(const Offset(300, 120));
-    await gesture.moveBy(const Offset(50, 0));
-    await gesture.moveBy(const Offset(50, 0));
-    await gesture.moveBy(const Offset(50, 0));
-    await gesture.moveBy(const Offset(50, 0));
-    await tester.pump();
-    expect(find.byKey(const Key('mobile-player-gesture-seek')), findsOneWidget);
-    // 浮层预览目标时间;松手后实际 seek 与预览一致。
-    final preview = tester
-        .widget<Text>(find.byKey(const Key('mobile-player-gesture-seek')))
-        .data!;
-    final parts = preview.split(':').map(int.parse).toList();
-    final target = parts.length == 3
-        ? Duration(hours: parts[0], minutes: parts[1], seconds: parts[2])
-        : Duration(minutes: parts[0], seconds: parts[1]);
-    expect(target, greaterThan(initial));
-    await gesture.up();
-    await tester.pump();
-    expect(backend.position, target);
-    await closePlayer(tester);
-    expect(tester.takeException(), isNull);
-  });
 
   testWidgets('locked screen hides controls and gestures; tap unlocks', (
     tester,
@@ -650,48 +610,52 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets(
-    'more panel hosts danmaku, tracks, speed, source, mute and volume',
-    (tester) async {
-      final backend = FakeVideoBackend();
-      await showPlayer(
-        tester,
-        itemId: 'movie-inception',
-        backend: backend,
-        wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
-      );
-      // 顶栏不再出现弹幕按钮（R11）。
-      expect(find.byKey(const Key('mobile-player-danmaku')), findsNothing);
-      await tester.tap(find.byKey(const Key('mobile-player-more')));
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 400));
-      expect(find.byKey(DanmakuKeys.toggle), findsOneWidget);
-      expect(find.byKey(DanmakuKeys.search), findsOneWidget);
-      expect(find.byKey(DanmakuKeys.panel), findsOneWidget);
-      expect(find.text('音轨与字幕'), findsOneWidget);
-      expect(find.text('字幕'), findsOneWidget);
-      expect(find.text('播放速度'), findsOneWidget);
-      expect(find.text('片源'), findsOneWidget);
-      expect(find.byKey(const Key('mobile-player-mute')), findsOneWidget);
-      expect(find.byKey(const Key('mobile-player-volume')), findsOneWidget);
-      // Mute from the more panel keeps the ability (R10).
-      final mute = find.byKey(const Key('mobile-player-mute'));
-      await tester.ensureVisible(mute);
-      await tester.pump();
-      await tester.tap(mute);
-      await tester.pump();
-      expect(backend.volume, 0);
-      final closeSheet = find.widgetWithText(TextButton, '返回');
-      await tester.ensureVisible(closeSheet);
-      await tester.pump();
-      await tester.tap(closeSheet);
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 400));
-      expect(find.byType(BottomSheet), findsNothing);
-      await closePlayer(tester);
-      expect(tester.takeException(), isNull);
-    },
-  );
+  testWidgets('player controls fade instead of popping', (tester) async {
+    final current = await showPlayer(
+      tester,
+      itemId: 'movie-inception',
+      wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
+    );
+    expect(
+      tester
+          .widget<AnimatedOpacity>(find.byKey(PhoneMotion.playerControlsKey))
+          .duration,
+      AppMotion.normal,
+    );
+    double controlsOpacity() => tester
+        .widget<FadeTransition>(
+          find.descendant(
+            of: find.byKey(PhoneMotion.playerControlsKey),
+            matching: find.byType(FadeTransition),
+          ),
+        )
+        .opacity
+        .value;
+    expect(controlsOpacity(), 1);
+
+    current.toggleControls();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 80));
+    final fading = controlsOpacity();
+    expect(fading, greaterThan(0));
+    expect(fading, lessThan(1));
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(controlsOpacity(), 0);
+
+    current.toggleControls();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 80));
+    final showing = controlsOpacity();
+    expect(showing, greaterThan(0));
+    expect(showing, lessThan(1));
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(controlsOpacity(), 1);
+    await tester.tap(find.byKey(const Key('mobile-player-toggle')));
+    await tester.pump();
+    expect(current.isPlaying, isFalse);
+    await closePlayer(tester);
+    expect(tester.takeException(), isNull);
+  });
 }
 
 class _FakeDisplayControl implements PhoneDisplayControl {

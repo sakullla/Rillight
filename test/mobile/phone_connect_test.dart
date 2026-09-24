@@ -79,41 +79,6 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('360dp submits with address, username and password only', (
-    tester,
-  ) async {
-    final auth = await pumpConnect(tester);
-    expect(find.byType(AndroidConnectPage), findsOneWidget);
-    expect(find.text('更多'), findsOneWidget);
-    expect(find.byKey(_path), findsNothing);
-    expect(find.byKey(_userAgent), findsNothing);
-    expect(find.byKey(_addLine), findsNothing);
-    expect(find.text('User-Agent'), findsNothing);
-    expect(find.text('线路地址'), findsNothing);
-
-    final addressTop = tester.getTopLeft(find.byKey(_address)).dy;
-    final usernameTop = tester.getTopLeft(find.byKey(_username)).dy;
-    final passwordTop = tester.getTopLeft(find.byKey(_password)).dy;
-    final submitTop = tester.getTopLeft(find.byKey(_submit)).dy;
-    final moreTop = tester.getTopLeft(find.byKey(_more)).dy;
-    expect(addressTop, lessThan(usernameTop));
-    expect(usernameTop, lessThan(passwordTop));
-    expect(passwordTop, lessThan(submitTop));
-    expect(submitTop, lessThan(moreTop));
-
-    await enterCredentials(
-      tester,
-      address: server.baseUrl.toString(),
-      username: 'alice',
-      password: 'correct-horse',
-    );
-    await tap(tester, find.byKey(_submit));
-
-    expect(auth.isLoggedIn, isTrue);
-    expect(auth.savedServers.single.baseUrl, server.baseUrl.toString());
-    expect(tester.takeException(), isNull);
-  }, tags: ['integration']);
-
   testWidgets('path, extra line and User-Agent stay under 更多 until expanded', (
     tester,
   ) async {

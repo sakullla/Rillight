@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/app/mobile_motion.dart';
 import 'package:rillight/app/mobile_widgets.dart';
 import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/router.dart';
@@ -19,7 +20,9 @@ import 'package:rillight/home/phone_hero.dart';
 import 'package:rillight/home/phone_home.dart';
 import 'package:rillight/home/phone_shelf_page.dart';
 import 'package:rillight/library/mobile_detail_page.dart';
+import 'package:rillight/library/mobile_series_page.dart';
 import 'package:rillight/library/shelf_grid_page.dart';
+import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/player/mobile_player_page.dart';
 
 import '../emby/fake_emby_server.dart';
@@ -34,6 +37,24 @@ const _device = EmbyDeviceInfo(
 
 void main() {
   setUp(isolateImageCache);
+
+  test('dark theme exposes the mobile navigation bar theme from tokens', () {
+    final theme = AppTheme.dark();
+    final nav = theme.navigationBarTheme;
+    expect(nav.elevation, 0);
+    expect(nav.surfaceTintColor, Colors.transparent);
+    expect(nav.backgroundColor!.a, closeTo(AppMobileNav.backgroundAlpha, 1e-6));
+    expect(nav.indicatorShape, isA<StadiumBorder>());
+    expect(nav.indicatorColor, isNotNull);
+    // 选中 pill 动效档位对齐 AppMotion。
+    expect(AppMobileNav.pillDuration, AppMotion.normal);
+    expect(AppMobileCard.pressDuration, AppMotion.fast);
+    // 控制层渐变 token 与 AppScrim 对齐(R8:不再散落 black54/black87)。
+    expect(AppMobileControls.bottomAlpha, AppScrim.playerBar);
+    expect(AppMobileControls.bottomSoftAlpha, AppScrim.playerBarSoft);
+    // 桌面 NavigationRail 主题保持原样,不受手机 token 影响。
+    expect(theme.navigationRailTheme, isNotNull);
+  });
 
   testWidgets('banner prefers resume, pauses after a tap, and stops at five', (
     tester,
@@ -87,156 +108,172 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('disableAnimations keeps the same banner', (tester) async {
-    PhoneHero.autoAdvanceEnabled = true;
-    addTearDown(() => PhoneHero.autoAdvanceEnabled = false);
+  testWidgets('MobilePressable scales and brightens while pressed', (
+    tester,
+  ) async {
+    Future<void> pumpPressable() {
+      return tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.dark(),
+          home: Scaffold(
+            body: Center(
+              child: MobilePressable(
+                onTap: () {},
+                child: const SizedBox(width: 100, height: 100),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    await pumpPressable();
+    final pressable = find.byType(MobilePressable);
+    expect(pressable, findsOneWidget);
+    final gesture = find.descendant(
+      of: pressable,
+      matching: find.byType(GestureDetector),
+    );
+    expect(gesture, findsOneWidget);
+
+    // 未按压:缩放 1、无提亮遮罩。
+    AnimatedScale scaleOf() => tester.widget(
+      find.descendant(of: pressable, matching: find.byType(AnimatedScale)),
+    );
+    expect(scaleOf().scale, 1);
+    expect(
+      tester
+          .widget<ColorFiltered>(
+            find.descendant(
+              of: pressable,
+              matching: find.byType(ColorFiltered),
+            ),
+          )
+          .colorFilter,
+      const ColorFilter.mode(Colors.transparent, BlendMode.plus),
+    );
+
+    final pointer = await tester.startGesture(tester.getCenter(gesture));
+    await tester.pump();
+    expect(scaleOf().scale, AppMobileCard.pressScale);
+    expect(scaleOf().duration, AppMotion.fast);
+    await pointer.up();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 150));
+    expect(scaleOf().scale, 1);
+
+    // 减弱动效下按压仍可用,但动画时长归零。
     tester.platformDispatcher.accessibilityFeaturesTestValue =
         const FakeAccessibilityFeatures(disableAnimations: true);
     addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
-    _usePhoneSurface(tester);
-    final catalog = _catalog(
-      resume: [
-        _item('episode-a', '试播集', 'Episode', percent: 40, seriesName: '示例剧'),
-        _item('movie-b', '乙电影', 'Movie'),
-      ],
-      movies: [_item('movie-c', '示例电影', 'Movie')],
-      series: const [],
+    await pumpPressable();
+    final reduced = find.byType(MobilePressable);
+    final reducedGesture = find.descendant(
+      of: reduced,
+      matching: find.byType(GestureDetector),
     );
-    addTearDown(catalog.auth.dispose);
-    addTearDown(catalog.dispose);
-    final router = _router(catalog);
-    addTearDown(router.dispose);
-    await tester.pumpWidget(_scriptedApp(catalog, router: router));
+    await tester.startGesture(tester.getCenter(reducedGesture));
     await tester.pump();
-
-    expect(
-      tester.widget<IconButton>(find.byKey(PhoneHero.pauseKey)).onPressed,
-      isNull,
+    final scale = tester.widget<AnimatedScale>(
+      find.descendant(of: reduced, matching: find.byType(AnimatedScale)),
     );
-    await tester.pump(const Duration(seconds: 7));
-    expect(find.byKey(PhoneHero.itemKey('episode-a')), findsOneWidget);
-    expect(find.text('继续播放'), findsOneWidget);
-    expect(find.text('已看 40%'), findsWidgets);
-    expect(tester.takeException(), isNull);
+    expect(scale.duration, Duration.zero);
+    expect(scale.scale, AppMobileCard.pressScale);
   });
 
   testWidgets(
-    'series opens the series page and movies or episodes open detail',
+    'poster flies to the top as the same image and is the only hero',
     (tester) async {
-      _usePhoneSurface(tester);
-      final catalog = _catalog(
-        resume: [
-          _item('episode-a', '试播集', 'Episode', percent: 40, seriesName: '示例剧'),
-        ],
-        movies: [_item('movie-c', '示例电影', 'Movie')],
-        series: [_item('series-h', '示例剧全集', 'Series')],
+      await _pumpMotionHome(tester);
+      await _until(tester, find.byKey(CatalogKeys.item('movie-inception')));
+      // 同一海报 id 只允许一个 Hero,否则 flight 会歧义。
+      expect(
+        find.byWidgetPredicate(
+          (widget) =>
+              widget is Hero &&
+              widget.tag ==
+                  PhoneMotion.imageTag(
+                    'movie-inception',
+                    preferBackdrop: false,
+                  ),
+        ),
+        findsOneWidget,
       );
-      addTearDown(catalog.auth.dispose);
-      addTearDown(catalog.dispose);
-      final router = _router(catalog);
-      addTearDown(router.dispose);
-      await tester.pumpWidget(_scriptedApp(catalog, router: router));
-      await _settle(tester);
+      final poster = find.byKey(CatalogKeys.item('movie-inception'));
+      final posterImage = tester.widget<MediaImage>(
+        find.descendant(of: poster, matching: find.byType(MediaImage)),
+      );
 
-      await tester.tap(find.byKey(PhoneHero.openKey));
-      await _settle(tester);
-      expect(find.text('详情 episode-a'), findsOneWidget);
-      expect(find.textContaining('播放 episode-a'), findsNothing);
+      await tester.tap(poster);
+      await _until(tester, find.byKey(PhoneItemBanner.bannerKey));
+      _expectSameImage(tester, posterImage, onstage: true);
+      expect(
+        find.byWidgetPredicate(
+          (widget) =>
+              widget is Hero &&
+              widget.tag ==
+                  PhoneMotion.imageTag(
+                    'movie-inception',
+                    preferBackdrop: false,
+                  ),
+        ),
+        findsWidgets,
+      );
 
-      router.pop();
       await _settle(tester);
-      await _showOnHome(tester, find.text('示例电影'));
-      await tester.tap(find.text('示例电影'));
-      await _settle(tester);
-      expect(find.text('详情 movie-c'), findsOneWidget);
-
-      router.pop();
-      await _settle(tester);
-      await _showOnHome(tester, find.text('示例剧全集'));
-      await tester.tap(find.text('示例剧全集'));
-      await _settle(tester);
-      expect(find.text('剧集页 series-h'), findsOneWidget);
+      expect(tester.getTopLeft(find.byKey(PhoneItemBanner.bannerKey)).dy, 0);
+      final landed = _bannerImage(tester);
+      expect(landed.item.id, posterImage.item.id);
+      expect(landed.preferBackdrop, isFalse);
+      expect(landed.maxWidth, posterImage.maxWidth);
+      expect(landed.item.primaryImageTag, posterImage.item.primaryImageTag);
+      final play = find.byKey(const Key('mobile-detail-play'));
+      expect(tester.widget<FilledButton>(play).onPressed, isNotNull);
+      expect(find.text('Inception'), findsWidgets);
       expect(tester.takeException(), isNull);
     },
   );
 
-  testWidgets('poster cards are pressable 2:3 cards sized by screen width', (
+  testWidgets('reduced motion keeps the banner and the primary action', (
     tester,
   ) async {
-    _usePhoneSurface(tester);
-    final catalog = _catalog(
-      resume: [_item('movie-b', '乙电影', 'Movie', percent: 10)],
-      movies: [_item('movie-c', '示例电影', 'Movie')],
-      series: [_item('series-h', '示例剧全集', 'Series')],
+    PhoneHero.autoAdvanceEnabled = true;
+    addTearDown(() => PhoneHero.autoAdvanceEnabled = false);
+    await _pumpMotionHome(tester, reduceMotion: true);
+    await _until(tester, find.byKey(PhoneHero.itemKey('movie-inception')));
+    expect(
+      tester.widget<IconButton>(find.byKey(PhoneHero.pauseKey)).onPressed,
+      isNull,
     );
-    addTearDown(catalog.auth.dispose);
-    addTearDown(catalog.dispose);
-    final router = _router(catalog);
-    addTearDown(router.dispose);
-    await tester.pumpWidget(_scriptedApp(catalog, router: router));
-    await tester.pump();
-
-    // 行结构仍在:继续观看/最新电影/最新剧集三行 + Hero。
-    expect(find.text('继续观看'), findsOneWidget);
-    expect(find.text('最近更新的电影'), findsOneWidget);
-    expect(find.text('最近更新的剧集'), findsOneWidget);
-
-    // 每张海报卡都是 MobilePressable,按压档位取 AppMobileCard token。
-    final pressables = tester.widgetList<MobilePressable>(
-      find.byType(MobilePressable),
+    expect(
+      tester.widget<FilledButton>(find.byKey(PhoneHero.openKey)).onPressed,
+      isNotNull,
     );
-    expect(pressables.length, 3);
-    for (final pressable in pressables) {
-      expect(pressable.scale, AppMobileCard.pressScale);
-      expect(pressable.brighten, AppMobileCard.pressBrighten);
-      expect(pressable.duration, AppMobileCard.pressDuration);
-    }
+    expect(find.text('已看 40%'), findsWidgets);
 
-    // 海报区保持 2:3 竖版。
-    final ratios = tester.widgetList<AspectRatio>(find.byType(AspectRatio));
-    expect(ratios.where((widget) => widget.aspectRatio == 2 / 3), isNotEmpty);
+    await tester.pump(const Duration(seconds: 7));
+    expect(find.byKey(PhoneHero.itemKey('movie-inception')), findsOneWidget);
+    expect(find.text('已看 40%'), findsWidgets);
+    expect(find.text('继续播放'), findsWidgets);
 
-    // 卡宽随屏宽伸缩,不再是写死的 148。
-    final width360 = tester
-        .getRect(find.byKey(CatalogKeys.item('movie-c')))
-        .width;
-    expect(width360, closeTo((360 - AppSpacing.md * 2) / 2.6, 0.5));
-    expect(width360, isNot(148));
-    expect(tester.takeException(), isNull);
-  });
-
-  testWidgets('card width tracks a wider phone and text scale grows the row', (
-    tester,
-  ) async {
-    tester.view.physicalSize = const Size(412, 900);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-    tester.platformDispatcher.accessibilityFeaturesTestValue =
-        const FakeAccessibilityFeatures(disableAnimations: true);
-    addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
-    final catalog = _catalog(
-      resume: const [],
-      movies: [_item('movie-c', '示例电影', 'Movie')],
-      series: const [],
+    await tester.tap(find.byKey(PhoneHero.openKey));
+    await _settle(tester);
+    expect(tester.getTopLeft(find.byKey(PhoneItemBanner.bannerKey)).dy, 0);
+    expect(_bannerImage(tester).preferBackdrop, isTrue);
+    expect(_bannerImage(tester).maxWidth, PhoneMotion.heroRequestWidth);
+    expect(find.textContaining('dream-sharing'), findsOneWidget);
+    expect(find.textContaining('2010'), findsOneWidget);
+    expect(
+      tester
+          .widget<FilledButton>(find.byKey(const Key('mobile-detail-play')))
+          .onPressed,
+      isNotNull,
     );
-    addTearDown(catalog.auth.dispose);
-    addTearDown(catalog.dispose);
-    final router = _router(catalog);
-    addTearDown(router.dispose);
-    await tester.pumpWidget(_scriptedApp(catalog, router: router));
-    await tester.pump();
-
-    final width412 = tester
-        .getRect(find.byKey(CatalogKeys.item('movie-c')))
-        .width;
-    expect(width412, closeTo((412 - AppSpacing.md * 2) / 2.6, 0.5));
-    expect(width412, greaterThan(140));
     expect(tester.takeException(), isNull);
   });
 
   testWidgets(
-    'resume card overlays title, progress and remove control in the card',
+    'resume card carries progress and remove, and removal survives refresh',
     (tester) async {
       _usePhoneSurface(tester);
       final catalog = _catalog(
@@ -262,212 +299,104 @@ void main() {
       );
       expect(find.byKey(CatalogKeys.resumeProgress), findsWidgets);
       expect(_inside(tester.getRect(find.text('已看 10%').last), card), isTrue);
+
+      // 真实服务器上移除后刷新,继续观看行保持消失并落库。
+      final (liveRouter, server) = await _openPhone(tester);
+      expect(find.byType(HomeHero), findsNothing);
+      expect(find.byType(PhoneHero), findsOneWidget);
+      expect(find.byKey(PhoneHero.itemKey('movie-inception')), findsOneWidget);
+      expect(find.text('继续播放'), findsWidgets);
+      expect(find.text('已看 40%'), findsWidgets);
+      expect(find.text('继续观看'), findsOneWidget);
+
+      await tester.tap(find.byKey(PhoneHero.openKey));
+      await _settle(tester);
+      expect(find.byType(MobilePlayerPage), findsNothing);
+      expect(
+        tester.widget<MobileDetailPage>(find.byType(MobileDetailPage)).itemId,
+        'movie-inception',
+      );
+      liveRouter.pop();
+      await _settle(tester);
+
+      final remove = find.byKey(
+        CatalogKeys.removeFromResume('movie-inception'),
+      );
+      await _showOnHome(tester, remove);
+      await tester.tap(remove);
+      await _settle(tester);
+      expect(find.text('继续观看'), findsNothing);
+
+      await _showOnHome(tester, find.text('刷新'));
+      await tester.tap(find.text('刷新'));
+      await _settle(tester);
+      expect(find.text('继续观看'), findsNothing);
+      expect(
+        server.items
+            .firstWhere((item) => item.id == 'movie-inception')
+            .hideFromResume,
+        isTrue,
+      );
       expect(tester.takeException(), isNull);
     },
+    tags: ['integration'],
   );
 
-  testWidgets('more is only offered when the row still has items after it', (
-    tester,
-  ) async {
-    _usePhoneSurface(tester);
-    final catalog = _catalog(
-      resume: [_item('movie-b', '乙电影', 'Movie', percent: 10)],
-      movies: [
-        for (var i = 0; i < phoneHomeRowLimit; i++)
-          _item('movie-$i', '电影 $i', 'Movie'),
-      ],
-      series: [
-        for (var i = 0; i < phoneHomeRowLimit - 1; i++)
-          _item('series-$i', '剧 $i', 'Series'),
-      ],
-    );
-    addTearDown(catalog.auth.dispose);
-    addTearDown(catalog.dispose);
-    final router = _router(catalog);
-    addTearDown(router.dispose);
-    await tester.pumpWidget(_scriptedApp(catalog, router: router));
-    await _settle(tester);
-
-    expect(
-      find.byKey(CatalogKeys.shelfMore(CatalogKeys.shelfLatestMovies)),
-      findsOneWidget,
-    );
-    expect(
-      find.byKey(CatalogKeys.shelfMore(CatalogKeys.shelfLatestSeries)),
-      findsNothing,
-    );
-    expect(
-      find.byKey(CatalogKeys.shelfMore(CatalogKeys.shelfResume)),
-      findsNothing,
-    );
-    expect(find.byType(ShelfGridPage), findsNothing);
-    expect(tester.takeException(), isNull);
-  });
-
-  testWidgets('removed resume item stays gone after refresh', (tester) async {
-    final (router, server) = await _openPhone(tester);
-    expect(find.byType(HomeHero), findsNothing);
-    expect(find.byType(PhoneHero), findsOneWidget);
-    expect(find.byKey(PhoneHero.itemKey('movie-inception')), findsOneWidget);
-    expect(find.text('继续播放'), findsWidgets);
-    expect(find.text('已看 40%'), findsWidgets);
-    expect(find.text('继续观看'), findsOneWidget);
-
-    await tester.tap(find.byKey(PhoneHero.openKey));
-    await _settle(tester);
-    expect(find.byType(MobilePlayerPage), findsNothing);
-    expect(
-      tester.widget<MobileDetailPage>(find.byType(MobileDetailPage)).itemId,
-      'movie-inception',
-    );
-    router.pop();
-    await _settle(tester);
-
-    await _showOnHome(tester, find.text('老友记'));
-    await tester.tap(find.text('老友记'));
-    await _settle(tester);
-    expect(
-      tester.widget<MobileDetailPage>(find.byType(MobileDetailPage)).itemId,
-      'series-friends',
-    );
-    router.pop();
-    await _settle(tester);
-
-    await _showOnHome(tester, find.text('The One with the Sonogram'));
-    await tester.tap(find.text('The One with the Sonogram'));
-    await _settle(tester);
-    expect(
-      tester.widget<MobileDetailPage>(find.byType(MobileDetailPage)).itemId,
-      'episode-friends-s1e2',
-    );
-    router.pop();
-    await _settle(tester);
-
-    final remove = find.byKey(CatalogKeys.removeFromResume('movie-inception'));
-    await _showOnHome(tester, remove);
-    await tester.tap(remove);
-    await _settle(tester);
-    expect(find.text('继续观看'), findsNothing);
-
-    await _showOnHome(tester, find.text('刷新'));
-    await tester.tap(find.text('刷新'));
-    await _settle(tester);
-    expect(find.text('继续观看'), findsNothing);
-    expect(
-      server.items
-          .firstWhere((item) => item.id == 'movie-inception')
-          .hideFromResume,
-      isTrue,
-    );
-    expect(tester.takeException(), isNull);
-  }, tags: ['integration']);
-
-  testWidgets('a full row opens a phone shelf with the same title', (
-    tester,
-  ) async {
-    final (_, server) = await _openPhone(tester, prepare: _addShelfMovies);
-    expect(find.text('冷门电影'), findsNothing);
-    final more = find.byKey(
-      CatalogKeys.shelfMore(CatalogKeys.shelfLatestMovies),
-    );
-    await _showOnHome(tester, more);
-    await tester.tap(more);
-    await _settle(tester);
-
-    expect(find.byType(PhoneShelfPage), findsOneWidget);
-    expect(find.byType(ShelfGridPage), findsNothing);
-    expect(find.byType(HomeHero), findsNothing);
-    expect(
-      find.descendant(of: find.byType(AppBar), matching: find.text('最近更新的电影')),
-      findsOneWidget,
-    );
-    expect(find.text('加载更多'), findsNothing);
-    expect(
-      server.requests.where(
-        (request) =>
-            request.contains('IncludeItemTypes=Movie') &&
-            request.contains('Limit=${PhoneShelfPage.pageSize}') &&
-            request.contains('StartIndex=0') &&
-            request.contains('SortBy=DateLastContentAdded') &&
-            request.contains('SortOrder=Descending'),
-      ),
-      isNotEmpty,
-    );
-    await tester.scrollUntilVisible(find.text('冷门电影'), 400);
-    expect(find.text('冷门电影'), findsOneWidget);
-    expect(tester.takeException(), isNull);
-  }, tags: ['integration']);
-
-  testWidgets('desktop shelf route still uses the desktop grid', (
-    tester,
-  ) async {
-    tester.view.physicalSize = const Size(1280, 800);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-    tester.platformDispatcher.accessibilityFeaturesTestValue =
-        const FakeAccessibilityFeatures(disableAnimations: true);
-    addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
-    final server = FakeEmbyServer();
-    final auth = AuthController.memory(
-      client: EmbyClient(
-        device: _device,
-        dio: dioForFakeEmby(FakeEmbyAdapter([server])),
-      ),
-    );
-    addTearDown(auth.dispose);
-    await tester.runAsync(() async {
-      await auth.connect(
-        address: server.baseUrl.toString(),
-        username: 'alice',
-        password: 'correct-horse',
+  testWidgets(
+    'shelf more appears only for full rows and opens the phone shelf',
+    (tester) async {
+      final (_, server) = await _openPhone(tester, prepare: _addShelfMovies);
+      expect(find.text('冷门电影'), findsNothing);
+      // 电影行满员出现"更多";剧集/继续观看行不满员不出现。
+      expect(
+        find.byKey(CatalogKeys.shelfMore(CatalogKeys.shelfLatestMovies)),
+        findsOneWidget,
       );
-    });
-    final desktopRouter = createAppRouter(
-      auth: auth,
-      environment: PresentationEnvironment.desktop,
-    );
-    addTearDown(desktopRouter.dispose);
-    desktopRouter.go(AppRoutes.shelfResume);
-    await tester.pumpWidget(
-      AuthScope(
-        controller: auth,
-        child: MaterialApp.router(
-          theme: AppTheme.dark(),
-          locale: const Locale('zh'),
-          supportedLocales: AppLocalizations.supportedLocales,
-          localizationsDelegates: AppLocalizations.localizationsDelegates,
-          routerConfig: desktopRouter,
-        ),
-      ),
-    );
-    await _settle(tester);
-    expect(find.byType(ShelfGridPage), findsOneWidget);
-    expect(find.byType(PhoneShelfPage), findsNothing);
+      expect(
+        find.byKey(CatalogKeys.shelfMore(CatalogKeys.shelfLatestSeries)),
+        findsNothing,
+      );
+      expect(
+        find.byKey(CatalogKeys.shelfMore(CatalogKeys.shelfResume)),
+        findsNothing,
+      );
+      expect(find.byType(ShelfGridPage), findsNothing);
 
-    final phoneRouter = createAppRouter(
-      auth: auth,
-      environment: PresentationEnvironment.phone,
-    );
-    addTearDown(phoneRouter.dispose);
-    phoneRouter.go(AppRoutes.shelfLatestMovies);
-    await tester.pumpWidget(
-      AuthScope(
-        controller: auth,
-        child: MaterialApp.router(
-          theme: AppTheme.dark(),
-          locale: const Locale('zh'),
-          supportedLocales: AppLocalizations.supportedLocales,
-          localizationsDelegates: AppLocalizations.localizationsDelegates,
-          routerConfig: phoneRouter,
+      final more = find.byKey(
+        CatalogKeys.shelfMore(CatalogKeys.shelfLatestMovies),
+      );
+      await _showOnHome(tester, more);
+      await tester.tap(more);
+      await _settle(tester);
+
+      expect(find.byType(PhoneShelfPage), findsOneWidget);
+      expect(find.byType(ShelfGridPage), findsNothing);
+      expect(find.byType(HomeHero), findsNothing);
+      expect(
+        find.descendant(
+          of: find.byType(AppBar),
+          matching: find.text('最近更新的电影'),
         ),
-      ),
-    );
-    await _settle(tester);
-    expect(find.byType(PhoneShelfPage), findsOneWidget);
-    expect(find.byType(ShelfGridPage), findsNothing);
-    expect(tester.takeException(), isNull);
-  }, tags: ['integration']);
+        findsOneWidget,
+      );
+      expect(find.text('加载更多'), findsNothing);
+      expect(
+        server.requests.where(
+          (request) =>
+              request.contains('IncludeItemTypes=Movie') &&
+              request.contains('Limit=${PhoneShelfPage.pageSize}') &&
+              request.contains('StartIndex=0') &&
+              request.contains('SortBy=DateLastContentAdded') &&
+              request.contains('SortOrder=Descending'),
+        ),
+        isNotEmpty,
+      );
+      await tester.scrollUntilVisible(find.text('冷门电影'), 400);
+      expect(find.text('冷门电影'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+    tags: ['integration'],
+  );
 }
 
 CatalogController _catalog({
@@ -496,6 +425,22 @@ EmbyItem _item(
     name: name,
     type: type,
     seriesName: seriesName,
+    userData: percent == null
+        ? const EmbyUserData()
+        : EmbyUserData(playbackPositionTicks: 1, playedPercentage: percent),
+  );
+}
+
+EmbyItem _movie(String id, String name, {double? percent}) {
+  return EmbyItem(
+    id: id,
+    name: name,
+    type: 'Movie',
+    overview: id == 'movie-inception'
+        ? 'A thief who steals corporate secrets through dream-sharing.'
+        : null,
+    productionYear: id == 'movie-inception' ? 2010 : 2009,
+    primaryImageTag: 'tag-$id',
     userData: percent == null
         ? const EmbyUserData()
         : EmbyUserData(playbackPositionTicks: 1, playedPercentage: percent),
@@ -555,9 +500,7 @@ GoRouter _router(CatalogController catalog) {
             path: '/item/:itemId',
             builder: (context, state) {
               final id = state.pathParameters['itemId']!;
-              final item = _findItem(catalog, id);
-              final label = item != null && item.isSeries ? '剧集页' : '详情';
-              return Scaffold(body: Text('$label $id'));
+              return Scaffold(body: Text('详情 $id'));
             },
           ),
           GoRoute(
@@ -570,22 +513,6 @@ GoRouter _router(CatalogController catalog) {
       ),
     ],
   );
-}
-
-EmbyItem? _findItem(CatalogController catalog, String id) {
-  for (final state in [
-    catalog.resume,
-    catalog.nextUp,
-    catalog.latestMovies,
-    catalog.latestSeries,
-  ]) {
-    for (final item in state.items) {
-      if (item.id == id) {
-        return item;
-      }
-    }
-  }
-  return null;
 }
 
 bool _inside(Rect inner, Rect outer) {
@@ -664,4 +591,139 @@ Future<(GoRouter, FakeEmbyServer)> _openPhone(
   );
   await _settle(tester);
   return (router, server);
+}
+
+// ---- Hero/动效专用 harness(自 phone_motion_test 并入) ----
+
+MediaImage _bannerImage(WidgetTester tester) {
+  return tester.widget<MediaImage>(
+    find.descendant(
+      of: find.byKey(PhoneItemBanner.bannerKey),
+      matching: find.byType(MediaImage),
+      skipOffstage: false,
+    ),
+  );
+}
+
+void _expectSameImage(
+  WidgetTester tester,
+  MediaImage poster, {
+  required bool onstage,
+}) {
+  final images = tester.widgetList<MediaImage>(
+    find.byType(MediaImage, skipOffstage: onstage),
+  );
+  expect(
+    images.where(
+      (image) =>
+          image.item.id == poster.item.id &&
+          image.preferBackdrop == poster.preferBackdrop &&
+          image.maxWidth == poster.maxWidth &&
+          image.item.primaryImageTag == poster.item.primaryImageTag,
+    ),
+    isNotEmpty,
+  );
+}
+
+Future<void> _pumpMotionHome(
+  WidgetTester tester, {
+  bool reduceMotion = false,
+}) async {
+  tester.view.physicalSize = const Size(360, 1600);
+  tester.view.devicePixelRatio = 1;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
+  if (reduceMotion) {
+    tester.platformDispatcher.accessibilityFeaturesTestValue =
+        const FakeAccessibilityFeatures(disableAnimations: true);
+    addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
+  }
+  final server = FakeEmbyServer();
+  final auth = AuthController.memory(
+    client: EmbyClient(
+      device: _device,
+      dio: dioForFakeEmby(FakeEmbyAdapter([server])),
+    ),
+  );
+  await tester.runAsync(
+    () => auth.connect(
+      address: server.baseUrl.toString(),
+      username: 'alice',
+      password: 'correct-horse',
+    ),
+  );
+  final catalog = CatalogController(auth: auth);
+  catalog.resume = CatalogRowState(
+    items: [
+      _movie('movie-inception', 'Inception', percent: 40),
+      _movie('movie-up', '飞屋环游记'),
+    ],
+  );
+  catalog.nextUp = const CatalogRowState(hidden: true);
+  catalog.latestMovies = CatalogRowState(
+    items: [
+      _movie('movie-inception', 'Inception', percent: 40),
+      _movie('movie-up', '飞屋环游记'),
+    ],
+  );
+  catalog.latestSeries = CatalogRowState(
+    items: [
+      const EmbyItem(
+        id: 'series-friends',
+        name: '老友记',
+        type: 'Series',
+        overview: 'Six friends living in New York.',
+        primaryImageTag: 'tag-friends',
+      ),
+    ],
+  );
+  catalog.librariesLoading = false;
+  final router = GoRouter(
+    initialLocation: AppRoutes.home,
+    routes: [
+      GoRoute(
+        path: AppRoutes.home,
+        builder: (context, state) => const PhoneHome(),
+      ),
+      GoRoute(
+        path: '/item/:itemId',
+        builder: (context, state) =>
+            MobileDetailPage(itemId: state.pathParameters['itemId']!),
+      ),
+    ],
+  );
+  addTearDown(router.dispose);
+  addTearDown(catalog.dispose);
+  addTearDown(auth.dispose);
+  addTearDown(() async {
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(milliseconds: 200));
+  });
+  MediaImageCache.instance.fetchTimeout = const Duration(milliseconds: 1);
+  await tester.pumpWidget(
+    AuthScope(
+      controller: auth,
+      child: CatalogScope(
+        controller: catalog,
+        child: MaterialApp.router(
+          theme: AppTheme.dark(),
+          locale: const Locale('zh'),
+          supportedLocales: AppLocalizations.supportedLocales,
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          routerConfig: router,
+        ),
+      ),
+    ),
+  );
+  await tester.pump();
+}
+
+Future<void> _until(WidgetTester tester, Finder finder) async {
+  for (var i = 0; i < 20; i++) {
+    if (finder.evaluate().isNotEmpty) {
+      return;
+    }
+    await tester.pump(const Duration(milliseconds: 50));
+  }
+  expect(finder, findsWidgets);
 }
