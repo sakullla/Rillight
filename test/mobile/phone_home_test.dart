@@ -35,25 +35,76 @@ const _device = EmbyDeviceInfo(
 void main() {
   setUp(isolateImageCache);
 
-  testWidgets('banner prefers resume, pauses after a tap, and stops at five', (
-    tester,
-  ) async {
-    PhoneHero.autoAdvanceEnabled = true;
-    addTearDown(() => PhoneHero.autoAdvanceEnabled = false);
+  testWidgets(
+    'banner prefers resume, pauses from the button, and stops at five',
+    (tester) async {
+      PhoneHero.autoAdvanceEnabled = true;
+      addTearDown(() => PhoneHero.autoAdvanceEnabled = false);
+      _usePhoneSurface(tester);
+      final catalog = _catalog(
+        resume: [
+          _item('episode-a', '试播集', 'Episode', percent: 40, seriesName: '示例剧'),
+          _item('movie-b', '乙电影', 'Movie', percent: 10),
+        ],
+        movies: [
+          _item('movie-b', '乙电影', 'Movie', percent: 10),
+          _item('movie-c', '示例电影', 'Movie'),
+          _item('movie-d', '丁电影', 'Movie'),
+          _item('movie-e', '戊电影', 'Movie'),
+          _item('movie-f', '落选电影', 'Movie'),
+        ],
+        series: [_item('series-h', '示例剧全集', 'Series')],
+      );
+      addTearDown(catalog.auth.dispose);
+      addTearDown(catalog.dispose);
+      final router = _router(catalog);
+      addTearDown(router.dispose);
+      await tester.pumpWidget(_scriptedApp(catalog, router: router));
+      await tester.pump();
+
+      expect(find.byType(HomeHero), findsNothing);
+      expect(find.byKey(PhoneHero.itemKey('episode-a')), findsOneWidget);
+      expect(find.byKey(PhoneHero.itemKey('movie-f')), findsNothing);
+      expect(find.byKey(PhoneHero.itemKey('series-h')), findsNothing);
+      expect(find.byKey(CatalogKeys.heroDot(4)), findsOneWidget);
+      expect(find.byKey(CatalogKeys.heroDot(5)), findsNothing);
+      expect(find.text('继续播放'), findsOneWidget);
+      expect(find.text('已看 40%'), findsWidgets);
+      expect(find.byTooltip('暂停轮播'), findsOneWidget);
+
+      await tester.pump(const Duration(seconds: 5));
+      expect(find.byKey(PhoneHero.itemKey('episode-a')), findsOneWidget);
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pump();
+      expect(find.byKey(PhoneHero.itemKey('movie-b')), findsOneWidget);
+
+      await tester.tap(find.byKey(PhoneHero.pauseKey));
+      await tester.pump();
+      expect(find.byTooltip('恢复轮播'), findsOneWidget);
+      await tester.pump(const Duration(seconds: 7));
+      expect(
+        _heroPageLeft(tester, 'movie-b'),
+        closeTo(tester.getRect(find.byKey(PhoneHero.bannerKey)).left, 1),
+      );
+
+      final banner = tester.getRect(find.byKey(PhoneHero.bannerKey));
+      await tester.tapAt(banner.topLeft + const Offset(16, 80));
+      await _settle(tester);
+      expect(find.text('详情 movie-b'), findsOneWidget);
+      expect(find.textContaining('播放 movie-b'), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('banner swipes to the next and previous item', (tester) async {
     _usePhoneSurface(tester);
     final catalog = _catalog(
       resume: [
         _item('episode-a', '试播集', 'Episode', percent: 40, seriesName: '示例剧'),
-        _item('movie-b', '乙电影', 'Movie', percent: 10),
+        _item('movie-b', '乙电影', 'Movie'),
       ],
-      movies: [
-        _item('movie-b', '乙电影', 'Movie', percent: 10),
-        _item('movie-c', '示例电影', 'Movie'),
-        _item('movie-d', '丁电影', 'Movie'),
-        _item('movie-e', '戊电影', 'Movie'),
-        _item('movie-f', '落选电影', 'Movie'),
-      ],
-      series: [_item('series-h', '示例剧全集', 'Series')],
+      movies: [_item('movie-c', '示例电影', 'Movie')],
+      series: const [],
     );
     addTearDown(catalog.auth.dispose);
     addTearDown(catalog.dispose);
@@ -62,28 +113,23 @@ void main() {
     await tester.pumpWidget(_scriptedApp(catalog, router: router));
     await tester.pump();
 
-    expect(find.byType(HomeHero), findsNothing);
-    expect(find.byKey(PhoneHero.itemKey('episode-a')), findsOneWidget);
-    expect(find.byKey(PhoneHero.itemKey('movie-f')), findsNothing);
-    expect(find.byKey(PhoneHero.itemKey('series-h')), findsNothing);
-    expect(find.byKey(CatalogKeys.heroDot(4)), findsOneWidget);
-    expect(find.byKey(CatalogKeys.heroDot(5)), findsNothing);
-    expect(find.text('继续播放'), findsOneWidget);
-    expect(find.text('已看 40%'), findsWidgets);
-    expect(find.byTooltip('暂停轮播'), findsOneWidget);
-
-    await tester.pump(const Duration(seconds: 5));
-    expect(find.byKey(PhoneHero.itemKey('episode-a')), findsOneWidget);
-    await tester.pump(const Duration(seconds: 1));
-    await tester.pump();
-    expect(find.byKey(PhoneHero.itemKey('movie-b')), findsOneWidget);
-
-    final banner = tester.getRect(find.byKey(PhoneHero.bannerKey));
-    await tester.tapAt(banner.topLeft + const Offset(16, 16));
-    await tester.pump();
-    expect(find.byTooltip('恢复轮播'), findsOneWidget);
-    await tester.pump(const Duration(seconds: 7));
-    expect(find.byKey(PhoneHero.itemKey('movie-b')), findsOneWidget);
+    final banner = find.byKey(PhoneHero.bannerKey);
+    expect(
+      _heroPageLeft(tester, 'episode-a'),
+      closeTo(tester.getRect(banner).left, 1),
+    );
+    await tester.drag(banner, const Offset(-280, 0));
+    await tester.pumpAndSettle();
+    expect(
+      _heroPageLeft(tester, 'movie-b'),
+      closeTo(tester.getRect(banner).left, 1),
+    );
+    await tester.drag(banner, const Offset(280, 0));
+    await tester.pumpAndSettle();
+    expect(
+      _heroPageLeft(tester, 'episode-a'),
+      closeTo(tester.getRect(banner).left, 1),
+    );
     expect(tester.takeException(), isNull);
   });
 
@@ -114,9 +160,25 @@ void main() {
       isNull,
     );
     await tester.pump(const Duration(seconds: 7));
-    expect(find.byKey(PhoneHero.itemKey('episode-a')), findsOneWidget);
+    expect(
+      _heroPageLeft(tester, 'episode-a'),
+      closeTo(tester.getRect(find.byKey(PhoneHero.bannerKey)).left, 1),
+    );
     expect(find.text('继续播放'), findsOneWidget);
     expect(find.text('已看 40%'), findsWidgets);
+    await tester.drag(find.byKey(PhoneHero.bannerKey), const Offset(-280, 0));
+    await tester.pumpAndSettle();
+    expect(
+      _heroPageLeft(tester, 'movie-b'),
+      closeTo(tester.getRect(find.byKey(PhoneHero.bannerKey)).left, 1),
+    );
+    await tester.tapAt(
+      tester.getRect(find.byKey(PhoneHero.bannerKey)).topLeft +
+          const Offset(16, 80),
+    );
+    await _settle(tester);
+    expect(find.text('详情 movie-b'), findsOneWidget);
+    expect(find.textContaining('播放 movie-b'), findsNothing);
     expect(tester.takeException(), isNull);
   });
 
@@ -196,12 +258,15 @@ void main() {
     final ratios = tester.widgetList<AspectRatio>(find.byType(AspectRatio));
     expect(ratios.where((widget) => widget.aspectRatio == 2 / 3), isNotEmpty);
 
-    // 卡宽随屏宽伸缩,不再是写死的 148。
+    // 最近电影卡宽：约 3 张完整海报再露出下一张。
     final width360 = tester
         .getRect(find.byKey(CatalogKeys.item('movie-c')))
         .width;
-    expect(width360, closeTo((360 - AppSpacing.md * 2) / 2.6, 0.5));
-    expect(width360, isNot(148));
+    expect(width360, closeTo(phoneHomePosterCardWidth(360), 0.5));
+    final available = 360 - AppSpacing.md * 2;
+    final stride = width360 + AppSpacing.sm;
+    expect(stride * 3, lessThan(available));
+    expect(stride * 3 + width360, greaterThan(available));
     expect(tester.takeException(), isNull);
   });
 
@@ -230,8 +295,11 @@ void main() {
     final width412 = tester
         .getRect(find.byKey(CatalogKeys.item('movie-c')))
         .width;
-    expect(width412, closeTo((412 - AppSpacing.md * 2) / 2.6, 0.5));
-    expect(width412, greaterThan(140));
+    expect(width412, closeTo(phoneHomePosterCardWidth(412), 0.5));
+    final available = 412 - AppSpacing.md * 2;
+    final stride = width412 + AppSpacing.sm;
+    expect(stride * 3, lessThan(available));
+    expect(stride * 3 + width412, greaterThan(available));
     expect(tester.takeException(), isNull);
   });
 
@@ -243,6 +311,7 @@ void main() {
         resume: [_item('movie-b', '乙电影', 'Movie', percent: 10)],
         movies: [_item('movie-c', '示例电影', 'Movie')],
         series: const [],
+        nextUp: [_item('episode-n', '下一集卡片', 'Episode')],
       );
       addTearDown(catalog.auth.dispose);
       addTearDown(catalog.dispose);
@@ -251,17 +320,43 @@ void main() {
       await tester.pumpWidget(_scriptedApp(catalog, router: router));
       await tester.pump();
 
-      // 进度条与单条移除都保留,并落在继续观看卡内(Hero 也有一条进度条)。
-      final card = tester.getRect(find.byKey(CatalogKeys.item('movie-b')));
-      expect(
-        _inside(
-          tester.getRect(find.byKey(CatalogKeys.removeFromResume('movie-b'))),
-          card,
-        ),
-        isTrue,
+      // 进度条与单条移除都保留。横卡是 16:9，移除按钮在画面下方。
+      final cardFinder = find.byKey(CatalogKeys.item('movie-b'));
+      final card = tester.getRect(cardFinder);
+      final image = tester.getRect(
+        find.descendant(of: cardFinder, matching: find.byType(AspectRatio)),
       );
+      expect(
+        tester
+            .widget<AspectRatio>(
+              find.descendant(
+                of: cardFinder,
+                matching: find.byType(AspectRatio),
+              ),
+            )
+            .aspectRatio,
+        16 / 9,
+      );
+      final remove = tester.getRect(
+        find.byKey(CatalogKeys.removeFromResume('movie-b')),
+      );
+      expect(_inside(remove, card), isTrue);
+      expect(remove.top, greaterThanOrEqualTo(image.bottom - 1));
       expect(find.byKey(CatalogKeys.resumeProgress), findsWidgets);
       expect(_inside(tester.getRect(find.text('已看 10%').last), card), isTrue);
+      final nextCard = find.byKey(CatalogKeys.item('episode-n'));
+      expect(
+        tester
+            .widget<AspectRatio>(
+              find.descendant(of: nextCard, matching: find.byType(AspectRatio)),
+            )
+            .aspectRatio,
+        16 / 9,
+      );
+      await tester.tap(find.text('下一集卡片'));
+      await _settle(tester);
+      expect(find.text('详情 episode-n'), findsOneWidget);
+      expect(find.textContaining('播放 episode-n'), findsNothing);
       expect(tester.takeException(), isNull);
     },
   );
@@ -393,8 +488,35 @@ void main() {
       ),
       isNotEmpty,
     );
+    expect(_sameRow(tester, ['新片 23', '新片 22', '新片 21']), isTrue);
+    expect(
+      tester.getTopLeft(find.text('新片 20')).dy,
+      greaterThan(tester.getTopLeft(find.text('新片 23')).dy + 40),
+    );
     await tester.scrollUntilVisible(find.text('冷门电影'), 400);
     expect(find.text('冷门电影'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  }, tags: ['integration']);
+
+  testWidgets('latest shelf stays at three columns on a 412dp phone', (
+    tester,
+  ) async {
+    await _openPhone(
+      tester,
+      size: const Size(412, 900),
+      prepare: _addShelfMovies,
+    );
+    final more = find.byKey(
+      CatalogKeys.shelfMore(CatalogKeys.shelfLatestMovies),
+    );
+    await _showOnHome(tester, more);
+    await tester.tap(more);
+    await _settle(tester);
+    expect(_sameRow(tester, ['新片 23', '新片 22', '新片 21']), isTrue);
+    expect(
+      tester.getTopLeft(find.text('新片 20')).dy,
+      greaterThan(tester.getTopLeft(find.text('新片 23')).dy + 40),
+    );
     expect(tester.takeException(), isNull);
   }, tags: ['integration']);
 
@@ -470,14 +592,28 @@ void main() {
   }, tags: ['integration']);
 }
 
+double _heroPageLeft(WidgetTester tester, String id) {
+  return tester.getRect(find.byKey(PhoneHero.itemKey(id))).left;
+}
+
+bool _sameRow(WidgetTester tester, List<String> names) {
+  final tops = [
+    for (final name in names) tester.getTopLeft(find.text(name)).dy,
+  ];
+  return tops.every((top) => (top - tops.first).abs() < 1);
+}
+
 CatalogController _catalog({
   required List<EmbyItem> resume,
   required List<EmbyItem> movies,
   required List<EmbyItem> series,
+  List<EmbyItem>? nextUp,
 }) {
   final catalog = CatalogController(auth: AuthController.memory());
   catalog.resume = CatalogRowState(items: resume);
-  catalog.nextUp = const CatalogRowState(hidden: true);
+  catalog.nextUp = nextUp == null
+      ? const CatalogRowState(hidden: true)
+      : CatalogRowState(items: nextUp);
   catalog.latestMovies = CatalogRowState(items: movies);
   catalog.latestSeries = CatalogRowState(items: series);
   catalog.librariesLoading = false;
@@ -624,8 +760,12 @@ void _addShelfMovies(FakeEmbyServer server) {
 Future<(GoRouter, FakeEmbyServer)> _openPhone(
   WidgetTester tester, {
   void Function(FakeEmbyServer server)? prepare,
+  Size size = const Size(360, 800),
 }) async {
-  _usePhoneSurface(tester);
+  tester.view.physicalSize = size;
+  tester.view.devicePixelRatio = 1;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
   tester.platformDispatcher.accessibilityFeaturesTestValue =
       const FakeAccessibilityFeatures(disableAnimations: true);
   addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);

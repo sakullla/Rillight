@@ -12,7 +12,7 @@ import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/media_image/media_image.dart';
 
 /// 手机首页横幅。候选规则与桌面首页横幅相同，但不把那个组件装进手机：
-/// 它依赖桌面顶栏重叠。点按画面暂停；减少动效时不轮换。
+/// 它依赖桌面顶栏重叠。左右滑动切换；点画面进入条目。减少动效时不轮换。
 class PhoneHero extends StatefulWidget {
   const PhoneHero({super.key, required this.catalog});
 
@@ -66,12 +66,14 @@ class _PhoneHeroState extends State<PhoneHero> {
   int _index = 0;
   bool _paused = false;
   Timer? _timer;
+  final PageController _page = PageController();
 
   List<EmbyItem> get _featured => PhoneHero.featuredItemsOf(widget.catalog);
 
   @override
   void dispose() {
     _timer?.cancel();
+    _page.dispose();
     super.dispose();
   }
 
@@ -100,25 +102,28 @@ class _PhoneHeroState extends State<PhoneHero> {
   }
 
   void _advance() {
-    if (!mounted || !_canAutoAdvance) {
+    if (!mounted || !_canAutoAdvance || !_page.hasClients) {
       return;
     }
     final count = _featured.length;
     if (count < 2) {
       return;
     }
-    setState(() => _index = (_index + 1) % count);
-  }
-
-  void _pauseFromTap() {
-    if (_reduceMotion || _paused || _featured.length < 2) {
-      return;
-    }
-    setState(() => _paused = true);
+    final next = (_index + 1) % count;
+    _page.jumpToPage(next);
   }
 
   void _togglePause() {
     setState(() => _paused = !_paused);
+  }
+
+  void _open(EmbyItem item) {
+    PhoneMotion.openItem(
+      context,
+      item,
+      preferBackdrop: true,
+      maxWidth: PhoneMotion.heroRequestWidth,
+    );
   }
 
   @override
@@ -129,12 +134,8 @@ class _PhoneHeroState extends State<PhoneHero> {
       return const SizedBox.shrink();
     }
     final index = _index % items.length;
-    final item = items[index];
     final l10n = AppLocalizations.of(context);
     final theme = Theme.of(context);
-    final title = item.isEpisode && (item.seriesName?.isNotEmpty ?? false)
-        ? item.seriesName!
-        : item.name;
     final rotating = items.length > 1;
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -147,140 +148,165 @@ class _PhoneHeroState extends State<PhoneHero> {
           child: SizedBox(
             width: width,
             height: height,
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: _pauseFromTap,
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  KeyedSubtree(
-                    key: PhoneHero.itemKey(item.id),
-                    child: PhoneMotion.sharedImage(
-                      itemId: item.id,
-                      preferBackdrop: true,
-                      child: MediaImage(
-                        item: item,
-                        preferBackdrop: true,
-                        maxWidth: PhoneMotion.heroRequestWidth,
-                      ),
-                    ),
-                  ),
-                  DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [
-                          theme.colorScheme.scrim.withValues(alpha: 0),
-                          theme.colorScheme.scrim.withValues(alpha: 0),
-                          theme.colorScheme.scrim.withValues(
-                            alpha: AppScrim.of(context, AppScrim.textStart),
-                          ),
-                        ],
-                        stops: const [
-                          AppMobileHero.topStart,
-                          AppMobileHero.bottomStart,
-                          AppMobileHero.bottomEnd,
-                        ],
-                      ),
-                    ),
-                  ),
-                  if (rotating)
-                    Positioned(
-                      top: AppSpacing.xxs,
-                      right: AppSpacing.xxs,
-                      child: IconButton(
-                        key: PhoneHero.pauseKey,
-                        tooltip: _paused || _reduceMotion
-                            ? l10n.resumeCarousel
-                            : l10n.pauseCarousel,
-                        onPressed: _reduceMotion ? null : _togglePause,
-                        icon: Icon(
-                          _paused || _reduceMotion
-                              ? Icons.play_arrow
-                              : Icons.pause,
-                        ),
-                      ),
-                    ),
-                  Padding(
-                    padding: const EdgeInsets.all(AppSpacing.md),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Spacer(),
-                        Text(
-                          title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.titleLarge?.copyWith(
-                            color: theme.colorScheme.onSurface,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                        if (item.canResume) ...[
-                          const SizedBox(height: AppSpacing.xs),
-                          LinearProgressIndicator(
-                            key: CatalogKeys.resumeProgress,
-                            value: item.playbackProgress,
-                            minHeight: 4,
-                          ),
-                          const SizedBox(height: AppSpacing.xxs),
-                          Text(
-                            l10n.playbackProgress(
-                              (item.playbackProgress * 100).round(),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                PageView.builder(
+                  controller: _page,
+                  physics: rotating
+                      ? const PageScrollPhysics()
+                      : const NeverScrollableScrollPhysics(),
+                  itemCount: items.length,
+                  onPageChanged: (value) {
+                    setState(() => _index = value);
+                  },
+                  itemBuilder: (context, page) {
+                    final pageItem = items[page];
+                    final pageTitle =
+                        pageItem.isEpisode &&
+                            (pageItem.seriesName?.isNotEmpty ?? false)
+                        ? pageItem.seriesName!
+                        : pageItem.name;
+                    return GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () => _open(pageItem),
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          KeyedSubtree(
+                            key: PhoneHero.itemKey(pageItem.id),
+                            child: PhoneMotion.sharedImage(
+                              itemId: pageItem.id,
+                              preferBackdrop: true,
+                              child: MediaImage(
+                                item: pageItem,
+                                preferBackdrop: true,
+                                maxWidth: PhoneMotion.heroRequestWidth,
+                              ),
                             ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.labelLarge,
                           ),
-                        ],
-                        if (rotating) ...[
-                          const SizedBox(height: AppSpacing.xs),
-                          Row(
-                            children: [
-                              for (var i = 0; i < items.length; i++)
-                                Container(
-                                  key: CatalogKeys.heroDot(i),
-                                  width: i == index ? 16 : 6,
-                                  height: 6,
-                                  margin: const EdgeInsets.only(
-                                    right: AppSpacing.xs,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: theme.colorScheme.onSurface
-                                        .withValues(
-                                          alpha: i == index ? 1 : 0.4,
-                                        ),
-                                    borderRadius: BorderRadius.circular(
-                                      AppRadii.sm,
+                          DecoratedBox(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                                colors: [
+                                  theme.colorScheme.scrim.withValues(alpha: 0),
+                                  theme.colorScheme.scrim.withValues(alpha: 0),
+                                  theme.colorScheme.scrim.withValues(
+                                    alpha: AppScrim.of(
+                                      context,
+                                      AppScrim.textStart,
                                     ),
                                   ),
+                                ],
+                                stops: const [
+                                  AppMobileHero.topStart,
+                                  AppMobileHero.bottomStart,
+                                  AppMobileHero.bottomEnd,
+                                ],
+                              ),
+                            ),
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.all(AppSpacing.md),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Spacer(),
+                                Text(
+                                  pageTitle,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.titleLarge?.copyWith(
+                                    color: theme.colorScheme.onSurface,
+                                    fontWeight: FontWeight.w800,
+                                  ),
                                 ),
-                            ],
+                                if (pageItem.canResume) ...[
+                                  const SizedBox(height: AppSpacing.xs),
+                                  LinearProgressIndicator(
+                                    key: CatalogKeys.resumeProgress,
+                                    value: pageItem.playbackProgress,
+                                    minHeight: 4,
+                                  ),
+                                  const SizedBox(height: AppSpacing.xxs),
+                                  Text(
+                                    l10n.playbackProgress(
+                                      (pageItem.playbackProgress * 100).round(),
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: theme.textTheme.labelLarge,
+                                  ),
+                                ],
+                                if (rotating) ...[
+                                  const SizedBox(height: AppSpacing.xs),
+                                  Row(
+                                    children: [
+                                      for (var i = 0; i < items.length; i++)
+                                        Container(
+                                          key: page == index
+                                              ? CatalogKeys.heroDot(i)
+                                              : null,
+                                          width: i == index ? 16 : 6,
+                                          height: 6,
+                                          margin: const EdgeInsets.only(
+                                            right: AppSpacing.xs,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: theme.colorScheme.onSurface
+                                                .withValues(
+                                                  alpha: i == index ? 1 : 0.4,
+                                                ),
+                                            borderRadius: BorderRadius.circular(
+                                              AppRadii.sm,
+                                            ),
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                ],
+                                const SizedBox(height: AppSpacing.sm),
+                                FilledButton.icon(
+                                  key: page == index ? PhoneHero.openKey : null,
+                                  style: FilledButton.styleFrom(
+                                    minimumSize: const Size(48, 48),
+                                  ),
+                                  onPressed: () => _open(pageItem),
+                                  icon: const Icon(Icons.play_arrow),
+                                  label: Text(
+                                    pageItem.canResume
+                                        ? l10n.resumePlay
+                                        : l10n.play,
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         ],
-                        const SizedBox(height: AppSpacing.sm),
-                        FilledButton.icon(
-                          key: PhoneHero.openKey,
-                          style: FilledButton.styleFrom(
-                            minimumSize: const Size(48, 48),
-                          ),
-                          onPressed: () => PhoneMotion.openItem(
-                            context,
-                            item,
-                            preferBackdrop: true,
-                            maxWidth: PhoneMotion.heroRequestWidth,
-                          ),
-                          icon: const Icon(Icons.play_arrow),
-                          label: Text(
-                            item.canResume ? l10n.resumePlay : l10n.play,
-                          ),
-                        ),
-                      ],
+                      ),
+                    );
+                  },
+                ),
+                if (rotating)
+                  Positioned(
+                    top: AppSpacing.xxs,
+                    right: AppSpacing.xxs,
+                    child: IconButton(
+                      key: PhoneHero.pauseKey,
+                      tooltip: _paused || _reduceMotion
+                          ? l10n.resumeCarousel
+                          : l10n.pauseCarousel,
+                      onPressed: _reduceMotion ? null : _togglePause,
+                      icon: Icon(
+                        _paused || _reduceMotion
+                            ? Icons.play_arrow
+                            : Icons.pause,
+                      ),
                     ),
                   ),
-                ],
-              ),
+              ],
             ),
           ),
         );

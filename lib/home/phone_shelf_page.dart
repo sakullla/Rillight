@@ -37,6 +37,14 @@ class PhoneShelfPage extends StatefulWidget {
   /// 与桌面货架每页条数相同。
   static const pageSize = 60;
 
+  /// 360–412dp 固定 3 列。更宽时增列，单张不会大到一屏只剩两张。
+  static int columnCountFor(double width) {
+    if (width <= 412) {
+      return 3;
+    }
+    return (width / 130).floor().clamp(3, 6);
+  }
+
   static const loadMoreKey = Key('phone-shelf-load-more');
 
   factory PhoneShelfPage.fromState(GoRouterState state) {
@@ -300,7 +308,7 @@ class _PhoneShelfPageState extends State<PhoneShelfPage> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final scale = MediaQuery.textScalerOf(context).scale(14) / 14;
-        final columns = (constraints.maxWidth / 165).floor().clamp(2, 6);
+        final columns = PhoneShelfPage.columnCountFor(constraints.maxWidth);
         final tileWidth = constraints.maxWidth / columns;
         final tileHeight = tileWidth * 1.5 + 52 * scale;
         return CustomScrollView(
