@@ -397,6 +397,79 @@ void main() {
     },
     tags: ['integration'],
   );
+
+  // '/shelf/:source' 的环境分派在全 test/ 仅此处守护:desktop 建 ShelfGridPage,
+  // phone 建 PhoneShelfPage。只断言路由分派,不泵页面内容。
+  testWidgets('desktop shelf route still uses the desktop grid', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    tester.platformDispatcher.accessibilityFeaturesTestValue =
+        const FakeAccessibilityFeatures(disableAnimations: true);
+    addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
+    final server = FakeEmbyServer();
+    final auth = AuthController.memory(
+      client: EmbyClient(
+        device: _device,
+        dio: dioForFakeEmby(FakeEmbyAdapter([server])),
+      ),
+    );
+    addTearDown(auth.dispose);
+    await tester.runAsync(() async {
+      await auth.connect(
+        address: server.baseUrl.toString(),
+        username: 'alice',
+        password: 'correct-horse',
+      );
+    });
+    final desktopRouter = createAppRouter(
+      auth: auth,
+      environment: PresentationEnvironment.desktop,
+    );
+    addTearDown(desktopRouter.dispose);
+    desktopRouter.go(AppRoutes.shelfResume);
+    await tester.pumpWidget(
+      AuthScope(
+        controller: auth,
+        child: MaterialApp.router(
+          theme: AppTheme.dark(),
+          locale: const Locale('zh'),
+          supportedLocales: AppLocalizations.supportedLocales,
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          routerConfig: desktopRouter,
+        ),
+      ),
+    );
+    await _settle(tester);
+    expect(find.byType(ShelfGridPage), findsOneWidget);
+    expect(find.byType(PhoneShelfPage), findsNothing);
+
+    final phoneRouter = createAppRouter(
+      auth: auth,
+      environment: PresentationEnvironment.phone,
+    );
+    addTearDown(phoneRouter.dispose);
+    phoneRouter.go(AppRoutes.shelfLatestMovies);
+    await tester.pumpWidget(
+      AuthScope(
+        controller: auth,
+        child: MaterialApp.router(
+          theme: AppTheme.dark(),
+          locale: const Locale('zh'),
+          supportedLocales: AppLocalizations.supportedLocales,
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          routerConfig: phoneRouter,
+        ),
+      ),
+    );
+    await _settle(tester);
+    expect(find.byType(PhoneShelfPage), findsOneWidget);
+    expect(find.byType(ShelfGridPage), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
 }
 
 CatalogController _catalog({
