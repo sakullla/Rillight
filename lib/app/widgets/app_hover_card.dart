@@ -16,6 +16,7 @@ class AppHoverCard extends StatefulWidget {
     this.borderRadius,
     this.hoverScale = 1.04,
     this.focusRingWidth = 1,
+    this.showRing = true,
     this.shadowBlurRadius = 16,
     this.focusNode,
     this.autofocus = false,
@@ -38,6 +39,10 @@ class AppHoverCard extends StatefulWidget {
 
   /// 焦点环描边宽度。
   final double focusRingWidth;
+
+  /// 是否在悬停/键盘焦点时显示焦点环。卡片自带选中描边时
+  /// 可置 false 抑制,避免双层描边;阴影与放大不受影响。
+  final bool showRing;
 
   /// 悬停/焦点时的阴影扩散半径。
   final double shadowBlurRadius;
@@ -148,7 +153,9 @@ class _AppHoverCardState extends State<AppHoverCard> {
       foregroundDecoration: BoxDecoration(
         borderRadius: radius,
         border: Border.all(
-          color: highlighted ? colorScheme.primary : Colors.transparent,
+          color: highlighted && widget.showRing
+              ? colorScheme.primary
+              : Colors.transparent,
           width: widget.focusRingWidth,
         ),
       ),

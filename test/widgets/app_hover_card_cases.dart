@@ -140,6 +140,50 @@ void main() {
     expect(_ring(tester).top.width, 1);
   });
 
+  testWidgets('showRing false suppresses the ring in rest, hover, and focus', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _wrap(
+        AppHoverCard(
+          onTap: () {},
+          showRing: false,
+          child: const SizedBox(width: 120, height: 180),
+        ),
+      ),
+    );
+    // 静止:无描边。
+    expect(_ring(tester).top.color, Colors.transparent);
+
+    // 悬停:放大与阴影保留,环仍被抑制。
+    final gesture = await _hoverCard(tester);
+    expect(_scale(tester).scale, 1.04);
+    expect((_decoration(tester).boxShadow!.single.color.a), greaterThan(0));
+    expect(_ring(tester).top.color, Colors.transparent);
+
+    await gesture.moveTo(Offset.zero);
+    await tester.pump();
+    expect(_ring(tester).top.color, Colors.transparent);
+  });
+
+  testWidgets('showRing false suppresses the ring under keyboard focus', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _wrap(
+        AppHoverCard(
+          onTap: () {},
+          autofocus: true,
+          showRing: false,
+          child: const SizedBox(width: 120, height: 180),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(_ring(tester).top.color, Colors.transparent);
+  });
+
   testWidgets('hover and focus notify onHighlighted', (tester) async {
     final highlights = <bool>[];
     await tester.pumpWidget(

@@ -152,6 +152,8 @@ class EpisodeThumbCard extends StatelessWidget {
         onTap: onTap,
         hoverScale: 1,
         borderRadius: BorderRadius.circular(AppRadii.sm),
+        // selected 卡片自带白色 3px 描边,抑制悬停/焦点环避免双层。
+        showRing: !selected,
         builder: (context, highlighted) {
           return Column(
             mainAxisSize: MainAxisSize.min,
@@ -374,6 +376,7 @@ class _HoverHighlight extends StatefulWidget {
     this.inkKey,
     this.borderRadius,
     this.hoverScale = 1.04,
+    this.showRing = true,
   });
 
   final Widget Function(BuildContext context, bool highlighted) builder;
@@ -381,6 +384,7 @@ class _HoverHighlight extends StatefulWidget {
   final Key? inkKey;
   final BorderRadius? borderRadius;
   final double hoverScale;
+  final bool showRing;
 
   @override
   State<_HoverHighlight> createState() => _HoverHighlightState();
@@ -396,6 +400,7 @@ class _HoverHighlightState extends State<_HoverHighlight> {
       onTap: widget.onTap,
       hoverScale: widget.hoverScale,
       borderRadius: widget.borderRadius,
+      showRing: widget.showRing,
       onHighlighted: (value) {
         if (_highlighted == value) {
           return;
