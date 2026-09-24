@@ -66,9 +66,92 @@ jobs:
     with:
       version: ${{ github.ref_name }}
 
+  android:
+    name: Build Android
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          # The deprecated tools package is no longer published, so the action default fails.
+          packages: platform-tools
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.4'
+          channel: stable
+          cache: true
+
+      - name: Check Android signing secrets
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          missing=()
+          [ -n "${ANDROID_KEYSTORE_BASE64:-}" ] || missing+=(ANDROID_KEYSTORE_BASE64)
+          [ -n "${ANDROID_KEY_ALIAS:-}" ] || missing+=(ANDROID_KEY_ALIAS)
+          [ -n "${ANDROID_STORE_PASSWORD:-}" ] || missing+=(ANDROID_STORE_PASSWORD)
+          [ -n "${ANDROID_KEY_PASSWORD:-}" ] || missing+=(ANDROID_KEY_PASSWORD)
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::Missing Android signing secrets: ${missing[*]}. Configure them in repository Settings > Secrets and variables > Actions before tagging a release."
+            exit 1
+          fi
+
+      - name: Decode keystore and write key.properties
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > android/app/upload.keystore
+          cat > android/key.properties <<EOF
+          storeFile=upload.keystore
+          storePassword=${ANDROID_STORE_PASSWORD}
+          keyAlias=${ANDROID_KEY_ALIAS}
+          keyPassword=${ANDROID_KEY_PASSWORD}
+          EOF
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build Android release APK
+        run: flutter build apk --release
+
+      - name: Rename APK artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/android
+          cp build/app/outputs/flutter-apk/app-release.apk \
+            "dist/android/Rillight-android-${GITHUB_REF_NAME}.apk"
+
+      - name: Upload Android package
+        uses: actions/upload-artifact@v6
+        with:
+          name: release-android
+          path: dist/android/Rillight-android-${{ github.ref_name }}.apk
+          if-no-files-found: error
+
   release:
     name: Create draft release
-    needs: [windows, macos, linux]
+    needs: [windows, macos, linux, android]
     runs-on: ubuntu-22.04
     steps:
       - name: Download packages
@@ -123,10 +206,43 @@ jobs:
 
           grep -Fqx "Rillight-windows-x64-${GITHUB_REF_NAME}-setup.exe" <<< "$assets"
           grep -Fqx "Rillight-linux-x64-${GITHUB_REF_NAME}.deb" <<< "$assets"
+          grep -Fqx "Rillight-android-${GITHUB_REF_NAME}.apk" <<< "$assets"
           grep -Fqx "SHA256SUMS" <<< "$assets"
           grep -Eq "^Rillight-macos-.*-adhoc\.dmg$" <<< "$assets"
 
           echo "RELEASE_ID=$(jq -r '.id' <<< "$release_json")" >> "$GITHUB_ENV"
+
+      - name: Set up Android build-tools
+        uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools build-tools;36.0.0
+
+      - name: Verify Android APK is not debug-signed
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          apk_dir="$(mktemp -d)"
+          gh release download "${GITHUB_REF_NAME}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --pattern "Rillight-android-${GITHUB_REF_NAME}.apk" \
+            --dir "$apk_dir" \
+            --clobber
+
+          apk="${apk_dir}/Rillight-android-${GITHUB_REF_NAME}.apk"
+          apksigner_bin="$(find "${ANDROID_HOME}/build-tools" -name apksigner -type f | sort -V | tail -n 1)"
+          if [ -z "$apksigner_bin" ]; then
+            echo "::error::apksigner not found under ${ANDROID_HOME}/build-tools"
+            exit 1
+          fi
+
+          certs="$("$apksigner_bin" verify --print-certs "$apk")"
+          echo "$certs"
+          if grep -qi "Android Debug" <<< "$certs"; then
+            echo "::error::Rillight-android-${GITHUB_REF_NAME}.apk is signed with the Android debug certificate"
+            exit 1
+          fi
 
       - name: Publish verified release
         shell: bash

@@ -17,7 +17,7 @@ adb -s emulator-5554 install -r build/app/outputs/flutter-apk/app-debug.apk
 flutter run -d emulator-5554
 ```
 
-PR/main CI 保存可安装的 `rillight-android-debug` 开发 APK。Android 尚无正式签名或商店发布流程；桌面 tag 发布保持原有规则。Android 默认保守声明 H.264/AAC 能力，不支持的媒体请求服务器 HLS 转码；服务器不可转码时显示错误。字幕支持内嵌与安全下载的 SRT/WebVTT，具体边界见 [Android 播放器说明](packages/rillight_android_player/README.md)。
+PR/main CI 保存可安装的 `rillight-android-debug` 开发 APK。推送 `v*` 标签的发布流程会额外构建 Android 正式签名 APK（签名密钥通过仓库 Secrets 注入，发布前校验资产清单与非 debug 签名），随桌面三平台安装包一并作为 GitHub Release 资产发布；不通过应用商店分发。Android 默认保守声明 H.264/AAC 能力，不支持的媒体请求服务器 HLS 转码；服务器不可转码时显示错误。字幕支持内嵌与安全下载的 SRT/WebVTT，具体边界见 [Android 播放器说明](packages/rillight_android_player/README.md)。
 
 设备验证使用隔离的 `.validation` 应用、合成服务器和合成媒体，流程见 [Android 验证说明](integration_test/android/README.md)。自动构建、页面操作、原生控制、显示像素与虚拟音频分别留证；AVD 通过不代表实体设备音频、硬件解码性能或长期 GPU 稳定性。
 
