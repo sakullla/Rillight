@@ -7,8 +7,8 @@ import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/auth/auth_scope.dart';
-import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/catalog_scope.dart';
+import 'package:rillight/home/tv_home_page.dart';
 import 'package:rillight/player/android_session_recovery.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/search/tv_search_page.dart';
@@ -204,7 +204,7 @@ class _TvShellState extends State<TvShell> with WidgetsBindingObserver {
                             child: FocusScope(
                               node: _panes[i],
                               child: [
-                                const _TvHome(),
+                                const TvHomePage(),
                                 const _TvLibraries(),
                                 const TvSearchPage(),
                                 const _TvSession(),
@@ -216,111 +216,6 @@ class _TvShellState extends State<TvShell> with WidgetsBindingObserver {
             ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _TvHome extends StatelessWidget {
-  const _TvHome();
-  @override
-  Widget build(BuildContext context) {
-    final c = CatalogScope.of(context), l = AppLocalizations.of(context);
-    return ListenableBuilder(
-      listenable: c,
-      builder: (context, _) => ListView(
-        key: const PageStorageKey('tv-home'),
-        children: [
-          for (final row in [
-            (
-              l.resumeRow,
-              c.resume,
-              AppRoutes.shelfResume,
-              CatalogKeys.shelfResume,
-            ),
-            (
-              l.nextUpRow,
-              c.nextUp,
-              AppRoutes.shelfNextUp,
-              CatalogKeys.shelfNextUp,
-            ),
-            (
-              l.latestMoviesRow,
-              c.latestMovies,
-              AppRoutes.shelfLatestMovies,
-              CatalogKeys.shelfLatestMovies,
-            ),
-            (
-              l.latestSeriesRow,
-              c.latestSeries,
-              AppRoutes.shelfLatestSeries,
-              CatalogKeys.shelfLatestSeries,
-            ),
-          ])
-            if (!row.$2.hidden) ...[
-              TvAction(
-                key: CatalogKeys.shelfMore(row.$4),
-                onPressed: row.$2.items.isEmpty
-                    ? null
-                    : () => context.push(row.$3),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Flexible(
-                      child: Text(
-                        row.$1,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.titleLarge,
-                      ),
-                    ),
-                    if (row.$2.items.isNotEmpty)
-                      Icon(
-                        Icons.chevron_right,
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                  ],
-                ),
-              ),
-              if (row.$2.loading && row.$2.items.isEmpty)
-                const _TvRowSkeleton(),
-              if (row.$2.error != null || row.$2.notice != null)
-                TvFailure(
-                  error: (row.$2.error ?? row.$2.notice)!,
-                  retry: c.reloadHomeRows,
-                ),
-              if (row.$2.items.isNotEmpty)
-                SizedBox(
-                  key: ValueKey('tv-row-${row.$1}'),
-                  height: 272,
-                  child: ListView.builder(
-                    key: PageStorageKey('tv-row-${row.$1}'),
-                    scrollDirection: Axis.horizontal,
-                    itemCount: row.$2.items.length,
-                    itemBuilder: (context, index) {
-                      final item = row.$2.items[index];
-                      return SizedBox(
-                        key: ValueKey(item.id),
-                        width: 170,
-                        child: TvPoster(item: item),
-                      );
-                    },
-                  ),
-                ),
-              const SizedBox(height: 20),
-            ],
-          if ([
-            c.resume,
-            c.nextUp,
-            c.latestMovies,
-            c.latestSeries,
-          ].every((r) => r.hidden))
-            Text(l.mobileEmpty),
-          TvAction(
-            onPressed: () => c.reload(showCachedFirst: false),
-            child: Text(l.mobileRefresh),
-          ),
-        ],
       ),
     );
   }
@@ -390,43 +285,6 @@ class _TvSession extends StatelessWidget {
           onPressed: auth.isBusy ? null : auth.logout,
           child: Text(l.logout),
         ),
-      ],
-    );
-  }
-}
-
-class _TvRowSkeleton extends StatelessWidget {
-  const _TvRowSkeleton();
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      height: 272,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        physics: const NeverScrollableScrollPhysics(),
-        itemCount: 6,
-        separatorBuilder: (context, index) => const SizedBox(width: 12),
-        itemBuilder: (context, index) {
-          return const SizedBox(width: 170, child: _TvPosterBone());
-        },
-      ),
-    );
-  }
-}
-
-class _TvPosterBone extends StatelessWidget {
-  const _TvPosterBone();
-
-  @override
-  Widget build(BuildContext context) {
-    final animate = !MediaQuery.disableAnimationsOf(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Expanded(child: SkeletonBlock(animated: animate)),
-        const SizedBox(height: 8),
-        SkeletonBlock(width: 120, height: 16, animated: animate),
       ],
     );
   }

@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/routes.dart';
+import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/auth/failure_message.dart';
 import 'package:rillight/emby/emby_errors.dart';
 import 'package:rillight/emby/emby_models.dart';
@@ -114,6 +116,12 @@ class TvAction extends StatefulWidget {
   final FutureOr<void> Function()? onPressed;
   final bool autofocus, selected, emphasized;
   final FocusNode? focusNode;
+
+  /// 聚焦放大档位,要求落在 1.05–1.1。
+  static const double focusedScale = 1.06;
+
+  /// 高对比焦点环宽度,要求不低于 4px。
+  static const double focusRingWidth = 4;
   @override
   State<TvAction> createState() => _TvActionState();
 }
@@ -225,30 +233,36 @@ class _TvActionState extends State<TvAction>
           selected: widget.selected,
           child: GestureDetector(
             onTap: widget.onPressed == null ? null : _activate,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 100),
-              margin: const EdgeInsets.all(4),
-              padding: const EdgeInsets.all(12),
-              constraints: const BoxConstraints(minHeight: 48),
-              decoration: BoxDecoration(
-                color: fill,
-                border: Border.all(
-                  color: _focused ? Colors.white : Colors.transparent,
-                  width: 3,
+            child: AnimatedScale(
+              // 焦点放大档位落在 1.05–1.1;动画经 AppMotion 中枢,减少动效时即时。
+              scale: _focused ? TvAction.focusedScale : 1.0,
+              duration: AppMotion.durationOf(context, AppMotion.fast),
+              curve: AppMotion.standard,
+              child: AnimatedContainer(
+                duration: AppMotion.durationOf(context, AppMotion.fast),
+                margin: const EdgeInsets.all(4),
+                padding: const EdgeInsets.all(12),
+                constraints: const BoxConstraints(minHeight: 48),
+                decoration: BoxDecoration(
+                  color: fill,
+                  border: Border.all(
+                    color: _focused ? Colors.white : Colors.transparent,
+                    width: TvAction.focusRingWidth,
+                  ),
+                  borderRadius: BorderRadius.circular(10),
                 ),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Opacity(
-                opacity: widget.onPressed == null ? .4 : 1,
-                child: foreground == null
-                    ? widget.child
-                    : IconTheme(
-                        data: IconThemeData(color: foreground),
-                        child: DefaultTextStyle.merge(
-                          style: TextStyle(color: foreground),
-                          child: widget.child,
+                child: Opacity(
+                  opacity: widget.onPressed == null ? .4 : 1,
+                  child: foreground == null
+                      ? widget.child
+                      : IconTheme(
+                          data: IconThemeData(color: foreground),
+                          child: DefaultTextStyle.merge(
+                            style: TextStyle(color: foreground),
+                            child: widget.child,
+                          ),
                         ),
-                      ),
+                ),
               ),
             ),
           ),
@@ -269,51 +283,60 @@ class TvFrame extends StatelessWidget {
   final Widget child;
   final bool back;
   @override
-  Widget build(BuildContext context) => Theme(
-    data: Theme.of(context).copyWith(
-      dialogTheme: const DialogThemeData(
-        backgroundColor: Color(0xff151a22),
-        surfaceTintColor: Colors.transparent,
+  Widget build(BuildContext context) {
+    final viewSize = MediaQuery.sizeOf(context);
+    // 安全区:边距不低于视口宽/高的 5%(960x540 下恰为 48),大屏随之放大。
+    final horizontal = math.max(48.0, viewSize.width * 0.05);
+    final vertical = math.max(48.0, viewSize.height * 0.05);
+    return Theme(
+      data: Theme.of(context).copyWith(
+        dialogTheme: const DialogThemeData(
+          backgroundColor: Color(0xff151a22),
+          surfaceTintColor: Colors.transparent,
+        ),
+        textTheme: Theme.of(context).textTheme.apply(fontSizeFactor: 1.15),
       ),
-      textTheme: Theme.of(context).textTheme.apply(fontSizeFactor: 1.15),
-    ),
-    child: TvFocusRegion(
-      child: Scaffold(
-        body: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(48),
-            child: FocusTraversalGroup(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Row(
-                    children: [
-                      if (back)
-                        TvAction(
-                          onPressed: () => Navigator.of(context).pop(),
-                          child: const Icon(Icons.arrow_back),
+      child: TvFocusRegion(
+        child: Scaffold(
+          body: SafeArea(
+            child: Padding(
+              padding: EdgeInsets.symmetric(
+                horizontal: horizontal,
+                vertical: vertical,
+              ),
+              child: FocusTraversalGroup(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        if (back)
+                          TvAction(
+                            onPressed: () => Navigator.of(context).pop(),
+                            child: const Icon(Icons.arrow_back),
+                          ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            title,
+                            style: Theme.of(context).textTheme.headlineSmall,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          title,
-                          style: Theme.of(context).textTheme.headlineSmall,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Expanded(child: child),
-                ],
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Expanded(child: child),
+                  ],
+                ),
               ),
             ),
           ),
         ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 class TvFailure extends StatelessWidget {
@@ -340,13 +363,16 @@ class TvPoster extends StatelessWidget {
     required this.item,
     this.autofocus = false,
     this.imageMaxWidth = 280,
+    this.focusNode,
   });
   final EmbyItem item;
   final bool autofocus;
   final int imageMaxWidth;
+  final FocusNode? focusNode;
   @override
   Widget build(BuildContext context) => TvAction(
     autofocus: autofocus,
+    focusNode: focusNode,
     onPressed: () => context.push(AppRoutes.item(item.id)),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
