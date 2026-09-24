@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/app/mobile_motion.dart';
 import 'package:rillight/app/phone_bottom_nav.dart';
 import 'package:rillight/app/phone_libraries_tab.dart';
 import 'package:rillight/app/phone_nav_style.dart';
@@ -179,13 +180,16 @@ class _MobileShellState extends State<MobileShell> with WidgetsBindingObserver {
                 Expanded(
                   child: IgnorePointer(
                     ignoring: _recovering || _recoveryFailed,
-                    child: IndexedStack(
+                    child: PhoneTabTransition(
                       index: _index,
-                      children: const [
-                        PhoneHome(),
-                        PhoneLibrariesTab(),
-                        MobileSearchPage(),
-                      ],
+                      child: IndexedStack(
+                        index: _index,
+                        children: const [
+                          PhoneHome(),
+                          PhoneLibrariesTab(),
+                          MobileSearchPage(),
+                        ],
+                      ),
                     ),
                   ),
                 ),

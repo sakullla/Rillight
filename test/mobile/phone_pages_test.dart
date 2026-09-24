@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:animations/animations.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -543,6 +544,124 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
+    test('route and tab transition tokens stay in the 200-300ms range', () {
+      const lower = Duration(milliseconds: 200);
+      const upper = Duration(milliseconds: 300);
+      expect(
+        PhoneMotion.pageTransition >= lower &&
+            PhoneMotion.pageTransition <= upper,
+        isTrue,
+      );
+      expect(
+        PhoneMotion.tabTransition >= lower &&
+            PhoneMotion.tabTransition <= upper,
+        isTrue,
+      );
+    });
+
+    testWidgets(
+      'detail, shelf and mine pushes run material motion page transitions',
+      (tester) async {
+        final (router, _) = await _openPhone(
+          tester,
+          prepare: _addShelfMovies,
+          reduceMotion: false,
+        );
+
+        // 详情:container transform 语义(fade-scale),时长走 AppMotion 中枢。
+        await tester.ensureVisible(find.byKey(PhoneHero.openKey));
+        await tester.tap(find.byKey(PhoneHero.openKey));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 80));
+        expect(find.byType(FadeScaleTransition), findsOneWidget);
+        expect(
+          ModalRoute.of(
+            tester.element(find.byType(MobileDetailPage)),
+          )!.transitionDuration,
+          PhoneMotion.pageTransition,
+        );
+        await _homeSettle(tester);
+        expect(find.byKey(PhoneItemBanner.bannerKey), findsOneWidget);
+        router.pop();
+        await _homeSettle(tester);
+
+        // 我的:shared axis Y。
+        await tester.tap(find.byKey(const Key('mobile-shell-mine-entry')));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 80));
+        expect(
+          tester
+              .widget<SharedAxisTransition>(
+                find.byType(SharedAxisTransition).last,
+              )
+              .transitionType,
+          SharedAxisTransitionType.vertical,
+        );
+        expect(
+          ModalRoute.of(
+            tester.element(find.byType(PhoneMinePage)),
+          )!.transitionDuration,
+          PhoneMotion.pageTransition,
+        );
+        await _homeSettle(tester);
+        router.pop();
+        await _homeSettle(tester);
+
+        // 货架:shared axis Y。
+        final more = find.byKey(
+          CatalogKeys.shelfMore(CatalogKeys.shelfLatestMovies),
+        );
+        await _showOnHome(tester, more);
+        await tester.tap(more);
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 80));
+        expect(
+          tester
+              .widget<SharedAxisTransition>(
+                find.byType(SharedAxisTransition).last,
+              )
+              .transitionType,
+          SharedAxisTransitionType.vertical,
+        );
+        expect(find.byType(PhoneShelfPage), findsOneWidget);
+        await _homeSettle(tester);
+        expect(find.byType(PhoneShelfPage), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      },
+      tags: ['integration'],
+    );
+
+    testWidgets('reduced motion finishes route transitions immediately', (
+      tester,
+    ) async {
+      final (router, _) = await _openPhone(tester);
+      await tester.ensureVisible(find.byKey(PhoneHero.openKey));
+      await tester.tap(find.byKey(PhoneHero.openKey));
+      await tester.pump();
+      expect(
+        ModalRoute.of(
+          tester.element(find.byType(MobileDetailPage)),
+        )!.transitionDuration,
+        Duration.zero,
+      );
+      await _homeSettle(tester);
+      expect(find.byKey(PhoneItemBanner.bannerKey), findsOneWidget);
+
+      router.pop();
+      await _homeSettle(tester);
+      await tester.tap(find.byKey(const Key('mobile-shell-mine-entry')));
+      await tester.pump();
+      expect(
+        ModalRoute.of(
+          tester.element(find.byType(PhoneMinePage)),
+        )!.transitionDuration,
+        Duration.zero,
+      );
+      await _homeSettle(tester);
+      expect(find.byType(PhoneMinePage), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    }, tags: ['integration']);
+
     testWidgets(
       'resume card carries progress and remove, and removal survives refresh',
       (tester) async {
@@ -764,6 +883,15 @@ void main() {
       await _homeSettle(tester);
       expect(find.byType(ShelfGridPage), findsOneWidget);
       expect(find.byType(PhoneShelfPage), findsNothing);
+      // 桌面路由不受手机 Material Motion 包装影响,仍是默认 Material 页面。
+      final desktopShelfRoute = ModalRoute.of(
+        tester.element(find.byType(ShelfGridPage)),
+      )!;
+      expect(desktopShelfRoute.settings, isA<MaterialPage<void>>());
+      expect(
+        desktopShelfRoute.settings,
+        isNot(isA<CustomTransitionPage<void>>()),
+      );
 
       final phoneRouter = createAppRouter(
         auth: auth,
@@ -1976,11 +2104,14 @@ void _addShelfMovies(FakeEmbyServer server) {
 Future<(GoRouter, FakeEmbyServer)> _openPhone(
   WidgetTester tester, {
   void Function(FakeEmbyServer server)? prepare,
+  bool reduceMotion = true,
 }) async {
   _usePhoneSurface(tester);
-  tester.platformDispatcher.accessibilityFeaturesTestValue =
-      const FakeAccessibilityFeatures(disableAnimations: true);
-  addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
+  if (reduceMotion) {
+    tester.platformDispatcher.accessibilityFeaturesTestValue =
+        const FakeAccessibilityFeatures(disableAnimations: true);
+    addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
+  }
   final server = FakeEmbyServer();
   prepare?.call(server);
   final auth = AuthController.memory(

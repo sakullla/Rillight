@@ -1,6 +1,7 @@
 import 'package:flutter/widgets.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/app_shell.dart';
+import 'package:rillight/app/mobile_motion.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/auth/android_connect_page.dart';
@@ -55,8 +56,12 @@ GoRouter createAppRouter({
         GoRoute(
           path: AppRoutes.connect,
           name: AppRoutes.connect,
-          builder: (context, state) => AndroidConnectPage(
-            addingAnother: state.uri.queryParameters['add'] == '1',
+          pageBuilder: (context, state) => PhoneMotion.fadeThroughPage(
+            context: context,
+            state: state,
+            child: AndroidConnectPage(
+              addingAnother: state.uri.queryParameters['add'] == '1',
+            ),
           ),
         ),
         ShellRoute(
@@ -72,45 +77,74 @@ GoRouter createAppRouter({
             // route otherwise remains current for Android predictive back.
             GoRoute(
               path: '/play/:itemId',
-              builder: (context, state) {
+              pageBuilder: (context, state) {
                 final request = state.extra as PlayerOpenRequest?;
-                return MobilePlayerPage(
-                  itemId: state.pathParameters['itemId']!,
-                  mediaSourceId: request?.mediaSourceId,
-                  autoResume: request?.autoResume ?? true,
-                  audioStreamIndex: request?.audioStreamIndex,
-                  subtitleStreamIndex: request?.subtitleStreamIndex,
+                return PhoneMotion.fadeThroughPage(
+                  context: context,
+                  state: state,
+                  child: MobilePlayerPage(
+                    itemId: state.pathParameters['itemId']!,
+                    mediaSourceId: request?.mediaSourceId,
+                    autoResume: request?.autoResume ?? true,
+                    audioStreamIndex: request?.audioStreamIndex,
+                    subtitleStreamIndex: request?.subtitleStreamIndex,
+                  ),
                 );
               },
             ),
             GoRoute(
               path: AppRoutes.home,
-              builder: (context, state) => const MobileShell(),
+              pageBuilder: (context, state) => PhoneMotion.fadeThroughPage(
+                context: context,
+                state: state,
+                child: const MobileShell(),
+              ),
             ),
             GoRoute(
               path: AppRoutes.mine,
-              builder: (context, state) => const PhoneMinePage(),
+              pageBuilder: (context, state) => PhoneMotion.sharedAxisPage(
+                context: context,
+                state: state,
+                child: const PhoneMinePage(),
+              ),
             ),
             GoRoute(
               path: AppRoutes.homeEdit,
-              builder: (context, state) => const PhoneHomeEditPage(),
+              pageBuilder: (context, state) => PhoneMotion.sharedAxisPage(
+                context: context,
+                state: state,
+                child: const PhoneHomeEditPage(),
+              ),
             ),
             GoRoute(
               path: '/library/:viewId',
-              builder: (context, state) =>
-                  MobileLibraryPage(viewId: state.pathParameters['viewId']!),
+              pageBuilder: (context, state) => PhoneMotion.sharedAxisPage(
+                context: context,
+                state: state,
+                child: MobileLibraryPage(
+                  viewId: state.pathParameters['viewId']!,
+                ),
+              ),
             ),
             GoRoute(
               path: '/item/:itemId',
-              builder: (context, state) => MobileDetailPage(
-                itemId: state.pathParameters['itemId']!,
-                initialSeasonId: state.uri.queryParameters['season'],
-                initialEpisodeId: state.uri.queryParameters['episode'],
+              pageBuilder: (context, state) => PhoneMotion.detailPage(
+                context: context,
+                state: state,
+                child: MobileDetailPage(
+                  itemId: state.pathParameters['itemId']!,
+                  initialSeasonId: state.uri.queryParameters['season'],
+                  initialEpisodeId: state.uri.queryParameters['episode'],
+                ),
               ),
             ),
             GoRoute(
               path: '/shelf/:source',
-              builder: (context, state) => PhoneShelfPage.fromState(state),
+              pageBuilder: (context, state) => PhoneMotion.sharedAxisPage(
+                context: context,
+                state: state,
+                child: PhoneShelfPage.fromState(state),
+              ),
             ),
           ],
         ),

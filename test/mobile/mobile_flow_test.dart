@@ -5,6 +5,7 @@ import 'package:rillight/app/app.dart';
 import 'package:rillight/app/app_shell.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_chrome.dart';
+import 'package:rillight/app/mobile_motion.dart';
 import 'package:rillight/app/mobile_shell.dart';
 import 'package:rillight/app/phone_libraries_tab.dart';
 import 'package:rillight/app/phone_mine_page.dart';
@@ -975,6 +976,71 @@ void main() {
       expect(
         tester.getRect(find.byKey(const Key('mobile-search-field'))).bottom,
         lessThanOrEqualTo(560),
+      );
+      expect(tester.takeException(), isNull);
+    },
+    tags: ['integration'],
+  );
+
+  testWidgets(
+    'bottom nav switches with a shared axis X slide and keeps tab state',
+    (tester) async {
+      final server = FakeEmbyServer();
+      await start(tester, server);
+      await login(tester, server);
+      SlideTransition slide() => tester.widget<SlideTransition>(
+        find.descendant(
+          of: find.byType(PhoneTabTransition),
+          matching: find.byType(SlideTransition),
+        ),
+      );
+
+      // 首次入场不播放,位置归零。
+      expect(slide().position.value, Offset.zero);
+
+      // 前进方向:新页从右侧滑入。
+      await tester.tap(find.text('搜索').last);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 80));
+      expect(slide().position.value.dx, greaterThan(0));
+      await tester.pumpAndSettle();
+      expect(slide().position.value, Offset.zero);
+
+      // 反向切换:从左侧滑入。
+      await tester.tap(find.text('首页').last);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 80));
+      expect(slide().position.value.dx, lessThan(0));
+      await tester.pumpAndSettle();
+      expect(slide().position.value, Offset.zero);
+
+      // IndexedStack 保留在转场内,tab 草稿不丢。
+      await tester.tap(find.text('搜索').last);
+      await tester.pumpAndSettle();
+      final field = find.byKey(const Key('mobile-search-field'));
+      await tester.enterText(field, 'Inception');
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('片库').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('搜索').last);
+      await tester.pumpAndSettle();
+      expect(tester.widget<TextField>(field).controller!.text, 'Inception');
+
+      // 减少动效:切换即时就位。
+      tester.platformDispatcher.accessibilityFeaturesTestValue =
+          const FakeAccessibilityFeatures(disableAnimations: true);
+      addTearDown(
+        tester.platformDispatcher.clearAccessibilityFeaturesTestValue,
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('首页').last);
+      await tester.pump();
+      expect(slide().position.value, Offset.zero);
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const PageStorageKey('mobile-home-scroll')),
+        findsOneWidget,
       );
       expect(tester.takeException(), isNull);
     },
