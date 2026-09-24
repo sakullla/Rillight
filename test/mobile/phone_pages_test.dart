@@ -275,89 +275,80 @@ void main() {
       expect(theme.navigationRailTheme, isNotNull);
     });
 
-    testWidgets(
-      'banner prefers resume, a drag stops the rotation, and stops at five',
-      (tester) async {
-        PhoneHero.autoAdvanceEnabled = true;
-        addTearDown(() => PhoneHero.autoAdvanceEnabled = false);
-        _usePhoneSurface(tester);
-        final catalog = _catalog(
-          resume: [
-            _item(
-              'episode-a',
-              '试播集',
-              'Episode',
-              percent: 40,
-              seriesName: '示例剧',
-            ),
-            _item('movie-b', '乙电影', 'Movie', percent: 10),
-          ],
-          movies: [
-            _item('movie-b', '乙电影', 'Movie', percent: 10),
-            _item('movie-c', '示例电影', 'Movie'),
-            _item('movie-d', '丁电影', 'Movie'),
-            _item('movie-e', '戊电影', 'Movie'),
-            _item('movie-f', '落选电影', 'Movie'),
-          ],
-          series: [_item('series-h', '示例剧全集', 'Series')],
-        );
-        addTearDown(catalog.auth.dispose);
-        addTearDown(catalog.dispose);
-        final router = _router(catalog);
-        addTearDown(router.dispose);
-        await tester.pumpWidget(_scriptedApp(catalog, router: router));
-        await tester.pump();
+    testWidgets('banner prefers continue watching and switches only by swipe', (
+      tester,
+    ) async {
+      _usePhoneSurface(tester);
+      final catalog = _catalog(
+        resume: [
+          _item('episode-a', '试播集', 'Episode', percent: 40, seriesName: '示例剧'),
+          _item('movie-b', '乙电影', 'Movie', percent: 10),
+        ],
+        movies: [
+          _item('movie-b', '乙电影', 'Movie', percent: 10),
+          _item('movie-c', '示例电影', 'Movie'),
+          _item('movie-d', '丁电影', 'Movie'),
+          _item('movie-e', '戊电影', 'Movie'),
+          _item('movie-f', '落选电影', 'Movie'),
+        ],
+        series: [_item('series-h', '示例剧全集', 'Series')],
+      );
+      addTearDown(catalog.auth.dispose);
+      addTearDown(catalog.dispose);
+      final router = _router(catalog);
+      addTearDown(router.dispose);
+      await tester.pumpWidget(_scriptedApp(catalog, router: router));
+      await tester.pump();
 
-        expect(find.byType(HomeHero), findsNothing);
-        expect(find.byKey(PhoneHero.itemKey('episode-a')), findsNothing);
-        expect(find.byKey(PhoneHero.itemKey('movie-b')), findsOneWidget);
-        expect(find.byKey(PhoneHero.itemKey('series-h')), findsNothing);
-        expect(find.byKey(CatalogKeys.heroDot(4)), findsOneWidget);
-        expect(find.byKey(CatalogKeys.heroDot(5)), findsNothing);
-        expect(find.text('继续播放'), findsNothing);
-        expect(find.text('已看 40%'), findsWidgets);
-        expect(find.byTooltip('暂停轮播'), findsNothing);
+      expect(find.byType(HomeHero), findsNothing);
+      // 继续观看优先、按 id 去重、上限 5:movie-f 与 series-h 落选。
+      expect(find.byKey(PhoneHero.itemKey('episode-a')), findsOneWidget);
+      expect(find.byKey(PhoneHero.itemKey('movie-f')), findsNothing);
+      expect(find.byKey(PhoneHero.itemKey('series-h')), findsNothing);
+      expect(find.byKey(CatalogKeys.heroDot(4)), findsOneWidget);
+      expect(find.byKey(CatalogKeys.heroDot(5)), findsNothing);
+      expect(find.text('继续播放'), findsNothing);
+      expect(find.text('已看 40%'), findsWidgets);
+      expect(find.byTooltip('暂停轮播'), findsNothing);
 
-        await tester.pump(const Duration(seconds: 5));
-        expect(find.byKey(PhoneHero.itemKey('movie-b')), findsOneWidget);
-        await tester.pump(const Duration(seconds: 1));
-        await tester.pump(const Duration(milliseconds: 520));
-        expect(find.byKey(PhoneHero.itemKey('movie-c')), findsOneWidget);
-
-        await tester.drag(
-          find.byKey(PhoneHero.bannerKey),
-          const Offset(-40, 0),
-        );
-        await tester.pump();
-        await tester.pump(const Duration(milliseconds: 400));
-        const featured = [
-          'movie-b',
-          'movie-c',
-          'movie-d',
-          'movie-e',
-          'movie-f',
-        ];
-        String? alignedHero() {
-          final banner = tester.getRect(find.byKey(PhoneHero.bannerKey));
-          for (final id in featured) {
-            final finder = find.byKey(PhoneHero.itemKey(id));
-            if (finder.evaluate().isEmpty) {
-              continue;
-            }
-            if ((tester.getRect(finder).left - banner.left).abs() < 2) {
-              return id;
-            }
+      const featured = [
+        'episode-a',
+        'movie-b',
+        'movie-c',
+        'movie-d',
+        'movie-e',
+      ];
+      String? alignedHero() {
+        final banner = tester.getRect(find.byKey(PhoneHero.bannerKey));
+        for (final id in featured) {
+          final finder = find.byKey(PhoneHero.itemKey(id));
+          if (finder.evaluate().isEmpty) {
+            continue;
           }
-          return null;
+          if ((tester.getRect(finder).left - banner.left).abs() < 2) {
+            return id;
+          }
         }
+        return null;
+      }
 
-        final shown = alignedHero();
-        expect(shown, isNotNull);
-        await tester.pump(const Duration(seconds: 7));
-        expect(alignedHero(), shown);
-        expect(tester.takeException(), isNull);
-      },
-    );
+      // 无自动轮换:停留再久也停在当前条。
+      expect(alignedHero(), 'episode-a');
+      await tester.pump(const Duration(seconds: 7));
+      expect(alignedHero(), 'episode-a');
+
+      // 手动滑动切换到下一条。
+      await tester.drag(find.byKey(PhoneHero.bannerKey), const Offset(-260, 0));
+      await tester.pump();
+      // PageView 弹簧归位动画跑完再判定。
+      await tester.pump(const Duration(seconds: 1));
+      expect(alignedHero(), 'movie-b');
+
+      // 滑动后也不会恢复自动轮换。
+      await tester.pump(const Duration(seconds: 7));
+      expect(alignedHero(), 'movie-b');
+      expect(tester.takeException(), isNull);
+    });
 
     testWidgets(
       'home row editing opens from the home tab, not the account page',
@@ -521,14 +512,11 @@ void main() {
     testWidgets('reduced motion keeps the banner and the primary action', (
       tester,
     ) async {
-      PhoneHero.autoAdvanceEnabled = true;
-      addTearDown(() => PhoneHero.autoAdvanceEnabled = false);
       await _pumpMotionHome(tester, reduceMotion: true);
       await _homeUntil(
         tester,
         find.byKey(PhoneHero.itemKey('movie-inception')),
       );
-      expect(find.byKey(PhoneHero.pauseKey), findsNothing);
       expect(
         tester.widget<GestureDetector>(find.byKey(PhoneHero.openKey)).onTap,
         isNotNull,

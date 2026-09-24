@@ -43,11 +43,6 @@ void main() {
   setUp(() {
     server = FakeEmbyServer();
     adapter = FakeEmbyAdapter([server]);
-    HomeHero.autoAdvanceEnabled = false;
-  });
-
-  tearDown(() {
-    HomeHero.autoAdvanceEnabled = true;
   });
 
   Future<AuthController> connect(WidgetTester tester) async {
@@ -153,7 +148,7 @@ void main() {
         find.byKey(CatalogKeys.heroDot(HomeHero.maxFeatured)),
         findsNothing,
       );
-      const featuredOrder = ['飞屋环游记', '封面失败片', 'Inception', '未分类型电影', '混合库电影'];
+      const featuredOrder = ['Inception', '老友记', '飞屋环游记', '封面失败片', '未分类型电影'];
       for (final title in featuredOrder) {
         if (title != featuredOrder.first) {
           await tester.tap(find.byKey(CatalogKeys.heroNext));

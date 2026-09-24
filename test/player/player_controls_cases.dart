@@ -6,7 +6,6 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
-import 'package:rillight/home/home_hero.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/server_list_store.dart';
@@ -42,16 +41,11 @@ void main() {
   late MemoryPlaybackSessionSnapshotStore snapshots;
 
   setUp(() {
-    HomeHero.autoAdvanceEnabled = false;
     server = FakeEmbyServer();
     adapter = FakeEmbyAdapter([server]);
     backend = FakeVideoBackend();
     window = PlayerWindow();
     snapshots = MemoryPlaybackSessionSnapshotStore();
-  });
-
-  tearDown(() {
-    HomeHero.autoAdvanceEnabled = true;
   });
 
   PlayerBindings bindings({

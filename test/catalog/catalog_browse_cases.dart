@@ -9,7 +9,6 @@ import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/home/catalog_keys.dart';
-import 'package:rillight/home/home_hero.dart';
 import 'package:rillight/library/episode_detail_sections.dart';
 import 'package:rillight/library/item_detail_page.dart';
 import 'package:rillight/app/theme/tokens.dart';
@@ -36,11 +35,6 @@ void main() {
   setUp(() {
     server = FakeEmbyServer();
     adapter = FakeEmbyAdapter([server]);
-    HomeHero.autoAdvanceEnabled = false;
-  });
-
-  tearDown(() {
-    HomeHero.autoAdvanceEnabled = true;
   });
 
   Future<AuthController> pumpLoggedIn(WidgetTester tester) async {

@@ -8,7 +8,6 @@ import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
-import 'package:rillight/home/home_hero.dart';
 import 'package:rillight/library/poster_card.dart';
 import 'package:rillight/library/shelf_grid_page.dart';
 import 'package:rillight/media_image/media_image.dart';
@@ -40,11 +39,9 @@ void main() {
         ),
       );
     }
-    HomeHero.autoAdvanceEnabled = false;
   });
 
   tearDown(() {
-    HomeHero.autoAdvanceEnabled = true;
     debugOnRebuildDirtyWidget = null;
   });
 
