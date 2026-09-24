@@ -3,8 +3,10 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme/tokens.dart';
+import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/library/provider_marks.dart';
@@ -149,6 +151,45 @@ class _ExternalLinkButton extends StatelessWidget {
     final mark = ProviderMark.match(link.name, link.url);
     final scheme = Theme.of(context).colorScheme;
     final name = mark?.shortName ?? label;
+    // 低调化:文字/短标/缺省图标统一 onSurfaceVariant 单色,
+    // 品牌色只保留在 16px 图形标志的 tint,不再给文字铺色。
+    final content = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (mark?.svg != null) ...[
+          ProviderMarkIcon(mark: mark!, size: 16),
+          const SizedBox(width: AppSpacing.xs),
+        ] else if (mark != null) ...[
+          ProviderMarkIcon(
+            mark: mark,
+            size: 16,
+            color: scheme.onSurfaceVariant,
+          ),
+          const SizedBox(width: AppSpacing.xs),
+        ] else ...[
+          Icon(Icons.link, size: 16, color: scheme.onSurfaceVariant),
+          const SizedBox(width: AppSpacing.xs),
+        ],
+        Text(
+          name,
+          style: Theme.of(context).textTheme.labelLarge?.copyWith(
+            color: scheme.onSurfaceVariant,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    );
+    if (PresentationScope.of(context).isTv) {
+      // TV:走 TvAction 纳入 D-pad 焦点序列,焦点视觉由 tv_widgets 统一。
+      return Tooltip(
+        message: label,
+        child: TvAction(
+          key: ValueKey('external-link-${link.url}'),
+          onPressed: () => _open(context),
+          child: content,
+        ),
+      );
+    }
     return Tooltip(
       message: label,
       child: Material(
@@ -158,30 +199,15 @@ class _ExternalLinkButton extends StatelessWidget {
         clipBehavior: Clip.antiAlias,
         child: InkWell(
           onTap: () => _open(context),
+          // 悬停/焦点仅轻微提亮,不出现高饱和色块。
+          hoverColor: scheme.onSurface.withValues(alpha: 0.06),
+          focusColor: scheme.onSurface.withValues(alpha: 0.08),
           child: Padding(
             padding: const EdgeInsets.symmetric(
               horizontal: AppSpacing.sm,
               vertical: AppSpacing.xs,
             ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (mark?.svg != null) ...[
-                  ProviderMarkIcon(mark: mark!, size: 16),
-                  const SizedBox(width: AppSpacing.xs),
-                ] else if (mark == null) ...[
-                  Icon(Icons.link, size: 16, color: scheme.onSurfaceVariant),
-                  const SizedBox(width: AppSpacing.xs),
-                ],
-                Text(
-                  name,
-                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                    color: mark == null ? scheme.onSurface : mark.color,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ),
+            child: content,
           ),
         ),
       ),
@@ -191,6 +217,7 @@ class _ExternalLinkButton extends StatelessWidget {
   Future<void> _open(BuildContext context) async {
     final uri = resolveExternalLink(link.url, title: title);
     if (uri == null) {
+      _showFailure(context);
       return;
     }
     final platform = Theme.of(context).platform;
@@ -207,7 +234,30 @@ class _ExternalLinkButton extends StatelessWidget {
       );
       return;
     }
-    await launchUrl(uri, mode: LaunchMode.externalApplication);
+    try {
+      final launched = await launchUrl(
+        uri,
+        mode: LaunchMode.externalApplication,
+      );
+      if (!launched && context.mounted) {
+        _showFailure(context);
+      }
+    } catch (_) {
+      if (context.mounted) {
+        _showFailure(context);
+      }
+    }
+  }
+
+  void _showFailure(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(
+        SnackBar(
+          content: Text('${l10n.externalLinks} · ${l10n.errorLoadFailed}'),
+        ),
+      );
   }
 }
 

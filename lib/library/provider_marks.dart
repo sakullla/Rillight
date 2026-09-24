@@ -84,10 +84,19 @@ enum ProviderMark {
 }
 
 class ProviderMarkIcon extends StatelessWidget {
-  const ProviderMarkIcon({super.key, required this.mark, this.size = 22});
+  const ProviderMarkIcon({
+    super.key,
+    required this.mark,
+    this.size = 22,
+    this.color,
+  });
 
   final ProviderMark mark;
   final double size;
+
+  /// 覆盖品牌色的单色呈现;低调场景(如详情页外链区)传主题色,
+  /// 不传时保留品牌色 tint/文字。
+  final Color? color;
 
   @override
   Widget build(BuildContext context) {
@@ -98,14 +107,14 @@ class ProviderMarkIcon extends StatelessWidget {
         height: size,
         fit: BoxFit.contain,
         colorFilter: mark.tint
-            ? ColorFilter.mode(mark.color, BlendMode.srcIn)
+            ? ColorFilter.mode(color ?? mark.color, BlendMode.srcIn)
             : null,
       );
     }
     return Text(
       mark.label ?? '',
       style: TextStyle(
-        color: mark.color,
+        color: color ?? mark.color,
         fontSize: 11,
         fontWeight: FontWeight.w700,
         height: 1,
