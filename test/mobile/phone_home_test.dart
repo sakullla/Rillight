@@ -721,6 +721,47 @@ void main() {
     );
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('a visible banner stays when the four rows are hidden', (
+    tester,
+  ) async {
+    _usePhoneSurface(tester);
+    final catalog = _catalog(
+      resume: [_item('movie-b', '乙电影', 'Movie', percent: 10)],
+      movies: [_item('movie-c', '示例电影', 'Movie')],
+      series: [_item('series-h', '示例剧全集', 'Series')],
+      nextUp: [_item('episode-n', '下一集卡片', 'Episode')],
+    );
+    addTearDown(catalog.auth.dispose);
+    addTearDown(catalog.dispose);
+    final sections = PhoneHomeSectionController(
+      store: MemoryPhoneHomeSectionStore(),
+    );
+    addTearDown(sections.dispose);
+    await sections.load('');
+    for (final id in [
+      PhoneHomeSectionId.resume,
+      PhoneHomeSectionId.nextUp,
+      PhoneHomeSectionId.latestMovies,
+      PhoneHomeSectionId.latestSeries,
+    ]) {
+      await sections.setVisible(id, false);
+    }
+
+    await tester.pumpWidget(
+      _sectionedHome(auth: catalog.auth, catalog: catalog, sections: sections),
+    );
+    await tester.pump();
+
+    expect(find.byType(PhoneHero), findsOneWidget);
+    expect(find.byKey(PhoneHero.itemKey('movie-b')), findsOneWidget);
+    expect(find.text('继续观看'), findsNothing);
+    expect(find.text('即将播放'), findsNothing);
+    expect(find.text('最近更新的电影'), findsNothing);
+    expect(find.text('最近更新的剧集'), findsNothing);
+    expect(find.text('暂无内容'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
 }
 
 double _heroPageLeft(WidgetTester tester, String id) {

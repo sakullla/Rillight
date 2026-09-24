@@ -104,6 +104,9 @@ class _PhoneHomeState extends State<PhoneHome> {
         final states = [for (final section in sections) section.state];
         final hasItems = states.any((state) => state.items.isNotEmpty);
         final loading = states.any((state) => state.loading);
+        final hasBanner =
+            visible.contains(PhoneHomeSectionId.banner) &&
+            PhoneHero.featuredItemsOf(catalog).isNotEmpty;
         final wantsLibraries =
             catalog.libraries.isNotEmpty &&
             visible.any(
@@ -111,6 +114,7 @@ class _PhoneHomeState extends State<PhoneHome> {
                   id == PhoneHomeSectionId.libraries ||
                   PhoneHomeSectionId.libraryIdOf(id) != null,
             );
+        final pageHasContent = hasItems || hasBanner || wantsLibraries;
         EmbyException? firstError;
         for (final state in states) {
           if (state.error != null) {
@@ -118,22 +122,19 @@ class _PhoneHomeState extends State<PhoneHome> {
             break;
           }
         }
-        // 没有海报时只留一种画面：占位、失败或空。已有海报则保留各行。
-        // 片库入口或「最近添加」仍要显示时，不用整页空状态换掉它们。
+        // 四行、横幅、片库入口和最近添加都没有可展示内容时才用整页占位、失败或空。
+        // 横幅候选来自被隐藏的行时，仍要画出横幅。
         final Widget body;
-        if (!hasItems && !wantsLibraries && firstError == null && loading) {
+        if (!pageHasContent && firstError == null && loading) {
           body = const MobileLoadingPlaceholder.home();
-        } else if (!hasItems &&
-            !wantsLibraries &&
-            firstError != null &&
-            !loading) {
+        } else if (!pageHasContent && firstError != null && !loading) {
           body = MobileFailureState(
             message: catalogFailureMessage(l10n, firstError),
             onRetry: () {
               catalog.reloadHomeRows();
             },
           );
-        } else if (!hasItems && !wantsLibraries && !loading) {
+        } else if (!pageHasContent && !loading) {
           body = MobileEmptyState(
             message: l10n.mobileEmpty,
             actionLabel: l10n.mobileRefresh,
