@@ -650,6 +650,40 @@ void main() {
   );
 
   test(
+    'consecutive progress report failures escalate to a persistent dismissible banner',
+    () async {
+      final controller = await startStandaloneController();
+      addTearDown(controller.dispose);
+      server.progressStatus = 500;
+      addTearDown(() => server.progressStatus = null);
+
+      // 第一次失败:仍是短暂横幅。
+      await controller.seekTo(const Duration(seconds: 5));
+      expect(controller.progressSyncFailed, isTrue);
+      expect(controller.progressSyncPersistent, isFalse);
+
+      // 第二次连续失败:升级为持续横幅。
+      await controller.seekTo(const Duration(seconds: 8));
+      expect(controller.progressSyncFailed, isTrue);
+      expect(controller.progressSyncPersistent, isTrue);
+
+      // 持续态可手动关闭,但失败计数保留:再失败仍按持续态显示。
+      controller.dismissProgressSyncBanner();
+      expect(controller.progressSyncFailed, isFalse);
+      expect(controller.progressSyncPersistent, isTrue);
+      await controller.seekTo(const Duration(seconds: 12));
+      expect(controller.progressSyncFailed, isTrue);
+      expect(controller.progressSyncPersistent, isTrue);
+
+      // 任一上报成功:横幅与持续态一并复位。
+      server.progressStatus = null;
+      await controller.seekTo(const Duration(seconds: 20));
+      expect(controller.progressSyncFailed, isFalse);
+      expect(controller.progressSyncPersistent, isFalse);
+    },
+  );
+
+  test(
     'close waits for an in-flight Stopped started by setMaxBitrate',
     () async {
       var closeCount = 0;
