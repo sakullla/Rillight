@@ -24,8 +24,8 @@ const _targetPrefix = 'Rillight/Emby/';
 String _target(String key) => '$_targetPrefix$key';
 
 Future<void> _write(String key, String value) async {
-  final target = _target(key).toNativeUtf16();
-  final user = 'Rillight'.toNativeUtf16();
+  final target = _target(key).toPwstr(allocator: calloc);
+  final user = 'Rillight'.toPwstr(allocator: calloc);
   final bytes = Uint8List.fromList(utf8.encode(value));
   final blob = calloc<Uint8>(bytes.length);
   blob.asTypedList(bytes.length).setAll(0, bytes);
@@ -38,8 +38,9 @@ Future<void> _write(String key, String value) async {
     ..CredentialBlob = blob
     ..CredentialBlobSize = bytes.length;
   try {
-    if (CredWrite(cred, 0) == FALSE) {
-      throw WindowsException(HRESULT_FROM_WIN32(GetLastError()));
+    final result = CredWrite(cred, 0);
+    if (!result.value) {
+      throw WindowsException(result.error.toHRESULT());
     }
   } finally {
     calloc.free(target);
@@ -50,15 +51,16 @@ Future<void> _write(String key, String value) async {
 }
 
 Future<String?> _read(String key) async {
-  final target = _target(key).toNativeUtf16();
+  final target = _target(key).toPcwstr(allocator: calloc);
   final cred = calloc<Pointer<CREDENTIAL>>();
   try {
-    if (CredRead(target, CRED_TYPE_GENERIC, 0, cred) == FALSE) {
-      final error = GetLastError();
+    final result = CredRead(target, CRED_TYPE_GENERIC, cred);
+    if (!result.value) {
+      final error = result.error;
       if (error == ERROR_NOT_FOUND || error == 0) {
         return null;
       }
-      throw WindowsException(HRESULT_FROM_WIN32(error));
+      throw WindowsException(error.toHRESULT());
     }
     final ref = cred.value.ref;
     final blob = ref.CredentialBlob.asTypedList(ref.CredentialBlobSize);
@@ -73,13 +75,11 @@ Future<String?> _read(String key) async {
 }
 
 Future<void> _delete(String key) async {
-  final target = _target(key).toNativeUtf16();
+  final target = _target(key).toPcwstr(allocator: calloc);
   try {
-    if (CredDelete(target, CRED_TYPE_GENERIC, 0) == FALSE) {
-      final error = GetLastError();
-      if (error != ERROR_NOT_FOUND) {
-        throw WindowsException(HRESULT_FROM_WIN32(error));
-      }
+    final result = CredDelete(target, CRED_TYPE_GENERIC);
+    if (!result.value && result.error != ERROR_NOT_FOUND) {
+      throw WindowsException(result.error.toHRESULT());
     }
   } finally {
     calloc.free(target);

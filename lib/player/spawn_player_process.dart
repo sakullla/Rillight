@@ -17,37 +17,39 @@ class _WindowsPlayerProcess implements WindowsPlayerProcess {
 
   @override
   final int pid;
-  int _handle;
+  HANDLE _handle;
 
   @override
   bool get isAlive {
-    if (_handle == 0) return false;
+    if (_handle == nullptr) return false;
+    final wait = WaitForSingleObject(_handle, 0);
     // A signalled process has exited, including one with exit code 259.
-    return switch (WaitForSingleObject(_handle, 0)) {
+    return switch (wait.value) {
       WAIT_OBJECT_0 => false,
       WAIT_TIMEOUT => true,
-      _ => throw WindowsException(HRESULT_FROM_WIN32(GetLastError())),
+      _ => throw WindowsException(wait.error.toHRESULT()),
     };
   }
 
   @override
   void terminate() {
     if (!isAlive) return;
-    if (TerminateProcess(_handle, 1) == FALSE) {
-      final error = GetLastError();
-      // The child may have exited between the poll and TerminateProcess.
-      if (isAlive) throw WindowsException(HRESULT_FROM_WIN32(error));
+    final result = TerminateProcess(_handle, 1);
+    // The child may have exited between the poll and TerminateProcess.
+    if (!result.value && isAlive) {
+      throw WindowsException(result.error.toHRESULT());
     }
   }
 
   @override
   void close() {
-    if (_handle == 0) return;
+    if (_handle == nullptr) return;
     if (isAlive) throw StateError('Cannot release a running player process');
-    if (CloseHandle(_handle) == FALSE) {
-      throw WindowsException(HRESULT_FROM_WIN32(GetLastError()));
+    final result = CloseHandle(_handle);
+    if (!result.value) {
+      throw WindowsException(result.error.toHRESULT());
     }
-    _handle = 0;
+    _handle = HANDLE(nullptr);
   }
 }
 
@@ -72,57 +74,57 @@ WindowsPlayerProcess spawnStandalonePlayer({
   final command = '"$executable" player "$payloadPath"';
   final startup = calloc<STARTUPINFO>();
   final processInfo = calloc<PROCESS_INFORMATION>();
-  final commandPtr = command.toNativeUtf16();
+  final commandPtr = command.toPwstr(allocator: calloc);
   final entries = playerProcessEnvironment().entries.toList()
     ..sort((a, b) => a.key.toLowerCase().compareTo(b.key.toLowerCase()));
   final environment =
       ('${entries.map((e) => '${e.key}=${e.value}').join('\u0000')}\u0000')
-          .toNativeUtf16();
+          .toPwstr(allocator: calloc);
   startup.ref.cb = sizeOf<STARTUPINFO>();
   var flags =
       CREATE_UNICODE_ENVIRONMENT |
       CREATE_NEW_PROCESS_GROUP |
       CREATE_BREAKAWAY_FROM_JOB;
-  var ok = CreateProcess(
-    nullptr,
+  var result = CreateProcess(
+    null,
     commandPtr,
-    nullptr,
-    nullptr,
-    FALSE,
+    null,
+    null,
+    false,
     flags,
-    environment.cast(),
-    nullptr,
+    environment,
+    null,
     startup,
     processInfo,
   );
-  if (ok == FALSE) {
+  if (!result.value) {
     flags = CREATE_UNICODE_ENVIRONMENT | CREATE_NEW_PROCESS_GROUP;
-    ok = CreateProcess(
-      nullptr,
+    result = CreateProcess(
+      null,
       commandPtr,
-      nullptr,
-      nullptr,
-      FALSE,
+      null,
+      null,
+      false,
       flags,
-      environment.cast(),
-      nullptr,
+      environment,
+      null,
       startup,
       processInfo,
     );
   }
-  final error = ok == FALSE ? GetLastError() : 0;
+  final error = !result.value ? result.error : ERROR_SUCCESS;
   final pid = processInfo.ref.dwProcessId;
   final handle = processInfo.ref.hProcess;
-  if (processInfo.ref.hThread != 0) {
+  if (processInfo.ref.hThread != nullptr) {
     CloseHandle(processInfo.ref.hThread);
   }
   calloc.free(environment);
   calloc.free(commandPtr);
   calloc.free(startup);
   calloc.free(processInfo);
-  if (ok == FALSE || pid == 0) {
-    if (handle != 0) CloseHandle(handle);
-    throw WindowsException(HRESULT_FROM_WIN32(error));
+  if (!result.value || pid == 0) {
+    if (handle != nullptr) CloseHandle(handle);
+    throw WindowsException(error.toHRESULT());
   }
   return _WindowsPlayerProcess(pid, handle);
 }

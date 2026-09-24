@@ -44,7 +44,7 @@ Future<void> main(List<String> args) async {
       final backend = controller.backend as MpvVideoBackend;
       Future<void> checkDisplayRequest(String phase, bool expected) async {
         if (!Platform.isWindows) return;
-        var previous = 0;
+        var previous = win32.EXECUTION_STATE(0);
         var thread = 0;
         await _until(() {
           // Windows exposes the previous calling-thread execution state via
