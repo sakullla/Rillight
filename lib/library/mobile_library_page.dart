@@ -59,6 +59,7 @@ class _MobileLibraryPageState extends State<MobileLibraryPage> {
   static const double _loadMoreThreshold = 480;
 
   final ScrollController _scroll = ScrollController();
+  bool _nearEndLoadArmed = true;
   final Set<int> _years = {};
   final Set<String> _genres = {};
   BrowseController? _controller;
@@ -136,16 +137,24 @@ class _MobileLibraryPageState extends State<MobileLibraryPage> {
     if (controller == null || !_scroll.hasClients) {
       return;
     }
+    final position = _scroll.position;
+    if (!position.hasContentDimensions) {
+      return;
+    }
+    final nearEnd =
+        position.maxScrollExtent > 0 &&
+        position.pixels >= position.maxScrollExtent - _loadMoreThreshold;
+    if (!nearEnd) {
+      _nearEndLoadArmed = true;
+      return;
+    }
     if (controller.loading || !controller.hasMore || controller.error != null) {
       return;
     }
-    final position = _scroll.position;
-    if (!position.hasContentDimensions || position.pixels <= 0) {
+    if (!_nearEndLoadArmed) {
       return;
     }
-    if (position.pixels < position.maxScrollExtent - _loadMoreThreshold) {
-      return;
-    }
+    _nearEndLoadArmed = false;
     controller.load(more: true);
   }
 
@@ -227,56 +236,80 @@ class _MobileLibraryPageState extends State<MobileLibraryPage> {
           listenable: controller,
           builder: (context, _) => RefreshIndicator(
             onRefresh: controller.load,
-            child: ListView(
+            child: CustomScrollView(
               controller: _scroll,
               key: PageStorageKey('library-${widget.viewId}'),
-              padding: const EdgeInsets.all(AppSpacing.md),
               physics: const AlwaysScrollableScrollPhysics(),
-              children: [
+              slivers: [
                 if (controller.loading && controller.items.isEmpty)
-                  const _LibrarySkeleton()
-                else ...[
-                  _ActiveFilters(
-                    controller: controller,
-                    onClear: _clearFilters,
-                  ),
-                  if (controller.loading) const LinearProgressIndicator(),
-                  if (controller.error != null)
-                    MobileFailureState(
-                      message: catalogFailureMessage(l10n, controller.error!),
-                      onRetry: () => controller.load(
-                        more: controller.items.isNotEmpty && controller.hasMore,
-                      ),
-                    ),
-                  if (!controller.loading &&
-                      controller.error == null &&
-                      controller.items.isEmpty)
-                    MobileEmptyState(
-                      message: l10n.mobileEmpty,
-                      actionLabel: _hasCriteria(controller)
-                          ? l10n.libraryFilterClear
-                          : l10n.mobileRefresh,
-                      onAction: _hasCriteria(controller)
-                          ? _clearFilters
-                          : () => controller.load(),
-                    ),
-                  if (controller.items.isNotEmpty)
-                    _PhonePosterGrid(items: controller.items),
-                  if (controller.hasMore && controller.error == null)
-                    Align(
-                      alignment: Alignment.center,
-                      child: FilledButton(
-                        key: const Key('phone-library-more'),
-                        style: FilledButton.styleFrom(
-                          minimumSize: const Size(48, 48),
+                  const SliverPadding(
+                    padding: EdgeInsets.all(AppSpacing.md),
+                    sliver: SliverToBoxAdapter(child: _LibrarySkeleton()),
+                  )
+                else
+                  SliverPadding(
+                    padding: const EdgeInsets.all(AppSpacing.md),
+                    sliver: SliverMainAxisGroup(
+                      slivers: [
+                        SliverToBoxAdapter(
+                          child: _ActiveFilters(
+                            controller: controller,
+                            onClear: _clearFilters,
+                          ),
                         ),
-                        onPressed: controller.loading
-                            ? null
-                            : () => controller.load(more: true),
-                        child: Text(l10n.mobileLoadMore),
-                      ),
+                        if (controller.loading)
+                          const SliverToBoxAdapter(
+                            child: LinearProgressIndicator(),
+                          ),
+                        if (controller.error != null)
+                          SliverToBoxAdapter(
+                            child: MobileFailureState(
+                              message: catalogFailureMessage(
+                                l10n,
+                                controller.error!,
+                              ),
+                              onRetry: () => controller.load(
+                                more:
+                                    controller.items.isNotEmpty &&
+                                    controller.hasMore,
+                              ),
+                            ),
+                          ),
+                        if (!controller.loading &&
+                            controller.error == null &&
+                            controller.items.isEmpty)
+                          SliverToBoxAdapter(
+                            child: MobileEmptyState(
+                              message: l10n.mobileEmpty,
+                              actionLabel: _hasCriteria(controller)
+                                  ? l10n.libraryFilterClear
+                                  : l10n.mobileRefresh,
+                              onAction: _hasCriteria(controller)
+                                  ? _clearFilters
+                                  : () => controller.load(),
+                            ),
+                          ),
+                        if (controller.items.isNotEmpty)
+                          _PhonePosterSliver(items: controller.items),
+                        if (controller.hasMore && controller.error == null)
+                          SliverToBoxAdapter(
+                            child: Align(
+                              alignment: Alignment.center,
+                              child: FilledButton(
+                                key: const Key('phone-library-more'),
+                                style: FilledButton.styleFrom(
+                                  minimumSize: const Size(48, 48),
+                                ),
+                                onPressed: controller.loading
+                                    ? null
+                                    : () => controller.load(more: true),
+                                child: Text(l10n.mobileLoadMore),
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
-                ],
+                  ),
               ],
             ),
           ),
@@ -613,23 +646,40 @@ class _LibrarySkeleton extends StatelessWidget {
   }
 }
 
-class _PhonePosterGrid extends StatelessWidget {
-  const _PhonePosterGrid({required this.items});
+class _PhonePosterSliver extends StatelessWidget {
+  const _PhonePosterSliver({required this.items});
 
   final List<EmbyItem> items;
 
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    return MobileGrid(
-      items: items,
-      itemBuilder: (context, item) => _PhonePoster(
-        key: ValueKey('phone-library-poster-${item.id}'),
-        item: item,
-        progressLabel: item.canResume
-            ? l10n.playbackProgress((item.playbackProgress * 100).round())
-            : null,
-      ),
+    return SliverLayoutBuilder(
+      builder: (context, constraints) {
+        const spacing = AppSpacing.md;
+        final columns = mobileGridColumnCount(constraints.crossAxisExtent);
+        final cellWidth =
+            (constraints.crossAxisExtent - spacing * (columns - 1)) / columns;
+        final textScale = MediaQuery.textScalerOf(context).scale(14) / 14;
+        return SliverGrid(
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: columns,
+            mainAxisSpacing: spacing,
+            crossAxisSpacing: spacing,
+            childAspectRatio: cellWidth / (cellWidth * 1.5 + 52 * textScale),
+          ),
+          delegate: SliverChildBuilderDelegate((context, index) {
+            final item = items[index];
+            return _PhonePoster(
+              key: ValueKey('phone-library-poster-${item.id}'),
+              item: item,
+              progressLabel: item.canResume
+                  ? l10n.playbackProgress((item.playbackProgress * 100).round())
+                  : null,
+            );
+          }, childCount: items.length),
+        );
+      },
     );
   }
 }

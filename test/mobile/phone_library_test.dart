@@ -129,12 +129,20 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('电影'), findsOneWidget);
-    final block = tester.getSize(
-      find.byKey(const Key('phone-library-block-view-movies')),
-    );
-    expect(block.width, greaterThan(200));
-    expect(block.height, greaterThan(100));
+    final movies = find.byKey(const Key('phone-library-block-view-movies'));
+    final shows = find.byKey(const Key('phone-library-block-view-tv'));
+    final block = tester.getSize(movies);
+    expect(block.width, closeTo((360 - 32 - 16) / 2, 1));
+    expect(block.width, lessThan(200));
     expect(block.height / block.width, closeTo(9 / 16, 0.02));
+    expect(
+      (tester.getTopLeft(movies).dy - tester.getTopLeft(shows).dy).abs(),
+      lessThan(1),
+    );
+    expect(
+      tester.getTopLeft(shows).dx,
+      greaterThan(tester.getTopLeft(movies).dx),
+    );
     expect(tester.takeException(), isNull);
   }, tags: ['integration']);
 
@@ -198,8 +206,14 @@ void main() {
           .map((box) => box.localToGlobal(Offset.zero).dx.round())
           .toSet();
       expect(columns.length, 3);
-      // T5:网格卡片统一为按压反馈 + 阴影形态。
-      expect(find.byType(MobileGrid), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(const PageStorageKey('library-view-movies')),
+          matching: find.byType(Scrollable),
+        ),
+        findsOneWidget,
+      );
+      expect(find.byType(MobileGrid), findsNothing);
       expect(find.byType(MobilePressable), findsWidgets);
       final poster = tester.widget<DecoratedBox>(
         find
@@ -420,17 +434,22 @@ void main() {
       findsNothing,
     );
     harness.server.itemsStatus = 503;
-    // GridView 自带内层 Scrollable,外层 ListView 的在树序中最先出现。
     final scrollable = tester.state<ScrollableState>(
-      find
-          .descendant(
-            of: find.byKey(const PageStorageKey('library-view-movies')),
-            matching: find.byType(Scrollable),
-          )
-          .first,
+      find.descendant(
+        of: find.byKey(const PageStorageKey('library-view-movies')),
+        matching: find.byType(Scrollable),
+      ),
     );
     scrollable.position.jumpTo(scrollable.position.maxScrollExtent);
+    final parked = scrollable.position.pixels;
     await tester.pumpAndSettle();
+    expect(scrollable.position.pixels, greaterThan(parked * 0.5));
+    expect(
+      harness.server.requests
+          .where((line) => line.contains('StartIndex=50'))
+          .length,
+      1,
+    );
     scrollable.position.jumpTo(0);
     await tester.pump();
     expect(
@@ -450,6 +469,21 @@ void main() {
     harness.server.itemsStatus = null;
     await tester.tap(find.byKey(MobileFailureState.retryKey));
     await tester.pumpAndSettle();
+    expect(find.byType(MobileFailureState), findsNothing);
+    expect(
+      harness.server.requests
+          .where((line) => line.contains('StartIndex=50'))
+          .length,
+      2,
+    );
+    final loaded = tester.state<ScrollableState>(
+      find.descendant(
+        of: find.byKey(const PageStorageKey('library-view-movies')),
+        matching: find.byType(Scrollable),
+      ),
+    );
+    loaded.position.jumpTo(parked);
+    await tester.pump();
     expect(
       find.byKey(const ValueKey('phone-library-poster-movie-50')),
       findsOneWidget,
@@ -487,6 +521,40 @@ void main() {
     );
     expect(tester.takeException(), isNull);
   }, tags: ['integration']);
+
+  testWidgets(
+    'a short page keeps an explicit next-page control without requesting it',
+    (tester) async {
+      final harness = await _start(tester);
+      harness.server.items = [
+        for (var i = 0; i < 51; i++)
+          FakeEmbyItem(
+            id: 'movie-$i',
+            name: 'Film ${i.toString().padLeft(2, '0')}',
+            type: 'Movie',
+            parentId: 'view-movies',
+          ),
+      ];
+      tester.view.physicalSize = const Size(360, 8000);
+      await tester.pumpAndSettle();
+      await _openMovies(tester);
+      expect(find.byKey(const Key('phone-library-more')), findsOneWidget);
+      expect(
+        harness.server.requests
+            .where((line) => line.contains('StartIndex=50'))
+            .length,
+        0,
+      );
+      await tester.tap(find.byKey(const Key('phone-library-more')));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('phone-library-poster-movie-50')),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+    },
+    tags: ['integration'],
+  );
 }
 
 String _lastItemsQuery(FakeEmbyServer server) {

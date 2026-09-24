@@ -9,7 +9,7 @@ import 'package:rillight/home/catalog_failure.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/media_image/media_image.dart';
 
-/// 手机片库列表。每个库是带库名的图片块；没有库图时用库名占满整块。
+/// 手机片库列表。大约两列带库名的卡片；没有库图时用库名占满该卡。
 class PhoneLibrariesTab extends StatelessWidget {
   const PhoneLibrariesTab({super.key});
 
@@ -54,17 +54,38 @@ class PhoneLibrariesTab extends StatelessWidget {
         }
         return RefreshIndicator(
           onRefresh: catalog.reload,
-          child: ListView(
+          child: CustomScrollView(
             key: const PageStorageKey('mobile-libraries-scroll'),
             physics: const AlwaysScrollableScrollPhysics(),
-            padding: const EdgeInsets.all(AppSpacing.md),
-            children: [
-              ?status,
-              for (final library in catalog.libraries)
-                _LibraryBlock(
-                  library: library,
-                  onTap: () => context.push(AppRoutes.library(library.id)),
+            slivers: [
+              if (status != null)
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.md,
+                    AppSpacing.md,
+                    AppSpacing.md,
+                    0,
+                  ),
+                  sliver: SliverToBoxAdapter(child: status),
                 ),
+              SliverPadding(
+                padding: const EdgeInsets.all(AppSpacing.md),
+                sliver: SliverGrid(
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 2,
+                    mainAxisSpacing: AppSpacing.md,
+                    crossAxisSpacing: AppSpacing.md,
+                    childAspectRatio: 16 / 9,
+                  ),
+                  delegate: SliverChildBuilderDelegate((context, index) {
+                    final library = catalog.libraries[index];
+                    return _LibraryBlock(
+                      library: library,
+                      onTap: () => context.push(AppRoutes.library(library.id)),
+                    );
+                  }, childCount: catalog.libraries.length),
+                ),
+              ),
             ],
           ),
         );
@@ -91,67 +112,61 @@ class _LibraryBlock extends StatelessWidget {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final hasImage = _hasImage;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-      child: Material(
-        color: scheme.surfaceContainerHigh,
-        borderRadius: BorderRadius.circular(AppRadii.md),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          key: Key('phone-library-block-${library.id}'),
-          onTap: onTap,
-          child: AspectRatio(
-            aspectRatio: 16 / 9,
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                if (hasImage)
-                  MediaImage(
-                    key: Key('phone-library-image-${library.id}'),
-                    item: library,
-                    preferBackdrop: true,
-                    maxWidth: 480,
-                  )
-                else
-                  _LibraryNamePlaceholder(
-                    key: Key('phone-library-placeholder-${library.id}'),
-                    name: library.name,
-                  ),
-                if (hasImage) ...[
-                  DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        stops: const [0.45, 1],
-                        colors: [
-                          scheme.scrim.withValues(alpha: 0),
-                          scheme.scrim.withValues(
-                            alpha: AppScrim.of(context, AppScrim.textStart),
-                          ),
-                        ],
+    return Material(
+      color: scheme.surfaceContainerHigh,
+      borderRadius: BorderRadius.circular(AppRadii.md),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        key: Key('phone-library-block-${library.id}'),
+        onTap: onTap,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            if (hasImage)
+              MediaImage(
+                key: Key('phone-library-image-${library.id}'),
+                item: library,
+                preferBackdrop: true,
+                maxWidth: 480,
+              )
+            else
+              _LibraryNamePlaceholder(
+                key: Key('phone-library-placeholder-${library.id}'),
+                name: library.name,
+              ),
+            if (hasImage) ...[
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    stops: const [0.45, 1],
+                    colors: [
+                      scheme.scrim.withValues(alpha: 0),
+                      scheme.scrim.withValues(
+                        alpha: AppScrim.of(context, AppScrim.textStart),
                       ),
+                    ],
+                  ),
+                ),
+              ),
+              Align(
+                alignment: Alignment.bottomCenter,
+                child: Padding(
+                  padding: const EdgeInsets.all(AppSpacing.md),
+                  child: Text(
+                    library.name,
+                    textAlign: TextAlign.center,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.titleLarge?.copyWith(
+                      color: scheme.onSurface,
                     ),
                   ),
-                  Align(
-                    alignment: Alignment.bottomCenter,
-                    child: Padding(
-                      padding: const EdgeInsets.all(AppSpacing.md),
-                      child: Text(
-                        library.name,
-                        textAlign: TextAlign.center,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.titleLarge?.copyWith(
-                          color: scheme.onSurface,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
+                ),
+              ),
+            ],
+          ],
         ),
       ),
     );
