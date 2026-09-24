@@ -114,6 +114,8 @@ class _PhoneHomeState extends State<PhoneHome> {
                   id == PhoneHomeSectionId.libraries ||
                   PhoneHomeSectionId.libraryIdOf(id) != null,
             );
+        // 片库入口单独不算「已有海报」。四行仍在安静重试时要保持整页骨架，
+        // 重试耗尽后仍是整页失败，而不是被片库入口换成空页或行内占位。
         final pageHasContent = hasItems || hasBanner || wantsLibraries;
         EmbyException? firstError;
         for (final state in states) {
@@ -125,9 +127,9 @@ class _PhoneHomeState extends State<PhoneHome> {
         // 四行、横幅、片库入口和最近添加都没有可展示内容时才用整页占位、失败或空。
         // 横幅候选来自被隐藏的行时，仍要画出横幅。
         final Widget body;
-        if (!pageHasContent && firstError == null && loading) {
+        if (!hasItems && !hasBanner && firstError == null && loading) {
           body = const MobileLoadingPlaceholder.home();
-        } else if (!pageHasContent && firstError != null && !loading) {
+        } else if (!hasItems && !hasBanner && firstError != null && !loading) {
           body = MobileFailureState(
             message: catalogFailureMessage(l10n, firstError),
             onRetry: () {

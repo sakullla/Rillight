@@ -173,7 +173,7 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
           ),
           IconButton(
             key: const Key('mobile-player-more'),
-            tooltip: l.mobileMore,
+            tooltip: l.mobileTracks,
             onPressed: c.loading ? null : () => unawaited(_openMore()),
             icon: const Icon(Icons.more_vert),
           ),
@@ -445,7 +445,10 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
         ),
       ),
     );
-    if (mounted) _controller.setControlsPinned(false);
+    final route = ModalRoute.of(context);
+    if (mounted && (route == null || route.isCurrent)) {
+      _controller.setControlsPinned(false);
+    }
   }
 }
 
