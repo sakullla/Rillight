@@ -459,7 +459,7 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
                           ),
                     preferBackdrop: handoff?.preferBackdrop ?? true,
                     maxWidth: handoff?.maxWidth ?? PhoneMotion.pageRequestWidth,
-                    maxImageHeight: item?.isSeries == true ? 120 : null,
+                    maxImageHeight: item?.isSeries == true ? 200 : null,
                   ),
                 if (controller.loading) const LinearProgressIndicator(),
                 if (controller.error != null && item == null)
@@ -607,13 +607,16 @@ class _PhoneItemDetail extends StatelessWidget {
             item.seriesName != null &&
             item.seriesName!.isNotEmpty &&
             item.seriesId != null)
-          Align(
-            alignment: Alignment.centerLeft,
-            child: TextButton(
-              key: CatalogKeys.seriesLink,
-              onPressed: () => onOpenSeries(item.seriesId!),
-              child: Text(item.seriesName!),
+          ListTile(
+            key: CatalogKeys.seriesLink,
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.md,
             ),
+            leading: Icon(Icons.tv_outlined, color: theme.colorScheme.primary),
+            title: Text(item.seriesName!),
+            subtitle: Text(l.viewSeries),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => onOpenSeries(item.seriesId!),
           ),
         if (plainOverview(item.overview) != null)
           EpisodeOverviewSection(overview: item.overview),

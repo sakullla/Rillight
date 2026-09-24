@@ -159,7 +159,7 @@ class _LibraryBlock extends StatelessWidget {
                     textAlign: TextAlign.center,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.titleLarge?.copyWith(
+                    style: theme.textTheme.titleMedium?.copyWith(
                       color: scheme.onSurface,
                     ),
                   ),
@@ -181,17 +181,27 @@ class _LibraryNamePlaceholder extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return ColoredBox(
-      color: theme.colorScheme.surfaceContainerHighest,
-      child: Center(
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            theme.colorScheme.surfaceContainerHigh,
+            theme.colorScheme.surfaceContainerHighest,
+          ],
+        ),
+      ),
+      child: Align(
+        alignment: Alignment.bottomLeft,
         child: Padding(
           padding: const EdgeInsets.all(AppSpacing.md),
           child: Text(
             name,
-            textAlign: TextAlign.center,
-            maxLines: 3,
+            textAlign: TextAlign.start,
+            maxLines: 2,
             overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.titleLarge,
+            style: theme.textTheme.titleMedium,
           ),
         ),
       ),

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/app/mobile_chrome.dart';
 import 'package:rillight/app/product.dart';
 import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/router.dart';
@@ -49,6 +50,9 @@ class RillightApp extends StatelessWidget {
               supportedLocales: AppLocalizations.supportedLocales,
               localizationsDelegates: AppLocalizations.localizationsDelegates,
               theme: AppTheme.dark(),
+              scrollBehavior: environment.isTv
+                  ? null
+                  : const PhoneScrollBehavior(),
               routerConfig: router,
             ),
           ),

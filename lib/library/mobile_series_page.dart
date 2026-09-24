@@ -228,7 +228,7 @@ class MobileSeriesPage extends StatelessWidget {
       children: [
         if (showSeasons)
           SizedBox(
-            height: 72,
+            height: 64,
             child: ListView.separated(
               key: const Key('phone-season-list'),
               scrollDirection: Axis.horizontal,

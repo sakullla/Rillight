@@ -149,6 +149,12 @@ class _PhoneHomeState extends State<PhoneHome> {
           final librariesById = {
             for (final library in catalog.libraries) library.id: library,
           };
+          const sectionPadding = EdgeInsets.fromLTRB(
+            AppSpacing.md,
+            AppSpacing.md,
+            AppSpacing.md,
+            0,
+          );
           body = Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -156,40 +162,44 @@ class _PhoneHomeState extends State<PhoneHome> {
                 if (id == PhoneHomeSectionId.banner)
                   PhoneHero(catalog: catalog)
                 else if (byId[id] != null)
-                  _PhoneHomeRow(
-                    section: byId[id]!,
-                    retry: () {
-                      catalog.reloadHomeRows();
-                    },
-                    onRemoveFromResume: catalog.hideFromResume,
-                    sharePoster: sharedPosterIds.add,
+                  Padding(
+                    padding: sectionPadding,
+                    child: _PhoneHomeRow(
+                      section: byId[id]!,
+                      retry: () {
+                        catalog.reloadHomeRows();
+                      },
+                      onRemoveFromResume: catalog.hideFromResume,
+                      sharePoster: sharedPosterIds.add,
+                    ),
                   )
                 else if (id == PhoneHomeSectionId.libraries)
-                  _PhoneLibraryEntry(libraries: catalog.libraries)
+                  Padding(
+                    padding: sectionPadding,
+                    child: _PhoneLibraryEntry(libraries: catalog.libraries),
+                  )
                 else if (PhoneHomeSectionId.libraryIdOf(id) != null &&
                     librariesById[PhoneHomeSectionId.libraryIdOf(id)!] != null)
-                  _PhoneLibraryLatest(
-                    library:
-                        librariesById[PhoneHomeSectionId.libraryIdOf(id)!]!,
-                    sharePoster: sharedPosterIds.add,
+                  Padding(
+                    padding: sectionPadding,
+                    child: _PhoneLibraryLatest(
+                      library:
+                          librariesById[PhoneHomeSectionId.libraryIdOf(id)!]!,
+                      sharePoster: sharedPosterIds.add,
+                    ),
                   ),
-              TextButton.icon(
-                style: TextButton.styleFrom(minimumSize: _refreshHit),
-                onPressed: () {
-                  catalog.reload(showCachedFirst: false);
-                },
-                icon: const Icon(Icons.refresh),
-                label: Text(l10n.mobileRefresh),
-              ),
             ],
           );
         }
+        final fullBleed = body is Column;
         return RefreshIndicator(
           onRefresh: () => catalog.reload(showCachedFirst: false),
           child: ListView(
             key: const PageStorageKey('mobile-home-scroll'),
             physics: const AlwaysScrollableScrollPhysics(),
-            padding: const EdgeInsets.all(AppSpacing.md),
+            padding: fullBleed
+                ? const EdgeInsets.only(bottom: AppSpacing.lg)
+                : const EdgeInsets.all(AppSpacing.md),
             children: [body],
           ),
         );
@@ -231,8 +241,8 @@ double _rowHeightOf(
     final titleBlock = AppSpacing.sm + 2 * 20 * textScale + AppSpacing.sm;
     return width * 1.5 + titleBlock;
   }
-  final titleLine = resume ? 48.0 : 22 * textScale;
-  final progress = AppSpacing.xxs + 16 * textScale + AppSpacing.xxs + 4;
+  final titleLine = resume ? 36.0 : 22 * textScale;
+  final progress = resume ? AppSpacing.xxs + 16 * textScale : 0.0;
   return width * 9 / 16 + AppSpacing.xs + titleLine + progress + AppSpacing.sm;
 }
 
@@ -292,7 +302,7 @@ class _PhoneHomeRow extends StatelessWidget {
               Expanded(
                 child: Text(
                   section.title,
-                  style: Theme.of(context).textTheme.titleLarge,
+                  style: Theme.of(context).textTheme.titleMedium,
                 ),
               ),
               if (hasMore)
@@ -379,7 +389,23 @@ class _WideCard extends StatelessWidget {
           item: item,
           shared: shared,
           aspectRatio: 16 / 9,
-          image: _sharedPosterImage(item, shared),
+          image: Stack(
+            fit: StackFit.expand,
+            children: [
+              _sharedPosterImage(item, shared),
+              if (item.canResume)
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  child: LinearProgressIndicator(
+                    key: CatalogKeys.resumeProgress,
+                    value: progress,
+                    minHeight: 3,
+                  ),
+                ),
+            ],
+          ),
           footer: Padding(
             padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
             child: Column(
@@ -403,25 +429,23 @@ class _WideCard extends StatelessWidget {
                         key: CatalogKeys.removeFromResume(item.id),
                         tooltip: l10n.removeFromResume,
                         visualDensity: VisualDensity.compact,
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints.tightFor(
+                          width: 32,
+                          height: 32,
+                        ),
                         onPressed: onRemove,
-                        icon: const Icon(Icons.close),
+                        icon: const Icon(Icons.close, size: 18),
                       ),
                   ],
                 ),
-                if (item.canResume) ...[
+                if (item.canResume)
                   Text(
                     l10n.playbackProgress((progress * 100).round()),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.labelSmall,
                   ),
-                  const SizedBox(height: AppSpacing.xxs),
-                  LinearProgressIndicator(
-                    key: CatalogKeys.resumeProgress,
-                    value: progress,
-                    minHeight: 3,
-                  ),
-                ],
               ],
             ),
           ),
@@ -534,6 +558,13 @@ class _PosterCard extends StatelessWidget {
   }
 }
 
+bool _libraryHasImage(EmbyItem library) {
+  bool tagged(String? tag) => tag != null && tag.isNotEmpty;
+  return tagged(library.primaryImageTag) ||
+      tagged(library.backdropImageTag) ||
+      tagged(library.thumbImageTag);
+}
+
 class _PhoneLibraryEntry extends StatelessWidget {
   const _PhoneLibraryEntry({required this.libraries});
 
@@ -545,7 +576,9 @@ class _PhoneLibraryEntry extends StatelessWidget {
       return const SizedBox.shrink();
     }
     final l10n = AppLocalizations.of(context);
-    final width = phoneHomeWideCardWidth(MediaQuery.sizeOf(context).width);
+    final theme = Theme.of(context);
+    const cardWidth = 148.0;
+    const cardHeight = 84.0;
     return Column(
       key: const Key('phone-home-libraries'),
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -554,37 +587,72 @@ class _PhoneLibraryEntry extends StatelessWidget {
           padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
           child: Text(
             l10n.phoneHomeSectionLibraries,
-            style: Theme.of(context).textTheme.titleLarge,
+            style: theme.textTheme.titleMedium,
           ),
         ),
         SizedBox(
-          height: width * 9 / 16,
+          height: cardHeight,
           child: ListView.builder(
             scrollDirection: Axis.horizontal,
             itemCount: libraries.length,
             itemBuilder: (context, index) {
               final library = libraries[index];
+              final hasImage = _libraryHasImage(library);
               return Padding(
                 padding: const EdgeInsets.only(right: AppSpacing.sm),
                 child: SizedBox(
-                  width: width,
+                  width: cardWidth,
+                  height: cardHeight,
                   child: Material(
-                    color: Theme.of(context).colorScheme.surfaceContainerHigh,
+                    color: theme.colorScheme.surfaceContainerHigh,
                     borderRadius: BorderRadius.circular(AppRadii.md),
                     clipBehavior: Clip.antiAlias,
                     child: InkWell(
                       key: Key('phone-home-library-${library.id}'),
                       onTap: () => context.push(AppRoutes.library(library.id)),
-                      child: Center(
-                        child: Padding(
-                          padding: const EdgeInsets.all(AppSpacing.sm),
-                          child: Text(
-                            library.name,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            textAlign: TextAlign.center,
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          if (hasImage)
+                            MediaImage(
+                              item: library,
+                              preferBackdrop: true,
+                              maxWidth: 320,
+                            ),
+                          if (hasImage)
+                            DecoratedBox(
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  begin: Alignment.topCenter,
+                                  end: Alignment.bottomCenter,
+                                  colors: [
+                                    theme.colorScheme.scrim.withValues(
+                                      alpha: 0,
+                                    ),
+                                    theme.colorScheme.scrim.withValues(
+                                      alpha: 0.72,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          Align(
+                            alignment: hasImage
+                                ? Alignment.bottomLeft
+                                : Alignment.center,
+                            child: Padding(
+                              padding: const EdgeInsets.all(AppSpacing.sm),
+                              child: Text(
+                                library.name,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.labelLarge?.copyWith(
+                                  color: theme.colorScheme.onSurface,
+                                ),
+                              ),
+                            ),
                           ),
-                        ),
+                        ],
                       ),
                     ),
                   ),

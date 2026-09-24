@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:io' show Platform;
-import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
@@ -140,11 +139,11 @@ class _PhoneHeroState extends State<PhoneHero> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final width = constraints.maxWidth;
-        // 大封面:比 16:9 更高一档,文字带落在图片下缘的渐变里。
-        final height = math.max(width * 0.66, 300.0);
+        // 手机横幅用 16:9，和继续观看、详情背图同一比例，不再额外垫高。
+        final height = width * 9 / 16;
         return ClipRRect(
           key: PhoneHero.bannerKey,
-          borderRadius: BorderRadius.circular(AppRadii.lg),
+          borderRadius: BorderRadius.zero,
           child: SizedBox(
             width: width,
             height: height,

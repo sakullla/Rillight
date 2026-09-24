@@ -3,6 +3,20 @@ import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/theme.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 
+/// 手机滚动不使用 Android 拉伸回弹，避免下拉刷新和上拉时把横幅、卡片拉变形。
+class PhoneScrollBehavior extends MaterialScrollBehavior {
+  const PhoneScrollBehavior();
+
+  @override
+  Widget buildOverscrollIndicator(
+    BuildContext context,
+    Widget child,
+    ScrollableDetails details,
+  ) {
+    return child;
+  }
+}
+
 /// 手机上的加载、空、失败三种画面。
 ///
 /// 颜色和字号跟随当前 [AppTheme]，出现过渡使用 [AppMotion]。

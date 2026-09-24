@@ -634,16 +634,29 @@ class _LibrarySkeleton extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final width = constraints.maxWidth / 2;
+        const spacing = AppSpacing.md;
+        final columns = phoneLibraryColumnCount(constraints.maxWidth);
+        final width =
+            (constraints.maxWidth - spacing * (columns - 1)) / columns;
         return Wrap(
+          spacing: spacing,
+          runSpacing: spacing,
           children: [
-            for (var i = 0; i < 4; i++)
+            for (var i = 0; i < columns * 2; i++)
               SkeletonBlock(width: width, height: width * 1.5, animated: false),
           ],
         );
       },
     );
   }
+}
+
+/// 手机片库海报在 480dp 以内固定 3 列。412dp 上 4 列会把标题挤成断行。
+int phoneLibraryColumnCount(double width) {
+  if (width <= 480) {
+    return 3;
+  }
+  return mobileGridColumnCount(width);
 }
 
 class _PhonePosterSliver extends StatelessWidget {
@@ -657,7 +670,7 @@ class _PhonePosterSliver extends StatelessWidget {
     return SliverLayoutBuilder(
       builder: (context, constraints) {
         const spacing = AppSpacing.md;
-        final columns = mobileGridColumnCount(constraints.crossAxisExtent);
+        final columns = phoneLibraryColumnCount(constraints.crossAxisExtent);
         final cellWidth =
             (constraints.crossAxisExtent - spacing * (columns - 1)) / columns;
         final textScale = MediaQuery.textScalerOf(context).scale(14) / 14;

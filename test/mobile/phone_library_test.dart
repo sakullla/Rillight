@@ -492,7 +492,7 @@ void main() {
     expect(tester.takeException(), isNull);
   }, tags: ['integration']);
 
-  testWidgets('the poster grid recalibrates to four columns at 412dp', (
+  testWidgets('the poster grid stays at three columns on a 412dp phone', (
     tester,
   ) async {
     await _start(tester);
@@ -512,9 +512,9 @@ void main() {
     final columns = arts
         .map((box) => box.localToGlobal(Offset.zero).dx.round())
         .toSet();
-    expect(columns.length, 4);
+    expect(columns.length, 3);
     final width = arts.first.size.width;
-    expect(width, closeTo((412 - 32 - 3 * 16) / 4, 1));
+    expect(width, closeTo((412 - 32 - 2 * 16) / 3, 1));
     expect(
       arts.every((box) => (box.size.height - width * 1.5).abs() < 0.5),
       isTrue,

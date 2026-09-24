@@ -453,8 +453,23 @@ void main() {
     await _settle(tester);
     expect(find.text('继续观看'), findsNothing);
 
-    await _showOnHome(tester, find.text('刷新'));
-    await tester.tap(find.text('刷新'));
+    final homeScroll = tester.state<ScrollableState>(
+      find.descendant(
+        of: find.byKey(const PageStorageKey('mobile-home-scroll')),
+        matching: find.byWidgetPredicate(
+          (widget) =>
+              widget is Scrollable &&
+              widget.axisDirection == AxisDirection.down,
+        ),
+      ),
+    );
+    homeScroll.position.jumpTo(0);
+    await tester.pump();
+    await tester.fling(
+      find.byKey(const PageStorageKey('mobile-home-scroll')),
+      const Offset(0, 400),
+      1500,
+    );
     await _settle(tester);
     expect(find.text('继续观看'), findsNothing);
     expect(
