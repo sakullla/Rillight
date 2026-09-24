@@ -747,9 +747,24 @@ void main() {
   // 等价断言(memoryBytes:4 + disk 下二读 diskHitBytes==8、upstreamBytes 不变)
   // 由 'opt-in no-store session buffer writes disk and validates reuse' 覆盖。
 
-  // 删除 'no-store and unsupported Vary never reuse bodies':no-store/Vary
-  // 不复用的等价断言由 'session buffering still rejects unknown Vary and
-  // unvalidated reuse' 覆盖(同为"绝不复用"路径的存储模式变体)。
+  // 原 'no-store and unsupported Vary never reuse bodies' 的 Vary 半边由
+  // 'session buffering still rejects unknown Vary and unvalidated reuse'
+  // 等价覆盖;no-store 半边不可并入会话缓冲锚点:非会话缓冲模式走
+  // http_cache_policy 的 storable 假分支(绝不入缓存、二读全量重下),
+  // 与 sessionBuffering 的 storable=true + lifetime=0 分支不同,
+  // 保留为独立小用例。
+  test(
+    'plain no-store without session buffering never reuses bodies',
+    () async {
+      final fixture = await _CacheFixture.open();
+      fixture.control = 'no-store';
+      expect((await fixture.read('bytes=0-7')).$2, 'abcdefgh');
+      await fixture.settle();
+      expect((await fixture.read('bytes=0-7')).$2, 'abcdefgh');
+      expect(fixture.requests, 2);
+      expect(fixture.cache.diagnostics['indexEntries'], 0);
+    },
+  );
 
   test(
     'opt-in no-store session buffer writes disk and validates reuse',
