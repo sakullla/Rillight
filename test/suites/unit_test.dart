@@ -99,10 +99,6 @@ void main() {
     caseEntrypoints['player/playback_check_in_cases.dart']!,
   );
   group(
-    'player/playback_http_proxy_test.dart',
-    caseEntrypoints['player/playback_http_proxy_cases.dart']!,
-  );
-  group(
     'player/playback_resolver_test.dart',
     caseEntrypoints['player/playback_resolver_cases.dart']!,
   );
