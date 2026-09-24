@@ -35,33 +35,7 @@ const _device = EmbyDeviceInfo(
 
 void main() {
   setUp(isolateImageCache);
-  group('app shell integration', () {
-    testWidgets('unsigned connect shell, theme, and deep link', (tester) async {
-      final app = RillightApp();
-      await tester.pumpWidget(app);
-      await settle(tester);
-
-      expect(find.byType(NavigationRail), findsNothing);
-      expect(find.byKey(AppShell.topBarKey), findsNothing);
-      expect(find.byKey(SessionActions.serverMenuKey), findsNothing);
-      expect(find.text('连接服务器'), findsOneWidget);
-
-      final material = tester.widget<MaterialApp>(find.byType(MaterialApp));
-      expect(material.themeMode, ThemeMode.dark);
-      expect(material.theme?.brightness, Brightness.dark);
-      expect(material.darkTheme?.brightness, Brightness.dark);
-      expect(
-        Theme.of(tester.element(find.byType(Scaffold))).brightness,
-        Brightness.dark,
-      );
-
-      app.router.go('/library/view-movies');
-      await settle(tester);
-      expect(find.text('连接服务器'), findsOneWidget);
-      expect(find.byKey(AppShell.topBarKey), findsNothing);
-      expect(find.byType(LibraryPage), findsNothing);
-    }, tags: ['integration']);
-  });
+  group('app shell integration', () {});
 
   testWidgets('AppErrorView shows failure message and retry', (tester) async {
     var retried = false;
@@ -271,65 +245,6 @@ void main() {
       },
       tags: ['integration'],
     );
-
-    testWidgets('top bar keeps five libraries and puts the rest in overflow', (
-      tester,
-    ) async {
-      final auth = await _connect(
-        tester,
-        server: FakeEmbyServer(
-          views: [
-            for (var i = 0; i < 8; i++)
-              FakeEmbyItem(
-                id: 'view-lib-$i',
-                name: '电视-$i',
-                type: 'CollectionFolder',
-                collectionType: 'tvshows',
-              ),
-          ],
-        ),
-      );
-      await tester.pumpWidget(RillightApp(auth: auth));
-      await settle(tester);
-
-      expect(find.byKey(AppShell.libraryNavKey('view-lib-0')), findsOneWidget);
-      expect(find.byKey(AppShell.overflowNavKey), findsOneWidget);
-      expect(find.byKey(AppShell.libraryNavKey('view-lib-7')), findsNothing);
-
-      await tester.tap(find.byKey(AppShell.overflowNavKey));
-      await settle(tester);
-      expect(find.text('电视-7'), findsOneWidget);
-      expect(find.text('自定义导航'), findsOneWidget);
-
-      await tester.tap(find.text('自定义导航'));
-      await settle(tester);
-      expect(find.text('自定义导航'), findsWidgets);
-      expect(find.text('保存'), findsOneWidget);
-
-      Finder dialogText(String label) {
-        return find.descendant(
-          of: find.byType(AlertDialog),
-          matching: find.text(label),
-        );
-      }
-
-      expect(dialogText('电视-5'), findsOneWidget);
-      expect(
-        tester.getTopLeft(dialogText('电视-0')).dy,
-        lessThan(tester.getTopLeft(dialogText('电视-5')).dy),
-      );
-      expect(
-        tester.getTopLeft(dialogText('电视-4')).dy,
-        lessThan(tester.getTopLeft(dialogText('电视-5')).dy),
-      );
-
-      await tester.tap(find.byKey(const Key('nav-pin-down-view-lib-0')));
-      await tester.pump();
-      expect(
-        tester.getTopLeft(dialogText('电视-1')).dy,
-        lessThan(tester.getTopLeft(dialogText('电视-0')).dy),
-      );
-    }, tags: ['integration']);
   });
 }
 

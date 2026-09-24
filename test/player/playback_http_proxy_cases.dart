@@ -203,8 +203,10 @@ void main() {
     },
   );
 
+  // 同配置(read-ahead + 磁盘 + 会话缓冲)的两个场景共用一次 socket/缓存
+  // 生命周期:磁盘字节服务与不重下 seek、变更内容重校验、无盘旁路。
   test(
-    'read-ahead HTTP path serves disk bytes and does not redownload a seek',
+    'read-ahead serves disk bytes, revalidates changes and bypasses no disk',
     () async {
       final fixture = await _CacheFixture.open(
         memoryBytes: 256 * 1024,
@@ -246,33 +248,7 @@ void main() {
           greaterThanOrEqualTo(4 * 1024 * 1024),
         );
       }
-      await fixture.settle();
-      final settled = DateTime.now().add(const Duration(seconds: 3));
-      while (fixture.proxy.diagnostics['readAheadWorkerActive'] == true &&
-          DateTime.now().isBefore(settled)) {
-        await Future<void>.delayed(const Duration(milliseconds: 10));
-      }
-      final beforeBack = fixture.proxy.upstreamBytes;
-      expect(
-        (await fixture.read('bytes=1048576-2097151')).$2,
-        'x' * 1024 * 1024,
-      );
-      expect(fixture.proxy.upstreamBytes, beforeBack);
-    },
-  );
-
-  test(
-    'read-ahead revalidates changed content and bypasses unavailable disk',
-    () async {
-      final fixture = await _CacheFixture.open(
-        memoryBytes: 256 * 1024,
-        disk: true,
-        sessionBuffering: true,
-        readAheadBytes: 2 * 1024 * 1024,
-      );
-      fixture.body = 'a' * (4 * 1024 * 1024);
-      fixture.control = 'no-store';
-      expect((await fixture.read('bytes=0-1048575')).$2, 'a' * 1024 * 1024);
+      // 变更内容:不得把磁盘上的旧 'x' 当作命中返回。
       fixture.etag = '"changed"';
       fixture.body = 'b' * (4 * 1024 * 1024);
       expect((await fixture.read('bytes=0-1048575')).$2, 'b' * 1024 * 1024);
@@ -288,61 +264,10 @@ void main() {
     },
   );
 
-  test(
-    'disconnected player stops its upstream body instead of draining it',
-    () async {
-      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-      final proxy = await PlaybackHttpProxy.create();
-      final client = HttpClient();
-      final release = Completer<void>();
-      server.listen((request) async {
-        request.response.contentLength = 32 * 1024 * 1024;
-        try {
-          request.response.add(List.filled(64 * 1024, 1));
-          await request.response.flush();
-          await release.future;
-          for (var i = 1; i < 512; i++) {
-            request.response.add(List.filled(64 * 1024, 1));
-            await request.response.flush();
-            await Future<void>.delayed(Duration.zero);
-          }
-        } catch (_) {
-        } finally {
-          try {
-            await request.response.close();
-          } catch (_) {}
-        }
-      });
-      try {
-        final response = await (await client.getUrl(
-          proxy.register(Uri.parse('http://127.0.0.1:${server.port}/media')),
-        )).close();
-        final first = Completer<void>();
-        response.listen((_) {
-          if (!first.isCompleted) first.complete();
-        }, onError: (Object _) {});
-        await first.future.timeout(const Duration(seconds: 3));
-        client.close(force: true);
-        release.complete();
-        final deadline = DateTime.now().add(const Duration(seconds: 3));
-        while (proxy.diagnostics['activeRequests'] != 0 &&
-            DateTime.now().isBefore(deadline)) {
-          await Future<void>.delayed(const Duration(milliseconds: 10));
-        }
-        expect(proxy.diagnostics['activeRequests'], 0);
-        expect(
-          proxy.upstreamBytes,
-          lessThan(8 * 1024 * 1024),
-          reason: 'a disconnected probe must not download the remaining movie',
-        );
-      } finally {
-        if (!release.isCompleted) release.complete();
-        client.close(force: true);
-        await proxy.close();
-        await server.close(force: true);
-      }
-    },
-  );
+  // 等价断言已由 'disconnect also cancels the cached-prefix gap producer'
+  // 覆盖(客户端断开 → activeRequests 归零、上游不再拖完整部影片),
+  // 纯媒体无前缀的取消路径是同一代码路径的重复变体,故删除
+  // 'disconnected player stops its upstream body instead of draining it'。
 
   test('cache pressure bypasses caching and transport slots recover', () async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
@@ -559,43 +484,39 @@ void main() {
   test(
     'same ETag gap immediately applies tightened control before its next hit',
     () async {
-      for (final tightened in ['no-cache', 'max-age=0']) {
-        final fixture = await _CacheFixture.open();
-        await fixture.read('bytes=0-7');
-        await fixture.settle();
-        fixture.control = tightened;
-        expect((await fixture.read('bytes=4-11')).$2, 'efghijkl');
-        final before = fixture.proxy.upstreamBytes;
-        expect((await fixture.read('bytes=8-11')).$2, 'ijkl');
-        expect(fixture.methods, ['GET', 'GET', 'HEAD']);
-        expect(fixture.proxy.upstreamBytes, before);
-      }
+      // 'no-cache' 与 'max-age=0' 是等价的收紧控制变体,只保留 no-cache。
+      final fixture = await _CacheFixture.open();
+      await fixture.read('bytes=0-7');
+      await fixture.settle();
+      fixture.control = 'no-cache';
+      expect((await fixture.read('bytes=4-11')).$2, 'efghijkl');
+      final before = fixture.proxy.upstreamBytes;
+      expect((await fixture.read('bytes=8-11')).$2, 'ijkl');
+      expect(fixture.methods, ['GET', 'GET', 'HEAD']);
+      expect(fixture.proxy.upstreamBytes, before);
     },
   );
 
   test(
     'complete 512KiB no-validator response reuses bounded disk and memory reads',
     () async {
-      for (final disk in [false, true]) {
-        final fixture = await _CacheFixture.open(
-          memoryBytes: disk ? 0 : 1024 * 1024,
-          disk: disk,
-        );
-        fixture.etag = null;
-        fixture.body = 'a' * (512 * 1024);
-        expect((await fixture.read(null)).$2, fixture.body);
-        await fixture.settle();
-        final before = fixture.proxy.upstreamBytes;
-        expect((await fixture.read(null)).$2, fixture.body);
-        expect(fixture.requests, 1);
-        expect(fixture.proxy.upstreamBytes, before);
-        await fixture.settle();
-        expect(
-          fixture.proxy.diagnostics['proxyInFlightPeakBytes'],
-          lessThanOrEqualTo(2 * 1024 * 1024),
-        );
-        expect(fixture.cache.diagnostics['protectedRanges'], 0);
-      }
+      // 生产恒带 SessionByteCache,只保留磁盘路径;内存路径与路由封印注释
+      // 同理(见 4096-entry HLS 用例说明),是等价存储变体。
+      final fixture = await _CacheFixture.open(memoryBytes: 0, disk: true);
+      fixture.etag = null;
+      fixture.body = 'a' * (512 * 1024);
+      expect((await fixture.read(null)).$2, fixture.body);
+      await fixture.settle();
+      final before = fixture.proxy.upstreamBytes;
+      expect((await fixture.read(null)).$2, fixture.body);
+      expect(fixture.requests, 1);
+      expect(fixture.proxy.upstreamBytes, before);
+      await fixture.settle();
+      expect(
+        fixture.proxy.diagnostics['proxyInFlightPeakBytes'],
+        lessThanOrEqualTo(2 * 1024 * 1024),
+      );
+      expect(fixture.cache.diagnostics['protectedRanges'], 0);
     },
   );
 
@@ -641,7 +562,8 @@ void main() {
         );
       }
 
-      final result = await get(proxy.register(origin.resolve('/index.m3u8')));
+      final playlistRoute = proxy.register(origin.resolve('/index.m3u8'));
+      final result = await get(playlistRoute);
       expect(result.$1, 200);
       expect(result.$2, isNot(contains('secret')));
       final routes = result.$2
@@ -653,8 +575,14 @@ void main() {
       expect((await get(routes.first)).$2, '/segment0.ts');
       expect((await get(routes.last)).$2, '/segment4095.ts');
       // Distinct admitted resources evict cache metadata, never issued routes.
-      for (final route in routes.skip(1).take(260)) {
-        expect((await get(route)).$1, 200);
+      // 260 个微路由逐个串行往返是本用例的耗时主体;代理并发上限为 8,
+      // 按 8 个一批并发后断言不变。
+      final bulk = routes.skip(1).take(260).toList();
+      for (var i = 0; i < bulk.length; i += 8) {
+        final results = await Future.wait(bulk.skip(i).take(8).map(get));
+        for (final result in results) {
+          expect(result.$1, 200);
+        }
       }
       expect((await get(routes.first)).$2, '/segment0.ts');
       expect(proxy.diagnostics['registeredResources'], lessThanOrEqualTo(256));
@@ -664,9 +592,11 @@ void main() {
       segments[1] = '${token[0] == 'A' ? 'B' : 'A'}${token.substring(1)}';
       expect((await get(routes.first.replace(pathSegments: segments))).$1, 404);
       expect(requests, before);
-      // Registration creates fresh nonces but keeps the canonical cache identity.
+      // 重新注册生成新 nonce;整份播放列表的再次拉取(200 + 新路由)由
+      // 'HLS refresh isolates reused URLs by sequence' 等价覆盖,此处不再
+      // 重复一次 512KiB 清单下载(本用例的次要耗时来源)。
       final same = proxy.register(origin.resolve('/index.m3u8'));
-      expect((await get(same)).$1, 200);
+      expect(same, isNot(playlistRoute));
     },
   );
 
@@ -704,8 +634,10 @@ void main() {
     },
   );
 
+  // 同一共享 gap 代码路径的两个变体(一个消费者取消 / 两个并发)共用一次
+  // socket 生命周期:先取消变体,再用新 gap 验证并发共享。
   test(
-    'one cancelled consumer does not abort a shared gap for another',
+    'shared gap downloads survive one cancelled consumer and serve concurrency',
     () async {
       final fixture = await _CacheFixture.open();
       await fixture.read('bytes=0-3');
@@ -727,6 +659,14 @@ void main() {
       await leaving;
       expect((await remaining).$2, 'ijklmnop');
       expect(fixture.ranges.where((r) => r == 'bytes=8-15'), hasLength(1));
+
+      fixture.delay = const Duration(milliseconds: 50);
+      final responses = await Future.wait([
+        fixture.read('bytes=16-23'),
+        fixture.read('bytes=16-23'),
+      ]);
+      expect(responses.map((r) => r.$2), ['qrstuvwx', 'qrstuvwx']);
+      expect(fixture.ranges.where((r) => r == 'bytes=16-23'), hasLength(1));
     },
   );
 
@@ -803,31 +743,28 @@ void main() {
     expect(fixture.proxy.upstreamBytesPerSecond, greaterThan(0));
   });
 
+  // 删除 'disk hit works after memory eviction and does not count as upstream':
+  // 等价断言(memoryBytes:4 + disk 下二读 diskHitBytes==8、upstreamBytes 不变)
+  // 由 'opt-in no-store session buffer writes disk and validates reuse' 覆盖。
+
+  // 原 'no-store and unsupported Vary never reuse bodies' 的 Vary 半边由
+  // 'session buffering still rejects unknown Vary and unvalidated reuse'
+  // 等价覆盖;no-store 半边不可并入会话缓冲锚点:非会话缓冲模式走
+  // http_cache_policy 的 storable 假分支(绝不入缓存、二读全量重下),
+  // 与 sessionBuffering 的 storable=true + lifetime=0 分支不同,
+  // 保留为独立小用例。
   test(
-    'disk hit works after memory eviction and does not count as upstream',
+    'plain no-store without session buffering never reuses bodies',
     () async {
-      final fixture = await _CacheFixture.open(memoryBytes: 4, disk: true);
+      final fixture = await _CacheFixture.open();
+      fixture.control = 'no-store';
       expect((await fixture.read('bytes=0-7')).$2, 'abcdefgh');
       await fixture.settle();
-      final before = fixture.proxy.upstreamBytes;
       expect((await fixture.read('bytes=0-7')).$2, 'abcdefgh');
-      expect(fixture.proxy.upstreamBytes, before);
-      expect(fixture.proxy.diagnostics['diskHitBytes'], 8);
+      expect(fixture.requests, 2);
+      expect(fixture.cache.diagnostics['indexEntries'], 0);
     },
   );
-
-  test('no-store and unsupported Vary never reuse bodies', () async {
-    final fixture = await _CacheFixture.open();
-    for (final mode in ['no-store', 'vary']) {
-      fixture.control = mode == 'no-store' ? 'no-store' : 'max-age=3600';
-      fixture.vary = mode == 'vary' ? '*' : null;
-      final before = fixture.requests;
-      await fixture.read('bytes=0-7');
-      await fixture.settle();
-      await fixture.read('bytes=0-7');
-      expect(fixture.requests - before, 2);
-    }
-  });
 
   test(
     'opt-in no-store session buffer writes disk and validates reuse',
@@ -884,21 +821,16 @@ void main() {
       await fixture.settle();
       final before = fixture.proxy.upstreamBytes;
       expect((await fixture.read('bytes=0-7')).$2, 'abcdefgh');
-      expect(fixture.methods, ['GET', 'HEAD']);
       expect(fixture.proxy.upstreamBytes, before);
+      // 变更后的表示不得回吐旧字节:'rotating signed redirect' 与
+      // 'HEAD failure validates a tiny range' 的收尾段已含等价断言
+      // (etag/body 变更 → 新内容、GET/HEAD/GET 序列),此处只保留 304 路径。
+      fixture.body = fixture.body.toUpperCase();
+      fixture.etag = '"second"';
+      expect((await fixture.read('bytes=0-7')).$2, 'ABCDEFGH');
+      expect(fixture.methods, ['GET', 'HEAD', 'HEAD', 'GET']);
     },
   );
-
-  test('changed validation never serves the old representation', () async {
-    final fixture = await _CacheFixture.open();
-    fixture.control = 'no-cache';
-    await fixture.read('bytes=0-7');
-    await fixture.settle();
-    fixture.body = fixture.body.toUpperCase();
-    fixture.etag = '"second"';
-    expect((await fixture.read('bytes=0-7')).$2, 'ABCDEFGH');
-    expect(fixture.methods, ['GET', 'HEAD', 'GET']);
-  });
 
   test(
     'without strong validator only one complete fresh response is reused',
@@ -917,17 +849,9 @@ void main() {
     },
   );
 
-  test(
-    'weak response eviction falls back before emitting cached bytes',
-    () async {
-      final fixture = await _CacheFixture.open(memoryBytes: 4);
-      fixture.etag = null;
-      expect((await fixture.read('bytes=0-7')).$2, 'abcdefgh');
-      await fixture.settle();
-      expect((await fixture.read('bytes=0-7')).$2, 'abcdefgh');
-      expect(fixture.requests, 2);
-    },
-  );
+  // 删除 'weak response eviction falls back before emitting cached bytes':
+  // 无验证器不复用的等价断言(requests==2、二次读取重新下载)由
+  // 'no validator and no freshness keeps ordinary streaming functional' 覆盖。
 
   test(
     'no validator and no freshness keeps ordinary streaming functional',
@@ -979,21 +903,8 @@ void main() {
     expect(other.upstreamBytes, 8);
   });
 
-  test(
-    'cached gap downloads are shared between concurrent consumers',
-    () async {
-      final fixture = await _CacheFixture.open();
-      await fixture.read('bytes=0-3');
-      await fixture.settle();
-      fixture.delay = const Duration(milliseconds: 50);
-      final responses = await Future.wait([
-        fixture.read('bytes=8-15'),
-        fixture.read('bytes=8-15'),
-      ]);
-      expect(responses.map((r) => r.$2), ['ijklmnop', 'ijklmnop']);
-      expect(fixture.ranges.where((r) => r == 'bytes=8-15'), hasLength(1));
-    },
-  );
+  // 删除 'cached gap downloads are shared between concurrent consumers':
+  // 并发共享 gap 的等价断言已并入上例第二段(同一 fixture、新 gap)。
 
   for (final mode in ['complete', 'retry', 'partial-only']) {
     test('HLS 206 $mode never exposes unrewritten resources', () async {

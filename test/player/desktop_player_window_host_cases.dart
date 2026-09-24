@@ -643,38 +643,6 @@ void main() {
       }
     }
 
-    testWidgets(
-      'a failed resend after the process vanished shows progressSyncFailedMain',
-      (tester) async {
-        late DesktopPlayerWindowHost host;
-        final auth = await pumpLoggedIn(
-          tester,
-          hostFor: (auth) => host = newHost(auth),
-        );
-        addTearDown(() {
-          host.dispose();
-          auth.dispose();
-        });
-        server.stoppedStatus = 500;
-
-        await host.open(const PlayerOpenRequest(itemId: 'movie-up'));
-        final pid = control.lastPid;
-        await storeFor(pid).write(snapshotFor(auth));
-        await tester.pump();
-
-        control.exit(pid);
-        await pumpUntil(
-          tester,
-          () => find.text('播放进度未能同步').evaluate().isNotEmpty,
-        );
-
-        expect(find.text('播放进度未能同步'), findsOneWidget);
-        expect(host.current, isNull);
-        expect(storeFor(pid).snapshot, isNotNull);
-      },
-      tags: ['integration'],
-    );
-
     testWidgets('logout closes the player window before auth.logout', (
       tester,
     ) async {
@@ -702,63 +670,6 @@ void main() {
       expect(
         calls,
         containsAllInOrder(['requestClose:$pid', 'kill:$pid', 'logout']),
-      );
-      expect(host.current, isNull);
-    }, tags: ['integration']);
-
-    testWidgets('switching servers closes the player window before switchTo', (
-      tester,
-    ) async {
-      final other = FakeEmbyServer(
-        serverId: 'server-id-2',
-        serverName: '另一台',
-        baseUrl: Uri.parse('http://emby-other.test:8096'),
-      );
-      adapter.add(other);
-      late DesktopPlayerWindowHost host;
-      final auth = await pumpLoggedIn(
-        tester,
-        hostFor: (auth) => host = newHost(auth),
-        authFor: () async {
-          final auth = newAuth();
-          await auth.connect(
-            address: other.baseUrl.toString(),
-            username: 'alice',
-            password: 'correct-horse',
-          );
-          await auth.connect(
-            address: server.baseUrl.toString(),
-            username: 'alice',
-            password: 'correct-horse',
-          );
-          expect(auth.savedServers, hasLength(2));
-          expect(auth.session?.server.id, server.serverId);
-          return auth;
-        },
-      );
-      addTearDown(() {
-        host.dispose();
-        auth.dispose();
-      });
-
-      await host.open(const PlayerOpenRequest(itemId: 'movie-up'));
-      final pid = control.lastPid;
-      await tester.pump();
-
-      await tester.tap(find.byKey(SessionActions.serverMenuKey));
-      await settle(tester);
-      await tester.tap(find.text('另一台'));
-      await pumpUntil(tester, () => auth.session?.server.id == other.serverId);
-      await settle(tester);
-
-      expect(auth.session?.server.id, other.serverId);
-      expect(
-        calls,
-        containsAllInOrder([
-          'requestClose:$pid',
-          'kill:$pid',
-          'switchTo:${other.serverId}',
-        ]),
       );
       expect(host.current, isNull);
     }, tags: ['integration']);

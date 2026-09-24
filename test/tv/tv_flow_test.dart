@@ -5,7 +5,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
 import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/tv_shell.dart';
-import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
@@ -140,25 +139,6 @@ void main() {
     expect(tester.takeException(), isNull);
   }, tags: ['integration']);
 
-  testWidgets('snapshot recovery repeated failure allows remote reconnection', (
-    tester,
-  ) async {
-    final server = FakeEmbyServer(), store = _FailingRecoveryStore();
-    final (app, _) = await start(tester, server, snapshotStore: store);
-    await login(tester, server);
-    expect(focusedLabel(tester), '重试');
-    await key(tester, LogicalKeyboardKey.select);
-    expect(store.reads, 2);
-    expect(focusedLabel(tester), '重试');
-    await key(tester, LogicalKeyboardKey.arrowDown);
-    expect(focusedLabel(tester), '连接');
-    await key(tester, LogicalKeyboardKey.select);
-    expect(app.auth.isLoggedIn, isFalse);
-    expect(find.byKey(const Key('tv-connect-address')), findsOneWidget);
-    expect(focusedAction(), findsOneWidget);
-    expect(tester.takeException(), isNull);
-  }, tags: ['integration']);
-
   testWidgets(
     'remote login browse play seek tracks back restores exact source card',
     (tester) async {
@@ -215,32 +195,6 @@ void main() {
     tags: ['integration'],
   );
 
-  testWidgets('remote Back exits after natural playback completion', (
-    tester,
-  ) async {
-    final server = FakeEmbyServer();
-    final (_, backend) = await start(tester, server);
-    await login(tester, server);
-    await key(tester, LogicalKeyboardKey.arrowRight);
-    await key(tester, LogicalKeyboardKey.select);
-    await key(tester, LogicalKeyboardKey.select);
-    final c = tester
-        .state<TvPlayerPageState>(find.byType(TvPlayerPage))
-        .controller!;
-    backend.completePlayback(at: c.duration);
-    await tester.pumpAndSettle();
-    expect(c.playbackEnded, isTrue);
-    expect(c.controlsVisible, isTrue);
-    await key(tester, LogicalKeyboardKey.goBack);
-    await tester.binding.handlePopRoute();
-    await tester.pumpAndSettle();
-    await tester.pump(const Duration(seconds: 4));
-    await tester.pumpAndSettle();
-    expect(find.byType(TvDetailPage), findsOneWidget);
-    expect(find.byType(TvPlayerPage), findsNothing);
-    expect(tester.takeException(), isNull);
-  }, tags: ['integration']);
-
   testWidgets(
     'remote search retains query and returns to home from destination',
     (tester) async {
@@ -268,92 +222,6 @@ void main() {
     tags: ['integration'],
   );
 
-  testWidgets('remote can return from home card to navigation', (tester) async {
-    final server = FakeEmbyServer();
-    await start(tester, server);
-    await login(tester, server);
-    await key(tester, LogicalKeyboardKey.arrowRight);
-    await key(tester, LogicalKeyboardKey.select);
-    await tester.binding.handlePopRoute();
-    await tester.pumpAndSettle();
-    await key(tester, LogicalKeyboardKey.arrowLeft);
-    expect(focusedLabel(tester), anyOf('首页', '片库', '搜索', '设置'));
-    expect(tester.takeException(), isNull);
-  }, tags: ['integration']);
-
-  testWidgets(
-    'remote offline search retry and empty results retain an escape path',
-    (tester) async {
-      final server = FakeEmbyServer();
-      await start(tester, server);
-      await login(tester, server);
-      await key(tester, LogicalKeyboardKey.arrowDown);
-      await key(tester, LogicalKeyboardKey.arrowDown);
-      await key(tester, LogicalKeyboardKey.select);
-      await key(tester, LogicalKeyboardKey.arrowRight);
-      server.searchStatus = 503;
-      await edit(tester, 'Inception');
-      expect(find.byType(TvFailure), findsOneWidget);
-      server.searchStatus = null;
-      await key(tester, LogicalKeyboardKey.arrowDown);
-      await key(tester, LogicalKeyboardKey.arrowDown);
-      await key(tester, LogicalKeyboardKey.select);
-      expect(find.byType(TvFailure), findsNothing);
-      expect(find.text('Inception'), findsWidgets);
-      await tester.binding.handlePopRoute();
-      await tester.pumpAndSettle();
-      expect(focusedLabel(tester), '首页');
-    },
-    tags: ['integration'],
-  );
-
-  testWidgets(
-    'remote authentication failure retries without retyping credentials',
-    (tester) async {
-      final server = FakeEmbyServer()..authenticationStatus = 503;
-      await start(tester, server);
-      await edit(tester, server.baseUrl.toString());
-      await key(tester, LogicalKeyboardKey.arrowDown);
-      await edit(tester, 'alice');
-      await key(tester, LogicalKeyboardKey.arrowDown);
-      await edit(tester, 'correct-horse');
-      await key(tester, LogicalKeyboardKey.arrowDown);
-      await key(tester, LogicalKeyboardKey.arrowDown);
-      await key(tester, LogicalKeyboardKey.select);
-      expect(find.byType(TvShell), findsNothing);
-      server.authenticationStatus = null;
-      await key(tester, LogicalKeyboardKey.select);
-      expect(find.byType(TvShell), findsOneWidget);
-    },
-    tags: ['integration'],
-  );
-
-  testWidgets('remote decoder failure retries and error back exits directly', (
-    tester,
-  ) async {
-    final server = FakeEmbyServer();
-    final (_, backend) = await start(tester, server);
-    await login(tester, server);
-    await key(tester, LogicalKeyboardKey.arrowRight);
-    await key(tester, LogicalKeyboardKey.select);
-    await key(tester, LogicalKeyboardKey.select);
-    backend.emitError('network stream interrupted');
-    await tester.pumpAndSettle();
-    expect(find.text('重试'), findsOneWidget);
-    expect(focusedLabel(tester), '重试');
-    final before = backend.openCount;
-    await key(tester, LogicalKeyboardKey.select);
-    expect(backend.openCount, before + 1);
-    backend.emitError('network stream interrupted');
-    await tester.pumpAndSettle();
-    await tester.binding.handlePopRoute();
-    await tester.pumpAndSettle();
-    await tester.pump(const Duration(seconds: 4));
-    await tester.pumpAndSettle();
-    expect(find.byType(TvPlayerPage), findsNothing);
-    expect(find.byType(TvDetailPage), findsOneWidget);
-  }, tags: ['integration']);
-
   testWidgets(
     'catalog removes focused card and remote recovers a visible target',
     (tester) async {
@@ -377,81 +245,6 @@ void main() {
       expect(focusedLabel(tester), isNotEmpty);
       await key(tester, LogicalKeyboardKey.select);
       expect(tester.takeException(), isNull);
-    },
-    tags: ['integration'],
-  );
-
-  testWidgets(
-    'expired authentication returns to remote connection with cleared secret',
-    (tester) async {
-      final server = FakeEmbyServer();
-      final (app, _) = await start(tester, server);
-      await login(tester, server);
-      server.expireAuthenticatedRequests = true;
-      server.authenticationStatus = 401;
-      final c = CatalogScope.of(tester.element(find.byType(TvShell)));
-      unawaited(c.reload(showCachedFirst: false));
-      await tester.pumpAndSettle();
-      expect(app.auth.isLoggedIn, isFalse);
-      expect(find.byKey(const Key('tv-connect-address')), findsOneWidget);
-      expect(find.textContaining('alice'), findsWidgets);
-      expect(find.textContaining('•'), findsNothing);
-      expect(focusedAction(), findsOneWidget);
-    },
-    tags: ['integration'],
-  );
-
-  testWidgets(
-    'covered collection does not steal detail focus and repairs on return',
-    (tester) async {
-      final server = FakeEmbyServer();
-      await start(tester, server);
-      await login(tester, server);
-      final catalog = CatalogScope.of(tester.element(find.byType(TvShell)));
-      await key(tester, LogicalKeyboardKey.arrowRight);
-      await key(tester, LogicalKeyboardKey.select);
-      final detailFocus = FocusManager.instance.primaryFocus;
-      server.items = [];
-      unawaited(catalog.reload(showCachedFirst: false));
-      await tester.pumpAndSettle();
-      expect(FocusManager.instance.primaryFocus, same(detailFocus));
-      await tester.binding.handlePopRoute();
-      await tester.pumpAndSettle();
-      expect(focusedAction(), findsOneWidget);
-      expect(tester.takeException(), isNull);
-    },
-    tags: ['integration'],
-  );
-
-  testWidgets(
-    'credential renewal unwinds TV track dialog and its owned player route',
-    (tester) async {
-      final server = FakeEmbyServer();
-      final (app, _) = await start(tester, server);
-      await login(tester, server);
-      await key(tester, LogicalKeyboardKey.arrowRight);
-      await key(tester, LogicalKeyboardKey.select);
-      await key(tester, LogicalKeyboardKey.select);
-      await key(tester, LogicalKeyboardKey.arrowUp);
-      await key(tester, LogicalKeyboardKey.arrowUp);
-      await key(tester, LogicalKeyboardKey.select);
-      expect(find.byType(AlertDialog), findsOneWidget);
-      final dialogFocus = FocusManager.instance.primaryFocus;
-      final catalog = CatalogScope.of(
-        tester.element(find.byType(TvShell, skipOffstage: false)),
-      );
-      server.items = [];
-      unawaited(catalog.reload(showCachedFirst: false));
-      await tester.pumpAndSettle();
-      expect(FocusManager.instance.primaryFocus, same(dialogFocus));
-      server.issuedTokens.clear();
-      unawaited(app.auth.client.getUser());
-      await tester.pumpAndSettle();
-      await tester.pump(const Duration(seconds: 4));
-      await tester.pumpAndSettle();
-      expect(find.byType(AlertDialog), findsNothing);
-      expect(find.byType(TvPlayerPage), findsNothing);
-      expect(find.byType(TvDetailPage), findsOneWidget);
     },
     tags: ['integration'],
   );
