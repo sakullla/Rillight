@@ -31,6 +31,7 @@ class PhoneItemBanner extends StatelessWidget {
     this.actions,
     this.preferBackdrop = true,
     this.maxWidth = PhoneMotion.pageRequestWidth,
+    this.maxImageHeight,
   });
 
   static const bannerKey = Key('phone-detail-banner');
@@ -43,6 +44,9 @@ class PhoneItemBanner extends StatelessWidget {
   final bool preferBackdrop;
   final int maxWidth;
 
+  /// 剧集把季列表和分集当作主体时，压低背图，避免先滑过一大块画面。
+  final double? maxImageHeight;
+
   /// 背图高度上限(相对屏高):横屏/矮窗里 16:9 全宽会超过半屏,
   /// 压住标题与主操作,这里封顶保证头部信息首屏可达。
   static const double _maxHeightFactor = 0.5;
@@ -53,7 +57,11 @@ class PhoneItemBanner extends StatelessWidget {
     final size = MediaQuery.sizeOf(context);
     final byWidth = size.width * 9 / 16;
     final heightCap = size.height * _maxHeightFactor;
-    final imageHeight = byWidth < heightCap ? byWidth : heightCap;
+    var imageHeight = byWidth < heightCap ? byWidth : heightCap;
+    final imageCap = maxImageHeight;
+    if (imageCap != null && imageHeight > imageCap) {
+      imageHeight = imageCap;
+    }
     return Column(
       key: bannerKey,
       crossAxisAlignment: CrossAxisAlignment.stretch,

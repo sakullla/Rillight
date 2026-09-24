@@ -217,7 +217,14 @@ void main() {
     );
     expect(find.text('从头播放'), findsNothing);
     expect(find.byKey(const Key('phone-episode-current')), findsOneWidget);
-    expect(tester.getRect(play).bottom, lessThanOrEqualTo(800 - 48));
+    final viewportBottom = 800 - 48;
+    expect(tester.getRect(play).bottom, lessThanOrEqualTo(viewportBottom));
+    final episodeRow = find.byKey(CatalogKeys.episode('episode-friends-s2e1'));
+    expect(tester.getRect(episodeRow).top, lessThan(viewportBottom));
+    expect(
+      tester.getRect(episodeRow).top,
+      greaterThan(tester.getRect(play).bottom),
+    );
 
     await tester.tap(play);
     await tester.pumpAndSettle();
@@ -288,8 +295,16 @@ void main() {
     expect(backend.position, Duration.zero);
     await closePlayer(tester);
 
-    await tester.ensureVisible(find.byKey(CatalogKeys.chapter(1)));
-    await tester.tap(find.byKey(CatalogKeys.chapter(1)));
+    final chapter0 = find.byKey(CatalogKeys.chapter(0));
+    final chapter1 = find.byKey(CatalogKeys.chapter(1));
+    await tester.ensureVisible(chapter1);
+    expect(tester.getSize(chapter0).height, lessThan(72));
+    expect(
+      tester.getRect(chapter1).top,
+      greaterThanOrEqualTo(tester.getRect(chapter0).bottom),
+    );
+    expect(tester.getSize(chapter0).width, greaterThan(300));
+    await tester.tap(chapter1);
     await tester.pumpAndSettle();
     expect(backend.position, const Duration(minutes: 7));
     final extra =
@@ -610,6 +625,74 @@ void main() {
     await closePlayer(tester);
     expect(tester.takeException(), isNull);
   }, tags: ['integration']);
+
+  testWidgets(
+    'episode detail resumes, restarts, and uses a compact chapter list',
+    (tester) async {
+      const minute = 10000000 * 60;
+      final server = FakeEmbyServer();
+      final episode = server.items.firstWhere(
+        (item) => item.id == 'episode-friends-s1e2',
+      );
+      episode.playbackPositionTicks = minute * 4;
+      episode.playedPercentage = 18;
+      episode.overview = 'Ross learns the news.';
+      episode.chapters = const [
+        FakeChapter(name: 'Cold open', startPositionTicks: 0),
+        FakeChapter(name: 'Theme', startPositionTicks: 90 * 10000000),
+      ];
+      episode.people = const [
+        FakePerson(name: 'Ross Actor', type: 'Actor', role: 'Ross'),
+      ];
+      final (router, backend) = await start(tester, server, width: 360);
+      await openItem(tester, router, 'episode-friends-s1e2');
+
+      expect(find.byType(MobileDetailPage), findsOneWidget);
+      expect(find.byType(ChoiceChip), findsNothing);
+      expect(find.text('继续播放'), findsOneWidget);
+      expect(find.text('从头播放'), findsOneWidget);
+      expect(find.byKey(EpisodeOverviewSection.textKey), findsOneWidget);
+      expect(find.text('演职员'), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('mobile-detail-play')));
+      await tester.pumpAndSettle();
+      expect(backend.position, const Duration(minutes: 4));
+      await closePlayer(tester);
+
+      await tester.tap(find.byKey(const Key('phone-detail-play-start')));
+      await tester.pumpAndSettle();
+      expect(backend.position, Duration.zero);
+      await closePlayer(tester);
+
+      final first = find.byKey(CatalogKeys.chapter(0));
+      final second = find.byKey(CatalogKeys.chapter(1));
+      await tester.scrollUntilVisible(
+        second,
+        120,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.pumpAndSettle();
+      expect(tester.getSize(first).height, lessThan(72));
+      expect(
+        tester.getRect(second).top,
+        greaterThanOrEqualTo(tester.getRect(first).bottom),
+      );
+      await tester.tap(second);
+      await tester.pumpAndSettle();
+      expect(backend.position, const Duration(seconds: 90));
+      await closePlayer(tester);
+
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      await openItem(tester, router, 'episode-friends-s1e1');
+      expect(find.text('从头播放'), findsNothing);
+      expect(find.text('章节'), findsNothing);
+      expect(find.byKey(CatalogKeys.chapter(0)), findsNothing);
+      expect(find.text('演职员'), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+    tags: ['integration'],
+  );
 }
 
 Future<void> _filterUnwatched(WidgetTester tester) async {

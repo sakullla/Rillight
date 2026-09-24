@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -460,6 +459,7 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
                           ),
                     preferBackdrop: handoff?.preferBackdrop ?? true,
                     maxWidth: handoff?.maxWidth ?? PhoneMotion.pageRequestWidth,
+                    maxImageHeight: item?.isSeries == true ? 120 : null,
                   ),
                 if (controller.loading) const LinearProgressIndicator(),
                 if (controller.error != null && item == null)
@@ -641,11 +641,7 @@ class _PhoneItemDetail extends StatelessWidget {
             ),
           ),
         if (item.chapters.isNotEmpty)
-          _ChapterRow(
-            itemId: item.id,
-            chapters: item.chapters,
-            onChapter: onChapter,
-          ),
+          _ChapterList(chapters: item.chapters, onChapter: onChapter),
         EpisodePeopleSection(people: item.people),
         if (similar.isNotEmpty)
           _DetailSimilar(
@@ -727,14 +723,10 @@ class _NeighborCard extends StatelessWidget {
   }
 }
 
-class _ChapterRow extends StatelessWidget {
-  const _ChapterRow({
-    required this.itemId,
-    required this.chapters,
-    required this.onChapter,
-  });
+/// 手机章节：时间 + 标题的紧凑行，点按从该时间开播。无章节时调用方不建此分区。
+class _ChapterList extends StatelessWidget {
+  const _ChapterList({required this.chapters, required this.onChapter});
 
-  final String itemId;
   final List<ItemChapter> chapters;
   final ValueChanged<ItemChapter>? onChapter;
 
@@ -742,6 +734,7 @@ class _ChapterRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context);
     final theme = Theme.of(context);
+    final lineStyle = theme.textTheme.bodyMedium;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -750,104 +743,43 @@ class _ChapterRow extends StatelessWidget {
             AppSpacing.md,
             AppSpacing.lg,
             AppSpacing.md,
-            AppSpacing.sm,
+            AppSpacing.xs,
           ),
           child: Text(l.chapters, style: theme.textTheme.titleMedium),
         ),
-        SizedBox(
-          height: 188,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
-            itemCount: chapters.length,
-            separatorBuilder: (context, index) =>
-                const SizedBox(width: AppSpacing.sm),
-            itemBuilder: (context, index) {
-              final chapter = chapters[index];
-              final playable = onChapter != null;
-              return InkWell(
-                key: CatalogKeys.chapter(index),
-                onTap: playable ? () => onChapter!(chapter) : null,
-                child: SizedBox(
-                  width: 200,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      AspectRatio(
-                        aspectRatio: 16 / 9,
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(AppRadii.sm),
-                          child: _ChapterStill(
-                            itemId: itemId,
-                            index: index,
-                            chapter: chapter,
-                          ),
-                        ),
+        for (var index = 0; index < chapters.length; index++)
+          InkWell(
+            key: CatalogKeys.chapter(index),
+            onTap: onChapter == null ? null : () => onChapter!(chapters[index]),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.md,
+                vertical: AppSpacing.sm,
+              ),
+              child: Row(
+                children: [
+                  SizedBox(
+                    width: 64,
+                    child: Text(
+                      chapterClock(chapters[index].startPositionTicks),
+                      style: theme.textTheme.labelLarge?.copyWith(
+                        color: theme.colorScheme.primary,
                       ),
-                      const SizedBox(height: AppSpacing.xxs),
-                      Text(
-                        chapterClock(chapter.startPositionTicks),
-                        style: theme.textTheme.labelMedium,
-                      ),
-                      Text(
-                        chapter.name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
+                    ),
                   ),
-                ),
-              );
-            },
+                  Expanded(
+                    child: Text(
+                      chapters[index].name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: lineStyle,
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
-        ),
       ],
-    );
-  }
-}
-
-class _ChapterStill extends StatefulWidget {
-  const _ChapterStill({
-    required this.itemId,
-    required this.index,
-    required this.chapter,
-  });
-
-  final String itemId;
-  final int index;
-  final ItemChapter chapter;
-
-  @override
-  State<_ChapterStill> createState() => _ChapterStillState();
-}
-
-class _ChapterStillState extends State<_ChapterStill> {
-  Future<Uint8List?>? _image;
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    _image ??= loadChapterImage(
-      context,
-      itemId: widget.itemId,
-      index: widget.index,
-      tag: widget.chapter.imageTag,
-      maxWidth: 480,
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return FutureBuilder<Uint8List?>(
-      future: _image,
-      builder: (context, snapshot) {
-        final bytes = snapshot.data;
-        if (bytes == null || bytes.isEmpty) {
-          return ColoredBox(color: theme.colorScheme.surfaceContainerHigh);
-        }
-        return Image.memory(bytes, fit: BoxFit.cover);
-      },
     );
   }
 }
