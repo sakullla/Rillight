@@ -504,7 +504,11 @@ class _MediaShelfState extends State<MediaShelf> {
                                                 ),
                                           onTap: () => widget.onTap(item),
                                           onRemoveFromResume:
-                                              widget.onRemoveFromResume,
+                                              widget.onRemoveFromResume !=
+                                                      null &&
+                                                  item.canResume
+                                              ? widget.onRemoveFromResume
+                                              : null,
                                         );
                                     return Padding(
                                       padding: const EdgeInsets.symmetric(

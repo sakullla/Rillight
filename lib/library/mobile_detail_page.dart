@@ -1,14 +1,17 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:rillight/app/content_theme.dart';
+import 'package:rillight/library/detail_extras.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_motion.dart';
 import 'package:rillight/app/mobile_widgets.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme/tokens.dart';
+import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/auth/auth_scope.dart';
-import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/catalog_scope.dart';
@@ -25,10 +28,12 @@ class MobileDetailPage extends StatefulWidget {
     super.key,
     required this.itemId,
     this.initialSeasonId,
+    this.initialEpisodeId,
   });
 
   final String itemId;
   final String? initialSeasonId;
+  final String? initialEpisodeId;
 
   @override
   State<MobileDetailPage> createState() => _MobileDetailPageState();
@@ -42,6 +47,22 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
   int? _audioStreamIndex;
   int? _subtitleStreamIndex;
   bool _playedBusy = false;
+  final _scroll = ScrollController();
+  var _barSolid = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _scroll.addListener(_onDetailScroll);
+  }
+
+  void _onDetailScroll() {
+    final solid = _scroll.hasClients && _scroll.offset > 72;
+    if (solid == _barSolid || !mounted) {
+      return;
+    }
+    setState(() => _barSolid = solid);
+  }
 
   @override
   void didChangeDependencies() {
@@ -58,6 +79,8 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
 
   @override
   void dispose() {
+    _scroll.removeListener(_onDetailScroll);
+    _scroll.dispose();
     _controller?.dispose();
     super.dispose();
   }
@@ -77,9 +100,38 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
     if (!mounted) return;
     await controller.load();
     if (!mounted) return;
+    await _revealInitialEpisode();
+    if (!mounted) return;
     await controller.retainOffPageResume();
     if (!mounted) return;
     await _loadExtras();
+  }
+
+  /// 从某一集进来时，把这一季的窗口对准该集，而不是总从第 1 集铺开。
+  Future<void> _revealInitialEpisode() async {
+    final id = widget.initialEpisodeId?.trim();
+    final controller = _controller;
+    if (id == null ||
+        id.isEmpty ||
+        controller == null ||
+        controller.item?.isSeries != true) {
+      return;
+    }
+    if (controller.episodes.any((episode) => episode.id == id)) {
+      return;
+    }
+    try {
+      final episode = await controller.repository.item(id);
+      final season = episode.seasonId ?? episode.parentId;
+      final number = episode.indexNumber;
+      if (season == null || season.isEmpty) {
+        return;
+      }
+      final start = number == null || number <= 1 ? 0 : number - 1;
+      await controller.selectSeason(season, startAt: start);
+    } catch (_) {
+      // 对不齐时仍显示已加载的季。
+    }
   }
 
   Future<void> _refresh() async {
@@ -150,7 +202,7 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
         next = null;
       }
       try {
-        previous = await _previousEpisodeOf(client, item);
+        previous = await client.getPreviousEpisode(item);
       } catch (_) {
         previous = null;
       }
@@ -161,29 +213,6 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
       _nextEpisode = next;
       _previousEpisode = previous;
     });
-  }
-
-  Future<EmbyItem?> _previousEpisodeOf(
-    EmbyClient client,
-    EmbyItem episode,
-  ) async {
-    final seriesId = episode.seriesId;
-    if (seriesId == null || seriesId.isEmpty) return null;
-    final episodes = await client.getItems(
-      parentId: seriesId,
-      includeItemTypes: 'Episode',
-      recursive: true,
-    );
-    episodes.sort((a, b) {
-      final season = (a.parentIndexNumber ?? 0).compareTo(
-        b.parentIndexNumber ?? 0,
-      );
-      if (season != 0) return season;
-      return (a.indexNumber ?? 0).compareTo(b.indexNumber ?? 0);
-    });
-    final index = episodes.indexWhere((item) => item.id == episode.id);
-    if (index <= 0) return null;
-    return episodes[index - 1];
   }
 
   Future<void> _openPlayer(
@@ -271,19 +300,50 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
     return found;
   }
 
+  void _showPlayed(EmbyItem item, {required bool played}) {
+    final controller = _controller;
+    if (controller == null) {
+      return;
+    }
+    controller.applyItem(
+      item.copyWith(
+        userData: item.userData.copyWith(
+          played: played,
+          playbackPositionTicks: 0,
+          playedPercentage: played ? 100 : 0,
+        ),
+      ),
+    );
+  }
+
   Future<void> _togglePlayed() async {
     final item = _controller?.item;
     if (item == null || _playedBusy) return;
+    final next = !item.userData.played;
     setState(() => _playedBusy = true);
+    _showPlayed(item, played: next);
     try {
       final client = AuthScope.of(context).client;
-      if (item.userData.played) {
-        await client.markUnplayed(item.id);
-      } else {
+      if (next) {
         await client.markPlayed(item.id);
+      } else {
+        await client.markUnplayed(item.id);
       }
       if (!mounted) return;
       await _controller!.load();
+      final current = _controller?.item;
+      if (current != null &&
+          current.id == item.id &&
+          current.userData.played != next) {
+        _showPlayed(current, played: next);
+      }
+      if (!mounted) return;
+      final l = AppLocalizations.of(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(next ? l.markPlayed : l.markUnplayed)),
+      );
+    } catch (_) {
+      if (mounted) _showPlayed(item, played: item.userData.played);
     } finally {
       if (mounted) setState(() => _playedBusy = false);
     }
@@ -291,6 +351,109 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
 
   void _openItem(String itemId) {
     context.push(AppRoutes.item(itemId));
+  }
+
+  void _openSeries(EmbyItem episode) {
+    final seriesId = episode.seriesId;
+    if (seriesId == null || seriesId.isEmpty) {
+      return;
+    }
+    context.push(
+      AppRoutes.item(
+        seriesId,
+        seasonId: episode.seasonId ?? episode.parentId,
+        episodeId: episode.id,
+      ),
+    );
+  }
+
+  Future<void> _pickEpisode() async {
+    final controller = _controller;
+    final seasonId = controller?.seasonId;
+    final total = controller?.episodeTotal ?? 0;
+    if (controller == null || seasonId == null || total <= 0) {
+      return;
+    }
+    final selected = await showModalBottomSheet<int>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) {
+        final l = AppLocalizations.of(context);
+        return Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.md,
+                0,
+                AppSpacing.md,
+                AppSpacing.sm,
+              ),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  l.pickEpisode,
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+              ),
+            ),
+            Expanded(
+              child: GridView.builder(
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.md,
+                  0,
+                  AppSpacing.md,
+                  AppSpacing.lg,
+                ),
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 6,
+                  mainAxisSpacing: 8,
+                  crossAxisSpacing: 8,
+                  childAspectRatio: 1.4,
+                ),
+                itemCount: total,
+                itemBuilder: (context, index) {
+                  final number = index + 1;
+                  final current = controller.episodes.any(
+                    (episode) => episode.indexNumber == number,
+                  );
+                  return OutlinedButton(
+                    style: OutlinedButton.styleFrom(
+                      padding: EdgeInsets.zero,
+                      backgroundColor: current
+                          ? Theme.of(
+                              context,
+                            ).colorScheme.primary.withValues(alpha: 0.18)
+                          : null,
+                    ),
+                    onPressed: () => Navigator.pop(context, number),
+                    child: Text('$number'),
+                  );
+                },
+              ),
+            ),
+          ],
+        );
+      },
+    );
+    if (!mounted || selected == null) {
+      return;
+    }
+    final start = selected <= 1 ? 0 : selected - 1;
+    await controller.selectSeason(seasonId, startAt: start);
+  }
+
+  void _openGenre(EmbyItem item, String genre) {
+    final types = item.isSeries || item.isEpisode ? 'Series' : 'Movie';
+    final parent = item.isEpisode ? null : item.parentId;
+    context.push(
+      AppRoutes.shelfItems(
+        parentId: parent,
+        includeItemTypes: types,
+        title: genre,
+        recursive: true,
+        genre: genre,
+      ),
+    );
   }
 
   ItemMediaSource? _source(EmbyItem item) {
@@ -301,70 +464,6 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
     return item.mediaSources.firstOrNull;
   }
 
-  bool _hasTracks(EmbyItem item) {
-    final source = _source(item);
-    return item.mediaSources.length > 1 ||
-        (source?.audioStreams.isNotEmpty ?? false) ||
-        (source?.subtitleStreams.isNotEmpty ?? false);
-  }
-
-  Future<void> _openTracks(EmbyItem item) async {
-    final source = _source(item);
-    await PhoneMotion.showBottomPanel<void>(
-      context: context,
-      showDragHandle: true,
-      useSafeArea: true,
-      builder: (context) {
-        final l = AppLocalizations.of(context);
-        return ListView(
-          padding: const EdgeInsets.only(bottom: AppSpacing.lg),
-          children: [
-            if (item.mediaSources.length > 1) ...[
-              ListTile(title: Text(l.mediaSource)),
-              for (final candidate in item.mediaSources)
-                ListTile(
-                  title: Text(candidate.label),
-                  selected: candidate.id == _controller?.mediaSourceId,
-                  onTap: () {
-                    _controller?.selectSource(candidate.id);
-                    setState(() {
-                      _audioStreamIndex = null;
-                      _subtitleStreamIndex = null;
-                    });
-                    Navigator.pop(context);
-                  },
-                ),
-            ],
-            if (source != null && source.audioStreams.isNotEmpty) ...[
-              ListTile(title: Text(l.audioTrack)),
-              for (final stream in source.audioStreams)
-                ListTile(
-                  title: Text(stream.label ?? '#${stream.index}'),
-                  selected: stream.index == _audioStreamIndex,
-                  onTap: () {
-                    setState(() => _audioStreamIndex = stream.index);
-                    Navigator.pop(context);
-                  },
-                ),
-            ],
-            if (source != null && source.subtitleStreams.isNotEmpty) ...[
-              ListTile(title: Text(l.subtitleTrack)),
-              for (final stream in source.subtitleStreams)
-                ListTile(
-                  title: Text(stream.label ?? '#${stream.index}'),
-                  selected: stream.index == _subtitleStreamIndex,
-                  onTap: () {
-                    setState(() => _subtitleStreamIndex = stream.index);
-                    Navigator.pop(context);
-                  },
-                ),
-            ],
-          ],
-        );
-      },
-    );
-  }
-
   PhoneImageHandoff? _imageHandoff(BuildContext context) {
     final extra = GoRouterState.of(context).extra;
     if (extra is! PhoneImageHandoff || extra.item.id != widget.itemId) {
@@ -373,7 +472,8 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
     return extra;
   }
 
-  /// 头部元数据胶囊:年份/季集数/时长/评级/类型,评级高亮突出层级。
+  /// 标题下只留辨认这部片子的一行:年份、时长、评分、类型。
+  /// 首播和入库日期在下方的媒体信息里。
   List<PhoneMetaEntry> _bannerMeta(AppLocalizations l, EmbyItem item) {
     if (item.isSeries) {
       final seasons = _controller?.seasons ?? const <EmbyItem>[];
@@ -383,6 +483,13 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
         if (seasons.isNotEmpty) PhoneMetaEntry(l.seasonCount(seasons.length)),
         if (item.childCount != null)
           PhoneMetaEntry(l.episodeCount(item.childCount!)),
+        if (item.communityRating != null)
+          PhoneMetaEntry(
+            item.communityRating!.toStringAsFixed(1),
+            highlight: true,
+          ),
+        for (final genre in item.genres)
+          PhoneMetaEntry(genre, onTap: () => _openGenre(item, genre)),
       ];
     }
     final code = item.isEpisode ? seasonEpisodeCode(item) : null;
@@ -396,7 +503,8 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
           item.communityRating!.toStringAsFixed(1),
           highlight: true,
         ),
-      for (final genre in item.genres) PhoneMetaEntry(genre),
+      for (final genre in item.genres)
+        PhoneMetaEntry(genre, onTap: () => _openGenre(item, genre)),
     ];
   }
 
@@ -420,98 +528,147 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
         final target = controller.playTarget;
         final handoff = _imageHandoff(context);
         final imageSource = handoff?.item ?? item;
-        return Scaffold(
-          extendBodyBehindAppBar: imageSource != null,
-          appBar: AppBar(
-            backgroundColor: imageSource == null ? null : Colors.transparent,
-            surfaceTintColor: Colors.transparent,
-            elevation: 0,
-            foregroundColor: imageSource == null ? null : Colors.white,
-            title: imageSource == null ? Text(l.playerLoading) : null,
-          ),
-          body: RefreshIndicator(
-            onRefresh: _refresh,
-            child: ListView(
-              key: PageStorageKey('detail-${widget.itemId}'),
-              physics: const AlwaysScrollableScrollPhysics(),
-              padding: EdgeInsets.zero,
-              children: [
-                if (imageSource != null)
-                  PhoneItemBanner(
-                    item: imageSource,
-                    title: (item ?? imageSource).name,
-                    meta: item == null ? const [] : _bannerMeta(l, item),
-                    actions: item == null
-                        ? null
-                        : _DetailPlayActions(
-                            label: target == null
-                                ? l.noPlayableStream
-                                : _playLabel(l, item, target),
-                            enabled: target != null && target.isPlayable,
-                            showRestart:
-                                !item.isSeries && target?.canResume == true,
-                            onPlay: target == null
-                                ? null
-                                : () => _openPlayer(target.id),
-                            onRestart: target == null
-                                ? null
-                                : () => _openPlayer(target.id, fromStart: true),
-                          ),
-                    preferBackdrop: handoff?.preferBackdrop ?? true,
-                    maxWidth: handoff?.maxWidth ?? PhoneMotion.pageRequestWidth,
-                    maxImageHeight: item?.isSeries == true ? 200 : null,
-                  ),
-                if (controller.loading) const LinearProgressIndicator(),
-                if (controller.error != null && item == null)
-                  MobileFailure(error: controller.error!, retry: _refresh),
-                if (item != null && item.isSeries)
-                  MobileSeriesPage(
-                    item: item,
-                    seasons: controller.seasons,
-                    seasonId: controller.seasonId,
-                    episodes: controller.episodes,
-                    episodesLoading: controller.episodesLoading,
-                    episodeError: controller.episodeError,
-                    hasMore: controller.hasMore,
-                    playTargetId: target?.id,
-                    similar: _similar,
-                    onSelectSeason: _changeSeason,
-                    onOpenEpisode: _openItem,
-                    onRetryEpisodes: controller.seasonId == null
-                        ? null
-                        : () => _changeSeason(
-                            controller.seasonId!,
-                            more:
-                                controller.episodes.isNotEmpty &&
-                                controller.hasMore,
-                          ),
-                    onLoadMore: controller.seasonId == null
-                        ? null
-                        : () => _changeSeason(controller.seasonId!, more: true),
-                    onOpenItem: _openItem,
-                    onOpenSimilar: _openSimilarShelf,
-                  ),
+        final immersive = imageSource != null && !_barSolid;
+        return ContentTheme(
+          item: imageSource,
+          preferBackdrop: handoff?.preferBackdrop ?? true,
+          child: Scaffold(
+            extendBodyBehindAppBar: imageSource != null,
+            appBar: AppBar(
+              backgroundColor: immersive ? Colors.transparent : null,
+              surfaceTintColor: Colors.transparent,
+              elevation: 0,
+              scrolledUnderElevation: 0,
+              foregroundColor: immersive ? Colors.white : null,
+              actions: [
                 if (item != null && !item.isSeries)
-                  _PhoneItemDetail(
-                    item: item,
-                    similar: _similar,
-                    nextEpisode: _nextEpisode,
-                    previousEpisode: _previousEpisode,
-                    playedBusy: _playedBusy,
-                    showTracks: _hasTracks(item),
-                    onOpenItem: _openItem,
-                    onOpenSeries: _openItem,
-                    onChapter: item.isPlayable
-                        ? (chapter) => _openPlayer(
-                            item.id,
-                            startTimeTicks: chapter.startPositionTicks,
-                          )
-                        : null,
-                    onTogglePlayed: _togglePlayed,
-                    onOpenTracks: () => _openTracks(item),
-                    onOpenSimilar: _openSimilarShelf,
+                  IconButton(
+                    key: CatalogKeys.playedToggle,
+                    tooltip: item.userData.played
+                        ? l.markUnplayed
+                        : l.markPlayed,
+                    onPressed: _playedBusy ? null : _togglePlayed,
+                    icon: Icon(
+                      item.userData.played
+                          ? Icons.check_circle
+                          : Icons.check_circle_outline,
+                      color: item.userData.played
+                          ? Theme.of(context).colorScheme.primary
+                          : null,
+                    ),
                   ),
               ],
+            ),
+            body: RefreshIndicator(
+              onRefresh: _refresh,
+              child: ListView(
+                key: PageStorageKey('detail-${widget.itemId}'),
+                controller: _scroll,
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: EdgeInsets.only(
+                  bottom: MediaQuery.paddingOf(context).bottom + AppSpacing.lg,
+                ),
+                children: [
+                  if (imageSource == null && controller.loading)
+                    const _PhoneDetailSkeleton()
+                  else if (imageSource != null)
+                    PhoneItemBanner(
+                      item: imageSource,
+                      title: (item ?? imageSource).name,
+                      titleHint: item != null && item.isEpisode
+                          ? item.seriesName
+                          : null,
+                      onTitleTap:
+                          item != null &&
+                              item.isEpisode &&
+                              item.seriesId != null &&
+                              item.seriesId!.isNotEmpty
+                          ? () => _openSeries(item)
+                          : null,
+                      meta: item == null ? const [] : _bannerMeta(l, item),
+                      actions: item == null
+                          ? null
+                          : _DetailPlayActions(
+                              label: target == null
+                                  ? l.noPlayableStream
+                                  : _playLabel(l, item, target),
+                              enabled: target != null && target.isPlayable,
+                              showRestart:
+                                  !item.isSeries && target?.canResume == true,
+                              onPlay: target == null
+                                  ? null
+                                  : () => _openPlayer(target.id),
+                              onRestart: target == null
+                                  ? null
+                                  : () =>
+                                        _openPlayer(target.id, fromStart: true),
+                              onPrevious:
+                                  item.isEpisode && _previousEpisode != null
+                                  ? () => _openItem(_previousEpisode!.id)
+                                  : null,
+                              onNext: item.isEpisode && _nextEpisode != null
+                                  ? () => _openItem(_nextEpisode!.id)
+                                  : null,
+                            ),
+                      preferBackdrop: handoff?.preferBackdrop ?? true,
+                      maxWidth:
+                          handoff?.maxWidth ?? PhoneMotion.pageRequestWidth,
+                    ),
+                  if (item != null) DetailAlbumStrip(item: item),
+                  if (controller.error != null && item == null)
+                    MobileFailure(error: controller.error!, retry: _refresh),
+                  if (item != null && item.isSeries)
+                    MobileSeriesPage(
+                      item: item,
+                      seasons: controller.seasons,
+                      seasonId: controller.seasonId,
+                      episodes: controller.episodes,
+                      episodesLoading: controller.episodesLoading,
+                      episodeError: controller.episodeError,
+                      hasMore: controller.hasMore,
+                      playTargetId: target?.id,
+                      focusEpisodeId: widget.initialEpisodeId,
+                      similar: _similar,
+                      onPickEpisode: _pickEpisode,
+                      onSelectSeason: _changeSeason,
+                      onOpenEpisode: _openItem,
+                      onRetryEpisodes: controller.seasonId == null
+                          ? null
+                          : () => _changeSeason(
+                              controller.seasonId!,
+                              more:
+                                  controller.episodes.isNotEmpty &&
+                                  controller.hasMore,
+                            ),
+                      onLoadMore: controller.seasonId == null
+                          ? null
+                          : () =>
+                                _changeSeason(controller.seasonId!, more: true),
+                      onOpenItem: _openItem,
+                      onOpenSimilar: _openSimilarShelf,
+                    ),
+                  if (item != null && !item.isSeries)
+                    _PhoneItemDetail(
+                      item: item,
+                      similar: _similar,
+                      mediaSource: _source(item),
+                      selectedAudioIndex: _audioStreamIndex,
+                      selectedSubtitleIndex: _subtitleStreamIndex,
+                      onAudio: (index) =>
+                          setState(() => _audioStreamIndex = index),
+                      onSubtitle: (index) =>
+                          setState(() => _subtitleStreamIndex = index),
+                      onOpenItem: _openItem,
+                      onChapter: item.isPlayable
+                          ? (chapter) => _openPlayer(
+                              item.id,
+                              startTimeTicks: chapter.startPositionTicks,
+                            )
+                          : null,
+                      onOpenSimilar: _openSimilarShelf,
+                    ),
+                ],
+              ),
             ),
           ),
         );
@@ -529,6 +686,8 @@ class _DetailPlayActions extends StatelessWidget {
     required this.showRestart,
     required this.onPlay,
     required this.onRestart,
+    this.onPrevious,
+    this.onNext,
   });
 
   final String label;
@@ -536,30 +695,53 @@ class _DetailPlayActions extends StatelessWidget {
   final bool showRestart;
   final VoidCallback? onPlay;
   final VoidCallback? onRestart;
+  final VoidCallback? onPrevious;
+  final VoidCallback? onNext;
 
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context);
+    final extras = <Widget>[
+      if (showRestart)
+        IconButton(
+          key: const Key('phone-detail-play-start'),
+          tooltip: l.playFromStart,
+          onPressed: onRestart,
+          icon: const Icon(Icons.replay),
+        ),
+      if (onPrevious != null)
+        IconButton(
+          key: CatalogKeys.previousEpisode,
+          tooltip: l.previousEpisode,
+          onPressed: onPrevious,
+          icon: const Icon(Icons.skip_previous),
+        ),
+      if (onNext != null)
+        IconButton(
+          key: CatalogKeys.nextEpisode,
+          tooltip: l.nextEpisode,
+          onPressed: onNext,
+          icon: const Icon(Icons.skip_next),
+        ),
+    ];
     return Row(
       children: [
-        Expanded(
-          child: FilledButton.icon(
+        Tooltip(
+          message: label,
+          child: FilledButton(
             key: const Key('mobile-detail-play'),
-            style: FilledButton.styleFrom(minimumSize: const Size(48, 48)),
+            style: FilledButton.styleFrom(
+              minimumSize: const Size(48, 48),
+              padding: EdgeInsets.zero,
+              shape: const CircleBorder(),
+            ),
             onPressed: enabled ? onPlay : null,
-            icon: const Icon(Icons.play_arrow),
-            label: Text(label, textAlign: TextAlign.center),
+            child: const Icon(Icons.play_arrow, size: 28),
           ),
         ),
-        if (showRestart) ...[
-          const SizedBox(width: AppSpacing.sm),
-          OutlinedButton.icon(
-            key: const Key('phone-detail-play-start'),
-            style: OutlinedButton.styleFrom(minimumSize: const Size(48, 48)),
-            onPressed: onRestart,
-            icon: const Icon(Icons.replay),
-            label: Text(l.playFromStart),
-          ),
+        if (extras.isNotEmpty) ...[
+          const SizedBox(width: AppSpacing.xs),
+          ...extras,
         ],
       ],
     );
@@ -570,110 +752,55 @@ class _PhoneItemDetail extends StatelessWidget {
   const _PhoneItemDetail({
     required this.item,
     required this.similar,
-    required this.nextEpisode,
-    required this.previousEpisode,
-    required this.playedBusy,
-    required this.showTracks,
+    required this.mediaSource,
+    required this.selectedAudioIndex,
+    required this.selectedSubtitleIndex,
+    required this.onAudio,
+    required this.onSubtitle,
     required this.onOpenItem,
-    required this.onOpenSeries,
     required this.onChapter,
-    required this.onTogglePlayed,
-    required this.onOpenTracks,
     required this.onOpenSimilar,
   });
 
   final EmbyItem item;
   final List<EmbyItem> similar;
-  final EmbyItem? nextEpisode;
-  final EmbyItem? previousEpisode;
-  final bool playedBusy;
-  final bool showTracks;
+  final ItemMediaSource? mediaSource;
+  final int? selectedAudioIndex;
+  final int? selectedSubtitleIndex;
+  final ValueChanged<int> onAudio;
+  final ValueChanged<int> onSubtitle;
   final ValueChanged<String> onOpenItem;
-  final ValueChanged<String> onOpenSeries;
   final ValueChanged<ItemChapter>? onChapter;
-  final VoidCallback onTogglePlayed;
-  final VoidCallback onOpenTracks;
   final VoidCallback onOpenSimilar;
 
   @override
   Widget build(BuildContext context) {
-    final l = AppLocalizations.of(context);
-    final theme = Theme.of(context);
-    final neighbors = [?previousEpisode, ?nextEpisode];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (item.isEpisode &&
-            item.seriesName != null &&
-            item.seriesName!.isNotEmpty &&
-            item.seriesId != null)
-          ListTile(
-            key: CatalogKeys.seriesLink,
-            contentPadding: const EdgeInsets.symmetric(
-              horizontal: AppSpacing.md,
-            ),
-            leading: Icon(Icons.tv_outlined, color: theme.colorScheme.primary),
-            title: Text(item.seriesName!),
-            subtitle: Text(l.viewSeries),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () => onOpenSeries(item.seriesId!),
-          ),
         if (plainOverview(item.overview) != null)
-          EpisodeOverviewSection(overview: item.overview),
-        if (neighbors.isNotEmpty)
-          SizedBox(
-            height: 220,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
-              itemCount: neighbors.length,
-              separatorBuilder: (context, index) =>
-                  const SizedBox(width: AppSpacing.sm),
-              itemBuilder: (context, index) {
-                final episode = neighbors[index];
-                final isNext = episode.id == nextEpisode?.id;
-                return _NeighborCard(
-                  episode: episode,
-                  label: isNext ? l.nextEpisode : l.previousEpisode,
-                  cardKey: isNext
-                      ? CatalogKeys.nextEpisode
-                      : CatalogKeys.previousEpisode,
-                  onTap: () => onOpenItem(episode.id),
-                );
-              },
-            ),
-          ),
+          EpisodeOverviewSection(overview: item.overview, compact: true),
         if (item.chapters.isNotEmpty)
-          _ChapterList(chapters: item.chapters, onChapter: onChapter),
+          _ChapterStrip(
+            itemId: item.id,
+            chapters: item.chapters,
+            onChapter: onChapter,
+          ),
         EpisodePeopleSection(people: item.people),
+        EpisodeMediaStreamsSection(
+          source: mediaSource,
+          selectedAudioIndex: selectedAudioIndex,
+          selectedSubtitleIndex: selectedSubtitleIndex,
+          onAudio: onAudio,
+          onSubtitle: onSubtitle,
+        ),
+        EpisodeMetadataSection(item: item),
+        DetailExternalLinks(links: item.externalUrls, title: item.name),
         if (similar.isNotEmpty)
           _DetailSimilar(
             items: similar,
             onOpenItem: onOpenItem,
             onOpenSimilar: onOpenSimilar,
-          ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
-          child: Align(
-            alignment: Alignment.centerLeft,
-            child: TextButton(
-              key: CatalogKeys.playedToggle,
-              onPressed: playedBusy ? null : onTogglePlayed,
-              child: Text(item.userData.played ? l.markUnplayed : l.markPlayed),
-            ),
-          ),
-        ),
-        if (showTracks)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: TextButton(
-                key: CatalogKeys.mediaSource,
-                onPressed: onOpenTracks,
-                child: Text(l.mediaSource, style: theme.textTheme.labelLarge),
-              ),
-            ),
           ),
         const SizedBox(height: AppSpacing.lg),
       ],
@@ -681,63 +808,25 @@ class _PhoneItemDetail extends StatelessWidget {
   }
 }
 
-class _NeighborCard extends StatelessWidget {
-  const _NeighborCard({
-    required this.episode,
-    required this.label,
-    required this.cardKey,
-    required this.onTap,
+/// 手机章节：横向 16:9 剧照卡，左下角时间，图下章节名。点按从该时间开播。
+class _ChapterStrip extends StatelessWidget {
+  const _ChapterStrip({
+    required this.itemId,
+    required this.chapters,
+    required this.onChapter,
   });
 
-  final EmbyItem episode;
-  final String label;
-  final Key cardKey;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return SizedBox(
-      width: 220,
-      child: InkWell(
-        key: cardKey,
-        onTap: onTap,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            AspectRatio(
-              aspectRatio: 16 / 9,
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(AppRadii.sm),
-                child: MediaImage(
-                  item: episode,
-                  preferThumb: true,
-                  maxWidth: 640,
-                ),
-              ),
-            ),
-            const SizedBox(height: AppSpacing.xxs),
-            Text(label, style: theme.textTheme.labelMedium),
-            Text(episode.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// 手机章节：时间 + 标题的紧凑行，点按从该时间开播。无章节时调用方不建此分区。
-class _ChapterList extends StatelessWidget {
-  const _ChapterList({required this.chapters, required this.onChapter});
-
+  final String itemId;
   final List<ItemChapter> chapters;
   final ValueChanged<ItemChapter>? onChapter;
+
+  static const double _cardWidth = 148;
 
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context);
     final theme = Theme.of(context);
-    final lineStyle = theme.textTheme.bodyMedium;
+    final labelHeight = (theme.textTheme.labelLarge?.fontSize ?? 14) * 1.4;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -746,43 +835,176 @@ class _ChapterList extends StatelessWidget {
             AppSpacing.md,
             AppSpacing.lg,
             AppSpacing.md,
-            AppSpacing.xs,
+            AppSpacing.sm,
           ),
           child: Text(l.chapters, style: theme.textTheme.titleMedium),
         ),
-        for (var index = 0; index < chapters.length; index++)
-          InkWell(
-            key: CatalogKeys.chapter(index),
-            onTap: onChapter == null ? null : () => onChapter!(chapters[index]),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: AppSpacing.md,
-                vertical: AppSpacing.sm,
-              ),
-              child: Row(
-                children: [
-                  SizedBox(
-                    width: 64,
-                    child: Text(
-                      chapterClock(chapters[index].startPositionTicks),
-                      style: theme.textTheme.labelLarge?.copyWith(
-                        color: theme.colorScheme.primary,
+        SizedBox(
+          height: _cardWidth * 9 / 16 + AppSpacing.xs + labelHeight + 6,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+            itemCount: chapters.length,
+            separatorBuilder: (context, index) =>
+                const SizedBox(width: AppSpacing.sm),
+            itemBuilder: (context, index) {
+              return _ChapterCard(
+                key: CatalogKeys.chapter(index),
+                itemId: itemId,
+                chapter: chapters[index],
+                index: index,
+                onTap: onChapter == null
+                    ? null
+                    : () => onChapter!(chapters[index]),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ChapterCard extends StatelessWidget {
+  const _ChapterCard({
+    super.key,
+    required this.itemId,
+    required this.chapter,
+    required this.index,
+    required this.onTap,
+  });
+
+  final String itemId;
+  final ItemChapter chapter;
+  final int index;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final name = chapter.name.trim().isEmpty ? '${index + 1}' : chapter.name;
+    final hasImage = chapter.imageTag != null && chapter.imageTag!.isNotEmpty;
+    return SizedBox(
+      width: _ChapterStrip._cardWidth,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(AppRadii.md),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(AppRadii.md),
+              child: SizedBox(
+                width: _ChapterStrip._cardWidth,
+                height: _ChapterStrip._cardWidth * 9 / 16,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    if (hasImage)
+                      _ChapterThumb(
+                        itemId: itemId,
+                        index: chapter.imageIndex ?? index,
+                        tag: chapter.imageTag,
+                      )
+                    else
+                      ColoredBox(
+                        color: scheme.surfaceContainerHigh,
+                        child: Icon(
+                          Icons.play_arrow_rounded,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                    Positioned(
+                      left: AppSpacing.xs,
+                      bottom: AppSpacing.xs,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.62),
+                          borderRadius: BorderRadius.circular(AppRadii.sm),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          child: Text(
+                            chapterClock(chapter.startPositionTicks),
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: Colors.white,
+                              fontFeatures: const [
+                                FontFeature.tabularFigures(),
+                              ],
+                            ),
+                          ),
+                        ),
                       ),
                     ),
-                  ),
-                  Expanded(
-                    child: Text(
-                      chapters[index].name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: lineStyle,
-                    ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
-          ),
-      ],
+            const SizedBox(height: AppSpacing.xs),
+            Text(
+              name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.labelLarge,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ChapterThumb extends StatefulWidget {
+  const _ChapterThumb({required this.itemId, required this.index, this.tag});
+
+  final String itemId;
+  final int index;
+  final String? tag;
+
+  @override
+  State<_ChapterThumb> createState() => _ChapterThumbState();
+}
+
+class _ChapterThumbState extends State<_ChapterThumb> {
+  Future<Uint8List?>? _future;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (widget.tag != null && widget.tag!.isNotEmpty) {
+      _future ??= loadChapterImage(
+        context,
+        itemId: widget.itemId,
+        index: widget.index,
+        tag: widget.tag,
+        maxWidth: 320,
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final fallback = ColoredBox(
+      color: scheme.surfaceContainerHigh,
+      child: Icon(
+        Icons.bookmark_outline_rounded,
+        color: scheme.onSurfaceVariant,
+      ),
+    );
+    return FutureBuilder<Uint8List?>(
+      future: _future,
+      builder: (context, snapshot) {
+        final bytes = snapshot.data;
+        if (bytes == null || bytes.isEmpty) {
+          return fallback;
+        }
+        return Image.memory(bytes, fit: BoxFit.cover, gaplessPlayback: true);
+      },
     );
   }
 }
@@ -856,7 +1078,7 @@ class _DetailSimilar extends StatelessWidget {
                       const SizedBox(height: AppSpacing.xxs),
                       Text(
                         item.name,
-                        maxLines: 2,
+                        maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
                     ],
@@ -867,6 +1089,71 @@ class _DetailSimilar extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// 详情还没回到条目时，按首屏结构占位：16:9 头图、标题、主按钮。
+class _PhoneDetailSkeleton extends StatelessWidget {
+  const _PhoneDetailSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    final size = MediaQuery.sizeOf(context);
+    final byWidth = size.width * 9 / 16;
+    final cap = size.height * 0.5;
+    final imageHeight = byWidth < cap ? byWidth : cap;
+    final animate = !MediaQuery.disableAnimationsOf(context);
+    return SizedBox(
+      height: imageHeight,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          SkeletonBlock(borderRadius: BorderRadius.zero, animated: animate),
+          Align(
+            alignment: Alignment.bottomCenter,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.md,
+                0,
+                AppSpacing.md,
+                AppSpacing.md,
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Expanded(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SkeletonBlock(
+                          width: size.width * 0.5,
+                          height: 28,
+                          animated: animate,
+                        ),
+                        const SizedBox(height: AppSpacing.xs),
+                        SkeletonBlock(
+                          width: size.width * 0.32,
+                          height: 14,
+                          animated: animate,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: AppSpacing.sm),
+                  SkeletonBlock(
+                    width: 48,
+                    height: 48,
+                    borderRadius: BorderRadius.circular(24),
+                    animated: animate,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

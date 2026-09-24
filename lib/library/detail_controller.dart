@@ -19,8 +19,16 @@ class DetailController extends ChangeNotifier {
   final DetailRepository repository;
   final String itemId;
   EmbyItem? item;
+
+  void applyItem(EmbyItem next) {
+    item = next;
+    notifyListeners();
+  }
+
   List<EmbyItem> seasons = const [], episodes = const [];
   String? seasonId, mediaSourceId;
+  int episodeTotal = 0;
+  int windowStart = 0;
   EmbyException? error, episodeError;
   bool loading = true, episodesLoading = false, hasMore = false;
 
@@ -77,14 +85,19 @@ class DetailController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> selectSeason(String id, {bool more = false}) async {
+  Future<void> selectSeason(
+    String id, {
+    bool more = false,
+    int startAt = 0,
+  }) async {
     if (more && (episodesLoading || !hasMore)) return;
     final revision = ++_seasonRevision;
     final identity = _identity;
-    final start = more ? _offset : 0;
+    final start = more ? _offset : startAt;
     if (!more) {
       _offset = 0;
       hasMore = false;
+      windowStart = startAt;
     }
     if (seasonId != id) {
       episodes = const [];
@@ -107,6 +120,7 @@ class DetailController extends ChangeNotifier {
           episode.id: episode,
       }.values.toList();
       _offset = start + page.items.length;
+      episodeTotal = page.totalRecordCount ?? _offset;
       hasMore = page.totalRecordCount == null
           ? page.items.length == 50
           : _offset < page.totalRecordCount!;

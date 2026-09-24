@@ -68,6 +68,23 @@ class MobileLoadingPlaceholder extends StatelessWidget {
   }
 }
 
+class _SectionSkeleton extends StatelessWidget {
+  const _SectionSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    final animate = AppMotion.durationOf(context) != Duration.zero;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SkeletonBlock(width: 96, height: 16, animated: animate),
+        const SizedBox(height: AppSpacing.sm),
+        _PosterLoading(animate: animate),
+      ],
+    );
+  }
+}
+
 class _HomeLoading extends StatelessWidget {
   const _HomeLoading({required this.animate});
 
@@ -81,22 +98,25 @@ class _HomeLoading extends StatelessWidget {
         LayoutBuilder(
           builder: (context, constraints) {
             final width = constraints.maxWidth;
+            final top = MediaQuery.paddingOf(context).top;
             return SkeletonBlock(
               width: width,
-              height: width * 9 / 16,
-              borderRadius: BorderRadius.circular(AppRadii.lg),
+              height: top + 56 + width * 9 / 16,
+              borderRadius: BorderRadius.zero,
               animated: animate,
             );
           },
         ),
-        const SizedBox(height: AppSpacing.lg),
-        SkeletonBlock(width: 128, height: 18, animated: animate),
-        const SizedBox(height: AppSpacing.sm),
-        _PosterLoading(animate: animate),
-        const SizedBox(height: AppSpacing.lg),
-        SkeletonBlock(width: 96, height: 18, animated: animate),
-        const SizedBox(height: AppSpacing.sm),
-        _PosterLoading(animate: animate),
+        const SizedBox(height: AppSpacing.md),
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: AppSpacing.md),
+          child: _SectionSkeleton(),
+        ),
+        const SizedBox(height: AppSpacing.md),
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: AppSpacing.md),
+          child: _SectionSkeleton(),
+        ),
       ],
     );
   }
@@ -109,25 +129,37 @@ class _LibrariesLoading extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        for (var i = 0; i < 4; i++)
-          Padding(
-            padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-            child: Row(
-              children: [
-                SkeletonBlock(
-                  width: AppSpacing.huge,
-                  height: AppSpacing.huge,
-                  borderRadius: BorderRadius.circular(AppRadii.md),
-                  animated: animate,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final cell = (constraints.maxWidth - AppSpacing.md) / 2;
+        return Wrap(
+          spacing: AppSpacing.md,
+          runSpacing: AppSpacing.md,
+          children: [
+            for (var i = 0; i < 4; i++)
+              SizedBox(
+                width: cell,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SkeletonBlock(
+                      width: cell,
+                      height: cell * 9 / 16,
+                      borderRadius: BorderRadius.circular(AppRadii.md),
+                      animated: animate,
+                    ),
+                    const SizedBox(height: AppSpacing.xs),
+                    SkeletonBlock(
+                      width: cell * 0.62,
+                      height: 14,
+                      animated: animate,
+                    ),
+                  ],
                 ),
-                const SizedBox(width: AppSpacing.md),
-                Expanded(child: SkeletonBlock(height: 16, animated: animate)),
-              ],
-            ),
-          ),
-      ],
+              ),
+          ],
+        );
+      },
     );
   }
 }
@@ -150,9 +182,10 @@ class _PosterLoading extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const posterWidth = 148.0;
-    const aspect = 2 / 3;
-    final posterHeight = posterWidth / aspect;
+    final screen = MediaQuery.sizeOf(context).width;
+    final available = screen - AppSpacing.md * 2;
+    final posterWidth = (available - AppSpacing.sm * 3) / 3.3;
+    final posterHeight = posterWidth * 1.5;
     return SizedBox(
       height: posterHeight + AppSpacing.xs + AppSpacing.sm,
       child: ListView.separated(

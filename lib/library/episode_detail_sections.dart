@@ -96,9 +96,9 @@ class _EpisodeOverviewSectionState extends State<EpisodeOverviewSection> {
     if (overview == null || overview.isEmpty) {
       return const SizedBox.shrink();
     }
-    final style = theme.textTheme.bodyMedium?.copyWith(
-      color: theme.colorScheme.onSurface.withValues(alpha: 0.88),
-      height: 1.5,
+    final style = theme.textTheme.bodyLarge?.copyWith(
+      color: theme.colorScheme.onSurface,
+      height: 1.55,
     );
     final body = LayoutBuilder(
       builder: (context, constraints) {
@@ -139,7 +139,15 @@ class _EpisodeOverviewSectionState extends State<EpisodeOverviewSection> {
       },
     );
     if (widget.compact) {
-      return body;
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(
+          AppSpacing.md,
+          AppSpacing.sm,
+          AppSpacing.md,
+          0,
+        ),
+        child: body,
+      );
     }
     return _Section(title: l10n.detailOverview, child: body);
   }
@@ -183,51 +191,87 @@ class EpisodePeopleSection extends StatelessWidget {
         if (groups.containsKey(type)) type,
       if (groups.containsKey('')) '',
     ];
-    // 各分组横向并排(演员组在前),组内人物 Wrap 换行;
-    // 导演/编剧通常只有一两人,不再各占一整行留下大片空白。
+    // 宽屏各组并排换行。手机宽度不够时改成每组一条横滑，避免三列把头像和名字挤断。
     return _Section(
       title: l10n.detailCast,
-      child: Wrap(
-        key: sectionKey,
-        spacing: AppSpacing.xxxl,
-        runSpacing: AppSpacing.lg,
-        crossAxisAlignment: WrapCrossAlignment.start,
-        children: [
-          for (final type in orderedTypes)
-            Column(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final narrow = constraints.maxWidth < 600;
+          if (narrow) {
+            final textScale = MediaQuery.textScalerOf(context).scale(1);
+            final rowHeight =
+                _PersonAvatar.size + AppSpacing.xs + (22 + 18) * textScale;
+            return Column(
+              key: sectionKey,
               crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
               children: [
-                Text(
-                  _groupLabel(l10n, type.isEmpty ? null : type),
-                  style: theme.textTheme.titleSmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
+                for (final type in orderedTypes) ...[
+                  Text(
+                    _groupLabel(l10n, type.isEmpty ? null : type),
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
                   ),
-                ),
-                const SizedBox(height: AppSpacing.sm),
-                Wrap(
-                  spacing: AppSpacing.md,
-                  runSpacing: AppSpacing.md,
+                  const SizedBox(height: AppSpacing.sm),
+                  SizedBox(
+                    height: rowHeight,
+                    child: ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: groups[type]!.length,
+                      separatorBuilder: (context, index) =>
+                          const SizedBox(width: AppSpacing.md),
+                      itemBuilder: (context, index) =>
+                          _PersonChip(person: groups[type]![index], width: 112),
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                ],
+              ],
+            );
+          }
+          return Wrap(
+            key: sectionKey,
+            spacing: AppSpacing.xxxl,
+            runSpacing: AppSpacing.lg,
+            crossAxisAlignment: WrapCrossAlignment.start,
+            children: [
+              for (final type in orderedTypes)
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    for (final person in groups[type]!)
-                      _PersonChip(person: person),
+                    Text(
+                      _groupLabel(l10n, type.isEmpty ? null : type),
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                    Wrap(
+                      spacing: AppSpacing.md,
+                      runSpacing: AppSpacing.md,
+                      children: [
+                        for (final person in groups[type]!)
+                          _PersonChip(person: person),
+                      ],
+                    ),
                   ],
                 ),
-              ],
-            ),
-        ],
+            ],
+          );
+        },
       ),
     );
   }
 }
 
 class _PersonChip extends StatelessWidget {
-  const _PersonChip({required this.person});
+  const _PersonChip({required this.person, this.width = 104});
 
   final ItemPerson person;
 
-  /// 卡宽:头像 + 两行居中文字。
-  static const double width = 104;
+  /// 卡宽:头像 + 两行居中文字。手机横滑行用更宽的一档，避免英文名被切成半个词。
+  final double width;
 
   @override
   Widget build(BuildContext context) {
@@ -358,12 +402,23 @@ class _PersonAvatarState extends State<_PersonAvatar> {
 
 /// 媒体流分区:当前片源的视频/音频/字幕轨分组列出。
 class EpisodeMediaStreamsSection extends StatelessWidget {
-  const EpisodeMediaStreamsSection({super.key, required this.source});
+  const EpisodeMediaStreamsSection({
+    super.key,
+    required this.source,
+    this.selectedAudioIndex,
+    this.selectedSubtitleIndex,
+    this.onAudio,
+    this.onSubtitle,
+  });
 
   static const sectionKey = Key('episode-media-streams');
 
   /// 当前选中的片源;为 null 或无流时分区整段隐藏。
   final ItemMediaSource? source;
+  final int? selectedAudioIndex;
+  final int? selectedSubtitleIndex;
+  final ValueChanged<int>? onAudio;
+  final ValueChanged<int>? onSubtitle;
 
   @override
   Widget build(BuildContext context) {
@@ -385,27 +440,45 @@ class EpisodeMediaStreamsSection extends StatelessWidget {
       for (final s in source.streams)
         if (s.isSubtitle) s,
     ];
-    final groups = <(String, List<String>)>[
+    final groups = <(String, List<Widget>)>[
       if (videos.isNotEmpty)
-        (l10n.videoTrack, [for (final s in videos) _videoLine(s)]),
+        (
+          l10n.videoTrack,
+          [for (final s in videos) _chip(context, _videoLine(s))],
+        ),
       if (audios.isNotEmpty)
-        (l10n.audioTrack, [for (final s in audios) _audioLine(l10n, s)]),
+        (
+          l10n.audioTrack,
+          [
+            for (final s in audios)
+              _chip(
+                context,
+                _audioLine(l10n, s),
+                selected: s.index == selectedAudioIndex,
+                onTap: onAudio == null ? null : () => onAudio!(s.index),
+              ),
+          ],
+        ),
       if (subtitles.isNotEmpty)
-        (l10n.subtitleTrack, [for (final s in subtitles) _subtitleLine(s)]),
+        (
+          l10n.subtitleTrack,
+          [
+            for (final s in subtitles)
+              _chip(
+                context,
+                _subtitleLine(s),
+                selected: s.index == selectedSubtitleIndex,
+                onTap: onSubtitle == null ? null : () => onSubtitle!(s.index),
+              ),
+          ],
+        ),
     ];
     if (groups.isEmpty) {
       return const SizedBox.shrink();
     }
-    final lineStyle = theme.textTheme.bodyMedium?.copyWith(
-      color: theme.colorScheme.onSurface.withValues(alpha: 0.88),
-      height: 1.5,
-    );
-    final labelStyle = theme.textTheme.titleSmall?.copyWith(
+    final labelStyle = theme.textTheme.labelLarge?.copyWith(
       color: theme.colorScheme.onSurfaceVariant,
-      height: 1.5,
     );
-    // 规格表式两列:左列固定宽的轨道类型,右列该类型的各条轨道,
-    // 一眼能对齐比较,不再是标题—正文交替的长条。
     return _Section(
       title: l10n.detailMediaInfo,
       child: ConstrainedBox(
@@ -414,36 +487,57 @@ class EpisodeMediaStreamsSection extends StatelessWidget {
           key: sectionKey,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            for (var i = 0; i < groups.length; i++)
-              Padding(
-                padding: EdgeInsets.only(top: i == 0 ? 0 : AppSpacing.sm),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    SizedBox(
-                      width: _labelWidth,
-                      child: Text(groups[i].$1, style: labelStyle),
-                    ),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          for (final line in groups[i].$2)
-                            Text(line, style: lineStyle),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
+            for (var i = 0; i < groups.length; i++) ...[
+              if (i > 0) const SizedBox(height: AppSpacing.sm),
+              Text(groups[i].$1, style: labelStyle),
+              const SizedBox(height: AppSpacing.xs),
+              Wrap(
+                spacing: AppSpacing.xs,
+                runSpacing: AppSpacing.xs,
+                children: groups[i].$2,
               ),
+            ],
           ],
         ),
       ),
     );
   }
 
-  /// 左列标签宽:容纳"视频/音轨/字幕"两字 + 间距。
-  static const double _labelWidth = 72;
+  Widget _chip(
+    BuildContext context,
+    String line, {
+    bool selected = false,
+    VoidCallback? onTap,
+  }) {
+    if (line.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Material(
+      color: selected
+          ? scheme.primary.withValues(alpha: 0.18)
+          : scheme.surfaceContainerHigh,
+      borderRadius: BorderRadius.circular(AppRadii.sm),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.sm,
+            vertical: AppSpacing.xs,
+          ),
+          child: Text(
+            line,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: selected ? scheme.primary : scheme.onSurface,
+              fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 
   static String _joined(List<String?> parts) {
     return [
@@ -461,26 +555,57 @@ class EpisodeMediaStreamsSection extends StatelessWidget {
   }
 
   static String _videoLine(ItemMediaStream stream) {
-    return _joined([
-      stream.label,
+    final range = stream.videoRange?.trim();
+    final showRange =
+        range != null && range.isNotEmpty && range.toUpperCase() != 'SDR';
+    final line = _joined([
+      _resolution(stream),
       _upper(stream.codec),
-      stream.width != null && stream.height != null
-          ? '${stream.width}×${stream.height}'
-          : null,
-      stream.videoRange,
+      if (showRange) range,
     ]);
+    if (line.isNotEmpty) {
+      return line;
+    }
+    return stream.label?.trim() ?? '';
+  }
+
+  static String? _resolution(ItemMediaStream stream) {
+    final height = stream.height;
+    if (height == null || height <= 0) {
+      return null;
+    }
+    if (height >= 2000) {
+      return '4K';
+    }
+    if (height >= 1400) {
+      return '1440p';
+    }
+    if (height >= 1000) {
+      return '1080p';
+    }
+    if (height >= 700) {
+      return '720p';
+    }
+    return '${height}p';
   }
 
   static String _audioLine(AppLocalizations l10n, ItemMediaStream stream) {
+    final label = stream.label?.trim();
+    if (label != null && label.isNotEmpty) {
+      return label;
+    }
     return _joined([
-      stream.label,
       _upper(stream.codec),
       stream.channels != null ? l10n.audioChannels(stream.channels!) : null,
     ]);
   }
 
   static String _subtitleLine(ItemMediaStream stream) {
-    return _joined([stream.label, _upper(stream.codec)]);
+    final label = stream.label?.trim();
+    if (label != null && label.isNotEmpty) {
+      return label;
+    }
+    return _upper(stream.codec) ?? '';
   }
 }
 

@@ -197,6 +197,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get more => '更多';
 
   @override
+  String get externalLinks => '外部链接';
+
+  @override
   String get similarRow => '更多类似';
 
   @override
@@ -435,6 +438,9 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get chapters => '章节';
+
+  @override
+  String get phoneAlbum => '相册';
 
   @override
   String get mediaSource => '片源';
@@ -875,6 +881,15 @@ class AppLocalizationsZh extends AppLocalizations {
   String get mobileAccountServerGroup => '账户与服务器';
 
   @override
+  String get phoneAppearanceGroup => '外观';
+
+  @override
+  String get phoneFloatingNav => '悬浮导航栏';
+
+  @override
+  String get phoneFloatingNavHint => '离开底边，页面从背后滑过';
+
+  @override
   String get mobilePlaybackGroup => '播放设置';
 
   @override
@@ -931,6 +946,12 @@ class AppLocalizationsZh extends AppLocalizations {
   String get phoneHomeSections => '首页区块';
 
   @override
+  String get phoneHomeEdit => '编辑首页';
+
+  @override
+  String get phoneHomeEditHint => '按住左侧手柄拖动排序。关闭的行会归到「未显示」。片库页仍会列出全部片库。';
+
+  @override
   String get phoneHomeSectionBanner => '横幅';
 
   @override
@@ -947,8 +968,14 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String phoneHomeLibraryLatest(String name) {
-    return '$name · 最近添加';
+    return '$name';
   }
+
+  @override
+  String get phoneHomeShown => '显示中';
+
+  @override
+  String get phoneHomeHidden => '未显示';
 
   @override
   String get phoneHomeSectionMoveUp => '上移';

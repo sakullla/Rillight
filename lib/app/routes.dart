@@ -6,6 +6,9 @@ abstract final class AppRoutes {
 
   /// 手机端"我的"页:底部 tab 移除后经顶栏头像入口进入(仅 phone 路由树注册)。
   static const mine = '/mine';
+
+  /// 手机首页行的顺序和显示。从首页进入，不放在「我的」。
+  static const homeEdit = '/home-edit';
   static const shelfResume = '/shelf/resume';
   static const shelfNextUp = '/shelf/nextup';
   static const shelfLatestMovies = '/shelf/latest-movies';
@@ -18,14 +21,18 @@ abstract final class AppRoutes {
   static bool isItem(String path) => path.startsWith('/item/');
 
   static String library(String viewId) => '/library/$viewId';
-  static String item(String itemId, {String? seasonId}) {
+  static String item(String itemId, {String? seasonId, String? episodeId}) {
     final season = seasonId?.trim() ?? '';
-    if (season.isEmpty) {
+    final episode = episodeId?.trim() ?? '';
+    if (season.isEmpty && episode.isEmpty) {
       return '/item/$itemId';
     }
     return Uri(
       path: '/item/$itemId',
-      queryParameters: {'season': season},
+      queryParameters: {
+        if (season.isNotEmpty) 'season': season,
+        if (episode.isNotEmpty) 'episode': episode,
+      },
     ).toString();
   }
 
@@ -33,6 +40,7 @@ abstract final class AppRoutes {
     String? parentId,
     String? includeItemTypes,
     String? title,
+    String? genre,
     bool recursive = false,
     bool moviesOrSeriesOnly = false,
   }) {
@@ -45,6 +53,7 @@ abstract final class AppRoutes {
         if (recursive) 'recursive': '1',
         if (moviesOrSeriesOnly) 'filter': 'movieseries',
         if (title != null && title.isNotEmpty) 'title': title,
+        if (genre != null && genre.isNotEmpty) 'genre': genre,
       },
     ).toString();
   }

@@ -1,13 +1,22 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/library/browse_controller.dart';
+import 'package:rillight/media_image/media_image.dart';
 
 class TvLibraryPage extends StatefulWidget {
-  const TvLibraryPage({super.key, required this.viewId});
+  const TvLibraryPage({
+    super.key,
+    required this.viewId,
+    this.initialGenre,
+    this.initialType,
+  });
   final String viewId;
+  final String? initialGenre;
+  final String? initialType;
   @override
   State<TvLibraryPage> createState() => _TvLibraryPageState();
 }
@@ -17,11 +26,20 @@ class _TvLibraryPageState extends State<TvLibraryPage> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _controller ??= BrowseController(
-      auth: AuthScope.of(context),
-      cache: CatalogScope.of(context).cache,
-      parentId: widget.viewId,
-    )..load();
+    _controller ??= () {
+      final controller = BrowseController(
+        auth: AuthScope.of(context),
+        cache: CatalogScope.of(context).cache,
+        parentId: widget.viewId,
+        includeItemTypes: widget.initialType ?? 'Movie,Series',
+      );
+      final genre = widget.initialGenre;
+      if (genre != null && genre.isNotEmpty) {
+        controller.genre = genre;
+      }
+      controller.load();
+      return controller;
+    }();
   }
 
   @override
@@ -109,36 +127,63 @@ class _TvLibraryPageState extends State<TvLibraryPage> {
       title: l.libraries,
       child: ListenableBuilder(
         listenable: c,
-        builder: (context, _) => ListView(
-          key: PageStorageKey('tv-library-${widget.viewId}'),
-          children: [
-            TvAction(
-              key: const Key('tv-library-filter'),
-              autofocus: true,
-              onPressed: _filter,
-              child: Text(l.libraryFilter),
-            ),
-            if (c.loading) const LinearProgressIndicator(),
-            if (c.error != null)
-              TvFailure(
-                error: c.error!,
-                retry: () => c.load(more: c.items.isNotEmpty && c.hasMore),
+        builder: (context, _) => LayoutBuilder(
+          builder: (context, constraints) {
+            final metrics = TvGrid.metricsFor(context, constraints.maxWidth);
+            return MediaImageScrollListener(
+              child: CustomScrollView(
+                key: PageStorageKey('tv-library-${widget.viewId}'),
+                scrollCacheExtent: const ScrollCacheExtent.viewport(0.5),
+                slivers: [
+                  SliverToBoxAdapter(
+                    child: TvAction(
+                      key: const Key('tv-library-filter'),
+                      autofocus: true,
+                      onPressed: _filter,
+                      child: Text(l.libraryFilter),
+                    ),
+                  ),
+                  if (c.loadingMore || (c.loading && c.items.isNotEmpty))
+                    const SliverToBoxAdapter(child: LinearProgressIndicator()),
+                  if (c.loading && c.items.isEmpty)
+                    const SliverToBoxAdapter(child: LinearProgressIndicator()),
+                  if (c.error != null)
+                    SliverToBoxAdapter(
+                      child: TvFailure(
+                        error: c.error!,
+                        retry: () =>
+                            c.load(more: c.items.isNotEmpty && c.hasMore),
+                      ),
+                    ),
+                  if (!c.loading && c.error == null && c.items.isEmpty)
+                    SliverToBoxAdapter(child: Text(l.mobileEmpty)),
+                  if (c.items.isNotEmpty)
+                    TvPosterSliver(
+                      key: const Key('tv-library-grid'),
+                      items: c.items,
+                      metrics: metrics,
+                    ),
+                  if (c.hasMore)
+                    SliverToBoxAdapter(
+                      child: TvAction(
+                        key: const Key('tv-library-more'),
+                        onPressed: c.loading || c.loadingMore
+                            ? null
+                            : () => c.load(more: true),
+                        child: Text(l.mobileLoadMore),
+                      ),
+                    ),
+                  SliverToBoxAdapter(
+                    child: TvAction(
+                      key: const Key('tv-library-refresh'),
+                      onPressed: c.load,
+                      child: Text(l.mobileRefresh),
+                    ),
+                  ),
+                ],
               ),
-            if (!c.loading && c.error == null && c.items.isEmpty)
-              Text(l.mobileEmpty),
-            TvGrid(key: const Key('tv-library-grid'), items: c.items),
-            if (c.hasMore)
-              TvAction(
-                key: const Key('tv-library-more'),
-                onPressed: c.loading ? null : () => c.load(more: true),
-                child: Text(l.mobileLoadMore),
-              ),
-            TvAction(
-              key: const Key('tv-library-refresh'),
-              onPressed: c.load,
-              child: Text(l.mobileRefresh),
-            ),
-          ],
+            );
+          },
         ),
       ),
     );

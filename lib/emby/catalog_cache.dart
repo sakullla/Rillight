@@ -117,6 +117,7 @@ CatalogRequest catalogSearchRequest({
   int? startIndex,
   int limit = 50,
   String fields = EmbyClient.itemFields,
+  List<String>? filters,
 }) {
   return catalogItemsRequest(
     userId: userId,
@@ -127,6 +128,7 @@ CatalogRequest catalogSearchRequest({
     startIndex: startIndex,
     sortBy: 'SortName',
     sortOrder: 'Ascending',
+    filters: filters,
     fields: fields,
   );
 }

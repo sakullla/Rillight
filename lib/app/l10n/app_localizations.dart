@@ -454,6 +454,12 @@ abstract class AppLocalizations {
   /// **'更多'**
   String get more;
 
+  /// Detail section title for links to IMDb, TMDB and other providers.
+  ///
+  /// In zh, this message translates to:
+  /// **'外部链接'**
+  String get externalLinks;
+
   /// Detail shelf title for similar titles when the server returns items.
   ///
   /// In zh, this message translates to:
@@ -897,6 +903,12 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'章节'**
   String get chapters;
+
+  /// No description provided for @phoneAlbum.
+  ///
+  /// In zh, this message translates to:
+  /// **'相册'**
+  String get phoneAlbum;
 
   /// Label for choosing a media version on the detail page.
   ///
@@ -1744,6 +1756,24 @@ abstract class AppLocalizations {
   /// **'账户与服务器'**
   String get mobileAccountServerGroup;
 
+  /// Mine page group header for phone chrome such as the bottom navigation.
+  ///
+  /// In zh, this message translates to:
+  /// **'外观'**
+  String get phoneAppearanceGroup;
+
+  /// Switch that detaches the phone bottom navigation from the screen edge.
+  ///
+  /// In zh, this message translates to:
+  /// **'悬浮导航栏'**
+  String get phoneFloatingNav;
+
+  /// Explains that the floating navigation sits above the page content.
+  ///
+  /// In zh, this message translates to:
+  /// **'离开底边，页面从背后滑过'**
+  String get phoneFloatingNavHint;
+
   /// Mine page group header for playback and danmaku settings.
   ///
   /// In zh, this message translates to:
@@ -1852,6 +1882,18 @@ abstract class AppLocalizations {
   /// **'首页区块'**
   String get phoneHomeSections;
 
+  /// Home-screen entry and title for reordering or hiding phone home rows.
+  ///
+  /// In zh, this message translates to:
+  /// **'编辑首页'**
+  String get phoneHomeEdit;
+
+  /// Explains that the home editor does not change the libraries tab.
+  ///
+  /// In zh, this message translates to:
+  /// **'按住左侧手柄拖动排序。关闭的行会归到「未显示」。片库页仍会列出全部片库。'**
+  String get phoneHomeEditHint;
+
   /// Phone home section label for the featured banner.
   ///
   /// In zh, this message translates to:
@@ -1882,11 +1924,23 @@ abstract class AppLocalizations {
   /// **'片库入口'**
   String get phoneHomeSectionLibraries;
 
-  /// Phone home row and mine label for one library's recently added items.
+  /// Phone home row and editor label for one library. The row itself is recently added items.
   ///
   /// In zh, this message translates to:
-  /// **'{name} · 最近添加'**
+  /// **'{name}'**
   String phoneHomeLibraryLatest(String name);
+
+  /// Heading for home rows that are currently visible.
+  ///
+  /// In zh, this message translates to:
+  /// **'显示中'**
+  String get phoneHomeShown;
+
+  /// Heading for home rows that are turned off.
+  ///
+  /// In zh, this message translates to:
+  /// **'未显示'**
+  String get phoneHomeHidden;
 
   /// Tooltip for moving a phone home section earlier.
   ///

@@ -363,6 +363,8 @@ class EmbyItem {
     this.primaryImageTag,
     this.thumbImageTag,
     this.backdropImageTag,
+    this.backdropImageTags = const [],
+    this.parentBackdropImageTags = const [],
     this.seriesPrimaryImageTag,
     this.parentThumbItemId,
     this.parentThumbImageTag,
@@ -370,6 +372,7 @@ class EmbyItem {
     this.parentBackdropImageTag,
     this.communityRating,
     this.genres = const [],
+    this.externalUrls = const [],
     this.mediaSources = const [],
     this.chapters = const [],
     this.people = const [],
@@ -400,6 +403,8 @@ class EmbyItem {
   final String? primaryImageTag;
   final String? thumbImageTag;
   final String? backdropImageTag;
+  final List<String> backdropImageTags;
+  final List<String> parentBackdropImageTags;
   final String? seriesPrimaryImageTag;
   final String? parentThumbItemId;
   final String? parentThumbImageTag;
@@ -409,6 +414,9 @@ class EmbyItem {
 
   /// 条目流派(服务端 /Items 默认返回的 Genres 数组),供片库流派筛选聚合取值。
   final List<String> genres;
+
+  /// Emby `ExternalUrls`：IMDb、官网等站外链接。
+  final List<ItemExternalUrl> externalUrls;
   final List<ItemMediaSource> mediaSources;
   final List<ItemChapter> chapters;
 
@@ -420,6 +428,8 @@ class EmbyItem {
   bool get isSeries => type == 'Series';
   bool get isSeason => type == 'Season';
   bool get isEpisode => type == 'Episode';
+  bool get isPhoto => type == 'Photo';
+  bool get isPhotoAlbum => type == 'PhotoAlbum';
   bool get isPlayable => isMovie || isEpisode;
   bool get isMovieOrSeries => isMovie || isSeries;
   bool get isResumeMedia => isMovie || isEpisode;
@@ -431,6 +441,8 @@ class EmbyItem {
       collectionTypeNormalized == 'movies' ||
       collectionTypeNormalized == 'tvshows';
 
+  bool get isPhotoCollection => collectionTypeNormalized == 'photos';
+
   bool get isUntypedCollection => collectionTypeNormalized.isEmpty;
 
   bool get isExcludedCollection {
@@ -440,7 +452,6 @@ class EmbyItem {
       'musicartists',
       'musicvideos',
       'livetv',
-      'photos',
       'books',
       'games',
       'playlists',
@@ -598,13 +609,15 @@ class EmbyItem {
     final primaryTag =
         _mapImageTag(tagMap, 'Primary') ?? _stringTag(json['PrimaryImageTag']);
     final thumbTag = _mapImageTag(tagMap, 'Thumb');
+    final backdropTags = _listTags(json['BackdropImageTags']);
+    final parentBackdropTags = _listTags(json['ParentBackdropImageTags']);
     final backdropTag =
-        _firstListTag(json['BackdropImageTags']) ??
-        _mapImageTag(tagMap, 'Backdrop');
-    final parentBackdropTag = _firstListTag(json['ParentBackdropImageTags']);
+        backdropTags.firstOrNull ?? _mapImageTag(tagMap, 'Backdrop');
+    final parentBackdropTag = parentBackdropTags.firstOrNull;
     final rawSources = json['MediaSources'];
     final rawChapters = json['Chapters'];
     final rawGenres = json['Genres'];
+    final rawLinks = json['ExternalUrls'];
     final rawPeople = json['People'];
     return EmbyItem(
       id: id,
@@ -626,6 +639,8 @@ class EmbyItem {
       primaryImageTag: primaryTag,
       thumbImageTag: thumbTag,
       backdropImageTag: backdropTag,
+      backdropImageTags: backdropTags,
+      parentBackdropImageTags: parentBackdropTags,
       seriesPrimaryImageTag: _stringTag(json['SeriesPrimaryImageTag']),
       parentThumbItemId: _stringTag(json['ParentThumbItemId']),
       parentThumbImageTag: _stringTag(json['ParentThumbImageTag']),
@@ -637,6 +652,12 @@ class EmbyItem {
           for (final genre in rawGenres)
             if (genre != null) genre.toString(),
       ],
+      externalUrls: [
+        if (rawLinks is List)
+          for (final link in rawLinks)
+            if (link is Map)
+              ItemExternalUrl.fromJson(Map<String, dynamic>.from(link)),
+      ].where((link) => link.url.isNotEmpty).toList(),
       mediaSources: [
         if (rawSources is List)
           for (final source in rawSources)
@@ -680,6 +701,8 @@ class EmbyItem {
       primaryImageTag: primaryImageTag,
       thumbImageTag: thumbImageTag,
       backdropImageTag: backdropImageTag,
+      backdropImageTags: backdropImageTags,
+      parentBackdropImageTags: parentBackdropImageTags,
       seriesPrimaryImageTag: seriesPrimaryImageTag,
       parentThumbItemId: parentThumbItemId,
       parentThumbImageTag: parentThumbImageTag,
@@ -687,10 +710,25 @@ class EmbyItem {
       parentBackdropImageTag: parentBackdropImageTag,
       communityRating: communityRating,
       genres: genres,
+      externalUrls: externalUrls,
       mediaSources: mediaSources,
       chapters: chapters,
       people: people,
       userData: userData ?? this.userData,
+    );
+  }
+}
+
+class ItemExternalUrl {
+  const ItemExternalUrl({required this.name, required this.url});
+
+  final String name;
+  final String url;
+
+  static ItemExternalUrl fromJson(Map<String, dynamic> json) {
+    return ItemExternalUrl(
+      name: json['Name']?.toString() ?? '',
+      url: json['Url']?.toString() ?? '',
     );
   }
 }
@@ -792,11 +830,14 @@ String? _imageTagValue(dynamic value) {
   return _stringTag(value);
 }
 
-String? _firstListTag(dynamic value) {
-  if (value is! List || value.isEmpty) {
-    return null;
+List<String> _listTags(dynamic value) {
+  if (value is! List) {
+    return const [];
   }
-  return _stringTag(value.first);
+  return [
+    for (final entry in value)
+      if (_stringTag(entry) != null) _stringTag(entry)!,
+  ];
 }
 
 /// 条目剧情:优先 Overview,部分 Emby/刮削只填 ShortOverview 或 Taglines。

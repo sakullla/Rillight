@@ -25,6 +25,39 @@ class CatalogRowState {
   final EmbyException? notice;
 }
 
+/// 继续观看 = 看到一半的条目，再接上已看完、还没开播的下一集。
+///
+/// 同一部剧已经有进行中的一集时，不再并列它的下一集。
+List<EmbyItem> continueWatchingItems(
+  List<EmbyItem> resume,
+  List<EmbyItem> nextUp,
+) {
+  final seen = <String>{};
+  final seriesInProgress = <String>{};
+  final items = <EmbyItem>[];
+  for (final item in resume) {
+    if (!seen.add(item.id)) {
+      continue;
+    }
+    items.add(item);
+    final seriesId = item.seriesId;
+    if (seriesId != null && seriesId.isNotEmpty) {
+      seriesInProgress.add(seriesId);
+    }
+  }
+  for (final item in nextUp) {
+    if (!seen.add(item.id)) {
+      continue;
+    }
+    final seriesId = item.seriesId;
+    if (seriesId != null && seriesInProgress.contains(seriesId)) {
+      continue;
+    }
+    items.add(item);
+  }
+  return items;
+}
+
 class CatalogController extends ChangeNotifier {
   CatalogController({required this.auth, CatalogCache? cache})
     : cache = cache ?? CatalogCache() {
@@ -156,13 +189,19 @@ class CatalogController extends ChangeNotifier {
     bool Function(EmbyItem item) filter,
     int gen,
     CatalogRowState Function() current,
-    void Function(CatalogRowState) assign,
-  ) async {
-    if (gen != _loadGen || _rowHasContent(current())) {
+    void Function(CatalogRowState) assign, {
+    bool Function()? superseded,
+  }) async {
+    if (gen != _loadGen ||
+        _rowHasContent(current()) ||
+        superseded?.call() == true) {
       return;
     }
     final hit = await cache.lookup(request);
-    if (gen != _loadGen || hit == null || _rowHasContent(current())) {
+    if (gen != _loadGen ||
+        hit == null ||
+        _rowHasContent(current()) ||
+        superseded?.call() == true) {
       return;
     }
     final items = parseCatalogPage(hit.json).items.where(filter).toList();
@@ -177,20 +216,26 @@ class CatalogController extends ChangeNotifier {
 
   Future<void> _loadResume(int gen, bool showCachedFirst) async {
     final request = catalogResumeRequest(userId: client.userId ?? '');
+    final network = cache.fetch(client, request);
+    var fresh = false;
     if (showCachedFirst) {
-      await _showCachedRow(
-        'resume',
-        request,
-        (item) => item.isResumeMedia,
-        gen,
-        () => resume,
-        (state) => resume = state,
+      unawaited(
+        _showCachedRow(
+          'resume',
+          request,
+          (item) => item.isResumeMedia,
+          gen,
+          () => resume,
+          (state) => resume = state,
+          superseded: () => fresh,
+        ),
       );
     }
     try {
       final items = parseCatalogPage(
-        await cache.fetch(client, request),
+        await network,
       ).items.where((item) => item.isResumeMedia).toList();
+      fresh = true;
       if (gen != _loadGen) {
         return;
       }
@@ -214,20 +259,26 @@ class CatalogController extends ChangeNotifier {
 
   Future<void> _loadNextUp(int gen, bool showCachedFirst) async {
     final request = catalogNextUpRequest(userId: client.userId ?? '');
+    final network = cache.fetch(client, request);
+    var fresh = false;
     if (showCachedFirst) {
-      await _showCachedRow(
-        'nextUp',
-        request,
-        (item) => item.isEpisode,
-        gen,
-        () => nextUp,
-        (state) => nextUp = state,
+      unawaited(
+        _showCachedRow(
+          'nextUp',
+          request,
+          (item) => item.isEpisode,
+          gen,
+          () => nextUp,
+          (state) => nextUp = state,
+          superseded: () => fresh,
+        ),
       );
     }
     try {
       final items = parseCatalogPage(
-        await cache.fetch(client, request),
+        await network,
       ).items.where((item) => item.isEpisode).toList();
+      fresh = true;
       if (gen != _loadGen) {
         return;
       }
@@ -265,20 +316,26 @@ class CatalogController extends ChangeNotifier {
       sortOrder: 'Descending',
       fields: EmbyClient.gridFields,
     );
+    final network = cache.fetch(client, request);
+    var fresh = false;
     if (showCachedFirst) {
-      await _showCachedRow(
-        'latestMovies',
-        request,
-        (item) => item.isMovie,
-        gen,
-        () => latestMovies,
-        (state) => latestMovies = state,
+      unawaited(
+        _showCachedRow(
+          'latestMovies',
+          request,
+          (item) => item.isMovie,
+          gen,
+          () => latestMovies,
+          (state) => latestMovies = state,
+          superseded: () => fresh,
+        ),
       );
     }
     try {
       final items = parseCatalogPage(
-        await cache.fetch(client, request),
+        await network,
       ).items.where((item) => item.isMovie).toList();
+      fresh = true;
       if (gen != _loadGen) {
         return;
       }
@@ -310,20 +367,26 @@ class CatalogController extends ChangeNotifier {
       sortOrder: 'Descending',
       fields: EmbyClient.gridFields,
     );
+    final network = cache.fetch(client, request);
+    var fresh = false;
     if (showCachedFirst) {
-      await _showCachedRow(
-        'latestSeries',
-        request,
-        (item) => item.isSeries,
-        gen,
-        () => latestSeries,
-        (state) => latestSeries = state,
+      unawaited(
+        _showCachedRow(
+          'latestSeries',
+          request,
+          (item) => item.isSeries,
+          gen,
+          () => latestSeries,
+          (state) => latestSeries = state,
+          superseded: () => fresh,
+        ),
       );
     }
     try {
       final items = parseCatalogPage(
-        await cache.fetch(client, request),
+        await network,
       ).items.where((item) => item.isSeries).toList();
+      fresh = true;
       if (gen != _loadGen) {
         return;
       }
@@ -347,16 +410,22 @@ class CatalogController extends ChangeNotifier {
 
   Future<void> _loadLibraries(int gen, bool showCachedFirst) async {
     final request = catalogViewsRequest(userId: client.userId ?? '');
+    final network = cache.fetch(client, request);
+    var fresh = false;
     if (showCachedFirst) {
-      final hit = await cache.lookup(request);
-      if (gen == _loadGen &&
-          hit != null &&
-          librariesLoading &&
-          libraries.isEmpty) {
+      unawaited(() async {
+        final hit = await cache.lookup(request);
+        if (fresh ||
+            gen != _loadGen ||
+            hit == null ||
+            !librariesLoading ||
+            libraries.isNotEmpty) {
+          return;
+        }
         final views = parseCatalogPage(hit.json).items;
         final cached = <EmbyItem>[];
         for (final view in views) {
-          if (view.isMovieOrTvCollection) {
+          if (view.isMovieOrTvCollection || view.isPhotoCollection) {
             cached.add(view);
           }
         }
@@ -367,19 +436,20 @@ class CatalogController extends ChangeNotifier {
           librariesLoading = false;
           _notify();
         }
-      }
+      }());
     }
     try {
-      final views = parseCatalogPage(await cache.fetch(client, request)).items;
+      final views = parseCatalogPage(await network).items;
       final libraries = <EmbyItem>[];
       for (final view in views) {
-        if (await _isMovieOrTvLibrary(view)) {
+        if (await _isMovieOrTvLibrary(view) || view.isPhotoCollection) {
           libraries.add(view);
         }
       }
       if (gen != _loadGen) {
         return;
       }
+      fresh = true;
       this.libraries = libraries;
       librariesError = null;
       librariesNotice = null;

@@ -3,10 +3,11 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/app/phone_bottom_nav.dart';
 import 'package:rillight/app/phone_libraries_tab.dart';
+import 'package:rillight/app/phone_nav_style.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme.dart';
-import 'package:rillight/app/widgets/liquid_glass.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/home/phone_home.dart';
@@ -22,10 +23,8 @@ class MobileShell extends StatefulWidget {
 
 class _MobileShellState extends State<MobileShell> with WidgetsBindingObserver {
   int _index = 0;
-  bool _recovering = false,
-      _recoveryFailed = false,
-      _recovered = false,
-      _initialized = false;
+  bool _homeCovered = false;
+  bool _recovering = false, _recoveryFailed = false, _initialized = false;
   @override
   void initState() {
     super.initState();
@@ -55,7 +54,17 @@ class _MobileShellState extends State<MobileShell> with WidgetsBindingObserver {
         AuthScope.of(context).client,
         store,
       );
-      if (mounted) setState(() => _recovered = recovered);
+      if (mounted && recovered) {
+        final messenger = ScaffoldMessenger.of(context);
+        messenger.clearSnackBars();
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text(AppLocalizations.of(context).mobilePreviousSession),
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 4),
+          ),
+        );
+      }
     } catch (_) {
       if (mounted) setState(() => _recoveryFailed = true);
     } finally {
@@ -90,6 +99,9 @@ class _MobileShellState extends State<MobileShell> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context), auth = AuthScope.of(context);
     final titles = [l.home, l.libraries, l.search];
+    final floating = PhoneNavStyle.floatingOf(context);
+    final keyboardOpen = MediaQuery.viewInsetsOf(context).bottom > 0;
+    final immersive = _index == 0 && !_homeCovered;
     const hit = Size(AppSpacing.huge, AppSpacing.huge);
     return PopScope(
       canPop: _index == 0,
@@ -97,13 +109,29 @@ class _MobileShellState extends State<MobileShell> with WidgetsBindingObserver {
         if (!popped) setState(() => _index = 0);
       },
       child: Scaffold(
+        extendBody: floating && !keyboardOpen,
+        extendBodyBehindAppBar: _index == 0,
         appBar: AppBar(
-          title: Padding(
-            padding: const EdgeInsets.only(bottom: AppSpacing.xs),
-            child: Text(titles[_index]),
+          toolbarHeight: 56,
+          centerTitle: false,
+          forceMaterialTransparency: immersive,
+          backgroundColor: immersive ? Colors.transparent : null,
+          surfaceTintColor: immersive ? Colors.transparent : null,
+          elevation: immersive ? 0 : null,
+          scrolledUnderElevation: immersive ? 0 : null,
+          title: Text(titles[_index]),
+          titleTextStyle: Theme.of(context).textTheme.titleLarge?.copyWith(
+            fontWeight: FontWeight.w600,
+            height: 1.2,
           ),
-          titleTextStyle: Theme.of(context).textTheme.headlineMedium,
           actions: [
+            if (_index == 0)
+              IconButton(
+                key: const Key('phone-home-edit'),
+                tooltip: l.phoneHomeEdit,
+                icon: const Icon(Icons.tune),
+                onPressed: () => context.push(AppRoutes.homeEdit),
+              ),
             IconButton(
               key: const Key('mobile-shell-mine-entry'),
               tooltip: l.mobileMine,
@@ -112,78 +140,68 @@ class _MobileShellState extends State<MobileShell> with WidgetsBindingObserver {
             ),
           ],
         ),
-        body: SafeArea(
-          child: Column(
-            children: [
-              if (_recovering) const LinearProgressIndicator(),
-              if (_recoveryFailed)
-                Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    children: [
-                      Text(l.mobileRecoveryFailed),
-                      FilledButton(
-                        style: FilledButton.styleFrom(minimumSize: hit),
-                        onPressed: _recover,
-                        child: Text(l.retry),
-                      ),
-                      TextButton(
-                        style: TextButton.styleFrom(minimumSize: hit),
-                        onPressed: auth.logout,
-                        child: Text(l.connect),
-                      ),
-                    ],
+        body: NotificationListener<ScrollNotification>(
+          onNotification: (notification) {
+            if (_index != 0 || notification.metrics.axis != Axis.vertical) {
+              return false;
+            }
+            final covered = notification.metrics.pixels > 24;
+            if (covered != _homeCovered) {
+              setState(() => _homeCovered = covered);
+            }
+            return false;
+          },
+          child: SafeArea(
+            top: _index != 0,
+            bottom: !floating,
+            child: Column(
+              children: [
+                if (_recovering) const LinearProgressIndicator(),
+                if (_recoveryFailed)
+                  Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      children: [
+                        Text(l.mobileRecoveryFailed),
+                        FilledButton(
+                          style: FilledButton.styleFrom(minimumSize: hit),
+                          onPressed: _recover,
+                          child: Text(l.retry),
+                        ),
+                        TextButton(
+                          style: TextButton.styleFrom(minimumSize: hit),
+                          onPressed: auth.logout,
+                          child: Text(l.connect),
+                        ),
+                      ],
+                    ),
+                  ),
+                Expanded(
+                  child: IgnorePointer(
+                    ignoring: _recovering || _recoveryFailed,
+                    child: IndexedStack(
+                      index: _index,
+                      children: const [
+                        PhoneHome(),
+                        PhoneLibrariesTab(),
+                        MobileSearchPage(),
+                      ],
+                    ),
                   ),
                 ),
-              if (_recovered)
-                Padding(
-                  padding: const EdgeInsets.all(8),
-                  child: Text(l.mobilePreviousSession),
-                ),
-              Expanded(
-                child: IgnorePointer(
-                  ignoring: _recovering || _recoveryFailed,
-                  child: IndexedStack(
-                    index: _index,
-                    children: const [
-                      PhoneHome(),
-                      PhoneLibrariesTab(),
-                      MobileSearchPage(),
-                    ],
-                  ),
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
-        bottomNavigationBar: MediaQuery.viewInsetsOf(context).bottom > 0
+        bottomNavigationBar: keyboardOpen
             ? null
-            : LiquidGlass(
-                kind: LiquidGlassKind.bar,
-                child: NavigationBar(
-                  animationDuration: AppMobileNav.pillDuration,
-                  selectedIndex: _index,
-                  onDestinationSelected: (index) {
-                    FocusScope.of(context).unfocus();
-                    setState(() => _index = index);
-                  },
-                  destinations: [
-                    NavigationDestination(
-                      icon: const Icon(Icons.home_outlined),
-                      selectedIcon: const Icon(Icons.home),
-                      label: l.home,
-                    ),
-                    NavigationDestination(
-                      icon: const Icon(Icons.video_library_outlined),
-                      selectedIcon: const Icon(Icons.video_library),
-                      label: l.libraries,
-                    ),
-                    NavigationDestination(
-                      icon: const Icon(Icons.search),
-                      label: l.search,
-                    ),
-                  ],
-                ),
+            : PhoneBottomNav(
+                index: _index,
+                floating: floating,
+                onSelected: (index) {
+                  FocusScope.of(context).unfocus();
+                  setState(() => _index = index);
+                },
               ),
       ),
     );

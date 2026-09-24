@@ -15,6 +15,7 @@ class SearchController extends ChangeNotifier {
   static const pageSize = 50;
   List<EmbyItem> items = const [];
   String term = '';
+  String? watch;
   int fetched = 0;
   bool loading = false, loadingMore = false, hasMore = false, searched = false;
   EmbyException? error, pageError;
@@ -31,6 +32,7 @@ class SearchController extends ChangeNotifier {
     _revision++;
     items = const [];
     fetched = 0;
+    watch = null;
     loading = loadingMore = hasMore = searched = false;
     error = pageError = null;
     _emit();
@@ -50,11 +52,7 @@ class SearchController extends ChangeNotifier {
     error = pageError = null;
     _emit();
     if (next.isEmpty) return;
-    final request = catalogSearchRequest(
-      userId: auth.client.userId ?? '',
-      searchTerm: next,
-      startIndex: 0,
-    );
+    final request = _request(0);
     final hit = await cache.lookup(request);
     if (!_owns(revision)) return;
     if (hit != null) _accept(parseCatalogPage(hit.json).items, 0);
@@ -79,14 +77,7 @@ class SearchController extends ChangeNotifier {
     _emit();
     try {
       final page = parseCatalogPage(
-        await cache.fetch(
-          auth.client,
-          catalogSearchRequest(
-            userId: auth.client.userId ?? '',
-            searchTerm: term,
-            startIndex: start,
-          ),
-        ),
+        await cache.fetch(auth.client, _request(start)),
       );
       if (!_owns(revision)) return;
       _accept(page.items, start);
@@ -96,6 +87,27 @@ class SearchController extends ChangeNotifier {
       loadingMore = false;
       _emit();
     }
+  }
+
+  void setWatch(String? next) {
+    if (next == watch) {
+      return;
+    }
+    watch = next;
+    if (term.isNotEmpty) {
+      submit(term);
+      return;
+    }
+    _emit();
+  }
+
+  CatalogRequest _request(int startIndex) {
+    return catalogSearchRequest(
+      userId: auth.client.userId ?? '',
+      searchTerm: term,
+      startIndex: startIndex,
+      filters: watch == null ? null : [watch!],
+    );
   }
 
   void _accept(List<EmbyItem> raw, int start) {

@@ -42,6 +42,7 @@ class LiquidGlass extends StatelessWidget {
     this.padding,
     this.width,
     this.height,
+    this.tint,
   });
 
   final Widget child;
@@ -50,6 +51,9 @@ class LiquidGlass extends StatelessWidget {
   final EdgeInsetsGeometry? padding;
   final double? width;
   final double? height;
+
+  /// 覆盖这一层的底色浓度。悬浮导航要更实，避免背后的标题透出来。
+  final double? tint;
 
   static bool reduced(BuildContext context) =>
       MediaQuery.disableAnimationsOf(context);
@@ -126,7 +130,7 @@ class LiquidGlass extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final radius = _radius;
     final fill = scheme.surface.withValues(
-      alpha: skipBlur ? AppGlass.reducedTint : _tint,
+      alpha: skipBlur ? AppGlass.reducedTint : (tint ?? _tint),
     );
     Widget body = child;
     if (padding != null) {

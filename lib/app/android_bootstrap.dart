@@ -41,11 +41,25 @@ class _AndroidBootstrapState extends State<AndroidBootstrap> {
       _detectionFailed = false;
     });
     try {
-      final environment = usePhone
+      var environment = usePhone
           ? PresentationEnvironment.phone
           : await (widget.resolveEnvironment ??
                 () => PresentationEnvironment.resolve(isAndroid: true))();
       if (!mounted) return;
+      // 模拟器冷启动第一帧经常是 0×0，平台通道会超时。再试两次再报失败。
+      if (!usePhone &&
+          widget.resolveEnvironment == null &&
+          environment.detectionFailed) {
+        for (
+          var attempt = 0;
+          attempt < 2 && environment.detectionFailed;
+          attempt++
+        ) {
+          await Future<void>.delayed(const Duration(milliseconds: 500));
+          if (!mounted) return;
+          environment = await PresentationEnvironment.resolve(isAndroid: true);
+        }
+      }
       if (environment.detectionFailed || environment.isDesktop) {
         setState(() => _detectionFailed = true);
         return;

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_chrome.dart';
+import 'package:rillight/app/phone_nav_style.dart';
 import 'package:rillight/app/product.dart';
 import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/router.dart';
@@ -37,7 +38,7 @@ class RillightApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (!environment.isDesktop) {
-      return PresentationScope(
+      final app = PresentationScope(
         environment: environment,
         child: AuthScope(
           controller: auth,
@@ -58,6 +59,10 @@ class RillightApp extends StatelessWidget {
           ),
         ),
       );
+      if (environment.isTv) {
+        return app;
+      }
+      return PhoneNavStyleHost(child: app);
     }
     return PresentationScope(
       environment: environment,

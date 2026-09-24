@@ -11,6 +11,7 @@ import 'package:rillight/home/catalog_shell.dart';
 import 'package:rillight/home/home_page.dart';
 import 'package:rillight/library/item_detail_page.dart';
 import 'package:rillight/library/library_page.dart';
+import 'package:rillight/home/phone_home_edit_page.dart';
 import 'package:rillight/home/phone_shelf_page.dart';
 import 'package:rillight/library/shelf_grid_page.dart';
 import 'package:rillight/search/search_page.dart';
@@ -24,6 +25,7 @@ import 'package:rillight/player/player_window_host.dart';
 import 'package:rillight/app/tv_shell.dart';
 import 'package:rillight/auth/tv_connect_page.dart';
 import 'package:rillight/library/tv_detail_page.dart';
+import 'package:rillight/home/tv_shelf_page.dart';
 import 'package:rillight/library/tv_library_page.dart';
 import 'package:rillight/player/tv_player_page.dart';
 
@@ -90,6 +92,10 @@ GoRouter createAppRouter({
               builder: (context, state) => const PhoneMinePage(),
             ),
             GoRoute(
+              path: AppRoutes.homeEdit,
+              builder: (context, state) => const PhoneHomeEditPage(),
+            ),
+            GoRoute(
               path: '/library/:viewId',
               builder: (context, state) =>
                   MobileLibraryPage(viewId: state.pathParameters['viewId']!),
@@ -99,6 +105,7 @@ GoRouter createAppRouter({
               builder: (context, state) => MobileDetailPage(
                 itemId: state.pathParameters['itemId']!,
                 initialSeasonId: state.uri.queryParameters['season'],
+                initialEpisodeId: state.uri.queryParameters['episode'],
               ),
             ),
             GoRoute(
@@ -133,6 +140,21 @@ GoRouter createAppRouter({
               path: '/library/:viewId',
               builder: (context, state) =>
                   TvLibraryPage(viewId: state.pathParameters['viewId']!),
+            ),
+            GoRoute(
+              path: '/shelf/:source',
+              builder: (context, state) {
+                final source = state.pathParameters['source'] ?? '';
+                if (TvShelfPage.handles(source)) {
+                  return TvShelfPage.fromState(state);
+                }
+                final query = state.uri.queryParameters;
+                return TvLibraryPage(
+                  viewId: query['parentId'] ?? '',
+                  initialGenre: query['genre'],
+                  initialType: query['includeItemTypes'],
+                );
+              },
             ),
             GoRoute(
               path: '/item/:itemId',

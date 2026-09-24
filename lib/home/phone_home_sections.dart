@@ -1,7 +1,7 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
@@ -224,6 +224,37 @@ class PhoneHomeSectionController extends ChangeNotifier {
     await _save(PhoneHomeSectionPrefs(order: _prefs.order, hidden: hidden));
   }
 
+  /// 只重排正在显示的行，未显示的行保持在后面。
+  Future<void> reorderVisible(
+    int oldIndex,
+    int newIndex,
+    List<EmbyItem> libraries,
+  ) async {
+    final order = orderedIds(libraries);
+    final shown = [
+      for (final id in order)
+        if (!isHidden(id)) id,
+    ];
+    final hidden = [
+      for (final id in order)
+        if (isHidden(id)) id,
+    ];
+    if (oldIndex < 0 || oldIndex >= shown.length) {
+      return;
+    }
+    if (newIndex < 0 || newIndex >= shown.length) {
+      return;
+    }
+    final moved = shown.removeAt(oldIndex);
+    shown.insert(newIndex, moved);
+    await _save(
+      PhoneHomeSectionPrefs(
+        order: [...shown, ...hidden],
+        hidden: _prefs.hidden,
+      ),
+    );
+  }
+
   Future<void> move(String id, int delta, List<EmbyItem> libraries) async {
     final order = orderedIds(libraries);
     final index = order.indexOf(id);
@@ -271,7 +302,7 @@ Future<PhoneHomeSectionStore> openPhoneHomeSectionStore() async {
   }
 }
 
-/// 「我的」里的显示、隐藏和排序。片库页不读这里。
+/// 首页编辑页里的显示、隐藏和排序。片库页不读这里。
 class PhoneHomeSectionEditor extends StatelessWidget {
   const PhoneHomeSectionEditor({
     super.key,
@@ -293,17 +324,75 @@ class PhoneHomeSectionEditor extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
+    final theme = Theme.of(context);
     final order = controller.orderedIds(libraries);
     final names = {for (final library in libraries) library.id: library.name};
-    return Column(
+    final shown = [
+      for (final id in order)
+        if (!controller.isHidden(id)) id,
+    ];
+    final hidden = [
+      for (final id in order)
+        if (controller.isHidden(id)) id,
+    ];
+    return ReorderableListView(
+      header: Padding(
+        padding: const EdgeInsets.fromLTRB(
+          AppSpacing.md,
+          AppSpacing.sm,
+          AppSpacing.md,
+          AppSpacing.xs,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              l10n.phoneHomeEditHint,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: AppSpacing.lg),
+            Text(l10n.phoneHomeShown, style: theme.textTheme.titleSmall),
+          ],
+        ),
+      ),
+      padding: const EdgeInsets.only(bottom: AppSpacing.lg),
+      buildDefaultDragHandles: false,
+      onReorderItem: (oldIndex, newIndex) {
+        unawaited(controller.reorderVisible(oldIndex, newIndex, libraries));
+      },
+      footer: hidden.isEmpty
+          ? null
+          : Padding(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.md,
+                AppSpacing.lg,
+                AppSpacing.md,
+                0,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(l10n.phoneHomeHidden, style: theme.textTheme.titleSmall),
+                  const SizedBox(height: AppSpacing.xs),
+                  for (final id in hidden)
+                    _row(
+                      context,
+                      id: id,
+                      label: _label(l10n, id, names),
+                      draggable: false,
+                    ),
+                ],
+              ),
+            ),
       children: [
-        for (var index = 0; index < order.length; index++)
+        for (var index = 0; index < shown.length; index++)
           _row(
             context,
-            id: order[index],
-            label: _label(l10n, order[index], names),
+            id: shown[index],
+            label: _label(l10n, shown[index], names),
             index: index,
-            last: index == order.length - 1,
           ),
       ],
     );
@@ -329,39 +418,51 @@ class PhoneHomeSectionEditor extends StatelessWidget {
     BuildContext context, {
     required String id,
     required String label,
-    required int index,
-    required bool last,
+    int? index,
+    bool draggable = true,
   }) {
-    final l10n = AppLocalizations.of(context);
+    final theme = Theme.of(context);
     final visible = !controller.isHidden(id);
-    return Row(
+    final handle = Icon(
+      Icons.drag_handle,
+      color: theme.colorScheme.onSurfaceVariant,
+    );
+    return Material(
       key: tileKey(id),
-      children: [
-        Expanded(
-          child: Text(label, maxLines: 2, overflow: TextOverflow.ellipsis),
+      color: Colors.transparent,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
+        child: Row(
+          children: [
+            if (draggable && index != null)
+              ReorderableDragStartListener(
+                index: index,
+                child: SizedBox(
+                  width: 48,
+                  height: 48,
+                  child: Center(child: handle),
+                ),
+              )
+            else
+              const SizedBox(width: 48, height: 48),
+            Expanded(
+              child: Text(
+                label,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodyLarge?.copyWith(
+                  color: visible ? null : theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+            Switch(
+              key: visibleKey(id),
+              value: visible,
+              onChanged: (value) => controller.setVisible(id, value),
+            ),
+          ],
         ),
-        IconButton(
-          key: moveUpKey(id),
-          tooltip: l10n.phoneHomeSectionMoveUp,
-          visualDensity: VisualDensity.compact,
-          onPressed: index == 0
-              ? null
-              : () => controller.move(id, -1, libraries),
-          icon: const Icon(Icons.arrow_upward),
-        ),
-        IconButton(
-          key: moveDownKey(id),
-          tooltip: l10n.phoneHomeSectionMoveDown,
-          visualDensity: VisualDensity.compact,
-          onPressed: last ? null : () => controller.move(id, 1, libraries),
-          icon: const Icon(Icons.arrow_downward),
-        ),
-        Switch(
-          key: visibleKey(id),
-          value: visible,
-          onChanged: (value) => controller.setVisible(id, value),
-        ),
-      ],
+      ),
     );
   }
 }

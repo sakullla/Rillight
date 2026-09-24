@@ -29,8 +29,8 @@ class SkeletonBlock extends StatefulWidget {
 
 class _SkeletonBlockState extends State<SkeletonBlock>
     with SingleTickerProviderStateMixin {
-  /// shimmer 循环周期:slow 阶梯的四倍。
-  static final Duration _period = AppMotion.slow * 4;
+  /// 从左向右扫过，大约一秒一轮，慢到不会抢内容的注意力。
+  static final Duration _period = AppMotion.slow * 3;
 
   AnimationController? _controller;
 
@@ -40,6 +40,20 @@ class _SkeletonBlockState extends State<SkeletonBlock>
     if (widget.animated) {
       _controller = AnimationController(vsync: this, duration: _period)
         ..repeat();
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final reduce = MediaQuery.disableAnimationsOf(context);
+    if (reduce || !widget.animated) {
+      _controller?.stop();
+      return;
+    }
+    _controller ??= AnimationController(vsync: this, duration: _period);
+    if (!_controller!.isAnimating) {
+      _controller!.repeat();
     }
   }
 

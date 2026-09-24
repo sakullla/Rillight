@@ -5,6 +5,7 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:rillight/app/content_theme.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme/tokens.dart';
@@ -13,14 +14,14 @@ import 'package:rillight/app/widgets/scrim_icon_button.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_controller.dart';
+import 'package:rillight/home/featured_items.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/media_shelf.dart';
 import 'package:rillight/library/item_format.dart';
 import 'package:rillight/media_image/media_image.dart';
-import 'package:rillight/player/player_window_host.dart';
 
-/// 首页全宽 hero 轮播:最多 5 条 featured 内容(继续观看优先,其次最新
-/// 电影/剧集),支持左右箭头与指示点手动切换,并约每 6 秒自动轮换。
+/// 首页全宽 hero 轮播:最多 5 条未看完、优先有背景图的电影和剧集。
+/// 支持左右箭头与指示点手动切换,并约每 6 秒自动轮换。
 /// 悬停或焦点只暂停计时与进度,离开后继续。手动切换或暂停会锁住,直到再次播放。
 /// [MediaQuery.disableAnimations] 或 [AppMotion.durationOf] 为零时不切换、
 /// 进度不走,暂停控制不可用(WCAG 2.2.2)。
@@ -91,34 +92,12 @@ class _HomeHeroState extends State<HomeHero> {
   int _elapsedMs = 0;
   final ValueNotifier<double> _progress = ValueNotifier<double>(0);
 
-  /// featured 候选:继续观看(可播/剧集)优先,其次最新电影、最新剧集,
-  /// 按 id 去重并截断到 [HomeHero.maxFeatured]。
+  /// 有背景图的未看完电影和剧集。
   List<EmbyItem> get _featuredItems {
-    final seen = <String>{};
-    final items = <EmbyItem>[];
-    void addAll(Iterable<EmbyItem> source, {bool playableOnly = false}) {
-      for (final item in source) {
-        if (items.length >= HomeHero.maxFeatured) return;
-        if (playableOnly && !item.isPlayable && !item.isSeries) {
-          continue;
-        }
-        if (seen.add(item.id)) {
-          items.add(item);
-        }
-        if (items.length >= HomeHero.maxFeatured) {
-          return;
-        }
-      }
-    }
-
-    addAll(widget.catalog.resume.items, playableOnly: true);
-    addAll(widget.catalog.latestMovies.items);
-    addAll(widget.catalog.latestSeries.items);
-    return items;
+    return featuredHomeItems(widget.catalog, limit: HomeHero.maxFeatured);
   }
 
   bool get _loading =>
-      widget.catalog.resume.loading ||
       widget.catalog.latestMovies.loading ||
       widget.catalog.latestSeries.loading;
 
@@ -282,42 +261,47 @@ class _HomeHeroState extends State<HomeHero> {
                     duration: AppMotion.durationOf(context, AppMotion.slow),
                     child: KeyedSubtree(
                       key: ValueKey(featured.id),
-                      child: Stack(
-                        fit: StackFit.expand,
-                        children: [
-                          BackdropScrim(
-                            topBandHeight: math.max(
-                              AppScrim.topBandHeight,
-                              widget.topOverlap + HomeHero.topBandFade,
-                            ),
-                            backdrop: !hasImage
-                                ? const SizedBox.expand()
-                                : MediaImage(
-                                    item: featured,
-                                    height: height,
-                                    preferBackdrop: true,
-                                    maxWidth: mediaBackdropRequestWidth(
-                                      layoutWidth: constraints.maxWidth,
-                                      devicePixelRatio:
-                                          MediaQuery.devicePixelRatioOf(
-                                            context,
-                                          ),
+                      child: ContentTheme(
+                        item: featured,
+                        preferBackdrop: true,
+                        fillSurface: false,
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            BackdropScrim(
+                              topBandHeight: math.max(
+                                AppScrim.topBandHeight,
+                                widget.topOverlap + HomeHero.topBandFade,
+                              ),
+                              backdrop: !hasImage
+                                  ? const SizedBox.expand()
+                                  : MediaImage(
+                                      item: featured,
+                                      height: height,
+                                      preferBackdrop: true,
+                                      maxWidth: mediaBackdropRequestWidth(
+                                        layoutWidth: constraints.maxWidth,
+                                        devicePixelRatio:
+                                            MediaQuery.devicePixelRatioOf(
+                                              context,
+                                            ),
+                                      ),
                                     ),
-                                  ),
-                          ),
-                          Padding(
-                            padding: EdgeInsets.fromLTRB(
-                              AppSpacing.page,
-                              math.max(AppSpacing.xl, widget.topOverlap),
-                              AppSpacing.page,
-                              items.length > 1 ? 64 : AppSpacing.xl,
                             ),
-                            child: _HeroContent(
-                              item: featured,
-                              width: constraints.maxWidth,
+                            Padding(
+                              padding: EdgeInsets.fromLTRB(
+                                AppSpacing.page,
+                                math.max(AppSpacing.xl, widget.topOverlap),
+                                AppSpacing.page,
+                                items.length > 1 ? 64 : AppSpacing.xl,
+                              ),
+                              child: _HeroContent(
+                                item: featured,
+                                width: constraints.maxWidth,
+                              ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -588,59 +572,20 @@ class _HeroContent extends StatelessWidget {
           ),
         ],
         const SizedBox(height: AppSpacing.lg),
-        Wrap(
-          spacing: AppSpacing.sm,
-          runSpacing: AppSpacing.sm,
-          children: [
-            if (item.isPlayable || item.isSeries)
-              FilledButton.icon(
-                key: CatalogKeys.heroPlay,
-                onPressed: () {
-                  if (item.isPlayable) {
-                    unawaited(
-                      PlayerWindowScope.of(context).open(
-                        PlayerOpenRequest(
-                          itemId: item.id,
-                          startTimeTicks: item.canResume
-                              ? item.resumePositionTicks
-                              : null,
-                        ),
-                      ),
-                    );
-                    return;
-                  }
-                  context.push(AppRoutes.item(item.id));
-                },
-                style: FilledButton.styleFrom(
-                  minimumSize: const Size(0, 48),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: AppSpacing.xl,
-                    vertical: AppSpacing.sm,
-                  ),
-                ),
-                icon: const Icon(Icons.play_arrow),
-                label: Text(
-                  item.isPlayable && item.canResume
-                      ? l10n.resumePlay
-                      : l10n.play,
-                ),
-              ),
-            OutlinedButton(
-              onPressed: () => context.push(AppRoutes.item(item.id)),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: theme.colorScheme.onSurface,
-                side: BorderSide(
-                  color: theme.colorScheme.onSurface.withValues(alpha: 0.42),
-                ),
-                minimumSize: const Size(0, 48),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: AppSpacing.lg,
-                  vertical: AppSpacing.sm,
-                ),
-              ),
-              child: Text(l10n.details),
+        OutlinedButton(
+          onPressed: () => context.push(AppRoutes.item(item.id)),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: theme.colorScheme.onSurface,
+            side: BorderSide(
+              color: theme.colorScheme.onSurface.withValues(alpha: 0.42),
             ),
-          ],
+            minimumSize: const Size(0, 48),
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.lg,
+              vertical: AppSpacing.sm,
+            ),
+          ),
+          child: Text(l10n.details),
         ),
       ],
     );

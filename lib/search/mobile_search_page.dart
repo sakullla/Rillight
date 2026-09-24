@@ -4,6 +4,7 @@ import 'package:flutter/material.dart' hide SearchController;
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_chrome.dart';
+import 'package:rillight/app/phone_bottom_nav.dart';
 import 'package:rillight/app/mobile_widgets.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme.dart';
@@ -11,6 +12,7 @@ import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_failure.dart';
 import 'package:rillight/home/catalog_scope.dart';
+import 'package:rillight/library/catalog_filter_button.dart';
 import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/search/search_controller.dart';
 
@@ -98,26 +100,40 @@ class _MobileSearchPageState extends State<MobileSearchPage> {
     return Column(
       children: [
         Padding(
-          padding: const EdgeInsets.all(AppSpacing.md),
-          child: TextField(
-            key: const Key('mobile-search-field'),
-            controller: _text,
-            focusNode: _focus,
-            textInputAction: TextInputAction.search,
-            scrollPadding: const EdgeInsets.all(20),
-            onSubmitted: (_) => _submit(),
-            onChanged: _onChanged,
-            decoration: InputDecoration(
-              hintText: l.searchHint,
-              prefixIcon: const Icon(Icons.search),
-              suffixIcon: IconButton(
-                tooltip: l.search,
-                onPressed: _submit,
-                icon: const Icon(Icons.arrow_forward),
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.md,
+            AppSpacing.md,
+            AppSpacing.xs,
+            AppSpacing.md,
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  key: const Key('mobile-search-field'),
+                  controller: _text,
+                  focusNode: _focus,
+                  textInputAction: TextInputAction.search,
+                  scrollPadding: const EdgeInsets.all(20),
+                  onSubmitted: (_) => _submit(),
+                  onChanged: _onChanged,
+                  decoration: InputDecoration(
+                    hintText: l.searchHint,
+                    prefixIcon: const Icon(Icons.search),
+                    suffixIcon: IconButton(
+                      tooltip: l.search,
+                      onPressed: _submit,
+                      icon: const Icon(Icons.arrow_forward),
+                    ),
+                  ),
+                ),
               ),
-            ),
+              CatalogFilterButton(watch: c.watch, onChanged: c.setWatch),
+            ],
           ),
         ),
+        if (c.watch != null)
+          CatalogWatchChip(watch: c.watch!, onClear: () => c.setWatch(null)),
         Expanded(
           child: ListenableBuilder(
             listenable: c,
@@ -182,7 +198,12 @@ class _SearchBody extends StatelessWidget {
       child: ListView(
         key: const PageStorageKey<String>('mobile-search-scroll'),
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.all(AppSpacing.md),
+        padding: EdgeInsets.fromLTRB(
+          AppSpacing.md,
+          AppSpacing.md,
+          AppSpacing.md,
+          AppSpacing.md + phoneScrollClearance(context),
+        ),
         children: [
           if (c.loading || c.loadingMore) const LinearProgressIndicator(),
           _ResultGrid(items: c.items),
@@ -329,7 +350,7 @@ class _ResultPoster extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xxs),
             child: Text(
               item.name,
-              maxLines: 2,
+              maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
           ),

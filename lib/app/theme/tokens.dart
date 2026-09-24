@@ -191,6 +191,17 @@ abstract final class AppMobileNav {
 
   /// 导航栏底色 alpha(透明底,内容可从背后透出)。
   static const double backgroundAlpha = 0.0;
+
+  /// 悬浮导航离窗口边缘的最小间距。贴底时为 0。
+  static const double floatMargin = AppSpacing.md;
+
+  /// 64dp 高的导航做成胶囊。贴底栏不加外圆角。
+  static const double floatRadius = 32;
+
+  /// Material 3 NavigationBar 的高度，加上上方溶入带。
+  /// 悬浮时页面要留出这段，最后一行才能滚到栏的上面。
+  static const double barHeight = 80;
+  static const double fadeHeight = 36;
 }
 
 /// Liquid Glass 浮层材质:只用于顶栏/面板/控件,不铺在海报内容上。

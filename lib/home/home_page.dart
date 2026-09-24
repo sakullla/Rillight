@@ -140,10 +140,33 @@ class _HomePageState extends State<HomePage> {
     return ListenableBuilder(
       listenable: catalog,
       builder: (context, _) {
+        final watching = continueWatchingItems(
+          catalog.resume.items,
+          catalog.nextUp.items,
+        );
+        final watchingIds = {for (final item in watching) item.id};
+        final nextUpItems = [
+          for (final item in catalog.nextUp.items)
+            if (!watchingIds.contains(item.id)) item,
+        ];
+        final resumeState = CatalogRowState(
+          items: watching,
+          loading: catalog.resume.loading && watching.isEmpty,
+          hidden: watching.isEmpty,
+          error: watching.isEmpty ? catalog.resume.error : null,
+          notice: catalog.resume.notice,
+        );
+        final nextUpState = CatalogRowState(
+          items: nextUpItems,
+          loading: catalog.nextUp.loading && nextUpItems.isEmpty,
+          hidden: nextUpItems.isEmpty,
+          error: nextUpItems.isEmpty ? catalog.nextUp.error : null,
+          notice: catalog.nextUp.notice,
+        );
         final overlap = HomePage.heroTopOverlap(context);
         final refreshHost = _refreshHost(catalog);
         final heroVisible = [
-          catalog.resume,
+          resumeState,
           catalog.latestMovies,
           catalog.latestSeries,
         ].any((row) => row.loading || row.items.isNotEmpty);
@@ -175,7 +198,7 @@ class _HomePageState extends State<HomePage> {
                       rowKey: CatalogKeys.resumeRow,
                       shelfId: CatalogKeys.shelfResume,
                       title: l10n.resumeRow,
-                      state: catalog.resume,
+                      state: resumeState,
                       showProgress: true,
                       wide: true,
                       headerAction: _refreshAction(
@@ -219,7 +242,7 @@ class _HomePageState extends State<HomePage> {
                       rowKey: CatalogKeys.nextUpRow,
                       shelfId: CatalogKeys.shelfNextUp,
                       title: l10n.nextUpRow,
-                      state: catalog.nextUp,
+                      state: nextUpState,
                       headerAction: _refreshAction(
                         l10n,
                         refreshHost,

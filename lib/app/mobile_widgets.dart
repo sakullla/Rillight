@@ -104,45 +104,51 @@ class MobileFailure extends StatelessWidget {
 }
 
 class MobilePoster extends StatelessWidget {
-  const MobilePoster({super.key, required this.item});
+  const MobilePoster({super.key, required this.item, this.imageMaxWidth = 240});
+
   final EmbyItem item;
+  final int imageMaxWidth;
+
   @override
   Widget build(BuildContext context) {
-    return MobilePressable(
-      onTap: () => context.push(AppRoutes.item(item.id)),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Expanded(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(AppRadii.md),
-                boxShadow: const [
-                  BoxShadow(
-                    color: Color.fromRGBO(0, 0, 0, AppMobileCard.shadowAlpha),
-                    blurRadius: AppMobileCard.shadowBlur,
-                    spreadRadius: AppMobileCard.shadowSpread,
-                    offset: Offset(0, AppMobileCard.shadowOffsetY),
-                  ),
-                ],
-              ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(AppRadii.md),
-                clipBehavior: Clip.antiAlias,
-                child: MediaImage(item: item, maxWidth: 400),
+    return RepaintBoundary(
+      child: MobilePressable(
+        onTap: () => context.push(AppRoutes.item(item.id)),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(AppRadii.md),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Color.fromRGBO(0, 0, 0, AppMobileCard.shadowAlpha),
+                      blurRadius: AppMobileCard.shadowBlur,
+                      spreadRadius: AppMobileCard.shadowSpread,
+                      offset: Offset(0, AppMobileCard.shadowOffsetY),
+                    ),
+                  ],
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(AppRadii.md),
+                  clipBehavior: Clip.hardEdge,
+                  child: MediaImage(item: item, maxWidth: imageMaxWidth),
+                ),
               ),
             ),
-          ),
-          const SizedBox(height: AppSpacing.xs),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xxs),
-            child: Text(
-              item.name,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
+            const SizedBox(height: AppSpacing.xs),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xxs),
+              child: Text(
+                item.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -187,7 +193,7 @@ class MobileGrid extends StatelessWidget {
           crossAxisCount: columns,
           mainAxisSpacing: spacing,
           crossAxisSpacing: spacing,
-          childAspectRatio: cellWidth / (cellWidth * 1.5 + 52 * textScale),
+          childAspectRatio: cellWidth / (cellWidth * 1.5 + 32 * textScale),
         ),
         itemCount: items.length,
         itemBuilder: (context, index) {

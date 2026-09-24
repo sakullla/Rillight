@@ -4,8 +4,10 @@ import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/routes.dart';
+import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/auth/auth_scope.dart';
+import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/player/android_session_recovery.dart';
 import 'package:rillight/player/player_bindings.dart';
@@ -230,14 +232,58 @@ class _TvHome extends StatelessWidget {
         key: const PageStorageKey('tv-home'),
         children: [
           for (final row in [
-            (l.resumeRow, c.resume),
-            (l.nextUpRow, c.nextUp),
-            (l.latestMoviesRow, c.latestMovies),
-            (l.latestSeriesRow, c.latestSeries),
+            (
+              l.resumeRow,
+              c.resume,
+              AppRoutes.shelfResume,
+              CatalogKeys.shelfResume,
+            ),
+            (
+              l.nextUpRow,
+              c.nextUp,
+              AppRoutes.shelfNextUp,
+              CatalogKeys.shelfNextUp,
+            ),
+            (
+              l.latestMoviesRow,
+              c.latestMovies,
+              AppRoutes.shelfLatestMovies,
+              CatalogKeys.shelfLatestMovies,
+            ),
+            (
+              l.latestSeriesRow,
+              c.latestSeries,
+              AppRoutes.shelfLatestSeries,
+              CatalogKeys.shelfLatestSeries,
+            ),
           ])
             if (!row.$2.hidden) ...[
-              Text(row.$1, style: Theme.of(context).textTheme.titleLarge),
-              if (row.$2.loading) const LinearProgressIndicator(),
+              TvAction(
+                key: CatalogKeys.shelfMore(row.$4),
+                onPressed: row.$2.items.isEmpty
+                    ? null
+                    : () => context.push(row.$3),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Flexible(
+                      child: Text(
+                        row.$1,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                    ),
+                    if (row.$2.items.isNotEmpty)
+                      Icon(
+                        Icons.chevron_right,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                  ],
+                ),
+              ),
+              if (row.$2.loading && row.$2.items.isEmpty)
+                const _TvRowSkeleton(),
               if (row.$2.error != null || row.$2.notice != null)
                 TvFailure(
                   error: (row.$2.error ?? row.$2.notice)!,
@@ -247,17 +293,18 @@ class _TvHome extends StatelessWidget {
                 SizedBox(
                   key: ValueKey('tv-row-${row.$1}'),
                   height: 272,
-                  child: ListView(
+                  child: ListView.builder(
                     key: PageStorageKey('tv-row-${row.$1}'),
                     scrollDirection: Axis.horizontal,
-                    children: [
-                      for (final item in row.$2.items)
-                        SizedBox(
-                          key: ValueKey(item.id),
-                          width: 170,
-                          child: TvPoster(item: item),
-                        ),
-                    ],
+                    itemCount: row.$2.items.length,
+                    itemBuilder: (context, index) {
+                      final item = row.$2.items[index];
+                      return SizedBox(
+                        key: ValueKey(item.id),
+                        width: 170,
+                        child: TvPoster(item: item),
+                      );
+                    },
                   ),
                 ),
               const SizedBox(height: 20),
@@ -289,7 +336,8 @@ class _TvLibraries extends StatelessWidget {
       builder: (context, _) => ListView(
         key: const PageStorageKey('tv-libraries'),
         children: [
-          if (c.librariesLoading) const LinearProgressIndicator(),
+          if (c.librariesLoading && c.libraries.isEmpty)
+            const _TvLibrarySkeleton(),
           if (c.librariesError != null || c.librariesNotice != null)
             TvFailure(
               error: (c.librariesError ?? c.librariesNotice)!,
@@ -342,6 +390,61 @@ class _TvSession extends StatelessWidget {
           onPressed: auth.isBusy ? null : auth.logout,
           child: Text(l.logout),
         ),
+      ],
+    );
+  }
+}
+
+class _TvRowSkeleton extends StatelessWidget {
+  const _TvRowSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 272,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        physics: const NeverScrollableScrollPhysics(),
+        itemCount: 6,
+        separatorBuilder: (context, index) => const SizedBox(width: 12),
+        itemBuilder: (context, index) {
+          return const SizedBox(width: 170, child: _TvPosterBone());
+        },
+      ),
+    );
+  }
+}
+
+class _TvPosterBone extends StatelessWidget {
+  const _TvPosterBone();
+
+  @override
+  Widget build(BuildContext context) {
+    final animate = !MediaQuery.disableAnimationsOf(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(child: SkeletonBlock(animated: animate)),
+        const SizedBox(height: 8),
+        SkeletonBlock(width: 120, height: 16, animated: animate),
+      ],
+    );
+  }
+}
+
+class _TvLibrarySkeleton extends StatelessWidget {
+  const _TvLibrarySkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    final animate = !MediaQuery.disableAnimationsOf(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (var i = 0; i < 6; i++) ...[
+          const SizedBox(height: 8),
+          SkeletonBlock(width: 280, height: 36, animated: animate),
+        ],
       ],
     );
   }

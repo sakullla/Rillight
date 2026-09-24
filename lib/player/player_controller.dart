@@ -281,6 +281,9 @@ class PlayerController extends ChangeNotifier {
   bool skipPromptVisible = false;
   bool controlsPinned = false;
   bool _nextUpOffered = false;
+
+  /// 这一集没有下一集时才显示跳过片尾。有下一集时下一集按钮代替它。
+  bool _outroSkipAllowed = false;
   bool _nextUpLoading = false;
   bool _handlingCompleted = false;
   bool _pendingCompletion = false;
@@ -367,6 +370,7 @@ class PlayerController extends ChangeNotifier {
     playbackEnded = false;
     _nextUpOffered = false;
     _nextUpLoading = false;
+    _outroSkipAllowed = false;
     _handlingCompleted = false;
     _pendingCompletion = false;
     skipPromptVisible = false;
@@ -896,22 +900,28 @@ class PlayerController extends ChangeNotifier {
 
   Future<void> playNextEpisode() async {
     final next = nextEpisode?.item;
+    final finishCurrent = _shouldFinishCurrentEpisode();
     _nextTimer?.cancel();
     _nextTimer = null;
     nextEpisode = null;
     if (next == null) {
       return;
     }
-    await _playItem(next.id, fromStart: true);
+    await _playItem(next.id, fromStart: true, finishCurrent: finishCurrent);
   }
 
   /// 切到任意集(剧集列表入口):源 id 每集不同,保留显示名以便对齐同名版本;
   /// 续播语义由 start() 按新集的进度决定。
+  /// 已经到片尾再切走时,把当前集标成已看。
   Future<void> playEpisode(EmbyItem episode) async {
     if (episode.id == itemId) {
       return;
     }
-    await _playItem(episode.id, fromStart: false);
+    await _playItem(
+      episode.id,
+      fromStart: false,
+      finishCurrent: _shouldFinishCurrentEpisode(),
+    );
   }
 
   /// 进程内切到另一集(ADR-4):不经 host 重启通道,直接以新 itemId
@@ -919,10 +929,20 @@ class PlayerController extends ChangeNotifier {
   /// (fromStart=false)时部分观看的集从续播位置起播。
   /// 首次起播请求携带的源/轨道/章节起点只对首个条目有效,换集后清除 id;
   /// 片源发行组标签保留,供下一集按组名对齐。
-  Future<void> _playItem(String targetId, {required bool fromStart}) async {
+  Future<void> _playItem(
+    String targetId, {
+    required bool fromStart,
+    bool finishCurrent = false,
+  }) async {
     final operation = _beginOperation();
     if (operation == null || _disposed) return;
-    final stopped = _stopSession();
+    final finishedId = itemId;
+    final stopped = _stopSession(
+      positionTicks: finishCurrent ? _completedTicks() : null,
+    );
+    if (finishCurrent) {
+      _showEpisodePlayed(finishedId);
+    }
     itemId = targetId;
     item = null;
     resolved = null;
@@ -934,6 +954,13 @@ class PlayerController extends ChangeNotifier {
     _emit();
     await _operations.interrupt(backend.stop);
     await stopped;
+    if (finishCurrent) {
+      try {
+        await client.markPlayed(finishedId);
+      } on EmbyException {
+        // 片尾位置的 Stopped 仍会让服务端按进度标已看。
+      }
+    }
     if (!_accepts(operation)) return;
     activeMediaSourceId = null;
     preferredMediaSourceId = null;
@@ -1363,7 +1390,17 @@ class PlayerController extends ChangeNotifier {
       skipPromptVisible = false;
       return;
     }
-    if (changed) {
+    if (next.kind == PlayerSkipKind.outro &&
+        item?.isEpisode == true &&
+        !_outroSkipAllowed) {
+      skipPromptVisible = false;
+      return;
+    }
+    final revealOutro =
+        next.kind == PlayerSkipKind.outro &&
+        _outroSkipAllowed &&
+        !skipPromptVisible;
+    if (changed || revealOutro) {
       _showSkipPrompt();
     }
   }
@@ -1402,29 +1439,14 @@ class PlayerController extends ChangeNotifier {
     if (current == null || !current.isEpisode) {
       return;
     }
-    if (duration <= Duration.zero) {
-      return;
-    }
-    Duration? threshold;
-    for (final segment in _skipSegments) {
-      if (segment.kind != PlayerSkipKind.outro) continue;
-      if (segment.start < duration - kTrustedOutroWindow) continue;
-      threshold = segment.start;
-      break;
-    }
-    if (threshold == null) {
-      if (duration < kMinRuntimeForEarlyNextUp) {
-        return;
-      }
-      threshold = duration - kNextUpLead;
-      if (threshold < Duration.zero) {
-        threshold = Duration.zero;
-      }
-    }
-    if (position < threshold) {
+    final threshold = _closingThreshold();
+    if (threshold == null || position < threshold) {
       return;
     }
     _nextUpOffered = true;
+    if (activeSkipSegment?.kind == PlayerSkipKind.outro) {
+      skipPromptVisible = false;
+    }
     unawaited(_offerEarlyNextEpisode());
   }
 
@@ -1445,6 +1467,9 @@ class PlayerController extends ChangeNotifier {
       if (next == null || nextEpisode != null) {
         if (next == null) {
           _nextUpOffered = false;
+          _outroSkipAllowed = true;
+          _updateActiveSkip();
+          _emit();
         }
         return;
       }
@@ -1455,7 +1480,12 @@ class PlayerController extends ChangeNotifier {
       nextEpisode = NextEpisodeOffer(item: next);
       _emit();
     } on EmbyException {
-      if (_accepts(operation)) _nextUpOffered = false;
+      if (_accepts(operation)) {
+        _nextUpOffered = false;
+        _outroSkipAllowed = true;
+        _updateActiveSkip();
+        _emit();
+      }
     } finally {
       if (_accepts(operation)) _nextUpLoading = false;
     }
@@ -1721,6 +1751,7 @@ class PlayerController extends ChangeNotifier {
     playbackEnded = false;
     _nextUpOffered = false;
     _nextUpLoading = false;
+    _outroSkipAllowed = false;
     _handlingCompleted = false;
     _pendingCompletion = false;
     _nextTimer?.cancel();
@@ -2308,12 +2339,12 @@ class PlayerController extends ChangeNotifier {
     }
   }
 
-  Future<void> _stopSession() {
+  Future<void> _stopSession({int? positionTicks}) {
     _progressTimer?.cancel();
     _progressTimer = null;
     final session = _session;
     if (session == null) return _awaitPendingStopped();
-    final report = _currentReport();
+    final report = _currentReport(positionTicks: positionTicks);
     session.report = report;
     session.stopped = true;
     _session = null;
@@ -2532,6 +2563,65 @@ class PlayerController extends ChangeNotifier {
       subtitleStreamIndex: subtitleStreamIndex,
       eventName: eventName,
     );
+  }
+
+  /// 片尾提示已经出现,或进度进入片尾/自然结束,离开时算看完。
+  bool _shouldFinishCurrentEpisode() {
+    final current = item;
+    if (current == null || !current.isEpisode || current.userData.played) {
+      return false;
+    }
+    if (playbackEnded || nextEpisode != null) {
+      return true;
+    }
+    final threshold = _closingThreshold();
+    if (threshold != null && position >= threshold) {
+      return true;
+    }
+    return _reachedEpisodeEnd();
+  }
+
+  /// 片尾标记处,或无标记时片长最后约 3 分钟。短片只认自然结束。
+  Duration? _closingThreshold() {
+    if (duration <= Duration.zero) {
+      return null;
+    }
+    for (final segment in _skipSegments) {
+      if (segment.kind != PlayerSkipKind.outro) continue;
+      if (segment.start < duration - kTrustedOutroWindow) continue;
+      return segment.start;
+    }
+    if (duration < kMinRuntimeForEarlyNextUp) {
+      return null;
+    }
+    final threshold = duration - kNextUpLead;
+    return threshold < Duration.zero ? Duration.zero : threshold;
+  }
+
+  int _completedTicks() {
+    var end = position;
+    if (duration > end) end = duration;
+    if (_catalogRuntime > end) end = _catalogRuntime;
+    return ticksFromDuration(end);
+  }
+
+  void _showEpisodePlayed(String id) {
+    if (id.isEmpty) {
+      return;
+    }
+    episodes = [
+      for (final episode in episodes)
+        if (episode.id == id)
+          episode.copyWith(
+            userData: episode.userData.copyWith(
+              played: true,
+              playbackPositionTicks: 0,
+              playedPercentage: 100,
+            ),
+          )
+        else
+          episode,
+    ];
   }
 
   /// 进度必须接近目录片长或当前片长里更长的那个。

@@ -16,6 +16,7 @@ import 'package:rillight/home/catalog_failure.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/home/media_shelf.dart';
+import 'package:rillight/library/catalog_filter_button.dart';
 import 'package:rillight/library/shelf_grid_page.dart';
 import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/search/search_action.dart';
@@ -183,6 +184,10 @@ class _SearchPageState extends State<SearchPage> {
             onPressed: _loading ? null : () => _submit(),
             child: Text(l10n.search),
           ),
+          CatalogFilterButton(
+            watch: _search.watch,
+            onChanged: _search.setWatch,
+          ),
         ],
       ),
     );
@@ -211,6 +216,11 @@ class _SearchPageState extends State<SearchPage> {
                 )
               : Center(child: field),
         ),
+        if (_search.watch != null)
+          CatalogWatchChip(
+            watch: _search.watch!,
+            onClear: () => _search.setWatch(null),
+          ),
         Expanded(child: _buildBody(l10n, screenWidth)),
       ],
     );

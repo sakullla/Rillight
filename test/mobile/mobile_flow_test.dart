@@ -230,8 +230,8 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byType(MobileDetailPage), findsOneWidget);
       expect(find.byType(MobileSeriesPage), findsNothing);
-      expect(find.text('继续播放'), findsOneWidget);
-      expect(find.text('从头播放'), findsOneWidget);
+      expect(find.byTooltip('继续播放'), findsOneWidget);
+      expect(find.byTooltip('从头播放'), findsOneWidget);
       expectPhoneOnly(tester);
 
       final play = find.byKey(const Key('mobile-detail-play'));
@@ -350,7 +350,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byType(MobilePlayerPage), findsNothing);
       expect(find.byType(MobileDetailPage), findsOneWidget);
-      expect(find.text('继续播放'), findsOneWidget);
+      expect(find.byTooltip('继续播放'), findsOneWidget);
       expect(
         server.playbackEvents.where((event) => event.kind == 'Stopped'),
         isNotEmpty,
@@ -810,8 +810,11 @@ void main() {
         ),
         isNotEmpty,
       );
+      final posterWidth = (360 - AppSpacing.md * 2 - AppSpacing.sm * 3) / 3.3;
       expect(
-        blocks.where((block) => block.width == 148).length,
+        blocks
+            .where((block) => (block.width! - posterWidth).abs() < 0.1)
+            .length,
         greaterThanOrEqualTo(3),
       );
 
@@ -884,9 +887,12 @@ void main() {
       final tiles = tester
           .widgetList<SkeletonBlock>(find.byType(SkeletonBlock))
           .toList();
-      expect(tiles.length, greaterThanOrEqualTo(4));
-      expect(tiles.every((block) => (block.height ?? 0) <= 48), isTrue);
-      expect(tiles.where((block) => (block.height ?? 0) > 100), isEmpty);
+      expect(tiles.length, greaterThanOrEqualTo(8));
+      expect(
+        tiles.where((block) => (block.height ?? 0) > 40).length,
+        greaterThanOrEqualTo(4),
+      );
+      expect(tiles.where((block) => block.height == 14).length, 4);
 
       catalog.edit((page) {
         page.librariesLoading = false;

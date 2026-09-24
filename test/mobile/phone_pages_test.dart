@@ -276,7 +276,7 @@ void main() {
     });
 
     testWidgets(
-      'banner prefers resume, pauses after a tap, and stops at five',
+      'banner prefers resume, a drag stops the rotation, and stops at five',
       (tester) async {
         PhoneHero.autoAdvanceEnabled = true;
         addTearDown(() => PhoneHero.autoAdvanceEnabled = false);
@@ -309,29 +309,82 @@ void main() {
         await tester.pump();
 
         expect(find.byType(HomeHero), findsNothing);
-        expect(find.byKey(PhoneHero.itemKey('episode-a')), findsOneWidget);
-        expect(find.byKey(PhoneHero.itemKey('movie-f')), findsNothing);
+        expect(find.byKey(PhoneHero.itemKey('episode-a')), findsNothing);
+        expect(find.byKey(PhoneHero.itemKey('movie-b')), findsOneWidget);
         expect(find.byKey(PhoneHero.itemKey('series-h')), findsNothing);
         expect(find.byKey(CatalogKeys.heroDot(4)), findsOneWidget);
         expect(find.byKey(CatalogKeys.heroDot(5)), findsNothing);
-        expect(find.text('继续播放'), findsOneWidget);
+        expect(find.text('继续播放'), findsNothing);
         expect(find.text('已看 40%'), findsWidgets);
-        expect(find.byTooltip('暂停轮播'), findsOneWidget);
+        expect(find.byTooltip('暂停轮播'), findsNothing);
 
         await tester.pump(const Duration(seconds: 5));
-        expect(find.byKey(PhoneHero.itemKey('episode-a')), findsOneWidget);
+        expect(find.byKey(PhoneHero.itemKey('movie-b')), findsOneWidget);
         await tester.pump(const Duration(seconds: 1));
-        await tester.pump();
-        expect(find.byKey(PhoneHero.itemKey('movie-b')), findsOneWidget);
+        await tester.pump(const Duration(milliseconds: 520));
+        expect(find.byKey(PhoneHero.itemKey('movie-c')), findsOneWidget);
 
-        final banner = tester.getRect(find.byKey(PhoneHero.bannerKey));
-        await tester.tapAt(banner.topLeft + const Offset(16, 16));
+        await tester.drag(
+          find.byKey(PhoneHero.bannerKey),
+          const Offset(-40, 0),
+        );
         await tester.pump();
-        expect(find.byTooltip('恢复轮播'), findsOneWidget);
+        await tester.pump(const Duration(milliseconds: 400));
+        const featured = [
+          'movie-b',
+          'movie-c',
+          'movie-d',
+          'movie-e',
+          'movie-f',
+        ];
+        String? alignedHero() {
+          final banner = tester.getRect(find.byKey(PhoneHero.bannerKey));
+          for (final id in featured) {
+            final finder = find.byKey(PhoneHero.itemKey(id));
+            if (finder.evaluate().isEmpty) {
+              continue;
+            }
+            if ((tester.getRect(finder).left - banner.left).abs() < 2) {
+              return id;
+            }
+          }
+          return null;
+        }
+
+        final shown = alignedHero();
+        expect(shown, isNotNull);
         await tester.pump(const Duration(seconds: 7));
-        expect(find.byKey(PhoneHero.itemKey('movie-b')), findsOneWidget);
+        expect(alignedHero(), shown);
         expect(tester.takeException(), isNull);
       },
+    );
+
+    testWidgets(
+      'home row editing opens from the home tab, not the account page',
+      (tester) async {
+        final (router, _) = await _openPhone(tester);
+        expect(find.byKey(const Key('phone-home-edit')), findsOneWidget);
+        expect(find.text('横幅'), findsNothing);
+
+        await tester.tap(find.byKey(const Key('phone-home-edit')));
+        await _homeSettle(tester);
+        expect(find.byKey(const Key('phone-home-edit-page')), findsOneWidget);
+        expect(find.text('横幅'), findsOneWidget);
+        expect(
+          find.text('按住左侧手柄拖动排序。关闭的行会归到「未显示」。片库页仍会列出全部片库。'),
+          findsOneWidget,
+        );
+
+        router.pop();
+        await _homeSettle(tester);
+        await tester.tap(find.byKey(const Key('mobile-shell-mine-entry')));
+        await _homeSettle(tester);
+        expect(find.byType(PhoneMinePage), findsOneWidget);
+        expect(find.text('横幅'), findsNothing);
+        expect(find.byKey(const Key('phone-home-edit-page')), findsNothing);
+        expect(tester.takeException(), isNull);
+      },
+      tags: ['integration'],
     );
 
     testWidgets('MobilePressable scales and brightens while pressed', (
@@ -475,12 +528,9 @@ void main() {
         tester,
         find.byKey(PhoneHero.itemKey('movie-inception')),
       );
+      expect(find.byKey(PhoneHero.pauseKey), findsNothing);
       expect(
-        tester.widget<IconButton>(find.byKey(PhoneHero.pauseKey)).onPressed,
-        isNull,
-      );
-      expect(
-        tester.widget<FilledButton>(find.byKey(PhoneHero.openKey)).onPressed,
+        tester.widget<GestureDetector>(find.byKey(PhoneHero.openKey)).onTap,
         isNotNull,
       );
       expect(find.text('已看 40%'), findsWidgets);
@@ -488,7 +538,6 @@ void main() {
       await tester.pump(const Duration(seconds: 7));
       expect(find.byKey(PhoneHero.itemKey('movie-inception')), findsOneWidget);
       expect(find.text('已看 40%'), findsWidgets);
-      expect(find.text('继续播放'), findsWidgets);
 
       await tester.tap(find.byKey(PhoneHero.openKey));
       await _homeSettle(tester);
@@ -538,15 +587,10 @@ void main() {
         final (liveRouter, server) = await _openPhone(tester);
         expect(find.byType(HomeHero), findsNothing);
         expect(find.byType(PhoneHero), findsOneWidget);
-        expect(
-          find.byKey(PhoneHero.itemKey('movie-inception')),
-          findsOneWidget,
-        );
-        expect(find.text('继续播放'), findsWidgets);
         expect(find.text('已看 40%'), findsWidgets);
         expect(find.text('继续观看'), findsOneWidget);
 
-        await tester.tap(find.byKey(PhoneHero.openKey));
+        await tester.tap(find.byKey(CatalogKeys.item('movie-inception')));
         await _homeSettle(tester);
         expect(find.byType(MobilePlayerPage), findsNothing);
         expect(
@@ -562,7 +606,14 @@ void main() {
         await _showOnHome(tester, remove);
         await tester.tap(remove);
         await _homeSettle(tester);
-        expect(find.text('继续观看'), findsNothing);
+        expect(
+          find.descendant(
+            of: find.byKey(CatalogKeys.resumeRow),
+            matching: find.byKey(CatalogKeys.item('movie-inception')),
+          ),
+          findsNothing,
+        );
+        expect(find.text('继续观看'), findsOneWidget);
 
         final homeScroll = tester.state<ScrollableState>(
           find.descendant(
@@ -582,7 +633,14 @@ void main() {
           1500,
         );
         await _homeSettle(tester);
-        expect(find.text('继续观看'), findsNothing);
+        expect(
+          find.descendant(
+            of: find.byKey(CatalogKeys.resumeRow),
+            matching: find.byKey(CatalogKeys.item('movie-inception')),
+          ),
+          findsNothing,
+        );
+        expect(find.text('继续观看'), findsOneWidget);
         expect(
           server.items
               .firstWhere((item) => item.id == 'movie-inception')
@@ -599,7 +657,7 @@ void main() {
       (tester) async {
         final (_, server) = await _openPhone(tester, prepare: _addShelfMovies);
         expect(find.text('冷门电影'), findsNothing);
-        // 电影行满员出现"更多";剧集/继续观看行不满员不出现。
+        // 电影行满员出现"更多"。继续观看只要有条目就出现，剧集行不满员不出现。
         expect(
           find.byKey(CatalogKeys.shelfMore(CatalogKeys.shelfLatestMovies)),
           findsOneWidget,
@@ -610,7 +668,7 @@ void main() {
         );
         expect(
           find.byKey(CatalogKeys.shelfMore(CatalogKeys.shelfResume)),
-          findsNothing,
+          findsOneWidget,
         );
         expect(find.byType(ShelfGridPage), findsNothing);
 
@@ -645,6 +703,24 @@ void main() {
         );
         await tester.scrollUntilVisible(find.text('冷门电影'), 400);
         expect(find.text('冷门电影'), findsOneWidget);
+        await tester.tap(find.byKey(const Key('phone-shelf-filter')));
+        await _homeSettle(tester);
+        expect(
+          find.byKey(const Key('catalog-filter-watch-unplayed')),
+          findsOneWidget,
+        );
+        await tester.tap(
+          find.byKey(const Key('catalog-filter-watch-unplayed')),
+        );
+        await _homeSettle(tester);
+        expect(
+          server.requests.where(
+            (request) =>
+                request.contains('IncludeItemTypes=Movie') &&
+                request.contains('Filters=IsUnplayed'),
+          ),
+          isNotEmpty,
+        );
         expect(tester.takeException(), isNull);
       },
       tags: ['integration'],
@@ -907,10 +983,10 @@ void main() {
         final play = find.byKey(const Key('mobile-detail-play'));
         expect(
           tester
-              .widget<Text>(
-                find.descendant(of: play, matching: find.byType(Text)),
+              .widget<Tooltip>(
+                find.ancestor(of: play, matching: find.byType(Tooltip)),
               )
-              .data,
+              .message,
           contains('The One with the Resume'),
         );
         expect(find.text('从头播放'), findsNothing);
@@ -938,7 +1014,7 @@ void main() {
         expect(find.byType(ChoiceChip), findsNothing);
         expect(find.text('Halfway through season two.'), findsOneWidget);
         expect(find.byKey(CatalogKeys.seriesLink), findsOneWidget);
-        expect(find.text('Season Two Follow Up'), findsOneWidget);
+        expect(find.byTooltip('下一集'), findsOneWidget);
         await tester.tap(find.byKey(CatalogKeys.nextEpisode));
         await tester.pumpAndSettle();
         expect(find.text('The next night.'), findsOneWidget);
@@ -974,8 +1050,8 @@ void main() {
         find.byWidgetPredicate((widget) => widget is DropdownButton),
         findsNothing,
       );
-      expect(find.text('继续播放'), findsOneWidget);
-      expect(find.text('从头播放'), findsOneWidget);
+      expect(find.byTooltip('继续播放'), findsOneWidget);
+      expect(find.byTooltip('从头播放'), findsOneWidget);
       expect(tester.getTopLeft(find.byKey(PhoneItemBanner.bannerKey)).dy, 0);
 
       await tester.tap(find.byKey(const Key('mobile-detail-play')));
@@ -1031,7 +1107,7 @@ void main() {
       await tester.ensureVisible(find.byKey(CatalogKeys.playedToggle));
       await tester.tap(find.byKey(CatalogKeys.playedToggle));
       await tester.pumpAndSettle();
-      expect(find.text('标记未看'), findsOneWidget);
+      expect(find.byTooltip('标记未看'), findsOneWidget);
       expect(
         server.items.firstWhere((item) => item.id == 'movie-inception').played,
         isTrue,
@@ -1052,7 +1128,7 @@ void main() {
       await tester.ensureVisible(find.byKey(CatalogKeys.playedToggle));
       await tester.tap(find.byKey(CatalogKeys.playedToggle));
       await tester.pumpAndSettle();
-      expect(find.text('标记已看'), findsOneWidget);
+      expect(find.byTooltip('标记已看'), findsOneWidget);
 
       await tester.binding.handlePopRoute();
       await tester.pumpAndSettle();
@@ -1096,15 +1172,11 @@ void main() {
         );
         await openItem(tester, router, 'movie-inception');
 
-        await tester.ensureVisible(find.byKey(CatalogKeys.mediaSource));
-        await tester.tap(find.byKey(CatalogKeys.mediaSource));
+        await tester.ensureVisible(find.textContaining('日语音轨'));
+        await tester.tap(find.textContaining('日语音轨'));
         await tester.pumpAndSettle();
-        await tester.tap(find.text('日语音轨'));
-        await tester.pumpAndSettle();
-        await tester.ensureVisible(find.byKey(CatalogKeys.mediaSource));
-        await tester.tap(find.byKey(CatalogKeys.mediaSource));
-        await tester.pumpAndSettle();
-        await tester.tap(find.text('英文字幕'));
+        await tester.ensureVisible(find.textContaining('英文字幕'));
+        await tester.tap(find.textContaining('英文字幕'));
         await tester.pumpAndSettle();
 
         await tester.tap(find.byKey(const Key('mobile-detail-play')));
@@ -1153,10 +1225,10 @@ void main() {
       final play = find.byKey(const Key('mobile-detail-play'));
       expect(
         tester
-            .widget<Text>(
-              find.descendant(of: play, matching: find.byType(Text)),
+            .widget<Tooltip>(
+              find.ancestor(of: play, matching: find.byType(Tooltip)),
             )
-            .data,
+            .message,
         contains('Far Resume'),
       );
       expect(find.text('Episode 1'), findsOneWidget);
@@ -1252,10 +1324,10 @@ void main() {
             ),
         ];
         await browse.load();
-        expect(browse.items, hasLength(50));
+        expect(browse.items, hasLength(BrowseController.pageSize));
         server.itemsStatus = 503;
         await browse.load(more: true);
-        expect(browse.items, hasLength(50));
+        expect(browse.items, hasLength(BrowseController.pageSize));
         expect(browse.error, isNotNull);
         expect(browse.hasMore, isTrue);
       },
@@ -1296,8 +1368,6 @@ void main() {
             .map((box) => box.localToGlobal(Offset.zero).dx.round())
             .toSet();
         expect(columns.length, 3);
-        // T5:网格卡片统一为按压反馈 + 阴影形态。
-        expect(find.byType(MobileGrid), findsOneWidget);
         expect(find.byType(MobilePressable), findsWidgets);
         final poster = tester.widget<DecoratedBox>(
           find
@@ -1322,12 +1392,13 @@ void main() {
         );
 
         await _openFilters(tester);
-        expect(find.text('最近添加'), findsOneWidget);
-        expect(find.text('名称'), findsWidgets);
+        expect(find.text('更新日期'), findsWidgets);
+        expect(find.text('加入日期'), findsOneWidget);
+        expect(find.text('标题'), findsOneWidget);
+        expect(find.text('出品年份'), findsOneWidget);
         expect(find.text('IMDb评分'), findsOneWidget);
-        expect(find.text('首映日期'), findsOneWidget);
-        expect(find.text('随机'), findsNothing);
-        expect(find.text('出品年份'), findsNothing);
+        expect(find.text('随机'), findsOneWidget);
+        expect(find.text('首映日期'), findsNothing);
         expect(
           find.byKey(const Key('phone-library-year-section')),
           findsOneWidget,
@@ -1342,9 +1413,12 @@ void main() {
         await _libraryTap(tester, const Key('phone-library-sort-DateCreated'));
         await _libraryTap(tester, const Key('phone-library-year-2010'));
         await _libraryTap(tester, const Key('phone-library-apply'));
-        expect(find.text('最近添加'), findsOneWidget);
+        expect(find.text('加入日期'), findsOneWidget);
         expect(find.text('未看'), findsOneWidget);
-        expect(find.text('2010'), findsOneWidget);
+        expect(
+          find.byKey(const Key('phone-library-active-year')),
+          findsOneWidget,
+        );
         final recent = _lastItemsQuery(harness.server);
         expect(recent, contains('SortBy=DateCreated'));
         expect(recent, contains('SortOrder=Descending'));
@@ -1353,7 +1427,10 @@ void main() {
         expect(recent, isNot(contains('Random')));
 
         await _openFilters(tester);
-        await _libraryTap(tester, const Key('phone-library-sort-PremiereDate'));
+        await _libraryTap(
+          tester,
+          const Key('phone-library-sort-ProductionYear'),
+        );
         await _libraryTap(
           tester,
           const Key('phone-library-sort-CommunityRating'),
@@ -1366,22 +1443,30 @@ void main() {
         );
 
         await _openFilters(tester);
-        await _libraryTap(tester, const Key('phone-library-sort-PremiereDate'));
+        await _libraryTap(
+          tester,
+          const Key('phone-library-sort-ProductionYear'),
+        );
         await _libraryTap(tester, const Key('phone-library-apply'));
-        expect(find.text('首映日期'), findsOneWidget);
+        expect(find.text('出品年份'), findsOneWidget);
         final premiere = _lastItemsQuery(harness.server);
-        expect(premiere, contains('SortBy=PremiereDate'));
+        expect(premiere, contains('SortBy=ProductionYear'));
         expect(premiere, contains('SortOrder=Descending'));
         expect(premiere, contains('Years=2010'));
 
         await _libraryTap(tester, const Key('phone-library-reset'));
-        expect(find.text('名称'), findsOneWidget);
-        expect(find.text('首映日期'), findsNothing);
-        expect(find.text('未看'), findsNothing);
-        expect(find.text('2010'), findsNothing);
+        expect(find.text('出品年份'), findsNothing);
+        expect(
+          find.byKey(const Key('phone-library-active-watch')),
+          findsNothing,
+        );
+        expect(
+          find.byKey(const Key('phone-library-active-year')),
+          findsNothing,
+        );
         final cleared = _lastItemsQuery(harness.server);
-        expect(cleared, contains('SortBy=SortName'));
-        expect(cleared, contains('SortOrder=Ascending'));
+        expect(cleared, contains('SortBy=DateLastContentAdded'));
+        expect(cleared, contains('SortOrder=Descending'));
         expect(cleared, contains('IncludeItemTypes=Movie,Series'));
         expect(cleared, isNot(contains('Years=')));
         expect(cleared, isNot(contains('Filters=')));
@@ -1389,6 +1474,22 @@ void main() {
       },
       tags: ['integration'],
     );
+
+    testWidgets('library watch filter stays in the filter sheet', (
+      tester,
+    ) async {
+      final harness = await _start(tester);
+      await _openMovies(tester);
+      expect(
+        find.byKey(const Key('phone-library-watch-chip-all')),
+        findsNothing,
+      );
+      await _openFilters(tester);
+      await _libraryTap(tester, const Key('phone-library-watch-IsUnplayed'));
+      await _libraryTap(tester, const Key('phone-library-apply'));
+      expect(_lastItemsQuery(harness.server), contains('Filters=IsUnplayed'));
+      expect(tester.takeException(), isNull);
+    }, tags: ['integration']);
 
     testWidgets('genre filter appears only when the server has genres', (
       tester,
@@ -1449,7 +1550,7 @@ void main() {
       expect(find.byType(MobileEmptyState), findsNothing);
       final cleared = _lastItemsQuery(harness.server);
       expect(cleared, contains('IncludeItemTypes=Movie,Series'));
-      expect(cleared, contains('SortBy=SortName'));
+      expect(cleared, contains('SortBy=DateLastContentAdded'));
       expect(tester.takeException(), isNull);
     }, tags: ['integration']);
 

@@ -2,13 +2,16 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:rillight/app/content_theme.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_chrome.dart';
+import 'package:rillight/app/phone_bottom_nav.dart';
 import 'package:rillight/app/mobile_motion.dart';
 import 'package:rillight/app/mobile_widgets.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme.dart';
 import 'package:rillight/auth/auth_scope.dart';
+import 'package:rillight/emby/catalog_cache.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_errors.dart';
 import 'package:rillight/emby/emby_models.dart';
@@ -16,12 +19,19 @@ import 'package:rillight/home/catalog_controller.dart';
 import 'package:rillight/home/catalog_failure.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/catalog_scope.dart';
+import 'package:rillight/library/item_format.dart';
 import 'package:rillight/home/phone_hero.dart';
 import 'package:rillight/home/phone_home_sections.dart';
 import 'package:rillight/media_image/media_image.dart';
 
 /// 首页行请求的 Limit。满这一页说明货架查询后面还有条目。
 const int phoneHomeRowLimit = 24;
+
+/// 每个片库在首页只预览一屏多一点，完整列表从「更多」进入。
+const int phoneHomeLibraryPreview = 12;
+
+/// 片库预览同时最多打两条请求，避免和首屏四行抢连接。
+final _homeLibraryLoads = _LoadGate(2);
 
 /// 手机首页：横幅、可配置区块，以及行后还有内容时的货架入口。
 class PhoneHome extends StatefulWidget {
@@ -36,6 +46,7 @@ class PhoneHome extends StatefulWidget {
 class _PhoneHomeState extends State<PhoneHome> {
   PhoneHomeSectionController? _sections;
   var _loadedServerId = '';
+  EmbyItem? _heroItem;
 
   PhoneHomeSectionController get _controller =>
       _sections ?? PhoneHomeSectionController.app();
@@ -63,10 +74,25 @@ class _PhoneHomeState extends State<PhoneHome> {
     return ListenableBuilder(
       listenable: Listenable.merge([catalog, _controller]),
       builder: (context, _) {
+        final watching = continueWatchingItems(
+          catalog.resume.items,
+          catalog.nextUp.items,
+        );
+        final watchingIds = {for (final item in watching) item.id};
+        final nextUpItems = [
+          for (final item in catalog.nextUp.items)
+            if (!watchingIds.contains(item.id)) item,
+        ];
         final byId = {
           PhoneHomeSectionId.resume: _HomeSection(
             title: l10n.resumeRow,
-            state: catalog.resume,
+            state: CatalogRowState(
+              items: watching,
+              loading: catalog.resume.loading && watching.isEmpty,
+              hidden: watching.isEmpty,
+              error: watching.isEmpty ? catalog.resume.error : null,
+              notice: catalog.resume.notice,
+            ),
             shelfId: CatalogKeys.shelfResume,
             location: AppRoutes.shelfResume,
             rowKey: CatalogKeys.resumeRow,
@@ -75,7 +101,13 @@ class _PhoneHomeState extends State<PhoneHome> {
           ),
           PhoneHomeSectionId.nextUp: _HomeSection(
             title: l10n.nextUpRow,
-            state: catalog.nextUp,
+            state: CatalogRowState(
+              items: nextUpItems,
+              loading: catalog.nextUp.loading && nextUpItems.isEmpty,
+              hidden: nextUpItems.isEmpty,
+              error: nextUpItems.isEmpty ? catalog.nextUp.error : null,
+              notice: catalog.nextUp.notice,
+            ),
             shelfId: CatalogKeys.shelfNextUp,
             location: AppRoutes.shelfNextUp,
             rowKey: CatalogKeys.nextUpRow,
@@ -160,7 +192,15 @@ class _PhoneHomeState extends State<PhoneHome> {
             children: [
               for (final id in visible)
                 if (id == PhoneHomeSectionId.banner)
-                  PhoneHero(catalog: catalog)
+                  PhoneHero(
+                    catalog: catalog,
+                    onItem: (item) {
+                      if (_heroItem?.id == item.id) {
+                        return;
+                      }
+                      setState(() => _heroItem = item);
+                    },
+                  )
                 else if (byId[id] != null)
                   Padding(
                     padding: sectionPadding,
@@ -191,24 +231,41 @@ class _PhoneHomeState extends State<PhoneHome> {
             ],
           );
         }
-        final fullBleed = body is Column;
-        return RefreshIndicator(
+        final fullBleed =
+            body is Column ||
+            (body is MobileLoadingPlaceholder &&
+                body.variant == MobileLoadingVariant.home);
+        final navClearance = phoneScrollClearance(context);
+        final page = RefreshIndicator(
           onRefresh: () => catalog.reload(showCachedFirst: false),
           child: ListView(
             key: const PageStorageKey('mobile-home-scroll'),
             physics: const AlwaysScrollableScrollPhysics(),
             padding: fullBleed
-                ? const EdgeInsets.only(bottom: AppSpacing.lg)
-                : const EdgeInsets.all(AppSpacing.md),
+                ? EdgeInsets.only(bottom: AppSpacing.lg + navClearance)
+                : EdgeInsets.fromLTRB(
+                    AppSpacing.md,
+                    AppSpacing.md,
+                    AppSpacing.md,
+                    AppSpacing.md + navClearance,
+                  ),
             children: [body],
           ),
+        );
+        final hero = _heroItem;
+        if (hero == null) {
+          return page;
+        }
+        return ContentTheme(
+          item: hero,
+          preferBackdrop: true,
+          fillSurface: true,
+          child: page,
         );
       },
     );
   }
 }
-
-const Size _refreshHit = Size(AppSpacing.huge, AppSpacing.huge);
 
 /// 最近电影/剧集卡宽：一屏约 3 张完整 2:3 海报，再露出下一张。
 double phoneHomePosterCardWidth(double screenWidth) {
@@ -229,21 +286,43 @@ double _cardWidthOf(BuildContext context, {required bool wide}) {
       : phoneHomePosterCardWidth(screen);
 }
 
-/// 行高 = 图区 + 卡下标题；横卡另留进度行，移除按钮在标题行而不压住画面。
-double _rowHeightOf(
-  BuildContext context, {
-  required bool wide,
-  required bool resume,
-}) {
+String _resumeTitle(EmbyItem item) {
+  final series = item.seriesName?.trim();
+  if (item.isEpisode && series != null && series.isNotEmpty) {
+    return series;
+  }
+  return item.name;
+}
+
+String _resumeMeta(EmbyItem item, String title) {
+  if (!item.isEpisode) {
+    final year = item.productionYear;
+    return year != null && year > 0 ? '$year' : '';
+  }
+  final code = seasonEpisodeCode(item);
+  final name = item.name.trim();
+  if (code == null) {
+    return name == title ? '' : name;
+  }
+  if (name.isEmpty || name == title) {
+    return code;
+  }
+  return '$code · $name';
+}
+
+/// 行高 = 图区 + 图下标题。横卡的进度在画面底边，移除按钮叠在画面角上。
+double _rowHeightOf(BuildContext context, {required bool wide}) {
   final textScale = MediaQuery.textScalerOf(context).scale(14) / 14;
   final width = _cardWidthOf(context, wide: wide);
   if (!wide) {
-    final titleBlock = AppSpacing.sm + 2 * 20 * textScale + AppSpacing.sm;
+    final line = 14 * 1.45 * textScale;
+    final yearLine = 12 * 1.2 * textScale;
+    final titleBlock = AppSpacing.xs * 2 + line + 2 + yearLine;
     return width * 1.5 + titleBlock;
   }
-  final titleLine = resume ? 36.0 : 22 * textScale;
-  final progress = resume ? AppSpacing.xxs + 16 * textScale : 0.0;
-  return width * 9 / 16 + AppSpacing.xs + titleLine + progress + AppSpacing.sm;
+  final titleLine = 14 * 1.2 * textScale;
+  final meta = 12 * 1.2 * textScale;
+  return width * 9 / 16 + 6 + titleLine + meta + 4;
 }
 
 class _HomeSection {
@@ -264,6 +343,55 @@ class _HomeSection {
   final Key rowKey;
   final bool wide;
   final bool resume;
+}
+
+/// 分栏标题。能进入完整列表时，箭头贴在标题右侧，整段都可点。
+class _SectionTitle extends StatelessWidget {
+  const _SectionTitle({required this.title, this.onMore, this.moreKey});
+
+  final String title;
+  final VoidCallback? onMore;
+  final Key? moreKey;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final label = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Flexible(
+          child: Text(
+            title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.w600,
+              height: 1.2,
+            ),
+          ),
+        ),
+        if (onMore != null)
+          Icon(Icons.chevron_right, color: theme.colorScheme.onSurfaceVariant),
+      ],
+    );
+    return Padding(
+      padding: const EdgeInsets.only(top: AppSpacing.md, bottom: AppSpacing.sm),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: onMore == null
+            ? label
+            : Material(
+                type: MaterialType.transparency,
+                child: InkWell(
+                  key: moreKey,
+                  onTap: onMore,
+                  borderRadius: BorderRadius.circular(AppRadii.sm),
+                  child: label,
+                ),
+              ),
+      ),
+    );
+  }
 }
 
 class _PhoneHomeRow extends StatelessWidget {
@@ -290,30 +418,18 @@ class _PhoneHomeRow extends StatelessWidget {
     final l10n = AppLocalizations.of(context);
     final problem = state.error ?? state.notice;
     final hasMore =
-        state.error == null && state.items.length >= phoneHomeRowLimit;
+        state.error == null &&
+        (section.resume
+            ? state.items.isNotEmpty
+            : state.items.length >= phoneHomeRowLimit);
     return Column(
       key: section.rowKey,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  section.title,
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-              ),
-              if (hasMore)
-                TextButton(
-                  key: CatalogKeys.shelfMore(section.shelfId),
-                  style: TextButton.styleFrom(minimumSize: _refreshHit),
-                  onPressed: () => context.push(section.location),
-                  child: Text(l10n.more),
-                ),
-            ],
-          ),
+        _SectionTitle(
+          title: section.title,
+          onMore: hasMore ? () => context.push(section.location) : null,
+          moreKey: hasMore ? CatalogKeys.shelfMore(section.shelfId) : null,
         ),
         if (state.loading && state.items.isEmpty)
           const MobileLoadingPlaceholder.row(),
@@ -324,11 +440,7 @@ class _PhoneHomeRow extends StatelessWidget {
           ),
         if (state.items.isNotEmpty)
           SizedBox(
-            height: _rowHeightOf(
-              context,
-              wide: section.wide,
-              resume: section.resume,
-            ),
+            height: _rowHeightOf(context, wide: section.wide),
             child: ListView.builder(
               key: PageStorageKey('row-${section.title}'),
               scrollDirection: Axis.horizontal,
@@ -342,7 +454,7 @@ class _PhoneHomeRow extends StatelessWidget {
                     item: item,
                     shared: shared,
                     width: cardWidth,
-                    onRemove: section.resume
+                    onRemove: section.resume && item.canResume
                         ? () {
                             unawaited(onRemoveFromResume(item));
                           }
@@ -380,74 +492,124 @@ class _WideCard extends StatelessWidget {
     final l10n = AppLocalizations.of(context);
     final theme = Theme.of(context);
     final progress = item.playbackProgress;
+    final title = _resumeTitle(item);
+    final meta = _resumeMeta(item, title);
     return Padding(
       padding: const EdgeInsets.only(right: AppSpacing.sm),
       child: SizedBox(
         width: width,
-        child: _PosterCard(
-          pressKey: CatalogKeys.item(item.id),
-          item: item,
-          shared: shared,
-          aspectRatio: 16 / 9,
-          image: Stack(
-            fit: StackFit.expand,
+        child: MobilePressable(
+          key: CatalogKeys.item(item.id),
+          onTap: () => PhoneMotion.openItem(context, item),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              _sharedPosterImage(item, shared),
-              if (item.canResume)
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  child: LinearProgressIndicator(
-                    key: CatalogKeys.resumeProgress,
-                    value: progress,
-                    minHeight: 3,
+              ClipRRect(
+                borderRadius: BorderRadius.circular(AppRadii.md),
+                child: AspectRatio(
+                  aspectRatio: 16 / 9,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    clipBehavior: Clip.hardEdge,
+                    children: [
+                      _sharedPosterImage(item, shared),
+                      if (item.canResume)
+                        Positioned(
+                          left: 0,
+                          right: 0,
+                          bottom: 0,
+                          child: SizedBox(
+                            key: CatalogKeys.resumeProgress,
+                            height: 4,
+                            child: ColoredBox(
+                              color: Colors.black.withValues(alpha: 0.45),
+                              child: FractionallySizedBox(
+                                alignment: Alignment.centerLeft,
+                                widthFactor: progress.clamp(0.0, 1.0),
+                                child: ColoredBox(
+                                  color: theme.colorScheme.primary,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      if (onRemove != null)
+                        Positioned(
+                          top: 0,
+                          right: 0,
+                          child: Tooltip(
+                            message: l10n.removeFromResume,
+                            child: GestureDetector(
+                              key: CatalogKeys.removeFromResume(item.id),
+                              behavior: HitTestBehavior.opaque,
+                              onTap: onRemove,
+                              child: const SizedBox(
+                                width: 48,
+                                height: 48,
+                                child: Center(
+                                  child: DecoratedBox(
+                                    decoration: BoxDecoration(
+                                      color: Color(0x8C000000),
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: SizedBox(
+                                      width: 28,
+                                      height: 28,
+                                      child: Icon(
+                                        Icons.close,
+                                        size: 16,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
                 ),
-            ],
-          ),
-          footer: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Row(
-                  children: [
+              ),
+              const SizedBox(height: 6),
+              Text(
+                title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  height: 1.2,
+                ),
+              ),
+              Row(
+                children: [
+                  if (meta.isNotEmpty)
                     Expanded(
                       child: Text(
-                        item.name,
+                        meta,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          fontWeight: FontWeight.w600,
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                          height: 1.2,
                         ),
+                      ),
+                    )
+                  else
+                    const Spacer(),
+                  if (item.canResume)
+                    Text(
+                      l10n.playbackProgress((progress * 100).round()),
+                      maxLines: 1,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                        height: 1.2,
                       ),
                     ),
-                    if (onRemove != null)
-                      IconButton(
-                        key: CatalogKeys.removeFromResume(item.id),
-                        tooltip: l10n.removeFromResume,
-                        visualDensity: VisualDensity.compact,
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints.tightFor(
-                          width: 32,
-                          height: 32,
-                        ),
-                        onPressed: onRemove,
-                        icon: const Icon(Icons.close, size: 18),
-                      ),
-                  ],
-                ),
-                if (item.canResume)
-                  Text(
-                    l10n.playbackProgress((progress * 100).round()),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.labelSmall,
-                  ),
-              ],
-            ),
+                ],
+              ),
+            ],
           ),
         ),
       ),
@@ -483,13 +645,29 @@ class _PhonePoster extends StatelessWidget {
               horizontal: AppSpacing.sm,
               vertical: AppSpacing.xs,
             ),
-            child: Text(
-              item.name,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                fontWeight: FontWeight.w500,
-              ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  item.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                    height: 1.25,
+                  ),
+                ),
+                if (item.productionYear != null && item.productionYear! > 0)
+                  Text(
+                    '${item.productionYear}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                      height: 1.2,
+                    ),
+                  ),
+              ],
             ),
           ),
         ),
@@ -499,7 +677,7 @@ class _PhonePoster extends StatelessWidget {
 }
 
 /// 海报卡外壳:AppRadii 圆角 + AppMobileCard 阴影 + MobilePressable 按压反馈。
-/// [footer] 为空时 [image] 铺满整卡,否则图区使用 [aspectRatio]。
+/// [footer] 为空时 [image] 铺满整卡,否则图区按 2:3。
 class _PosterCard extends StatelessWidget {
   const _PosterCard({
     required this.item,
@@ -507,7 +685,6 @@ class _PosterCard extends StatelessWidget {
     required this.image,
     this.footer,
     this.pressKey,
-    this.aspectRatio = 2 / 3,
   });
 
   final EmbyItem item;
@@ -515,7 +692,6 @@ class _PosterCard extends StatelessWidget {
   final Widget image;
   final Widget? footer;
   final Key? pressKey;
-  final double aspectRatio;
 
   @override
   Widget build(BuildContext context) {
@@ -547,7 +723,7 @@ class _PosterCard extends StatelessWidget {
                 : Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      AspectRatio(aspectRatio: aspectRatio, child: image),
+                      AspectRatio(aspectRatio: 2 / 3, child: image),
                       footer!,
                     ],
                   ),
@@ -577,17 +753,22 @@ class _PhoneLibraryEntry extends StatelessWidget {
     }
     final l10n = AppLocalizations.of(context);
     final theme = Theme.of(context);
-    const cardWidth = 148.0;
-    const cardHeight = 84.0;
+    final screen = MediaQuery.sizeOf(context).width;
+    final available = screen - AppSpacing.md * 2;
+    final cardWidth = (available - AppSpacing.sm) / 2.15;
+    final cardHeight = cardWidth * 9 / 16;
     return Column(
       key: const Key('phone-home-libraries'),
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+          padding: const EdgeInsets.only(top: AppSpacing.sm),
           child: Text(
             l10n.phoneHomeSectionLibraries,
-            style: theme.textTheme.titleMedium,
+            style: theme.textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.w600,
+              height: 1.2,
+            ),
           ),
         ),
         SizedBox(
@@ -694,29 +875,48 @@ class _PhoneLibraryLatestState extends State<_PhoneLibraryLatest> {
 
   Future<void> _load() async {
     final catalog = CatalogScope.of(context);
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+    final request = catalogItemsRequest(
+      userId: catalog.client.userId ?? '',
+      parentId: widget.library.id,
+      includeItemTypes: _latestTypes(widget.library),
+      recursive: true,
+      limit: phoneHomeLibraryPreview,
+      sortBy: 'DateCreated',
+      sortOrder: 'Descending',
+      fields: EmbyClient.homePosterFields,
+    );
+    final hit = await catalog.cache.lookup(request);
+    if (!mounted) {
+      return;
+    }
+    if (hit != null) {
+      final cached = parseCatalogPage(hit.json).items;
+      if (cached.isNotEmpty) {
+        setState(() {
+          _items = cached;
+          _loading = false;
+          _error = null;
+        });
+      }
+    }
     try {
-      final items = await catalog.auth.client.getItems(
-        parentId: widget.library.id,
-        includeItemTypes: _latestTypes(widget.library),
-        recursive: true,
-        limit: phoneHomeRowLimit,
-        sortBy: 'DateCreated',
-        sortOrder: 'Descending',
-        fields: EmbyClient.gridFields,
+      final items = await _homeLibraryLoads.run(
+        () => catalog.cache.fetch(catalog.client, request),
       );
       if (!mounted) {
         return;
       }
       setState(() {
-        _items = items;
+        _items = parseCatalogPage(items).items;
         _loading = false;
+        _error = null;
       });
     } catch (error) {
       if (!mounted) {
+        return;
+      }
+      if (_items.isNotEmpty) {
+        setState(() => _loading = false);
         return;
       }
       setState(() {
@@ -739,9 +939,10 @@ class _PhoneLibraryLatestState extends State<_PhoneLibraryLatest> {
       key: Key('phone-home-library-latest-${widget.library.id}'),
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
-          child: Text(title, style: Theme.of(context).textTheme.titleLarge),
+        _SectionTitle(
+          title: title,
+          moreKey: CatalogKeys.shelfMore('library-${widget.library.id}'),
+          onMore: () => context.push(AppRoutes.library(widget.library.id)),
         ),
         if (_loading && _items.isEmpty) const MobileLoadingPlaceholder.row(),
         if (_error != null)
@@ -753,7 +954,7 @@ class _PhoneLibraryLatestState extends State<_PhoneLibraryLatest> {
           ),
         if (_items.isNotEmpty)
           SizedBox(
-            height: _rowHeightOf(context, wide: false, resume: false),
+            height: _rowHeightOf(context, wide: false),
             child: ListView.builder(
               key: PageStorageKey('row-$title'),
               scrollDirection: Axis.horizontal,
@@ -770,6 +971,32 @@ class _PhoneLibraryLatestState extends State<_PhoneLibraryLatest> {
           ),
       ],
     );
+  }
+}
+
+/// 限制同时进行的首页片库请求。完成一条再放行下一条。
+class _LoadGate {
+  _LoadGate(this._limit);
+
+  final int _limit;
+  var _active = 0;
+  final _waiters = <Completer<void>>[];
+
+  Future<T> run<T>(Future<T> Function() job) async {
+    if (_active >= _limit) {
+      final ticket = Completer<void>();
+      _waiters.add(ticket);
+      await ticket.future;
+    }
+    _active++;
+    try {
+      return await job();
+    } finally {
+      _active--;
+      if (_waiters.isNotEmpty) {
+        _waiters.removeAt(0).complete();
+      }
+    }
   }
 }
 

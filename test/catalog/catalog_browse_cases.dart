@@ -98,10 +98,7 @@ void main() {
       expect(find.byKey(AppShell.homeNavKey), findsOneWidget);
       expect(find.byKey(AppShell.libraryNavKey('view-movies')), findsOneWidget);
       expect(find.byKey(CatalogKeys.resumeRow), findsOneWidget);
-      expect(
-        tester.getTopLeft(find.byKey(CatalogKeys.resumeRow)).dy,
-        lessThan(tester.getTopLeft(find.byKey(CatalogKeys.nextUpRow)).dy),
-      );
+      expect(find.byKey(CatalogKeys.nextUpRow), findsNothing);
       expect(
         tester.getTopLeft(find.byKey(CatalogKeys.resumeRow)).dy,
         lessThan(tester.getTopLeft(find.byKey(CatalogKeys.latestMoviesRow)).dy),
@@ -112,7 +109,13 @@ void main() {
       );
       expect(find.text('Inception'), findsWidgets);
       expect(find.byKey(CatalogKeys.resumeProgress), findsWidgets);
-      expect(find.byKey(CatalogKeys.nextUpRow), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(CatalogKeys.resumeRow),
+          matching: find.text('老友记'),
+        ),
+        findsOneWidget,
+      );
       expect(find.text('最近更新的电影'), findsOneWidget);
       expect(find.text('飞屋环游记'), findsWidgets);
       expect(find.text('最近更新的剧集'), findsOneWidget);
@@ -123,7 +126,7 @@ void main() {
       );
       expect(
         find.byKey(CatalogKeys.shelfMore(CatalogKeys.shelfNextUp)),
-        findsOneWidget,
+        findsNothing,
       );
       expect(
         find.byKey(CatalogKeys.shelfMore(CatalogKeys.shelfLatestMovies)),
@@ -133,7 +136,7 @@ void main() {
         find.byKey(CatalogKeys.shelfMore(CatalogKeys.shelfLatestSeries)),
         findsOneWidget,
       );
-      expect(find.text('更多'), findsNWidgets(4));
+      expect(find.text('更多'), findsNWidgets(3));
       expect(
         find.descendant(
           of: find.byKey(CatalogKeys.librariesMenu),
@@ -144,7 +147,7 @@ void main() {
       expect(find.byKey(CatalogKeys.library('view-movies')), findsNothing);
       expect(find.byKey(CatalogKeys.library('view-tv')), findsNothing);
       expect(find.text('音乐'), findsNothing);
-      expect(find.text('相册'), findsNothing);
+      expect(find.byKey(AppShell.libraryNavKey('view-photos')), findsOneWidget);
       expect(find.text('混合媒体'), findsNothing);
       expect(
         find.descendant(
@@ -265,7 +268,14 @@ void main() {
       await settle(tester);
       await _tapDetailBack(tester);
       await settle(tester);
-      expect(find.byKey(CatalogKeys.resumeRow), findsNothing);
+      expect(
+        find.descendant(
+          of: find.byKey(CatalogKeys.resumeRow),
+          matching: find.byKey(CatalogKeys.item('movie-inception')),
+        ),
+        findsNothing,
+      );
+      expect(find.byKey(CatalogKeys.resumeRow), findsOneWidget);
       await tester.ensureVisible(
         find.byKey(CatalogKeys.item('movie-inception')),
       );

@@ -212,7 +212,7 @@ void main() {
     expect(server.requests, hasLength(count));
     await browse.load();
     expect(server.requests.last, contains('StartIndex=0'));
-    expect(browse.items, hasLength(50));
+    expect(browse.items, hasLength(BrowseController.pageSize));
   });
   test('failed new season cannot use previous paging offset', () async {
     server.setEpisodes('series-friends', [
@@ -295,7 +295,7 @@ void main() {
       );
       addTearDown(browse.dispose);
       await browse.load();
-      expect(browse.items, hasLength(50));
+      expect(browse.items, hasLength(BrowseController.pageSize));
       await browse.load(more: true);
       expect(browse.items, hasLength(65));
       expect(browse.hasMore, isFalse);

@@ -19,6 +19,12 @@ import 'package:rillight/emby/emby_models.dart';
 /// 分开计数,两边都按低配内存留余量,避免空闲时各吃 256 MiB。
 const int kPaintingImageCacheMaxEntries = 400;
 
+/// 海报请求宽度：按格子的物理像素取整，上限与桌面海报的 280 对齐。
+int catalogPosterMaxWidth(double logicalWidth, double devicePixelRatio) {
+  final physical = logicalWidth * devicePixelRatio;
+  return physical.round().clamp(160, 280);
+}
+
 /// Flutter [ImageCache] 解码像素上限,约 64 MiB。
 const int kPaintingImageCacheMaxBytes = 64 * 1024 * 1024;
 
@@ -73,6 +79,7 @@ class MediaImage extends StatefulWidget {
     this.preferThumb = false,
     this.preferParentBackdrop = false,
     this.maxWidth,
+    this.alignment = Alignment.center,
   });
 
   final EmbyItem item;
@@ -84,6 +91,7 @@ class MediaImage extends StatefulWidget {
   /// 优先所属剧集的 Backdrop(单集 hero 底图),见 [EmbyItem.imageCandidates]。
   final bool preferParentBackdrop;
   final int? maxWidth;
+  final Alignment alignment;
 
   /// 清空内存与磁盘两级缓存,仅测试使用。
   @visibleForTesting
@@ -342,7 +350,7 @@ class _MediaImageState extends State<MediaImage> {
       width: width,
       height: height,
       fit: BoxFit.cover,
-      alignment: Alignment.center,
+      alignment: widget.alignment,
       filterQuality: FilterQuality.low,
       gaplessPlayback: true,
       isAntiAlias: false,

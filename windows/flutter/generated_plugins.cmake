@@ -5,6 +5,7 @@
 list(APPEND FLUTTER_PLUGIN_LIST
   rillight_player
   screen_retriever_windows
+  url_launcher_windows
   window_manager
 )
 

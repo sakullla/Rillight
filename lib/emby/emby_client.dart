@@ -167,6 +167,11 @@ class EmbyClient {
   static const gridFields =
       'Overview,ShortOverview,Taglines,ProductionYear,RunTimeTicks,ChildCount,'
       'SeriesInfo,DateCreated,PremiereDate,CommunityRating,SortName,ImageTags';
+
+  /// 首页海报行：不要简介和标语，这两项会把每条片库的 /Items 撑大。
+  static const homePosterFields =
+      'ProductionYear,ChildCount,SeriesInfo,DateCreated,PremiereDate,'
+      'CommunityRating,ImageTags';
   static const imageTypes = 'Primary,Backdrop,Thumb';
   static const detailImageTypes = 'Primary,Backdrop,Thumb,Chapter';
 
@@ -486,6 +491,60 @@ class EmbyClient {
     return postJson('/Sessions/Playing/Stopped', body: report.toJson());
   }
 
+  /// 同一季里紧邻的一集。只取一小页，避免为了上一集/下一集拉整季。
+  Future<EmbyItem?> _adjacentEpisode(
+    EmbyItem episode, {
+    required bool after,
+  }) async {
+    final seasonId = episode.seasonId ?? episode.parentId;
+    final number = episode.indexNumber;
+    if (seasonId == null || seasonId.isEmpty || number == null) {
+      return null;
+    }
+    final start = number > 1 ? number - 2 : 0;
+    final page = await queryItems(
+      parentId: seasonId,
+      includeItemTypes: 'Episode',
+      sortBy: 'IndexNumber',
+      sortOrder: 'Ascending',
+      startIndex: start,
+      limit: 5,
+      fields: itemFields,
+    );
+    EmbyItem? neighbor;
+    for (final candidate in page.items) {
+      final candidateNumber = candidate.indexNumber;
+      if (candidate.id == episode.id || candidateNumber == null) {
+        continue;
+      }
+      final matches = after
+          ? candidateNumber > number
+          : candidateNumber < number;
+      if (!matches) {
+        continue;
+      }
+      if (neighbor == null) {
+        neighbor = candidate;
+        continue;
+      }
+      final neighborNumber = neighbor.indexNumber ?? 0;
+      final closer = after
+          ? candidateNumber < neighborNumber
+          : candidateNumber > neighborNumber;
+      if (closer) {
+        neighbor = candidate;
+      }
+    }
+    return neighbor;
+  }
+
+  Future<EmbyItem?> getPreviousEpisode(EmbyItem episode) async {
+    if (!episode.isEpisode) {
+      return null;
+    }
+    return _adjacentEpisode(episode, after: false);
+  }
+
   Future<EmbyItem?> getNextEpisode(EmbyItem episode) async {
     if (!episode.isEpisode) {
       return null;
@@ -493,6 +552,10 @@ class EmbyClient {
     final seriesId = episode.seriesId;
     if (seriesId == null || seriesId.isEmpty) {
       return null;
+    }
+    final nearby = await _adjacentEpisode(episode, after: true);
+    if (nearby != null) {
+      return nearby;
     }
     final episodes = await getItems(
       parentId: seriesId,
@@ -666,11 +729,15 @@ class EmbyClient {
     String itemId, {
     String type = 'Primary',
     String? tag,
+    int? index,
     int maxWidth = 280,
     CancelToken? cancelToken,
   }) {
+    final path = index == null
+        ? '/Items/$itemId/Images/$type'
+        : '/Items/$itemId/Images/$type/$index';
     return _requestBytes(
-      '/Items/$itemId/Images/$type',
+      path,
       queryParameters: {
         'maxWidth': '$maxWidth',
         if (tag != null && tag.isNotEmpty) 'tag': tag,

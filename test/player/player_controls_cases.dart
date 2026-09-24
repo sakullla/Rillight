@@ -510,6 +510,61 @@ void main() {
     expect(controller.skipPromptVisible, isTrue);
   });
 
+  test('a following episode hides skip outro', () async {
+    const minute = 10000000 * 60;
+    final episode = server.items.firstWhere(
+      (item) => item.id == 'episode-friends-s1e1',
+    );
+    episode.played = false;
+    episode.playbackPositionTicks = 0;
+    episode.chapters = const [
+      FakeChapter(name: '片尾', startPositionTicks: 20 * minute),
+    ];
+    final controller = await startStandaloneController(
+      itemId: 'episode-friends-s1e1',
+    );
+    addTearDown(controller.dispose);
+    backend.emitEvent(VideoEventKind.duration, const Duration(minutes: 22));
+    backend.emitEvent(
+      VideoEventKind.position,
+      const Duration(minutes: 20, seconds: 30),
+    );
+    for (var i = 0; i < 30; i++) {
+      if (controller.nextEpisode != null) break;
+      await Future<void>.delayed(Duration.zero);
+    }
+    expect(controller.nextEpisode?.item.id, 'episode-friends-s1e2');
+    expect(controller.skipPromptVisible, isFalse);
+  });
+
+  test('the last episode still shows skip outro', () async {
+    const minute = 10000000 * 60;
+    final episode = server.items.firstWhere(
+      (item) => item.id == 'episode-friends-s1e2',
+    );
+    episode.played = false;
+    episode.playbackPositionTicks = 0;
+    episode.chapters = const [
+      FakeChapter(name: '片尾', startPositionTicks: 20 * minute),
+    ];
+    final controller = await startStandaloneController(
+      itemId: 'episode-friends-s1e2',
+    );
+    addTearDown(controller.dispose);
+    backend.emitEvent(VideoEventKind.duration, const Duration(minutes: 22));
+    backend.emitEvent(
+      VideoEventKind.position,
+      const Duration(minutes: 20, seconds: 30),
+    );
+    for (var i = 0; i < 30; i++) {
+      if (controller.skipPromptVisible) break;
+      await Future<void>.delayed(Duration.zero);
+    }
+    expect(controller.nextEpisode, isNull);
+    expect(controller.activeSkipSegment?.kind, PlayerSkipKind.outro);
+    expect(controller.skipPromptVisible, isTrue);
+  });
+
   test('resuming in the last minutes still offers the next episode', () async {
     const minute = 10000000 * 60;
     final episode = server.items.firstWhere(
@@ -538,6 +593,11 @@ void main() {
       server,
       subtitleIndexById: {'episode-friends-s1e1': 2, 'episode-friends-s1e2': 4},
     );
+    final current = server.items.firstWhere(
+      (item) => item.id == 'episode-friends-s1e1',
+    );
+    current.played = false;
+    current.playedPercentage = 0;
     final controller = await startStandaloneController(
       itemId: 'episode-friends-s1e1',
     );
@@ -554,7 +614,36 @@ void main() {
     expect(controller.subtitleStreamIndex, 4);
     expect(controller.maxStreamingBitrate, 4000000);
     expect(controller.error, isNull);
+    expect(
+      server.items
+          .firstWhere((item) => item.id == 'episode-friends-s1e1')
+          .played,
+      isTrue,
+    );
   });
+
+  test(
+    'switching episodes before the ending does not mark it played',
+    () async {
+      final current = server.items.firstWhere(
+        (item) => item.id == 'episode-friends-s1e1',
+      );
+      current.played = false;
+      current.playedPercentage = 0;
+      final controller = await startStandaloneController(
+        itemId: 'episode-friends-s1e1',
+      );
+      addTearDown(controller.dispose);
+      final next = await controller.client.getItem('episode-friends-s1e2');
+      await controller.playEpisode(next);
+      expect(
+        server.items
+            .firstWhere((item) => item.id == 'episode-friends-s1e1')
+            .played,
+        isFalse,
+      );
+    },
+  );
 
   test(
     'bitrate-only memory does not turn subtitles off on the next episode',

@@ -3,9 +3,11 @@ import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_motion.dart';
 import 'package:rillight/app/mobile_widgets.dart';
 import 'package:rillight/app/theme/tokens.dart';
+import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/emby/emby_errors.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_keys.dart';
+import 'package:rillight/library/detail_extras.dart';
 import 'package:rillight/library/episode_detail_sections.dart';
 import 'package:rillight/library/item_format.dart';
 import 'package:rillight/media_image/media_image.dart';
@@ -13,14 +15,14 @@ import 'package:rillight/media_image/media_image.dart';
 /// 头部元数据条目:年份/时长/评级/季集数等,以胶囊形式排在标题下方。
 /// [highlight] 用于评级等需要强调的值。
 class PhoneMetaEntry {
-  const PhoneMetaEntry(this.label, {this.highlight = false});
+  const PhoneMetaEntry(this.label, {this.highlight = false, this.onTap});
 
   final String label;
   final bool highlight;
+  final VoidCallback? onTap;
 }
 
-/// 沉浸头部:全宽 16:9 背图 + 顶带/底带渐变(收敛到 [AppScrim]/[AppMobileHero]
-/// token),标题、元数据胶囊与主操作排在图片下方的衔接带上,不再叠字压图。
+/// 沉浸头部:全宽 16:9 背图,标题和元数据落在底部渐变上,主操作紧贴画面。
 /// 背图缺失时以占位底色兜底,不出现空白区。
 class PhoneItemBanner extends StatelessWidget {
   const PhoneItemBanner({
@@ -29,6 +31,8 @@ class PhoneItemBanner extends StatelessWidget {
     required this.title,
     this.meta = const [],
     this.actions,
+    this.onTitleTap,
+    this.titleHint,
     this.preferBackdrop = true,
     this.maxWidth = PhoneMotion.pageRequestWidth,
     this.maxImageHeight,
@@ -41,6 +45,10 @@ class PhoneItemBanner extends StatelessWidget {
   final String title;
   final List<PhoneMetaEntry> meta;
   final Widget? actions;
+
+  /// 单集标题进所属剧集。非空时标题行带箭头，[titleHint] 写剧集名。
+  final VoidCallback? onTitleTap;
+  final String? titleHint;
   final bool preferBackdrop;
   final int maxWidth;
 
@@ -96,56 +104,142 @@ class PhoneItemBanner extends StatelessWidget {
                   ),
                 ),
               ),
-              // 底带:画面溶入页面底色,与下方信息块无缝衔接。
-              DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      Colors.transparent,
-                      Colors.transparent,
-                      theme.colorScheme.surface,
-                    ],
-                    stops: const [
-                      0,
-                      AppMobileHero.bottomStart,
-                      AppMobileHero.bottomEnd,
-                    ],
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                height: imageHeight * 0.62,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        Colors.transparent,
+                        theme.colorScheme.surface.withValues(alpha: 0.72),
+                        theme.colorScheme.surface,
+                      ],
+                      stops: const [0, 0.55, 1],
+                    ),
                   ),
+                ),
+              ),
+              Positioned(
+                left: AppSpacing.md,
+                right: AppSpacing.md,
+                bottom: AppSpacing.sm,
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _BannerTitle(
+                            title: title,
+                            hint: onTitleTap == null ? null : titleHint,
+                            onTap: onTitleTap,
+                          ),
+                          if (meta.isNotEmpty) ...[
+                            const SizedBox(height: AppSpacing.xs),
+                            Wrap(
+                              key: metaKey,
+                              spacing: AppSpacing.xs,
+                              runSpacing: AppSpacing.xxs,
+                              crossAxisAlignment: WrapCrossAlignment.center,
+                              children: [
+                                for (var i = 0; i < meta.length; i++) ...[
+                                  if (i > 0)
+                                    Text(
+                                      '·',
+                                      style: theme.textTheme.labelMedium
+                                          ?.copyWith(
+                                            color: theme
+                                                .colorScheme
+                                                .onSurfaceVariant,
+                                          ),
+                                    ),
+                                  _MetaChip(entry: meta[i]),
+                                ],
+                              ],
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    if (actions != null) ...[
+                      const SizedBox(width: AppSpacing.sm),
+                      actions!,
+                    ],
+                  ],
                 ),
               ),
             ],
           ),
         ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(
-            AppSpacing.md,
-            AppSpacing.sm,
-            AppSpacing.md,
-            AppSpacing.md,
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+      ],
+    );
+  }
+}
+
+class _BannerTitle extends StatelessWidget {
+  const _BannerTitle({required this.title, this.hint, this.onTap});
+
+  final String title;
+  final String? hint;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final titleStyle = theme.textTheme.headlineSmall?.copyWith(
+      color: theme.colorScheme.onSurface,
+      fontWeight: FontWeight.w700,
+      height: 1.2,
+    );
+    final text = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: titleStyle,
+        ),
+        if (hint != null && hint!.isNotEmpty) ...[
+          const SizedBox(height: 2),
+          Row(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Text(title, style: theme.textTheme.headlineSmall),
-              if (meta.isNotEmpty) ...[
-                const SizedBox(height: AppSpacing.xs),
-                Wrap(
-                  key: metaKey,
-                  spacing: AppSpacing.xs,
-                  runSpacing: AppSpacing.xxs,
-                  children: [for (final entry in meta) _MetaChip(entry: entry)],
+              Flexible(
+                child: Text(
+                  hint!,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    color: theme.colorScheme.primary,
+                  ),
                 ),
-              ],
-              if (actions != null) ...[
-                const SizedBox(height: AppSpacing.sm),
-                actions!,
-              ],
+              ),
+              if (onTap != null)
+                Icon(
+                  Icons.chevron_right,
+                  size: 18,
+                  color: theme.colorScheme.primary,
+                ),
             ],
           ),
-        ),
+        ],
       ],
+    );
+    if (onTap == null) {
+      return text;
+    }
+    return InkWell(
+      key: CatalogKeys.seriesLink,
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(AppRadii.sm),
+      child: text,
     );
   }
 }
@@ -159,24 +253,25 @@ class _MetaChip extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final highlight = entry.highlight;
-    return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: AppSpacing.sm,
-        vertical: AppSpacing.xxs,
+    final chip = Text(
+      entry.label,
+      style: theme.textTheme.labelLarge?.copyWith(
+        color: highlight || entry.onTap != null
+            ? theme.colorScheme.primary
+            : theme.colorScheme.onSurfaceVariant,
+        fontWeight: highlight ? FontWeight.w700 : FontWeight.w500,
       ),
-      decoration: BoxDecoration(
-        color: highlight
-            ? theme.colorScheme.primary.withValues(alpha: 0.16)
-            : theme.colorScheme.surfaceContainerHigh,
+    );
+    final onTap = entry.onTap;
+    if (onTap == null) {
+      return chip;
+    }
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
         borderRadius: BorderRadius.circular(AppRadii.md),
-      ),
-      child: Text(
-        entry.label,
-        style: theme.textTheme.labelSmall?.copyWith(
-          color: highlight
-              ? theme.colorScheme.primary
-              : theme.colorScheme.onSurfaceVariant,
-        ),
+        child: chip,
       ),
     );
   }
@@ -194,7 +289,9 @@ class MobileSeriesPage extends StatelessWidget {
     required this.episodeError,
     required this.hasMore,
     required this.playTargetId,
+    this.focusEpisodeId,
     required this.similar,
+    this.onPickEpisode,
     required this.onSelectSeason,
     required this.onOpenEpisode,
     required this.onRetryEpisodes,
@@ -211,7 +308,9 @@ class MobileSeriesPage extends StatelessWidget {
   final EmbyException? episodeError;
   final bool hasMore;
   final String? playTargetId;
+  final String? focusEpisodeId;
   final List<EmbyItem> similar;
+  final VoidCallback? onPickEpisode;
   final ValueChanged<String> onSelectSeason;
   final ValueChanged<String> onOpenEpisode;
   final VoidCallback? onRetryEpisodes;
@@ -226,16 +325,15 @@ class MobileSeriesPage extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (showSeasons)
+        if (plainOverview(item.overview) != null)
+          EpisodeOverviewSection(overview: item.overview, compact: true),
+        if (showSeasons || onPickEpisode != null)
           SizedBox(
-            height: 64,
+            height: 48,
             child: ListView.separated(
               key: const Key('phone-season-list'),
               scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(
-                horizontal: AppSpacing.md,
-                vertical: AppSpacing.xs,
-              ),
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
               itemCount: seasons.length,
               separatorBuilder: (context, index) =>
                   const SizedBox(width: AppSpacing.xs),
@@ -252,10 +350,44 @@ class MobileSeriesPage extends StatelessWidget {
               },
             ),
           ),
-        if (episodesLoading)
+        if (episodes.isNotEmpty || episodesLoading)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              AppSpacing.md,
+              AppSpacing.sm,
+              AppSpacing.md,
+              AppSpacing.xxs,
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    l.seasonEpisodes,
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                ),
+                if (onPickEpisode != null)
+                  TextButton.icon(
+                    key: CatalogKeys.locateEpisode,
+                    onPressed: onPickEpisode,
+                    icon: const Icon(Icons.apps_rounded, size: 18),
+                    label: Text(l.pickEpisode),
+                  ),
+              ],
+            ),
+          ),
+        if (episodesLoading && episodes.isEmpty)
           const Padding(
             padding: EdgeInsets.symmetric(horizontal: AppSpacing.md),
-            child: LinearProgressIndicator(),
+            child: Row(
+              children: [
+                SkeletonBlock(width: 144, height: 81),
+                SizedBox(width: AppSpacing.sm),
+                SkeletonBlock(width: 144, height: 81),
+                SizedBox(width: AppSpacing.sm),
+                SkeletonBlock(width: 144, height: 81),
+              ],
+            ),
           ),
         if (episodeError != null && onRetryEpisodes != null)
           MobileFailure(error: episodeError!, retry: onRetryEpisodes!),
@@ -268,10 +400,13 @@ class MobileSeriesPage extends StatelessWidget {
             child: Text(l.mobileEmpty),
           ),
         for (final episode in episodes)
-          _EpisodeRow(
-            episode: episode,
-            current: episode.id == playTargetId,
-            onTap: () => onOpenEpisode(episode.id),
+          _RevealEpisode(
+            reveal: episode.id == focusEpisodeId,
+            child: _EpisodeRow(
+              episode: episode,
+              current: episode.id == (focusEpisodeId ?? playTargetId),
+              onTap: () => onOpenEpisode(episode.id),
+            ),
           ),
         if (hasMore && onLoadMore != null)
           Padding(
@@ -281,9 +416,9 @@ class MobileSeriesPage extends StatelessWidget {
               child: Text(l.mobileLoadMore),
             ),
           ),
-        if (plainOverview(item.overview) != null)
-          EpisodeOverviewSection(overview: item.overview),
         EpisodePeopleSection(people: item.people),
+        EpisodeMetadataSection(item: item),
+        DetailExternalLinks(links: item.externalUrls, title: item.name),
         if (similar.isNotEmpty)
           _SimilarRow(
             items: similar,
@@ -294,6 +429,32 @@ class MobileSeriesPage extends StatelessWidget {
       ],
     );
   }
+}
+
+class _RevealEpisode extends StatefulWidget {
+  const _RevealEpisode({required this.reveal, required this.child});
+
+  final bool reveal;
+  final Widget child;
+
+  @override
+  State<_RevealEpisode> createState() => _RevealEpisodeState();
+}
+
+class _RevealEpisodeState extends State<_RevealEpisode> {
+  @override
+  void initState() {
+    super.initState();
+    if (widget.reveal) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        Scrollable.ensureVisible(context, alignment: 0.2);
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }
 
 class _EpisodeRow extends StatelessWidget {
@@ -353,15 +514,60 @@ class _EpisodeRow extends StatelessWidget {
                             preferThumb: true,
                             maxWidth: 480,
                           ),
+                          if (progress > 0 && !episode.userData.played)
+                            Positioned(
+                              left: 0,
+                              right: 0,
+                              bottom: 0,
+                              child: LinearProgressIndicator(
+                                value: progress,
+                                minHeight: 3,
+                              ),
+                            ),
+                          if (runtime != null)
+                            Positioned(
+                              right: 6,
+                              bottom: progress > 0 && !episode.userData.played
+                                  ? 8
+                                  : 6,
+                              child: Text(
+                                runtime,
+                                style: theme.textTheme.labelSmall?.copyWith(
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ),
                           if (code != null)
                             Positioned(
                               left: 6,
-                              bottom: 4,
-                              child: Text(
-                                code,
-                                style: theme.textTheme.labelMedium?.copyWith(
-                                  color: Colors.white,
+                              top: 6,
+                              child: DecoratedBox(
+                                decoration: BoxDecoration(
+                                  color: Colors.black.withValues(alpha: 0.55),
+                                  borderRadius: BorderRadius.circular(
+                                    AppRadii.sm,
+                                  ),
                                 ),
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 6,
+                                    vertical: 2,
+                                  ),
+                                  child: Text(
+                                    code,
+                                    style: theme.textTheme.labelMedium
+                                        ?.copyWith(color: Colors.white),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          if (current)
+                            Center(
+                              child: Icon(
+                                Icons.play_circle_fill,
+                                key: const Key('phone-episode-current'),
+                                color: Colors.white.withValues(alpha: 0.92),
+                                size: 36,
                               ),
                             ),
                         ],
@@ -375,13 +581,6 @@ class _EpisodeRow extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(episode.name, style: theme.textTheme.titleSmall),
-                      if (runtime != null)
-                        Text(
-                          runtime,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
-                          ),
-                        ),
                       // 该集简介:EmbyItem.overview 缺失(无字段/纯空白/HTML 残迹)
                       // 时整行隐藏,卡片优雅降级为标题+时长。
                       if (overview != null)
@@ -395,21 +594,10 @@ class _EpisodeRow extends StatelessWidget {
                             height: 1.4,
                           ),
                         ),
-                      if (progress > 0 && !episode.userData.played)
-                        Padding(
-                          padding: const EdgeInsets.only(top: AppSpacing.xxs),
-                          child: LinearProgressIndicator(value: progress),
-                        ),
                       if (episode.userData.played)
                         Text(
                           l.mobileWatched,
                           style: theme.textTheme.labelMedium,
-                        ),
-                      if (current)
-                        Icon(
-                          Icons.play_circle,
-                          key: const Key('phone-episode-current'),
-                          color: theme.colorScheme.primary,
                         ),
                     ],
                   ),
@@ -492,7 +680,7 @@ class _SimilarRow extends StatelessWidget {
                       const SizedBox(height: AppSpacing.xxs),
                       Text(
                         item.name,
-                        maxLines: 2,
+                        maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
                     ],

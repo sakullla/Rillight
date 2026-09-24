@@ -72,6 +72,7 @@ class ShelfGridPage extends StatefulWidget {
     this.showTitle = true,
     this.recursive = false,
     this.moviesOrSeriesOnly = false,
+    this.initialGenre,
   });
 
   final String source;
@@ -87,6 +88,7 @@ class ShelfGridPage extends StatefulWidget {
   final bool showTitle;
   final bool recursive;
   final bool moviesOrSeriesOnly;
+  final String? initialGenre;
 
   /// 每页条数:分页加载,避免一次拉全库导致卡顿。similar 只取这一页。
   static const int pageSize = 60;
@@ -206,6 +208,7 @@ class ShelfGridPage extends StatefulWidget {
       title: query['title'] ?? '',
       recursive: query['recursive'] == '1',
       moviesOrSeriesOnly: query['filter'] == 'movieseries',
+      initialGenre: query['genre'],
     );
   }
 
@@ -224,7 +227,9 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
   late CatalogSort _sort = _defaultSort;
 
   /// 片库组合筛选:类型/年份/流派/已看,与排序叠加生效。
-  ShelfFilters _filters = const ShelfFilters();
+  late ShelfFilters _filters = widget.initialGenre == null
+      ? const ShelfFilters()
+      : ShelfFilters(genres: [widget.initialGenre!]);
 
   /// 筛选取值维度:从已加载条目聚合,只增不减,翻页/筛选后取值稳定。
   final Set<int> _knownYears = {};

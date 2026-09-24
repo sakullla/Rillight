@@ -251,6 +251,10 @@
   "@more": {
     "description": "Opens the full poster wall for a media shelf."
   },
+  "externalLinks": "外部链接",
+  "@externalLinks": {
+    "description": "Detail section title for links to IMDb, TMDB and other providers."
+  },
   "similarRow": "更多类似",
   "@similarRow": {
     "description": "Detail shelf title for similar titles when the server returns items."
@@ -579,6 +583,7 @@
     }
   },
   "chapters": "章节",
+  "phoneAlbum": "相册",
   "@chapters": {
     "description": "Detail shelf of movie or episode chapters."
   },
@@ -1130,6 +1135,18 @@
   "@mobileAccountServerGroup": {
     "description": "Mine page group header for account and server rows."
   },
+  "phoneAppearanceGroup": "外观",
+  "@phoneAppearanceGroup": {
+    "description": "Mine page group header for phone chrome such as the bottom navigation."
+  },
+  "phoneFloatingNav": "悬浮导航栏",
+  "@phoneFloatingNav": {
+    "description": "Switch that detaches the phone bottom navigation from the screen edge."
+  },
+  "phoneFloatingNavHint": "离开底边，页面从背后滑过",
+  "@phoneFloatingNavHint": {
+    "description": "Explains that the floating navigation sits above the page content."
+  },
   "mobilePlaybackGroup": "播放设置",
   "@mobilePlaybackGroup": {
     "description": "Mine page group header for playback and danmaku settings."
@@ -1186,6 +1203,14 @@
   "@phoneHomeSections": {
     "description": "Mine page group for showing, hiding and ordering phone home sections."
   },
+  "phoneHomeEdit": "编辑首页",
+  "@phoneHomeEdit": {
+    "description": "Home-screen entry and title for reordering or hiding phone home rows."
+  },
+  "phoneHomeEditHint": "按住左侧手柄拖动排序。关闭的行会归到「未显示」。片库页仍会列出全部片库。",
+  "@phoneHomeEditHint": {
+    "description": "Explains that the home editor does not change the libraries tab."
+  },
   "phoneHomeSectionBanner": "横幅",
   "@phoneHomeSectionBanner": {
     "description": "Phone home section label for the featured banner."
@@ -1206,14 +1231,22 @@
   "@phoneHomeSectionLibraries": {
     "description": "Phone home section label for the library shortcut row."
   },
-  "phoneHomeLibraryLatest": "{name} · 最近添加",
+  "phoneHomeLibraryLatest": "{name}",
   "@phoneHomeLibraryLatest": {
-    "description": "Phone home row and mine label for one library's recently added items.",
+    "description": "Phone home row and editor label for one library. The row itself is recently added items.",
     "placeholders": {
       "name": {
         "type": "String"
       }
     }
+  },
+  "phoneHomeShown": "显示中",
+  "@phoneHomeShown": {
+    "description": "Heading for home rows that are currently visible."
+  },
+  "phoneHomeHidden": "未显示",
+  "@phoneHomeHidden": {
+    "description": "Heading for home rows that are turned off."
   },
   "phoneHomeSectionMoveUp": "上移",
   "@phoneHomeSectionMoveUp": {

@@ -274,6 +274,7 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
   Future<void> _openMore() async {
     final c = _controller;
     final danmaku = widget.danmaku;
+    final route = ModalRoute.of(context);
     c.setControlsPinned(true);
     await PhoneMotion.showBottomPanel<void>(
       context: context,
@@ -445,7 +446,6 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
         ),
       ),
     );
-    final route = ModalRoute.of(context);
     if (mounted && (route == null || route.isCurrent)) {
       _controller.setControlsPinned(false);
     }

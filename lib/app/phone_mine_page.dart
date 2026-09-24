@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/app/phone_nav_style.dart';
 import 'package:rillight/app/product.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/settings/settings_page.dart';
@@ -12,16 +13,13 @@ import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/auth/failure_message.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/home/catalog_scope.dart';
-import 'package:rillight/home/phone_home_sections.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_runtime_options.dart';
 import 'package:rillight/player/player_settings.dart';
 
 /// 手机「我的」：当前身份、线路、倍速和弹幕来源。
 class PhoneMinePage extends StatefulWidget {
-  const PhoneMinePage({super.key, this.sections});
-
-  final PhoneHomeSectionController? sections;
+  const PhoneMinePage({super.key});
 
   static const userKey = Key('phone-mine-user');
   static const serverKey = Key('phone-mine-server');
@@ -32,6 +30,7 @@ class PhoneMinePage extends StatefulWidget {
   static const danmakuAppIdKey = Key('phone-mine-danmaku-app-id');
   static const danmakuTokenKey = Key('phone-mine-danmaku-token');
   static const tokenVisibilityKey = Key('phone-mine-token-visibility');
+  static const floatingNavKey = Key('phone-nav-floating');
 
   static const playbackRates = <double>[0.5, 1.0, 1.25, 1.5, 2.0];
 
@@ -47,8 +46,6 @@ class PhoneMinePage extends StatefulWidget {
 }
 
 class _PhoneMinePageState extends State<PhoneMinePage> {
-  PhoneHomeSectionController? _sections;
-  var _loadedSectionServerId = '';
   final _danmakuServer = TextEditingController();
   final _danmakuAppId = TextEditingController();
   final _danmakuToken = TextEditingController();
@@ -58,6 +55,7 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
 
   PlayerSettingsStore? _store;
   PlayerSettings _settings = const PlayerSettings();
+  PhoneNavStyleController? _localNav;
   double _rate = 1;
   bool _loaded = false;
   bool _tokenVisible = false;
@@ -70,27 +68,19 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
     _danmakuTokenFocus.addListener(_onDanmakuTokenFocus);
   }
 
-  PhoneHomeSectionController get _sectionController =>
-      _sections ?? PhoneHomeSectionController.app();
-
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final next = widget.sections ?? PhoneHomeSectionController.app();
-    if (!identical(next, _sections)) {
-      _sections = next;
-      _loadedSectionServerId = '';
-    }
-    final serverId = AuthScope.of(context).session?.server.id ?? '';
-    if (_loadedSectionServerId != serverId) {
-      _loadedSectionServerId = serverId;
-      unawaited(_sectionController.load(serverId));
-    }
     if (_loaded) {
       return;
     }
     _loaded = true;
     unawaited(_load());
+    if (PhoneNavStyle.maybeOf(context) == null) {
+      final local = PhoneNavStyleController();
+      _localNav = local;
+      unawaited(local.load());
+    }
   }
 
   @override
@@ -104,6 +94,7 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
     _danmakuServer.dispose();
     _danmakuAppId.dispose();
     _danmakuToken.dispose();
+    _localNav?.dispose();
     super.dispose();
   }
 
@@ -306,6 +297,33 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
     );
   }
 
+  Widget _floatingNav(BuildContext context, AppLocalizations l10n) {
+    final shared = PhoneNavStyle.maybeOf(context);
+    final nav = shared ?? _localNav;
+    if (nav == null) {
+      return const SizedBox.shrink();
+    }
+    return ListenableBuilder(
+      listenable: nav,
+      builder: (context, _) {
+        return _group(
+          context,
+          title: l10n.phoneAppearanceGroup,
+          children: [
+            SwitchListTile(
+              key: PhoneMinePage.floatingNavKey,
+              contentPadding: EdgeInsets.zero,
+              title: Text(l10n.phoneFloatingNav),
+              subtitle: Text(l10n.phoneFloatingNavHint),
+              value: nav.floating,
+              onChanged: (value) => unawaited(nav.setFloating(value)),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   Widget _fieldLabel(BuildContext context, String label) {
     return Padding(
       padding: const EdgeInsets.only(top: AppSpacing.md),
@@ -317,7 +335,6 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
   Widget build(BuildContext context) {
     final auth = AuthScope.of(context);
     final l10n = AppLocalizations.of(context);
-    final catalog = CatalogScope.maybeOf(context);
     final scheme = Theme.of(context).colorScheme;
     final session = auth.session;
     final lineLabel = session?.server.activeLine?.hostLabel ?? '';
@@ -413,6 +430,8 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
               const SizedBox(height: AppSpacing.md),
             ],
           ),
+          const SizedBox(height: AppSpacing.lg),
+          _floatingNav(context, l10n),
           const SizedBox(height: AppSpacing.lg),
           _group(
             context,
@@ -565,27 +584,6 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
               ),
               const SizedBox(height: AppSpacing.md),
             ],
-          ),
-          const SizedBox(height: AppSpacing.lg),
-          ListenableBuilder(
-            listenable: catalog == null
-                ? _sectionController
-                : Listenable.merge([_sectionController, catalog]),
-            builder: (context, _) {
-              return _group(
-                context,
-                title: l10n.phoneHomeSections,
-                children: [
-                  Padding(
-                    padding: phoneHomeSectionEditorPadding,
-                    child: PhoneHomeSectionEditor(
-                      controller: _sectionController,
-                      libraries: catalog?.libraries ?? const [],
-                    ),
-                  ),
-                ],
-              );
-            },
           ),
           const SizedBox(height: AppSpacing.lg),
           _group(

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_chrome.dart';
+import 'package:rillight/app/phone_bottom_nav.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme.dart';
 import 'package:rillight/emby/emby_models.dart';
@@ -69,21 +70,39 @@ class PhoneLibrariesTab extends StatelessWidget {
                   sliver: SliverToBoxAdapter(child: status),
                 ),
               SliverPadding(
-                padding: const EdgeInsets.all(AppSpacing.md),
-                sliver: SliverGrid(
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 2,
-                    mainAxisSpacing: AppSpacing.md,
-                    crossAxisSpacing: AppSpacing.md,
-                    childAspectRatio: 16 / 9,
-                  ),
-                  delegate: SliverChildBuilderDelegate((context, index) {
-                    final library = catalog.libraries[index];
-                    return _LibraryBlock(
-                      library: library,
-                      onTap: () => context.push(AppRoutes.library(library.id)),
+                padding: EdgeInsets.fromLTRB(
+                  AppSpacing.md,
+                  AppSpacing.md,
+                  AppSpacing.md,
+                  AppSpacing.md + phoneScrollClearance(context),
+                ),
+                sliver: SliverLayoutBuilder(
+                  builder: (context, constraints) {
+                    const spacing = AppSpacing.md;
+                    const columns = 2;
+                    final cellWidth =
+                        (constraints.crossAxisExtent - spacing) / columns;
+                    final textScale =
+                        MediaQuery.textScalerOf(context).scale(14) / 14;
+                    final titleBlock = AppSpacing.xs + 22 * textScale;
+                    return SliverGrid(
+                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: columns,
+                        mainAxisSpacing: spacing,
+                        crossAxisSpacing: spacing,
+                        childAspectRatio:
+                            cellWidth / (cellWidth * 9 / 16 + titleBlock),
+                      ),
+                      delegate: SliverChildBuilderDelegate((context, index) {
+                        final library = catalog.libraries[index];
+                        return _LibraryBlock(
+                          library: library,
+                          onTap: () =>
+                              context.push(AppRoutes.library(library.id)),
+                        );
+                      }, childCount: catalog.libraries.length),
                     );
-                  }, childCount: catalog.libraries.length),
+                  },
                 ),
               ),
             ],
@@ -113,59 +132,39 @@ class _LibraryBlock extends StatelessWidget {
     final scheme = theme.colorScheme;
     final hasImage = _hasImage;
     return Material(
-      color: scheme.surfaceContainerHigh,
-      borderRadius: BorderRadius.circular(AppRadii.md),
-      clipBehavior: Clip.antiAlias,
+      color: Colors.transparent,
       child: InkWell(
         key: Key('phone-library-block-${library.id}'),
         onTap: onTap,
-        child: Stack(
-          fit: StackFit.expand,
+        borderRadius: BorderRadius.circular(AppRadii.md),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            if (hasImage)
-              MediaImage(
-                key: Key('phone-library-image-${library.id}'),
-                item: library,
-                preferBackdrop: true,
-                maxWidth: 480,
-              )
-            else
-              _LibraryNamePlaceholder(
-                key: Key('phone-library-placeholder-${library.id}'),
-                name: library.name,
-              ),
-            if (hasImage) ...[
-              DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    stops: const [0.45, 1],
-                    colors: [
-                      scheme.scrim.withValues(alpha: 0),
-                      scheme.scrim.withValues(
-                        alpha: AppScrim.of(context, AppScrim.textStart),
+            Expanded(
+              child: Material(
+                color: scheme.surfaceContainerHigh,
+                borderRadius: BorderRadius.circular(AppRadii.md),
+                clipBehavior: Clip.antiAlias,
+                child: hasImage
+                    ? MediaImage(
+                        key: Key('phone-library-image-${library.id}'),
+                        item: library,
+                        preferBackdrop: true,
+                        maxWidth: 480,
+                      )
+                    : _LibraryNamePlaceholder(
+                        key: Key('phone-library-placeholder-${library.id}'),
                       ),
-                    ],
-                  ),
-                ),
               ),
-              Align(
-                alignment: Alignment.bottomCenter,
-                child: Padding(
-                  padding: const EdgeInsets.all(AppSpacing.md),
-                  child: Text(
-                    library.name,
-                    textAlign: TextAlign.center,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      color: scheme.onSurface,
-                    ),
-                  ),
-                ),
-              ),
-            ],
+            ),
+            const SizedBox(height: AppSpacing.xs),
+            Text(
+              library.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodyMedium,
+            ),
           ],
         ),
       ),
@@ -174,37 +173,12 @@ class _LibraryBlock extends StatelessWidget {
 }
 
 class _LibraryNamePlaceholder extends StatelessWidget {
-  const _LibraryNamePlaceholder({super.key, required this.name});
-
-  final String name;
+  const _LibraryNamePlaceholder({super.key});
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            theme.colorScheme.surfaceContainerHigh,
-            theme.colorScheme.surfaceContainerHighest,
-          ],
-        ),
-      ),
-      child: Align(
-        alignment: Alignment.bottomLeft,
-        child: Padding(
-          padding: const EdgeInsets.all(AppSpacing.md),
-          child: Text(
-            name,
-            textAlign: TextAlign.start,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.titleMedium,
-          ),
-        ),
-      ),
+    return ColoredBox(
+      color: Theme.of(context).colorScheme.surfaceContainerHigh,
     );
   }
 }

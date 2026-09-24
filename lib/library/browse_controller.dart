@@ -10,6 +10,7 @@ class BrowseController extends ChangeNotifier {
     required this.auth,
     required this.cache,
     required this.parentId,
+    this.includeItemTypes = 'Movie,Series',
   }) {
     _identity = _currentIdentity;
     auth.addListener(_onAuth);
@@ -17,11 +18,16 @@ class BrowseController extends ChangeNotifier {
   final AuthController auth;
   final CatalogCache cache;
   final String parentId;
+  final String includeItemTypes;
+
+  /// 与桌面货架每页 60 条相同。
+  static const pageSize = 60;
+
   List<EmbyItem> items = const [];
-  bool loading = false, hasMore = false;
+  bool loading = false, loadingMore = false, hasMore = false;
   String? type, watch, genre;
   int? year;
-  String sortBy = 'SortName';
+  String sortBy = CatalogSort.initial.sortBy;
   EmbyException? error;
   int _revision = 0, _offset = 0;
   bool _disposed = false;
@@ -34,52 +40,81 @@ class BrowseController extends ChangeNotifier {
     _revision++;
     items = const [];
     _offset = 0;
-    loading = hasMore = false;
+    loading = loadingMore = hasMore = false;
     error = null;
     notifyListeners();
   }
 
   bool _owns(int revision) =>
       !_disposed && revision == _revision && _identity == _currentIdentity;
+  CatalogRequest _request(int startIndex) {
+    return catalogItemsRequest(
+      userId: auth.client.userId ?? '',
+      parentId: parentId,
+      recursive: true,
+      includeItemTypes: type ?? includeItemTypes,
+      limit: pageSize,
+      startIndex: startIndex,
+      sortBy: sortBy,
+      sortOrder: _sortOrder,
+      filters: watch == null ? null : [watch!],
+      genres: genre == null ? null : [genre!],
+      years: year == null ? null : [year!],
+    );
+  }
+
+  void _apply(EmbyItemPage page, int offset, {required bool more}) {
+    if (more) {
+      final before = items.length;
+      items = {
+        for (final item in [...items, ...page.items]) item.id: item,
+      }.values.toList();
+      _offset = offset + page.items.length;
+      if (page.items.length < pageSize || items.length == before) {
+        hasMore = false;
+        return;
+      }
+    } else {
+      items = page.items;
+      _offset = page.items.length;
+      if (page.items.length < pageSize) {
+        hasMore = false;
+        return;
+      }
+    }
+    hasMore = page.hasMore(fetched: _offset, pageSize: pageSize);
+  }
+
   Future<void> load({bool more = false}) async {
-    if (more && (loading || !hasMore)) return;
+    if (more && (loading || loadingMore || !hasMore)) return;
     final revision = more ? _revision : ++_revision;
     final offset = more ? _offset : 0;
     if (!more) {
       _offset = 0;
       hasMore = false;
     }
-    loading = true;
+    if (more) {
+      loadingMore = true;
+    } else {
+      loading = true;
+    }
     error = null;
     notifyListeners();
-    try {
-      final page = parseCatalogPage(
-        await cache.fetch(
-          auth.client,
-          catalogItemsRequest(
-            userId: auth.client.userId ?? '',
-            parentId: parentId,
-            recursive: true,
-            includeItemTypes: type ?? 'Movie,Series',
-            limit: 50,
-            startIndex: offset,
-            sortBy: sortBy,
-            sortOrder: _sortOrder,
-            filters: watch == null ? null : [watch!],
-            genres: genre == null ? null : [genre!],
-            years: year == null ? null : [year!],
-          ),
-        ),
-      );
+    final request = _request(offset);
+    // 首屏先画缓存，再后台重拉。已有条目时不拿较短的缓存页盖住，失败也留着。
+    if (!more && items.isEmpty) {
+      final hit = await cache.lookup(request);
       if (!_owns(revision)) return;
-      items = {
-        for (final item in [...(more ? items : <EmbyItem>[]), ...page.items])
-          item.id: item,
-      }.values.toList();
-      _offset = offset + page.items.length;
-      hasMore = page.totalRecordCount == null
-          ? page.items.length == 50
-          : _offset < page.totalRecordCount!;
+      if (hit != null) {
+        _apply(parseCatalogPage(hit.json), offset, more: false);
+        loading = false;
+        notifyListeners();
+      }
+    }
+    try {
+      final page = parseCatalogPage(await cache.fetch(auth.client, request));
+      if (!_owns(revision)) return;
+      _apply(page, offset, more: more);
     } catch (failure) {
       if (!_owns(revision)) return;
       error = failure is EmbyException
@@ -88,6 +123,7 @@ class BrowseController extends ChangeNotifier {
     }
     if (!_owns(revision)) return;
     loading = false;
+    loadingMore = false;
     notifyListeners();
   }
 

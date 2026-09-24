@@ -25,9 +25,10 @@ class PosterPlaceholder extends StatelessWidget {
         height: height,
         child: DecoratedBox(
           decoration: BoxDecoration(
-            color: colorScheme.surfaceContainerHighest,
+            color: colorScheme.surfaceContainerHigh,
             borderRadius: BorderRadius.circular(8),
           ),
+          child: const Center(child: SizedBox.shrink()),
         ),
       ),
     );

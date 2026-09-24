@@ -138,16 +138,8 @@ void main() {
           of: find.byType(HomeHero),
           matching: find.byType(FilledButton),
         ),
-        findsOneWidget,
+        findsNothing,
       );
-      expect(
-        find.descendant(
-          of: find.byKey(CatalogKeys.heroPlay),
-          matching: find.text('继续播放'),
-        ),
-        findsOneWidget,
-      );
-      expect(find.textContaining('已看 40%'), findsWidgets);
       expect(
         tester.widget(find.byKey(CatalogKeys.heroPrev)),
         isA<ScrimIconButton>(),
@@ -161,7 +153,7 @@ void main() {
         find.byKey(CatalogKeys.heroDot(HomeHero.maxFeatured)),
         findsNothing,
       );
-      const featuredOrder = ['Inception', '飞屋环游记', '封面失败片', '未分类型电影', '混合库电影'];
+      const featuredOrder = ['飞屋环游记', '封面失败片', 'Inception', '未分类型电影', '混合库电影'];
       for (final title in featuredOrder) {
         if (title != featuredOrder.first) {
           await tester.tap(find.byKey(CatalogKeys.heroNext));

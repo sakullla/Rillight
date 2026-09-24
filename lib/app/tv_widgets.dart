@@ -7,6 +7,7 @@ import 'package:rillight/app/routes.dart';
 import 'package:rillight/auth/failure_message.dart';
 import 'package:rillight/emby/emby_errors.dart';
 import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/home/media_shelf.dart';
 import 'package:rillight/media_image/media_image.dart';
 
 /// Repairs a removed remote target only on the visible route. Offstage panes
@@ -107,10 +108,11 @@ class TvAction extends StatefulWidget {
     this.autofocus = false,
     this.focusNode,
     this.selected = false,
+    this.emphasized = false,
   });
   final Widget child;
   final FutureOr<void> Function()? onPressed;
-  final bool autofocus, selected;
+  final bool autofocus, selected, emphasized;
   final FocusNode? focusNode;
   @override
   State<TvAction> createState() => _TvActionState();
@@ -184,6 +186,17 @@ class _TvActionState extends State<TvAction>
   @override
   Widget build(BuildContext context) {
     super.build(context);
+    final scheme = Theme.of(context).colorScheme;
+    final fill = widget.emphasized
+        ? (_focused ? scheme.primary : scheme.primaryContainer)
+        : _focused
+        ? const Color(0xff315d8c)
+        : widget.selected
+        ? const Color(0xff253a50)
+        : const Color(0xff20252d);
+    final foreground = widget.emphasized
+        ? (_focused ? scheme.onPrimary : scheme.onPrimaryContainer)
+        : null;
     return ExcludeFocus(
       excluding: widget.onPressed == null,
       child: FocusableActionDetector(
@@ -218,11 +231,7 @@ class _TvActionState extends State<TvAction>
               padding: const EdgeInsets.all(12),
               constraints: const BoxConstraints(minHeight: 48),
               decoration: BoxDecoration(
-                color: _focused
-                    ? const Color(0xff315d8c)
-                    : widget.selected
-                    ? const Color(0xff253a50)
-                    : const Color(0xff20252d),
+                color: fill,
                 border: Border.all(
                   color: _focused ? Colors.white : Colors.transparent,
                   width: 3,
@@ -231,7 +240,15 @@ class _TvActionState extends State<TvAction>
               ),
               child: Opacity(
                 opacity: widget.onPressed == null ? .4 : 1,
-                child: widget.child,
+                child: foreground == null
+                    ? widget.child
+                    : IconTheme(
+                        data: IconThemeData(color: foreground),
+                        child: DefaultTextStyle.merge(
+                          style: TextStyle(color: foreground),
+                          child: widget.child,
+                        ),
+                      ),
               ),
             ),
           ),
@@ -264,7 +281,7 @@ class TvFrame extends StatelessWidget {
       child: Scaffold(
         body: SafeArea(
           child: Padding(
-            padding: const EdgeInsets.all(28),
+            padding: const EdgeInsets.all(48),
             child: FocusTraversalGroup(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -318,9 +335,15 @@ class TvFailure extends StatelessWidget {
 }
 
 class TvPoster extends StatelessWidget {
-  const TvPoster({super.key, required this.item, this.autofocus = false});
+  const TvPoster({
+    super.key,
+    required this.item,
+    this.autofocus = false,
+    this.imageMaxWidth = 280,
+  });
   final EmbyItem item;
   final bool autofocus;
+  final int imageMaxWidth;
   @override
   Widget build(BuildContext context) => TvAction(
     autofocus: autofocus,
@@ -328,9 +351,13 @@ class TvPoster extends StatelessWidget {
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Expanded(child: MediaImage(item: item, maxWidth: 400)),
+        Expanded(
+          child: RepaintBoundary(
+            child: MediaImage(item: item, maxWidth: imageMaxWidth),
+          ),
+        ),
         const SizedBox(height: 8),
-        Text(item.name, maxLines: 2, overflow: TextOverflow.ellipsis),
+        Text(item.name, maxLines: 1, overflow: TextOverflow.ellipsis),
       ],
     ),
   );
@@ -339,24 +366,82 @@ class TvPoster extends StatelessWidget {
 class TvGrid extends StatelessWidget {
   const TvGrid({super.key, required this.items});
   final List<EmbyItem> items;
+
+  static int columnCount(double width) => (width / 180).floor().clamp(2, 6);
+
+  static TvGridMetrics metricsFor(BuildContext context, double width) {
+    final columns = columnCount(width);
+    final cell = width / columns;
+    final title = MediaShelf.lineHeightOf(
+      context,
+      Theme.of(context).textTheme.bodyMedium,
+    );
+    return TvGridMetrics(
+      columns: columns,
+      imageMaxWidth: catalogPosterMaxWidth(
+        cell,
+        MediaQuery.devicePixelRatioOf(context),
+      ),
+      childAspectRatio: cell / (cell * 1.35 + 8 + title),
+    );
+  }
+
   @override
-  Widget build(BuildContext context) => LayoutBuilder(
-    builder: (context, size) {
-      final columns = (size.maxWidth / 180).floor().clamp(2, 6);
-      final width = size.maxWidth / columns;
-      return Wrap(
-        children: [
-          for (final item in items)
-            SizedBox(
-              key: ValueKey(item.id),
-              width: width,
-              height: width * 1.35 + 76,
-              child: TvPoster(item: item),
-            ),
-        ],
+  Widget build(BuildContext context) {
+    final metrics = metricsFor(context, MediaQuery.sizeOf(context).width);
+    return TvPosterSliver(items: items, metrics: metrics);
+  }
+}
+
+class TvGridMetrics {
+  const TvGridMetrics({
+    required this.columns,
+    required this.imageMaxWidth,
+    required this.childAspectRatio,
+  });
+
+  final int columns;
+  final int imageMaxWidth;
+  final double childAspectRatio;
+}
+
+/// 只构建视口内的海报。列数在滚动视图外算好，避免每滚一帧重建整屏。
+class TvPosterSliver extends StatelessWidget {
+  const TvPosterSliver({super.key, required this.items, required this.metrics});
+
+  final List<EmbyItem> items;
+  final TvGridMetrics metrics;
+
+  @override
+  Widget build(BuildContext context) {
+    return SliverGrid(
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: metrics.columns,
+        childAspectRatio: metrics.childAspectRatio,
+      ),
+      delegate: _TvPosterDelegate(items: items, metrics: metrics),
+    );
+  }
+}
+
+class _TvPosterDelegate extends SliverChildBuilderDelegate {
+  _TvPosterDelegate({required this.items, required TvGridMetrics metrics})
+    : super(
+        (context, index) => TvPoster(
+          key: ValueKey(items[index].id),
+          item: items[index],
+          imageMaxWidth: metrics.imageMaxWidth,
+        ),
+        childCount: items.length,
+        addAutomaticKeepAlives: false,
       );
-    },
-  );
+
+  final List<EmbyItem> items;
+
+  @override
+  bool shouldRebuild(covariant _TvPosterDelegate oldDelegate) {
+    return !identical(oldDelegate.items, items);
+  }
 }
 
 /// Keep navigation keys out of EditableText until the user deliberately edits.

@@ -147,6 +147,7 @@ void main() {
       await login(tester, server);
       expect(focusedLabel(tester), '首页');
       await key(tester, LogicalKeyboardKey.arrowRight);
+      await key(tester, LogicalKeyboardKey.arrowDown);
       final card = FocusManager.instance.primaryFocus;
       final label = focusedLabel(tester);
       expect(label, isNotEmpty);
@@ -207,8 +208,10 @@ void main() {
       await key(tester, LogicalKeyboardKey.arrowRight);
       await edit(tester, 'Inception');
       expect(find.text('Inception'), findsWidgets);
-      await key(tester, LogicalKeyboardKey.arrowDown); // submit
-      await key(tester, LogicalKeyboardKey.arrowDown); // first result
+      for (var i = 0; i < 6 && focusedLabel(tester) != 'Inception'; i++) {
+        await key(tester, LogicalKeyboardKey.arrowDown);
+      }
+      expect(focusedLabel(tester), 'Inception');
       await key(tester, LogicalKeyboardKey.select);
       expect(find.byType(TvDetailPage), findsOneWidget);
       await tester.binding.handlePopRoute();
@@ -254,7 +257,7 @@ void main() {
     (tester) async {
       final server = FakeEmbyServer(
         items: [
-          for (var i = 0; i < 51; i++)
+          for (var i = 0; i < 61; i++)
             FakeEmbyItem(
               id: 'catalog-$i',
               name: 'Catalog ${i.toString().padLeft(2, '0')}',
@@ -281,12 +284,12 @@ void main() {
       await tester.binding.handlePopRoute();
       await tester.pumpAndSettle();
       expect(find.byType(AlertDialog), findsNothing);
-      for (var i = 0; i < 20 && focusedLabel(tester) != '加载更多'; i++) {
+      for (var i = 0; i < 40 && focusedLabel(tester) != '加载更多'; i++) {
         await key(tester, LogicalKeyboardKey.arrowDown);
       }
       expect(focusedLabel(tester), '加载更多');
       await key(tester, LogicalKeyboardKey.select);
-      expect(find.text('Catalog 50'), findsOneWidget);
+      expect(find.text('Catalog 60'), findsOneWidget);
       expect(focusedAction(), findsOneWidget);
       expect(focusedLabel(tester), isNot('加载更多'));
       expect(tester.takeException(), isNull);
