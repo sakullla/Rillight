@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "ffmpeg": {
+    "version": "n9.0.1",
+    "repository": "https://github.com/FFmpeg/FFmpeg.git",
+    "commit": "bf1b838f2ab88b4f8fd83443325c782ea0e0f7fa",
+    "libraries": ["avformat", "avcodec", "avutil", "swresample", "swscale", "avfilter"]
+  },
+  "libass": {
+    "version": "0.17.5",
+    "repository": "https://github.com/libass/libass.git",
+    "commit": "4a05d8127f525943ebf45fdc6497c9e665947f0d",
+    "license": "ISC",
+    "required_build_dependencies": ["freetype2", "fribidi", "harfbuzz", "fontconfig"]
+  },
+  "platforms": {
+    "windows-x64": {"sdk_required": true},
+    "macos-universal": {"sdk_required": true},
+    "linux-x64": {"sdk_required": true},
+    "android-arm64-v8a": {"sdk_required": true},
+    "android-armeabi-v7a": {"sdk_required": true},
+    "android-x86_64": {"sdk_required": true}
+  }
+}
