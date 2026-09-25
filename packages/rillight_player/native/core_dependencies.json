@@ -4,6 +4,9 @@
     "version": "n9.0.1",
     "repository": "https://github.com/FFmpeg/FFmpeg.git",
     "commit": "bf1b838f2ab88b4f8fd83443325c782ea0e0f7fa",
+    "patches": {
+      "patches/ffmpeg-hls-custom-io-http.patch": "2cc65a9a408cb1e0c840ef7dfd6b454d6f54d85272dfff714eb4c86446d34b49"
+    },
     "libraries": ["avformat", "avcodec", "avutil", "swresample", "swscale", "avfilter"]
   },
   "libass": {

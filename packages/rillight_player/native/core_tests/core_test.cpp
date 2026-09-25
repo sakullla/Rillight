@@ -304,8 +304,9 @@ bool wait_for(RillightCore *core, Predicate predicate,
   while (std::chrono::steady_clock::now() < deadline) {
     if (predicate(snapshot(core))) return true;
     if (drain_audio) {
-      auto *frame = rillight_core_take_frame(core, RILLIGHT_CORE_AUDIO_S16);
-      rillight_core_release_frame(frame);
+      while (auto *frame = rillight_core_take_frame(
+                 core, RILLIGHT_CORE_AUDIO_S16))
+        rillight_core_release_frame(frame);
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(5));
   }
@@ -595,6 +596,38 @@ int main() {
   assert(wait_for(core, [](const auto &state) {
     return state.state == RILLIGHT_CORE_ENDED;
   }));
+  rillight_core_destroy(core);
+
+  Media clock_media{make_wav(48000 * 2), make_bmp()};
+  RillightCoreIo clock_io{&clock_media, open, read, seek, close, nullptr,
+                          cancel_media_io};
+  core = rillight_core_create(&clock_io);
+  assert(core && rillight_core_open(core, "clock.wav", 1) == 0);
+  assert(wait_for(core, [](const auto &state) {
+    return state.first_audio_frame_ready && state.state != RILLIGHT_CORE_FAILED;
+  }));
+  assert(rillight_core_set_playing(core, 0, 2) == 0);
+  const auto clock_identity = snapshot(core);
+  assert(rillight_core_report_audio_played(
+             core, clock_identity.session_id, clock_identity.timeline_version,
+             200000, 50000) == 0);
+  assert(snapshot(core).position_us == 150000);
+  assert(rillight_core_set_playing(core, 1, 3) == 0);
+  assert(rillight_core_report_audio_unavailable(
+             core, clock_identity.session_id, clock_identity.timeline_version) == 0);
+  const auto handed_off = snapshot(core).position_us;
+  std::this_thread::sleep_for(std::chrono::milliseconds(30));
+  const auto moving = snapshot(core).position_us;
+  assert(moving >= handed_off + 20000);
+  assert(rillight_core_report_audio_unavailable(
+             core, clock_identity.session_id, clock_identity.timeline_version) == 0);
+  std::this_thread::sleep_for(std::chrono::milliseconds(30));
+  assert(snapshot(core).position_us >= moving + 20000);
+  assert(rillight_core_report_audio_played(
+             core, clock_identity.session_id, clock_identity.timeline_version,
+             150000, 0) != 0);
+  assert(rillight_core_report_audio_unavailable(
+             core, clock_identity.session_id, clock_identity.timeline_version + 1) != 0);
   rillight_core_destroy(core);
   return 0;
 }

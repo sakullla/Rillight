@@ -13,7 +13,7 @@
 extern "C" {
 #endif
 
-#define RILLIGHT_CORE_ABI_VERSION 6
+#define RILLIGHT_CORE_ABI_VERSION 7
 
 typedef struct RillightCore RillightCore;
 typedef struct RillightCoreFrame RillightCoreFrame;
@@ -131,9 +131,13 @@ struct RillightCoreFrame {
  * - Seek, track selection and reopen advance timeline_version. A sink discards
  *   and releases frames whose session_id or timeline_version is no longer
  *   current, including frames already handed to a platform queue.
- * - The audio sink reports the media PTS actually heard and remaining device
- *   delay through report_audio_played. With no audio, snapshot.position_us is
- *   driven by the core monotonic clock. After source_eof, the sink reports
+ * - The audio sink reports the media PTS at the end of submitted PCM and the
+ *   remaining device delay in media microseconds through report_audio_played.
+ *   Convert wall-clock device latency using playback_speed before reporting.
+ *   When submitted audio has drained and no more PCM is available, the sink
+ *   calls report_audio_unavailable once to hand the clock to monotonic time.
+ *   Later audio reports behind that clock are rejected. After source_eof, the
+ *   sink reports
  *   output_drained only when platform audio/video queues are empty. */
 
 typedef struct RillightCoreSnapshot {
@@ -203,7 +207,11 @@ RILLIGHT_CORE_API int rillight_core_get_track(RillightCore *core, int ordinal,
                                              RillightCoreTrack *track);
 RILLIGHT_CORE_API int rillight_core_report_audio_played(
     RillightCore *core, uint64_t session_id, uint64_t timeline_version,
-    int64_t played_pts_us, int64_t device_delay_us);
+    int64_t queued_end_pts_us, int64_t remaining_media_delay_us);
+/* Called after the sink's PCM and device queue have drained. Repeated calls
+ * for the same timeline are harmless and do not restart the monotonic clock. */
+RILLIGHT_CORE_API int rillight_core_report_audio_unavailable(
+    RillightCore *core, uint64_t session_id, uint64_t timeline_version);
 RILLIGHT_CORE_API int rillight_core_report_output_drained(
     RillightCore *core, uint64_t session_id, uint64_t timeline_version);
 RILLIGHT_CORE_API int rillight_core_snapshot(RillightCore *core,

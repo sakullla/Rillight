@@ -30,6 +30,18 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def locked_ffmpeg_patches() -> dict[str, Path]:
+    patches: dict[str, Path] = {}
+    for relative, expected in SPEC["ffmpeg"].get("patches", {}).items():
+        path = (ROOT / relative).resolve()
+        if ROOT.resolve() not in path.parents or not path.is_file():
+            raise RuntimeError(f"Missing/unsafe FFmpeg patch: {relative}")
+        if sha256(path) != expected:
+            raise RuntimeError(f"FFmpeg patch hash mismatch: {relative}")
+        patches[relative] = path
+    return patches
+
+
 def fetch_source(source: Path, repository: str, commit: str, tag: str) -> None:
     if not source.exists():
         source.mkdir()
@@ -80,13 +92,26 @@ def main() -> int:
     commit = SPEC["ffmpeg"]["commit"]
     tag = SPEC["ffmpeg"]["version"]
     repository = SPEC["ffmpeg"]["repository"]
+    patches = locked_ffmpeg_patches()
+    if (source / ".git").is_dir():
+        for path in patches.values():
+            if subprocess.run(["git", "apply", "--reverse", "--check", str(path)],
+                              cwd=source, stdout=subprocess.DEVNULL,
+                              stderr=subprocess.DEVNULL).returncode == 0:
+                run(["git", "apply", "--reverse", str(path)], source)
     fetch_source(source, repository, commit, tag)
+    for path in patches.values():
+        run(["git", "apply", "--check", str(path)], source)
+        run(["git", "apply", str(path)], source)
+    for dependency in ("libva", "libva-drm", "libdrm"):
+        run(["pkg-config", "--exists", dependency])
     build.mkdir(parents=True, exist_ok=True)
     configure = [
         str(source / "configure"), f"--prefix={prefix}", "--libdir=" + str(prefix / "lib"),
         "--enable-shared", "--disable-static", "--disable-programs", "--disable-doc",
         "--disable-network", "--enable-pic", "--enable-avfilter",
-        "--enable-swresample", "--enable-swscale",
+        "--enable-swresample", "--enable-swscale", "--enable-vaapi",
+        "--enable-libdrm",
     ]
     run(configure, build)
     run(["make", f"-j{args.jobs}"], build)
@@ -140,8 +165,13 @@ def main() -> int:
         "ffmpeg_version": SPEC["ffmpeg"]["version"],
         "ffmpeg_commit": commit,
         "ffmpeg_tag": tag,
+        "ffmpeg_patches": SPEC["ffmpeg"].get("patches", {}),
         "libraries": artifacts,
         "configure": configure[1:],
+        "vaapi_build_dependencies": {
+            name: run(["pkg-config", "--modversion", name])
+            for name in ("libva", "libva-drm", "libdrm")
+        },
     }
     if libass_marker:
         marker["libass"] = libass_marker

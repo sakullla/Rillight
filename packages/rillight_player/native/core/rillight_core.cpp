@@ -1,6 +1,7 @@
 #include "rillight_core.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cerrno>
 #include <chrono>
@@ -25,6 +26,7 @@ extern "C" {
 #include <libavfilter/buffersrc.h>
 #include <libavformat/avformat.h>
 #include <libavutil/avutil.h>
+#include <libavutil/aes.h>
 #include <libavutil/channel_layout.h>
 #include <libavutil/hwcontext.h>
 #include <libavutil/imgutils.h>
@@ -51,8 +53,21 @@ using Clock = std::chrono::steady_clock;
 
 struct Source {
   RillightCoreIo io;
+  std::atomic<int> *fatal_error = nullptr;
+  std::atomic<uint64_t> *timeline_signal = nullptr;
+  std::atomic<uint64_t> *active_read_timeline = nullptr;
   void *handle = nullptr;
   AVIOContext *avio = nullptr;
+  AVAES *aes = nullptr;
+  std::array<uint8_t, 16> initial_iv{};
+  std::array<uint8_t, 16> iv{};
+  std::vector<uint8_t> ciphertext;
+  std::vector<uint8_t> plaintext;
+  size_t ciphertext_size = 0;
+  size_t plaintext_size = 0;
+  size_t plaintext_offset = 0;
+  int64_t position = 0;
+  bool encrypted_eof = false;
 };
 
 struct Decoder {
@@ -434,6 +449,7 @@ struct RillightCoreImpl {
   std::atomic<bool> stop{false};
   std::atomic<uint64_t> timeline_signal{0};
   std::atomic<uint64_t> active_read_timeline{0};
+  std::atomic<int> io_fatal_error{0};
   bool media_io_active = false;
   uint64_t session = 0;
   uint64_t operation = 0;
@@ -460,6 +476,8 @@ struct RillightCoreImpl {
   int64_t base_position = 0;
   Clock::time_point base_time = Clock::now();
   bool audio_clock_active = false;
+  bool audio_clock_handed_off = false;
+  bool paused_video_frame_emitted = false;
   std::deque<RillightCoreFrame *> video;
   std::deque<RillightCoreFrame *> audio;
   std::vector<RillightCoreTrack> tracks;
@@ -763,6 +781,9 @@ void reset_frames(RillightCoreImpl *core) {
   core->input_exhausted = false;
   core->output_drained = false;
   core->audio_clock_active = false;
+  core->audio_clock_handed_off = false;
+  core->paused_video_frame_emitted = false;
+  core->io_fatal_error = 0;
 }
 
 bool accept_operation(RillightCoreImpl *core, uint64_t operation) {
@@ -780,22 +801,118 @@ int interrupt_read(void *opaque) {
          core->timeline_signal.load() != core->active_read_timeline.load();
 }
 
+int fill_decrypted(Source *source) {
+  if (source->encrypted_eof && !source->ciphertext_size)
+    return AVERROR_EOF;
+  while (!source->encrypted_eof && source->ciphertext_size < 32) {
+    const int capacity = static_cast<int>(source->ciphertext.size() -
+                                          source->ciphertext_size);
+    const int read = source->io.read(source->io.opaque, source->handle,
+                                     source->ciphertext.data() +
+                                         source->ciphertext_size,
+                                     capacity);
+    if (read > capacity) return AVERROR(EIO);
+    if (read < 0) return read;
+    if (read == 0) {
+      source->encrypted_eof = true;
+      break;
+    }
+    source->ciphertext_size += read;
+  }
+  if (source->encrypted_eof &&
+      (source->ciphertext_size == 0 || source->ciphertext_size % 16 != 0))
+    return AVERROR_INVALIDDATA;
+  size_t blocks = source->ciphertext_size / 16;
+  if (!source->encrypted_eof) --blocks;  // Keep the final block for PKCS#7.
+  if (!blocks) return AVERROR(EAGAIN);
+  const size_t decrypted_size = blocks * 16;
+  av_aes_crypt(source->aes, source->plaintext.data(),
+               source->ciphertext.data(), static_cast<int>(blocks),
+               source->iv.data(), 1);
+  source->plaintext_size = decrypted_size;
+  source->plaintext_offset = 0;
+  if (source->encrypted_eof) {
+    const uint8_t padding = source->plaintext[decrypted_size - 1];
+    if (padding == 0 || padding > 16 ||
+        !std::all_of(source->plaintext.data() + decrypted_size - padding,
+                     source->plaintext.data() + decrypted_size,
+                     [padding](uint8_t byte) { return byte == padding; }))
+      return AVERROR_INVALIDDATA;
+    source->plaintext_size -= padding;
+  }
+  source->ciphertext_size -= decrypted_size;
+  if (source->ciphertext_size)
+    std::memmove(source->ciphertext.data(),
+                 source->ciphertext.data() + decrypted_size,
+                 source->ciphertext_size);
+  return source->plaintext_size ? 0 : AVERROR_EOF;
+}
+
 int source_read(void *opaque, uint8_t *buffer, int size) {
   auto *source = static_cast<Source *>(opaque);
-  const int result = source->io.read(source->io.opaque, source->handle,
-                                     buffer, size);
-  if (result > size) return AVERROR(EIO);
-  return result == 0 ? AVERROR_EOF : result;
+  const uint64_t read_timeline = source->timeline_signal->load();
+  const auto record_error = [source, read_timeline](int result) {
+    if (result < 0 && result != AVERROR_EOF &&
+        result != AVERROR(EAGAIN) && result != AVERROR_EXIT &&
+        source->timeline_signal->load() == read_timeline &&
+        source->active_read_timeline->load() == read_timeline) {
+      int expected = 0;
+      source->fatal_error->compare_exchange_strong(expected, result);
+    }
+    return result;
+  };
+  if (!source->aes) {
+    const int result = source->io.read(source->io.opaque, source->handle,
+                                       buffer, size);
+    if (result > size) return record_error(AVERROR(EIO));
+    return record_error(result == 0 ? AVERROR_EOF : result);
+  }
+  int copied = 0;
+  while (copied < size) {
+    if (source->plaintext_offset == source->plaintext_size) {
+      const int result = fill_decrypted(source);
+      if (result < 0) {
+        record_error(result);
+        return copied ? copied : result;
+      }
+    }
+    const size_t count = std::min<size_t>(
+        size - copied, source->plaintext_size - source->plaintext_offset);
+    std::memcpy(buffer + copied,
+                source->plaintext.data() + source->plaintext_offset, count);
+    copied += static_cast<int>(count);
+    source->plaintext_offset += count;
+    source->position += count;
+  }
+  return copied;
 }
 
 int64_t source_seek(void *opaque, int64_t offset, int whence) {
   auto *source = static_cast<Source *>(opaque);
-  return source->io.seek(source->io.opaque, source->handle, offset, whence);
+  if (!source->aes)
+    return source->io.seek(source->io.opaque, source->handle, offset, whence);
+  if (whence == AVSEEK_SIZE)
+    return source->io.seek(source->io.opaque, source->handle, offset, whence);
+  if (whence == SEEK_CUR && offset == 0) return source->position;
+  if (whence != SEEK_SET || offset != 0) return AVERROR(ENOSYS);
+  const int64_t target = source->io.seek(source->io.opaque, source->handle,
+                                         0, SEEK_SET);
+  if (target != 0) return target < 0 ? target : AVERROR(EIO);
+  source->iv = source->initial_iv;
+  source->ciphertext_size = 0;
+  source->plaintext_size = 0;
+  source->plaintext_offset = 0;
+  source->position = 0;
+  source->encrypted_eof = false;
+  return 0;
 }
 
 Source *open_source(RillightCoreImpl *core, const char *url, int flags) {
   auto source = std::make_unique<Source>();
   source->io = core->io;
+  source->fatal_error = &core->io_fatal_error;
+  source->timeline_signal = &core->timeline_signal;
+  source->active_read_timeline = &core->active_read_timeline;
   source->handle = core->io.open(core->io.opaque, url, flags);
   if (!source->handle) return nullptr;
   auto *buffer = static_cast<unsigned char *>(av_malloc(kIoBufferSize));
@@ -820,14 +937,58 @@ void close_source(Source *source) {
     avio_context_free(&source->avio);
   }
   source->io.close(source->io.opaque, source->handle);
+  av_free(source->aes);
   delete source;
 }
 
+bool parse_aes_hex(const char *hex, uint8_t *bytes) {
+  if (!hex || std::strlen(hex) != 32) return false;
+  const auto digit = [](char value) -> int {
+    if (value >= '0' && value <= '9') return value - '0';
+    if (value >= 'a' && value <= 'f') return value - 'a' + 10;
+    if (value >= 'A' && value <= 'F') return value - 'A' + 10;
+    return -1;
+  };
+  for (int index = 0; index < 16; ++index) {
+    const int high = digit(hex[index * 2]);
+    const int low = digit(hex[index * 2 + 1]);
+    if (high < 0 || low < 0) return false;
+    bytes[index] = static_cast<uint8_t>((high << 4) | low);
+  }
+  return true;
+}
+
 int nested_open(AVFormatContext *format, AVIOContext **avio,
-                const char *url, int flags, AVDictionary **) {
+                const char *url, int flags, AVDictionary **options) {
   auto *core = static_cast<RillightCoreImpl *>(format->opaque);
-  auto *source = open_source(core, url, flags);
+  const bool encrypted = std::strncmp(url, "crypto+", 7) == 0;
+  if (encrypted && (flags & AVIO_FLAG_WRITE)) return AVERROR(EACCES);
+  std::array<uint8_t, 16> key{};
+  std::array<uint8_t, 16> iv{};
+  if (encrypted) {
+    const auto *key_option = options && *options
+        ? av_dict_get(*options, "key", nullptr, 0) : nullptr;
+    const auto *iv_option = options && *options
+        ? av_dict_get(*options, "iv", nullptr, 0) : nullptr;
+    if (!key_option || !iv_option ||
+        !parse_aes_hex(key_option->value, key.data()) ||
+        !parse_aes_hex(iv_option->value, iv.data()))
+      return AVERROR_INVALIDDATA;
+  }
+  auto *source = open_source(core, encrypted ? url + 7 : url, flags);
   if (!source) return AVERROR(EACCES);
+  if (encrypted) {
+    source->aes = av_aes_alloc();
+    if (!source->aes || av_aes_init(source->aes, key.data(), 128, 1) < 0) {
+      close_source(source);
+      return AVERROR(ENOMEM);
+    }
+    source->initial_iv = iv;
+    source->iv = iv;
+    source->ciphertext.resize(kIoBufferSize + 16);
+    source->plaintext.resize(kIoBufferSize + 16);
+    source->avio->seekable = 0;
+  }
   *avio = source->avio;
   return 0;
 }
@@ -1605,6 +1766,12 @@ void run(RillightCoreImpl *core, uint64_t session) {
         continue;
       }
     }
+    const int fatal_io_error = core->io_fatal_error.load();
+    if (fatal_io_error < 0) {
+      av_packet_free(&packet);
+      result = fatal_io_error;
+      break;
+    }
     if (result == AVERROR(EAGAIN)) {
       av_packet_free(&packet);
       {
@@ -2018,15 +2185,42 @@ int rillight_core_get_track(RillightCore *pointer, int ordinal,
 int rillight_core_report_audio_played(RillightCore *pointer,
                                       uint64_t session_id,
                                       uint64_t timeline_version,
-                                      int64_t played_pts_us,
-                                      int64_t device_delay_us) {
-  if (!pointer || played_pts_us < 0 || device_delay_us < 0) return -1;
+                                      int64_t queued_end_pts_us,
+                                      int64_t remaining_media_delay_us) {
+  if (!pointer || queued_end_pts_us < 0 || remaining_media_delay_us < 0)
+    return -1;
   auto *core = impl(pointer);
   std::lock_guard lock(core->mutex);
   if (session_id != core->session || timeline_version != core->timeline)
     return -1;
+  const auto now = Clock::now();
+  int64_t current_position = core->base_position;
+  if (!core->audio_clock_active && core->state == RILLIGHT_CORE_PLAYING)
+    current_position += static_cast<int64_t>(
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            now - core->base_time).count() * core->speed);
+  const int64_t reported_position =
+      std::max<int64_t>(0, queued_end_pts_us - remaining_media_delay_us);
+  if (core->audio_clock_handed_off && reported_position < current_position)
+    return -1;
   core->audio_clock_active = true;
-  core->base_position = std::max<int64_t>(0, played_pts_us - device_delay_us);
+  core->audio_clock_handed_off = false;
+  core->base_position = std::max(current_position, reported_position);
+  core->base_time = now;
+  return 0;
+}
+
+int rillight_core_report_audio_unavailable(RillightCore *pointer,
+                                           uint64_t session_id,
+                                           uint64_t timeline_version) {
+  if (!pointer) return -1;
+  auto *core = impl(pointer);
+  std::lock_guard lock(core->mutex);
+  if (session_id != core->session || timeline_version != core->timeline)
+    return -1;
+  if (!core->audio_clock_active) return 0;
+  core->audio_clock_active = false;
+  core->audio_clock_handed_off = true;
   core->base_time = Clock::now();
   return 0;
 }
@@ -2099,11 +2293,15 @@ RillightCoreFrame *rillight_core_take_frame(RillightCore *pointer, int type) {
       bytes -= late->data_size;
       rillight_core_release_frame(late);
     }
-    if (queue.front()->pts_us > clock_us + 10000) return nullptr;
+    if (queue.front()->pts_us > clock_us + 10000 &&
+        !(core->state == RILLIGHT_CORE_PAUSED &&
+          !core->paused_video_frame_emitted)) return nullptr;
   }
   auto *frame = queue.front();
   queue.pop_front();
   bytes -= frame->data_size;
+  if (type == RILLIGHT_CORE_VIDEO_RGBA)
+    core->paused_video_frame_emitted = true;
   core->wake.notify_all();
   return frame;
 }

@@ -44,6 +44,23 @@ def verify(prefix: Path, target: str, require_subtitles: bool = False) -> list[s
         errors.append(f"{target}: FFmpeg source commit mismatch")
     if marker.get("ffmpeg_tag") != SPEC["ffmpeg"]["version"]:
         errors.append(f"{target}: FFmpeg release tag mismatch")
+    patches = SPEC["ffmpeg"].get("patches", {})
+    if marker.get("ffmpeg_patches") != patches:
+        errors.append(f"{target}: FFmpeg patch provenance mismatch")
+    for relative, expected in patches.items():
+        path = (ROOT / relative).resolve()
+        if ROOT.resolve() not in path.parents or not path.is_file() or \
+                digest(path).lower() != expected.lower():
+            errors.append(f"{target}: FFmpeg patch hash mismatch {relative}")
+    if target == "linux-x64":
+        configure = marker.get("configure")
+        if not isinstance(configure, list) or not {"--enable-vaapi", "--enable-libdrm"} <= set(configure):
+            errors.append(f"{target}: VAAPI/DRM were not enabled in FFmpeg")
+        build_dependencies = marker.get("vaapi_build_dependencies")
+        if not isinstance(build_dependencies, dict) or any(
+                not isinstance(build_dependencies.get(name), str)
+                for name in ("libva", "libva-drm", "libdrm")):
+            errors.append(f"{target}: missing VAAPI build dependency provenance")
     libraries = marker.get("libraries")
     if not isinstance(libraries, dict) or not libraries:
         errors.append(f"{target}: missing library hashes")

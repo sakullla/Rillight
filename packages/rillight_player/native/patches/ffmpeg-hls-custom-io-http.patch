@@ -1,0 +1,41 @@
+diff --git a/libavformat/hls.c b/libavformat/hls.c
+index 0e1a1ba..02d2720 100644
+--- a/libavformat/hls.c
++++ b/libavformat/hls.c
+@@ -699,6 +699,18 @@ static int open_url(AVFormatContext *s, AVIOContext **pb, const char *url,
+     if (!proto_name)
+         proto_name = avio_find_protocol_name(url);
+ 
++    /* Custom IO may intentionally omit FFmpeg's built-in network protocols.
++     * Classify HTTP URLs so the application-owned io_open can authorize and
++     * read playlists, keys, and segments without enabling direct network IO. */
++    if (s->flags & AVFMT_FLAG_CUSTOM_IO) {
++        const char *nested = url;
++        av_strstart(nested, "crypto+", &nested);
++        if (av_strstart(nested, "http://", NULL))
++            proto_name = "http";
++        else if (av_strstart(nested, "https://", NULL))
++            proto_name = "https";
++    }
++
+     if (!proto_name)
+         return AVERROR_INVALIDDATA;
+ 
+@@ -1847,6 +1859,17 @@ restart:
+ 
+         return ret;
+     }
++    /* A custom source can report a fatal decrypt or authorization error.
++     * Do not treat it as a completed segment and continue the playlist. */
++    if (ret == AVERROR(EAGAIN) &&
++        (v->parent->flags & AVFMT_FLAG_CUSTOM_IO)) {
++        v->input->error = 0;
++        v->input->eof_reached = 0;
++        return ret;
++    }
++    if (ret < 0 && ret != AVERROR_EOF &&
++        (v->parent->flags & AVFMT_FLAG_CUSTOM_IO))
++        return ret;
+     if (ret == 0 && segment_reusable(v->input, seg, next_segment(v))) {
+         /* Clean boundary, and the next segment continues this resource. Keep
+          * the connection open and read it as a whole. Note that splitting

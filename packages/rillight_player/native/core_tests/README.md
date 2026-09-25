@@ -3,6 +3,10 @@
 The source build currently supports Linux x86_64. It builds FFmpeg from the
 commit pinned in `../core_dependencies.json`; the core links directly to its C
 libraries. The old libmpv bundle is not a usable SDK for this check.
+The builder applies the SHA256-locked HLS custom-IO patch before compiling
+FFmpeg. It keeps FFmpeg's direct network protocols disabled while allowing
+application-owned HTTP(S) playlist, key, and segment reads. The SDK manifest
+records the patch hash; verification rejects an unpatched or stale SDK.
 
 Install `git`, `make`, a C/C++ compiler, `cmake`, `pkg-config`, `nasm`, and
 Python 3 in a Linux build environment, then run from the repository root:
@@ -22,11 +26,28 @@ The Linux CTest target sets `LD_LIBRARY_PATH` only for its process so the
 loader can find FFmpeg's transitive libraries in the verified SDK prefix.
 Release packaging must provide its own complete library closure and RUNPATH.
 
+The controlled-IO HLS regression also runs against the pinned SDK:
+
+```sh
+cmake -S packages/rillight_player/native/core_tests/android \
+  -B build/core-hls-test -DRILLIGHT_CORE_PREFIX="$PWD/build/core-sdk"
+cmake --build build/core-hls-test --parallel 4
+ctest --test-dir build/core-hls-test -R rillight_android_encrypted_hls \
+  --output-on-failure
+```
+
+Its eight cases cover local and HTTP URLs, two AES-128 segments, a missing
+key, corrupt PKCS#7 padding, and one transient `EAGAIN` read. HTTP bytes must
+come from the supplied IO callbacks. This native test does not establish an
+Android ABI build or device playback.
+
 `core_test.cpp` constructs PCM WAV and RGB BMP media in memory. The test
 requires the real pinned FFmpeg libraries and exercises decoding, stream
 metadata, first-frame readiness, pause, seek, 2.0x audio sample reduction,
 stale operation rejection, session change, EOF drain, frame ownership, and
-strict hardware failure versus explicit software fallback. A controlled IO
+strict hardware failure versus explicit software fallback. It also checks
+audio-clock handoff to monotonic time, repeated handoff calls, and rejection
+of an old audio position after handoff. A controlled IO
 read blocks after decoded audio is ready; seek must cancel that old read,
 produce frames on the new timeline, and tolerate a second seek. A gated EOF
 read checks that seeking while old EOF is pending cannot publish old EOF or
@@ -85,8 +106,10 @@ other external subtitle formats, direct hardware frame import, and verified
 platform output remain required before product playback can use it. The base
 SDK command above omits libass; compile and run the
 separate ASS-enabled build below before claiming that path has been exercised.
-The C ABI is version 6 because the targeted cancel callback now covers both
-read and seek; every native caller must be rebuilt against this header.
+The C ABI is version 7. The audio sink reports submitted PCM end PTS and
+remaining device latency in media microseconds, and calls
+`rillight_core_report_audio_unavailable` after output drains. Every native
+caller must be rebuilt against this header.
 
 To build the ASS/SSA path, the Linux builder accepts `--with-libass`. This
 requires Meson, Ninja, and development packages exposing `freetype2`,

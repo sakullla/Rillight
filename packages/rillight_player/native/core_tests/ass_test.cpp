@@ -301,7 +301,7 @@ bool wait_for(RillightCore *core, Predicate predicate,
 }  // namespace
 
 int main() {
-  assert(rillight_core_abi_version() == 6);
+  assert(rillight_core_abi_version() == RILLIGHT_CORE_ABI_VERSION);
   Media media{};
   media.video = make_ass_video();
   media.srt_video = make_ass_video(AV_CODEC_ID_SUBRIP);
