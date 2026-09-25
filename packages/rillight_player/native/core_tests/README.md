@@ -49,6 +49,8 @@ EAGAIN; it must be judged by time since last progress.
 External SRT and WebVTT fixtures are read through the same controlled IO,
 parsed by FFmpeg and selected as libass-composed tracks. Invalid external SRT
 leaves the old selection intact; valid cues appear at their one-second time.
+The test then repeats eight failed and eight successful external text loads in
+one session to exercise the AVIO success and failure cleanup paths.
 This is a native composition check, not a Flutter surface or font coverage
 check; the build environment must provide a usable sans-serif font.
 The test prints the actual loaded FFmpeg library versions. CMake rejects an
@@ -72,16 +74,19 @@ SRT, and WebVTT files can be added asynchronously
 through a separate, cancellable controlled-IO loader and selected by their
 synthetic track indices. Callback owners must support concurrent media and
 subtitle handles; `cancel` must release both on close. Each
-media read has a separate prompt `cancel_media_read` signal for seek and track
-changes; its callback must not call core APIs or wait for worker progress.
-The transport must leave the media handle reusable after that read is
-interrupted and seek resets its state. Each source is limited to 4 MiB, with
+media operation has a separate prompt `cancel_media_io` signal for seek and
+track changes; it must interrupt a blocked media read or seek without calling
+core APIs or waiting for worker progress. The transport must leave the media
+handle reusable after the new seek resets its state. Each source is limited to
+4 MiB, with
 16 tracks and 16 MiB per session. Invalid
 external scripts and IO errors leave the selected track and timeline intact;
 other external subtitle formats, direct hardware frame import, and verified
 platform output remain required before product playback can use it. The base
 SDK command above omits libass; compile and run the
 separate ASS-enabled build below before claiming that path has been exercised.
+The C ABI is version 6 because the targeted cancel callback now covers both
+read and seek; every native caller must be rebuilt against this header.
 
 To build the ASS/SSA path, the Linux builder accepts `--with-libass`. This
 requires Meson, Ninja, and development packages exposing `freetype2`,

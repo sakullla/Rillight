@@ -434,7 +434,7 @@ struct RillightCoreImpl {
   std::atomic<bool> stop{false};
   std::atomic<uint64_t> timeline_signal{0};
   std::atomic<uint64_t> active_read_timeline{0};
-  bool media_read_active = false;
+  bool media_io_active = false;
   uint64_t session = 0;
   uint64_t operation = 0;
   uint64_t timeline = 0;
@@ -661,6 +661,7 @@ finish_external_text:
   av_packet_free(&packet);
   avcodec_free_context(&decoder);
   if (format) avformat_close_input(&format);
+  if (avio) av_freep(&avio->buffer);
   avio_context_free(&avio);
   return result;
 }
@@ -1455,7 +1456,7 @@ void run(RillightCoreImpl *core, uint64_t session) {
       {
         std::lock_guard lock(core->mutex);
         if (core->timeline != timeline) continue;
-        core->media_read_active = true;
+        core->media_io_active = true;
       }
       if (format->pb) {
         format->pb->error = 0;
@@ -1464,7 +1465,7 @@ void run(RillightCoreImpl *core, uint64_t session) {
       result = av_seek_frame(format, -1, seek, AVSEEK_FLAG_BACKWARD);
       {
         std::lock_guard lock(core->mutex);
-        core->media_read_active = false;
+        core->media_io_active = false;
         if (core->timeline != timeline) {
           if (format->pb) {
             format->pb->error = 0;
@@ -1589,12 +1590,12 @@ void run(RillightCoreImpl *core, uint64_t session) {
         av_packet_free(&packet);
         continue;
       }
-      core->media_read_active = true;
+      core->media_io_active = true;
     }
     result = av_read_frame(format, packet);
     {
       std::lock_guard lock(core->mutex);
-      core->media_read_active = false;
+      core->media_io_active = false;
       if (core->timeline != timeline) {
         av_packet_free(&packet);
         if (format->pb) {
@@ -1728,7 +1729,7 @@ const char *rillight_core_ffmpeg_versions(void) {
 
 RillightCore *rillight_core_create(const RillightCoreIo *io) {
   if (!io || !io->open || !io->read || !io->seek || !io->close ||
-      !io->cancel_media_read) return nullptr;
+      !io->cancel_media_io) return nullptr;
   auto *core = new (std::nothrow) RillightCoreImpl(*io);
   return reinterpret_cast<RillightCore *>(core);
 }
@@ -1784,7 +1785,7 @@ int rillight_core_open(RillightCore *pointer, const char *url,
     std::lock_guard lock(core->mutex);
     reset_frames(core);
     core->stop = false;
-    core->media_read_active = false;
+    core->media_io_active = false;
     ++core->session;
     ++core->timeline;
     core->timeline_signal = core->timeline;
@@ -1858,8 +1859,8 @@ int rillight_core_seek(RillightCore *pointer, int64_t position_us,
   core->state = RILLIGHT_CORE_RECOVERING;
   core->wake.notify_all();
   // The worker cannot start a new-timeline read until this callback returns.
-  if (core->media_read_active)
-    core->io.cancel_media_read(core->io.opaque);
+  if (core->media_io_active)
+    core->io.cancel_media_io(core->io.opaque);
   return 0;
 }
 
@@ -1886,8 +1887,8 @@ int rillight_core_select_audio(RillightCore *pointer, int stream_index,
   core->base_time = Clock::now();
   core->state = RILLIGHT_CORE_RECOVERING;
   core->wake.notify_all();
-  if (core->media_read_active)
-    core->io.cancel_media_read(core->io.opaque);
+  if (core->media_io_active)
+    core->io.cancel_media_io(core->io.opaque);
   return 0;
 }
 
@@ -1921,8 +1922,8 @@ int rillight_core_select_subtitle(RillightCore *pointer, int stream_index,
   core->base_time = Clock::now();
   core->state = RILLIGHT_CORE_RECOVERING;
   core->wake.notify_all();
-  if (core->media_read_active)
-    core->io.cancel_media_read(core->io.opaque);
+  if (core->media_io_active)
+    core->io.cancel_media_io(core->io.opaque);
   return 0;
 }
 
@@ -1998,8 +1999,8 @@ int rillight_core_set_speed(RillightCore *pointer, double speed,
   core->base_time = Clock::now();
   core->state = RILLIGHT_CORE_RECOVERING;
   core->wake.notify_all();
-  if (core->media_read_active)
-    core->io.cancel_media_read(core->io.opaque);
+  if (core->media_io_active)
+    core->io.cancel_media_io(core->io.opaque);
   return 0;
 }
 

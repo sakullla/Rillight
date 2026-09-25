@@ -57,6 +57,7 @@ struct OverlapSeekMedia {
   bool entered = false;
   bool cancelled = false;
   bool consumed = false;
+  int targeted_cancel_count = 0;
 };
 
 void append16(std::vector<uint8_t> &data, uint16_t value) {
@@ -155,7 +156,7 @@ int64_t seek(void *, void *handle, int64_t offset, int whence) {
 }
 
 void close(void *, void *handle) { delete static_cast<Bytes *>(handle); }
-void cancel_media_read(void *) {}
+void cancel_media_io(void *) {}
 
 void *blocked_open(void *opaque, const char *, int) { return opaque; }
 
@@ -256,9 +257,13 @@ int64_t overlap_seek(void *opaque, void *handle, int64_t offset, int whence) {
   if (whence != 0x10000) {
     std::unique_lock lock(media->mutex);
     if (media->armed && !media->consumed) {
+      const int prior_cancels = media->targeted_cancel_count;
       media->entered = true;
       media->wake.notify_all();
-      media->wake.wait(lock, [&] { return media->cancelled; });
+      media->wake.wait(lock, [&] {
+        return media->cancelled ||
+               media->targeted_cancel_count > prior_cancels;
+      });
       media->consumed = true;
       return -5;  // Old seek fails after the newer timeline cancels it.
     }
@@ -271,6 +276,15 @@ void overlap_cancel(void *opaque) {
   {
     std::lock_guard lock(media->mutex);
     media->cancelled = true;
+  }
+  media->wake.notify_all();
+}
+
+void overlap_cancel_media_io(void *opaque) {
+  auto *media = static_cast<OverlapSeekMedia *>(opaque);
+  {
+    std::lock_guard lock(media->mutex);
+    ++media->targeted_cancel_count;
   }
   media->wake.notify_all();
 }
@@ -306,7 +320,7 @@ int main() {
   std::printf("loaded FFmpeg libraries: %s\n", versions);
   Media media{make_wav(), make_bmp()};
   RillightCoreIo io{&media, open, read, seek, close, nullptr,
-                    cancel_media_read};
+                    cancel_media_io};
   auto *core = rillight_core_create(&io);
   assert(core);
   assert(rillight_core_open(core, "synthetic.wav", 1) == 0);
@@ -491,7 +505,7 @@ int main() {
   overlap_media.wav = make_wav(48000 * 30);
   RillightCoreIo overlap_io{&overlap_media, overlap_open, read,
                             overlap_seek, [](void *, void *) {},
-                            overlap_cancel, overlap_cancel};
+                            overlap_cancel, overlap_cancel_media_io};
   core = rillight_core_create(&overlap_io);
   assert(core && rillight_core_open(core, "overlap.wav", 1) == 0);
   assert(wait_for(core, [](const auto &state) {
@@ -508,6 +522,11 @@ int main() {
       return overlap_media.entered;
     }));
   }
+  int cancels_before_second_seek;
+  {
+    std::lock_guard lock(overlap_media.mutex);
+    cancels_before_second_seek = overlap_media.targeted_cancel_count;
+  }
   const auto first_seek_timeline = snapshot(core).timeline_version;
   assert(rillight_core_seek(core, 0, 3) == 0);
   assert(wait_for(core, [first_seek_timeline](const auto &state) {
@@ -515,6 +534,10 @@ int main() {
            state.first_audio_frame_ready && state.state != RILLIGHT_CORE_FAILED;
   }));
   assert(snapshot(core).ffmpeg_error == 0);
+  {
+    std::lock_guard lock(overlap_media.mutex);
+    assert(overlap_media.targeted_cancel_count > cancels_before_second_seek);
+  }
   rillight_core_destroy(core);
 
   EofGateMedia eof_media;

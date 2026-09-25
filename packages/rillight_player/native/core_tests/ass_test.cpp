@@ -274,7 +274,7 @@ void cancel(void *opaque) {
   }
   blocking->wake.notify_all();
 }
-void cancel_media_read(void *) {}
+void cancel_media_io(void *) {}
 
 RillightCoreSnapshot snapshot(RillightCore *core) {
   RillightCoreSnapshot state{};
@@ -301,7 +301,7 @@ bool wait_for(RillightCore *core, Predicate predicate,
 }  // namespace
 
 int main() {
-  assert(rillight_core_abi_version() == 5);
+  assert(rillight_core_abi_version() == 6);
   Media media{};
   media.video = make_ass_video();
   media.srt_video = make_ass_video(AV_CODEC_ID_SUBRIP);
@@ -321,7 +321,7 @@ int main() {
   media.slow.slow_progress_reads = 10;
   media.slow.eagain_after_progress = true;
   RillightCoreIo io{&media, open, read, seek, close, cancel,
-                    cancel_media_read};
+                    cancel_media_io};
   RillightCore *core = rillight_core_create(&io);
   assert(core && rillight_core_open(core, "synthetic.mkv", 1) == 0);
   assert(wait_for(core, [](const auto &state) {
@@ -359,7 +359,7 @@ int main() {
         std::fprintf(stderr,
             "decoded frame metadata: ABI=%u size=%u SAR=%d/%d matrix=%d "
             "rotation=%.1f range=%d space=%d primaries=%d transfer=%d "
-            "(expected ABI=5 size=%zu SAR=2/1 rotation=-90 range=%d "
+            "(expected ABI=6 size=%zu SAR=2/1 rotation=-90 range=%d "
             "space=%d primaries=%d transfer=%d)\n",
             rillight_core_abi_version(), frame->struct_size,
             frame->sar_num, frame->sar_den, frame->has_display_matrix,
@@ -631,6 +631,34 @@ int main() {
     assert(early_blank && timed_text_visible);
     rillight_core_destroy(core);
   }
+  // Exercise both success and rejected parse cleanup repeatedly in one
+  // session; leak instrumentation can run this same executable under ASan.
+  core = rillight_core_create(&io);
+  assert(core && rillight_core_open(core, "synthetic.mkv", 1) == 0);
+  assert(wait_for(core, [](const auto &state) {
+    return state.first_video_frame_ready && state.state != RILLIGHT_CORE_FAILED;
+  }));
+  const auto repeated_before = snapshot(core);
+  uint64_t operation = 2;
+  for (int iteration = 0; iteration < 8; ++iteration) {
+    assert(rillight_core_add_external_subtitle(core, "invalid.srt",
+                                              operation++) == 0);
+    assert(wait_for(core, [](const auto &state) {
+      return !state.external_subtitle_pending && state.ffmpeg_error < 0;
+    }));
+    assert(rillight_core_track_count(core) == 2 + iteration);
+    const char *url = iteration % 2 ? "external.vtt" : "external.srt";
+    assert(rillight_core_add_external_subtitle(core, url,
+                                              operation++) == 0);
+    assert(wait_for(core, [](const auto &state) {
+      return !state.external_subtitle_pending && state.ffmpeg_error == 0;
+    }));
+    assert(rillight_core_track_count(core) == 3 + iteration);
+    assert(snapshot(core).subtitle_stream_index ==
+               repeated_before.subtitle_stream_index &&
+           snapshot(core).timeline_version == repeated_before.timeline_version);
+  }
+  rillight_core_destroy(core);
   std::printf("Embedded and external ASS subtitle composition verified (%d "
               "external frames)\n", frames);
   return 0;

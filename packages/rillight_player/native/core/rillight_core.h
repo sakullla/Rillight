@@ -13,7 +13,7 @@
 extern "C" {
 #endif
 
-#define RILLIGHT_CORE_ABI_VERSION 5
+#define RILLIGHT_CORE_ABI_VERSION 6
 
 typedef struct RillightCore RillightCore;
 typedef struct RillightCoreFrame RillightCoreFrame;
@@ -78,11 +78,13 @@ typedef struct RillightCoreTrack {
  * callback; authorization and the protocol allow-list belong to its owner.
  * The external-subtitle loader may call open/read/close on a separate handle
  * concurrently with media IO. cancel must unblock both kinds of handles.
- * cancel_media_read must be a prompt, nonblocking signal: it is invoked while
- * the core state mutex is held so a new-timeline read cannot start before the
- * signal returns. It must not call core APIs or wait for worker progress. It
- * must interrupt only the current media read; the same handle must remain
- * seekable and readable after seek resets it. */
+ * cancel_media_io must promptly interrupt the current media read OR seek,
+ * including a seek callback blocked in transport IO. It is invoked while the
+ * core state mutex is held so new-timeline IO cannot start before the signal
+ * returns. It must only signal, not call core APIs or wait for worker progress.
+ * The cancellation must not poison the next operation: the same media handle
+ * must remain seekable and readable after the new seek resets transport state.
+ * Subtitle handles must not be cancelled by this targeted signal. */
 typedef struct RillightCoreIo {
   void *opaque;
   void *(*open)(void *opaque, const char *url, int flags);
@@ -90,7 +92,7 @@ typedef struct RillightCoreIo {
   int64_t (*seek)(void *opaque, void *handle, int64_t offset, int whence);
   void (*close)(void *opaque, void *handle);
   void (*cancel)(void *opaque);
-  void (*cancel_media_read)(void *opaque);
+  void (*cancel_media_io)(void *opaque);
 } RillightCoreIo;
 
 struct RillightCoreFrame {
