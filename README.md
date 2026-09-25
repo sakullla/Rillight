@@ -21,7 +21,7 @@ PR/main CI 保存可安装的 `rillight-android-debug` 开发 APK。推送 `v*` 
 
 设备验证使用隔离的 `.validation` 应用、合成服务器和合成媒体，流程见 [Android 验证说明](integration_test/android/README.md)。自动构建、页面操作、原生控制、显示像素与虚拟音频分别留证；AVD 通过不代表实体设备音频、硬件解码性能或长期 GPU 稳定性。
 
-发行包捆绑 libmpv 和媒体依赖，Windows/Linux 的版本、来源与校验值见 [`dependencies.json`](packages/rillight_player/native/dependencies.json)。当前稳定版基线为 mpv 0.41.0；Windows 固定构建为 `0.41.0-1023-g69e63f425`，它是 git 构建。macOS 在构建时从 IINA 的 live dylib 列表下载 universal 库，不在仓库内锁定远程文件哈希；应用最低版本为 12（Flutter 3.47.4 要求）。Linux deb 自带新版 `libmpv.so.2`，不需要手工创建 `.so.1` 软链接或设置 `LD_LIBRARY_PATH`。使用桌面菜单或 `/usr/bin/rillight` 启动；依赖缺失时启动包装会提供诊断。GitHub Release 的 macOS 包是拖拽安装：打开 DMG 后把应用拖到 Applications；PR/main CI 的包为 ad-hoc 签名，发布包使用固定自签证书签名，首次打开被 Gatekeeper 拦截时在访达中右键选“打开”放行一次。
+发行包捆绑 libmpv 和媒体依赖，Windows/Linux 的版本、来源与校验值见 [`dependencies.json`](packages/rillight_player/native/dependencies.json)。当前稳定版基线为 mpv 0.41.0；Windows 固定构建为 `0.41.0-1023-g69e63f425`，它是 git 构建。macOS 在构建时从 IINA 的 live dylib 列表下载 universal 库，不在仓库内锁定远程文件哈希；应用最低版本为 12（Flutter 3.47.4 要求）。Linux deb 自带新版 `libmpv.so.2`，不需要手工创建 `.so.1` 软链接或设置 `LD_LIBRARY_PATH`。使用桌面菜单或 `/usr/bin/rillight` 启动；依赖缺失时启动包装会提供诊断。GitHub Release 的 macOS 包是拖拽安装：打开 DMG 即见标准安装窗口——品牌深色背景、左侧应用图标、右侧 Applications 文件夹与拖拽箭头指引，把应用图标拖到 Applications 即完成安装；PR/main CI 的包为 ad-hoc 签名，发布包使用固定自签证书签名，首次打开被 Gatekeeper 拦截时打开系统设置 > 隐私与安全性，在对应提示下点“仍要打开”放行一次（旧版 macOS 亦可在访达中右键选“打开”）。
 
 配套 FFmpeg 基线升级为 9.0.1，Linux 按固定提交整套重建；Windows 保留兼容的固定开发构建 `N-126390-g9fc8c785e`。版本检查读取实际加载库的属性，不根据文件名推断版本。macOS 媒体库的实际加载仍需对应系统验证；固定自签证书的导入、签名与挂载校验由发布流程自动执行。
 

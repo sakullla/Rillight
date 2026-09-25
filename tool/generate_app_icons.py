@@ -13,6 +13,7 @@ Requirements:
 Example:
     python tool/generate_app_icons.py --force
     python tool/generate_app_icons.py --reuse-source --force
+    python tool/generate_app_icons.py --dmg-background --force
 """
 
 from __future__ import annotations
@@ -34,10 +35,20 @@ from urllib.request import Request, urlopen
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MAC_ICON_DIR = REPO_ROOT / "macos/Runner/Assets.xcassets/AppIcon.appiconset"
 WINDOWS_ICON = REPO_ROOT / "windows/runner/resources/app_icon.ico"
+DMG_BACKGROUND = REPO_ROOT / "macos/dmg_assets/background.png"
 DEFAULT_MODEL = "gpt-image-2.5"
 SOURCE_SIZE = (1024, 1024)
 MAC_SIZES = (16, 32, 64, 128, 256, 512, 1024)
 WINDOWS_SIZES = (16, 24, 32, 48, 64, 128, 256)
+
+# The DMG install window is 660x400 with two 128px icon slots; these
+# coordinates mirror macos/package_dmg.py so the drawn slots sit exactly
+# behind the Finder icons positioned by the generated .DS_Store.
+DMG_BACKGROUND_SIZE = (660, 400)
+DMG_BACKGROUND_BASE = (16, 25, 30)
+DMG_SLOT_SIZE = 144
+DMG_APP_SLOT_CENTER = (160, 200)
+DMG_APPLICATIONS_SLOT_CENTER = (500, 200)
 
 PROMPT = """Use case: logo-brand
 Asset type: production-ready square desktop application icon for the Chinese Emby client "灯川 Rillight"
@@ -67,6 +78,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--android-only", action="store_true",
         help="Build Android launcher icons/banner from the committed macOS brand icon, offline.",
+    )
+    parser.add_argument(
+        "--dmg-background", action="store_true",
+        help="Draw the DMG install-window background offline and commit it to "
+             "macos/dmg_assets/background.png.",
     )
     parser.add_argument(
         "--config",
@@ -399,8 +415,55 @@ def write_android_icons() -> None:
         banner.save(target)
 
 
+def write_dmg_background(force: bool) -> None:
+    """Draw the 660x400 DMG install-window background offline, Pillow only."""
+    Image, _ = require_pillow()
+    from PIL import ImageDraw
+
+    if DMG_BACKGROUND.is_file() and not force:
+        fail(
+            "DMG background already exists; rerun with --force to replace it: "
+            + str(DMG_BACKGROUND)
+        )
+
+    image = Image.new("RGB", DMG_BACKGROUND_SIZE, DMG_BACKGROUND_BASE)
+    draw = ImageDraw.Draw(image)
+
+    def slot_box(center):
+        half = DMG_SLOT_SIZE // 2
+        x, y = center
+        return (x - half, y - half, x + half, y + half)
+
+    # Drop targets for the Finder icons: outlined slots on a dark base.
+    for center in (DMG_APP_SLOT_CENTER, DMG_APPLICATIONS_SLOT_CENTER):
+        draw.rounded_rectangle(slot_box(center), radius=24,
+                               outline=BRAND_OUTLINE, width=4)
+
+    # Drag guide: an arrow from the app slot to the Applications slot.
+    y = DMG_BACKGROUND_SIZE[1] // 2
+    start = DMG_APP_SLOT_CENTER[0] + DMG_SLOT_SIZE // 2 + 14
+    end = DMG_APPLICATIONS_SLOT_CENTER[0] - DMG_SLOT_SIZE // 2 - 10
+    draw.rectangle((start, y - 3, end - 26, y + 3), fill=BRAND_PRIMARY)
+    draw.polygon(
+        [(end - 30, y - 16), (end, y), (end - 30, y + 16)],
+        fill=BRAND_PRIMARY,
+    )
+
+    DMG_BACKGROUND.parent.mkdir(parents=True, exist_ok=True)
+    staging_root = REPO_ROOT / "build/imagegen"
+    staging_root.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="rillight-dmg-", dir=staging_root) as temp_dir:
+        staged = Path(temp_dir) / DMG_BACKGROUND.name
+        image.save(staged, format="PNG", optimize=True)
+        os.replace(staged, DMG_BACKGROUND)
+
+
 def main() -> None:
     args = parse_args()
+    if args.dmg_background:
+        write_dmg_background(args.force)
+        print(f"Generated DMG background: {DMG_BACKGROUND}")
+        return
     if args.android_only:
         write_android_icons()
         return
