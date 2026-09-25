@@ -23,7 +23,7 @@ class CoreQueueClockTest {
         val clock = CoreQueueClock()
         clock.reset(0)
         clock.submitted(0, 19_200, 19_200, 1.0)
-        clock.reset(4_800)
+        clock.reset(0)
         assertFalse(clock.hasPlaybackProgress())
         assertNull(clock.snapshot(0))
         clock.submitted(5_000_000, 19_200, 19_200, 1.0)
@@ -44,7 +44,13 @@ class CoreQueueClockTest {
         clock.submitted(0, 19_200, 19_200, 1.0)
         clock.snapshot(2_520)
         assertTrue(clock.hasPlaybackProgress())
-        clock.snapshot(0)
+        assertNull(clock.snapshot(0))
+        assertFalse(clock.hasPlaybackProgress())
+        assertTrue(clock.takeCounterReset())
+        assertFalse(clock.takeCounterReset())
+        assertNull(clock.snapshot(2_400))
+        clock.submitted(5_000_000, 19_200, 19_200, 1.0)
+        assertEquals(5_100_000L to 100_000L, clock.snapshot(0))
         assertFalse(clock.hasPlaybackProgress())
     }
 }

@@ -9,6 +9,7 @@ internal class CoreQueueClock {
     private var endPtsUs = -1L
     private var speed = 1.0
     private var playbackProgressed = false
+    private var counterReset = false
 
     fun reset(headPosition: Long) {
         val head = headPosition and 0xffffffffL
@@ -19,6 +20,7 @@ internal class CoreQueueClock {
         endPtsUs = -1
         speed = 1.0
         playbackProgressed = false
+        counterReset = false
     }
 
     fun submitted(framePtsUs: Long, frameBytesWritten: Int, newBytes: Int,
@@ -36,10 +38,11 @@ internal class CoreQueueClock {
         if (head < lastHead) {
             if (lastHead > 0xf0000000L && head < 0x10000000L) wraps += 1L shl 32
             else {
-                // AudioTrack can reset its counter after flush/device recovery.
-                headBase = head
-                wraps = 0
-                playbackProgressed = false
+                // The old device queue is no longer measurable. The caller must
+                // flush it before using a new timeline or reporting a drain.
+                reset(head)
+                counterReset = true
+                return null
             }
         }
         lastHead = head
@@ -51,4 +54,10 @@ internal class CoreQueueClock {
     }
 
     fun hasPlaybackProgress(): Boolean = playbackProgressed
+
+    fun takeCounterReset(): Boolean {
+        val value = counterReset
+        counterReset = false
+        return value
+    }
 }

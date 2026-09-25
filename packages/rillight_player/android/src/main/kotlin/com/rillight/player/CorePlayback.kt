@@ -424,9 +424,12 @@ internal class CorePlayback(
                         }
                     }
                 }
-                if (snap[12] == 1L && snap[13] == 0L && snap[14] == 0L &&
-                    pending == null && (audio == null || audio.drained())) {
-                    CoreNative.reportDrained(active.handle, snap[1], snap[3])
+                if (snap[12] == 1L && snap[13] == 0L && snap[14] == 0L && pending == null) {
+                    synchronized(outputLock) {
+                        audio?.finishInput()
+                        if (audio == null || audio.drained())
+                            CoreNative.reportDrained(active.handle, snap[1], snap[3])
+                    }
                 }
                 val now = android.os.SystemClock.elapsedRealtime()
                 if (now - lastTick >= 250) {
