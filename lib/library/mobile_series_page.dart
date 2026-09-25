@@ -35,6 +35,7 @@ class PhoneItemBanner extends StatelessWidget {
     this.titleHint,
     this.preferBackdrop = true,
     this.maxWidth = PhoneMotion.pageRequestWidth,
+    this.showCaption = true,
     this.maxImageHeight,
   });
 
@@ -51,6 +52,9 @@ class PhoneItemBanner extends StatelessWidget {
   final String? titleHint;
   final bool preferBackdrop;
   final int maxWidth;
+
+  /// 为 false 时只画头图。加载中的标题和主操作由调用方放在头图下面。
+  final bool showCaption;
 
   /// 剧集把季列表和分集当作主体时，压低背图，避免先滑过一大块画面。
   final double? maxImageHeight;
@@ -124,56 +128,57 @@ class PhoneItemBanner extends StatelessWidget {
                   ),
                 ),
               ),
-              Positioned(
-                left: AppSpacing.md,
-                right: AppSpacing.md,
-                bottom: AppSpacing.sm,
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          _BannerTitle(
-                            title: title,
-                            hint: onTitleTap == null ? null : titleHint,
-                            onTap: onTitleTap,
-                          ),
-                          if (meta.isNotEmpty) ...[
-                            const SizedBox(height: AppSpacing.xs),
-                            Wrap(
-                              key: metaKey,
-                              spacing: AppSpacing.xs,
-                              runSpacing: AppSpacing.xxs,
-                              crossAxisAlignment: WrapCrossAlignment.center,
-                              children: [
-                                for (var i = 0; i < meta.length; i++) ...[
-                                  if (i > 0)
-                                    Text(
-                                      '·',
-                                      style: theme.textTheme.labelMedium
-                                          ?.copyWith(
-                                            color: theme
-                                                .colorScheme
-                                                .onSurfaceVariant,
-                                          ),
-                                    ),
-                                  _MetaChip(entry: meta[i]),
-                                ],
-                              ],
+              if (showCaption)
+                Positioned(
+                  left: AppSpacing.md,
+                  right: AppSpacing.md,
+                  bottom: AppSpacing.sm,
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _BannerTitle(
+                              title: title,
+                              hint: onTitleTap == null ? null : titleHint,
+                              onTap: onTitleTap,
                             ),
+                            if (meta.isNotEmpty) ...[
+                              const SizedBox(height: AppSpacing.xs),
+                              Wrap(
+                                key: metaKey,
+                                spacing: AppSpacing.xs,
+                                runSpacing: AppSpacing.xxs,
+                                crossAxisAlignment: WrapCrossAlignment.center,
+                                children: [
+                                  for (var i = 0; i < meta.length; i++) ...[
+                                    if (i > 0)
+                                      Text(
+                                        '·',
+                                        style: theme.textTheme.labelMedium
+                                            ?.copyWith(
+                                              color: theme
+                                                  .colorScheme
+                                                  .onSurfaceVariant,
+                                            ),
+                                      ),
+                                    _MetaChip(entry: meta[i]),
+                                  ],
+                                ],
+                              ),
+                            ],
                           ],
-                        ],
+                        ),
                       ),
-                    ),
-                    if (actions != null) ...[
-                      const SizedBox(width: AppSpacing.sm),
-                      actions!,
+                      if (actions != null) ...[
+                        const SizedBox(width: AppSpacing.sm),
+                        actions!,
+                      ],
                     ],
-                  ],
+                  ),
                 ),
-              ),
             ],
           ),
         ),
@@ -377,17 +382,32 @@ class MobileSeriesPage extends StatelessWidget {
             ),
           ),
         if (episodesLoading && episodes.isEmpty)
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: AppSpacing.md),
-            child: Row(
-              children: [
-                SkeletonBlock(width: 144, height: 81),
-                SizedBox(width: AppSpacing.sm),
-                SkeletonBlock(width: 144, height: 81),
-                SizedBox(width: AppSpacing.sm),
-                SkeletonBlock(width: 144, height: 81),
-              ],
-            ),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              // 三块固定 144 的 Row 在 360dp 上会横向溢出。卡片不超过内容宽，多的横滑。
+              final inner = constraints.maxWidth - AppSpacing.md * 2;
+              final cardWidth = inner >= 144
+                  ? 144.0
+                  : inner > 0
+                  ? inner
+                  : 0.0;
+              final cardHeight = cardWidth * 9 / 16;
+              return SizedBox(
+                height: cardHeight,
+                child: ListView.separated(
+                  key: const Key('phone-season-episode-placeholder'),
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.md,
+                  ),
+                  itemCount: cardWidth <= 0 ? 0 : 3,
+                  separatorBuilder: (context, index) =>
+                      const SizedBox(width: AppSpacing.sm),
+                  itemBuilder: (context, index) =>
+                      SkeletonBlock(width: cardWidth, height: cardHeight),
+                ),
+              );
+            },
           ),
         if (episodeError != null && onRetryEpisodes != null)
           MobileFailure(error: episodeError!, retry: onRetryEpisodes!),

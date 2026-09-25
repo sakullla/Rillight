@@ -491,7 +491,9 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
         final item = controller.item;
         final target = controller.playTarget;
         final handoff = _imageHandoff(context);
-        final imageSource = handoff?.item ?? item;
+        final pending = item == null && controller.loading;
+        final failed = item == null && controller.error != null;
+        final imageSource = failed ? null : handoff?.item ?? item;
         final immersive = imageSource != null && !_barSolid;
         return ContentTheme(
           item: imageSource,
@@ -533,8 +535,10 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
                   bottom: MediaQuery.paddingOf(context).bottom + AppSpacing.lg,
                 ),
                 children: [
-                  if (imageSource == null && controller.loading)
-                    const _PhoneDetailSkeleton()
+                  if (pending)
+                    _PhoneDetailPending(handoff: handoff)
+                  else if (failed)
+                    MobileFailure(error: controller.error!, retry: _refresh)
                   else if (imageSource != null)
                     PhoneItemBanner(
                       item: imageSource,
@@ -579,8 +583,6 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
                           handoff?.maxWidth ?? PhoneMotion.pageRequestWidth,
                     ),
                   if (item != null) DetailAlbumStrip(item: item),
-                  if (controller.error != null && item == null)
-                    MobileFailure(error: controller.error!, retry: _refresh),
                   if (item != null && item.isSeries)
                     MobileSeriesPage(
                       item: item,
@@ -803,26 +805,24 @@ class _ChapterStrip extends StatelessWidget {
           ),
           child: Text(l.chapters, style: theme.textTheme.titleMedium),
         ),
-        SizedBox(
+        WholeCardStrip(
+          key: const Key('phone-chapter-strip'),
           height: _cardWidth * 9 / 16 + AppSpacing.xs + labelHeight + 6,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
-            itemCount: chapters.length,
-            separatorBuilder: (context, index) =>
-                const SizedBox(width: AppSpacing.sm),
-            itemBuilder: (context, index) {
-              return _ChapterCard(
-                key: CatalogKeys.chapter(index),
-                itemId: itemId,
-                chapter: chapters[index],
-                index: index,
-                onTap: onChapter == null
-                    ? null
-                    : () => onChapter!(chapters[index]),
-              );
-            },
-          ),
+          itemCount: chapters.length,
+          cardWidth: _cardWidth,
+          gap: AppSpacing.sm,
+          margin: AppSpacing.md,
+          itemBuilder: (context, index) {
+            return _ChapterCard(
+              key: CatalogKeys.chapter(index),
+              itemId: itemId,
+              chapter: chapters[index],
+              index: index,
+              onTap: onChapter == null
+                  ? null
+                  : () => onChapter!(chapters[index]),
+            );
+          },
         ),
       ],
     );
@@ -1057,67 +1057,127 @@ class _DetailSimilar extends StatelessWidget {
   }
 }
 
-/// 详情还没回到条目时，按首屏结构占位：16:9 头图、标题、主按钮。
-class _PhoneDetailSkeleton extends StatelessWidget {
-  const _PhoneDetailSkeleton();
+/// 条目还没返回时：头图（交接图或占位）下面同时有标题、主操作和正文占位。
+class _PhoneDetailPending extends StatelessWidget {
+  const _PhoneDetailPending({required this.handoff});
+
+  final PhoneImageHandoff? handoff;
+
+  static const headerKey = Key('phone-detail-pending-header');
+  static const titleKey = Key('phone-detail-pending-title');
+  static const actionKey = Key('phone-detail-pending-action');
+  static const bodyKey = Key('phone-detail-pending-body');
 
   @override
   Widget build(BuildContext context) {
-    final size = MediaQuery.sizeOf(context);
-    final byWidth = size.width * 9 / 16;
-    final cap = size.height * 0.5;
-    final imageHeight = byWidth < cap ? byWidth : cap;
+    final l = AppLocalizations.of(context);
+    final theme = Theme.of(context);
+    final source = handoff;
+    final width = MediaQuery.sizeOf(context).width;
+    final contentWidth = width - AppSpacing.md * 2;
     final animate = !MediaQuery.disableAnimationsOf(context);
-    return SizedBox(
-      height: imageHeight,
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          SkeletonBlock(borderRadius: BorderRadius.zero, animated: animate),
-          Align(
-            alignment: Alignment.bottomCenter,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpacing.md,
-                0,
-                AppSpacing.md,
-                AppSpacing.md,
-              ),
-              child: Row(
+    final name = source?.item.name.trim() ?? '';
+    final header = source == null
+        ? SizedBox(
+            height: _pendingHeaderHeight(context),
+            child: SkeletonBlock(
+              borderRadius: BorderRadius.zero,
+              animated: animate,
+            ),
+          )
+        : PhoneItemBanner(
+            item: source.item,
+            title: name,
+            showCaption: false,
+            preferBackdrop: source.preferBackdrop,
+            maxWidth: source.maxWidth,
+          );
+    final title = name.isEmpty
+        ? SkeletonBlock(
+            key: titleKey,
+            width: contentWidth * 0.5,
+            height: 28,
+            animated: animate,
+          )
+        : Text(
+            name,
+            key: titleKey,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.headlineSmall?.copyWith(
+              fontWeight: FontWeight.w700,
+              height: 1.2,
+            ),
+          );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        KeyedSubtree(key: headerKey, child: header),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.md,
+            AppSpacing.md,
+            AppSpacing.md,
+            0,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  Expanded(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        SkeletonBlock(
-                          width: size.width * 0.5,
-                          height: 28,
-                          animated: animate,
-                        ),
-                        const SizedBox(height: AppSpacing.xs),
-                        SkeletonBlock(
-                          width: size.width * 0.32,
-                          height: 14,
-                          animated: animate,
-                        ),
-                      ],
+                  Expanded(child: title),
+                  const SizedBox(width: AppSpacing.sm),
+                  Tooltip(
+                    message: l.play,
+                    child: FilledButton(
+                      key: actionKey,
+                      style: FilledButton.styleFrom(
+                        minimumSize: const Size(48, 48),
+                        padding: EdgeInsets.zero,
+                        shape: const CircleBorder(),
+                      ),
+                      onPressed: null,
+                      child: const Icon(Icons.play_arrow, size: 28),
                     ),
                   ),
-                  const SizedBox(width: AppSpacing.sm),
+                ],
+              ),
+              const SizedBox(height: AppSpacing.md),
+              Column(
+                key: bodyKey,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
                   SkeletonBlock(
-                    width: 48,
-                    height: 48,
-                    borderRadius: BorderRadius.circular(24),
+                    width: contentWidth,
+                    height: 14,
+                    animated: animate,
+                  ),
+                  const SizedBox(height: AppSpacing.xs),
+                  SkeletonBlock(
+                    width: contentWidth * 0.72,
+                    height: 14,
+                    animated: animate,
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  SkeletonBlock(
+                    width: contentWidth,
+                    height: 96,
                     animated: animate,
                   ),
                 ],
               ),
-            ),
+            ],
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
+}
+
+double _pendingHeaderHeight(BuildContext context) {
+  final size = MediaQuery.sizeOf(context);
+  final byWidth = size.width * 9 / 16;
+  final cap = size.height * 0.5;
+  return byWidth < cap ? byWidth : cap;
 }

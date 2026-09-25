@@ -153,6 +153,91 @@ class _EpisodeOverviewSectionState extends State<EpisodeOverviewSection> {
   }
 }
 
+/// 窄屏横滑一次只露出放得下的整数张卡片。
+///
+/// 剩余宽度留白，下一张整页留在外面。滑到最后一页时卡片靠右，
+/// 右侧边距与行首相同。宽屏换行不走这里。
+class WholeCardStrip extends StatelessWidget {
+  const WholeCardStrip({
+    super.key,
+    required this.itemCount,
+    required this.cardWidth,
+    required this.gap,
+    required this.height,
+    required this.itemBuilder,
+    this.margin = 0,
+  });
+
+  final int itemCount;
+  final double cardWidth;
+  final double gap;
+  final double height;
+  final double margin;
+  final IndexedWidgetBuilder itemBuilder;
+
+  int _perPage(double viewport) {
+    final inner = viewport - margin * 2;
+    if (inner <= cardWidth || cardWidth <= 0) {
+      return 1;
+    }
+    var count = ((inner + gap) / (cardWidth + gap)).floor();
+    if (count < 1) {
+      count = 1;
+    }
+    while (count > 1 && count * cardWidth + (count - 1) * gap > inner + 0.1) {
+      count--;
+    }
+    return count;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (itemCount <= 0) {
+      return SizedBox(height: height);
+    }
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final viewport = constraints.maxWidth;
+        if (!viewport.isFinite || viewport <= 0) {
+          return SizedBox(height: height);
+        }
+        final perPage = _perPage(viewport);
+        final pages = (itemCount + perPage - 1) ~/ perPage;
+        return SizedBox(
+          height: height,
+          child: PageView.builder(
+            itemCount: pages,
+            padEnds: false,
+            itemBuilder: (context, page) {
+              final start = page * perPage;
+              final end = start + perPage > itemCount
+                  ? itemCount
+                  : start + perPage;
+              final children = <Widget>[];
+              for (var index = start; index < end; index++) {
+                if (children.isNotEmpty) {
+                  children.add(SizedBox(width: gap));
+                }
+                children.add(itemBuilder(context, index));
+              }
+              final alignEnd = pages > 1 && page == pages - 1;
+              return Padding(
+                padding: EdgeInsets.symmetric(horizontal: margin),
+                child: Row(
+                  mainAxisAlignment: alignEnd
+                      ? MainAxisAlignment.end
+                      : MainAxisAlignment.start,
+                  children: children,
+                ),
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
+}
+
 /// 演职员分区:按类型分组(演员/导演/编剧/其他),头像 + 名字 + 角色,
 /// 无图条目文字首字兜底。
 class EpisodePeopleSection extends StatelessWidget {
@@ -213,16 +298,19 @@ class EpisodePeopleSection extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: AppSpacing.sm),
-                  SizedBox(
+                  WholeCardStrip(
                     height: rowHeight,
-                    child: ListView.separated(
-                      scrollDirection: Axis.horizontal,
-                      itemCount: groups[type]!.length,
-                      separatorBuilder: (context, index) =>
-                          const SizedBox(width: AppSpacing.md),
-                      itemBuilder: (context, index) =>
-                          _PersonChip(person: groups[type]![index], width: 112),
-                    ),
+                    itemCount: groups[type]!.length,
+                    cardWidth: 112,
+                    gap: AppSpacing.md,
+                    itemBuilder: (context, index) {
+                      final person = groups[type]![index];
+                      return _PersonChip(
+                        key: ValueKey('episode-person-$type-$index'),
+                        person: person,
+                        width: 112,
+                      );
+                    },
                   ),
                   const SizedBox(height: AppSpacing.md),
                 ],
@@ -251,8 +339,15 @@ class EpisodePeopleSection extends StatelessWidget {
                       spacing: AppSpacing.md,
                       runSpacing: AppSpacing.md,
                       children: [
-                        for (final person in groups[type]!)
-                          _PersonChip(person: person),
+                        for (
+                          var index = 0;
+                          index < groups[type]!.length;
+                          index++
+                        )
+                          _PersonChip(
+                            key: ValueKey('episode-person-$type-$index'),
+                            person: groups[type]![index],
+                          ),
                       ],
                     ),
                   ],
@@ -266,7 +361,7 @@ class EpisodePeopleSection extends StatelessWidget {
 }
 
 class _PersonChip extends StatelessWidget {
-  const _PersonChip({required this.person, this.width = 104});
+  const _PersonChip({super.key, required this.person, this.width = 104});
 
   final ItemPerson person;
 

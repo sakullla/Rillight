@@ -3,6 +3,7 @@ import 'package:flutter/rendering.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_chrome.dart';
+import 'package:rillight/app/mobile_motion.dart';
 import 'package:rillight/app/mobile_widgets.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme.dart';
@@ -791,6 +792,15 @@ class _PhonePoster extends StatelessWidget {
             );
             return;
           }
+          if (_hasImage) {
+            PhoneMotion.openItem(
+              context,
+              item,
+              preferBackdrop: false,
+              maxWidth: imageMaxWidth,
+            );
+            return;
+          }
           context.push(AppRoutes.item(item.id));
         },
         child: LayoutBuilder(
@@ -826,7 +836,9 @@ class _PhonePoster extends StatelessWidget {
                         fit: StackFit.expand,
                         children: [
                           if (_hasImage)
-                            RepaintBoundary(
+                            PhoneMotion.sharedImage(
+                              itemId: item.id,
+                              preferBackdrop: false,
                               child: MediaImage(
                                 item: item,
                                 maxWidth: imageMaxWidth,
