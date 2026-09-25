@@ -184,10 +184,19 @@ class _MobileShellState extends State<MobileShell> with WidgetsBindingObserver {
                       index: _index,
                       child: IndexedStack(
                         index: _index,
-                        children: const [
-                          PhoneHome(),
-                          PhoneLibrariesTab(),
-                          MobileSearchPage(),
+                        children: [
+                          TickerMode(
+                            enabled: _index == 0,
+                            child: const PhoneHome(),
+                          ),
+                          TickerMode(
+                            enabled: _index == 1,
+                            child: const PhoneLibrariesTab(),
+                          ),
+                          TickerMode(
+                            enabled: _index == 2,
+                            child: const MobileSearchPage(),
+                          ),
                         ],
                       ),
                     ),

@@ -35,19 +35,15 @@ class _SkeletonBlockState extends State<SkeletonBlock>
   AnimationController? _controller;
 
   @override
-  void initState() {
-    super.initState();
-    if (widget.animated) {
-      _controller = AnimationController(vsync: this, duration: _period)
-        ..repeat();
-    }
-  }
-
-  @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final reduce = MediaQuery.disableAnimationsOf(context);
-    if (reduce || !widget.animated) {
+    _syncAnimation();
+  }
+
+  void _syncAnimation() {
+    if (!widget.animated ||
+        MediaQuery.disableAnimationsOf(context) ||
+        !TickerMode.valuesOf(context).enabled) {
       _controller?.stop();
       return;
     }
@@ -60,15 +56,7 @@ class _SkeletonBlockState extends State<SkeletonBlock>
   @override
   void didUpdateWidget(SkeletonBlock oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.animated == widget.animated) {
-      return;
-    }
-    if (widget.animated) {
-      _controller ??= AnimationController(vsync: this, duration: _period);
-      _controller!.repeat();
-    } else {
-      _controller?.stop();
-    }
+    if (oldWidget.animated != widget.animated) _syncAnimation();
   }
 
   @override
@@ -82,7 +70,10 @@ class _SkeletonBlockState extends State<SkeletonBlock>
     final colorScheme = Theme.of(context).colorScheme;
     final radius = widget.borderRadius ?? BorderRadius.circular(AppRadii.sm);
     final controller = _controller;
-    if (!widget.animated || controller == null) {
+    if (!widget.animated ||
+        MediaQuery.disableAnimationsOf(context) ||
+        !TickerMode.valuesOf(context).enabled ||
+        controller == null) {
       return SizedBox(
         width: widget.width,
         height: widget.height,

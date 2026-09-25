@@ -146,11 +146,14 @@ class _TvActionState extends State<TvAction>
     if (_node.hasFocus) {
       _region?.selected(_node);
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && _node.hasFocus) {
+        if (mounted &&
+            _node.hasFocus &&
+            ModalRoute.of(context)?.isCurrent != false) {
           Scrollable.ensureVisible(
             context,
             alignment: .5,
-            duration: const Duration(milliseconds: 120),
+            duration: AppMotion.durationOf(context, AppMotion.fast),
+            curve: AppMotion.standard,
           );
         }
       });

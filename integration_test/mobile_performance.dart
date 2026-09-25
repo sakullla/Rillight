@@ -5,6 +5,7 @@
 // Repeat each scenario in the same build mode; keep cold/warm samples separate.
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui' show FrameTiming;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
@@ -24,9 +25,11 @@ class _PageProbe {
   final Stopwatch _clock = Stopwatch();
   String? _label, _cacheMode, _contentKey, _actionKey, _device, _buildId;
   double? _contentMs, _operableMs;
+  final List<double> _uiFrameMs = [], _rasterFrameMs = [];
   bool _active = false;
 
   Future<void> start() async {
+    WidgetsBinding.instance.addTimingsCallback(_onFrameTimings);
     WidgetsBinding.instance.addPersistentFrameCallback((_) {
       if (!_active || (_contentMs != null && _operableMs != null)) return;
       WidgetsBinding.instance.addPostFrameCallback((_) => _sample());
@@ -54,6 +57,8 @@ class _PageProbe {
             _contentKey = q['contentKey'];
             _actionKey = q['actionKey'];
             _contentMs = _operableMs = null;
+            _uiFrameMs.clear();
+            _rasterFrameMs.clear();
             _clock
               ..reset()
               ..start();
@@ -79,6 +84,8 @@ class _PageProbe {
 
   Map<String, Object?> _record() {
     final view = WidgetsBinding.instance.platformDispatcher.views.first;
+    final refreshRate = view.display.refreshRate;
+    final frameBudgetMs = refreshRate > 0 ? 1000 / refreshRate : null;
     return {
       'label': _label,
       'cache': _cacheMode,
@@ -92,6 +99,10 @@ class _PageProbe {
           : 'debug',
       'physicalSize': [view.physicalSize.width, view.physicalSize.height],
       'pixelRatio': view.devicePixelRatio,
+      'refreshRateHz': refreshRate,
+      'frameBudgetMs': frameBudgetMs,
+      'uiFrameMs': List<double>.of(_uiFrameMs),
+      'rasterFrameMs': List<double>.of(_rasterFrameMs),
       'contentKey': _contentKey,
       'actionKey': _actionKey,
       'firstContentMs': _contentMs,
@@ -99,6 +110,14 @@ class _PageProbe {
       'elapsedMs': _clock.elapsedMicroseconds / 1000,
       'complete': _contentMs != null && _operableMs != null,
     };
+  }
+
+  void _onFrameTimings(List<FrameTiming> timings) {
+    if (!_active) return;
+    for (final timing in timings) {
+      _uiFrameMs.add(timing.buildDuration.inMicroseconds / 1000);
+      _rasterFrameMs.add(timing.rasterDuration.inMicroseconds / 1000);
+    }
   }
 
   void _sample() {

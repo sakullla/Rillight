@@ -44,7 +44,10 @@ class PhoneBottomNav extends StatelessWidget {
         context: context,
         removeBottom: floating,
         child: NavigationBar(
-          animationDuration: AppMobileNav.pillDuration,
+          animationDuration: AppMotion.durationOf(
+            context,
+            AppMobileNav.pillDuration,
+          ),
           backgroundColor: Colors.transparent,
           elevation: 0,
           selectedIndex: index,

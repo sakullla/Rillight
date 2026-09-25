@@ -55,7 +55,13 @@ void main(List<String> arguments) {
   for (final entry in groups.entries) {
     final content = <double>[];
     final operable = <double>[];
+    final uiFrames = <double>[];
+    final rasterFrames = <double>[];
     var failures = 0;
+    var missingFrameData = 0;
+    var overBudgetFrames = 0;
+    var measuredFrames = 0;
+    double? frameBudgetMs;
     for (final sample in entry.value) {
       final first = sample['firstContentMs'];
       final action = sample['firstOperableMs'];
@@ -65,6 +71,38 @@ void main(List<String> arguments) {
       }
       content.add(first.toDouble());
       operable.add(action.toDouble());
+      final budget = sample['frameBudgetMs'];
+      final ui = sample['uiFrameMs'];
+      final raster = sample['rasterFrameMs'];
+      if (budget is! num ||
+          budget <= 0 ||
+          ui is! List ||
+          raster is! List ||
+          ui.isEmpty ||
+          ui.length != raster.length ||
+          ui.any((value) => value is! num || value < 0) ||
+          raster.any((value) => value is! num || value < 0)) {
+        missingFrameData++;
+        continue;
+      }
+      final currentBudget = budget.toDouble();
+      if (frameBudgetMs != null &&
+          (frameBudgetMs - currentBudget).abs() > 0.01) {
+        stderr.writeln('Mixed frame budgets in ${entry.key}');
+        exitCode = 1;
+        return;
+      }
+      frameBudgetMs = currentBudget;
+      for (var i = 0; i < ui.length; i++) {
+        final uiMs = (ui[i] as num).toDouble();
+        final rasterMs = (raster[i] as num).toDouble();
+        uiFrames.add(uiMs);
+        rasterFrames.add(rasterMs);
+        measuredFrames++;
+        if (uiMs > currentBudget || rasterMs > currentBudget) {
+          overBudgetFrames++;
+        }
+      }
     }
     stdout.writeln(
       jsonEncode({
@@ -73,6 +111,15 @@ void main(List<String> arguments) {
         'failures': failures,
         'firstContentMs': _summary(content),
         'firstOperableMs': _summary(operable),
+        'frameBudgetMs': frameBudgetMs,
+        'measuredFrames': measuredFrames,
+        'missingFrameDataSamples': missingFrameData,
+        'uiFrameMs': _summary(uiFrames),
+        'rasterFrameMs': _summary(rasterFrames),
+        'overBudgetFrames': overBudgetFrames,
+        'overBudgetRate': measuredFrames == 0
+            ? null
+            : overBudgetFrames / measuredFrames,
       }),
     );
   }

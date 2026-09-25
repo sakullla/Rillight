@@ -238,6 +238,14 @@ class _PhoneTabTransitionState extends State<PhoneTabTransition>
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (MediaQuery.disableAnimationsOf(context) && _controller.isAnimating) {
+      _controller.value = 1;
+    }
+  }
+
+  @override
   void dispose() {
     _curve.dispose();
     _controller.dispose();

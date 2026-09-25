@@ -589,10 +589,18 @@ class _MediaShelfState extends State<MediaShelf> {
   }
 }
 
-class _EnsureVisibleOnFocus extends StatelessWidget {
+class _EnsureVisibleOnFocus extends StatefulWidget {
   const _EnsureVisibleOnFocus({required this.child});
 
   final Widget child;
+
+  @override
+  State<_EnsureVisibleOnFocus> createState() => _EnsureVisibleOnFocusState();
+}
+
+class _EnsureVisibleOnFocusState extends State<_EnsureVisibleOnFocus> {
+  int _focusRevision = 0;
+  bool _focused = false;
 
   @override
   Widget build(BuildContext context) {
@@ -600,24 +608,20 @@ class _EnsureVisibleOnFocus extends StatelessWidget {
       canRequestFocus: false,
       skipTraversal: true,
       onFocusChange: (focused) {
-        if (!focused) {
-          return;
-        }
-        final target = context;
-        final duration = AppMotion.durationOf(target, AppMotion.fast);
+        _focused = focused;
+        final revision = ++_focusRevision;
+        if (!focused) return;
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (!target.mounted) {
-            return;
-          }
+          if (!mounted || !_focused || revision != _focusRevision) return;
           Scrollable.ensureVisible(
-            target,
+            context,
             alignment: 0.5,
-            duration: duration,
+            duration: AppMotion.durationOf(context, AppMotion.fast),
             curve: AppMotion.standard,
           );
         });
       },
-      child: child,
+      child: widget.child,
     );
   }
 }

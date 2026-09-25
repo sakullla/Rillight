@@ -21,6 +21,7 @@ class TvShell extends StatefulWidget {
 
 class _TvShellState extends State<TvShell> with WidgetsBindingObserver {
   int _index = 0;
+  int _paneSelectionRevision = 0;
   bool _initialized = false, _recovering = false, _failed = false;
   final _home = FocusNode();
   final _recoveryRetry = FocusNode();
@@ -88,6 +89,25 @@ class _TvShellState extends State<TvShell> with WidgetsBindingObserver {
     }
   }
 
+  void _selectPane(int index, {bool enter = false}) {
+    final revision = ++_paneSelectionRevision;
+    final changed = _index != index;
+    if (changed) setState(() => _index = index);
+    if (!enter) return;
+    if (!changed) {
+      _enterPane(index);
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted &&
+          _index == index &&
+          revision == _paneSelectionRevision &&
+          ModalRoute.of(context)?.isCurrent == true) {
+        _enterPane(index);
+      }
+    });
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed && mounted) {
@@ -122,7 +142,7 @@ class _TvShellState extends State<TvShell> with WidgetsBindingObserver {
       canPop: _index == 0,
       onPopInvokedWithResult: (popped, _) {
         if (!popped) {
-          setState(() => _index = 0);
+          _selectPane(0);
           _home.requestFocus();
         }
       },
@@ -146,18 +166,7 @@ class _TvShellState extends State<TvShell> with WidgetsBindingObserver {
                           if (event is KeyDownEvent &&
                               event.logicalKey ==
                                   LogicalKeyboardKey.arrowRight) {
-                            void enter() => _enterPane(i);
-                            if (_index == i) {
-                              enter();
-                            } else {
-                              setState(() => _index = i);
-                              WidgetsBinding.instance.addPostFrameCallback((_) {
-                                if (mounted) {
-                                  enter();
-                                  WidgetsBinding.instance.scheduleFrame();
-                                }
-                              });
-                            }
+                            _selectPane(i, enter: true);
                             return KeyEventResult.handled;
                           }
                           return KeyEventResult.ignored;
@@ -167,7 +176,7 @@ class _TvShellState extends State<TvShell> with WidgetsBindingObserver {
                           autofocus: i == 0,
                           focusNode: i == 0 ? _home : null,
                           selected: i == _index,
-                          onPressed: () => setState(() => _index = i),
+                          onPressed: () => _selectPane(i),
                           child: Text(labels[i]),
                         ),
                       ),
@@ -201,14 +210,17 @@ class _TvShellState extends State<TvShell> with WidgetsBindingObserver {
                         for (var i = 0; i < 4; i++)
                           ExcludeFocus(
                             excluding: i != _index,
-                            child: FocusScope(
-                              node: _panes[i],
-                              child: [
-                                const TvHomePage(),
-                                const _TvLibraries(),
-                                const TvSearchPage(),
-                                const _TvSession(),
-                              ][i],
+                            child: TickerMode(
+                              enabled: i == _index,
+                              child: FocusScope(
+                                node: _panes[i],
+                                child: [
+                                  const TvHomePage(),
+                                  const _TvLibraries(),
+                                  const TvSearchPage(),
+                                  const _TvSession(),
+                                ][i],
+                              ),
                             ),
                           ),
                       ],
