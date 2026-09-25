@@ -1,0 +1,10 @@
+cmake_minimum_required(VERSION 3.20)
+project(rillight_android_io_roles LANGUAGES CXX)
+enable_testing()
+add_executable(rillight_android_io_roles_test media_io_roles_test.cpp)
+target_compile_features(rillight_android_io_roles_test PRIVATE cxx_std_17)
+find_package(Threads REQUIRED)
+target_link_libraries(rillight_android_io_roles_test PRIVATE Threads::Threads)
+target_include_directories(rillight_android_io_roles_test PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../../android/src/main/cpp")
+add_test(NAME rillight_android_io_roles COMMAND rillight_android_io_roles_test)
