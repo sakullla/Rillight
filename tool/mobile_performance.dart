@@ -53,76 +53,98 @@ void main(List<String> arguments) {
     return;
   }
   for (final entry in groups.entries) {
-    final content = <double>[];
-    final operable = <double>[];
-    final uiFrames = <double>[];
-    final rasterFrames = <double>[];
-    var failures = 0;
-    var missingFrameData = 0;
-    var overBudgetFrames = 0;
-    var measuredFrames = 0;
-    double? frameBudgetMs;
-    for (final sample in entry.value) {
-      final first = sample['firstContentMs'];
-      final action = sample['firstOperableMs'];
-      if (sample['complete'] != true || first is! num || action is! num) {
-        failures++;
-        continue;
-      }
+    try {
+      stdout.writeln(
+        jsonEncode(summarizeMobileSamples(entry.key, entry.value)),
+      );
+    } on FormatException catch (error) {
+      stderr.writeln(error.message);
+      exitCode = 1;
+      return;
+    }
+  }
+}
+
+/// Keeps page completion and frame quality independent for a measured scenario.
+Map<String, Object?> summarizeMobileSamples(
+  String scenario,
+  List<Map<String, dynamic>> samples,
+) {
+  final content = <double>[];
+  final operable = <double>[];
+  final uiFrames = <double>[];
+  final rasterFrames = <double>[];
+  var failures = 0;
+  var missingFrameData = 0;
+  var incompleteFrameTimingSamples = 0;
+  var missingFrameTimings = 0;
+  var overBudgetFrames = 0;
+  var measuredFrames = 0;
+  double? frameBudgetMs;
+  for (final sample in samples) {
+    final first = sample['firstContentMs'];
+    final action = sample['firstOperableMs'];
+    if (sample['complete'] != true || first is! num || action is! num) {
+      failures++;
+    } else {
       content.add(first.toDouble());
       operable.add(action.toDouble());
-      final budget = sample['frameBudgetMs'];
-      final ui = sample['uiFrameMs'];
-      final raster = sample['rasterFrameMs'];
-      if (budget is! num ||
-          budget <= 0 ||
-          ui is! List ||
-          raster is! List ||
-          ui.isEmpty ||
-          ui.length != raster.length ||
-          ui.any((value) => value is! num || value < 0) ||
-          raster.any((value) => value is! num || value < 0)) {
-        missingFrameData++;
-        continue;
-      }
-      final currentBudget = budget.toDouble();
-      if (frameBudgetMs != null &&
-          (frameBudgetMs - currentBudget).abs() > 0.01) {
-        stderr.writeln('Mixed frame budgets in ${entry.key}');
-        exitCode = 1;
-        return;
-      }
-      frameBudgetMs = currentBudget;
-      for (var i = 0; i < ui.length; i++) {
-        final uiMs = (ui[i] as num).toDouble();
-        final rasterMs = (raster[i] as num).toDouble();
-        uiFrames.add(uiMs);
-        rasterFrames.add(rasterMs);
-        measuredFrames++;
-        if (uiMs > currentBudget || rasterMs > currentBudget) {
-          overBudgetFrames++;
-        }
+    }
+    if (sample['frameTimingsComplete'] != true) {
+      incompleteFrameTimingSamples++;
+    }
+    final missing = sample['missingFrameTimings'];
+    if (missing is num && missing > 0) {
+      missingFrameTimings += missing.toInt();
+    }
+    final budget = sample['frameBudgetMs'];
+    final ui = sample['uiFrameMs'];
+    final raster = sample['rasterFrameMs'];
+    if (budget is! num ||
+        budget <= 0 ||
+        ui is! List ||
+        raster is! List ||
+        ui.isEmpty ||
+        ui.length != raster.length ||
+        ui.any((value) => value is! num || value < 0) ||
+        raster.any((value) => value is! num || value < 0)) {
+      missingFrameData++;
+      continue;
+    }
+    final currentBudget = budget.toDouble();
+    if (frameBudgetMs != null && (frameBudgetMs - currentBudget).abs() > 0.01) {
+      throw FormatException('Mixed frame budgets in $scenario');
+    }
+    frameBudgetMs = currentBudget;
+    for (var i = 0; i < ui.length; i++) {
+      final uiMs = (ui[i] as num).toDouble();
+      final rasterMs = (raster[i] as num).toDouble();
+      uiFrames.add(uiMs);
+      rasterFrames.add(rasterMs);
+      measuredFrames++;
+      if (uiMs > currentBudget || rasterMs > currentBudget) {
+        overBudgetFrames++;
       }
     }
-    stdout.writeln(
-      jsonEncode({
-        'scenario': entry.key,
-        'samples': entry.value.length,
-        'failures': failures,
-        'firstContentMs': _summary(content),
-        'firstOperableMs': _summary(operable),
-        'frameBudgetMs': frameBudgetMs,
-        'measuredFrames': measuredFrames,
-        'missingFrameDataSamples': missingFrameData,
-        'uiFrameMs': _summary(uiFrames),
-        'rasterFrameMs': _summary(rasterFrames),
-        'overBudgetFrames': overBudgetFrames,
-        'overBudgetRate': measuredFrames == 0
-            ? null
-            : overBudgetFrames / measuredFrames,
-      }),
-    );
   }
+  return {
+    'scenario': scenario,
+    'samples': samples.length,
+    'failures': failures,
+    'firstContentMs': _summary(content),
+    'firstOperableMs': _summary(operable),
+    'frameBudgetMs': frameBudgetMs,
+    'measuredFrames': measuredFrames,
+    'missingFrameDataSamples': missingFrameData,
+    'incompleteFrameTimingSamples': incompleteFrameTimingSamples,
+    'missingFrameTimings': missingFrameTimings,
+    'uiFrameMs': _summary(uiFrames),
+    'rasterFrameMs': _summary(rasterFrames),
+    'overBudgetFrames': overBudgetFrames,
+    'overBudgetRate': measuredFrames == 0
+        ? null
+        : overBudgetFrames / measuredFrames,
+  };
 }
 
 Map<String, double>? _summary(List<double> values) {

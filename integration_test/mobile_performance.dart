@@ -3,12 +3,13 @@
 // warm, device, build, and exact visible contentKey/actionKey before navigation.
 // Poll GET /state and append POST /end JSON to a baseline or candidate JSONL.
 // Repeat each scenario in the same build mode; keep cold/warm samples separate.
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:ui' show FrameTiming;
+import 'dart:ui' show FramePhase, FrameTiming;
 
-import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/main.dart' as production;
@@ -22,17 +23,23 @@ Future<void> main() async {
 }
 
 class _PageProbe {
-  final Stopwatch _clock = Stopwatch();
-  String? _label, _cacheMode, _contentKey, _actionKey, _device, _buildId;
-  double? _contentMs, _operableMs;
-  final List<double> _uiFrameMs = [], _rasterFrameMs = [];
-  bool _active = false;
+  final MobileFrameTimingCollector _timings = MobileFrameTimingCollector();
+  _PageSample? _active, _latest;
 
   Future<void> start() async {
-    WidgetsBinding.instance.addTimingsCallback(_onFrameTimings);
+    WidgetsBinding.instance.addTimingsCallback(_timings.receive);
     WidgetsBinding.instance.addPersistentFrameCallback((_) {
-      if (!_active || (_contentMs != null && _operableMs != null)) return;
-      WidgetsBinding.instance.addPostFrameCallback((_) => _sample());
+      final sample = _active;
+      if (sample == null) return;
+      // This is the engine's raw onBeginFrame timestamp. FrameTiming.buildStart
+      // uses exactly the same value, even if the timing batch arrives later.
+      _timings.frameStarted(
+        sample.frames,
+        WidgetsBinding.instance.currentSystemFrameTimeStamp.inMicroseconds,
+      );
+      if (!sample.contentTimedOut && !sample.complete) {
+        WidgetsBinding.instance.addPostFrameCallback((_) => _sample(sample));
+      }
     });
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 8798);
     server.listen((request) async {
@@ -49,28 +56,39 @@ class _PageProbe {
             request.response.write(
               'label, cache, device, build, contentKey and actionKey required',
             );
+          } else if (_active != null) {
+            request.response.statusCode = HttpStatus.conflict;
+            request.response.write(
+              'End the active scenario before beginning another',
+            );
           } else {
-            _label = q['label'];
-            _cacheMode = q['cache'];
-            _device = q['device'];
-            _buildId = q['build'];
-            _contentKey = q['contentKey'];
-            _actionKey = q['actionKey'];
-            _contentMs = _operableMs = null;
-            _uiFrameMs.clear();
-            _rasterFrameMs.clear();
-            _clock
-              ..reset()
-              ..start();
-            _active = true;
-            request.response.write(jsonEncode(_record()));
+            final sample = _PageSample(
+              label: q['label']!,
+              cacheMode: q['cache']!,
+              device: q['device']!,
+              buildId: q['build']!,
+              contentKey: q['contentKey']!,
+              actionKey: q['actionKey']!,
+              frames: _timings.begin(),
+            );
+            _active = _latest = sample;
+            request.response.write(jsonEncode(_record(sample)));
           }
         } else if (request.method == 'GET' && request.uri.path == '/state') {
-          request.response.write(jsonEncode(_record()));
+          request.response.write(jsonEncode(_record(_latest)));
         } else if (request.method == 'POST' && request.uri.path == '/end') {
-          _active = false;
-          _clock.stop();
-          request.response.write(jsonEncode(_record()));
+          final sample = _active;
+          if (sample == null) {
+            request.response.statusCode = HttpStatus.conflict;
+            request.response.write('No active scenario');
+          } else {
+            _active = null;
+            sample.clock.stop();
+            // Release/profile timing batches can arrive up to a second after
+            // their frames. Keep this window alive while a new one begins.
+            await _timings.end(sample.frames);
+            request.response.write(jsonEncode(_record(sample)));
+          }
         } else {
           request.response.statusCode = HttpStatus.notFound;
         }
@@ -82,15 +100,15 @@ class _PageProbe {
     });
   }
 
-  Map<String, Object?> _record() {
+  Map<String, Object?> _record(_PageSample? sample) {
     final view = WidgetsBinding.instance.platformDispatcher.views.first;
     final refreshRate = view.display.refreshRate;
     final frameBudgetMs = refreshRate > 0 ? 1000 / refreshRate : null;
     return {
-      'label': _label,
-      'cache': _cacheMode,
-      'device': _device,
-      'build': _buildId,
+      'label': sample?.label,
+      'cache': sample?.cacheMode,
+      'device': sample?.device,
+      'build': sample?.buildId,
       'platform': Platform.operatingSystem,
       'buildMode': kReleaseMode
           ? 'release'
@@ -101,29 +119,27 @@ class _PageProbe {
       'pixelRatio': view.devicePixelRatio,
       'refreshRateHz': refreshRate,
       'frameBudgetMs': frameBudgetMs,
-      'uiFrameMs': List<double>.of(_uiFrameMs),
-      'rasterFrameMs': List<double>.of(_rasterFrameMs),
-      'contentKey': _contentKey,
-      'actionKey': _actionKey,
-      'firstContentMs': _contentMs,
-      'firstOperableMs': _operableMs,
-      'elapsedMs': _clock.elapsedMicroseconds / 1000,
-      'complete': _contentMs != null && _operableMs != null,
+      'uiFrameMs': List<double>.of(sample?.frames.uiFrameMs ?? const []),
+      'rasterFrameMs': List<double>.of(
+        sample?.frames.rasterFrameMs ?? const [],
+      ),
+      'expectedFrames': sample?.frames.expectedFrames ?? 0,
+      'pendingFrameTimings': sample?.frames.pendingFrameTimings ?? 0,
+      'missingFrameTimings': sample?.frames.missingFrameTimings ?? 0,
+      'frameTimingsComplete': sample?.frames.frameTimingsComplete ?? false,
+      'contentKey': sample?.contentKey,
+      'actionKey': sample?.actionKey,
+      'firstContentMs': sample?.contentMs,
+      'firstOperableMs': sample?.operableMs,
+      'elapsedMs': (sample?.clock.elapsedMicroseconds ?? 0) / 1000,
+      'complete': sample?.complete ?? false,
     };
   }
 
-  void _onFrameTimings(List<FrameTiming> timings) {
-    if (!_active) return;
-    for (final timing in timings) {
-      _uiFrameMs.add(timing.buildDuration.inMicroseconds / 1000);
-      _rasterFrameMs.add(timing.rasterDuration.inMicroseconds / 1000);
-    }
-  }
-
-  void _sample() {
-    if (!_active) return;
-    if (_clock.elapsed > const Duration(seconds: 20)) {
-      _active = false;
+  void _sample(_PageSample sample) {
+    if (!identical(_active, sample)) return;
+    if (sample.clock.elapsed > const Duration(seconds: 20)) {
+      sample.contentTimedOut = true;
       return;
     }
     final root = WidgetsBinding.instance.rootElement;
@@ -139,14 +155,14 @@ class _PageProbe {
         if (render is RenderBox && render.attached && render.hasSize) {
           final rect = render.localToGlobal(Offset.zero) & render.size;
           if (rect.overlaps(viewport)) {
-            final ms = _clock.elapsedMicroseconds / 1000;
-            if (_contentMs == null && key.value == _contentKey) {
-              _contentMs = ms;
+            final ms = sample.clock.elapsedMicroseconds / 1000;
+            if (sample.contentMs == null && key.value == sample.contentKey) {
+              sample.contentMs = ms;
             }
-            if (_operableMs == null &&
-                key.value == _actionKey &&
+            if (sample.operableMs == null &&
+                key.value == sample.actionKey &&
                 _enabled(widget)) {
-              _operableMs = ms;
+              sample.operableMs = ms;
             }
           }
         }
@@ -174,4 +190,90 @@ class _PageProbe {
     GestureDetector(:final onTap) => onTap != null,
     _ => true,
   };
+}
+
+class _PageSample {
+  _PageSample({
+    required this.label,
+    required this.cacheMode,
+    required this.device,
+    required this.buildId,
+    required this.contentKey,
+    required this.actionKey,
+    required this.frames,
+  }) {
+    clock.start();
+  }
+
+  final String label, cacheMode, device, buildId, contentKey, actionKey;
+  final MobileFrameTimingWindow frames;
+  final Stopwatch clock = Stopwatch();
+  double? contentMs, operableMs;
+  bool contentTimedOut = false;
+  bool get complete => contentMs != null && operableMs != null;
+}
+
+/// Matches delayed engine timing batches to the frame window where UI work ran.
+/// `buildStart` is the raw timestamp supplied to onBeginFrame, so callback
+/// delivery time and a later scenario's active state do not affect ownership.
+class MobileFrameTimingCollector {
+  final Map<int, MobileFrameTimingWindow> _owners = {};
+
+  MobileFrameTimingWindow begin() => MobileFrameTimingWindow._();
+
+  void frameStarted(MobileFrameTimingWindow window, int buildStartUs) {
+    if (window._finished || !window._pending.add(buildStartUs)) return;
+    window.expectedFrames++;
+    _owners[buildStartUs] = window;
+  }
+
+  void receive(List<FrameTiming> timings) {
+    for (final timing in timings) {
+      final timestamp = timing.timestampInMicroseconds(FramePhase.buildStart);
+      final window = _owners.remove(timestamp);
+      if (window == null || !window._pending.remove(timestamp)) continue;
+      window.uiFrameMs.add(timing.buildDuration.inMicroseconds / 1000);
+      window.rasterFrameMs.add(timing.rasterDuration.inMicroseconds / 1000);
+      if (window._pending.isEmpty) {
+        final drained = window._drained;
+        if (drained != null && !drained.isCompleted) drained.complete();
+      }
+    }
+  }
+
+  /// Waits for the final batch. A lost engine timing remains explicit in JSON.
+  Future<void> end(
+    MobileFrameTimingWindow window, {
+    Duration timeout = const Duration(seconds: 2),
+  }) async {
+    if (window._finished) return;
+    if (window._pending.isNotEmpty) {
+      final drained = window._drained ??= Completer<void>();
+      try {
+        await drained.future.timeout(timeout);
+      } on TimeoutException {
+        // Do not silently turn an incomplete timing sample into a passing one.
+      }
+    }
+    window.missingFrameTimings = window._pending.length;
+    for (final timestamp in window._pending) {
+      _owners.remove(timestamp);
+    }
+    window._pending.clear();
+    window._finished = true;
+  }
+}
+
+class MobileFrameTimingWindow {
+  MobileFrameTimingWindow._();
+
+  final List<double> uiFrameMs = [], rasterFrameMs = [];
+  final Set<int> _pending = {};
+  Completer<void>? _drained;
+  bool _finished = false;
+  int expectedFrames = 0;
+  int missingFrameTimings = 0;
+
+  int get pendingFrameTimings => _pending.length;
+  bool get frameTimingsComplete => _finished && missingFrameTimings == 0;
 }
