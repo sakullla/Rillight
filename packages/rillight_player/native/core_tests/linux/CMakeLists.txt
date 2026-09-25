@@ -1,0 +1,12 @@
+cmake_minimum_required(VERSION 3.16)
+project(rillight_linux_frame_output LANGUAGES CXX)
+enable_testing()
+add_executable(rillight_linux_frame_output_test frame_output_test.cpp)
+target_compile_features(rillight_linux_frame_output_test PRIVATE cxx_std_17)
+if(MSVC)
+  target_compile_options(rillight_linux_frame_output_test PRIVATE /UNDEBUG)
+else()
+  target_compile_options(rillight_linux_frame_output_test PRIVATE
+    -Wall -Wextra -Werror -UNDEBUG)
+endif()
+add_test(NAME rillight_linux_frame_output COMMAND rillight_linux_frame_output_test)

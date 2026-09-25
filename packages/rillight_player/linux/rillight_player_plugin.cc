@@ -1,19 +1,18 @@
 #include "include/rillight_player/rillight_player_plugin.h"
-#include <epoxy/gl.h>
+#include "frame_output.h"
 #include <epoxy/egl.h>
-#include <mpv/client.h>
-#include <mpv/render.h>
+#include <pulse/pulseaudio.h>
+#include <pulse/error.h>
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdarg>
-#include <clocale>
 #include <condition_variable>
 #include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
-#include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
@@ -24,11 +23,9 @@ typedef struct _RillightTexture { FlPixelBufferTexture parent_instance; std::sha
 typedef struct _RillightTextureClass { FlPixelBufferTextureClass parent_class; } RillightTextureClass;
 G_DEFINE_TYPE(RillightTexture, rillight_texture, fl_pixel_buffer_texture_get_type())
 
-// Flutter 3.47 Linux Impeller already owns EGL on the GTK view. A second
-// gdk_window_create_gl_context / eglInitialize from this plugin hangs or
-// fails on Intel/Mesa/VNC before the HTTP proxy even listens. The published
-// texture is already a CPU FlPixelBufferTexture, so libmpv's software
-// renderer (MPV_RENDER_API_TYPE_SW) is the matching embed path.
+// The core returns completed CPU RGBA frames even when VAAPI decoded the
+// source. Flutter owns the upload context; this plugin creates no producer GL
+// context and does not imply zero-copy hardware presentation.
 
 static void PlayerLog(const char* fmt, ...) {
   FILE* log = fopen("/tmp/rillight-gl.log", "a");
@@ -59,25 +56,140 @@ static void Main(std::function<void()> callback) {
   g_source_unref(source);
 }
 
+// PulseAudio's mainloop is pumped without a blocking wait on the surface
+// worker. A suspended or disappearing sink therefore cannot trap detach in
+// pa_simple_write while Flutter waits for the producer to retire.
+class PulseOutput {
+ public:
+  PulseOutput() {
+    loop_ = pa_mainloop_new();
+    if (!loop_) { error_ = "PulseAudio mainloop unavailable"; return; }
+    context_ = pa_context_new(pa_mainloop_get_api(loop_), "Rillight");
+    if (!context_ || pa_context_connect(context_, nullptr, PA_CONTEXT_NOFLAGS,
+                                        nullptr) < 0)
+      error_ = "PulseAudio connection unavailable";
+  }
+  ~PulseOutput() {
+    if (stream_) { pa_stream_disconnect(stream_); pa_stream_unref(stream_); }
+    if (context_) { pa_context_disconnect(context_); pa_context_unref(context_); }
+    if (loop_) pa_mainloop_free(loop_);
+  }
+  bool Pump() {
+    if (!error_.empty()) return false;
+    int result = 0;
+    if (pa_mainloop_iterate(loop_, 0, &result) < 0) {
+      error_ = "PulseAudio mainloop failed"; return false;
+    }
+    const auto state = pa_context_get_state(context_);
+    if (state == PA_CONTEXT_FAILED || state == PA_CONTEXT_TERMINATED) {
+      error_ = std::string("PulseAudio: ") + pa_strerror(pa_context_errno(context_));
+      return false;
+    }
+    if (state != PA_CONTEXT_READY) {
+      if (std::chrono::steady_clock::now() - started_ >
+          std::chrono::seconds(5)) {
+        error_ = "PulseAudio connection timed out";
+        return false;
+      }
+      return true;
+    }
+    if (!stream_) {
+      const pa_sample_spec spec{PA_SAMPLE_S16NE, 48000, 2};
+      stream_ = pa_stream_new(context_, "Media", &spec, nullptr);
+      if (!stream_) { error_ = "PulseAudio stream unavailable"; return false; }
+      started_ = std::chrono::steady_clock::now();
+      pa_buffer_attr attributes{};
+      attributes.maxlength = static_cast<uint32_t>(-1);
+      attributes.tlength = 4800;
+      attributes.prebuf = 0;
+      attributes.minreq = 1920;
+      attributes.fragsize = static_cast<uint32_t>(-1);
+      if (pa_stream_connect_playback(stream_, nullptr, &attributes,
+                                     PA_STREAM_ADJUST_LATENCY, nullptr,
+                                     nullptr) < 0) {
+        error_ = std::string("PulseAudio stream: ") +
+                 pa_strerror(pa_context_errno(context_));
+        return false;
+      }
+    }
+    const auto stream_state = pa_stream_get_state(stream_);
+    if (stream_state == PA_STREAM_FAILED || stream_state == PA_STREAM_TERMINATED) {
+      error_ = std::string("PulseAudio stream: ") +
+               pa_strerror(pa_context_errno(context_));
+      return false;
+    }
+    if (stream_state != PA_STREAM_READY &&
+        std::chrono::steady_clock::now() - started_ >
+            std::chrono::seconds(5)) {
+      error_ = "PulseAudio stream timed out";
+      return false;
+    }
+    return true;
+  }
+  size_t Write(const uint8_t* data, size_t size) {
+    if (!stream_ || pa_stream_get_state(stream_) != PA_STREAM_READY) return 0;
+    const size_t writable = pa_stream_writable_size(stream_);
+    if (writable == static_cast<size_t>(-1)) {
+      error_ = "PulseAudio writable size failed"; return 0;
+    }
+    const size_t chunk = std::min({size, writable, size_t{1920}}) & ~size_t{3};
+    if (chunk == 0) return 0;
+    if (pa_stream_write(stream_, data, chunk, nullptr, 0,
+                        PA_SEEK_RELATIVE) < 0) {
+      error_ = std::string("PulseAudio write: ") +
+               pa_strerror(pa_context_errno(context_));
+      return 0;
+    }
+    return chunk;
+  }
+  int64_t Latency() const {
+    if (!stream_ || pa_stream_get_state(stream_) != PA_STREAM_READY) return 0;
+    pa_usec_t delay = 0;
+    int negative = 0;
+    if (pa_stream_get_latency(stream_, &delay, &negative) < 0) return -1;
+    return negative ? 0 : static_cast<int64_t>(delay);
+  }
+  void Flush() {
+    if (!stream_ || pa_stream_get_state(stream_) != PA_STREAM_READY) return;
+    if (auto* operation = pa_stream_flush(stream_, nullptr, nullptr))
+      pa_operation_unref(operation);
+  }
+  void Cork(bool paused) {
+    if (!stream_ || pa_stream_get_state(stream_) != PA_STREAM_READY) return;
+    if (auto* operation = pa_stream_cork(stream_, paused ? 1 : 0,
+                                         nullptr, nullptr))
+      pa_operation_unref(operation);
+  }
+  const std::string& error() const { return error_; }
+ private:
+  pa_mainloop* loop_ = nullptr;
+  pa_context* context_ = nullptr;
+  pa_stream* stream_ = nullptr;
+  std::string error_;
+  std::chrono::steady_clock::time_point started_ =
+      std::chrono::steady_clock::now();
+};
+
 struct Surface : std::enable_shared_from_this<Surface> {
-  struct Frame {
-    int width = 1, height = 1;
-    std::vector<uint8_t> pixels = std::vector<uint8_t>(4, 0);
-  };
-  mpv_handle* player;
+  using Frame = rillight_linux::PixelFrame;
+  RillightCore* core;
   FlTextureRegistrar* registrar;
   RillightTexture* texture = nullptr;
-  mpv_render_context* render = nullptr;
   std::thread worker;
   std::mutex mutex;
   std::condition_variable wake;
-  bool stopped = false, dirty = true, registered = false;
+  bool stopped = false, registered = false;
   bool detached = false, retired = false, joining = false;
   bool engine_gone = false;
   bool notification_pending = false;
   uint64_t generation = 0;
   int width = 1280, height = 720;
   int rendered_width = 0, rendered_height = 0;
+  uint64_t session = 0, timeline = 0;
+  uint32_t actual_hardware = 0;
+  bool decoded_video = false;
+  bool has_video = false;
+  bool audio_failed = false;
   // Immutable CPU frames cross the GDK/Flutter context boundary. At most the
   // latest frame, the raster callback's borrowed frame, and one producer exist.
   std::shared_ptr<const Frame> latest, displayed;
@@ -91,16 +203,11 @@ struct Surface : std::enable_shared_from_this<Surface> {
   std::string error;
   std::vector<std::function<void()>> release_callbacks;
 
-  Surface(mpv_handle* p, FlTextureRegistrar* r)
-      : player(p), registrar(FL_TEXTURE_REGISTRAR(g_object_ref(r))) {}
+  Surface(RillightCore* p, FlTextureRegistrar* r)
+      : core(p), registrar(FL_TEXTURE_REGISTRAR(g_object_ref(r))) {}
   ~Surface() {
     if (worker.joinable()) worker.join();
     g_object_unref(registrar);
-  }
-  static void Update(void* data) {
-    auto self = static_cast<Surface*>(data);
-    { std::lock_guard<std::mutex> lock(self->mutex); if (self->stopped) return; self->dirty = true; }
-    self->wake.notify_one();
   }
   void Notify() {
     uint64_t queued_generation;
@@ -117,87 +224,205 @@ struct Surface : std::enable_shared_from_this<Surface> {
       fl_texture_registrar_mark_texture_frame_available(self->registrar, FL_TEXTURE(self->texture));
     });
   }
-  void Render(int w, int h, bool frame_requested) {
-    auto frame = std::make_shared<Frame>();
-    frame->width = w;
-    frame->height = h;
-    const size_t stride = static_cast<size_t>(w) * 4;
-    const size_t bytes = stride * static_cast<size_t>(h);
-    std::vector<uint8_t> storage(bytes + 64);
-    const auto raw = reinterpret_cast<uintptr_t>(storage.data());
-    const size_t pad = (64 - (raw % 64)) % 64;
-    auto* pixels = storage.data() + pad;
-    int size[2] = {w, h};
-    char format[] = "rgb0";
-    int block = 0;
-    size_t stride_value = stride;
-    mpv_render_frame_info info{};
-    mpv_render_context_get_info(render, {MPV_RENDER_PARAM_NEXT_FRAME_INFO, &info});
-    mpv_render_param params[] = {
-        {MPV_RENDER_PARAM_SW_SIZE, size},
-        {MPV_RENDER_PARAM_SW_FORMAT, format},
-        {MPV_RENDER_PARAM_SW_STRIDE, &stride_value},
-        {MPV_RENDER_PARAM_SW_POINTER, pixels},
-        {MPV_RENDER_PARAM_BLOCK_FOR_TARGET_TIME, &block},
-        {MPV_RENDER_PARAM_INVALID, nullptr}};
-    const int result = mpv_render_context_render(render, params);
-    if (result < 0) throw std::runtime_error(mpv_error_string(result));
-    for (size_t i = 3; i < bytes; i += 4) pixels[i] = 255;
-    frame->pixels.assign(pixels, pixels + bytes);
+  void Render(const RillightCoreFrame& source, int w, int h,
+              bool new_frame) {
+    if (!rillight_linux::ValidSource(source)) {
+      std::lock_guard<std::mutex> lock(mutex);
+      error = "Core returned invalid RGBA frame";
+      stopped = true;
+      wake.notify_one();
+      return;
+    }
+    auto frame = std::make_shared<Frame>(rillight_linux::Present(source, w, h));
     {
       std::lock_guard<std::mutex> lock(mutex);
-      if (stopped) return;
+      if (stopped || source.session_id != session ||
+          source.timeline_version != timeline) return;
       latest = std::move(frame);
       rendered_width = w;
       rendered_height = h;
-      if (frame_requested && (info.flags & MPV_RENDER_FRAME_INFO_PRESENT)) ++frames;
+      if (new_frame) ++frames;
     }
     Notify();
-    mpv_render_context_report_swap(render);
   }
   void Start(std::function<void(std::string)> ready) {
     worker = std::thread([this, ready] {
-      bool announced = false;
-      try {
-        setlocale(LC_NUMERIC, "C");
-        PlayerLog("sw-render start");
-        int advanced = 1;
-        mpv_render_param init[] = {
-            {MPV_RENDER_PARAM_API_TYPE, const_cast<char*>(MPV_RENDER_API_TYPE_SW)},
-            {MPV_RENDER_PARAM_ADVANCED_CONTROL, &advanced},
-            {MPV_RENDER_PARAM_INVALID, nullptr}};
-        const int status = mpv_render_context_create(&render, player, init);
-        PlayerLog("sw-render create status=%d", status);
-        if (status < 0) throw std::runtime_error(mpv_error_string(status));
-        { std::lock_guard<std::mutex> lock(mutex); latest = std::make_shared<Frame>(); }
-        mpv_render_context_set_update_callback(render, Update, this);
-        announced = true; ready("");
-        while (true) {
-          int w, h;
-          {
-            std::unique_lock<std::mutex> lock(mutex);
-            wake.wait(lock, [this] { return stopped || dirty; });
-            if (stopped) break;
-            dirty = false; w = width; h = height;
-          }
-          const auto updates = mpv_render_context_update(render);
-          const bool frame_requested = updates & MPV_RENDER_UPDATE_FRAME;
-          if (frame_requested || rendered_width != w || rendered_height != h)
-            Render(w, h, frame_requested);
+      std::unique_ptr<PulseOutput> audio;
+      RillightCoreFrame* pending_audio = nullptr;
+      int pending_offset = 0;
+      int64_t audio_end_pts = -1;
+      double audio_speed = 1.0;
+      RillightCoreFrame* last_video = nullptr;
+      RillightCoreState previous_state = RILLIGHT_CORE_IDLE;
+      bool audio_corked = false;
+      uint64_t last_session = 0, last_timeline = 0;
+      { std::lock_guard<std::mutex> lock(mutex); latest = std::make_shared<Frame>(); }
+      ready("");
+      while (true) {
+        int w, h;
+        {
+          std::unique_lock<std::mutex> lock(mutex);
+          if (stopped) break;
+          w = width; h = height;
         }
-      } catch (const std::exception& e) {
-        PlayerLog("sw-render error %s", e.what());
-        { std::lock_guard<std::mutex> lock(mutex); error = e.what(); stopped = true; ++generation; }
-        if (!announced) ready(e.what());
+        RillightCoreSnapshot snapshot{};
+        snapshot.struct_size = sizeof(snapshot);
+        if (rillight_core_snapshot(core, &snapshot) != 0 ||
+            snapshot.abi_version != RILLIGHT_CORE_ABI_VERSION) {
+          std::lock_guard<std::mutex> lock(mutex);
+          error = "Core snapshot or ABI unavailable";
+          stopped = true;
+          break;
+        }
+        const bool changed = last_session != snapshot.session_id ||
+                             last_timeline != snapshot.timeline_version;
+        if (changed) {
+          if (audio) audio->Flush();
+          audio_end_pts = -1;
+          if (pending_audio) {
+            rillight_core_release_frame(pending_audio);
+            pending_audio = nullptr;
+            pending_offset = 0;
+          }
+          if (last_video) { rillight_core_release_frame(last_video); last_video = nullptr; }
+          {
+            std::lock_guard<std::mutex> lock(mutex);
+            session = snapshot.session_id; timeline = snapshot.timeline_version;
+            latest = std::make_shared<Frame>();
+            rendered_width = rendered_height = 0;
+            actual_hardware = 0;
+            decoded_video = false;
+            has_video = false;
+            frames = 0;
+          }
+          last_session = snapshot.session_id;
+          last_timeline = snapshot.timeline_version;
+          Notify();
+        }
+        if (snapshot.state == RILLIGHT_CORE_PAUSED &&
+            previous_state != RILLIGHT_CORE_PAUSED && audio) {
+          const int64_t delay = audio->Latency();
+          if (audio_end_pts >= 0 && delay >= 0)
+            rillight_core_report_audio_played(core, snapshot.session_id,
+                snapshot.timeline_version, audio_end_pts,
+                static_cast<int64_t>(delay * audio_speed));
+          audio->Cork(true);
+          audio_corked = true;
+        }
+        if (snapshot.state == RILLIGHT_CORE_PLAYING && audio_corked && audio) {
+          audio->Cork(false);
+          audio_corked = false;
+        }
+        previous_state = snapshot.state;
+        {
+          std::lock_guard<std::mutex> lock(mutex);
+          decoded_video = snapshot.first_video_frame_ready;
+          has_video = snapshot.video_stream_index >= 0;
+        }
+
+        if (snapshot.video_stream_index >= 0) {
+          const int count = rillight_core_track_count(core);
+          for (int i = 0; i < count; ++i) {
+            RillightCoreTrack track{};
+            track.struct_size = sizeof(track);
+            if (rillight_core_get_track(core, i, &track) == 0 &&
+                track.stream_index == snapshot.video_stream_index &&
+                track.type == RILLIGHT_CORE_TRACK_VIDEO) {
+              std::lock_guard<std::mutex> lock(mutex);
+              actual_hardware = track.actual_hardware;
+              break;
+            }
+          }
+        }
+        if (snapshot.state == RILLIGHT_CORE_PLAYING &&
+            snapshot.audio_stream_index >= 0) {
+          if (!audio) audio = std::make_unique<PulseOutput>();
+          if (!pending_audio) {
+            pending_audio = rillight_core_take_frame(core, RILLIGHT_CORE_AUDIO_S16);
+            pending_offset = 0;
+          }
+          if (pending_audio) {
+            auto* frame = pending_audio;
+            if (frame->session_id != snapshot.session_id ||
+                frame->timeline_version != snapshot.timeline_version ||
+                frame->sample_rate != 48000 || frame->channels != 2 ||
+                frame->data_size != frame->sample_count * 4) {
+              rillight_core_release_frame(frame);
+              pending_audio = nullptr;
+            } else {
+              const size_t size = audio->Write(frame->data + pending_offset,
+                                               frame->data_size - pending_offset);
+              if (!audio->error().empty()) {
+                std::lock_guard<std::mutex> lock(mutex);
+                error = audio->error();
+                audio_failed = stopped = true;
+              }
+              pending_offset += static_cast<int>(size);
+              const int64_t delay = audio->Latency();
+              if (size && delay >= 0 && frame->pts_us >= 0) {
+                const int64_t played_pts = frame->pts_us +
+                    static_cast<int64_t>(pending_offset / 4.0 / 48000.0 *
+                                         1000000.0 * snapshot.playback_speed);
+                audio_end_pts = played_pts;
+                audio_speed = snapshot.playback_speed;
+                rillight_core_report_audio_played(core, frame->session_id,
+                    frame->timeline_version, played_pts,
+                    static_cast<int64_t>(delay * snapshot.playback_speed));
+              }
+              if (pending_offset == frame->data_size) {
+                rillight_core_release_frame(frame);
+                pending_audio = nullptr;
+              }
+            }
+          }
+        }
+        if (audio) {
+          if (!audio->Pump()) {
+            std::lock_guard<std::mutex> lock(mutex);
+            error = audio->error();
+            audio_failed = stopped = true;
+            break;
+          }
+          const int64_t delay = audio->Latency();
+          if (audio_end_pts >= 0 && delay >= 0 &&
+              (snapshot.state == RILLIGHT_CORE_PLAYING ||
+               snapshot.state == RILLIGHT_CORE_BUFFERING))
+            rillight_core_report_audio_played(core, snapshot.session_id,
+                snapshot.timeline_version, audio_end_pts,
+                static_cast<int64_t>(delay * audio_speed));
+        }
+        auto* video = rillight_core_take_frame(core, RILLIGHT_CORE_VIDEO_RGBA);
+        if (video) {
+          if (video->session_id == snapshot.session_id &&
+              video->timeline_version == snapshot.timeline_version) {
+            if (last_video) rillight_core_release_frame(last_video);
+            last_video = video;
+            Render(*last_video, w, h, true);
+          } else {
+            rillight_core_release_frame(video);
+          }
+        } else if (last_video &&
+                   (rendered_width != w || rendered_height != h)) {
+          Render(*last_video, w, h, false);
+        }
+        if (snapshot.source_eof && snapshot.queued_video_frames == 0 &&
+            snapshot.queued_audio_frames == 0 && !pending_audio) {
+          const int64_t delay = audio ? audio->Latency() : 0;
+          if (delay >= 0 && delay < 10000)
+            rillight_core_report_output_drained(core, snapshot.session_id,
+                                                snapshot.timeline_version);
+        }
+        std::unique_lock<std::mutex> lock(mutex);
+        wake.wait_for(lock, std::chrono::milliseconds(10),
+                      [this] { return stopped; });
       }
-      if (render) {
-        mpv_render_context_set_update_callback(render, nullptr, nullptr);
-      }
+      if (pending_audio) rillight_core_release_frame(pending_audio);
+      audio.reset();
+      if (last_video) rillight_core_release_frame(last_video);
       {
         std::unique_lock<std::mutex> lock(mutex);
         wake.wait(lock, [this] { return retired; });
       }
-      if (render) { mpv_render_context_free(render); render = nullptr; }
       {
         std::lock_guard<std::mutex> lock(mutex);
         latest.reset(); displayed.reset();
@@ -243,7 +468,7 @@ struct Surface : std::enable_shared_from_this<Surface> {
     }).detach();
   }
   // Called on raster, before FlPixelBufferTexture performs glTexImage2D. No
-  // mpv calls or producer wait occur on this callback.
+  // core calls or producer wait occur on this callback.
   bool PrepareCleanupContext() {
     if (cleanup_context != EGL_NO_CONTEXT) return true;
     cleanup_display = eglGetCurrentDisplay();
@@ -269,7 +494,7 @@ struct Surface : std::enable_shared_from_this<Surface> {
       // Engine finalization has already destroyed its EGL display. Deliberately
       // retain the tiny GObject/Surface until process exit instead of invoking
       // the parent's GL destructor against a destroyed context. CPU frames and
-      // mpv renderer were freed above; normal awaited disposal does not leak.
+      // core frame references were freed above; normal awaited disposal does not leak.
       return;
     }
     if (cleanup_context != EGL_NO_CONTEXT &&
@@ -342,7 +567,17 @@ static void Handle(FlMethodChannel*, FlMethodCall* call, gpointer data) {
       fl_method_call_respond_error(call, "texture", "Texture registrar unavailable", nullptr, nullptr);
       return;
     }
-    auto surface = std::make_shared<Surface>(reinterpret_cast<mpv_handle*>(handle), registrar);
+    if (!handle || rillight_core_abi_version() != RILLIGHT_CORE_ABI_VERSION) {
+      fl_method_call_respond_error(call, "core", "Core ABI unavailable", nullptr, nullptr);
+      return;
+    }
+    auto* core = reinterpret_cast<RillightCore*>(handle);
+    if (rillight_core_configure_hardware(core, RILLIGHT_CORE_HW_VAAPI, 1) != 0) {
+      fl_method_call_respond_error(call, "core",
+          "Configure VAAPI before opening the Linux core", nullptr, nullptr);
+      return;
+    }
+    auto surface = std::make_shared<Surface>(core, registrar);
     auto texture = reinterpret_cast<RillightTexture*>(g_object_new(rillight_texture_get_type(), nullptr));
     texture->surface = new std::shared_ptr<Surface>(surface); surface->texture = texture;
     if (!fl_texture_registrar_register_texture(registrar, FL_TEXTURE(texture))) {
@@ -384,7 +619,6 @@ static void Handle(FlMethodChannel*, FlMethodCall* call, gpointer data) {
       if (!surface->stopped) {
         surface->width = std::clamp(static_cast<int>(Number(args, "width")), 1, 7680);
         surface->height = std::clamp(static_cast<int>(Number(args, "height")), 1, 4320);
-        surface->dirty = true;
       }
     }
     surface->wake.notify_one(); RespondSuccess(call);
@@ -392,7 +626,16 @@ static void Handle(FlMethodChannel*, FlMethodCall* call, gpointer data) {
     std::lock_guard<std::mutex> lock(surface->mutex);
     g_autoptr(FlValue) status = fl_value_new_map();
     fl_value_set_string_take(status, "frames", fl_value_new_int(surface->frames));
-    fl_value_set_string_take(status, "error", fl_value_new_string(surface->error.c_str())); RespondSuccess(call, status);
+    fl_value_set_string_take(status, "error", fl_value_new_string(surface->error.c_str()));
+    fl_value_set_string_take(status, "session", fl_value_new_int(surface->session));
+    fl_value_set_string_take(status, "timeline", fl_value_new_int(surface->timeline));
+    fl_value_set_string_take(status, "actualHardware", fl_value_new_int(surface->actual_hardware));
+    const char* decoder = !surface->has_video ? "none" :
+        !surface->decoded_video ? "pending" :
+        surface->actual_hardware == RILLIGHT_CORE_HW_VAAPI ? "vaapi" : "software";
+    fl_value_set_string_take(status, "decoder", fl_value_new_string(decoder));
+    fl_value_set_string_take(status, "audioFailed", fl_value_new_bool(surface->audio_failed));
+    RespondSuccess(call, status);
   } else if (method == "detach") {
     if (surface->Detach()) { g_autoptr(FlValue) queued = fl_value_new_bool(true); RespondSuccess(call, queued); }
     else fl_method_call_respond_error(call, "detach", "Texture unregister was not queued", nullptr, nullptr);
@@ -411,10 +654,7 @@ static void Handle(FlMethodChannel*, FlMethodCall* call, gpointer data) {
   } else fl_method_call_respond_not_implemented(call, nullptr);
 }
 void rillight_player_plugin_register_with_registrar(FlPluginRegistrar* registrar) {
-  // libmpv refuses mpv_create() when LC_NUMERIC is not C. Flutter/GTK set a
-  // UTF-8 UI locale (zh_CN.UTF-8), so pin numeric formatting for this process.
-  setlocale(LC_NUMERIC, "C");
-  PlayerLog("plugin registered LC_NUMERIC=%s", setlocale(LC_NUMERIC, nullptr));
+  PlayerLog("core output plugin registered abi=%u", rillight_core_abi_version());
   auto plugin = std::make_shared<Plugin>();
   // The generated registrar is a temporary g_autoptr, released immediately
   // after plugin registration. Keep its weak-view/messenger accessors alive.
