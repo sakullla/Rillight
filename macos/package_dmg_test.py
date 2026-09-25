@@ -85,7 +85,7 @@ class PackageCommandTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory(prefix='rillight-dmg-pkg-') as directory:
             app = make_app(directory)
-            output = Path(directory) / 'Rillight-macos-v0.0.0-test-adhoc.dmg'
+            output = Path(directory) / 'Rillight-macos-v0.0.0-test-signed.dmg'
             with patch('package_dmg.subprocess.check_call', side_effect=execute):
                 self.assertEqual(package(app, output), output)
             self.assertTrue(output.is_file())
@@ -109,7 +109,11 @@ class ReleaseWorkflowTest(unittest.TestCase):
         helper = Path(__file__).with_name('package_dmg.py').read_text(encoding='utf-8')
         self.assertIn('python3 macos/package_dmg.py', workflow)
         self.assertIn('python3 macos/package_dmg_test.py', workflow)
-        self.assertIn('Rillight-macos-${BUILD_VERSION}-$(uname -m)-adhoc.dmg', workflow)
+        self.assertIn('- name: Sign, verify and package', workflow)
+        self.assertNotIn('Ad-hoc sign', workflow)
+        self.assertIn('Rillight-macos-${BUILD_VERSION}-$(uname -m)-${suffix}.dmg', workflow)
+        self.assertIn('suffix="signed"', workflow)
+        self.assertIn('suffix="adhoc"', workflow)
         self.assertNotIn('notarytool', workflow)
         self.assertNotIn('Developer ID', workflow)
         self.assertNotIn('staple', workflow)
@@ -126,7 +130,7 @@ class AttachedImageTest(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix='rillight-dmg-attach-') as directory:
             directory = Path(directory)
             app = make_app(directory)
-            image = directory / 'Rillight-macos-test-adhoc.dmg'
+            image = directory / 'Rillight-macos-test-signed.dmg'
             package(app, image)
             mount = directory / 'mnt'
             mount.mkdir()

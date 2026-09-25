@@ -167,7 +167,31 @@ class ReleaseSigningTest(unittest.TestCase):
     def test_negative_control_removes_only_server_and_keeps_sandbox(self):
         self.check_signing(True)
 
-    def check_signing(self, negative):
+    def test_identity_mode_signs_nested_and_app_with_the_certificate(self):
+        self.check_signing(False, identity='Rillight Self Sign')
+
+    def test_adhoc_signature_assertion_fails_without_the_adhoc_marker(self):
+        self.check_missing_signature_marker('Signature=adhoc')
+
+    def test_identity_signature_assertion_fails_without_the_authority(self):
+        self.check_missing_signature_marker('Authority=Rillight Self Sign')
+
+    def check_missing_signature_marker(self, marker):
+        def output(command, **kwargs):
+            if '--verbose=4' in command:
+                return 'Executable=rillight\n'
+            return plistlib.dumps(release_entitlements())
+
+        with tempfile.TemporaryDirectory() as directory:
+            app = Path(directory) / 'rillight.app'
+            (app / 'Contents/MacOS').mkdir(parents=True)
+            identity = 'Rillight Self Sign' if marker.startswith('Authority=') else None
+            with patch('sign_bundle.subprocess.check_call'), \
+                 patch('sign_bundle.subprocess.check_output', side_effect=output):
+                with self.assertRaisesRegex(ValueError, 'distribution signature'):
+                    sign(app, identity=identity)
+
+    def check_signing(self, negative, identity=None):
         expected = release_entitlements()
         if negative:
             expected.pop('com.apple.security.network.server')
@@ -181,7 +205,9 @@ class ReleaseSigningTest(unittest.TestCase):
 
         def output(command, **kwargs):
             if '--verbose=4' in command:
-                return 'Executable=rillight\nSignature=adhoc\n'
+                if identity is None:
+                    return 'Executable=rillight\nSignature=adhoc\n'
+                return f'Executable=rillight\nAuthority={identity}\n'
             return plistlib.dumps(expected)
 
         with tempfile.TemporaryDirectory() as directory:
@@ -193,9 +219,11 @@ class ReleaseSigningTest(unittest.TestCase):
             library.write_bytes(b'fixture')
             with patch('sign_bundle.subprocess.check_call', side_effect=execute), \
                  patch('sign_bundle.subprocess.check_output', side_effect=output):
-                sign(app, without_server_for_test=negative)
+                sign(app, identity=identity, without_server_for_test=negative)
             signing = [command for command in commands if '--sign' in command]
             self.assertEqual(len(signing), 3)
+            signer = identity or '-'
+            self.assertTrue(all(c[c.index('--sign') + 1] == signer for c in signing))
             self.assertTrue(all('--entitlements' not in c and '--deep' not in c for c in signing[:-1]))
             self.assertEqual(signing[-1][-1], str(app.resolve()))
             self.assertIn('--entitlements', signing[-1])

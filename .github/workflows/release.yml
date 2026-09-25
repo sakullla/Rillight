@@ -60,6 +60,8 @@ jobs:
     uses: ./.github/workflows/macos-package.yml
     with:
       version: ${{ github.ref_name }}
+      signing: identity
+    secrets: inherit
 
   linux:
     uses: ./.github/workflows/linux-package.yml
@@ -178,7 +180,8 @@ jobs:
   verify-release:
     name: Verify and publish release
     needs: release
-    runs-on: ubuntu-22.04
+    # macOS runner: the DMG check below needs hdiutil and codesign.
+    runs-on: macos-latest
     permissions:
       contents: write
     steps:
@@ -208,7 +211,7 @@ jobs:
           grep -Fqx "Rillight-linux-x64-${GITHUB_REF_NAME}.deb" <<< "$assets"
           grep -Fqx "Rillight-android-${GITHUB_REF_NAME}.apk" <<< "$assets"
           grep -Fqx "SHA256SUMS" <<< "$assets"
-          grep -Eq "^Rillight-macos-.*-adhoc\.dmg$" <<< "$assets"
+          grep -Eq "^Rillight-macos-.*-signed\.dmg$" <<< "$assets"
 
           echo "RELEASE_ID=$(jq -r '.id' <<< "$release_json")" >> "$GITHUB_ENV"
 
@@ -241,6 +244,37 @@ jobs:
           echo "$certs"
           if grep -qi "Android Debug" <<< "$certs"; then
             echo "::error::Rillight-android-${GITHUB_REF_NAME}.apk is signed with the Android debug certificate"
+            exit 1
+          fi
+
+      - name: Verify macOS DMG carries the fixed self signature
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          dmg_dir="$(mktemp -d)"
+          gh release download "${GITHUB_REF_NAME}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --pattern "Rillight-macos-*-signed.dmg" \
+            --dir "$dmg_dir" \
+            --clobber
+          dmg="$(find "$dmg_dir" -name 'Rillight-macos-*-signed.dmg' -type f | sort | head -n 1)"
+          if [ -z "$dmg" ]; then
+            echo "::error::Rillight-macos-${GITHUB_REF_NAME}-*-signed.dmg was not found in the release"
+            exit 1
+          fi
+
+          mount_point="$(mktemp -d)/Rillight"
+          mkdir -p "$mount_point"
+          hdiutil attach -nobrowse -readonly -mountpoint "$mount_point" "$dmg" > /dev/null
+          cleanup() { hdiutil detach "$mount_point" -force > /dev/null 2>&1 || true; }
+          trap cleanup EXIT
+
+          signature="$(codesign -dv "$mount_point/rillight.app" 2>&1 || true)"
+          echo "$signature"
+          if ! grep -q "Rillight Self Sign" <<< "$signature"; then
+            echo "::error::Rillight-macos-${GITHUB_REF_NAME} does not carry the fixed self signature"
             exit 1
           fi
 

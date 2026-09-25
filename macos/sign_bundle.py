@@ -28,10 +28,11 @@ def verify_signed_entitlements(app, expected):
     return actual
 
 
-def sign(app, *, without_server_for_test=False):
+def sign(app, *, identity=None, without_server_for_test=False):
     app = Path(app).resolve()
     if app.suffix != '.app' or not (app / 'Contents/MacOS').is_dir():
         raise ValueError('Expected an existing .app bundle')
+    signer = identity or '-'
     expected = release_entitlements()
     if without_server_for_test:
         expected.pop('com.apple.security.network.server')
@@ -43,20 +44,23 @@ def sign(app, *, without_server_for_test=False):
         if canonical in seen:
             continue
         seen.add(canonical)
-        subprocess.check_call(['codesign', '--force', '--sign', '-',
+        subprocess.check_call(['codesign', '--force', '--sign', signer,
                                '--timestamp=none', str(path)])
     with tempfile.TemporaryDirectory(prefix='rillight-entitlements-') as directory:
         entitlements = Path(directory) / 'Release.entitlements'
         entitlements.write_bytes(plistlib.dumps(expected))
         # No --deep here: app sandbox/network rights belong to the executable,
         # not every dylib/framework bundled into the application.
-        subprocess.check_call(['codesign', '--force', '--sign', '-', '--timestamp=none',
+        subprocess.check_call(['codesign', '--force', '--sign', signer, '--timestamp=none',
                                '--entitlements', str(entitlements), str(app)])
-    identity = subprocess.check_output(
+    displayed = subprocess.check_output(
         ['codesign', '--display', '--verbose=4', str(app)], stderr=subprocess.STDOUT,
         text=True)
-    if 'Signature=adhoc' not in identity.splitlines():
-        raise ValueError('Expected the explicit ad-hoc distribution signature')
+    if identity is None:
+        if 'Signature=adhoc' not in displayed.splitlines():
+            raise ValueError('Expected the explicit ad-hoc distribution signature')
+    elif f'Authority={identity}' not in displayed:
+        raise ValueError(f'Expected the distribution signature of {identity}')
     subprocess.check_call(['codesign', '--verify', '--deep', '--strict', str(app)])
     verify_signed_entitlements(app, expected)
 
@@ -64,7 +68,10 @@ def sign(app, *, without_server_for_test=False):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('app')
+    parser.add_argument('--identity', default=None,
+                        help='Code-signing identity name; omit it for an ad-hoc signature')
     parser.add_argument('--without-server-for-test', action='store_true',
                         help='Negative sandbox regression only; never a release artifact')
     args = parser.parse_args()
-    sign(args.app, without_server_for_test=args.without_server_for_test)
+    sign(args.app, identity=args.identity,
+         without_server_for_test=args.without_server_for_test)

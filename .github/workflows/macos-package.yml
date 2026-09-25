@@ -6,6 +6,17 @@ on:
       version:
         type: string
         default: v0.0.0-ci
+      signing:
+        type: choice
+        default: adhoc
+        options:
+          - adhoc
+          - identity
+    secrets:
+      MACOS_CERTIFICATE_P12_BASE64:
+        required: false
+      MACOS_CERTIFICATE_PASSWORD:
+        required: false
 
 permissions:
   contents: read
@@ -44,22 +55,75 @@ jobs:
           DYLD_LIBRARY_PATH="$PWD/$app/Contents/Frameworks" \
             python3 packages/rillight_player/native/check_mpv.py \
             "$app/Contents/Frameworks/libmpv.2.dylib" > macos-native-versions.json
-      - name: Ad-hoc sign, verify and package
+      - name: Check macOS signing secrets
+        if: inputs.signing == 'identity'
+        shell: bash
+        env:
+          MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          missing=()
+          [ -n "${MACOS_CERTIFICATE_P12_BASE64:-}" ] || missing+=(MACOS_CERTIFICATE_P12_BASE64)
+          [ -n "${MACOS_CERTIFICATE_PASSWORD:-}" ] || missing+=(MACOS_CERTIFICATE_PASSWORD)
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::Missing macOS signing secrets: ${missing[*]}. Configure them in repository Settings > Secrets and variables > Actions before tagging a release."
+            exit 1
+          fi
+
+      - name: Import the self-signed certificate into a temporary keychain
+        if: inputs.signing == 'identity'
+        shell: bash
+        env:
+          MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          echo "$MACOS_CERTIFICATE_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/rillight-certificate.p12"
+          keychain="$RUNNER_TEMP/rillight-signing.keychain-db"
+          password="$(openssl rand -hex 16)"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security import "$RUNNER_TEMP/rillight-certificate.p12" -k "$keychain" \
+            -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -k "$password" "$keychain"
+          security list-keychain -d user -s "$keychain" \
+            "$(security list-keychain -d user | tr '\n' ' ')"
+
+      - name: Sign, verify and package
         shell: bash
         env:
           BUILD_VERSION: ${{ inputs.version }}
+          SIGNING_MODE: ${{ inputs.signing }}
         run: |
           set -euo pipefail
           app="build/macos/Build/Products/Release/rillight.app"
-          python3 macos/sign_bundle.py "$app"
+          if [ "$SIGNING_MODE" = "identity" ]; then
+            suffix="signed"
+            python3 macos/sign_bundle.py "$app" --identity 'Rillight Self Sign'
+          else
+            suffix="adhoc"
+            python3 macos/sign_bundle.py "$app"
+          fi
           python3 macos/verify_bundle.py --signed "$app"
           codesign --display --entitlements :- "$app" > macos-release-entitlements.plist
           python3 macos/package_dmg.py "$app" \
-            "Rillight-macos-${BUILD_VERSION}-$(uname -m)-adhoc.dmg"
+            "Rillight-macos-${BUILD_VERSION}-$(uname -m)-${suffix}.dmg"
+
+      - name: Delete the temporary signing keychain
+        if: ${{ always() && inputs.signing == 'identity' }}
+        shell: bash
+        run: |
+          keychain="$RUNNER_TEMP/rillight-signing.keychain-db"
+          if [ -f "$keychain" ]; then
+            security delete-keychain "$keychain"
+          fi
+
       - uses: actions/upload-artifact@v6
         with:
           name: release-macos
-          path: Rillight-macos-*-adhoc.dmg
+          path: Rillight-macos-*.dmg
           if-no-files-found: error
       - uses: actions/upload-artifact@v6
         if: always()
