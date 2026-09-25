@@ -1,5 +1,6 @@
 #include "include/rillight_player/rillight_player_plugin.h"
 #include "frame_output.h"
+#include "audio_schedule.h"
 #include <epoxy/egl.h>
 #include <pulse/pulseaudio.h>
 #include <pulse/error.h>
@@ -252,9 +253,14 @@ struct Surface : std::enable_shared_from_this<Surface> {
       int pending_offset = 0;
       int64_t audio_end_pts = -1;
       double audio_speed = 1.0;
+      bool audio_clock_started = false;
+      bool audio_handed_off = false;
+      std::chrono::steady_clock::time_point first_audio_write{};
       RillightCoreFrame* last_video = nullptr;
       RillightCoreState previous_state = RILLIGHT_CORE_IDLE;
       bool audio_corked = false;
+      rillight_linux::AudioStartupGate startup_gate;
+      rillight_linux::AudioHandoffPolicy handoff_policy;
       uint64_t last_session = 0, last_timeline = 0;
       { std::lock_guard<std::mutex> lock(mutex); latest = std::make_shared<Frame>(); }
       ready("");
@@ -279,6 +285,11 @@ struct Surface : std::enable_shared_from_this<Surface> {
         if (changed) {
           if (audio) audio->Flush();
           audio_end_pts = -1;
+          audio_clock_started = false;
+          audio_handed_off = false;
+          first_audio_write = {};
+          startup_gate.Reset();
+          handoff_policy.Reset();
           if (pending_audio) {
             rillight_core_release_frame(pending_audio);
             pending_audio = nullptr;
@@ -299,13 +310,27 @@ struct Surface : std::enable_shared_from_this<Surface> {
           last_timeline = snapshot.timeline_version;
           Notify();
         }
+        auto report_audio_clock = [&](int64_t end_pts, int64_t delay,
+                                      double speed) {
+          RillightCoreSnapshot current{};
+          current.struct_size = sizeof(current);
+          if (rillight_core_snapshot(core, &current) != 0 ||
+              current.session_id != snapshot.session_id ||
+              current.timeline_version != snapshot.timeline_version)
+            return;
+          if (rillight_core_report_audio_played(core, current.session_id,
+                                                current.timeline_version,
+                                                end_pts,
+                                                static_cast<int64_t>(delay * speed)) == 0) {
+            audio_clock_started = true;
+            audio_handed_off = false;
+          }
+        };
         if (snapshot.state == RILLIGHT_CORE_PAUSED &&
             previous_state != RILLIGHT_CORE_PAUSED && audio) {
           const int64_t delay = audio->Latency();
           if (audio_end_pts >= 0 && delay >= 0)
-            rillight_core_report_audio_played(core, snapshot.session_id,
-                snapshot.timeline_version, audio_end_pts,
-                static_cast<int64_t>(delay * audio_speed));
+            report_audio_clock(audio_end_pts, delay, audio_speed);
           audio->Cork(true);
           audio_corked = true;
         }
@@ -335,47 +360,8 @@ struct Surface : std::enable_shared_from_this<Surface> {
           }
         }
         if (snapshot.state == RILLIGHT_CORE_PLAYING &&
-            snapshot.audio_stream_index >= 0) {
-          if (!audio) audio = std::make_unique<PulseOutput>();
-          if (!pending_audio) {
-            pending_audio = rillight_core_take_frame(core, RILLIGHT_CORE_AUDIO_S16);
-            pending_offset = 0;
-          }
-          if (pending_audio) {
-            auto* frame = pending_audio;
-            if (frame->session_id != snapshot.session_id ||
-                frame->timeline_version != snapshot.timeline_version ||
-                frame->sample_rate != 48000 || frame->channels != 2 ||
-                frame->data_size != frame->sample_count * 4) {
-              rillight_core_release_frame(frame);
-              pending_audio = nullptr;
-            } else {
-              const size_t size = audio->Write(frame->data + pending_offset,
-                                               frame->data_size - pending_offset);
-              if (!audio->error().empty()) {
-                std::lock_guard<std::mutex> lock(mutex);
-                error = audio->error();
-                audio_failed = stopped = true;
-              }
-              pending_offset += static_cast<int>(size);
-              const int64_t delay = audio->Latency();
-              if (size && delay >= 0 && frame->pts_us >= 0) {
-                const int64_t played_pts = frame->pts_us +
-                    static_cast<int64_t>(pending_offset / 4.0 / 48000.0 *
-                                         1000000.0 * snapshot.playback_speed);
-                audio_end_pts = played_pts;
-                audio_speed = snapshot.playback_speed;
-                rillight_core_report_audio_played(core, frame->session_id,
-                    frame->timeline_version, played_pts,
-                    static_cast<int64_t>(delay * snapshot.playback_speed));
-              }
-              if (pending_offset == frame->data_size) {
-                rillight_core_release_frame(frame);
-                pending_audio = nullptr;
-              }
-            }
-          }
-        }
+            snapshot.audio_stream_index >= 0 && !audio)
+          audio = std::make_unique<PulseOutput>();
         if (audio) {
           if (!audio->Pump()) {
             std::lock_guard<std::mutex> lock(mutex);
@@ -387,11 +373,111 @@ struct Surface : std::enable_shared_from_this<Surface> {
           if (audio_end_pts >= 0 && delay >= 0 &&
               (snapshot.state == RILLIGHT_CORE_PLAYING ||
                snapshot.state == RILLIGHT_CORE_BUFFERING))
-            rillight_core_report_audio_played(core, snapshot.session_id,
-                snapshot.timeline_version, audio_end_pts,
-                static_cast<int64_t>(delay * audio_speed));
+            report_audio_clock(audio_end_pts, delay, audio_speed);
         }
-        auto* video = rillight_core_take_frame(core, RILLIGHT_CORE_VIDEO_RGBA);
+        bool audio_progress = false;
+        if (snapshot.state == RILLIGHT_CORE_PLAYING && audio) {
+          int audio_byte_budget = 19200;
+          for (int frames_to_feed = 0;
+               frames_to_feed < 8 && audio_byte_budget > 0;
+               ++frames_to_feed) {
+            if (!pending_audio) {
+              pending_audio = rillight_core_take_frame(core,
+                                                       RILLIGHT_CORE_AUDIO_S16);
+              pending_offset = 0;
+            }
+            if (!pending_audio) break;
+            auto* frame = pending_audio;
+            if (frame->session_id != snapshot.session_id ||
+                frame->timeline_version != snapshot.timeline_version ||
+                frame->sample_rate != 48000 || frame->channels != 2 ||
+                frame->data_size != frame->sample_count * 4) {
+              rillight_core_release_frame(frame);
+              pending_audio = nullptr;
+              continue;
+            }
+            if (!audio_clock_started && frame->pts_us >= 0) {
+              RillightCoreSnapshot current{};
+              current.struct_size = sizeof(current);
+              if (rillight_core_snapshot(core, &current) != 0 ||
+                  current.session_id != snapshot.session_id ||
+                  current.timeline_version != snapshot.timeline_version)
+                break;
+              if (frame->pts_us > current.position_us + 50000) break;
+              pending_offset = std::max(pending_offset,
+                  rillight_linux::StartOffset(*frame,
+                      rillight_linux::StartupAudioTarget(current.position_us,
+                                                         frame->pts_us),
+                                               current.playback_speed));
+              if (pending_offset >= frame->data_size) {
+                rillight_core_release_frame(frame);
+                pending_audio = nullptr;
+                continue;
+              }
+            }
+            const int before = pending_offset;
+            pending_offset = rillight_linux::DrainPcm(
+                frame->data, frame->data_size, pending_offset,
+                [&](const uint8_t* data, size_t bytes) {
+                  return audio->Write(data, bytes);
+                },
+                [&](int sent) {
+                  const int64_t delay = audio->Latency();
+                  if (frame->pts_us < 0) return;
+                  const int64_t end_pts = frame->pts_us +
+                      static_cast<int64_t>(sent / 4.0 / 48000.0 *
+                                           1000000.0 * snapshot.playback_speed);
+                  audio_end_pts = end_pts;
+                  audio_speed = snapshot.playback_speed;
+                  if (first_audio_write ==
+                      std::chrono::steady_clock::time_point{})
+                    first_audio_write = std::chrono::steady_clock::now();
+                  if (delay >= 0)
+                    report_audio_clock(end_pts, delay, audio_speed);
+                }, audio_byte_budget);
+            audio_byte_budget -= pending_offset - before;
+            audio_progress |= pending_offset > before;
+            if (!audio->error().empty()) {
+              std::lock_guard<std::mutex> lock(mutex);
+              error = audio->error();
+              audio_failed = stopped = true;
+              break;
+            }
+            if (pending_offset < frame->data_size) break;
+            rillight_core_release_frame(frame);
+            pending_audio = nullptr;
+          }
+        }
+        if (audio_end_pts >= 0 && !audio_clock_started &&
+            std::chrono::steady_clock::now() - first_audio_write >
+                std::chrono::seconds(2)) {
+          std::lock_guard<std::mutex> lock(mutex);
+          error = "PulseAudio clock did not start";
+          audio_failed = stopped = true;
+          break;
+        }
+        RillightCoreSnapshot handoff_snapshot{};
+        handoff_snapshot.struct_size = sizeof(handoff_snapshot);
+        if (rillight_core_snapshot(core, &handoff_snapshot) == 0 &&
+            handoff_snapshot.session_id == snapshot.session_id &&
+            handoff_snapshot.timeline_version == snapshot.timeline_version) {
+          const int64_t delay = audio ? audio->Latency() : 0;
+          if (handoff_policy.ShouldHandoff(handoff_snapshot,
+                  pending_audio != nullptr, delay, audio_clock_started,
+                  std::chrono::steady_clock::now()) &&
+              rillight_core_report_audio_unavailable(core,
+                  snapshot.session_id, snapshot.timeline_version) == 0) {
+            audio_end_pts = -1;
+            audio_clock_started = false;
+            audio_handed_off = true;
+            first_audio_write = {};
+          }
+        }
+        auto* video = startup_gate.HoldVideo(
+            snapshot, pending_audio, audio_clock_started || audio_handed_off,
+            audio_end_pts >= 0,
+            std::chrono::steady_clock::now())
+            ? nullptr : rillight_core_take_frame(core, RILLIGHT_CORE_VIDEO_RGBA);
         if (video) {
           if (video->session_id == snapshot.session_id &&
               video->timeline_version == snapshot.timeline_version) {
@@ -413,7 +499,11 @@ struct Surface : std::enable_shared_from_this<Surface> {
                                                 snapshot.timeline_version);
         }
         std::unique_lock<std::mutex> lock(mutex);
-        wake.wait_for(lock, std::chrono::milliseconds(10),
+        const int wait_ms = audio_progress &&
+            (pending_audio || snapshot.queued_audio_frames > 0) ? 0 :
+            audio && snapshot.state == RILLIGHT_CORE_PLAYING &&
+                snapshot.audio_stream_index >= 0 ? 2 : 10;
+        wake.wait_for(lock, std::chrono::milliseconds(wait_ms),
                       [this] { return stopped; });
       }
       if (pending_audio) rillight_core_release_frame(pending_audio);
