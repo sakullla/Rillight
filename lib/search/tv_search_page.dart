@@ -76,17 +76,26 @@ class _TvSearchPageState extends State<TvSearchPage> {
                       onClear: () => c.setWatch(null),
                     ),
                   ),
-                if (c.loading)
-                  const SliverToBoxAdapter(child: LinearProgressIndicator()),
+                if (c.refreshingFirstPage)
+                  const SliverToBoxAdapter(
+                    child: LinearProgressIndicator(
+                      key: Key('tv-search-refreshing'),
+                    ),
+                  ),
                 if (c.error != null)
                   SliverToBoxAdapter(
+                    key: Key(
+                      c.items.isNotEmpty
+                          ? 'tv-search-refresh-failure'
+                          : 'tv-search-failure',
+                    ),
                     child: TvFailure(
                       error: c.error!,
-                      retry: () => c.submit(_text.text),
+                      retry: () => c.submit(c.term),
                     ),
                   ),
                 if (c.searched &&
-                    !c.loading &&
+                    !c.refreshingFirstPage &&
                     c.error == null &&
                     c.items.isEmpty)
                   SliverToBoxAdapter(child: Text(l.mobileEmpty)),

@@ -166,21 +166,21 @@ class _SearchBody extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = controller;
-    // 搜索失败整页换掉；下一页失败留在海报下面，四种画面互不混用。
+    // 已显示缓存结果时，实时刷新失败保留列表和局部重试。
     if (!c.searched) {
       return MobileEmptyState(
         key: const Key('mobile-search-idle'),
         message: label.searchEmptyQuery,
       );
     }
-    if (c.error != null) {
+    if (c.error != null && c.items.isEmpty) {
       return MobileFailureState(
         key: const Key('mobile-search-failure'),
         message: searchFailureMessage(label, c.error!),
         onRetry: onRetry,
       );
     }
-    if (c.loading && c.items.isEmpty) {
+    if (c.refreshingFirstPage && c.items.isEmpty) {
       return const Center(
         child: CircularProgressIndicator(key: Key('mobile-search-loading')),
       );
@@ -205,7 +205,16 @@ class _SearchBody extends StatelessWidget {
           AppSpacing.md + phoneScrollClearance(context),
         ),
         children: [
-          if (c.loading || c.loadingMore) const LinearProgressIndicator(),
+          if (c.refreshingFirstPage)
+            const LinearProgressIndicator(key: Key('mobile-search-refreshing')),
+          if (c.loadingMore) const LinearProgressIndicator(),
+          if (c.error != null)
+            _PageFailure(
+              key: const Key('mobile-search-refresh-failure'),
+              message: searchFailureMessage(label, c.error!),
+              onRetry: () => c.submit(c.term),
+              retryKey: const Key('mobile-search-refresh-retry'),
+            ),
           _ResultGrid(items: c.items),
           if (c.pageError != null)
             _PageFailure(
@@ -229,10 +238,16 @@ class _SearchBody extends StatelessWidget {
 }
 
 class _PageFailure extends StatelessWidget {
-  const _PageFailure({super.key, required this.message, required this.onRetry});
+  const _PageFailure({
+    super.key,
+    required this.message,
+    required this.onRetry,
+    this.retryKey = const Key('mobile-search-page-retry'),
+  });
 
   final String message;
   final VoidCallback onRetry;
+  final Key retryKey;
 
   @override
   Widget build(BuildContext context) {
@@ -248,7 +263,7 @@ class _PageFailure extends StatelessWidget {
             Text(message),
             const SizedBox(height: 8),
             FilledButton(
-              key: const Key('mobile-search-page-retry'),
+              key: retryKey,
               style: FilledButton.styleFrom(
                 minimumSize: const Size(AppSpacing.huge, AppSpacing.huge),
               ),

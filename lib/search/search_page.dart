@@ -47,6 +47,7 @@ class SearchPage extends StatefulWidget {
 
   /// 继续加载失败后的重试按钮。
   static const loadMoreRetryKey = Key('search-load-more-retry');
+  static const refreshRetryKey = Key('search-refresh-retry');
 
   /// 搜索输入区最大宽度,随 [AppBreakpoints] 舒展。
   static double fieldWidthFor(double screenWidth) {
@@ -228,7 +229,7 @@ class _SearchPageState extends State<SearchPage> {
   }
 
   Widget _buildBody(AppLocalizations l10n, double screenWidth) {
-    if (_loading) {
+    if (_search.refreshingFirstPage && _items.isEmpty) {
       return SkeletonPosterGrid(
         maxCrossAxisExtent: ShelfGridPage.maxCrossAxisExtentFor(screenWidth),
         padding: const EdgeInsets.fromLTRB(
@@ -239,7 +240,7 @@ class _SearchPageState extends State<SearchPage> {
         ),
       );
     }
-    if (_error != null) {
+    if (_error != null && _items.isEmpty) {
       return AppErrorView(
         message: searchFailureMessage(l10n, _error!),
         onRetry: _submit,
@@ -258,6 +259,14 @@ class _SearchPageState extends State<SearchPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        if (_search.refreshingFirstPage)
+          const LinearProgressIndicator(key: Key('search-refreshing')),
+        if (_error != null)
+          CatalogInlineFailure(
+            message: searchFailureMessage(l10n, _error!),
+            onRetry: () => _search.submit(_term),
+            retryKey: SearchPage.refreshRetryKey,
+          ),
         if (_pageError != null)
           CatalogInlineFailure(
             message: searchFailureMessage(l10n, _pageError!),
