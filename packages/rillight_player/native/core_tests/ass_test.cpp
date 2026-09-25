@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cassert>
 #include <chrono>
+#include <cmath>
 #include <condition_variable>
 #include <cstdint>
 #include <cstdio>
@@ -16,6 +17,7 @@ extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include <libavutil/imgutils.h>
+#include <libavutil/display.h>
 }
 
 namespace {
@@ -31,14 +33,20 @@ struct Bytes {
   size_t offset = 0;
   bool fail_read = false;
   Blocking *block = nullptr;
+  int slow_progress_reads = 0;
+  bool eagain_after_progress = false;
+  size_t stall_at_offset = 0;
 };
 
 struct Media {
   Bytes video;
+  Bytes srt_video;
+  Bytes vtt_video;
   Bytes external;
   Bytes invalid;
   Bytes read_failure;
   Bytes blocked;
+  Bytes slow;
   Blocking blocking;
 };
 
@@ -83,7 +91,7 @@ int write_video_packets(AVFormatContext *format, AVCodecContext *encoder,
   return result == AVERROR(EAGAIN) || result == AVERROR_EOF ? 0 : result;
 }
 
-Bytes make_ass_video() {
+Bytes make_ass_video(AVCodecID subtitle_codec = AV_CODEC_ID_ASS) {
   AVFormatContext *format = nullptr;
   assert(avformat_alloc_output_context2(&format, nullptr, "matroska", nullptr) == 0);
   assert(avio_open_dyn_buf(&format->pb) >= 0);
@@ -97,26 +105,41 @@ Bytes make_ass_video() {
   encoder->time_base = AVRational{1, 10};
   encoder->framerate = AVRational{10, 1};
   encoder->bit_rate = 300000;
+  encoder->sample_aspect_ratio = AVRational{2, 1};
+  encoder->color_range = AVCOL_RANGE_MPEG;
+  encoder->colorspace = AVCOL_SPC_BT709;
+  encoder->color_primaries = AVCOL_PRI_BT709;
+  encoder->color_trc = AVCOL_TRC_BT709;
   assert(avcodec_open2(encoder, codec, nullptr) == 0);
   AVStream *video = avformat_new_stream(format, nullptr);
   assert(video);
   video->time_base = encoder->time_base;
   assert(avcodec_parameters_from_context(video->codecpar, encoder) == 0);
+  video->sample_aspect_ratio = AVRational{2, 1};
+  auto *display = av_packet_side_data_new(
+      &video->codecpar->coded_side_data,
+      &video->codecpar->nb_coded_side_data,
+      AV_PKT_DATA_DISPLAYMATRIX, 9 * sizeof(int32_t), 0);
+  assert(display);
+  av_display_rotation_set(reinterpret_cast<int32_t *>(display->data), 90);
 
   AVStream *subtitle = avformat_new_stream(format, nullptr);
   assert(subtitle);
   subtitle->time_base = AVRational{1, 1000};
   subtitle->codecpar->codec_type = AVMEDIA_TYPE_SUBTITLE;
-  subtitle->codecpar->codec_id = AV_CODEC_ID_ASS;
-  const size_t header_size = std::strlen(kAssHeader);
-  subtitle->codecpar->extradata = static_cast<uint8_t *>(
-      av_mallocz(header_size + AV_INPUT_BUFFER_PADDING_SIZE));
-  assert(subtitle->codecpar->extradata);
-  std::memcpy(subtitle->codecpar->extradata, kAssHeader, header_size);
-  subtitle->codecpar->extradata_size = static_cast<int>(header_size);
+  subtitle->codecpar->codec_id = subtitle_codec;
+  if (subtitle_codec == AV_CODEC_ID_ASS) {
+    const size_t header_size = std::strlen(kAssHeader);
+    subtitle->codecpar->extradata = static_cast<uint8_t *>(
+        av_mallocz(header_size + AV_INPUT_BUFFER_PADDING_SIZE));
+    assert(subtitle->codecpar->extradata);
+    std::memcpy(subtitle->codecpar->extradata, kAssHeader, header_size);
+    subtitle->codecpar->extradata_size = static_cast<int>(header_size);
+  }
   assert(avformat_write_header(format, nullptr) == 0);
 
-  const char *event = "0,0,Default,,0,0,0,,VISIBLE SUBTITLE";
+  const char *event = subtitle_codec == AV_CODEC_ID_ASS ?
+      "0,0,Default,,0,0,0,,VISIBLE SUBTITLE" : "VISIBLE TEXT";
   AVPacket *subtitle_packet = av_packet_alloc();
   assert(subtitle_packet);
   assert(av_new_packet(subtitle_packet, static_cast<int>(std::strlen(event))) == 0);
@@ -164,6 +187,10 @@ Bytes make_ass_video() {
 void *open(void *opaque, const char *url, int) {
   auto *media = static_cast<Media *>(opaque);
   if (std::strcmp(url, "synthetic.mkv") == 0) return new Bytes(media->video);
+  if (std::strcmp(url, "synthetic-srt.mkv") == 0)
+    return new Bytes(media->srt_video);
+  if (std::strcmp(url, "synthetic-vtt.mkv") == 0)
+    return new Bytes(media->vtt_video);
   if (std::strcmp(url, "external.ass") == 0)
     return new Bytes(media->external);
   if (std::strcmp(url, "invalid.ass") == 0)
@@ -172,6 +199,8 @@ void *open(void *opaque, const char *url, int) {
     return new Bytes(media->read_failure);
   if (std::strcmp(url, "blocked.ass") == 0)
     return new Bytes(media->blocked);
+  if (std::strcmp(url, "slow.ass") == 0)
+    return new Bytes(media->slow);
   return nullptr;
 }
 
@@ -185,8 +214,22 @@ int read(void *, void *handle, uint8_t *data, int size) {
     return -5;
   }
   if (bytes->fail_read) return -5;
-  const size_t count = std::min(static_cast<size_t>(size),
-                                bytes->data.size() - bytes->offset);
+  if (bytes->stall_at_offset &&
+      bytes->offset >= bytes->stall_at_offset) return -11;
+  if (bytes->slow_progress_reads > 0) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(550));
+    --bytes->slow_progress_reads;
+    size = std::min(size, 32);
+  } else if (bytes->eagain_after_progress) {
+    bytes->eagain_after_progress = false;
+    return -11;
+  }
+  if (bytes->stall_at_offset)
+    size = std::min(size, 1024);
+  size_t count = std::min(static_cast<size_t>(size),
+                          bytes->data.size() - bytes->offset);
+  if (bytes->stall_at_offset)
+    count = std::min(count, bytes->stall_at_offset - bytes->offset);
   if (!count) return 0;
   std::memcpy(data, bytes->data.data() + bytes->offset, count);
   bytes->offset += count;
@@ -215,6 +258,7 @@ void cancel(void *opaque) {
   }
   blocking->wake.notify_all();
 }
+void cancel_media_read(void *) {}
 
 RillightCoreSnapshot snapshot(RillightCore *core) {
   RillightCoreSnapshot state{};
@@ -225,9 +269,9 @@ RillightCoreSnapshot snapshot(RillightCore *core) {
 
 template <typename Predicate>
 bool wait_for(RillightCore *core, Predicate predicate,
-              bool drain_video = false) {
+              bool drain_video = false, int timeout_seconds = 5) {
   const auto deadline = std::chrono::steady_clock::now() +
-                        std::chrono::seconds(5);
+                        std::chrono::seconds(timeout_seconds);
   while (std::chrono::steady_clock::now() < deadline) {
     if (predicate(snapshot(core))) return true;
     if (drain_video) {
@@ -241,11 +285,22 @@ bool wait_for(RillightCore *core, Predicate predicate,
 }  // namespace
 
 int main() {
-  Media media{make_ass_video(), make_external_ass(), {}, {}, {}, {}};
+  assert(rillight_core_abi_version() == 5);
+  Media media{};
+  media.video = make_ass_video();
+  media.srt_video = make_ass_video(AV_CODEC_ID_SUBRIP);
+  media.vtt_video = make_ass_video(AV_CODEC_ID_WEBVTT);
+  media.srt_video.stall_at_offset = media.srt_video.data.size() - 1;
+  media.vtt_video.stall_at_offset = media.vtt_video.data.size() - 1;
+  media.external = make_external_ass();
   media.invalid.data = {'n', 'o', 't', ' ', 'A', 'S', 'S'};
   media.read_failure.fail_read = true;
   media.blocked.block = &media.blocking;
-  RillightCoreIo io{&media, open, read, seek, close, cancel};
+  media.slow = make_external_ass();
+  media.slow.slow_progress_reads = 10;
+  media.slow.eagain_after_progress = true;
+  RillightCoreIo io{&media, open, read, seek, close, cancel,
+                    cancel_media_read};
   RillightCore *core = rillight_core_create(&io);
   assert(core && rillight_core_open(core, "synthetic.mkv", 1) == 0);
   assert(wait_for(core, [](const auto &state) {
@@ -254,6 +309,8 @@ int main() {
   assert(rillight_core_track_count(core) == 2);
   const auto initial = snapshot(core);
   bool embedded_rendered = false;
+  bool display_metadata_seen = false;
+  bool display_metadata_diagnosed = false;
   const auto deadline = std::chrono::steady_clock::now() +
                         std::chrono::seconds(5);
   while (std::chrono::steady_clock::now() < deadline && !embedded_rendered) {
@@ -264,6 +321,33 @@ int main() {
       continue;
     }
     if (frame->pts_us >= 100000 && frame->pts_us <= 2000000) {
+      const double rotation = frame->has_display_matrix ?
+          av_display_rotation_get(frame->display_matrix) : NAN;
+      // Matroska's display-matrix convention reports this muxed 90-degree
+      // fixture as -90 degrees after FFmpeg demux. Preserve that signed value.
+      const bool metadata_matches = frame->struct_size == sizeof(*frame) &&
+          frame->sar_num == 2 && frame->sar_den == 1 &&
+          frame->has_display_matrix &&
+          std::isfinite(rotation) && std::abs(rotation + 90.0) < 1.0 &&
+          frame->source_color_range == AVCOL_RANGE_MPEG &&
+          frame->source_color_space == AVCOL_SPC_BT709 &&
+          frame->source_color_primaries == AVCOL_PRI_BT709 &&
+          frame->source_color_transfer == AVCOL_TRC_BT709;
+      display_metadata_seen |= metadata_matches;
+      if (!metadata_matches && !display_metadata_diagnosed) {
+        std::fprintf(stderr,
+            "decoded frame metadata: ABI=%u size=%u SAR=%d/%d matrix=%d "
+            "rotation=%.1f range=%d space=%d primaries=%d transfer=%d "
+            "(expected ABI=5 size=%zu SAR=2/1 rotation=-90 range=%d "
+            "space=%d primaries=%d transfer=%d)\n",
+            rillight_core_abi_version(), frame->struct_size,
+            frame->sar_num, frame->sar_den, frame->has_display_matrix,
+            rotation, frame->source_color_range, frame->source_color_space,
+            frame->source_color_primaries, frame->source_color_transfer,
+            sizeof(*frame), AVCOL_RANGE_MPEG, AVCOL_SPC_BT709,
+            AVCOL_PRI_BT709, AVCOL_TRC_BT709);
+        display_metadata_diagnosed = true;
+      }
       for (int row = frame->height / 2; row < frame->height; ++row) {
         for (int column = 0; column < frame->width; ++column) {
           const uint8_t *pixel = frame->data +
@@ -276,6 +360,7 @@ int main() {
     rillight_core_release_frame(frame);
   }
   assert(embedded_rendered);
+  assert(display_metadata_seen);
 
   assert(rillight_core_add_external_subtitle(
              core, "read-failure.ass", 2) == 0);
@@ -396,6 +481,67 @@ int main() {
   rillight_core_destroy(core);
   assert(std::chrono::steady_clock::now() - close_start <
          std::chrono::seconds(2));
+  core = rillight_core_create(&io);
+  assert(core && rillight_core_open(core, "synthetic.mkv", 1) == 0);
+  assert(wait_for(core, [](const auto &state) {
+    return state.first_video_frame_ready;
+  }));
+  assert(rillight_core_add_external_subtitle(core, "slow.ass", 2) == 0);
+  assert(wait_for(core, [](const auto &state) {
+    return !state.external_subtitle_pending && state.ffmpeg_error == 0;
+  }, false, 9));
+  assert(rillight_core_track_count(core) == 3);
+  rillight_core_destroy(core);
+  for (const char *url : {"synthetic-srt.mkv", "synthetic-vtt.mkv"}) {
+    core = rillight_core_create(&io);
+    assert(core && rillight_core_open(core, url, 1) == 0);
+    assert(wait_for(core, [](const auto &state) {
+      return state.first_video_frame_ready &&
+             state.subtitle_stream_index >= 0 &&
+             state.state != RILLIGHT_CORE_FAILED;
+    }));
+    assert(rillight_core_track_count(core) == 2);
+    RillightCoreTrack text_track{};
+    text_track.struct_size = sizeof(text_track);
+    assert(rillight_core_get_track(core, 1, &text_track) == 0);
+    assert(text_track.type == RILLIGHT_CORE_TRACK_SUBTITLE);
+    assert(rillight_core_select_subtitle(core, -1, 2) == 0);
+    assert(wait_for(core, [](const auto &state) {
+      return state.subtitle_stream_index == -1 &&
+             state.first_video_frame_ready && state.state != RILLIGHT_CORE_FAILED;
+    }));
+    assert(rillight_core_select_subtitle(core, text_track.stream_index, 3) == 0);
+    assert(wait_for(core, [text_track](const auto &state) {
+      return state.subtitle_stream_index == text_track.stream_index &&
+             state.first_video_frame_ready && state.state != RILLIGHT_CORE_FAILED;
+    }));
+    bool text_rendered = false;
+    const auto text_deadline = std::chrono::steady_clock::now() +
+                               std::chrono::seconds(5);
+    while (std::chrono::steady_clock::now() < text_deadline &&
+           !text_rendered) {
+      auto *text_frame = rillight_core_take_frame(core,
+                                                  RILLIGHT_CORE_VIDEO_RGBA);
+      if (!text_frame) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        continue;
+      }
+      if (text_frame->pts_us >= 100000 && text_frame->pts_us <= 2000000) {
+        for (int row = text_frame->height / 2; row < text_frame->height;
+             ++row) {
+          for (int column = 0; column < text_frame->width; ++column) {
+            const uint8_t *pixel = text_frame->data +
+                static_cast<size_t>(row) * text_frame->stride + column * 4;
+            text_rendered |= pixel[0] > 100 && pixel[1] > 100 &&
+                             pixel[2] > 100;
+          }
+        }
+      }
+      rillight_core_release_frame(text_frame);
+    }
+    assert(text_rendered);
+    rillight_core_destroy(core);
+  }
   std::printf("Embedded and external ASS subtitle composition verified (%d "
               "external frames)\n", frames);
   return 0;

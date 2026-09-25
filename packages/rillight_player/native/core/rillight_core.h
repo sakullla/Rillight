@@ -13,7 +13,7 @@
 extern "C" {
 #endif
 
-#define RILLIGHT_CORE_ABI_VERSION 4
+#define RILLIGHT_CORE_ABI_VERSION 5
 
 typedef struct RillightCore RillightCore;
 typedef struct RillightCoreFrame RillightCoreFrame;
@@ -77,7 +77,12 @@ typedef struct RillightCoreTrack {
  * open returns an opaque handle or NULL. Nested FFmpeg opens use this same
  * callback; authorization and the protocol allow-list belong to its owner.
  * The external-subtitle loader may call open/read/close on a separate handle
- * concurrently with media IO. cancel must unblock both kinds of handles. */
+ * concurrently with media IO. cancel must unblock both kinds of handles.
+ * cancel_media_read must be a prompt, nonblocking signal: it is invoked while
+ * the core state mutex is held so a new-timeline read cannot start before the
+ * signal returns. It must not call core APIs or wait for worker progress. It
+ * must interrupt only the current media read; the same handle must remain
+ * seekable and readable after seek resets it. */
 typedef struct RillightCoreIo {
   void *opaque;
   void *(*open)(void *opaque, const char *url, int flags);
@@ -85,6 +90,7 @@ typedef struct RillightCoreIo {
   int64_t (*seek)(void *opaque, void *handle, int64_t offset, int whence);
   void (*close)(void *opaque, void *handle);
   void (*cancel)(void *opaque);
+  void (*cancel_media_read)(void *opaque);
 } RillightCoreIo;
 
 struct RillightCoreFrame {
@@ -101,6 +107,17 @@ struct RillightCoreFrame {
   int sample_count;
   int data_size;
   uint8_t *data;
+  /* VIDEO_RGBA source display metadata. RGBA bytes are full-range after the
+   * core's YUV range/matrix conversion. The sink still applies SAR and the
+   * FFmpeg display matrix when presenting the frame. No matrix means identity. */
+  int sar_num;
+  int sar_den;
+  int source_color_range;
+  int source_color_space;
+  int source_color_primaries;
+  int source_color_transfer;
+  int has_display_matrix;
+  int32_t display_matrix[9];
 };
 
 /* Pull-output contract for platform sinks:

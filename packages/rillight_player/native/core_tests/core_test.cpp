@@ -28,6 +28,26 @@ struct Blocking {
   bool cancelled = false;
 };
 
+struct SeekBlockingMedia {
+  Bytes wav;
+  std::mutex mutex;
+  std::condition_variable wake;
+  bool entered = false;
+  bool cancelled = false;
+  bool block_armed = false;
+  bool gate_consumed = false;
+  int cancel_count = 0;
+};
+
+struct EofGateMedia {
+  Bytes wav;
+  std::mutex mutex;
+  std::condition_variable wake;
+  bool armed = false;
+  int entered_count = 0;
+  int released_count = 0;
+};
+
 void append16(std::vector<uint8_t> &data, uint16_t value) {
   data.push_back(static_cast<uint8_t>(value));
   data.push_back(static_cast<uint8_t>(value >> 8));
@@ -38,10 +58,9 @@ void append32(std::vector<uint8_t> &data, uint32_t value) {
   append16(data, static_cast<uint16_t>(value >> 16));
 }
 
-Bytes make_wav() {
+Bytes make_wav(uint32_t samples = 4800) {
   Bytes bytes;
   auto &data = bytes.data;
-  const uint32_t samples = 4800;
   const uint32_t payload = samples * 2;
   data.insert(data.end(), {'R', 'I', 'F', 'F'});
   append32(data, 36 + payload);
@@ -125,6 +144,7 @@ int64_t seek(void *, void *handle, int64_t offset, int whence) {
 }
 
 void close(void *, void *handle) { delete static_cast<Bytes *>(handle); }
+void cancel_media_read(void *) {}
 
 void *blocked_open(void *opaque, const char *, int) { return opaque; }
 
@@ -148,6 +168,70 @@ void blocked_cancel(void *opaque) {
   blocking->wake.notify_all();
 }
 
+void *seek_block_open(void *opaque, const char *, int) {
+  auto *media = static_cast<SeekBlockingMedia *>(opaque);
+  media->wav.offset = 0;
+  return &media->wav;
+}
+
+int seek_block_read(void *opaque, void *handle, uint8_t *buffer, int size) {
+  auto *media = static_cast<SeekBlockingMedia *>(opaque);
+  {
+    std::unique_lock lock(media->mutex);
+    // The test arms only after a decoded frame is ready. The next IO read on
+    // that timeline then remains blocked until seek signals cancellation.
+    if (media->block_armed && !media->gate_consumed) {
+      media->entered = true;
+      media->wake.notify_all();
+      media->wake.wait(lock, [&] { return media->cancelled; });
+      media->gate_consumed = true;
+      return -5;  // The core discards the cancelled old-timeline read.
+    }
+  }
+  return read(nullptr, handle, buffer, std::min(size, 4096));
+}
+
+void seek_block_cancel(void *opaque) {
+  auto *media = static_cast<SeekBlockingMedia *>(opaque);
+  {
+    std::lock_guard lock(media->mutex);
+    media->cancelled = true;
+    ++media->cancel_count;
+  }
+  media->wake.notify_all();
+}
+
+void *eof_gate_open(void *opaque, const char *, int) {
+  auto *media = static_cast<EofGateMedia *>(opaque);
+  media->wav.offset = 0;
+  return &media->wav;
+}
+
+int eof_gate_read(void *opaque, void *handle, uint8_t *buffer, int size) {
+  auto *media = static_cast<EofGateMedia *>(opaque);
+  auto *bytes = static_cast<Bytes *>(handle);
+  if (bytes->offset == bytes->data.size()) {
+    std::unique_lock lock(media->mutex);
+    media->wake.wait(lock, [&] { return media->armed; });
+    if (media->entered_count >= 2) return 0;
+    const int gate = ++media->entered_count;
+    media->wake.notify_all();
+    media->wake.wait(lock, [&] { return media->released_count >= gate; });
+    return 0;
+  }
+  return read(nullptr, handle, buffer, std::min(size, 4096));
+}
+
+void eof_gate_release(void *opaque) {
+  auto *media = static_cast<EofGateMedia *>(opaque);
+  {
+    std::lock_guard lock(media->mutex);
+    media->armed = true;
+    media->released_count = media->entered_count;
+  }
+  media->wake.notify_all();
+}
+
 RillightCoreSnapshot snapshot(RillightCore *core) {
   RillightCoreSnapshot value{};
   value.struct_size = sizeof(value);
@@ -155,11 +239,17 @@ RillightCoreSnapshot snapshot(RillightCore *core) {
   return value;
 }
 
-bool wait_for(RillightCore *core, bool (*predicate)(const RillightCoreSnapshot &)) {
+template <typename Predicate>
+bool wait_for(RillightCore *core, Predicate predicate,
+              bool drain_audio = false) {
   const auto deadline = std::chrono::steady_clock::now() +
                         std::chrono::seconds(5);
   while (std::chrono::steady_clock::now() < deadline) {
     if (predicate(snapshot(core))) return true;
+    if (drain_audio) {
+      auto *frame = rillight_core_take_frame(core, RILLIGHT_CORE_AUDIO_S16);
+      rillight_core_release_frame(frame);
+    }
     std::this_thread::sleep_for(std::chrono::milliseconds(5));
   }
   return false;
@@ -172,7 +262,8 @@ int main() {
   assert(versions && std::strstr(versions, "avformat=") != nullptr);
   std::printf("loaded FFmpeg libraries: %s\n", versions);
   Media media{make_wav(), make_bmp()};
-  RillightCoreIo io{&media, open, read, seek, close, nullptr};
+  RillightCoreIo io{&media, open, read, seek, close, nullptr,
+                    cancel_media_read};
   auto *core = rillight_core_create(&io);
   assert(core);
   assert(rillight_core_open(core, "synthetic.wav", 1) == 0);
@@ -217,11 +308,12 @@ int main() {
   assert(wait_for(core, [](const auto &state) {
     return state.first_audio_frame_ready != 0;
   }));
-  assert(rillight_core_report_output_drained(
-             core, after.session_id, after.timeline_version) == 0);
+  // The short WAV may already have reached real EOF here. The gated EOF
+  // fixture below checks premature drain without depending on this race.
   const auto deadline = std::chrono::steady_clock::now() +
                         std::chrono::seconds(5);
   int speed_samples = 0;
+  bool output_reported = false;
   while (snapshot(core).state != RILLIGHT_CORE_ENDED &&
          std::chrono::steady_clock::now() < deadline) {
     frame = rillight_core_take_frame(core, RILLIGHT_CORE_AUDIO_S16);
@@ -230,7 +322,13 @@ int main() {
       rillight_core_release_frame(frame);
     }
     else std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    if (!output_reported && snapshot(core).source_eof) {
+      assert(rillight_core_report_output_drained(
+                 core, after.session_id, after.timeline_version) == 0);
+      output_reported = true;
+    }
   }
+  assert(output_reported);
   assert(snapshot(core).state == RILLIGHT_CORE_ENDED);
   assert(speed_samples > 1500 && speed_samples < 3500);
   assert(rillight_core_configure_hardware(core, RILLIGHT_CORE_HW_VAAPI, 1) == 0);
@@ -268,7 +366,8 @@ int main() {
   rillight_core_destroy(core);
   Blocking blocking;
   RillightCoreIo blocked_io{&blocking, blocked_open, blocked_read,
-                            blocked_seek, blocked_close, blocked_cancel};
+                            blocked_seek, blocked_close, blocked_cancel,
+                            blocked_cancel};
   core = rillight_core_create(&blocked_io);
   assert(core);
   assert(rillight_core_open(core, "blocked.stream", 1) == 0);
@@ -276,5 +375,116 @@ int main() {
   rillight_core_destroy(core);
   assert(std::chrono::steady_clock::now() - close_started <
          std::chrono::seconds(2));
+
+  SeekBlockingMedia seek_media;
+  seek_media.wav = make_wav(48000 * 30);
+  RillightCoreIo seek_block_io{&seek_media, seek_block_open, seek_block_read,
+                               seek, [](void *, void *) {}, seek_block_cancel,
+                               seek_block_cancel};
+  core = rillight_core_create(&seek_block_io);
+  assert(core && rillight_core_open(core, "seek-blocked.wav", 1) == 0);
+  assert(wait_for(core, [](const auto &state) {
+    return state.first_audio_frame_ready && state.state != RILLIGHT_CORE_FAILED;
+  }));
+  {
+    std::lock_guard lock(seek_media.mutex);
+    seek_media.block_armed = true;
+  }
+  seek_media.wake.notify_all();
+  const auto entered_deadline = std::chrono::steady_clock::now() +
+                                std::chrono::seconds(5);
+  bool entered = false;
+  while (std::chrono::steady_clock::now() < entered_deadline && !entered) {
+    {
+      std::lock_guard lock(seek_media.mutex);
+      entered = seek_media.entered;
+    }
+    if (entered) break;
+    auto *queued = rillight_core_take_frame(core, RILLIGHT_CORE_AUDIO_S16);
+    const bool had_frame = queued != nullptr;
+    rillight_core_release_frame(queued);
+    if (!had_frame) std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  }
+  assert(entered);
+  const auto blocked_timeline = snapshot(core).timeline_version;
+  const auto seek_started = std::chrono::steady_clock::now();
+  assert(rillight_core_seek(core, 0, 2) == 0);
+  assert(std::chrono::steady_clock::now() - seek_started <
+         std::chrono::milliseconds(500));
+  assert(wait_for(core, [blocked_timeline](const auto &state) {
+    return state.timeline_version > blocked_timeline &&
+           state.first_audio_frame_ready && state.state != RILLIGHT_CORE_FAILED;
+  }));
+  assert(seek_media.cancel_count == 1);
+  frame = rillight_core_take_frame(core, RILLIGHT_CORE_AUDIO_S16);
+  assert(frame && frame->timeline_version > blocked_timeline);
+  rillight_core_release_frame(frame);
+  const auto first_recovery = snapshot(core).timeline_version;
+  assert(rillight_core_seek(core, 0, 3) == 0);
+  assert(wait_for(core, [first_recovery](const auto &state) {
+    return state.timeline_version > first_recovery &&
+           state.first_audio_frame_ready && state.state != RILLIGHT_CORE_FAILED;
+  }));
+  frame = rillight_core_take_frame(core, RILLIGHT_CORE_AUDIO_S16);
+  assert(frame && frame->timeline_version > first_recovery);
+  rillight_core_release_frame(frame);
+  rillight_core_destroy(core);
+
+  EofGateMedia eof_media;
+  eof_media.wav = make_wav(48000 * 30);
+  RillightCoreIo eof_io{&eof_media, eof_gate_open, eof_gate_read,
+                        seek, [](void *, void *) {}, eof_gate_release,
+                        eof_gate_release};
+  core = rillight_core_create(&eof_io);
+  assert(core && rillight_core_open(core, "eof-gated.wav", 1) == 0);
+  assert(wait_for(core, [](const auto &state) {
+    return state.first_audio_frame_ready && state.state != RILLIGHT_CORE_FAILED;
+  }));
+  {
+    std::lock_guard lock(eof_media.mutex);
+    eof_media.armed = true;
+  }
+  eof_media.wake.notify_all();
+  const auto wait_eof_gate = [&](int target) {
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::seconds(5);
+    while (std::chrono::steady_clock::now() < deadline) {
+      {
+        std::lock_guard lock(eof_media.mutex);
+        if (eof_media.entered_count >= target) return true;
+      }
+      auto *queued = rillight_core_take_frame(core, RILLIGHT_CORE_AUDIO_S16);
+      const bool had_frame = queued != nullptr;
+      rillight_core_release_frame(queued);
+      if (!had_frame) std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    return false;
+  };
+  assert(wait_eof_gate(1));
+  const auto old_eof = snapshot(core);
+  assert(!old_eof.source_eof);
+  assert(rillight_core_seek(core, 0, 2) == 0);
+  const auto new_timeline = snapshot(core).timeline_version;
+  assert(new_timeline > old_eof.timeline_version);
+  assert(rillight_core_report_output_drained(
+             core, old_eof.session_id, old_eof.timeline_version) != 0);
+  assert(wait_eof_gate(2));
+  assert(snapshot(core).timeline_version == new_timeline);
+  assert(!snapshot(core).source_eof);
+  assert(rillight_core_report_output_drained(
+             core, old_eof.session_id, new_timeline) != 0);
+  eof_gate_release(&eof_media);
+  assert(wait_for(core, [new_timeline](const auto &state) {
+    return state.timeline_version == new_timeline && state.source_eof &&
+           state.first_audio_frame_ready && state.state != RILLIGHT_CORE_FAILED;
+  }, true));
+  while ((frame = rillight_core_take_frame(core, RILLIGHT_CORE_AUDIO_S16)))
+    rillight_core_release_frame(frame);
+  assert(rillight_core_report_output_drained(
+             core, old_eof.session_id, new_timeline) == 0);
+  assert(wait_for(core, [](const auto &state) {
+    return state.state == RILLIGHT_CORE_ENDED;
+  }));
+  rillight_core_destroy(core);
   return 0;
 }

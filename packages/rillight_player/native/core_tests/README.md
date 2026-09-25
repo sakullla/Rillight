@@ -26,7 +26,11 @@ Release packaging must provide its own complete library closure and RUNPATH.
 requires the real pinned FFmpeg libraries and exercises decoding, stream
 metadata, first-frame readiness, pause, seek, 2.0x audio sample reduction,
 stale operation rejection, session change, EOF drain, frame ownership, and
-strict hardware failure versus explicit software fallback.
+strict hardware failure versus explicit software fallback. A controlled IO
+read blocks after decoded audio is ready; seek must cancel that old read,
+produce frames on the new timeline, and tolerate a second seek. A gated EOF
+read checks that seeking while old EOF is pending cannot publish old EOF or
+accept a premature output-drained report on the new timeline.
 When the SDK contains the pinned libass build, `ass_test.cpp` constructs a
 Matroska MPEG-4/ASS stream entirely in memory and checks that text changes
 decoded RGBA pixels. It also adds an external ASS script through controlled IO,
@@ -34,6 +38,11 @@ checks failed reads and invalid scripts preserve the selected subtitle and
 timeline, selects the external track, and checks its blue text changes pixels.
 An independent blocked subtitle read then checks pause, seek, first video
 output, and bounded destroy/cancellation while that loader is still waiting.
+The text fixture also muxes SRT and WebVTT tracks and checks actual selection
+and subtitle pixels after switching away and back. Its non-square pixel ratio,
+display matrix, and BT.709 tags exercise the versioned frame metadata. A
+slow external ASS read makes progress for more than five seconds, then returns
+EAGAIN; it must be judged by time since last progress.
 This is a native composition check, not a Flutter surface or font coverage
 check; the build environment must provide a usable sans-serif font.
 The test prints the actual loaded FFmpeg library versions. CMake rejects an
@@ -51,11 +60,16 @@ test has no hardware decoder and therefore proves fallback/strict failure, not
 GPU decoding on target hardware.
 It decodes and blends embedded bitmap subtitles, and routes audio through
 FFmpeg `atempo` and `aformat` with automatic resampling. A conditional libass
-path processes embedded ASS events and font attachments, then blends libass
-images into decoded video. External ASS/SSA scripts can be added asynchronously
+path processes embedded ASS events and font attachments plus decoded SRT and
+WebVTT text, then blends libass images into decoded video. External ASS/SSA
+scripts can be added asynchronously
 through a separate, cancellable controlled-IO loader and selected by their
 synthetic track indices. Callback owners must support concurrent media and
 subtitle handles; `cancel` must release both on close. Each
+media read has a separate prompt `cancel_media_read` signal for seek and track
+changes; its callback must not call core APIs or wait for worker progress.
+The transport must leave the media handle reusable after that read is
+interrupted and seek resets its state. Each
 script is limited to 4 MiB, with 16 tracks and 16 MiB per session. Invalid
 external scripts and IO errors leave the selected track and timeline intact;
 other external subtitle formats, direct hardware frame import, and verified

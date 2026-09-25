@@ -148,6 +148,61 @@ bool open_ass(AssRenderer *ass, AVFormatContext *format, int stream_index) {
   return true;
 }
 
+bool open_text_ass(AssRenderer *ass, const AVCodecContext *decoder,
+                   int stream_index) {
+  if (!decoder || !decoder->subtitle_header ||
+      decoder->subtitle_header_size <= 0) return false;
+  AssRenderer replacement;
+  replacement.library = ass_library_init();
+  if (!replacement.library) return false;
+  replacement.renderer = ass_renderer_init(replacement.library);
+  replacement.track = ass_new_track(replacement.library);
+  if (!replacement.renderer || !replacement.track) {
+    close_ass(&replacement);
+    return false;
+  }
+  ass_process_codec_private(replacement.track,
+                            reinterpret_cast<const char *>(
+                                decoder->subtitle_header),
+                            decoder->subtitle_header_size);
+  ass_set_fonts(replacement.renderer, nullptr, "sans-serif",
+                ASS_FONTPROVIDER_AUTODETECT, nullptr, 1);
+  replacement.stream = stream_index;
+  close_ass(ass);
+  *ass = replacement;
+  return true;
+}
+
+int decode_text_subtitle(Decoder &decoder, const AVPacket *packet,
+                         AVRational time_base, AssRenderer *ass) {
+  AVSubtitle subtitle{};
+  int got = 0;
+  const int result = avcodec_decode_subtitle2(decoder.context, &subtitle,
+                                               &got, packet);
+  if (result < 0) return result;
+  if (!got) return 0;
+  int64_t start_ms = subtitle.pts == AV_NOPTS_VALUE ?
+      (packet->pts == AV_NOPTS_VALUE ? 0 :
+       av_rescale_q(packet->pts, time_base, AVRational{1, 1000})) :
+      subtitle.pts / 1000;
+  start_ms += subtitle.start_display_time;
+  int64_t duration_ms = 0;
+  if (subtitle.end_display_time > subtitle.start_display_time)
+    duration_ms = subtitle.end_display_time - subtitle.start_display_time;
+  else if (packet->duration > 0)
+    duration_ms = av_rescale_q(packet->duration, time_base,
+                               AVRational{1, 1000});
+  if (duration_ms <= 0) duration_ms = 5000;
+  for (unsigned int index = 0; index < subtitle.num_rects; ++index) {
+    const auto *rect = subtitle.rects[index];
+    if (rect->type != SUBTITLE_ASS || !rect->ass) continue;
+    ass_process_chunk(ass->track, rect->ass, std::strlen(rect->ass),
+                      start_ms, duration_ms);
+  }
+  avsubtitle_free(&subtitle);
+  return 0;
+}
+
 bool open_external_ass(AssRenderer *ass, const std::vector<char> &script,
                        int stream_index) {
   if (script.empty()) return false;
@@ -335,6 +390,9 @@ struct RillightCoreImpl {
   std::thread worker;
   std::thread subtitle_loader;
   std::atomic<bool> stop{false};
+  std::atomic<uint64_t> timeline_signal{0};
+  std::atomic<uint64_t> active_read_timeline{0};
+  bool media_read_active = false;
   uint64_t session = 0;
   uint64_t operation = 0;
   uint64_t timeline = 0;
@@ -386,11 +444,11 @@ int read_external_ass(RillightCoreImpl *core, const std::string &url,
   std::vector<char> bytes;
   uint8_t buffer[kIoBufferSize];
   int result = 0;
-  const auto deadline = Clock::now() + std::chrono::seconds(5);
+  auto progress_deadline = Clock::now() + std::chrono::seconds(5);
   while (!core->stop) {
     const int count = core->io.read(core->io.opaque, handle, buffer,
                                     sizeof(buffer));
-    if (count == AVERROR(EAGAIN) && Clock::now() < deadline) {
+    if (count == AVERROR(EAGAIN) && Clock::now() < progress_deadline) {
       std::this_thread::sleep_for(std::chrono::milliseconds(20));
       continue;
     }
@@ -407,6 +465,7 @@ int read_external_ass(RillightCoreImpl *core, const std::string &url,
     }
     bytes.insert(bytes.end(), reinterpret_cast<char *>(buffer),
                  reinterpret_cast<char *>(buffer) + count);
+    progress_deadline = Clock::now() + std::chrono::seconds(5);
   }
   core->io.close(core->io.opaque, handle);
   if (core->stop) return AVERROR_EXIT;
@@ -494,7 +553,9 @@ bool accept_operation(RillightCoreImpl *core, uint64_t operation) {
 }
 
 int interrupt_read(void *opaque) {
-  return static_cast<RillightCoreImpl *>(opaque)->stop.load() ? 1 : 0;
+  auto *core = static_cast<RillightCoreImpl *>(opaque);
+  return core->stop.load() ||
+         core->timeline_signal.load() != core->active_read_timeline.load();
 }
 
 int source_read(void *opaque, uint8_t *buffer, int size) {
@@ -589,6 +650,8 @@ Decoder make_decoder(AVFormatContext *format, int index,
     result.error = AVERROR(EINVAL);
     return result;
   }
+  if (parameters->codec_type == AVMEDIA_TYPE_SUBTITLE)
+    context->pkt_timebase = format->streams[index]->time_base;
   if (preference != RILLIGHT_CORE_HW_NONE &&
       parameters->codec_type == AVMEDIA_TYPE_VIDEO) {
     const AVHWDeviceType device_type = hardware_device_type(preference);
@@ -641,6 +704,12 @@ bool bitmap_subtitle_codec(AVCodecID codec) {
          codec == AV_CODEC_ID_DVB_SUBTITLE ||
          codec == AV_CODEC_ID_DVD_SUBTITLE || codec == AV_CODEC_ID_XSUB;
 }
+
+#if RILLIGHT_HAVE_LIBASS
+bool text_subtitle_codec(AVCodecID codec) {
+  return codec == AV_CODEC_ID_SUBRIP || codec == AV_CODEC_ID_WEBVTT;
+}
+#endif
 
 void copy_field(char *destination, size_t capacity, const char *source) {
   if (!source) return;
@@ -719,6 +788,7 @@ int64_t frame_time(const AVFrame *frame, const AVStream *stream) {
 
 RillightCoreFrame *convert_video(const AVFrame *frame, int64_t pts,
                                  uint64_t session, uint64_t timeline,
+                                 const AVStream *stream,
                                  SwsContext **scale) {
   if (frame->width <= 0 || frame->height <= 0 ||
       frame->width > static_cast<int>(kMaxVideoBytes / 4))
@@ -732,6 +802,19 @@ RillightCoreFrame *convert_video(const AVFrame *frame, int64_t pts,
                                  frame->width, frame->height, AV_PIX_FMT_RGBA,
                                  SWS_BILINEAR, nullptr, nullptr, nullptr);
   if (!*scale) return nullptr;
+  const AVColorRange source_range =
+      frame->color_range != AVCOL_RANGE_UNSPECIFIED ? frame->color_range :
+      stream->codecpar->color_range;
+  const AVColorSpace source_space =
+      frame->colorspace != AVCOL_SPC_UNSPECIFIED ? frame->colorspace :
+      stream->codecpar->color_space;
+  int sws_space = SWS_CS_DEFAULT;
+  if (source_space == AVCOL_SPC_BT709) sws_space = SWS_CS_ITU709;
+  else if (source_space == AVCOL_SPC_BT2020_NCL) sws_space = SWS_CS_BT2020;
+  const int *coefficients = sws_getCoefficients(sws_space);
+  if (sws_setColorspaceDetails(*scale, coefficients,
+          source_range == AVCOL_RANGE_JPEG, coefficients, 1,
+          0, 1 << 16, 1 << 16) < 0) return nullptr;
   auto *output = new (std::nothrow) RillightCoreFrame{};
   if (!output) return nullptr;
   output->data = new (std::nothrow) uint8_t[bytes];
@@ -756,6 +839,39 @@ RillightCoreFrame *convert_video(const AVFrame *frame, int64_t pts,
   output->height = frame->height;
   output->stride = stride;
   output->data_size = bytes;
+  AVRational sar = frame->sample_aspect_ratio;
+  if (sar.num <= 0 || sar.den <= 0) sar = stream->sample_aspect_ratio;
+  if (sar.num <= 0 || sar.den <= 0)
+    sar = stream->codecpar->sample_aspect_ratio;
+  if (sar.num <= 0 || sar.den <= 0) sar = AVRational{1, 1};
+  output->sar_num = sar.num;
+  output->sar_den = sar.den;
+  output->source_color_range = source_range;
+  output->source_color_space = source_space;
+  output->source_color_primaries =
+      frame->color_primaries != AVCOL_PRI_UNSPECIFIED ?
+      frame->color_primaries : stream->codecpar->color_primaries;
+  output->source_color_transfer =
+      frame->color_trc != AVCOL_TRC_UNSPECIFIED ?
+      frame->color_trc : stream->codecpar->color_trc;
+  const AVFrameSideData *matrix =
+      av_frame_get_side_data(frame, AV_FRAME_DATA_DISPLAYMATRIX);
+  if (matrix && matrix->size >= sizeof(output->display_matrix)) {
+    std::memcpy(output->display_matrix, matrix->data,
+                sizeof(output->display_matrix));
+    output->has_display_matrix = 1;
+  } else {
+    const AVPacketSideData *stream_matrix = av_packet_side_data_get(
+        stream->codecpar->coded_side_data,
+        stream->codecpar->nb_coded_side_data,
+        AV_PKT_DATA_DISPLAYMATRIX);
+    if (stream_matrix &&
+        stream_matrix->size >= sizeof(output->display_matrix)) {
+      std::memcpy(output->display_matrix, stream_matrix->data,
+                  sizeof(output->display_matrix));
+      output->has_display_matrix = 1;
+    }
+  }
   return output;
 }
 
@@ -966,7 +1082,8 @@ int decode_packet(RillightCoreImpl *core, AVFormatContext *format,
             track.actual_hardware = decoder.hardware;
         }
       }
-      auto *output = convert_video(picture, pts, session, timeline, scale);
+      auto *output = convert_video(picture, pts, session, timeline,
+                                   format->streams[decoder.stream], scale);
       av_frame_free(&downloaded);
       av_frame_unref(decoded);
       if (!output) { result = AVERROR(EINVAL); break; }
@@ -1011,6 +1128,7 @@ void run(RillightCoreImpl *core, uint64_t session) {
   int result = AVERROR(ENOMEM);
   bool ended = false;
   if (!format) goto finish;
+  core->active_read_timeline = core->timeline_signal.load();
   format->opaque = core;
   format->interrupt_callback = AVIOInterruptCB{interrupt_read, core};
   format->io_open = nested_open;
@@ -1045,6 +1163,13 @@ void run(RillightCoreImpl *core, uint64_t session) {
 #if RILLIGHT_HAVE_LIBASS
       else if (codec == AV_CODEC_ID_ASS && open_ass(&ass, format, si))
         subtitle.stream = si;
+      else if (text_subtitle_codec(codec)) {
+        subtitle = make_decoder(format, si);
+        if (!subtitle.context || !open_text_ass(&ass, subtitle.context, si)) {
+          avcodec_free_context(&subtitle.context);
+          subtitle = {};
+        }
+      }
 #endif
     }
     if (!video.context && !audio.context) {
@@ -1061,6 +1186,21 @@ void run(RillightCoreImpl *core, uint64_t session) {
     core->embedded_stream_count = format->nb_streams;
 #endif
     for (unsigned int index = 0; index < format->nb_streams; ++index) {
+      const auto codec = format->streams[index]->codecpar->codec_id;
+      const auto type = format->streams[index]->codecpar->codec_type;
+      if (type == AVMEDIA_TYPE_SUBTITLE &&
+          !bitmap_subtitle_codec(codec)
+#if RILLIGHT_HAVE_LIBASS
+          && codec != AV_CODEC_ID_ASS && !text_subtitle_codec(codec)
+#endif
+          ) continue;
+      if (type == AVMEDIA_TYPE_SUBTITLE &&
+          (bitmap_subtitle_codec(codec)
+#if RILLIGHT_HAVE_LIBASS
+           || text_subtitle_codec(codec)
+#endif
+          ) &&
+          !avcodec_find_decoder(codec)) continue;
       auto track = make_track(format->streams[index]);
       if (track.type != 0) core->tracks.push_back(track);
     }
@@ -1089,7 +1229,12 @@ void run(RillightCoreImpl *core, uint64_t session) {
       selected_speed = core->requested_speed;
       core->speed_change = false;
     }
+    core->active_read_timeline = timeline;
     if (seek >= 0) {
+      if (format->pb) {
+        format->pb->error = 0;
+        format->pb->eof_reached = 0;
+      }
       result = av_seek_frame(format, -1, seek, AVSEEK_FLAG_BACKWARD);
       if (result < 0) break;
       if (video.context) avcodec_flush_buffers(video.context);
@@ -1137,6 +1282,17 @@ void run(RillightCoreImpl *core, uint64_t session) {
           replacement.stream = selected_subtitle;
           ass_selected = true;
         }
+        else if (text_subtitle_codec(codec)) {
+          replacement = make_decoder(format, selected_subtitle);
+          if (replacement.context &&
+              open_text_ass(&replacement_ass, replacement.context,
+                            selected_subtitle))
+            ass_selected = true;
+          else {
+            avcodec_free_context(&replacement.context);
+            replacement = {};
+          }
+        }
 #endif
       }
 #if RILLIGHT_HAVE_LIBASS
@@ -1181,7 +1337,27 @@ void run(RillightCoreImpl *core, uint64_t session) {
     }
     AVPacket *packet = av_packet_alloc();
     if (!packet) { result = AVERROR(ENOMEM); break; }
+    {
+      std::lock_guard lock(core->mutex);
+      if (core->timeline != timeline) {
+        av_packet_free(&packet);
+        continue;
+      }
+      core->media_read_active = true;
+    }
     result = av_read_frame(format, packet);
+    {
+      std::lock_guard lock(core->mutex);
+      core->media_read_active = false;
+      if (core->timeline != timeline) {
+        av_packet_free(&packet);
+        if (format->pb) {
+          format->pb->error = 0;
+          format->pb->eof_reached = 0;
+        }
+        continue;
+      }
+    }
     if (result == AVERROR(EAGAIN)) {
       av_packet_free(&packet);
       {
@@ -1196,6 +1372,7 @@ void run(RillightCoreImpl *core, uint64_t session) {
       av_packet_free(&packet);
       {
         std::lock_guard lock(core->mutex);
+        if (core->timeline != timeline) continue;
         core->input_exhausted = true;
       }
       result = decode_packet(core, format, video, nullptr, video.stream,
@@ -1216,6 +1393,7 @@ void run(RillightCoreImpl *core, uint64_t session) {
         if (result < 0) break;
       }
       std::unique_lock lock(core->mutex);
+      if (core->timeline != timeline) continue;
       core->eof = true;
       core->wake.wait(lock, [&] {
         return core->stop || core->timeline != timeline ||
@@ -1240,9 +1418,18 @@ void run(RillightCoreImpl *core, uint64_t session) {
                              core->speed, session,
                              timeline);
     else if (packet->stream_index == subtitle.stream) {
-      if (subtitle.context)
-        result = decode_bitmap_subtitle(subtitle, packet,
-            format->streams[subtitle.stream]->time_base, &subtitle_cues);
+      if (subtitle.context) {
+        const auto codec =
+            format->streams[subtitle.stream]->codecpar->codec_id;
+        if (bitmap_subtitle_codec(codec))
+          result = decode_bitmap_subtitle(subtitle, packet,
+              format->streams[subtitle.stream]->time_base, &subtitle_cues);
+#if RILLIGHT_HAVE_LIBASS
+        else if (text_subtitle_codec(codec) && ass.track)
+          result = decode_text_subtitle(subtitle, packet,
+              format->streams[subtitle.stream]->time_base, &ass);
+#endif
+      }
 #if RILLIGHT_HAVE_LIBASS
       else if (ass.track)
         process_ass(&ass, packet,
@@ -1294,7 +1481,8 @@ const char *rillight_core_ffmpeg_versions(void) {
 }
 
 RillightCore *rillight_core_create(const RillightCoreIo *io) {
-  if (!io || !io->open || !io->read || !io->seek || !io->close) return nullptr;
+  if (!io || !io->open || !io->read || !io->seek || !io->close ||
+      !io->cancel_media_read) return nullptr;
   auto *core = new (std::nothrow) RillightCoreImpl(*io);
   return reinterpret_cast<RillightCore *>(core);
 }
@@ -1350,8 +1538,10 @@ int rillight_core_open(RillightCore *pointer, const char *url,
     std::lock_guard lock(core->mutex);
     reset_frames(core);
     core->stop = false;
+    core->media_read_active = false;
     ++core->session;
     ++core->timeline;
+    core->timeline_signal = core->timeline;
     core->url = url;
     core->video_index = core->audio_index = core->subtitle_index = -1;
     core->duration = -1;
@@ -1407,18 +1597,23 @@ int rillight_core_seek(RillightCore *pointer, int64_t position_us,
                        uint64_t operation_id) {
   if (!pointer || position_us < 0) return -1;
   auto *core = impl(pointer);
-  std::lock_guard lock(core->mutex);
+  std::unique_lock lock(core->mutex);
   if (core->state == RILLIGHT_CORE_IDLE ||
+      core->state == RILLIGHT_CORE_OPENING ||
       core->state == RILLIGHT_CORE_ENDED ||
       core->state == RILLIGHT_CORE_FAILED ||
       !accept_operation(core, operation_id)) return -1;
   ++core->timeline;
+  core->timeline_signal = core->timeline;
   reset_frames(core);
   core->seek_target = position_us;
   core->base_position = position_us;
   core->base_time = Clock::now();
   core->state = RILLIGHT_CORE_RECOVERING;
   core->wake.notify_all();
+  // The worker cannot start a new-timeline read until this callback returns.
+  if (core->media_read_active)
+    core->io.cancel_media_read(core->io.opaque);
   return 0;
 }
 
@@ -1426,7 +1621,7 @@ int rillight_core_select_audio(RillightCore *pointer, int stream_index,
                                 uint64_t operation_id) {
   if (!pointer || stream_index < 0) return -1;
   auto *core = impl(pointer);
-  std::lock_guard lock(core->mutex);
+  std::unique_lock lock(core->mutex);
   if (core->state == RILLIGHT_CORE_IDLE ||
       core->state == RILLIGHT_CORE_ENDED ||
       core->state == RILLIGHT_CORE_FAILED ||
@@ -1438,11 +1633,14 @@ int rillight_core_select_audio(RillightCore *pointer, int stream_index,
   core->requested_audio = stream_index;
   core->audio_change = true;
   ++core->timeline;
+  core->timeline_signal = core->timeline;
   reset_frames(core);
   core->seek_target = core->base_position;
   core->base_time = Clock::now();
   core->state = RILLIGHT_CORE_RECOVERING;
   core->wake.notify_all();
+  if (core->media_read_active)
+    core->io.cancel_media_read(core->io.opaque);
   return 0;
 }
 
@@ -1450,7 +1648,7 @@ int rillight_core_select_subtitle(RillightCore *pointer, int stream_index,
                                    uint64_t operation_id) {
   if (!pointer || stream_index < -1) return -1;
   auto *core = impl(pointer);
-  std::lock_guard lock(core->mutex);
+  std::unique_lock lock(core->mutex);
   if (core->state == RILLIGHT_CORE_IDLE ||
       core->state == RILLIGHT_CORE_ENDED ||
       core->state == RILLIGHT_CORE_FAILED ||
@@ -1469,11 +1667,14 @@ int rillight_core_select_subtitle(RillightCore *pointer, int stream_index,
   core->requested_subtitle = stream_index;
   core->subtitle_change = true;
   ++core->timeline;
+  core->timeline_signal = core->timeline;
   reset_frames(core);
   core->seek_target = core->base_position;
   core->base_time = Clock::now();
   core->state = RILLIGHT_CORE_RECOVERING;
   core->wake.notify_all();
+  if (core->media_read_active)
+    core->io.cancel_media_read(core->io.opaque);
   return 0;
 }
 
@@ -1530,7 +1731,7 @@ int rillight_core_set_speed(RillightCore *pointer, double speed,
   if (!pointer || !std::isfinite(speed) || speed < 0.5 || speed > 2.0)
     return -1;
   auto *core = impl(pointer);
-  std::lock_guard lock(core->mutex);
+  std::unique_lock lock(core->mutex);
   if (core->state == RILLIGHT_CORE_IDLE ||
       core->state == RILLIGHT_CORE_ENDED ||
       core->state == RILLIGHT_CORE_FAILED ||
@@ -1542,11 +1743,14 @@ int rillight_core_set_speed(RillightCore *pointer, double speed,
   core->requested_speed = speed;
   core->speed_change = true;
   ++core->timeline;
+  core->timeline_signal = core->timeline;
   reset_frames(core);
   core->seek_target = core->base_position;
   core->base_time = Clock::now();
   core->state = RILLIGHT_CORE_RECOVERING;
   core->wake.notify_all();
+  if (core->media_read_active)
+    core->io.cancel_media_read(core->io.opaque);
   return 0;
 }
 
@@ -1585,6 +1789,7 @@ int rillight_core_report_output_drained(RillightCore *pointer,
   std::lock_guard lock(core->mutex);
   if (session_id != core->session || timeline_version != core->timeline)
     return -1;
+  if (!core->eof) return -1;
   core->output_drained = true;
   core->wake.notify_all();
   return 0;
