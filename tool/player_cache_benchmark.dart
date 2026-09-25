@@ -28,15 +28,29 @@ Future<void> main(List<String> args) async {
     return;
   }
   final rows = <Map<String, Object?>>[];
-  for (final scenario in [
+  const scenarios = [
     'stable',
     'limited',
     'outage',
+    'transient',
     'overquota',
     'limited-overquota',
     'disk-fault',
-  ]) {
-    for (var trial = 0; trial < 5; trial++) {
+  ];
+  final scenarioIndex = args.indexOf('--scenario');
+  final selected = scenarioIndex < 0
+      ? scenarios
+      : [args.elementAtOrNull(scenarioIndex + 1) ?? ''];
+  if (selected.any((scenario) => !scenarios.contains(scenario))) {
+    throw ArgumentError('Unknown cache benchmark scenario');
+  }
+  final trialsIndex = args.indexOf('--trials');
+  final trials = trialsIndex < 0
+      ? 5
+      : int.tryParse(args.elementAtOrNull(trialsIndex + 1) ?? '') ?? 0;
+  if (trials < 1) throw ArgumentError('Trial count must be positive');
+  for (final scenario in selected) {
+    for (var trial = 0; trial < trials; trial++) {
       // Alternate order so baseline does not systematically receive cold JIT.
       for (final enabled in trial.isEven ? [false, true] : [true, false]) {
         final row = await _run(scenario, trial, enabled);
@@ -60,11 +74,14 @@ Future<void> main(List<String> args) async {
         'initialReadMs',
         'repeatReadMs',
         'upstreamBytes',
+        'repeatUpstreamBytes',
+        'recoveryAttempts',
+        'recoveries',
         'rssPeakBytes',
       ]) {
         final values = subset.map((r) => r[key] as num).toList()..sort();
         item[key] = {
-          'median': values[2],
+          'median': values[values.length ~/ 2],
           'min': values.first,
           'max': values.last,
         };
@@ -78,11 +95,13 @@ Future<void> main(List<String> args) async {
   await File(
     '${output.path}/summary.json',
   ).writeAsString(const JsonEncoder.withIndent('  ').convert(summary));
-  final protection = await _largeProtection();
-  await File(
-    '${output.path}/large-protection.json',
-  ).writeAsString(const JsonEncoder.withIndent('  ').convert(protection));
-  stdout.writeln(jsonEncode(protection));
+  if (!args.contains('--skip-protection')) {
+    final protection = await _largeProtection();
+    await File(
+      '${output.path}/large-protection.json',
+    ).writeAsString(const JsonEncoder.withIndent('  ').convert(protection));
+    stdout.writeln(jsonEncode(protection));
+  }
   stdout.writeln('Evidence: ${output.absolute.path}');
 }
 
@@ -174,6 +193,7 @@ Future<Map<String, Object?>> _run(
   final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
   final client = HttpClient();
   var offline = false;
+  var temporaryFailures = 0;
   var upstreamBytes = 0;
   var upstreamRequests = 0;
   var rssPeak = ProcessInfo.currentRss;
@@ -185,6 +205,12 @@ Future<Map<String, Object?>> _run(
     upstreamRequests++;
     try {
       if (offline) {
+        request.response.statusCode = HttpStatus.serviceUnavailable;
+        await request.response.close();
+        return;
+      }
+      if (temporaryFailures > 0) {
+        temporaryFailures--;
         request.response.statusCode = HttpStatus.serviceUnavailable;
         await request.response.close();
         return;
@@ -272,9 +298,10 @@ Future<Map<String, Object?>> _run(
 
     Future<void> settled() async {
       final deadline = DateTime.now().add(const Duration(seconds: 10));
-      while ((store?.diagnostics['pendingBytes'] as int? ?? 0) > 0) {
+      while ((store?.diagnostics['pendingBytes'] as int? ?? 0) > 0 ||
+          (proxy?.diagnostics['activeRequests'] as int? ?? 0) > 0) {
         if (DateTime.now().isAfter(deadline)) {
-          throw StateError('Cache writes did not settle');
+          throw StateError('Cache transport did not settle');
         }
         await Future<void>.delayed(const Duration(milliseconds: 5));
       }
@@ -294,6 +321,7 @@ Future<Map<String, Object?>> _run(
       }
     }
     if (scenario == 'outage') offline = true;
+    if (scenario == 'transient') temporaryFailures = 1;
     final upstreamBeforeRepeat = upstreamBytes;
     final requestsBeforeRepeat = upstreamRequests;
     final repeatWatch = Stopwatch()..start();
@@ -330,6 +358,12 @@ Future<Map<String, Object?>> _run(
       'upstreamBytes': upstreamBytes,
       'repeatUpstreamBytes': upstreamBytes - upstreamBeforeRepeat,
       'repeatUpstreamRequests': upstreamRequests - requestsBeforeRepeat,
+      'recoveryAttempts': diagnostics['recoveryAttempts'],
+      'recoveries': diagnostics['recoveries'],
+      'recoveryFailures': diagnostics['recoveryFailures'],
+      'mediaDownloadBytes': diagnostics['mediaDownloadBytes'],
+      'controlDownloadBytes': diagnostics['controlDownloadBytes'],
+      'repeatedDownloadBytes': diagnostics['repeatedDownloadBytes'],
       'rssPeakBytes': rssPeak,
       'actualDiskBytes': actualDiskBytes,
       'diagnostics': diagnostics,

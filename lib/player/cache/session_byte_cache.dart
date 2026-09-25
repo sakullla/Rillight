@@ -89,7 +89,9 @@ class SessionByteCache {
     required this.pendingLimitBytes,
     required this.maxEntries,
     required this.diskSessionLimitBytes,
-  });
+  }) : _appliedMemoryLimitBytes = memoryLimitBytes,
+       _appliedPendingLimitBytes = pendingLimitBytes,
+       _appliedDiskSessionLimitBytes = diskSessionLimitBytes;
 
   static const maxBlockBytes = 1024 * 1024;
 
@@ -134,6 +136,9 @@ class SessionByteCache {
   int pendingLimitBytes;
   final int maxEntries;
   int diskSessionLimitBytes;
+  int _appliedMemoryLimitBytes;
+  int _appliedPendingLimitBytes;
+  int _appliedDiskSessionLimitBytes;
   final _entries = <_BlockKey, _Entry>{};
   final _memory = <_BlockKey, Uint8List>{};
   final _memoryPins = <_BlockKey, int>{};
@@ -153,27 +158,47 @@ class SessionByteCache {
   int _invalidations = 0;
   Future<void>? _closing;
 
-  Map<String, Object?> get diagnostics => {
-    'memoryLimitBytes': memoryLimitBytes,
-    'pendingLimitBytes': pendingLimitBytes,
-    'diskSessionLimitBytes': diskSessionLimitBytes,
-    'memoryResizePending': _memoryBytes > memoryLimitBytes,
-    'pendingResizePending': _pendingBytes > pendingLimitBytes,
-    'memoryBytes': _memoryBytes,
-    'memoryPeakBytes': _memoryPeak,
-    'pendingBytes': _pendingBytes,
-    'pendingPeakBytes': _pendingPeak,
-    'indexEntries': _entries.length,
-    'indexBudgetBytes': _indexBytes,
-    'memoryHitBytes': _memoryHits,
-    'diskHitBytes': _diskHits,
-    'evictions': _evictions,
-    'invalidations': _invalidations,
-    'protectedRanges': _rangeLeases.length,
-    'degradation': _degradation ?? _disk?.degradation,
-    'closed': _closed,
-    ...?_disk?.diagnostics,
-  };
+  Map<String, Object?> get diagnostics {
+    _updateAppliedLimits();
+    return {
+      'memoryLimitBytes': memoryLimitBytes,
+      'pendingLimitBytes': pendingLimitBytes,
+      'diskSessionLimitBytes': diskSessionLimitBytes,
+      'appliedMemoryLimitBytes': _appliedMemoryLimitBytes,
+      'appliedPendingLimitBytes': _appliedPendingLimitBytes,
+      'appliedDiskSessionLimitBytes': _appliedDiskSessionLimitBytes,
+      'memoryResizePending': _memoryBytes > memoryLimitBytes,
+      'pendingResizePending': _pendingBytes > pendingLimitBytes,
+      'memoryBytes': _memoryBytes,
+      'memoryPeakBytes': _memoryPeak,
+      'pendingBytes': _pendingBytes,
+      'pendingPeakBytes': _pendingPeak,
+      'indexEntries': _entries.length,
+      'indexBudgetBytes': _indexBytes,
+      'memoryHitBytes': _memoryHits,
+      'diskHitBytes': _diskHits,
+      'evictions': _evictions,
+      'invalidations': _invalidations,
+      'protectedRanges': _rangeLeases.length,
+      'degradation': _degradation ?? _disk?.degradation,
+      'closed': _closed,
+      ...?_disk?.diagnostics,
+    };
+  }
+
+  void _updateAppliedLimits() {
+    if (_memoryBytes <= memoryLimitBytes) {
+      _appliedMemoryLimitBytes = memoryLimitBytes;
+    }
+    if (_pendingBytes <= pendingLimitBytes) {
+      _appliedPendingLimitBytes = pendingLimitBytes;
+    }
+    if (_disk == null ||
+        (_disk?.degradation == null &&
+            _disk?.diagnostics['diskResizePending'] != true)) {
+      _appliedDiskSessionLimitBytes = diskSessionLimitBytes;
+    }
+  }
 
   /// Existing protected reads remain valid. New writes honor the new target;
   /// protected excess is released as consumers finish, never copied elsewhere.
@@ -191,6 +216,7 @@ class SessionByteCache {
     diskSessionLimitBytes = diskBytes;
     _trimMemory();
     await _disk?.setSessionLimit(diskBytes);
+    _updateAppliedLimits();
   }
 
   void _trimMemory() {

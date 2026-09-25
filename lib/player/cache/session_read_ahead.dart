@@ -102,7 +102,9 @@ class SessionReadAhead {
   int get _windowEnd {
     // Disk failure must not turn a disk-sized read-ahead into RAM usage.
     final usable = cache.diagnostics['degradation'] == null;
-    final length = usable ? aheadBytes : blockBytes;
+    final length = usable
+        ? min(aheadBytes, cache.diskSessionLimitBytes ~/ 2)
+        : min(blockBytes, cache.memoryLimitBytes);
     return min(total, _position + length);
   }
 
@@ -123,6 +125,9 @@ class SessionReadAhead {
       while (_active && !_closed && reader == _reader) {
         if (cache.diagnostics['degradation'] == 'disk-timeout') {
           _waitingForDisk = true;
+        }
+        if (_position < total && _windowEnd <= _position) {
+          throw const HttpException('Read-ahead budget unavailable');
         }
         final missing = _missing();
         if (missing == null) return;

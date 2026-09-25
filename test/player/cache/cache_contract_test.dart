@@ -328,9 +328,11 @@ void main() {
         expect(lease, isNotNull);
         await cache.resize(memoryBytes: 4, pendingBytes: 2048, diskBytes: 256);
         expect(cache.diagnostics['memoryResizePending'], isTrue);
+        expect(cache.diagnostics['appliedMemoryLimitBytes'], 16);
         expect((await lease!.read(0))!.bytes, List.filled(16, 7));
         await lease.close();
         expect(cache.diagnostics['memoryResizePending'], isFalse);
+        expect(cache.diagnostics['appliedMemoryLimitBytes'], 4);
         expect(cache.diagnostics['memoryBytes'], lessThanOrEqualTo(4));
         await cache.resize(
           memoryBytes: 32,
@@ -357,9 +359,11 @@ void main() {
         expect(lease, isNotNull);
         await cache.resize(memoryBytes: 0, pendingBytes: 2048, diskBytes: 128);
         expect(cache.diagnostics['diskResizePending'], isTrue);
+        expect(cache.diagnostics['appliedDiskSessionLimitBytes'], 4096);
         expect((await lease!.read(0))!.bytes, List.filled(600, 7));
         await lease.close();
         expect(cache.diagnostics['diskResizePending'], isFalse);
+        expect(cache.diagnostics['appliedDiskSessionLimitBytes'], 128);
         expect(_actualBytes(root), lessThanOrEqualTo(128));
       },
     );

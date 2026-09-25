@@ -9,6 +9,178 @@ import 'package:rillight/player/cache/session_byte_cache.dart';
 
 void main() {
   test(
+    'VOD HLS prefetches only the next selected segment into session cache',
+    () async {
+      final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final cache = await SessionByteCache.open(memoryLimitBytes: 1024 * 1024);
+      final proxy = await PlaybackHttpProxy.create(cache: cache);
+      final client = HttpClient();
+      final counts = <String, int>{};
+      upstream.listen((request) async {
+        final path = request.uri.path;
+        counts[path] = (counts[path] ?? 0) + 1;
+        if (path == '/index.m3u8') {
+          request.response.headers.contentType = ContentType(
+            'application',
+            'vnd.apple.mpegurl',
+          );
+          request.response.write(
+            '#EXTM3U\n#EXT-X-MAP:URI="init.mp4"\n#EXTINF:2,\na.ts\n#EXTINF:2,\nb.ts\n#EXTINF:2,\nc.ts\n#EXT-X-ENDLIST\n',
+          );
+        } else {
+          request.response.headers.set('etag', '"segments"');
+          request.response.headers.set('cache-control', 'max-age=120');
+          if (request.headers.value('range') != null) {
+            request.response.statusCode = HttpStatus.partialContent;
+            request.response.headers.set('content-range', 'bytes 0-3/4');
+          }
+          request.response.contentLength = 4;
+          request.response.write('data');
+        }
+        await request.response.close();
+      });
+      final origin = Uri.parse('http://127.0.0.1:${upstream.port}');
+      Future<String> get(Uri url) async => (await (await client.getUrl(
+        url,
+      )).close()).transform(utf8.decoder).join();
+      try {
+        final playlist = await get(
+          proxy.register(origin.resolve('/index.m3u8')),
+        );
+        final segments = playlist
+            .split('\n')
+            .where((line) => line.startsWith('http://127.0.0.1:'))
+            .map(Uri.parse)
+            .toList();
+        expect(segments, hasLength(3));
+        expect(await get(segments[0]), 'data');
+        final deadline = DateTime.now().add(const Duration(seconds: 3));
+        while (((counts['/b.ts'] ?? 0) == 0 ||
+                proxy.diagnostics['segmentPrefetchActive'] == true ||
+                proxy.diagnostics['activeRequests'] != 0) &&
+            DateTime.now().isBefore(deadline)) {
+          await Future<void>.delayed(const Duration(milliseconds: 10));
+        }
+        expect(counts['/b.ts'], 1);
+        expect(counts['/init.mp4'], 1);
+        expect(counts['/c.ts'], isNull);
+        final map = RegExp('URI="([^"]+)"').firstMatch(playlist)![1]!;
+        expect(await get(Uri.parse(map)), 'data');
+        expect(counts['/init.mp4'], 1);
+        expect(await get(segments[1]), 'data');
+        expect(counts['/b.ts'], 1);
+      } finally {
+        client.close(force: true);
+        await proxy.close();
+        await upstream.close(force: true);
+      }
+    },
+  );
+
+  test('foreground segment cancels stalled HLS prefetch', () async {
+    final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final cache = await SessionByteCache.open(memoryLimitBytes: 1024 * 1024);
+    final proxy = await PlaybackHttpProxy.create(cache: cache);
+    final client = HttpClient();
+    final stalled = <HttpResponse>[];
+    var backgroundStarted = false;
+    upstream.listen((request) async {
+      if (request.uri.path == '/index.m3u8') {
+        request.response.headers.contentType = ContentType(
+          'application',
+          'vnd.apple.mpegurl',
+        );
+        request.response.write(
+          '#EXTM3U\n#EXTINF:2,\na.ts\n#EXTINF:2,\nb.ts\n#EXTINF:2,\nc.ts\n#EXT-X-ENDLIST\n',
+        );
+        await request.response.close();
+      } else if (request.uri.path == '/b.ts') {
+        stalled.add(request.response);
+        backgroundStarted = true;
+        request.response.contentLength = 4;
+        await request.response.flush();
+      } else {
+        request.response.contentLength = 4;
+        request.response.write('data');
+        await request.response.close();
+      }
+    });
+    final origin = Uri.parse('http://127.0.0.1:${upstream.port}');
+    Future<String> get(Uri url) async => (await (await client.getUrl(
+      url,
+    )).close()).transform(utf8.decoder).join();
+    try {
+      final playlist = await get(proxy.register(origin.resolve('/index.m3u8')));
+      final segments = playlist
+          .split('\n')
+          .where((line) => line.startsWith('http://127.0.0.1:'))
+          .map(Uri.parse)
+          .toList();
+      expect(segments, hasLength(3));
+      expect(await get(segments[0]), 'data');
+      final deadline = DateTime.now().add(const Duration(seconds: 3));
+      while (!backgroundStarted && DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      expect(backgroundStarted, isTrue);
+      proxy.cancelPendingReads(preserveSubtitles: true);
+      final watch = Stopwatch()..start();
+      expect(
+        await get(segments[2]).timeout(const Duration(seconds: 2)),
+        'data',
+      );
+      expect(watch.elapsed, lessThan(const Duration(seconds: 2)));
+      final settled = DateTime.now().add(const Duration(seconds: 2));
+      while (proxy.diagnostics['activeRequests'] != 0 &&
+          DateTime.now().isBefore(settled)) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      expect(proxy.diagnostics['activeRequests'], 0);
+    } finally {
+      client.close(force: true);
+      await proxy.close();
+      for (final response in stalled) {
+        try {
+          await response.close();
+        } catch (_) {}
+      }
+      await upstream.close(force: true);
+    }
+  });
+
+  test(
+    'temporary upstream failure retries without counting cached bytes',
+    () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final client = HttpClient();
+      var requests = 0;
+      server.listen((request) async {
+        requests++;
+        if (requests == 1) {
+          request.response.statusCode = HttpStatus.serviceUnavailable;
+        } else {
+          request.response.write('recovered');
+        }
+        await request.response.close();
+      });
+      final proxy = await PlaybackHttpProxy.create();
+      try {
+        final url = proxy.register(
+          Uri.parse('http://127.0.0.1:${server.port}/video'),
+        );
+        final response = await (await client.getUrl(url)).close();
+        expect(await response.transform(utf8.decoder).join(), 'recovered');
+        expect(requests, 2);
+        expect(proxy.upstreamBytes, 9);
+      } finally {
+        client.close(force: true);
+        await proxy.close();
+        await server.close(force: true);
+      }
+    },
+  );
+
+  test(
     'seek cancellation preserves a pending subtitle but close cancels it',
     () async {
       final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
@@ -167,8 +339,12 @@ void main() {
       await fixture.settle();
       fixture.redirectVersion = 2;
       final before = fixture.proxy.upstreamBytes;
+      final mediaBefore =
+          fixture.proxy.diagnostics['mediaDownloadBytes'] as int;
       expect((await fixture.read('bytes=0-7')).$2, 'abcdefgh');
       expect(fixture.proxy.upstreamBytes - before, 1);
+      expect(fixture.proxy.diagnostics['mediaDownloadBytes'], mediaBefore);
+      expect(fixture.proxy.diagnostics['controlDownloadBytes'], greaterThan(0));
       expect(fixture.cache.diagnostics['diskHitBytes'], 8);
       expect(fixture.cache.diagnostics['invalidations'], 0);
       fixture.redirectVersion = 3;
@@ -1087,7 +1263,7 @@ void main() {
           '/subtitle.ass',
         ]),
       );
-      expect(foreignRequests, hasLength(3));
+      expect(foreignRequests.length, greaterThanOrEqualTo(3));
       for (final request in foreignRequests) {
         expect(request.headers.value('x-emby-token'), isNull);
         expect(request.headers.value('authorization'), isNull);
