@@ -28,12 +28,14 @@ enum MobileLoadingVariant { home, libraries, row }
 /// 内容形状的加载占位：首页是横幅加海报行，片库是列表条。
 class MobileLoadingPlaceholder extends StatelessWidget {
   const MobileLoadingPlaceholder.home({super.key})
-    : variant = MobileLoadingVariant.home;
+    : variant = MobileLoadingVariant.home,
+      wide = false;
 
   const MobileLoadingPlaceholder.libraries({super.key})
-    : variant = MobileLoadingVariant.libraries;
+    : variant = MobileLoadingVariant.libraries,
+      wide = false;
 
-  const MobileLoadingPlaceholder.row({super.key})
+  const MobileLoadingPlaceholder.row({super.key, this.wide = false})
     : variant = MobileLoadingVariant.row;
 
   static const Key homeKey = Key('mobile-home-loading');
@@ -41,13 +43,16 @@ class MobileLoadingPlaceholder extends StatelessWidget {
 
   final MobileLoadingVariant variant;
 
+  /// 行内占位跟随成品：继续观看和下一集是 16:9，海报行是 2:3。
+  final bool wide;
+
   @override
   Widget build(BuildContext context) {
     final animate = AppMotion.durationOf(context) != Duration.zero;
     final shaped = switch (variant) {
       MobileLoadingVariant.home => _HomeLoading(animate: animate),
       MobileLoadingVariant.libraries => _LibrariesLoading(animate: animate),
-      MobileLoadingVariant.row => _RowLoading(animate: animate),
+      MobileLoadingVariant.row => _RailLoading(animate: animate, wide: wide),
     };
     final keyed = switch (variant) {
       MobileLoadingVariant.home => KeyedSubtree(key: homeKey, child: shaped),
@@ -69,7 +74,9 @@ class MobileLoadingPlaceholder extends StatelessWidget {
 }
 
 class _SectionSkeleton extends StatelessWidget {
-  const _SectionSkeleton();
+  const _SectionSkeleton({required this.wide});
+
+  final bool wide;
 
   @override
   Widget build(BuildContext context) {
@@ -79,7 +86,7 @@ class _SectionSkeleton extends StatelessWidget {
       children: [
         SkeletonBlock(width: 96, height: 16, animated: animate),
         const SizedBox(height: AppSpacing.sm),
-        _PosterLoading(animate: animate),
+        _RailLoading(animate: animate, wide: wide),
       ],
     );
   }
@@ -110,12 +117,12 @@ class _HomeLoading extends StatelessWidget {
         const SizedBox(height: AppSpacing.md),
         const Padding(
           padding: EdgeInsets.symmetric(horizontal: AppSpacing.md),
-          child: _SectionSkeleton(),
+          child: _SectionSkeleton(wide: true),
         ),
         const SizedBox(height: AppSpacing.md),
         const Padding(
           padding: EdgeInsets.symmetric(horizontal: AppSpacing.md),
-          child: _SectionSkeleton(),
+          child: _SectionSkeleton(wide: false),
         ),
       ],
     );
@@ -164,52 +171,59 @@ class _LibrariesLoading extends StatelessWidget {
   }
 }
 
-class _RowLoading extends StatelessWidget {
-  const _RowLoading({required this.animate});
-
-  final bool animate;
-
-  @override
-  Widget build(BuildContext context) {
-    return _PosterLoading(animate: animate);
-  }
+/// 海报卡宽：一屏三张完整 2:3，再露出下一张。页边距 16，间距 8。
+double phoneHomePosterCardWidth(double screenWidth) {
+  final available = screenWidth - AppSpacing.md * 2;
+  return (available - AppSpacing.xs * 3) / 3.3;
 }
 
-class _PosterLoading extends StatelessWidget {
-  const _PosterLoading({required this.animate});
+/// 横卡宽：一屏一张完整 16:9，再露出下一张。页边距 16，间距 8。
+double phoneHomeWideCardWidth(double screenWidth) {
+  final available = screenWidth - AppSpacing.md * 2;
+  return (available - AppSpacing.xs) / 1.3;
+}
+
+class _RailLoading extends StatelessWidget {
+  const _RailLoading({required this.animate, required this.wide});
 
   final bool animate;
+  final bool wide;
 
   @override
   Widget build(BuildContext context) {
     final screen = MediaQuery.sizeOf(context).width;
-    final available = screen - AppSpacing.md * 2;
-    final posterWidth = (available - AppSpacing.sm * 3) / 3.3;
-    final posterHeight = posterWidth * 1.5;
+    final cardWidth = wide
+        ? phoneHomeWideCardWidth(screen)
+        : phoneHomePosterCardWidth(screen);
+    final imageHeight = wide ? cardWidth * 9 / 16 : cardWidth * 1.5;
     return SizedBox(
-      height: posterHeight + AppSpacing.xs + AppSpacing.sm,
-      child: ListView.separated(
+      height: imageHeight + AppSpacing.xs + 14,
+      child: ListView.builder(
         scrollDirection: Axis.horizontal,
         physics: const NeverScrollableScrollPhysics(),
-        itemCount: 3,
-        separatorBuilder: (context, index) =>
-            const SizedBox(width: AppSpacing.sm),
+        itemCount: wide ? 2 : 4,
         itemBuilder: (context, index) {
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              SkeletonBlock(
-                width: posterWidth,
-                height: posterHeight,
-                animated: animate,
+          return Padding(
+            padding: const EdgeInsets.only(right: AppSpacing.xs),
+            child: SizedBox(
+              width: cardWidth,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SkeletonBlock(
+                    width: cardWidth,
+                    height: imageHeight,
+                    animated: animate,
+                  ),
+                  const SizedBox(height: AppSpacing.xs),
+                  SkeletonBlock(
+                    width: cardWidth * 0.72,
+                    height: 14,
+                    animated: animate,
+                  ),
+                ],
               ),
-              const SizedBox(height: AppSpacing.xs),
-              SkeletonBlock(
-                width: posterWidth * 0.75,
-                height: AppSpacing.sm,
-                animated: animate,
-              ),
-            ],
+            ),
           );
         },
       ),

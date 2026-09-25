@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -89,7 +90,7 @@ class _PhoneHomeState extends State<PhoneHome> {
             state: CatalogRowState(
               items: watching,
               loading: catalog.resume.loading && watching.isEmpty,
-              hidden: watching.isEmpty,
+              hidden: watching.isEmpty && !catalog.resume.loading,
               error: watching.isEmpty ? catalog.resume.error : null,
               notice: catalog.resume.notice,
             ),
@@ -104,7 +105,7 @@ class _PhoneHomeState extends State<PhoneHome> {
             state: CatalogRowState(
               items: nextUpItems,
               loading: catalog.nextUp.loading && nextUpItems.isEmpty,
-              hidden: nextUpItems.isEmpty,
+              hidden: nextUpItems.isEmpty && !catalog.nextUp.loading,
               error: nextUpItems.isEmpty ? catalog.nextUp.error : null,
               notice: catalog.nextUp.notice,
             ),
@@ -185,21 +186,32 @@ class _PhoneHomeState extends State<PhoneHome> {
             AppSpacing.md,
             AppSpacing.md,
             AppSpacing.md,
-            0,
+            AppSpacing.md,
+          );
+          final screen = MediaQuery.sizeOf(context);
+          final bannerSlot = _bannerSlot(
+            context: context,
+            width: screen.width,
+            viewport: screen.height,
+            visible: visible,
+            resume: byId[PhoneHomeSectionId.resume],
           );
           body = Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               for (final id in visible)
                 if (id == PhoneHomeSectionId.banner)
-                  PhoneHero(
-                    catalog: catalog,
-                    onItem: (item) {
-                      if (_heroItem?.id == item.id) {
-                        return;
-                      }
-                      setState(() => _heroItem = item);
-                    },
+                  _fitBanner(
+                    slot: bannerSlot,
+                    child: PhoneHero(
+                      catalog: catalog,
+                      onItem: (item) {
+                        if (_heroItem?.id == item.id) {
+                          return;
+                        }
+                        setState(() => _heroItem = item);
+                      },
+                    ),
                   )
                 else if (byId[id] != null)
                   Padding(
@@ -265,18 +277,6 @@ class _PhoneHomeState extends State<PhoneHome> {
       },
     );
   }
-}
-
-/// 最近电影/剧集卡宽：一屏约 3 张完整 2:3 海报，再露出下一张。
-double phoneHomePosterCardWidth(double screenWidth) {
-  final available = screenWidth - AppSpacing.md * 2;
-  return (available - AppSpacing.sm * 3) / 3.3;
-}
-
-/// 继续观看/下一集横卡宽：一屏并排约两张 16:9，并露出下一张。
-double phoneHomeWideCardWidth(double screenWidth) {
-  final available = screenWidth - AppSpacing.md * 2;
-  return (available - AppSpacing.sm * 2) / 2.3;
 }
 
 double _cardWidthOf(BuildContext context, {required bool wide}) {
@@ -354,7 +354,77 @@ double _rowHeightOf(BuildContext context, {required bool wide}) {
   }
   final titleLine = 14 * 1.2 * textScale;
   final meta = 12 * 1.2 * textScale;
-  return width * 9 / 16 + 6 + titleLine + meta + 4;
+  final badge = _wideBadgeHeight(context);
+  return width * 9 / 16 + 6 + badge + titleLine + meta + 4;
+}
+
+double _wideBadgeHeight(BuildContext context) {
+  final line = MediaQuery.textScalerOf(context).scale(12) * 1.2;
+  return line + AppSpacing.xxs * 2;
+}
+
+/// 横幅默认高度仍是顶栏延伸加 16:9。继续观看放不下时只缩短这段延伸。
+class _BannerSlot {
+  const _BannerSlot({required this.natural, required this.fitted});
+
+  final double natural;
+  final double fitted;
+}
+
+_BannerSlot _bannerSlot({
+  required BuildContext context,
+  required double width,
+  required double viewport,
+  required List<String> visible,
+  required _HomeSection? resume,
+}) {
+  final extension = MediaQuery.paddingOf(context).top + 56;
+  final picture = width * 9 / 16;
+  final natural = extension + picture;
+  var bannerThenResume = false;
+  for (final id in visible) {
+    if (id == PhoneHomeSectionId.banner) {
+      bannerThenResume = true;
+      continue;
+    }
+    bannerThenResume =
+        bannerThenResume &&
+        id == PhoneHomeSectionId.resume &&
+        resume != null &&
+        !resume.state.hidden;
+    break;
+  }
+  if (!bannerThenResume || !viewport.isFinite || viewport <= 0) {
+    return _BannerSlot(natural: natural, fitted: natural);
+  }
+  final titleLine = math.max(
+    24.0,
+    MediaQuery.textScalerOf(context).scale(14) * 1.2,
+  );
+  final beforeImage = AppSpacing.md * 2 + titleLine + AppSpacing.sm;
+  final resumeImage = phoneHomeWideCardWidth(width) * 9 / 16;
+  final limit = viewport - phoneScrollClearance(context);
+  final overflow = natural + beforeImage + resumeImage - limit;
+  if (overflow <= 0) {
+    return _BannerSlot(natural: natural, fitted: natural);
+  }
+  return _BannerSlot(
+    natural: natural,
+    fitted: math.max(picture, natural - overflow),
+  );
+}
+
+Widget _fitBanner({required _BannerSlot slot, required Widget child}) {
+  if (slot.natural <= 0 || slot.fitted >= slot.natural - 0.5) {
+    return child;
+  }
+  return ClipRect(
+    child: Align(
+      alignment: Alignment.bottomCenter,
+      heightFactor: (slot.fitted / slot.natural).clamp(0.01, 1.0),
+      child: child,
+    ),
+  );
 }
 
 class _HomeSection {
@@ -464,7 +534,7 @@ class _PhoneHomeRow extends StatelessWidget {
           moreKey: hasMore ? CatalogKeys.shelfMore(section.shelfId) : null,
         ),
         if (state.loading && state.items.isEmpty)
-          const MobileLoadingPlaceholder.row(),
+          MobileLoadingPlaceholder.row(wide: section.wide),
         if (problem != null)
           MobileFailureState(
             message: catalogFailureMessage(l10n, problem),
@@ -578,8 +648,9 @@ class _WideCard extends StatelessWidget {
     final title = _resumeTitle(item);
     final meta = _resumeMeta(item, title);
     final badges = _badgeLabels(l10n, item);
+    final badgeHeight = _wideBadgeHeight(context);
     return Padding(
-      padding: const EdgeInsets.only(right: AppSpacing.sm),
+      padding: const EdgeInsets.only(right: AppSpacing.xs),
       child: SizedBox(
         width: width,
         child: MobilePressable(
@@ -598,13 +669,6 @@ class _WideCard extends StatelessWidget {
                     clipBehavior: Clip.hardEdge,
                     children: [
                       _sharedPosterImage(item, shared),
-                      if (badges.isNotEmpty)
-                        Positioned(
-                          top: AppSpacing.xs,
-                          left: AppSpacing.xs,
-                          right: AppSpacing.xs,
-                          child: _PosterBadges(itemId: item.id, labels: badges),
-                        ),
                       if (item.canResume)
                         Positioned(
                           left: 0,
@@ -664,6 +728,13 @@ class _WideCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 6),
+              if (badges.isNotEmpty)
+                SizedBox(
+                  height: badgeHeight,
+                  child: ClipRect(
+                    child: _PosterBadges(itemId: item.id, labels: badges),
+                  ),
+                ),
               Text(
                 title,
                 maxLines: 1,
@@ -713,7 +784,7 @@ class _PhonePoster extends StatelessWidget {
     final l10n = AppLocalizations.of(context);
     final badges = _badgeLabels(l10n, item, includePlayback: playbackBadges);
     return Padding(
-      padding: const EdgeInsets.only(right: AppSpacing.sm),
+      padding: const EdgeInsets.only(right: AppSpacing.xs),
       child: SizedBox(
         width: width,
         child: _PosterCard(

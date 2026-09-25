@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -200,7 +201,7 @@ class _PhoneShelfPageState extends State<PhoneShelfPage> {
       return;
     }
     setState(() => _watch = watch);
-    unawaited(_load());
+    unawaited(_load(keepVisible: true));
   }
 
   /// similar 接口不支持 StartIndex，只取这一页。
@@ -227,16 +228,19 @@ class _PhoneShelfPageState extends State<PhoneShelfPage> {
     return parseCatalogPage(json);
   }
 
-  Future<void> _load() async {
+  Future<void> _load({bool keepVisible = false}) async {
     final gen = ++_loadGen;
+    final keep = keepVisible && _items.isNotEmpty;
     setState(() {
-      _loading = true;
+      _loading = !keep;
       _loadingMore = false;
       _error = null;
       _pageError = null;
-      _items = const [];
-      _hasMore = false;
-      _fetched = 0;
+      if (!keep) {
+        _items = const [];
+        _hasMore = false;
+        _fetched = 0;
+      }
     });
     try {
       final page = await _fetch(0);
@@ -255,7 +259,11 @@ class _PhoneShelfPageState extends State<PhoneShelfPage> {
       }
       setState(() {
         _loading = false;
-        _error = _asEmby(error);
+        if (keep) {
+          _pageError = _asEmby(error);
+        } else {
+          _error = _asEmby(error);
+        }
       });
     }
   }
@@ -370,11 +378,12 @@ class _PhoneShelfPageState extends State<PhoneShelfPage> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final scale = MediaQuery.textScalerOf(context).scale(14) / 14;
-        final columns = PhoneShelfPage.columnCountFor(constraints.maxWidth);
-        final tileWidth = constraints.maxWidth / columns;
-        final tileHeight = tileWidth * 1.5 + 32 * scale;
+        final metrics = _shelfGridMetrics(constraints.maxWidth, scale);
+        if (metrics.tileWidth <= 0 || metrics.tileHeight <= 0) {
+          return const SizedBox.shrink();
+        }
         final imageWidth = catalogPosterMaxWidth(
-          tileWidth,
+          metrics.tileWidth,
           MediaQuery.devicePixelRatioOf(context),
         );
         return MediaImageScrollListener(
@@ -385,10 +394,10 @@ class _PhoneShelfPageState extends State<PhoneShelfPage> {
                 padding: const EdgeInsets.all(AppSpacing.md),
                 sliver: SliverGrid(
                   gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: columns,
-                    mainAxisSpacing: AppSpacing.sm,
-                    crossAxisSpacing: AppSpacing.sm,
-                    childAspectRatio: tileWidth / tileHeight,
+                    crossAxisCount: metrics.columns,
+                    mainAxisSpacing: metrics.spacing,
+                    crossAxisSpacing: metrics.spacing,
+                    childAspectRatio: metrics.tileWidth / metrics.tileHeight,
                   ),
                   delegate: SliverChildBuilderDelegate(
                     (context, index) {
@@ -450,44 +459,78 @@ class _PhoneShelfPageState extends State<PhoneShelfPage> {
   }
 }
 
+/// 页边距算在宽度里面。占位和成品共用列数、间距和格子高宽比。
+class _ShelfGridMetrics {
+  const _ShelfGridMetrics({
+    required this.columns,
+    required this.spacing,
+    required this.tileWidth,
+    required this.tileHeight,
+  });
+
+  final int columns;
+  final double spacing;
+  final double tileWidth;
+  final double tileHeight;
+}
+
+_ShelfGridMetrics _shelfGridMetrics(double outerWidth, double textScale) {
+  const spacing = AppSpacing.sm;
+  final columns = PhoneShelfPage.columnCountFor(outerWidth);
+  final content = math.max(0.0, outerWidth - AppSpacing.md * 2);
+  final gaps = spacing * math.max(0, columns - 1);
+  final tileWidth = columns <= 0 || content <= gaps
+      ? 0.0
+      : (content - gaps) / columns;
+  return _ShelfGridMetrics(
+    columns: columns,
+    spacing: spacing,
+    tileWidth: tileWidth,
+    tileHeight: tileWidth * 1.5 + 32 * textScale,
+  );
+}
+
 class _ShelfGridSkeleton extends StatelessWidget {
   const _ShelfGridSkeleton();
 
   @override
   Widget build(BuildContext context) {
-    final animate = !MediaQuery.disableAnimationsOf(context);
     return LayoutBuilder(
       builder: (context, constraints) {
-        const spacing = AppSpacing.sm;
-        final columns = PhoneShelfPage.columnCountFor(constraints.maxWidth);
-        final tile = (constraints.maxWidth - spacing * (columns - 1)) / columns;
+        final scale = MediaQuery.textScalerOf(context).scale(14) / 14;
+        final metrics = _shelfGridMetrics(constraints.maxWidth, scale);
+        if (metrics.columns <= 0 ||
+            metrics.tileWidth <= 0 ||
+            metrics.tileHeight <= 0) {
+          return const SizedBox.shrink();
+        }
         return Padding(
           padding: const EdgeInsets.all(AppSpacing.md),
-          child: Wrap(
-            spacing: spacing,
-            runSpacing: spacing,
-            children: [
-              for (var i = 0; i < columns * 3; i++)
-                SizedBox(
-                  width: tile,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      SkeletonBlock(
-                        width: tile,
-                        height: tile * 1.5,
-                        animated: animate,
-                      ),
-                      const SizedBox(height: AppSpacing.xs),
-                      SkeletonBlock(
-                        width: tile * 0.72,
-                        height: 14,
-                        animated: animate,
-                      ),
-                    ],
+          child: GridView.builder(
+            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: metrics.columns,
+              mainAxisSpacing: metrics.spacing,
+              crossAxisSpacing: metrics.spacing,
+              childAspectRatio: metrics.tileWidth / metrics.tileHeight,
+            ),
+            itemCount: metrics.columns * 3,
+            itemBuilder: (context, index) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const AspectRatio(
+                    aspectRatio: 2 / 3,
+                    child: SkeletonBlock(animated: false),
                   ),
-                ),
-            ],
+                  const SizedBox(height: AppSpacing.xs),
+                  SkeletonBlock(
+                    width: metrics.tileWidth * 0.72,
+                    height: 14,
+                    animated: false,
+                  ),
+                ],
+              );
+            },
           ),
         );
       },

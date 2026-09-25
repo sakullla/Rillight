@@ -814,7 +814,7 @@ void main() {
         ),
         isNotEmpty,
       );
-      final posterWidth = (360 - AppSpacing.md * 2 - AppSpacing.sm * 3) / 3.3;
+      final posterWidth = phoneHomePosterCardWidth(360);
       expect(
         blocks
             .where((block) => (block.width! - posterWidth).abs() < 0.1)
