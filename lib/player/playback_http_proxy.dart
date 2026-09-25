@@ -1571,47 +1571,202 @@ class PlaybackHttpProxy {
           _cacheWorkspace -= _cachedResponseWorkspace;
         }
       }
-      final (response, effective) = await _fetch(
+      var (response, effective) = await _fetch(
         incoming,
         url,
         allowRange: allowRange,
         read: read,
       );
-      output.statusCode = response.statusCode;
-      for (final name in [
-        'content-type',
-        'content-range',
-        'accept-ranges',
-        'etag',
-        'last-modified',
-      ]) {
-        output.headers.removeAll(name);
-        final value = response.headers.value(name);
-        if (value != null) output.headers.set(name, value);
+      void copyResponseHeaders(HttpClientResponse source) {
+        output.statusCode = source.statusCode;
+        for (final name in [
+          'content-type',
+          'content-range',
+          'accept-ranges',
+          'etag',
+          'last-modified',
+        ]) {
+          output.headers.removeAll(name);
+          final value = source.headers.value(name);
+          if (value != null) output.headers.set(name, value);
+        }
       }
+
+      copyResponseHeaders(response);
       if (incoming.method == 'HEAD') {
         output.contentLength = response.contentLength;
         await _discard(response, read);
         return;
       }
-      final chunks = StreamIterator<List<int>>(response);
+      var chunks = StreamIterator<List<int>>(response);
       read.iterators.add(chunks);
       try {
         final prefixBytes = <int>[];
         var prefixInterrupted = false;
+        var prefixRecoveryAttempts = 0;
+        DateTime? prefixRecoveryStarted;
+        Duration? prefixRetryAfter;
+        var awaitingPrefixRecoveryByte = false;
         while (prefixBytes.length < 8) {
           bool advanced;
           try {
             advanced = await _advance(chunks, read);
           } catch (_) {
             read.check();
-            if (prefixBytes.isEmpty) rethrow;
+            advanced = false;
             prefixInterrupted = true;
-            break;
           }
-          if (!advanced) break;
-          read.check();
-          prefixBytes.addAll(chunks.current);
+          if (advanced) {
+            read.check();
+            if (awaitingPrefixRecoveryByte && chunks.current.isNotEmpty) {
+              awaitingPrefixRecoveryByte = false;
+              prefixRecoveryAttempts = 0;
+              prefixRecoveryStarted = null;
+              _recoveries++;
+            }
+            prefixBytes.addAll(chunks.current);
+            continue;
+          }
+          if (prefixBytes.isNotEmpty) break;
+          if (response.contentLength <= 0 && !prefixInterrupted) break;
+          final initialRange = response.statusCode == HttpStatus.partialContent
+              ? MediaContentRange.parse(response.headers.value('content-range'))
+              : null;
+          final length = response.contentLength;
+          final etag = MediaCachePolicy(response.headers).strongEtag;
+          final restartable =
+              incoming.method == 'GET' &&
+              [
+                PlaybackResourceRole.media,
+                PlaybackResourceRole.segment,
+                PlaybackResourceRole.initialization,
+              ].contains(_roles[key]) &&
+              (response.statusCode == HttpStatus.ok ||
+                  response.statusCode == HttpStatus.partialContent);
+          final validatedRange =
+              restartable &&
+              length > 0 &&
+              etag != null &&
+              response.compressionState !=
+                  HttpClientResponseCompressionState.decompressed &&
+              (response.statusCode == HttpStatus.ok ||
+                  response.statusCode == HttpStatus.partialContent &&
+                      initialRange != null &&
+                      initialRange.end - initialRange.start + 1 == length);
+          if (!restartable) {
+            _lastValidationFailure = 'foreground-resume-unavailable';
+            _recoveryFailures++;
+            throw const HttpException('Media body cannot safely resume');
+          }
+          read.iterators.remove(chunks);
+          await chunks.cancel();
+          final started = prefixRecoveryStarted ??= DateTime.now();
+          HttpClientResponse? resumed;
+          while (resumed == null) {
+            if (prefixRecoveryAttempts >= 6) {
+              _lastValidationFailure = 'foreground-resume-exhausted';
+              _recoveryFailures++;
+              throw const HttpException('Media body recovery exhausted');
+            }
+            final attempt = prefixRecoveryAttempts++;
+            _recoveryAttempts++;
+            try {
+              await _backoff(
+                attempt,
+                started,
+                read,
+                retryAfter: prefixRetryAfter,
+              );
+              prefixRetryAfter = null;
+              final remaining =
+                  const Duration(seconds: 120) -
+                  DateTime.now().difference(started);
+              if (remaining <= Duration.zero) {
+                throw StateError('Media recovery budget exhausted');
+              }
+              final (
+                candidate,
+                resumedEffective,
+              ) = await _fetchOnce(
+                incoming,
+                url,
+                allowRange: allowRange,
+                read: read,
+                overrides: validatedRange
+                    ? <String, String?>{
+                        'range':
+                            'bytes=${initialRange?.start ?? 0}-${initialRange?.end ?? length - 1}',
+                        'if-range': etag,
+                        'if-none-match': null,
+                        'if-modified-since': null,
+                      }
+                    : const <String, String?>{},
+              ).timeout(
+                remaining,
+                onTimeout: () {
+                  for (final request in read.requests.toList()) {
+                    request.abort();
+                  }
+                  throw StateError('Media recovery budget exhausted');
+                },
+              );
+              if (_retryableStatus(candidate.statusCode)) {
+                prefixRetryAfter = candidate.statusCode == 429
+                    ? _retryAfter(candidate.headers.value('retry-after'))
+                    : null;
+                for (final request in read.requests.toList()) {
+                  request.abort();
+                }
+                continue;
+              }
+              if (!validatedRange) {
+                // No bytes have been forwarded. A fresh full response can be
+                // adopted without joining content from two representations.
+                response = candidate;
+                effective = resumedEffective;
+                copyResponseHeaders(candidate);
+                resumed = candidate;
+                continue;
+              }
+              final range = MediaContentRange.parse(
+                candidate.headers.value('content-range'),
+              );
+              if (candidate.statusCode != HttpStatus.partialContent ||
+                  range == null ||
+                  range.start != (initialRange?.start ?? 0) ||
+                  range.end != (initialRange?.end ?? length - 1) ||
+                  range.total != (initialRange?.total ?? length) ||
+                  candidate.contentLength != length ||
+                  candidate.compressionState ==
+                      HttpClientResponseCompressionState.decompressed ||
+                  MediaCachePolicy(candidate.headers).strongEtag != etag ||
+                  resumedEffective != effective) {
+                _lastValidationFailure = 'foreground-resume-mismatch';
+                _recoveryFailures++;
+                for (final request in read.requests.toList()) {
+                  request.abort();
+                }
+                throw const _UnsafeForegroundResume();
+              }
+              resumed = candidate;
+            } on _UnsafeForegroundResume {
+              rethrow;
+            } on SocketException {
+              read.check();
+            } on TimeoutException {
+              read.check();
+            } on HttpException {
+              read.check();
+            } on StateError {
+              _lastValidationFailure = 'foreground-resume-exhausted';
+              _recoveryFailures++;
+              rethrow;
+            }
+          }
+          chunks = StreamIterator<List<int>>(resumed);
+          read.iterators.add(chunks);
+          prefixInterrupted = false;
+          awaitingPrefixRecoveryByte = true;
         }
         final contentType = response.headers.contentType?.mimeType ?? '';
         final playlist =

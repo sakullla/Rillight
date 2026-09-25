@@ -12,6 +12,51 @@ void main() {
     PlaybackResourceRole.media,
     PlaybackResourceRole.segment,
   ]) {
+    test('zero-byte $role body resumes from a validated range', () async {
+      final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final proxy = await PlaybackHttpProxy.create();
+      final client = HttpClient();
+      final ranges = <String?>[];
+      upstream.listen((request) async {
+        request.response.headers.set('etag', '"stable"');
+        if (request.method == 'HEAD') {
+          request.response.contentLength = 12;
+          await request.response.close();
+          return;
+        }
+        ranges.add(request.headers.value('range'));
+        if (ranges.length == 1) {
+          request.response.contentLength = 12;
+          final socket = await request.response.detachSocket(
+            writeHeaders: true,
+          );
+          await socket.flush();
+          socket.destroy();
+        } else {
+          request.response.statusCode = HttpStatus.partialContent;
+          request.response.headers.set('content-range', 'bytes 0-11/12');
+          request.response.contentLength = 12;
+          request.response.write('abcdefghijkl');
+          await request.response.close();
+        }
+      });
+      try {
+        final url = proxy.register(
+          Uri.parse('http://127.0.0.1:${upstream.port}/body.ts'),
+          role: role,
+        );
+        final response = await (await client.getUrl(url)).close();
+        expect(await response.transform(utf8.decoder).join(), 'abcdefghijkl');
+        expect(ranges, [null, 'bytes=0-11']);
+        expect(proxy.diagnostics['recoveryAttempts'], 1);
+        expect(proxy.diagnostics['recoveries'], 1);
+      } finally {
+        client.close(force: true);
+        await proxy.close();
+        await upstream.close(force: true);
+      }
+    });
+
     test('interrupted $role body resumes only the validated suffix', () async {
       final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
       final proxy = await PlaybackHttpProxy.create();
@@ -58,6 +103,231 @@ void main() {
       }
     });
   }
+
+  test('zero-byte body stall resumes after the body deadline', () async {
+    final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final proxy = await PlaybackHttpProxy.create();
+    final client = HttpClient();
+    final stalled = <Socket>[];
+    var requests = 0;
+    upstream.listen((request) async {
+      if (request.method == 'HEAD') {
+        request.response.headers.set('etag', '"stable"');
+        request.response.contentLength = 12;
+        await request.response.close();
+        return;
+      }
+      requests++;
+      request.response.headers.set('etag', '"stable"');
+      request.response.contentLength = 12;
+      if (requests == 1) {
+        final socket = await request.response.detachSocket(writeHeaders: true);
+        stalled.add(socket);
+        await socket.flush();
+      } else {
+        expect(request.headers.value('range'), 'bytes=0-11');
+        request.response.statusCode = HttpStatus.partialContent;
+        request.response.headers.set('content-range', 'bytes 0-11/12');
+        request.response.write('abcdefghijkl');
+        await request.response.close();
+      }
+    });
+    try {
+      final url = proxy.register(
+        Uri.parse('http://127.0.0.1:${upstream.port}/video'),
+      );
+      final watch = Stopwatch()..start();
+      final response = await (await client.getUrl(url)).close();
+      expect(await response.transform(utf8.decoder).join(), 'abcdefghijkl');
+      expect(watch.elapsed, greaterThanOrEqualTo(const Duration(seconds: 15)));
+      expect(requests, 2);
+      expect(proxy.diagnostics['recoveries'], 1);
+    } finally {
+      client.close(force: true);
+      await proxy.close();
+      for (final socket in stalled) {
+        socket.destroy();
+      }
+      await upstream.close(force: true);
+    }
+  }, timeout: const Timeout(Duration(seconds: 30)));
+
+  test('zero-byte untagged body restarts before forwarding bytes', () async {
+    final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final proxy = await PlaybackHttpProxy.create();
+    final client = HttpClient();
+    final ranges = <String?>[];
+    upstream.listen((request) async {
+      if (request.method == 'HEAD') {
+        request.response.contentLength = 12;
+        await request.response.close();
+        return;
+      }
+      ranges.add(request.headers.value('range'));
+      if (ranges.length == 1) {
+        request.response.contentLength = 12;
+        final socket = await request.response.detachSocket(writeHeaders: true);
+        await socket.flush();
+        socket.destroy();
+      } else {
+        request.response.contentLength = 11;
+        request.response.write('new-content');
+        await request.response.close();
+      }
+    });
+    try {
+      final url = proxy.register(
+        Uri.parse('http://127.0.0.1:${upstream.port}/video'),
+      );
+      final response = await (await client.getUrl(url)).close();
+      expect(response.statusCode, HttpStatus.ok);
+      expect(response.contentLength, 11);
+      expect(await response.transform(utf8.decoder).join(), 'new-content');
+      expect(ranges, [null, null]);
+      expect(proxy.diagnostics['recoveryAttempts'], 1);
+      expect(proxy.diagnostics['recoveries'], 1);
+    } finally {
+      client.close(force: true);
+      await proxy.close();
+      await upstream.close(force: true);
+    }
+  });
+
+  test('seek cancels zero-byte recovery without another upstream read', () async {
+    final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final proxy = await PlaybackHttpProxy.create();
+    final client = HttpClient();
+    final stalled = <Socket>[];
+    var requests = 0;
+    upstream.listen((request) async {
+      requests++;
+      request.response.headers.set('etag', '"stable"');
+      request.response.contentLength = 12;
+      final socket = await request.response.detachSocket(writeHeaders: true);
+      stalled.add(socket);
+      await socket.flush();
+    });
+    try {
+      final url = proxy.register(
+        Uri.parse('http://127.0.0.1:${upstream.port}/video'),
+      );
+      final responseFuture = (await client.getUrl(url)).close();
+      final deadline = DateTime.now().add(const Duration(seconds: 2));
+      while (requests == 0 && DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      expect(requests, 1);
+      proxy.cancelPendingReads(preserveSubtitles: true);
+      try {
+        final response = await responseFuture.timeout(
+          const Duration(seconds: 2),
+        );
+        expect(response.statusCode, HttpStatus.badGateway);
+        await response.drain<void>();
+      } on Exception catch (error) {
+        if (error is TimeoutException) rethrow;
+        // A cancelled socket may close before the local 502 reaches the client.
+      }
+      expect(requests, 1);
+      expect(proxy.diagnostics['recoveryAttempts'], 0);
+    } finally {
+      client.close(force: true);
+      await proxy.close();
+      for (final socket in stalled) {
+        socket.destroy();
+      }
+      await upstream.close(force: true);
+    }
+  });
+
+  test('zero-byte recovery rejects an ignored Range', () async {
+    final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final proxy = await PlaybackHttpProxy.create();
+    final client = HttpClient();
+    var requests = 0;
+    upstream.listen((request) async {
+      if (request.method == 'HEAD') {
+        request.response.headers.set('etag', '"stable"');
+        request.response.contentLength = 12;
+        await request.response.close();
+        return;
+      }
+      requests++;
+      request.response.headers.set('etag', '"stable"');
+      request.response.contentLength = 12;
+      if (requests == 1) {
+        final socket = await request.response.detachSocket(writeHeaders: true);
+        await socket.flush();
+        socket.destroy();
+      } else {
+        // The upstream ignored Range and sent a 200 replacement body.
+        request.response.write('abcdefghijkl');
+        await request.response.close();
+      }
+    });
+    try {
+      final url = proxy.register(
+        Uri.parse('http://127.0.0.1:${upstream.port}/video'),
+      );
+      final response = await (await client.getUrl(url)).close();
+      expect(response.statusCode, HttpStatus.badGateway);
+      await response.drain<void>();
+      expect(requests, 2);
+      expect(
+        proxy.diagnostics['lastValidationFailure'],
+        'foreground-resume-mismatch',
+      );
+    } finally {
+      client.close(force: true);
+      await proxy.close();
+      await upstream.close(force: true);
+    }
+  });
+
+  test('zero-byte recovery exhausts six transient attempts', () async {
+    final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final proxy = await PlaybackHttpProxy.create();
+    final client = HttpClient();
+    var requests = 0;
+    upstream.listen((request) async {
+      if (request.method == 'HEAD') {
+        request.response.headers.set('etag', '"stable"');
+        request.response.contentLength = 12;
+        await request.response.close();
+        return;
+      }
+      requests++;
+      if (requests == 1) {
+        request.response.headers.set('etag', '"stable"');
+        request.response.contentLength = 12;
+        final socket = await request.response.detachSocket(writeHeaders: true);
+        await socket.flush();
+        socket.destroy();
+      } else {
+        request.response.statusCode = HttpStatus.serviceUnavailable;
+        await request.response.close();
+      }
+    });
+    try {
+      final url = proxy.register(
+        Uri.parse('http://127.0.0.1:${upstream.port}/video'),
+      );
+      final response = await (await client.getUrl(url)).close();
+      expect(response.statusCode, HttpStatus.badGateway);
+      await response.drain<void>();
+      expect(requests, 7);
+      expect(proxy.diagnostics['recoveryAttempts'], 6);
+      expect(proxy.diagnostics['recoveryFailures'], 1);
+      expect(
+        proxy.diagnostics['lastValidationFailure'],
+        'foreground-resume-exhausted',
+      );
+    } finally {
+      client.close(force: true);
+      await proxy.close();
+      await upstream.close(force: true);
+    }
+  }, timeout: const Timeout(Duration(seconds: 50)));
 
   test('interrupted body rejects a changed validator', () async {
     final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
