@@ -20,6 +20,10 @@ class SearchController extends ChangeNotifier {
   String? watch;
   int fetched = 0;
   bool loading = false, loadingMore = false, hasMore = false, searched = false;
+
+  /// Cached first-page items may be visible before the live page establishes
+  /// the cursor used by subsequent pages.
+  bool liveFirstPageReady = false;
   EmbyException? error, pageError;
   int _revision = 0;
   bool _disposed = false;
@@ -36,6 +40,7 @@ class SearchController extends ChangeNotifier {
     fetched = 0;
     watch = null;
     loading = loadingMore = hasMore = searched = false;
+    liveFirstPageReady = false;
     error = pageError = null;
     _emit();
   }
@@ -50,6 +55,7 @@ class SearchController extends ChangeNotifier {
     loading = next.isNotEmpty;
     searched = next.isNotEmpty;
     loadingMore = hasMore = false;
+    liveFirstPageReady = false;
     fetched = 0;
     error = pageError = null;
     _emit();
@@ -69,6 +75,7 @@ class SearchController extends ChangeNotifier {
     try {
       final result = parseCatalogPage(await network);
       if (!_owns(revision)) return;
+      liveFirstPageReady = true;
       _accept(result.items, 0);
     } catch (failure) {
       if (!_owns(revision)) return;
@@ -79,7 +86,13 @@ class SearchController extends ChangeNotifier {
   }
 
   Future<void> loadMore() async {
-    if (!hasMore || loading || loadingMore || term.isEmpty) return;
+    if (!hasMore ||
+        !liveFirstPageReady ||
+        loading ||
+        loadingMore ||
+        term.isEmpty) {
+      return;
+    }
     final revision = _revision;
     final start = fetched;
     loadingMore = true;

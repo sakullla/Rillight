@@ -460,6 +460,11 @@ class _TvPosterDelegate extends SliverChildBuilderDelegate {
         ),
         childCount: items.length,
         addAutomaticKeepAlives: false,
+        findChildIndexCallback: (key) {
+          if (key is! ValueKey<String>) return null;
+          final index = items.indexWhere((item) => item.id == key.value);
+          return index < 0 ? null : index;
+        },
       );
 
   final List<EmbyItem> items;

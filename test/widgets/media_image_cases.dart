@@ -112,6 +112,52 @@ void main() {
     primaryImageTag: 'tag-img',
   );
 
+  testWidgets('same-server account switch reloads protected artwork', (
+    tester,
+  ) async {
+    server = FakeEmbyServer(
+      users: [
+        const FakeEmbyUser(
+          username: 'alice',
+          password: 'correct-horse',
+          userId: 'user-alice',
+        ),
+        const FakeEmbyUser(
+          username: 'bob',
+          password: 'bob-password',
+          userId: 'user-bob',
+        ),
+      ],
+      items: [...server.items],
+    );
+    adapter = FakeEmbyAdapter([server]);
+    final auth = await connect(tester);
+    await tester.runAsync(() async {
+      await tester.pumpWidget(buildSubject(auth, withTag));
+      for (var i = 0; i < 30 && imageRequests().isEmpty; i++) {
+        await tester.pump();
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+    });
+    expect(imageRequests(), hasLength(1));
+
+    await tester.runAsync(() async {
+      await auth.logout();
+      await auth.connect(
+        address: server.baseUrl.toString(),
+        username: 'bob',
+        password: 'bob-password',
+      );
+    });
+    await tester.runAsync(() async {
+      for (var i = 0; i < 30 && imageRequests().length < 2; i++) {
+        await tester.pump();
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+    });
+    expect(imageRequests(), hasLength(2));
+  });
+
   test('backdrop request width follows the window pixels and clamps', () {
     expect(
       mediaBackdropRequestWidth(layoutWidth: 960, devicePixelRatio: 1),
@@ -739,7 +785,7 @@ void main() {
     'viewport disk hits paint while scrolling and offscreen disk stays deferred',
     (tester) async {
       final auth = await connect(tester);
-      final serverId = auth.session!.server.id;
+      final serverId = '${auth.session!.server.id}|${auth.client.userId}';
       final disk = _FakeDiskStore();
       MediaImageCache.instance.debugSetDiskStore(disk);
       for (final index in [0, 1]) {

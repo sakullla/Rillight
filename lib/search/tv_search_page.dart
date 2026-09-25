@@ -100,7 +100,7 @@ class _TvSearchPageState extends State<TvSearchPage> {
                   SliverToBoxAdapter(
                     child: TvFailure(error: c.pageError!, retry: c.loadMore),
                   ),
-                if (c.hasMore)
+                if (c.hasMore && c.liveFirstPageReady)
                   SliverToBoxAdapter(
                     child: TvAction(
                       key: const Key('tv-search-more'),

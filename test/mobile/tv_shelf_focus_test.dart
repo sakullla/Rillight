@@ -10,6 +10,7 @@ void main() {
   ) async {
     const first = EmbyItem(id: 'first', name: 'First', type: 'Movie');
     const second = EmbyItem(id: 'second', name: 'Second', type: 'Movie');
+    const third = EmbyItem(id: 'third', name: 'Third', type: 'Movie');
     const metrics = TvGridMetrics(
       columns: 2,
       imageMaxWidth: 200,
@@ -38,6 +39,14 @@ void main() {
     expect(node.hasFocus, isTrue);
 
     await tester.pumpWidget(page([second, first]));
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<FocusableActionDetector>(focusable('second')).focusNode,
+      same(node),
+    );
+    expect(node.hasFocus, isTrue);
+
+    await tester.pumpWidget(page([first, third, second]));
     await tester.pumpAndSettle();
     expect(
       tester.widget<FocusableActionDetector>(focusable('second')).focusNode,

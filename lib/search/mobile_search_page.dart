@@ -213,7 +213,7 @@ class _SearchBody extends StatelessWidget {
               message: searchFailureMessage(label, c.pageError!),
               onRetry: c.loadMore,
             ),
-          if (c.pageError == null && c.hasMore)
+          if (c.pageError == null && c.hasMore && c.liveFirstPageReady)
             FilledButton(
               key: const Key('mobile-search-load-more'),
               style: FilledButton.styleFrom(

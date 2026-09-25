@@ -148,6 +148,70 @@ void main() {
     expect(search.items.every((item) => item.name.contains('老友记')), isTrue);
     expect(search.fetched, greaterThan(0));
   });
+  test('cached search page cannot paginate before live page settles', () async {
+    server.items = [
+      for (var i = 0; i < 65; i++)
+        FakeEmbyItem(id: 'cached-$i', name: 'Film $i', type: 'Movie'),
+    ];
+    final request = catalogSearchRequest(
+      userId: auth.client.userId!,
+      searchTerm: 'Film',
+      startIndex: 0,
+    );
+    await cache.fetch(auth.client, request);
+    server.items = [
+      for (var i = 0; i < 65; i++)
+        FakeEmbyItem(id: 'live-$i', name: 'Film $i', type: 'Movie'),
+    ];
+    final entered = Completer<void>();
+    final release = Completer<void>();
+    addTearDown(() {
+      if (!release.isCompleted) release.complete();
+    });
+    dio.interceptors.add(
+      InterceptorsWrapper(
+        onResponse: (response, handler) async {
+          final query = response.requestOptions.uri.queryParameters;
+          if (query['SearchTerm'] == 'Film' && query['StartIndex'] == '0') {
+            if (!entered.isCompleted) entered.complete();
+            await release.future;
+          }
+          handler.next(response);
+        },
+      ),
+    );
+    final search = SearchController(auth: auth, cache: cache);
+    addTearDown(search.dispose);
+    final first = search.submit('Film');
+    await entered.future.timeout(const Duration(seconds: 5));
+    final cachedReady = Completer<void>();
+    void checkCached() {
+      if (search.items.isNotEmpty && !cachedReady.isCompleted) {
+        cachedReady.complete();
+      }
+    }
+
+    search.addListener(checkCached);
+    checkCached();
+    await cachedReady.future.timeout(const Duration(seconds: 5));
+    search.removeListener(checkCached);
+    expect(search.items.first.id, startsWith('cached-'));
+    expect(search.hasMore, isTrue);
+    expect(search.liveFirstPageReady, isFalse);
+    await search.loadMore();
+    expect(
+      server.requests.where((entry) => entry.contains('StartIndex=50')),
+      isEmpty,
+    );
+    release.complete();
+    await first;
+    expect(search.liveFirstPageReady, isTrue);
+    expect(search.items, hasLength(50));
+    expect(search.items.every((item) => item.id.startsWith('live-')), isTrue);
+    await search.loadMore();
+    expect(search.items, hasLength(65));
+    expect(search.items.every((item) => item.id.startsWith('live-')), isTrue);
+  });
   test('search filter clears old-condition results while loading', () async {
     final search = SearchController(auth: auth, cache: cache);
     addTearDown(search.dispose);

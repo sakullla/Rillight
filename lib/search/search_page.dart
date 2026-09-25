@@ -129,6 +129,7 @@ class _SearchPageState extends State<SearchPage> {
 
   void _maybeLoadMore() {
     if (!_hasMore ||
+        !_search.liveFirstPageReady ||
         _loading ||
         _loadingMore ||
         _pageError != null ||

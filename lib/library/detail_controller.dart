@@ -154,6 +154,18 @@ class DetailController extends ChangeNotifier {
       seasons = loaded;
       seasonsLoading = false;
       notifyListeners();
+      if (seasons.isEmpty) {
+        _resumeCancel?.cancel('seasons-removed');
+        _seasonRevision++;
+        seasonId = null;
+        episodes = const [];
+        episodeTotal = windowStart = _offset = 0;
+        episodesLoading = hasMore = false;
+        resumeBeyondPage = null;
+        episodeError = null;
+        notifyListeners();
+        return;
+      }
       final episodeId = initialEpisodeId?.trim();
       if (episodeId != null && episodeId.isNotEmpty) {
         try {
@@ -176,7 +188,7 @@ class DetailController extends ChangeNotifier {
       final selected = seasons.any((s) => s.id == seasonId)
           ? seasonId
           : seasons.firstOrNull?.id;
-      if (selected != null && !episodesLoading) {
+      if (selected != null && (!episodesLoading || seasonId != selected)) {
         await selectSeason(selected);
       }
       if (_disposed || revision != _revision || identity != _identity) return;
