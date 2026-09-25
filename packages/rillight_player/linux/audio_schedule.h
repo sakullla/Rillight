@@ -23,14 +23,31 @@ inline int StartOffset(const RillightCoreFrame& frame, int64_t position_us,
   return std::max(0, static_cast<int>(std::ceil(samples))) * 4;
 }
 
-inline int64_t StartupAudioTarget(int64_t position_us, int64_t frame_pts_us) {
-  // A device's first timing report includes its startup queue. When video has
-  // already advanced, queue PCM slightly ahead so that subtracting that delay
-  // cannot rewind the core clock. Never trim the opening sample at position 0.
-  if (position_us <= 10000 || frame_pts_us > position_us + 50000)
+inline int64_t StartupAudioTarget(int64_t position_us, int64_t frame_pts_us,
+                                  int64_t device_delay_us, double speed) {
+  // Queue far enough ahead for the measured device latency, not a fixed
+  // 30 ms assumption. This is used only before the first accepted audio clock
+  // report; the core also refuses a backward report after handoff.
+  if (frame_pts_us > position_us + 50000)
     return position_us;
-  return position_us > std::numeric_limits<int64_t>::max() - 30000
-      ? std::numeric_limits<int64_t>::max() : position_us + 30000;
+  if (position_us <= 10000 && device_delay_us < 30000)
+    return position_us;
+  const int64_t delay_media = device_delay_us > 0 && speed > 0
+      ? static_cast<int64_t>(std::min(1000000.0,
+                                     device_delay_us * speed)) : 0;
+  const int64_t lead = std::max<int64_t>(30000, delay_media + 10000);
+  return position_us > std::numeric_limits<int64_t>::max() - lead
+      ? std::numeric_limits<int64_t>::max() : position_us + lead;
+}
+
+inline bool NeedsStartupRealign(int64_t queued_end_pts_us,
+                                int64_t device_delay_us, double speed,
+                                int64_t current_position_us,
+                                bool audio_clock_started) {
+  if (audio_clock_started || queued_end_pts_us < 0 ||
+      device_delay_us < 0 || speed <= 0) return false;
+  return queued_end_pts_us - static_cast<int64_t>(device_delay_us * speed) +
+             5000 < current_position_us;
 }
 
 class AudioStartupGate {

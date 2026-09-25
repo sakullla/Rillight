@@ -43,3 +43,16 @@ if(RILLIGHT_CORE_PREFIX)
   set_tests_properties(rillight_linux_short_audio_handoff PROPERTIES
     TIMEOUT 15 ENVIRONMENT "LD_LIBRARY_PATH=${RILLIGHT_CORE_PREFIX}/lib")
 endif()
+
+option(RILLIGHT_PULSE_TEST "Build the real PulseAudio stream regression" OFF)
+if(RILLIGHT_PULSE_TEST)
+  find_package(PkgConfig REQUIRED)
+  pkg_check_modules(PULSE REQUIRED IMPORTED_TARGET libpulse)
+  add_executable(rillight_linux_pulse_output pulse_output_test.cpp)
+  target_compile_features(rillight_linux_pulse_output PRIVATE cxx_std_17)
+  target_compile_options(rillight_linux_pulse_output PRIVATE
+    -Wall -Wextra -Werror -UNDEBUG)
+  target_link_libraries(rillight_linux_pulse_output PRIVATE PkgConfig::PULSE)
+  add_test(NAME rillight_linux_pulse_output COMMAND rillight_linux_pulse_output)
+  set_tests_properties(rillight_linux_pulse_output PROPERTIES TIMEOUT 10)
+endif()

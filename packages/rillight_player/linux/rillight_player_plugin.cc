@@ -1,6 +1,7 @@
 #include "include/rillight_player/rillight_player_plugin.h"
 #include "frame_output.h"
 #include "audio_schedule.h"
+#include "pulse_output.h"
 #include <epoxy/egl.h>
 #include <pulse/pulseaudio.h>
 #include <pulse/error.h>
@@ -56,120 +57,6 @@ static void Main(std::function<void()> callback) {
   g_source_attach(source, g_main_context_default());
   g_source_unref(source);
 }
-
-// PulseAudio's mainloop is pumped without a blocking wait on the surface
-// worker. A suspended or disappearing sink therefore cannot trap detach in
-// pa_simple_write while Flutter waits for the producer to retire.
-class PulseOutput {
- public:
-  PulseOutput() {
-    loop_ = pa_mainloop_new();
-    if (!loop_) { error_ = "PulseAudio mainloop unavailable"; return; }
-    context_ = pa_context_new(pa_mainloop_get_api(loop_), "Rillight");
-    if (!context_ || pa_context_connect(context_, nullptr, PA_CONTEXT_NOFLAGS,
-                                        nullptr) < 0)
-      error_ = "PulseAudio connection unavailable";
-  }
-  ~PulseOutput() {
-    if (stream_) { pa_stream_disconnect(stream_); pa_stream_unref(stream_); }
-    if (context_) { pa_context_disconnect(context_); pa_context_unref(context_); }
-    if (loop_) pa_mainloop_free(loop_);
-  }
-  bool Pump() {
-    if (!error_.empty()) return false;
-    int result = 0;
-    if (pa_mainloop_iterate(loop_, 0, &result) < 0) {
-      error_ = "PulseAudio mainloop failed"; return false;
-    }
-    const auto state = pa_context_get_state(context_);
-    if (state == PA_CONTEXT_FAILED || state == PA_CONTEXT_TERMINATED) {
-      error_ = std::string("PulseAudio: ") + pa_strerror(pa_context_errno(context_));
-      return false;
-    }
-    if (state != PA_CONTEXT_READY) {
-      if (std::chrono::steady_clock::now() - started_ >
-          std::chrono::seconds(5)) {
-        error_ = "PulseAudio connection timed out";
-        return false;
-      }
-      return true;
-    }
-    if (!stream_) {
-      const pa_sample_spec spec{PA_SAMPLE_S16NE, 48000, 2};
-      stream_ = pa_stream_new(context_, "Media", &spec, nullptr);
-      if (!stream_) { error_ = "PulseAudio stream unavailable"; return false; }
-      started_ = std::chrono::steady_clock::now();
-      pa_buffer_attr attributes{};
-      attributes.maxlength = static_cast<uint32_t>(-1);
-      attributes.tlength = 4800;
-      attributes.prebuf = 0;
-      attributes.minreq = 1920;
-      attributes.fragsize = static_cast<uint32_t>(-1);
-      if (pa_stream_connect_playback(stream_, nullptr, &attributes,
-                                     PA_STREAM_ADJUST_LATENCY, nullptr,
-                                     nullptr) < 0) {
-        error_ = std::string("PulseAudio stream: ") +
-                 pa_strerror(pa_context_errno(context_));
-        return false;
-      }
-    }
-    const auto stream_state = pa_stream_get_state(stream_);
-    if (stream_state == PA_STREAM_FAILED || stream_state == PA_STREAM_TERMINATED) {
-      error_ = std::string("PulseAudio stream: ") +
-               pa_strerror(pa_context_errno(context_));
-      return false;
-    }
-    if (stream_state != PA_STREAM_READY &&
-        std::chrono::steady_clock::now() - started_ >
-            std::chrono::seconds(5)) {
-      error_ = "PulseAudio stream timed out";
-      return false;
-    }
-    return true;
-  }
-  size_t Write(const uint8_t* data, size_t size) {
-    if (!stream_ || pa_stream_get_state(stream_) != PA_STREAM_READY) return 0;
-    const size_t writable = pa_stream_writable_size(stream_);
-    if (writable == static_cast<size_t>(-1)) {
-      error_ = "PulseAudio writable size failed"; return 0;
-    }
-    const size_t chunk = std::min({size, writable, size_t{1920}}) & ~size_t{3};
-    if (chunk == 0) return 0;
-    if (pa_stream_write(stream_, data, chunk, nullptr, 0,
-                        PA_SEEK_RELATIVE) < 0) {
-      error_ = std::string("PulseAudio write: ") +
-               pa_strerror(pa_context_errno(context_));
-      return 0;
-    }
-    return chunk;
-  }
-  int64_t Latency() const {
-    if (!stream_ || pa_stream_get_state(stream_) != PA_STREAM_READY) return 0;
-    pa_usec_t delay = 0;
-    int negative = 0;
-    if (pa_stream_get_latency(stream_, &delay, &negative) < 0) return -1;
-    return negative ? 0 : static_cast<int64_t>(delay);
-  }
-  void Flush() {
-    if (!stream_ || pa_stream_get_state(stream_) != PA_STREAM_READY) return;
-    if (auto* operation = pa_stream_flush(stream_, nullptr, nullptr))
-      pa_operation_unref(operation);
-  }
-  void Cork(bool paused) {
-    if (!stream_ || pa_stream_get_state(stream_) != PA_STREAM_READY) return;
-    if (auto* operation = pa_stream_cork(stream_, paused ? 1 : 0,
-                                         nullptr, nullptr))
-      pa_operation_unref(operation);
-  }
-  const std::string& error() const { return error_; }
- private:
-  pa_mainloop* loop_ = nullptr;
-  pa_context* context_ = nullptr;
-  pa_stream* stream_ = nullptr;
-  std::string error_;
-  std::chrono::steady_clock::time_point started_ =
-      std::chrono::steady_clock::now();
-};
 
 struct Surface : std::enable_shared_from_this<Surface> {
   using Frame = rillight_linux::PixelFrame;
@@ -248,7 +135,7 @@ struct Surface : std::enable_shared_from_this<Surface> {
   }
   void Start(std::function<void(std::string)> ready) {
     worker = std::thread([this, ready] {
-      std::unique_ptr<PulseOutput> audio;
+      std::unique_ptr<rillight_linux::PulseOutput> audio;
       RillightCoreFrame* pending_audio = nullptr;
       int pending_offset = 0;
       int64_t audio_end_pts = -1;
@@ -310,6 +197,7 @@ struct Surface : std::enable_shared_from_this<Surface> {
           last_timeline = snapshot.timeline_version;
           Notify();
         }
+        bool startup_realign = false;
         auto report_audio_clock = [&](int64_t end_pts, int64_t delay,
                                       double speed) {
           RillightCoreSnapshot current{};
@@ -318,6 +206,12 @@ struct Surface : std::enable_shared_from_this<Surface> {
               current.session_id != snapshot.session_id ||
               current.timeline_version != snapshot.timeline_version)
             return;
+          if (rillight_linux::NeedsStartupRealign(
+                  end_pts, delay, speed, current.position_us,
+                  audio_clock_started)) {
+            startup_realign = true;
+            return;
+          }
           if (rillight_core_report_audio_played(core, current.session_id,
                                                 current.timeline_version,
                                                 end_pts,
@@ -361,7 +255,7 @@ struct Surface : std::enable_shared_from_this<Surface> {
         }
         if (snapshot.state == RILLIGHT_CORE_PLAYING &&
             snapshot.audio_stream_index >= 0 && !audio)
-          audio = std::make_unique<PulseOutput>();
+          audio = std::make_unique<rillight_linux::PulseOutput>();
         if (audio) {
           if (!audio->Pump()) {
             std::lock_guard<std::mutex> lock(mutex);
@@ -374,6 +268,12 @@ struct Surface : std::enable_shared_from_this<Surface> {
               (snapshot.state == RILLIGHT_CORE_PLAYING ||
                snapshot.state == RILLIGHT_CORE_BUFFERING))
             report_audio_clock(audio_end_pts, delay, audio_speed);
+          if (startup_realign) {
+            audio->Flush();
+            audio_end_pts = -1;
+            first_audio_write = {};
+            startup_realign = false;
+          }
         }
         bool audio_progress = false;
         if (snapshot.state == RILLIGHT_CORE_PLAYING && audio) {
@@ -397,6 +297,8 @@ struct Surface : std::enable_shared_from_this<Surface> {
               continue;
             }
             if (!audio_clock_started && frame->pts_us >= 0) {
+              const int64_t device_delay = audio->Latency();
+              if (device_delay < 0) break;
               RillightCoreSnapshot current{};
               current.struct_size = sizeof(current);
               if (rillight_core_snapshot(core, &current) != 0 ||
@@ -407,7 +309,9 @@ struct Surface : std::enable_shared_from_this<Surface> {
               pending_offset = std::max(pending_offset,
                   rillight_linux::StartOffset(*frame,
                       rillight_linux::StartupAudioTarget(current.position_us,
-                                                         frame->pts_us),
+                                                         frame->pts_us,
+                                                         device_delay,
+                                                         current.playback_speed),
                                                current.playback_speed));
               if (pending_offset >= frame->data_size) {
                 rillight_core_release_frame(frame);
@@ -419,7 +323,7 @@ struct Surface : std::enable_shared_from_this<Surface> {
             pending_offset = rillight_linux::DrainPcm(
                 frame->data, frame->data_size, pending_offset,
                 [&](const uint8_t* data, size_t bytes) {
-                  return audio->Write(data, bytes);
+                  return startup_realign ? size_t{0} : audio->Write(data, bytes);
                 },
                 [&](int sent) {
                   const int64_t delay = audio->Latency();
@@ -437,6 +341,13 @@ struct Surface : std::enable_shared_from_this<Surface> {
                 }, audio_byte_budget);
             audio_byte_budget -= pending_offset - before;
             audio_progress |= pending_offset > before;
+            if (startup_realign) {
+              audio->Flush();
+              audio_end_pts = -1;
+              first_audio_write = {};
+              startup_realign = false;
+              break;
+            }
             if (!audio->error().empty()) {
               std::lock_guard<std::mutex> lock(mutex);
               error = audio->error();
