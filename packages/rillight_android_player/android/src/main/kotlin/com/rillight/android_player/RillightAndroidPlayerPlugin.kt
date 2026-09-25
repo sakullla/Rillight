@@ -8,6 +8,8 @@ import android.os.Handler
 import android.os.Looper
 import android.view.View
 import android.view.ViewGroup
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.common.*
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DefaultDataSource
@@ -76,9 +78,10 @@ class RillightAndroidPlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandl
                 val types = MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos.filter { !it.isEncoder }.flatMap { it.supportedTypes.toList() }
                 result.success(mapOf("sessionId" to session, "h264" to types.contains("video/avc"), "aac" to types.contains("audio/mp4a-latm"))); return
             }
-            // System brightness / volume are activity-scoped, not session-scoped.
+            // Activity-scoped. System UI mode from Flutter is ignored at targetSdk 36.
             if (call.method == "setSystemBrightness" || call.method == "getSystemBrightness" ||
-                call.method == "setSystemVolume" || call.method == "getSystemVolume") {
+                call.method == "setSystemVolume" || call.method == "getSystemVolume" ||
+                call.method == "setSystemBarsHidden" || call.method == "androidSdkInt") {
                 display(call, result); return
             }
             val owner = owners.getOrPut(id) { Owner(id) }
@@ -130,6 +133,15 @@ class RillightAndroidPlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandl
                 val audio = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
                 val max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
                 result.success(if (max > 0) audio.getStreamVolume(AudioManager.STREAM_MUSIC).toFloat() / max else 0f)
+            }
+            "androidSdkInt" -> result.success(android.os.Build.VERSION.SDK_INT)
+            "setSystemBarsHidden" -> {
+                val window = activity?.window ?: run { result.error("control", "No activity", null); return }
+                val controller = WindowInsetsControllerCompat(window, window.decorView)
+                controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                val bars = WindowInsetsCompat.Type.systemBars()
+                if ((call.arguments as? Map<*, *>)?.get("hidden") == true) controller.hide(bars) else controller.show(bars)
+                result.success(null)
             }
             else -> result.notImplemented()
         }

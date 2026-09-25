@@ -1,6 +1,9 @@
 import 'dart:async';
+import 'dart:math' as math;
+import 'dart:ui' show DisplayFeature, DisplayFeatureType;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_motion.dart';
 import 'package:rillight/app/theme/tokens.dart';
@@ -14,6 +17,12 @@ import 'package:rillight/player/player_settings.dart';
 /// a bottom-edge transport (play, progress, time) and the "more" panel that
 /// hosts picture scale, danmaku, tracks, speed, media source, mute and volume.
 /// Transport hit targets stay at least 48dp with an 8dp gap.
+///
+/// The video surface is not inset. This layer is, by the per-edge maximum of
+/// [MediaQueryData.padding], [MediaQueryData.viewPadding] and
+/// [MediaQueryData.systemGestureInsets]. Below Android API 30 a display
+/// cutout is not part of that padding once the system bars are hidden, so it
+/// is included from [MediaQueryData.displayFeatures].
 ///
 /// The lock state is a state-machine field of this layer; the page mirrors
 /// it through [onLockChanged] to disable the gesture layer. `PlayerController`
@@ -53,6 +62,66 @@ class PhonePlayerControls extends StatefulWidget {
   State<PhonePlayerControls> createState() => PhonePlayerControlsState();
 }
 
+const MethodChannel _androidPlayerChannel = MethodChannel(
+  'rillight/android_player',
+);
+
+/// Obstruction insets for the phone player controls.
+///
+/// [androidSdkInt] null means the device SDK is not known yet. Cutouts are
+/// included in that case; on API 30+ they are already inside
+/// [MediaQueryData.viewPadding], so the per-edge maximum does not add them
+/// twice once the SDK is known.
+EdgeInsets phonePlayerControlInsets(
+  MediaQueryData media, {
+  int? androidSdkInt,
+}) {
+  final padding = media.padding;
+  final view = media.viewPadding;
+  final gesture = media.systemGestureInsets;
+  var left = math.max(padding.left, math.max(view.left, gesture.left));
+  var top = math.max(padding.top, math.max(view.top, gesture.top));
+  var right = math.max(padding.right, math.max(view.right, gesture.right));
+  var bottom = math.max(padding.bottom, math.max(view.bottom, gesture.bottom));
+  if (androidSdkInt == null || androidSdkInt < 30) {
+    final cutout = _displayCutoutInsets(media.size, media.displayFeatures);
+    left = math.max(left, cutout.left);
+    top = math.max(top, cutout.top);
+    right = math.max(right, cutout.right);
+    bottom = math.max(bottom, cutout.bottom);
+  }
+  return EdgeInsets.fromLTRB(left, top, right, bottom);
+}
+
+EdgeInsets _displayCutoutInsets(Size size, List<DisplayFeature> features) {
+  if (size.isEmpty) return EdgeInsets.zero;
+  var left = 0.0, top = 0.0, right = 0.0, bottom = 0.0;
+  for (final feature in features) {
+    if (feature.type != DisplayFeatureType.cutout) continue;
+    final rect = feature.bounds;
+    if (rect.left <= 0) left = math.max(left, rect.right);
+    if (rect.top <= 0) top = math.max(top, rect.bottom);
+    if (rect.right >= size.width) {
+      right = math.max(right, size.width - rect.left);
+    }
+    if (rect.bottom >= size.height) {
+      bottom = math.max(bottom, size.height - rect.top);
+    }
+  }
+  return EdgeInsets.fromLTRB(left, top, right, bottom);
+}
+
+Future<int?> _androidSdkInt() async {
+  try {
+    return await _androidPlayerChannel.invokeMethod<int>(
+      'androidSdkInt',
+      const <String, Object>{},
+    );
+  } catch (_) {
+    return null;
+  }
+}
+
 final ButtonStyle _phoneChromeButton = IconButton.styleFrom(
   visualDensity: VisualDensity.standard,
   minimumSize: const Size(48, 48),
@@ -62,10 +131,23 @@ final ButtonStyle _phoneChromeButton = IconButton.styleFrom(
 class PhonePlayerControlsState extends State<PhonePlayerControls> {
   double? _seek;
   late bool _locked = widget.locked;
+  int? _androidSdk;
 
   bool get locked => _locked;
 
   PlayerController get _controller => widget.controller;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_loadAndroidSdk());
+  }
+
+  Future<void> _loadAndroidSdk() async {
+    final sdk = await _androidSdkInt();
+    if (!mounted || sdk == _androidSdk) return;
+    setState(() => _androidSdk = sdk);
+  }
 
   @override
   void didUpdateWidget(covariant PhonePlayerControls oldWidget) {
@@ -86,7 +168,12 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
 
   @override
   Widget build(BuildContext context) {
-    return SafeArea(
+    final insets = phonePlayerControlInsets(
+      MediaQuery.of(context),
+      androidSdkInt: _androidSdk,
+    );
+    return Padding(
+      padding: insets,
       child: Column(
         children: [
           _buildTopBar(context),

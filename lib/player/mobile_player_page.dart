@@ -52,7 +52,8 @@ class MobilePlayerPage extends StatefulWidget {
   /// direction captured on entry.
   final PhoneOrientation? orientation;
 
-  /// Replaceable status and navigation bar hide. Null uses [SystemChrome].
+  /// Replaceable status and navigation bar hide. Null uses
+  /// [PhoneSystemBars.platformRequest].
   final PhoneSystemBars? systemBars;
 
   /// Replaceable screen wake. Null uses wakelock_plus directly.
@@ -108,20 +109,26 @@ class PhonePlaybackWakeLock {
 /// Hides status and navigation bars while the phone player is on screen.
 ///
 /// [request] is replaceable so tests can observe hide and restore without
-/// changing the host. A failed request is swallowed. Leaving the page, or
-/// returning to it after the system shows the bars, is applied in order.
+/// changing the host. The default is [platformRequest]. A failed request is
+/// swallowed. Leaving the page, or returning to it after the system shows
+/// the bars, is applied in order.
 class PhoneSystemBars {
   PhoneSystemBars({Future<void> Function(bool hidden)? request})
     : _request = request ?? platformRequest;
 
+  static const MethodChannel _channel = MethodChannel(
+    'rillight/android_player',
+  );
+
+  /// Hides or shows Android system bars through `RillightAndroidPlayerPlugin`.
+  ///
+  /// The plugin uses `WindowInsetsControllerCompat` with
+  /// `BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE`. [SystemChrome.setEnabledSystemUIMode]
+  /// is not used: Flutter ignores it when the app targets Android SDK 16.
   static Future<void> platformRequest(bool hidden) {
-    if (hidden) {
-      return SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-    }
-    return SystemChrome.setEnabledSystemUIMode(
-      SystemUiMode.manual,
-      overlays: SystemUiOverlay.values,
-    );
+    return _channel.invokeMethod<void>('setSystemBarsHidden', <String, Object>{
+      'hidden': hidden,
+    });
   }
 
   final Future<void> Function(bool hidden) _request;

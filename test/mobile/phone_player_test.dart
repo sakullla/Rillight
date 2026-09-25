@@ -1,3 +1,5 @@
+import 'dart:ui' show DisplayFeature, DisplayFeatureState, DisplayFeatureType;
+
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -27,6 +29,28 @@ import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/video_backend.dart';
 
 import '../emby/fake_emby_server.dart';
+
+const _androidPlayerChannel = MethodChannel('rillight/android_player');
+
+void _mockAndroidPlayerChannel(List<MethodCall> calls, {int sdk = 34}) {
+  final messenger =
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+  messenger.setMockMethodCallHandler(_androidPlayerChannel, (call) async {
+    calls.add(call);
+    if (call.method == 'androidSdkInt') return sdk;
+    return null;
+  });
+  addTearDown(
+    () => messenger.setMockMethodCallHandler(_androidPlayerChannel, null),
+  );
+}
+
+List<bool> _systemBarHidden(List<MethodCall> calls) {
+  return calls
+      .where((call) => call.method == 'setSystemBarsHidden')
+      .map((call) => (call.arguments as Map)['hidden'] as bool)
+      .toList();
+}
 
 const _device = EmbyDeviceInfo(
   clientName: 'test',
@@ -775,7 +799,9 @@ void main() {
   testWidgets(
     'playback hides system bars, stays landscape, and drops the rotate button',
     (tester) async {
-      final bars = PhoneSystemBars(request: (_) async {});
+      final channelCalls = <MethodCall>[];
+      _mockAndroidPlayerChannel(channelCalls);
+      final bars = PhoneSystemBars();
       final orientation = PhoneOrientation(
         restoreTo: const [DeviceOrientation.portraitUp],
         request: (_) async {},
@@ -789,6 +815,7 @@ void main() {
       );
       await bars.settled;
       expect(bars.calls, [true]);
+      expect(_systemBarHidden(channelCalls), [true]);
       expect(orientation.calls.single, PhoneOrientation.landscape);
       expect(
         orientation.calls.single,
@@ -803,11 +830,13 @@ void main() {
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
       await bars.settled;
       expect(bars.calls, [true, true]);
+      expect(_systemBarHidden(channelCalls), [true, true]);
 
       await closePlayer(tester);
       await bars.settled;
       await orientation.settled;
       expect(bars.calls, [true, true, false]);
+      expect(_systemBarHidden(channelCalls), [true, true, false]);
       expect(orientation.calls[1], const [DeviceOrientation.portraitUp]);
       expect(find.byType(MobilePlayerPage), findsNothing);
     },
@@ -858,6 +887,106 @@ void main() {
     expect(backend.position, start);
     await closePlayer(tester);
   });
+
+  testWidgets(
+    'controls use gesture and view padding while the video stays full bleed',
+    (tester) async {
+      const size = Size(800, 360);
+      tester.view.padding = FakeViewPadding();
+      tester.view.viewPadding = const FakeViewPadding(top: 30);
+      tester.view.systemGestureInsets = const FakeViewPadding(
+        left: 24,
+        top: 12,
+        right: 24,
+        bottom: 40,
+      );
+      addTearDown(tester.view.resetPadding);
+      addTearDown(tester.view.resetViewPadding);
+      addTearDown(tester.view.resetSystemGestureInsets);
+      final channelCalls = <MethodCall>[];
+      _mockAndroidPlayerChannel(channelCalls, sdk: 34);
+      await showPlayer(
+        tester,
+        itemId: 'movie-inception',
+        wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
+        size: size,
+      );
+      expect(
+        channelCalls.map((call) => call.method),
+        contains('androidSdkInt'),
+      );
+
+      final back = tester.getRect(find.byTooltip('关闭'));
+      final more = tester.getRect(find.byKey(const Key('mobile-player-more')));
+      final rewind = tester.getRect(
+        find.byKey(const Key('mobile-player-rewind')),
+      );
+      final video = find.byWidgetPredicate(
+        (widget) =>
+            widget is ColoredBox && widget.color == const Color(0xFF000000),
+      );
+      expect(video, findsOneWidget);
+      final picture = tester.getRect(video);
+      expect(picture.left, closeTo(0, 0.2));
+      expect(picture.top, closeTo(0, 0.2));
+      expect(picture.width, closeTo(size.width, 0.2));
+      expect(picture.height, closeTo(size.height, 0.2));
+      expect(back.top - picture.top, closeTo(30, 0.01));
+      expect(back.left - picture.left, closeTo(24, 0.01));
+      expect(picture.right - more.right, closeTo(24, 0.01));
+      expect(rewind.left - picture.left, greaterThanOrEqualTo(24));
+      expect(picture.bottom - rewind.bottom, closeTo(40, 0.01));
+      expect(tester.takeException(), isNull);
+      await closePlayer(tester);
+    },
+  );
+
+  testWidgets(
+    'pre-30 display cutouts inset controls and API 30 keeps them in view padding',
+    (tester) async {
+      const size = Size(800, 360);
+      const cutout = DisplayFeature(
+        bounds: Rect.fromLTWH(0, 40, 32, 120),
+        type: DisplayFeatureType.cutout,
+        state: DisplayFeatureState.unknown,
+      );
+
+      Future<double> backLeft(int sdk) async {
+        tester.view.padding = FakeViewPadding();
+        tester.view.viewPadding = FakeViewPadding();
+        tester.view.systemGestureInsets = FakeViewPadding();
+        tester.view.displayFeatures = const [cutout];
+        addTearDown(tester.view.resetPadding);
+        addTearDown(tester.view.resetViewPadding);
+        addTearDown(tester.view.resetSystemGestureInsets);
+        addTearDown(tester.view.resetDisplayFeatures);
+        _mockAndroidPlayerChannel(<MethodCall>[], sdk: sdk);
+        await showPlayer(
+          tester,
+          itemId: 'movie-inception',
+          wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
+          size: size,
+        );
+        final video = find.byWidgetPredicate(
+          (widget) =>
+              widget is ColoredBox && widget.color == const Color(0xFF000000),
+        );
+        final picture = tester.getRect(video);
+        expect(picture.left, closeTo(0, 0.2));
+        expect(picture.width, closeTo(size.width, 0.2));
+        expect(picture.height, closeTo(size.height, 0.2));
+        final left = tester.getTopLeft(find.byTooltip('关闭')).dx - picture.left;
+        await closePlayer(tester);
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pump();
+        return left;
+      }
+
+      expect(await backLeft(29), greaterThanOrEqualTo(32 - 0.01));
+      expect(await backLeft(30), lessThan(1));
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets(
     'unsupported startup tracks stay silent and a manual choice is in Chinese',
