@@ -5,6 +5,7 @@
 #include <flutter/plugin_registrar_windows.h>
 #include <flutter/standard_method_codec.h>
 #include <map>
+#include <mutex>
 #include <optional>
 
 namespace {
@@ -12,6 +13,32 @@ using Value = flutter::EncodableValue;
 using Map = flutter::EncodableMap;
 using Result = flutter::MethodResult<Value>;
 constexpr UINT kDispatch = WM_APP + 0x3e1;
+struct DispatchQueue {
+  explicit DispatchQueue(HWND window) : window(window) {}
+  HWND window;
+  std::mutex mutex;
+  bool alive = true;
+  uint64_t next_id = 1;
+  std::map<uint64_t, std::function<void()>> pending;
+};
+
+void Post(const std::shared_ptr<DispatchQueue>& dispatch,
+          std::function<void()> callback) {
+  uint64_t id;
+  {
+    std::lock_guard lock(dispatch->mutex);
+    if (!dispatch->alive) return;
+    id = dispatch->next_id++;
+    dispatch->pending.emplace(id, std::move(callback));
+  }
+  const HWND root = GetAncestor(dispatch->window, GA_ROOT);
+  if (!root || !PostMessage(root, kDispatch,
+                            reinterpret_cast<WPARAM>(dispatch.get()),
+                            static_cast<LPARAM>(id))) {
+    std::lock_guard lock(dispatch->mutex);
+    dispatch->pending.erase(id);
+  }
+}
 int64_t Number(const Map& args, const char* key) {
   const auto& value = args.at(Value(key));
   if (auto integer = std::get_if<int32_t>(&value)) return *integer;
@@ -23,27 +50,41 @@ class RillightPlayerPlugin : public flutter::Plugin {
     // Plugin registration precedes SetChildContent in the standard runner.
     // Keep the stable child HWND, but resolve its parent only when posting.
     window_ = registrar_->GetView()->GetNativeWindow();
-    delegate_ = registrar_->RegisterTopLevelWindowProcDelegate([this](HWND, UINT message, WPARAM owner, LPARAM task) -> std::optional<LRESULT> {
-      if (message != kDispatch || owner != reinterpret_cast<WPARAM>(this)) return std::nullopt;
-      std::unique_ptr<std::function<void()>> callback(reinterpret_cast<std::function<void()>*>(task));
-      (*callback)();
+    dispatch_ = std::make_shared<DispatchQueue>(window_);
+    delegate_ = registrar_->RegisterTopLevelWindowProcDelegate([dispatch = dispatch_](HWND, UINT message, WPARAM owner, LPARAM task) -> std::optional<LRESULT> {
+      if (message != kDispatch ||
+          owner != reinterpret_cast<WPARAM>(dispatch.get())) return std::nullopt;
+      std::function<void()> callback;
+      {
+        std::lock_guard lock(dispatch->mutex);
+        const auto found = dispatch->pending.find(static_cast<uint64_t>(task));
+        if (found != dispatch->pending.end()) {
+          callback = std::move(found->second);
+          dispatch->pending.erase(found);
+        }
+      }
+      if (callback) callback();
       return 0;
     });
     channel_ = std::make_unique<flutter::MethodChannel<Value>>(registrar_->messenger(), "rillight_player", &flutter::StandardMethodCodec::GetInstance());
     channel_->SetMethodCallHandler([this](const auto& call, auto result) { Handle(call, std::move(result)); });
   }
   ~RillightPlayerPlugin() override {
+    {
+      std::lock_guard lock(dispatch_->mutex);
+      dispatch_->alive = false;
+      dispatch_->pending.clear();
+    }
+    for (auto& entry : outstanding_) {
+      entry.second->Error("player-shutdown", "Player window closed");
+    }
+    outstanding_.clear();
     // Normal ownership is Dart dispose -> unregister -> renderer free -> core
     // destroy. This is only an engine shutdown safety net.
     for (auto& entry : surfaces_) entry.second->Stop([] {});
     registrar_->UnregisterTopLevelWindowProcDelegate(delegate_);
   }
  private:
-  void Post(std::function<void()> callback) {
-    auto task = new std::function<void()>(std::move(callback));
-    const HWND root = GetAncestor(window_, GA_ROOT);
-    if (!PostMessage(root, kDispatch, reinterpret_cast<WPARAM>(this), reinterpret_cast<LPARAM>(task))) delete task;
-  }
   void Handle(const flutter::MethodCall<Value>& call, std::unique_ptr<Result> uniqueResult) {
     auto result = std::shared_ptr<Result>(std::move(uniqueResult));
     try {
@@ -57,10 +98,21 @@ class RillightPlayerPlugin : public flutter::Plugin {
             reinterpret_cast<RillightCore*>(handle), api_,
             registrar_->texture_registrar());
         surfaces_[handle] = surface;
-        surface->Start([this, result, surface, handle](std::string error) {
-          Post([this, result, surface, handle, error] {
-            if (error.empty()) result->Success(Value(surface->texture_id()));
-            else surface->Stop([this, result, handle, error] { Post([this, result, handle, error] { surfaces_.erase(handle); result->Error("render-create", error); }); });
+        const uint64_t request = next_result_id_++;
+        outstanding_[request] = result;
+        auto dispatch = dispatch_;
+        surface->Start([this, dispatch, result, surface, handle, request](std::string error) {
+          Post(dispatch, [this, dispatch, result, surface, handle, request, error] {
+            if (error.empty()) {
+              outstanding_.erase(request);
+              result->Success(Value(surface->texture_id()));
+            } else surface->Stop([this, dispatch, result, handle, request, error] {
+              Post(dispatch, [this, result, handle, request, error] {
+                surfaces_.erase(handle);
+                outstanding_.erase(request);
+                result->Error("render-create", error);
+              });
+            });
           });
         });
         return;
@@ -91,10 +143,20 @@ class RillightPlayerPlugin : public flutter::Plugin {
         result->Success(Value(Map{
             {Value("frames"), Value(surface->frames())},
             {Value("error"), Value(surface->error())},
+            {Value("audioWarning"), Value(surface->audio_warning())},
             {Value("actualHardware"), Value(static_cast<int32_t>(actual_hardware))},
         }));
       } else if (method == "dispose") {
-        surface->Stop([this, result, handle] { Post([this, result, handle] { surfaces_.erase(handle); result->Success(); }); });
+        const uint64_t request = next_result_id_++;
+        outstanding_[request] = result;
+        auto dispatch = dispatch_;
+        surface->Stop([this, dispatch, result, handle, request] {
+          Post(dispatch, [this, result, handle, request] {
+            surfaces_.erase(handle);
+            outstanding_.erase(request);
+            result->Success();
+          });
+        });
       } else result->NotImplemented();
     } catch (const std::exception& exception) { result->Error("native-player", exception.what()); }
   }
@@ -103,6 +165,9 @@ class RillightPlayerPlugin : public flutter::Plugin {
   int delegate_;
   std::unique_ptr<flutter::MethodChannel<Value>> channel_;
   std::shared_ptr<CoreApi> api_;
+  std::shared_ptr<DispatchQueue> dispatch_;
+  uint64_t next_result_id_ = 1;
+  std::map<uint64_t, std::shared_ptr<Result>> outstanding_;
   std::map<int64_t, std::shared_ptr<VideoSurface>> surfaces_;
 };
 }

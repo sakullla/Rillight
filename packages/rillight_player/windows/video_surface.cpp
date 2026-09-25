@@ -1,7 +1,10 @@
 #include "video_surface.h"
 
+#include <Windows.h>
+
 #include <algorithm>
 #include <chrono>
+#include <cwchar>
 #include <stdexcept>
 #include <vector>
 
@@ -41,7 +44,11 @@ void VideoSurface::Resize(int width, int height) {
 
 std::string VideoSurface::error() const {
   std::lock_guard lock(mutex_);
-  if (!error_.empty()) return error_;
+  return error_;
+}
+
+std::string VideoSurface::audio_warning() const {
+  std::lock_guard lock(mutex_);
   return audio_ ? audio_->error() : std::string();
 }
 
@@ -53,6 +60,12 @@ void VideoSurface::SetError(std::string error) {
 const FlutterDesktopPixelBuffer* VideoSurface::Obtain() {
   std::lock_guard lock(mutex_);
   if (stopped_ || !latest_ || tickets_->load() >= 8) return nullptr;
+  RillightCoreSnapshot state{};
+  state.struct_size = sizeof(state);
+  if (api_->snapshot(core_, &state) != 0 ||
+      latest_->session != state.session_id ||
+      latest_->timeline != state.timeline_version)
+    return nullptr;
   auto* ticket = new Ticket();
   ticket->frame = latest_;
   ticket->count = tickets_;
@@ -93,12 +106,22 @@ void VideoSurface::Stop(std::function<void()> done) {
 }
 
 void VideoSurface::Initialize() {
+#if defined(_DEBUG)
+  wchar_t delay[16]{};
+  if (GetEnvironmentVariableW(L"RILLIGHT_TEST_SURFACE_DELAY_MS", delay,
+                              static_cast<DWORD>(sizeof(delay) / sizeof(delay[0]))) > 0) {
+    const int milliseconds = static_cast<int>(
+        std::clamp(std::wcstol(delay, nullptr, 10), 0L, 2000L));
+    std::this_thread::sleep_for(std::chrono::milliseconds(milliseconds));
+  }
+#endif
   audio_ = std::make_unique<AudioOutput>(core_, api_);
   audio_->Start();
 }
 
-void VideoSurface::Publish(const RillightCoreFrame& source, int width,
-                           int height, bool decoded) {
+bool VideoSurface::Publish(const RillightCoreFrame& source, int width,
+                           int height, uint64_t session, uint64_t timeline,
+                           bool decoded) {
   auto pixels = rillight_windows::Present(source, width, height);
   if (pixels.width == 1 && pixels.height == 1 &&
       (width > 1 || height > 1)) {
@@ -107,18 +130,25 @@ void VideoSurface::Publish(const RillightCoreFrame& source, int width,
   auto frame = std::make_shared<Frame>();
   frame->width = pixels.width;
   frame->height = pixels.height;
+  frame->session = session;
+  frame->timeline = timeline;
   frame->rgba = std::move(pixels.bgra);
   for (size_t offset = 0; offset < frame->rgba.size(); offset += 4) {
     std::swap(frame->rgba[offset], frame->rgba[offset + 2]);
   }
-  if (stopped_) return;
+  if (stopped_) return false;
   {
     std::lock_guard lock(mutex_);
-    if (stopped_) return;
+    RillightCoreSnapshot state{};
+    state.struct_size = sizeof(state);
+    if (stopped_ || api_->snapshot(core_, &state) != 0 ||
+        state.session_id != session || state.timeline_version != timeline)
+      return false;
     latest_ = std::move(frame);
     if (decoded) ++frames_;
   }
   textures_->MarkTextureFrameAvailable(texture_id_);
+  return true;
 }
 
 void VideoSurface::Run(std::function<void(std::string)> ready) {
@@ -164,9 +194,11 @@ void VideoSurface::Run(std::function<void(std::string)> ready) {
           blank.width = blank.height = 1;
           blank.stride = blank.data_size = 4;
           blank.data = black;
-          Publish(blank, blank_width, blank_height, false);
-          displayed_width = blank_width;
-          displayed_height = blank_height;
+          if (Publish(blank, blank_width, blank_height, session, timeline,
+                      false)) {
+            displayed_width = blank_width;
+            displayed_height = blank_height;
+          }
         }
       }
       int width;
@@ -189,14 +221,16 @@ void VideoSurface::Run(std::function<void(std::string)> ready) {
                                 pending->pts_us >= 0 &&
                                 pending->pts_us + 250000 < state.position_us;
           if (!too_late) {
-            Publish(*pending, width, height);
-            displayed_width = width;
-            displayed_height = height;
-            if (pending->data_size > 0 && pending->data_size <= 64 * 1024 * 1024) {
-              previous_bytes.assign(pending->data,
-                                    pending->data + pending->data_size);
-              previous = *pending;
-              previous.data = previous_bytes.data();
+            if (Publish(*pending, width, height, session, timeline)) {
+              displayed_width = width;
+              displayed_height = height;
+              if (pending->data_size > 0 &&
+                  pending->data_size <= 64 * 1024 * 1024) {
+                previous_bytes.assign(pending->data,
+                                      pending->data + pending->data_size);
+                previous = *pending;
+                previous.data = previous_bytes.data();
+              }
             }
           }
           api_->release_frame(pending);
@@ -206,9 +240,10 @@ void VideoSurface::Run(std::function<void(std::string)> ready) {
       if (!previous_bytes.empty() &&
           (width != displayed_width || height != displayed_height)) {
         previous.data = previous_bytes.data();
-        Publish(previous, width, height);
-        displayed_width = width;
-        displayed_height = height;
+        if (Publish(previous, width, height, session, timeline)) {
+          displayed_width = width;
+          displayed_height = height;
+        }
       }
       if (!drained && state.source_eof && !pending &&
           state.queued_video_frames == 0 && state.queued_audio_frames == 0 &&

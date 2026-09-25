@@ -24,12 +24,15 @@ class VideoSurface : public std::enable_shared_from_this<VideoSurface> {
   int64_t texture_id() const { return texture_id_; }
   int64_t frames() const { return frames_; }
   std::string error() const;
+  std::string audio_warning() const;
 
  private:
   struct Frame {
     std::vector<uint8_t> rgba;
     int width = 0;
     int height = 0;
+    uint64_t session = 0;
+    uint64_t timeline = 0;
   };
   struct Ticket {
     std::shared_ptr<Frame> frame;
@@ -39,8 +42,8 @@ class VideoSurface : public std::enable_shared_from_this<VideoSurface> {
   const FlutterDesktopPixelBuffer* Obtain();
   void Run(std::function<void(std::string)> ready);
   void Initialize();
-  void Publish(const RillightCoreFrame& source, int width, int height,
-               bool decoded = true);
+  bool Publish(const RillightCoreFrame& source, int width, int height,
+               uint64_t session, uint64_t timeline, bool decoded = true);
   void SetError(std::string error);
 
   RillightCore* core_;

@@ -89,6 +89,20 @@ extern "C" __declspec(dllexport) int64_t t4_smoke_position(
   return snapshot.position_us;
 }
 
+extern "C" __declspec(dllexport) uint64_t t4_smoke_timeline(
+    SmokeSession* session) {
+  if (!session) return 0;
+  RillightCoreSnapshot snapshot{};
+  snapshot.struct_size = sizeof(snapshot);
+  if (rillight_core_snapshot(session->core, &snapshot) != 0) return 0;
+  return snapshot.timeline_version;
+}
+
+extern "C" __declspec(dllexport) int t4_smoke_seek(SmokeSession* session,
+                                                     int64_t position_us) {
+  return session ? rillight_core_seek(session->core, position_us, 3) : -1;
+}
+
 extern "C" __declspec(dllexport) int t4_smoke_audio_ready(
     SmokeSession* session) {
   if (!session) return -1;
@@ -96,6 +110,15 @@ extern "C" __declspec(dllexport) int t4_smoke_audio_ready(
   snapshot.struct_size = sizeof(snapshot);
   if (rillight_core_snapshot(session->core, &snapshot) != 0) return -1;
   return snapshot.first_audio_frame_ready;
+}
+
+extern "C" __declspec(dllexport) int t4_smoke_queued_audio(
+    SmokeSession* session) {
+  if (!session) return -1;
+  RillightCoreSnapshot snapshot{};
+  snapshot.struct_size = sizeof(snapshot);
+  if (rillight_core_snapshot(session->core, &snapshot) != 0) return -1;
+  return snapshot.queued_audio_frames;
 }
 
 extern "C" __declspec(dllexport) void t4_smoke_destroy(

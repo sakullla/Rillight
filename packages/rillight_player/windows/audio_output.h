@@ -19,6 +19,7 @@ class AudioOutput {
 
  private:
   void Run();
+  void DrainUnavailableAudio();
   RillightCore* core_;
   std::shared_ptr<CoreApi> api_;
   std::atomic<bool> stopped_{false};

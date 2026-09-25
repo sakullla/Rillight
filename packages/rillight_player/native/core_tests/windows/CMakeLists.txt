@@ -21,3 +21,13 @@ target_compile_features(rillight_windows_wasapi_output_test PRIVATE cxx_std_17)
 target_link_libraries(rillight_windows_wasapi_output_test PRIVATE ole32 uuid)
 add_test(NAME rillight_windows_wasapi_output
          COMMAND rillight_windows_wasapi_output_test)
+add_executable(rillight_windows_audio_schedule_test audio_schedule_test.cpp)
+target_compile_features(rillight_windows_audio_schedule_test PRIVATE cxx_std_17)
+if(MSVC)
+  target_compile_options(rillight_windows_audio_schedule_test PRIVATE /W4 /WX /UNDEBUG)
+else()
+  target_compile_options(rillight_windows_audio_schedule_test PRIVATE
+    -Wall -Wextra -Werror -UNDEBUG)
+endif()
+add_test(NAME rillight_windows_audio_schedule
+         COMMAND rillight_windows_audio_schedule_test)
