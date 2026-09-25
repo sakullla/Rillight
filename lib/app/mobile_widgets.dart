@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/app/mobile_motion.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/emby/emby_errors.dart';
 import 'package:rillight/emby/emby_models.dart';
@@ -109,11 +110,35 @@ class MobilePoster extends StatelessWidget {
   final EmbyItem item;
   final int imageMaxWidth;
 
+  /// 与 [MediaImage] 默认 `preferBackdrop: false` 的候选一致。
+  /// 无标签的 Primary 兜底不算有图，避免把占位交出去。
+  bool get _hasImage {
+    return item
+        .imageCandidates(preferBackdrop: false)
+        .any((ref) => ref.tag != null && ref.tag!.isNotEmpty);
+  }
+
   @override
   Widget build(BuildContext context) {
+    final image = MediaImage(
+      item: item,
+      preferBackdrop: false,
+      maxWidth: imageMaxWidth,
+    );
     return RepaintBoundary(
       child: MobilePressable(
-        onTap: () => context.push(AppRoutes.item(item.id)),
+        onTap: () {
+          if (!_hasImage) {
+            context.push(AppRoutes.item(item.id));
+            return;
+          }
+          PhoneMotion.openItem(
+            context,
+            item,
+            preferBackdrop: false,
+            maxWidth: imageMaxWidth,
+          );
+        },
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -133,7 +158,13 @@ class MobilePoster extends StatelessWidget {
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(AppRadii.md),
                   clipBehavior: Clip.hardEdge,
-                  child: MediaImage(item: item, maxWidth: imageMaxWidth),
+                  child: _hasImage
+                      ? PhoneMotion.sharedImage(
+                          itemId: item.id,
+                          preferBackdrop: false,
+                          child: image,
+                        )
+                      : image,
                 ),
               ),
             ),

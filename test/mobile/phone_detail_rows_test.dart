@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_motion.dart';
+import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/auth/auth_controller.dart';
@@ -16,6 +17,7 @@ import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_controller.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/catalog_scope.dart';
+import 'package:rillight/home/phone_shelf_page.dart';
 import 'package:rillight/library/episode_detail_sections.dart';
 import 'package:rillight/library/mobile_detail_page.dart';
 import 'package:rillight/library/mobile_library_page.dart';
@@ -292,6 +294,147 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('The Pilot'), findsWidgets);
     expect(tester.takeException(), isNull);
+  }, tags: ['integration']);
+
+  testWidgets(
+    'shelf poster handoff keeps the tapped image on the first detail frame',
+    (tester) async {
+      final gate = Completer<void>();
+      addTearDown(() {
+        if (!gate.isCompleted) {
+          gate.complete();
+        }
+      });
+      final harness = await _startDetail(
+        tester,
+        width: 360,
+        reduceMotion: true,
+        intercept: (dio) => _holdItemDetail(dio, gate),
+      );
+      unawaited(harness.router.push(AppRoutes.shelfLatestMovies));
+      await tester.pumpAndSettle();
+
+      final poster = find.byKey(const ValueKey('movie-inception'));
+      await tester.ensureVisible(poster);
+      await tester.pumpAndSettle();
+      final posterImage = tester.widget<MediaImage>(
+        find.descendant(of: poster, matching: find.byType(MediaImage)),
+      );
+      expect(posterImage.preferBackdrop, isFalse);
+      expect(
+        find.descendant(
+          of: poster,
+          matching: find.byWidgetPredicate(
+            (widget) =>
+                widget is Hero &&
+                widget.tag ==
+                    PhoneMotion.imageTag(
+                      'movie-inception',
+                      preferBackdrop: false,
+                    ),
+          ),
+        ),
+        findsOneWidget,
+      );
+
+      await tester.tap(poster);
+      await tester.pump();
+      await tester.pump();
+      expect(find.byKey(_pendingHeader), findsOneWidget);
+      final headerImages = tester.widgetList<MediaImage>(
+        find.descendant(
+          of: find.byKey(_pendingHeader),
+          matching: find.byType(MediaImage),
+          skipOffstage: false,
+        ),
+      );
+      expect(headerImages, isNotEmpty);
+      final headerImage = headerImages.single;
+      expect(headerImage.item.id, posterImage.item.id);
+      expect(headerImage.preferBackdrop, posterImage.preferBackdrop);
+      expect(headerImage.maxWidth, posterImage.maxWidth);
+      expect(
+        headerImage.item.primaryImageTag,
+        posterImage.item.primaryImageTag,
+      );
+      final extra = GoRouterState.of(
+        tester.element(find.byType(MobileDetailPage)),
+      ).extra;
+      expect(extra, isA<PhoneImageHandoff>());
+      final handoff = extra! as PhoneImageHandoff;
+      expect(handoff.item.id, 'movie-inception');
+      expect(handoff.preferBackdrop, isFalse);
+      expect(handoff.maxWidth, posterImage.maxWidth);
+      expect(tester.takeException(), isNull);
+
+      gate.complete();
+      await tester.pumpAndSettle();
+      expect(find.textContaining('dream-sharing'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+    tags: ['integration'],
+  );
+
+  testWidgets('shelf poster without an image still opens by a direct push', (
+    tester,
+  ) async {
+    final gate = Completer<void>();
+    addTearDown(() {
+      if (!gate.isCompleted) {
+        gate.complete();
+      }
+    });
+    final harness = await _startDetail(
+      tester,
+      width: 360,
+      reduceMotion: true,
+      intercept: (dio) => _holdItemDetail(dio, gate),
+    );
+    unawaited(harness.router.push(AppRoutes.shelfLatestMovies));
+    await tester.pumpAndSettle();
+
+    final poster = find.byKey(const ValueKey('movie-transcode'));
+    await tester.scrollUntilVisible(
+      poster,
+      300,
+      scrollable: find.byType(Scrollable).last,
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.descendant(of: poster, matching: find.byType(Hero)),
+      findsNothing,
+    );
+
+    await tester.tap(poster);
+    await tester.pump();
+    await tester.pump();
+    expect(
+      find.descendant(
+        of: find.byKey(_pendingHeader),
+        matching: find.byType(MediaImage),
+      ),
+      findsNothing,
+    );
+    expect(find.byKey(_pendingTitle), findsOneWidget);
+    expect(find.byKey(_pendingAction), findsOneWidget);
+    expect(find.byKey(_pendingBody), findsOneWidget);
+    final extra = GoRouterState.of(
+      tester.element(find.byType(MobileDetailPage)),
+    ).extra;
+    expect(extra, isNot(isA<PhoneImageHandoff>()));
+    expect(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is Hero &&
+            widget.tag ==
+                PhoneMotion.imageTag('movie-transcode', preferBackdrop: false),
+      ),
+      findsNothing,
+    );
+    expect(tester.takeException(), isNull);
+    gate.complete();
+    await tester.pumpAndSettle();
+    expect(find.text('需转码片'), findsWidgets);
   }, tags: ['integration']);
 
   testWidgets(
@@ -648,6 +791,24 @@ Future<_Started> _startDetail(
   );
 }
 
+void _holdItemDetail(Dio dio, Completer<void> gate) {
+  dio.interceptors.add(
+    InterceptorsWrapper(
+      onRequest: (options, handler) async {
+        final uri = options.uri.toString();
+        final detail =
+            options.method == 'GET' &&
+            RegExp(r'/Items/[^/?]+($|\?)').hasMatch(uri) &&
+            !uri.contains('/Images/');
+        if (detail && !gate.isCompleted) {
+          await gate.future;
+        }
+        handler.next(options);
+      },
+    ),
+  );
+}
+
 Future<_Started> _startLibrary(
   WidgetTester tester, {
   required double width,
@@ -732,6 +893,10 @@ Future<_Started> _start(
         path: '/library/:viewId',
         builder: (context, state) =>
             MobileLibraryPage(viewId: state.pathParameters['viewId']!),
+      ),
+      GoRoute(
+        path: '/shelf/:source',
+        builder: (context, state) => PhoneShelfPage.fromState(state),
       ),
       GoRoute(
         path: '/item/:itemId',
