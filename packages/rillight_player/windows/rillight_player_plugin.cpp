@@ -1,5 +1,6 @@
 #include "include/rillight_player/rillight_player_plugin_c_api.h"
 #include "video_surface.h"
+#include "core_api.h"
 #include <flutter/method_channel.h>
 #include <flutter/plugin_registrar_windows.h>
 #include <flutter/standard_method_codec.h>
@@ -51,7 +52,10 @@ class RillightPlayerPlugin : public flutter::Plugin {
       const auto method = call.method_name();
       if (method == "create") {
         if (surfaces_.count(handle)) throw std::runtime_error("Surface already exists");
-        auto surface = std::make_shared<VideoSurface>(reinterpret_cast<mpv_handle*>(handle), registrar_->texture_registrar());
+        if (!api_) api_ = std::make_shared<CoreApi>();
+        auto surface = std::make_shared<VideoSurface>(
+            reinterpret_cast<RillightCore*>(handle), api_,
+            registrar_->texture_registrar());
         surfaces_[handle] = surface;
         surface->Start([this, result, surface, handle](std::string error) {
           Post([this, result, surface, handle, error] {
@@ -72,7 +76,23 @@ class RillightPlayerPlugin : public flutter::Plugin {
         surface->Resize(static_cast<int>(Number(args, "width")), static_cast<int>(Number(args, "height")));
         result->Success();
       } else if (method == "status") {
-        result->Success(Value(Map{{Value("frames"), Value(surface->frames())}, {Value("error"), Value(surface->error())}}));
+        uint32_t actual_hardware = 0;
+        const int count = api_->track_count(reinterpret_cast<RillightCore*>(handle));
+        for (int index = 0; index < count; ++index) {
+          RillightCoreTrack track{};
+          track.struct_size = sizeof(track);
+          if (api_->get_track(reinterpret_cast<RillightCore*>(handle), index,
+                              &track) == 0 &&
+              track.type == RILLIGHT_CORE_TRACK_VIDEO) {
+            actual_hardware = track.actual_hardware;
+            break;
+          }
+        }
+        result->Success(Value(Map{
+            {Value("frames"), Value(surface->frames())},
+            {Value("error"), Value(surface->error())},
+            {Value("actualHardware"), Value(static_cast<int32_t>(actual_hardware))},
+        }));
       } else if (method == "dispose") {
         surface->Stop([this, result, handle] { Post([this, result, handle] { surfaces_.erase(handle); result->Success(); }); });
       } else result->NotImplemented();
@@ -82,6 +102,7 @@ class RillightPlayerPlugin : public flutter::Plugin {
   HWND window_;
   int delegate_;
   std::unique_ptr<flutter::MethodChannel<Value>> channel_;
+  std::shared_ptr<CoreApi> api_;
   std::map<int64_t, std::shared_ptr<VideoSurface>> surfaces_;
 };
 }
