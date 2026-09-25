@@ -261,6 +261,75 @@ void main() {
     },
   );
 
+  test(
+    'device-rejected startup tracks are not selected and stay silent',
+    () async {
+      final support = _TrackSupportBackend(
+        rejectedAudio: {9},
+        rejectedSubtitles: {2},
+      );
+      backend = support;
+      final movie = server.items.firstWhere((item) => item.id == 'movie-up');
+      movie.mediaStreams = const [
+        FakeMediaStream(index: 0, type: 'Video', codec: 'h264'),
+        FakeMediaStream(
+          index: 1,
+          type: 'Audio',
+          codec: 'aac',
+          displayTitle: 'Japanese',
+          isDefault: true,
+        ),
+        FakeMediaStream(
+          index: 9,
+          type: 'Audio',
+          codec: 'ac3',
+          displayTitle: 'Commentary',
+        ),
+        FakeMediaStream(
+          index: 2,
+          type: 'Subtitle',
+          codec: 'ass',
+          displayTitle: '中文',
+          isDefault: true,
+          isTextSubtitleStream: true,
+        ),
+      ];
+      final controller = await startStandaloneController();
+      addTearDown(controller.dispose);
+      expect(support.audioCalls, [1]);
+      expect(support.subtitleCalls, isEmpty);
+      expect(controller.audioStreamIndex, 1);
+      expect(controller.subtitleStreamIndex, isNull);
+      expect(controller.trackFailure, isNull);
+      expect(controller.error, isNull);
+      expect(controller.isPlaying, isTrue);
+      expect(support.openCount, 1);
+
+      await controller.setAudio(9);
+      expect(support.audioCalls, [1]);
+      expect(controller.audioStreamIndex, 1);
+      expect(controller.trackFailure, isNotNull);
+      expect(controller.trackFailure, isNot(contains('Bad state:')));
+      expect(
+        controller.trackFailure,
+        isNot(contains('Unsupported media track')),
+      );
+      expect(controller.error, isNull);
+      expect(support.openCount, 1);
+
+      await controller.setSubtitle(2);
+      expect(support.subtitleCalls, isEmpty);
+      expect(controller.subtitleStreamIndex, isNull);
+      expect(controller.trackFailure, isNotNull);
+      expect(support.openCount, 1);
+
+      await controller.setAudio(1);
+      expect(controller.audioStreamIndex, 1);
+      expect(controller.trackFailure, isNull);
+      expect(support.openCount, 1);
+    },
+  );
+
   testWidgets('saved progress resumes without a continue-or-restart prompt', (
     tester,
   ) async {
@@ -1066,5 +1135,38 @@ class _IndexMissBackend extends FakeVideoBackend {
   @override
   Future<void> setSubtitleIndex(int index) async {
     throw StateError('Requested sub track is unavailable');
+  }
+}
+
+class _TrackSupportBackend extends FakeVideoBackend
+    implements VideoBackendTrackSupport {
+  _TrackSupportBackend({
+    this.rejectedAudio = const {},
+    this.rejectedSubtitles = const {},
+  });
+
+  final Set<int> rejectedAudio;
+  final Set<int> rejectedSubtitles;
+  final List<int> audioCalls = [];
+  final List<int> subtitleCalls = [];
+
+  @override
+  bool? audioTrackSupported(int index) =>
+      rejectedAudio.contains(index) ? false : true;
+
+  @override
+  bool? subtitleTrackSupported(int index) =>
+      rejectedSubtitles.contains(index) ? false : true;
+
+  @override
+  Future<void> setAudioIndex(int index) async {
+    audioCalls.add(index);
+    await super.setAudioIndex(index);
+  }
+
+  @override
+  Future<void> setSubtitleIndex(int index) async {
+    subtitleCalls.add(index);
+    await super.setSubtitleIndex(index);
   }
 }

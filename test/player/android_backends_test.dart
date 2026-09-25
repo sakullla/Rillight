@@ -259,6 +259,66 @@ void main() {
         await source.close();
       },
     );
+    test(
+      'unsupported tracks are not sent and do not surface Bad state',
+      () async {
+        final source = StreamController<dynamic>.broadcast();
+        final player = AndroidPlayer(channel: channel, events: source.stream);
+        final backend = AndroidVideoBackend(player: player);
+        final calls = <String>[];
+        messenger.setMockMethodCallHandler(channel, (call) async {
+          calls.add(call.method);
+          final args = call.arguments as Map;
+          if (call.method == 'audio' || call.method == 'subtitle') {
+            throw PlatformException(
+              code: 'unsupported',
+              message: 'Unsupported media track',
+              details: {'sessionId': args['sessionId']},
+            );
+          }
+          return {
+            'sessionId': args['sessionId'],
+            'audioIndex': 3,
+            'playableAudio': [3],
+            'rejectedAudio': [1],
+            'playableSubtitle': <int>[],
+            'rejectedSubtitle': [2],
+          };
+        });
+        await backend.open(
+          VideoOpenRequest(sessionId: 7, url: Uri.parse('https://test/media')),
+        );
+        expect(backend.audioTrackSupported(1), isFalse);
+        expect(backend.audioTrackSupported(3), isTrue);
+        expect(backend.subtitleTrackSupported(2), isFalse);
+        expect(backend.subtitleTrackSupported(9), isNull);
+        final before = calls.length;
+        await expectLater(
+          backend.setAudioIndex(1),
+          throwsA(isA<DeviceTrackRejected>()),
+        );
+        await expectLater(
+          backend.setSubtitleIndex(2),
+          throwsA(isA<DeviceTrackRejected>()),
+        );
+        expect(calls, hasLength(before));
+        await expectLater(
+          backend.setAudioIndex(4),
+          throwsA(isA<DeviceTrackRejected>()),
+        );
+        expect(calls.sublist(before), ['audio']);
+        expect(
+          const DeviceTrackRejected().toString(),
+          isNot(contains('Bad state:')),
+        );
+        expect(
+          const DeviceTrackRejected().toString(),
+          isNot(contains('Unsupported media track')),
+        );
+        await backend.dispose();
+        await source.close();
+      },
+    );
     tearDown(() => messenger.setMockMethodCallHandler(channel, null));
   });
 

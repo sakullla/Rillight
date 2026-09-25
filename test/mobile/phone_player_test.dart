@@ -60,13 +60,16 @@ void main() {
     PlayerSettingsStore? settings,
     DandanplayClient? danmakuClient,
     PhoneOrientation? orientation,
+    PhoneSystemBars? systemBars,
     PhonePlaybackWakeLock? wakeLock,
+    void Function(FakeEmbyServer server)? prepare,
     DanmakuStreamHasher? hasher,
     PhoneDisplayControl? display,
     Size size = const Size(800, 360),
     Duration? mediaDuration,
   }) async {
     final server = FakeEmbyServer();
+    prepare?.call(server);
     final auth = await tester.runAsync(() => login(server));
     final video = backend ?? FakeVideoBackend();
     if (mediaDuration != null) video.duration = mediaDuration;
@@ -104,6 +107,7 @@ void main() {
                         builder: (_) => MobilePlayerPage(
                           itemId: itemId,
                           orientation: orientation,
+                          systemBars: systemBars,
                           wakeLock: wakeLock,
                           danmakuHasher: hasher,
                           displayControl: display,
@@ -582,6 +586,7 @@ void main() {
     await tester.pump();
     expect(find.byKey(const Key('mobile-player-toggle')), findsNothing);
     expect(find.byKey(const Key('mobile-player-more')), findsNothing);
+    expect(find.byIcon(Icons.screen_rotation), findsNothing);
     expect(find.byKey(const Key('mobile-player-unlock')), findsOneWidget);
 
     // Gestures are inert while locked: dragging must not seek or show
@@ -766,6 +771,231 @@ void main() {
     await closePlayer(tester);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets(
+    'playback hides system bars, stays landscape, and drops the rotate button',
+    (tester) async {
+      final bars = PhoneSystemBars(request: (_) async {});
+      final orientation = PhoneOrientation(
+        restoreTo: const [DeviceOrientation.portraitUp],
+        request: (_) async {},
+      );
+      await showPlayer(
+        tester,
+        itemId: 'movie-inception',
+        orientation: orientation,
+        systemBars: bars,
+        wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
+      );
+      await bars.settled;
+      expect(bars.calls, [true]);
+      expect(orientation.calls.single, PhoneOrientation.landscape);
+      expect(
+        orientation.calls.single,
+        isNot(contains(DeviceOrientation.portraitUp)),
+      );
+      expect(find.byIcon(Icons.screen_rotation), findsNothing);
+      expect(find.byKey(const Key('mobile-player-lock')), findsOneWidget);
+      expect(find.byKey(const Key('mobile-player-more')), findsOneWidget);
+      expect(find.byTooltip('关闭'), findsOneWidget);
+
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await bars.settled;
+      expect(bars.calls, [true, true]);
+
+      await closePlayer(tester);
+      await bars.settled;
+      await orientation.settled;
+      expect(bars.calls, [true, true, false]);
+      expect(orientation.calls[1], const [DeviceOrientation.portraitUp]);
+      expect(find.byType(MobilePlayerPage), findsNothing);
+    },
+  );
+
+  testWidgets('transport targets are at least 48dp and still step 10 seconds', (
+    tester,
+  ) async {
+    final backend = FakeVideoBackend(duration: const Duration(hours: 3));
+    await showPlayer(
+      tester,
+      itemId: 'movie-inception',
+      backend: backend,
+      mediaDuration: const Duration(hours: 3),
+      wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
+      size: const Size(360, 640),
+    );
+    final rewind = tester.getRect(
+      find.byKey(const Key('mobile-player-rewind')),
+    );
+    final toggle = tester.getRect(
+      find.byKey(const Key('mobile-player-toggle')),
+    );
+    final forward = tester.getRect(
+      find.byKey(const Key('mobile-player-forward')),
+    );
+    for (final rect in [rewind, toggle, forward]) {
+      expect(rect.width, greaterThanOrEqualTo(48 - 0.01));
+      expect(rect.height, greaterThanOrEqualTo(48 - 0.01));
+    }
+    expect(toggle.left - rewind.right, greaterThanOrEqualTo(8 - 0.01));
+    expect(forward.left - toggle.right, greaterThanOrEqualTo(8 - 0.01));
+    for (final key in [
+      find.byTooltip('关闭'),
+      find.byKey(const Key('mobile-player-lock')),
+      find.byKey(const Key('mobile-player-more')),
+    ]) {
+      expect(tester.getSize(key).shortestSide, greaterThanOrEqualTo(48 - 0.01));
+    }
+    expect(tester.takeException(), isNull);
+
+    final start = backend.position;
+    await tester.tap(find.byKey(const Key('mobile-player-forward')));
+    await tester.pump();
+    expect(backend.position - start, const Duration(seconds: 10));
+    await tester.tap(find.byKey(const Key('mobile-player-rewind')));
+    await tester.pump();
+    expect(backend.position, start);
+    await closePlayer(tester);
+  });
+
+  testWidgets(
+    'unsupported startup tracks stay silent and a manual choice is in Chinese',
+    (tester) async {
+      final backend = _PhoneTrackBackend(
+        rejectedAudio: {8},
+        rejectedSubtitles: {4},
+      );
+      final current = await showPlayer(
+        tester,
+        itemId: 'movie-inception',
+        backend: backend,
+        wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
+        size: const Size(800, 800),
+        prepare: (server) {
+          server.items
+              .firstWhere((item) => item.id == 'movie-inception')
+              .mediaStreams = const [
+            FakeMediaStream(index: 0, type: 'Video', codec: 'h264'),
+            FakeMediaStream(
+              index: 1,
+              type: 'Audio',
+              codec: 'aac',
+              displayTitle: 'English',
+              isDefault: true,
+            ),
+            FakeMediaStream(
+              index: 8,
+              type: 'Audio',
+              codec: 'ac3',
+              displayTitle: 'Commentary',
+            ),
+            FakeMediaStream(
+              index: 4,
+              type: 'Subtitle',
+              codec: 'ass',
+              displayTitle: '中文',
+              isDefault: true,
+              isTextSubtitleStream: true,
+            ),
+          ];
+        },
+      );
+      expect(current.error, isNull);
+      expect(current.trackFailure, isNull);
+      expect(current.isPlaying, isTrue);
+      expect(backend.audioCalls, [1]);
+      expect(backend.subtitleCalls, isEmpty);
+      expect(find.text('此轨道在当前设备上不可用'), findsNothing);
+      expect(find.textContaining('Bad state:'), findsNothing);
+      expect(find.textContaining('Unsupported media track'), findsNothing);
+
+      await tester.tap(find.byKey(const Key('mobile-player-more')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      final commentary = find.text('Commentary');
+      await tester.ensureVisible(commentary);
+      await tester.pump();
+      await tester.tap(commentary);
+      await tester.pump();
+      expect(find.text('此轨道在当前设备上不可用'), findsWidgets);
+      expect(find.textContaining('Bad state:'), findsNothing);
+      expect(find.textContaining('Unsupported media track'), findsNothing);
+      expect(find.text('Device track is not playable'), findsNothing);
+      expect(current.error, isNull);
+      expect(current.isPlaying, isTrue);
+      expect(current.audioStreamIndex, 1);
+      expect(backend.audioCalls, [1]);
+      expect(backend.openCount, 1);
+      expect(find.text('重试'), findsNothing);
+
+      final closeSheet = find.widgetWithText(TextButton, '返回');
+      await tester.ensureVisible(closeSheet);
+      await tester.pump();
+      await tester.tap(closeSheet);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      final before = backend.position;
+      await tester.tap(find.byKey(const Key('mobile-player-forward')));
+      await tester.pump();
+      expect(backend.position - before, const Duration(seconds: 10));
+      await closePlayer(tester);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('a video that cannot open still offers retry', (tester) async {
+    await showPlayer(
+      tester,
+      itemId: 'movie-inception',
+      backend: _FailOpenBackend(),
+      wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
+    );
+    expect(find.text('无法播放'), findsOneWidget);
+    expect(find.text('重试'), findsOneWidget);
+    expect(find.textContaining('Bad state:'), findsNothing);
+    await closePlayer(tester);
+  });
+}
+
+class _PhoneTrackBackend extends FakeVideoBackend
+    implements VideoBackendTrackSupport {
+  _PhoneTrackBackend({
+    this.rejectedAudio = const {},
+    this.rejectedSubtitles = const {},
+  }) : super(duration: const Duration(hours: 3));
+
+  final Set<int> rejectedAudio;
+  final Set<int> rejectedSubtitles;
+  final List<int> audioCalls = [];
+  final List<int> subtitleCalls = [];
+
+  @override
+  bool? audioTrackSupported(int index) =>
+      rejectedAudio.contains(index) ? false : true;
+
+  @override
+  bool? subtitleTrackSupported(int index) =>
+      rejectedSubtitles.contains(index) ? false : true;
+
+  @override
+  Future<void> setAudioIndex(int index) async {
+    audioCalls.add(index);
+    await super.setAudioIndex(index);
+  }
+
+  @override
+  Future<void> setSubtitleIndex(int index) async {
+    subtitleCalls.add(index);
+    await super.setSubtitleIndex(index);
+  }
+}
+
+class _FailOpenBackend extends FakeVideoBackend {
+  @override
+  Future<void> open(VideoOpenRequest request) async {
+    throw StateError('media open failed');
+  }
 }
 
 class _FakeDisplayControl implements PhoneDisplayControl {

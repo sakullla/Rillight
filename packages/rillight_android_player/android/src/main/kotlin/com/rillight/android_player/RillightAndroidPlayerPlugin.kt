@@ -178,8 +178,30 @@ class RillightAndroidPlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandl
         fun emit(kind: String, value: Any) { sink?.success(mapOf("owner" to id, "sessionId" to session, "kind" to kind, "value" to value)) }
         fun success(result: MethodChannel.Result) {
             val selected = player?.currentTracks?.groups?.flatMapIndexed { groupIndex, g -> (0 until g.length).filter { g.isTrackSelected(it) }.map { "$groupIndex:$it" } } ?: emptyList()
+            val audio = classify("Audio", C.TRACK_TYPE_AUDIO)
+            val text = classify("Subtitle", C.TRACK_TYPE_TEXT)
             result.success(mapOf("sessionId" to session, "audioIndex" to mappings.entries.firstOrNull { it.value in selected && streams.any { s -> s.index == it.key && s.type == "Audio" } }?.key,
-                "subtitleIndex" to mappings.entries.firstOrNull { it.value in selected && streams.any { s -> s.index == it.key && s.type == "Subtitle" } }?.key))
+                "subtitleIndex" to mappings.entries.firstOrNull { it.value in selected && streams.any { s -> s.index == it.key && s.type == "Subtitle" } }?.key,
+                "playableAudio" to audio.first, "rejectedAudio" to audio.second,
+                "playableSubtitle" to text.first, "rejectedSubtitle" to text.second))
+        }
+        private fun classify(typeName: String, trackType: Int): Pair<List<Int>, List<Int>> {
+            val playable = mutableListOf<Int>()
+            val rejected = mutableListOf<Int>()
+            val p = player ?: return playable to rejected
+            for ((index, key) in mappings) {
+                if (streams.none { it.index == index && it.type == typeName }) continue
+                val parts = key.split(':')
+                if (parts.size != 2) continue
+                val gi = parts[0].toIntOrNull() ?: continue
+                val ti = parts[1].toIntOrNull() ?: continue
+                val groups = p.currentTracks.groups
+                if (gi !in groups.indices) continue
+                val group = groups[gi]
+                if (group.type != trackType || ti !in (0 until group.length)) continue
+                if (group.isTrackSupported(ti)) playable += index else rejected += index
+            }
+            return playable to rejected
         }
         fun release() {
             handler.removeCallbacks(tick); handler.removeCallbacks(openTimeout); handler.removeCallbacks(trackTimeout)
@@ -259,10 +281,18 @@ class RillightAndroidPlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandl
         private fun isExternal(format: Format) = format.id == "rillight-external" || format.label == "rillight-external"
         fun select(index: Int, audio: Boolean, result: MethodChannel.Result) {
             val key = mappings[index] ?: throw IllegalStateException("Container track cannot be mapped to server stream $index")
-            val (gi, ti) = key.split(':').map { it.toInt() }
-            val p = player!!; val group = p.currentTracks.groups[gi]
+            val parts = key.split(':')
+            val gi = parts.getOrNull(0)?.toIntOrNull()
+            val ti = parts.getOrNull(1)?.toIntOrNull()
+            val p = player!!
             val type = if(audio) C.TRACK_TYPE_AUDIO else C.TRACK_TYPE_TEXT
-            require(group.type == type && group.isTrackSupported(ti)) { "Unsupported media track" }
+            val groups = p.currentTracks.groups
+            val group = if (gi != null && gi in groups.indices) groups[gi] else null
+            // Unsupported tracks are not selected. Playback keeps the current picture.
+            if (group == null || ti == null || group.type != type || ti !in (0 until group.length) || !group.isTrackSupported(ti)) {
+                result.error("unsupported", "Device cannot play this track", mapOf("sessionId" to session))
+                return
+            }
             beginTrack(key, result)
             p.trackSelectionParameters = p.trackSelectionParameters.buildUpon().setTrackTypeDisabled(type, false).setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, ti)).build()
             confirmTrack()

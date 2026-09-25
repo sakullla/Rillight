@@ -8,7 +8,10 @@ import 'package:rillight_android_player/rillight_android_player.dart';
 
 /// Media3 owns media resources; this adapter preserves controller identities.
 class AndroidVideoBackend extends VideoBackend
-    implements VideoBackendCapabilities, VideoBackendTranscodeSubtitles {
+    implements
+        VideoBackendCapabilities,
+        VideoBackendTranscodeSubtitles,
+        VideoBackendTrackSupport {
   AndroidVideoBackend({AndroidPlayer? player})
     : _player = player ?? AndroidPlayer() {
     _subscription = _player.events.listen(_onEvent);
@@ -35,6 +38,11 @@ class AndroidVideoBackend extends VideoBackend
   int? selectedAudioIndex;
   @override
   int? selectedSubtitleIndex;
+  bool _trackSupportKnown = false;
+  Set<int> _playableAudio = const {};
+  Set<int> _rejectedAudio = const {};
+  Set<int> _playableSubtitle = const {};
+  Set<int> _rejectedSubtitle = const {};
   @override
   Stream<VideoBackendEvent> get events => _events.stream;
   Stream<T> _values<T>(VideoEventKind kind) =>
@@ -134,6 +142,11 @@ class AndroidVideoBackend extends VideoBackend
     duration = buffer = Duration.zero;
     isPlaying = false;
     selectedAudioIndex = selectedSubtitleIndex = null;
+    _trackSupportKnown = false;
+    _playableAudio = const {};
+    _rejectedAudio = const {};
+    _playableSubtitle = const {};
+    _rejectedSubtitle = const {};
     try {
       final opening = _player.open({
         'url': request.url.toString(),
@@ -161,6 +174,7 @@ class AndroidVideoBackend extends VideoBackend
       if (_identity != identity) throw StateError('Superseded Android open');
       selectedAudioIndex = result['audioIndex'] as int?;
       selectedSubtitleIndex = result['subtitleIndex'] as int?;
+      _readTrackSupport(result);
     } on PlatformException catch (error) {
       if (error.message?.contains('DECOD') == true ||
           error.message?.contains('PARSING') == true) {
@@ -168,6 +182,41 @@ class AndroidVideoBackend extends VideoBackend
       }
       throw StateError(error.message ?? 'Android playback failed');
     }
+  }
+
+  @override
+  bool? audioTrackSupported(int index) =>
+      _trackSupported(index, _playableAudio, _rejectedAudio);
+
+  @override
+  bool? subtitleTrackSupported(int index) =>
+      _trackSupported(index, _playableSubtitle, _rejectedSubtitle);
+
+  bool? _trackSupported(int index, Set<int> playable, Set<int> rejected) {
+    if (!_trackSupportKnown) return null;
+    if (rejected.contains(index)) return false;
+    if (playable.contains(index)) return true;
+    return null;
+  }
+
+  void _readTrackSupport(Map<String, dynamic> result) {
+    if (!result.containsKey('rejectedAudio') ||
+        !result.containsKey('rejectedSubtitle')) {
+      return;
+    }
+    _trackSupportKnown = true;
+    _playableAudio = _indexSet(result['playableAudio']);
+    _rejectedAudio = _indexSet(result['rejectedAudio']);
+    _playableSubtitle = _indexSet(result['playableSubtitle']);
+    _rejectedSubtitle = _indexSet(result['rejectedSubtitle']);
+  }
+
+  Set<int> _indexSet(Object? value) {
+    if (value is! List) return const {};
+    return {
+      for (final item in value)
+        if (item is num) item.toInt(),
+    };
   }
 
   Future<void> _command(
@@ -180,7 +229,9 @@ class AndroidVideoBackend extends VideoBackend
       if (_identity != identity) throw StateError('Superseded Android command');
       selectedAudioIndex = result['audioIndex'] as int?;
       selectedSubtitleIndex = result['subtitleIndex'] as int?;
+      _readTrackSupport(result);
     } on PlatformException catch (error) {
+      if (error.code == 'unsupported') throw const DeviceTrackRejected();
       throw StateError(error.message ?? 'Android playback command failed');
     }
   }
@@ -200,10 +251,19 @@ class AndroidVideoBackend extends VideoBackend
   @override
   Future<void> setRate(double rate) => _command('rate', {'value': rate});
   @override
-  Future<void> setAudioIndex(int index) => _command('audio', {'index': index});
+  Future<void> setAudioIndex(int index) async {
+    if (audioTrackSupported(index) == false) throw const DeviceTrackRejected();
+    await _command('audio', {'index': index});
+  }
+
   @override
-  Future<void> setSubtitleIndex(int index) =>
-      _command('subtitle', {'index': index});
+  Future<void> setSubtitleIndex(int index) async {
+    if (subtitleTrackSupported(index) == false) {
+      throw const DeviceTrackRejected();
+    }
+    await _command('subtitle', {'index': index});
+  }
+
   @override
   Future<bool> setSubtitleUri(Uri uri, {String? title}) async {
     await _command('subtitleUri', {'url': uri.toString(), 'title': title});

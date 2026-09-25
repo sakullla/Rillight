@@ -6,7 +6,6 @@ import 'package:rillight/app/mobile_motion.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/player/danmaku/danmaku_controller.dart';
 import 'package:rillight/player/danmaku/danmaku_keys.dart';
-import 'package:rillight/player/phone_orientation.dart';
 import 'package:rillight/player/phone_player_gestures.dart';
 import 'package:rillight/player/player_controller.dart';
 import 'package:rillight/player/player_settings.dart';
@@ -14,6 +13,7 @@ import 'package:rillight/player/player_settings.dart';
 /// Control layer of the phone player: top bar (back / title / lock / more),
 /// a bottom-edge transport (play, progress, time) and the "more" panel that
 /// hosts picture scale, danmaku, tracks, speed, media source, mute and volume.
+/// Transport hit targets stay at least 48dp with an 8dp gap.
 ///
 /// The lock state is a state-machine field of this layer; the page mirrors
 /// it through [onLockChanged] to disable the gesture layer. `PlayerController`
@@ -23,7 +23,6 @@ class PhonePlayerControls extends StatefulWidget {
     super.key,
     required this.controller,
     required this.danmaku,
-    required this.orientation,
     required this.onClose,
     required this.onOpenDanmakuPanel,
     required this.onOpenDanmakuSearch,
@@ -36,7 +35,6 @@ class PhonePlayerControls extends StatefulWidget {
 
   final PlayerController controller;
   final DanmakuController? danmaku;
-  final PhoneOrientation orientation;
   final VoidCallback onClose;
   final VoidCallback onOpenDanmakuPanel;
   final VoidCallback onOpenDanmakuSearch;
@@ -54,6 +52,12 @@ class PhonePlayerControls extends StatefulWidget {
   @override
   State<PhonePlayerControls> createState() => PhonePlayerControlsState();
 }
+
+final ButtonStyle _phoneChromeButton = IconButton.styleFrom(
+  visualDensity: VisualDensity.standard,
+  minimumSize: const Size(48, 48),
+  tapTargetSize: MaterialTapTargetSize.padded,
+);
 
 class PhonePlayerControlsState extends State<PhonePlayerControls> {
   double? _seek;
@@ -120,6 +124,7 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
             IconButton(
               key: const Key('mobile-player-unlock'),
               tooltip: l.mobileUnlock,
+              style: _phoneChromeButton,
               onPressed: toggleLock,
               icon: const Icon(Icons.lock),
             ),
@@ -148,6 +153,7 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
         children: [
           IconButton(
             tooltip: l.closePlayer,
+            style: _phoneChromeButton,
             onPressed: widget.onClose,
             icon: const Icon(Icons.arrow_back),
           ),
@@ -159,21 +165,16 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
             ),
           ),
           IconButton(
-            key: const Key('mobile-player-rotate'),
-            tooltip: l.mobileRotate,
-            onPressed: () =>
-                unawaited(widget.orientation.togglePortraitPreview()),
-            icon: const Icon(Icons.screen_rotation),
-          ),
-          IconButton(
             key: const Key('mobile-player-lock'),
             tooltip: l.mobileLock,
+            style: _phoneChromeButton,
             onPressed: toggleLock,
             icon: const Icon(Icons.lock_open),
           ),
           IconButton(
             key: const Key('mobile-player-more'),
             tooltip: l.mobileTracks,
+            style: _phoneChromeButton,
             onPressed: c.loading ? null : () => unawaited(_openMore()),
             icon: const Icon(Icons.more_vert),
           ),
@@ -209,22 +210,22 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
           mainAxisSize: MainAxisSize.min,
           children: [
             if (c.progressSyncFailed) Text(l.progressSyncFailed),
-            if (c.trackFailure != null) Text(c.trackFailure!),
+            if (c.trackFailure != null) Text(l.mobileTrackUnavailable),
             if (c.backgroundReleased) Text(l.mobileBackgroundPaused),
             if (c.playbackEnded) Text(l.playbackEnded),
             if (c.isBuffering && !c.loading) const LinearProgressIndicator(),
             Row(
               children: [
-                IconButton(
+                _transportButton(
+                  key: const Key('mobile-player-rewind'),
                   tooltip: l.mobileRewind,
-                  visualDensity: VisualDensity.compact,
                   onPressed: () => c.seekRelative(const Duration(seconds: -10)),
-                  icon: const Icon(Icons.replay_10),
+                  icon: Icons.replay_10,
                 ),
-                IconButton(
+                const SizedBox(width: 8),
+                _transportButton(
                   key: const Key('mobile-player-toggle'),
                   tooltip: c.isPlaying ? l.pause : l.play,
-                  visualDensity: VisualDensity.compact,
                   onPressed:
                       c.loading ||
                           c.error != null ||
@@ -232,15 +233,14 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                           c.sessionExpired
                       ? null
                       : c.togglePlay,
-                  icon: Icon(
-                    c.isPlaying ? Icons.pause_circle : Icons.play_circle,
-                  ),
+                  icon: c.isPlaying ? Icons.pause_circle : Icons.play_circle,
                 ),
-                IconButton(
+                const SizedBox(width: 8),
+                _transportButton(
+                  key: const Key('mobile-player-forward'),
                   tooltip: l.mobileForward,
-                  visualDensity: VisualDensity.compact,
                   onPressed: () => c.seekRelative(const Duration(seconds: 10)),
-                  icon: const Icon(Icons.forward_10),
+                  icon: Icons.forward_10,
                 ),
                 Text(phonePlayerClock(c.position)),
                 Expanded(
@@ -266,6 +266,31 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
               ],
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _transportButton({
+    required Key key,
+    required String tooltip,
+    required VoidCallback? onPressed,
+    required IconData icon,
+  }) {
+    return SizedBox(
+      key: key,
+      width: 48,
+      height: 48,
+      child: IconButton(
+        tooltip: tooltip,
+        onPressed: onPressed,
+        icon: Icon(icon),
+        style: IconButton.styleFrom(
+          fixedSize: const Size(48, 48),
+          minimumSize: const Size(48, 48),
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          visualDensity: VisualDensity.standard,
+          padding: EdgeInsets.zero,
         ),
       ),
     );
@@ -375,7 +400,8 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                     title: Text(track.label),
                     onTap: () => c.setSubtitle(track.index),
                   ),
-                if (c.trackFailure != null) Text(c.trackFailure!),
+                if (c.trackFailure != null)
+                  Text(AppLocalizations.of(context).mobileTrackUnavailable),
                 const Divider(),
                 Text(AppLocalizations.of(context).mediaSource),
                 for (final source in c.mediaSources)

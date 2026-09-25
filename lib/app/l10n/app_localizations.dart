@@ -1858,11 +1858,11 @@ abstract class AppLocalizations {
   /// **'更多'**
   String get mobileMore;
 
-  /// Player top-bar tooltip toggling portrait preview while playback keeps the orientation lock.
+  /// Phone player notice when a selected audio or subtitle track cannot be played. Raw playback exceptions are not shown.
   ///
   /// In zh, this message translates to:
-  /// **'切换竖屏预览'**
-  String get mobileRotate;
+  /// **'此轨道在当前设备上不可用'**
+  String get mobileTrackUnavailable;
 
   /// More-panel entry that opens the danmaku settings panel.
   ///

@@ -1187,9 +1187,9 @@
   "@mobileMore": {
     "description": "Player top-bar tooltip opening the bottom panel with danmaku, tracks, speed and volume."
   },
-  "mobileRotate": "切换竖屏预览",
-  "@mobileRotate": {
-    "description": "Player top-bar tooltip toggling portrait preview while playback keeps the orientation lock."
+  "mobileTrackUnavailable": "此轨道在当前设备上不可用",
+  "@mobileTrackUnavailable": {
+    "description": "Phone player notice when a selected audio or subtitle track cannot be played. Raw playback exceptions are not shown."
   },
   "mobileDanmakuPanel": "弹幕设置",
   "@mobileDanmakuPanel": {

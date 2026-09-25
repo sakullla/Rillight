@@ -50,6 +50,24 @@ class VideoCompatibilityException implements Exception {
   String toString() => message;
 }
 
+/// The device cannot decode this mapped audio or subtitle.
+///
+/// Startup leaves the playable selection in place. A later manual choice
+/// records the failure without reopening the video.
+class DeviceTrackRejected implements Exception {
+  const DeviceTrackRejected();
+
+  @override
+  String toString() => 'Device track is not playable';
+}
+
+/// Optional. Null means this backend has not classified [index].
+/// False means selection must not be sent to the device.
+abstract interface class VideoBackendTrackSupport {
+  bool? audioTrackSupported(int index);
+  bool? subtitleTrackSupported(int index);
+}
+
 enum VideoEventKind {
   position,
   duration,

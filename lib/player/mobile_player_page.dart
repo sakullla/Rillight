@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_motion.dart';
 import 'package:rillight/app/widgets/liquid_glass.dart';
@@ -34,6 +35,7 @@ class MobilePlayerPage extends StatefulWidget {
     this.audioStreamIndex,
     this.subtitleStreamIndex,
     this.orientation,
+    this.systemBars,
     this.wakeLock,
     this.danmakuHasher,
     this.displayControl,
@@ -49,6 +51,9 @@ class MobilePlayerPage extends StatefulWidget {
   /// Replaceable landscape request. Null uses [SystemChrome] and the viewport
   /// direction captured on entry.
   final PhoneOrientation? orientation;
+
+  /// Replaceable status and navigation bar hide. Null uses [SystemChrome].
+  final PhoneSystemBars? systemBars;
 
   /// Replaceable screen wake. Null uses wakelock_plus directly.
   final PhonePlaybackWakeLock? wakeLock;
@@ -100,13 +105,67 @@ class PhonePlaybackWakeLock {
   }
 }
 
-class MobilePlayerPageState extends State<MobilePlayerPage> {
+/// Hides status and navigation bars while the phone player is on screen.
+///
+/// [request] is replaceable so tests can observe hide and restore without
+/// changing the host. A failed request is swallowed. Leaving the page, or
+/// returning to it after the system shows the bars, is applied in order.
+class PhoneSystemBars {
+  PhoneSystemBars({Future<void> Function(bool hidden)? request})
+    : _request = request ?? platformRequest;
+
+  static Future<void> platformRequest(bool hidden) {
+    if (hidden) {
+      return SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    }
+    return SystemChrome.setEnabledSystemUIMode(
+      SystemUiMode.manual,
+      overlays: SystemUiOverlay.values,
+    );
+  }
+
+  final Future<void> Function(bool hidden) _request;
+  final List<bool> calls = [];
+  bool _hidden = false;
+  bool _applied = false;
+  Future<void> _queue = Future<void>.value();
+
+  Future<void> get settled => _queue;
+
+  Future<void> hide() => _enqueue(true, force: false);
+
+  Future<void> restore() => _enqueue(false, force: false);
+
+  /// Sends the current mode again after a transient system-bar restore.
+  Future<void> reassert() => _enqueue(_hidden, force: true);
+
+  Future<void> _enqueue(bool hidden, {required bool force}) {
+    final changed = !_applied || _hidden != hidden;
+    _hidden = hidden;
+    if (!force && !changed) return _queue;
+    _queue = _queue.then((_) async {
+      if (_hidden != hidden) return;
+      _applied = true;
+      calls.add(hidden);
+      try {
+        await _request(hidden).timeout(const Duration(milliseconds: 300));
+      } catch (_) {
+        // System UI must not block playback or route teardown.
+      }
+    });
+    return _queue;
+  }
+}
+
+class MobilePlayerPageState extends State<MobilePlayerPage>
+    with WidgetsBindingObserver {
   PlayerController? controller;
   AndroidPlaybackLifecycle? _lifecycle;
   AuthController? _auth;
   Object? _identity;
   bool _closing = false;
   PhoneOrientation? _orientation;
+  PhoneSystemBars? _bars;
   PhonePlaybackWakeLock? _wake;
   DanmakuController? _danmaku;
   bool _danmakuLayerPinned = false;
@@ -114,6 +173,19 @@ class MobilePlayerPageState extends State<MobilePlayerPage> {
   PhoneDisplayControl? _display;
   bool _controlsLocked = false;
   bool _fillFrame = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && !_closing) {
+      unawaited(_bars?.reassert());
+    }
+  }
 
   @override
   void didChangeDependencies() {
@@ -132,6 +204,7 @@ class MobilePlayerPageState extends State<MobilePlayerPage> {
         PhoneOrientation(
           restoreTo: phoneOrientationsFor(MediaQuery.orientationOf(context)),
         );
+    _bars = widget.systemBars ?? PhoneSystemBars();
     _wake = widget.wakeLock ?? PhonePlaybackWakeLock();
     _display = widget.displayControl ?? MethodChannelPhoneDisplayControl();
     final created = PlayerController(
@@ -160,6 +233,7 @@ class MobilePlayerPageState extends State<MobilePlayerPage> {
     _danmaku = danmaku;
     danmaku.addListener(_onDanmaku);
     _lifecycle = AndroidPlaybackLifecycle(created);
+    unawaited(_bars!.hide());
     unawaited(_orientation!.enterPlayback());
     unawaited(created.start());
   }
@@ -259,6 +333,7 @@ class MobilePlayerPageState extends State<MobilePlayerPage> {
     final route = ModalRoute.of(context);
     final navigator = Navigator.of(context);
     _lifecycle?.dispose();
+    await _bars?.restore();
     await _orientation?.leavePlayback();
     await _wake?.hold(false);
     await controller?.close();
@@ -378,12 +453,15 @@ class MobilePlayerPageState extends State<MobilePlayerPage> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _auth?.removeListener(_authChanged);
     controller?.removeListener(_onPlayback);
     _danmaku?.removeListener(_onDanmaku);
     _lifecycle?.dispose();
     final orientation = _orientation;
+    final bars = _bars;
     final wake = _wake;
+    if (bars != null) unawaited(bars.restore());
     if (orientation != null) unawaited(orientation.leavePlayback());
     if (wake != null) unawaited(wake.hold(false));
     _danmaku?.dispose();
@@ -490,7 +568,6 @@ class MobilePlayerPageState extends State<MobilePlayerPage> {
                       child: PhonePlayerControls(
                         controller: c,
                         danmaku: danmaku,
-                        orientation: _orientation!,
                         onClose: _close,
                         onOpenDanmakuPanel: _openDanmakuPanel,
                         onOpenDanmakuSearch: _openDanmakuSearch,

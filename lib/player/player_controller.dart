@@ -700,7 +700,11 @@ class PlayerController extends ChangeNotifier {
       return;
     }
     await _selectTrack(
-      (_) => backend.setAudioIndex(index),
+      (_) => _selectDeviceTrack(
+        audio: true,
+        index: index,
+        select: () => backend.setAudioIndex(index),
+      ),
       () => audioStreamIndex = index,
       'AudioTrackChange',
     );
@@ -1911,7 +1915,11 @@ class PlayerController extends ChangeNotifier {
         await _restoreParameter(operation, () => backend.setRate(playbackRate));
         await _restoreParameter(operation, () async {
           if (selectedAudio != null && !next.isTranscode) {
-            await backend.setAudioIndex(selectedAudio);
+            await _selectDeviceTrack(
+              audio: true,
+              index: selectedAudio,
+              select: () => backend.setAudioIndex(selectedAudio),
+            );
           }
           if (_accepts(operation)) audioStreamIndex = selectedAudio;
         });
@@ -1980,6 +1988,8 @@ class PlayerController extends ChangeNotifier {
     if (!current()) return;
     try {
       await apply();
+    } on DeviceTrackRejected {
+      // Startup restore keeps the playable track and stays silent.
     } on TimeoutException {
       // A missing native reply does not establish a healthy control channel.
       if (current()) rethrow;
@@ -1989,6 +1999,24 @@ class PlayerController extends ChangeNotifier {
         _emit();
       }
     }
+  }
+
+  /// Skips a mapped track the device cannot play instead of selecting it.
+  Future<void> _selectDeviceTrack({
+    required bool audio,
+    required int index,
+    required Future<void> Function() select,
+  }) async {
+    if (backend is! VideoBackendTrackSupport) {
+      await select();
+      return;
+    }
+    final support = backend as VideoBackendTrackSupport;
+    final supported = audio
+        ? support.audioTrackSupported(index)
+        : support.subtitleTrackSupported(index);
+    if (supported == false) throw const DeviceTrackRejected();
+    await select();
   }
 
   Future<void> _failOpen(
@@ -2072,7 +2100,11 @@ class PlayerController extends ChangeNotifier {
           );
           return;
         case TranscodeSubtitleDelivery.manifest:
-          await backend.setSubtitleIndex(subtitle);
+          await _selectDeviceTrack(
+            audio: false,
+            index: subtitle,
+            select: () => backend.setSubtitleIndex(subtitle),
+          );
           return;
       }
     }
@@ -2097,15 +2129,25 @@ class PlayerController extends ChangeNotifier {
       throw StateError('Subtitle track is unavailable');
     }
     if (!forceExternal && stream.isBitmapSubtitle) {
-      await backend.setSubtitleIndex(index);
+      await _selectDeviceTrack(
+        audio: false,
+        index: index,
+        select: () => backend.setSubtitleIndex(index),
+      );
       return;
     }
     if (!forceExternal && !stream.isExternal) {
       try {
         // 内嵌文本(ASS 等)已在直连容器里。按流索引选择,避免再向
         // 服务器提取一份外挂文件(该请求会超时或选不中,字幕就不出现)。
-        await backend.setSubtitleIndex(index);
+        await _selectDeviceTrack(
+          audio: false,
+          index: index,
+          select: () => backend.setSubtitleIndex(index),
+        );
         return;
+      } on DeviceTrackRejected {
+        rethrow;
       } on StateError {
         // 容器里没有对应轨道时,再走外挂地址。
       }

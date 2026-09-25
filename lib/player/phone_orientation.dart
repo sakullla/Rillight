@@ -22,8 +22,8 @@ class PhoneOrientation with WidgetsBindingObserver {
   }) : _request = request ?? systemRequest,
        restoreTo = List<DeviceOrientation>.unmodifiable(restoreTo ?? unlocked);
 
-  /// Both landscape directions. Portrait stays out of this list only while
-  /// playback holds it; exit puts [restoreTo] back.
+  /// Playback stays on these two landscape directions, including when the
+  /// phone is held upright. Exit puts [restoreTo] back.
   static const landscape = <DeviceOrientation>[
     DeviceOrientation.landscapeLeft,
     DeviceOrientation.landscapeRight,
@@ -51,7 +51,6 @@ class PhoneOrientation with WidgetsBindingObserver {
   Object? lastError;
   bool _entered = false;
   bool _awaitingReturn = false;
-  bool _portraitPreview = false;
   bool _observing = false;
   Future<void> _queue = Future<void>.value();
 
@@ -61,30 +60,13 @@ class PhoneOrientation with WidgetsBindingObserver {
     if (_entered) return _queue;
     _entered = true;
     _awaitingReturn = false;
-    _portraitPreview = false;
     _stopObserving();
     return _enqueue(() => _send(landscape));
-  }
-
-  /// Whether the in-page rotation button flipped playback to portrait.
-  bool get portraitPreview => _portraitPreview;
-
-  /// Toggles portrait preview while playback keeps owning the orientation
-  /// lock. The control layer rotation button drives this; toggling back
-  /// re-requests landscape. Exit still restores [restoreTo].
-  Future<void> togglePortraitPreview() {
-    if (!_entered) return _queue;
-    _portraitPreview = !_portraitPreview;
-    final target = _portraitPreview
-        ? const <DeviceOrientation>[DeviceOrientation.portraitUp]
-        : landscape;
-    return _enqueue(() => _send(target));
   }
 
   Future<void> leavePlayback() {
     if (!_entered) return _queue;
     _entered = false;
-    _portraitPreview = false;
     return _enqueue(() async {
       final releaseLater = !_same(restoreTo, unlocked);
       if (releaseLater) {

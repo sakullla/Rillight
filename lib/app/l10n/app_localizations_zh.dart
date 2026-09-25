@@ -934,7 +934,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get mobileMore => '更多';
 
   @override
-  String get mobileRotate => '切换竖屏预览';
+  String get mobileTrackUnavailable => '此轨道在当前设备上不可用';
 
   @override
   String get mobileDanmakuPanel => '弹幕设置';
