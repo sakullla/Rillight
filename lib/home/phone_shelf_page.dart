@@ -75,9 +75,15 @@ class _PhoneShelfPageState extends State<PhoneShelfPage> {
   List<EmbyItem> _items = const [];
   bool _loading = true;
   bool _loadingMore = false;
+
+  /// 已有条目上的筛选刷新。飞行期间禁止加载更多。
+  bool _refreshing = false;
   bool _hasMore = false;
   EmbyException? _error;
   EmbyException? _pageError;
+
+  /// 筛选刷新失败时保留原列表；重试重拉第 0 页，而不是分页追加。
+  EmbyException? _refreshError;
   int _fetched = 0;
   int _loadGen = 0;
   CatalogCache? _fallbackCache;
@@ -234,8 +240,10 @@ class _PhoneShelfPageState extends State<PhoneShelfPage> {
     setState(() {
       _loading = !keep;
       _loadingMore = false;
+      _refreshing = keep;
       _error = null;
       _pageError = null;
+      _refreshError = null;
       if (!keep) {
         _items = const [];
         _hasMore = false;
@@ -252,6 +260,7 @@ class _PhoneShelfPageState extends State<PhoneShelfPage> {
         _fetched = page.items.length;
         _hasMore = _continues(page, _fetched, grew: true);
         _loading = false;
+        _refreshing = false;
       });
     } catch (error) {
       if (!mounted || gen != _loadGen) {
@@ -259,8 +268,9 @@ class _PhoneShelfPageState extends State<PhoneShelfPage> {
       }
       setState(() {
         _loading = false;
+        _refreshing = false;
         if (keep) {
-          _pageError = _asEmby(error);
+          _refreshError = _asEmby(error);
         } else {
           _error = _asEmby(error);
         }
@@ -269,7 +279,11 @@ class _PhoneShelfPageState extends State<PhoneShelfPage> {
   }
 
   Future<void> _loadMore() async {
-    if (!_hasMore || _loading || _loadingMore) {
+    if (!_hasMore ||
+        _loading ||
+        _loadingMore ||
+        _refreshing ||
+        _refreshError != null) {
       return;
     }
     final gen = _loadGen;
@@ -422,7 +436,14 @@ class _PhoneShelfPageState extends State<PhoneShelfPage> {
                   ),
                 ),
               ),
-              if (_pageError != null)
+              if (_refreshError != null)
+                SliverToBoxAdapter(
+                  child: MobileFailureState(
+                    message: catalogFailureMessage(l10n, _refreshError!),
+                    onRetry: () => unawaited(_load(keepVisible: true)),
+                  ),
+                )
+              else if (_pageError != null)
                 SliverToBoxAdapter(
                   child: MobileFailureState(
                     message: catalogFailureMessage(l10n, _pageError!),
@@ -437,7 +458,7 @@ class _PhoneShelfPageState extends State<PhoneShelfPage> {
                       style: TextButton.styleFrom(
                         minimumSize: const Size(48, 48),
                       ),
-                      onPressed: _loadingMore
+                      onPressed: _loadingMore || _refreshing
                           ? null
                           : () => unawaited(_loadMore()),
                       child: Text(l10n.episodesLoadMore),

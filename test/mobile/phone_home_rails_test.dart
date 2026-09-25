@@ -36,6 +36,9 @@ const _device = EmbyDeviceInfo(
   version: '1',
 );
 
+const _filteredShelfPage =
+    '{"Items":[{"Id":"series-filtered","Name":"仅新筛选","Type":"Series"}],"TotalRecordCount":1}';
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -116,6 +119,81 @@ void main() {
       tags: ['integration'],
     );
   }
+
+  testWidgets('kept shelf filter failure retries page zero', (tester) async {
+    final harness = await _pumpShelf(
+      tester,
+      width: 360,
+      height: 1200,
+      source: 'latest-series',
+      items: _series(6),
+    );
+    harness.hold.release();
+    await tester.pumpAndSettle();
+    expect(find.text('剧集 0'), findsOneWidget);
+    harness.hold.failFilteredRemaining = 1;
+    harness.hold.filteredBody = _filteredShelfPage;
+    await _tapUnplayed(tester);
+    await tester.pumpAndSettle();
+    expect(find.text('剧集 0'), findsOneWidget);
+    expect(find.byKey(MobileFailureState.retryKey), findsOneWidget);
+    expect(find.byKey(PhoneShelfPage.loadMoreKey), findsNothing);
+
+    await tester.tap(find.byKey(MobileFailureState.retryKey));
+    await tester.pumpAndSettle();
+    expect(find.text('仅新筛选'), findsOneWidget);
+    expect(find.text('剧集 0'), findsNothing);
+    expect(find.text('老友记'), findsNothing);
+    _expectUnplayedFirstPage(harness.hold.itemRequests);
+    expect(tester.takeException(), isNull);
+  }, tags: ['integration']);
+
+  testWidgets(
+    'in-flight shelf filter blocks load more and retry replaces the page',
+    (tester) async {
+      final harness = await _pumpShelf(
+        tester,
+        width: 360,
+        height: 5200,
+        source: 'latest-series',
+        items: _series(60),
+      );
+      harness.hold.release();
+      await tester.pumpAndSettle();
+      expect(find.text('老友记'), findsOneWidget);
+      expect(find.byKey(PhoneShelfPage.loadMoreKey), findsOneWidget);
+      final loaded = harness.hold.itemRequests.length;
+
+      harness.hold.holdLists = true;
+      harness.hold.failFilteredRemaining = 1;
+      harness.hold.filteredBody = _filteredShelfPage;
+      await _tapUnplayed(tester);
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(find.text('老友记'), findsOneWidget);
+      expect(
+        tester
+            .widget<TextButton>(find.byKey(PhoneShelfPage.loadMoreKey))
+            .onPressed,
+        isNull,
+      );
+
+      harness.hold.release();
+      await tester.pumpAndSettle();
+      expect(find.text('老友记'), findsOneWidget);
+      expect(find.byKey(MobileFailureState.retryKey), findsOneWidget);
+      expect(find.byKey(PhoneShelfPage.loadMoreKey), findsNothing);
+
+      await tester.ensureVisible(find.byKey(MobileFailureState.retryKey));
+      await tester.tap(find.byKey(MobileFailureState.retryKey));
+      await tester.pumpAndSettle();
+      expect(find.text('仅新筛选'), findsOneWidget);
+      expect(find.text('老友记'), findsNothing);
+      expect(find.text('剧集 0'), findsNothing);
+      _expectUnplayedFirstPage(harness.hold.itemRequests.skip(loaded));
+      expect(tester.takeException(), isNull);
+    },
+    tags: ['integration'],
+  );
 
   testWidgets('home row placeholders follow wide and poster cards', (
     tester,
@@ -446,13 +524,37 @@ class _ShelfHarness {
   final AuthController auth;
 }
 
+List<FakeEmbyItem> _series(int count) {
+  return [
+    for (var i = 0; i < count; i++)
+      FakeEmbyItem(id: 'series-$i', name: '剧集 $i', type: 'Series'),
+  ];
+}
+
+void _expectUnplayedFirstPage(Iterable<Uri> uris) {
+  final filtered = uris.where(
+    (uri) => uri.queryParameters['Filters'] == 'IsUnplayed',
+  );
+  expect(filtered, isNotEmpty);
+  for (final uri in filtered) {
+    expect(uri.queryParameters['StartIndex'], '0');
+  }
+}
+
+Future<void> _tapUnplayed(WidgetTester tester) async {
+  await tester.tap(find.byKey(const Key('phone-shelf-filter')));
+  await tester.pumpAndSettle();
+  await tester.tap(find.byKey(const Key('catalog-filter-watch-unplayed')));
+}
+
 Future<_ShelfHarness> _pumpShelf(
   WidgetTester tester, {
   required double width,
   required String source,
+  double height = 800,
   List<FakeEmbyItem>? items,
 }) async {
-  await _pumpSurface(tester, width: width, height: 800);
+  await _pumpSurface(tester, width: width, height: height);
   final server = FakeEmbyServer(
     items: items == null ? null : [...defaultCatalogItems(), ...items],
   );
@@ -575,6 +677,9 @@ class _HoldAdapter implements HttpClientAdapter {
 
   final HttpClientAdapter _inner;
   var holdLists = false;
+  var failFilteredRemaining = 0;
+  String? filteredBody;
+  final itemRequests = <Uri>[];
   final _waiters = <Completer<void>>[];
 
   void release() {
@@ -593,10 +698,27 @@ class _HoldAdapter implements HttpClientAdapter {
     Stream<Uint8List>? requestStream,
     Future<void>? cancelFuture,
   ) async {
+    final itemsList = options.uri.path.endsWith('/Items');
+    if (itemsList) {
+      itemRequests.add(options.uri);
+    }
     if (holdLists) {
       final gate = Completer<void>();
       _waiters.add(gate);
       await gate.future;
+    }
+    if (itemsList) {
+      final filters = options.uri.queryParameters['Filters'];
+      if (filters != null && filters.isNotEmpty) {
+        if (failFilteredRemaining > 0) {
+          failFilteredRemaining--;
+          return _scriptedBody('{"error":"items failed"}', 500);
+        }
+        final body = filteredBody;
+        if (body != null) {
+          return _scriptedBody(body, 200);
+        }
+      }
     }
     return _inner.fetch(options, requestStream, cancelFuture);
   }
@@ -606,4 +728,14 @@ class _HoldAdapter implements HttpClientAdapter {
     release();
     _inner.close(force: force);
   }
+}
+
+ResponseBody _scriptedBody(String raw, int status) {
+  return ResponseBody.fromString(
+    raw,
+    status,
+    headers: {
+      Headers.contentTypeHeader: [Headers.jsonContentType],
+    },
+  );
 }
