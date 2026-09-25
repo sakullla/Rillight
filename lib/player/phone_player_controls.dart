@@ -292,7 +292,7 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
         ),
       ),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(4, 0, 8, 0),
+        padding: const EdgeInsets.only(right: 4),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -365,10 +365,10 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
     required IconData icon,
   }) {
     return SizedBox(
-      key: key,
       width: 48,
       height: 48,
       child: IconButton(
+        key: key,
         tooltip: tooltip,
         onPressed: onPressed,
         icon: Icon(icon),
