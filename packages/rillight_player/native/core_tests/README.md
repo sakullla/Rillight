@@ -31,6 +31,9 @@ read blocks after decoded audio is ready; seek must cancel that old read,
 produce frames on the new timeline, and tolerate a second seek. A gated EOF
 read checks that seeking while old EOF is pending cannot publish old EOF or
 accept a premature output-drained report on the new timeline.
+Opening probes reject speed and track changes without advancing the operation
+or timeline. Another controlled IO fixture blocks inside `av_seek_frame` and
+requires a newer seek to cancel the old one and produce new-timeline frames.
 When the SDK contains the pinned libass build, `ass_test.cpp` constructs a
 Matroska MPEG-4/ASS stream entirely in memory and checks that text changes
 decoded RGBA pixels. It also adds an external ASS script through controlled IO,
@@ -43,6 +46,9 @@ and subtitle pixels after switching away and back. Its non-square pixel ratio,
 display matrix, and BT.709 tags exercise the versioned frame metadata. A
 slow external ASS read makes progress for more than five seconds, then returns
 EAGAIN; it must be judged by time since last progress.
+External SRT and WebVTT fixtures are read through the same controlled IO,
+parsed by FFmpeg and selected as libass-composed tracks. Invalid external SRT
+leaves the old selection intact; valid cues appear at their one-second time.
 This is a native composition check, not a Flutter surface or font coverage
 check; the build environment must provide a usable sans-serif font.
 The test prints the actual loaded FFmpeg library versions. CMake rejects an
@@ -61,16 +67,16 @@ GPU decoding on target hardware.
 It decodes and blends embedded bitmap subtitles, and routes audio through
 FFmpeg `atempo` and `aformat` with automatic resampling. A conditional libass
 path processes embedded ASS events and font attachments plus decoded SRT and
-WebVTT text, then blends libass images into decoded video. External ASS/SSA
-scripts can be added asynchronously
+WebVTT text, then blends libass images into decoded video. External ASS/SSA,
+SRT, and WebVTT files can be added asynchronously
 through a separate, cancellable controlled-IO loader and selected by their
 synthetic track indices. Callback owners must support concurrent media and
 subtitle handles; `cancel` must release both on close. Each
 media read has a separate prompt `cancel_media_read` signal for seek and track
 changes; its callback must not call core APIs or wait for worker progress.
 The transport must leave the media handle reusable after that read is
-interrupted and seek resets its state. Each
-script is limited to 4 MiB, with 16 tracks and 16 MiB per session. Invalid
+interrupted and seek resets its state. Each source is limited to 4 MiB, with
+16 tracks and 16 MiB per session. Invalid
 external scripts and IO errors leave the selected track and timeline intact;
 other external subtitle formats, direct hardware frame import, and verified
 platform output remain required before product playback can use it. The base

@@ -185,8 +185,9 @@ RILLIGHT_CORE_API int rillight_core_select_audio(RillightCore *core,
 RILLIGHT_CORE_API int rillight_core_select_subtitle(RillightCore *core,
                                                     int stream_index,
                                                     uint64_t operation_id);
-/* Add an external ASS/SSA subtitle using the same controlled IO callbacks as
- * media. Acceptance is asynchronous and does not change the selected track or
+/* Add an external ASS/SSA, SRT, or WebVTT subtitle using the same controlled
+ * IO callbacks as media. SRT/WebVTT are parsed with FFmpeg and composed with
+ * libass. Acceptance is asynchronous and does not change the selected track or
  * timeline. Wait for snapshot.external_subtitle_pending to clear, then inspect
  * ffmpeg_error and the track list. A successful track has is_external=1 and a
  * synthetic stream_index; select it with select_subtitle. Invalid, oversized,

@@ -4,6 +4,7 @@
 #include <atomic>
 #include <cerrno>
 #include <chrono>
+#include <cctype>
 #include <cmath>
 #include <condition_variable>
 #include <cstdio>
@@ -91,9 +92,18 @@ struct SubtitleCue {
 };
 
 #if RILLIGHT_HAVE_LIBASS
+struct ExternalTextCue {
+  int64_t start_ms = 0;
+  int64_t duration_ms = 0;
+  std::string ass_chunk;
+};
+
 struct ExternalSubtitle {
   int stream_index = -1;
+  AVCodecID codec = AV_CODEC_ID_NONE;
   std::shared_ptr<const std::vector<char>> script;
+  std::shared_ptr<const std::vector<ExternalTextCue>> cues;
+  size_t source_bytes = 0;
 };
 #endif
 
@@ -217,6 +227,38 @@ bool open_external_ass(AssRenderer *ass, const std::vector<char> &script,
                                       nullptr);
   if (!replacement.renderer || !replacement.track ||
       replacement.track->n_events <= 0) {
+    close_ass(&replacement);
+    return false;
+  }
+  ass_set_fonts(replacement.renderer, nullptr, "sans-serif",
+                ASS_FONTPROVIDER_AUTODETECT, nullptr, 1);
+  replacement.stream = stream_index;
+  replacement.external = true;
+  close_ass(ass);
+  *ass = replacement;
+  return true;
+}
+
+bool open_external_text(AssRenderer *ass, const std::vector<char> &header,
+                        const std::vector<ExternalTextCue> &cues,
+                        int stream_index) {
+  if (header.empty() || cues.empty()) return false;
+  AssRenderer replacement;
+  replacement.library = ass_library_init();
+  if (!replacement.library) return false;
+  replacement.renderer = ass_renderer_init(replacement.library);
+  replacement.track = ass_new_track(replacement.library);
+  if (!replacement.renderer || !replacement.track) {
+    close_ass(&replacement);
+    return false;
+  }
+  ass_process_codec_private(replacement.track, header.data(), header.size());
+  for (const auto &cue : cues) {
+    std::string chunk = cue.ass_chunk;
+    ass_process_chunk(replacement.track, chunk.data(), chunk.size(),
+                      cue.start_ms, cue.duration_ms);
+  }
+  if (replacement.track->n_events <= 0) {
     close_ass(&replacement);
     return false;
   }
@@ -475,13 +517,186 @@ int read_external_ass(RillightCoreImpl *core, const std::string &url,
   return 0;
 }
 
+struct SubtitleMemoryInput {
+  RillightCoreImpl *core;
+  const std::vector<char> *bytes;
+  size_t offset = 0;
+};
+
+int subtitle_memory_read(void *opaque, uint8_t *buffer, int size) {
+  auto *input = static_cast<SubtitleMemoryInput *>(opaque);
+  if (input->core->stop) return AVERROR_EXIT;
+  const size_t count = std::min(static_cast<size_t>(size),
+                                input->bytes->size() - input->offset);
+  if (!count) return AVERROR_EOF;
+  std::memcpy(buffer, input->bytes->data() + input->offset, count);
+  input->offset += count;
+  return static_cast<int>(count);
+}
+
+int64_t subtitle_memory_seek(void *opaque, int64_t offset, int whence) {
+  auto *input = static_cast<SubtitleMemoryInput *>(opaque);
+  if (input->core->stop) return AVERROR_EXIT;
+  if ((whence & ~AVSEEK_FORCE) == AVSEEK_SIZE)
+    return static_cast<int64_t>(input->bytes->size());
+  int64_t base = 0;
+  switch (whence & ~AVSEEK_FORCE) {
+    case SEEK_CUR: base = static_cast<int64_t>(input->offset); break;
+    case SEEK_END: base = static_cast<int64_t>(input->bytes->size()); break;
+    case SEEK_SET: break;
+    default: return AVERROR(EINVAL);
+  }
+  if ((offset < 0 && offset < -base) ||
+      (offset > 0 && base > INT64_MAX - offset)) return AVERROR(EINVAL);
+  const int64_t target = base + offset;
+  if (target < 0 || target > static_cast<int64_t>(input->bytes->size()))
+    return AVERROR(EINVAL);
+  input->offset = static_cast<size_t>(target);
+  return target;
+}
+
+int parse_external_text(RillightCoreImpl *core,
+                        const std::vector<char> &bytes, AVCodecID codec,
+                        std::vector<char> *header,
+                        std::vector<ExternalTextCue> *cues) {
+  const char *name = codec == AV_CODEC_ID_SUBRIP ? "srt" :
+                     codec == AV_CODEC_ID_WEBVTT ? "webvtt" : nullptr;
+  if (!name || bytes.empty()) return AVERROR(EINVAL);
+  const AVInputFormat *input_format = av_find_input_format(name);
+  const AVCodec *avcodec = avcodec_find_decoder(codec);
+  if (!input_format || !avcodec) return AVERROR_DECODER_NOT_FOUND;
+  SubtitleMemoryInput input{core, &bytes};
+  auto *buffer = static_cast<uint8_t *>(av_malloc(kIoBufferSize));
+  if (!buffer) return AVERROR(ENOMEM);
+  AVIOContext *avio = avio_alloc_context(buffer, kIoBufferSize, 0, &input,
+                                        subtitle_memory_read, nullptr,
+                                        subtitle_memory_seek);
+  if (!avio) { av_free(buffer); return AVERROR(ENOMEM); }
+  AVFormatContext *format = avformat_alloc_context();
+  AVCodecContext *decoder = nullptr;
+  AVPacket *packet = nullptr;
+  int result = AVERROR(ENOMEM);
+  if (!format) goto finish_external_text;
+  format->pb = avio;
+  format->flags |= AVFMT_FLAG_CUSTOM_IO;
+  result = avformat_open_input(&format, nullptr, input_format, nullptr);
+  if (result < 0) goto finish_external_text;
+  result = avformat_find_stream_info(format, nullptr);
+  if (result < 0) goto finish_external_text;
+  {
+    const int stream_index = av_find_best_stream(format,
+        AVMEDIA_TYPE_SUBTITLE, -1, -1, nullptr, 0);
+    if (stream_index < 0) { result = stream_index; goto finish_external_text; }
+    const AVStream *stream = format->streams[stream_index];
+    if (stream->codecpar->codec_id != codec) {
+      result = AVERROR_INVALIDDATA;
+      goto finish_external_text;
+    }
+    decoder = avcodec_alloc_context3(avcodec);
+    if (!decoder) { result = AVERROR(ENOMEM); goto finish_external_text; }
+    result = avcodec_parameters_to_context(decoder, stream->codecpar);
+    if (result < 0) goto finish_external_text;
+    decoder->pkt_timebase = stream->time_base;
+    result = avcodec_open2(decoder, avcodec, nullptr);
+    if (result < 0) goto finish_external_text;
+    if (!decoder->subtitle_header || decoder->subtitle_header_size <= 0) {
+      result = AVERROR_INVALIDDATA;
+      goto finish_external_text;
+    }
+    header->assign(decoder->subtitle_header,
+                   decoder->subtitle_header + decoder->subtitle_header_size);
+    packet = av_packet_alloc();
+    if (!packet) { result = AVERROR(ENOMEM); goto finish_external_text; }
+    size_t total_chunk_bytes = header->size();
+    while ((result = av_read_frame(format, packet)) >= 0) {
+      if (core->stop) { result = AVERROR_EXIT; break; }
+      if (packet->stream_index == stream_index) {
+        AVSubtitle subtitle{};
+        int got = 0;
+        const int decoded = avcodec_decode_subtitle2(decoder, &subtitle,
+                                                     &got, packet);
+        if (decoded < 0) {
+          avsubtitle_free(&subtitle);
+          result = decoded;
+          break;
+        }
+        if (got) {
+          int64_t start_ms = subtitle.pts == AV_NOPTS_VALUE ?
+              (packet->pts == AV_NOPTS_VALUE ? 0 :
+               av_rescale_q(packet->pts, stream->time_base,
+                            AVRational{1, 1000})) : subtitle.pts / 1000;
+          start_ms += subtitle.start_display_time;
+          int64_t duration_ms = subtitle.end_display_time >
+                                subtitle.start_display_time ?
+              subtitle.end_display_time - subtitle.start_display_time :
+              av_rescale_q(packet->duration, stream->time_base,
+                           AVRational{1, 1000});
+          if (start_ms < 0 || duration_ms <= 0) {
+            avsubtitle_free(&subtitle);
+            result = AVERROR_INVALIDDATA;
+            break;
+          }
+          for (unsigned int index = 0; index < subtitle.num_rects; ++index) {
+            const AVSubtitleRect *rect = subtitle.rects[index];
+            if (rect->type != SUBTITLE_ASS || !rect->ass) continue;
+            const size_t length = std::strlen(rect->ass);
+            if (cues->size() >= 10000 ||
+                length > kMaxExternalSubtitleBytes - total_chunk_bytes) {
+              result = AVERROR(EFBIG);
+              break;
+            }
+            cues->push_back({start_ms, duration_ms, rect->ass});
+            total_chunk_bytes += length;
+          }
+        }
+        avsubtitle_free(&subtitle);
+      }
+      av_packet_unref(packet);
+      if (result < 0) break;
+    }
+    if (result == AVERROR_EOF && !cues->empty()) result = 0;
+    else if (result == AVERROR_EOF) result = AVERROR_INVALIDDATA;
+  }
+finish_external_text:
+  av_packet_free(&packet);
+  avcodec_free_context(&decoder);
+  if (format) avformat_close_input(&format);
+  avio_context_free(&avio);
+  return result;
+}
+
+AVCodecID external_subtitle_codec(const std::string &url) {
+  std::string path = url.substr(0, url.find_first_of("?#"));
+  std::transform(path.begin(), path.end(), path.begin(),
+                 [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+  const auto ends_with = [&path](const char *suffix) {
+    const size_t length = std::strlen(suffix);
+    return path.size() >= length &&
+           path.compare(path.size() - length, length, suffix) == 0;
+  };
+  if (ends_with(".srt")) return AV_CODEC_ID_SUBRIP;
+  if (ends_with(".vtt") || ends_with(".webvtt")) return AV_CODEC_ID_WEBVTT;
+  return AV_CODEC_ID_ASS;
+}
+
 void load_external_ass(RillightCoreImpl *core, uint64_t session,
                        std::string url) {
+  std::vector<char> source;
+  int result = read_external_ass(core, url, &source);
+  const size_t source_bytes = source.size();
+  const AVCodecID codec = external_subtitle_codec(url);
   std::vector<char> script;
-  int result = read_external_ass(core, url, &script);
+  std::vector<ExternalTextCue> cues;
+  if (result >= 0) {
+    if (codec == AV_CODEC_ID_ASS) script = std::move(source);
+    else result = parse_external_text(core, source, codec, &script, &cues);
+  }
   if (result >= 0) {
     AssRenderer probe;
-    if (!open_external_ass(&probe, script, -1))
+    const bool valid = codec == AV_CODEC_ID_ASS ?
+        open_external_ass(&probe, script, -1) :
+        open_external_text(&probe, script, cues, -1);
+    if (!valid)
       result = AVERROR_INVALIDDATA;
     close_ass(&probe);
   }
@@ -490,7 +705,7 @@ void load_external_ass(RillightCoreImpl *core, uint64_t session,
     if (core->stop || core->session != session) return;
     if (result >= 0 &&
         (core->external_subtitles.size() >= kMaxExternalSubtitleTracks ||
-         core->external_subtitle_bytes + script.size() >
+         core->external_subtitle_bytes + source_bytes >
              kMaxExternalSubtitleTotalBytes ||
          core->embedded_stream_count >= kExternalSubtitleStreamBase))
       result = AVERROR(EFBIG);
@@ -501,14 +716,20 @@ void load_external_ass(RillightCoreImpl *core, uint64_t session,
       track.struct_size = sizeof(track);
       track.stream_index = index;
       track.type = RILLIGHT_CORE_TRACK_SUBTITLE;
-      track.codec_id = AV_CODEC_ID_ASS;
-      std::snprintf(track.codec_name, sizeof(track.codec_name), "ass");
-      std::snprintf(track.title, sizeof(track.title), "External ASS");
+      track.codec_id = codec;
+      std::snprintf(track.codec_name, sizeof(track.codec_name), "%s",
+                    avcodec_get_name(codec));
+      std::snprintf(track.title, sizeof(track.title), "External %s",
+                    codec == AV_CODEC_ID_ASS ? "ASS" :
+                    codec == AV_CODEC_ID_SUBRIP ? "SRT" : "WebVTT");
       track.is_external = 1;
       core->tracks.push_back(track);
-      core->external_subtitle_bytes += script.size();
+      core->external_subtitle_bytes += source_bytes;
       core->external_subtitles.push_back(
-          {index, std::make_shared<const std::vector<char>>(std::move(script))});
+          {index, codec,
+           std::make_shared<const std::vector<char>>(std::move(script)),
+           std::make_shared<const std::vector<ExternalTextCue>>(std::move(cues)),
+           source_bytes});
     }
     core->error = result;
     core->external_subtitle_pending = false;
@@ -1231,11 +1452,27 @@ void run(RillightCoreImpl *core, uint64_t session) {
     }
     core->active_read_timeline = timeline;
     if (seek >= 0) {
+      {
+        std::lock_guard lock(core->mutex);
+        if (core->timeline != timeline) continue;
+        core->media_read_active = true;
+      }
       if (format->pb) {
         format->pb->error = 0;
         format->pb->eof_reached = 0;
       }
       result = av_seek_frame(format, -1, seek, AVSEEK_FLAG_BACKWARD);
+      {
+        std::lock_guard lock(core->mutex);
+        core->media_read_active = false;
+        if (core->timeline != timeline) {
+          if (format->pb) {
+            format->pb->error = 0;
+            format->pb->eof_reached = 0;
+          }
+          continue;
+        }
+      }
       if (result < 0) break;
       if (video.context) avcodec_flush_buffers(video.context);
       if (audio.context) avcodec_flush_buffers(audio.context);
@@ -1298,17 +1535,26 @@ void run(RillightCoreImpl *core, uint64_t session) {
 #if RILLIGHT_HAVE_LIBASS
       if (!replacement.context && !ass_selected) {
         std::shared_ptr<const std::vector<char>> script;
+        std::shared_ptr<const std::vector<ExternalTextCue>> cues;
+        AVCodecID external_codec = AV_CODEC_ID_NONE;
         {
           std::lock_guard lock(core->mutex);
           for (const auto &external : core->external_subtitles) {
             if (external.stream_index == selected_subtitle) {
               script = external.script;
+              cues = external.cues;
+              external_codec = external.codec;
               break;
             }
           }
         }
-        if (script && open_external_ass(&replacement_ass, *script,
-                                        selected_subtitle)) {
+        const bool opened = script &&
+            (external_codec == AV_CODEC_ID_ASS ?
+             open_external_ass(&replacement_ass, *script,
+                               selected_subtitle) :
+             cues && open_external_text(&replacement_ass, *script, *cues,
+                                         selected_subtitle));
+        if (opened) {
           replacement.stream = selected_subtitle;
           ass_selected = true;
         }
@@ -1623,6 +1869,7 @@ int rillight_core_select_audio(RillightCore *pointer, int stream_index,
   auto *core = impl(pointer);
   std::unique_lock lock(core->mutex);
   if (core->state == RILLIGHT_CORE_IDLE ||
+      core->state == RILLIGHT_CORE_OPENING ||
       core->state == RILLIGHT_CORE_ENDED ||
       core->state == RILLIGHT_CORE_FAILED ||
       !accept_operation(core, operation_id)) return -1;
@@ -1650,6 +1897,7 @@ int rillight_core_select_subtitle(RillightCore *pointer, int stream_index,
   auto *core = impl(pointer);
   std::unique_lock lock(core->mutex);
   if (core->state == RILLIGHT_CORE_IDLE ||
+      core->state == RILLIGHT_CORE_OPENING ||
       core->state == RILLIGHT_CORE_ENDED ||
       core->state == RILLIGHT_CORE_FAILED ||
       core->input_exhausted) return -1;
@@ -1733,6 +1981,7 @@ int rillight_core_set_speed(RillightCore *pointer, double speed,
   auto *core = impl(pointer);
   std::unique_lock lock(core->mutex);
   if (core->state == RILLIGHT_CORE_IDLE ||
+      core->state == RILLIGHT_CORE_OPENING ||
       core->state == RILLIGHT_CORE_ENDED ||
       core->state == RILLIGHT_CORE_FAILED ||
       !accept_operation(core, operation_id)) return -1;

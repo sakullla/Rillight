@@ -11,6 +11,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 extern "C" {
@@ -43,6 +44,9 @@ struct Media {
   Bytes srt_video;
   Bytes vtt_video;
   Bytes external;
+  Bytes external_srt;
+  Bytes external_vtt;
+  Bytes invalid_srt;
   Bytes invalid;
   Bytes read_failure;
   Bytes blocked;
@@ -71,6 +75,12 @@ Bytes make_external_ass() {
   script += "Dialogue: 0,0:00:00.00,0:00:04.00,Default,,0,0,0,,EXTERNAL BLUE\n";
   Bytes bytes;
   bytes.data.assign(script.begin(), script.end());
+  return bytes;
+}
+
+Bytes text_bytes(const char *text) {
+  Bytes bytes;
+  bytes.data.assign(text, text + std::strlen(text));
   return bytes;
 }
 
@@ -193,6 +203,12 @@ void *open(void *opaque, const char *url, int) {
     return new Bytes(media->vtt_video);
   if (std::strcmp(url, "external.ass") == 0)
     return new Bytes(media->external);
+  if (std::strcmp(url, "external.srt") == 0)
+    return new Bytes(media->external_srt);
+  if (std::strcmp(url, "external.vtt") == 0)
+    return new Bytes(media->external_vtt);
+  if (std::strcmp(url, "invalid.srt") == 0)
+    return new Bytes(media->invalid_srt);
   if (std::strcmp(url, "invalid.ass") == 0)
     return new Bytes(media->invalid);
   if (std::strcmp(url, "read-failure.ass") == 0)
@@ -293,6 +309,11 @@ int main() {
   media.srt_video.stall_at_offset = media.srt_video.data.size() - 1;
   media.vtt_video.stall_at_offset = media.vtt_video.data.size() - 1;
   media.external = make_external_ass();
+  media.external_srt = text_bytes(
+      "1\n00:00:01,000 --> 00:00:02,000\nEXTERNAL SRT\n\n");
+  media.external_vtt = text_bytes(
+      "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nEXTERNAL WEBVTT\n\n");
+  media.invalid_srt = text_bytes("not a timed subtitle\n");
   media.invalid.data = {'n', 'o', 't', ' ', 'A', 'S', 'S'};
   media.read_failure.fail_read = true;
   media.blocked.block = &media.blocking;
@@ -540,6 +561,74 @@ int main() {
       rillight_core_release_frame(text_frame);
     }
     assert(text_rendered);
+    rillight_core_destroy(core);
+  }
+  for (const auto &external_text : {
+           std::pair<const char *, AVCodecID>{"external.srt", AV_CODEC_ID_SUBRIP},
+           {"external.vtt", AV_CODEC_ID_WEBVTT}}) {
+    core = rillight_core_create(&io);
+    assert(core && rillight_core_open(core, "synthetic.mkv", 1) == 0);
+    assert(wait_for(core, [](const auto &state) {
+      return state.first_video_frame_ready && state.state != RILLIGHT_CORE_FAILED;
+    }));
+    const auto before_external = snapshot(core);
+    assert(rillight_core_add_external_subtitle(core, "invalid.srt", 2) == 0);
+    assert(wait_for(core, [](const auto &state) {
+      return !state.external_subtitle_pending && state.ffmpeg_error < 0;
+    }));
+    assert(rillight_core_track_count(core) == 2);
+    assert(snapshot(core).subtitle_stream_index ==
+               before_external.subtitle_stream_index &&
+           snapshot(core).timeline_version == before_external.timeline_version);
+    assert(rillight_core_add_external_subtitle(core, external_text.first, 3) == 0);
+    assert(wait_for(core, [](const auto &state) {
+      return !state.external_subtitle_pending && state.ffmpeg_error == 0;
+    }));
+    assert(rillight_core_track_count(core) == 3);
+    RillightCoreTrack added{};
+    added.struct_size = sizeof(added);
+    assert(rillight_core_get_track(core, 2, &added) == 0);
+    assert(added.type == RILLIGHT_CORE_TRACK_SUBTITLE &&
+           added.is_external == 1 && added.codec_id == external_text.second);
+    assert(snapshot(core).subtitle_stream_index ==
+           before_external.subtitle_stream_index);
+    assert(rillight_core_select_subtitle(core, added.stream_index, 4) == 0);
+    assert(wait_for(core, [added](const auto &state) {
+      return state.subtitle_stream_index == added.stream_index &&
+             state.first_video_frame_ready && state.state != RILLIGHT_CORE_FAILED;
+    }));
+    assert(rillight_core_seek(core, 0, 5) == 0);
+    assert(wait_for(core, [](const auto &state) {
+      return state.first_video_frame_ready && state.state != RILLIGHT_CORE_FAILED;
+    }));
+    assert(rillight_core_set_playing(core, 1, 6) == 0);
+    bool early_blank = false;
+    bool timed_text_visible = false;
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::seconds(5);
+    while (std::chrono::steady_clock::now() < deadline &&
+           !(early_blank && timed_text_visible)) {
+      auto *video_frame = rillight_core_take_frame(core,
+                                                   RILLIGHT_CORE_VIDEO_RGBA);
+      if (!video_frame) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        continue;
+      }
+      bool bright = false;
+      for (int row = video_frame->height / 2; row < video_frame->height;
+           ++row) {
+        for (int column = 0; column < video_frame->width; ++column) {
+          const uint8_t *pixel = video_frame->data +
+              static_cast<size_t>(row) * video_frame->stride + column * 4;
+          bright |= pixel[0] > 100 && pixel[1] > 100 && pixel[2] > 100;
+        }
+      }
+      if (video_frame->pts_us <= 400000) early_blank |= !bright;
+      if (video_frame->pts_us >= 1100000 &&
+          video_frame->pts_us <= 1900000) timed_text_visible |= bright;
+      rillight_core_release_frame(video_frame);
+    }
+    assert(early_blank && timed_text_visible);
     rillight_core_destroy(core);
   }
   std::printf("Embedded and external ASS subtitle composition verified (%d "

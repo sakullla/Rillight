@@ -25,6 +25,7 @@ struct Media {
 struct Blocking {
   std::mutex mutex;
   std::condition_variable wake;
+  bool entered = false;
   bool cancelled = false;
 };
 
@@ -46,6 +47,16 @@ struct EofGateMedia {
   bool armed = false;
   int entered_count = 0;
   int released_count = 0;
+};
+
+struct OverlapSeekMedia {
+  Bytes wav;
+  std::mutex mutex;
+  std::condition_variable wake;
+  bool armed = false;
+  bool entered = false;
+  bool cancelled = false;
+  bool consumed = false;
 };
 
 void append16(std::vector<uint8_t> &data, uint16_t value) {
@@ -151,6 +162,8 @@ void *blocked_open(void *opaque, const char *, int) { return opaque; }
 int blocked_read(void *opaque, void *, uint8_t *, int) {
   auto *blocking = static_cast<Blocking *>(opaque);
   std::unique_lock lock(blocking->mutex);
+  blocking->entered = true;
+  blocking->wake.notify_all();
   blocking->wake.wait(lock, [&] { return blocking->cancelled; });
   return -1;
 }
@@ -228,6 +241,36 @@ void eof_gate_release(void *opaque) {
     std::lock_guard lock(media->mutex);
     media->armed = true;
     media->released_count = media->entered_count;
+  }
+  media->wake.notify_all();
+}
+
+void *overlap_open(void *opaque, const char *, int) {
+  auto *media = static_cast<OverlapSeekMedia *>(opaque);
+  media->wav.offset = 0;
+  return &media->wav;
+}
+
+int64_t overlap_seek(void *opaque, void *handle, int64_t offset, int whence) {
+  auto *media = static_cast<OverlapSeekMedia *>(opaque);
+  if (whence != 0x10000) {
+    std::unique_lock lock(media->mutex);
+    if (media->armed && !media->consumed) {
+      media->entered = true;
+      media->wake.notify_all();
+      media->wake.wait(lock, [&] { return media->cancelled; });
+      media->consumed = true;
+      return -5;  // Old seek fails after the newer timeline cancels it.
+    }
+  }
+  return seek(nullptr, handle, offset, whence);
+}
+
+void overlap_cancel(void *opaque) {
+  auto *media = static_cast<OverlapSeekMedia *>(opaque);
+  {
+    std::lock_guard lock(media->mutex);
+    media->cancelled = true;
   }
   media->wake.notify_all();
 }
@@ -371,6 +414,20 @@ int main() {
   core = rillight_core_create(&blocked_io);
   assert(core);
   assert(rillight_core_open(core, "blocked.stream", 1) == 0);
+  {
+    std::unique_lock lock(blocking.mutex);
+    assert(blocking.wake.wait_for(lock, std::chrono::seconds(2), [&] {
+      return blocking.entered;
+    }));
+  }
+  const auto opening = snapshot(core);
+  assert(opening.state == RILLIGHT_CORE_OPENING);
+  assert(rillight_core_set_speed(core, 1.5, 2) != 0);
+  assert(rillight_core_select_audio(core, 0, 2) != 0);
+  assert(rillight_core_select_subtitle(core, -1, 2) != 0);
+  assert(snapshot(core).timeline_version == opening.timeline_version &&
+         snapshot(core).operation_id == opening.operation_id &&
+         snapshot(core).state == RILLIGHT_CORE_OPENING);
   const auto close_started = std::chrono::steady_clock::now();
   rillight_core_destroy(core);
   assert(std::chrono::steady_clock::now() - close_started <
@@ -428,6 +485,36 @@ int main() {
   frame = rillight_core_take_frame(core, RILLIGHT_CORE_AUDIO_S16);
   assert(frame && frame->timeline_version > first_recovery);
   rillight_core_release_frame(frame);
+  rillight_core_destroy(core);
+
+  OverlapSeekMedia overlap_media;
+  overlap_media.wav = make_wav(48000 * 30);
+  RillightCoreIo overlap_io{&overlap_media, overlap_open, read,
+                            overlap_seek, [](void *, void *) {},
+                            overlap_cancel, overlap_cancel};
+  core = rillight_core_create(&overlap_io);
+  assert(core && rillight_core_open(core, "overlap.wav", 1) == 0);
+  assert(wait_for(core, [](const auto &state) {
+    return state.first_audio_frame_ready && state.state != RILLIGHT_CORE_FAILED;
+  }));
+  {
+    std::lock_guard lock(overlap_media.mutex);
+    overlap_media.armed = true;
+  }
+  assert(rillight_core_seek(core, 500000, 2) == 0);
+  {
+    std::unique_lock lock(overlap_media.mutex);
+    assert(overlap_media.wake.wait_for(lock, std::chrono::seconds(5), [&] {
+      return overlap_media.entered;
+    }));
+  }
+  const auto first_seek_timeline = snapshot(core).timeline_version;
+  assert(rillight_core_seek(core, 0, 3) == 0);
+  assert(wait_for(core, [first_seek_timeline](const auto &state) {
+    return state.timeline_version > first_seek_timeline &&
+           state.first_audio_frame_ready && state.state != RILLIGHT_CORE_FAILED;
+  }));
+  assert(snapshot(core).ffmpeg_error == 0);
   rillight_core_destroy(core);
 
   EofGateMedia eof_media;
