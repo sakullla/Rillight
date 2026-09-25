@@ -6,3 +6,4 @@ macos/.cache/
 macos/Frameworks/
 macos/Libraries/
 macos/Headers/
+android/.cxx/
