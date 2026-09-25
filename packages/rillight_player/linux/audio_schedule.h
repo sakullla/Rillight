@@ -5,7 +5,6 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <limits>
 
 #include "../native/core/rillight_core.h"
 
@@ -21,36 +20,6 @@ inline int StartOffset(const RillightCoreFrame& frame, int64_t position_us,
                          (1000000.0 * speed);
   if (samples >= frame.sample_count) return frame.sample_count * 4;
   return std::max(0, static_cast<int>(std::ceil(samples))) * 4;
-}
-
-inline int64_t StartupAudioTarget(int64_t position_us, int64_t frame_pts_us,
-                                  int64_t device_delay_us, double speed) {
-  // Queue far enough ahead for the measured device latency, not a fixed
-  // 30 ms assumption. This is used only before the first accepted audio clock
-  // report; the core also refuses a backward report after handoff.
-  if (frame_pts_us > position_us + 50000)
-    return position_us;
-  // Keep the opening samples while video is still at the beginning. Device
-  // latency is queued time, not evidence that media time has advanced.
-  if (position_us <= 10000)
-    return position_us;
-  const int64_t delay_media = device_delay_us > 0 && speed > 0
-      ? static_cast<int64_t>(std::min(1000000.0,
-                                     device_delay_us * speed)) : 0;
-  const int64_t lead = std::max<int64_t>(30000, delay_media + 10000);
-  return position_us > std::numeric_limits<int64_t>::max() - lead
-      ? std::numeric_limits<int64_t>::max() : position_us + lead;
-}
-
-inline bool NeedsStartupRealign(int64_t queued_end_pts_us,
-                                int64_t device_delay_us, double speed,
-                                int64_t current_position_us,
-                                bool audio_clock_started) {
-  if (audio_clock_started || current_position_us <= 10000 ||
-      queued_end_pts_us < 0 ||
-      device_delay_us < 0 || speed <= 0) return false;
-  return queued_end_pts_us - static_cast<int64_t>(device_delay_us * speed) +
-             5000 < current_position_us;
 }
 
 class AudioStartupGate {

@@ -197,7 +197,6 @@ struct Surface : std::enable_shared_from_this<Surface> {
           last_timeline = snapshot.timeline_version;
           Notify();
         }
-        bool startup_realign = false;
         auto report_audio_clock = [&](int64_t end_pts, int64_t delay,
                                       double speed) {
           RillightCoreSnapshot current{};
@@ -206,12 +205,6 @@ struct Surface : std::enable_shared_from_this<Surface> {
               current.session_id != snapshot.session_id ||
               current.timeline_version != snapshot.timeline_version)
             return;
-          if (rillight_linux::NeedsStartupRealign(
-                  end_pts, delay, speed, current.position_us,
-                  audio_clock_started)) {
-            startup_realign = true;
-            return;
-          }
           if (rillight_core_report_audio_played(core, current.session_id,
                                                 current.timeline_version,
                                                 end_pts,
@@ -268,12 +261,6 @@ struct Surface : std::enable_shared_from_this<Surface> {
               (snapshot.state == RILLIGHT_CORE_PLAYING ||
                snapshot.state == RILLIGHT_CORE_BUFFERING))
             report_audio_clock(audio_end_pts, delay, audio_speed);
-          if (startup_realign) {
-            audio->Flush();
-            audio_end_pts = -1;
-            first_audio_write = {};
-            startup_realign = false;
-          }
         }
         bool audio_progress = false;
         if (snapshot.state == RILLIGHT_CORE_PLAYING && audio) {
@@ -307,12 +294,8 @@ struct Surface : std::enable_shared_from_this<Surface> {
                 break;
               if (frame->pts_us > current.position_us + 50000) break;
               pending_offset = std::max(pending_offset,
-                  rillight_linux::StartOffset(*frame,
-                      rillight_linux::StartupAudioTarget(current.position_us,
-                                                         frame->pts_us,
-                                                         device_delay,
-                                                         current.playback_speed),
-                                               current.playback_speed));
+                  rillight_linux::StartOffset(*frame, current.position_us,
+                                              current.playback_speed));
               if (pending_offset >= frame->data_size) {
                 rillight_core_release_frame(frame);
                 pending_audio = nullptr;
@@ -323,7 +306,7 @@ struct Surface : std::enable_shared_from_this<Surface> {
             pending_offset = rillight_linux::DrainPcm(
                 frame->data, frame->data_size, pending_offset,
                 [&](const uint8_t* data, size_t bytes) {
-                  return startup_realign ? size_t{0} : audio->Write(data, bytes);
+                  return audio->Write(data, bytes);
                 },
                 [&](int sent) {
                   const int64_t delay = audio->Latency();
@@ -341,13 +324,6 @@ struct Surface : std::enable_shared_from_this<Surface> {
                 }, audio_byte_budget);
             audio_byte_budget -= pending_offset - before;
             audio_progress |= pending_offset > before;
-            if (startup_realign) {
-              audio->Flush();
-              audio_end_pts = -1;
-              first_audio_write = {};
-              startup_realign = false;
-              break;
-            }
             if (!audio->error().empty()) {
               std::lock_guard<std::mutex> lock(mutex);
               error = audio->error();
