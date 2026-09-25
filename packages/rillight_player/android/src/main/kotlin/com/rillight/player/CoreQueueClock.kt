@@ -8,6 +8,7 @@ internal class CoreQueueClock {
     private var wraps = 0L
     private var endPtsUs = -1L
     private var speed = 1.0
+    private var playbackProgressed = false
 
     fun reset(headPosition: Long) {
         val head = headPosition and 0xffffffffL
@@ -17,6 +18,7 @@ internal class CoreQueueClock {
         wraps = 0
         endPtsUs = -1
         speed = 1.0
+        playbackProgressed = false
     }
 
     fun submitted(framePtsUs: Long, frameBytesWritten: Int, newBytes: Int,
@@ -37,12 +39,16 @@ internal class CoreQueueClock {
                 // AudioTrack can reset its counter after flush/device recovery.
                 headBase = head
                 wraps = 0
+                playbackProgressed = false
             }
         }
         lastHead = head
         val consumed = (wraps + head - headBase).coerceAtLeast(0)
+        if (consumed > 0) playbackProgressed = true
         val waiting = (submitted - consumed).coerceAtLeast(0)
         val mediaDelay = (waiting.toDouble() * 1_000_000 / 48_000 * speed).toLong()
         return endPtsUs to mediaDelay
     }
+
+    fun hasPlaybackProgress(): Boolean = playbackProgressed
 }

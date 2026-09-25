@@ -54,7 +54,11 @@ internal class CoreAudioOutput {
 
     /** Core ABI6 expects submitted tail PTS and remaining delay in media time. */
     fun clock(): Pair<Long, Long>? {
-        return clock.snapshot(track.playbackHeadPosition.toLong())
+        val snapshot = clock.snapshot(track.playbackHeadPosition.toLong())
+        // A newly started AudioTrack can wait for its prebuffer. Feeding a
+        // stationary head to the core would freeze video before more audio
+        // can be decoded and submitted.
+        return snapshot.takeIf { clock.hasPlaybackProgress() }
     }
 
     fun drained(): Boolean = clock()?.second == 0L

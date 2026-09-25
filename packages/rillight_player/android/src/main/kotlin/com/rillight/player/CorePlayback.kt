@@ -396,6 +396,10 @@ internal class CorePlayback(
                             }
                         }
                     }
+                    if (audioClockActive && audio?.clock() == null) {
+                        if (CoreNative.reportAudioUnavailable(active.handle, snap[1], snap[3]) == 0)
+                            audioClockActive = false
+                    }
                     if (audioClockActive && pending == null && snap[14] == 0L &&
                         audio?.drained() == true) {
                         audio.clock()?.let { (tail, delay) ->
