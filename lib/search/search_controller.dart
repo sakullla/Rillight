@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/emby/catalog_cache.dart';
@@ -53,11 +55,19 @@ class SearchController extends ChangeNotifier {
     _emit();
     if (next.isEmpty) return;
     final request = _request(0);
-    final hit = await cache.lookup(request);
-    if (!_owns(revision)) return;
-    if (hit != null) _accept(parseCatalogPage(hit.json).items, 0);
+    final network = cache.fetch(auth.client, request);
+    unawaited(network.then<void>((_) {}, onError: (Object _) {}));
+    unawaited(() async {
+      try {
+        final hit = await cache.lookupWhenReady(request);
+        if (!_owns(revision) || !loading || hit == null) return;
+        _accept(parseCatalogPage(hit.json).items, 0);
+      } catch (_) {
+        // A damaged cache row cannot delay the live search response.
+      }
+    }());
     try {
-      final result = parseCatalogPage(await cache.fetch(auth.client, request));
+      final result = parseCatalogPage(await network);
       if (!_owns(revision)) return;
       _accept(result.items, 0);
     } catch (failure) {
@@ -95,7 +105,8 @@ class SearchController extends ChangeNotifier {
     }
     watch = next;
     if (term.isNotEmpty) {
-      submit(term);
+      items = const [];
+      unawaited(submit(term));
       return;
     }
     _emit();

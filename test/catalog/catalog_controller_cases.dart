@@ -102,6 +102,7 @@ void main() {
       );
       addTearDown(first.dispose);
       await first.reload();
+      await first.cache.flushPendingWrites();
       expect(first.resume.items.map((item) => item.id), ['movie-inception']);
       expect(disk.files, isNotEmpty);
 
@@ -325,6 +326,7 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 50));
     expect(warm.latestMovies.items, isNotEmpty);
+    await tester.runAsync(warm.cache.flushPendingWrites);
 
     server.latestMovieStatus = 500;
     final catalog = CatalogController(

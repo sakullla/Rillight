@@ -27,6 +27,7 @@ class TvDetailPage extends StatefulWidget {
 
 class _TvDetailPageState extends State<TvDetailPage> {
   DetailController? _controller;
+  bool _playBusy = false;
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -45,19 +46,34 @@ class _TvDetailPageState extends State<TvDetailPage> {
   }
 
   Future<void> _play({bool fromStart = false}) async {
-    final c = _controller!, target = _controller!.playTarget;
-    if (target == null) return;
-    await context.push(
-      '/play/${target.id}',
-      extra: PlayerOpenRequest(
-        itemId: target.id,
-        mediaSourceId: c.item?.isSeries == true ? null : c.mediaSourceId,
-        autoResume: !fromStart,
-      ),
-    );
-    if (mounted && AuthScope.of(context).isLoggedIn) {
-      c.load();
-      CatalogScope.of(context).reloadHomeRows();
+    if (_playBusy) return;
+    final c = _controller!;
+    setState(() => _playBusy = true);
+    try {
+      if (c.item?.isSeries == true && !fromStart) {
+        try {
+          await c.retainOffPageResume();
+        } catch (_) {
+          // The first visible episode remains usable if the scan fails.
+        }
+      }
+      if (!mounted || !AuthScope.of(context).isLoggedIn) return;
+      final target = c.playTarget;
+      if (target == null) return;
+      await context.push(
+        '/play/${target.id}',
+        extra: PlayerOpenRequest(
+          itemId: target.id,
+          mediaSourceId: c.item?.isSeries == true ? null : c.mediaSourceId,
+          autoResume: !fromStart,
+        ),
+      );
+      if (mounted && AuthScope.of(context).isLoggedIn) {
+        c.load();
+        CatalogScope.of(context).reloadHomeRows();
+      }
+    } finally {
+      if (mounted) setState(() => _playBusy = false);
     }
   }
 
@@ -95,6 +111,8 @@ class _TvDetailPageState extends State<TvDetailPage> {
                 if (item != null) ...[
                   _TvBackdropHeader(item: item),
                   const SizedBox(height: 12),
+                  if (c.seasonError != null)
+                    TvFailure(error: c.seasonError!, retry: c.loadSeasons),
                   Wrap(
                     spacing: 4,
                     runSpacing: 4,
@@ -105,7 +123,8 @@ class _TvDetailPageState extends State<TvDetailPage> {
                         emphasized: true,
                         autofocus: true,
                         onPressed:
-                            target != null &&
+                            !_playBusy &&
+                                target != null &&
                                 (target.isMovie || target.isEpisode)
                             ? _play
                             : null,
@@ -119,7 +138,9 @@ class _TvDetailPageState extends State<TvDetailPage> {
                       ),
                       if (target?.canResume == true)
                         TvAction(
-                          onPressed: () => _play(fromStart: true),
+                          onPressed: _playBusy
+                              ? null
+                              : () => _play(fromStart: true),
                           child: Text(l.playFromStart),
                         ),
                       if (!item.isSeries)

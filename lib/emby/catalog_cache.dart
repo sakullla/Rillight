@@ -3,6 +3,7 @@ import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:rillight/emby/emby_client.dart';
@@ -227,6 +228,7 @@ class FileCatalogDiskStore implements PrefixCatalogDiskStore {
   final int limitBytes;
 
   static const String _fileSuffix = '.json';
+  static int _temporaryFileId = 0;
 
   static String _fileName(String key) {
     final encoded = base64Url.encode(utf8.encode(key)).replaceAll('=', '');
@@ -249,7 +251,16 @@ class FileCatalogDiskStore implements PrefixCatalogDiskStore {
   @override
   Future<void> write(String key, String body) async {
     await directory.create(recursive: true);
-    await _fileFor(key).writeAsString(body, flush: true);
+    final target = _fileFor(key);
+    final temporary = File(
+      '${target.path}.${DateTime.now().microsecondsSinceEpoch}-${_temporaryFileId++}.tmp',
+    );
+    try {
+      await temporary.writeAsString(body, flush: true);
+      await temporary.rename(target.path);
+    } finally {
+      if (await temporary.exists()) await temporary.delete();
+    }
     await _trimToLimit();
   }
 
@@ -347,6 +358,12 @@ class _CatalogMemoryEntry {
   final DateTime storedAt;
 }
 
+class _PendingCatalogWrite {
+  const _PendingCatalogWrite(this.body, this.generation);
+  final String body;
+  final int generation;
+}
+
 /// 目录数据两层 JSON 缓存:
 /// - key 为 `serverId|userId|path?规范化查询参数`,多服务器/多用户不串数据;
 /// - 内存层为进程内 LRU(按条目数上限),磁盘层支撑重启先显;
@@ -354,7 +371,7 @@ class _CatalogMemoryEntry {
 /// - 「先显后刷」由调用方组合 [lookup] + [fetch] 完成:命中缓存立即渲染,
 ///   同时后台重拉,完成后无感更新;
 /// - [fetch] 总是走网络(手动刷新即只调 fetch,天然绕过缓存),
-///   成功后写穿两层;失败原样抛出,不动已有缓存;
+///   成功后立即更新内存并排队落盘;失败原样抛出,不动已有缓存;
 /// - 磁盘读写失败静默降级为仅内存/直连,不影响正常显示。
 class CatalogCache {
   CatalogCache({this.ttl = defaultTtl}) {
@@ -386,10 +403,23 @@ class CatalogCache {
   CatalogDiskStore? _diskStore;
   bool _diskResolved = false;
   Future<CatalogDiskStore?>? _diskResolveFuture;
+  int _diskConfiguration = 0;
+  final LinkedHashMap<String, _PendingCatalogWrite> _pendingWrites =
+      LinkedHashMap();
+  Future<void>? _writeDrain;
+  int _writeGeneration = 0;
+  Object? lastDiskWriteError;
+  int diskWriteFailures = 0;
+  int droppedDiskWrites = 0;
+
+  /// Pending writes are coalesced by request key. The memory copy remains
+  /// available even when the disk is slow or a write has to be dropped.
+  static const int maxPendingDiskWrites = defaultMemoryLimitEntries;
 
   /// 测试注入磁盘存储;传入 null 表示已解析且禁用磁盘层。
   @visibleForTesting
   void debugSetDiskStore(CatalogDiskStore? store) {
+    _diskConfiguration++;
     _diskStore = store;
     _diskResolved = true;
     _diskResolveFuture = null;
@@ -403,6 +433,10 @@ class CatalogCache {
     _memory.clear();
     _serverId = null;
     _userId = null;
+    _writeGeneration++;
+    _pendingWrites.clear();
+    lastDiskWriteError = null;
+    diskWriteFailures = droppedDiskWrites = 0;
     debugSetDiskStore(null);
     _diskResolved = false;
   }
@@ -413,6 +447,8 @@ class CatalogCache {
       _userId != null &&
       _userId!.isNotEmpty;
 
+  Object get identityToken => (_serverId, _userId, _writeGeneration);
+
   /// 绑定会话(key 前缀)。会话切换时清内存层;磁盘层按 key 隔离,无需清。
   void attachSession({required String serverId, required String userId}) {
     if (_serverId == serverId && _userId == userId) {
@@ -421,12 +457,16 @@ class CatalogCache {
     _serverId = serverId;
     _userId = userId;
     _memory.clear();
+    _writeGeneration++;
+    _pendingWrites.clear();
   }
 
   void detachSession() {
     _serverId = null;
     _userId = null;
     _memory.clear();
+    _writeGeneration++;
+    _pendingWrites.clear();
   }
 
   String _key(CatalogRequest request) {
@@ -452,6 +492,7 @@ class CatalogCache {
       return null;
     }
     final key = _key(request);
+    final generation = _writeGeneration;
     final now = clock();
     final cached = _memory.remove(key);
     if (cached != null) {
@@ -479,6 +520,12 @@ class CatalogCache {
         unawaited(_removeDiskQuiet(store, key));
         return null;
       }
+      // An in-flight read from an old account must never repopulate memory.
+      if (!hasSession ||
+          key != _key(request) ||
+          generation != _writeGeneration) {
+        return null;
+      }
       _storeMemory(key, hit.json, hit.storedAt);
       return hit;
     } catch (_) {
@@ -486,22 +533,37 @@ class CatalogCache {
     }
   }
 
-  /// 后台重拉:总是走网络(不读缓存),成功后写穿两层。
+  /// Waits for the initial disk handle without tying page delivery to that
+  /// wait. Callers start their network request first and consume this result
+  /// only while the same request is still pending.
+  Future<CatalogCacheHit?> lookupWhenReady(CatalogRequest request) async {
+    final identity = identityToken;
+    if (!_diskResolved) await _ensureDiskStore();
+    if (identity != identityToken) return null;
+    return lookup(request);
+  }
+
+  /// 后台重拉:总是走网络(不读缓存),成功后写入内存并排队落盘。
   /// 失败原样抛出,已有缓存不受影响。
-  Future<Object> fetch(EmbyClient client, CatalogRequest request) async {
+  Future<Object> fetch(
+    EmbyClient client,
+    CatalogRequest request, {
+    CancelToken? cancelToken,
+  }) async {
+    final generation = _writeGeneration;
     final json = await client.getJson(
       request.path,
       queryParameters: request.query,
+      cancelToken: cancelToken,
     );
-    await write(request, json);
+    if (generation == _writeGeneration) unawaited(write(request, json));
     return json;
   }
 
-  /// 写穿:内存层立即写入;磁盘层已解析则写入,未解析则后台解析后补写,
-  /// 不阻塞调用方。未绑定会话时跳过。
-  Future<void> write(CatalogRequest request, Object json) async {
+  /// 内存立即可读;磁盘 flush/trim 在有界队列中执行,不延迟网络结果。
+  Future<void> write(CatalogRequest request, Object json) {
     if (!hasSession) {
-      return;
+      return Future<void>.value();
     }
     final key = _key(request);
     final storedAt = clock();
@@ -510,30 +572,41 @@ class CatalogCache {
       'storedAt': storedAt.toIso8601String(),
       'data': json,
     });
-    if (_diskResolved) {
-      final store = _diskStore;
-      if (store == null) {
-        return;
-      }
-      try {
-        await store.write(key, body);
-      } catch (_) {
-        // 磁盘写入失败降级为仅内存缓存,不影响显示。
-      }
-      return;
+    _pendingWrites.remove(key);
+    _pendingWrites[key] = _PendingCatalogWrite(body, _writeGeneration);
+    while (_pendingWrites.length > maxPendingDiskWrites) {
+      _pendingWrites.remove(_pendingWrites.keys.first);
+      droppedDiskWrites++;
     }
-    unawaited(
-      _ensureDiskStore().then((store) async {
-        if (store == null) {
-          return;
-        }
+    _writeDrain ??= _drainWrites();
+    return Future<void>.value();
+  }
+
+  Future<void> _drainWrites() async {
+    try {
+      final store = await _ensureDiskStore();
+      while (_pendingWrites.isNotEmpty) {
+        final key = _pendingWrites.keys.first;
+        final pending = _pendingWrites.remove(key)!;
+        if (store == null || pending.generation != _writeGeneration) continue;
         try {
-          await store.write(key, body);
-        } catch (_) {
-          // 同上,静默降级。
+          await store.write(key, pending.body);
+        } catch (error) {
+          lastDiskWriteError = error;
+          diskWriteFailures++;
         }
-      }),
-    );
+      }
+    } finally {
+      _writeDrain = null;
+      if (_pendingWrites.isNotEmpty) _writeDrain = _drainWrites();
+    }
+  }
+
+  @visibleForTesting
+  Future<void> flushPendingWrites() async {
+    while (_writeDrain != null) {
+      await _writeDrain;
+    }
   }
 
   CatalogCacheHit? _decodeEntry(String raw, DateTime now) {
@@ -570,7 +643,12 @@ class CatalogCache {
   /// 失效 key 以 [prefix] 开头的条目:内存层同步移除,磁盘层尽力删除
   /// (存储不支持前缀删除或删除失败时静默,仍有 TTL 兜底)。
   Future<void> invalidatePrefix(String prefix) async {
+    _writeGeneration++;
     _memory.removeWhere((key, _) => key.startsWith(prefix));
+    _pendingWrites.removeWhere((key, _) => key.startsWith(prefix));
+    // Writes already in progress finish before removal, so invalidation cannot
+    // be undone by an older queued body.
+    await _writeDrain;
     if (!_diskResolved) {
       // 磁盘层尚未解析:解析完成后补删,不阻塞调用方。
       unawaited(
@@ -599,6 +677,7 @@ class CatalogCache {
   }
 
   void _storeMemory(String key, Object json, DateTime storedAt) {
+    _memory.remove(key);
     _memory[key] = _CatalogMemoryEntry(json: json, storedAt: storedAt);
     while (_memory.length > defaultMemoryLimitEntries) {
       _memory.remove(_memory.keys.first);
@@ -609,18 +688,22 @@ class CatalogCache {
     if (_diskResolved) {
       return Future<CatalogDiskStore?>.value(_diskStore);
     }
+    final configuration = _diskConfiguration;
     return _diskResolveFuture ??= openDefaultCatalogDiskStore()
         .then<CatalogDiskStore?>((store) {
+          if (configuration != _diskConfiguration) return _diskStore;
           _diskStore = store;
           return store;
         })
         .catchError((Object _) {
           // 磁盘层不可用(如测试环境)时降级为仅内存缓存。
-          return null;
+          return configuration == _diskConfiguration ? null : _diskStore;
         })
         .whenComplete(() {
-          _diskResolved = true;
-          _diskResolveFuture = null;
+          if (configuration == _diskConfiguration) {
+            _diskResolved = true;
+            _diskResolveFuture = null;
+          }
         });
   }
 

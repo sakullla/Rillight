@@ -749,8 +749,14 @@ class EmbyClient {
   Future<Map<String, dynamic>> getJson(
     String path, {
     Map<String, dynamic>? queryParameters,
+    CancelToken? cancelToken,
   }) {
-    return _requestJson('GET', path, queryParameters: queryParameters);
+    return _requestJson(
+      'GET',
+      path,
+      queryParameters: queryParameters,
+      cancelToken: cancelToken,
+    );
   }
 
   Future<Map<String, dynamic>> postJson(
@@ -793,12 +799,14 @@ class EmbyClient {
     String path, {
     Object? body,
     Map<String, dynamic>? queryParameters,
+    CancelToken? cancelToken,
   }) async {
     final data = await _request(
       method,
       path,
       body: body,
       queryParameters: queryParameters,
+      cancelToken: cancelToken,
     );
     if (data is Map<String, dynamic>) {
       return data;
@@ -817,6 +825,7 @@ class EmbyClient {
     String path, {
     Object? body,
     Map<String, dynamic>? queryParameters,
+    CancelToken? cancelToken,
   }) async {
     if (!hasSession) {
       throw const EmbyException(EmbyFailureKind.sessionExpired);
@@ -833,6 +842,7 @@ class EmbyClient {
           method: method,
           headers: _headers(token: _accessToken, userId: _userId),
         ),
+        cancelToken: cancelToken,
       );
       return _decodeBody(response.data);
     });

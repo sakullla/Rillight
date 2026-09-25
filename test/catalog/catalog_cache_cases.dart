@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -48,6 +49,18 @@ class _FakeDiskStore implements CatalogDiskStore {
   }
 }
 
+class _BlockingDiskStore extends _FakeDiskStore {
+  final started = Completer<void>();
+  final release = Completer<void>();
+
+  @override
+  Future<void> write(String key, String body) async {
+    if (!started.isCompleted) started.complete();
+    await release.future;
+    await super.write(key, body);
+  }
+}
+
 void main() {
   late FakeEmbyServer server;
   late FakeEmbyAdapter adapter;
@@ -85,6 +98,7 @@ void main() {
       final request = catalogResumeRequest(userId: 'user-alice');
 
       await cacheA.fetch(client, request);
+      await cacheA.flushPendingWrites();
       expect(disk.files, hasLength(1));
       expect(disk.files.keys.single, contains('server-a|user-alice|'));
 
@@ -132,6 +146,7 @@ void main() {
       );
 
       await first.fetch(client, request);
+      await first.flushPendingWrites();
       // 重启:内存层随进程消失,磁盘层保留。
       final second = newCache(disk);
       final hit = await second.lookup(request);
@@ -147,9 +162,62 @@ void main() {
     final request = catalogResumeRequest(userId: 'user-alice');
 
     final json = await cache.fetch(client, request);
+    await cache.flushPendingWrites();
     expect(parseCatalogPage(json).items, isNotEmpty);
     expect(disk.files, isEmpty);
+    expect(cache.diskWriteFailures, 1);
     expect(await cache.lookup(request), isNotNull);
+  });
+
+  test('network result and memory hit do not wait for disk flush', () async {
+    final disk = _BlockingDiskStore();
+    final cache = newCache(disk);
+    final request = catalogResumeRequest(userId: 'user-alice');
+
+    final json = await cache.fetch(client, request);
+    await disk.started.future;
+    expect(parseCatalogPage(json).items, isNotEmpty);
+    expect(await cache.lookup(request), isNotNull);
+    expect(disk.files, isEmpty);
+
+    disk.release.complete();
+    await cache.flushPendingWrites();
+    expect(disk.files, hasLength(1));
+  });
+
+  test('queued old-session writes never land under a new account', () async {
+    final disk = _BlockingDiskStore();
+    final cache = newCache(disk);
+    await cache.fetch(client, catalogResumeRequest(userId: 'user-alice'));
+    await disk.started.future;
+    await cache.fetch(client, catalogNextUpRequest(userId: 'user-alice'));
+
+    cache.attachSession(serverId: 'server-a', userId: 'user-bob');
+    disk.release.complete();
+    await cache.flushPendingWrites();
+    expect(disk.files.keys, everyElement(contains('user-alice')));
+    expect(disk.files.keys.where((key) => key.contains('NextUp')), isEmpty);
+  });
+
+  test('slow storage keeps pending writes bounded', () async {
+    final disk = _BlockingDiskStore();
+    final cache = newCache(disk);
+    await cache.write(const CatalogRequest('/blocked'), {'value': 0});
+    await disk.started.future;
+    for (
+      var index = 0;
+      index < CatalogCache.maxPendingDiskWrites + 10;
+      index++
+    ) {
+      await cache.write(CatalogRequest('/item/$index'), {'value': index});
+    }
+    expect(cache.droppedDiskWrites, greaterThan(0));
+    disk.release.complete();
+    await cache.flushPendingWrites();
+    expect(
+      disk.files.length,
+      lessThanOrEqualTo(CatalogCache.maxPendingDiskWrites + 1),
+    );
   });
 
   test('disk read failure falls back to a miss without throwing', () async {
@@ -165,26 +233,24 @@ void main() {
     expect(await restarted.lookup(request), isNotNull);
   });
 
-  test(
-    'fetch always goes to the network and writes through both layers',
-    () async {
-      final disk = _FakeDiskStore();
-      final cache = newCache(disk);
-      final request = catalogResumeRequest(userId: 'user-alice');
+  test('fetch always goes to the network and eventually persists', () async {
+    final disk = _FakeDiskStore();
+    final cache = newCache(disk);
+    final request = catalogResumeRequest(userId: 'user-alice');
 
-      await cache.fetch(client, request);
-      await cache.fetch(client, request);
-      await cache.fetch(client, request);
+    await cache.fetch(client, request);
+    await cache.fetch(client, request);
+    await cache.fetch(client, request);
+    await cache.flushPendingWrites();
 
-      final resumeRequests = server.requests
-          .where(
-            (entry) => entry.startsWith('GET /Users/user-alice/Items/Resume'),
-          )
-          .length;
-      expect(resumeRequests, 3, reason: '每次 fetch 都走网络,不吃缓存');
-      expect(disk.files, hasLength(1));
-    },
-  );
+    final resumeRequests = server.requests
+        .where(
+          (entry) => entry.startsWith('GET /Users/user-alice/Items/Resume'),
+        )
+        .length;
+    expect(resumeRequests, 3, reason: '每次 fetch 都走网络,不吃缓存');
+    expect(disk.files, hasLength(1));
+  });
 
   test(
     'request parity: cache fetch matches the equivalent client request',
@@ -327,6 +393,7 @@ void main() {
     await cache.fetch(client, byYear);
     await cache.fetch(client, byGenre);
     await cache.fetch(client, combined);
+    await cache.flushPendingWrites();
 
     // 同 parentId 不同筛选各自独立缓存,互不串数据。
     expect(disk.files, hasLength(5));

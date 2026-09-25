@@ -13,6 +13,7 @@ import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/emby/emby_errors.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/library/detail_controller.dart';
@@ -44,6 +45,8 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
   List<EmbyItem> _similar = const [];
   EmbyItem? _nextEpisode;
   EmbyItem? _previousEpisode;
+  EmbyException? _similarError;
+  int _extrasRevision = 0;
   int? _audioStreamIndex;
   int? _subtitleStreamIndex;
   final _scroll = ScrollController();
@@ -72,12 +75,14 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
       cache: CatalogScope.of(context).cache,
       itemId: widget.itemId,
       seasonId: widget.initialSeasonId,
+      initialEpisodeId: widget.initialEpisodeId,
     );
     unawaited(_load());
   }
 
   @override
   void dispose() {
+    _extrasRevision++;
     _scroll.removeListener(_onDetailScroll);
     _scroll.dispose();
     _controller?.dispose();
@@ -87,58 +92,15 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
   Future<void> _load() async {
     final controller = _controller;
     if (controller == null) return;
-    if (controller.seasonId == null) {
-      try {
-        final season = await _seasonForPlayback(controller);
-        if (!mounted) return;
-        if (season != null) controller.seasonId = season;
-      } catch (_) {
-        // load() surfaces the item failure.
-      }
-    }
-    if (!mounted) return;
     await controller.load();
     if (!mounted) return;
-    await _revealInitialEpisode();
-    if (!mounted) return;
-    await controller.retainOffPageResume();
-    if (!mounted) return;
-    await _loadExtras();
-  }
-
-  /// 从某一集进来时，把这一季的窗口对准该集，而不是总从第 1 集铺开。
-  Future<void> _revealInitialEpisode() async {
-    final id = widget.initialEpisodeId?.trim();
-    final controller = _controller;
-    if (id == null ||
-        id.isEmpty ||
-        controller == null ||
-        controller.item?.isSeries != true) {
-      return;
-    }
-    if (controller.episodes.any((episode) => episode.id == id)) {
-      return;
-    }
-    try {
-      final episode = await controller.repository.item(id);
-      final season = episode.seasonId ?? episode.parentId;
-      final number = episode.indexNumber;
-      if (season == null || season.isEmpty) {
-        return;
-      }
-      final start = number == null || number <= 1 ? 0 : number - 1;
-      await controller.selectSeason(season, startAt: start);
-    } catch (_) {
-      // 对不齐时仍显示已加载的季。
-    }
+    unawaited(_loadExtras());
   }
 
   Future<void> _refresh() async {
     final controller = _controller;
     if (controller == null) return;
     await controller.load();
-    if (!mounted) return;
-    await controller.retainOffPageResume();
     if (!mounted) return;
     await _loadExtras();
   }
@@ -147,71 +109,82 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
     final controller = _controller;
     if (controller == null) return;
     await controller.selectSeason(id, more: more);
-    if (!mounted) return;
-    await controller.retainOffPageResume();
   }
 
-  /// 续播季优先，否则第一条未看所在季，再否则第一季。
-  Future<String?> _seasonForPlayback(DetailController controller) async {
-    final item = await controller.repository.item(widget.itemId);
-    if (!item.isSeries) return null;
-    final seasons = await controller.repository.seasons(item.id);
-    String? unwatched;
-    for (final season in seasons) {
-      var start = 0;
-      while (true) {
-        final page = await controller.repository.episodes(
-          season.id,
-          start: start,
-        );
-        if (page.items.any((episode) => episode.canResume)) return season.id;
-        if (unwatched == null &&
-            page.items.any((episode) => !episode.userData.played)) {
-          unwatched = season.id;
-        }
-        final loaded = page.items.length;
-        if (loaded == 0) break;
-        start += loaded;
-        final total = page.totalRecordCount;
-        final more = total == null ? loaded == 50 : start < total;
-        if (!more) break;
+  Future<void> _openPreferredPlayer() async {
+    final controller = _controller;
+    if (controller == null) return;
+    if (controller.item?.isSeries == true) {
+      try {
+        await controller.retainOffPageResume();
+      } catch (_) {
+        // A failed optional scan keeps the already loaded playable episode.
       }
     }
-    return unwatched ?? seasons.firstOrNull?.id;
+    if (!mounted) return;
+    final target = controller.playTarget;
+    if (target != null && target.isPlayable) await _openPlayer(target.id);
   }
 
   Future<void> _loadExtras() async {
-    final item = _controller?.item;
+    final controller = _controller;
+    final item = controller?.item;
     if (item == null || !mounted) return;
-    final client = AuthScope.of(context).client;
-    var similar = const <EmbyItem>[];
-    EmbyItem? next;
-    EmbyItem? previous;
+    final revision = ++_extrasRevision;
+    final auth = AuthScope.of(context);
+    final identity = (
+      auth.session?.server.id,
+      auth.client.baseUrl,
+      auth.client.userId,
+    );
+    bool owns() =>
+        mounted &&
+        revision == _extrasRevision &&
+        _controller?.item?.id == item.id &&
+        identity ==
+            (auth.session?.server.id, auth.client.baseUrl, auth.client.userId);
+    setState(() {
+      _similarError = null;
+      _similar = const [];
+      _nextEpisode = _previousEpisode = null;
+    });
     if (item.isMovie || item.isSeries) {
+      final network = controller!.repository.similar(item.id);
+      unawaited(() async {
+        try {
+          final cached = await controller.repository.cachedSimilar(item.id);
+          if (owns() && cached != null && _similar.isEmpty) {
+            setState(() => _similar = cached);
+          }
+        } catch (_) {
+          // A stale cache entry does not prevent the live request.
+        }
+      }());
       try {
-        similar = await client.getSimilar(item.id, limit: 12);
-      } catch (_) {
-        similar = const [];
+        final similar = await network;
+        if (owns()) setState(() => _similar = similar);
+      } catch (failure) {
+        if (owns()) {
+          setState(
+            () => _similarError = failure is EmbyException
+                ? failure
+                : EmbyException(EmbyFailureKind.unknown, cause: failure),
+          );
+        }
       }
     }
     if (item.isEpisode) {
-      try {
-        next = await client.getNextEpisode(item);
-      } catch (_) {
-        next = null;
-      }
-      try {
-        previous = await client.getPreviousEpisode(item);
-      } catch (_) {
-        previous = null;
+      final neighbors = await Future.wait<EmbyItem?>([
+        auth.client.getNextEpisode(item).catchError((Object _) => null),
+        auth.client.getPreviousEpisode(item).catchError((Object _) => null),
+      ]);
+      if (owns()) {
+        setState(() {
+          _nextEpisode = neighbors[0];
+          _previousEpisode = neighbors[1];
+        });
       }
     }
-    if (!mounted || _controller?.item?.id != item.id) return;
-    setState(() {
-      _similar = similar;
-      _nextEpisode = next;
-      _previousEpisode = previous;
-    });
   }
 
   Future<void> _openPlayer(
@@ -240,8 +213,6 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
     );
     if (!mounted || !AuthScope.of(context).isLoggedIn) return;
     await controller.load();
-    if (!mounted || !AuthScope.of(context).isLoggedIn) return;
-    await controller.retainOffPageResume();
     if (!mounted || !AuthScope.of(context).isLoggedIn) return;
     CatalogScope.of(context).reloadHomeRows();
     await _loadExtras();
@@ -565,7 +536,7 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
                                   !item.isSeries && target?.canResume == true,
                               onPlay: target == null
                                   ? null
-                                  : () => _openPlayer(target.id),
+                                  : _openPreferredPlayer,
                               onRestart: target == null
                                   ? null
                                   : () =>
@@ -582,7 +553,14 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
                       maxWidth:
                           handoff?.maxWidth ?? PhoneMotion.pageRequestWidth,
                     ),
+                  if (item != null && controller.error != null)
+                    MobileFailure(error: controller.error!, retry: _refresh),
                   if (item != null) DetailAlbumStrip(item: item),
+                  if (item?.isSeries == true && controller.seasonError != null)
+                    MobileFailure(
+                      error: controller.seasonError!,
+                      retry: controller.loadSeasons,
+                    ),
                   if (item != null && item.isSeries)
                     MobileSeriesPage(
                       item: item,
@@ -633,6 +611,8 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
                           : null,
                       onOpenSimilar: _openSimilarShelf,
                     ),
+                  if (_similarError != null)
+                    MobileFailure(error: _similarError!, retry: _loadExtras),
                 ],
               ),
             ),

@@ -9,6 +9,7 @@ import 'package:rillight/app/mobile_chrome.dart';
 import 'package:rillight/app/mobile_widgets.dart';
 import 'package:rillight/app/theme.dart';
 import 'package:rillight/auth/auth_scope.dart';
+import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/emby/catalog_cache.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_errors.dart';
@@ -87,6 +88,45 @@ class _PhoneShelfPageState extends State<PhoneShelfPage> {
   int _fetched = 0;
   int _loadGen = 0;
   CatalogCache? _fallbackCache;
+  AuthController? _auth;
+  Object? _identity;
+
+  Object _identityOf(AuthController auth) =>
+      (auth.session?.server.id, auth.client.baseUrl, auth.client.userId);
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final auth = AuthScope.of(context);
+    if (identical(auth, _auth)) return;
+    _auth?.removeListener(_onAuth);
+    _auth = auth;
+    _identity = _identityOf(auth);
+    auth.addListener(_onAuth);
+  }
+
+  void _onAuth() {
+    final auth = _auth;
+    if (auth == null) return;
+    final next = _identityOf(auth);
+    if (next == _identity) return;
+    _identity = next;
+    _loadGen++;
+    setState(() {
+      _items = const [];
+      _fetched = 0;
+      _hasMore = false;
+      _error = _pageError = _refreshError = null;
+    });
+    if (auth.isLoggedIn) unawaited(_load());
+  }
+
+  @override
+  void dispose() {
+    _loadGen++;
+    _auth?.removeListener(_onAuth);
+    super.dispose();
+  }
 
   /// `Filters` 的已看状态。null 表示全部。
   String? _watch;
@@ -236,7 +276,13 @@ class _PhoneShelfPageState extends State<PhoneShelfPage> {
 
   Future<void> _load({bool keepVisible = false}) async {
     final gen = ++_loadGen;
+    final identity = _identity;
     final keep = keepVisible && _items.isNotEmpty;
+    final client = AuthScope.of(context).client;
+    final request = _request(client, 0, PhoneShelfPage.pageSize);
+    final network = _fetch(0);
+    unawaited(network.then<void>((_) {}, onError: (Object _) {}));
+    bool owns() => mounted && gen == _loadGen && identity == _identity;
     setState(() {
       _loading = !keep;
       _loadingMore = false;
@@ -250,9 +296,34 @@ class _PhoneShelfPageState extends State<PhoneShelfPage> {
         _fetched = 0;
       }
     });
+    if (!keep) {
+      unawaited(() async {
+        try {
+          final hit = await _cache.lookupWhenReady(request);
+          if (!owns() ||
+              hit == null ||
+              (_items.isNotEmpty || (!_loading && _error == null))) {
+            return;
+          }
+          final cached = parseCatalogPage(hit.json);
+          if (cached.items.isEmpty) return;
+          setState(() {
+            _items = cached.items;
+            _fetched = cached.items.length;
+            _hasMore = _continues(cached, _fetched, grew: true);
+            _refreshError = _error;
+            _error = null;
+            _loading = false;
+            _refreshing = _refreshError == null;
+          });
+        } catch (_) {
+          // A damaged disk row never blocks or replaces the live request.
+        }
+      }());
+    }
     try {
-      final page = await _fetch(0);
-      if (!mounted || gen != _loadGen) {
+      final page = await network;
+      if (!owns()) {
         return;
       }
       setState(() {
@@ -263,7 +334,7 @@ class _PhoneShelfPageState extends State<PhoneShelfPage> {
         _refreshing = false;
       });
     } catch (error) {
-      if (!mounted || gen != _loadGen) {
+      if (!owns()) {
         return;
       }
       setState(() {
@@ -287,6 +358,7 @@ class _PhoneShelfPageState extends State<PhoneShelfPage> {
       return;
     }
     final gen = _loadGen;
+    final identity = _identity;
     final start = _fetched;
     setState(() {
       _loadingMore = true;
@@ -294,7 +366,7 @@ class _PhoneShelfPageState extends State<PhoneShelfPage> {
     });
     try {
       final page = await _fetch(start);
-      if (!mounted || gen != _loadGen) {
+      if (!mounted || gen != _loadGen || identity != _identity) {
         return;
       }
       final before = _items.length;
@@ -306,7 +378,7 @@ class _PhoneShelfPageState extends State<PhoneShelfPage> {
         _loadingMore = false;
       });
     } catch (error) {
-      if (!mounted || gen != _loadGen) {
+      if (!mounted || gen != _loadGen || identity != _identity) {
         return;
       }
       setState(() {
@@ -402,8 +474,21 @@ class _PhoneShelfPageState extends State<PhoneShelfPage> {
         );
         return MediaImageScrollListener(
           child: CustomScrollView(
+            key: PageStorageKey(
+              'phone-shelf-${widget.source}|${widget.parentId}|'
+              '${widget.itemId}|${widget.genre}|${widget.recursive}|$_watch',
+            ),
             scrollCacheExtent: const ScrollCacheExtent.viewport(0.5),
             slivers: [
+              if (_refreshing)
+                const SliverToBoxAdapter(child: LinearProgressIndicator()),
+              if (_refreshError != null)
+                SliverToBoxAdapter(
+                  child: MobileFailureState(
+                    message: catalogFailureMessage(l10n, _refreshError!),
+                    onRetry: () => unawaited(_load(keepVisible: true)),
+                  ),
+                ),
               SliverPadding(
                 padding: const EdgeInsets.all(AppSpacing.md),
                 sliver: SliverGrid(
@@ -436,21 +521,14 @@ class _PhoneShelfPageState extends State<PhoneShelfPage> {
                   ),
                 ),
               ),
-              if (_refreshError != null)
-                SliverToBoxAdapter(
-                  child: MobileFailureState(
-                    message: catalogFailureMessage(l10n, _refreshError!),
-                    onRetry: () => unawaited(_load(keepVisible: true)),
-                  ),
-                )
-              else if (_pageError != null)
+              if (_pageError != null)
                 SliverToBoxAdapter(
                   child: MobileFailureState(
                     message: catalogFailureMessage(l10n, _pageError!),
                     onRetry: () => unawaited(_loadMore()),
                   ),
                 )
-              else if (_hasMore)
+              else if (_hasMore && _refreshError == null)
                 SliverToBoxAdapter(
                   child: Center(
                     child: TextButton(
@@ -458,7 +536,8 @@ class _PhoneShelfPageState extends State<PhoneShelfPage> {
                       style: TextButton.styleFrom(
                         minimumSize: const Size(48, 48),
                       ),
-                      onPressed: _loadingMore || _refreshing
+                      onPressed:
+                          _loadingMore || _refreshing || _refreshError != null
                           ? null
                           : () => unawaited(_loadMore()),
                       child: Text(l10n.episodesLoadMore),

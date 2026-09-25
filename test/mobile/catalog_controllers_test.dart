@@ -58,6 +58,26 @@ void main() {
   tearDown(() {
     auth.dispose();
   });
+  Future<void> loadDetailReady(DetailController detail) async {
+    await detail.load();
+    bool ready() =>
+        !detail.seasonsLoading &&
+        !detail.episodesLoading &&
+        (detail.seasonId != null || detail.seasonError != null);
+    if (ready()) return;
+    final completed = Completer<void>();
+    void onChange() {
+      if (ready() && !completed.isCompleted) completed.complete();
+    }
+
+    detail.addListener(onChange);
+    try {
+      await completed.future.timeout(const Duration(seconds: 5));
+    } finally {
+      detail.removeListener(onChange);
+    }
+  }
+
   test('browse accepts same-user automatic token renewal', () async {
     final browse = BrowseController(
       auth: auth,
@@ -81,7 +101,7 @@ void main() {
     );
     addTearDown(detail.dispose);
     server.issuedTokens.clear();
-    await detail.load();
+    await loadDetailReady(detail);
     expect(detail.loading, isFalse);
     expect(detail.item?.id, 'series-friends');
     expect(detail.episodes, isNotEmpty);
@@ -101,6 +121,66 @@ void main() {
     expect(search.items.map((i) => i.name), contains('Inception'));
     expect(search.error, isNull);
   });
+  test('late search response cannot replace a newer query', () async {
+    final search = SearchController(auth: auth, cache: cache);
+    addTearDown(search.dispose);
+    final entered = Completer<void>();
+    final release = Completer<void>();
+    dio.interceptors.add(
+      InterceptorsWrapper(
+        onResponse: (response, handler) async {
+          if (response.requestOptions.uri.queryParameters['SearchTerm'] ==
+              'Inception') {
+            entered.complete();
+            await release.future;
+          }
+          handler.next(response);
+        },
+      ),
+    );
+    final older = search.submit('Inception');
+    await entered.future;
+    await search.submit('老友记');
+    release.complete();
+    await older;
+    expect(search.term, '老友记');
+    expect(search.items, isNotEmpty);
+    expect(search.items.every((item) => item.name.contains('老友记')), isTrue);
+    expect(search.fetched, greaterThan(0));
+  });
+  test('search filter clears old-condition results while loading', () async {
+    final search = SearchController(auth: auth, cache: cache);
+    addTearDown(search.dispose);
+    await search.submit('Inception');
+    expect(search.items, isNotEmpty);
+    final entered = Completer<void>();
+    final release = Completer<void>();
+    final done = Completer<void>();
+    dio.interceptors.add(
+      InterceptorsWrapper(
+        onResponse: (response, handler) async {
+          if (response.requestOptions.uri.queryParameters['Filters'] ==
+              'IsPlayed') {
+            entered.complete();
+            await release.future;
+          }
+          handler.next(response);
+        },
+      ),
+    );
+    search.addListener(() {
+      if (search.watch == 'IsPlayed' && !search.loading && !done.isCompleted) {
+        done.complete();
+      }
+    });
+    search.setWatch('IsPlayed');
+    await entered.future;
+    expect(search.items, isEmpty);
+    expect(search.loading, isTrue);
+    release.complete();
+    await done.future;
+    expect(search.items, isNotEmpty);
+  });
   test('season request completes after its own token renewal', () async {
     final detail = DetailController(
       auth: auth,
@@ -108,7 +188,7 @@ void main() {
       itemId: 'series-friends',
     );
     addTearDown(detail.dispose);
-    await detail.load();
+    await loadDetailReady(detail);
     final token = auth.client.accessToken;
     server.issuedTokens.clear();
     await detail.selectSeason(detail.seasonId!);
@@ -136,7 +216,7 @@ void main() {
           addTearDown(browse.dispose);
           addTearDown(detail.dispose);
           addTearDown(search.dispose);
-          await detail.load();
+          await loadDetailReady(detail);
           final entered = Completer<void>(), release = Completer<void>();
           dio.interceptors.add(
             InterceptorsWrapper(
@@ -231,7 +311,7 @@ void main() {
       itemId: 'series-friends',
     );
     addTearDown(detail.dispose);
-    await detail.load();
+    await loadDetailReady(detail);
     expect(detail.hasMore, isTrue);
     server.itemsStatus = 503;
     await detail.selectSeason('season-friends-2');
@@ -331,7 +411,7 @@ void main() {
         itemId: 'series-friends',
       );
       addTearDown(detail.dispose);
-      await detail.load();
+      await loadDetailReady(detail);
       expect(detail.item?.isSeries, isTrue);
       expect(detail.episodes, hasLength(50));
       server.itemsStatus = 503;

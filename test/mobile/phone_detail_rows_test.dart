@@ -243,16 +243,13 @@ void main() {
       width: 360,
       reduceMotion: true,
       intercept: (dio) {
-        var episodeQueries = 0;
         dio.interceptors.add(
           InterceptorsWrapper(
             onRequest: (options, handler) async {
               final uri = options.uri.toString();
-              if (uri.contains('IncludeItemTypes=Episode')) {
-                episodeQueries++;
-                if (episodeQueries > 1 && !gate.isCompleted) {
-                  await gate.future;
-                }
+              if (uri.contains('IncludeItemTypes=Episode') &&
+                  !gate.isCompleted) {
+                await gate.future;
               }
               handler.next(options);
             },

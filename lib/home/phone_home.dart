@@ -1026,18 +1026,45 @@ class _PhoneLibraryLatestState extends State<_PhoneLibraryLatest> {
   var _loading = true;
   EmbyException? _error;
   var _started = false;
+  Object? _identity;
+  int _generation = 0;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (_started) {
+    final auth = AuthScope.of(context);
+    final identity = (
+      auth.session?.server.id,
+      auth.client.baseUrl,
+      auth.client.userId,
+    );
+    if (_started && identity == _identity) {
       return;
     }
     _started = true;
+    _identity = identity;
+    _items = const [];
+    _loading = true;
+    _error = null;
     unawaited(_load());
   }
 
+  @override
+  void didUpdateWidget(covariant _PhoneLibraryLatest oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.library.id != widget.library.id) {
+      _items = const [];
+      _loading = true;
+      _error = null;
+      unawaited(_load());
+    }
+  }
+
   Future<void> _load() async {
+    final generation = ++_generation;
+    final identity = _identity;
+    bool owns() =>
+        mounted && generation == _generation && identity == _identity;
     final catalog = CatalogScope.of(context);
     final request = catalogItemsRequest(
       userId: catalog.client.userId ?? '',
@@ -1049,25 +1076,31 @@ class _PhoneLibraryLatestState extends State<_PhoneLibraryLatest> {
       sortOrder: 'Descending',
       fields: EmbyClient.homePosterFields,
     );
-    final hit = await catalog.cache.lookup(request);
-    if (!mounted) {
-      return;
-    }
-    if (hit != null) {
-      final cached = parseCatalogPage(hit.json).items;
-      if (cached.isNotEmpty) {
+    final network = _homeLibraryLoads.run(
+      () => catalog.cache.fetch(catalog.client, request),
+    );
+    unawaited(network.then<void>((_) {}, onError: (Object _) {}));
+    unawaited(() async {
+      try {
+        final hit = await catalog.cache.lookupWhenReady(request);
+        if (!owns() ||
+            hit == null ||
+            (_items.isNotEmpty || (!_loading && _error == null))) {
+          return;
+        }
+        final cached = parseCatalogPage(hit.json).items;
+        if (cached.isEmpty) return;
         setState(() {
           _items = cached;
           _loading = false;
-          _error = null;
         });
+      } catch (_) {
+        // A damaged disk row cannot delay the live library response.
       }
-    }
+    }());
     try {
-      final items = await _homeLibraryLoads.run(
-        () => catalog.cache.fetch(catalog.client, request),
-      );
-      if (!mounted) {
+      final items = await network;
+      if (!owns()) {
         return;
       }
       setState(() {
@@ -1076,11 +1109,7 @@ class _PhoneLibraryLatestState extends State<_PhoneLibraryLatest> {
         _error = null;
       });
     } catch (error) {
-      if (!mounted) {
-        return;
-      }
-      if (_items.isNotEmpty) {
-        setState(() => _loading = false);
+      if (!owns()) {
         return;
       }
       setState(() {

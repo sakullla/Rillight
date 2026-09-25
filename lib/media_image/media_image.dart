@@ -130,6 +130,7 @@ class _LoadedImage {
 
 class _MediaImageState extends State<MediaImage> {
   Future<_LoadedImage?>? _future;
+  String? _lastAccountScope;
   int _loadGeneration = 0;
   ScrollPosition? _observedScroll;
   bool _frameWakeQueued = false;
@@ -147,14 +148,23 @@ class _MediaImageState extends State<MediaImage> {
 
   int get _requestMaxWidth => widget.maxWidth ?? widget.width?.round() ?? 280;
 
-  /// 缓存 key 的服务器维度:多服务器之间不串图。
-  String get _serverId => AuthScope.maybeOf(context)?.session?.server.id ?? '';
+  /// Protected artwork is scoped to both the server and authenticated user.
+  String get _accountScope {
+    final auth = AuthScope.maybeOf(context);
+    return '${auth?.session?.server.id ?? ''}|${auth?.client.userId ?? ''}';
+  }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     _trackScrollable();
-    if (_hasImageSource && AuthScope.maybeOf(context) != null) {
+    final scope = _accountScope;
+    if (scope != _lastAccountScope) {
+      _lastAccountScope = scope;
+      _loadGeneration++;
+      _future = null;
+    }
+    if (_hasImageSource && AuthScope.maybeOf(context)?.isLoggedIn == true) {
       _future ??= _load();
     }
   }
@@ -207,14 +217,14 @@ class _MediaImageState extends State<MediaImage> {
     final candidate = _candidates.first;
     final maxWidth = _requestMaxWidth;
     final cacheKey = MediaImageCache.key(
-      serverId: _serverId,
+      serverId: _accountScope,
       itemId: candidate.itemId,
       type: candidate.type,
       tag: candidate.tag,
       maxWidth: maxWidth,
     );
     final bytes = MediaImageCache.instance.peek(
-      serverId: _serverId,
+      serverId: _accountScope,
       itemId: candidate.itemId,
       type: candidate.type,
       tag: candidate.tag,
@@ -411,7 +421,7 @@ class _MediaImageState extends State<MediaImage> {
     }
     final candidate = _candidates.first;
     final maxWidth = _requestMaxWidth;
-    final serverId = _serverId;
+    final serverId = _accountScope;
     final bytes = await MediaImageCache.instance._readDiskCache(
       serverId: serverId,
       itemId: candidate.itemId,
@@ -436,7 +446,7 @@ class _MediaImageState extends State<MediaImage> {
   }
 
   bool _canRetryLoad() {
-    final serverId = _serverId;
+    final serverId = _accountScope;
     final maxWidth = _requestMaxWidth;
     for (final candidate in _candidates) {
       if (!MediaImageCache.instance.isNegativeCached(
@@ -454,7 +464,7 @@ class _MediaImageState extends State<MediaImage> {
 
   Future<_LoadedImage?> _loadOnce() async {
     final client = AuthScope.of(context).client;
-    final serverId = _serverId;
+    final serverId = _accountScope;
     final maxWidth = _requestMaxWidth;
     for (final candidate in _candidates) {
       CancelToken? token;
@@ -465,6 +475,7 @@ class _MediaImageState extends State<MediaImage> {
         tag: candidate.tag,
         maxWidth: maxWidth,
         fetch: () async {
+          if (!mounted || _accountScope != serverId) return null;
           token = CancelToken();
           try {
             final data = await client.getItemImage(
@@ -474,7 +485,7 @@ class _MediaImageState extends State<MediaImage> {
               maxWidth: maxWidth,
               cancelToken: token,
             );
-            if (data.isEmpty) {
+            if (!mounted || _accountScope != serverId || data.isEmpty) {
               return null;
             }
             return Uint8List.fromList(data);
@@ -505,7 +516,7 @@ class _MediaImageState extends State<MediaImage> {
   Widget build(BuildContext context) {
     final width = widget.width;
     final height = widget.height;
-    if (!_hasImageSource || AuthScope.maybeOf(context) == null) {
+    if (!_hasImageSource || AuthScope.maybeOf(context)?.isLoggedIn != true) {
       return PosterPlaceholder(width: width, height: height);
     }
     // 内存命中同一帧画上。视口内磁盘命中不等滚动空闲;屏幕外未缓存仍推迟。
@@ -663,14 +674,19 @@ Future<Uint8List?> loadChapterImage(
     return Future<Uint8List?>.value();
   }
   final auth = AuthScope.of(context);
-  return MediaImageCache.instance.load(
-    serverId: auth.session?.server.id ?? '',
+  final scope = '${auth.session?.server.id ?? ''}|${auth.client.userId ?? ''}';
+  final bytes = await MediaImageCache.instance.load(
+    serverId: scope,
     itemId: itemId,
     type: 'Chapter',
     variant: '$index',
     tag: tag,
     maxWidth: maxWidth,
     fetch: () async {
+      if ('${auth.session?.server.id ?? ''}|${auth.client.userId ?? ''}' !=
+          scope) {
+        return null;
+      }
       try {
         final data = await auth.client.getChapterImage(
           itemId,
@@ -678,7 +694,9 @@ Future<Uint8List?> loadChapterImage(
           tag: tag,
           maxWidth: maxWidth,
         );
-        if (data.isEmpty) {
+        if ('${auth.session?.server.id ?? ''}|${auth.client.userId ?? ''}' !=
+                scope ||
+            data.isEmpty) {
           return null;
         }
         return Uint8List.fromList(data);
@@ -687,6 +705,9 @@ Future<Uint8List?> loadChapterImage(
       }
     },
   );
+  return '${auth.session?.server.id ?? ''}|${auth.client.userId ?? ''}' == scope
+      ? bytes
+      : null;
 }
 
 class _PosterLoadTurn {
@@ -704,7 +725,7 @@ class _PosterLoadTurn {
 /// - 第一级为进程内 LRU,按字节量上限(默认约 64 MiB,可调)淘汰最久未用条目;
 /// - 第二级为磁盘缓存,目录 `ApplicationSupport/rillight/image_cache/`,
 ///   总占用超过上限时按 LRU 回收;
-/// - 缓存 key 为 `serverId|itemId|type|tag|variant|maxWidth`,tag 变化即换 key,
+/// - 图片入口把 serverId 与 userId 组成账号域后再生成缓存 key,tag 变化即换 key,
 ///   服务器换图后自动重新拉取;
 /// - 负缓存带 TTL,失败结果不再被永久吞掉;
 /// - 磁盘写入失败时降级为仅内存缓存,不影响显示。

@@ -197,7 +197,7 @@ class CatalogController extends ChangeNotifier {
         superseded?.call() == true) {
       return;
     }
-    final hit = await cache.lookup(request);
+    final hit = await cache.lookupWhenReady(request);
     if (gen != _loadGen ||
         hit == null ||
         _rowHasContent(current()) ||
@@ -414,7 +414,7 @@ class CatalogController extends ChangeNotifier {
     var fresh = false;
     if (showCachedFirst) {
       unawaited(() async {
-        final hit = await cache.lookup(request);
+        final hit = await cache.lookupWhenReady(request);
         if (fresh ||
             gen != _loadGen ||
             hit == null ||
@@ -441,9 +441,20 @@ class CatalogController extends ChangeNotifier {
     try {
       final views = parseCatalogPage(await network).items;
       final libraries = <EmbyItem>[];
-      for (final view in views) {
-        if (await _isMovieOrTvLibrary(view) || view.isPhotoCollection) {
-          libraries.add(view);
+      // Unknown collection types need a child probe. Bound those probes while
+      // preserving the server's library order and stop new groups on reload.
+      for (var start = 0; start < views.length; start += 3) {
+        if (gen != _loadGen) return;
+        final group = views.skip(start).take(3).toList();
+        final accepted = await Future.wait(
+          group.map(
+            (view) async =>
+                view.isPhotoCollection || await _isMovieOrTvLibrary(view),
+          ),
+        );
+        if (gen != _loadGen) return;
+        for (var index = 0; index < group.length; index++) {
+          if (accepted[index]) libraries.add(group[index]);
         }
       }
       if (gen != _loadGen) {
