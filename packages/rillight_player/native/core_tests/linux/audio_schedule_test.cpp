@@ -46,7 +46,38 @@ int main() {
   assert(delayed_offset == 6720 * 4);
   assert(frame.pts_us + delayed_offset / 4 * 1000000LL / 48000 - 80000 >=
          1050000);
-  assert(rillight_linux::StartupAudioTarget(0, 0, 80000, 1.0) == 90000);
+  assert(rillight_linux::StartupAudioTarget(0, 0, 80000, 1.0) == 0);
+  frame.pts_us = 0;
+  frame.sample_count = 960;  // A 20 ms first packet must reach the device.
+  assert(rillight_linux::StartOffset(frame,
+      rillight_linux::StartupAudioTarget(0, frame.pts_us, 80000, 1.0),
+      1.0) == 0);
+  assert(!rillight_linux::NeedsStartupRealign(20000, 80000, 1.0,
+                                              0, false));
+  assert(!rillight_linux::NeedsStartupRealign(40000, 80000, 1.0,
+                                              0, false));
+  int opening_packets_written = 0;
+  bool opening_clock_started = false;
+  for (int packet = 0; packet < 3; ++packet) {
+    frame.pts_us = packet * 20000;
+    const int first_byte = opening_clock_started ? 0 :
+        rillight_linux::StartOffset(frame,
+            rillight_linux::StartupAudioTarget(0, frame.pts_us, 80000, 1.0),
+            1.0);
+    assert(first_byte == 0);
+    const int sent = rillight_linux::DrainPcm(
+        pcm, frame.sample_count * 4, first_byte,
+        [](const uint8_t*, size_t available) { return available; },
+        [&](int sent_bytes) {
+          assert(!rillight_linux::NeedsStartupRealign(
+              frame.pts_us + sent_bytes / 4 * 1000000LL / 48000,
+              80000, 1.0, 0, opening_clock_started));
+          opening_clock_started = true;
+        });
+    assert(sent == frame.sample_count * 4);
+    ++opening_packets_written;
+  }
+  assert(opening_packets_written == 3 && opening_clock_started);
   assert(rillight_linux::NeedsStartupRealign(1090000, 80000, 1.0,
                                              1050000, false));
   assert(!rillight_linux::NeedsStartupRealign(1150000, 80000, 1.0,

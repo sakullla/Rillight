@@ -30,7 +30,9 @@ inline int64_t StartupAudioTarget(int64_t position_us, int64_t frame_pts_us,
   // report; the core also refuses a backward report after handoff.
   if (frame_pts_us > position_us + 50000)
     return position_us;
-  if (position_us <= 10000 && device_delay_us < 30000)
+  // Keep the opening samples while video is still at the beginning. Device
+  // latency is queued time, not evidence that media time has advanced.
+  if (position_us <= 10000)
     return position_us;
   const int64_t delay_media = device_delay_us > 0 && speed > 0
       ? static_cast<int64_t>(std::min(1000000.0,
@@ -44,7 +46,8 @@ inline bool NeedsStartupRealign(int64_t queued_end_pts_us,
                                 int64_t device_delay_us, double speed,
                                 int64_t current_position_us,
                                 bool audio_clock_started) {
-  if (audio_clock_started || queued_end_pts_us < 0 ||
+  if (audio_clock_started || current_position_us <= 10000 ||
+      queued_end_pts_us < 0 ||
       device_delay_us < 0 || speed <= 0) return false;
   return queued_end_pts_us - static_cast<int64_t>(device_delay_us * speed) +
              5000 < current_position_us;
