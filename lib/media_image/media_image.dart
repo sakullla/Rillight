@@ -8,6 +8,7 @@ import 'dart:ui' as ui;
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/poster_placeholder.dart';
@@ -129,6 +130,10 @@ class _LoadedImage {
 
 class _MediaImageState extends State<MediaImage> {
   Future<_LoadedImage?>? _future;
+  int _loadGeneration = 0;
+  ScrollPosition? _observedScroll;
+  bool _frameWakeQueued = false;
+  Completer<void>? _layoutWake;
 
   List<ItemImageRef> get _candidates {
     return widget.item.imageCandidates(
@@ -148,9 +153,23 @@ class _MediaImageState extends State<MediaImage> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    _trackScrollable();
     if (_hasImageSource && AuthScope.maybeOf(context) != null) {
       _future ??= _load();
     }
+  }
+
+  @override
+  void dispose() {
+    _loadGeneration++;
+    _observedScroll?.removeListener(_onObservedScroll);
+    _observedScroll = null;
+    final wake = _layoutWake;
+    _layoutWake = null;
+    if (wake != null && !wake.isCompleted) {
+      wake.complete();
+    }
+    super.dispose();
   }
 
   @override
@@ -211,32 +230,209 @@ class _MediaImageState extends State<MediaImage> {
     return null;
   }
 
-  Future<_LoadedImage?> _load() async {
-    for (var attempt = 0; attempt < 3; attempt++) {
-      if (!mounted) {
-        return null;
-      }
-      // 内存命中立刻返回,回滑已看过的海报不闪骨架、也不等停稳。
-      // 未命中才等滚动停稳:桌面滚轮是 jumpTo,ScrollAwareImageProvider
-      // 几乎不推迟,这里挡住的是磁盘/网络,不是解码。
-      final peeked = _peekLoaded();
-      if (peeked != null) {
-        return peeked;
-      }
-      await MediaImageCache.instance.waitForScrollIdle();
-      if (!mounted) {
-        return null;
-      }
-      final loaded = await _loadOnce();
-      if (loaded != null) {
-        return loaded;
-      }
-      if (!mounted || !_canRetryLoad()) {
-        return null;
-      }
-      await Future<void>.delayed(Duration(milliseconds: 200 * (attempt + 1)));
+  /// 本帧 layout 结束后才能判断格子在不在视口里。
+  /// didChangeDependencies 里启动的 future 要先让出一次,微任务才落在布局之后。
+  Future<void> _waitUntilLaidOut() async {
+    await Future<void>.value();
+    if (!mounted || _viewportHit() != null) {
+      return;
     }
-    return null;
+    final done = Completer<void>();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!done.isCompleted) {
+        done.complete();
+      }
+    });
+    await done.future;
+  }
+
+  /// 滚动位置只在依赖变化时订阅。异步续体里再调 [Scrollable.maybeOf] 会登记继承依赖。
+  void _trackScrollable() {
+    final position = Scrollable.maybeOf(context)?.position;
+    if (identical(position, _observedScroll)) {
+      return;
+    }
+    _observedScroll?.removeListener(_onObservedScroll);
+    _observedScroll = position;
+    position?.addListener(_onObservedScroll);
+  }
+
+  void _onObservedScroll() {
+    if (_frameWakeQueued || !mounted) {
+      return;
+    }
+    _frameWakeQueued = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _frameWakeQueued = false;
+      final wake = _layoutWake;
+      if (wake != null && !wake.isCompleted) {
+        wake.complete();
+      }
+    });
+  }
+
+  Future<void> _waitForViewportMove(_PosterLoadTurn turn) {
+    final wake = Completer<void>();
+    _layoutWake = wake;
+    turn.done.future.whenComplete(() {
+      if (!wake.isCompleted) {
+        wake.complete();
+      }
+    });
+    return wake.future;
+  }
+
+  /// true 在视口内,false 在滚动缓存区,null 还没有尺寸。
+  /// 不在滚动视口里(详情头图等)视为在屏内。
+  bool? _viewportHit() {
+    if (!mounted) {
+      return null;
+    }
+    final object = context.findRenderObject();
+    if (object is! RenderBox || !object.attached || !object.hasSize) {
+      return null;
+    }
+    final viewport = RenderAbstractViewport.maybeOf(object);
+    if (viewport == null) {
+      return true;
+    }
+    if (viewport is! RenderBox) {
+      return null;
+    }
+    final box = viewport as RenderBox;
+    if (!box.attached || !box.hasSize) {
+      return null;
+    }
+    final rect = MatrixUtils.transformRect(
+      object.getTransformTo(box),
+      Offset.zero & object.size,
+    );
+    return rect.overlaps(Offset.zero & box.size);
+  }
+
+  Future<_LoadedImage?> _load() async {
+    final generation = ++_loadGeneration;
+    bool current() => mounted && generation == _loadGeneration;
+    // 内存命中立刻返回,回滑已看过的海报不闪骨架、也不等停稳。
+    final peeked = _peekLoaded();
+    if (peeked != null) {
+      return peeked;
+    }
+    final cache = MediaImageCache.instance;
+    try {
+      for (var attempt = 0; attempt < 3; attempt++) {
+        if (!current()) {
+          return null;
+        }
+        final again = _peekLoaded();
+        if (again != null) {
+          return again;
+        }
+        await _waitUntilLaidOut();
+        if (!current()) {
+          return null;
+        }
+        final turn = cache._claimPosterLoadTurn(
+          () => current() && _viewportHit() == true,
+        );
+        var probing = false;
+        var probed = false;
+        var ready = false;
+        try {
+          while (current() && !turn.isReleased) {
+            // 视口内的磁盘命中不等滚动空闲。滑进视口时再探一次。
+            if (!probed && _viewportHit() == true) {
+              probed = true;
+              probing = true;
+              cache._beginViewportDiskProbe();
+              final disk = await _readDiskLoaded();
+              probing = false;
+              cache._endViewportDiskProbe();
+              if (!current()) {
+                return null;
+              }
+              if (disk != null) {
+                cache._cancelPosterLoadTurn(turn);
+                return disk;
+              }
+            }
+            if (turn.isReleased) {
+              break;
+            }
+            if (!cache.isScrollBusy && !cache._hasActiveViewportDiskProbe) {
+              await turn.done.future;
+              break;
+            }
+            await _waitForViewportMove(turn);
+          }
+          ready = current();
+        } finally {
+          if (probing) {
+            cache._endViewportDiskProbe();
+          }
+          if (!ready) {
+            cache._cancelPosterLoadTurn(turn);
+          }
+        }
+        if (!ready) {
+          return null;
+        }
+        if (!turn.isReleased) {
+          await turn.done.future;
+        }
+        if (!current()) {
+          return null;
+        }
+        // 屏幕外的磁盘和网络仍等停稳,并排在视口内加载之后。解码并发不变。
+        final loaded = await _loadOnce();
+        if (loaded != null) {
+          return loaded;
+        }
+        if (!current() || !_canRetryLoad()) {
+          return null;
+        }
+        await Future<void>.delayed(Duration(milliseconds: 200 * (attempt + 1)));
+      }
+      return null;
+    } finally {
+      if (generation == _loadGeneration) {
+        final wake = _layoutWake;
+        _layoutWake = null;
+        if (wake != null && !wake.isCompleted) {
+          wake.complete();
+        }
+      }
+    }
+  }
+
+  Future<_LoadedImage?> _readDiskLoaded() async {
+    if (_candidates.isEmpty) {
+      return null;
+    }
+    final candidate = _candidates.first;
+    final maxWidth = _requestMaxWidth;
+    final serverId = _serverId;
+    final bytes = await MediaImageCache.instance._readDiskCache(
+      serverId: serverId,
+      itemId: candidate.itemId,
+      type: candidate.type,
+      tag: candidate.tag,
+      maxWidth: maxWidth,
+    );
+    if (bytes == null || bytes.isEmpty) {
+      return null;
+    }
+    return _LoadedImage(
+      bytes: bytes,
+      type: candidate.type,
+      cacheKey: MediaImageCache.key(
+        serverId: serverId,
+        itemId: candidate.itemId,
+        type: candidate.type,
+        tag: candidate.tag,
+        maxWidth: maxWidth,
+      ),
+    );
   }
 
   bool _canRetryLoad() {
@@ -312,8 +508,7 @@ class _MediaImageState extends State<MediaImage> {
     if (!_hasImageSource || AuthScope.maybeOf(context) == null) {
       return PosterPlaceholder(width: width, height: height);
     }
-    // 缓存命中立刻画。未命中的磁盘/网络在 [MediaImageCache.waitForScrollIdle]
-    // 之后才走,避免片库快滑时每张新海报都打盘和 CPU。
+    // 内存命中同一帧画上。视口内磁盘命中不等滚动空闲;屏幕外未缓存仍推迟。
     final cached = _peekLoaded();
     if (cached != null) {
       return _paint(context, cached, width, height);
@@ -494,6 +689,17 @@ Future<Uint8List?> loadChapterImage(
   );
 }
 
+class _PosterLoadTurn {
+  _PosterLoadTurn({required this.sequence, required this.inViewport});
+
+  final int sequence;
+  final bool Function() inViewport;
+  final Completer<void> done = Completer<void>();
+  bool cancelled = false;
+
+  bool get isReleased => done.isCompleted;
+}
+
 /// 图片字节两级缓存:
 /// - 第一级为进程内 LRU,按字节量上限(默认约 64 MiB,可调)淘汰最久未用条目;
 /// - 第二级为磁盘缓存,目录 `ApplicationSupport/rillight/image_cache/`,
@@ -523,8 +729,8 @@ class MediaImageCache {
 
   static const int _maxConcurrentFetches = 8;
 
-  /// 片库滚动停稳后再打未命中的磁盘/网络。桌面滚轮是离散 jumpTo,
-  /// Flutter 自带的滑动推迟几乎不生效。
+  /// 屏幕外未缓存海报等滚动停稳后再读盘、再走网络。桌面滚轮是离散 jumpTo,
+  /// Flutter 自带的滑动推迟几乎不生效。视口内的磁盘命中不走这个等待。
   static const Duration defaultScrollIdle = Duration(milliseconds: 80);
 
   int memoryLimitBytes = defaultMemoryLimitBytes;
@@ -603,12 +809,14 @@ class MediaImageCache {
   void _completeScrollIdleIfQuiet() {
     _scrollIdleTimer = null;
     _releaseScrollIdleWaiters();
+    _schedulePosterRelease();
   }
 
   void _resetScrollIdle() {
     _scrollIdleTimer?.cancel();
     _scrollIdleTimer = null;
     _releaseScrollIdleWaiters();
+    _resetPosterTurns();
   }
 
   void _releaseScrollIdleWaiters() {
@@ -622,6 +830,149 @@ class MediaImageCache {
         waiter.complete();
       }
     }
+  }
+
+  bool get _hasActiveViewportDiskProbe => _viewportDiskProbes > 0;
+
+  int _viewportDiskProbes = 0;
+  int _posterTurnSerial = 0;
+  final List<_PosterLoadTurn> _posterTurns = [];
+  bool _posterReleaseQueued = false;
+
+  /// 登记一次海报加载。滚动中或仍有视口磁盘探测时不放行。
+  /// 放行时视口内排在屏幕外之前。
+  _PosterLoadTurn _claimPosterLoadTurn(bool Function() inViewport) {
+    final turn = _PosterLoadTurn(
+      sequence: _posterTurnSerial++,
+      inViewport: inViewport,
+    );
+    _posterTurns.add(turn);
+    _schedulePosterRelease();
+    return turn;
+  }
+
+  void _cancelPosterLoadTurn(_PosterLoadTurn turn) {
+    turn.cancelled = true;
+    _posterTurns.remove(turn);
+  }
+
+  void _beginViewportDiskProbe() {
+    _viewportDiskProbes++;
+  }
+
+  void _endViewportDiskProbe() {
+    if (_viewportDiskProbes > 0) {
+      _viewportDiskProbes--;
+    }
+    _schedulePosterRelease();
+  }
+
+  void _schedulePosterRelease() {
+    if (_posterReleaseQueued || _viewportDiskProbes > 0 || isScrollBusy) {
+      return;
+    }
+    if (_posterTurns.isEmpty) {
+      return;
+    }
+    _posterReleaseQueued = true;
+    scheduleMicrotask(() {
+      _posterReleaseQueued = false;
+      if (_viewportDiskProbes > 0 || isScrollBusy) {
+        return;
+      }
+      _releasePosterTurns();
+    });
+  }
+
+  void _releasePosterTurns() {
+    if (_posterTurns.isEmpty) {
+      return;
+    }
+    final turns = List<_PosterLoadTurn>.from(_posterTurns);
+    _posterTurns.clear();
+    final viewport = <_PosterLoadTurn>[];
+    final offscreen = <_PosterLoadTurn>[];
+    for (final turn in turns) {
+      if (turn.cancelled || turn.done.isCompleted) {
+        continue;
+      }
+      if (_turnInViewport(turn)) {
+        viewport.add(turn);
+      } else {
+        offscreen.add(turn);
+      }
+    }
+    int bySequence(_PosterLoadTurn a, _PosterLoadTurn b) =>
+        a.sequence.compareTo(b.sequence);
+    viewport.sort(bySequence);
+    offscreen.sort(bySequence);
+    for (final turn in viewport.followedBy(offscreen)) {
+      if (!turn.done.isCompleted) {
+        turn.done.complete();
+      }
+    }
+  }
+
+  bool _turnInViewport(_PosterLoadTurn turn) {
+    try {
+      return turn.inViewport();
+    } catch (_) {
+      return false;
+    }
+  }
+
+  void _resetPosterTurns() {
+    _viewportDiskProbes = 0;
+    _posterReleaseQueued = false;
+    final turns = List<_PosterLoadTurn>.from(_posterTurns);
+    _posterTurns.clear();
+    for (final turn in turns) {
+      if (!turn.done.isCompleted) {
+        turn.done.complete();
+      }
+    }
+  }
+
+  /// 只读内存和磁盘,不发网络,也不等滚动空闲。
+  Future<Uint8List?> _readDiskCache({
+    required String serverId,
+    required String itemId,
+    required String type,
+    String? tag,
+    String variant = '',
+    required int maxWidth,
+  }) async {
+    final cacheKey = key(
+      serverId: serverId,
+      itemId: itemId,
+      type: type,
+      tag: tag,
+      variant: variant,
+      maxWidth: maxWidth,
+    );
+    final cached = _touch(cacheKey);
+    if (cached != null && cached.isNotEmpty) {
+      return cached;
+    }
+    if (isNegativeCached(
+      serverId: serverId,
+      itemId: itemId,
+      type: type,
+      tag: tag,
+      variant: variant,
+      maxWidth: maxWidth,
+    )) {
+      return null;
+    }
+    if (!_diskResolved) {
+      await _ensureDiskStore();
+    }
+    final disk = await _readDisk(cacheKey);
+    if (disk != null && disk.isNotEmpty) {
+      _storeBytes(cacheKey, disk);
+      return disk;
+    }
+    return null;
   }
 
   Uint8List? peek({

@@ -682,6 +682,152 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     MediaImage.debugResetCacheConfiguration();
   });
+
+  Future<void> pumpPosterStrip(
+    WidgetTester tester,
+    AuthController auth, {
+    required int count,
+    double cacheExtent = 400,
+  }) {
+    return tester.pumpWidget(
+      wrap(
+        auth,
+        SizedBox(
+          width: 120,
+          height: 180,
+          child: ListView.builder(
+            scrollCacheExtent: ScrollCacheExtent.pixels(cacheExtent),
+            itemExtent: 180,
+            itemCount: count,
+            itemBuilder: (context, index) {
+              return MediaImage(
+                key: ValueKey('poster-$index'),
+                item: EmbyItem(
+                  id: 'poster-$index',
+                  name: '海报$index',
+                  type: 'Movie',
+                  primaryImageTag: 'tag-$index',
+                ),
+                width: 120,
+                height: 180,
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
+  void addPosterItems(int count) {
+    for (var i = 0; i < count; i++) {
+      server.items.add(
+        FakeEmbyItem(
+          id: 'poster-$i',
+          name: '海报$i',
+          type: 'Movie',
+          primaryImageTag: 'tag-$i',
+        ),
+      );
+    }
+  }
+
+  String? requestedItemId(String request) {
+    return RegExp(r'/Items/([^/]+)/Images/').firstMatch(request)?.group(1);
+  }
+
+  testWidgets(
+    'viewport disk hits paint while scrolling and offscreen disk stays deferred',
+    (tester) async {
+      final auth = await connect(tester);
+      final serverId = auth.session!.server.id;
+      final disk = _FakeDiskStore();
+      MediaImageCache.instance.debugSetDiskStore(disk);
+      for (final index in [0, 1]) {
+        await MediaImageCache.instance.load(
+          serverId: serverId,
+          itemId: 'poster-$index',
+          type: 'Primary',
+          tag: 'tag-$index',
+          maxWidth: 120,
+          fetch: () async => kTinyPng,
+        );
+      }
+      MediaImage.debugClearMemory();
+      expect(disk.files, isNotEmpty);
+
+      MediaImageCache.instance.markScrollActivity();
+      await pumpPosterStrip(tester, auth, count: 2);
+      MediaImageCache.instance.markScrollActivity();
+      await tester.pump();
+      expect(MediaImageCache.instance.isScrollBusy, isTrue);
+      expect(imageRequests(), isEmpty);
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('poster-0')),
+          matching: find.byType(Image),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('poster-1')),
+          matching: find.byType(Image),
+        ),
+        findsNothing,
+      );
+
+      final position = tester
+          .state<ScrollableState>(find.byType(Scrollable))
+          .position;
+      position.jumpTo(180);
+      MediaImageCache.instance.markScrollActivity();
+      await tester.pump();
+      await tester.pump();
+      expect(MediaImageCache.instance.isScrollBusy, isTrue);
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('poster-1')),
+          matching: find.byType(Image),
+        ),
+        findsOneWidget,
+      );
+      expect(imageRequests(), isEmpty);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump(MediaImageCache.defaultScrollIdle);
+    },
+  );
+
+  testWidgets(
+    'after scroll idle, viewport posters start before offscreen ones',
+    (tester) async {
+      addPosterItems(2);
+      final auth = await connect(tester);
+      await tester.runAsync(() async {
+        MediaImageCache.instance.markScrollActivity();
+        await pumpPosterStrip(tester, auth, count: 2);
+        MediaImageCache.instance.markScrollActivity();
+        await Future<void>.delayed(const Duration(milliseconds: 30));
+      });
+      await tester.pump();
+      expect(imageRequests(), isEmpty);
+      expect(find.byType(MediaImage), findsWidgets);
+
+      await tester.runAsync(() async {
+        await Future<void>.delayed(const Duration(milliseconds: 150));
+      });
+      await tester.pump();
+      await tester.pump();
+      final ids = imageRequests().map(requestedItemId).whereType<String>();
+      expect(ids, contains('poster-0'));
+      expect(ids, contains('poster-1'));
+      expect(
+        ids.toList().indexOf('poster-0'),
+        lessThan(ids.toList().indexOf('poster-1')),
+      );
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump(MediaImageCache.defaultFetchTimeout);
+    },
+  );
 }
 
 class _HangingWriteStore implements MediaImageDiskStore {
