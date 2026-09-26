@@ -808,6 +808,87 @@ void main() {
   });
 
   test(
+    'sealed private subtitle serves bounded ranges without remote access',
+    () async {
+      final temp = await Directory.systemTemp.createTemp('rillight-subtitles-');
+      final file = File('${temp.path}${Platform.pathSeparator}1.srt');
+      await file.writeAsString('1\n00:00:01,000 --> 00:00:02,000\nhello\n');
+      final outside = File(
+        '${temp.parent.path}${Platform.pathSeparator}other.srt',
+      );
+      await outside.writeAsString('outside');
+      final proxy = await PlaybackHttpProxy.create();
+      final client = HttpClient();
+      try {
+        expect(
+          () =>
+              proxy.register(outside.uri, role: PlaybackResourceRole.subtitle),
+          throwsArgumentError,
+        );
+        expect(
+          () => proxy.register(file.uri, role: PlaybackResourceRole.media),
+          throwsArgumentError,
+        );
+        final sealed = proxy.register(
+          file.uri,
+          role: PlaybackResourceRole.subtitle,
+        );
+        expect(sealed.host, '127.0.0.1');
+        final first = await (await client.getUrl(sealed)).close();
+        expect(first.statusCode, HttpStatus.ok);
+        expect(await first.transform(utf8.decoder).join(), contains('hello'));
+        final partialRequest = await client.getUrl(sealed);
+        partialRequest.headers.set(HttpHeaders.rangeHeader, 'bytes=0-0');
+        final partial = await partialRequest.close();
+        expect(partial.statusCode, HttpStatus.partialContent);
+        expect(await partial.transform(utf8.decoder).join(), '1');
+        final head = await (await client.headUrl(sealed)).close();
+        expect(head.statusCode, HttpStatus.ok);
+        expect(head.contentLength, await file.length());
+        await head.drain<void>();
+      } finally {
+        client.close(force: true);
+        await proxy.close();
+        await temp.delete(recursive: true);
+        await outside.delete();
+      }
+    },
+  );
+
+  test(
+    'upstream authentication status is observable without error parsing',
+    () async {
+      final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      upstream.listen((request) async {
+        request.response.statusCode = HttpStatus.unauthorized;
+        await request.response.close();
+      });
+      final proxy = await PlaybackHttpProxy.create();
+      final client = HttpClient();
+      try {
+        final source = Uri.parse('http://127.0.0.1:${upstream.port}/media');
+        final response = await (await client.getUrl(
+          proxy.register(source),
+        )).close();
+        expect(response.statusCode, HttpStatus.unauthorized);
+        await response.drain<void>();
+        expect(
+          proxy.diagnostics['lastUpstreamStatus'],
+          HttpStatus.unauthorized,
+        );
+        expect(
+          proxy.diagnostics['authenticationStatus'],
+          HttpStatus.unauthorized,
+        );
+      } finally {
+        client.close(force: true);
+        await proxy.close();
+        await upstream.close(force: true);
+      }
+    },
+  );
+
+  test(
     'unsupported conditional ranges fall back before committing output',
     () async {
       final fixture = await _CacheFixture.open(

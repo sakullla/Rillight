@@ -69,6 +69,7 @@ class PlaybackHttpProxy {
   bool _refreshingTimeline = false;
   final FutureOr<void> Function(PlaybackCacheStream)? onStreamChanged;
   final _routes = SealedMediaRoutes();
+  final _privateSubtitles = <String, String>{};
   final _roles = <String, PlaybackResourceRole>{};
   final _hlsNext = <String, _HlsNext>{};
   final _hlsOwners = <String, Set<String>>{};
@@ -102,6 +103,8 @@ class PlaybackHttpProxy {
   int _recoveryFailures = 0;
   int _cancelled = 0;
   String? _lastValidationFailure;
+  int? _lastUpstreamStatus;
+  int? _authenticationStatus;
   int _inFlight = 0;
   int _inFlightPeak = 0;
   final _samples = <(DateTime, int)>[];
@@ -168,6 +171,8 @@ class PlaybackHttpProxy {
     'recoveryFailures': _recoveryFailures,
     'cancelledReads': _cancelled,
     'lastValidationFailure': _lastValidationFailure,
+    'lastUpstreamStatus': _lastUpstreamStatus,
+    'authenticationStatus': _authenticationStatus,
     'proxyInFlightBytes': _inFlight,
     'proxyInFlightPeakBytes': _inFlightPeak,
     'registeredResources': _roles.length,
@@ -313,6 +318,21 @@ class PlaybackHttpProxy {
     PlaybackResourceRole role = PlaybackResourceRole.media,
     String context = '',
   }) {
+    if (url.scheme == 'file' && role == PlaybackResourceRole.subtitle) {
+      final path = _validatedPrivateSubtitle(url);
+      if (_privateSubtitles.length >= 32) {
+        throw StateError('Too many private subtitle routes');
+      }
+      final token = List.generate(
+        24,
+        (_) => Random.secure().nextInt(256).toRadixString(16).padLeft(2, '0'),
+      ).join();
+      _privateSubtitles[token] = path;
+      _roles[token] = PlaybackResourceRole.subtitle;
+      return Uri.parse(
+        'http://127.0.0.1:${_server.port}/$_secret/$token/subtitle',
+      );
+    }
     if (url.scheme != 'http' && url.scheme != 'https') {
       throw ArgumentError('Only HTTP(S) media resources are allowed');
     }
@@ -324,6 +344,33 @@ class PlaybackHttpProxy {
     return Uri.parse(
       'http://127.0.0.1:${_server.port}/$_secret/$token/${Uri.encodeComponent(suffix.substring(0, min(suffix.length, 128)))}',
     );
+  }
+
+  String _validatedPrivateSubtitle(Uri uri) {
+    final file = File.fromUri(uri);
+    final path = file.resolveSymbolicLinksSync();
+    final canonical = File(path);
+    final temp = Directory.systemTemp.resolveSymbolicLinksSync();
+    final parent = canonical.parent;
+    final parentPath = parent.parent.path;
+    final insideTemp = Platform.isWindows
+        ? parentPath.toLowerCase() == temp.toLowerCase()
+        : parentPath == temp;
+    final extension = canonical.uri.pathSegments.last
+        .split('.')
+        .last
+        .toLowerCase();
+    if (!insideTemp ||
+        !parent.uri.pathSegments
+            .where((part) => part.isNotEmpty)
+            .last
+            .startsWith('rillight-subtitles-') ||
+        !const {'srt', 'ass', 'ssa', 'vtt'}.contains(extension) ||
+        canonical.statSync().type != FileSystemEntityType.file ||
+        canonical.lengthSync() > 16 * 1024 * 1024) {
+      throw ArgumentError('External subtitle is not an app-private file');
+    }
+    return path;
   }
 
   Uri _withoutForeignCredentials(Uri url) {
@@ -510,6 +557,11 @@ class PlaybackHttpProxy {
         },
       );
       read.check();
+      _lastUpstreamStatus = response.statusCode;
+      if (response.statusCode == HttpStatus.unauthorized ||
+          response.statusCode == HttpStatus.forbidden) {
+        _authenticationStatus = response.statusCode;
+      }
       final location = response.headers.value(HttpHeaders.locationHeader);
       if ([301, 302, 303, 307, 308].contains(response.statusCode) &&
           location != null) {
@@ -1600,6 +1652,60 @@ class PlaybackHttpProxy {
     }
   }
 
+  Future<void> _servePrivateSubtitle(
+    HttpRequest incoming,
+    _ProxyRead read,
+    String registeredPath,
+  ) async {
+    final output = incoming.response;
+    if (_closed || !['GET', 'HEAD'].contains(incoming.method)) {
+      output.statusCode = HttpStatus.notFound;
+      return;
+    }
+    // Recheck after registration so replacing a temporary file with a link
+    // cannot turn a sealed subtitle route into an arbitrary file read.
+    final resolved = _validatedPrivateSubtitle(File(registeredPath).uri);
+    if (Platform.isWindows
+        ? resolved.toLowerCase() != registeredPath.toLowerCase()
+        : resolved != registeredPath) {
+      output.statusCode = HttpStatus.notFound;
+      return;
+    }
+    final file = File(resolved);
+    final length = await file.length();
+    var start = 0;
+    var end = length - 1;
+    final header = incoming.headers.value(HttpHeaders.rangeHeader);
+    if (header != null) {
+      final match = RegExp(r'^bytes=(\d+)-(\d*)$').firstMatch(header);
+      if (match == null) {
+        output.statusCode = HttpStatus.requestedRangeNotSatisfiable;
+        output.headers.set('content-range', 'bytes */$length');
+        return;
+      }
+      start = int.parse(match[1]!);
+      if (match[2]!.isNotEmpty) end = int.parse(match[2]!);
+      if (start >= length || start > end) {
+        output.statusCode = HttpStatus.requestedRangeNotSatisfiable;
+        output.headers.set('content-range', 'bytes */$length');
+        return;
+      }
+      end = min(end, length - 1);
+      output.statusCode = HttpStatus.partialContent;
+      output.headers.set('content-range', 'bytes $start-$end/$length');
+    }
+    output.headers.set('accept-ranges', 'bytes');
+    output.headers.contentType = ContentType.text;
+    output.contentLength = max(0, end - start + 1);
+    if (incoming.method == 'HEAD' || length == 0) return;
+    await for (final chunk in file.openRead(start, end + 1)) {
+      read.check();
+      output.add(chunk);
+      read.outputStarted = true;
+      await output.flush();
+    }
+  }
+
   Future<void> _serveResponse(
     HttpRequest incoming,
     _ProxyRead read, {
@@ -1611,6 +1717,12 @@ class PlaybackHttpProxy {
       final token = incoming.uri.path.startsWith(prefix)
           ? incoming.uri.path.substring(prefix.length).split('/').first
           : '';
+      final privatePath = _privateSubtitles[token];
+      if (privatePath != null) {
+        read.resourceKey = token;
+        await _servePrivateSubtitle(incoming, read, privatePath);
+        return;
+      }
       final route = _closed ? null : _routes.open(token);
       if (route == null ||
           route.role < 0 ||
@@ -2519,6 +2631,7 @@ class PlaybackHttpProxy {
     await cache?.close();
     await Future.wait(_writes.toList());
     _routes.close();
+    _privateSubtitles.clear();
     _hlsNext.clear();
     _hlsOwners.clear();
     _representations.clear();

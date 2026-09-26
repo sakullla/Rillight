@@ -7,13 +7,12 @@ import 'dart:io';
 import 'package:flutter/widgets.dart';
 import 'package:rillight/app/app.dart';
 import 'package:rillight/emby/emby_models.dart';
-import 'package:rillight/player/mpv_video_backend.dart';
+import 'package:rillight/player/rillight_video_backend.dart';
 import 'package:rillight/player/player_page.dart';
 import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/player_window_host.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:win32/win32.dart' as win32;
-import 'package:rillight_player/rillight_player.dart';
 import 'package:rillight/main.dart' as production;
 
 Future<void> main(List<String> args) async {
@@ -41,7 +40,7 @@ Future<void> main(List<String> args) async {
         return page?.controller != null;
       });
       final controller = page!.controller!;
-      final backend = controller.backend as MpvVideoBackend;
+      final backend = controller.backend as RillightVideoBackend;
       Future<void> checkDisplayRequest(String phase, bool expected) async {
         if (!Platform.isWindows) return;
         var previous = win32.EXECUTION_STATE(0);
@@ -71,34 +70,18 @@ Future<void> main(List<String> args) async {
         });
       }
 
-      Future<void> captureCoreSubtitle(String label) async {
-        // Let the selected subtitle decoder receive packets and render within
-        // the synthetic fixture's 0–8/12 second subtitle interval.
+      Future<void> verifyCoreSubtitle(String label, int expectedIndex) async {
+        // Let the selected decoder receive packets within the fixture's
+        // subtitle interval. Pixel output is checked by platform smoke tests.
         await Future<void>.delayed(const Duration(milliseconds: 350));
-        final view = _find<MpvVideoView>(
-          (element) => element.widget is MpvVideoView
-              ? element.widget as MpvVideoView
-              : null,
-        );
-        if (view == null) throw StateError('Native video view is not mounted');
-        final target = '${root.path}/$label-core.png';
-        await view.player.command(['screenshot-to-file', target, 'subtitles']);
-        final properties = <String, Object?>{};
-        for (final key in [
-          'time-pos',
-          'sid',
-          'sub-start',
-          'sub-end',
-          'sub-text',
-        ]) {
-          try {
-            properties[key] = await view.player.getProperty(key);
-          } catch (_) {}
+        if (backend.selectedSubtitleIndex != expectedIndex ||
+            controller.subtitleStreamIndex != expectedIndex) {
+          throw StateError('Native subtitle selection did not confirm $label');
         }
-        await record('core-subtitle-screenshot', {
+        await record('core-subtitle-selection', {
           'label': label,
-          'file': target,
-          ...properties,
+          'selectedIndex': expectedIndex,
+          ...await backend.diagnostics(),
         });
       }
 
@@ -117,7 +100,7 @@ Future<void> main(List<String> args) async {
         );
         if (controller.error != null) {
           throw StateError(
-            '$name failed: ${controller.error}; ${backend.lastFailure}; ${controller.loadFailure}',
+            '$name failed: ${controller.error}; ${controller.loadFailure}',
           );
         }
         await _until(
@@ -303,24 +286,15 @@ Future<void> main(List<String> args) async {
       // The fixture returns an invalid subtitle at 18 seconds. A rejected
       // download must never reach native sub-add or change the selected track.
       await _until(() => switchWatch.elapsedMilliseconds >= 20000);
-      final nativeView = _find<MpvVideoView>(
-        (element) => element.widget is MpvVideoView
-            ? element.widget as MpvVideoView
-            : null,
-      )!;
-      final lateSid = await nativeView.player.getProperty('sid');
-      final lateTracks =
-          await nativeView.player.getProperty('track-list') as List;
-      if (lateSid != false ||
+      if (backend.selectedSubtitleIndex != null ||
           controller.subtitleStreamIndex != null ||
           !controller.isPlaying ||
-          controller.position < const Duration(seconds: 18) ||
-          lateTracks.any((track) => track is Map && track['type'] == 'sub')) {
+          controller.position < const Duration(seconds: 18)) {
         throw StateError('Late subtitle changed selection or media stopped');
       }
       await record('late-subtitle-remained-unselected', {
         'elapsedMs': switchWatch.elapsedMilliseconds,
-        'sid': lateSid,
+        'selectedIndex': backend.selectedSubtitleIndex,
         'positionMs': controller.position.inMilliseconds,
       });
       // A newer explicit choice must supersede restoration while the resource
@@ -352,13 +326,7 @@ Future<void> main(List<String> args) async {
       );
       await supersededSubtitle;
       await _until(() => switchWatch.elapsedMilliseconds >= 20000);
-      final currentView = _find<MpvVideoView>(
-        (element) => element.widget is MpvVideoView
-            ? element.widget as MpvVideoView
-            : null,
-      )!;
-      final supersededSid = await currentView.player.getProperty('sid');
-      if (supersededSid != false ||
+      if (backend.selectedSubtitleIndex != null ||
           controller.subtitleStreamIndex != null ||
           controller.trackFailure != null ||
           controller.error != null ||
@@ -369,7 +337,7 @@ Future<void> main(List<String> args) async {
       }
       await record('superseded-subtitle-remained-off', {
         'elapsedMs': switchWatch.elapsedMilliseconds,
-        'sid': supersededSid,
+        'selectedIndex': backend.selectedSubtitleIndex,
         'commandCount': pendingCommands.length,
         'commands': pendingCommands,
         ...await backend.diagnostics(),
@@ -395,21 +363,24 @@ Future<void> main(List<String> args) async {
             throw StateError('PGS selection failed');
           }
           await record('pgs', await backend.diagnostics());
-          await captureCoreSubtitle('pgs');
+          await verifyCoreSubtitle('pgs', 3);
           await Future<void>.delayed(const Duration(seconds: 2));
           await controller.setSubtitle(4);
           if (controller.trackFailure != null) {
             throw StateError('ASS selection failed');
           }
           await record('ass', await backend.diagnostics());
-          await captureCoreSubtitle('ass');
+          await verifyCoreSubtitle('ass', 4);
           for (final index in [5, 6, 7]) {
             await controller.setSubtitle(index);
             if (controller.trackFailure != null) {
               throw StateError('External subtitle $index failed');
             }
             await record('subtitle-$index', await backend.diagnostics());
-            await captureCoreSubtitle({5: 'srt', 6: 'vtt', 7: 'ssa'}[index]!);
+            await verifyCoreSubtitle(
+              {5: 'srt', 6: 'vtt', 7: 'ssa'}[index]!,
+              index,
+            );
           }
           await controller.setSubtitle(null);
           if (controller.subtitleStreamIndex != null) {
@@ -466,8 +437,11 @@ Future<void> main(List<String> args) async {
                   const Duration(milliseconds: 500),
         );
         await _until(
-          () =>
-              backend.buffer - controller.position > const Duration(seconds: 3),
+          () => backend.bufferSnapshot.ranges.any(
+            (range) =>
+                range.start <= controller.position &&
+                range.end - controller.position > const Duration(seconds: 3),
+          ),
         );
         await network(true);
         final probe = await (await networkClient.getUrl(
@@ -485,7 +459,10 @@ Future<void> main(List<String> args) async {
           'afterMs': controller.position.inMilliseconds,
           'advancedMs': advanced.inMilliseconds,
           'playing': controller.isPlaying,
-          'bufferMs': backend.buffer.inMilliseconds,
+          'bufferRanges': [
+            for (final range in backend.bufferSnapshot.ranges)
+              [range.start.inMilliseconds, range.end.inMilliseconds],
+          ],
         });
         if (!controller.isPlaying ||
             advanced < const Duration(milliseconds: 500)) {
