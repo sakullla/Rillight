@@ -31,7 +31,9 @@ jobs:
           flutter-version: '3.47.4'
           channel: stable
           cache: true
-      - uses: actions/cache@v5
+      - name: Restore pinned Linux SDK
+        id: sdk-cache
+        uses: actions/cache/restore@v5
         with:
           path: ${{ runner.temp }}/rillight-native
           key: owned-core-ubuntu22-${{ runner.arch }}-${{ hashFiles('packages/rillight_player/native/build_linux.sh', 'packages/rillight_player/native/build_core_dependencies.py', 'packages/rillight_player/native/verify_core_dependencies.py', 'packages/rillight_player/native/core_dependencies.json', 'packages/rillight_player/native/patches/**') }}
@@ -39,6 +41,14 @@ jobs:
         run: python3 packages/rillight_player/native/build_core_dependencies_test.py
       - name: Build the fixed media stack
         run: bash packages/rillight_player/native/build_linux.sh "$RUNNER_TEMP/rillight-native"
+      # build_linux.sh verifies the SDK on both cache hits and fresh builds.
+      # Save it now so a later package or playback failure does not discard it.
+      - name: Save verified Linux SDK
+        if: steps.sdk-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ runner.temp }}/rillight-native
+          key: ${{ steps.sdk-cache.outputs.cache-primary-key }}
       - name: Build and audit the complete Flutter bundle
         run: |
           export RILLIGHT_CORE_PREFIX="$RUNNER_TEMP/rillight-native"
@@ -48,7 +58,7 @@ jobs:
           # Link-time discovery only; bundle audit explicitly removes this.
           export LD_LIBRARY_PATH="$RILLIGHT_CORE_PREFIX/lib"
           flutter pub get
-          flutter build linux --release
+          flutter build linux --release --no-pub
           python3 tool/linux_release_checks.py verify build/linux/x64/release/bundle
       - name: Package real system dependencies
         env:
@@ -59,6 +69,7 @@ jobs:
       - uses: actions/upload-artifact@v6
         with:
           name: release-linux
+          compression-level: 0
           path: dist/linux/*.deb
           if-no-files-found: error
       - name: Build the production-entry playback validation target
@@ -66,7 +77,7 @@ jobs:
           export RILLIGHT_CORE_PREFIX="$RUNNER_TEMP/rillight-native"
           export PKG_CONFIG_PATH="$RILLIGHT_CORE_PREFIX/lib/pkgconfig"
           export LD_LIBRARY_PATH="$RILLIGHT_CORE_PREFIX/lib"
-          flutter build linux --release --target tool/player_smoke.dart
+          flutter build linux --release --no-pub --target tool/player_smoke.dart
           tar -C build/linux/x64/release/bundle -czf linux-playback-bundle.tar.gz .
       - name: Generate deterministic media fixtures
         run: |
@@ -75,6 +86,7 @@ jobs:
       - uses: actions/upload-artifact@v6
         with:
           name: linux-playback-inputs
+          compression-level: 0
           path: |
             linux-playback-bundle.tar.gz
             linux-playback-media.tar.gz

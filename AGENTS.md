@@ -45,13 +45,13 @@ Report native build, package launch, actual video/audio output and GPU stability
 
 ## Release Procedure
 
-PR/main CI runs formatting, analysis, tests, Android APK audit, Linux package regression and macOS package/playback-control checks. When all four macOS artifact inputs are absent, ordinary CI builds the universal SDK from pinned sources and the core from the candidate; partial inputs fail. Cached native SDKs are verified before use. Hosted macOS controls do not establish displayed frames, physical audio or hardware acceptance; those remain in the target-machine handoff. The tag release workflow requires all native SDK inputs and must fail closed if one is missing. Do not tag a candidate on the strength of CI configuration alone.
+PR/main CI runs formatting, analysis, tests, Android APK audit, Linux package regression and macOS package/playback-control checks. When all four macOS artifact inputs are absent, ordinary CI builds the universal SDK from pinned sources and the core from the candidate; partial inputs fail. Cached native SDKs are verified before use. Hosted macOS controls do not establish displayed frames, physical audio or hardware acceptance; those remain in the target-machine handoff. The tag release workflow requires all native SDK inputs and must fail closed if one is missing.
 
 Before tagging a release:
 
 1. Update the synchronized application version in `pubspec.yaml`, `lib/app/product.dart`, and `windows/installer/rillight.iss`.
 2. Run `flutter pub get`, `dart format lib test`, `flutter analyze`, and `flutter test`.
-3. Verify package hashes, installed output and hardware evidence with `python tool/player_core_release_checks.py --all-platforms --require-hardware`, and compare measured baseline/candidate runs with `python tool/player_performance_checks.py --compare-baseline --require-all-targets`. The macOS handoff exception is for local workflow closure, not a five-platform release claim.
+3. The release workflow must verify package hashes, signatures and native dependency closure before publishing. Local hardware acceptance records and baseline/candidate performance samples are not prerequisites for tagging. Report missing evidence as unverified; do not claim hardware acceptance or performance improvements without measurements.
 4. Commit the release change, push `main`, then create and push an annotated tag:
 
    ```sh

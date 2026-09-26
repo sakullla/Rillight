@@ -112,7 +112,7 @@ jobs:
       - name: Verify drag-install DMG layout regressions
         run: python3 macos/package_dmg_test.py
       - name: Compile the Release sandbox proxy test target
-        run: flutter build macos --release --target integration_test/macos_proxy_smoke.dart
+        run: flutter build macos --release --no-pub --target integration_test/macos_proxy_smoke.dart
       - name: Exercise production loopback proxy and missing-server negative control
         id: proxy
         run: |
@@ -122,7 +122,7 @@ jobs:
         id: playback
         run: python3 macos/player_smoke.py --skip-restore --skip-window-capture
       - name: Restore the ordinary release entry point
-        run: flutter build macos --release --target lib/main.dart
+        run: flutter build macos --release --no-pub --target lib/main.dart
       - name: Verify bundled dylib closure and runtime versions
         id: bundle
         shell: bash
@@ -190,6 +190,7 @@ jobs:
       - uses: actions/upload-artifact@v6
         with:
           name: release-macos
+          compression-level: 0
           path: Rillight-macos-*.dmg
           if-no-files-found: error
       - name: Preserve native inputs and source build provenance

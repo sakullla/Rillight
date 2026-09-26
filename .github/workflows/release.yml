@@ -6,21 +6,20 @@ on:
       - "v*"
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: release-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   windows:
     name: Build Windows
     runs-on: windows-latest
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
@@ -57,7 +56,7 @@ jobs:
         run: flutter pub get
 
       - name: Build Windows
-        run: flutter build windows --release
+        run: flutter build windows --release --no-pub
 
       - name: Audit Windows release bundle
         run: python tool/verify_player_dependencies.py
@@ -80,6 +79,7 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: release-windows
+          compression-level: 0
           path: dist/windows/Rillight-windows-x64-${{ github.ref_name }}-setup.exe
           if-no-files-found: error
 
@@ -103,6 +103,7 @@ jobs:
   android:
     name: Build Android
     runs-on: ubuntu-22.04
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -112,6 +113,13 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
+          cache: gradle
+          cache-dependency-path: |
+            android/**/*.gradle*
+            android/gradle.properties
+            android/gradle/wrapper/gradle-wrapper.properties
+            packages/rillight_player/android/**/*.gradle*
+            pubspec.lock
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
@@ -169,7 +177,7 @@ jobs:
         uses: ./.github/actions/android-core
 
       - name: Build Android release APK
-        run: flutter build apk --release
+        run: flutter build apk --release --no-pub
 
       - name: Audit owned core APK closure
         run: python3 tool/android_release_checks.py --apk build/app/outputs/flutter-apk/app-release.apk --output build/android-validation/release-apk-audit
@@ -186,6 +194,7 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: release-android
+          compression-level: 0
           path: dist/android/Rillight-android-${{ github.ref_name }}.apk
           if-no-files-found: error
 
@@ -193,6 +202,9 @@ jobs:
     name: Create draft release
     needs: [windows, macos, linux, android]
     runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
     steps:
       - name: Download packages
         uses: actions/download-artifact@v7
@@ -220,6 +232,7 @@ jobs:
     needs: release
     # macOS runner: the DMG check below needs hdiutil and codesign.
     runs-on: macos-latest
+    timeout-minutes: 20
     permissions:
       contents: write
     steps:
