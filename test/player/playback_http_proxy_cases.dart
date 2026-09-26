@@ -737,7 +737,7 @@ void main() {
   );
 
   test(
-    'busy timeline snapshot does not shrink buffer or degrade disk',
+    'busy integrity snapshot withdraws timeline without degrading disk',
     () async {
       final fixture = await _CacheFixture.open(
         disk: true,
@@ -767,7 +767,7 @@ void main() {
           const Duration(seconds: 5),
           const Duration(seconds: 10),
         ),
-        duration,
+        const Duration(seconds: 10),
       );
       expect(fixture.cache.diagnostics['degradation'], null);
       await fixture.cache.close();
@@ -781,6 +781,38 @@ void main() {
       );
     },
   );
+
+  test('same-length disk corruption withdraws a published timeline', () async {
+    final fixture = await _CacheFixture.open(
+      memoryBytes: 0,
+      disk: true,
+      sessionBuffering: true,
+      readAheadBytes: 2 * 1024 * 1024,
+    );
+    fixture.body = 'x' * (2 * 1024 * 1024);
+    await fixture.read('bytes=0-2097151');
+    await fixture.settle();
+    const duration = Duration(seconds: 30);
+    await fixture.proxy.refreshTimeline(duration);
+    expect(fixture.proxy.diagnostics['cachedTimeRanges'], isNotEmpty);
+
+    final blocks = fixture.root!
+        .listSync(recursive: true, followLinks: false)
+        .whereType<File>()
+        .where((file) => file.path.endsWith('.block'))
+        .toList();
+    expect(blocks, isNotEmpty);
+    final block = blocks.first;
+    final data = await block.readAsBytes();
+    data[0] ^= 0xff;
+    await block.writeAsBytes(data, flush: true);
+    // The worker memoizes only unchanged file metadata. Explicitly advance the
+    // mtime so this test is stable on filesystems with coarse timestamps.
+    await block.setLastModified(DateTime.now().add(const Duration(seconds: 2)));
+    await fixture.proxy.refreshTimeline(duration);
+    expect(fixture.proxy.diagnostics['cachedTimeRanges'], isEmpty);
+    expect(fixture.cache.diagnostics['pendingBytes'], 0);
+  });
 
   test('retry invalidates published timeline identity and ranges', () async {
     final fixture = await _CacheFixture.open(
@@ -1881,9 +1913,10 @@ void main() {
 }
 
 class _CacheFixture {
-  _CacheFixture(this.server, this.cache);
+  _CacheFixture(this.server, this.cache, this.root);
   final HttpServer server;
   final SessionByteCache cache;
+  final Directory? root;
   late final PlaybackHttpProxy proxy;
   final client = HttpClient();
   Uri get origin => Uri.parse('http://127.0.0.1:${server.port}');
@@ -1917,6 +1950,7 @@ class _CacheFixture {
     final fixture = _CacheFixture(
       await HttpServer.bind(InternetAddress.loopbackIPv4, 0),
       cache,
+      root,
     );
     fixture.server.listen(fixture._serve);
     fixture.proxy = await PlaybackHttpProxy.create(

@@ -85,6 +85,16 @@ class DiskCacheSession {
     return Set<String>.from(result['present'] as List? ?? const []);
   }
 
+  /// Returns only blocks whose current on-disk contents pass the token CRC.
+  /// The worker hashes bounded new data and never transfers media bytes here.
+  Future<Set<String>?> verifiedTokens(List<String> tokens) async {
+    final result = await _call('verified', {'tokens': tokens}, optional: true);
+    if (result == null || result['error'] != null || result['busy'] == true) {
+      return null;
+    }
+    return Set<String>.from(result['present'] as List? ?? const []);
+  }
+
   /// Verifies and protects a complete immutable range without retaining its
   /// media bytes in RAM. Pin metadata is charged to the ordinary disk quota.
   Future<String?> protect(List<String> tokens) async {
@@ -328,6 +338,14 @@ class _Lease {
   int sessionLimit;
 }
 
+typedef _VerifiedBlock = (int size, int modified, int changed);
+
+_VerifiedBlock _blockFingerprint(FileStat stat) => (
+  stat.size,
+  stat.modified.microsecondsSinceEpoch,
+  stat.changed.microsecondsSinceEpoch,
+);
+
 class _DiskStore {
   _DiskStore(String path) : root = Directory(path);
   final Directory root;
@@ -340,6 +358,8 @@ class _DiskStore {
   // directory between operations, so no inventory survives a lock release.
   final _entryInventory = <String, List<FileSystemEntity>>{};
   final _statInventory = <String, FileStat>{};
+  final _verifiedBlocks = <String, _VerifiedBlock>{};
+  static const _verificationBudgetBytes = 4 * 1024 * 1024;
 
   Future<Map<String, Object?>> handle(Map<String, Object?> message) async {
     if (message['op'] == 'shutdown') return {'ok': true};
@@ -425,6 +445,11 @@ class _DiskStore {
             }
           }
           return {'available': false};
+        case 'verified':
+          return _verifiedTokens(
+            id,
+            List<String>.from(message['tokens'] as List),
+          );
         case 'protect':
           return _protect(
             id,
@@ -528,6 +553,65 @@ class _DiskStore {
     // Drop listings after mutation while retaining unchanged file statistics.
     _entryInventory.clear();
     _statInventory.remove(file.path);
+    _verifiedBlocks.remove(file.path);
+  }
+
+  Map<String, Object?> _verifiedTokens(String id, List<String> tokens) {
+    final lease = _leases[id];
+    if (lease == null || tokens.length > 8192) {
+      return {'error': 'invalid-verification'};
+    }
+    var remaining = _verificationBudgetBytes;
+    var removedCorruptBlock = false;
+    final present = <String>[];
+    for (final token in tokens) {
+      if (!_blockPattern.hasMatch(token)) continue;
+      final length = int.parse(token.split('-')[1]);
+      if (length <= 0 || length > 1024 * 1024) continue;
+      final file = File(_join(lease.directory.path, token));
+      if (FileSystemEntity.typeSync(file.path, followLinks: false) !=
+          FileSystemEntityType.file) {
+        _verifiedBlocks.remove(file.path);
+        continue;
+      }
+      try {
+        final stat = file.statSync();
+        if (stat.size != length) {
+          _verifiedBlocks.remove(file.path);
+          continue;
+        }
+        final fingerprint = _blockFingerprint(stat);
+        if (_verifiedBlocks[file.path] == fingerprint) {
+          present.add(token);
+          continue;
+        }
+        if (remaining < length) continue;
+        remaining -= length;
+        final bytes = file.readAsBytesSync();
+        final checksum = int.parse(
+          token.split('-')[2].split('.').first,
+          radix: 16,
+        );
+        // A concurrent writer without the cache lock could change the file
+        // during verification. Publish only when the stat is stable as well.
+        final after = file.statSync();
+        final valid = bytes.length == length && _crc32(bytes) == checksum;
+        if (valid && _blockFingerprint(after) == fingerprint) {
+          _verifiedBlocks[file.path] = fingerprint;
+          present.add(token);
+        } else {
+          _verifiedBlocks.remove(file.path);
+          if (!valid && _blockFingerprint(after) == fingerprint) {
+            file.deleteSync();
+            _changed(file);
+            removedCorruptBlock = true;
+          }
+        }
+      } on FileSystemException {
+        _verifiedBlocks.remove(file.path);
+      }
+    }
+    return {'present': present, if (removedCorruptBlock) 'stats': _stats()};
   }
 
   List<File> _files(Directory directory) =>
@@ -748,12 +832,15 @@ class _DiskStore {
     }
     final bytes = file.readAsBytesSync();
     final checksum = int.parse(parts[2].split('.').first, radix: 16);
-    if (_crc32(bytes) != checksum) {
+    if (bytes.length != length || _crc32(bytes) != checksum) {
       file.deleteSync();
       _changed(file);
       return {'stats': _stats()};
     }
     file.setLastModifiedSync(DateTime.now());
+    // The read itself has just checked the CRC. Its access timestamp update
+    // must not force a redundant hash on the next timeline refresh.
+    _verifiedBlocks[file.path] = _blockFingerprint(file.statSync());
     // Immutable owned bytes are sent before another command can evict the file.
     // Reads do not change quota. Avoid a full disk inventory on every 64 KiB
     // consumer slice; allocation/deletion operations refresh usage diagnostics.
@@ -833,6 +920,10 @@ class _DiskStore {
   Future<Map<String, Object?>> _close(String id) async {
     final lease = _leases.remove(id);
     if (lease == null) return {'ok': true};
+    _verifiedBlocks.removeWhere(
+      (path, _) =>
+          path.startsWith('${lease.directory.path}${Platform.pathSeparator}'),
+    );
     try {
       await _removeData(lease.directory);
     } finally {

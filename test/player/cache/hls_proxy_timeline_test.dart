@@ -10,6 +10,7 @@ import 'mp4_fixture.dart';
 
 void main() {
   test('VOD fMP4 HLS exposes only fully verified cached segments', () async {
+    final diskRoot = await Directory.systemTemp.createTemp('rillight-hls-crc-');
     final fixture = fragmentedMp4Fixture();
     final init = Uint8List.sublistView(
       fixture.bytes,
@@ -27,8 +28,9 @@ void main() {
     );
     final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     final cache = await SessionByteCache.open(
-      memoryLimitBytes: 1024 * 1024,
-      diskLimitBytes: 0,
+      root: diskRoot,
+      memoryLimitBytes: 0,
+      diskLimitBytes: 16 * 1024 * 1024,
     );
     final proxy = await PlaybackHttpProxy.create(
       origin: Uri.parse('http://127.0.0.1:${upstream.port}'),
@@ -110,13 +112,40 @@ seg1.m4s
       expect(proxy.diagnostics['timelineUnknownReason'], isNotNull);
 
       await get(map);
+      await _waitFor(() => cache.diagnostics['pendingBytes'] == 0);
       await proxy.refreshTimeline(const Duration(seconds: 4));
-      expect(timeline(), [(0, 2000)], reason: proxy.diagnostics.toString());
+      expect(
+        timeline(),
+        anyOf(equals([(0, 2000)]), equals([(0, 4000)])),
+        reason: proxy.diagnostics.toString(),
+      );
       expect(proxy.diagnostics['timelineUnknownReason'], isNull);
 
       await get(segments[1]);
+      await _waitFor(() => cache.diagnostics['pendingBytes'] == 0);
       await proxy.refreshTimeline(const Duration(seconds: 4));
       expect(timeline(), [(0, 4000)]);
+
+      final firstBlock = diskRoot
+          .listSync(recursive: true, followLinks: false)
+          .whereType<File>()
+          .where((file) => file.path.endsWith('.block'))
+          .firstWhere((file) {
+            final bytes = file.readAsBytesSync();
+            if (bytes.length != first.length) return false;
+            for (var i = 0; i < bytes.length; i++) {
+              if (bytes[i] != first[i]) return false;
+            }
+            return true;
+          });
+      final damaged = await firstBlock.readAsBytes();
+      damaged[0] ^= 0xff;
+      await firstBlock.writeAsBytes(damaged, flush: true);
+      await firstBlock.setLastModified(
+        DateTime.now().add(const Duration(seconds: 2)),
+      );
+      await proxy.refreshTimeline(const Duration(seconds: 4));
+      expect(timeline(), isEmpty);
 
       await cache.resize(
         memoryBytes: 0,
@@ -129,6 +158,7 @@ seg1.m4s
       client.close(force: true);
       await proxy.close();
       await upstream.close(force: true);
+      await diskRoot.delete(recursive: true);
     }
   });
 

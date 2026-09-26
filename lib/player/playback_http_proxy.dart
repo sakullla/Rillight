@@ -273,11 +273,14 @@ class PlaybackHttpProxy {
       final bytes = await cache!.availableRanges(
         resource: ahead.resource,
         generation: ahead.generation,
+        verifyChecksum: true,
       );
       if (_closed || !identical(ahead, _readAhead)) return;
       if (bytes == null) {
-        // A busy cache snapshot can time out without invalidating verified
-        // blocks. Explicit eviction/invalidation clears the timeline below.
+        // A busy or timed-out integrity snapshot cannot support a previously
+        // published interval: its disk blocks may have changed since then.
+        _cachedTimeline = const [];
+        _timelineSequence++;
         return;
       }
       if (bytes.length == 1 &&
@@ -386,6 +389,12 @@ class PlaybackHttpProxy {
               '${segment.byteRange?.start ?? -1}:${segment.byteRange?.end ?? -1}:'
               '${init.key}:${init.representation.generation}:'
               '${segment.mapRange?.start ?? -1}:${segment.mapRange?.end ?? -1}';
+          if (!media.availability.contains(segment.byteRange) ||
+              !init.availability.contains(segment.mapRange)) {
+            state.verified.remove(segment.sequence);
+            _hlsProbeCache.remove(signature);
+            continue;
+          }
           var verified = state.verified[segment.sequence];
           if (verified != null && verified.identity != signature) {
             state.verified.remove(segment.sequence);
@@ -534,6 +543,7 @@ class PlaybackHttpProxy {
     final bytes = await cache!.availableRanges(
       resource: key,
       generation: representation.generation,
+      verifyChecksum: true,
     );
     if (bytes == null || !identical(_representations[key], representation)) {
       return null;

@@ -1,14 +1,99 @@
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/player/cache/hls_cache_index.dart';
 import 'package:rillight/player/cache/matroska_cache_index.dart';
 import 'package:rillight/player/cache/mp4_cache_index.dart';
+import 'package:rillight/player/cache/session_byte_cache.dart';
 
 import 'mp4_fixture.dart';
 
 void main() {
   group('progressive MP4 cache index', () {
+    test('CRC failure retracts only the affected disk-backed GOP', () async {
+      final root = await Directory.systemTemp.createTemp('rillight-mp4-crc-');
+      final cache = await SessionByteCache.open(
+        root: root,
+        memoryLimitBytes: 0,
+        diskLimitBytes: 1024 * 1024,
+      );
+      try {
+        final fixture = progressiveMp4Fixture();
+        const resource = 'mp4-crc-fixture';
+        for (final (start, end) in [
+          (0, 28),
+          (28, 32),
+          (32, 36),
+          (36, 40),
+          (40, 44),
+          (44, fixture.length),
+        ]) {
+          expect(
+            await cache.put(
+              resource: resource,
+              generation: 1,
+              offset: start,
+              bytes: Uint8List.sublistView(fixture, start, end),
+            ),
+            isTrue,
+          );
+        }
+        Future<Uint8List?> read(int offset, int length) async {
+          final output = BytesBuilder(copy: false);
+          while (output.length < length) {
+            final hit = await cache.read(
+              resource: resource,
+              generation: 1,
+              offset: offset + output.length,
+              maxLength: length - output.length,
+              countHit: false,
+            );
+            if (hit == null) return null;
+            output.add(hit.bytes);
+          }
+          return output.takeBytes();
+        }
+
+        final index = await Mp4CacheIndex.load(
+          total: fixture.length,
+          read: read,
+        );
+        expect(index, isNotNull);
+        Future<List<(int, int)>> times() async => index!
+            .ranges(
+              (await cache.availableRanges(
+                resource: resource,
+                generation: 1,
+                verifyChecksum: true,
+              ))!,
+              const Duration(seconds: 4),
+            )
+            .map((range) => (range.start.inSeconds, range.end.inSeconds))
+            .toList();
+        expect(await times(), [(0, 4)]);
+
+        final firstVideo = root
+            .listSync(recursive: true, followLinks: false)
+            .whereType<File>()
+            .where((file) => file.path.endsWith('.block'))
+            .firstWhere((file) {
+              final bytes = file.readAsBytesSync();
+              return bytes.length == 4 && bytes[0] == fixture[28];
+            });
+        final bytes = await firstVideo.readAsBytes();
+        bytes[0] ^= 0xff;
+        await firstVideo.writeAsBytes(bytes, flush: true);
+        await firstVideo.setLastModified(
+          DateTime.now().add(const Duration(seconds: 2)),
+        );
+        expect(await times(), [(2, 4)]);
+      } finally {
+        await cache.close();
+        await root.delete(recursive: true);
+      }
+    });
+
     test('requires complete GOP, selected audio, and moov bytes', () async {
       final fixture = progressiveMp4Fixture();
       final index = await Mp4CacheIndex.load(

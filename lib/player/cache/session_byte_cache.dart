@@ -361,11 +361,14 @@ class SessionByteCache {
     return CacheRead(offset, result, source);
   }
 
-  /// A physical availability snapshot, not a checksum verification. Null means
-  /// the optional query is busy; it must not be mistaken for lost cache data.
+  /// A physical availability snapshot. With [verifyChecksum], disk blocks must
+  /// pass a bounded worker-side CRC check before they can appear in the result.
+  /// Null means the optional query is busy or timed out; timeline callers must
+  /// fail closed rather than keep a previously published interval.
   Future<List<CachedByteRange>?> availableRanges({
     required String resource,
     required int generation,
+    bool verifyChecksum = false,
   }) async {
     if (_closed) return const [];
     if (diagnostics['degradation'] == 'disk-timeout') return null;
@@ -389,6 +392,8 @@ class SessionByteCache {
     try {
       present = tokens.isEmpty
           ? {}
+          : verifyChecksum
+          ? await _disk?.verifiedTokens(tokens.toList())
           : await _disk?.availableTokens(tokens.toList());
     } finally {
       // Optional queries may time out without degrading the disk. Keep their
@@ -417,7 +422,7 @@ class SessionByteCache {
       for (final entry in entries)
         if (identical(_entries[entry.key], entry.value) &&
             (_memory.containsKey(entry.key) ||
-                entry.value.publication != null ||
+                (!verifyChecksum && entry.value.publication != null) ||
                 present.contains(entry.value.diskToken)))
           CachedByteRange(
             entry.key.offset,
