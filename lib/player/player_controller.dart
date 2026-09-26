@@ -10,6 +10,7 @@ import 'package:rillight/emby/emby_errors.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/emby/media_source_format.dart';
 import 'package:rillight/player/playback_check_in.dart';
+import 'package:rillight/player/buffer_snapshot.dart';
 import 'package:rillight/player/playback_coordinator.dart';
 import 'package:rillight/player/playback_session.dart';
 import 'package:rillight/player/playback_state.dart';
@@ -235,7 +236,7 @@ class PlayerController extends ChangeNotifier {
   int volume = 100;
   int _unmutedVolume = 100;
   double playbackRate = 1.0;
-  int maxStreamingBitrate = kMpvMaxStreamingBitrate;
+  int maxStreamingBitrate = kCoreMaxStreamingBitrate;
   int? audioStreamIndex;
   int? subtitleStreamIndex;
   Duration position = Duration.zero;
@@ -244,9 +245,15 @@ class PlayerController extends ChangeNotifier {
   /// 条目或媒体源上的片长。进度条可能被更短的探测时长盖掉,切集仍以它为准。
   Duration _catalogRuntime = Duration.zero;
   Duration buffer = Duration.zero;
+  BufferSnapshot bufferSnapshot = BufferSnapshot.empty(
+    sessionId: 0,
+    unknownReason: 'notOpened',
+  );
 
   /// HTTP 代理的上游接收速度，字节/秒；本地缓存命中不计入，无下载时为 0。
   double cacheSpeedBytesPerSec = 0;
+  bool networkSlow = false;
+  DateTime? _slowSince;
   DateTime _lastPlaybackUi = DateTime.fromMillisecondsSinceEpoch(0);
   PlayerErrorKind? error;
   EmbyException? loadFailure;
@@ -805,9 +812,54 @@ class PlayerController extends ChangeNotifier {
   }
 
   Future<void> setMaxBitrate(int bitrate) async {
-    if (_operations.isClosed) return;
-    maxStreamingBitrate = bitrate;
-    await _reopen(startTicks: ticksFromDuration(position));
+    if (_operations.isClosed || loading || bitrate == maxStreamingBitrate) {
+      return;
+    }
+    if (!availableBitrates.contains(bitrate)) {
+      trackFailure = 'The server cannot provide this quality';
+      _emit();
+      return;
+    }
+    final previous = maxStreamingBitrate;
+    final startTicks = ticksFromDuration(position);
+    final paused = !isPlaying;
+    final opened = await _reopen(
+      startTicks: startTicks,
+      requestedBitrate: bitrate,
+      startPaused: paused,
+    );
+    final source = resolved?.mediaSource;
+    final withinLimit = source?.bitrate != null && source!.bitrate! <= bitrate;
+    if (opened &&
+        (bitrate == kCoreMaxStreamingBitrate || isTranscode || withinLimit)) {
+      maxStreamingBitrate = bitrate;
+      trackFailure = null;
+      _emit();
+      await _persistSeriesPreference();
+      return;
+    }
+    if (!_operations.isClosed && !_disposed) {
+      await _reopen(
+        startTicks: startTicks,
+        requestedBitrate: previous,
+        startPaused: paused,
+      );
+      trackFailure = 'The server did not confirm this quality';
+      _emit();
+    }
+  }
+
+  List<int> get availableBitrates {
+    final source = resolved?.mediaSource;
+    if (source == null || !source.supportsTranscoding) {
+      return const [kCoreMaxStreamingBitrate];
+    }
+    final sourceBitrate = source.bitrate;
+    return [
+      kCoreMaxStreamingBitrate,
+      for (final value in kTranscodeBitrates.skip(1))
+        if (sourceBitrate == null || value < sourceBitrate) value,
+    ];
   }
 
   Future<void> toggleFullScreen() {
@@ -951,6 +1003,10 @@ class PlayerController extends ChangeNotifier {
     item = null;
     resolved = null;
     position = duration = buffer = Duration.zero;
+    bufferSnapshot = BufferSnapshot.empty(
+      sessionId: operation.id,
+      unknownReason: 'preparing',
+    );
     isPlaying = false;
     loading = true;
     state.phase = PlaybackPhase.loading;
@@ -1651,6 +1707,7 @@ class PlayerController extends ChangeNotifier {
           final prompt = skipPromptVisible;
           final offered = nextEpisode;
           _setPosition(event.value as Duration);
+          _updateNetworkSlow();
           if (identical(skip, activeSkipSegment) &&
               prompt == skipPromptVisible &&
               identical(offered, nextEpisode) &&
@@ -1668,13 +1725,24 @@ class PlayerController extends ChangeNotifier {
           buffer = event.value as Duration;
           if (buffer < Duration.zero) buffer = Duration.zero;
           if (duration > Duration.zero && buffer > duration) buffer = duration;
+        case VideoEventKind.bufferSnapshot:
+          final next = event.value as BufferSnapshot;
+          if (next.sessionId != operation.id ||
+              next.sequence < bufferSnapshot.sequence ||
+              next.trackVersion < bufferSnapshot.trackVersion) {
+            return;
+          }
+          bufferSnapshot = next;
+          _updateNetworkSlow();
         case VideoEventKind.cacheSpeed:
           final value = event.value;
           cacheSpeedBytesPerSec = value is num && value.isFinite && value > 0
               ? value.toDouble()
               : 0;
+          _updateNetworkSlow();
         case VideoEventKind.buffering:
           state.buffering = event.value as bool;
+          _updateNetworkSlow();
           if (!loading) state.updatePlaying(isPlaying);
         case VideoEventKind.playing:
           if (state.phase == PlaybackPhase.failed) return;
@@ -1733,6 +1801,42 @@ class PlayerController extends ChangeNotifier {
     return DateTime.now().difference(_lastPlaybackUi) >= kPlaybackUiMinInterval;
   }
 
+  void _updateNetworkSlow() {
+    final sourceBitrate = resolved?.mediaSource.bitrate;
+    final expected =
+        isTranscode && maxStreamingBitrate < kCoreMaxStreamingBitrate
+        ? maxStreamingBitrate
+        : sourceBitrate;
+    var availableAhead = Duration.zero;
+    if (bufferSnapshot.isKnown) {
+      for (final range in bufferSnapshot.ranges) {
+        if (range.start <= position && position < range.end) {
+          availableAhead = range.end - position;
+          break;
+        }
+      }
+    }
+    final needsNetwork =
+        isBuffering ||
+        (bufferSnapshot.isKnown &&
+            availableAhead < const Duration(seconds: 10));
+    final slow =
+        !loading &&
+        !disconnected &&
+        expected != null &&
+        expected > 0 &&
+        needsNetwork &&
+        cacheSpeedBytesPerSec * 8 < expected * 0.7;
+    if (!slow) {
+      _slowSince = null;
+      networkSlow = false;
+      return;
+    }
+    _slowSince ??= DateTime.now();
+    networkSlow =
+        DateTime.now().difference(_slowSince!) >= const Duration(seconds: 6);
+  }
+
   Future<void> _open({
     required PlaybackOperation operation,
     required int startTicks,
@@ -1741,6 +1845,7 @@ class PlayerController extends ChangeNotifier {
     bool subtitleOff = false,
     bool forceTranscode = false,
     bool startPaused = false,
+    int? requestedBitrate,
   }) async {
     if (!_accepts(operation)) return;
     loading = true;
@@ -1750,7 +1855,13 @@ class PlayerController extends ChangeNotifier {
     disconnected = false;
     disconnectDetail = null;
     buffer = Duration.zero;
+    bufferSnapshot = BufferSnapshot.empty(
+      sessionId: operation.id,
+      unknownReason: 'preparing',
+    );
     cacheSpeedBytesPerSec = 0;
+    networkSlow = false;
+    _slowSince = null;
     nextEpisode = null;
     playbackEnded = false;
     _nextUpOffered = false;
@@ -1767,7 +1878,7 @@ class PlayerController extends ChangeNotifier {
       // [preferredPlaybackSourceId] 按 id/发行组标签挑选。
       final info = await client.getPlaybackInfo(
         itemId: itemId,
-        maxStreamingBitrate: maxStreamingBitrate,
+        maxStreamingBitrate: requestedBitrate ?? maxStreamingBitrate,
         startTimeTicks: startTicks > 0 ? startTicks : null,
         audioStreamIndex: audio ?? preferredAudioStreamIndex,
         subtitleStreamIndex: subtitleOff
@@ -1775,7 +1886,7 @@ class PlayerController extends ChangeNotifier {
             : (subtitle ?? preferredSubtitleStreamIndex),
         deviceProfile: backend is VideoBackendCapabilities
             ? await (backend as VideoBackendCapabilities).deviceProfile(
-                maxStreamingBitrate,
+                requestedBitrate ?? maxStreamingBitrate,
               )
             : null,
         forceTranscode: forceTranscode,
@@ -1967,6 +2078,7 @@ class PlayerController extends ChangeNotifier {
           subtitleOff: subtitleOff,
           forceTranscode: true,
           startPaused: startPaused,
+          requestedBitrate: requestedBitrate,
         );
       } else {
         await _failOpen(operation, detail: failure.toString());
@@ -2297,27 +2409,32 @@ class PlayerController extends ChangeNotifier {
     );
   }
 
-  Future<void> _reopen({
+  Future<bool> _reopen({
     required int startTicks,
     int? subtitle,
     int? audio,
     bool subtitleOff = false,
+    int? requestedBitrate,
+    bool startPaused = false,
   }) async {
     final operation = _beginOperation();
-    if (operation == null || _disposed) return;
+    if (operation == null || _disposed) return false;
     final nextSubtitle = subtitleOff ? null : subtitle ?? subtitleStreamIndex;
     final nextAudio = audio ?? audioStreamIndex;
     final stopped = _stopSession();
     await _operations.interrupt(backend.stop);
     await stopped;
-    if (!_accepts(operation)) return;
+    if (!_accepts(operation)) return false;
     await _open(
       operation: operation,
       startTicks: startTicks,
       audio: nextAudio,
       subtitle: nextSubtitle,
       subtitleOff: nextSubtitle == null,
+      requestedBitrate: requestedBitrate,
+      startPaused: startPaused,
     );
+    return _accepts(operation) && !loading && error == null && resolved != null;
   }
 
   bool _ownsSession(PlaybackSession session) =>

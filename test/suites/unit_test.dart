@@ -91,10 +91,6 @@ void main() {
     caseEntrypoints['player/emby_playback_client_cases.dart']!,
   );
   group(
-    'player/mpv_video_backend_test.dart',
-    caseEntrypoints['player/mpv_video_backend_cases.dart']!,
-  );
-  group(
     'player/playback_check_in_test.dart',
     caseEntrypoints['player/playback_check_in_cases.dart']!,
   );

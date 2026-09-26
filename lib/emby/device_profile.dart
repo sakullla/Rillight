@@ -1,4 +1,5 @@
-const int kMpvMaxStreamingBitrate = 140000000;
+const int kCoreMaxStreamingBitrate = 140000000;
+const int kMpvMaxStreamingBitrate = kCoreMaxStreamingBitrate;
 
 /// Only the verified baseline is advertised, gated by native decoder discovery.
 Map<String, dynamic> androidDeviceProfile({
@@ -76,6 +77,21 @@ Map<String, dynamic> androidDeviceProfile({
     for (final format in ['ass', 'ssa', 'pgs', 'pgssub', 'dvdsub', 'dvbsub'])
       {'Format': format, 'Method': 'Encode'},
   ],
+};
+
+/// Conservative profile shared by the owned core on desktop and Android.
+/// A platform advertises this baseline only when its required decoders exist.
+Map<String, dynamic> ownedCoreDeviceProfile({
+  required bool h264,
+  required bool aac,
+  int maxStreamingBitrate = kCoreMaxStreamingBitrate,
+}) => {
+  ...androidDeviceProfile(
+    h264: h264,
+    aac: aac,
+    maxStreamingBitrate: maxStreamingBitrate,
+  ),
+  'Name': 'Rillight owned FFmpeg core',
 };
 
 /// Honest libmpv/ffmpeg capabilities. Do not claim Web/HTML5-only formats.

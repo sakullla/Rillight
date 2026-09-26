@@ -31,6 +31,19 @@ const _device = EmbyDeviceInfo(
   version: '0.1.0',
 );
 
+class _FailOneOpenBackend extends FakeVideoBackend {
+  bool failNext = false;
+
+  @override
+  Future<void> open(VideoOpenRequest request) async {
+    if (failNext) {
+      failNext = false;
+      throw StateError('Candidate stream failed');
+    }
+    await super.open(request);
+  }
+}
+
 void main() {
   setUp(isolateImageCache);
   late RillightApp app;
@@ -740,6 +753,28 @@ void main() {
       await controller.playNextEpisode();
       expect(controller.subtitleStreamIndex, 3);
       expect(controller.maxStreamingBitrate, 4000000);
+    },
+  );
+
+  test(
+    'failed quality switch restores selected quality and pause intent',
+    () async {
+      final failing = _FailOneOpenBackend();
+      backend = failing;
+      final controller = await startStandaloneController();
+      addTearDown(controller.dispose);
+      final previous = controller.maxStreamingBitrate;
+      await controller.togglePlay();
+      expect(controller.isPlaying, isFalse);
+      failing.failNext = true;
+
+      await controller.setMaxBitrate(4000000);
+
+      expect(controller.maxStreamingBitrate, previous);
+      expect(controller.loading, isFalse);
+      expect(controller.error, isNull);
+      expect(controller.isPlaying, isFalse);
+      expect(controller.trackFailure, contains('did not confirm'));
     },
   );
 

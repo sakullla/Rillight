@@ -1,1 +1,1 @@
-export 'src/player.dart';
+export 'src/core_player.dart';

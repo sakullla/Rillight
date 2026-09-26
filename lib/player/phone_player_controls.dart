@@ -7,9 +7,11 @@ import 'package:flutter/services.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_motion.dart';
 import 'package:rillight/app/theme/tokens.dart';
+import 'package:rillight/emby/device_profile.dart';
 import 'package:rillight/player/danmaku/danmaku_controller.dart';
 import 'package:rillight/player/danmaku/danmaku_keys.dart';
 import 'package:rillight/player/phone_player_gestures.dart';
+import 'package:rillight/player/buffered_ranges_track.dart';
 import 'package:rillight/player/player_controller.dart';
 import 'package:rillight/player/player_settings.dart';
 
@@ -63,7 +65,7 @@ class PhonePlayerControls extends StatefulWidget {
 }
 
 const MethodChannel _androidPlayerChannel = MethodChannel(
-  'rillight/android_player',
+  'rillight/android_core',
 );
 
 /// Obstruction insets for the phone player controls.
@@ -297,6 +299,7 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
           mainAxisSize: MainAxisSize.min,
           children: [
             if (c.progressSyncFailed) Text(l.progressSyncFailed),
+            if (c.networkSlow) Text(l.networkSlowHint),
             if (c.trackFailure != null) Text(l.mobileTrackUnavailable),
             if (c.backgroundReleased) Text(l.mobileBackgroundPaused),
             if (c.playbackEnded) Text(l.playbackEnded),
@@ -331,22 +334,26 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                 ),
                 Text(phonePlayerClock(c.position)),
                 Expanded(
-                  child: Slider(
-                    key: const Key('mobile-player-seek'),
-                    value: (_seek ?? c.position.inMilliseconds.toDouble())
-                        .clamp(0, durationMs),
-                    max: durationMs.clamp(1, double.infinity),
-                    onChanged:
-                        c.loading ||
-                            c.error != null ||
-                            c.disconnected ||
-                            c.sessionExpired
-                        ? null
-                        : (v) => setState(() => _seek = v),
-                    onChangeEnd: (v) {
-                      setState(() => _seek = null);
-                      c.seekTo(Duration(milliseconds: v.round()));
-                    },
+                  child: BufferedRangesTrack(
+                    snapshot: c.bufferSnapshot,
+                    duration: c.duration,
+                    child: Slider(
+                      key: const Key('mobile-player-seek'),
+                      value: (_seek ?? c.position.inMilliseconds.toDouble())
+                          .clamp(0, durationMs),
+                      max: durationMs.clamp(1, double.infinity),
+                      onChanged:
+                          c.loading ||
+                              c.error != null ||
+                              c.disconnected ||
+                              c.sessionExpired
+                          ? null
+                          : (v) => setState(() => _seek = v),
+                      onChangeEnd: (v) {
+                        setState(() => _seek = null);
+                        c.seekTo(Duration(milliseconds: v.round()));
+                      },
+                    ),
                   ),
                 ),
                 Text(phonePlayerClock(c.duration)),
@@ -497,6 +504,28 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                     title: Text(source.name ?? source.id),
                     onTap: () => c.switchMediaSource(source.id),
                   ),
+                const Divider(),
+                Text(AppLocalizations.of(context).quality),
+                Wrap(
+                  spacing: 8,
+                  children: [
+                    for (final bitrate in c.availableBitrates)
+                      ChoiceChip(
+                        key: ValueKey('mobile-quality-$bitrate'),
+                        label: Text(
+                          bitrate == kTranscodeBitrates.first
+                              ? AppLocalizations.of(context).qualityAuto
+                              : AppLocalizations.of(
+                                  context,
+                                ).qualityMbps(bitrate ~/ 1000000),
+                        ),
+                        selected: c.maxStreamingBitrate == bitrate,
+                        onSelected: c.loading
+                            ? null
+                            : (_) => unawaited(c.setMaxBitrate(bitrate)),
+                      ),
+                  ],
+                ),
                 const Divider(),
                 Text(AppLocalizations.of(context).mobileSpeed),
                 Wrap(

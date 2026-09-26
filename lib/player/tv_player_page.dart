@@ -5,7 +5,9 @@ import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
-import 'package:rillight/player/android_video_backend.dart';
+import 'package:rillight/emby/device_profile.dart';
+import 'package:rillight/player/rillight_video_backend.dart';
+import 'package:rillight/player/buffered_ranges_track.dart';
 import 'package:rillight/player/android_playback_lifecycle.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_controller.dart';
@@ -52,7 +54,7 @@ class TvPlayerPageState extends State<TvPlayerPage> {
     final created = PlayerController(
       client: auth.client,
       itemId: widget.itemId,
-      backend: bindings.createBackend?.call() ?? AndroidVideoBackend(),
+      backend: bindings.createBackend?.call() ?? RillightVideoBackend(),
       window: bindings.window ?? PlayerWindow(),
       autoResume: widget.autoResume,
       preferredMediaSourceId: widget.mediaSourceId,
@@ -247,6 +249,20 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                       onPressed: () => c.switchMediaSource(source.id),
                       child: Text(source.name ?? source.id),
                     ),
+                  Text(l.quality),
+                  for (final bitrate in c.availableBitrates)
+                    TvAction(
+                      key: ValueKey('tv-quality-$bitrate'),
+                      selected: c.maxStreamingBitrate == bitrate,
+                      onPressed: c.loading
+                          ? null
+                          : () => c.setMaxBitrate(bitrate),
+                      child: Text(
+                        bitrate == kTranscodeBitrates.first
+                            ? l.qualityAuto
+                            : l.qualityMbps(bitrate ~/ 1000000),
+                      ),
+                    ),
                   Text(l.mobileSpeed),
                   for (final rate in [.5, 1.0, 1.25, 1.5, 2.0])
                     TvAction(
@@ -400,6 +416,8 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                     children: [
                                       if (c.progressSyncFailed)
                                         Text(l.progressSyncFailed),
+                                      if (c.networkSlow)
+                                        Text(l.networkSlowHint),
                                       if (c.trackFailure != null)
                                         Text(c.trackFailure!),
                                       if (c.backgroundReleased)
@@ -501,19 +519,26 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                                 ],
                                               ),
                                               const SizedBox(height: 8),
-                                              LinearProgressIndicator(
-                                                value:
-                                                    c.duration.inMilliseconds <=
-                                                        0
-                                                    ? 0
-                                                    : ((_seek ??
-                                                                  c
-                                                                      .position
-                                                                      .inMilliseconds) /
-                                                              c
-                                                                  .duration
-                                                                  .inMilliseconds)
-                                                          .clamp(0, 1),
+                                              BufferedRangesTrack(
+                                                snapshot: c.bufferSnapshot,
+                                                duration: c.duration,
+                                                horizontalInset: 0,
+                                                child: LinearProgressIndicator(
+                                                  value:
+                                                      c
+                                                              .duration
+                                                              .inMilliseconds <=
+                                                          0
+                                                      ? 0
+                                                      : ((_seek ??
+                                                                    c
+                                                                        .position
+                                                                        .inMilliseconds) /
+                                                                c
+                                                                    .duration
+                                                                    .inMilliseconds)
+                                                            .clamp(0, 1),
+                                                ),
                                               ),
                                             ],
                                           ),

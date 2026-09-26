@@ -1,4 +1,4 @@
-// Real Media3 smoke entrypoint. Build with -t and ANDROID_SMOKE_BASE; failures
+// Real owned-core smoke entrypoint. Build with -t and ANDROID_SMOKE_BASE; failures
 // emit RILLIGHT_ANDROID_SMOKE_FAIL, never the success marker. Host tooling must
 // separately inspect displayed frames/audio; position is not output evidence.
 import 'dart:async';
@@ -8,7 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/emby/emby_models.dart';
-import 'package:rillight/player/android_video_backend.dart';
+import 'package:rillight/player/rillight_video_backend.dart';
 import 'package:rillight/player/playback_models.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/player_controller.dart';
@@ -28,13 +28,12 @@ class _Smoke extends StatefulWidget {
 }
 
 class _SmokeState extends State<_Smoke> {
-  final backend = AndroidVideoBackend();
+  final backend = RillightVideoBackend();
   String stage = 'starting';
   bool showView = true;
   int firstFrames = 0;
   int authenticationFailures = 0;
   final errors = <String>[];
-  Uri? localMedia;
   late final StreamSubscription<Map<String, dynamic>> native;
   late final StreamSubscription<String> errorSubscription;
   final base = Uri.parse(
@@ -68,9 +67,7 @@ class _SmokeState extends State<_Smoke> {
     bool paused = false,
   }) => VideoOpenRequest(
     sessionId: id,
-    url: file == 'android-tracks.mkv'
-        ? localMedia ?? base.resolve(file)
-        : base.resolve(file),
+    url: base.resolve(file),
     credentialOrigin: base,
     credentialHeaders: const {'X-Emby-Token': 'synthetic-android-smoke'},
     startPaused: paused,
@@ -102,18 +99,6 @@ class _SmokeState extends State<_Smoke> {
       if (const bool.fromEnvironment('ANDROID_SMOKE_HLS_SUBTITLES_ONLY')) {
         await runHlsSubtitles();
         return;
-      }
-      if (const bool.fromEnvironment('ANDROID_SMOKE_LOCAL')) {
-        final http = HttpClient();
-        final download = await http.getUrl(base.resolve('android-tracks.mkv'));
-        download.headers.set('X-Emby-Token', 'synthetic-android-smoke');
-        final response = await download.close();
-        final file = File(
-          '${Directory.systemTemp.path}/android-smoke-local.mkv',
-        );
-        await response.pipe(file.openWrite());
-        http.close();
-        localMedia = file.uri;
       }
       final profile = await backend.deviceProfile(8000000);
       check(
@@ -157,7 +142,7 @@ class _SmokeState extends State<_Smoke> {
         'Seek did not settle',
       );
       final directory = await Directory.systemTemp.createTemp(
-        'android-subtitle-smoke-',
+        'rillight-subtitles-smoke-',
       );
       final srt = File('${directory.path}/smoke.srt');
       await srt.writeAsString(

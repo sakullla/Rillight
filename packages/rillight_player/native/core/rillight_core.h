@@ -13,7 +13,7 @@
 extern "C" {
 #endif
 
-#define RILLIGHT_CORE_ABI_VERSION 7
+#define RILLIGHT_CORE_ABI_VERSION 8
 
 typedef struct RillightCore RillightCore;
 typedef struct RillightCoreFrame RillightCoreFrame;
@@ -168,6 +168,11 @@ RILLIGHT_CORE_API uint32_t rillight_core_abi_version(void);
 RILLIGHT_CORE_API const char *rillight_core_ffmpeg_versions(void);
 RILLIGHT_CORE_API RillightCore *rillight_core_create(const RillightCoreIo *io);
 RILLIGHT_CORE_API void rillight_core_destroy(RillightCore *core);
+/* Desktop-only transport adapter. Accepts sealed HTTP URLs on 127.0.0.1;
+ * neither credentials nor remote addresses may cross this boundary. The
+ * paired destroy owns the IO adapter and waits for all native reads to stop. */
+RILLIGHT_CORE_API RillightCore *rillight_core_create_loopback(void);
+RILLIGHT_CORE_API void rillight_core_destroy_loopback(RillightCore *core);
 /* Configure only while idle, ended, or failed. The selected decoder is reported
  * per track after opening; actual_hardware changes only after a hardware frame
  * is decoded. If fallback is false, missing device/configuration fails open. */
@@ -202,6 +207,10 @@ RILLIGHT_CORE_API int rillight_core_add_external_subtitle(
     RillightCore *core, const char *url, uint64_t operation_id);
 RILLIGHT_CORE_API int rillight_core_set_speed(RillightCore *core, double speed,
                                              uint64_t operation_id);
+/* Gain is applied to owned S16 PCM as it leaves the core; 1.0 is unchanged,
+ * 0.0 is muted and values above 1.0 saturate safely. */
+RILLIGHT_CORE_API int rillight_core_set_volume(RillightCore *core, double gain,
+                                              uint64_t operation_id);
 RILLIGHT_CORE_API int rillight_core_track_count(RillightCore *core);
 RILLIGHT_CORE_API int rillight_core_get_track(RillightCore *core, int ordinal,
                                              RillightCoreTrack *track);

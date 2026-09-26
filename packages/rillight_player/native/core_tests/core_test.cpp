@@ -88,7 +88,7 @@ Bytes make_wav(uint32_t samples = 4800) {
   append32(data, payload);
   for (uint32_t index = 0; index < samples; ++index) {
     // A non-silent fixed waveform proves the PCM decoder produced data.
-    append16(data, static_cast<uint16_t>((index % 80) * 300));
+    append16(data, static_cast<uint16_t>((index % 80) * 400));
   }
   return bytes;
 }
@@ -413,6 +413,59 @@ int main() {
     return state.session_id == 3 && state.first_audio_frame_ready != 0;
   }));
   rillight_core_destroy(core);
+  core = rillight_core_create(&io);
+  assert(core && rillight_core_open(core, "synthetic.wav", 1) == 0);
+  assert(wait_for(core, [](const auto &state) {
+    return state.first_audio_frame_ready && state.state != RILLIGHT_CORE_FAILED;
+  }));
+  assert(rillight_core_set_playing(core, 0, 2) == 0);
+  auto take_peak = [&]() {
+    auto *pcm = rillight_core_take_frame(core, RILLIGHT_CORE_AUDIO_S16);
+    assert(pcm && pcm->data_size > 0);
+    int peak = 0;
+    const auto *samples = reinterpret_cast<const int16_t *>(pcm->data);
+    for (int i = 0; i < pcm->data_size / 2; ++i)
+      peak = std::max(peak, std::abs(static_cast<int>(samples[i])));
+    rillight_core_release_frame(pcm);
+    return peak;
+  };
+  assert(rillight_core_set_volume(core, 1.0, 3) == 0);
+  const int full_peak = take_peak();
+  assert(full_peak > 0);
+  assert(rillight_core_seek(core, 0, 4) == 0);
+  assert(wait_for(core, [](const auto &state) {
+    return state.first_audio_frame_ready != 0;
+  }));
+  assert(rillight_core_set_volume(core, 0.5, 5) == 0);
+  const int half_peak = take_peak();
+  assert(half_peak > 0 && half_peak < full_peak);
+  assert(rillight_core_seek(core, 0, 6) == 0);
+  assert(wait_for(core, [](const auto &state) {
+    return state.first_audio_frame_ready != 0;
+  }));
+  assert(rillight_core_set_volume(core, 0.0, 7) == 0);
+  assert(take_peak() == 0);
+  assert(rillight_core_seek(core, 0, 8) == 0);
+  assert(wait_for(core, [](const auto &state) {
+    return state.first_audio_frame_ready != 0;
+  }));
+  assert(rillight_core_set_volume(core, 1.5, 9) == 0);
+  const int boosted_peak = take_peak();
+  assert(boosted_peak == 32767);
+  assert(rillight_core_set_volume(core, 1.0, 8) != 0);
+  assert(rillight_core_set_volume(core, -0.1, 10) != 0);
+  assert(rillight_core_set_speed(core, 3.0, 10) == 0);
+  assert(wait_for(core, [](const auto &state) {
+    return state.playback_speed == 3.0 && state.first_audio_frame_ready != 0;
+  }));
+  rillight_core_destroy(core);
+  core = rillight_core_create_loopback();
+  assert(core);
+  assert(rillight_core_open(core, "https://example.com/video.mp4", 1) == 0);
+  assert(wait_for(core, [](const auto &state) {
+    return state.state == RILLIGHT_CORE_FAILED;
+  }));
+  rillight_core_destroy_loopback(core);
   core = rillight_core_create(&io);
   assert(core);
   assert(rillight_core_configure_hardware(core, RILLIGHT_CORE_HW_VAAPI, 0) == 0);

@@ -6,7 +6,7 @@ import 'package:rillight/app/mobile_motion.dart';
 import 'package:rillight/app/widgets/liquid_glass.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
-import 'package:rillight/player/android_video_backend.dart';
+import 'package:rillight/player/rillight_video_backend.dart';
 import 'package:rillight/player/android_playback_lifecycle.dart';
 import 'package:rillight/player/danmaku/danmaku_controller.dart';
 import 'package:rillight/player/danmaku/danmaku_hash.dart';
@@ -23,7 +23,6 @@ import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_controller.dart';
 import 'package:rillight/player/player_keys.dart';
 import 'package:rillight/player/player_window.dart';
-import 'package:rillight_android_player/rillight_android_player.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 class MobilePlayerPage extends StatefulWidget {
@@ -64,7 +63,7 @@ class MobilePlayerPage extends StatefulWidget {
   final DanmakuStreamHasher? danmakuHasher;
 
   /// Optional system brightness / volume access for the gesture layer.
-  /// Null uses the MethodChannel backed by `RillightAndroidPlayerPlugin`.
+  /// Null uses the owned Android core's platform channel.
   final PhoneDisplayControl? displayControl;
   @override
   State<MobilePlayerPage> createState() => MobilePlayerPageState();
@@ -116,11 +115,9 @@ class PhoneSystemBars {
   PhoneSystemBars({Future<void> Function(bool hidden)? request})
     : _request = request ?? platformRequest;
 
-  static const MethodChannel _channel = MethodChannel(
-    'rillight/android_player',
-  );
+  static const MethodChannel _channel = MethodChannel('rillight/android_core');
 
-  /// Hides or shows Android system bars through `RillightAndroidPlayerPlugin`.
+  /// Hides or shows Android system bars through the owned core plugin.
   ///
   /// The plugin uses `WindowInsetsControllerCompat` with
   /// `BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE`. [SystemChrome.setEnabledSystemUIMode]
@@ -217,7 +214,7 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
     final created = PlayerController(
       client: auth.client,
       itemId: widget.itemId,
-      backend: bindings.createBackend?.call() ?? AndroidVideoBackend(),
+      backend: bindings.createBackend?.call() ?? RillightVideoBackend(),
       window: bindings.window ?? PlayerWindow(),
       autoResume: widget.autoResume,
       preferredMediaSourceId: widget.mediaSourceId,
@@ -540,83 +537,82 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
         enabled: false,
         child: Scaffold(
           backgroundColor: Colors.black,
-          body: AndroidVideoScaleScope(
-            scale: _fillFrame ? AndroidVideoScale.fill : AndroidVideoScale.fit,
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                c.backend.buildView(),
-                if (danmaku != null && _showDanmakuLayer(c))
-                  Positioned.fill(
-                    child: IgnorePointer(
-                      child: DanmakuView(controller: danmaku),
+          body: Stack(
+            fit: StackFit.expand,
+            children: [
+              c.backend.buildView(),
+              if (danmaku != null && _showDanmakuLayer(c))
+                Positioned.fill(
+                  child: IgnorePointer(child: DanmakuView(controller: danmaku)),
+                ),
+              PhonePlayerGestures(
+                controller: c,
+                display: _display!,
+                locked: _controlsLocked,
+                onUnlock: _unlock,
+              ),
+              ListenableBuilder(
+                listenable: c,
+                builder: (context, _) {
+                  final showControls =
+                      c.controlsVisible ||
+                      c.loading ||
+                      c.error != null ||
+                      c.disconnected ||
+                      c.sessionExpired ||
+                      c.progressSyncFailed ||
+                      c.trackFailure != null;
+                  return PhoneMotion.reveal(
+                    context: context,
+                    visible: showControls || _controlsLocked,
+                    child: PhonePlayerControls(
+                      controller: c,
+                      danmaku: danmaku,
+                      onClose: _close,
+                      onOpenDanmakuPanel: _openDanmakuPanel,
+                      onOpenDanmakuSearch: _openDanmakuSearch,
+                      center: _centerStatus(c),
+                      locked: _controlsLocked,
+                      onLockChanged: _onLockChanged,
+                      fillFrame: _fillFrame,
+                      onFillFrame: (fill) {
+                        if (_fillFrame == fill) return;
+                        setState(() => _fillFrame = fill);
+                        final backend = c.backend;
+                        if (backend is RillightVideoBackend) {
+                          unawaited(
+                            backend.setVideoScale(fill ? 'fill' : 'fit'),
+                          );
+                        }
+                      },
+                    ),
+                  );
+                },
+              ),
+              if (c.nextEpisode != null && c.error == null && !c.sessionExpired)
+                Positioned(
+                  left: 12,
+                  right: 12,
+                  bottom: 12,
+                  child: SafeArea(child: _PhoneNextEpisode(controller: c)),
+                ),
+              if (danmaku != null &&
+                  c.error == null &&
+                  !c.loading &&
+                  _danmakuNeedsAttention(danmaku))
+                Positioned(
+                  top: c.nextEpisode != null ? 148 : 8,
+                  left: 12,
+                  right: 12,
+                  child: SafeArea(
+                    child: _PhoneDanmakuFailure(
+                      danmaku: danmaku,
+                      onRetry: _retryDanmaku,
+                      onDisable: () => unawaited(danmaku.toggleDanmaku()),
                     ),
                   ),
-                PhonePlayerGestures(
-                  controller: c,
-                  display: _display!,
-                  locked: _controlsLocked,
-                  onUnlock: _unlock,
                 ),
-                ListenableBuilder(
-                  listenable: c,
-                  builder: (context, _) {
-                    final showControls =
-                        c.controlsVisible ||
-                        c.loading ||
-                        c.error != null ||
-                        c.disconnected ||
-                        c.sessionExpired ||
-                        c.progressSyncFailed ||
-                        c.trackFailure != null;
-                    return PhoneMotion.reveal(
-                      context: context,
-                      visible: showControls || _controlsLocked,
-                      child: PhonePlayerControls(
-                        controller: c,
-                        danmaku: danmaku,
-                        onClose: _close,
-                        onOpenDanmakuPanel: _openDanmakuPanel,
-                        onOpenDanmakuSearch: _openDanmakuSearch,
-                        center: _centerStatus(c),
-                        locked: _controlsLocked,
-                        onLockChanged: _onLockChanged,
-                        fillFrame: _fillFrame,
-                        onFillFrame: (fill) {
-                          if (_fillFrame == fill) return;
-                          setState(() => _fillFrame = fill);
-                        },
-                      ),
-                    );
-                  },
-                ),
-                if (c.nextEpisode != null &&
-                    c.error == null &&
-                    !c.sessionExpired)
-                  Positioned(
-                    left: 12,
-                    right: 12,
-                    bottom: 12,
-                    child: SafeArea(child: _PhoneNextEpisode(controller: c)),
-                  ),
-                if (danmaku != null &&
-                    c.error == null &&
-                    !c.loading &&
-                    _danmakuNeedsAttention(danmaku))
-                  Positioned(
-                    top: c.nextEpisode != null ? 148 : 8,
-                    left: 12,
-                    right: 12,
-                    child: SafeArea(
-                      child: _PhoneDanmakuFailure(
-                        danmaku: danmaku,
-                        onRetry: _retryDanmaku,
-                        onDisable: () => unawaited(danmaku.toggleDanmaku()),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
+            ],
           ),
         ),
       ),

@@ -3,6 +3,8 @@
 Windows needs MSYS2 Bash, make, and a MinGW host compiler. Linux needs Bash,
 make, and a host C compiler. This does not build libass or certify a release
 library closure; use it to compile and test the Android core before packaging.
+For text/ASS subtitle support, follow it with build_android_libass.py using
+the same --prefix-root and --ndk for all three ABIs.
 """
 
 import argparse

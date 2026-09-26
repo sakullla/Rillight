@@ -15,9 +15,13 @@
 #include <mutex>
 #include <new>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
+#if defined(__ANDROID__)
+#include <unistd.h>
+#endif
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -50,6 +54,102 @@ constexpr size_t kMaxExternalSubtitleTracks = 16;
 constexpr int kExternalSubtitleStreamBase = 1000000;
 #endif
 using Clock = std::chrono::steady_clock;
+
+struct LoopbackIo {
+  std::atomic<uint64_t> media_generation{0};
+  std::atomic<bool> closing{false};
+  std::mutex thread_mutex;
+  std::thread::id media_thread;
+};
+
+struct LoopbackHandle {
+  LoopbackIo *owner;
+  AVIOContext *io = nullptr;
+  bool media = false;
+  std::atomic<uint64_t> read_generation{0};
+};
+
+bool sealed_loopback_url(const char *url) {
+  if (!url) return false;
+  constexpr std::string_view prefix = "http://127.0.0.1:";
+  const std::string_view value(url);
+  if (value.size() < prefix.size() || value.substr(0, prefix.size()) != prefix)
+    return false;
+  size_t offset = prefix.size();
+  const size_t port_start = offset;
+  while (offset < value.size() && value[offset] >= '0' &&
+         value[offset] <= '9') ++offset;
+  return offset > port_start && offset - port_start <= 5 &&
+         offset < value.size() && value[offset] == '/' &&
+         value.find('@') == std::string_view::npos &&
+         value.find('\\') == std::string_view::npos;
+}
+
+int loopback_interrupted(void *opaque) {
+  const auto *handle = static_cast<LoopbackHandle *>(opaque);
+  return handle->owner->closing.load() ||
+         (handle->media && handle->read_generation.load() !=
+                               handle->owner->media_generation.load());
+}
+
+void *loopback_open(void *opaque, const char *url, int flags) {
+  auto *owner = static_cast<LoopbackIo *>(opaque);
+  if (!owner || owner->closing.load() || !sealed_loopback_url(url) ||
+      !(flags & AVIO_FLAG_READ) || (flags & AVIO_FLAG_WRITE)) return nullptr;
+  auto handle = std::make_unique<LoopbackHandle>();
+  handle->owner = owner;
+  {
+    std::lock_guard lock(owner->thread_mutex);
+    if (owner->media_thread == std::thread::id())
+      owner->media_thread = std::this_thread::get_id();
+    handle->media = owner->media_thread == std::this_thread::get_id();
+  }
+  handle->read_generation = owner->media_generation.load();
+  AVDictionary *options = nullptr;
+  av_dict_set(&options, "rw_timeout", "15000000", 0);
+  // FFmpeg's HTTP protocol otherwise follows Location itself, bypassing the
+  // per-open sealed route check on a redirect to a remote server.
+  av_dict_set(&options, "max_redirects", "0", 0);
+  const AVIOInterruptCB interrupt{loopback_interrupted, handle.get()};
+  const int result = avio_open2(&handle->io, url, AVIO_FLAG_READ,
+                                &interrupt, &options);
+  av_dict_free(&options);
+  if (result < 0) return nullptr;
+  return handle.release();
+}
+
+int loopback_read(void *, void *pointer, uint8_t *data, int size) {
+  auto *handle = static_cast<LoopbackHandle *>(pointer);
+  if (!handle || !handle->io || size <= 0) return AVERROR(EINVAL);
+  handle->read_generation = handle->owner->media_generation.load();
+  return avio_read(handle->io, data, size);
+}
+
+int64_t loopback_seek(void *, void *pointer, int64_t offset, int whence) {
+  auto *handle = static_cast<LoopbackHandle *>(pointer);
+  if (!handle || !handle->io) return AVERROR(EINVAL);
+  handle->read_generation = handle->owner->media_generation.load();
+  if (whence & AVSEEK_SIZE) return avio_size(handle->io);
+  return avio_seek(handle->io, offset, whence & ~AVSEEK_FORCE);
+}
+
+void loopback_close(void *, void *pointer) {
+  auto *handle = static_cast<LoopbackHandle *>(pointer);
+  if (!handle) return;
+  if (handle->io) avio_closep(&handle->io);
+  delete handle;
+}
+
+void loopback_cancel(void *opaque) {
+  auto *owner = static_cast<LoopbackIo *>(opaque);
+  owner->closing = true;
+  ++owner->media_generation;
+}
+
+void loopback_cancel_media(void *opaque) {
+  auto *owner = static_cast<LoopbackIo *>(opaque);
+  ++owner->media_generation;
+}
 
 struct Source {
   RillightCoreIo io;
@@ -138,6 +238,30 @@ void close_ass(AssRenderer *ass) {
   *ass = {};
 }
 
+void configure_ass_fonts(ASS_Renderer *renderer) {
+#if defined(__ANDROID__)
+  // Android has no Fontconfig provider. Use a readable system font for text
+  // subtitles and ASS scripts without an attached font.
+  constexpr const char *fonts[] = {
+      "/system/fonts/NotoSansCJK-Regular.ttc",
+      "/system/fonts/Roboto-Regular.ttf",
+      "/system/fonts/DroidSans.ttf",
+  };
+  const char *fallback = nullptr;
+  for (const char *font : fonts) {
+    if (access(font, R_OK) == 0) {
+      fallback = font;
+      break;
+    }
+  }
+  ass_set_fonts(renderer, fallback, "sans-serif", ASS_FONTPROVIDER_NONE,
+                nullptr, 1);
+#else
+  ass_set_fonts(renderer, nullptr, "sans-serif", ASS_FONTPROVIDER_AUTODETECT,
+                nullptr, 1);
+#endif
+}
+
 bool open_ass(AssRenderer *ass, AVFormatContext *format, int stream_index) {
   AssRenderer replacement;
   replacement.library = ass_library_init();
@@ -165,8 +289,7 @@ bool open_ass(AssRenderer *ass, AVFormatContext *format, int stream_index) {
                    reinterpret_cast<const char *>(stream->codecpar->extradata),
                    stream->codecpar->extradata_size);
   }
-  ass_set_fonts(replacement.renderer, nullptr, "sans-serif",
-                ASS_FONTPROVIDER_AUTODETECT, nullptr, 1);
+  configure_ass_fonts(replacement.renderer);
   replacement.stream = stream_index;
   close_ass(ass);
   *ass = replacement;
@@ -190,8 +313,7 @@ bool open_text_ass(AssRenderer *ass, const AVCodecContext *decoder,
                             reinterpret_cast<const char *>(
                                 decoder->subtitle_header),
                             decoder->subtitle_header_size);
-  ass_set_fonts(replacement.renderer, nullptr, "sans-serif",
-                ASS_FONTPROVIDER_AUTODETECT, nullptr, 1);
+  configure_ass_fonts(replacement.renderer);
   replacement.stream = stream_index;
   close_ass(ass);
   *ass = replacement;
@@ -245,8 +367,7 @@ bool open_external_ass(AssRenderer *ass, const std::vector<char> &script,
     close_ass(&replacement);
     return false;
   }
-  ass_set_fonts(replacement.renderer, nullptr, "sans-serif",
-                ASS_FONTPROVIDER_AUTODETECT, nullptr, 1);
+  configure_ass_fonts(replacement.renderer);
   replacement.stream = stream_index;
   replacement.external = true;
   close_ass(ass);
@@ -277,8 +398,7 @@ bool open_external_text(AssRenderer *ass, const std::vector<char> &header,
     close_ass(&replacement);
     return false;
   }
-  ass_set_fonts(replacement.renderer, nullptr, "sans-serif",
-                ASS_FONTPROVIDER_AUTODETECT, nullptr, 1);
+  configure_ass_fonts(replacement.renderer);
   replacement.stream = stream_index;
   replacement.external = true;
   close_ass(ass);
@@ -441,6 +561,7 @@ void close_audio_filter(AudioFilter *filter) {
 struct RillightCoreImpl {
   explicit RillightCoreImpl(const RillightCoreIo &source_io) : io(source_io) {}
   RillightCoreIo io;
+  std::unique_ptr<LoopbackIo> owned_loopback;
   std::mutex mutex;
   std::mutex lifecycle_mutex;
   std::condition_variable wake;
@@ -487,6 +608,7 @@ struct RillightCoreImpl {
   size_t embedded_stream_count = 0;
 #endif
   double speed = 1.0;
+  double volume = 1.0;
   double requested_speed = 1.0;
   bool speed_change = false;
   RillightCoreHardware hardware_preference = RILLIGHT_CORE_HW_NONE;
@@ -1304,16 +1426,24 @@ int prepare_audio_filter(AudioFilter *filter, const AVFrame *frame,
                 av_get_sample_fmt_name(static_cast<AVSampleFormat>(frame->format)),
                 layout);
   AVFilterContext *tempo = nullptr;
+  AVFilterContext *tempo_second = nullptr;
   AVFilterContext *format = nullptr;
   int result = avfilter_graph_create_filter(
       &filter->source, avfilter_get_by_name("abuffer"), "input", args,
       nullptr, filter->graph);
   if (result < 0) return result;
-  const std::string tempo_arg = std::to_string(speed);
+  const std::string tempo_arg = std::to_string(std::min(speed, 2.0));
   result = avfilter_graph_create_filter(
       &tempo, avfilter_get_by_name("atempo"), "tempo", tempo_arg.c_str(),
       nullptr, filter->graph);
   if (result < 0) return result;
+  if (speed > 2.0) {
+    const std::string second_arg = std::to_string(speed / 2.0);
+    result = avfilter_graph_create_filter(
+        &tempo_second, avfilter_get_by_name("atempo"), "tempo_second",
+        second_arg.c_str(), nullptr, filter->graph);
+    if (result < 0) return result;
+  }
   result = avfilter_graph_create_filter(
       &format, avfilter_get_by_name("aformat"), "format",
       "sample_fmts=s16:sample_rates=48000:channel_layouts=stereo",
@@ -1325,7 +1455,11 @@ int prepare_audio_filter(AudioFilter *filter, const AVFrame *frame,
   if (result < 0) return result;
   result = avfilter_link(filter->source, 0, tempo, 0);
   if (result < 0) return result;
-  result = avfilter_link(tempo, 0, format, 0);
+  if (tempo_second) {
+    result = avfilter_link(tempo, 0, tempo_second, 0);
+    if (result < 0) return result;
+  }
+  result = avfilter_link(tempo_second ? tempo_second : tempo, 0, format, 0);
   if (result < 0) return result;
   result = avfilter_link(format, 0, filter->sink, 0);
   if (result < 0) return result;
@@ -1930,6 +2064,20 @@ RillightCore *rillight_core_create(const RillightCoreIo *io) {
   return reinterpret_cast<RillightCore *>(core);
 }
 
+RillightCore *rillight_core_create_loopback(void) {
+  auto owner = std::make_unique<LoopbackIo>();
+  const RillightCoreIo io{owner.get(), loopback_open, loopback_read,
+                          loopback_seek, loopback_close, loopback_cancel,
+                          loopback_cancel_media};
+  auto *core = rillight_core_create(&io);
+  if (core) impl(core)->owned_loopback = std::move(owner);
+  return core;
+}
+
+void rillight_core_destroy_loopback(RillightCore *core) {
+  rillight_core_destroy(core);
+}
+
 int rillight_core_configure_hardware(RillightCore *pointer,
                                       RillightCoreHardware preference,
                                       int allow_software_fallback) {
@@ -2173,7 +2321,7 @@ int rillight_core_track_count(RillightCore *pointer) {
 
 int rillight_core_set_speed(RillightCore *pointer, double speed,
                             uint64_t operation_id) {
-  if (!pointer || !std::isfinite(speed) || speed < 0.5 || speed > 2.0)
+  if (!pointer || !std::isfinite(speed) || speed < 0.5 || speed > 3.0)
     return -1;
   auto *core = impl(pointer);
   std::unique_lock lock(core->mutex);
@@ -2197,6 +2345,19 @@ int rillight_core_set_speed(RillightCore *pointer, double speed,
   core->wake.notify_all();
   if (core->media_io_active)
     core->io.cancel_media_io(core->io.opaque);
+  return 0;
+}
+
+int rillight_core_set_volume(RillightCore *pointer, double gain,
+                             uint64_t operation_id) {
+  if (!pointer || !std::isfinite(gain) || gain < 0.0 || gain > 1.5)
+    return -1;
+  auto *core = impl(pointer);
+  std::lock_guard lock(core->mutex);
+  if (core->state == RILLIGHT_CORE_IDLE ||
+      core->state == RILLIGHT_CORE_CLOSING ||
+      !accept_operation(core, operation_id)) return -1;
+  core->volume = gain;
   return 0;
 }
 
@@ -2329,6 +2490,14 @@ RillightCoreFrame *rillight_core_take_frame(RillightCore *pointer, int type) {
   auto *frame = queue.front();
   queue.pop_front();
   bytes -= frame->data_size;
+  if (type == RILLIGHT_CORE_AUDIO_S16 && core->volume != 1.0) {
+    auto *samples = reinterpret_cast<int16_t *>(frame->data);
+    const int count = frame->data_size / sizeof(int16_t);
+    for (int index = 0; index < count; ++index) {
+      const double value = std::round(samples[index] * core->volume);
+      samples[index] = static_cast<int16_t>(std::clamp(value, -32768.0, 32767.0));
+    }
+  }
   if (type == RILLIGHT_CORE_VIDEO_RGBA)
     core->paused_video_frame_emitted = true;
   core->wake.notify_all();

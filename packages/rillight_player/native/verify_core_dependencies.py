@@ -102,6 +102,11 @@ def verify(prefix: Path, target: str, require_subtitles: bool = False) -> list[s
         for name in specification["required_build_dependencies"]:
             if not isinstance(build_dependencies.get(name), str):
                 errors.append(f"{target}: missing {name} build provenance")
+        if target.startswith("android-"):
+            if libass.get("android_sources") != specification.get("android_sources"):
+                errors.append(f"{target}: Android subtitle source pins mismatch")
+            if build_dependencies.get("fontconfig") != "disabled (Android explicit font path)":
+                errors.append(f"{target}: Android font provider provenance mismatch")
     return errors
 
 

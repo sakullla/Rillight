@@ -889,7 +889,7 @@ abstract class AppLocalizations {
   /// Automatic transcode quality preset.
   ///
   /// In zh, this message translates to:
-  /// **'自动'**
+  /// **'最高可用'**
   String get qualityAuto;
 
   /// Named transcode bitrate preset.
@@ -897,6 +897,12 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'{mbps} Mbps'**
   String qualityMbps(int mbps);
+
+  /// Shown after sustained low download speed while playback needs more data.
+  ///
+  /// In zh, this message translates to:
+  /// **'网络较慢，已保持当前画质；可手动切换画质'**
+  String get networkSlowHint;
 
   /// Detail shelf of movie or episode chapters.
   ///

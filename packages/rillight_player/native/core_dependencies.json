@@ -14,7 +14,12 @@
     "repository": "https://github.com/libass/libass.git",
     "commit": "4a05d8127f525943ebf45fdc6497c9e665947f0d",
     "license": "ISC",
-    "required_build_dependencies": ["freetype2", "fribidi", "harfbuzz", "fontconfig"]
+    "required_build_dependencies": ["freetype2", "fribidi", "harfbuzz", "fontconfig"],
+    "android_sources": {
+      "freetype": {"version": "2.13.3", "repository": "https://github.com/freetype/freetype.git", "tag": "VER-2-13-3", "commit": "42608f77f20749dd6ddc9e0536788eaad70ea4b5"},
+      "fribidi": {"version": "1.0.16", "repository": "https://github.com/fribidi/fribidi.git", "tag": "v1.0.16", "commit": "68162babff4f39c4e2dc164a5e825af93bda9983"},
+      "harfbuzz": {"version": "10.4.0", "repository": "https://github.com/harfbuzz/harfbuzz.git", "tag": "10.4.0", "commit": "3ef8709829a5884517ad91a97b32b9435b2f20d1"}
+    }
   },
   "platforms": {
     "windows-x64": {"sdk_required": true},

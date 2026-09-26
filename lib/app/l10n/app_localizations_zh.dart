@@ -429,12 +429,15 @@ class AppLocalizationsZh extends AppLocalizations {
   String get quality => '画质';
 
   @override
-  String get qualityAuto => '自动';
+  String get qualityAuto => '最高可用';
 
   @override
   String qualityMbps(int mbps) {
     return '$mbps Mbps';
   }
+
+  @override
+  String get networkSlowHint => '网络较慢，已保持当前画质；可手动切换画质';
 
   @override
   String get chapters => '章节';

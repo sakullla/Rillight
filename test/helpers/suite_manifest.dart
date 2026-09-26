@@ -32,7 +32,6 @@ const caseModules = <String>[
   'player/desktop_player_window_host_cases.dart',
   'player/device_profile_cases.dart',
   'player/emby_playback_client_cases.dart',
-  'player/mpv_video_backend_cases.dart',
   'player/playback_check_in_cases.dart',
   'player/playback_http_proxy_cases.dart',
   'player/playback_resolver_cases.dart',

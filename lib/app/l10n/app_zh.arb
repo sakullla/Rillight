@@ -569,11 +569,15 @@
   "@quality": {
     "description": "Transcode bitrate selector label in the player overflow menu."
   },
-  "qualityAuto": "自动",
+  "qualityAuto": "最高可用",
   "@qualityAuto": {
     "description": "Automatic transcode quality preset."
   },
   "qualityMbps": "{mbps} Mbps",
+  "networkSlowHint": "网络较慢，已保持当前画质；可手动切换画质",
+  "@networkSlowHint": {
+    "description": "Shown after sustained low download speed while playback needs more data."
+  },
   "@qualityMbps": {
     "description": "Named transcode bitrate preset.",
     "placeholders": {

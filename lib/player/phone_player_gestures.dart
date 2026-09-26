@@ -15,8 +15,8 @@ String phonePlayerClock(Duration value) {
 
 /// System brightness / volume access for the gesture layer (ADR-6).
 ///
-/// The default implementation talks to the `rillight/android_player`
-/// MethodChannel backed by `RillightAndroidPlayerPlugin.kt`. Where the
+/// The default implementation talks to the `rillight/android_core`
+/// MethodChannel backed by the owned core plugin. Where the
 /// platform side is missing (widget tests, desktop embedders) it degrades
 /// to an in-memory value so the gesture feedback chain keeps working.
 abstract class PhoneDisplayControl {
@@ -28,7 +28,7 @@ abstract class PhoneDisplayControl {
 
 class MethodChannelPhoneDisplayControl implements PhoneDisplayControl {
   MethodChannelPhoneDisplayControl({MethodChannel? channel})
-    : _channel = channel ?? const MethodChannel('rillight/android_player');
+    : _channel = channel ?? const MethodChannel('rillight/android_core');
 
   final MethodChannel _channel;
   double _brightness = 0.5;

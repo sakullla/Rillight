@@ -1,5 +1,5 @@
 name: rillight_player
-description: Rillight's desktop libmpv control and video surfaces.
+description: Rillight's owned FFmpeg playback core for desktop and Android.
 version: 0.1.0
 publish_to: none
 environment:
@@ -15,6 +15,9 @@ dev_dependencies:
 flutter:
   plugin:
     platforms:
+      android:
+        package: com.rillight.player
+        pluginClass: RillightCorePlayerPlugin
       windows:
         pluginClass: RillightPlayerPluginCApi
       macos:

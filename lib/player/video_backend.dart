@@ -72,6 +72,7 @@ enum VideoEventKind {
   position,
   duration,
   buffer,
+  bufferSnapshot,
   playing,
   buffering,
   completed,

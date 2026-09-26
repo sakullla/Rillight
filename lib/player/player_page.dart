@@ -22,11 +22,12 @@ import 'package:rillight/player/danmaku/danmaku_match_query.dart';
 import 'package:rillight/player/danmaku/danmaku_panel.dart';
 import 'package:rillight/player/danmaku/danmaku_renderer.dart';
 import 'package:rillight/player/danmaku/dandanplay_models.dart';
-import 'package:rillight/player/mpv_video_backend.dart';
+import 'package:rillight/player/rillight_video_backend.dart';
 import 'package:rillight/player/network_throughput.dart';
 import 'package:rillight/player/playback_models.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_controller.dart';
+import 'package:rillight/player/buffered_ranges_track.dart';
 import 'package:rillight/player/player_keys.dart';
 import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/player_window.dart';
@@ -623,6 +624,11 @@ class PlayerPageState extends State<PlayerPage> {
                         text:
                             current.disconnectDetail ??
                             l10n.playbackDisconnected,
+                      ),
+                    if (current.networkSlow && !current.disconnected)
+                      _Banner(
+                        key: const ValueKey('player-network-slow'),
+                        text: l10n.networkSlowHint,
                       ),
                     if (current.progressSyncFailed &&
                         !(current.disconnected && !current.isPlaying))
@@ -2214,31 +2220,30 @@ class _SeekTimeline extends StatelessWidget {
                   0.0,
                   1.0,
                 ));
-    final bufferValue = playerBufferFraction(
-      buffer: controller.buffer,
-      duration: controller.duration,
-    );
     return Row(
       children: [
         Text(_clock(controller.position), style: _overlayTimeStyle(theme)),
         const SizedBox(width: AppSpacing.sm),
         Expanded(
-          child: SliderTheme(
-            data: _overlaySliderTheme(theme, thumbRadius: 6),
-            child: Slider(
-              key: PlayerKeys.seekBar,
-              value: value,
-              secondaryTrackValue: bufferValue,
-              onChanged: !seekEnabled
-                  ? null
-                  : (next) {
-                      if (!dragging) {
-                        onDragStart(next);
-                      } else {
-                        onDragUpdate(next);
-                      }
-                    },
-              onChangeEnd: !seekEnabled ? null : onDragEnd,
+          child: BufferedRangesTrack(
+            snapshot: controller.bufferSnapshot,
+            duration: controller.duration,
+            child: SliderTheme(
+              data: _overlaySliderTheme(theme, thumbRadius: 6),
+              child: Slider(
+                key: PlayerKeys.seekBar,
+                value: value,
+                onChanged: !seekEnabled
+                    ? null
+                    : (next) {
+                        if (!dragging) {
+                          onDragStart(next);
+                        } else {
+                          onDragUpdate(next);
+                        }
+                      },
+                onChangeEnd: !seekEnabled ? null : onDragEnd,
+              ),
             ),
           ),
         ),
@@ -2462,7 +2467,7 @@ class _PlaybackOverflowMenu extends StatelessWidget {
                   !kTranscodeBitrates.contains(controller.maxStreamingBitrate),
               child: Text(AppLocalizations.of(context).qualityAuto),
             ),
-            for (final value in kTranscodeBitrates.skip(1))
+            for (final value in controller.availableBitrates.skip(1))
               CheckedPopupMenuItem(
                 value: value,
                 checked: controller.maxStreamingBitrate == value,
@@ -3240,7 +3245,7 @@ VideoBackend _createBackend(PlayerBindings bindings) {
     }
     return true;
   }());
-  return MpvVideoBackend(settingsStore: bindings.settingsStore);
+  return RillightVideoBackend(settingsStore: bindings.settingsStore);
 }
 
 String _clock(Duration duration) {
