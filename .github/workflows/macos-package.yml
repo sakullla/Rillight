@@ -9,6 +9,10 @@ on:
       signing:
         type: string
         default: adhoc
+      allow_source_build:
+        description: Build pinned sources when all artifact inputs are absent (non-release CI only)
+        type: boolean
+        default: false
       core_sdk_url:
         type: string
         default: ''
@@ -32,68 +36,24 @@ permissions:
 
 jobs:
   build:
-    runs-on: macos-latest
+    runs-on: macos-15
+    timeout-minutes: 75
+    env:
+      CORE_SDK_URL: ${{ inputs.core_sdk_url }}
+      CORE_SDK_SHA256: ${{ inputs.core_sdk_sha256 }}
+      CORE_DYLIB_URL: ${{ inputs.core_dylib_url }}
+      CORE_DYLIB_SHA256: ${{ inputs.core_dylib_sha256 }}
+      ALLOW_SOURCE_BUILD: ${{ inputs.allow_source_build }}
     steps:
       - uses: actions/checkout@v7
-      - uses: subosito/flutter-action@v2
-        with:
-          flutter-version: '3.47.4'
-          channel: stable
-          cache: true
-      - name: Install Flutter and native dependencies
-        run: flutter pub get
-      - name: Provision pinned macOS core SDK and dylib
-        shell: bash
-        env:
-          CORE_SDK_URL: ${{ inputs.core_sdk_url }}
-          CORE_SDK_SHA256: ${{ inputs.core_sdk_sha256 }}
-          CORE_DYLIB_URL: ${{ inputs.core_dylib_url }}
-          CORE_DYLIB_SHA256: ${{ inputs.core_dylib_sha256 }}
-        run: |
-          set -euo pipefail
-          for name in CORE_SDK_URL CORE_SDK_SHA256 CORE_DYLIB_URL CORE_DYLIB_SHA256; do
-            if [ -z "${!name:-}" ]; then
-              echo "::error::Missing pinned macOS core input ${name}; see packages/rillight_player/macos/TESTING_HANDOFF.md"
-              exit 1
-            fi
-          done
-          sdk_archive="$RUNNER_TEMP/rillight-macos-sdk.tar.gz"
-          core_dylib="$RUNNER_TEMP/librillight_core.dylib"
-          sdk_prefix="$RUNNER_TEMP/rillight-macos-sdk"
-          curl --fail --location --retry 3 "$CORE_SDK_URL" --output "$sdk_archive"
-          curl --fail --location --retry 3 "$CORE_DYLIB_URL" --output "$core_dylib"
-          echo "$CORE_SDK_SHA256  $sdk_archive" | shasum -a 256 --check
-          echo "$CORE_DYLIB_SHA256  $core_dylib" | shasum -a 256 --check
-          mkdir -p "$sdk_prefix"
-          tar -xzf "$sdk_archive" -C "$sdk_prefix"
-          python3 packages/rillight_player/native/verify_core_dependencies.py \
-            --prefix "$sdk_prefix" --target macos-universal --require-subtitles
-          echo "RILLIGHT_MACOS_CORE_PREFIX=$sdk_prefix" >> "$GITHUB_ENV"
-          echo "RILLIGHT_MACOS_CORE_DYLIB=$core_dylib" >> "$GITHUB_ENV"
-          echo "RILLIGHT_MACOS_CORE_SHA256=$CORE_DYLIB_SHA256" >> "$GITHUB_ENV"
-      - name: Install DMG layout dependency
-        run: python3 -m pip install ds_store==1.3.1
-      - name: Verify signing and Mach-O audit regressions
-        run: python3 macos/verify_bundle_test.py
-      - name: Verify drag-install DMG layout regressions
-        run: python3 macos/package_dmg_test.py
-      - name: Compile the Release sandbox proxy test target
-        run: flutter build macos --release --target integration_test/macos_proxy_smoke.dart
-      - name: Exercise production loopback proxy and missing-server negative control
-        run: |
-          python3 macos/proxy_smoke.py build/macos/Build/Products/Release/rillight.app \
-            build/macos-proxy-sandbox-evidence
-      - name: Restore the ordinary release entry point
-        run: flutter build macos --release --target lib/main.dart
-      - name: Verify bundled dylib closure and runtime versions
+      - name: Validate macOS inputs and select provisioning mode
+        id: core-inputs
         shell: bash
         run: |
-          set -euo pipefail
-          app="build/macos/Build/Products/Release/rillight.app"
-          python3 macos/verify_bundle.py "$app"
-          # Probe packaged core/FFmpeg versions; this is not a GUI/playback test.
-          DYLD_LIBRARY_PATH="$PWD/$app/Contents/Frameworks" \
-            python3 macos/probe_core.py "$app" > macos-native-versions.json
+          mode="$(bash .github/scripts/macos_core.sh mode)"
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+          toolchain="$(xcodebuild -version | shasum -a 256 | awk '{print $1}')"
+          echo "toolchain=$toolchain" >> "$GITHUB_OUTPUT"
       - name: Check macOS signing secrets
         if: inputs.signing == 'identity'
         shell: bash
@@ -110,6 +70,69 @@ jobs:
             exit 1
           fi
 
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.4'
+          channel: stable
+          cache: true
+      - name: Install Flutter and native dependencies
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: '1'
+        run: |
+          brew install nasm pkg-config ffmpeg
+          flutter pub get
+      - name: Restore pinned universal SDK
+        if: steps.core-inputs.outputs.mode == 'source'
+        id: sdk-cache
+        uses: actions/cache/restore@v5
+        with:
+          path: ${{ runner.temp }}/rillight-macos-sdk
+          key: macos15-universal-${{ runner.arch }}-${{ steps.core-inputs.outputs.toolchain }}-${{ hashFiles('.github/scripts/macos_core.sh', 'packages/rillight_player/native/build_macos.sh', 'packages/rillight_player/native/*core_dependencies*', 'packages/rillight_player/native/prepare_macos.py', 'packages/rillight_player/native/patches/**') }}
+      - name: Provision pinned macOS core SDK and dylib
+        shell: bash
+        run: bash .github/scripts/macos_core.sh
+      - name: Save verified universal SDK
+        if: steps.core-inputs.outputs.mode == 'source' && steps.sdk-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ runner.temp }}/rillight-macos-sdk
+          key: ${{ steps.sdk-cache.outputs.cache-primary-key }}
+      - name: Verify native frame output logic
+        run: |
+          cmake -S packages/rillight_player/native/core_tests/macos -B build/macos-frame-output
+          cmake --build build/macos-frame-output
+          ctest --test-dir build/macos-frame-output --output-on-failure
+      - name: Install DMG layout dependency
+        run: python3 -m pip install ds_store==1.3.1
+      - name: Verify signing and Mach-O audit regressions
+        run: python3 macos/verify_bundle_test.py
+      - name: Verify drag-install DMG layout regressions
+        run: python3 macos/package_dmg_test.py
+      - name: Compile the Release sandbox proxy test target
+        run: flutter build macos --release --target integration_test/macos_proxy_smoke.dart
+      - name: Exercise production loopback proxy and missing-server negative control
+        id: proxy
+        run: |
+          python3 macos/proxy_smoke.py build/macos/Build/Products/Release/rillight.app \
+            build/macos-proxy-sandbox-evidence
+      - name: Exercise production playback controls on the hosted runner
+        id: playback
+        run: python3 macos/player_smoke.py --skip-restore --skip-window-capture
+      - name: Restore the ordinary release entry point
+        run: flutter build macos --release --target lib/main.dart
+      - name: Verify bundled dylib closure and runtime versions
+        id: bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          app="build/macos/Build/Products/Release/rillight.app"
+          python3 macos/verify_bundle.py "$app"
+          # Probe packaged core/FFmpeg versions; this is not a GUI/playback test.
+          DYLD_LIBRARY_PATH="$PWD/$app/Contents/Frameworks" \
+            python3 macos/probe_core.py "$app" > macos-native-versions.json
       - name: Import the self-signed certificate into a temporary keychain
         if: inputs.signing == 'identity'
         shell: bash
@@ -131,6 +154,7 @@ jobs:
             "$(security list-keychain -d user | tr '\n' ' ')"
 
       - name: Sign, verify and package
+        id: package
         shell: bash
         env:
           BUILD_VERSION: ${{ inputs.version }}
@@ -168,6 +192,13 @@ jobs:
           name: release-macos
           path: Rillight-macos-*.dmg
           if-no-files-found: error
+      - name: Preserve native inputs and source build provenance
+        uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: macos-native-inputs
+          path: build/macos-native-inputs
+          if-no-files-found: warn
       - uses: actions/upload-artifact@v6
         if: always()
         with:
@@ -176,4 +207,25 @@ jobs:
             macos-native-versions.json
             macos-release-entitlements.plist
             build/macos-proxy-sandbox-evidence
+            build/player-validation/macos-runs
+            build/macos-frame-output/Testing/Temporary
           if-no-files-found: warn
+      - name: Report macOS validation scope
+        if: always()
+        env:
+          INPUT_MODE: ${{ steps.core-inputs.outputs.mode }}
+          BUNDLE_RESULT: ${{ steps.bundle.outcome }}
+          PACKAGE_RESULT: ${{ steps.package.outcome }}
+          PROXY_RESULT: ${{ steps.proxy.outcome }}
+          PLAYBACK_RESULT: ${{ steps.playback.outcome }}
+        run: |
+          {
+            echo '## macOS hosted-runner validation'
+            echo "Native inputs: ${INPUT_MODE:-unavailable}"
+            echo "Bundle audit and loaded libraries: $BUNDLE_RESULT"
+            echo "Signing and DMG packaging: $PACKAGE_RESULT"
+            echo "Sandbox proxy: $PROXY_RESULT"
+            echo "Playback controls and decoder diagnostics: $PLAYBACK_RESULT"
+            echo 'Screen capture was disabled on the hosted runner. Changing GUI frames, physical audio, Intel device playback and hardware performance remain unverified.'
+            echo 'See packages/rillight_player/macos/TESTING_HANDOFF.md for target-device checks. CI success is not release hardware acceptance.'
+          } >> "$GITHUB_STEP_SUMMARY"

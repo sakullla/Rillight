@@ -45,7 +45,7 @@ Report native build, package launch, actual video/audio output and GPU stability
 
 ## Release Procedure
 
-PR/main CI runs formatting, analysis, tests, Android APK audit and Linux package regression. macOS package checks run when the pinned universal SDK/core inputs are configured; otherwise CI records an explicit unverified handoff. The tag release workflow requires all native SDK inputs and must fail closed if one is missing. Do not tag a candidate on the strength of CI configuration alone.
+PR/main CI runs formatting, analysis, tests, Android APK audit, Linux package regression and macOS package/playback-control checks. When all four macOS artifact inputs are absent, ordinary CI builds the universal SDK from pinned sources and the core from the candidate; partial inputs fail. Cached native SDKs are verified before use. Hosted macOS controls do not establish displayed frames, physical audio or hardware acceptance; those remain in the target-machine handoff. The tag release workflow requires all native SDK inputs and must fail closed if one is missing. Do not tag a candidate on the strength of CI configuration alone.
 
 Before tagging a release:
 

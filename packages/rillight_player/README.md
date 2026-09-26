@@ -79,6 +79,21 @@ Apple M3 host built, packaged and probed that core; GUI playback, physical
 audio, actual VideoToolbox decoder use and Intel remain open in
 [`macos/TESTING_HANDOFF.md`](macos/TESTING_HANDOFF.md).
 
+PR/main CI runs macOS packaging even without repository artifact variables:
+it builds the pinned universal SDK and compiles the candidate's owned core.
+The SDK cache includes source pins, patches, builder/verifier code and Xcode;
+every restored SDK is verified, and the core is rebuilt for each candidate.
+`macos-native-inputs` preserves the SDK archive, core, hashes and build context.
+To use prebuilt inputs, supply all four `MACOS_CORE_SDK_URL`,
+`MACOS_CORE_SDK_SHA256`, `MACOS_CORE_DYLIB_URL`, `MACOS_CORE_DYLIB_SHA256`
+repository variables. Partial inputs, invalid hashes or download failures fail
+the job. Tags always require all four inputs and cannot use source fallback.
+
+Hosted CI runs sandbox proxy and production playback controls with synthetic
+media; screen capture is disabled explicitly. `validation-scope.json` records
+control results separately from unverified frames, physical audio and hardware
+acceptance. Hardware release checks still require target-device evidence.
+
 ## Checks and evidence
 
 Run `flutter test packages/rillight_player/test`, native platform tests and

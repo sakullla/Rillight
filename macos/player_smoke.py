@@ -2,7 +2,8 @@
 
 Builds tool/player_smoke.dart, drives synthetic Emby fixtures, checks
 result.json, and samples actual player-window pixels. Restores lib/main.dart
-afterwards. Physical speaker output is not asserted.
+afterwards. Hosted runners can explicitly skip window capture; the evidence
+scope records that omission. Physical speaker output is not asserted.
 """
 from __future__ import annotations
 
@@ -45,7 +46,7 @@ def core_env():
     }
 
 
-def smoke(*, skip_build=False, skip_restore=False):
+def smoke(*, skip_build=False, skip_restore=False, skip_window_capture=False):
     env = core_env()
     sdk = Path(env['RILLIGHT_MACOS_CORE_PREFIX'])
     run([sys.executable,
@@ -61,6 +62,13 @@ def smoke(*, skip_build=False, skip_restore=False):
               'rillight-validation' / stamp)
     output.mkdir(parents=True, exist_ok=False)
     archive.mkdir(parents=True)
+    # Keep control results distinct from displayed pixels and physical output.
+    scope = {
+        'playback_controls': 'not_run',
+        'window_capture': 'not_run',
+        'physical_audio': 'not_run',
+        'hardware_acceptance': 'not_run',
+    }
     media = ROOT / 'build/player-validation/media'
     ffmpeg = shutil.which('ffmpeg')
     if not ffmpeg:
@@ -103,10 +111,13 @@ def smoke(*, skip_build=False, skip_restore=False):
             capture_cmd = [sys.executable, str(capture_script),
                            '--output', str(output), '--timeout', '240',
                            '--app', str(APP)]
-        capture = subprocess.Popen(
-            capture_cmd, cwd=ROOT,
-            stdout=(output / 'capture-open.log').open('w'),
-            stderr=subprocess.STDOUT)
+        if not skip_window_capture:
+            scope['window_capture'] = 'failed'
+            capture = subprocess.Popen(
+                capture_cmd, cwd=ROOT,
+                stdout=(output / 'capture-open.log').open('w'),
+                stderr=subprocess.STDOUT)
+        scope['playback_controls'] = 'failed'
         app = subprocess.Popen(
             [str(EXECUTABLE)], cwd=ROOT, env=env,
             stdout=(output / 'app.stdout.log').open('w'),
@@ -117,14 +128,20 @@ def smoke(*, skip_build=False, skip_restore=False):
             if time.monotonic() > deadline:
                 raise RuntimeError('Playback validation timed out')
             time.sleep(0.25)
-        capture_status = capture.wait(timeout=30)
+        capture_status = capture.wait(timeout=30) if capture is not None else None
         if app.returncode != 0:
             raise RuntimeError(f'Player smoke exited {app.returncode}')
         result = json.loads((output / 'result.json').read_text(encoding='utf-8'))
         if result.get('passed') is not True:
             raise RuntimeError('Playback validation failed: ' + str(result))
+        scope['playback_controls'] = 'passed'
         evidence_path = output / 'window-evidence.json'
-        if capture_status != 0 or not evidence_path.is_file():
+        if skip_window_capture:
+            print('Playback controls passed; window capture was disabled. '
+                  'Displayed frames, physical audio and hardware acceptance '
+                  'remain unverified.', flush=True)
+        elif capture_status != 0 or not evidence_path.is_file():
+            scope['window_capture'] = 'failed'
             print('Dart playback passed; window pixel capture did not '
                   f'(capture exit {capture_status}). Allow Screen Recording '
                   'for Python to capture actual frames.', flush=True)
@@ -134,10 +151,13 @@ def smoke(*, skip_build=False, skip_restore=False):
                                  'av1-loaded', 'vp9-loaded'}:
                 raise RuntimeError(
                     'Incomplete window evidence: ' + str(sorted(evidence)))
+            scope['window_capture'] = 'passed'
             print('Owned-core macOS production main/child playback and '
                   'window video passed')
         return archive
     finally:
+        (output / 'validation-scope.json').write_text(
+            json.dumps(scope, indent=2) + '\n', encoding='utf-8')
         if app is not None and app.poll() is None:
             app.terminate()
             try:
@@ -178,9 +198,13 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--skip-build', action='store_true')
     parser.add_argument('--skip-restore', action='store_true')
+    parser.add_argument('--skip-window-capture', action='store_true',
+                        help='Run playback controls without Screen Recording; '
+                             'does not verify displayed frames or physical audio')
     args = parser.parse_args()
     try:
-        smoke(skip_build=args.skip_build, skip_restore=args.skip_restore)
+        smoke(skip_build=args.skip_build, skip_restore=args.skip_restore,
+              skip_window_capture=args.skip_window_capture)
     except (OSError, RuntimeError, subprocess.CalledProcessError, ValueError) as error:
         print(f'macOS player smoke failed: {error}', file=sys.stderr)
         sys.exit(1)

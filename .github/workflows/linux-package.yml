@@ -13,6 +13,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-22.04
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
       - name: Install native build dependencies
@@ -33,7 +34,7 @@ jobs:
       - uses: actions/cache@v5
         with:
           path: ${{ runner.temp }}/rillight-native
-          key: owned-core-ubuntu22-${{ hashFiles('packages/rillight_player/native/build_linux.sh', 'packages/rillight_player/native/build_core_dependencies.py', 'packages/rillight_player/native/verify_core_dependencies.py') }}
+          key: owned-core-ubuntu22-${{ runner.arch }}-${{ hashFiles('packages/rillight_player/native/build_linux.sh', 'packages/rillight_player/native/build_core_dependencies.py', 'packages/rillight_player/native/verify_core_dependencies.py', 'packages/rillight_player/native/core_dependencies.json', 'packages/rillight_player/native/patches/**') }}
       - name: Check pinned source fetch with a Git mirror
         run: python3 packages/rillight_player/native/build_core_dependencies_test.py
       - name: Build the fixed media stack
@@ -82,6 +83,7 @@ jobs:
   ubuntu24-install:
     needs: build
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     container: ubuntu:24.04
     steps:
       - uses: actions/checkout@v7
