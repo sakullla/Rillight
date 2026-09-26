@@ -1080,12 +1080,17 @@ class PlaybackHttpProxy {
     }
   }
 
-  void _cancelSegmentPrefetch({bool clearPending = false}) {
+  void _cancelSegmentPrefetch({
+    bool clearPending = false,
+    bool requeue = true,
+  }) {
     if (clearPending) {
       _pendingSegmentPrefetch.clear();
       _activeSegmentPrefetch = null;
-    } else if (_activeSegmentPrefetch case final active?) {
-      _queueSegmentPrefetch(active);
+    } else if (requeue) {
+      if (_activeSegmentPrefetch case final active?) {
+        _queueSegmentPrefetch(active);
+      }
     }
     _segmentPrefetchGeneration++;
     _segmentPrefetchRead?.cancel();
@@ -1120,7 +1125,7 @@ class PlaybackHttpProxy {
   void _pumpSegmentPrefetch() {
     if (_closed ||
         _segmentPrefetch != null ||
-        _active != 0 ||
+        _active >= _maxRequests - 1 ||
         _pendingSegmentPrefetch.isEmpty) {
       return;
     }
@@ -1135,7 +1140,9 @@ class PlaybackHttpProxy {
           if (_closed || generation != _segmentPrefetchGeneration) {
             return;
           }
-          if (_active != 0) {
+          // One speculative producer may overlap a slow foreground segment,
+          // but always leave a slot for a new demand (which can preempt it).
+          if (_active >= _maxRequests - 1) {
             _queueSegmentPrefetch(next);
             return;
           }
@@ -2039,7 +2046,24 @@ class PlaybackHttpProxy {
     try {
       final prefetch = incoming.headers.value('x-rillight-prefetch') == '1';
       if (!prefetch) {
-        _cancelSegmentPrefetch();
+        final next = _activeSegmentPrefetch;
+        final sameResource =
+            next != null &&
+            (incoming.uri.path == next.url.path ||
+                incoming.uri.path == next.initialization?.path);
+        final pending = _segmentPrefetch;
+        if (sameResource && pending != null) {
+          // A nearly finished speculative download can publish its cache and
+          // satisfy demand without a duplicate GET. Never put playback behind
+          // a stalled speculative request's network timeout.
+          await Future.any<void>([
+            pending,
+            read.cancelledFuture,
+            Future<void>.delayed(const Duration(milliseconds: 100)),
+          ]);
+          read.check();
+        }
+        _cancelSegmentPrefetch(requeue: !sameResource);
       } else {
         _segmentPrefetchRead = read;
       }
@@ -2073,7 +2097,7 @@ class PlaybackHttpProxy {
           incoming.response.statusCode < 300) {
         final owner = _hlsSegmentOwners[key];
         if (owner != null) _hlsActiveOwners.add(owner);
-        _scheduleSegmentPrefetch(key);
+        if (!read.segmentPrefetchScheduled) _scheduleSegmentPrefetch(key);
       }
       _pumpSegmentPrefetch();
     }
@@ -2483,6 +2507,18 @@ class PlaybackHttpProxy {
             response,
             effective,
           );
+          if (incoming.method == 'GET' &&
+              incoming.headers.value('x-rillight-prefetch') != '1' &&
+              read.seekGeneration == _seekGeneration &&
+              _roles[key] == PlaybackResourceRole.segment &&
+              response.statusCode >= 200 &&
+              response.statusCode < 300) {
+            // The manifest has already selected this segment/variant. Start
+            // the next segment after receiving its predecessor's first bytes,
+            // instead of serializing connection setup behind the entire body.
+            read.segmentPrefetchScheduled = true;
+            _scheduleSegmentPrefetch(key);
+          }
           if (response.statusCode == HttpStatus.partialContent &&
               _canReadAhead(incoming, key, representation)) {
             // Metadata/sniffing is complete. Do not keep this unbounded probe
@@ -3228,6 +3264,7 @@ class _ProxyRead {
   String? resourceKey;
   bool cancelled = false;
   bool outputStarted = false;
+  bool segmentPrefetchScheduled = false;
   final requests = <HttpClientRequest>{};
   final iterators = <StreamIterator<List<int>>>{};
   final _cancelled = Completer<void>();
