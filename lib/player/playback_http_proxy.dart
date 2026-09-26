@@ -6,6 +6,7 @@ import 'dart:typed_data';
 
 import 'cache/http_cache_policy.dart';
 import 'cache/matroska_cache_index.dart';
+import 'cache/mp4_cache_index.dart';
 import 'cache/session_byte_cache.dart';
 import 'cache/session_read_ahead.dart';
 import 'cache/sealed_media_route.dart';
@@ -61,6 +62,7 @@ class PlaybackHttpProxy {
   SessionReadAhead? _readAhead;
   final _readAheadBypass = <String>{};
   MatroskaCacheIndex? _timelineIndex;
+  Mp4CacheIndex? _mp4TimelineIndex;
   String? _timelineIdentity;
   List<CachedTimeRange> _cachedTimeline = const [];
   int _timelineSequence = 0;
@@ -113,6 +115,7 @@ class PlaybackHttpProxy {
     final previous = _readAhead;
     _readAhead = null;
     _timelineIndex = null;
+    _mp4TimelineIndex = null;
     _timelineIdentity = null;
     _cachedTimeline = const [];
     _timelineSequence++;
@@ -135,10 +138,15 @@ class PlaybackHttpProxy {
     if (degradation != null && degradation != 'disk-timeout') {
       return 'cacheUncertain';
     }
+    if (_hlsNext.isNotEmpty && _readAhead == null) {
+      return 'hlsTimingUnavailable';
+    }
     if (_readAhead == null || _timelineIdentity == null) {
       return 'indexUnavailable';
     }
-    if (_cachedTimeline.isEmpty && _timelineIndex == null) {
+    if (_cachedTimeline.isEmpty &&
+        _timelineIndex == null &&
+        _mp4TimelineIndex == null) {
       return 'mediaMappingUnavailable';
     }
     return null;
@@ -167,6 +175,7 @@ class PlaybackHttpProxy {
     'streamPolicy': _stream.name,
     'sessionBuffering': sessionBuffering,
     'activeRequests': _active,
+    'upstreamBytesPerSecond': upstreamBytesPerSecond,
     'cacheWorkspaceBytes': _cacheWorkspace,
     'timelineIdentity': _timelineIdentity ?? '',
     'timelineSequence': _timelineSequence,
@@ -236,6 +245,7 @@ class PlaybackHttpProxy {
       if (_timelineIdentity != identity) {
         _timelineIdentity = identity;
         _timelineIndex = null;
+        _mp4TimelineIndex = null;
         _cachedTimeline = const [];
         _timelineSequence++;
       }
@@ -277,7 +287,16 @@ class PlaybackHttpProxy {
           await MatroskaCacheIndex.load(total: ahead.total, read: read);
       if (_closed || !identical(ahead, _readAhead)) return;
       _timelineIndex = index;
-      _cachedTimeline = index?.ranges(bytes, duration) ?? const [];
+      if (index != null) {
+        _cachedTimeline = index.ranges(bytes, duration);
+      } else {
+        final mp4 =
+            _mp4TimelineIndex ??
+            await Mp4CacheIndex.load(total: ahead.total, read: read);
+        if (_closed || !identical(ahead, _readAhead)) return;
+        _mp4TimelineIndex = mp4;
+        _cachedTimeline = mp4?.ranges(bytes, duration) ?? const [];
+      }
       _timelineSequence++;
     } catch (_) {
       _cachedTimeline = const [];
@@ -766,6 +785,7 @@ class PlaybackHttpProxy {
       _cachedTimeline = const [];
       _timelineIdentity = null;
       _timelineIndex = null;
+      _mp4TimelineIndex = null;
       _timelineSequence++;
     }
     if (_readAhead?.resource == key &&
@@ -1103,6 +1123,7 @@ class PlaybackHttpProxy {
         await ahead?.close();
         _timelineIdentity = null;
         _timelineIndex = null;
+        _mp4TimelineIndex = null;
         _cachedTimeline = const [];
         _timelineSequence++;
         ahead = SessionReadAhead(
