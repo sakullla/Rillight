@@ -28,21 +28,38 @@ List<int> element(int id, List<int> body) {
   ];
 }
 
-(Uint8List, List<int>) fixture({int scale = 1000000}) {
+(Uint8List, List<int>, int) fixture({
+  int scale = 1000000,
+  bool videoKeyframe = true,
+  bool includeAudio = true,
+}) {
   final info = element(0x1549a966, element(0x2ad7b1, uint(scale)));
-  final tracks = element(
-    0x1654ae6b,
-    element(0xae, [
+  final tracks = element(0x1654ae6b, [
+    ...element(0xae, [
       ...element(0xd7, [1]),
       ...element(0x83, [1]),
     ]),
-  );
+    ...element(0xae, [
+      ...element(0xd7, [2]),
+      ...element(0x83, [2]),
+      ...element(0x86, 'A_AAC'.codeUnits),
+    ]),
+  ]);
   final payload = [...info, ...tracks];
   final positions = <int>[];
+  var clusterNumber = 0;
   for (final size in [100, 500, 80]) {
     positions.add(payload.length);
-    payload.addAll(element(0x1f43b675, List.filled(size, 0)));
+    payload.addAll(
+      element(0x1f43b675, [
+        ...element(0xe7, uint(clusterNumber++ * 10000)),
+        ...element(0xa3, [0x81, 0, 0, videoKeyframe ? 0x80 : 0, 1]),
+        if (includeAudio) ...element(0xa3, [0x82, 0, 0, 0, 2]),
+        ...element(0xec, List.filled(size, 0)),
+      ]),
+    );
   }
+  final cuesPosition = payload.length;
   payload.addAll(
     element(0x1c53bb6b, [
       for (var i = 0; i < positions.length; i++)
@@ -61,6 +78,7 @@ List<int> element(int id, List<int> body) {
   return (
     Uint8List.fromList([...ebml, ...segment]),
     [for (final p in positions) base + p],
+    base + cuesPosition,
   );
 }
 
@@ -134,29 +152,45 @@ void main() {
     test(
       'variable bitrate clusters map via cues, not file percentage',
       () async {
-        final (bytes, positions) = fixture();
+        final (bytes, positions, cuesPosition) = fixture();
         final index = await MatroskaCacheIndex.load(
           total: bytes.length,
           read: (offset, length) async =>
               Uint8List.sublistView(bytes, offset, offset + length),
         );
         expect(index, isNotNull);
-        final partial = index!.ranges([
-          CachedByteRange(positions[1], positions[2] + 5),
-        ], const Duration(seconds: 30));
+        final metadata = [
+          CachedByteRange(0, positions.first),
+          CachedByteRange(cuesPosition, bytes.length),
+        ];
+        final partial = await index!.ranges(
+          [...metadata, CachedByteRange(positions[1], positions[2] + 5)],
+          const Duration(seconds: 30),
+          read: (offset, length) async =>
+              Uint8List.sublistView(bytes, offset, offset + length),
+        );
         expect(partial.map((r) => (r.start.inSeconds, r.end.inSeconds)), [
           (10, 20),
         ]);
-        final tail = index.ranges([
-          CachedByteRange(positions[1], bytes.length),
-        ], const Duration(seconds: 30));
+        final tail = await index.ranges(
+          [...metadata, CachedByteRange(positions[1], bytes.length)],
+          const Duration(seconds: 30),
+          read: (offset, length) async =>
+              Uint8List.sublistView(bytes, offset, offset + length),
+        );
         expect(tail.map((r) => (r.start.inSeconds, r.end.inSeconds)), [
           (10, 30),
         ]);
-        final holes = index.ranges([
-          CachedByteRange(positions[0], positions[1]),
-          CachedByteRange(positions[2], bytes.length),
-        ], const Duration(seconds: 30));
+        final holes = await index.ranges(
+          [
+            ...metadata,
+            CachedByteRange(positions[0], positions[1]),
+            CachedByteRange(positions[2], bytes.length),
+          ],
+          const Duration(seconds: 30),
+          read: (offset, length) async =>
+              Uint8List.sublistView(bytes, offset, offset + length),
+        );
         expect(holes.map((r) => (r.start.inSeconds, r.end.inSeconds)), [
           (0, 10),
           (20, 30),
@@ -165,21 +199,74 @@ void main() {
     );
 
     test(
+      'evicted metadata clears previously verified cluster coverage',
+      () async {
+        final (bytes, positions, cuesPosition) = fixture();
+        final index = (await MatroskaCacheIndex.load(
+          total: bytes.length,
+          read: (offset, length) async =>
+              Uint8List.sublistView(bytes, offset, offset + length),
+        ))!;
+        Future<List<CachedTimeRange>> map(List<CachedByteRange> ranges) =>
+            index.ranges(
+              ranges,
+              const Duration(seconds: 30),
+              read: (offset, length) async =>
+                  Uint8List.sublistView(bytes, offset, offset + length),
+            );
+        final all = [CachedByteRange(0, bytes.length)];
+        expect(await map(all), isNotEmpty);
+        expect(
+          await map([CachedByteRange(positions.first, bytes.length)]),
+          isEmpty,
+        );
+        expect(await map([CachedByteRange(0, cuesPosition)]), isEmpty);
+      },
+    );
+
+    test('cue alone cannot prove keyframe or selected audio', () async {
+      for (final data in [
+        fixture(videoKeyframe: false),
+        fixture(includeAudio: false),
+      ]) {
+        final (bytes, _, _) = data;
+        final index = (await MatroskaCacheIndex.load(
+          total: bytes.length,
+          read: (offset, length) async =>
+              Uint8List.sublistView(bytes, offset, offset + length),
+        ))!;
+        expect(
+          await index.ranges(
+            [CachedByteRange(0, bytes.length)],
+            const Duration(seconds: 30),
+            read: (offset, length) async =>
+                Uint8List.sublistView(bytes, offset, offset + length),
+          ),
+          isEmpty,
+        );
+      }
+    });
+
+    test(
       'timestamp scale is honored and unavailable metadata is not guessed',
       () async {
-        final (bytes, positions) = fixture(scale: 2000000);
+        final (bytes, positions, cuesPosition) = fixture(scale: 2000000);
         final index = await MatroskaCacheIndex.load(
           total: bytes.length,
           read: (offset, length) async =>
               Uint8List.sublistView(bytes, offset, offset + length),
         );
         expect(
-          index!
-              .ranges([
-                CachedByteRange(positions[1], bytes.length),
-              ], const Duration(seconds: 60))
-              .single
-              .start,
+          (await index!.ranges(
+            [
+              CachedByteRange(0, positions.first),
+              CachedByteRange(cuesPosition, bytes.length),
+              CachedByteRange(positions[1], bytes.length),
+            ],
+            const Duration(seconds: 60),
+            read: (offset, length) async =>
+                Uint8List.sublistView(bytes, offset, offset + length),
+          )).single.start,
           const Duration(seconds: 20),
         );
         expect(

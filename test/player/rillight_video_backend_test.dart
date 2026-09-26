@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rillight/player/buffer_snapshot.dart';
 import 'package:rillight/player/rillight_video_backend.dart';
 import 'package:rillight/player/playback_models.dart';
 import 'package:rillight/player/player_settings.dart';
@@ -82,7 +83,80 @@ class _UnauthorizedCoreDriver extends _CoreDriver {
   }
 }
 
+class _SlowDisposeCoreDriver extends _CoreDriver {
+  final releaseDispose = Completer<void>();
+
+  @override
+  Future<void> dispose() async {
+    await releaseDispose.future;
+    await super.dispose();
+  }
+}
+
 void main() {
+  test(
+    'same-session reopen clears track cache before old core stops',
+    () async {
+      final temp = await Directory.systemTemp.createTemp(
+        'rillight-core-reopen-',
+      );
+      final first = _SlowDisposeCoreDriver();
+      final second = _CoreDriver();
+      var creates = 0;
+      final backend = RillightVideoBackend(
+        settingsStore: MemoryPlayerSettingsStore(),
+        diskCacheDirectory: temp,
+        createPlayer: () async => creates++ == 0 ? first : second,
+      );
+      addTearDown(() async {
+        if (!first.releaseDispose.isCompleted) first.releaseDispose.complete();
+        await backend.dispose();
+        await temp.delete(recursive: true);
+      });
+      final request = VideoOpenRequest(
+        sessionId: 29,
+        url: Uri.parse('http://127.0.0.1:8765/stream.mp4'),
+      );
+      final snapshots = <BufferSnapshot>[];
+      final subscription = backend.events
+          .where((event) => event.kind == VideoEventKind.bufferSnapshot)
+          .listen((event) => snapshots.add(event.value as BufferSnapshot));
+      addTearDown(subscription.cancel);
+
+      await backend.open(request);
+      await backend.setAudioIndex(2);
+      final before = backend.bufferSnapshot;
+      expect(before.trackVersion, greaterThan(0));
+      backend.bufferSnapshot = BufferSnapshot(
+        sessionId: before.sessionId,
+        resourceId: before.resourceId,
+        representationVersion: before.representationVersion,
+        trackVersion: before.trackVersion,
+        sequence: before.sequence,
+        ranges: const [
+          BufferedRange(Duration(seconds: 10), Duration(seconds: 20)),
+        ],
+      );
+
+      final reopening = backend.open(request);
+      final cleared = backend.bufferSnapshot;
+      expect(first.disposed, isFalse);
+      expect(cleared.ranges, isEmpty);
+      expect(cleared.unknownReason, 'reconnecting');
+      expect(cleared.sessionId, before.sessionId);
+      expect(cleared.sequence, greaterThan(before.sequence));
+      expect(cleared.trackVersion, greaterThan(before.trackVersion));
+      first.releaseDispose.complete();
+      await reopening;
+      expect(second.request, isNotNull);
+      expect(snapshots.last.sequence, greaterThanOrEqualTo(cleared.sequence));
+      expect(
+        snapshots.last.trackVersion,
+        greaterThanOrEqualTo(cleared.trackVersion),
+      );
+    },
+  );
+
   test(
     'owned backend sends only sealed URL and filters stale core events',
     () async {

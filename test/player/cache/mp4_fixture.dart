@@ -79,7 +79,14 @@ class FragmentedMp4Fixture {
   final int firstFragmentEnd;
 }
 
-FragmentedMp4Fixture fragmentedMp4Fixture({bool videoStartsWithSync = true}) {
+FragmentedMp4Fixture fragmentedMp4Fixture({
+  bool videoStartsWithSync = true,
+  bool includeVideo = true,
+  bool includeAudio = true,
+}) {
+  if (!includeVideo && !includeAudio) {
+    throw ArgumentError('At least one track is required');
+  }
   final ftyp = _box('ftyp', [
     ...ascii.encode('iso6'),
     ..._u32(0),
@@ -106,9 +113,12 @@ FragmentedMp4Fixture fragmentedMp4Fixture({bool videoStartsWithSync = true}) {
     ..._u32(0x01010000),
   ]);
   final moov = _box('moov', [
-    ...track(1, 'vide'),
-    ...track(2, 'soun'),
-    ..._box('mvex', [...trex(1), ...trex(2)]),
+    if (includeVideo) ...track(1, 'vide'),
+    if (includeAudio) ...track(2, 'soun'),
+    ..._box('mvex', [
+      if (includeVideo) ...trex(1),
+      if (includeAudio) ...trex(2),
+    ]),
   ]);
 
   List<int> fragment(int baseTime) {
@@ -129,18 +139,34 @@ FragmentedMp4Fixture fragmentedMp4Fixture({bool videoStartsWithSync = true}) {
       return _box('traf', [...tfhd, ...tfdt, ...trun]);
     }
 
-    List<int> moof(int videoOffset, int audioOffset) =>
-        _box('moof', [...traf(1, videoOffset), ...traf(2, audioOffset)]);
+    List<int> moof(int videoOffset, int audioOffset) => _box('moof', [
+      if (includeVideo) ...traf(1, videoOffset),
+      if (includeAudio) ...traf(2, audioOffset),
+    ]);
     final provisional = moof(0, 0);
-    final actualMoof = moof(provisional.length + 8, provisional.length + 12);
-    final mdat = _box('mdat', List.generate(8, (i) => i + baseTime));
+    final actualMoof = moof(
+      provisional.length + 8,
+      provisional.length + 8 + (includeVideo ? 4 : 0),
+    );
+    final mdat = _box(
+      'mdat',
+      List.generate(
+        (includeVideo ? 4 : 0) + (includeAudio ? 4 : 0),
+        (i) => i + baseTime,
+      ),
+    );
     return [...actualMoof, ...mdat];
   }
 
   final first = fragment(0);
   final second = fragment(2000);
   final firstMoofStart = ftyp.length + moov.length;
-  final firstMdatStart = firstMoofStart + first.length - 16;
+  final firstMdatStart =
+      firstMoofStart +
+      first.length -
+      (includeVideo ? 4 : 0) -
+      (includeAudio ? 4 : 0) -
+      8;
   final firstFragmentEnd = firstMoofStart + first.length;
   return FragmentedMp4Fixture(
     bytes: Uint8List.fromList([...ftyp, ...moov, ...first, ...second]),

@@ -779,6 +779,42 @@ void main() {
   );
 
   test(
+    'server output above requested quality restores prior selection',
+    () async {
+      server.forcedTranscodeOutputBitrate = 8000000;
+      final controller = await startStandaloneController();
+      addTearDown(controller.dispose);
+      await controller.seekTo(const Duration(seconds: 42));
+      await controller.togglePlay();
+      final previous = controller.maxStreamingBitrate;
+      final opens = backend.openCount;
+
+      await controller.setMaxBitrate(4000000);
+
+      expect(backend.openCount, opens + 2);
+      expect(controller.maxStreamingBitrate, previous);
+      expect(controller.isPlaying, isFalse);
+      expect(backend.openedPaused, isTrue);
+      expect(backend.openedStart, const Duration(seconds: 42));
+      expect(controller.error, isNull);
+      expect(controller.trackFailure, contains('did not confirm'));
+    },
+  );
+
+  test('unverifiable transcode cap keeps prior quality', () async {
+    server.omitTranscodeOutputBitrates = true;
+    final controller = await startStandaloneController();
+    addTearDown(controller.dispose);
+    final previous = controller.maxStreamingBitrate;
+
+    await controller.setMaxBitrate(4000000);
+
+    expect(controller.maxStreamingBitrate, previous);
+    expect(controller.error, isNull);
+    expect(controller.trackFailure, contains('did not confirm'));
+  });
+
+  test(
     'close waits for Stopped before onClose and reports the last position',
     () async {
       var stoppedAtClose = -1;

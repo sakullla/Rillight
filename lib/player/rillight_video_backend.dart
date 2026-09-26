@@ -215,15 +215,19 @@ class RillightVideoBackend extends VideoBackend
   Future<void> _open(VideoOpenRequest request) async {
     if (_disposed) throw StateError('Player backend disposed');
     final generation = ++_generation;
-    await _stopSession(keepAndroidPlayer: true);
-    if (_disposed || generation != _generation) return;
+    final sameSession = _sessionId == request.sessionId;
     _sessionId = request.sessionId;
     _coreSession = 'app-${request.sessionId}-$generation';
     position = request.start;
     duration = buffer = Duration.zero;
     isPlaying = false;
     selectedAudioIndex = selectedSubtitleIndex = null;
-    _trackVersion = _bufferSequence = 0;
+    if (sameSession) {
+      ++_trackVersion;
+      ++_bufferSequence;
+    } else {
+      _trackVersion = _bufferSequence = 0;
+    }
     _lastProxySequence = -1;
     _trackSupportKnown = false;
     _opened = false;
@@ -234,9 +238,13 @@ class RillightVideoBackend extends VideoBackend
     bufferSnapshot = BufferSnapshot.empty(
       sessionId: request.sessionId,
       resourceId: request.url.toString(),
-      unknownReason: 'preparing',
+      trackVersion: _trackVersion,
+      sequence: _bufferSequence,
+      unknownReason: sameSession ? 'reconnecting' : 'preparing',
     );
     _emit(VideoEventKind.bufferSnapshot, bufferSnapshot, generation);
+    await _stopSession(keepAndroidPlayer: true);
+    if (_disposed || generation != _generation) return;
     try {
       final settings =
           await (_settingsStore ??= await openPlayerSettingsStore()).read();

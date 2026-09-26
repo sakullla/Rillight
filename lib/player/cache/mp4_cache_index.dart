@@ -8,10 +8,17 @@ import 'matroska_cache_index.dart';
 /// edit list, encryption, external data reference, or unsupported fragment
 /// leaves the cache timeline unknown instead of estimating it from bitrate.
 class Mp4CacheIndex {
-  Mp4CacheIndex._(this._units, this.total);
+  Mp4CacheIndex._(
+    this._units,
+    this.total, {
+    required this.hasVideo,
+    required this.hasAudio,
+  });
 
   final List<_PlayableUnit> _units;
   final int total;
+  final bool hasVideo;
+  final bool hasAudio;
 
   static Future<Mp4CacheIndex?> load({
     required int total,
@@ -125,7 +132,12 @@ class Mp4CacheIndex {
         units.add(_PlayableUnit(begin, end, required));
       }
       if (units.isEmpty) return null;
-      return Mp4CacheIndex._(units, total);
+      return Mp4CacheIndex._(
+        units,
+        total,
+        hasVideo: video != null,
+        hasAudio: audio != null,
+      );
     } on FormatException {
       return null;
     } on RangeError {
@@ -362,7 +374,12 @@ Future<Mp4CacheIndex?> _loadFragmented({
     if (units[i].startUs < units[i - 1].endUs) return null;
   }
   if (units.isEmpty) return null;
-  return Mp4CacheIndex._(units, total);
+  return Mp4CacheIndex._(
+    units,
+    total,
+    hasVideo: video != null,
+    hasAudio: audio != null,
+  );
 }
 
 _FragmentTrack? _fragmentTrack(Uint8List bytes, _Box box) {
@@ -491,7 +508,7 @@ _FragmentSamples? _parseFragmentTrack({
   final runFlags = _u32(bytes, trun.data) & 0xffffff;
   if (runFlags & 1 == 0 || runFlags & ~0x000705 != 0) return null;
   final count = _u32(bytes, trun.data + 4);
-  if (count == 0 || count > 200000) return null;
+  if (count == 0 || count > 8192) return null;
   var cursor = trun.data + 8;
   var dataOffset = _u32(bytes, cursor);
   if (dataOffset > 0x7fffffff) dataOffset -= 0x100000000;

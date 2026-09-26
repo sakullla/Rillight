@@ -5,6 +5,8 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import 'cache/http_cache_policy.dart';
+import 'cache/hls_cache_index.dart';
+import 'cache/hls_fmp4_probe.dart';
 import 'cache/matroska_cache_index.dart';
 import 'cache/mp4_cache_index.dart';
 import 'cache/session_byte_cache.dart';
@@ -73,6 +75,12 @@ class PlaybackHttpProxy {
   final _roles = <String, PlaybackResourceRole>{};
   final _hlsNext = <String, _HlsNext>{};
   final _hlsOwners = <String, Set<String>>{};
+  final _hlsPlaylists = <String, _HlsPlaylistState>{};
+  final _hlsSegmentOwners = <String, String>{};
+  final _hlsDependencyKeys = <String>{};
+  final _hlsActiveOwners = <String>{};
+  final _hlsProbeCache = <String, HlsFmp4ProbeResult>{};
+  String? _hlsUnknownReason;
   final _representations = <String, _Representation>{};
   final _reads = <_ProxyRead>{};
   final _loads = <String, _SharedLoad>{};
@@ -122,6 +130,7 @@ class PlaybackHttpProxy {
     _timelineIdentity = null;
     _cachedTimeline = const [];
     _timelineSequence++;
+    if (_hlsPlaylists.isNotEmpty) _hlsUnknownReason = 'hlsTimingUnavailable';
     _readAheadBypass.clear();
     await previous?.close();
   }
@@ -141,6 +150,7 @@ class PlaybackHttpProxy {
     if (degradation != null && degradation != 'disk-timeout') {
       return 'cacheUncertain';
     }
+    if (_hlsPlaylists.isNotEmpty) return _hlsUnknownReason;
     if (_hlsNext.isNotEmpty && _readAhead == null) {
       return 'hlsTimingUnavailable';
     }
@@ -196,6 +206,8 @@ class PlaybackHttpProxy {
     'readAheadBypassedResources': _readAheadBypass.length,
     'hlsNextSegments': _hlsNext.length,
     'hlsIndexBytes': _hlsIndexBytes,
+    'hlsPlaylists': _hlsPlaylists.length,
+    'hlsActivePlaylists': _hlsActiveOwners.length,
     'segmentPrefetchActive': _segmentPrefetch != null,
     'segmentPrefetchPending': _pendingSegmentPrefetch.length,
     ...?_readAhead?.diagnostics,
@@ -231,6 +243,10 @@ class PlaybackHttpProxy {
   }
 
   Future<void> refreshTimeline(Duration duration) async {
+    if (_hlsPlaylists.isNotEmpty) {
+      await _refreshHlsTimeline(duration);
+      return;
+    }
     final ahead = _readAhead;
     if (_closed ||
         _refreshingTimeline ||
@@ -293,7 +309,7 @@ class PlaybackHttpProxy {
       if (_closed || !identical(ahead, _readAhead)) return;
       _timelineIndex = index;
       if (index != null) {
-        _cachedTimeline = index.ranges(bytes, duration);
+        _cachedTimeline = await index.ranges(bytes, duration, read: read);
       } else {
         final mp4 =
             _mp4TimelineIndex ??
@@ -311,6 +327,283 @@ class PlaybackHttpProxy {
       _cacheWorkspace -= 1024 * 1024;
       _refreshingTimeline = false;
     }
+  }
+
+  Future<void> _refreshHlsTimeline(Duration duration) async {
+    if (_closed ||
+        _refreshingTimeline ||
+        cache == null ||
+        duration <= Duration.zero) {
+      return;
+    }
+    _refreshingTimeline = true;
+    try {
+      final owners = _hlsActiveOwners.where(_hlsPlaylists.containsKey).toList()
+        ..sort();
+      final identity = 'hls:${owners.join(':')}';
+      if (_timelineIdentity != identity) {
+        _timelineIdentity = identity;
+        _cachedTimeline = const [];
+        _timelineSequence++;
+      }
+      if (owners.isEmpty || owners.length > 2) {
+        _hlsUnknownReason = 'hlsSelectionUnverified';
+        _cachedTimeline = const [];
+        _timelineSequence++;
+        return;
+      }
+      final resources = <Uri, HlsCachedResource>{};
+      var probesLeft = 2;
+      final mapped = <_HlsMappedPlaylist>[];
+      for (final owner in owners) {
+        final state = _hlsPlaylists[owner]!;
+        final index = state.index;
+        if (index == null ||
+            index.isLive ||
+            index.mediaSequence != 0 ||
+            index.segments.any(
+              (segment) =>
+                  segment.discontinuitySequence !=
+                  index.segments.first.discontinuitySequence,
+            )) {
+          _hlsUnknownReason = 'hlsPlaylistMappingUnavailable';
+          _cachedTimeline = const [];
+          _timelineSequence++;
+          return;
+        }
+        for (final segment in index.segments) {
+          if (segment.mapUri == null || segment.keyUri != null) continue;
+          final media = await _hlsResource(segment.uri);
+          final init = await _hlsResource(segment.mapUri!);
+          if (media == null || init == null) {
+            state.verified.remove(segment.sequence);
+            continue;
+          }
+          resources[segment.uri] = media.availability;
+          resources[segment.mapUri!] = init.availability;
+          final signature =
+              '${media.key}:${media.representation.generation}:'
+              '${segment.byteRange?.start ?? -1}:${segment.byteRange?.end ?? -1}:'
+              '${init.key}:${init.representation.generation}:'
+              '${segment.mapRange?.start ?? -1}:${segment.mapRange?.end ?? -1}';
+          var verified = state.verified[segment.sequence];
+          if (verified != null && verified.identity != signature) {
+            state.verified.remove(segment.sequence);
+            verified = null;
+          }
+          if (verified == null &&
+              probesLeft > 0 &&
+              media.availability.contains(segment.byteRange) &&
+              init.availability.contains(segment.mapRange)) {
+            probesLeft--;
+            var result = _hlsProbeCache[signature];
+            if (result == null && _reserveCacheWorkspace(1024 * 1024)) {
+              _charge(1024 * 1024);
+              try {
+                if (await _hlsVerifyReadable(init, segment.mapRange) &&
+                    await _hlsVerifyReadable(media, segment.byteRange)) {
+                  final initStart = segment.mapRange?.start ?? 0;
+                  final initLength = segment.mapRange == null
+                      ? init.representation.total
+                      : segment.mapRange!.end - initStart;
+                  final mediaStart = segment.byteRange?.start ?? 0;
+                  final mediaLength = segment.byteRange == null
+                      ? media.representation.total
+                      : segment.byteRange!.end - mediaStart;
+                  result = await probeHlsFmp4Segment(
+                    initializationLength: initLength,
+                    segmentLength: mediaLength,
+                    readInitialization: (offset, length) =>
+                        _hlsReadExact(init, initStart + offset, length),
+                    readSegment: (offset, length) =>
+                        _hlsReadExact(media, mediaStart + offset, length),
+                  );
+                }
+              } finally {
+                _charge(-1024 * 1024);
+                _cacheWorkspace -= 1024 * 1024;
+              }
+              if (result != null) {
+                if (_hlsProbeCache.length >= 64) {
+                  _hlsProbeCache.remove(_hlsProbeCache.keys.first);
+                }
+                _hlsProbeCache[signature] = result;
+              }
+            }
+            if (result != null) {
+              verified = _HlsVerifiedProbe(signature, result);
+              state.verified[segment.sequence] = verified;
+            }
+          }
+        }
+        final first = state.verified[index.segments.first.sequence]?.result;
+        if (first == null) continue;
+        final times = <int, HlsVerifiedSegmentTime>{};
+        var consistent = true;
+        for (final segment in index.segments) {
+          final result = state.verified[segment.sequence]?.result;
+          if (result == null) continue;
+          if (result.hasVideo != first.hasVideo ||
+              result.hasAudio != first.hasAudio) {
+            consistent = false;
+            break;
+          }
+          final start = result.start - first.start;
+          final end = result.end - first.start;
+          if (start < Duration.zero || end <= start) {
+            consistent = false;
+            break;
+          }
+          times[segment.sequence] = HlsVerifiedSegmentTime(
+            start: start,
+            end: end,
+            timelineEpoch: 0,
+            decodeStartVerified: true,
+            requiresInitialization: true,
+          );
+        }
+        if (!consistent) continue;
+        final timeline = HlsCacheIndex.parseMediaPlaylist(
+          text: state.text,
+          playlistUri: state.base,
+          verifiedTimes: times,
+        );
+        if (timeline != null) {
+          mapped.add(
+            _HlsMappedPlaylist(
+              timeline,
+              first.hasVideo,
+              first.hasAudio,
+              first.start,
+            ),
+          );
+        }
+      }
+      List<CachedTimeRange> ranges = const [];
+      if (mapped.length == 1 &&
+          (mapped.single.hasAudio && mapped.single.hasVideo ||
+              mapped.single.hasAudio && _hlsPlaylists.length == 1)) {
+        ranges = mapped.single.index.ranges(
+          resources: resources,
+          usableSessionKeys: const {},
+        );
+      } else if (mapped.length == 2) {
+        final videos = mapped.where((item) => item.hasVideo && !item.hasAudio);
+        final audios = mapped.where((item) => item.hasAudio && !item.hasVideo);
+        if (videos.length == 1 &&
+            audios.length == 1 &&
+            videos.single.rawStart == audios.single.rawStart) {
+          ranges = videos.single.index.ranges(
+            resources: resources,
+            usableSessionKeys: const {},
+            selectedAudio: audios.single.index,
+          );
+        }
+      }
+      _cachedTimeline = [
+        for (final range in ranges)
+          if (range.start < duration && range.end > Duration.zero)
+            CachedTimeRange(
+              range.start < Duration.zero ? Duration.zero : range.start,
+              range.end > duration ? duration : range.end,
+            ),
+      ];
+      _hlsUnknownReason = _cachedTimeline.isEmpty
+          ? 'hlsTimingUnavailable'
+          : null;
+      _timelineSequence++;
+    } catch (_) {
+      _cachedTimeline = const [];
+      _hlsUnknownReason = 'hlsCacheUncertain';
+      _timelineSequence++;
+    } finally {
+      _refreshingTimeline = false;
+    }
+  }
+
+  Future<_HlsResource?> _hlsResource(Uri uri) async {
+    final key = _hlsRouteIdentity(uri);
+    final representation = key == null ? null : _representations[key];
+    if (key == null ||
+        representation == null ||
+        !representation.complete ||
+        representation.total <= 0 ||
+        representation.total > 16 * 1024 * 1024) {
+      return null;
+    }
+    final bytes = await cache!.availableRanges(
+      resource: key,
+      generation: representation.generation,
+    );
+    if (bytes == null || !identical(_representations[key], representation)) {
+      return null;
+    }
+    return _HlsResource(
+      key,
+      representation,
+      HlsCachedResource(length: representation.total, ranges: bytes),
+    );
+  }
+
+  Future<bool> _hlsVerifyReadable(
+    _HlsResource resource,
+    CachedByteRange? requested,
+  ) async {
+    final start = requested?.start ?? 0;
+    final end = requested?.end ?? resource.representation.total;
+    if (start < 0 ||
+        end <= start ||
+        end > resource.representation.total ||
+        end - start > 16 * 1024 * 1024) {
+      return false;
+    }
+    var cursor = start;
+    while (cursor < end) {
+      final hit = await cache!.read(
+        resource: resource.key,
+        generation: resource.representation.generation,
+        offset: cursor,
+        maxLength: min(64 * 1024, end - cursor),
+        countHit: false,
+      );
+      if (hit == null ||
+          hit.bytes.isEmpty ||
+          !identical(_representations[resource.key], resource.representation)) {
+        return false;
+      }
+      cursor += hit.bytes.length;
+    }
+    return true;
+  }
+
+  Future<Uint8List?> _hlsReadExact(
+    _HlsResource resource,
+    int offset,
+    int length,
+  ) async {
+    if (length < 0 ||
+        length > 512 * 1024 ||
+        offset < 0 ||
+        offset + length > resource.representation.total) {
+      return null;
+    }
+    final output = BytesBuilder(copy: false);
+    while (output.length < length) {
+      final hit = await cache!.read(
+        resource: resource.key,
+        generation: resource.representation.generation,
+        offset: offset + output.length,
+        maxLength: min(64 * 1024, length - output.length),
+        countHit: false,
+      );
+      if (hit == null ||
+          hit.bytes.isEmpty ||
+          !identical(_representations[resource.key], resource.representation)) {
+        return null;
+      }
+      output.add(hit.bytes);
+    }
+    return output.takeBytes();
   }
 
   Uri register(
@@ -658,6 +951,12 @@ class PlaybackHttpProxy {
   /// position-independent subtitle loads; close cancels every outstanding read.
   void cancelPendingReads({bool preserveSubtitles = false}) {
     _seekGeneration++;
+    if (_hlsPlaylists.isNotEmpty) {
+      _hlsActiveOwners.clear();
+      _cachedTimeline = const [];
+      _hlsUnknownReason = 'hlsSelectionUnverified';
+      _timelineSequence++;
+    }
     _cancelSegmentPrefetch(clearPending: true);
     _readAhead?.stop();
     for (final read in _reads.toList()) {
@@ -836,6 +1135,11 @@ class PlaybackHttpProxy {
           ).hasMatch(incoming.headers.value('range')!));
 
   void _invalidate(String key, _Representation representation) {
+    if (_hlsDependencyKeys.contains(key)) {
+      _cachedTimeline = const [];
+      _hlsUnknownReason = 'hlsResourceChanged';
+      _timelineSequence++;
+    }
     if (_readAhead?.resource == key) {
       _cachedTimeline = const [];
       _timelineIdentity = null;
@@ -1649,6 +1953,8 @@ class PlaybackHttpProxy {
           _roles[key] == PlaybackResourceRole.segment &&
           incoming.response.statusCode >= 200 &&
           incoming.response.statusCode < 300) {
+        final owner = _hlsSegmentOwners[key];
+        if (owner != null) _hlsActiveOwners.add(owner);
         _scheduleSegmentPrefetch(key);
       }
       _pumpSegmentPrefetch();
@@ -2501,6 +2807,8 @@ class PlaybackHttpProxy {
     final nextSegments = <String, _HlsNext>{};
     var nextSegmentBytes = 0;
     var playlistNext = false;
+    StringBuffer? timelineText = StringBuffer();
+    var timelineTextBytes = 0;
     String child(Uri url, PlaybackResourceRole role, String context) {
       final result = register(url, role: role, context: context);
       if (role == PlaybackResourceRole.initialization) {
@@ -2587,6 +2895,14 @@ class PlaybackHttpProxy {
           in source.transform(utf8.decoder).transform(const LineSplitter())) {
         read.check();
         final rewritten = rewrite(line);
+        if (timelineText != null) {
+          timelineTextBytes += utf8.encode(rewritten).length + 1;
+          if (timelineTextBytes <= 128 * 1024) {
+            timelineText.write('$rewritten\n');
+          } else {
+            timelineText = null;
+          }
+        }
         read.outputStarted = true;
         output.add(utf8.encode('$rewritten\n'));
         await output.flush();
@@ -2596,7 +2912,10 @@ class PlaybackHttpProxy {
             ? PlaybackCacheStream.stable
             : PlaybackCacheStream.conservative,
       );
-      if (stable && !master) _replaceHlsIndex(parent, nextSegments);
+      if (!master) {
+        if (stable) _replaceHlsIndex(parent, nextSegments);
+        _setHlsPlaylist(parent, base, timelineText?.toString());
+      }
     } finally {
       _charge(-512 * 1024);
       _cacheWorkspace -= 512 * 1024;
@@ -2620,6 +2939,67 @@ class PlaybackHttpProxy {
     if (owned.isNotEmpty) _hlsOwners[parent] = owned;
   }
 
+  void _setHlsPlaylist(String parent, Uri base, String? text) {
+    final previous = _hlsPlaylists.remove(parent);
+    if (previous != null) {
+      for (final key in previous.segmentKeys) {
+        if (_hlsSegmentOwners[key] == parent) _hlsSegmentOwners.remove(key);
+      }
+    }
+    final index = text == null
+        ? null
+        : HlsCacheIndex.parseMediaPlaylist(
+            text: text,
+            playlistUri: base,
+            verifiedTimes: const {},
+          );
+    final keys = <String>{};
+    if (index != null) {
+      for (final segment in index.segments) {
+        final key = _hlsRouteIdentity(segment.uri);
+        if (key == null) continue;
+        _hlsSegmentOwners[key] = parent;
+        keys.add(key);
+      }
+    }
+    if (_hlsPlaylists.length >= 4) {
+      final oldest = _hlsPlaylists.keys.first;
+      _hlsActiveOwners.remove(oldest);
+      final discarded = _hlsPlaylists.remove(oldest);
+      for (final key in discarded?.segmentKeys ?? const <String>{}) {
+        if (_hlsSegmentOwners[key] == oldest) _hlsSegmentOwners.remove(key);
+      }
+    }
+    _hlsPlaylists[parent] = _HlsPlaylistState(base, text ?? '', index, keys);
+    _hlsDependencyKeys.clear();
+    for (final playlist in _hlsPlaylists.values) {
+      for (final segment
+          in playlist.index?.segments ?? const <HlsIndexedSegment>[]) {
+        final segmentKey = _hlsRouteIdentity(segment.uri);
+        final mapKey = segment.mapUri == null
+            ? null
+            : _hlsRouteIdentity(segment.mapUri!);
+        if (segmentKey != null) _hlsDependencyKeys.add(segmentKey);
+        if (mapKey != null) _hlsDependencyKeys.add(mapKey);
+      }
+    }
+    _cachedTimeline = const [];
+    _hlsUnknownReason = text == null
+        ? 'hlsManifestTooLarge'
+        : 'hlsTimingUnavailable';
+    _timelineSequence++;
+  }
+
+  String? _hlsRouteIdentity(Uri uri) {
+    if (uri.host != '127.0.0.1' ||
+        uri.port != _server.port ||
+        uri.pathSegments.length < 3 ||
+        uri.pathSegments.first != _secret) {
+      return null;
+    }
+    return _routes.open(uri.pathSegments[1])?.identity;
+  }
+
   Future<void> close() async {
     if (_closed) return;
     _closed = true;
@@ -2637,6 +3017,11 @@ class PlaybackHttpProxy {
     _privateSubtitles.clear();
     _hlsNext.clear();
     _hlsOwners.clear();
+    _hlsPlaylists.clear();
+    _hlsSegmentOwners.clear();
+    _hlsDependencyKeys.clear();
+    _hlsActiveOwners.clear();
+    _hlsProbeCache.clear();
     _representations.clear();
     _roles.clear();
   }
@@ -2705,6 +3090,42 @@ class _HlsNext {
   final String owner;
   int get cost =>
       url.toString().length + (initialization?.toString().length ?? 0) + 64;
+}
+
+class _HlsPlaylistState {
+  _HlsPlaylistState(this.base, this.text, this.index, this.segmentKeys);
+
+  final Uri base;
+  final String text;
+  final HlsCacheIndex? index;
+  final Set<String> segmentKeys;
+  final verified = <int, _HlsVerifiedProbe>{};
+}
+
+class _HlsVerifiedProbe {
+  const _HlsVerifiedProbe(this.identity, this.result);
+  final String identity;
+  final HlsFmp4ProbeResult result;
+}
+
+class _HlsMappedPlaylist {
+  const _HlsMappedPlaylist(
+    this.index,
+    this.hasVideo,
+    this.hasAudio,
+    this.rawStart,
+  );
+  final HlsCacheIndex index;
+  final bool hasVideo;
+  final bool hasAudio;
+  final Duration rawStart;
+}
+
+class _HlsResource {
+  const _HlsResource(this.key, this.representation, this.availability);
+  final String key;
+  final _Representation representation;
+  final HlsCachedResource availability;
 }
 
 class _UnsafeForegroundResume implements Exception {

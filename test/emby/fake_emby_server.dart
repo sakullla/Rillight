@@ -479,6 +479,8 @@ class FakeEmbyServer {
   Map<String, dynamic>? lastDeviceProfile;
   Map<String, dynamic>? lastPlaybackInfoBody;
   int? progressStatus;
+  int? forcedTranscodeOutputBitrate;
+  bool omitTranscodeOutputBitrates = false;
 
   /// 字幕提取接口的状态码;为 null 时返回一段文本字幕。
   int? subtitleStatus;
@@ -847,10 +849,18 @@ class FakeEmbyServer {
       'MediaStreams': [for (final stream in streams) stream.toJson()],
     };
     if (transcode) {
+      final outputBitrate =
+          forcedTranscodeOutputBitrate ?? maxBitrate ?? 8000000;
+      const audioBitrate = 192000;
       var transcoding =
           '/videos/${item.id}/master.m3u8?MediaSourceId=$id'
           '&PlaySessionId=$playSessionId'
           '&MaxStreamingBitrate=${maxBitrate ?? 8000000}';
+      if (!omitTranscodeOutputBitrates) {
+        transcoding +=
+            '&VideoBitrate=${outputBitrate - audioBitrate}'
+            '&AudioBitrate=$audioBitrate';
+      }
       if (startTicks > 0) {
         transcoding += '&StartTimeTicks=$startTicks';
       }

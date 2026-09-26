@@ -828,10 +828,7 @@ class PlayerController extends ChangeNotifier {
       requestedBitrate: bitrate,
       startPaused: paused,
     );
-    final source = resolved?.mediaSource;
-    final withinLimit = source?.bitrate != null && source!.bitrate! <= bitrate;
-    if (opened &&
-        (bitrate == kCoreMaxStreamingBitrate || isTranscode || withinLimit)) {
+    if (opened && _qualityConfirmed(bitrate)) {
       maxStreamingBitrate = bitrate;
       trackFailure = null;
       _emit();
@@ -847,6 +844,37 @@ class PlayerController extends ChangeNotifier {
       trackFailure = 'The server did not confirm this quality';
       _emit();
     }
+  }
+
+  bool _qualityConfirmed(int requestedBitrate) {
+    if (requestedBitrate == kCoreMaxStreamingBitrate) return true;
+    final playback = resolved;
+    if (playback == null) return false;
+    final source = playback.mediaSource;
+    if (!playback.isTranscode) {
+      final bitrate = source.bitrate;
+      return bitrate != null && bitrate > 0 && bitrate <= requestedBitrate;
+    }
+
+    // A transcode URL can echo MaxStreamingBitrate without honoring it. Only
+    // the server's selected video and audio bitrates confirm the output cap.
+    final url = source.transcodingUrl;
+    final uri = url == null ? null : Uri.tryParse(url);
+    if (uri == null) return false;
+    int? bitrateParameter(String name) {
+      final matches = uri.queryParametersAll.entries
+          .where((entry) => entry.key.toLowerCase() == name.toLowerCase())
+          .toList();
+      if (matches.length != 1 || matches.single.value.length != 1) return null;
+      return int.tryParse(matches.single.value.single);
+    }
+
+    final video = bitrateParameter('VideoBitrate');
+    final audio = bitrateParameter('AudioBitrate');
+    if (video == null || audio == null || video <= 0 || audio < 0) {
+      return false;
+    }
+    return video <= requestedBitrate && audio <= requestedBitrate - video;
   }
 
   List<int> get availableBitrates {

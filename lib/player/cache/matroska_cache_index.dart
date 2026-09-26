@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
 
@@ -18,9 +19,25 @@ class CachedTimeRange {
 /// A bounded Matroska Cues reader. No bitrate/byte-percentage estimates: only
 /// complete indexed Cluster intervals are translated into media timestamps.
 class MatroskaCacheIndex {
-  MatroskaCacheIndex._(this.points, this.total);
+  MatroskaCacheIndex._(
+    this.points,
+    this.total,
+    this._metadataEnd,
+    this._cuesOffset,
+    this._cuesLength,
+    this._videoTrack,
+    this._audioTracks,
+    this._timecodeScale,
+  );
   final List<(int, Duration)> points;
   final int total;
+  final int _metadataEnd;
+  final int _cuesOffset;
+  final int _cuesLength;
+  final int _videoTrack;
+  final Set<int> _audioTracks;
+  final int _timecodeScale;
+  final Set<int> _verifiedClusters = {};
 
   static Future<MatroskaCacheIndex?> load({
     required int total,
@@ -95,17 +112,39 @@ class MatroskaCacheIndex {
       }
       if (scale <= 0 || scale > 1000000000) return null;
       int? videoTrack;
+      final audioTracks = <int>{};
       for (final track in _children(tracks, _element(tracks, 0))) {
         if (track.id != 0xae) continue;
         int? number;
         int? type;
+        String? codec;
         for (final child in _children(tracks, track)) {
           if (child.id == 0xd7) number = _uint(tracks, child);
           if (child.id == 0x83) type = _uint(tracks, child);
+          if (child.id == 0x86) {
+            codec = ascii.decode(tracks.sublist(child.data, child.end));
+          }
           // Nonstandard per-track timestamp scales need an explicit mapping.
           if (child.id == 0x23314f) return null;
         }
-        if (type == 1 && videoTrack == null) videoTrack = number;
+        if (type == 1) {
+          // The selected video track is not supplied to this index. Multiple
+          // video tracks cannot be mapped without that identity.
+          if (videoTrack != null || number == null) return null;
+          videoTrack = number;
+        }
+        if (type == 2) {
+          if (number == null ||
+              !const {
+                'A_AAC',
+                'A_AC3',
+                'A_EAC3',
+                'A_MPEG/L3',
+              }.contains(codec)) {
+            return null;
+          }
+          audioTracks.add(number);
+        }
       }
       if (videoTrack == null) return null;
       final points = <int, int>{};
@@ -139,10 +178,19 @@ class MatroskaCacheIndex {
       for (var i = 1; i < ordered.length; i++) {
         if (ordered[i].value < ordered[i - 1].value) return null;
       }
-      return MatroskaCacheIndex._([
-        for (final point in ordered)
-          (point.key, Duration(microseconds: point.value * scale ~/ 1000)),
-      ], total);
+      return MatroskaCacheIndex._(
+        [
+          for (final point in ordered)
+            (point.key, Duration(microseconds: point.value * scale ~/ 1000)),
+        ],
+        total,
+        ordered.first.key,
+        cuesOffset,
+        cues.length,
+        videoTrack,
+        audioTracks,
+        scale,
+      );
     } on FormatException {
       return null;
     } on RangeError {
@@ -150,23 +198,32 @@ class MatroskaCacheIndex {
     }
   }
 
-  List<CachedTimeRange> ranges(List<CachedByteRange> bytes, Duration duration) {
+  /// Reports only complete clusters with still-cached initialization, Cues,
+  /// an independently decodable video block and every declared audio track.
+  /// Requiring all audio tracks is conservative when the selected track is
+  /// unknown; unsupported BlockGroup or lacing layouts remain unknown.
+  Future<List<CachedTimeRange>> ranges(
+    List<CachedByteRange> bytes,
+    Duration duration, {
+    required Future<Uint8List?> Function(int offset, int length) read,
+  }) async {
     final result = <CachedTimeRange>[];
-    var rangeIndex = 0;
+    if (!_covers(bytes, 0, _metadataEnd) ||
+        !_covers(bytes, _cuesOffset, _cuesOffset + _cuesLength)) {
+      return result;
+    }
     for (var i = 0; i < points.length; i++) {
       final start = points[i];
       final endByte = i + 1 < points.length ? points[i + 1].$1 : total;
       final endTime = i + 1 < points.length ? points[i + 1].$2 : duration;
-      while (rangeIndex < bytes.length && bytes[rangeIndex].end <= start.$1) {
-        rangeIndex++;
-      }
-      if (rangeIndex == bytes.length) break;
-      if (bytes[rangeIndex].start > start.$1 ||
-          bytes[rangeIndex].end < endByte ||
+      if (!_covers(bytes, start.$1, endByte) ||
           start.$2 >= endTime ||
-          endTime > duration) {
+          endTime > duration ||
+          !(_verifiedClusters.contains(start.$1) ||
+              await _verifyCluster(start.$1, endByte, start.$2, read))) {
         continue;
       }
+      _verifiedClusters.add(start.$1);
       if (result.isNotEmpty && result.last.end == start.$2) {
         final previous = result.removeLast();
         result.add(CachedTimeRange(previous.start, endTime));
@@ -175,6 +232,84 @@ class MatroskaCacheIndex {
       }
     }
     return result;
+  }
+
+  bool _covers(List<CachedByteRange> bytes, int start, int end) {
+    if (start < 0 || end <= start || end > total) return false;
+    var cursor = start;
+    final ordered = bytes.toList()..sort((a, b) => a.start.compareTo(b.start));
+    for (final range in ordered) {
+      if (range.end <= cursor) continue;
+      if (range.start > cursor) return false;
+      cursor = max(cursor, range.end);
+      if (cursor >= end) return true;
+    }
+    return false;
+  }
+
+  Future<bool> _verifyCluster(
+    int offset,
+    int limit,
+    Duration cueTime,
+    Future<Uint8List?> Function(int offset, int length) read,
+  ) async {
+    try {
+      final header = await read(offset, min(16, total - offset));
+      if (header == null) return false;
+      final cluster = _element(header, 0);
+      if (cluster.id != 0x1f43b675 || offset + cluster.end > limit) {
+        return false;
+      }
+      int? clusterTime;
+      var keyframe = false;
+      final audioSeen = <int>{};
+      var cursor = offset + cluster.data;
+      var elements = 0;
+      while (cursor < offset + cluster.end && elements++ < 8192) {
+        final bytes = await read(cursor, min(16, total - cursor));
+        if (bytes == null) return false;
+        final child = _element(bytes, 0);
+        if (child.end <= child.data ||
+            cursor + child.end > offset + cluster.end) {
+          return false;
+        }
+        if (child.id == 0xe7) {
+          final value = await read(cursor + child.data, child.end - child.data);
+          if (value == null || value.length > 8 || value.isEmpty) return false;
+          clusterTime = 0;
+          for (final byte in value) {
+            clusterTime = (clusterTime! << 8) | byte;
+          }
+        } else if (child.id == 0xa3) {
+          final block = await read(
+            cursor + child.data,
+            min(16, child.end - child.data),
+          );
+          if (block == null) return false;
+          final (track, trackLength) = _vint(block, 0);
+          if (trackLength + 3 > block.length) return false;
+          final rawTime = (block[trackLength] << 8) | block[trackLength + 1];
+          final relativeTime = rawTime >= 0x8000 ? rawTime - 0x10000 : rawTime;
+          final flags = block[trackLength + 2];
+          if (track == _videoTrack &&
+              clusterTime != null &&
+              flags & 0x80 != 0 &&
+              flags & 0x06 == 0) {
+            final timestamp =
+                (clusterTime + relativeTime) * _timecodeScale ~/ 1000;
+            keyframe |= timestamp == cueTime.inMicroseconds;
+          }
+          if (_audioTracks.contains(track)) audioSeen.add(track);
+        }
+        if (keyframe && audioSeen.containsAll(_audioTracks)) return true;
+        cursor += child.end;
+      }
+      return false;
+    } on FormatException {
+      return false;
+    } on RangeError {
+      return false;
+    }
   }
 }
 
