@@ -1,4 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
+
+import 'package:cryptography/dart.dart';
+import 'package:dio/dio.dart';
 import 'dart:typed_data';
 
 import 'package:fake_async/fake_async.dart';
@@ -15,6 +19,7 @@ import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
+import 'package:rillight/emby/emby_errors.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/media_image/media_image.dart';
 
@@ -157,6 +162,301 @@ void main() {
     });
     expect(imageRequests(), hasLength(2));
   });
+
+  Future<void> pumpPosterStrip(
+    WidgetTester tester,
+    AuthController auth, {
+    required int count,
+    double cacheExtent = 400,
+  }) {
+    return tester.pumpWidget(
+      wrap(
+        auth,
+        SizedBox(
+          width: 120,
+          height: 180,
+          child: ListView.builder(
+            scrollCacheExtent: ScrollCacheExtent.pixels(cacheExtent),
+            itemExtent: 180,
+            itemCount: count,
+            itemBuilder: (context, index) {
+              return MediaImage(
+                key: ValueKey('poster-$index'),
+                item: EmbyItem(
+                  id: 'poster-$index',
+                  name: '海报$index',
+                  type: 'Movie',
+                  primaryImageTag: 'tag-$index',
+                ),
+                width: 120,
+                height: 180,
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
+  AuthController detachedAuth(_ControlledImageClient client) => AuthController(
+    client: client,
+    credentials: MemoryCredentialStore(),
+    servers: MemoryServerListStore(),
+  );
+
+  testWidgets(
+    'attached player client loads and isolates endpoint, user and logout',
+    (tester) async {
+      final client = _ControlledImageClient();
+      final auth = detachedAuth(client);
+      expect(auth.session, isNull);
+      expect(auth.isLoggedIn, isFalse);
+      await tester.pumpWidget(buildSubject(auth, withTag));
+      await pumpUntilImage(tester);
+      expect(client.requested, ['img-movie']);
+      expect(find.byType(Image), findsOneWidget);
+      var provider = tester.widget<Image>(find.byType(Image)).image;
+
+      for (final identity in [
+        ('https://second.example/emby', 'alice'),
+        ('https://second.example/emby', 'bob'),
+      ]) {
+        client.attachSession(
+          baseUrl: Uri.parse(identity.$1),
+          accessToken: 'synthetic',
+          userId: identity.$2,
+        );
+        await tester.pumpWidget(buildSubject(auth, withTag));
+        await pumpUntilImage(tester);
+        final next = tester.widget<Image>(find.byType(Image)).image;
+        expect(next, isNot(provider));
+        provider = next;
+      }
+      expect(client.requested, hasLength(3));
+      client.clearSession();
+      await tester.pumpWidget(buildSubject(auth, withTag));
+      await tester.pump();
+      expect(find.byType(Image), findsNothing);
+      expect(find.byType(PosterPlaceholder), findsOneWidget);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
+  testWidgets(
+    'chapter cache follows attached endpoint and drops late logout response',
+    (tester) async {
+      final client = _ControlledImageClient();
+      final auth = detachedAuth(client);
+      late BuildContext imageContext;
+      await tester.pumpWidget(
+        wrap(
+          auth,
+          Builder(
+            builder: (context) {
+              imageContext = context;
+              return const SizedBox();
+            },
+          ),
+        ),
+      );
+      Future<Uint8List?> chapter() => loadChapterImage(
+        imageContext,
+        itemId: 'chapter-item',
+        index: 0,
+        tag: 'tag',
+      );
+      expect(await chapter(), kTinyPng);
+      expect(await chapter(), kTinyPng);
+      expect(client.requested, hasLength(1));
+      client.attachSession(
+        baseUrl: Uri.parse('https://second.example/emby'),
+        accessToken: 'synthetic',
+        userId: 'alice',
+      );
+      client.hold = true;
+      final late = chapter();
+      await tester.pump();
+      expect(client.requested, hasLength(2));
+      client.clearSession();
+      client.pending['chapter-item']!.complete(kTinyPng);
+      expect(await late, isNull);
+      expect(await chapter(), isNull);
+      expect(client.requested, hasLength(2));
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
+  testWidgets(
+    'transient image failure retries while absent image remains negative cached',
+    (tester) async {
+      for (final failure in [
+        const EmbyException(EmbyFailureKind.timeout),
+        const EmbyException(EmbyFailureKind.unreachable),
+        const EmbyException(EmbyFailureKind.unknown, statusCode: 429),
+        const EmbyException(EmbyFailureKind.unknown, statusCode: 503),
+      ]) {
+        MediaImage.debugClearCache();
+        final client = _ControlledImageClient()..failures.add(failure);
+        await tester.pumpWidget(buildSubject(detachedAuth(client), withTag));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 201));
+        await pumpUntilImage(tester);
+        expect(client.requested, hasLength(2), reason: '$failure');
+        expect(find.byType(Image), findsOneWidget);
+        await tester.pumpWidget(const SizedBox.shrink());
+      }
+      MediaImage.debugClearCache();
+      final absent = _ControlledImageClient()
+        ..failures.add(
+          const EmbyException(EmbyFailureKind.unknown, statusCode: 404),
+        );
+      await tester.pumpWidget(buildSubject(detachedAuth(absent), withTag));
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+      expect(absent.requested, hasLength(1));
+      expect(find.byType(PosterPlaceholder), findsOneWidget);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
+  testWidgets(
+    'repeated transient failures stop after three attempts and remount can recover',
+    (tester) async {
+      final client = _ControlledImageClient()
+        ..failures.addAll(
+          List.filled(
+            10,
+            const EmbyException(EmbyFailureKind.unknown, statusCode: 503),
+          ),
+        );
+      final auth = detachedAuth(client);
+      await tester.pumpWidget(buildSubject(auth, withTag));
+      await tester.pump();
+      for (final delay in [201, 401, 601]) {
+        await tester.pump(Duration(milliseconds: delay));
+      }
+      await tester.pump(const Duration(seconds: 5));
+      expect(client.requested, hasLength(3));
+      expect(find.byType(PosterPlaceholder), findsOneWidget);
+      await tester.pumpWidget(const SizedBox.shrink());
+      client.failures.clear();
+      await tester.pumpWidget(buildSubject(auth, withTag));
+      await pumpUntilImage(tester);
+      expect(client.requested, hasLength(4));
+      expect(find.byType(Image), findsOneWidget);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
+  testWidgets(
+    'slow queue promotes newly visible poster and backscroll uses warm cache',
+    (tester) async {
+      final client = _ControlledImageClient()..hold = true;
+      final auth = detachedAuth(client);
+      await pumpPosterStrip(tester, auth, count: 24, cacheExtent: 10000);
+      await tester.pump();
+      expect(client.requested, List.generate(8, (i) => 'poster-$i'));
+      await tester.pump(const Duration(milliseconds: 500));
+      expect(client.requested, hasLength(8));
+      final position = tester
+          .state<ScrollableState>(find.byType(Scrollable))
+          .position;
+      position.jumpTo(15 * 180);
+      await tester.pump();
+      client.pending['poster-0']!.complete(kTinyPng);
+      await tester.pump();
+      expect(client.requested[8], 'poster-15');
+      expect(client.maxActive, 8);
+      client.pending['poster-15']!.complete(kTinyPng);
+      await tester.pump();
+      await pumpUntilImage(tester);
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('poster-15')),
+          matching: find.byType(Image),
+        ),
+        findsOneWidget,
+      );
+      position.jumpTo(0);
+      await tester.pump();
+      position.jumpTo(15 * 180);
+      MediaImageCache.instance.markScrollActivity();
+      await tester.pump();
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('poster-15')),
+          matching: find.byType(Image),
+        ),
+        findsOneWidget,
+      );
+      expect(client.requested.where((id) => id == 'poster-15'), hasLength(1));
+      await tester.pumpWidget(const SizedBox.shrink());
+      for (final pending in client.pending.values) {
+        if (!pending.isCompleted) pending.complete(kTinyPng);
+      }
+      await tester.pump(MediaImageCache.defaultScrollIdle);
+    },
+  );
+
+  test(
+    'deduplicated queue keeps current consumer when its first widget leaves',
+    () async {
+      final cache = MediaImageCache.instance;
+      final blockers = List.generate(8, (_) => Completer<Uint8List?>());
+      Future<Uint8List?> load(
+        String id,
+        Future<Uint8List?> Function() fetch, {
+        bool Function()? current,
+        bool Function()? visible,
+      }) => cache.load(
+        serverId: 'scope',
+        itemId: id,
+        type: 'Primary',
+        maxWidth: 120,
+        fetch: fetch,
+        isCurrent: current,
+        inViewport: visible,
+      );
+      final active = [
+        for (var i = 0; i < 8; i++) load('active-$i', () => blockers[i].future),
+      ];
+      await Future<void>.delayed(Duration.zero);
+      var firstValid = true;
+      final started = <String>[];
+      final abandoned = load('abandoned', () async {
+        started.add('abandoned');
+        return kTinyPng;
+      }, current: () => firstValid);
+      final first = load('shared', () async {
+        started.add('first');
+        return kTinyPng;
+      }, current: () => firstValid);
+      final second = load('shared', () async {
+        started.add('second');
+        return kTinyPng;
+      }, visible: () => true);
+      await Future<void>.delayed(Duration.zero);
+      firstValid = false;
+      blockers[0].complete(kTinyPng);
+      expect(await abandoned, isNull);
+      expect(await first, kTinyPng);
+      expect(await second, kTinyPng);
+      expect(started, ['second']);
+      for (final blocker in blockers.skip(1)) {
+        blocker.complete(kTinyPng);
+      }
+      await Future.wait(active);
+      expect(
+        cache.isNegativeCached(
+          serverId: 'scope',
+          itemId: 'abandoned',
+          type: 'Primary',
+          maxWidth: 120,
+        ),
+        isFalse,
+      );
+    },
+  );
 
   test('backdrop request width follows the window pixels and clamps', () {
     expect(
@@ -729,41 +1029,6 @@ void main() {
     MediaImage.debugResetCacheConfiguration();
   });
 
-  Future<void> pumpPosterStrip(
-    WidgetTester tester,
-    AuthController auth, {
-    required int count,
-    double cacheExtent = 400,
-  }) {
-    return tester.pumpWidget(
-      wrap(
-        auth,
-        SizedBox(
-          width: 120,
-          height: 180,
-          child: ListView.builder(
-            scrollCacheExtent: ScrollCacheExtent.pixels(cacheExtent),
-            itemExtent: 180,
-            itemCount: count,
-            itemBuilder: (context, index) {
-              return MediaImage(
-                key: ValueKey('poster-$index'),
-                item: EmbyItem(
-                  id: 'poster-$index',
-                  name: '海报$index',
-                  type: 'Movie',
-                  primaryImageTag: 'tag-$index',
-                ),
-                width: 120,
-                height: 180,
-              );
-            },
-          ),
-        ),
-      ),
-    );
-  }
-
   void addPosterItems(int count) {
     for (var i = 0; i < count; i++) {
       server.items.add(
@@ -785,7 +1050,18 @@ void main() {
     'viewport disk hits paint while scrolling and offscreen disk stays deferred',
     (tester) async {
       final auth = await connect(tester);
-      final serverId = '${auth.session!.server.id}|${auth.client.userId}';
+      final serverId = const DartSha256()
+          .hashSync(
+            utf8.encode(
+              jsonEncode([
+                auth.client.baseUrl.toString().replaceFirst(RegExp(r'/+$'), ''),
+                auth.client.userId,
+              ]),
+            ),
+          )
+          .bytes
+          .map((byte) => byte.toRadixString(16).padLeft(2, '0'))
+          .join();
       final disk = _FakeDiskStore();
       MediaImageCache.instance.debugSetDiskStore(disk);
       for (final index in [0, 1]) {
@@ -931,5 +1207,63 @@ class _FakeDiskStore implements MediaImageDiskStore {
   @override
   Future<void> clear() async {
     files.clear();
+  }
+}
+
+class _ControlledImageClient extends EmbyClient {
+  _ControlledImageClient() : super(device: _device) {
+    attachSession(
+      baseUrl: Uri.parse('https://first.example/emby'),
+      accessToken: 'synthetic',
+      userId: 'alice',
+    );
+  }
+
+  bool hold = false;
+  final requested = <String>[];
+  final pending = <String, Completer<Uint8List>>{};
+  final failures = <EmbyException>[];
+  int active = 0;
+  int maxActive = 0;
+
+  @override
+  Future<List<int>> getChapterImage(
+    String itemId, {
+    required int index,
+    String? tag,
+    int maxWidth = 400,
+    CancelToken? cancelToken,
+  }) => getItemImage(
+    itemId,
+    type: 'Chapter',
+    index: index,
+    tag: tag,
+    maxWidth: maxWidth,
+    cancelToken: cancelToken,
+  );
+
+  @override
+  Future<List<int>> getItemImage(
+    String itemId, {
+    String type = 'Primary',
+    int? index,
+    String? tag,
+    int maxWidth = 280,
+    CancelToken? cancelToken,
+  }) async {
+    requested.add(itemId);
+    active++;
+    if (active > maxActive) maxActive = active;
+    try {
+      if (failures.isNotEmpty) throw failures.removeAt(0);
+      if (hold) {
+        final completer = Completer<Uint8List>();
+        pending[itemId] = completer;
+        return await completer.future;
+      }
+      return kTinyPng;
+    } finally {
+      active--;
+    }
   }
 }

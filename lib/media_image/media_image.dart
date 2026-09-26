@@ -5,6 +5,7 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
+import 'package:cryptography/dart.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -13,7 +14,9 @@ import 'package:path_provider/path_provider.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/poster_placeholder.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
+import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
+import 'package:rillight/emby/emby_errors.dart';
 import 'package:rillight/emby/emby_models.dart';
 
 /// Flutter [ImageCache] 解码图条目上限。与 [MediaImageCache] 的 JPEG 字节层
@@ -128,6 +131,48 @@ class _LoadedImage {
   final String cacheKey;
 }
 
+// The independent player attaches a client session without restoring the
+// account controller. Use the actual authenticated endpoint and user in both
+// processes; a missing session must never resolve to a shared anonymous key.
+String? _imageAccountScope(AuthController? auth) {
+  final client = auth?.client;
+  if (client == null ||
+      !client.hasSession ||
+      client.userId?.isNotEmpty != true) {
+    return null;
+  }
+  final base = client.baseUrl!;
+  final endpoint = Uri(
+    scheme: base.scheme,
+    host: base.host,
+    port: base.port,
+    path: base.path,
+  );
+  return const DartSha256()
+      .hashSync(
+        utf8.encode(
+          jsonEncode([
+            endpoint.toString().replaceFirst(RegExp(r'/+$'), ''),
+            client.userId,
+          ]),
+        ),
+      )
+      .bytes
+      .map((byte) => byte.toRadixString(16).padLeft(2, '0'))
+      .join();
+}
+
+bool _isTransientImageFailure(Object error) {
+  if (error is TimeoutException || error is SocketException) return true;
+  if (error is! EmbyException) return false;
+  final status = error.statusCode;
+  return error.kind == EmbyFailureKind.timeout ||
+      error.kind == EmbyFailureKind.unreachable ||
+      status == 408 ||
+      status == 429 ||
+      (status != null && status >= 500);
+}
+
 class _MediaImageState extends State<MediaImage> {
   Future<_LoadedImage?>? _future;
   String? _lastAccountScope;
@@ -149,10 +194,7 @@ class _MediaImageState extends State<MediaImage> {
   int get _requestMaxWidth => widget.maxWidth ?? widget.width?.round() ?? 280;
 
   /// Protected artwork is scoped to both the server and authenticated user.
-  String get _accountScope {
-    final auth = AuthScope.maybeOf(context);
-    return '${auth?.session?.server.id ?? ''}|${auth?.client.userId ?? ''}';
-  }
+  String? get _accountScope => _imageAccountScope(AuthScope.maybeOf(context));
 
   @override
   void didChangeDependencies() {
@@ -164,7 +206,7 @@ class _MediaImageState extends State<MediaImage> {
       _loadGeneration++;
       _future = null;
     }
-    if (_hasImageSource && AuthScope.maybeOf(context)?.isLoggedIn == true) {
+    if (_hasImageSource && scope != null) {
       _future ??= _load();
     }
   }
@@ -185,11 +227,15 @@ class _MediaImageState extends State<MediaImage> {
   @override
   void didUpdateWidget(MediaImage oldWidget) {
     super.didUpdateWidget(oldWidget);
+    final scope = _accountScope;
+    final accountChanged = scope != _lastAccountScope;
+    _lastAccountScope = scope;
     // 网格滚动时 LayoutBuilder 宽度会抖 1px;已指定 maxWidth 则不重拉。
     final maxWidthChanged = oldWidget.maxWidth != widget.maxWidth;
     final widthChanged =
         widget.maxWidth == null && oldWidget.width != widget.width;
-    if (oldWidget.item.id != widget.item.id ||
+    if (accountChanged ||
+        oldWidget.item.id != widget.item.id ||
         oldWidget.item.primaryImageTag != widget.item.primaryImageTag ||
         oldWidget.item.thumbImageTag != widget.item.thumbImageTag ||
         oldWidget.item.backdropImageTag != widget.item.backdropImageTag ||
@@ -204,27 +250,29 @@ class _MediaImageState extends State<MediaImage> {
         oldWidget.preferParentBackdrop != widget.preferParentBackdrop ||
         maxWidthChanged ||
         widthChanged) {
-      _future = _hasImageSource ? _load() : null;
+      _loadGeneration++;
+      _future = _hasImageSource && _accountScope != null ? _load() : null;
     }
   }
 
   _LoadedImage? _peekLoaded() {
     // 只看首选候选。后面的剧 Backdrop 往往已经在缓存里,跳过去会让换集时
     // 背景永远停在同一张剧图,连本集 Thumb 都不拉。
-    if (_candidates.isEmpty) {
+    final scope = _accountScope;
+    if (_candidates.isEmpty || scope == null) {
       return null;
     }
     final candidate = _candidates.first;
     final maxWidth = _requestMaxWidth;
     final cacheKey = MediaImageCache.key(
-      serverId: _accountScope,
+      serverId: scope,
       itemId: candidate.itemId,
       type: candidate.type,
       tag: candidate.tag,
       maxWidth: maxWidth,
     );
     final bytes = MediaImageCache.instance.peek(
-      serverId: _accountScope,
+      serverId: scope,
       itemId: candidate.itemId,
       type: candidate.type,
       tag: candidate.tag,
@@ -394,7 +442,8 @@ class _MediaImageState extends State<MediaImage> {
           return null;
         }
         // 屏幕外的磁盘和网络仍等停稳,并排在视口内加载之后。解码并发不变。
-        final loaded = await _loadOnce();
+        final loaded = await _loadOnce(current);
+        if (!current()) return null;
         if (loaded != null) {
           return loaded;
         }
@@ -422,6 +471,7 @@ class _MediaImageState extends State<MediaImage> {
     final candidate = _candidates.first;
     final maxWidth = _requestMaxWidth;
     final serverId = _accountScope;
+    if (serverId == null) return null;
     final bytes = await MediaImageCache.instance._readDiskCache(
       serverId: serverId,
       itemId: candidate.itemId,
@@ -447,6 +497,7 @@ class _MediaImageState extends State<MediaImage> {
 
   bool _canRetryLoad() {
     final serverId = _accountScope;
+    if (serverId == null) return false;
     final maxWidth = _requestMaxWidth;
     for (final candidate in _candidates) {
       if (!MediaImageCache.instance.isNegativeCached(
@@ -462,11 +513,15 @@ class _MediaImageState extends State<MediaImage> {
     return false;
   }
 
-  Future<_LoadedImage?> _loadOnce() async {
-    final client = AuthScope.of(context).client;
+  Future<_LoadedImage?> _loadOnce(bool Function() current) async {
+    final auth = AuthScope.of(context);
+    final client = auth.client;
     final serverId = _accountScope;
+    if (serverId == null) return null;
+    bool valid() => current() && _accountScope == serverId;
     final maxWidth = _requestMaxWidth;
     for (final candidate in _candidates) {
+      if (!valid()) return null;
       CancelToken? token;
       final bytes = await MediaImageCache.instance.load(
         serverId: serverId,
@@ -474,8 +529,10 @@ class _MediaImageState extends State<MediaImage> {
         type: candidate.type,
         tag: candidate.tag,
         maxWidth: maxWidth,
+        isCurrent: valid,
+        inViewport: () => valid() && _viewportHit() == true,
         fetch: () async {
-          if (!mounted || _accountScope != serverId) return null;
+          if (!valid()) return null;
           token = CancelToken();
           try {
             final data = await client.getItemImage(
@@ -485,11 +542,12 @@ class _MediaImageState extends State<MediaImage> {
               maxWidth: maxWidth,
               cancelToken: token,
             );
-            if (!mounted || _accountScope != serverId || data.isEmpty) {
+            if (_imageAccountScope(auth) != serverId || data.isEmpty) {
               return null;
             }
             return Uint8List.fromList(data);
-          } catch (_) {
+          } catch (error) {
+            if (_isTransientImageFailure(error)) rethrow;
             return null;
           }
         },
@@ -516,7 +574,7 @@ class _MediaImageState extends State<MediaImage> {
   Widget build(BuildContext context) {
     final width = widget.width;
     final height = widget.height;
-    if (!_hasImageSource || AuthScope.maybeOf(context)?.isLoggedIn != true) {
+    if (!_hasImageSource || _accountScope == null) {
       return PosterPlaceholder(width: width, height: height);
     }
     // 内存命中同一帧画上。视口内磁盘命中不等滚动空闲;屏幕外未缓存仍推迟。
@@ -525,6 +583,7 @@ class _MediaImageState extends State<MediaImage> {
       return _paint(context, cached, width, height);
     }
     return FutureBuilder<_LoadedImage?>(
+      key: ValueKey(_accountScope),
       future: _future,
       builder: (context, snapshot) {
         final loaded = snapshot.data;
@@ -674,7 +733,8 @@ Future<Uint8List?> loadChapterImage(
     return Future<Uint8List?>.value();
   }
   final auth = AuthScope.of(context);
-  final scope = '${auth.session?.server.id ?? ''}|${auth.client.userId ?? ''}';
+  final scope = _imageAccountScope(auth);
+  if (scope == null) return null;
   final bytes = await MediaImageCache.instance.load(
     serverId: scope,
     itemId: itemId,
@@ -682,9 +742,9 @@ Future<Uint8List?> loadChapterImage(
     variant: '$index',
     tag: tag,
     maxWidth: maxWidth,
+    isCurrent: () => _imageAccountScope(auth) == scope,
     fetch: () async {
-      if ('${auth.session?.server.id ?? ''}|${auth.client.userId ?? ''}' !=
-          scope) {
+      if (_imageAccountScope(auth) != scope) {
         return null;
       }
       try {
@@ -694,20 +754,17 @@ Future<Uint8List?> loadChapterImage(
           tag: tag,
           maxWidth: maxWidth,
         );
-        if ('${auth.session?.server.id ?? ''}|${auth.client.userId ?? ''}' !=
-                scope ||
-            data.isEmpty) {
+        if (_imageAccountScope(auth) != scope || data.isEmpty) {
           return null;
         }
         return Uint8List.fromList(data);
-      } catch (_) {
+      } catch (error) {
+        if (_isTransientImageFailure(error)) rethrow;
         return null;
       }
     },
   );
-  return '${auth.session?.server.id ?? ''}|${auth.client.userId ?? ''}' == scope
-      ? bytes
-      : null;
+  return _imageAccountScope(auth) == scope ? bytes : null;
 }
 
 class _PosterLoadTurn {
@@ -719,6 +776,42 @@ class _PosterLoadTurn {
   bool cancelled = false;
 
   bool get isReleased => done.isCompleted;
+}
+
+class _ImageFetchConsumer {
+  const _ImageFetchConsumer(
+    this.fetch,
+    this.onAbort,
+    this.isCurrent,
+    this.inViewport,
+  );
+
+  final Future<Uint8List?> Function() fetch;
+  final VoidCallback? onAbort;
+  final bool Function()? isCurrent;
+  final bool Function()? inViewport;
+
+  bool get valid => isCurrent?.call() ?? true;
+}
+
+class _ImageFetchRequest {
+  _ImageFetchRequest(_ImageFetchConsumer consumer) : consumers = [consumer];
+
+  final List<_ImageFetchConsumer> consumers;
+  final Completer<bool> slot = Completer<bool>();
+  late final Future<Uint8List?> result;
+
+  _ImageFetchConsumer? get currentConsumer {
+    for (final consumer in consumers) {
+      if (consumer.valid) return consumer;
+    }
+    return null;
+  }
+
+  bool get isCurrent => currentConsumer != null;
+  bool get inViewport => consumers.any(
+    (consumer) => consumer.valid && (consumer.inViewport?.call() ?? true),
+  );
 }
 
 /// 图片字节两级缓存:
@@ -762,9 +855,10 @@ class MediaImageCache {
   final LinkedHashMap<String, Uint8List> _bytes = LinkedHashMap();
   int _bytesTotal = 0;
   final Map<String, DateTime> _misses = {};
-  final Map<String, Future<Uint8List?>> _inflight = {};
+  final Map<String, _ImageFetchRequest> _inflight = {};
+  int _cacheGeneration = 0;
   int _activeFetches = 0;
-  final List<Completer<void>> _waiters = [];
+  final List<_ImageFetchRequest> _waiters = [];
   Timer? _scrollIdleTimer;
   final List<Completer<void>> _scrollIdleWaiters = [];
   final Map<String, Uint8List> _pendingDiskWrites = {};
@@ -1043,6 +1137,8 @@ class MediaImageCache {
     required int maxWidth,
     required Future<Uint8List?> Function() fetch,
     VoidCallback? onAbort,
+    bool Function()? isCurrent,
+    bool Function()? inViewport,
   }) {
     final cacheKey = key(
       serverId: serverId,
@@ -1063,51 +1159,72 @@ class MediaImageCache {
       }
       _misses.remove(cacheKey);
     }
-    return _inflight.putIfAbsent(cacheKey, () async {
-      try {
-        // 磁盘读写不占网络并发槽:网格滑过几十张时写盘变慢,不能把后面的
-        // 缩略图堵在 _acquire 队列里一直转圈。
-        if (_diskResolved) {
-          final disk = await _readDisk(cacheKey);
-          if (disk != null && disk.isNotEmpty) {
-            _storeBytes(cacheKey, disk);
-            return disk;
-          }
-        } else {
-          unawaited(_ensureDiskStore());
+    final consumer = _ImageFetchConsumer(fetch, onAbort, isCurrent, inViewport);
+    final existing = _inflight[cacheKey];
+    if (existing != null) {
+      existing.consumers.add(consumer);
+      return existing.result;
+    }
+    final request = _ImageFetchRequest(consumer);
+    _inflight[cacheKey] = request;
+    request.result = _loadRequest(cacheKey, request, _cacheGeneration);
+    return request.result;
+  }
+
+  Future<Uint8List?> _loadRequest(
+    String cacheKey,
+    _ImageFetchRequest request,
+    int generation,
+  ) async {
+    bool current() => generation == _cacheGeneration && request.isCurrent;
+    try {
+      // Disk reads do not consume a network slot.
+      if (_diskResolved) {
+        final disk = await _readDisk(cacheKey);
+        if (!current()) return null;
+        if (disk != null && disk.isNotEmpty) {
+          _storeBytes(cacheKey, disk);
+          return disk;
         }
-        await _acquire();
-        Uint8List? bytes;
-        var timedOut = false;
-        try {
-          bytes = await fetch().timeout(fetchTimeout);
-        } on TimeoutException {
-          timedOut = true;
-          bytes = null;
-          onAbort?.call();
-        } finally {
-          _release();
-        }
-        if (bytes != null && bytes.isNotEmpty) {
-          final loaded = bytes;
-          _storeBytes(cacheKey, loaded);
-          if (_diskResolved) {
-            unawaited(_writeDisk(cacheKey, loaded));
-          } else {
-            unawaited(
-              _ensureDiskStore().then((_) => _writeDisk(cacheKey, loaded)),
-            );
-          }
-          return loaded;
-        }
-        if (!timedOut) {
-          _recordMiss(cacheKey);
-        }
-        return null;
-      } finally {
-        _inflight.remove(cacheKey);
+      } else {
+        unawaited(_ensureDiskStore());
       }
-    });
+      if (!current() || !await _acquire(request)) return null;
+      Uint8List? bytes;
+      var retryable = false;
+      try {
+        final consumer = request.currentConsumer;
+        if (consumer == null || !current()) return null;
+        try {
+          bytes = await consumer.fetch().timeout(fetchTimeout);
+        } on TimeoutException {
+          retryable = true;
+          consumer.onAbort?.call();
+        } catch (error) {
+          retryable = _isTransientImageFailure(error);
+          bytes = null;
+        }
+      } finally {
+        if (generation == _cacheGeneration) _release();
+      }
+      if (!current()) return null;
+      if (bytes != null && bytes.isNotEmpty) {
+        final loaded = bytes;
+        _storeBytes(cacheKey, loaded);
+        if (_diskResolved) {
+          unawaited(_writeDisk(cacheKey, loaded));
+        } else {
+          unawaited(
+            _ensureDiskStore().then((_) => _writeDisk(cacheKey, loaded)),
+          );
+        }
+        return loaded;
+      }
+      if (!retryable) _recordMiss(cacheKey);
+      return null;
+    } finally {
+      if (identical(_inflight[cacheKey], request)) _inflight.remove(cacheKey);
+    }
   }
 
   Uint8List? _touch(String cacheKey) {
@@ -1217,25 +1334,27 @@ class MediaImageCache {
     }
   }
 
-  Future<void> _acquire() async {
+  Future<bool> _acquire(_ImageFetchRequest request) {
     if (_activeFetches < _maxConcurrentFetches) {
       _activeFetches++;
-      return;
+      return Future<bool>.value(true);
     }
-    final gate = Completer<void>();
-    _waiters.add(gate);
-    await gate.future;
+    _waiters.add(request);
+    return request.slot.future;
   }
 
   void _release() {
-    while (_waiters.isNotEmpty) {
-      final next = _waiters.removeAt(0);
-      if (!next.isCompleted) {
-        next.complete();
-        return;
-      }
-    }
-    if (_activeFetches > 0) {
+    // Re-evaluate geometry at each free slot: visibility when the request first
+    // queued is stale after scrolling. Keep FIFO within each priority class.
+    _waiters.removeWhere((request) {
+      if (request.isCurrent) return false;
+      request.slot.complete(false);
+      return true;
+    });
+    if (_waiters.isNotEmpty) {
+      final visible = _waiters.indexWhere((request) => request.inViewport);
+      _waiters.removeAt(visible < 0 ? 0 : visible).slot.complete(true);
+    } else if (_activeFetches > 0) {
       _activeFetches--;
     }
   }
@@ -1260,13 +1379,14 @@ class MediaImageCache {
     _bytes.clear();
     _bytesTotal = 0;
     _misses.clear();
+    _cacheGeneration++;
     _inflight.clear();
-    final pending = List<Completer<void>>.from(_waiters);
+    final pending = List<_ImageFetchRequest>.from(_waiters);
     _waiters.clear();
     _activeFetches = 0;
     for (final waiter in pending) {
-      if (!waiter.isCompleted) {
-        waiter.complete();
+      if (!waiter.slot.isCompleted) {
+        waiter.slot.complete(false);
       }
     }
     _pendingDiskWrites.clear();

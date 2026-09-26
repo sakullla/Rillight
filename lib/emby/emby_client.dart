@@ -10,7 +10,8 @@ import 'package:rillight/emby/emby_url.dart';
 import 'package:rillight/player/playback_models.dart';
 import 'package:rillight/player/playback_resolver.dart';
 
-/// 图和 JSON 共用一个 Host。Dart 默认每主机 6 条连接,网格一滑就排队超时。
+/// 图和 JSON 共用一个 Host。Dart 默认不限制每主机连接数；这里显式限制为 16，
+/// 为有界图片并发之外的目录/API 请求保留空间。
 /// 只改默认 adapter 的 HttpClient,不替换整个 adapter,避免丢掉 Dio 的空闲回收。
 const int _maxConnectionsPerHost = 16;
 
