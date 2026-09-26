@@ -40,7 +40,8 @@ pin alone does not certify that a bundled binary came from that source.
 
 Windows, macOS, Linux and Android may additionally use system hardware decode
 and output APIs. The release bundle's exact dependency list, loaded versions,
-source and license material must be checked for that target. The macOS SDK and
-core dylib have not yet been built or exercised on a target Mac; see
+source and license material must be checked for that target. A 2026-09-26
+Apple M3 host built and probed the macOS SDK/core; window playback, physical
+audio and Intel remain in
 [`macos/TESTING_HANDOFF.md`](macos/TESTING_HANDOFF.md). No libmpv or Media3
 runtime is part of the owned playback core.

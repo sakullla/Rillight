@@ -80,6 +80,11 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   # must resolve that closure while linking the core and its test executable.
   target_link_options(rillight_core PRIVATE "LINKER:-rpath-link,${core_lib_dir}")
 endif()
+if(APPLE)
+  set_target_properties(rillight_core PROPERTIES
+    INSTALL_NAME_DIR "@rpath"
+    MACOSX_RPATH ON)
+endif()
 if(MSVC)
   target_compile_options(rillight_core PRIVATE /W4 /WX)
 else()

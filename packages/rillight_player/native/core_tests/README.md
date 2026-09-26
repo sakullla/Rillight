@@ -1,7 +1,8 @@
 # Direct FFmpeg core development check
 
-The source build currently supports Linux x86_64. It builds FFmpeg from the
-commit pinned in `../core_dependencies.json`; the core links directly to its C
+Linux x86_64 uses `../build_core_dependencies.py`. macOS universal
+x86_64+arm64 uses `../build_macos.sh`. Both build FFmpeg from the commit
+pinned in `../core_dependencies.json`; the core links directly to its C
 libraries. The old libmpv bundle is not a usable SDK for this check.
 The builder applies the SHA256-locked HLS custom-IO patch before compiling
 FFmpeg. It keeps FFmpeg's direct network protocols disabled while allowing

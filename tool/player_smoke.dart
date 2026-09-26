@@ -543,10 +543,10 @@ Future<void> main(List<String> args) async {
           'rssBytes': ProcessInfo.currentRss,
           'rate': controller.playbackRate,
         });
-        // Linux Xvfb checks the actual child-window pixels after publication.
-        // Keep the source stable for that bounded presentation check without
+        // Linux/macOS window capture checks actual child-window pixels after
+        // publication. Keep the source stable for that bounded check without
         // changing the existing three-second performance sampling interval.
-        if (Platform.isLinux) {
+        if (Platform.isLinux || Platform.isMacOS) {
           await Future<void>.delayed(const Duration(seconds: 3));
         }
       }

@@ -29,6 +29,6 @@ Flutter documents that listeners need `network.server` in the Release
 entitlements as well as Debug/Profile:
 https://docs.flutter.dev/platform-integration/macos/building#entitlements-and-the-app-sandbox
 
-The Python signing-command/entitlement regressions and Dart static analysis
-were run on the development Windows host. The signed macOS sandbox test and
-new CI steps have not been executed there; no native macOS pass is claimed.
+The signed Release sandbox proxy and missing-server negative control passed
+on an Apple M3 host on 2026-09-26 (`build/macos-proxy-sandbox-evidence`).
+That check is not GUI playback.

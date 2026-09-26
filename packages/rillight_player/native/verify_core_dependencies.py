@@ -6,6 +6,8 @@ symbol visibility for distribution. It also does not audit transitive runtime
 libraries, ELF RUNPATH, licenses, or target-device playback.
 """
 
+from __future__ import annotations
+
 import argparse
 import ctypes
 import hashlib
@@ -50,6 +52,21 @@ def _input_protocols(prefix: Path, target: str) -> set[str] | None:
         result = subprocess.check_output([sys.executable, "-c", code, str(candidates[-1])],
                                          env=env, text=True)
         return set(result.splitlines())
+    if target == "macos-universal" and platform.system() == "Darwin":
+        candidates = [path for path in (prefix / "lib").glob("libavformat*.dylib")
+                      if path.is_file() and not path.is_symlink()]
+        if not candidates:
+            return set()
+        selected = max(candidates, key=lambda path: len(path.name))
+        code = ("import ctypes,sys; l=ctypes.CDLL(sys.argv[1]);"
+                "l.avio_enum_protocols.argtypes=[ctypes.POINTER(ctypes.c_void_p),ctypes.c_int];"
+                "l.avio_enum_protocols.restype=ctypes.c_char_p; p=ctypes.c_void_p();"
+                "\nwhile (name:=l.avio_enum_protocols(ctypes.byref(p),0)): print(name.decode())")
+        env = dict(os.environ)
+        env["DYLD_LIBRARY_PATH"] = str(prefix / "lib")
+        result = subprocess.check_output([sys.executable, "-c", code, str(selected)],
+                                         env=env, text=True)
+        return set(result.splitlines())
     return None
 
 
@@ -81,7 +98,7 @@ def verify(prefix: Path, target: str, require_subtitles: bool = False) -> list[s
     patches = SPEC["ffmpeg"].get("patches", {})
     if marker.get("ffmpeg_patches") != patches:
         errors.append(f"{target}: FFmpeg patch provenance mismatch")
-    if target in ("windows-x64", "linux-x64"):
+    if target in ("windows-x64", "linux-x64", "macos-universal"):
         configure = marker.get("configure")
         if not isinstance(configure, list) or "--enable-network" not in configure or \
                 "--disable-network" in configure:
@@ -93,6 +110,12 @@ def verify(prefix: Path, target: str, require_subtitles: bool = False) -> list[s
                     errors.append(f"{target}: missing FFmpeg HTTP/TCP input protocols")
             except (OSError, subprocess.CalledProcessError) as error:
                 errors.append(f"{target}: could not inspect FFmpeg input protocols: {error}")
+    if target == "macos-universal":
+        configure = marker.get("configure")
+        if not isinstance(configure, list) or "--enable-videotoolbox" not in configure:
+            errors.append(f"{target}: VideoToolbox hardware decoding was not enabled")
+        if not isinstance(configure, list) or "--disable-autodetect" not in configure:
+            errors.append(f"{target}: FFmpeg autodetection was not disabled")
     for relative, expected in patches.items():
         path = (ROOT / relative).resolve()
         if ROOT.resolve() not in path.parents or not path.is_file() or \
@@ -191,6 +214,11 @@ def verify(prefix: Path, target: str, require_subtitles: bool = False) -> list[s
                 errors.append(f"{target}: Android subtitle source pins mismatch")
             if build_dependencies.get("fontconfig") != "disabled (Android explicit font path)":
                 errors.append(f"{target}: Android font provider provenance mismatch")
+        if target == "macos-universal":
+            if libass.get("sources") != specification.get("android_sources"):
+                errors.append(f"{target}: subtitle source pins mismatch")
+            if build_dependencies.get("fontconfig") != "disabled (macOS CoreText)":
+                errors.append(f"{target}: macOS font provider provenance mismatch")
     return errors
 
 

@@ -11,6 +11,16 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 
 
+def av1_encoder(ffmpeg):
+    encoders = subprocess.check_output(
+        [ffmpeg, '-hide_banner', '-encoders'], text=True, stderr=subprocess.STDOUT)
+    if 'libaom-av1' in encoders:
+        return 'libaom-av1', ['-cpu-used', '8', '-row-mt', '1', '-threads', '4']
+    if 'libsvtav1' in encoders:
+        return 'libsvtav1', ['-preset', '12']
+    raise RuntimeError('Need libaom-av1 or libsvtav1 to generate AV1 fixtures')
+
+
 def generate(directory, ffmpeg):
     directory.mkdir(parents=True, exist_ok=True)
     if not (directory / 'sample.sup').exists():
@@ -52,7 +62,8 @@ Dialogue: 0,0:00:00.00,0:00:12.00,Default,,0,0,0,,Rillight ASS validation
     if not (directory / 'stream.m3u8').exists():
         subprocess.run([ffmpeg, '-y', '-i', str(directory / 'baseline.mp4'), '-c', 'copy',
                         '-hls_time', '2', '-hls_list_size', '0', str(directory / 'stream.m3u8')], check=True)
-    for name, codec, extra in [('av1.mkv', 'libaom-av1', ['-cpu-used', '8', '-row-mt', '1', '-threads', '4']),
+    av1_codec, av1_extra = av1_encoder(ffmpeg)
+    for name, codec, extra in [('av1.mkv', av1_codec, av1_extra),
                                ('vp9.webm', 'libvpx-vp9', ['-deadline', 'realtime', '-cpu-used', '8'])]:
         if not (directory / name).exists():
             subprocess.run([ffmpeg, '-y', '-i', str(directory / 'baseline.mp4'), '-t', '4',

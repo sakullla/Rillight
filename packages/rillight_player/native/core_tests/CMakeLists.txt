@@ -18,6 +18,10 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   set_tests_properties(rillight_core_audio_session PROPERTIES
     ENVIRONMENT "LD_LIBRARY_PATH=${core_lib_dir}")
 endif()
+if(APPLE)
+  set_tests_properties(rillight_core_audio_session PROPERTIES
+    ENVIRONMENT "DYLD_LIBRARY_PATH=${core_lib_dir}")
+endif()
 
 if(ass_library)
   add_executable(rillight_core_ass_test ass_test.cpp)
@@ -42,5 +46,9 @@ if(ass_library)
   if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set_tests_properties(rillight_core_ass_composition PROPERTIES
       ENVIRONMENT "LD_LIBRARY_PATH=${core_lib_dir}")
+  endif()
+  if(APPLE)
+    set_tests_properties(rillight_core_ass_composition PROPERTIES
+      ENVIRONMENT "DYLD_LIBRARY_PATH=${core_lib_dir}")
   endif()
 endif()

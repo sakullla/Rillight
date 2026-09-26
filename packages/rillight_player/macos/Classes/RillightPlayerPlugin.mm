@@ -25,6 +25,7 @@ using Clock = std::chrono::steady_clock;
   NSLock* lock;
   CVPixelBufferRef latest;
   std::atomic<bool> stopped;
+  std::atomic<bool> detached;
   std::atomic<int> width;
   std::atomic<int> height;
   int64_t frames;
@@ -32,7 +33,8 @@ using Clock = std::chrono::steady_clock;
   uint32_t actualHardware;
 }
 - (void)start:(void (^)(NSString* error))ready;
-- (void)stop:(void (^)(void))done;
+- (BOOL)detach;
+- (void)retire:(void (^)(void))done;
 - (void)resizeWidth:(int)w height:(int)h;
 @end
 
@@ -66,6 +68,7 @@ using Clock = std::chrono::steady_clock;
     lock = [[NSLock alloc] init];
     latest = nullptr;
     stopped = false;
+    detached = false;
     width = 1280;
     height = 720;
     frames = 0;
@@ -413,40 +416,47 @@ using Clock = std::chrono::steady_clock;
   height = std::clamp(h, 1, 2304);
 }
 
-- (void)stop:(void (^)(void))done {
-  // Method calls and _closeBlocks access stay on Flutter's platform thread.
-  if (done) [_closeBlocks addObject:[done copy]];
-  if (stopped.exchange(true)) return;
-  dispatch_async(_queue, ^{
+- (BOOL)detach {
+  // Platform thread. Queue unregister without waiting for Impeller's raster
+  // callback; Dart fences remaining copyPixelBuffer work with a picture snapshot.
+  stopped.store(true);
+  if (detached.exchange(true)) return YES;
+  dispatch_sync(_queue, ^{
     if (self->_timer) {
       dispatch_source_cancel(self->_timer);
       self->_timer = nil;
     }
     [self releasePending];
-    self->_audio.reset();  // Stop Core Audio before detaching Flutter.
-    dispatch_async(dispatch_get_main_queue(), ^{
-      [self->registry unregisterTexture:self->textureId];
-    });
+    self->_audio.reset();
   });
+  [registry unregisterTexture:textureId];
+  return YES;
+}
+
+- (void)retire:(void (^)(void))done {
+  if (done) [_closeBlocks addObject:[done copy]];
+  [lock lock];
+  if (latest) {
+    CVPixelBufferRelease(latest);
+    latest = nullptr;
+  }
+  [lock unlock];
+  NSArray* callbacks = [_closeBlocks copy];
+  [_closeBlocks removeAllObjects];
+  for (id entry in callbacks) {
+    void (^callback)(void) = entry;
+    callback();
+  }
 }
 
 - (void)onTextureUnregistered:(NSObject<FlutterTexture>*)texture {
   (void)texture;
-  // Flutter calls this on its raster thread. Producer work is already drained
-  // before unregister, and the retained pixel buffer can be released here.
   [lock lock];
-  if (latest) { CVPixelBufferRelease(latest); latest = nullptr; }
+  if (latest) {
+    CVPixelBufferRelease(latest);
+    latest = nullptr;
+  }
   [lock unlock];
-  dispatch_async(dispatch_get_main_queue(), ^{
-    // Complete dispose on the platform thread, after the raster callback has
-    // released its reference. This also serializes duplicate dispose calls.
-    NSArray* callbacks = [self->_closeBlocks copy];
-    [self->_closeBlocks removeAllObjects];
-    for (id entry in callbacks) {
-      void (^callback)(void) = entry;
-      callback();
-    }
-  });
 }
 @end
 
@@ -487,7 +497,8 @@ using Clock = std::chrono::steady_clock;
     _surfaces[handle] = surface;
     [surface start:^(NSString* failure) {
       if (failure) {
-        [surface stop:^{
+        [surface detach];
+        [surface retire:^{
           if (self->_surfaces[handle] == surface)
             [self->_surfaces removeObjectForKey:handle];
           result([FlutterError errorWithCode:@"render" message:failure
@@ -495,13 +506,21 @@ using Clock = std::chrono::steady_clock;
         }];
       } else result(@(surface->textureId));
     }];
+  } else if ([call.method isEqualToString:@"detach"]) {
+    result(surface ? @([surface detach]) : @NO);
   } else if ([call.method isEqualToString:@"dispose"]) {
     if (!surface) result(nil);
-    else [surface stop:^{
-      if (self->_surfaces[handle] == surface)
-        [self->_surfaces removeObjectForKey:handle];
-      result(nil);
-    }];
+    else if (!surface->detached.load()) {
+      result([FlutterError errorWithCode:@"retirement"
+                                 message:@"Detach and raster barrier required"
+                                 details:nil]);
+    } else {
+      [surface retire:^{
+        if (self->_surfaces[handle] == surface)
+          [self->_surfaces removeObjectForKey:handle];
+        result(nil);
+      }];
+    }
   } else if (!surface) {
     result([FlutterError errorWithCode:@"missing"
                                   message:@"Surface unavailable" details:nil]);

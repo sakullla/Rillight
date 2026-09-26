@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.16)
+project(rillight_macos_frame_output LANGUAGES CXX)
+enable_testing()
+add_executable(rillight_macos_frame_output_test frame_output_test.cpp)
+target_compile_features(rillight_macos_frame_output_test PRIVATE cxx_std_17)
+target_compile_options(rillight_macos_frame_output_test PRIVATE
+  -Wall -Wextra -Werror -UNDEBUG)
+add_test(NAME rillight_macos_frame_output COMMAND rillight_macos_frame_output_test)

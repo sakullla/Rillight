@@ -26,6 +26,6 @@ Android APK 在设置 `RILLIGHT_CORE_SDK_ROOT` 后使用 `flutter build apk --de
 
 [`tool/player_release_evidence.md`](tool/player_release_evidence.md) 定义制品哈希、原生依赖、安装启动、可见连续画面、物理声音、音画同步和性能对照的独立证据。`tool/player_core_release_checks.py` 与 `tool/player_performance_checks.py` 只审核已有结果；缺证据不会生成通过结论。历史 libmpv/Media3 基线保留在 [验证记录](integration_test/README.md)，不能作为当前核心的成功证据。
 
-当前仓库没有可在这台 Windows 机器上运行的 macOS 通用 SDK/核心制品，也没有目标 Mac 播放结果。[macOS 交接文档](packages/rillight_player/macos/TESTING_HANDOFF.md)列出另一台 Mac 上需执行的构建、依赖、画面、声音与硬解检查。PR CI 会明确标为待验证；正式 macOS 发布构建仍要求固定 SDK/核心输入，不能静默跳过。
+Apple M3 目标机已从固定源构建通用 SDK/核心，并完成 Release 包审计、探针、adhoc 签名和沙箱代理；H.264/HEVC/VP9/AV1 窗口画面、物理声音、VideoToolbox 实际 decoder 和 Intel 仍见 [macOS 交接文档](packages/rillight_player/macos/TESTING_HANDOFF.md)。PR CI 在缺少输入时明确标为待验证；正式 macOS 发布构建仍要求固定 SDK/核心输入，不能静默跳过。
 
 网络、页面加载和动画优化需要与冻结基线在同一设备、媒体、网络条件和 profile/release 模式下比较。模拟器、Xvfb、虚拟音频、CI 配置和实体设备观察应分别报告；尚未采集的数据不宣称性能收益。

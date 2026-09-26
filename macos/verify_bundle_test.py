@@ -12,7 +12,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'packages/rillight_player/native'))
 import prepare_macos
-from bundle_macos import audit_binary, bundle, otool_dependencies
+from bundle_macos import NATIVE_LICENSES, audit_binary, bundle, otool_dependencies
 from sign_bundle import release_entitlements, sign, verify_signed_entitlements
 from verify_bundle import deployment_versions, verify
 
@@ -62,8 +62,7 @@ class PreparedFixture:
         (self.root / 'THIRD_PARTY_NOTICES.md').write_text('FFmpeg/libass', encoding='utf-8')
         licenses = self.root / 'native/licenses'
         licenses.mkdir()
-        for name in ('FFmpeg-GPL-2.0.txt', 'FFmpeg-LGPL-2.1.txt',
-                     'libass-ISC.txt', 'dav1d-BSD-2-Clause.txt'):
+        for name in NATIVE_LICENSES:
             (licenses / name).write_text('license', encoding='utf-8')
 
 
@@ -116,6 +115,15 @@ class PrepareTest(unittest.TestCase):
             marker['libraries']['lib/libmpv.2.dylib'] = sha(b'mpv')
             with self.assertRaisesRegex(RuntimeError, 'libmpv'):
                 prepare_macos.runtime_paths(fixture.prefix, marker)
+
+    def test_dav1d_marker_library_is_staged_even_if_absent_from_ffmpeg_hashes(self):
+        with tempfile.TemporaryDirectory() as temp:
+            fixture = PreparedFixture(temp)
+            marker = fixture.marker
+            dav1d = marker['libraries'].pop('lib/libdav1d.7.dylib')
+            marker['dav1d'] = {'library': 'lib/libdav1d.7.dylib', 'sha256': dav1d}
+            paths = prepare_macos.runtime_paths(fixture.prefix, marker)
+            self.assertIn('libdav1d.7.dylib', {path.name for path in paths})
 
 
 class MachOTest(unittest.TestCase):
@@ -171,6 +179,10 @@ class BundleVerificationTest(unittest.TestCase):
                              'libass-ISC.txt').is_file())
             self.assertTrue((app / 'Contents/Resources/rillight-native-licenses/'
                              'dav1d-BSD-2-Clause.txt').is_file())
+            self.assertTrue((app / 'Contents/Resources/rillight-native-licenses/'
+                             'FreeType-FTL.txt').is_file())
+            self.assertTrue((app / 'Contents/Resources/rillight-native-licenses/'
+                             'HarfBuzz-Old-MIT.txt').is_file())
             self.assertFalse((app / 'Contents/Frameworks/libmpv.2.dylib').exists())
 
     def make_app(self, root):
@@ -219,8 +231,7 @@ class BundleVerificationTest(unittest.TestCase):
         (resources / 'rillight-native-notices.md').write_text('notices')
         licenses = resources / 'rillight-native-licenses'
         licenses.mkdir()
-        for name in ('FFmpeg-GPL-2.0.txt', 'FFmpeg-LGPL-2.1.txt',
-                     'libass-ISC.txt', 'dav1d-BSD-2-Clause.txt'):
+        for name in NATIVE_LICENSES:
             (licenses / name).write_text('license')
         return app, record_path
 
