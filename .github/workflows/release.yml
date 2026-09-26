@@ -16,7 +16,7 @@ jobs:
   windows:
     name: Build Windows
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 90
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -28,29 +28,49 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Verify pinned Windows core SDK
+      - name: Set up native build tools
+        id: msys2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          install: >-
+            git make diffutils
+            mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja mingw-w64-x86_64-meson
+            mingw-w64-x86_64-nasm mingw-w64-x86_64-pkgconf
+            mingw-w64-x86_64-fontconfig mingw-w64-x86_64-freetype
+            mingw-w64-x86_64-fribidi mingw-w64-x86_64-harfbuzz
+
+      - name: Identify native toolchain for the SDK cache
+        id: toolchain
+        shell: msys2 {0}
+        run: echo "packages=$(pacman -Q | sha256sum | cut -d ' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Windows media SDK
+        id: sdk-cache
+        uses: actions/cache/restore@v5
+        with:
+          path: ${{ runner.temp }}/rillight-windows-sdk
+          key: windows-media-sdk-${{ runner.arch }}-${{ steps.toolchain.outputs.packages }}-${{ hashFiles('packages/rillight_player/native/*core_dependencies*', 'packages/rillight_player/native/build_windows_dependencies.py', 'packages/rillight_player/native/patches/**') }}
+
+      - name: Build Windows SDK and candidate core
         shell: pwsh
         env:
-          CORE_SDK_URL: ${{ vars.WINDOWS_CORE_SDK_URL }}
-          CORE_SDK_SHA256: ${{ vars.WINDOWS_CORE_SDK_SHA256 }}
+          MSYS_ROOT: ${{ steps.msys2.outputs.msys2-location }}
         run: |
-          if (-not $env:CORE_SDK_URL -or -not $env:CORE_SDK_SHA256) {
-            throw 'Set WINDOWS_CORE_SDK_URL and WINDOWS_CORE_SDK_SHA256 before a release tag.'
-          }
-          $archive = Join-Path $env:RUNNER_TEMP 'rillight-windows-core-sdk.zip'
-          $extract = Join-Path $env:RUNNER_TEMP 'rillight-windows-core-sdk'
-          Invoke-WebRequest -Uri $env:CORE_SDK_URL -OutFile $archive
-          $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash.ToLowerInvariant()
-          if ($actual -ne $env:CORE_SDK_SHA256.ToLowerInvariant()) {
-            throw "Windows core SDK archive SHA256 mismatch: $actual"
-          }
-          Expand-Archive -LiteralPath $archive -DestinationPath $extract
-          $markers = @(Get-ChildItem -LiteralPath $extract -Filter 'rillight-core-dependencies.json' -File -Recurse)
-          if ($markers.Count -ne 1) { throw "Expected one pinned SDK marker, found $($markers.Count)" }
-          $prefix = $markers[0].DirectoryName
-          python packages/rillight_player/native/verify_core_dependencies.py --prefix "$prefix" --target windows-x64 --require-subtitles
-          if ($LASTEXITCODE -ne 0) { throw 'Pinned Windows core SDK verification failed' }
+          $prefix = Join-Path $env:RUNNER_TEMP 'rillight-windows-sdk'
+          $work = Join-Path $env:RUNNER_TEMP 'rillight-windows-sdk-work'
+          python packages/rillight_player/native/build_windows_dependencies.py `
+            --prefix "$prefix" --work "$work" --msys-root "$env:MSYS_ROOT"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           "RILLIGHT_CORE_PREFIX_WINDOWS_X64=$prefix" >> $env:GITHUB_ENV
+
+      - name: Save verified Windows SDK
+        if: steps.sdk-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ runner.temp }}/rillight-windows-sdk
+          key: ${{ steps.sdk-cache.outputs.cache-primary-key }}
 
       - name: Install dependencies
         run: flutter pub get
@@ -88,11 +108,6 @@ jobs:
     with:
       version: ${{ github.ref_name }}
       signing: identity
-      allow_source_build: false
-      core_sdk_url: ${{ vars.MACOS_CORE_SDK_URL }}
-      core_sdk_sha256: ${{ vars.MACOS_CORE_SDK_SHA256 }}
-      core_dylib_url: ${{ vars.MACOS_CORE_DYLIB_URL }}
-      core_dylib_sha256: ${{ vars.MACOS_CORE_DYLIB_SHA256 }}
     secrets: inherit
 
   linux:

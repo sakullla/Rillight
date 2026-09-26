@@ -8,7 +8,16 @@ import subprocess
 import struct
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from socketserver import TCPServer
 from urllib.parse import urlsplit
+
+
+class LoopbackHTTPServer(ThreadingHTTPServer):
+    def server_bind(self):
+        # This fixture uses a numeric loopback address. HTTPServer's reverse DNS
+        # lookup can stall on hosted macOS runners and is unnecessary here.
+        TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address
 
 
 def av1_encoder(ffmpeg):
@@ -198,7 +207,7 @@ def serve(media, output):
             else:
                 self.send_json({'Items': [item('baseline')], 'TotalRecordCount': 1})
 
-    server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+    server = LoopbackHTTPServer(('127.0.0.1', 0), Handler)
     output.mkdir(parents=True, exist_ok=True)
     (output / 'server.json').write_text(json.dumps({'url': f'http://127.0.0.1:{server.server_port}'}), encoding='utf-8')
     server.serve_forever()

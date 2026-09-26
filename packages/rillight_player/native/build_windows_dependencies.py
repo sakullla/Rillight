@@ -1,137 +1,155 @@
-"""Rebuild pinned Windows FFmpeg with loopback HTTP support using MSYS2 MinGW64.
-
-The source checkout must be the locked commit with the locked HLS custom-IO
-patch already applied. The input prefix contains separately pinned libass and
-its transitive runtime closure; this command updates FFmpeg in that prefix.
-"""
+"""Build the pinned Windows media SDK and candidate core using MSYS2 MinGW64."""
 
 import argparse
-import hashlib
 import json
 import os
 from pathlib import Path
-import platform
+import re
 import shlex
+import shutil
 import subprocess
 
-from verify_core_dependencies import SPEC, ROOT
-from build_core_dependencies import fetch_source
+from build_core_dependencies import fetch_source, locked_ffmpeg_patches
+from verify_core_dependencies import ROOT, SPEC, digest, verify
 
 
-def run(args, **kwargs):
-    return subprocess.check_output(args, text=True, **kwargs).strip()
+def copy_runtime_dependencies(prefix: Path, mingw: Path) -> None:
+    """Copy transitive MinGW DLL imports, leaving Windows DLLs to the OS."""
+    pending = list((prefix / 'bin').glob('*.dll'))
+    seen = set()
+    system = Path(os.environ['SystemRoot']) / 'System32'
+    while pending:
+        library = pending.pop()
+        if library.name.lower() in seen:
+            continue
+        seen.add(library.name.lower())
+        output = subprocess.check_output(
+            [str(mingw / 'bin/objdump.exe'), '-p', str(library)], text=True)
+        for name in re.findall(r'DLL Name:\s*(\S+)', output):
+            destination = prefix / 'bin' / name
+            source = mingw / 'bin' / name
+            if destination.is_file():
+                pending.append(destination)
+            elif source.is_file():
+                shutil.copy2(source, destination)
+                pending.append(destination)
+            elif not (name.lower().startswith(('api-ms-win-', 'ext-ms-win-')) or
+                      (system / name).is_file()):
+                raise RuntimeError(f'Missing runtime dependency: {name} ({library.name})')
 
 
-def digest(path: Path) -> str:
-    value = hashlib.sha256()
-    with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            value.update(chunk)
-    return value.hexdigest()
+def record_libraries(prefix: Path, marker: dict) -> None:
+    marker['libraries'] = {
+        path.relative_to(prefix).as_posix(): digest(path)
+        for path in sorted([*(prefix / 'bin').glob('*.dll'),
+                            *(prefix / 'lib').glob('*.dll.a')])
+    }
+    (prefix / 'rillight-core-dependencies.json').write_text(
+        json.dumps(marker, indent=2, sort_keys=True) + '\n', encoding='utf-8')
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--source", type=Path, required=True)
-    parser.add_argument("--prefix", type=Path, required=True)
-    parser.add_argument("--build", type=Path, required=True)
-    parser.add_argument("--msys-root", type=Path, default=Path("C:/msys64"))
-    parser.add_argument("--jobs", type=int, default=min(8, os.cpu_count() or 2))
-    parser.add_argument("--dav1d-source", type=Path)
-    parser.add_argument("--dav1d-build", type=Path)
+    parser.add_argument('--prefix', type=Path, required=True)
+    parser.add_argument('--work', type=Path, required=True)
+    parser.add_argument('--msys-root', type=Path, default=Path('C:/msys64'))
+    parser.add_argument('--jobs', type=int, default=min(8, os.cpu_count() or 2))
     args = parser.parse_args()
-    if platform.system() != "Windows":
-        parser.error("the Windows SDK must be built on Windows")
-    source, prefix, build, msys = (path.resolve() for path in
-                                   (args.source, args.prefix, args.build, args.msys_root))
-    dav1d_source = (args.dav1d_source or build.parent / "dav1d-source").resolve()
-    dav1d_build = (args.dav1d_build or build.parent / "dav1d-build").resolve()
-    if any(a == b or a in b.parents for a, b in ((source, prefix), (source, build),
-                                                 (prefix, build), (build, prefix))):
-        parser.error("source, prefix and build paths must be separate")
-    if run(["git", "-C", str(source), "rev-parse", "HEAD"]) != SPEC["ffmpeg"]["commit"]:
-        parser.error("FFmpeg source is not the pinned commit")
-    patches = SPEC["ffmpeg"].get("patches", {})
-    for relative, expected in patches.items():
-        patch = (ROOT / relative).resolve()
-        if ROOT not in patch.parents or not patch.is_file() or digest(patch) != expected:
-            parser.error(f"Missing/changed pinned patch: {relative}")
-        result = subprocess.run(["git", "-C", str(source), "apply", "--reverse",
-                                 "--check", str(patch)], capture_output=True)
-        if result.returncode:
-            parser.error(f"Pinned FFmpeg patch is not applied: {relative}")
-    marker_file = prefix / "rillight-core-dependencies.json"
-    if not marker_file.is_file():
-        parser.error("input prefix needs an existing pinned libass/FFmpeg SDK marker")
-    marker = json.loads(marker_file.read_text(encoding="utf-8"))
-    if (marker.get("platform") != "windows-x64" or
-            marker.get("ffmpeg_commit") != SPEC["ffmpeg"]["commit"] or
-            marker.get("ffmpeg_version") != SPEC["ffmpeg"]["version"] or
-            marker.get("ffmpeg_patches") != patches or
-            marker.get("libass", {}).get("version") != SPEC["libass"]["version"] or
-            marker.get("libass", {}).get("commit") != SPEC["libass"]["commit"]):
-        parser.error("input SDK source provenance differs from the lock")
-    for relative, expected in marker.get("libraries", {}).items():
-        artifact = (prefix / relative).resolve()
-        if prefix not in artifact.parents or not artifact.is_file() or digest(artifact) != expected:
-            parser.error(f"input SDK hash mismatch: {relative}")
-    bash, cygpath = msys / "usr/bin/bash.exe", msys / "usr/bin/cygpath.exe"
-    if not bash.is_file() or not cygpath.is_file():
-        parser.error(f"MSYS2 bash/cygpath missing under {msys}")
-    build.mkdir(parents=True, exist_ok=True)
-    unix = lambda path: run([str(cygpath), "-u", str(path)])
-    dav1d = SPEC["dav1d"]
-    fetch_source(dav1d_source, dav1d["repository"],
-                 dav1d["commit"], dav1d["version"])
-    meson_setup = [
-        "meson", "setup", unix(dav1d_build), unix(dav1d_source),
-        f"--prefix={unix(prefix)}", "--libdir=lib", "--buildtype=release",
-        "-Ddefault_library=shared", "-Denable_tools=false",
-        "-Denable_tests=false",
-    ]
-    if (dav1d_build / "build.ninja").exists():
-        meson_setup.insert(2, "--reconfigure")
-    configure = [f"--prefix={unix(prefix)}", f"--libdir={unix(prefix / 'lib')}",
-                 "--target-os=mingw32", "--arch=x86_64", "--enable-shared",
-                 "--disable-static", "--disable-programs", "--disable-doc",
-                 "--enable-network", "--disable-autodetect", "--enable-avfilter",
-                 "--enable-swresample", "--enable-swscale", "--enable-d3d11va",
-                 "--enable-dxva2", "--enable-libdav1d"]
-    script = ("set -euo pipefail\nexport PATH=/mingw64/bin:/usr/bin:$PATH\n"
-              f"meson_setup=({ ' '.join(shlex.quote(value) for value in meson_setup) })\n"
-              '"${meson_setup[@]}"\n'
-              f"meson compile -C {shlex.quote(unix(dav1d_build))} -j{args.jobs}\n"
-              f"meson install -C {shlex.quote(unix(dav1d_build))}\n"
-              f"export PKG_CONFIG_PATH={shlex.quote(unix(prefix / 'lib/pkgconfig'))}\n"
-              f"cd {shlex.quote(unix(build))}\n"
-              f"{shlex.quote(unix(source / 'configure'))} " +
-              " ".join(shlex.quote(value) for value in configure) + "\n"
-              f"make -j{args.jobs}\nmake install\n")
-    env = dict(os.environ)
-    env["MSYSTEM"] = "MINGW64"
-    env["CHERE_INVOKING"] = "1"
-    subprocess.run([str(bash), "-lc", script], env=env, check=True)
-    dav1d_dlls = sorted((prefix / "bin").glob("*dav1d*.dll"))
-    if len(dav1d_dlls) != 1:
-        raise RuntimeError("Expected exactly one pinned dav1d runtime DLL")
-    dav1d_dll = dav1d_dlls[0]
-    marker["dav1d"] = {
-        "version": dav1d["version"], "commit": dav1d["commit"],
-        "library": dav1d_dll.relative_to(prefix).as_posix(),
-        "sha256": digest(dav1d_dll),
-    }
-    marker["libraries"][dav1d_dll.relative_to(prefix).as_posix()] = digest(dav1d_dll)
-    marker["configure"] = configure
-    for relative in marker["libraries"]:
-        path = prefix / relative
-        if not path.is_file():
-            raise RuntimeError(f"Previously recorded SDK library disappeared: {relative}")
-        marker["libraries"][relative] = digest(path)
-    marker["libass"]["sha256"] = digest(prefix / marker["libass"]["library"])
-    marker_file.write_text(json.dumps(marker, indent=2, sort_keys=True) + "\n",
-                           encoding="utf-8")
-    print(f"Rebuilt pinned Windows FFmpeg with network input: {prefix}")
+    prefix, work, msys = (path.resolve() for path in
+                          (args.prefix, args.work, args.msys_root))
+    prefix.mkdir(parents=True, exist_ok=True)
+    work.mkdir(parents=True, exist_ok=True)
+    mingw = msys / 'mingw64'
+    environment = {**os.environ, 'MSYSTEM': 'MINGW64', 'CHERE_INVOKING': '1'}
+
+    def unix(path):
+        return subprocess.check_output(
+            [str(msys / 'usr/bin/cygpath.exe'), '-u', str(path)], text=True).strip()
+
+    def shell(script, *, capture=False):
+        command = [str(msys / 'usr/bin/bash.exe'), '-lc',
+                   'set -euo pipefail\nexport PATH=/mingw64/bin:/usr/bin:$PATH\n' + script]
+        if capture:
+            return subprocess.check_output(command, env=environment, text=True).strip()
+        subprocess.run(command, env=environment, check=True)
+
+    prefix_unix = unix(prefix)
+    if verify(prefix, 'windows-x64', require_subtitles=True):
+        for name in ('dav1d', 'libass', 'ffmpeg'):
+            spec = SPEC[name]
+            source = work / name
+            if name == 'ffmpeg' and (source / '.git').exists():
+                for patch in locked_ffmpeg_patches().values():
+                    if subprocess.run(['git', '-C', str(source), 'apply', '--reverse',
+                                       '--check', str(patch)], capture_output=True).returncode == 0:
+                        subprocess.run(['git', '-C', str(source), 'apply', '--reverse',
+                                        str(patch)], check=True)
+            fetch_source(source, spec['repository'], spec['commit'], spec['version'])
+        for patch in locked_ffmpeg_patches().values():
+            subprocess.run(['git', '-C', str(work / 'ffmpeg'), 'apply', str(patch)], check=True)
+
+        for name, options in (
+            ('dav1d', ['-Denable_tools=false', '-Denable_tests=false']),
+            ('libass', ['-Dfontconfig=enabled', '-Drequire-system-font-provider=true']),
+        ):
+            build = work / (name + '-build')
+            setup = ['meson', 'setup', unix(build), unix(work / name),
+                     f'--prefix={prefix_unix}', '--libdir=lib', '--buildtype=release',
+                     '-Ddefault_library=shared', *options]
+            if (build / 'build.ninja').exists():
+                setup.append('--reconfigure')
+            shell(shlex.join(setup) + '\n' +
+                  f'meson compile -C {shlex.quote(unix(build))} -j{args.jobs}\n' +
+                  f'meson install -C {shlex.quote(unix(build))}\n')
+
+        build = work / 'ffmpeg-build'
+        build.mkdir(exist_ok=True)
+        configure = [f'--prefix={prefix_unix}', f'--libdir={prefix_unix}/lib',
+                     '--target-os=mingw32', '--arch=x86_64', '--enable-shared',
+                     '--disable-static', '--disable-programs', '--disable-doc',
+                     '--enable-network', '--disable-autodetect', '--enable-avfilter',
+                     '--enable-swresample', '--enable-swscale', '--enable-d3d11va',
+                     '--enable-dxva2', '--enable-libdav1d']
+        shell(f'export PKG_CONFIG_PATH={shlex.quote(prefix_unix + "/lib/pkgconfig")}\n' +
+              f'cd {shlex.quote(unix(build))}\n' +
+              shlex.join([unix(work / 'ffmpeg/configure'), *configure]) + '\n' +
+              f'make -j{args.jobs}\nmake install\n')
+        copy_runtime_dependencies(prefix, mingw)
+        marker = {'schema': 1, 'platform': 'windows-x64',
+                  'ffmpeg_version': SPEC['ffmpeg']['version'],
+                  'ffmpeg_tag': SPEC['ffmpeg']['version'],
+                  'ffmpeg_commit': SPEC['ffmpeg']['commit'],
+                  'ffmpeg_patches': SPEC['ffmpeg'].get('patches', {}),
+                  'configure': configure}
+        for name, pattern in (('dav1d', '*dav1d*.dll'), ('libass', '*ass-*.dll')):
+            library, = (prefix / 'bin').glob(pattern)
+            marker[name] = {'version': SPEC[name]['version'], 'commit': SPEC[name]['commit'],
+                            'library': library.relative_to(prefix).as_posix(),
+                            'sha256': digest(library)}
+        marker['libass']['build_dependencies'] = {
+            name: shell(shlex.join(['pkg-config', '--modversion', name]), capture=True)
+            for name in SPEC['libass']['required_build_dependencies']
+        }
+        record_libraries(prefix, marker)
+    else:
+        print(f'Using verified Windows SDK: {prefix}', flush=True)
+        marker = json.loads((prefix / 'rillight-core-dependencies.json').read_text())
+
+    # The dependency cache never substitutes for compiling the candidate core.
+    core_build = work / 'core-build'
+    shell(shlex.join(['cmake', '-S', unix(ROOT), '-B', unix(core_build), '-G', 'Ninja',
+                      '-DCMAKE_BUILD_TYPE=Release', '-DCMAKE_CXX_COMPILER=/mingw64/bin/c++.exe',
+                      f'-DRILLIGHT_CORE_PREFIX={prefix_unix}']) + '\n' +
+          shlex.join(['cmake', '--build', unix(core_build), '--target', 'rillight_core',
+                      '--parallel', str(args.jobs)]))
+    shutil.copy2(core_build / 'librillight_core.dll', prefix / 'bin/librillight_core.dll')
+    copy_runtime_dependencies(prefix, mingw)
+    record_libraries(prefix, marker)
+    errors = verify(prefix, 'windows-x64', require_subtitles=True)
+    if errors:
+        raise RuntimeError('\n'.join(errors))
+    print(f'Built and verified Windows SDK and candidate core: {prefix}')
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

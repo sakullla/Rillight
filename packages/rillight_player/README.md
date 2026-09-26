@@ -51,11 +51,11 @@ libass, dav1d and `librillight_core.dll`, then build the Flutter Windows target.
 The CMake target fails closed when the SDK marker or libraries are missing.
 `tool/player_smoke.ps1` exercises the normal application entry with synthetic
 credentials. Record actual window frames, audio output and GPU behavior
-separately from native control events. The tag workflow requires
-`WINDOWS_CORE_SDK_URL` and `WINDOWS_CORE_SDK_SHA256`, checks the downloaded
-archive hash and verifies the SDK manifest before building. Preserve the
-SDK's source build log with the archive; a prebuilt archive hash alone does
-not prove how its native libraries were produced.
+separately from native control events. The tag workflow builds the SDK with
+`native/build_windows_dependencies.py --prefix SDK --work WORK --msys-root MSYS2`,
+using MSYS2 MinGW64. It caches the media dependencies, verifies cache hits and
+rebuilds the candidate core. The builder generates library hashes automatically;
+no SDK URL or SHA256 repository variables are needed.
 
 ### Android
 
@@ -79,15 +79,12 @@ Apple M3 host built, packaged and probed that core; GUI playback, physical
 audio, actual VideoToolbox decoder use and Intel remain open in
 [`macos/TESTING_HANDOFF.md`](macos/TESTING_HANDOFF.md).
 
-PR/main CI runs macOS packaging even without repository artifact variables:
-it builds the pinned universal SDK and compiles the candidate's owned core.
+PR/main CI and tag releases build the pinned universal SDK and compile the
+candidate's owned core without repository artifact variables.
 The SDK cache includes source pins, patches, builder/verifier code and Xcode;
 every restored SDK is verified, and the core is rebuilt for each candidate.
 `macos-native-inputs` preserves the SDK archive, core, hashes and build context.
-To use prebuilt inputs, supply all four `MACOS_CORE_SDK_URL`,
-`MACOS_CORE_SDK_SHA256`, `MACOS_CORE_DYLIB_URL`, `MACOS_CORE_DYLIB_SHA256`
-repository variables. Partial inputs, invalid hashes or download failures fail
-the job. Tags always require all four inputs and cannot use source fallback.
+Library manifests and artifact checksums are generated during the build.
 
 Hosted CI runs sandbox proxy and production playback controls with synthetic
 media; screen capture is disabled explicitly. `validation-scope.json` records

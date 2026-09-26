@@ -53,7 +53,9 @@ jobs:
           python3 tool/linux_release_checks_test.py
           python3 macos/verify_bundle_test.py
           python3 packages/rillight_player/native/build_macos_core_dependencies_test.py
+          python3 packages/rillight_player/native/build_windows_dependencies_test.py
           python3 tool/workflow_contracts_test.py
+          python3 tool/player_fixtures_test.py
           python3 macos/player_smoke_test.py
           bash linux/packaging/launcher_contract_test.sh
 
@@ -62,12 +64,6 @@ jobs:
 
   macos-package:
     uses: ./.github/workflows/macos-package.yml
-    with:
-      allow_source_build: true
-      core_sdk_url: ${{ vars.MACOS_CORE_SDK_URL }}
-      core_sdk_sha256: ${{ vars.MACOS_CORE_SDK_SHA256 }}
-      core_dylib_url: ${{ vars.MACOS_CORE_DYLIB_URL }}
-      core_dylib_sha256: ${{ vars.MACOS_CORE_DYLIB_SHA256 }}
 
   android:
     name: Android APK and native contracts

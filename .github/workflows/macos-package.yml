@@ -9,22 +9,6 @@ on:
       signing:
         type: string
         default: adhoc
-      allow_source_build:
-        description: Build pinned sources when all artifact inputs are absent (non-release CI only)
-        type: boolean
-        default: false
-      core_sdk_url:
-        type: string
-        default: ''
-      core_sdk_sha256:
-        type: string
-        default: ''
-      core_dylib_url:
-        type: string
-        default: ''
-      core_dylib_sha256:
-        type: string
-        default: ''
     secrets:
       MACOS_CERTIFICATE_P12_BASE64:
         required: false
@@ -38,20 +22,12 @@ jobs:
   build:
     runs-on: macos-15
     timeout-minutes: 75
-    env:
-      CORE_SDK_URL: ${{ inputs.core_sdk_url }}
-      CORE_SDK_SHA256: ${{ inputs.core_sdk_sha256 }}
-      CORE_DYLIB_URL: ${{ inputs.core_dylib_url }}
-      CORE_DYLIB_SHA256: ${{ inputs.core_dylib_sha256 }}
-      ALLOW_SOURCE_BUILD: ${{ inputs.allow_source_build }}
     steps:
       - uses: actions/checkout@v7
-      - name: Validate macOS inputs and select provisioning mode
+      - name: Identify Xcode toolchain for the SDK cache
         id: core-inputs
         shell: bash
         run: |
-          mode="$(bash .github/scripts/macos_core.sh mode)"
-          echo "mode=$mode" >> "$GITHUB_OUTPUT"
           toolchain="$(xcodebuild -version | shasum -a 256 | awk '{print $1}')"
           echo "toolchain=$toolchain" >> "$GITHUB_OUTPUT"
       - name: Check macOS signing secrets
@@ -85,7 +61,6 @@ jobs:
           brew install nasm pkg-config ffmpeg
           flutter pub get
       - name: Restore pinned universal SDK
-        if: steps.core-inputs.outputs.mode == 'source'
         id: sdk-cache
         uses: actions/cache/restore@v5
         with:
@@ -95,7 +70,7 @@ jobs:
         shell: bash
         run: bash .github/scripts/macos_core.sh
       - name: Save verified universal SDK
-        if: steps.core-inputs.outputs.mode == 'source' && steps.sdk-cache.outputs.cache-hit != 'true'
+        if: steps.sdk-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v5
         with:
           path: ${{ runner.temp }}/rillight-macos-sdk
@@ -214,7 +189,6 @@ jobs:
       - name: Report macOS validation scope
         if: always()
         env:
-          INPUT_MODE: ${{ steps.core-inputs.outputs.mode }}
           BUNDLE_RESULT: ${{ steps.bundle.outcome }}
           PACKAGE_RESULT: ${{ steps.package.outcome }}
           PROXY_RESULT: ${{ steps.proxy.outcome }}
@@ -222,7 +196,7 @@ jobs:
         run: |
           {
             echo '## macOS hosted-runner validation'
-            echo "Native inputs: ${INPUT_MODE:-unavailable}"
+            echo 'Native inputs: pinned source build with a verified SDK cache'
             echo "Bundle audit and loaded libraries: $BUNDLE_RESULT"
             echo "Signing and DMG packaging: $PACKAGE_RESULT"
             echo "Sandbox proxy: $PROXY_RESULT"
