@@ -21,7 +21,7 @@ enum PlaybackResourceRole {
 
 enum PlaybackCacheStream { conservative, stable }
 
-/// A per-session loopback transport. mpv never receives Emby credentials;
+/// A per-session loopback transport. The native core never receives Emby credentials;
 /// every redirect, HLS child resource and subtitle is authorized separately.
 class PlaybackHttpProxy {
   PlaybackHttpProxy._(
@@ -63,6 +63,7 @@ class PlaybackHttpProxy {
   MatroskaCacheIndex? _timelineIndex;
   String? _timelineIdentity;
   List<CachedTimeRange> _cachedTimeline = const [];
+  int _timelineSequence = 0;
   bool _refreshingTimeline = false;
   final FutureOr<void> Function(PlaybackCacheStream)? onStreamChanged;
   final _routes = SealedMediaRoutes();
@@ -111,11 +112,38 @@ class PlaybackHttpProxy {
     if (_closed) return;
     final previous = _readAhead;
     _readAhead = null;
+    _timelineIndex = null;
+    _timelineIdentity = null;
+    _cachedTimeline = const [];
+    _timelineSequence++;
     _readAheadBypass.clear();
     await previous?.close();
   }
 
   PlaybackCacheStream get stream => _stream;
+  List<CachedTimeRange> get _visibleCachedTimeline {
+    final degradation = cache?.diagnostics['degradation'];
+    return degradation == null || degradation == 'disk-timeout'
+        ? _cachedTimeline
+        : const [];
+  }
+
+  String? get _timelineUnknownReason {
+    if (_closed) return 'closed';
+    if (cache == null || !sessionBuffering) return 'cacheDisabled';
+    final degradation = cache!.diagnostics['degradation'];
+    if (degradation != null && degradation != 'disk-timeout') {
+      return 'cacheUncertain';
+    }
+    if (_readAhead == null || _timelineIdentity == null) {
+      return 'indexUnavailable';
+    }
+    if (_cachedTimeline.isEmpty && _timelineIndex == null) {
+      return 'mediaMappingUnavailable';
+    }
+    return null;
+  }
+
   double get upstreamBytesPerSecond {
     _pruneSamples();
     return _samples.fold<int>(0, (sum, sample) => sum + sample.$2).toDouble();
@@ -140,8 +168,11 @@ class PlaybackHttpProxy {
     'sessionBuffering': sessionBuffering,
     'activeRequests': _active,
     'cacheWorkspaceBytes': _cacheWorkspace,
+    'timelineIdentity': _timelineIdentity ?? '',
+    'timelineSequence': _timelineSequence,
+    'timelineUnknownReason': _timelineUnknownReason,
     'cachedTimeRanges': [
-      for (final range in _cachedTimeline)
+      for (final range in _visibleCachedTimeline)
         {
           'startMs': range.start.inMilliseconds,
           'endMs': range.end.inMilliseconds,
@@ -179,7 +210,7 @@ class PlaybackHttpProxy {
     var end = demuxerEnd < position ? position : demuxerEnd;
     final degradation = cache?.diagnostics['degradation'];
     if (degradation != null && degradation != 'disk-timeout') return end;
-    for (final range in _cachedTimeline) {
+    for (final range in _visibleCachedTimeline) {
       if (range.start <= end && range.end > end) end = range.end;
     }
     return end;
@@ -191,6 +222,10 @@ class PlaybackHttpProxy {
         _refreshingTimeline ||
         ahead == null ||
         duration <= Duration.zero) {
+      if (ahead == null && _cachedTimeline.isNotEmpty) {
+        _cachedTimeline = const [];
+        _timelineSequence++;
+      }
       return;
     }
     if (!_reserveCacheWorkspace(1024 * 1024)) return;
@@ -202,17 +237,23 @@ class PlaybackHttpProxy {
         _timelineIdentity = identity;
         _timelineIndex = null;
         _cachedTimeline = const [];
+        _timelineSequence++;
       }
       final bytes = await cache!.availableRanges(
         resource: ahead.resource,
         generation: ahead.generation,
       );
       if (_closed || !identical(ahead, _readAhead)) return;
-      if (bytes == null) return;
+      if (bytes == null) {
+        // A busy cache snapshot can time out without invalidating verified
+        // blocks. Explicit eviction/invalidation clears the timeline below.
+        return;
+      }
       if (bytes.length == 1 &&
           bytes.single.start == 0 &&
           bytes.single.end >= ahead.total) {
         _cachedTimeline = [CachedTimeRange(Duration.zero, duration)];
+        _timelineSequence++;
         return;
       }
       Future<Uint8List?> read(int offset, int length) async {
@@ -237,8 +278,10 @@ class PlaybackHttpProxy {
       if (_closed || !identical(ahead, _readAhead)) return;
       _timelineIndex = index;
       _cachedTimeline = index?.ranges(bytes, duration) ?? const [];
+      _timelineSequence++;
     } catch (_) {
       _cachedTimeline = const [];
+      _timelineSequence++;
     } finally {
       _charge(-1024 * 1024);
       _cacheWorkspace -= 1024 * 1024;
@@ -719,7 +762,12 @@ class PlaybackHttpProxy {
           ).hasMatch(incoming.headers.value('range')!));
 
   void _invalidate(String key, _Representation representation) {
-    if (_readAhead?.resource == key) _cachedTimeline = const [];
+    if (_readAhead?.resource == key) {
+      _cachedTimeline = const [];
+      _timelineIdentity = null;
+      _timelineIndex = null;
+      _timelineSequence++;
+    }
     if (_readAhead?.resource == key &&
         _readAhead?.generation == representation.generation) {
       unawaited(_readAhead!.close());
@@ -1053,6 +1101,10 @@ class PlaybackHttpProxy {
           ahead.resource != key ||
           ahead.generation != rep.generation) {
         await ahead?.close();
+        _timelineIdentity = null;
+        _timelineIndex = null;
+        _cachedTimeline = const [];
+        _timelineSequence++;
         ahead = SessionReadAhead(
           cache: cache!,
           resource: key,
