@@ -2235,11 +2235,11 @@ class _SeekTimeline extends StatelessWidget {
         Text(_clock(controller.position), style: _overlayTimeStyle(theme)),
         const SizedBox(width: AppSpacing.sm),
         Expanded(
-          child: BufferedRangesTrack(
-            snapshot: controller.bufferSnapshot,
-            duration: controller.duration,
-            child: SliderTheme(
-              data: _overlaySliderTheme(theme, thumbRadius: 6),
+          child: SliderTheme(
+            data: _overlaySliderTheme(theme, thumbRadius: 6),
+            child: BufferedRangesTrack(
+              snapshot: controller.bufferSnapshot,
+              duration: controller.duration,
               child: Slider(
                 key: PlayerKeys.seekBar,
                 value: value,

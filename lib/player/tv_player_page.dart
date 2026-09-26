@@ -519,26 +519,21 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                                 ],
                                               ),
                                               const SizedBox(height: 8),
-                                              BufferedRangesTrack(
+                                              BufferedRangesProgressIndicator(
                                                 snapshot: c.bufferSnapshot,
                                                 duration: c.duration,
-                                                horizontalInset: 0,
-                                                child: LinearProgressIndicator(
-                                                  value:
-                                                      c
-                                                              .duration
-                                                              .inMilliseconds <=
-                                                          0
-                                                      ? 0
-                                                      : ((_seek ??
-                                                                    c
-                                                                        .position
-                                                                        .inMilliseconds) /
-                                                                c
-                                                                    .duration
-                                                                    .inMilliseconds)
-                                                            .clamp(0, 1),
-                                                ),
+                                                value:
+                                                    c.duration.inMilliseconds <=
+                                                        0
+                                                    ? 0
+                                                    : ((_seek ??
+                                                                  c
+                                                                      .position
+                                                                      .inMilliseconds) /
+                                                              c
+                                                                  .duration
+                                                                  .inMilliseconds)
+                                                          .clamp(0, 1),
                                               ),
                                             ],
                                           ),
