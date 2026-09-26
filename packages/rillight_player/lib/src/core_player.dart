@@ -252,7 +252,7 @@ class DesktopCorePlayer implements CorePlayer {
       await retireSurface(
         channel: _channel,
         handle: handle.address,
-        needsRasterBarrier: Platform.isLinux,
+        needsRasterBarrier: Platform.isLinux || Platform.isMacOS,
       );
       await _destroyCore((handle.address, bindings.libraryPath));
       rethrow;
@@ -700,7 +700,7 @@ class DesktopCorePlayer implements CorePlayer {
     await retireSurface(
       channel: _channel,
       handle: _handle.address,
-      needsRasterBarrier: Platform.isLinux,
+      needsRasterBarrier: Platform.isLinux || Platform.isMacOS,
     );
     await _destroyCore((_handle.address, _bindings.libraryPath));
     await _events.close();

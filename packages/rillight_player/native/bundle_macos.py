@@ -3,6 +3,8 @@
 Usage: python3 bundle_macos.py path/to/rillight.app
 """
 
+from __future__ import annotations
+
 import json
 import os
 from pathlib import Path
@@ -11,6 +13,12 @@ import subprocess
 import sys
 
 from prepare_macos import RECORD, ROOT, digest, prepare
+
+NATIVE_LICENSES = (
+    "FFmpeg-GPL-2.0.txt", "FFmpeg-LGPL-2.1.txt", "libass-ISC.txt",
+    "dav1d-BSD-2-Clause.txt", "FreeType-FTL.txt", "FreeType-LICENSE.txt",
+    "FriBidi-LGPL-2.1.txt", "HarfBuzz-Old-MIT.txt",
+)
 
 
 def otool_dependencies(output: str) -> list[str]:
@@ -90,8 +98,7 @@ def bundle(app_path: Path, *, root: Path = ROOT, record: dict | None = None) -> 
     if not notices.is_file():
         raise RuntimeError("Native third-party notices are missing")
     shutil.copyfile(notices, resources / "rillight-native-notices.md")
-    for name in ("FFmpeg-GPL-2.0.txt", "FFmpeg-LGPL-2.1.txt", "libass-ISC.txt",
-                 "dav1d-BSD-2-Clause.txt"):
+    for name in NATIVE_LICENSES:
         source = root / "native/licenses" / name
         if not source.is_file():
             raise RuntimeError(f"Native license material missing: {name}")

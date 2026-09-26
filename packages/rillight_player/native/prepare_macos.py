@@ -4,6 +4,8 @@ No live binary downloads or libmpv fallback are permitted. The target Mac must
 provide a pinned FFmpeg/libass/dav1d SDK marker and a separately hashed core dylib.
 """
 
+from __future__ import annotations
+
 import hashlib
 import json
 import os
@@ -22,6 +24,14 @@ RECORD = "rillight-macos-closure.json"
 ENV_PREFIX = "RILLIGHT_MACOS_CORE_PREFIX"
 ENV_CORE = "RILLIGHT_MACOS_CORE_DYLIB"
 ENV_HASH = "RILLIGHT_MACOS_CORE_SHA256"
+ABI_MAJOR_DYLIB = re.compile(r"^lib[A-Za-z0-9_-]+\.\d+\.dylib$")
+MACHO_MAGICS = {
+    b"\xca\xfe\xba\xbe", b"\xbe\xba\xfe\xca",
+    b"\xca\xfe\xba\xbf", b"\xbf\xba\xfe\xca",
+    b"\xfe\xed\xfa\xce", b"\xce\xfa\xed\xfe",
+    b"\xfe\xed\xfa\xcf", b"\xcf\xfa\xed\xfe",
+}
+SYSTEM_PREFIXES = ("/System/Library/", "/usr/lib/", "/Library/Apple/")
 
 
 def digest(path: Path) -> str:
@@ -32,13 +42,100 @@ def digest(path: Path) -> str:
     return sha.hexdigest()
 
 
+def is_macho(path: Path) -> bool:
+    try:
+        with path.open("rb") as stream:
+            return stream.read(4) in MACHO_MAGICS
+    except OSError:
+        return False
+
+
+def bundled_names(paths) -> set[str]:
+    return {Path(path).name for path in paths}
+
+
+def unique(items: list[str]) -> list[str]:
+    seen: list[str] = []
+    for item in items:
+        if item not in seen:
+            seen.append(item)
+    return seen
+
+
+def load_dylibs(path: Path) -> list[str]:
+    output = subprocess.check_output(["otool", "-L", str(path)], text=True)
+    names = []
+    for line in output.splitlines():
+        stripped = line.strip()
+        if " (compatibility version " not in stripped:
+            continue
+        names.append(stripped.split(" (compatibility version ", 1)[0])
+    return names
+
+
+def dependent_dylibs(path: Path) -> list[str]:
+    return [dep for dep in load_dylibs(path) if Path(dep).name != path.name]
+
+
+def mach_o_rpaths(path: Path) -> list[str]:
+    output = subprocess.check_output(["otool", "-l", str(path)], text=True)
+    command = None
+    rpaths: list[str] = []
+    for line in output.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("cmd "):
+            command = stripped.split()[1]
+        elif command == "LC_RPATH" and stripped.startswith("path "):
+            rpaths.append(stripped.split(" ", 1)[1].split(" (offset", 1)[0].strip())
+            command = None
+    return rpaths
+
+
+def sanitize_install_names(path: Path, names: set[str]) -> None:
+    subprocess.check_call(
+        ["install_name_tool", "-id", f"@rpath/{path.name}", str(path)])
+    for dep in unique(dependent_dylibs(path)):
+        if dep.startswith(SYSTEM_PREFIXES):
+            continue
+        leaf = Path(dep).name
+        if leaf in names:
+            target = f"@rpath/{leaf}"
+            if dep != target:
+                subprocess.check_call(
+                    ["install_name_tool", "-change", dep, target, str(path)])
+        elif not dep.startswith(("@rpath/", "@loader_path/", "@executable_path/")):
+            raise RuntimeError(f"{path.name}: nonportable dependency {dep}")
+    for rpath in unique(mach_o_rpaths(path)):
+        if rpath.startswith(("@loader_path", "@executable_path", "@rpath")):
+            continue
+        subprocess.check_call(["install_name_tool", "-delete_rpath", rpath, str(path)])
+    if "@loader_path" not in unique(mach_o_rpaths(path)):
+        subprocess.check_call(
+            ["install_name_tool", "-add_rpath", "@loader_path", str(path)])
+    for dep in unique(dependent_dylibs(path)):
+        if dep.startswith(SYSTEM_PREFIXES):
+            continue
+        leaf = Path(dep).name
+        if dep == f"@rpath/{leaf}" and leaf in names:
+            continue
+        if dep.startswith(("@loader_path/", "@executable_path/")):
+            continue
+        raise RuntimeError(f"{path.name}: leftover nonportable dependency {dep}")
+    for rpath in unique(mach_o_rpaths(path)):
+        if not rpath.startswith(("@loader_path", "@executable_path", "@rpath")):
+            raise RuntimeError(f"{path.name}: leftover absolute rpath {rpath}")
+
+
 def runtime_paths(prefix: Path, marker: dict) -> list[Path]:
+    prefix = prefix.resolve()
     libraries = marker.get("libraries")
     libass = marker.get("libass")
     if not isinstance(libraries, dict) or not isinstance(libass, dict):
         raise RuntimeError("macOS SDK manifest lacks FFmpeg/libass provenance")
     relatives = set(libraries)
-    relatives.add(libass.get("library"))
+    for extra in (libass, marker.get("dav1d")):
+        if isinstance(extra, dict) and isinstance(extra.get("library"), str):
+            relatives.add(extra["library"])
     if None in relatives:
         raise RuntimeError("macOS SDK manifest has no libass library")
     selected = []
@@ -117,8 +214,13 @@ def prepare(prefix: Path | None = None, core: Path | None = None,
     for source in sources:
         target = destination / source.name
         shutil.copyfile(source, target)
-        if digest(target) != record["libraries"][source.name]:
-            raise RuntimeError(f"Staged macOS dylib hash mismatch: {source.name}")
+    core_target = destination / core.name
+    if is_macho(core_target):
+        sanitize_install_names(core_target, set(record["libraries"]))
+        record["libraries"][core.name] = digest(core_target)
+    for name, expected in record["libraries"].items():
+        if digest(destination / name) != expected:
+            raise RuntimeError(f"Staged macOS dylib hash mismatch: {name}")
     for stale in destination.glob("*.dylib"):
         if stale.name not in record["libraries"]:
             stale.unlink()

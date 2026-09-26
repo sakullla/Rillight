@@ -10,7 +10,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] /
                        'packages/rillight_player/native'))
-from bundle_macos import audit_binary
+from bundle_macos import NATIVE_LICENSES, audit_binary
 from prepare_macos import REQUIRED, digest
 
 
@@ -90,6 +90,9 @@ def verify(app_path, *, signed=False):
                   if Path(path).name.endswith('.dylib')}
     if isinstance(libass.get('library'), str):
         sdk_hashes[Path(libass['library']).name] = libass.get('sha256')
+    dav1d = sdk_marker.get('dav1d', {})
+    if isinstance(dav1d, dict) and isinstance(dav1d.get('library'), str):
+        sdk_hashes[Path(dav1d['library']).name] = dav1d.get('sha256')
     for name, source_hash in libraries.items():
         if name != 'librillight_core.dylib' and sdk_hashes.get(name) != source_hash:
             raise RuntimeError('Bundled source hash differs from SDK marker: ' + name)
@@ -108,8 +111,7 @@ def verify(app_path, *, signed=False):
         if not versions or any((version + (0, 0))[:2] > (12, 0)
                                for version in versions):
             raise RuntimeError('Bundled dylib exceeds macOS 12 deployment: ' + name)
-    for name in ('FFmpeg-GPL-2.0.txt', 'FFmpeg-LGPL-2.1.txt', 'libass-ISC.txt',
-                 'dav1d-BSD-2-Clause.txt'):
+    for name in NATIVE_LICENSES:
         if not (resources / 'rillight-native-licenses' / name).is_file():
             raise RuntimeError('Missing bundled native license: ' + name)
     if not (resources / 'rillight-native-notices.md').is_file():

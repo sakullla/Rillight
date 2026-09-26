@@ -70,14 +70,14 @@ emulator evidence, distinct from a physical phone or TV.
 
 ### macOS
 
-The podspec requires `RILLIGHT_MACOS_CORE_PREFIX`,
-`RILLIGHT_MACOS_CORE_DYLIB` and `RILLIGHT_MACOS_CORE_SHA256`. Preparation and
-bundling verify universal x86_64/arm64 slices, SDK source/hash markers,
-dependency closure and signatures. This workspace has no pinned universal
-SDK/core artifact and no target Mac playback result. Follow
-[`macos/TESTING_HANDOFF.md`](macos/TESTING_HANDOFF.md) on the other computer;
-until then macOS build, installed playback, physical audio and hardware decode
-remain unverified.
+`native/build_macos.sh` builds the pinned universal x86_64+arm64 SDK with
+libass, dav1d and VideoToolbox. The podspec requires
+`RILLIGHT_MACOS_CORE_PREFIX`, `RILLIGHT_MACOS_CORE_DYLIB` and
+`RILLIGHT_MACOS_CORE_SHA256`. Preparation and bundling verify dual-arch
+slices, SDK source/hash markers, `@rpath` closure and signatures. A 2026-09-26
+Apple M3 host built, packaged and probed that core; GUI playback, physical
+audio, actual VideoToolbox decoder use and Intel remain open in
+[`macos/TESTING_HANDOFF.md`](macos/TESTING_HANDOFF.md).
 
 ## Checks and evidence
 

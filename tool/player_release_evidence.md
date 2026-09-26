@@ -42,9 +42,12 @@ are development evidence, not a five-platform release candidate report.
   one used a stale gRPC discovery file. The phone runs predate the final
   desktop transport/cache revisions; they are not fresh current-source runs.
   All three targets have emulator evidence only.
-- macOS: no Mac host was available; follow
-  `packages/rillight_player/macos/TESTING_HANDOFF.md` on the user's other Mac.
-  No macOS build or playback pass is claimed.
+- macOS: an Apple M3 host on 2026-09-26 built the pinned universal SDK/core,
+  verified the Release bundle, probed FFmpeg n9.0.1/ABI 8, adhoc-signed a
+  test DMG and passed the sandbox proxy. GUI H.264/HEVC/VP9/AV1 frames,
+  physical audio, actual VideoToolbox decoder use and Intel remain open in
+  `packages/rillight_player/macos/TESTING_HANDOFF.md`. That is not a
+  playback pass.
 
 The all-hardware release gate and matched baseline/candidate performance
 comparison have not passed: physical Windows/Linux/Android audio and GPU
@@ -96,11 +99,11 @@ CI configuration must be labeled with its actual environment; it cannot count
 as physical output. The JSON example describes a fully observed candidate,
 not a current result.
 
-The target Mac is unavailable in this workspace. For the explicitly agreed
-handoff, append `--macos-handoff
+GUI playback, physical audio and Intel results are still missing. For the
+explicitly agreed handoff, append `--macos-handoff
 packages/rillight_player/macos/TESTING_HANDOFF.md`. The result reports
 `passed: false`, `accepted_with_handoff: true`, and an unverified macOS item.
-This permits local workflow closure while preserving the missing Mac proof.
+This permits local workflow closure while preserving the missing playback proof.
 An existing Mac result is audited even when the flag is present, so a recorded
 failure cannot be hidden by the handoff. Do not use that flag for a release
 decision that requires all five target hardware results.

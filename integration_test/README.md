@@ -2,8 +2,8 @@
 
 Current candidate (2026-09-26): Windows, macOS, Linux, Android phone and TV use
 the owned FFmpeg core in `packages/rillight_player`. The Android Studio emulator
-and desktop native tests provide only their observed scope. macOS target-machine
-build and playback remain in
+and desktop native tests provide only their observed scope. macOS SDK/core
+build and remaining GUI playback work are in
 [`packages/rillight_player/macos/TESTING_HANDOFF.md`](../packages/rillight_player/macos/TESTING_HANDOFF.md).
 The release evidence contract is in
 [`tool/player_release_evidence.md`](../tool/player_release_evidence.md); package,
