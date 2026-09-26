@@ -1008,19 +1008,6 @@ AVHWDeviceType hardware_device_type(RillightCoreHardware hardware) {
   }
 }
 
-const char *mediacodec_decoder_name(AVCodecID codec) {
-  switch (codec) {
-    case AV_CODEC_ID_H264: return "h264_mediacodec";
-    case AV_CODEC_ID_HEVC: return "hevc_mediacodec";
-    case AV_CODEC_ID_AV1: return "av1_mediacodec";
-    case AV_CODEC_ID_VP8: return "vp8_mediacodec";
-    case AV_CODEC_ID_VP9: return "vp9_mediacodec";
-    case AV_CODEC_ID_MPEG2VIDEO: return "mpeg2_mediacodec";
-    case AV_CODEC_ID_MPEG4: return "mpeg4_mediacodec";
-    default: return nullptr;
-  }
-}
-
 AVPixelFormat choose_hardware_format(AVCodecContext *context,
                                      const AVPixelFormat *formats) {
   const auto wanted = *static_cast<AVPixelFormat *>(context->opaque);
@@ -1038,12 +1025,6 @@ Decoder make_decoder(AVFormatContext *format, int index,
   if (index < 0 || index >= static_cast<int>(format->nb_streams)) return result;
   const auto *parameters = format->streams[index]->codecpar;
   const AVCodec *codec = avcodec_find_decoder(parameters->codec_id);
-  if (preference == RILLIGHT_CORE_HW_MEDIACODEC &&
-      parameters->codec_type == AVMEDIA_TYPE_VIDEO) {
-    const char *name = mediacodec_decoder_name(parameters->codec_id);
-    const AVCodec *platform = name ? avcodec_find_decoder_by_name(name) : nullptr;
-    if (platform) codec = platform;
-  }
   if (!codec) { result.error = AVERROR_DECODER_NOT_FOUND; return result; }
   AVCodecContext *context = avcodec_alloc_context3(codec);
   if (!context) { result.error = AVERROR(ENOMEM); return result; }
@@ -1118,35 +1099,30 @@ void copy_field(char *destination, size_t capacity, const char *source) {
   std::snprintf(destination, capacity, "%s", source);
 }
 
-uint32_t hardware_capabilities(AVCodecID codec_id) {
+uint32_t hardware_capabilities(const AVCodec *decoder) {
+  if (!decoder) return 0;
   uint32_t capabilities = 0;
-  auto collect = [&capabilities](const AVCodec *decoder) {
-    if (!decoder) return;
-    for (int index = 0;; ++index) {
-      const AVCodecHWConfig *config = avcodec_get_hw_config(decoder, index);
-      if (!config) break;
-      if (!(config->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX)) continue;
-      switch (config->device_type) {
-        case AV_HWDEVICE_TYPE_D3D11VA:
-          capabilities |= RILLIGHT_CORE_HW_D3D11;
-          break;
-        case AV_HWDEVICE_TYPE_VIDEOTOOLBOX:
-          capabilities |= RILLIGHT_CORE_HW_VIDEOTOOLBOX;
-          break;
-        case AV_HWDEVICE_TYPE_VAAPI:
-          capabilities |= RILLIGHT_CORE_HW_VAAPI;
-          break;
-        case AV_HWDEVICE_TYPE_MEDIACODEC:
-          capabilities |= RILLIGHT_CORE_HW_MEDIACODEC;
-          break;
-        default:
-          break;
-      }
+  for (int index = 0;; ++index) {
+    const AVCodecHWConfig *config = avcodec_get_hw_config(decoder, index);
+    if (!config) break;
+    if (!(config->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX)) continue;
+    switch (config->device_type) {
+      case AV_HWDEVICE_TYPE_D3D11VA:
+        capabilities |= RILLIGHT_CORE_HW_D3D11;
+        break;
+      case AV_HWDEVICE_TYPE_VIDEOTOOLBOX:
+        capabilities |= RILLIGHT_CORE_HW_VIDEOTOOLBOX;
+        break;
+      case AV_HWDEVICE_TYPE_VAAPI:
+        capabilities |= RILLIGHT_CORE_HW_VAAPI;
+        break;
+      case AV_HWDEVICE_TYPE_MEDIACODEC:
+        capabilities |= RILLIGHT_CORE_HW_MEDIACODEC;
+        break;
+      default:
+        break;
     }
-  };
-  collect(avcodec_find_decoder(codec_id));
-  const char *name = mediacodec_decoder_name(codec_id);
-  if (name) collect(avcodec_find_decoder_by_name(name));
+  }
   return capabilities;
 }
 
@@ -1170,8 +1146,8 @@ RillightCoreTrack make_track(const AVStream *stream) {
       track.type = RILLIGHT_CORE_TRACK_VIDEO;
       track.width = stream->codecpar->width;
       track.height = stream->codecpar->height;
-      track.decoder_hardware_capabilities =
-          hardware_capabilities(stream->codecpar->codec_id);
+      track.decoder_hardware_capabilities = hardware_capabilities(
+          avcodec_find_decoder(stream->codecpar->codec_id));
       break;
     case AVMEDIA_TYPE_AUDIO:
       track.type = RILLIGHT_CORE_TRACK_AUDIO;
@@ -1472,7 +1448,6 @@ int decode_packet(RillightCoreImpl *core, AVFormatContext *format,
     if (decoder.stream == video_index) {
       const AVFrame *picture = decoded;
       AVFrame *downloaded = nullptr;
-      bool decoded_with_hardware = false;
       if (decoder.hardware != RILLIGHT_CORE_HW_NONE && decoder.hw_format &&
           decoded->format == *decoder.hw_format) {
         downloaded = av_frame_alloc();
@@ -1484,24 +1459,17 @@ int decode_packet(RillightCoreImpl *core, AVFormatContext *format,
           break;
         }
         picture = downloaded;
-        decoded_with_hardware = true;
-      } else if (decoder.hardware == RILLIGHT_CORE_HW_MEDIACODEC) {
-        // MediaCodec without a Surface copies the decoded output into a CPU
-        // frame. The decoder still ran through MediaCodec; no transfer is needed.
-        decoded_with_hardware = true;
-      }
-      auto *output = convert_video(picture, pts, session, timeline,
-                                   format->streams[decoder.stream], scale);
-      av_frame_free(&downloaded);
-      av_frame_unref(decoded);
-      if (!output) { result = AVERROR(EINVAL); break; }
-      if (decoded_with_hardware) {
         std::lock_guard lock(core->mutex);
         for (auto &track : core->tracks) {
           if (track.stream_index == decoder.stream)
             track.actual_hardware = decoder.hardware;
         }
       }
+      auto *output = convert_video(picture, pts, session, timeline,
+                                   format->streams[decoder.stream], scale);
+      av_frame_free(&downloaded);
+      av_frame_unref(decoded);
+      if (!output) { result = AVERROR(EINVAL); break; }
       blend_subtitles(output, *cues);
       blend_ass(output, ass);
       if (pts >= 0)

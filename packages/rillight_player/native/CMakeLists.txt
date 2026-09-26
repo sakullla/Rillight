@@ -40,7 +40,7 @@ set(core_lib_dir "${RILLIGHT_CORE_PREFIX}/lib")
 
 foreach(component avformat avcodec avutil avfilter swresample swscale)
   find_library(${component}_library NAMES ${component}
-    PATHS "${core_lib_dir}" NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH REQUIRED)
+    PATHS "${core_lib_dir}" NO_DEFAULT_PATH REQUIRED)
 endforeach()
 
 add_library(rillight_core SHARED core/rillight_core.cpp)
@@ -59,7 +59,7 @@ if(EXISTS "${RILLIGHT_CORE_PREFIX}/include/ass/ass.h")
     message(FATAL_ERROR "libass SDK failed verification: ${ass_verify_error}")
   endif()
   find_library(ass_library NAMES ass PATHS "${core_lib_dir}"
-    NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH REQUIRED)
+    NO_DEFAULT_PATH REQUIRED)
   target_link_libraries(rillight_core PRIVATE ${ass_library})
   target_compile_definitions(rillight_core PRIVATE RILLIGHT_HAVE_LIBASS=1)
 else()
