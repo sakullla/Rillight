@@ -782,6 +782,31 @@ void main() {
     },
   );
 
+  test('retry invalidates published timeline identity and ranges', () async {
+    final fixture = await _CacheFixture.open(
+      disk: true,
+      sessionBuffering: true,
+      readAheadBytes: 2 * 1024 * 1024,
+    );
+    fixture.body = 'x' * (2 * 1024 * 1024);
+    await fixture.read('bytes=0-2097151');
+    await fixture.settle();
+    await fixture.proxy.refreshTimeline(const Duration(seconds: 30));
+    final before = fixture.proxy.diagnostics;
+    expect(before['timelineIdentity'], isNotEmpty);
+    expect(before['cachedTimeRanges'], isNotEmpty);
+
+    await fixture.proxy.retryReadAhead();
+    final after = fixture.proxy.diagnostics;
+    expect(after['timelineIdentity'], '');
+    expect(after['cachedTimeRanges'], isEmpty);
+    expect(after['timelineUnknownReason'], 'indexUnavailable');
+    expect(
+      after['timelineSequence'],
+      greaterThan(before['timelineSequence'] as int),
+    );
+  });
+
   test(
     'unsupported conditional ranges fall back before committing output',
     () async {
