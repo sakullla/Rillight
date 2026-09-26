@@ -114,12 +114,12 @@ class _HomeLoading extends StatelessWidget {
             );
           },
         ),
-        const SizedBox(height: AppSpacing.md),
+        const SizedBox(height: AppSpacing.xl),
         const Padding(
           padding: EdgeInsets.symmetric(horizontal: AppSpacing.md),
           child: _SectionSkeleton(wide: true),
         ),
-        const SizedBox(height: AppSpacing.md),
+        const SizedBox(height: AppSpacing.xl),
         const Padding(
           padding: EdgeInsets.symmetric(horizontal: AppSpacing.md),
           child: _SectionSkeleton(wide: false),

@@ -283,7 +283,14 @@ void main() {
       _usePhoneSurface(tester);
       final catalog = _catalog(
         resume: [
-          _item('episode-a', '试播集', 'Episode', percent: 40, seriesName: '示例剧'),
+          _item(
+            'episode-a',
+            '试播集',
+            'Episode',
+            percent: 40,
+            seriesName: '示例剧',
+            overview: '首播集剧情简介不该出现在首页横幅。',
+          ),
           _item('movie-b', '乙电影', 'Movie', percent: 10),
         ],
         movies: [
@@ -312,6 +319,8 @@ void main() {
       expect(find.text('继续播放'), findsNothing);
       expect(find.text('已看 40%'), findsWidgets);
       expect(find.byTooltip('暂停轮播'), findsNothing);
+      // 横幅只留标题和元信息行，不再叠剧情简介。
+      expect(find.textContaining('剧情简介'), findsNothing);
 
       const featured = [
         'episode-a',
@@ -2153,12 +2162,14 @@ EmbyItem _item(
   String type, {
   double? percent,
   String? seriesName,
+  String? overview,
 }) {
   return EmbyItem(
     id: id,
     name: name,
     type: type,
     seriesName: seriesName,
+    overview: overview,
     userData: percent == null
         ? const EmbyUserData()
         : EmbyUserData(playbackPositionTicks: 1, playedPercentage: percent),

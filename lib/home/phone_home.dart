@@ -182,12 +182,7 @@ class _PhoneHomeState extends State<PhoneHome> {
           final librariesById = {
             for (final library in catalog.libraries) library.id: library,
           };
-          const sectionPadding = EdgeInsets.fromLTRB(
-            AppSpacing.md,
-            AppSpacing.md,
-            AppSpacing.md,
-            AppSpacing.md,
-          );
+          const sectionMargin = EdgeInsets.symmetric(horizontal: AppSpacing.md);
           final screen = MediaQuery.sizeOf(context);
           final bannerSlot = _bannerSlot(
             context: context,
@@ -196,50 +191,78 @@ class _PhoneHomeState extends State<PhoneHome> {
             visible: visible,
             resume: byId[PhoneHomeSectionId.resume],
           );
+          // 区块之间统一 24 的垂直节奏；隐藏的区块不占位。横幅全出血。
+          final children = <Widget>[];
+          for (final id in visible) {
+            if (id == PhoneHomeSectionId.banner) {
+              children.add(
+                _fitBanner(
+                  slot: bannerSlot,
+                  child: PhoneHero(
+                    catalog: catalog,
+                    onItem: (item) {
+                      if (_heroItem?.id == item.id) {
+                        return;
+                      }
+                      setState(() => _heroItem = item);
+                    },
+                  ),
+                ),
+              );
+              continue;
+            }
+            final section = byId[id];
+            if (section != null) {
+              if (section.state.hidden) {
+                continue;
+              }
+              children.add(
+                Padding(
+                  padding: sectionMargin,
+                  child: _PhoneHomeRow(
+                    section: section,
+                    retry: () {
+                      catalog.reloadHomeRows();
+                    },
+                    onRemoveFromResume: catalog.hideFromResume,
+                    sharePoster: sharedPosterIds.add,
+                  ),
+                ),
+              );
+              continue;
+            }
+            if (id == PhoneHomeSectionId.libraries) {
+              if (catalog.libraries.isEmpty) {
+                continue;
+              }
+              children.add(
+                Padding(
+                  padding: sectionMargin,
+                  child: _PhoneLibraryEntry(libraries: catalog.libraries),
+                ),
+              );
+              continue;
+            }
+            final libraryId = PhoneHomeSectionId.libraryIdOf(id);
+            if (libraryId != null && librariesById[libraryId] != null) {
+              children.add(
+                Padding(
+                  padding: sectionMargin,
+                  child: _PhoneLibraryLatest(
+                    library: librariesById[libraryId]!,
+                    sharePoster: sharedPosterIds.add,
+                  ),
+                ),
+              );
+            }
+          }
           body = Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              for (final id in visible)
-                if (id == PhoneHomeSectionId.banner)
-                  _fitBanner(
-                    slot: bannerSlot,
-                    child: PhoneHero(
-                      catalog: catalog,
-                      onItem: (item) {
-                        if (_heroItem?.id == item.id) {
-                          return;
-                        }
-                        setState(() => _heroItem = item);
-                      },
-                    ),
-                  )
-                else if (byId[id] != null)
-                  Padding(
-                    padding: sectionPadding,
-                    child: _PhoneHomeRow(
-                      section: byId[id]!,
-                      retry: () {
-                        catalog.reloadHomeRows();
-                      },
-                      onRemoveFromResume: catalog.hideFromResume,
-                      sharePoster: sharedPosterIds.add,
-                    ),
-                  )
-                else if (id == PhoneHomeSectionId.libraries)
-                  Padding(
-                    padding: sectionPadding,
-                    child: _PhoneLibraryEntry(libraries: catalog.libraries),
-                  )
-                else if (PhoneHomeSectionId.libraryIdOf(id) != null &&
-                    librariesById[PhoneHomeSectionId.libraryIdOf(id)!] != null)
-                  Padding(
-                    padding: sectionPadding,
-                    child: _PhoneLibraryLatest(
-                      library:
-                          librariesById[PhoneHomeSectionId.libraryIdOf(id)!]!,
-                      sharePoster: sharedPosterIds.add,
-                    ),
-                  ),
+              for (var i = 0; i < children.length; i++) ...[
+                if (i > 0) const SizedBox(height: AppSpacing.xl),
+                children[i],
+              ],
             ],
           );
         }
@@ -248,13 +271,20 @@ class _PhoneHomeState extends State<PhoneHome> {
             (body is MobileLoadingPlaceholder &&
                 body.variant == MobileLoadingVariant.home);
         final navClearance = phoneScrollClearance(context);
+        // 横幅不出现时（被隐藏或暂无候选），首块内容要躲开状态栏和透明顶栏。
+        final topInset = body is Column && !hasBanner
+            ? MediaQuery.paddingOf(context).top + 56 + AppSpacing.md
+            : 0.0;
         final page = RefreshIndicator(
           onRefresh: () => catalog.reload(showCachedFirst: false),
           child: ListView(
             key: const PageStorageKey('mobile-home-scroll'),
             physics: const AlwaysScrollableScrollPhysics(),
             padding: fullBleed
-                ? EdgeInsets.only(bottom: AppSpacing.lg + navClearance)
+                ? EdgeInsets.only(
+                    top: topInset,
+                    bottom: AppSpacing.lg + navClearance,
+                  )
                 : EdgeInsets.fromLTRB(
                     AppSpacing.md,
                     AppSpacing.md,
@@ -347,10 +377,9 @@ double _rowHeightOf(BuildContext context, {required bool wide}) {
   final textScale = MediaQuery.textScalerOf(context).scale(14) / 14;
   final width = _cardWidthOf(context, wide: wide);
   if (!wide) {
-    final line = 14 * 1.45 * textScale;
+    final titleLine = 14 * 1.2 * textScale;
     final yearLine = 12 * 1.2 * textScale;
-    final titleBlock = AppSpacing.xs * 2 + line + 2 + yearLine;
-    return width * 1.5 + titleBlock;
+    return width * 1.5 + 6 + titleLine + yearLine + 2;
   }
   final titleLine = 14 * 1.2 * textScale;
   final meta = 12 * 1.2 * textScale;
@@ -360,7 +389,7 @@ double _rowHeightOf(BuildContext context, {required bool wide}) {
 
 double _wideBadgeHeight(BuildContext context) {
   final line = MediaQuery.textScalerOf(context).scale(12) * 1.2;
-  return line + AppSpacing.xxs * 2;
+  return line + 2 * 2;
 }
 
 /// 横幅默认高度仍是顶栏延伸加 16:9。继续观看放不下时只缩短这段延伸。
@@ -466,7 +495,7 @@ class _SectionTitle extends StatelessWidget {
             title,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.titleSmall?.copyWith(
+            style: theme.textTheme.titleMedium?.copyWith(
               fontWeight: FontWeight.w600,
               height: 1.2,
             ),
@@ -476,8 +505,9 @@ class _SectionTitle extends StatelessWidget {
           Icon(Icons.chevron_right, color: theme.colorScheme.onSurfaceVariant),
       ],
     );
+    // 区块之间的垂直节奏由首页统一负责，标题只留与卡片的下间距。
     return Padding(
-      padding: const EdgeInsets.only(top: AppSpacing.md, bottom: AppSpacing.sm),
+      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
       child: Align(
         alignment: Alignment.centerLeft,
         child: onMore == null
@@ -591,10 +621,7 @@ class _PosterBadge extends StatelessWidget {
         borderRadius: BorderRadius.circular(AppRadii.sm),
       ),
       child: Padding(
-        padding: const EdgeInsets.symmetric(
-          horizontal: AppSpacing.xs,
-          vertical: AppSpacing.xxs,
-        ),
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
         child: Text(
           label,
           maxLines: 1,
@@ -787,110 +814,60 @@ class _PhonePoster extends StatelessWidget {
       padding: const EdgeInsets.only(right: AppSpacing.xs),
       child: SizedBox(
         width: width,
-        child: _PosterCard(
-          pressKey: shared ? CatalogKeys.item(item.id) : null,
-          item: item,
-          shared: shared,
-          image: Stack(
-            fit: StackFit.expand,
+        child: MobilePressable(
+          key: shared ? CatalogKeys.item(item.id) : null,
+          onTap: () => PhoneMotion.openItem(context, item),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              _sharedPosterImage(item, shared),
-              if (badges.isNotEmpty)
-                Positioned(
-                  top: AppSpacing.xs,
-                  left: AppSpacing.xs,
-                  right: AppSpacing.xs,
-                  child: _PosterBadges(itemId: item.id, labels: badges),
-                ),
-            ],
-          ),
-          footer: Padding(
-            padding: const EdgeInsets.symmetric(
-              horizontal: AppSpacing.sm,
-              vertical: AppSpacing.xs,
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  item.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
-                    height: 1.25,
-                  ),
-                ),
-                if (item.productionYear != null && item.productionYear! > 0)
-                  Text(
-                    '${item.productionYear}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                      height: 1.2,
+              ClipRRect(
+                borderRadius: BorderRadius.circular(AppRadii.md),
+                child: AspectRatio(
+                  aspectRatio: 2 / 3,
+                  // 图缺失时 MediaImage 落主题化占位,底衬与页面分层。
+                  child: ColoredBox(
+                    color: theme.colorScheme.surfaceContainerLow,
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        _sharedPosterImage(item, shared),
+                        if (badges.isNotEmpty)
+                          Positioned(
+                            top: AppSpacing.xs,
+                            left: AppSpacing.xs,
+                            right: AppSpacing.xs,
+                            child: _PosterBadges(
+                              itemId: item.id,
+                              labels: badges,
+                            ),
+                          ),
+                      ],
                     ),
                   ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// 海报卡外壳:AppRadii 圆角 + AppMobileCard 阴影 + MobilePressable 按压反馈。
-/// [footer] 为空时 [image] 铺满整卡,否则图区按 2:3。
-class _PosterCard extends StatelessWidget {
-  const _PosterCard({
-    required this.item,
-    required this.shared,
-    required this.image,
-    this.footer,
-    this.pressKey,
-  });
-
-  final EmbyItem item;
-  final bool shared;
-  final Widget image;
-  final Widget? footer;
-  final Key? pressKey;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return MobilePressable(
-      key: pressKey,
-      onTap: () => PhoneMotion.openItem(context, item),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(AppRadii.md),
-          boxShadow: [
-            BoxShadow(
-              color: theme.colorScheme.scrim.withValues(
-                alpha: AppMobileCard.shadowAlpha,
+                ),
               ),
-              blurRadius: AppMobileCard.shadowBlur,
-              spreadRadius: AppMobileCard.shadowSpread,
-              offset: const Offset(0, AppMobileCard.shadowOffsetY),
-            ),
-          ],
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(AppRadii.md),
-          // 图缺失时 MediaImage 落主题化占位,底衬与页面分层。
-          child: ColoredBox(
-            color: theme.colorScheme.surfaceContainerLow,
-            child: footer == null
-                ? image
-                : Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      AspectRatio(aspectRatio: 2 / 3, child: image),
-                      footer!,
-                    ],
+              const SizedBox(height: 6),
+              Text(
+                item.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  height: 1.2,
+                ),
+              ),
+              if (item.productionYear != null && item.productionYear! > 0)
+                Text(
+                  '${item.productionYear}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                    height: 1.2,
                   ),
+                ),
+            ],
           ),
         ),
       ),
@@ -918,23 +895,14 @@ class _PhoneLibraryEntry extends StatelessWidget {
     final l10n = AppLocalizations.of(context);
     final theme = Theme.of(context);
     final screen = MediaQuery.sizeOf(context).width;
-    final available = screen - AppSpacing.md * 2;
-    final cardWidth = (available - AppSpacing.sm) / 2.15;
+    // 与「继续观看」横卡同宽:一屏一张多,露出下一张。
+    final cardWidth = phoneHomeWideCardWidth(screen);
     final cardHeight = cardWidth * 9 / 16;
     return Column(
       key: const Key('phone-home-libraries'),
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Padding(
-          padding: const EdgeInsets.only(top: AppSpacing.sm),
-          child: Text(
-            l10n.phoneHomeSectionLibraries,
-            style: theme.textTheme.titleSmall?.copyWith(
-              fontWeight: FontWeight.w600,
-              height: 1.2,
-            ),
-          ),
-        ),
+        _SectionTitle(title: l10n.phoneHomeSectionLibraries),
         SizedBox(
           height: cardHeight,
           child: ListView.builder(
@@ -944,60 +912,61 @@ class _PhoneLibraryEntry extends StatelessWidget {
               final library = libraries[index];
               final hasImage = _libraryHasImage(library);
               return Padding(
-                padding: const EdgeInsets.only(right: AppSpacing.sm),
+                padding: const EdgeInsets.only(right: AppSpacing.xs),
                 child: SizedBox(
                   width: cardWidth,
                   height: cardHeight,
-                  child: Material(
-                    color: theme.colorScheme.surfaceContainerHigh,
-                    borderRadius: BorderRadius.circular(AppRadii.md),
-                    clipBehavior: Clip.antiAlias,
-                    child: InkWell(
-                      key: Key('phone-home-library-${library.id}'),
-                      onTap: () => context.push(AppRoutes.library(library.id)),
-                      child: Stack(
-                        fit: StackFit.expand,
-                        children: [
-                          if (hasImage)
-                            MediaImage(
-                              item: library,
-                              preferBackdrop: true,
-                              maxWidth: 320,
-                            ),
-                          if (hasImage)
-                            DecoratedBox(
-                              decoration: BoxDecoration(
-                                gradient: LinearGradient(
-                                  begin: Alignment.topCenter,
-                                  end: Alignment.bottomCenter,
-                                  colors: [
-                                    theme.colorScheme.scrim.withValues(
-                                      alpha: 0,
-                                    ),
-                                    theme.colorScheme.scrim.withValues(
-                                      alpha: 0.72,
-                                    ),
-                                  ],
+                  child: MobilePressable(
+                    key: Key('phone-home-library-${library.id}'),
+                    onTap: () => context.push(AppRoutes.library(library.id)),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(AppRadii.md),
+                      child: ColoredBox(
+                        color: theme.colorScheme.surfaceContainerHigh,
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            if (hasImage)
+                              MediaImage(
+                                item: library,
+                                preferBackdrop: true,
+                                maxWidth: 480,
+                              ),
+                            if (hasImage)
+                              const DecoratedBox(
+                                decoration: BoxDecoration(
+                                  gradient: LinearGradient(
+                                    begin: Alignment.topCenter,
+                                    end: Alignment.bottomCenter,
+                                    colors: [
+                                      Color(0x00000000),
+                                      Color(0xB3000000),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            Align(
+                              alignment: hasImage
+                                  ? Alignment.bottomLeft
+                                  : Alignment.center,
+                              child: Padding(
+                                padding: const EdgeInsets.all(AppSpacing.md),
+                                child: Text(
+                                  library.name,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.titleMedium?.copyWith(
+                                    color: hasImage
+                                        ? Colors.white
+                                        : theme.colorScheme.onSurface,
+                                    fontWeight: FontWeight.w600,
+                                    height: 1.2,
+                                  ),
                                 ),
                               ),
                             ),
-                          Align(
-                            alignment: hasImage
-                                ? Alignment.bottomLeft
-                                : Alignment.center,
-                            child: Padding(
-                              padding: const EdgeInsets.all(AppSpacing.sm),
-                              child: Text(
-                                library.name,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: theme.textTheme.labelLarge?.copyWith(
-                                  color: theme.colorScheme.onSurface,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
                   ),

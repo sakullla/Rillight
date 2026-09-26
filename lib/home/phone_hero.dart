@@ -6,7 +6,6 @@ import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_controller.dart';
 import 'package:rillight/home/featured_items.dart';
 import 'package:rillight/home/catalog_keys.dart';
-import 'package:rillight/library/item_format.dart';
 import 'package:rillight/media_image/media_image.dart';
 
 /// 手机首页横幅。候选规则与桌面首页横幅相同，但不把那个组件装进手机：
@@ -123,10 +122,16 @@ class _PhoneHeroState extends State<PhoneHero> {
                             Positioned(
                               left: AppSpacing.md,
                               right: AppSpacing.md,
-                              bottom: rotating ? 22 : AppSpacing.md,
+                              bottom: AppSpacing.md,
                               child: _HeroCaption(
                                 item: pageItem,
                                 title: pageTitle,
+                                trailing: rotating && page == index
+                                    ? _HeroDots(
+                                        count: items.length,
+                                        index: index,
+                                      )
+                                    : null,
                               ),
                             ),
                           ],
@@ -136,42 +141,6 @@ class _PhoneHeroState extends State<PhoneHero> {
                   );
                 },
               ),
-              if (rotating)
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: AppSpacing.xs,
-                  child: ContentTheme(
-                    item: items[index],
-                    preferBackdrop: true,
-                    fillSurface: false,
-                    child: Builder(
-                      builder: (context) {
-                        final active = Theme.of(context).colorScheme.primary;
-                        return Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            for (var i = 0; i < items.length; i++)
-                              Container(
-                                key: CatalogKeys.heroDot(i),
-                                width: i == index ? 16 : 6,
-                                height: 4,
-                                margin: const EdgeInsets.symmetric(
-                                  horizontal: 3,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: i == index
-                                      ? active
-                                      : Colors.white.withValues(alpha: 0.45),
-                                  borderRadius: BorderRadius.circular(99),
-                                ),
-                              ),
-                          ],
-                        );
-                      },
-                    ),
-                  ),
-                ),
             ],
           ),
         );
@@ -204,48 +173,73 @@ class _HeroWash extends StatelessWidget {
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
           colors: [
-            Color(0xB3000000),
+            Color(0x8C000000),
             Color(0x00000000),
             Color(0x00000000),
             Color(0x8C000000),
-            Color(0xE6000000),
           ],
-          stops: [0, 0.22, 0.48, 0.78, 1],
+          stops: [0, 0.3, 0.55, 1],
         ),
       ),
     );
   }
 }
 
+/// 轮播点：贴在元信息行右侧，活动段拉长，颜色取当前画面主题色。
+class _HeroDots extends StatelessWidget {
+  const _HeroDots({required this.count, required this.index});
+
+  final int count;
+  final int index;
+
+  @override
+  Widget build(BuildContext context) {
+    final active = Theme.of(context).colorScheme.primary;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (var i = 0; i < count; i++)
+          Container(
+            key: CatalogKeys.heroDot(i),
+            width: i == index ? 16 : 6,
+            height: 4,
+            margin: const EdgeInsets.symmetric(horizontal: 3),
+            decoration: BoxDecoration(
+              color: i == index ? active : Colors.white.withValues(alpha: 0.45),
+              borderRadius: BorderRadius.circular(99),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// 横幅文案：标题加一行元信息（年份 · 评分 · 类型），[trailing] 放轮播点。
 class _HeroCaption extends StatelessWidget {
-  const _HeroCaption({required this.item, required this.title});
+  const _HeroCaption({required this.item, required this.title, this.trailing});
 
   final EmbyItem item;
   final String title;
+  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final date = _heroDate(item);
+    final year = item.productionYear != null && item.productionYear! > 0
+        ? item.productionYear
+        : item.premiereDate?.year;
     final rating = item.communityRating;
     final genre = item.genres.isEmpty ? null : item.genres.first;
-    final overview = plainOverview(item.overview);
+    final meta = [
+      if (year != null) '$year',
+      if (rating != null) rating.toStringAsFixed(1),
+      ?genre,
+    ].join('  ·  ');
     const ink = Colors.white;
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (date != null)
-          Text(
-            date,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.labelMedium?.copyWith(
-              color: ink.withValues(alpha: 0.78),
-              letterSpacing: 0.4,
-              height: 1.2,
-            ),
-          ),
         Text(
           title,
           maxLines: 2,
@@ -256,47 +250,26 @@ class _HeroCaption extends StatelessWidget {
             height: 1.15,
           ),
         ),
-        if (rating != null || genre != null) ...[
+        if (meta.isNotEmpty || trailing != null) ...[
           const SizedBox(height: 6),
-          Text(
-            [
-              if (rating != null) rating.toStringAsFixed(1),
-              ?genre,
-            ].join('  ·  '),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.labelLarge?.copyWith(
-              color: ink.withValues(alpha: 0.88),
-              height: 1.2,
-            ),
-          ),
-        ],
-        if (overview != null) ...[
-          const SizedBox(height: 8),
-          Text(
-            overview,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: ink.withValues(alpha: 0.78),
-              height: 1.35,
-            ),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  meta,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    color: ink.withValues(alpha: 0.88),
+                    height: 1.2,
+                  ),
+                ),
+              ),
+              ?trailing,
+            ],
           ),
         ],
       ],
     );
   }
-}
-
-/// 首播日期单独成行。没有首播日时只留年份。
-String? _heroDate(EmbyItem item) {
-  final premiere = item.premiereDate;
-  if (premiere != null) {
-    return '${premiere.year}年${premiere.month}月${premiere.day}日';
-  }
-  final year = item.productionYear;
-  if (year != null && year > 0) {
-    return '$year';
-  }
-  return null;
 }
