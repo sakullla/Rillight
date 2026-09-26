@@ -889,7 +889,7 @@ void main() {
   });
 
   testWidgets(
-    'controls use gesture and view padding while the video stays full bleed',
+    'landscape controls use actual top obstruction while video stays full bleed',
     (tester) async {
       const size = Size(800, 360);
       tester.view.padding = FakeViewPadding();
@@ -931,12 +931,33 @@ void main() {
       expect(picture.top, closeTo(0, 0.2));
       expect(picture.width, closeTo(size.width, 0.2));
       expect(picture.height, closeTo(size.height, 0.2));
-      expect(back.top - picture.top, closeTo(30, 0.01));
+      final topScrim = find.byKey(const Key('mobile-player-top-scrim'));
+      final bottomScrim = find.byKey(const Key('mobile-player-bottom-scrim'));
+      expect(tester.getRect(topScrim).top, closeTo(picture.top, 0.01));
+      expect(tester.getRect(topScrim).left, closeTo(picture.left, 0.01));
+      expect(tester.getRect(topScrim).right, closeTo(picture.right, 0.01));
+      expect(tester.getRect(bottomScrim).bottom, closeTo(picture.bottom, 0.01));
+      expect(tester.getRect(bottomScrim).left, closeTo(picture.left, 0.01));
+      expect(tester.getRect(bottomScrim).right, closeTo(picture.right, 0.01));
+      final topDecoration =
+          tester.widget<DecoratedBox>(topScrim).decoration as BoxDecoration;
+      expect(topDecoration.gradient!.colors.first.a, greaterThan(0));
+      expect(back.top - picture.top, closeTo(0, 0.01));
       expect(back.left - picture.left, closeTo(24, 0.01));
       expect(picture.right - more.right, closeTo(24, 0.01));
       expect(rewind.left - picture.left, greaterThanOrEqualTo(24));
       expect(picture.bottom - rewind.bottom, closeTo(40, 0.01));
+      await tester.tap(find.byKey(const Key('mobile-player-lock')));
+      await tester.pump();
+      expect(tester.getRect(topScrim).top, closeTo(picture.top, 0.01));
+      expect(tester.getRect(topScrim).left, closeTo(picture.left, 0.01));
+      expect(
+        tester.getTopLeft(find.byKey(const Key('mobile-player-unlock'))).dy,
+        closeTo(0, 0.01),
+      );
       expect(tester.takeException(), isNull);
+      await tester.tap(find.byKey(const Key('mobile-player-unlock')));
+      await tester.pump();
       await closePlayer(tester);
     },
   );
@@ -987,6 +1008,34 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets('landscape top cutout still insets the top controls', (
+    tester,
+  ) async {
+    tester.view.padding = FakeViewPadding();
+    tester.view.viewPadding = const FakeViewPadding(top: 36);
+    tester.view.systemGestureInsets = FakeViewPadding();
+    tester.view.displayFeatures = const [
+      DisplayFeature(
+        bounds: Rect.fromLTWH(350, 0, 100, 24),
+        type: DisplayFeatureType.cutout,
+        state: DisplayFeatureState.unknown,
+      ),
+    ];
+    addTearDown(tester.view.resetPadding);
+    addTearDown(tester.view.resetViewPadding);
+    addTearDown(tester.view.resetSystemGestureInsets);
+    addTearDown(tester.view.resetDisplayFeatures);
+    _mockAndroidPlayerChannel(<MethodCall>[], sdk: 36);
+    await showPlayer(
+      tester,
+      itemId: 'movie-inception',
+      wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
+      size: const Size(800, 360),
+    );
+    expect(tester.getTopLeft(find.byTooltip('关闭')).dy, closeTo(24, 0.01));
+    await closePlayer(tester);
+  });
 
   testWidgets(
     'unsupported startup tracks stay silent and a manual choice is in Chinese',

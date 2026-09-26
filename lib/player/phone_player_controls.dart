@@ -20,11 +20,12 @@ import 'package:rillight/player/player_settings.dart';
 /// hosts picture scale, danmaku, tracks, speed, media source, mute and volume.
 /// Transport hit targets stay at least 48dp with an 8dp gap.
 ///
-/// The video surface is not inset. This layer is, by the per-edge maximum of
-/// [MediaQueryData.padding], [MediaQueryData.viewPadding] and
-/// [MediaQueryData.systemGestureInsets]. Below Android API 30 a display
-/// cutout is not part of that padding once the system bars are hidden, so it
-/// is included from [MediaQueryData.displayFeatures].
+/// The video surface and control scrims extend to the screen edges. Buttons
+/// and center content avoid gesture regions and cutouts. In landscape an OEM
+/// may report a top system gesture inset even with the status bar hidden;
+/// the top bar only uses the actual top display cutout so its buttons reach
+/// the screen edge. Below Android API 30 display cutouts are also applied to
+/// the other edges from [MediaQueryData.displayFeatures].
 ///
 /// The lock state is a state-machine field of this layer; the page mirrors
 /// it through [onLockChanged] to disable the gesture layer. `PlayerController`
@@ -81,12 +82,14 @@ EdgeInsets phonePlayerControlInsets(
   final padding = media.padding;
   final view = media.viewPadding;
   final gesture = media.systemGestureInsets;
+  final cutout = _displayCutoutInsets(media.size, media.displayFeatures);
   var left = math.max(padding.left, math.max(view.left, gesture.left));
-  var top = math.max(padding.top, math.max(view.top, gesture.top));
+  var top = media.size.width > media.size.height
+      ? cutout.top
+      : math.max(padding.top, math.max(view.top, gesture.top));
   var right = math.max(padding.right, math.max(view.right, gesture.right));
   var bottom = math.max(padding.bottom, math.max(view.bottom, gesture.bottom));
   if (androidSdkInt == null || androidSdkInt < 30) {
-    final cutout = _displayCutoutInsets(media.size, media.displayFeatures);
     left = math.max(left, cutout.left);
     top = math.max(top, cutout.top);
     right = math.max(right, cutout.right);
@@ -174,24 +177,27 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
       MediaQuery.of(context),
       androidSdkInt: _androidSdk,
     );
-    return Padding(
-      padding: insets,
-      child: Column(
-        children: [
-          _buildTopBar(context),
-          Expanded(child: widget.center),
-          if (!_locked) _buildBottomBar(context),
-        ],
-      ),
+    return Column(
+      children: [
+        _buildTopBar(context, insets),
+        Expanded(
+          child: Padding(
+            padding: EdgeInsets.only(left: insets.left, right: insets.right),
+            child: widget.center,
+          ),
+        ),
+        if (!_locked) _buildBottomBar(context, insets),
+      ],
     );
   }
 
-  Widget _buildTopBar(BuildContext context) {
+  Widget _buildTopBar(BuildContext context, EdgeInsets insets) {
     final l = AppLocalizations.of(context);
     final c = _controller;
     if (_locked) {
       // Locked: only the unlock affordance stays on screen.
       return DecoratedBox(
+        key: const Key('mobile-player-top-scrim'),
         decoration: BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topCenter,
@@ -208,20 +214,28 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
             stops: const [0, 0.55, 1],
           ),
         ),
-        child: Row(
-          children: [
-            IconButton(
-              key: const Key('mobile-player-unlock'),
-              tooltip: l.mobileUnlock,
-              style: _phoneChromeButton,
-              onPressed: toggleLock,
-              icon: const Icon(Icons.lock),
-            ),
-          ],
+        child: Padding(
+          padding: EdgeInsets.only(
+            left: insets.left,
+            top: insets.top,
+            right: insets.right,
+          ),
+          child: Row(
+            children: [
+              IconButton(
+                key: const Key('mobile-player-unlock'),
+                tooltip: l.mobileUnlock,
+                style: _phoneChromeButton,
+                onPressed: toggleLock,
+                icon: const Icon(Icons.lock),
+              ),
+            ],
+          ),
         ),
       );
     }
     return DecoratedBox(
+      key: const Key('mobile-player-top-scrim'),
       decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topCenter,
@@ -238,45 +252,53 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
           stops: const [0, 0.55, 1],
         ),
       ),
-      child: Row(
-        children: [
-          IconButton(
-            tooltip: l.closePlayer,
-            style: _phoneChromeButton,
-            onPressed: widget.onClose,
-            icon: const Icon(Icons.arrow_back),
-          ),
-          Expanded(
-            child: Text(
-              c.item?.name ?? l.playerLoading,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+      child: Padding(
+        padding: EdgeInsets.only(
+          left: insets.left,
+          top: insets.top,
+          right: insets.right,
+        ),
+        child: Row(
+          children: [
+            IconButton(
+              tooltip: l.closePlayer,
+              style: _phoneChromeButton,
+              onPressed: widget.onClose,
+              icon: const Icon(Icons.arrow_back),
             ),
-          ),
-          IconButton(
-            key: const Key('mobile-player-lock'),
-            tooltip: l.mobileLock,
-            style: _phoneChromeButton,
-            onPressed: toggleLock,
-            icon: const Icon(Icons.lock_open),
-          ),
-          IconButton(
-            key: const Key('mobile-player-more'),
-            tooltip: l.mobileTracks,
-            style: _phoneChromeButton,
-            onPressed: c.loading ? null : () => unawaited(_openMore()),
-            icon: const Icon(Icons.more_vert),
-          ),
-        ],
+            Expanded(
+              child: Text(
+                c.item?.name ?? l.playerLoading,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            IconButton(
+              key: const Key('mobile-player-lock'),
+              tooltip: l.mobileLock,
+              style: _phoneChromeButton,
+              onPressed: toggleLock,
+              icon: const Icon(Icons.lock_open),
+            ),
+            IconButton(
+              key: const Key('mobile-player-more'),
+              tooltip: l.mobileTracks,
+              style: _phoneChromeButton,
+              onPressed: c.loading ? null : () => unawaited(_openMore()),
+              icon: const Icon(Icons.more_vert),
+            ),
+          ],
+        ),
       ),
     );
   }
 
-  Widget _buildBottomBar(BuildContext context) {
+  Widget _buildBottomBar(BuildContext context, EdgeInsets insets) {
     final l = AppLocalizations.of(context);
     final c = _controller;
     final durationMs = c.duration.inMilliseconds.toDouble();
     return DecoratedBox(
+      key: const Key('mobile-player-bottom-scrim'),
       decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topCenter,
@@ -294,7 +316,11 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
         ),
       ),
       child: Padding(
-        padding: const EdgeInsets.only(right: 4),
+        padding: EdgeInsets.only(
+          left: insets.left,
+          right: insets.right + 4,
+          bottom: insets.bottom,
+        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
