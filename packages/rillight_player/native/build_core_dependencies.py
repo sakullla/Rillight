@@ -50,15 +50,17 @@ def fetch_source(source: Path, repository: str, commit: str, tag: str) -> None:
             raise RuntimeError(f"Source path is not a Git repository: {source}")
         run(["git", "init", str(source)])
         run(["git", "remote", "add", "origin", repository], source)
-    if run(["git", "remote", "get-url", "origin"], source) != repository:
+    # `remote get-url` expands a host's url.*.insteadOf mirror rule. Verify the
+    # URL stored in this repository; the pinned commit and tag are checked below.
+    if run(["git", "config", "--local", "--get", "remote.origin.url"], source) != repository:
         raise RuntimeError(f"Source remote does not match lock: {source}")
     if subprocess.run(["git", "cat-file", "-e", f"{commit}^{{commit}}"],
                       cwd=source, stdout=subprocess.DEVNULL,
                       stderr=subprocess.DEVNULL).returncode != 0:
         run(["git", "-c", "protocol.version=2", "fetch", "--depth=1",
-             "--filter=blob:none", "origin", commit], source)
+             "origin", commit], source)
     run(["git", "-c", "protocol.version=2", "fetch", "--depth=1",
-         "--filter=blob:none", "origin", f"refs/tags/{tag}:refs/tags/{tag}"], source)
+         "origin", f"refs/tags/{tag}:refs/tags/{tag}"], source)
     if run(["git", "rev-parse", f"refs/tags/{tag}^{{}}"], source) != commit:
         raise RuntimeError(f"Source release tag does not match pinned commit: {source}")
     run(["git", "checkout", "--detach", commit], source)

@@ -34,6 +34,8 @@ jobs:
         with:
           path: ${{ runner.temp }}/rillight-native
           key: owned-core-ubuntu22-${{ hashFiles('packages/rillight_player/native/build_linux.sh', 'packages/rillight_player/native/build_core_dependencies.py', 'packages/rillight_player/native/verify_core_dependencies.py') }}
+      - name: Check pinned source fetch with a Git mirror
+        run: python3 packages/rillight_player/native/build_core_dependencies_test.py
       - name: Build the fixed media stack
         run: bash packages/rillight_player/native/build_linux.sh "$RUNNER_TEMP/rillight-native"
       - name: Build and audit the complete Flutter bundle

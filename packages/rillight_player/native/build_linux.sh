@@ -22,7 +22,7 @@ for package in libva libva-drm libdrm freetype2 fribidi harfbuzz fontconfig; do
 done
 python3 -m venv "$work/venv"
 "$work/venv/bin/pip" install 'meson==1.7.2' 'ninja==1.11.1.4'
-"$work/venv/bin/python" "$script_dir/build_core_dependencies.py" \
+PATH="$work/venv/bin:$PATH" "$work/venv/bin/python" "$script_dir/build_core_dependencies.py" \
   --prefix "$prefix" --work "$work" --with-libass
 "$work/venv/bin/python" "$script_dir/verify_core_dependencies.py" \
   --prefix "$prefix" --target linux-x64 --require-subtitles
