@@ -9,6 +9,7 @@ import 'package:rillight/app/app.dart';
 import 'package:rillight/player/mobile_player_page.dart';
 import 'package:rillight/player/tv_player_page.dart';
 import 'package:rillight/player/player_controller.dart';
+import 'package:rillight/player/rillight_video_backend.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -18,17 +19,18 @@ Future<void> main() async {
       request.response.statusCode = HttpStatus.notFound;
     } else {
       request.response.headers.contentType = ContentType.json;
-      request.response.write(jsonEncode(snapshot()));
+      request.response.write(jsonEncode(await snapshot()));
     }
     await request.response.close();
   });
   await production.main([]);
 }
 
-Map<String, Object?> snapshot() {
+Future<Map<String, Object?>> snapshot() async {
   final rows = <Map<String, Object?>>[];
   final pages = <String>{};
   Map<String, Object?>? player;
+  RillightVideoBackend? observedBackend;
   bool? tv, authenticated;
   final view = WidgetsBinding.instance.platformDispatcher.views.first;
   void visit(Element element) {
@@ -53,6 +55,9 @@ Map<String, Object?> snapshot() {
           _ => null,
         };
         if (controller != null) {
+          if (controller.backend case final RillightVideoBackend backend) {
+            observedBackend = backend;
+          }
           player = {
             'loading': controller.loading,
             'error': controller.error?.name,
@@ -105,6 +110,45 @@ Map<String, Object?> snapshot() {
 
   final root = WidgetsBinding.instance.rootElement;
   if (root != null) visit(root);
+  if (observedBackend != null && player != null) {
+    // Keep this observer usable with a real signed-in account. Only scalar
+    // transport/core facts are exposed; no URL, identity, or raw error text.
+    try {
+      final diagnostics = await observedBackend!.diagnostics();
+      player!['diagnostics'] = {
+        for (final key in const [
+          'openPhase',
+          'transportAttached',
+          'transportDiagnosticsStatus',
+          'transportWorkerExited',
+          'transportWorkerFailureKind',
+          'transportWorkerFailureFrames',
+          'backendSessionId',
+          'coreSession',
+          'coreLastEvent',
+          'upstreamBytes',
+          'activeRequests',
+          'lastUpstreamStatus',
+          'upstreamConnectingRequests',
+          'upstreamAwaitingHeadersRequests',
+          'lastUpstreamPhase',
+          'lastUpstreamFailureKind',
+          'lastUpstreamPhaseElapsedMs',
+          'recoveryAttempts',
+          'recoveryFailures',
+          'authenticationStatus',
+          'corePositionMs',
+          'coreDurationMs',
+          'coreActualHardware',
+          'coreActualHardwareName',
+          'corePlaying',
+        ])
+          key: diagnostics[key],
+      };
+    } catch (_) {
+      player!['diagnosticsUnavailable'] = true;
+    }
+  }
   return {
     'tv': tv,
     'authenticated': authenticated,

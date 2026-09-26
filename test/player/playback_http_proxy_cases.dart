@@ -8,6 +8,49 @@ import 'package:rillight/player/playback_resolver.dart';
 import 'package:rillight/player/cache/session_byte_cache.dart';
 
 void main() {
+  test(
+    'upstream diagnostics distinguish waiting headers without secrets',
+    () async {
+      final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final proxy = await PlaybackHttpProxy.create();
+      final client = HttpClient();
+      final received = Completer<void>();
+      final release = Completer<void>();
+      upstream.listen((request) async {
+        received.complete();
+        await release.future;
+        request.response.write('media-body');
+        await request.response.close();
+      });
+      try {
+        final url = proxy.register(
+          Uri.parse('http://127.0.0.1:${upstream.port}/private?token=secret'),
+        );
+        final response = (await client.getUrl(url)).close();
+        await received.future;
+        expect(proxy.diagnostics['upstreamConnectingRequests'], 0);
+        expect(proxy.diagnostics['upstreamAwaitingHeadersRequests'], 1);
+        expect(proxy.diagnostics['lastUpstreamPhase'], 'headers');
+        expect(proxy.diagnostics['lastUpstreamStatus'], isNull);
+        expect(jsonEncode(proxy.diagnostics), isNot(contains('secret')));
+        expect(jsonEncode(proxy.diagnostics), isNot(contains('/private')));
+        release.complete();
+        expect(
+          await (await response).transform(utf8.decoder).join(),
+          'media-body',
+        );
+        expect(proxy.diagnostics['upstreamAwaitingHeadersRequests'], 0);
+        expect(proxy.diagnostics['lastUpstreamStatus'], 200);
+        expect(proxy.diagnostics['lastUpstreamPhaseElapsedMs'], isNonNegative);
+      } finally {
+        if (!release.isCompleted) release.complete();
+        client.close(force: true);
+        await proxy.close();
+        await upstream.close(force: true);
+      }
+    },
+  );
+
   for (final role in [
     PlaybackResourceRole.media,
     PlaybackResourceRole.segment,
@@ -1087,10 +1130,9 @@ void main() {
     },
   );
 
-  // 等价断言已由 'disconnect also cancels the cached-prefix gap producer'
-  // 覆盖(客户端断开 → activeRequests 归零、上游不再拖完整部影片),
-  // 纯媒体无前缀的取消路径是同一代码路径的重复变体,故删除
-  // 'disconnected player stops its upstream body instead of draining it'。
+  // The uncached 200 probe/recovery path has a separate async* cancellation
+  // boundary. Its isolate-survival coverage lives in
+  // playback_transport_session_test.dart, alongside the cached-prefix case here.
 
   test('cache pressure bypasses caching and transport slots recover', () async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);

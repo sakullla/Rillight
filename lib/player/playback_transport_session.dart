@@ -11,6 +11,11 @@ class PlaybackTransportSession {
   PlaybackTransportSession._(this._isolate, this._inbox, this._worker) {
     _inbox.listen((message) {
       if (message is! List || message.length != 3) {
+        if (message is List && message.length == 2) {
+          _workerFailure = TransportWorkerFailure.fromMessage(message);
+        } else if (message == null) {
+          _workerExited = true;
+        }
         if (!_closed && !_closing) {
           _closed = true;
           for (final pending in _pending.values) {
@@ -37,6 +42,15 @@ class PlaybackTransportSession {
   int _nextId = 0;
   bool _closed = false;
   bool _closing = false;
+  bool _workerExited = false;
+  TransportWorkerFailure? _workerFailure;
+
+  /// Host-side facts survive a worker failure without querying the dead port.
+  Map<String, Object?> get localDiagnostics => {
+    'transportWorkerExited': _workerExited,
+    'transportWorkerFailureKind': _workerFailure?.kind,
+    'transportWorkerFailureFrames': _workerFailure?.frames ?? const <String>[],
+  };
 
   static Future<PlaybackTransportSession> start({
     Uri? origin,
@@ -165,6 +179,29 @@ class PlaybackTransportSession {
       _isolate.kill(priority: Isolate.immediate);
     }
   }
+}
+
+/// An isolate error message can embed signed URLs. Retain only its error class
+/// and Dart source locations, never the message or arbitrary stack text.
+class TransportWorkerFailure {
+  TransportWorkerFailure._(this.kind, this.frames);
+
+  factory TransportWorkerFailure.fromMessage(List<Object?> message) {
+    final raw = message.firstOrNull?.toString() ?? '';
+    final named = RegExp(
+      r'^([A-Za-z_][A-Za-z_0-9]*(?:Exception|Error))\b',
+    ).firstMatch(raw)?.group(1);
+    final kind =
+        named ?? (raw.startsWith('Bad state:') ? 'StateError' : 'unknown');
+    final stack = message.length > 1 ? message[1]?.toString() ?? '' : '';
+    final frames = RegExp(
+      r'(?:package:[A-Za-z_0-9]+/[A-Za-z_0-9./-]+\.dart|dart:[A-Za-z_0-9./-]+)(?::\d+){1,2}',
+    ).allMatches(stack).take(16).map((match) => match.group(0)!).toList();
+    return TransportWorkerFailure._(kind, List.unmodifiable(frames));
+  }
+
+  final String kind;
+  final List<String> frames;
 }
 
 Future<void> _serveTransport(List<Object?> arguments) async {

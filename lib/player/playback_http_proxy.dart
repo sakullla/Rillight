@@ -41,8 +41,8 @@ class PlaybackHttpProxy {
         (_) => Random.secure().nextInt(256).toRadixString(16).padLeft(2, '0'),
       ).join() {
     _client.autoUncompress = true;
-    // HttpClient defaults to a smaller per-host pool than the proxy's request
-    // budget. One extra connection keeps the single read-ahead producer from
+    // Bound the pool to the proxy's request budget. One extra connection keeps
+    // the single read-ahead producer from
     // occupying a foreground media, seek, or subtitle connection.
     _client.maxConnectionsPerHost = _maxRequests + 1;
     _client.connectionTimeout = const Duration(seconds: 15);
@@ -113,6 +113,10 @@ class PlaybackHttpProxy {
   int _cancelled = 0;
   String? _lastValidationFailure;
   int? _lastUpstreamStatus;
+  final _upstreamPhases = <String, int>{};
+  String? _lastUpstreamPhase;
+  String? _lastUpstreamFailureKind;
+  int? _lastUpstreamPhaseElapsedMs;
   int? _authenticationStatus;
   int _inFlight = 0;
   int _inFlightPeak = 0;
@@ -184,6 +188,11 @@ class PlaybackHttpProxy {
     'cancelledReads': _cancelled,
     'lastValidationFailure': _lastValidationFailure,
     'lastUpstreamStatus': _lastUpstreamStatus,
+    'upstreamConnectingRequests': _upstreamPhases['connect'] ?? 0,
+    'upstreamAwaitingHeadersRequests': _upstreamPhases['headers'] ?? 0,
+    'lastUpstreamPhase': _lastUpstreamPhase,
+    'lastUpstreamFailureKind': _lastUpstreamFailureKind,
+    'lastUpstreamPhaseElapsedMs': _lastUpstreamPhaseElapsedMs,
     'authenticationStatus': _authenticationStatus,
     'proxyInFlightBytes': _inFlight,
     'proxyInFlightPeakBytes': _inFlightPeak,
@@ -846,14 +855,20 @@ class PlaybackHttpProxy {
       read.check();
       url = _withoutForeignCredentials(url);
       final opening = _client.openUrl(method ?? incoming.method, url);
-      final request = await opening.timeout(
-        const Duration(seconds: 15),
-        onTimeout: () {
-          unawaited(
-            opening.then<void>((late) => late.abort(), onError: (Object _) {}),
-          );
-          throw const HttpException('Media connection timeout');
-        },
+      final request = await _observeUpstream(
+        'connect',
+        () => opening.timeout(
+          const Duration(seconds: 15),
+          onTimeout: () {
+            unawaited(
+              opening.then<void>(
+                (late) => late.abort(),
+                onError: (Object _) {},
+              ),
+            );
+            throw const HttpException('Media connection timeout');
+          },
+        ),
       );
       read.requests.clear();
       read.requests.add(request);
@@ -884,12 +899,15 @@ class PlaybackHttpProxy {
           request.headers.set(header.key, header.value);
         }
       }
-      final response = await request.close().timeout(
-        const Duration(seconds: 20),
-        onTimeout: () {
-          request.abort();
-          throw const HttpException('Media response timeout');
-        },
+      final response = await _observeUpstream(
+        'headers',
+        () => request.close().timeout(
+          const Duration(seconds: 20),
+          onTimeout: () {
+            request.abort();
+            throw const HttpException('Media response timeout');
+          },
+        ),
       );
       read.check();
       _lastUpstreamStatus = response.statusCode;
@@ -912,6 +930,29 @@ class PlaybackHttpProxy {
       return (response, url);
     }
     throw StateError('Too many media redirects');
+  }
+
+  Future<T> _observeUpstream<T>(String phase, Future<T> Function() work) async {
+    _upstreamPhases[phase] = (_upstreamPhases[phase] ?? 0) + 1;
+    _lastUpstreamPhase = phase;
+    final elapsed = Stopwatch()..start();
+    try {
+      return await work();
+    } catch (error) {
+      // Never expose exception messages: sockets and HTTP errors may contain
+      // the original media URL, signed query, or server address.
+      _lastUpstreamFailureKind = switch (error) {
+        HandshakeException() => 'tls',
+        SocketException() => 'socket',
+        TimeoutException() => 'timeout',
+        HttpException() => 'http',
+        _ => 'other',
+      };
+      rethrow;
+    } finally {
+      _upstreamPhases[phase] = _upstreamPhases[phase]! - 1;
+      _lastUpstreamPhaseElapsedMs = elapsed.elapsedMilliseconds;
+    }
   }
 
   void _pruneSamples() {
@@ -2527,12 +2568,12 @@ class PlaybackHttpProxy {
           var complete = false;
           try {
             Stream<List<int>> body() async* {
-              yield* forward(prefixBytes);
               var iterator = chunks;
               var resumeAttempts = 0;
               DateTime? recoveryStarted;
               var awaitingRecoveredByte = false;
               try {
+                yield* forward(prefixBytes);
                 while (true) {
                   bool advanced;
                   var interrupted = false;
@@ -2682,6 +2723,14 @@ class PlaybackHttpProxy {
                   read.iterators.add(iterator);
                   awaitingRecoveredByte = true;
                 }
+              } on HttpException {
+                // A demuxer can close its initial 200 probe while this async*
+                // generator is awaiting recovery, then open a tail range.
+                // HttpResponse may cancel its subscription without observing
+                // the cancellation future. Complete that cancellation inside
+                // the generator so it cannot terminate the transport isolate.
+                // A live read's HTTP failures still abort its response.
+                if (!read.cancelled) rethrow;
               } finally {
                 if (!identical(iterator, chunks)) {
                   read.iterators.remove(iterator);

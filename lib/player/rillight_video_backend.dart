@@ -93,22 +93,31 @@ class RillightVideoBackend extends VideoBackend
   Stream<VideoBackendEvent> get events => _events.stream;
   Stream<Map<String, dynamic>> get nativeEvents => _nativeEvents.stream;
   String? get lastFailure => _lastFailure;
+  String _openPhase = 'idle';
 
   Future<Map<String, Object?>> diagnostics() async {
     Map<String, Object?> transport = _lastTransportDiagnostics;
     final active = _transport;
+    var diagnosticStatus = active == null ? 'detached' : 'live';
     if (active != null) {
       try {
         transport = await active.diagnostics.timeout(
           const Duration(seconds: 2),
         );
         _lastTransportDiagnostics = transport;
+      } on TimeoutException {
+        diagnosticStatus = 'timeout';
       } catch (_) {
+        diagnosticStatus = 'error';
         // The last sample remains useful after a stopped or failed session.
       }
     }
     return {
       ...transport,
+      ...?active?.localDiagnostics,
+      'openPhase': _openPhase,
+      'transportAttached': active != null,
+      'transportDiagnosticsStatus': diagnosticStatus,
       'backendSessionId': _sessionId,
       'coreSession': _coreSession,
       'corePlaying': isPlaying,
@@ -259,11 +268,14 @@ class RillightVideoBackend extends VideoBackend
       unknownReason: sameSession ? 'reconnecting' : 'preparing',
     );
     _emit(VideoEventKind.bufferSnapshot, bufferSnapshot, generation);
+    _openPhase = 'retiringPrevious';
     await _stopSession(keepAndroidPlayer: true);
     if (_disposed || generation != _generation) return;
     try {
+      _openPhase = 'settings';
       final settings =
           await (_settingsStore ??= await openPlayerSettingsStore()).read();
+      _openPhase = 'transport';
       final transport = await PlaybackTransportSession.start(
         origin: request.credentialOrigin,
         headers: request.credentialHeaders.isNotEmpty
@@ -284,8 +296,10 @@ class RillightVideoBackend extends VideoBackend
         return;
       }
       _transport = transport;
+      _openPhase = 'register';
       final sealed = await transport.register(request.url);
       if (_disposed || generation != _generation) return;
+      _openPhase = 'player';
       final player = _player ??= await _createPlayer();
       if (_disposed || generation != _generation) {
         if (!Platform.isAndroid) await player.dispose();
@@ -294,6 +308,7 @@ class RillightVideoBackend extends VideoBackend
       _coreEvents = player.events.listen(
         (event) => _onCoreEvent(event, generation),
       );
+      _openPhase = 'openingCore';
       final result = await player.open(
         CorePlayerOpen(
           url: sealed,
@@ -325,6 +340,7 @@ class RillightVideoBackend extends VideoBackend
       selectedAudioIndex = result['audioIndex'] as int?;
       selectedSubtitleIndex = result['subtitleIndex'] as int?;
       _opened = true;
+      _openPhase = 'opened';
       _diagnosticsTimer = Timer.periodic(const Duration(milliseconds: 250), (
         _,
       ) {
@@ -341,7 +357,12 @@ class RillightVideoBackend extends VideoBackend
               ) ??
               const {};
           _reportAuthentication(_lastTransportDiagnostics, generation);
-        } catch (_) {}
+        } catch (_) {
+          _lastTransportDiagnostics = {
+            ..._lastTransportDiagnostics,
+            ...?_transport?.localDiagnostics,
+          };
+        }
         await _stopSession(keepAndroidPlayer: true);
       }
       rethrow;
