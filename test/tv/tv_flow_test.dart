@@ -169,10 +169,10 @@ void main() {
       await key(tester, LogicalKeyboardKey.arrowRight);
       await key(tester, LogicalKeyboardKey.select);
       expect(backend.position, greaterThan(Duration.zero));
-      await key(tester, LogicalKeyboardKey.arrowUp);
+      await key(tester, LogicalKeyboardKey.arrowDown);
       await key(tester, LogicalKeyboardKey.arrowRight);
       await key(tester, LogicalKeyboardKey.select);
-      expect(find.byType(AlertDialog), findsOneWidget);
+      expect(find.byKey(const Key('tv-player-panel')), findsOneWidget);
       await tester.binding.handlePopRoute();
       await tester.pumpAndSettle();
       expect(find.byType(TvPlayerPage), findsOneWidget);

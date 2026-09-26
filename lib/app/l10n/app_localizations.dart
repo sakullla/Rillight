@@ -1006,6 +1006,18 @@ abstract class AppLocalizations {
   /// **'没有可播放的流'**
   String get noPlayableStream;
 
+  /// No description provided for @playerPlaying.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在播放'**
+  String get playerPlaying;
+
+  /// No description provided for @playerBuffering.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在缓冲…'**
+  String get playerBuffering;
+
   /// Status shown while PlaybackInfo and the stream are loading.
   ///
   /// In zh, this message translates to:

@@ -656,6 +656,8 @@
   "@noPlayableStream": {
     "description": "Visible failure when PlaybackInfo has no stream."
   },
+  "playerPlaying": "正在播放",
+  "playerBuffering": "正在缓冲…",
   "playerLoading": "正在打开播放…",
   "@playerLoading": {
     "description": "Status shown while PlaybackInfo and the stream are loading."

@@ -493,6 +493,12 @@ class AppLocalizationsZh extends AppLocalizations {
   String get noPlayableStream => '没有可播放的流';
 
   @override
+  String get playerPlaying => '正在播放';
+
+  @override
+  String get playerBuffering => '正在缓冲…';
+
+  @override
   String get playerLoading => '正在打开播放…';
 
   @override
