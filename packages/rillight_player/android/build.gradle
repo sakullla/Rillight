@@ -4,20 +4,13 @@ apply plugin: 'com.android.library'
 
 def coreSdkRoot = providers.gradleProperty('rillightCoreSdkRoot')
     .orElse(providers.environmentVariable('RILLIGHT_CORE_SDK_ROOT')).orNull ?: ''
-def supportedCoreAbis = ['arm64-v8a', 'armeabi-v7a', 'x86_64']
-def coreAbis = providers.gradleProperty('rillightCoreAbis')
-    .orElse(supportedCoreAbis.join(',')).get().split(',').collect { it.trim() }.findAll { it }
-if (!coreAbis || coreAbis.toSet().size() != coreAbis.size ||
-        !supportedCoreAbis.containsAll(coreAbis)) {
-    throw new GradleException("rillightCoreAbis must select unique values from ${supportedCoreAbis.join(',')}")
-}
 
 android {
     namespace = 'com.rillight.player'
     compileSdk = 36
     defaultConfig {
         minSdk = 24
-        ndk { abiFilters.addAll(coreAbis) }
+        ndk { abiFilters 'arm64-v8a', 'armeabi-v7a', 'x86_64' }
         externalNativeBuild {
             cmake { arguments "-DRILLIGHT_CORE_SDK_ROOT=${coreSdkRoot}" }
         }
@@ -45,7 +38,7 @@ dependencies {
 def stageCoreJni = tasks.register('stageCoreJniLibs') {
     doLast {
         if (!coreSdkRoot) throw new GradleException('Set rillightCoreSdkRoot or RILLIGHT_CORE_SDK_ROOT')
-        coreAbis.each { abi ->
+        ['arm64-v8a', 'armeabi-v7a', 'x86_64'].each { abi ->
             def source = file("${coreSdkRoot}/${abi}/lib")
             if (!source.isDirectory()) throw new GradleException("Missing verified core SDK: ${source}")
             copy {
