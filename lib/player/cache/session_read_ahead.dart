@@ -164,7 +164,11 @@ class SessionReadAhead {
                 // put publishes RAM synchronously. Let playback consume it
                 // while the independent disk operation is still in flight.
                 _notify();
-                await publication;
+                if (!await publication) {
+                  throw const HttpException(
+                    'Read-ahead cache rejected a block',
+                  );
+                }
                 if (cache.diagnostics['degradation'] == 'disk-timeout') {
                   _waitingForDisk = true;
                 }
@@ -221,6 +225,9 @@ class SessionReadAhead {
           _schedule();
           await changed.timeout(const Duration(seconds: 25));
           continue;
+        }
+        if (hit.bytes.isEmpty) {
+          throw const HttpException('Cached media read made no progress');
         }
         yield hit.bytes;
         offset += hit.bytes.length;

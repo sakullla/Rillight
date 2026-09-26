@@ -10,10 +10,9 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
-    // Hybrid PlayerView + Flutter overlays can leave the Impeller OpenGLES
-    // surface context unavailable after route teardown and screen lock (12290).
-    // Keep the Activity opaque and Impeller enabled, but host Flutter in a
-    // TextureView so hybrid composition does not switch its SurfaceView target.
+    // The owned core's platform view and Flutter overlays share an Activity.
+    // Keep Flutter in a TextureView across route teardown and screen lock so
+    // surface transitions do not switch the Activity's rendering target.
     override fun getRenderMode(): RenderMode = RenderMode.texture
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {

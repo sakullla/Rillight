@@ -63,24 +63,24 @@ Dialogue: 0,0:00:00.00,0:00:12.00,Default,,0,0,0,,Rillight ASS validation
                         str(directory / ('sample.' + extension))], check=True, capture_output=True)
     # Existing synthetic PGS fixture is needed because FFmpeg has no PGS encoder.
     # Never substitute an ASS track and label it PGS.
-    if not (directory / 'tracks.mkv').exists():
+    if not (directory / 'tracks-long.mkv').exists():
         if not (directory / 'sample.sup').exists():
             raise RuntimeError('PGS validation requires a synthetic sample.sup fixture')
-        subprocess.run([ffmpeg, '-y', '-i', str(directory / 'baseline.mp4'), '-f', 'lavfi', '-i',
+        subprocess.run([ffmpeg, '-y', '-stream_loop', '2', '-i', str(directory / 'baseline.mp4'), '-f', 'lavfi', '-i',
                         'sine=frequency=880:sample_rate=48000', '-i', str(directory / 'sample.sup'),
                         '-i', str(directory / 'sample.ass'), '-map', '0:v', '-map', '0:a', '-map', '1:a',
-                        '-map', '2:s', '-map', '3:s', '-t', '12', '-c:v', 'copy', '-c:a', 'aac', '-c:s', 'copy',
-                        str(directory / 'tracks.mkv')], check=True)
+                        '-map', '2:s', '-map', '3:s', '-t', '30', '-c:v', 'copy', '-c:a', 'aac', '-c:s', 'copy',
+                        str(directory / 'tracks-long.mkv')], check=True)
 
 
 def serve(media, output):
     conditions = {'offline': False}
-    paths = {'baseline': 'baseline.mp4', 'delayed-report': 'timeout.mp4', 'delayed-subtitle': 'timeout.mp4', 'tracks': 'tracks.mkv', 'hls': 'stream.m3u8',
+    paths = {'baseline': 'baseline.mp4', 'delayed-report': 'timeout.mp4', 'delayed-subtitle': 'timeout.mp4', 'tracks': 'tracks-long.mkv', 'hls': 'stream.m3u8',
              '1080p60': '1080p60.mp4', '4k-hevc': '4k-hevc.mkv', 'av1': 'av1.mkv',
              'vp9': 'vp9.webm', 'broken': 'missing.mkv'}
     user = {'Id': 'validation-user', 'Name': 'validation', 'Configuration': {'EnableNextEpisodeAutoPlay': False}}
     def item(identifier):
-        return {'Id': identifier, 'Name': identifier, 'Type': 'Movie', 'RunTimeTicks': 300000000 if identifier.startswith('delayed-') else 120000000,
+        return {'Id': identifier, 'Name': identifier, 'Type': 'Movie', 'RunTimeTicks': 300000000 if identifier.startswith('delayed-') or identifier == 'tracks' else 120000000,
                 'UserData': {'PlaybackPositionTicks': 20000000 if identifier == 'baseline' else 0}, 'MediaType': 'Video'}
 
     class Handler(BaseHTTPRequestHandler):
@@ -111,7 +111,8 @@ def serve(media, output):
                     streams += [{'Index': 2, 'Type': 'Audio', 'Codec': 'aac'},
                                 {'Index': 3, 'Type': 'Subtitle', 'Codec': 'pgssub', 'IsTextSubtitleStream': False},
                                 {'Index': 4, 'Type': 'Subtitle', 'Codec': 'ass', 'IsTextSubtitleStream': True},
-                                *[{'Index': i, 'Type': 'Subtitle', 'Codec': codec, 'IsTextSubtitleStream': True}
+                                *[{'Index': i, 'Type': 'Subtitle', 'Codec': codec,
+                                   'IsTextSubtitleStream': True, 'IsExternal': True}
                                   for i, codec in [(5, 'srt'), (6, 'vtt'), (7, 'ssa')]]]
                 source = {'Id': identifier, 'Container': 'mkv' if identifier == 'tracks' else 'mp4',
                           'Name': identifier, 'RunTimeTicks': item(identifier)['RunTimeTicks'],
@@ -119,7 +120,8 @@ def serve(media, output):
                           'DefaultAudioStreamIndex': 1, 'MediaStreams': streams,
                           'TranscodingUrl' if identifier == 'hls' else 'DirectStreamUrl': '/media/' + paths[identifier]}
                 if identifier == 'delayed-subtitle':
-                    streams.append({'Index': 8, 'Type': 'Subtitle', 'Codec': 'srt', 'IsTextSubtitleStream': True})
+                    streams.append({'Index': 8, 'Type': 'Subtitle', 'Codec': 'srt',
+                                    'IsTextSubtitleStream': True, 'IsExternal': True})
                     source['DefaultSubtitleStreamIndex'] = 8
                 self.send_json({'PlaySessionId': identifier + '-session', 'MediaSources': [source]})
             elif path.startswith('/Sessions/'):

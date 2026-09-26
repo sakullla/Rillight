@@ -84,13 +84,20 @@ class PlaybackTransportSession {
     }
   }
 
-  Future<Object?> _request(String operation, [Object? value]) {
+  Future<Object?> _request(
+    String operation, [
+    Object? value,
+    Duration? deadline,
+  ]) {
     if (_closed) throw StateError('Transport session closed');
     final id = ++_nextId;
     final pending = Completer<Object?>();
     _pending[id] = pending;
     _worker.send([id, operation, value]);
-    return pending.future;
+    if (deadline == null) return pending.future;
+    return pending.future.timeout(deadline).whenComplete(() {
+      _pending.remove(id);
+    });
   }
 
   Future<Uri> register(
@@ -103,7 +110,10 @@ class PlaybackTransportSession {
   );
 
   Future<Map<String, Object?>> get diagnostics async =>
-      Map<String, Object?>.from((await _request('diagnostics'))! as Map);
+      Map<String, Object?>.from(
+        (await _request('diagnostics', null, const Duration(seconds: 2)))!
+            as Map,
+      );
 
   Future<void> seek() async {
     await _request('seek');
@@ -118,7 +128,11 @@ class PlaybackTransportSession {
   }
 
   Future<void> refreshTimeline(Duration duration) async {
-    await _request('timeline', duration.inMicroseconds);
+    await _request(
+      'timeline',
+      duration.inMicroseconds,
+      const Duration(seconds: 5),
+    );
   }
 
   Future<void> resizeCache({
@@ -138,6 +152,9 @@ class PlaybackTransportSession {
     _closing = true;
     try {
       await _request('close').timeout(const Duration(seconds: 10));
+    } on TimeoutException {
+      // The finally block forcefully retires the unresponsive worker. Close is
+      // best effort and must not replace the original playback failure.
     } finally {
       _closed = true;
       for (final pending in _pending.values) {
@@ -154,6 +171,7 @@ Future<void> _serveTransport(List<Object?> arguments) async {
   final ready = arguments[0]! as SendPort;
   final inbox = arguments[1]! as SendPort;
   final commands = ReceivePort();
+
   SessionByteCache? cache;
   PlaybackHttpProxy? proxy;
   try {
@@ -176,6 +194,22 @@ Future<void> _serveTransport(List<Object?> arguments) async {
       if (message is! List || message.length != 3) continue;
       final id = message[0] as int;
       final operation = message[1] as String;
+      if (operation == 'timeline') {
+        // The optional cache snapshot may wait on disk. Keep playback controls
+        // and diagnostics serviceable while it is calculated.
+        unawaited(() async {
+          try {
+            await proxy!.refreshTimeline(
+              Duration(microseconds: message[2] as int),
+              verifyChecksum: false,
+            );
+            inbox.send([id, true, null]);
+          } catch (error) {
+            inbox.send([id, false, error.toString()]);
+          }
+        }());
+        continue;
+      }
       try {
         Object? result;
         switch (operation) {
@@ -200,11 +234,6 @@ Future<void> _serveTransport(List<Object?> arguments) async {
             break;
           case 'retry':
             await proxy.retryReadAhead();
-            break;
-          case 'timeline':
-            await proxy.refreshTimeline(
-              Duration(microseconds: message[2] as int),
-            );
             break;
           case 'resize':
             final value = message[2] as List;

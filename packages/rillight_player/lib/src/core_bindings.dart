@@ -128,6 +128,11 @@ class CoreBindings {
         Int32 Function(Pointer<Void>, Pointer<Utf8>, Uint64),
         int Function(Pointer<Void>, Pointer<Utf8>, int)
       >('rillight_core_open');
+  late final configureHardware = _library
+      .lookupFunction<
+        Int32 Function(Pointer<Void>, Int32, Int32),
+        int Function(Pointer<Void>, int, int)
+      >('rillight_core_configure_hardware');
   late final setPlaying = _library
       .lookupFunction<
         Int32 Function(Pointer<Void>, Int32, Uint64),

@@ -102,9 +102,15 @@ class PlaybackWakeLock {
   }
 
   Future<void> dispose() {
+    disposeNow();
+    return _coordinator.settle();
+  }
+
+  /// Widget disposal cannot await a platform service or leave a timeout timer
+  /// in the widget test clock. The coordinator still serializes the release.
+  void disposeNow() {
     update(false);
     _closed = true;
-    return _coordinator.settle();
   }
 
   Map<String, Object?> get diagnostics => {

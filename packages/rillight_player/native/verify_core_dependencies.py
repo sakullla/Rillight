@@ -7,16 +7,50 @@ libraries, ELF RUNPATH, licenses, or target-device playback.
 """
 
 import argparse
+import ctypes
 import hashlib
 import json
 import os
 from pathlib import Path
 import platform
+import subprocess
 import sys
 
 
 ROOT = Path(__file__).resolve().parent
 SPEC = json.loads((ROOT / "core_dependencies.json").read_text(encoding="utf-8"))
+
+
+def _input_protocols(prefix: Path, target: str) -> set[str] | None:
+    prefix = prefix.resolve()
+    if target == "windows-x64" and platform.system() == "Windows":
+        candidates = sorted((prefix / "bin").glob("avformat-*.dll"))
+        if not candidates:
+            return set()
+        with os.add_dll_directory(str(prefix / "bin")):
+            library = ctypes.CDLL(str(candidates[-1]))
+            library.avio_enum_protocols.argtypes = [ctypes.POINTER(ctypes.c_void_p), ctypes.c_int]
+            library.avio_enum_protocols.restype = ctypes.c_char_p
+            opaque = ctypes.c_void_p()
+            result = set()
+            while name := library.avio_enum_protocols(ctypes.byref(opaque), 0):
+                result.add(name.decode("ascii"))
+            return result
+    if target == "linux-x64" and platform.system() == "Linux":
+        candidates = sorted((prefix / "lib").glob("libavformat.so.*"))
+        candidates = [path for path in candidates if path.is_file() and not path.is_symlink()]
+        if not candidates:
+            return set()
+        code = ("import ctypes,sys; l=ctypes.CDLL(sys.argv[1]);"
+                "l.avio_enum_protocols.argtypes=[ctypes.POINTER(ctypes.c_void_p),ctypes.c_int];"
+                "l.avio_enum_protocols.restype=ctypes.c_char_p; p=ctypes.c_void_p();"
+                "\nwhile (name:=l.avio_enum_protocols(ctypes.byref(p),0)): print(name.decode())")
+        env = dict(os.environ)
+        env["LD_LIBRARY_PATH"] = str(prefix / "lib")
+        result = subprocess.check_output([sys.executable, "-c", code, str(candidates[-1])],
+                                         env=env, text=True)
+        return set(result.splitlines())
+    return None
 
 
 def digest(path: Path) -> str:
@@ -47,11 +81,45 @@ def verify(prefix: Path, target: str, require_subtitles: bool = False) -> list[s
     patches = SPEC["ffmpeg"].get("patches", {})
     if marker.get("ffmpeg_patches") != patches:
         errors.append(f"{target}: FFmpeg patch provenance mismatch")
+    if target in ("windows-x64", "linux-x64"):
+        configure = marker.get("configure")
+        if not isinstance(configure, list) or "--enable-network" not in configure or \
+                "--disable-network" in configure:
+            errors.append(f"{target}: FFmpeg network input is disabled")
+        else:
+            try:
+                protocols = _input_protocols(prefix, target)
+                if protocols is not None and not {"http", "tcp"} <= protocols:
+                    errors.append(f"{target}: missing FFmpeg HTTP/TCP input protocols")
+            except (OSError, subprocess.CalledProcessError) as error:
+                errors.append(f"{target}: could not inspect FFmpeg input protocols: {error}")
     for relative, expected in patches.items():
         path = (ROOT / relative).resolve()
         if ROOT.resolve() not in path.parents or not path.is_file() or \
                 digest(path).lower() != expected.lower():
             errors.append(f"{target}: FFmpeg patch hash mismatch {relative}")
+    if target in ("windows-x64", "linux-x64", "macos-universal"):
+        configure = marker.get("configure")
+        if not isinstance(configure, list) or "--enable-libdav1d" not in configure:
+            errors.append(f"{target}: dav1d AV1 software decoding was not enabled")
+        dav1d = marker.get("dav1d")
+        specification = SPEC["dav1d"]
+        if not isinstance(dav1d, dict) or \
+                dav1d.get("version") != specification["version"] or \
+                dav1d.get("commit") != specification["commit"]:
+            errors.append(f"{target}: dav1d source provenance mismatch")
+        else:
+            relative = dav1d.get("library")
+            if not isinstance(relative, str):
+                errors.append(f"{target}: missing dav1d library path")
+            else:
+                path = (prefix / relative).resolve()
+                if prefix.resolve() not in path.parents or not path.is_file():
+                    errors.append(f"{target}: missing/unsafe dav1d library {relative}")
+                elif digest(path).lower() != str(dav1d.get("sha256", "")).lower():
+                    errors.append(f"{target}: dav1d SHA256 mismatch {relative}")
+            if not (prefix / "include/dav1d/dav1d.h").is_file():
+                errors.append(f"{target}: missing dav1d header")
     if target == "linux-x64":
         configure = marker.get("configure")
         if not isinstance(configure, list) or not {"--enable-vaapi", "--enable-libdrm"} <= set(configure):

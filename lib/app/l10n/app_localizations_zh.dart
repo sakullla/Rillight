@@ -514,7 +514,8 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsHardwareDecoding => '硬件解码';
 
   @override
-  String get settingsHardwareDecodingHint => '用显卡解码，降低 CPU 占用';
+  String get settingsHardwareDecodingHint =>
+      '优先使用可用的硬件解码，失败时回退软件解码；实际启用状态以播放诊断为准';
 
   @override
   String get settingsHardwareDecodingAuto => '自动';

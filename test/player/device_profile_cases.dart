@@ -22,23 +22,23 @@ void main() {
       );
     },
   );
-  test('mpv DeviceProfile declares honest Direct Play codecs', () {
-    final profile = mpvDeviceProfile();
+  test('owned core profile only advertises the verified video baseline', () {
+    final profile = ownedCoreDeviceProfile(h264: true, aac: true);
     final direct = profile['DirectPlayProfiles'] as List<dynamic>;
     final video = Map<String, dynamic>.from(
       direct.cast<Map>().firstWhere((item) => item['Type'] == 'Video'),
     );
     expect(video['Container'], contains('mkv'));
     expect(video['Container'], contains('mp4'));
-    expect(video['VideoCodec'], contains('h264'));
-    expect(video['VideoCodec'], contains('hevc'));
-    expect(video['AudioCodec'], contains('aac'));
-    expect(video['AudioCodec'], contains('ac3'));
-    expect(direct.toString(), isNot(contains('html5')));
+    expect(profile['Name'], 'Rillight owned FFmpeg core');
+    expect(video['VideoCodec'], 'h264');
+    expect(video['AudioCodec'], 'aac');
+    expect(direct.toString(), isNot(contains('hevc')));
+    expect(direct.toString(), isNot(contains('ac3')));
   });
 
-  test('text subtitles are External and PGS is locally renderable', () {
-    final profile = mpvDeviceProfile();
+  test('text subtitles are External and bitmap subtitles require burn-in', () {
+    final profile = ownedCoreDeviceProfile(h264: true, aac: true);
     final subs = (profile['SubtitleProfiles'] as List)
         .map((item) => Map<String, dynamic>.from(item as Map))
         .toList();
@@ -48,15 +48,13 @@ void main() {
       ),
       isTrue,
     );
-    // pgs/pgssub 使用文档枚举值 Embed:直连场景服务端不强制烧录,
-    // mpv 本地渲染内嵌轨道(SubtitleDeliveryMethod: External/Embed/Encode)。
     expect(
-      subs.any((item) => item['Format'] == 'pgs' && item['Method'] == 'Embed'),
+      subs.any((item) => item['Format'] == 'pgs' && item['Method'] == 'Encode'),
       isTrue,
     );
     expect(
       subs.any(
-        (item) => item['Format'] == 'pgssub' && item['Method'] == 'Embed',
+        (item) => item['Format'] == 'pgssub' && item['Method'] == 'Encode',
       ),
       isTrue,
     );
@@ -78,7 +76,7 @@ void main() {
   });
 
   test('transcode fallback is HLS TS H.264 AAC', () {
-    final profile = mpvDeviceProfile();
+    final profile = ownedCoreDeviceProfile(h264: true, aac: true);
     final transcoding = Map<String, dynamic>.from(
       (profile['TranscodingProfiles'] as List).first as Map,
     );

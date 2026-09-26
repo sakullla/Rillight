@@ -779,6 +779,42 @@ void main() {
         await cache.close();
       }
     });
+
+    test(
+      'rejected cache publication stops the producer and wakes playback',
+      () async {
+        final cache = await SessionByteCache.open();
+        await cache.close();
+        var fetches = 0;
+        final ahead = SessionReadAhead(
+          cache: cache,
+          resource: 'closed',
+          generation: 0,
+          total: SessionReadAhead.blockBytes,
+          aheadBytes: SessionReadAhead.blockBytes,
+          fetch: (_, _) async {
+            fetches++;
+            return ReadAheadTransfer(
+              Stream.value(Uint8List(SessionReadAhead.blockBytes)),
+              () {},
+            );
+          },
+        );
+        try {
+          await expectLater(
+            ahead
+                .read(0, 100)
+                .drain<void>()
+                .timeout(const Duration(seconds: 2)),
+            throwsA(isA<HttpException>()),
+          );
+          expect(ahead.failed, true);
+          expect(fetches, 1);
+        } finally {
+          await ahead.close();
+        }
+      },
+    );
   });
 }
 

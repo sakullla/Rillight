@@ -87,6 +87,29 @@ def main() -> int:
         parser.error("prefix and work must be separate directories")
     prefix.mkdir(parents=True, exist_ok=True)
     work.mkdir(parents=True, exist_ok=True)
+    dav1d_spec = SPEC["dav1d"]
+    dav1d_source = work / "dav1d"
+    dav1d_build = work / "dav1d-build"
+    fetch_source(dav1d_source, dav1d_spec["repository"],
+                 dav1d_spec["commit"], dav1d_spec["version"])
+    dav1d_setup = [
+        "meson", "setup", str(dav1d_build), str(dav1d_source),
+        f"--prefix={prefix}", "--libdir=lib", "--buildtype=release",
+        "-Ddefault_library=shared", "-Denable_tools=false",
+        "-Denable_tests=false",
+    ]
+    if (dav1d_build / "build.ninja").exists():
+        dav1d_setup.insert(2, "--reconfigure")
+    run(dav1d_setup)
+    run(["meson", "compile", "-C", str(dav1d_build), "-j", str(args.jobs)])
+    run(["meson", "install", "-C", str(dav1d_build)])
+    dav1d_libraries = [path for path in (prefix / "lib").glob("libdav1d.so.*")
+                       if path.is_file() and not path.is_symlink()]
+    if not dav1d_libraries:
+        raise RuntimeError("pinned dav1d library was not installed")
+    dav1d_library = max(dav1d_libraries, key=lambda path: len(path.name))
+    os.environ["PKG_CONFIG_PATH"] = str(prefix / "lib/pkgconfig") + os.pathsep + \
+        os.environ.get("PKG_CONFIG_PATH", "")
     source = work / "ffmpeg"
     build = work / "ffmpeg-build"
     commit = SPEC["ffmpeg"]["commit"]
@@ -109,9 +132,9 @@ def main() -> int:
     configure = [
         str(source / "configure"), f"--prefix={prefix}", "--libdir=" + str(prefix / "lib"),
         "--enable-shared", "--disable-static", "--disable-programs", "--disable-doc",
-        "--disable-network", "--enable-pic", "--enable-avfilter",
+        "--enable-network", "--enable-pic", "--enable-avfilter",
         "--enable-swresample", "--enable-swscale", "--enable-vaapi",
-        "--enable-libdrm",
+        "--enable-libdrm", "--enable-libdav1d",
     ]
     run(configure, build)
     run(["make", f"-j{args.jobs}"], build)
@@ -171,6 +194,12 @@ def main() -> int:
         "vaapi_build_dependencies": {
             name: run(["pkg-config", "--modversion", name])
             for name in ("libva", "libva-drm", "libdrm")
+        },
+        "dav1d": {
+            "version": dav1d_spec["version"],
+            "commit": dav1d_spec["commit"],
+            "library": str(dav1d_library.relative_to(prefix)),
+            "sha256": sha256(dav1d_library),
         },
     }
     if libass_marker:

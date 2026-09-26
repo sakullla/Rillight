@@ -456,9 +456,11 @@ void main() {
         url,
       )).close()).transform(utf8.decoder).join();
       try {
-        final playlist = await get(
+        final playlistResponse = await (await client.getUrl(
           proxy.register(origin.resolve('/index.m3u8')),
-        );
+        )).close();
+        final playlist = await playlistResponse.transform(utf8.decoder).join();
+        expect(playlistResponse.contentLength, utf8.encode(playlist).length);
         final segments = playlist
             .split('\n')
             .where((line) => line.startsWith('http://127.0.0.1:'))
@@ -793,7 +795,14 @@ void main() {
     await fixture.read('bytes=0-2097151');
     await fixture.settle();
     const duration = Duration(seconds: 30);
-    await fixture.proxy.refreshTimeline(duration);
+    // Integrity work is bounded per snapshot; the complete two-block range
+    // becomes visible after the verifier has visited both blocks.
+    for (var attempt = 0; attempt < 3; attempt++) {
+      await fixture.proxy.refreshTimeline(duration);
+      if ((fixture.proxy.diagnostics['cachedTimeRanges'] as List).isNotEmpty) {
+        break;
+      }
+    }
     expect(fixture.proxy.diagnostics['cachedTimeRanges'], isNotEmpty);
 
     final blocks = fixture.root!

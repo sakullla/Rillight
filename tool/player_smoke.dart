@@ -11,6 +11,7 @@ import 'package:rillight/player/rillight_video_backend.dart';
 import 'package:rillight/player/player_page.dart';
 import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/player_window_host.dart';
+import 'package:rillight/player/playback_wake_lock.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:win32/win32.dart' as win32;
 import 'package:rillight/main.dart' as production;
@@ -25,11 +26,16 @@ Future<void> main(List<String> args) async {
   final root = Directory(path);
   final child = args.isNotEmpty && args.first == 'player';
   final log = File('${root.path}/${child ? 'player' : 'main'}.jsonl');
-  Future<void> record(String event, [Object? value]) => log.writeAsString(
-    '${jsonEncode({'at': DateTime.now().toIso8601String(), 'event': event, 'value': value})}\n',
-    mode: FileMode.append,
-    flush: true,
-  );
+  var pendingLog = Future<void>.value();
+  Future<void> record(String event, [Object? value]) {
+    final line =
+        '${jsonEncode({'at': DateTime.now().toIso8601String(), 'event': event, 'value': value})}\n';
+    pendingLog = pendingLog.then(
+      (_) => log.writeAsString(line, mode: FileMode.append, flush: true),
+    );
+    return pendingLog;
+  }
+
   try {
     await production.main(args);
     await record('production-main', {'pid': pid, 'player': child});
@@ -41,24 +47,52 @@ Future<void> main(List<String> args) async {
       });
       final controller = page!.controller!;
       final backend = controller.backend as RillightVideoBackend;
+      final heartbeat = Timer.periodic(const Duration(seconds: 3), (_) {
+        unawaited(
+          record('player-heartbeat', {
+            'itemId': controller.itemId,
+            'positionMs': controller.position.inMilliseconds,
+            'loading': controller.loading,
+            'playing': controller.isPlaying,
+          }),
+        );
+      });
       Future<void> checkDisplayRequest(String phase, bool expected) async {
         if (!Platform.isWindows) return;
         var previous = win32.EXECUTION_STATE(0);
         var thread = 0;
-        await _until(() {
-          // Windows exposes the previous calling-thread execution state via
-          // this API. Temporarily clear and immediately restore it, without
-          // changing the user's power plan or any other process's request.
-          thread = win32.GetCurrentThreadId();
-          previous = win32.SetThreadExecutionState(win32.ES_CONTINUOUS);
-          if (previous == 0) {
-            throw StateError('Cannot inspect thread execution state');
-          }
-          if (win32.SetThreadExecutionState(previous) == 0) {
-            throw StateError('Cannot restore thread execution state');
-          }
-          return (previous & win32.ES_DISPLAY_REQUIRED != 0) == expected;
-        }, timeout: const Duration(seconds: 3));
+        try {
+          await _until(() {
+            // Windows exposes the previous calling-thread execution state via
+            // this API. Temporarily clear and immediately restore it, without
+            // changing the user's power plan or any other process's request.
+            thread = win32.GetCurrentThreadId();
+            previous = win32.SetThreadExecutionState(win32.ES_CONTINUOUS);
+            if (previous == 0) {
+              throw StateError('Cannot inspect thread execution state');
+            }
+            if (win32.SetThreadExecutionState(previous) == 0) {
+              throw StateError('Cannot restore thread execution state');
+            }
+            return (previous & win32.ES_DISPLAY_REQUIRED != 0) == expected;
+          }, timeout: const Duration(seconds: 3));
+        } on TimeoutException {
+          await record('display-power-request-timeout', {
+            'phase': phase,
+            'expected': expected,
+            'threadId': thread,
+            'previousFlags': '0x${previous.toRadixString(16)}',
+            'controllerPlaying': controller.isPlaying,
+            'controllerError': controller.error?.name,
+            'disconnectDetail': controller.disconnectDetail,
+            'wakeLockDesired': ScreenWakeLockCoordinator.shared.desired,
+            'wakeLockConfirmed': ScreenWakeLockCoordinator.shared.confirmed,
+            'wakeLockError': ScreenWakeLockCoordinator.shared.lastError
+                ?.toString(),
+            ...await backend.diagnostics(),
+          });
+          rethrow;
+        }
         await record('display-power-request', {
           'phase': phase,
           'pid': pid,
@@ -81,7 +115,7 @@ Future<void> main(List<String> args) async {
         await record('core-subtitle-selection', {
           'label': label,
           'selectedIndex': expectedIndex,
-          ...await backend.diagnostics(),
+          ...await backend.diagnostics().timeout(const Duration(seconds: 8)),
         });
       }
 
@@ -99,15 +133,35 @@ Future<void> main(List<String> args) async {
           timeout: const Duration(seconds: 60),
         );
         if (controller.error != null) {
+          final details = {
+            'loadFailure': controller.loadFailure?.toString(),
+            'backendFailure': backend.lastFailure,
+            ...await backend.diagnostics(),
+          };
+          await record('load-failure', details);
           throw StateError(
-            '$name failed: ${controller.error}; ${controller.loadFailure}',
+            '$name failed: ${controller.error}; ${jsonEncode(details)}',
           );
         }
-        await _until(
-          () =>
-              controller.isPlaying &&
-              controller.position > const Duration(milliseconds: 100),
-        );
+        try {
+          await _until(
+            () =>
+                controller.isPlaying &&
+                controller.position > const Duration(milliseconds: 100),
+          );
+        } on TimeoutException {
+          await record('load-playback-timeout', {
+            'name': name,
+            'loading': controller.loading,
+            'playing': controller.isPlaying,
+            'positionMs': controller.position.inMilliseconds,
+            'error': controller.error?.name,
+            'loadFailure': controller.loadFailure?.toString(),
+            'disconnectDetail': controller.disconnectDetail,
+            ...await backend.diagnostics(),
+          });
+          rethrow;
+        }
         await record(name, {
           ...await backend.diagnostics(),
           'openMs': loadWatch.elapsedMilliseconds,
@@ -135,12 +189,18 @@ Future<void> main(List<String> args) async {
       await controller.togglePlay();
       await _until(() => controller.isPlaying);
       await checkDisplayRequest('resumed', true);
+      await record('before-control-seek');
       await controller.seekTo(const Duration(seconds: 2));
+      await record('after-control-seek');
       await controller.setRate(1.25);
+      await record('after-control-rate');
       await windowManager.setSize(const Size(960, 540));
+      await record('after-window-resize');
       await controller.toggleFullScreen();
+      await record('after-fullscreen-enter');
       await Future<void>.delayed(const Duration(milliseconds: 400));
       await controller.toggleFullScreen();
+      await record('after-fullscreen-exit');
       await record('controls', {
         'position': controller.position.inMilliseconds,
         'playing': controller.isPlaying,
@@ -173,7 +233,15 @@ Future<void> main(List<String> args) async {
       if (readyMs >= 15000) throw StateError('Readiness waited for Playing');
       final readyPosition = controller.position;
       await delayedSwitch;
-      await _until(() => switchWatch.elapsedMilliseconds >= 16000);
+      // A host pause can advance the wall clock without scheduling either
+      // Flutter timers or media output. Require observed media progression as
+      // well as the delayed-report deadline, with a bounded overall wait.
+      await _until(
+        () =>
+            switchWatch.elapsedMilliseconds >= 16000 &&
+            controller.position - readyPosition >= const Duration(seconds: 10),
+        timeout: const Duration(seconds: 30),
+      );
       controller.removeListener(observeReportFailure);
       await record('delayed-report-state', {
         'sawReportFailure': sawReportFailure,
@@ -259,7 +327,22 @@ Future<void> main(List<String> args) async {
         'restore-volume',
         () => controller.setVolume(15),
       );
+      await record('before-subtitle-resume', {
+        'controllerPlaying': controller.isPlaying,
+        'backendPlaying': backend.isPlaying,
+        'loading': controller.loading,
+        'playbackEnded': controller.playbackEnded,
+        'error': controller.error,
+      });
       await whileSubtitlePending('resume', controller.togglePlay);
+      await record('after-subtitle-resume', {
+        'controllerPlaying': controller.isPlaying,
+        'backendPlaying': backend.isPlaying,
+        'loading': controller.loading,
+        'playbackEnded': controller.playbackEnded,
+        'error': controller.error,
+        ...await backend.diagnostics(),
+      });
       await _until(() => controller.isPlaying);
       await record('controls-during-subtitle-load', {
         'commandCount': pendingCommands.length,
@@ -268,6 +351,19 @@ Future<void> main(List<String> args) async {
         ...await backend.diagnostics(),
       });
       await subtitleSwitch;
+      await record('subtitle-download-outcome', {
+        'controllerPlaying': controller.isPlaying,
+        'backendPlaying': backend.isPlaying,
+        'loading': controller.loading,
+        'playbackEnded': controller.playbackEnded,
+        'error': controller.error,
+        'disconnected': controller.disconnected,
+        'trackFailure': controller.trackFailure,
+        'controllerSubtitleIndex': controller.subtitleStreamIndex,
+        'backendSubtitleIndex': backend.selectedSubtitleIndex,
+        'positionMs': controller.position.inMilliseconds,
+        ...await backend.diagnostics(),
+      });
       if (controller.error != null ||
           controller.disconnected ||
           !controller.isPlaying ||
@@ -285,11 +381,13 @@ Future<void> main(List<String> args) async {
       });
       // The fixture returns an invalid subtitle at 18 seconds. A rejected
       // download must never reach native sub-add or change the selected track.
-      await _until(() => switchWatch.elapsedMilliseconds >= 20000);
+      final positionAfterFailedSubtitle = controller.position;
+      await Future<void>.delayed(const Duration(seconds: 1));
       if (backend.selectedSubtitleIndex != null ||
           controller.subtitleStreamIndex != null ||
           !controller.isPlaying ||
-          controller.position < const Duration(seconds: 18)) {
+          controller.position <
+              positionAfterFailedSubtitle + const Duration(milliseconds: 300)) {
         throw StateError('Late subtitle changed selection or media stopped');
       }
       await record('late-subtitle-remained-unselected', {
@@ -352,28 +450,79 @@ Future<void> main(List<String> args) async {
       ]) {
         if (item == '1080p60') await controller.setRate(1);
         loadWatch.reset();
-        await controller.playEpisode(
-          EmbyItem.fromJson({'Id': item, 'Type': 'Movie', 'Name': item}),
-        );
+        if (item == 'tracks') {
+          await record('before-tracks-open', await backend.diagnostics());
+        }
+        final openHeartbeat = item == 'tracks'
+            ? Timer.periodic(const Duration(seconds: 2), (_) {
+                unawaited(
+                  record('tracks-open-waiting', {
+                    'loading': controller.loading,
+                    'playing': controller.isPlaying,
+                    'error': controller.error?.name,
+                  }),
+                );
+              })
+            : null;
+        try {
+          await controller
+              .playEpisode(
+                EmbyItem.fromJson({'Id': item, 'Type': 'Movie', 'Name': item}),
+              )
+              .timeout(const Duration(seconds: 30));
+        } finally {
+          openHeartbeat?.cancel();
+        }
         await loaded('$item-loaded');
         if (item == 'tracks') {
-          await controller.setAudio(2);
-          await controller.setSubtitle(3);
+          await record('before-audio-switch', await backend.diagnostics());
+          await controller.setAudio(2).timeout(const Duration(seconds: 15));
+          await record('audio-switch-command-returned');
+          await record(
+            'after-audio-switch',
+            await backend.diagnostics().timeout(const Duration(seconds: 8)),
+          );
+          await controller.setSubtitle(3).timeout(const Duration(seconds: 15));
+          await record('pgs-command-returned');
           if (controller.trackFailure != null) {
             throw StateError('PGS selection failed');
           }
           await record('pgs', await backend.diagnostics());
           await verifyCoreSubtitle('pgs', 3);
           await Future<void>.delayed(const Duration(seconds: 2));
-          await controller.setSubtitle(4);
+          await record('before-ass-switch', await backend.diagnostics());
+          final assHeartbeat = Timer.periodic(const Duration(seconds: 2), (_) {
+            unawaited(
+              record('ass-switch-waiting', {
+                'controllerPlaying': controller.isPlaying,
+                'selectedIndex': controller.subtitleStreamIndex,
+              }),
+            );
+          });
+          try {
+            await controller
+                .setSubtitle(4)
+                .timeout(const Duration(seconds: 15));
+          } finally {
+            assHeartbeat.cancel();
+          }
           if (controller.trackFailure != null) {
             throw StateError('ASS selection failed');
           }
           await record('ass', await backend.diagnostics());
           await verifyCoreSubtitle('ass', 4);
           for (final index in [5, 6, 7]) {
-            await controller.setSubtitle(index);
+            await controller
+                .setSubtitle(index)
+                .timeout(const Duration(seconds: 15));
             if (controller.trackFailure != null) {
+              await record('external-subtitle-failure', {
+                'index': index,
+                'failure': controller.trackFailure,
+                'controllerSubtitleIndex': controller.subtitleStreamIndex,
+                'backendSubtitleIndex': backend.selectedSubtitleIndex,
+                ...await backend.diagnostics(),
+              });
               throw StateError('External subtitle $index failed');
             }
             await record('subtitle-$index', await backend.diagnostics());
@@ -539,6 +688,7 @@ Future<void> main(List<String> args) async {
       await File(
         '${root.path}/player-result.json',
       ).writeAsString(jsonEncode({'passed': true}));
+      heartbeat.cancel();
       // Let the main host exercise its normal close/exit confirmation path.
     } else {
       RillightApp? app;
@@ -594,6 +744,21 @@ Future<void> main(List<String> args) async {
       exit(0);
     }
   } catch (error, stack) {
+    try {
+      final current = _page()?.controller;
+      if (current != null && current.backend is RillightVideoBackend) {
+        final currentBackend = current.backend as RillightVideoBackend;
+        await record('failure-state', {
+          'itemId': current.itemId,
+          'playing': current.isPlaying,
+          'loading': current.loading,
+          'error': current.error?.name,
+          'disconnectDetail': current.disconnectDetail,
+          'trackFailure': current.trackFailure,
+          ...await currentBackend.diagnostics(),
+        });
+      }
+    } catch (_) {}
     await record('failure', {
       'error': error.toString(),
       'stack': stack.toString(),

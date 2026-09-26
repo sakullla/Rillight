@@ -20,11 +20,12 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def inside(output):
     output.mkdir(parents=True, exist_ok=False)
+    core_prefix = os.environ.get('RILLIGHT_VALIDATION_CORE_PREFIX', '/cache/native')
     env = {**os.environ, 'PUB_CACHE': '/cache/pub',
            'PATH': '/cache/flutter/bin:' + os.environ['PATH'],
-           'RILLIGHT_MPV_PREFIX': '/cache/native',
-           'PKG_CONFIG_PATH': '/cache/native/lib/pkgconfig',
-           'LD_LIBRARY_PATH': '/cache/native/lib'}
+           'RILLIGHT_CORE_PREFIX': core_prefix,
+           'PKG_CONFIG_PATH': core_prefix + '/lib/pkgconfig',
+           'LD_LIBRARY_PATH': core_prefix + '/lib'}
     bundle = ROOT / 'build/linux/x64/release/bundle'
 
     def run(name, args, environment=env):
@@ -52,8 +53,7 @@ def inside(output):
                               'verify', str(bundle)], clean)
         (output / 'native-versions.json').write_bytes(
             (bundle / 'data/rillight_player/loaded-versions.json').read_bytes())
-        native = {**clean, 'RILLIGHT_TEST_MPV': str(bundle / 'lib/libmpv.so.2'),
-                  'RILLIGHT_TEST_MEDIA':
+        native = {**clean, 'RILLIGHT_TEST_MEDIA':
                   '/source/build/player-validation/media/baseline.mp4'}
         run('native-package', ['flutter', 'test', 'packages/rillight_player/test'], native)
         run('smoke-build', ['flutter', 'build', 'linux', '--release',
@@ -77,6 +77,8 @@ def inside(output):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--container')
+    parser.add_argument('--core-prefix', default='/cache/native',
+                        help='Absolute SDK path inside the validation container')
     parser.add_argument('--inside', type=Path)
     args = parser.parse_args()
     if args.inside:
@@ -87,7 +89,10 @@ def main():
     stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
     output = ROOT / 'build/player-validation' / ('linux-current-' + stamp)
     output.mkdir(parents=True, exist_ok=False)
-    docker = ['docker', 'exec', args.container]
+    if not args.core_prefix.startswith('/'):
+        parser.error('--core-prefix must be absolute inside the container')
+    docker = ['docker', 'exec', '-e',
+              f'RILLIGHT_VALIDATION_CORE_PREFIX={args.core_prefix}', args.container]
     work = subprocess.check_output(docker + ['mktemp', '-d', '/work/rillight-validation-XXXXXX'],
                                    text=True).strip()
     with tempfile.TemporaryDirectory(prefix='rillight-linux-source-') as temporary:
@@ -104,6 +109,7 @@ def main():
                                                cwd=ROOT, text=True).strip(),
             'archiveSha256': hashlib.sha256(archive.read_bytes()).hexdigest(),
             'container': args.container, 'sourceDirectory': work,
+            'corePrefix': args.core_prefix,
             'includesUncommittedChanges': True,
         }, indent=2) + '\n')
         subprocess.run(['docker', 'cp', str(archive), f'{args.container}:{work}/source.tar'], check=True)

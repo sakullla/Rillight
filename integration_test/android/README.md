@@ -1,6 +1,9 @@
 # Android device validation
 
-Use Flutter 3.47.4, Android SDK API 36/build-tools 36, JDK 17+ and FFmpeg on PATH.
+Use Flutter 3.47.4, Android SDK API 36/build-tools 36, NDK with
+`llvm-readelf`, JDK 17+ and FFmpeg on PATH. Set `RILLIGHT_CORE_SDK_ROOT` to the
+pinned Android core SDK containing `arm64-v8a`, `armeabi-v7a` and `x86_64`
+prefixes before building.
 Install Python dependencies in a virtual environment:
 
 ```sh
@@ -8,6 +11,8 @@ python -m venv build/android-validation/python
 # Activate this environment using Scripts/Activate.ps1 or bin/activate.
 python -m pip install grpcio==1.78.0 grpcio-tools==1.78.0 Pillow==12.1.1
 python tool/android_release_checks_test.py
+flutter build apk --debug
+python tool/android_release_checks.py --apk build/app/outputs/flutter-apk/app-debug.apk
 python tool/android_release_checks.py --all-targets
 # Or a single device for development:
 python tool/android_release_checks.py --serial emulator-5554
@@ -59,11 +64,16 @@ The ordinary application package is never cleared or replaced. The application
 probe invokes `lib/main.dart` and only observes visible widgets/controller state
 through a loopback endpoint; navigation, taps, Android Back and input enter via
 adb. It is not a production entrypoint. The native smoke separately checks
-Media3 first-frame readiness, pause/seek, audio tracks, embedded/external
+owned-core first-frame readiness, pause/seek, audio tracks, embedded/external
 subtitles, surface recreation, HLS, redirect credential isolation, 401, missing
 media and retry. Both produce screenshots; the application flow separately
 captures virtual audio. Black/static frames,
 silent/truncated audio, missing terminal markers and unavailable devices fail.
+The phone flow saves a pre-submit connection screenshot and accessibility tree
+and rejects a synthetic URL or username that did not survive input. The TV
+automation submits its editor with the IME Done/Enter key; repeated Back can
+leave the Android TV keyboard and Flutter dialog mounted. These automated text
+injections are not the OSK-only check described below.
 Each device must have its own accepted Playing and Stopped reports. A monotonic
 fixture sequence bounds that device's run even when the report window rolls;
 earlier devices cannot supply its success. Its report interval and raw events
@@ -75,6 +85,10 @@ build logs, device input events, screenshots, native logs, PCM and `result.json`
 The verifier restores and audits an ordinary `lib/main.dart` debug APK even after
 failure. Supplying explicit `--app-apk`/`--native-apk` reuses development artifacts;
 do not claim those reused APKs as proof of a newer source candidate.
+The APK audit records the package identity, SHA-256, Flutter ABIs, each bundled
+owned-core/FFmpeg library hash, ELF machine and `DT_NEEDED` closure. It rejects
+Media3 classes and libmpv artifacts. The native fixture lives at
+`integration_test/android/smoke_server.py`; the former Media3 plugin is retired.
 
 TV application navigation uses real D-pad/confirm/Back/media keys. Automated IME
 typing uses adb text injection and is explicitly marked `tv_osk_only: false`.
@@ -83,8 +97,10 @@ the TV input method's direction/confirm keys, record all keys and capture field,
 dialog and returned focus. Do not classify injected text as this manual check.
 
 Inspect the saved subtitle screenshots for actual text independently of track
-selection status. A frame delta establishes changing colored pixels in the
-video region, not lack of flicker. Virtual PCM is not physical speaker output.
+selection status. Core `firstFrame` and position events are control evidence;
+the separately captured frame delta establishes changing colored pixels in the
+displayed video region, not lack of flicker. Virtual PCM is not physical speaker
+output.
 AVD SwiftShader/WHPX runs do not establish hardware performance or GPU stability.
 Build CI uploads a debug APK and runs native unit/host contracts; it does not run
 the three-AVD audio/UI matrix. Configured CI is not an executed native result.
@@ -96,5 +112,5 @@ on a macOS host. Python contract tests do not replace a native build or playback
 The desktop smoke observes the controller's actual external-subtitle download
 and injects a delayed invalid response. Pause, seek, volume and superseding
 selection must remain responsive, and the failed download must never add a
-native subtitle. The separate native package test still exercises a real pending
-libmpv `sub-add` timeout; these are distinct paths.
+native subtitle. The separate owned-core test exercises a blocked external
+subtitle load; these are distinct paths.

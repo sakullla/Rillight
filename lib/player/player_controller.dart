@@ -483,7 +483,11 @@ class PlayerController extends ChangeNotifier {
     }
     final operation = _operations.current;
     if (operation != null) {
-      await _operations.run(operation, backend.playOrPause);
+      // The UI event is the last confirmed playback state. A native command
+      // may update the backend optimistically before its state event arrives,
+      // so toggling the backend's own flag can issue the opposite command.
+      final resume = !isPlaying;
+      await _operations.run(operation, resume ? backend.play : backend.pause);
     }
   }
 
@@ -1655,6 +1659,13 @@ class PlayerController extends ChangeNotifier {
     if (_disposed || _operations.isClosed) return;
     _operations.invalidate();
     _cancelPlaybackTimers();
+    // The invalidated operation no longer accepts the backend's stopped
+    // event. Publish the stopped state here so the UI releases its wake lock.
+    isPlaying = false;
+    loading = false;
+    state.buffering = false;
+    state.phase = PlaybackPhase.idle;
+    _emit();
     final stopped = _stopSession();
     await _operations.interrupt(backend.stop);
     await _operations.drained;
@@ -1680,6 +1691,12 @@ class PlayerController extends ChangeNotifier {
     _operations.close();
     state.phase = PlaybackPhase.closing;
     _cancelPlaybackTimers();
+    // Closing invalidates backend events, so publish the stopped state while
+    // the page is still mounted to release its display wake lock.
+    isPlaying = false;
+    loading = false;
+    state.buffering = false;
+    _emit();
     _progressFailBannerTimer?.cancel();
     _subtitleNoticeTimer?.cancel();
     _settingsSaveTimer?.cancel();
@@ -1706,8 +1723,6 @@ class PlayerController extends ChangeNotifier {
         await _deleteSubtitleCache();
       }
     }
-    isPlaying = false;
-    state.buffering = false;
     await stopped;
     await _persistSettings();
     state.phase = PlaybackPhase.closed;
@@ -2068,21 +2083,21 @@ class PlayerController extends ChangeNotifier {
       bool ownsSubtitle() =>
           identical(subtitleSession, _session) &&
           subtitleRevision == _trackRevisions['SubtitleTrackChange'];
-      await _restoreParameter(operation, () async {
+      final subtitleApplied = await _restoreParameter(operation, () async {
         await _applySubtitle(
           next,
           operation,
           subtitle: selectedSubtitle,
           revision: subtitleRevision,
         );
-        if (_accepts(operation) && ownsSubtitle()) {
-          subtitleStreamIndex = selectedSubtitle;
-        }
       }, accepts: ownsSubtitle);
+      if (subtitleApplied && ownsSubtitle()) {
+        subtitleStreamIndex = selectedSubtitle;
+      }
       if (!_accepts(operation) || disconnected) return;
       // 换源/重开后部分后端会丢外挂字幕选择(字幕要等一会儿才出现),
       // 起流片刻后重断言一次,字幕晚显的问题即消失。
-      if (ownsSubtitle()) _scheduleSubtitleReassert();
+      if (subtitleApplied && ownsSubtitle()) _scheduleSubtitleReassert();
       await started;
       if (!_accepts(operation) || disconnected) return;
       error = null;
@@ -2118,26 +2133,30 @@ class PlayerController extends ChangeNotifier {
     }
   }
 
-  Future<void> _restoreParameter(
+  Future<bool> _restoreParameter(
     PlaybackOperation operation,
     Future<void> Function() apply, {
     bool Function()? accepts,
   }) async {
     bool current() =>
         _accepts(operation) && !disconnected && (accepts?.call() ?? true);
-    if (!current()) return;
+    if (!current()) return false;
     try {
       await apply();
+      return current();
     } on DeviceTrackRejected {
       // Startup restore keeps the playable track and stays silent.
+      return false;
     } on TimeoutException {
       // A missing native reply does not establish a healthy control channel.
       if (current()) rethrow;
+      return false;
     } catch (failure) {
       if (current()) {
         trackFailure = failure.toString();
         _emit();
       }
+      return false;
     }
   }
 
@@ -2251,7 +2270,7 @@ class PlayerController extends ChangeNotifier {
     await _activateSubtitle(next.mediaSource, subtitle, current: current);
   }
 
-  /// 内嵌文本按容器流索引切换。外挂文本先整文件下载到本地,再交给 mpv。
+  /// 内嵌文本按容器流索引切换。外挂文本先整文件下载到本地，再交给播放核心。
   /// 菜单勾选只在调用方确认这次选择已经生效后更新。
   Future<void> _activateSubtitle(
     PlaybackMediaSource source,
@@ -2315,6 +2334,7 @@ class PlayerController extends ChangeNotifier {
       final applied = await backend.setSubtitleUri(
         file.uri,
         title: stream.label,
+        index: index,
       );
       if (!current()) return;
       if (!applied) {

@@ -21,5 +21,3 @@ target_include_directories(${PLUGIN_NAME} INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}
 target_link_libraries(${PLUGIN_NAME} PRIVATE flutter rillight_core
   PkgConfig::PULSE PkgConfig::EPOXY)
 set(rillight_player_bundled_libraries "$<TARGET_FILE:rillight_core>" PARENT_SCOPE)
-install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../native/dependencies.json" "${CMAKE_CURRENT_SOURCE_DIR}/../THIRD_PARTY_NOTICES.md" DESTINATION "data/rillight_player" COMPONENT Runtime)
-install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../native/licenses" DESTINATION "data/rillight_player" COMPONENT Runtime)

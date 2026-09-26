@@ -9,6 +9,12 @@
     },
     "libraries": ["avformat", "avcodec", "avutil", "swresample", "swscale", "avfilter"]
   },
+  "dav1d": {
+    "version": "1.5.3",
+    "repository": "https://github.com/videolan/dav1d.git",
+    "commit": "b546257f770768b2c88258c533da38b91a06f737",
+    "license": "BSD-2-Clause"
+  },
   "libass": {
     "version": "0.17.5",
     "repository": "https://github.com/libass/libass.git",

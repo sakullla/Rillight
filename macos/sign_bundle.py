@@ -1,5 +1,7 @@
 """Sign nested code without app entitlements, then the app with Release rights."""
 import argparse
+import hashlib
+import json
 from pathlib import Path
 import plistlib
 import subprocess
@@ -46,6 +48,23 @@ def sign(app, *, identity=None, without_server_for_test=False):
         seen.add(canonical)
         subprocess.check_call(['codesign', '--force', '--sign', signer,
                                '--timestamp=none', str(path)])
+    record_path = app / 'Contents/Resources/rillight-macos-closure.json'
+    if not record_path.is_file():
+        raise ValueError('Missing owned-core macOS closure record before signing')
+    record = json.loads(record_path.read_text(encoding='utf-8'))
+    libraries = record.get('libraries')
+    if not isinstance(libraries, dict) or 'librillight_core.dylib' not in libraries:
+        raise ValueError('Owned-core closure record is incomplete')
+    final_hashes = {}
+    for name in libraries:
+        path = frameworks / name
+        if not path.is_file():
+            raise ValueError('Missing owned-core release dylib: ' + name)
+        final_hashes[name] = hashlib.sha256(path.read_bytes()).hexdigest()
+    record['final_libraries_sha256'] = final_hashes
+    record_path.write_text(json.dumps(record, ensure_ascii=False,
+                                      sort_keys=True, indent=2) + '\n',
+                           encoding='utf-8')
     with tempfile.TemporaryDirectory(prefix='rillight-entitlements-') as directory:
         entitlements = Path(directory) / 'Release.entitlements'
         entitlements.write_bytes(plistlib.dumps(expected))

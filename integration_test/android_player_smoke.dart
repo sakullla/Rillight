@@ -263,7 +263,7 @@ class _SmokeState extends State<_Smoke> {
 
   Future<void> runHlsSubtitles() async {
     // Only Emby metadata/reporting is synthetic. The shared controller fetches
-    // subtitle bytes over real authenticated HTTP and awaits real Media3 tracks.
+    // subtitle bytes over real authenticated HTTP and awaits owned-core tracks.
     final client = _HlsSubtitleClient()
       ..attachSession(
         baseUrl: base,

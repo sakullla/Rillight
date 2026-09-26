@@ -37,6 +37,27 @@ class CorePlayerTrack {
   };
 }
 
+enum CoreHardware {
+  auto(-1),
+  software(0),
+  d3d11(1),
+  videotoolbox(2),
+  vaapi(4),
+  mediacodec(8);
+
+  const CoreHardware(this.nativeValue);
+  final int nativeValue;
+
+  CoreHardware get resolved {
+    if (this != CoreHardware.auto) return this;
+    if (Platform.isWindows) return CoreHardware.d3d11;
+    if (Platform.isMacOS) return CoreHardware.videotoolbox;
+    if (Platform.isLinux) return CoreHardware.vaapi;
+    if (Platform.isAndroid) return CoreHardware.mediacodec;
+    return CoreHardware.software;
+  }
+}
+
 class CorePlayerOpen {
   const CorePlayerOpen({
     required this.url,
@@ -44,12 +65,14 @@ class CorePlayerOpen {
     this.start = Duration.zero,
     this.paused = false,
     this.streams = const [],
+    this.hardware = CoreHardware.auto,
   });
   final Uri url;
   final String session;
   final Duration start;
   final bool paused;
   final List<CorePlayerTrack> streams;
+  final CoreHardware hardware;
 }
 
 class _CoreSnapshot {
@@ -141,6 +164,7 @@ class AndroidCorePlayer implements CorePlayer {
       'start': request.start.inMilliseconds,
       'paused': request.paused,
       'streams': [for (final track in request.streams) track.toChannel()],
+      'preferredHardware': request.hardware.resolved.nativeValue,
     });
     if (_session != request.session) throw StateError('Superseded core open');
     return result ?? const {};
@@ -246,6 +270,14 @@ class DesktopCorePlayer implements CorePlayer {
     _poll?.cancel();
     _previousPosition = _previousDuration = _previousState = _previousTimeline =
         -1;
+    _check(
+      _bindings.configureHardware(
+        _handle,
+        request.hardware.resolved.nativeValue,
+        1,
+      ),
+      'configure hardware',
+    );
     final url = request.url.toString().toNativeUtf8();
     try {
       _check(_bindings.open(_handle, url, ++_operation), 'open');
@@ -379,6 +411,7 @@ class DesktopCorePlayer implements CorePlayer {
     List<CorePlayerTrack> server,
   ) {
     final native = <int, (int, String?)>{};
+    var actualHardware = 0;
     final track = calloc<NativeCoreTrack>();
     try {
       for (
@@ -388,6 +421,10 @@ class DesktopCorePlayer implements CorePlayer {
       ) {
         track.ref.structSize = sizeOf<NativeCoreTrack>();
         if (_bindings.getTrack(_handle, ordinal, track) != 0) continue;
+        if (track.ref.type == 1 &&
+            track.ref.streamIndex == snapshot.videoStreamIndex) {
+          actualHardware = track.ref.actualHardware;
+        }
         native[track.ref.streamIndex] = (
           track.ref.type,
           _cstring(track.ref.language),
@@ -430,6 +467,8 @@ class DesktopCorePlayer implements CorePlayer {
     }
     _trackMap = mapped;
     return {
+      // The decoded hardware of the selected video track, not the preference.
+      'actualHardware': actualHardware,
       'audioIndex': mapped.entries
           .where((entry) => entry.value == snapshot.audioStreamIndex)
           .firstOrNull
@@ -481,6 +520,9 @@ class DesktopCorePlayer implements CorePlayer {
         : method == 'subtitleOff'
         ? -1
         : null;
+    final timelineBefore = method == 'seek'
+        ? _readSnapshot().timelineVersion
+        : 0;
     switch (method) {
       case 'play':
         result = _bindings.setPlaying(_handle, 1, ++_operation);
@@ -526,7 +568,19 @@ class DesktopCorePlayer implements CorePlayer {
     }
     _check(result, method);
     _CoreSnapshot snapshot;
-    if (method == 'audio') {
+    if (method == 'seek') {
+      // The native seek call only queues a timeline change. Complete this
+      // command after the new timeline has decoded media so a following rate
+      // or track command cannot invalidate an in-flight FFmpeg seek.
+      snapshot = await _waitSnapshot(
+        (value) =>
+            value.timelineVersion > timelineBefore &&
+            value.state >= 2 &&
+            value.state <= 5 &&
+            (value.firstVideoFrameReady != 0 ||
+                value.firstAudioFrameReady != 0),
+      );
+    } else if (method == 'audio') {
       snapshot = await _waitSnapshot(
         (value) => value.audioStreamIndex == selectedStream && value.state != 6,
       );
@@ -539,7 +593,9 @@ class DesktopCorePlayer implements CorePlayer {
       await _waitSnapshot((value) => value.externalSubtitlePending == 0);
       final external = _latestExternalSubtitle();
       if (external == null) {
-        throw StateError('External subtitle failed to load');
+        throw StateError(
+          'External subtitle failed to load (${_readSnapshot().ffmpegError})',
+        );
       }
       _check(
         _bindings.selectSubtitle(_handle, external, ++_operation),
@@ -573,7 +629,13 @@ class DesktopCorePlayer implements CorePlayer {
       if (accept(value)) return value;
       await Future<void>.delayed(const Duration(milliseconds: 40));
     }
-    throw TimeoutException('Core did not confirm command');
+    final last = _readSnapshot();
+    throw TimeoutException(
+      'Core did not confirm command '
+      '(state=${last.state}, timeline=${last.timelineVersion}, '
+      'video=${last.firstVideoFrameReady}, audio=${last.firstAudioFrameReady}, '
+      'error=${last.ffmpegError})',
+    );
   }
 
   int? _latestExternalSubtitle() {

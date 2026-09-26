@@ -27,7 +27,7 @@ internal class CorePlayback(
                                val alive: AtomicBoolean = AtomicBoolean(true),
                                var thread: Thread? = null)
     private data class TrackRequest(val result: MethodChannel.Result, val expected: Int,
-                                    val subtitle: Boolean)
+                                    val subtitle: Boolean, val timeline: Long)
     private data class ServerStream(val index: Int, val type: String,
                                     val language: String?, val external: Boolean)
     private val serial = Executors.newSingleThreadExecutor()
@@ -42,7 +42,14 @@ internal class CorePlayback(
     private var pendingTrack: TrackRequest? = null
     private var externalPending: MethodChannel.Result? = null
     private val openTimeout = Runnable { fail("Media ready / first frame timed out") }
-    private val trackTimeout = Runnable { trackFailure("Native track selection timed out") }
+    private val trackTimeout = Runnable {
+        val active = running
+        val snapshot = active?.let { CoreNative.snapshot(it.handle) }
+        if (active != null && confirmTrack(active, snapshot)) return@Runnable
+        val pending = pendingTrack
+        trackFailure("Native track selection timed out (state=${snapshot?.getOrNull(0)}, " +
+            "timeline=${snapshot?.getOrNull(3)}, selected=${snapshot?.getOrNull(if (pending?.subtitle == true) 7 else 6)})")
+    }
     private var serverStreams = emptyList<ServerStream>()
     private var mapping = emptyMap<Int, Int>()
     @Volatile private var requestedStartUs = 0L
@@ -101,6 +108,11 @@ internal class CorePlayback(
             result.error("source", "Core requires a sealed loopback URL", mapOf("sessionId" to token))
             return
         }
+        val preferredHardware = (args["preferredHardware"] as? Number)?.toInt() ?: 8
+        if (preferredHardware != 0 && preferredHardware != 8) {
+            result.error("hardware", "Unsupported Android decoder preference", mapOf("sessionId" to token))
+            return
+        }
         val revision = generation.incrementAndGet()
         val previous = running
         previous?.alive?.set(false)
@@ -142,7 +154,8 @@ internal class CorePlayback(
                 return@execute
             }
             val accepted = try {
-                CoreNative.open(handle, address, operation.incrementAndGet()) == 0 &&
+                CoreNative.configureHardware(handle, preferredHardware, true) == 0 &&
+                    CoreNative.open(handle, address, operation.incrementAndGet()) == 0 &&
                     (!desiredPaused || CoreNative.play(handle, false, operation.incrementAndGet()) == 0)
             } catch (error: Throwable) {
                 CoreNative.destroy(handle)
@@ -224,7 +237,7 @@ internal class CorePlayback(
                         if (selected == 0) audioOutput?.flush()
                         selected
                     }
-                    if (code == 0) { beginTrack(TrackRequest(result, stream, method == "subtitle")); return }
+                    if (code == 0) { beginTrack(result, stream, method == "subtitle", handle); return }
                     code
                 }
                 "subtitleOff" -> {
@@ -233,7 +246,7 @@ internal class CorePlayback(
                         if (selected == 0) audioOutput?.flush()
                         selected
                     }
-                    if (code == 0) { beginTrack(TrackRequest(result, -1, true)); return }
+                    if (code == 0) { beginTrack(result, -1, true, handle); return }
                     code
                 }
                 "subtitleUri" -> {
@@ -285,11 +298,17 @@ internal class CorePlayback(
         emit("interruption", reason)
     }
 
-    private fun beginTrack(request: TrackRequest) {
+    private fun beginTrack(result: MethodChannel.Result, expected: Int,
+                           subtitle: Boolean, handle: Long) {
+        val timeline = CoreNative.snapshot(handle)?.getOrNull(3)
+        if (timeline == null) {
+            result.error("track", "Native track timeline unavailable", mapOf("sessionId" to session))
+            return
+        }
         pendingTrack?.result?.error("superseded", "Track selection superseded", mapOf("sessionId" to session))
-        pendingTrack = request
+        pendingTrack = TrackRequest(result, expected, subtitle, timeline)
         handler.removeCallbacks(trackTimeout)
-        handler.postDelayed(trackTimeout, 4_500)
+        handler.postDelayed(trackTimeout, 12_000)
     }
 
     private fun trackFailure(message: String) {
@@ -490,18 +509,22 @@ internal class CorePlayback(
                     if (chosen == 0) audioOutput?.flush()
                     chosen
                 }
-                if (code == 0) beginTrack(TrackRequest(external, selected[0], true))
+                if (code == 0) beginTrack(external, selected[0], true, active.handle)
                 else external.error("track", "External subtitle selection failed", mapOf("sessionId" to session))
             }
         }
-        val track = pendingTrack
-        if (track != null && snap[0] in 2L..4L &&
-            (if (track.subtitle) snap[7] else snap[6]) == track.expected.toLong()) {
-            pendingTrack = null
-            handler.removeCallbacks(trackTimeout)
-            updateTrackMapping(active.handle)
-            track.result.success(successMap(active.handle))
-        }
+        confirmTrack(active, snap)
+    }
+
+    private fun confirmTrack(active: Running, snapshot: LongArray?): Boolean {
+        val track = pendingTrack ?: return false
+        if (!CoreTrackConfirmation.matches(snapshot, track.timeline, track.expected,
+                track.subtitle)) return false
+        pendingTrack = null
+        handler.removeCallbacks(trackTimeout)
+        updateTrackMapping(active.handle)
+        track.result.success(successMap(active.handle))
+        return true
     }
 
     private fun updateTrackMapping(handle: Long) {
@@ -533,6 +556,10 @@ internal class CorePlayback(
 
     fun successMap(handle: Long? = running?.handle): Map<String, Any?> {
         val snap = handle?.let(CoreNative::snapshot)
+        val actualHardware = handle?.let { core ->
+            CoreTrackConfirmation.actualHardware((0 until CoreNative.trackCount(core))
+                .mapNotNull { CoreNative.track(core, it) })
+        } ?: 0
         val audioIndex = snap?.get(6)?.toInt()?.let { native -> mapping.entries.firstOrNull { it.value == native }?.key }
         val subtitleIndex = snap?.get(7)?.toInt()?.let { native -> mapping.entries.firstOrNull { it.value == native }?.key }
         val playableAudio = serverStreams.filter { it.type == "Audio" && it.index in mapping }.map { it.index }
@@ -542,7 +569,9 @@ internal class CorePlayback(
         return mapOf("sessionId" to session, "audioIndex" to audioIndex,
             "subtitleIndex" to subtitleIndex, "playableAudio" to playableAudio,
             "rejectedAudio" to rejectedAudio, "playableSubtitle" to playableText,
-            "rejectedSubtitle" to rejectedText)
+            "rejectedSubtitle" to rejectedText,
+            // Decoder actually used for the video track; 0 means software or no video.
+            "actualHardware" to actualHardware)
     }
 
     private fun requestFocus(): Boolean {

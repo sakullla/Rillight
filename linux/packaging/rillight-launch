@@ -11,7 +11,7 @@ if [ -f "$log" ]; then mv -f "$log" "$state_dir/launch.previous.log"; fi
 printf 'Rillight launch %s\n' "$(date -Iseconds)" > "$log"
 failure=''
 if [ ! -x "$app_dir/rillight" ]; then failure='缺少主程序或没有执行权限。'; fi
-if [ ! -f "$app_dir/lib/libmpv.so.2" ]; then failure='安装包缺少 libmpv.so.2，请重新安装。'; fi
+if [ ! -f "$app_dir/lib/librillight_core.so" ]; then failure='安装包缺少 librillight_core.so，请重新安装。'; fi
 if [ -n "$failure" ]; then printf '%s\n' "$failure" >> "$log"; fi
 if ! command -v ldd >/dev/null 2>&1; then
   failure='缺少系统诊断工具 ldd（libc-bin）。'
@@ -19,16 +19,13 @@ else
   # Check every plugin as well as the executable: RUNPATH is not transitive.
   for binary in "$app_dir/rillight" "$app_dir"/lib/*.so*; do
     [ -f "$binary" ] || continue
-    # An unreferenced old ABI1 file does not affect this ABI2 application.
-    # Actual ABI1 consumers are still detected by their ldd dependency lists.
-    case "$binary" in */libmpv.so.1*) continue;; esac
     printf '\n%s\n' "$binary" >> "$log"
     report=$(LC_ALL=C ldd "$binary" 2>&1)
     status=$?
     printf '%s\n' "$report" >> "$log"
     missing=$(printf '%s\n' "$report" | sed -n 's/^[[:space:]]*\([^[:space:]]*\)[[:space:]]*=>[[:space:]]*not found.*/\1/p')
     if [ -n "$missing" ]; then failure="缺少共享库：$missing"; fi
-    case "$report" in *'libmpv.so.1'*) failure='播放组件仍依赖旧版 libmpv.so.1，请重新安装当前版本。';; esac
+    case "$report" in *'libmpv.so'*) failure='播放组件仍依赖旧版 libmpv，请重新安装当前版本。';; esac
     case "$report" in *'not a dynamic executable'*|*'statically linked'*) status=0;; esac
     if [ "$status" -ne 0 ]; then failure='无法加载程序或播放组件，请查看诊断日志。'; fi
   done

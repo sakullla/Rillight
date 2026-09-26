@@ -89,6 +89,16 @@ using Clock = std::chrono::steady_clock;
       dispatch_async(dispatch_get_main_queue(), ^{ ready(@"Core ABI mismatch"); });
       return;
     }
+    // DesktopCorePlayer awaits texture creation before calling core_open.
+    // Prefer VideoToolbox for this session, with the owned software decoder
+    // available when a device or codec cannot use hardware acceleration.
+    if (rillight_core_configure_hardware(
+            self->core, RILLIGHT_CORE_HW_VIDEOTOOLBOX, 1) != 0) {
+      dispatch_async(dispatch_get_main_queue(), ^{
+        ready(@"Core VideoToolbox preference could not be configured");
+      });
+      return;
+    }
     _timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, self->_queue);
     dispatch_source_set_timer(_timer, dispatch_time(DISPATCH_TIME_NOW, 0),
                               5 * NSEC_PER_MSEC, NSEC_PER_MSEC);
@@ -511,6 +521,10 @@ using Clock = std::chrono::steady_clock;
     NSDictionary* status = @{@"frames": @(surface->frames),
                              @"error": surface->error,
                              @"actualHardware": @(surface->actualHardware),
+                             @"preferredHardware": @(hasSnapshot ?
+                                 snapshot.preferred_hardware : 0),
+                             @"allowSoftwareFallback": @(hasSnapshot &&
+                                 snapshot.allow_software_fallback != 0),
                              @"decoder": decoder,
                              @"session": @(hasSnapshot ? snapshot.session_id : 0),
                              @"timeline": @(hasSnapshot ? snapshot.timeline_version : 0)};

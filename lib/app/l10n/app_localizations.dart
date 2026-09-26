@@ -1051,7 +1051,7 @@ abstract class AppLocalizations {
   /// Short explanation under the hardware decoding row.
   ///
   /// In zh, this message translates to:
-  /// **'用显卡解码，降低 CPU 占用'**
+  /// **'优先使用可用的硬件解码，失败时回退软件解码；实际启用状态以播放诊断为准'**
   String get settingsHardwareDecodingHint;
 
   /// Hardware decoding follows the platform default.

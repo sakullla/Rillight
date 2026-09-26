@@ -12,6 +12,7 @@ import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/player/playback_models.dart';
+import 'package:rillight/player/playback_state.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/network_throughput.dart';
 import 'package:rillight/player/player_bindings.dart';
@@ -217,7 +218,7 @@ void main() {
       userAgent: 'LineUA/subs',
     );
     addTearDown(controller.dispose);
-    expect(backend.subtitleIndex, isNull);
+    expect(backend.subtitleIndex, 2);
     expect(backend.subtitleUri?.scheme, 'file');
     final subtitleRequest = server.requests.indexWhere(
       (request) => request.contains('/Subtitles/2/0/Stream.ass'),
@@ -941,6 +942,38 @@ void main() {
       expect(stoppedEvents(), hasLength(1));
     },
   );
+
+  test(
+    'stopping a session clears playing state before it can replay',
+    () async {
+      final controller = await startStandaloneController();
+      addTearDown(controller.dispose);
+      expect(controller.isPlaying, isTrue);
+
+      await controller.shutdownSession();
+      expect(controller.isPlaying, isFalse);
+      expect(controller.state.phase, PlaybackPhase.idle);
+      expect(backend.isPlaying, isFalse);
+
+      await controller.replay();
+      expect(controller.isPlaying, isTrue);
+    },
+  );
+
+  test('disposing a live session publishes stopped state', () async {
+    final controller = await startStandaloneController();
+    addTearDown(controller.dispose);
+    expect(controller.isPlaying, isTrue);
+    final observed = <bool>[];
+    controller.addListener(() => observed.add(controller.isPlaying));
+
+    await controller.disposeAsync();
+
+    expect(controller.isPlaying, isFalse);
+    expect(observed, contains(false));
+    expect(backend.isPlaying, isFalse);
+    expect(controller.state.phase, PlaybackPhase.closed);
+  });
 
   test('a second close joins the first and fires onClose once', () async {
     var closeCount = 0;

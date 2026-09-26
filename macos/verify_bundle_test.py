@@ -1,7 +1,7 @@
-"""Portable regression for thin/fat otool output used by native packaging."""
-from io import BytesIO
+"""Portable regressions for owned-core macOS provenance and bundle checks."""
+
+import hashlib
 import json
-import os
 from pathlib import Path
 import plistlib
 import sys
@@ -9,225 +9,278 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'packages/rillight_player/native'))
-import prepare_macos
-from bundle_macos import otool_dependencies
-from prepare_macos import FILELIST_URL, USER_AGENT, download, parse_filelist, prepare_dylibs
-from sign_bundle import release_entitlements, sign, verify_signed_entitlements
-
-FAT = b'\xca\xfe\xba\xbe' + b'\x00\x00\x00\x02' + b'\x00' * 24
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'packages/rillight_player/native'))
+import prepare_macos
+from bundle_macos import audit_binary, bundle, otool_dependencies
+from sign_bundle import release_entitlements, sign, verify_signed_entitlements
+from verify_bundle import deployment_versions, verify
 
 
-class FakeResponse:
-    def __init__(self, data, headers=None):
-        self._data = BytesIO(data)
-        self.headers = headers or {}
-
-    def read(self, size=-1):
-        return self._data.read(size)
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *args):
-        return False
+NAMES = ['libavformat.61.dylib', 'libavcodec.61.dylib',
+         'libavutil.59.dylib', 'libavfilter.10.dylib',
+         'libswresample.5.dylib', 'libswscale.8.dylib',
+         'libass.9.dylib', 'libdav1d.7.dylib']
 
 
-class NativeDownloadTest(unittest.TestCase):
-    def test_download_sends_an_explicit_user_agent(self):
-        captured = {}
+def sha(data):
+    return hashlib.sha256(data).hexdigest()
 
-        def urlopen(request, **kwargs):
-            captured['headers'] = dict(request.header_items())
-            captured['url'] = request.full_url
-            return FakeResponse(b'dylib')
 
-        with tempfile.TemporaryDirectory() as directory:
-            target = Path(directory) / 'libogg.0.dylib'
-            with patch('prepare_macos.urllib.request.urlopen', side_effect=urlopen):
-                download('https://iina.io/dylibs/universal/libogg.0.dylib', target)
-            self.assertEqual(target.read_bytes(), b'dylib')
-        self.assertEqual(captured['url'], 'https://iina.io/dylibs/universal/libogg.0.dylib')
-        headers = {key.lower(): value for key, value in captured['headers'].items()}
-        self.assertEqual(headers['user-agent'], USER_AGENT)
-
-    def test_python_urllib_without_user_agent_is_the_known_403_path(self):
-        self.assertNotIn('Python-urllib', USER_AGENT)
-        self.assertTrue(USER_AGENT.startswith('Rillight/'))
-
-    def test_manifest_does_not_pin_iina_dylib_hashes(self):
-        manifest = json.loads((ROOT / 'packages/rillight_player/native/dependencies.json').read_text())
-        self.assertNotIn('files', manifest['macos'])
-        self.assertNotIn('sha256', json.dumps(manifest['macos']))
-        self.assertEqual(manifest['macos']['dylibs_url'], 'https://iina.io/dylibs/universal')
-        self.assertEqual(manifest['macos']['filelist_url'], FILELIST_URL)
-
-    def test_filelist_requires_libmpv_and_rejects_paths(self):
-        names = parse_filelist('libogg.0.dylib\nlibmpv.2.dylib\nlibogg.0.dylib\n')
-        self.assertEqual(names, ['libogg.0.dylib', 'libmpv.2.dylib'])
-        with self.assertRaisesRegex(RuntimeError, 'missing libmpv.2.dylib'):
-            parse_filelist('libogg.0.dylib\n')
-        with self.assertRaisesRegex(RuntimeError, 'Invalid IINA file list entry'):
-            parse_filelist('../libmpv.2.dylib\n')
-
-    def test_prepare_follows_live_filelist_without_sha256(self):
-        requested = []
-        payloads = {
-            FILELIST_URL: b'libmpv.2.dylib\nlibogg.0.dylib\n',
-            'https://iina.io/dylibs/universal/libmpv.2.dylib': FAT + b'mpv',
-            'https://iina.io/dylibs/universal/libogg.0.dylib': FAT + b'ogg',
+class PreparedFixture:
+    def __init__(self, temporary):
+        self.root = Path(temporary)
+        self.prefix = self.root / 'sdk'
+        self.core = self.root / 'core/librillight_core.dylib'
+        self.core.parent.mkdir(parents=True)
+        self.core.write_bytes(b'owned-core')
+        self.marker = {
+            'platform': 'macos-universal',
+            'ffmpeg_version': 'n9.0.1',
+            'ffmpeg_commit': 'locked-ffmpeg',
+            'ffmpeg_tag': 'n9.0.1',
+            'ffmpeg_patches': {'patch': 'sha'},
+            'libraries': {},
+            'libass': {'version': '0.17.5', 'commit': 'locked-ass',
+                       'library': 'lib/libass.9.dylib'},
         }
-
-        def urlopen(request, **kwargs):
-            requested.append(request.full_url)
-            headers = {key.lower(): value for key, value in request.header_items()}
-            self.assertEqual(headers['user-agent'], USER_AGENT)
-            return FakeResponse(payloads[request.full_url], {'ETag': '"live"'})
-
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            leftover = root / 'macos/Libraries/libarchive.13.dylib'
-            leftover.parent.mkdir(parents=True)
-            leftover.write_bytes(FAT + b'stale')
-            with patch.object(prepare_macos, 'ROOT', root), \
-                    patch.dict(os.environ, {'RILLIGHT_NATIVE_CACHE': str(root / 'cache')}), \
-                    patch('prepare_macos.urllib.request.urlopen', side_effect=urlopen):
-                prepare_dylibs()
-            libraries = root / 'macos/Libraries'
-            self.assertEqual((libraries / 'libmpv.2.dylib').read_bytes(), FAT + b'mpv')
-            self.assertEqual((libraries / 'libogg.0.dylib').read_bytes(), FAT + b'ogg')
-            self.assertFalse(leftover.exists())
-        self.assertEqual(requested[0], FILELIST_URL)
-        self.assertIn('https://iina.io/dylibs/universal/libmpv.2.dylib', requested)
-
-    def test_non_macho_download_is_rejected(self):
-        payloads = {
-            FILELIST_URL: b'libmpv.2.dylib\n',
-            'https://iina.io/dylibs/universal/libmpv.2.dylib': b'<!doctype html>',
-        }
-
-        def urlopen(request, **kwargs):
-            return FakeResponse(payloads[request.full_url])
-
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            with patch.object(prepare_macos, 'ROOT', root), \
-                    patch.dict(os.environ, {'RILLIGHT_NATIVE_CACHE': str(root / 'cache')}), \
-                    patch('prepare_macos.urllib.request.urlopen', side_effect=urlopen):
-                with self.assertRaisesRegex(RuntimeError, 'universal Mach-O'):
-                    prepare_dylibs()
+        for name in NAMES:
+            path = self.prefix / 'lib' / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(name.encode())
+            self.marker['libraries']['lib/' + name] = sha(path.read_bytes())
+        (self.prefix / 'rillight-core-dependencies.json').write_text(
+            json.dumps(self.marker), encoding='utf-8')
+        (self.root / 'native/core').mkdir(parents=True)
+        (self.root / 'native/core/rillight_core.h').write_text(
+            '#define RILLIGHT_CORE_ABI_VERSION 7\n', encoding='utf-8')
+        (self.root / 'native/core_dependencies.json').write_text(
+            json.dumps({'ffmpeg': {'version': 'n9.0.1',
+                                   'commit': 'locked-ffmpeg',
+                                   'patches': {'patch': 'sha'}},
+                        'libass': {'commit': 'locked-ass'}}), encoding='utf-8')
+        (self.root / 'THIRD_PARTY_NOTICES.md').write_text('FFmpeg/libass', encoding='utf-8')
+        licenses = self.root / 'native/licenses'
+        licenses.mkdir()
+        for name in ('FFmpeg-GPL-2.0.txt', 'FFmpeg-LGPL-2.1.txt',
+                     'libass-ISC.txt', 'dav1d-BSD-2-Clause.txt'):
+            (licenses / name).write_text('license', encoding='utf-8')
 
 
-class OtoolDependenciesTest(unittest.TestCase):
-    def test_thin_file_title_is_not_a_build_machine_dependency(self):
-        output = '/Users/runner/work/Rillight.app/Contents/Frameworks/libmpv.2.dylib:\n' \
-                 '\t@rpath/libmpv.2.dylib (compatibility version 2.0.0, current version 2.5.0)\n' \
-                 '\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1292.60.1)\n'
-        self.assertEqual(otool_dependencies(output), ['@rpath/libmpv.2.dylib', '/usr/lib/libSystem.B.dylib'])
+class PrepareTest(unittest.TestCase):
+    def test_missing_explicit_inputs_fails_without_download(self):
+        with patch.dict('os.environ', {}, clear=True):
+            with self.assertRaisesRegex(RuntimeError, 'Set RILLIGHT_MACOS_CORE_PREFIX'):
+                prepare_macos.prepare()
 
-    def test_fat_architecture_titles_are_not_dependencies(self):
+    def test_universal_hashed_closure_stages_only_sdk_runtime_dylibs(self):
+        with tempfile.TemporaryDirectory() as temp:
+            fixture = PreparedFixture(temp)
+            stale = fixture.root / 'macos/Libraries/libmpv.2.dylib'
+            stale.parent.mkdir(parents=True)
+            stale.write_bytes(b'old')
+            with patch('prepare_macos.verify', return_value=[]), \
+                 patch('prepare_macos.architectures', return_value={'x86_64', 'arm64'}):
+                record = prepare_macos.prepare(
+                    fixture.prefix, fixture.core, sha(b'owned-core'), fixture.root)
+            self.assertEqual(record['core_abi'], 7)
+            self.assertEqual(set(record['libraries']), set(NAMES + [fixture.core.name]))
+            self.assertFalse(stale.exists())
+            self.assertEqual((fixture.root / 'macos/Libraries' /
+                              prepare_macos.RECORD).is_file(), True)
+            self.assertEqual((fixture.root / 'macos/Libraries' /
+                              fixture.core.name).read_bytes(), b'owned-core')
+
+    def test_hash_or_missing_architecture_rejects_core(self):
+        with tempfile.TemporaryDirectory() as temp:
+            fixture = PreparedFixture(temp)
+            with patch('prepare_macos.verify', return_value=[]):
+                with self.assertRaisesRegex(RuntimeError, 'SHA256 mismatch'):
+                    prepare_macos.prepare(fixture.prefix, fixture.core, '0' * 64,
+                                          fixture.root)
+                with patch('prepare_macos.architectures', return_value={'arm64'}):
+                    with self.assertRaisesRegex(RuntimeError, 'not universal'):
+                        prepare_macos.prepare(fixture.prefix, fixture.core,
+                                              sha(b'owned-core'), fixture.root)
+
+    def test_missing_component_and_mpv_are_rejected(self):
+        with tempfile.TemporaryDirectory() as temp:
+            fixture = PreparedFixture(temp)
+            marker = fixture.marker
+            marker['libraries'].pop('lib/libavcodec.61.dylib')
+            with self.assertRaisesRegex(RuntimeError, 'libavcodec'):
+                prepare_macos.runtime_paths(fixture.prefix, marker)
+            marker['libraries']['lib/libavcodec.61.dylib'] = 'hash'
+            path = fixture.prefix / 'lib/libmpv.2.dylib'
+            path.write_bytes(b'mpv')
+            marker['libraries']['lib/libmpv.2.dylib'] = sha(b'mpv')
+            with self.assertRaisesRegex(RuntimeError, 'libmpv'):
+                prepare_macos.runtime_paths(fixture.prefix, marker)
+
+
+class MachOTest(unittest.TestCase):
+    def test_otool_fat_titles_are_not_dependencies(self):
         output = ''.join(
-            f'/Users/runner/app/libmpv.2.dylib (architecture {arch}):\n'
-            '\t@rpath/libavcodec.63.dylib (compatibility version 63.0.0, current version 63.1.100)\n'
-            for arch in ['x86_64', 'arm64'])
-        self.assertEqual(otool_dependencies(output), ['@rpath/libavcodec.63.dylib'] * 2)
+            f'/builder/libavcodec.dylib (architecture {arch}):\n'
+            '\t@rpath/libavformat.61.dylib (compatibility version 1.0.0)\n'
+            for arch in ('x86_64', 'arm64'))
+        self.assertEqual(otool_dependencies(output),
+                         ['@rpath/libavformat.61.dylib'] * 2)
 
-    def test_real_nonportable_dependencies_remain_visible_to_audit(self):
-        output = '/Users/runner/libmpv.2.dylib:\n' \
-                 '\t/Users/builder/lib/libbad.dylib (compatibility version 1.0.0, current version 1.0.0)\n'
-        self.assertEqual(otool_dependencies(output), ['/Users/builder/lib/libbad.dylib'])
+    def test_rejects_unbundled_and_legacy_dependencies(self):
+        with tempfile.TemporaryDirectory() as temp:
+            contents = Path(temp) / 'rillight.app/Contents'
+            binary = contents / 'Frameworks/librillight_core.dylib'
+            binary.parent.mkdir(parents=True)
+            binary.write_bytes(b'core')
+            with patch('bundle_macos.subprocess.check_output',
+                       return_value='\t@rpath/libmpv.2.dylib (compatibility version 2)'):
+                with self.assertRaisesRegex(RuntimeError, 'Legacy playback'):
+                    audit_binary(binary, contents)
+            with patch('bundle_macos.subprocess.check_output',
+                       return_value='\t@rpath/libmissing.dylib (compatibility version 1)'):
+                with self.assertRaisesRegex(RuntimeError, 'unbundled'):
+                    audit_binary(binary, contents)
+
+    def test_macos_deployment_parser_handles_both_load_commands(self):
+        output = 'cmd LC_BUILD_VERSION\n  minos 12.0\n  sdk 15.0\n' \
+                 'cmd LC_VERSION_MIN_MACOSX\n  version 11.0.0\n'
+        self.assertEqual(deployment_versions(output), [(12, 0), (11, 0, 0)])
 
 
-class ReleaseSigningTest(unittest.TestCase):
-    def test_release_retains_all_three_required_rights(self):
-        expected = release_entitlements()
-        for key in ('app-sandbox', 'network.client', 'network.server'):
-            self.assertIs(expected['com.apple.security.' + key], True)
+class BundleVerificationTest(unittest.TestCase):
+    def test_build_phase_bundles_only_verified_core_libraries(self):
+        with tempfile.TemporaryDirectory() as temp:
+            fixture = PreparedFixture(temp)
+            with patch('prepare_macos.verify', return_value=[]), \
+                 patch('prepare_macos.architectures', return_value={'x86_64', 'arm64'}):
+                record = prepare_macos.prepare(
+                    fixture.prefix, fixture.core, sha(b'owned-core'), fixture.root)
+            app = fixture.root / 'candidate.app'
+            (app / 'Contents/MacOS').mkdir(parents=True)
+            (app / 'Contents/MacOS/rillight').write_bytes(b'executable')
+            with patch.dict('os.environ',
+                            {'RILLIGHT_MACOS_CORE_PREFIX': str(fixture.prefix)}), \
+                 patch('bundle_macos.audit_binary'), \
+                 patch('bundle_macos.subprocess.check_call'):
+                result = bundle(app, root=fixture.root, record=record)
+            self.assertEqual(set(result['bundled_libraries_sha256']),
+                             set(record['libraries']))
+            self.assertTrue((app / 'Contents/Frameworks/librillight_core.dylib').is_file())
+            self.assertTrue((app / 'Contents/Resources/rillight-native-licenses/'
+                             'libass-ISC.txt').is_file())
+            self.assertTrue((app / 'Contents/Resources/rillight-native-licenses/'
+                             'dav1d-BSD-2-Clause.txt').is_file())
+            self.assertFalse((app / 'Contents/Frameworks/libmpv.2.dylib').exists())
 
-    def test_missing_server_in_release_configuration_is_rejected(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / 'Release.entitlements'
+    def make_app(self, root):
+        app = root / 'rillight.app'
+        contents = app / 'Contents'
+        frameworks = contents / 'Frameworks'
+        resources = contents / 'Resources'
+        executable = contents / 'MacOS/rillight'
+        executable.parent.mkdir(parents=True)
+        executable.write_bytes(b'executable')
+        frameworks.mkdir()
+        resources.mkdir()
+        (contents / 'Info.plist').write_bytes(plistlib.dumps({
+            'LSMinimumSystemVersion': '12.0', 'CFBundleExecutable': 'rillight'}))
+        source_lock = ROOT / 'packages/rillight_player/native/core_dependencies.json'
+        (resources / 'rillight-core-source-lock.json').write_bytes(source_lock.read_bytes())
+        lock = json.loads(source_lock.read_text(encoding='utf-8'))
+        sdk = {'platform': 'macos-universal',
+               'ffmpeg_version': lock['ffmpeg']['version'],
+               'ffmpeg_commit': lock['ffmpeg']['commit'],
+               'libraries': {'lib/' + name: sha(name.encode()) for name in NAMES},
+               'libass': {'library': 'lib/libass.9.dylib',
+                          'sha256': sha(b'libass.9.dylib')}}
+        sdk_path = resources / 'rillight-core-dependencies.json'
+        sdk_path.write_text(json.dumps(sdk), encoding='utf-8')
+        libraries = {}
+        for name in NAMES + ['librillight_core.dylib']:
+            path = frameworks / name
+            path.write_bytes(name.encode())
+            libraries[name] = sha(path.read_bytes())
+        record = {
+            'schema': 1, 'target': 'macos-universal',
+            'core_spec_sha256': sha(source_lock.read_bytes()),
+            'sdk_marker_sha256': sha(sdk_path.read_bytes()),
+            'ffmpeg_version': lock['ffmpeg']['version'],
+            'ffmpeg_commit': lock['ffmpeg']['commit'],
+            'ffmpeg_tag': lock['ffmpeg']['version'],
+            'ffmpeg_patches': lock['ffmpeg']['patches'],
+            'libass_version': lock['libass']['version'],
+            'libass_commit': lock['libass']['commit'],
+            'libraries': libraries,
+            'bundled_libraries_sha256': libraries.copy(),
+        }
+        record_path = resources / 'rillight-macos-closure.json'
+        record_path.write_text(json.dumps(record), encoding='utf-8')
+        (resources / 'rillight-native-notices.md').write_text('notices')
+        licenses = resources / 'rillight-native-licenses'
+        licenses.mkdir()
+        for name in ('FFmpeg-GPL-2.0.txt', 'FFmpeg-LGPL-2.1.txt',
+                     'libass-ISC.txt', 'dav1d-BSD-2-Clause.txt'):
+            (licenses / name).write_text('license')
+        return app, record_path
+
+    def test_verifies_owned_core_hash_and_rejects_mpv(self):
+        with tempfile.TemporaryDirectory() as temp:
+            app, record = self.make_app(Path(temp))
+            def tool_output(command, **_):
+                if command[0] == 'lipo':
+                    return 'x86_64 arm64'
+                return 'cmd LC_BUILD_VERSION\n  minos 12.0\n' \
+                       'path @executable_path/../Frameworks (offset 12)\n'
+            with patch('verify_bundle.subprocess.check_output', side_effect=tool_output), \
+                 patch('verify_bundle.audit_binary'):
+                self.assertEqual(verify(app)['target'], 'macos-universal')
+                (app / 'Contents/Frameworks/libmpv.2.dylib').write_bytes(b'mpv')
+                with self.assertRaisesRegex(RuntimeError, 'Legacy libmpv'):
+                    verify(app)
+                (app / 'Contents/Frameworks/libmpv.2.dylib').unlink()
+                (app / 'Contents/Frameworks/librillight_core.dylib').write_bytes(b'changed')
+                with self.assertRaisesRegex(RuntimeError, 'hash mismatch'):
+                    verify(app)
+
+    def test_rejects_dylib_requiring_newer_macos(self):
+        with tempfile.TemporaryDirectory() as temp:
+            app, _ = self.make_app(Path(temp))
+            def tool_output(command, **_):
+                if command[0] == 'lipo':
+                    return 'x86_64 arm64'
+                return 'cmd LC_BUILD_VERSION\n  minos 13.0\n'
+            with patch('verify_bundle.subprocess.check_output', side_effect=tool_output), \
+                 patch('verify_bundle.audit_binary'):
+                with self.assertRaisesRegex(RuntimeError, 'exceeds macOS 12'):
+                    verify(app)
+
+    def test_final_signing_records_new_library_hashes_before_app_sign(self):
+        with tempfile.TemporaryDirectory() as temp:
+            app, record_path = self.make_app(Path(temp))
+            commands = []
             expected = release_entitlements()
-            del expected['com.apple.security.network.server']
-            path.write_bytes(plistlib.dumps(expected))
-            with self.assertRaisesRegex(ValueError, 'network server'):
-                release_entitlements(path)
+            def checked(command):
+                commands.append(command)
+            def output(command, **_):
+                if '--verbose=4' in command:
+                    return 'Executable=rillight\nSignature=adhoc\n'
+                return plistlib.dumps(expected)
+            with patch('sign_bundle.subprocess.check_call', side_effect=checked), \
+                 patch('sign_bundle.subprocess.check_output', side_effect=output):
+                sign(app)
+            record = json.loads(record_path.read_text(encoding='utf-8'))
+            self.assertEqual(record['final_libraries_sha256'], record['libraries'])
+            self.assertEqual(commands[-2][-1], str(app.resolve()))
+            self.assertIn('--entitlements', commands[-2])
 
-    def test_signature_validity_does_not_hide_lost_entitlements(self):
+    def test_signed_entitlements_are_checked_from_signature(self):
         expected = release_entitlements()
         actual = {**expected, 'com.apple.security.network.server': False}
-        with patch('sign_bundle.subprocess.check_output', return_value=plistlib.dumps(actual)):
+        with patch('sign_bundle.subprocess.check_output',
+                   return_value=plistlib.dumps(actual)):
             with self.assertRaisesRegex(ValueError, 'Signed entitlements differ'):
                 verify_signed_entitlements('rillight.app', expected)
-
-    def test_app_rights_are_not_applied_to_nested_libraries(self):
-        self.check_signing(False)
-
-    def test_negative_control_removes_only_server_and_keeps_sandbox(self):
-        self.check_signing(True)
-
-    def test_identity_mode_signs_nested_and_app_with_the_certificate(self):
-        self.check_signing(False, identity='Rillight Self Sign')
-
-    def test_adhoc_signature_assertion_fails_without_the_adhoc_marker(self):
-        self.check_missing_signature_marker('Signature=adhoc')
-
-    def test_identity_signature_assertion_fails_without_the_authority(self):
-        self.check_missing_signature_marker('Authority=Rillight Self Sign')
-
-    def check_missing_signature_marker(self, marker):
-        def output(command, **kwargs):
-            if '--verbose=4' in command:
-                return 'Executable=rillight\n'
-            return plistlib.dumps(release_entitlements())
-
-        with tempfile.TemporaryDirectory() as directory:
-            app = Path(directory) / 'rillight.app'
-            (app / 'Contents/MacOS').mkdir(parents=True)
-            identity = 'Rillight Self Sign' if marker.startswith('Authority=') else None
-            with patch('sign_bundle.subprocess.check_call'), \
-                 patch('sign_bundle.subprocess.check_output', side_effect=output):
-                with self.assertRaisesRegex(ValueError, 'distribution signature'):
-                    sign(app, identity=identity)
-
-    def check_signing(self, negative, identity=None):
-        expected = release_entitlements()
-        if negative:
-            expected.pop('com.apple.security.network.server')
-        commands = []
-
-        def execute(command):
-            commands.append(command)
-            if '--entitlements' in command:
-                path = Path(command[command.index('--entitlements') + 1])
-                self.assertEqual(plistlib.loads(path.read_bytes()), expected)
-
-        def output(command, **kwargs):
-            if '--verbose=4' in command:
-                if identity is None:
-                    return 'Executable=rillight\nSignature=adhoc\n'
-                return f'Executable=rillight\nAuthority={identity}\n'
-            return plistlib.dumps(expected)
-
-        with tempfile.TemporaryDirectory() as directory:
-            app = Path(directory) / 'rillight.app'
-            (app / 'Contents/MacOS').mkdir(parents=True)
-            framework = app / 'Contents/Frameworks/Plugin.framework'
-            framework.mkdir(parents=True)
-            library = app / 'Contents/Frameworks/libmpv.2.dylib'
-            library.write_bytes(b'fixture')
-            with patch('sign_bundle.subprocess.check_call', side_effect=execute), \
-                 patch('sign_bundle.subprocess.check_output', side_effect=output):
-                sign(app, identity=identity, without_server_for_test=negative)
-            signing = [command for command in commands if '--sign' in command]
-            self.assertEqual(len(signing), 3)
-            signer = identity or '-'
-            self.assertTrue(all(c[c.index('--sign') + 1] == signer for c in signing))
-            self.assertTrue(all('--entitlements' not in c and '--deep' not in c for c in signing[:-1]))
-            self.assertEqual(signing[-1][-1], str(app.resolve()))
-            self.assertIn('--entitlements', signing[-1])
-            self.assertNotIn('--deep', signing[-1])
 
 
 if __name__ == '__main__':

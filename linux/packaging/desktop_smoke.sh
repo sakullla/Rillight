@@ -5,7 +5,7 @@ unset LD_LIBRARY_PATH LD_PRELOAD LD_AUDIT
 export LIBGL_ALWAYS_SOFTWARE=1
 export XDG_STATE_HOME="${RILLIGHT_SMOKE_STATE:-/tmp/rillight-desktop-smoke}"
 mkdir -p "$XDG_STATE_HOME"
-media=/opt/rillight/lib/libmpv.so.2
+media=/opt/rillight/lib/librillight_core.so
 main_pid=''
 openbox > "$XDG_STATE_HOME/openbox.log" 2>&1 &
 wm_pid=$!
@@ -34,8 +34,8 @@ done
 if [ -e "/proc/$main_pid/exe" ]; then echo 'Main window failed to close' >&2; exit 1; fi
 main_pid=''
 
-# A system libmpv.so.2 may still exist. Missing the bundled version must produce
-# a visible diagnostic, not silently use the old system core or fail unseen.
+# A system media library may still exist. Missing the owned core must produce
+# a visible diagnostic, rather than silently using another player.
 mv "$media" "$media.disabled"
 gtk-launch rillight
 dialog=$(timeout 15s xdotool search --sync --onlyvisible --name '^Rillight 启动失败$' | head -1)
@@ -43,7 +43,7 @@ test -n "$dialog"
 dialog_pid=$(xdotool getwindowpid "$dialog")
 test "$(readlink "/proc/$dialog_pid/exe")" = /usr/bin/zenity
 python3 "$(dirname "$0")/assert_diagnostic.py" "$dialog_pid" "$XDG_STATE_HOME/diagnostic-accessibility.json"
-grep -q '缺少 libmpv.so.2' "$XDG_STATE_HOME/rillight/launch.log"
+grep -q '缺少 librillight_core.so' "$XDG_STATE_HOME/rillight/launch.log"
 xdotool windowactivate --sync "$dialog" key Return >/dev/null 2>&1 || true
 mv "$media.disabled" "$media"
 echo 'Installed gtk-launch, graceful exit and visible missing-library diagnostic passed.'

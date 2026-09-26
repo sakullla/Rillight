@@ -9,7 +9,12 @@ import 'dart:typed_data';
 /// mutex; the nonblocking OS lock coordinates other player processes. Media
 /// bytes and filesystem calls never run on the playback isolate.
 class DiskCacheSession {
-  DiskCacheSession._(this._coordinator, this._id, this._timeout);
+  DiskCacheSession._(
+    this._coordinator,
+    this._id,
+    this._timeout,
+    this._directory,
+  );
 
   static Future<DiskCacheSession> open({
     required Directory root,
@@ -19,7 +24,12 @@ class DiskCacheSession {
   }) async {
     final coordinator = await _Coordinator.acquire(root);
     final id = _nonce();
-    final session = DiskCacheSession._(coordinator, id, timeout);
+    final session = DiskCacheSession._(
+      coordinator,
+      id,
+      timeout,
+      Directory(_join(root.absolute.path, id)),
+    );
     final result = await session._call('open', {
       'limit': limitBytes,
       'sessionLimit': sessionLimitBytes,
@@ -28,17 +38,26 @@ class DiskCacheSession {
       await session.close();
       throw const FileSystemException('Cache session unavailable');
     }
+    try {
+      session._verifier = await _Verifier.start();
+    } catch (_) {
+      // Playback still works when optional integrity snapshots are unavailable.
+    }
     return session;
   }
 
   final _Coordinator _coordinator;
   final String _id;
   final Duration _timeout;
+  final Directory _directory;
   String? degradation;
   bool _closed = false;
   Future<void>? _closing;
   final Map<String, Object?> _stats = {};
   final _operations = <Future<Map<String, Object?>>>{};
+  Future<Map<String, Object?>>? _verification;
+  _Verifier? _verifier;
+  Map<String, _VerifiedBlock> _verifiedFingerprints = {};
   Future<Map<String, Object?>>? _timedOutOperation;
   Map<String, Object?> get diagnostics => Map.unmodifiable(_stats);
 
@@ -88,11 +107,49 @@ class DiskCacheSession {
   /// Returns only blocks whose current on-disk contents pass the token CRC.
   /// The worker hashes bounded new data and never transfers media bytes here.
   Future<Set<String>?> verifiedTokens(List<String> tokens) async {
-    final result = await _call('verified', {'tokens': tokens}, optional: true);
-    if (result == null || result['error'] != null || result['busy'] == true) {
+    if (_closed || degradation != null || tokens.length > 8192) return null;
+    // Integrity snapshots are optional UI work. Keep filesystem requests off
+    // the serialized worker that serves foreground media reads.
+    if (_verification != null) return null;
+    final verifier = _verifier;
+    if (verifier == null) return null;
+    final directory = _directory.path;
+    final known = Map<String, _VerifiedBlock>.from(_verifiedFingerprints);
+    final requested = List<String>.from(tokens);
+    final operation = verifier.verify(directory, requested, known);
+    _verification = operation;
+    _operations.add(operation);
+    unawaited(
+      operation.then(
+        (result) {
+          if (!_closed) {
+            _verifiedFingerprints = Map<String, _VerifiedBlock>.from(
+              result['fingerprints'] as Map,
+            );
+          }
+          _operations.remove(operation);
+          if (identical(_verification, operation)) _verification = null;
+        },
+        onError: (Object _) {
+          _operations.remove(operation);
+          if (identical(_verification, operation)) _verification = null;
+        },
+      ),
+    );
+    try {
+      final result = await operation.timeout(
+        _timeout < const Duration(seconds: 2)
+            ? const Duration(seconds: 2)
+            : _timeout,
+      );
+      return Set<String>.from(result['present'] as List);
+    } on TimeoutException {
+      verifier.close();
+      if (identical(_verifier, verifier)) _verifier = null;
+      return null;
+    } catch (_) {
       return null;
     }
-    return Set<String>.from(result['present'] as List? ?? const []);
   }
 
   /// Verifies and protects a complete immutable range without retaining its
@@ -213,6 +270,8 @@ class DiskCacheSession {
 
   Future<void> _close() async {
     _closed = true;
+    _verifier?.close();
+    _verifier = null;
     final cleanup = _coordinator.request({'op': 'close', 'id': _id});
     // Always keep an owner for late cleanup, even when the UI wait expires.
     final released = cleanup.then((result) {
@@ -345,6 +404,157 @@ _VerifiedBlock _blockFingerprint(FileStat stat) => (
   stat.modified.microsecondsSinceEpoch,
   stat.changed.microsecondsSinceEpoch,
 );
+
+class _Verifier {
+  _Verifier(this._isolate, this._requests);
+
+  final Isolate _isolate;
+  final SendPort _requests;
+  final _pending = <ReceivePort>{};
+
+  static Future<_Verifier> start() async {
+    final ready = ReceivePort();
+    try {
+      final isolate = await Isolate.spawn(_serveVerifier, ready.sendPort);
+      final requests = await ready.first as SendPort;
+      return _Verifier(isolate, requests);
+    } finally {
+      ready.close();
+    }
+  }
+
+  Future<Map<String, Object?>> verify(
+    String directory,
+    List<String> tokens,
+    Map<String, _VerifiedBlock> known,
+  ) async {
+    final response = ReceivePort();
+    _pending.add(response);
+    try {
+      _requests.send([
+        directory,
+        tokens,
+        {
+          for (final entry in known.entries)
+            entry.key: [entry.value.$1, entry.value.$2, entry.value.$3],
+        },
+        response.sendPort,
+      ]);
+      final result = Map<String, Object?>.from(await response.first as Map);
+      final raw = result['fingerprints'] as Map;
+      result['fingerprints'] = <String, _VerifiedBlock>{
+        for (final entry in raw.entries)
+          entry.key as String: (
+            (entry.value as List)[0] as int,
+            (entry.value as List)[1] as int,
+            (entry.value as List)[2] as int,
+          ),
+      };
+      return result;
+    } finally {
+      _pending.remove(response);
+      response.close();
+    }
+  }
+
+  void close() {
+    _isolate.kill(priority: Isolate.immediate);
+    for (final response in _pending.toList()) {
+      response.close();
+    }
+    _pending.clear();
+  }
+}
+
+void _serveVerifier(SendPort ready) {
+  final requests = ReceivePort();
+  ready.send(requests.sendPort);
+  requests.listen((message) {
+    final parts = message as List;
+    final response = parts[3] as SendPort;
+    try {
+      response.send(
+        (() {
+          final raw = Map<String, List<int>>.from(parts[2] as Map);
+          final result = _verifyTokenFiles(
+            parts[0] as String,
+            List<String>.from(parts[1] as List),
+            {
+              for (final entry in raw.entries)
+                entry.key: (entry.value[0], entry.value[1], entry.value[2]),
+            },
+          );
+          final fingerprints =
+              result['fingerprints'] as Map<String, _VerifiedBlock>;
+          return {
+            'present': result['present'],
+            'fingerprints': {
+              for (final entry in fingerprints.entries)
+                entry.key: [entry.value.$1, entry.value.$2, entry.value.$3],
+            },
+          };
+        })(),
+      );
+    } catch (_) {
+      response.send({
+        'present': <String>[],
+        'fingerprints': <String, _VerifiedBlock>{},
+      });
+    }
+  });
+}
+
+Map<String, Object?> _verifyTokenFiles(
+  String directory,
+  List<String> tokens,
+  Map<String, _VerifiedBlock> known,
+) {
+  final present = <String>[];
+  final fingerprints = <String, _VerifiedBlock>{};
+  if (FileSystemEntity.typeSync(directory, followLinks: false) !=
+      FileSystemEntityType.directory) {
+    return {'present': present, 'fingerprints': fingerprints};
+  }
+  // Verify one new block per snapshot. Repeated snapshots advance through a
+  // large cache without a burst of disk reads during seek or track changes.
+  var remaining = 1024 * 1024;
+  for (final token in tokens) {
+    if (!_blockPattern.hasMatch(token)) continue;
+    final length = int.parse(token.split('-')[1]);
+    if (length <= 0 || length > 1024 * 1024) continue;
+    final file = File(_join(directory, token));
+    if (!known.containsKey(file.path) && remaining < length) continue;
+    try {
+      if (FileSystemEntity.typeSync(file.path, followLinks: false) !=
+          FileSystemEntityType.file) {
+        continue;
+      }
+      final stat = file.statSync();
+      if (stat.size != length) continue;
+      final fingerprint = _blockFingerprint(stat);
+      if (known[file.path] != fingerprint) {
+        if (remaining < length) continue;
+        remaining -= length;
+        final bytes = file.readAsBytesSync();
+        final checksum = int.parse(
+          token.split('-')[2].split('.').first,
+          radix: 16,
+        );
+        if (bytes.length != length ||
+            _crc32(bytes) != checksum ||
+            _blockFingerprint(file.statSync()) != fingerprint) {
+          continue;
+        }
+      }
+      fingerprints[file.path] = fingerprint;
+      present.add(token);
+    } on FileSystemException {
+      // A concurrent eviction or inaccessible file never becomes a timeline
+      // interval. Foreground reads independently validate their own blocks.
+    }
+  }
+  return {'present': present, 'fingerprints': fingerprints};
+}
 
 class _DiskStore {
   _DiskStore(String path) : root = Directory(path);

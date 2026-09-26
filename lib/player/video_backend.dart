@@ -121,7 +121,7 @@ abstract class VideoBackend {
 
   /// 选中 [uri] 对应的外挂字幕后返回 true。
   /// 更新的字幕操作抢先完成时返回 false,不表示加载失败。
-  Future<bool> setSubtitleUri(Uri uri, {String? title});
+  Future<bool> setSubtitleUri(Uri uri, {String? title, int? index});
 
   /// 选择容器内嵌字幕轨道(按 MediaStream 索引,如直连时的 PGS 位图轨)。
   Future<void> setSubtitleIndex(int index);
@@ -283,8 +283,9 @@ class FakeVideoBackend implements VideoBackend {
   }
 
   @override
-  Future<bool> setSubtitleUri(Uri uri, {String? title}) async {
+  Future<bool> setSubtitleUri(Uri uri, {String? title, int? index}) async {
     subtitleUri = uri;
+    subtitleIndex = index;
     subtitleOff = false;
     return true;
   }

@@ -7,11 +7,20 @@ on:
         type: string
         default: v0.0.0-ci
       signing:
-        type: choice
+        type: string
         default: adhoc
-        options:
-          - adhoc
-          - identity
+      core_sdk_url:
+        type: string
+        default: ''
+      core_sdk_sha256:
+        type: string
+        default: ''
+      core_dylib_url:
+        type: string
+        default: ''
+      core_dylib_sha256:
+        type: string
+        default: ''
     secrets:
       MACOS_CERTIFICATE_P12_BASE64:
         required: false
@@ -33,6 +42,35 @@ jobs:
           cache: true
       - name: Install Flutter and native dependencies
         run: flutter pub get
+      - name: Provision pinned macOS core SDK and dylib
+        shell: bash
+        env:
+          CORE_SDK_URL: ${{ inputs.core_sdk_url }}
+          CORE_SDK_SHA256: ${{ inputs.core_sdk_sha256 }}
+          CORE_DYLIB_URL: ${{ inputs.core_dylib_url }}
+          CORE_DYLIB_SHA256: ${{ inputs.core_dylib_sha256 }}
+        run: |
+          set -euo pipefail
+          for name in CORE_SDK_URL CORE_SDK_SHA256 CORE_DYLIB_URL CORE_DYLIB_SHA256; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Missing pinned macOS core input ${name}; see packages/rillight_player/macos/TESTING_HANDOFF.md"
+              exit 1
+            fi
+          done
+          sdk_archive="$RUNNER_TEMP/rillight-macos-sdk.tar.gz"
+          core_dylib="$RUNNER_TEMP/librillight_core.dylib"
+          sdk_prefix="$RUNNER_TEMP/rillight-macos-sdk"
+          curl --fail --location --retry 3 "$CORE_SDK_URL" --output "$sdk_archive"
+          curl --fail --location --retry 3 "$CORE_DYLIB_URL" --output "$core_dylib"
+          echo "$CORE_SDK_SHA256  $sdk_archive" | shasum -a 256 --check
+          echo "$CORE_DYLIB_SHA256  $core_dylib" | shasum -a 256 --check
+          mkdir -p "$sdk_prefix"
+          tar -xzf "$sdk_archive" -C "$sdk_prefix"
+          python3 packages/rillight_player/native/verify_core_dependencies.py \
+            --prefix "$sdk_prefix" --target macos-universal --require-subtitles
+          echo "RILLIGHT_MACOS_CORE_PREFIX=$sdk_prefix" >> "$GITHUB_ENV"
+          echo "RILLIGHT_MACOS_CORE_DYLIB=$core_dylib" >> "$GITHUB_ENV"
+          echo "RILLIGHT_MACOS_CORE_SHA256=$CORE_DYLIB_SHA256" >> "$GITHUB_ENV"
       - name: Install DMG layout dependency
         run: python3 -m pip install ds_store==1.3.1
       - name: Verify signing and Mach-O audit regressions
@@ -53,10 +91,9 @@ jobs:
           set -euo pipefail
           app="build/macos/Build/Products/Release/rillight.app"
           python3 macos/verify_bundle.py "$app"
-          # Probe the packaged libraries; this is not a GUI/playback test.
+          # Probe packaged core/FFmpeg versions; this is not a GUI/playback test.
           DYLD_LIBRARY_PATH="$PWD/$app/Contents/Frameworks" \
-            python3 packages/rillight_player/native/check_mpv.py \
-            "$app/Contents/Frameworks/libmpv.2.dylib" > macos-native-versions.json
+            python3 macos/probe_core.py "$app" > macos-native-versions.json
       - name: Check macOS signing secrets
         if: inputs.signing == 'identity'
         shell: bash
@@ -101,6 +138,10 @@ jobs:
         run: |
           set -euo pipefail
           app="build/macos/Build/Products/Release/rillight.app"
+          if [ "$SIGNING_MODE" != "identity" ] && [ "$SIGNING_MODE" != "adhoc" ]; then
+            echo "::error::Unsupported macOS signing mode: $SIGNING_MODE"
+            exit 1
+          fi
           if [ "$SIGNING_MODE" = "identity" ]; then
             suffix="signed"
             python3 macos/sign_bundle.py "$app" --identity 'Rillight Self Sign'
@@ -136,4 +177,3 @@ jobs:
             macos-release-entitlements.plist
             build/macos-proxy-sandbox-evidence
           if-no-files-found: warn
-

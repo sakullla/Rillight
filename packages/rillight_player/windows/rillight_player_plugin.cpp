@@ -94,6 +94,10 @@ class RillightPlayerPlugin : public flutter::Plugin {
       if (method == "create") {
         if (surfaces_.count(handle)) throw std::runtime_error("Surface already exists");
         if (!api_) api_ = std::make_shared<CoreApi>();
+        if (api_->configure_hardware(reinterpret_cast<RillightCore*>(handle),
+                                     RILLIGHT_CORE_HW_D3D11, 1) != 0) {
+          throw std::runtime_error("Could not configure D3D11 decoding with software fallback");
+        }
         auto surface = std::make_shared<VideoSurface>(
             reinterpret_cast<RillightCore*>(handle), api_,
             registrar_->texture_registrar());

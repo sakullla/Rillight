@@ -23,7 +23,7 @@ import io.flutter.plugin.platform.PlatformView
 import io.flutter.plugin.platform.PlatformViewFactory
 import kotlin.math.roundToInt
 
-/** Android output for the FFmpeg ABI6 core. It contains no Media3 player. */
+/** Android output for the owned FFmpeg core. It contains no Media3 player. */
 class RillightCorePlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandler,
     EventChannel.StreamHandler, ActivityAware {
     private lateinit var context: Context

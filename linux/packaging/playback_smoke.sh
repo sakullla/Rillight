@@ -11,6 +11,7 @@ if [ -e "$output/result.json" ] || [ -e "$output/server.json" ]; then
   echo 'Use a fresh evidence directory; stale results are not accepted' >&2; exit 2
 fi
 source_root=$(cd "$(dirname "$0")/../.." && pwd)
+python3 "$source_root/tool/linux_release_checks.py" verify "$bundle" > "$output/core-closure.log"
 export LANG=C.UTF-8 LC_ALL=C.UTF-8 LIBGL_ALWAYS_SOFTWARE=1
 unset LD_LIBRARY_PATH LD_PRELOAD LD_AUDIT
 export RILLIGHT_VALIDATION_DIRECTORY="$output"
@@ -44,7 +45,7 @@ start_pulse() {
 
 dump_evidence() {
   echo "---- playback evidence ----" >&2
-  for name in pulseaudio.log capture.log app.stderr.log app.stdout.log server.log result.json window-evidence.json; do
+  for name in core-closure.log pulseaudio.log capture.log app.stderr.log app.stdout.log server.log result.json window-evidence.json; do
     [ -e "$output/$name" ] || continue
     echo "==== $name ====" >&2
     tail -n 80 "$output/$name" >&2 || true
@@ -65,7 +66,55 @@ app_pid=''; capture_pid=''
 cleanup() {
   [ -z "$app_pid" ] || kill "$app_pid" 2>/dev/null || true
   [ -z "$capture_pid" ] || kill "$capture_pid" 2>/dev/null || true
-  # The control host heartbeat makes orphaned validation children close too.
+  # The host can time out while its player child is awaiting a native or
+  # transport reply. Retire only the child whose executable and validation
+  # directory match this smoke, even after the child has been reparented.
+  python3 - "$output" "$bundle/rillight" <<'PY' || true
+import json
+import os
+import signal
+import sys
+import time
+from pathlib import Path
+
+root = Path(sys.argv[1])
+executable = str(Path(sys.argv[2]).resolve())
+log = root / 'player.jsonl'
+if log.is_file():
+    for line in log.read_text(errors='replace').splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if event.get('event') != 'production-main':
+            continue
+        pid = event.get('value', {}).get('pid')
+        if not isinstance(pid, int) or pid <= 0:
+            continue
+        proc = Path('/proc') / str(pid)
+        try:
+            same_executable = os.readlink(proc / 'exe') == executable
+            same_session = (
+                f'RILLIGHT_VALIDATION_DIRECTORY={root}'.encode()
+                in (proc / 'environ').read_bytes().split(b'\0')
+            )
+        except OSError:
+            continue
+        if not (same_executable and same_session):
+            continue
+        os.kill(pid, signal.SIGTERM)
+        for _ in range(20):
+            try:
+                state = (proc / 'stat').read_text().split(') ')[1][0]
+            except OSError:
+                break
+            if state == 'Z':
+                break
+            time.sleep(0.1)
+        else:
+            os.kill(pid, signal.SIGKILL)
+        break
+PY
   kill "$server_pid" "$wm_pid" 2>/dev/null || true
   if [ -n "${previous_sink:-}" ]; then
     pactl set-default-sink "$previous_sink" 2>/dev/null || true
@@ -95,20 +144,22 @@ if [ "$app_status" -ne 0 ] || [ "$capture_status" -ne 0 ]; then
   dump_evidence
   exit 1
 fi
-if ! python3 - "$output" <<'PY'
+if ! python3 - "$output" "$bundle" <<'PY'
 import json,sys
 from pathlib import Path
 root=Path(sys.argv[1])
+bundle=Path(sys.argv[2])
 result=root/'result.json'
 evidence=root/'window-evidence.json'
 assert result.is_file(), 'missing result.json'
 assert evidence.is_file(), 'missing window-evidence.json'
 assert json.loads(result.read_text())['passed'] is True
 assert len(json.loads(evidence.read_text())) == 4
-print('Production main/child playback, real window video, subtitles, switching, and virtual audio passed')
+core=json.loads((bundle/'data/rillight_player/loaded-versions.json').read_text())
+assert core['coreAbi'] > 0 and core['versions'].startswith(('ffmpeg=n9.0.1;', 'ffmpeg=9.0.1;'))
+print('Owned-core production main/child playback, real window video, subtitles, switching, and virtual audio passed')
 PY
 then
   dump_evidence
   exit 1
 fi
-

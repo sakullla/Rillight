@@ -1,8 +1,19 @@
-# Native desktop playback validation
+# Native playback validation
 
-Android phone/TV uses a separate Media3 harness and isolated package; see
-[`android/README.md`](android/README.md). Desktop evidence below remains tied
-to its stated source/date and does not establish Android playback.
+Current candidate (2026-09-26): Windows, macOS, Linux, Android phone and TV use
+the owned FFmpeg core in `packages/rillight_player`. The Android Studio emulator
+and desktop native tests provide only their observed scope. macOS target-machine
+build and playback remain in
+[`packages/rillight_player/macos/TESTING_HANDOFF.md`](../packages/rillight_player/macos/TESTING_HANDOFF.md).
+The release evidence contract is in
+[`tool/player_release_evidence.md`](../tool/player_release_evidence.md); package,
+actual changing frames, physical audio and hardware performance are distinct.
+See [`android/README.md`](android/README.md) for the current Android harness.
+
+## Historical libmpv baseline and prior validation
+
+The dated sections below record the previous libmpv and Media3 baseline. They
+remain useful for comparison but do not validate the owned-core candidate.
 
 Run `powershell -NoProfile -ExecutionPolicy Bypass -File tool/player_smoke.ps1`
 on Windows. The release-mode wrapper in `tool/player_smoke.dart` invokes the

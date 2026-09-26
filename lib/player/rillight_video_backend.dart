@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:rillight/emby/device_profile.dart';
 import 'package:rillight/player/buffer_snapshot.dart';
@@ -57,6 +58,7 @@ class RillightVideoBackend extends VideoBackend
   bool _trackSupportKnown = false;
   String? _lastFailure;
   String? _lastCoreEvent;
+  int? _actualHardware;
   Map<String, Object?> _lastTransportDiagnostics = const {};
   bool _authenticationReported = false;
   VideoOpenRequest? _lastOpenRequest;
@@ -65,6 +67,7 @@ class RillightVideoBackend extends VideoBackend
   bool _recovering = false;
   int _recoveryEpoch = 0;
   Uri? _selectedSubtitleUri;
+  int? _selectedSubtitleServerIndex;
   String? _selectedSubtitleTitle;
   double _volume = 1;
   double _rate = 1;
@@ -96,7 +99,9 @@ class RillightVideoBackend extends VideoBackend
     final active = _transport;
     if (active != null) {
       try {
-        transport = await active.diagnostics;
+        transport = await active.diagnostics.timeout(
+          const Duration(seconds: 2),
+        );
         _lastTransportDiagnostics = transport;
       } catch (_) {
         // The last sample remains useful after a stopped or failed session.
@@ -110,6 +115,15 @@ class RillightVideoBackend extends VideoBackend
       'corePositionMs': position.inMilliseconds,
       'coreDurationMs': duration.inMilliseconds,
       'coreLastEvent': _lastCoreEvent,
+      'coreActualHardware': _actualHardware,
+      'coreActualHardwareName': switch (_actualHardware) {
+        0 => 'software',
+        1 => 'd3d11',
+        2 => 'videotoolbox',
+        4 => 'vaapi',
+        8 => 'mediacodec',
+        _ => 'unknown',
+      },
       'selectedAudioIndex': selectedAudioIndex,
       'selectedSubtitleIndex': selectedSubtitleIndex,
       'bufferIdentity': bufferSnapshot.representationVersion,
@@ -208,6 +222,7 @@ class RillightVideoBackend extends VideoBackend
     _lastOpenRequest = request;
     _wantsPlayback = !request.startPaused;
     _selectedSubtitleUri = null;
+    _selectedSubtitleServerIndex = null;
     _selectedSubtitleTitle = null;
     await _open(request);
   }
@@ -233,6 +248,7 @@ class RillightVideoBackend extends VideoBackend
     _opened = false;
     _lastFailure = null;
     _lastCoreEvent = null;
+    _actualHardware = null;
     _lastTransportDiagnostics = const {};
     _authenticationReported = false;
     bufferSnapshot = BufferSnapshot.empty(
@@ -284,6 +300,10 @@ class RillightVideoBackend extends VideoBackend
           session: _coreSession,
           start: request.start,
           paused: request.startPaused,
+          hardware: PlayerRuntimeOptions.coreHardware(
+            settings,
+            defaultTargetPlatform,
+          ),
           streams: [
             for (final stream in request.mediaStreams)
               CorePlayerTrack(
@@ -315,7 +335,11 @@ class RillightVideoBackend extends VideoBackend
       if (generation == _generation) {
         _lastFailure = error.toString();
         try {
-          _lastTransportDiagnostics = await _transport?.diagnostics ?? const {};
+          _lastTransportDiagnostics =
+              await _transport?.diagnostics.timeout(
+                const Duration(seconds: 2),
+              ) ??
+              const {};
           _reportAuthentication(_lastTransportDiagnostics, generation);
         } catch (_) {}
         await _stopSession(keepAndroidPlayer: true);
@@ -386,10 +410,13 @@ class RillightVideoBackend extends VideoBackend
     final selectedSubtitle = selectedSubtitleIndex;
     final selectedUri = _selectedSubtitleUri;
     final selectedTitle = _selectedSubtitleTitle;
+    final selectedServerIndex = _selectedSubtitleServerIndex;
     try {
       Map<String, Object?> data = const {};
       try {
-        data = await _transport?.diagnostics ?? const {};
+        data =
+            await _transport?.diagnostics.timeout(const Duration(seconds: 2)) ??
+            const {};
         _lastTransportDiagnostics = data;
       } catch (_) {}
       if (epoch != _recoveryEpoch || _disposed) return;
@@ -430,7 +457,11 @@ class RillightVideoBackend extends VideoBackend
           if (epoch != _recoveryEpoch || _disposed) return;
           if (selectedAudio != null) await setAudioIndex(selectedAudio);
           if (selectedUri != null) {
-            await setSubtitleUri(selectedUri, title: selectedTitle);
+            await setSubtitleUri(
+              selectedUri,
+              title: selectedTitle,
+              index: selectedServerIndex,
+            );
           } else if (selectedSubtitle != null) {
             await setSubtitleIndex(selectedSubtitle);
           }
@@ -461,8 +492,14 @@ class RillightVideoBackend extends VideoBackend
     _diagnosticsBusy = true;
     final trackVersion = _trackVersion;
     try {
-      if (duration > Duration.zero) await transport.refreshTimeline(duration);
-      final data = await transport.diagnostics;
+      if (duration > Duration.zero) {
+        await transport
+            .refreshTimeline(duration)
+            .timeout(const Duration(seconds: 5));
+      }
+      final data = await transport.diagnostics.timeout(
+        const Duration(seconds: 2),
+      );
       _lastTransportDiagnostics = data;
       _reportAuthentication(data, generation);
       if (generation != _generation ||
@@ -531,6 +568,8 @@ class RillightVideoBackend extends VideoBackend
         }
       : const {};
   void _readTrackSupport(Map<String, dynamic> result) {
+    final actualHardware = result['actualHardware'];
+    if (actualHardware is num) _actualHardware = actualHardware.toInt();
     if (!result.containsKey('rejectedAudio')) return;
     _trackSupportKnown = true;
     _playableAudio = _indices(result['playableAudio']);
@@ -546,7 +585,15 @@ class RillightVideoBackend extends VideoBackend
     final generation = _generation;
     final player = _player;
     if (player == null) throw StateError('Player has not opened');
-    final result = await player.command(method, args);
+    final Map<String, dynamic> result;
+    try {
+      result = await player.command(method, args);
+    } on TimeoutException catch (failure) {
+      throw TimeoutException(
+        'Core did not confirm $method: ${failure.message}',
+        failure.duration,
+      );
+    }
     if (generation != _generation) {
       throw StateError('Superseded player command');
     }
@@ -628,12 +675,13 @@ class RillightVideoBackend extends VideoBackend
     }
     await _command('subtitle', {'index': index});
     _selectedSubtitleUri = null;
+    _selectedSubtitleServerIndex = null;
     _selectedSubtitleTitle = null;
     _invalidateTrack();
   }
 
   @override
-  Future<bool> setSubtitleUri(Uri uri, {String? title}) async {
+  Future<bool> setSubtitleUri(Uri uri, {String? title, int? index}) async {
     final transport = _transport;
     if (transport == null) throw StateError('Playback transport unavailable');
     final sealed = await transport.register(
@@ -642,7 +690,9 @@ class RillightVideoBackend extends VideoBackend
     );
     await _command('subtitleUri', {'url': sealed.toString(), 'title': title});
     _selectedSubtitleUri = uri;
+    _selectedSubtitleServerIndex = index;
     _selectedSubtitleTitle = title;
+    selectedSubtitleIndex = index;
     _invalidateTrack();
     return true;
   }
@@ -651,6 +701,7 @@ class RillightVideoBackend extends VideoBackend
   Future<void> setSubtitleOff() async {
     await _command('subtitleOff');
     _selectedSubtitleUri = null;
+    _selectedSubtitleServerIndex = null;
     _selectedSubtitleTitle = null;
     _invalidateTrack();
   }

@@ -71,7 +71,7 @@ class MobilePlayerPage extends StatefulWidget {
 
 /// Keeps the phone display on while playback is running.
 ///
-/// Not [PlaybackWakeLock]: that lease is for the desktop libmpv process.
+/// The phone page owns this lease separately from the desktop player page.
 /// Pause, close, and background each release the hold. A platform failure
 /// does not surface on the player.
 class PhonePlaybackWakeLock {

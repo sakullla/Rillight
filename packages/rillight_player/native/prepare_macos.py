@@ -1,129 +1,134 @@
-"""Prepare live IINA universal dylibs and the SHA256-locked mpv 0.41 headers."""
+"""Stage a hash-verified universal owned-core SDK for the macOS CocoaPod.
+
+No live binary downloads or libmpv fallback are permitted. The target Mac must
+provide a pinned FFmpeg/libass/dav1d SDK marker and a separately hashed core dylib.
+"""
+
 import hashlib
 import json
 import os
 from pathlib import Path
 import re
 import shutil
-import urllib.error
-import urllib.request
+import subprocess
+
+from verify_core_dependencies import verify
 
 ROOT = Path(__file__).resolve().parent.parent
-MANIFEST = json.loads((ROOT / 'native/dependencies.json').read_text())
-USER_AGENT = 'Rillight/1.0 (+https://github.com/sakullla/Rillight)'
-DYLIBS_URL = MANIFEST['macos']['dylibs_url'].rstrip('/')
-FILELIST_URL = MANIFEST['macos'].get('filelist_url', DYLIBS_URL + '/filelist.txt')
-FAT_MAGIC = b'\xca\xfe\xba\xbe'
-DYLIB_NAME = re.compile(r'^[A-Za-z0-9._-]+\.dylib$')
+SPEC = ROOT / "native/core_dependencies.json"
+REQUIRED = ("avformat", "avcodec", "avutil", "avfilter", "swresample",
+            "swscale", "ass", "dav1d")
+RECORD = "rillight-macos-closure.json"
+ENV_PREFIX = "RILLIGHT_MACOS_CORE_PREFIX"
+ENV_CORE = "RILLIGHT_MACOS_CORE_DYLIB"
+ENV_HASH = "RILLIGHT_MACOS_CORE_SHA256"
 
 
-def verified(path, entry):
-    return path.is_file() and hashlib.sha256(path.read_bytes()).hexdigest() == entry['sha256']
+def digest(path: Path) -> str:
+    sha = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            sha.update(chunk)
+    return sha.hexdigest()
 
 
-def is_universal_dylib(path):
-    if not path.is_file():
-        return False
-    header = path.read_bytes()[:8]
-    if len(header) < 8 or header[:4] != FAT_MAGIC:
-        return False
-    return 2 <= int.from_bytes(header[4:8], 'big') <= 16
+def runtime_paths(prefix: Path, marker: dict) -> list[Path]:
+    libraries = marker.get("libraries")
+    libass = marker.get("libass")
+    if not isinstance(libraries, dict) or not isinstance(libass, dict):
+        raise RuntimeError("macOS SDK manifest lacks FFmpeg/libass provenance")
+    relatives = set(libraries)
+    relatives.add(libass.get("library"))
+    if None in relatives:
+        raise RuntimeError("macOS SDK manifest has no libass library")
+    selected = []
+    for relative in sorted(relatives):
+        if not isinstance(relative, str):
+            raise RuntimeError("macOS SDK manifest contains a non-path library")
+        if not relative.endswith(".dylib"):
+            continue  # Hashed import/static archives are not runtime code.
+        source = (prefix / relative).resolve()
+        if prefix not in source.parents or not source.is_file():
+            raise RuntimeError(f"Missing/unsafe runtime dylib: {relative}")
+        selected.append(source)
+    names = [path.name for path in selected]
+    if len(names) != len(set(names)):
+        raise RuntimeError("macOS SDK contains duplicate runtime dylib names")
+    for component in REQUIRED:
+        if not any(name.startswith(f"lib{component}.") for name in names):
+            raise RuntimeError(f"macOS SDK lacks runtime lib{component}.dylib")
+    if any("mpv" in name.lower() for name in names):
+        raise RuntimeError("macOS SDK contains libmpv")
+    return selected
 
 
-def download(url, destination, extra_headers=None):
-    headers = {'User-Agent': USER_AGENT, 'Accept': '*/*'}
-    if extra_headers:
-        headers.update(extra_headers)
-    request = urllib.request.Request(url, headers=headers)
-    with urllib.request.urlopen(request) as response, Path(destination).open('wb') as output:
-        shutil.copyfileobj(response, output)
-        return getattr(response, 'headers', {})
+def architectures(path: Path) -> set[str]:
+    return set(subprocess.check_output(
+        ["lipo", "-archs", str(path)], text=True).split())
 
 
-def fetch_text(url):
-    request = urllib.request.Request(url, headers={'User-Agent': USER_AGENT, 'Accept': '*/*'})
-    with urllib.request.urlopen(request) as response:
-        return response.read().decode('utf-8')
-
-
-def parse_filelist(text):
-    names = []
-    seen = set()
-    for line in text.splitlines():
-        name = line.strip()
-        if not name or name.startswith('#'):
-            continue
-        if not DYLIB_NAME.fullmatch(name):
-            raise RuntimeError('Invalid IINA file list entry: ' + name)
-        if name in seen:
-            continue
-        seen.add(name)
-        names.append(name)
-    if 'libmpv.2.dylib' not in seen:
-        raise RuntimeError('IINA file list is missing libmpv.2.dylib')
-    return names
-
-
-def _cache_headers(meta_path):
-    if not meta_path.is_file():
-        return {}
-    meta = json.loads(meta_path.read_text())
-    headers = {}
-    if meta.get('etag'):
-        headers['If-None-Match'] = meta['etag']
-    elif meta.get('last_modified'):
-        headers['If-Modified-Since'] = meta['last_modified']
-    return headers
-
-
-def prepare_dylibs():
-    destination = ROOT / 'macos/Libraries'
+def prepare(prefix: Path | None = None, core: Path | None = None,
+            expected_core_hash: str | None = None, root: Path = ROOT) -> dict:
+    prefix = prefix or (Path(os.environ[ENV_PREFIX]) if os.environ.get(ENV_PREFIX) else None)
+    core = core or (Path(os.environ[ENV_CORE]) if os.environ.get(ENV_CORE) else None)
+    expected_core_hash = expected_core_hash or os.environ.get(ENV_HASH)
+    if prefix is None or core is None or not expected_core_hash:
+        raise RuntimeError(f"Set {ENV_PREFIX}, {ENV_CORE}, and {ENV_HASH} to verified macOS core inputs")
+    prefix = prefix.resolve()
+    core = core.resolve()
+    root = root.resolve()
+    if not re.fullmatch(r"[0-9a-fA-F]{64}", expected_core_hash):
+        raise RuntimeError("macOS core SHA256 must be a 64-character hex digest")
+    if core.name != "librillight_core.dylib" or not core.is_file():
+        raise RuntimeError("Missing owned librillight_core.dylib")
+    failures = verify(prefix, "macos-universal", require_subtitles=True)
+    if failures:
+        raise RuntimeError("macOS SDK verification failed: " + "; ".join(failures))
+    if digest(core).lower() != expected_core_hash.lower():
+        raise RuntimeError("Owned core dylib SHA256 mismatch")
+    marker_path = prefix / "rillight-core-dependencies.json"
+    marker = json.loads(marker_path.read_text(encoding="utf-8"))
+    sources = runtime_paths(prefix, marker) + [core]
+    if len({path.name for path in sources}) != len(sources):
+        raise RuntimeError("Core and SDK dylib names collide")
+    for source in sources:
+        if not {"x86_64", "arm64"}.issubset(architectures(source)):
+            raise RuntimeError(f"macOS native dylib is not universal: {source.name}")
+    header = (root / "native/core/rillight_core.h").read_text(encoding="utf-8")
+    abi = re.search(r"#define RILLIGHT_CORE_ABI_VERSION\s+(\d+)", header)
+    if abi is None:
+        raise RuntimeError("Owned core ABI declaration missing")
+    record = {
+        "schema": 1,
+        "target": "macos-universal",
+        "core_abi": int(abi.group(1)),
+        "ffmpeg_version": marker["ffmpeg_version"],
+        "ffmpeg_commit": marker["ffmpeg_commit"],
+        "ffmpeg_tag": marker["ffmpeg_tag"],
+        "ffmpeg_patches": marker["ffmpeg_patches"],
+        "libass_version": marker["libass"]["version"],
+        "libass_commit": marker["libass"]["commit"],
+        "sdk_marker_sha256": digest(marker_path),
+        "core_spec_sha256": digest(root / "native/core_dependencies.json"),
+        "libraries": {path.name: digest(path) for path in sources},
+    }
+    destination = root / "macos/Libraries"
     destination.mkdir(parents=True, exist_ok=True)
-    cache = Path(os.environ.get('RILLIGHT_NATIVE_CACHE', str(ROOT / 'macos/.cache')))
-    cache.mkdir(parents=True, exist_ok=True)
-    names = parse_filelist(fetch_text(FILELIST_URL))
-    for name in names:
-        url = f'{DYLIBS_URL}/{name}'
-        target = destination / name
-        cached = cache / name
-        meta_path = cache / (name + '.meta')
-        temporary = cache / (name + '.download')
-        try:
-            headers = download(url, temporary, _cache_headers(meta_path) if cached.is_file() else None)
-            if not is_universal_dylib(temporary):
-                raise RuntimeError('macOS native download is not a universal Mach-O: ' + name)
-            temporary.replace(cached)
-            meta_path.write_text(json.dumps({
-                'etag': headers.get('ETag'),
-                'last_modified': headers.get('Last-Modified'),
-            }))
-        except urllib.error.HTTPError as error:
-            if error.code != 304 or not is_universal_dylib(cached):
-                raise
-        finally:
-            if temporary.exists():
-                temporary.unlink()
-        shutil.copyfile(cached, target)
-    wanted = set(names)
-    for path in destination.glob('*.dylib'):
-        if path.name not in wanted:
-            path.unlink()
+    for source in sources:
+        target = destination / source.name
+        shutil.copyfile(source, target)
+        if digest(target) != record["libraries"][source.name]:
+            raise RuntimeError(f"Staged macOS dylib hash mismatch: {source.name}")
+    for stale in destination.glob("*.dylib"):
+        if stale.name not in record["libraries"]:
+            stale.unlink()
+    (destination / RECORD).write_text(
+        json.dumps(record, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+        encoding="utf-8")
+    return record
 
 
-def prepare_headers():
-    headers = ROOT / 'macos/Headers/mpv'
-    headers.mkdir(parents=True, exist_ok=True)
-    for entry in MANIFEST['headers']:
-        source = ROOT / 'native/include/mpv' / entry['name']
-        if not verified(source, entry):
-            raise RuntimeError('libmpv header SHA256 mismatch: ' + entry['name'])
-        shutil.copyfile(source, headers / entry['name'])
-
-
-def prepare():
-    prepare_dylibs()
-    prepare_headers()
-
-
-if __name__ == '__main__':
-    prepare()
+if __name__ == "__main__":
+    prepared = prepare()
+    print("Prepared owned macOS core closure:", len(prepared["libraries"]),
+          "universal dylibs")

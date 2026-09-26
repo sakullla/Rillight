@@ -682,5 +682,31 @@ int main() {
   assert(rillight_core_report_audio_unavailable(
              core, clock_identity.session_id, clock_identity.timeline_version + 1) != 0);
   rillight_core_destroy(core);
+
+  core = rillight_core_create(&io);
+  assert(core && rillight_core_open(core, "synthetic.wav", 1) == 0);
+  assert(wait_for(core, [](const auto &state) {
+    return state.first_audio_frame_ready && state.state != RILLIGHT_CORE_FAILED;
+  }));
+  const auto original_rate = snapshot(core);
+  assert(rillight_core_set_speed(core, 1.0, 2) == 0);
+  const auto unchanged_rate = snapshot(core);
+  assert(unchanged_rate.timeline_version == original_rate.timeline_version);
+  assert(unchanged_rate.state == original_rate.state);
+  assert(unchanged_rate.first_audio_frame_ready ==
+         original_rate.first_audio_frame_ready);
+  assert(rillight_core_select_audio(core, original_rate.audio_stream_index,
+                                    3) == 0);
+  const auto unchanged_audio = snapshot(core);
+  assert(unchanged_audio.timeline_version == original_rate.timeline_version);
+  assert(unchanged_audio.state == original_rate.state);
+  assert(unchanged_audio.audio_stream_index ==
+         original_rate.audio_stream_index);
+  assert(rillight_core_select_subtitle(core, -1, 4) == 0);
+  const auto unchanged_subtitle = snapshot(core);
+  assert(unchanged_subtitle.timeline_version == original_rate.timeline_version);
+  assert(unchanged_subtitle.state == original_rate.state);
+  assert(unchanged_subtitle.subtitle_stream_index == -1);
+  rillight_core_destroy(core);
   return 0;
 }

@@ -457,14 +457,19 @@ class EmbyClient {
     final bitrate =
         deviceProfile?['MaxStreamingBitrate'] as int? ??
         maxStreamingBitrate ??
-        kMpvMaxStreamingBitrate;
+        kCoreMaxStreamingBitrate;
     final data = await postJson(
       '/Items/$itemId/PlaybackInfo',
       queryParameters: {'UserId': _requireUserId()},
       body: {
         'UserId': _requireUserId(),
         'DeviceProfile':
-            deviceProfile ?? mpvDeviceProfile(maxStreamingBitrate: bitrate),
+            deviceProfile ??
+            ownedCoreDeviceProfile(
+              h264: true,
+              aac: true,
+              maxStreamingBitrate: bitrate,
+            ),
         'MaxStreamingBitrate': bitrate,
         'StartTimeTicks': ?startTimeTicks,
         'AutoOpenLiveStream': true,

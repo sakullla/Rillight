@@ -33,6 +33,7 @@ struct Bytes {
   std::vector<uint8_t> data;
   size_t offset = 0;
   bool fail_read = false;
+  bool eof_error = false;
   Blocking *block = nullptr;
   int slow_progress_reads = 0;
   bool eagain_after_progress = false;
@@ -246,7 +247,7 @@ int read(void *, void *handle, uint8_t *data, int size) {
                           bytes->data.size() - bytes->offset);
   if (bytes->stall_at_offset)
     count = std::min(count, bytes->stall_at_offset - bytes->offset);
-  if (!count) return 0;
+  if (!count) return bytes->eof_error ? AVERROR_EOF : 0;
   std::memcpy(data, bytes->data.data() + bytes->offset, count);
   bytes->offset += count;
   return static_cast<int>(count);
@@ -311,6 +312,7 @@ int main() {
   media.external = make_external_ass();
   media.external_srt = text_bytes(
       "1\n00:00:01,000 --> 00:00:02,000\nEXTERNAL SRT\n\n");
+  media.external_srt.eof_error = true;
   media.external_vtt = text_bytes(
       "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nEXTERNAL WEBVTT\n\n");
   media.invalid_srt = text_bytes("not a timed subtitle\n");
@@ -359,13 +361,13 @@ int main() {
         std::fprintf(stderr,
             "decoded frame metadata: ABI=%u size=%u SAR=%d/%d matrix=%d "
             "rotation=%.1f range=%d space=%d primaries=%d transfer=%d "
-            "(expected ABI=6 size=%zu SAR=2/1 rotation=-90 range=%d "
+            "(expected ABI=%u size=%zu SAR=2/1 rotation=-90 range=%d "
             "space=%d primaries=%d transfer=%d)\n",
             rillight_core_abi_version(), frame->struct_size,
             frame->sar_num, frame->sar_den, frame->has_display_matrix,
             rotation, frame->source_color_range, frame->source_color_space,
             frame->source_color_primaries, frame->source_color_transfer,
-            sizeof(*frame), AVCOL_RANGE_MPEG, AVCOL_SPC_BT709,
+            RILLIGHT_CORE_ABI_VERSION, sizeof(*frame), AVCOL_RANGE_MPEG, AVCOL_SPC_BT709,
             AVCOL_PRI_BT709, AVCOL_TRC_BT709);
         display_metadata_diagnosed = true;
       }

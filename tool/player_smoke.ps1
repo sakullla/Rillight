@@ -2,6 +2,17 @@ param([switch]$SkipBuild, [ValidateRange(1, 20)][int]$Runs = 1)
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 Set-Location -LiteralPath $root
+$sdk = $env:RILLIGHT_CORE_PREFIX_WINDOWS_X64
+if (-not $sdk) {
+  $candidate = Join-Path $root 'build/ffmpeg-core-windows-hw-sdk'
+  if (Test-Path -LiteralPath (Join-Path $candidate 'rillight-core-dependencies.json')) {
+    $sdk = (Resolve-Path -LiteralPath $candidate).Path
+    $env:RILLIGHT_CORE_PREFIX_WINDOWS_X64 = $sdk
+  }
+}
+if (-not $sdk) { throw 'Set RILLIGHT_CORE_PREFIX_WINDOWS_X64 to a pinned Windows FFmpeg core SDK' }
+python packages/rillight_player/native/verify_core_dependencies.py --prefix $sdk --target windows-x64 --require-subtitles
+if ($LASTEXITCODE -ne 0) { throw 'Pinned Windows core SDK verification failed' }
 if ($Runs -gt 1) {
   if (-not $SkipBuild) {
     flutter build windows --release --target tool/player_smoke.dart

@@ -30,7 +30,7 @@ for _ in range(50):
         if app and app.get_process_id() == pid:
             observed = collect(app)
             text = '\n'.join(observed)
-            if 'libmpv.so.2' in text and '诊断日志' in text:
+            if 'librillight_core.so' in text and '诊断日志' in text:
                 output.write_text(json.dumps({'pid': pid, 'text': observed}, ensure_ascii=False, indent=2), encoding='utf-8')
                 print('Visible diagnostic process exposes missing-core and log-path text')
                 sys.exit(0)

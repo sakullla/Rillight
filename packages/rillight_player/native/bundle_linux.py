@@ -1,33 +1,60 @@
-"""Copy a built prefix's shared media libraries into a Flutter Linux bundle.
+"""Bundle only the verified FFmpeg/libass SDK used by the owned Linux core.
 
 Usage: python3 bundle_linux.py PREFIX BUNDLE
-System GL/audio/font dependencies remain distribution runtime prerequisites.
+System GL, audio and font libraries remain distribution prerequisites.
 """
+
+import hashlib
+import json
 from pathlib import Path
 import shutil
-import subprocess
 import sys
 
-prefix, bundle = (Path(value).resolve() for value in sys.argv[1:3])
-destination = bundle / 'lib'
-destination.mkdir(parents=True, exist_ok=True)
-libraries = sorted((prefix / 'lib').glob('*.so*'))
-if not any(path.name == 'libmpv.so.2' for path in libraries):
-    raise RuntimeError('Prefix has no libmpv.so.2; use the source build prefix')
-for source in libraries:
-    if source.is_file():
-        target = destination / source.name
-        shutil.copyfile(source.resolve(), target)
-        subprocess.check_call(['patchelf', '--set-rpath', '$ORIGIN', str(target)])
-report = prefix / 'rillight-source-versions.txt'
-for plugin in destination.glob('*rillight_player*.so'):
-    subprocess.check_call(['patchelf', '--set-rpath', '$ORIGIN', str(plugin)])
-if report.exists():
-    shutil.copyfile(report, bundle / report.name)
-root = Path(__file__).resolve().parent.parent
-notices = bundle / 'data/rillight_player'
-notices.mkdir(parents=True, exist_ok=True)
-shutil.copyfile(root / 'native/dependencies.json', notices / 'dependencies.json')
-shutil.copyfile(root / 'THIRD_PARTY_NOTICES.md', notices / 'THIRD_PARTY_NOTICES.md')
-shutil.copytree(root / 'native/licenses', notices / 'licenses', dirs_exist_ok=True)
-print('Bundled', len(libraries), 'media library names into', destination)
+from verify_core_dependencies import verify
+
+
+def digest(path: Path) -> str:
+    value = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            value.update(chunk)
+    return value.hexdigest()
+
+
+def bundle(prefix: Path, output: Path) -> None:
+    prefix, output = prefix.resolve(), output.resolve()
+    errors = verify(prefix, "linux-x64", require_subtitles=True)
+    if errors:
+        raise RuntimeError("Invalid pinned Linux SDK:\n" + "\n".join(errors))
+    marker = json.loads((prefix / "rillight-core-dependencies.json").read_text())
+    destination = output / "lib"
+    destination.mkdir(parents=True, exist_ok=True)
+    selected = dict(marker["libraries"])
+    selected[marker["libass"]["library"]] = marker["libass"]["sha256"]
+    selected[marker["dav1d"]["library"]] = marker["dav1d"]["sha256"]
+    for relative, expected in selected.items():
+        source = (prefix / relative).resolve()
+        if prefix not in source.parents or digest(source) != expected:
+            raise RuntimeError(f"SDK library changed or escaped prefix: {relative}")
+        shutil.copyfile(source, destination / source.name)
+    # Include only SONAME aliases resolving to a verified selected library.
+    copied = {str((prefix / name).resolve()) for name in selected}
+    for alias in (prefix / "lib").glob("*.so*"):
+        if alias.is_symlink() and str(alias.resolve()) in copied:
+            destination.joinpath(alias.name).symlink_to(alias.resolve().name)
+    notices = output / "data/rillight_player"
+    notices.mkdir(parents=True, exist_ok=True)
+    native = Path(__file__).resolve().parent
+    shutil.copyfile(native / "core_dependencies.json", notices / "core_dependencies.json")
+    shutil.copyfile(prefix / "rillight-core-dependencies.json",
+                    notices / "rillight-core-dependencies.json")
+    shutil.copyfile(native.parent / "THIRD_PARTY_NOTICES.md",
+                    notices / "THIRD_PARTY_NOTICES.md")
+    shutil.copytree(native / "licenses", notices / "licenses", dirs_exist_ok=True)
+    print(f"Bundled {len(selected)} verified core dependency libraries into {destination}")
+
+
+if __name__ == "__main__":
+    if len(sys.argv) != 3:
+        raise SystemExit("Usage: bundle_linux.py PREFIX BUNDLE")
+    bundle(Path(sys.argv[1]), Path(sys.argv[2]))

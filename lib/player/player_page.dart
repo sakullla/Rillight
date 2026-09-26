@@ -25,6 +25,7 @@ import 'package:rillight/player/danmaku/dandanplay_models.dart';
 import 'package:rillight/player/rillight_video_backend.dart';
 import 'package:rillight/player/network_throughput.dart';
 import 'package:rillight/player/playback_models.dart';
+import 'package:rillight/player/playback_wake_lock.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_controller.dart';
 import 'package:rillight/player/buffered_ranges_track.dart';
@@ -106,6 +107,7 @@ class PlayerPage extends StatefulWidget {
 
 class PlayerPageState extends State<PlayerPage> {
   PlayerController? controller;
+  final PlaybackWakeLock _wakeLock = PlaybackWakeLock();
   DanmakuController? _danmaku;
   bool _dragSeeking = false;
   double _dragValue = 0;
@@ -171,6 +173,7 @@ class PlayerPageState extends State<PlayerPage> {
     _danmaku?.dispose();
     final current = controller;
     current?.removeListener(_onController);
+    _wakeLock.disposeNow();
     current?.dispose();
     _playerShortcuts.dispose();
     super.dispose();
@@ -178,6 +181,13 @@ class PlayerPageState extends State<PlayerPage> {
 
   void _onController() {
     final current = controller;
+    _wakeLock.update(
+      current != null &&
+          current.isPlaying &&
+          !current.loading &&
+          current.error == null &&
+          !current.playbackEnded,
+    );
     final danmaku = _danmaku;
     if (current != null &&
         ((_danmakuLayerItemId != null &&

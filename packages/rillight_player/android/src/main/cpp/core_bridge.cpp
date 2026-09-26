@@ -219,14 +219,24 @@ Java_com_rillight_player_CoreNative_create(JNIEnv *env, jobject, jobject factory
   io.cancel = Bridge::cancel;
   io.cancel_media_io = Bridge::cancel_media;
   owner->core = rillight_core_create(&io);
-  if (!owner->core || rillight_core_configure_hardware(
-          owner->core, RILLIGHT_CORE_HW_MEDIACODEC, 1) != 0) return 0;
+  if (!owner->core) return 0;
   return reinterpret_cast<jlong>(owner.release());
 }
 
 JNIEXPORT void JNICALL
 Java_com_rillight_player_CoreNative_destroy(JNIEnv *, jobject, jlong handle) {
   delete bridge(handle);
+}
+
+JNIEXPORT jint JNICALL
+Java_com_rillight_player_CoreNative_configureHardware(
+    JNIEnv *, jobject, jlong handle, jint preference, jboolean fallback) {
+  if (!handle || (preference != RILLIGHT_CORE_HW_NONE &&
+                  preference != RILLIGHT_CORE_HW_MEDIACODEC)) return -1;
+  auto *owner = bridge(handle);
+  std::lock_guard lock(owner->presentation_mutex);
+  return rillight_core_configure_hardware(
+      owner->core, static_cast<RillightCoreHardware>(preference), fallback ? 1 : 0);
 }
 
 JNIEXPORT jint JNICALL

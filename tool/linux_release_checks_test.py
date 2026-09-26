@@ -1,5 +1,6 @@
 """Portable regression tests for the Linux ELF/installer contracts."""
 import json
+import hashlib
 from pathlib import Path
 import shutil
 import struct
@@ -44,85 +45,122 @@ class LinuxReleaseTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.bundle = Path(self.temp.name)
         self.plugin = self.bundle / 'lib/librillight_player_plugin.so'
-        self.mpv = self.bundle / 'lib/libmpv.so.2'
+        self.core = self.bundle / 'lib/librillight_core.so'
         write_elf(self.bundle / 'rillight', ['librillight_player_plugin.so', 'libc.so.6'], runpath='$ORIGIN/lib')
-        write_elf(self.plugin, ['libmpv.so.2', 'libc.so.6'], 'librillight_player_plugin.so')
-        write_elf(self.mpv, ['libavcodec.so.62', 'libc.so.6'], 'libmpv.so.2')
-        write_elf(self.bundle / 'lib/libavcodec.so.62', ['libc.so.6'], 'libavcodec.so.62')
+        write_elf(self.plugin, ['librillight_core.so', 'libc.so.6'], 'librillight_player_plugin.so')
+        write_elf(self.core, ['libavcodec.so.63', 'libc.so.6'], 'librillight_core.so')
+        write_elf(self.bundle / 'lib/libavcodec.so.63', ['libc.so.6'], 'libavcodec.so.63')
         wrapper = self.bundle / 'rillight-launch'
         shutil.copyfile(checks.ROOT / 'linux/packaging/rillight-launch', wrapper)
         wrapper.chmod(0o755)
+        notices = self.bundle / 'data/rillight_player'
+        notices.mkdir(parents=True)
+        spec = json.loads((checks.ROOT / 'packages/rillight_player/native/core_dependencies.json').read_text())
+        (notices / 'rillight-core-dependencies.json').write_text(json.dumps({
+            'platform': 'linux-x64', 'ffmpeg_version': spec['ffmpeg']['version'],
+            'ffmpeg_commit': spec['ffmpeg']['commit'],
+            'ffmpeg_patches': spec['ffmpeg']['patches'],
+            'libass': {'commit': spec['libass']['commit']},
+            'dav1d': {'commit': spec['dav1d']['commit']},
+        }))
+        self.write_report()
+
+    def write_report(self):
+        notices = self.bundle / 'data/rillight_player'
+        (notices / 'loaded-versions.json').write_text(json.dumps({
+            'coreAbi': 8, 'versions': 'ffmpeg=9.0.1;avformat=1',
+            'bundledLibraries': {
+                str(path.relative_to(self.bundle)): hashlib.sha256(path.read_bytes()).hexdigest()
+                for path in (self.bundle / 'lib').glob('*.so*') if path.is_file() and not path.is_symlink()
+            },
+        }))
 
     def test_valid_bundle_reads_real_program_headers_without_sections(self):
         files = checks.verify_bundle(self.bundle, runtime=False,
                                      desktop=checks.ROOT / 'linux/packaging/rillight.desktop')
         self.assertEqual(len(files), 4)
-        self.assertEqual(files[self.plugin]['needed'], ['libmpv.so.2', 'libc.so.6'])
+        self.assertEqual(files[self.plugin]['needed'], ['librillight_core.so', 'libc.so.6'])
+
+    def test_loaded_ffmpeg_version_accepts_pinned_tag_spelling_only(self):
+        class Function:
+            def __init__(self, value):
+                self.value = value
+
+            def __call__(self):
+                return self.value
+
+        class Core:
+            rillight_core_abi_version = Function(8)
+            rillight_core_ffmpeg_versions = Function(b'ffmpeg=n9.0.1;avformat=1')
+
+        with patch.object(checks.ctypes, 'CDLL', return_value=Core()):
+            self.assertEqual(checks.loaded_core_versions(self.bundle)['coreAbi'], 8)
+            Core.rillight_core_ffmpeg_versions.value = b'ffmpeg=9.0.1;avformat=1'
+            self.assertEqual(checks.loaded_core_versions(self.bundle)['coreAbi'], 8)
+            Core.rillight_core_ffmpeg_versions.value = b'ffmpeg=n9.0.2;avformat=1'
+            with self.assertRaisesRegex(ValueError, 'version mismatch'):
+                checks.loaded_core_versions(self.bundle)
 
     def test_legacy_plugin_is_rejected_even_when_new_core_is_present(self):
         write_elf(self.bundle / 'lib/libold_plugin.so', ['libmpv.so.1'], runpath='$ORIGIN')
-        with self.assertRaisesRegex(ValueError, 'libmpv.so.1'):
+        with self.assertRaisesRegex(ValueError, 'libmpv'):
             checks.verify_bundle(self.bundle, runtime=False)
 
     def test_legacy_alias_is_never_an_abi_fix(self):
-        shutil.copyfile(self.mpv, self.bundle / 'lib/libmpv.so.1')
-        with self.assertRaisesRegex(ValueError, 'libmpv.so.1'):
+        shutil.copyfile(self.core, self.bundle / 'lib/libmpv.so.2')
+        with self.assertRaisesRegex(ValueError, 'libmpv'):
             checks.verify_bundle(self.bundle, runtime=False)
 
     def test_renamed_library_must_retain_the_correct_soname(self):
-        write_elf(self.mpv, ['libc.so.6'], 'libmpv.so.1')
+        write_elf(self.core, ['libc.so.6'], 'libmpv.so.2')
         with self.assertRaisesRegex(ValueError, 'SONAME'):
             checks.verify_bundle(self.bundle, runtime=False)
 
     def test_plugin_build_machine_runpath_is_rejected(self):
-        write_elf(self.plugin, ['libmpv.so.2'], 'librillight_player_plugin.so',
+        write_elf(self.plugin, ['librillight_core.so'], 'librillight_player_plugin.so',
                   runpath='/home/runner/work/Rillight/linux/flutter/ephemeral')
         with self.assertRaisesRegex(ValueError, 'RUNPATH'):
             checks.verify_bundle(self.bundle, runtime=False)
 
     def test_transitive_media_library_needs_its_own_runpath(self):
-        write_elf(self.mpv, ['libavcodec.so.62'], 'libmpv.so.2', runpath=None)
+        write_elf(self.core, ['libavcodec.so.63'], 'librillight_core.so', runpath=None)
         with self.assertRaisesRegex(ValueError, 'RUNPATH'):
             checks.verify_bundle(self.bundle, runtime=False)
 
     def test_missing_transitive_media_library_is_not_a_system_fallback(self):
-        (self.bundle / 'lib/libavcodec.so.62').unlink()
+        (self.bundle / 'lib/libavcodec.so.63').unlink()
         with self.assertRaisesRegex(ValueError, 'unbundled media dependency'):
             checks.verify_bundle(self.bundle, runtime=False)
 
-    def test_ubuntu_libjpeg_must_be_vendored_for_debian(self):
-        write_elf(self.mpv, ['libjpeg.so.8', 'libc.so.6'], 'libmpv.so.2')
+    def test_changed_core_bytes_fail_final_bundle_hash(self):
+        with self.core.open('ab') as output:
+            output.write(b'corrupt')
+        with self.assertRaisesRegex(ValueError, 'SHA256 mismatch'):
+            checks.verify_bundle(self.bundle, runtime=False)
+
+    def test_unbundled_libass_is_rejected(self):
+        write_elf(self.core, ['libass.so.9'], 'librillight_core.so')
         with self.assertRaisesRegex(ValueError, 'unbundled media dependency'):
             checks.verify_bundle(self.bundle, runtime=False)
-        write_elf(self.bundle / 'lib/libjpeg.so.8', ['libc.so.6'], 'libjpeg.so.8')
-        checks.verify_bundle(self.bundle, runtime=False)
 
-    def test_vendor_sonames_copies_host_libjpeg_next_to_libmpv(self):
-        write_elf(self.mpv, ['libjpeg.so.8', 'libc.so.6'], 'libmpv.so.2')
-        host = self.bundle / 'host/libjpeg.so.8.2.2'
-        write_elf(host, ['libc.so.6'], 'libjpeg.so.8')
-        checks.vendor_sonames(self.bundle, resolver=lambda name, files: host)
-        self.assertTrue((self.bundle / 'lib/libjpeg.so.8').is_file())
-        self.assertTrue((self.bundle / 'lib/libjpeg.so.8.2.2').is_file())
-
-    def test_system_mpv_resolution_is_rejected(self):
+    def test_system_core_resolution_is_rejected(self):
         resolved = {path.name: str(path) for path in self.bundle.rglob('*.so*')}
-        resolved.update({'libmpv.so.2': '/usr/lib/libmpv.so.2', 'libc.so.6': '/lib/libc.so.6'})
+        resolved.update({'librillight_core.so': '/usr/lib/librillight_core.so', 'libc.so.6': '/lib/libc.so.6'})
         with patch.object(checks, 'run', return_value='unused'), \
                 patch.object(checks, 'parse_ldd', return_value=resolved):
             with self.assertRaisesRegex(ValueError, 'outside the bundle'):
-                checks.verify_bundle(self.bundle)
+                checks.verify_bundle(self.bundle, integrity=False)
 
     def test_missing_library_diagnostic_and_runtime_mapping(self):
         with self.assertRaisesRegex(ValueError, 'Unresolved'):
-            checks.parse_ldd('libmpv.so.1 => not found\n')
-        self.assertEqual(checks.parse_ldd(' libmpv.so.2 => /opt/rillight/lib/libmpv.so.2 (0x123)\n'),
-                         {'libmpv.so.2': '/opt/rillight/lib/libmpv.so.2'})
+            checks.parse_ldd('librillight_core.so => not found\n')
+        self.assertEqual(checks.parse_ldd(' librillight_core.so => /opt/rillight/lib/librillight_core.so (0x123)\n'),
+                         {'librillight_core.so': '/opt/rillight/lib/librillight_core.so'})
 
     def test_unresolved_runtime_dependency_names_the_file(self):
         with patch.object(checks, 'run', return_value='libjvm.so => not found\n'):
             with self.assertRaises(ValueError) as raised:
-                checks.verify_bundle(self.bundle)
+                checks.verify_bundle(self.bundle, integrity=False)
         message = str(raised.exception)
         self.assertIn('Unresolved ELF dependency', message)
         self.assertRegex(message, r'^\S+: Unresolved')
@@ -149,23 +187,21 @@ class LinuxReleaseTests(unittest.TestCase):
             checks.verify_bundle(self.bundle, runtime=False)
 
     def test_build_prefix_cannot_be_replaced_with_arbitrary_system_pkgconfig(self):
-        with self.assertRaisesRegex(ValueError, 'fixed native/build_linux.sh'):
+        with self.assertRaisesRegex(ValueError, 'verified pinned FFmpeg core SDK'):
             checks.prepare_bundle(self.bundle / 'empty-prefix', self.bundle)
 
-    def test_old_prefix_without_required_source_patch_is_rejected(self):
+    def test_old_mpv_prefix_cannot_be_used(self):
         prefix = self.bundle / 'old-prefix'
         prefix.mkdir()
         (prefix / 'rillight-source-versions.txt').write_text('mpv=0.41.0\nffmpeg=n9.0.1\n')
-        with self.assertRaisesRegex(ValueError, 'required scaler padding patch'):
+        with self.assertRaisesRegex(ValueError, 'verified pinned FFmpeg core SDK'):
             checks.prepare_bundle(prefix, self.bundle)
 
     def test_dpkg_shlibdeps_maps_private_libraries_and_retains_real_system_depends(self):
-        write_elf(self.bundle / 'lib/libjpeg.so.8', ['libc.so.6'], 'libjpeg.so.8')
         def shlibdeps(command, **kwargs):
             local = (Path(kwargs['cwd']) / 'debian/shlibs.local').read_text()
-            self.assertIn('libmpv 2 rillight', local)
-            self.assertIn('libavcodec 62 rillight', local)
-            self.assertIn('libjpeg 8 rillight', local)
+            self.assertIn('librillight_core 0 rillight', local)
+            self.assertIn('libavcodec 63 rillight', local)
             self.assertIn('-xrillight', command)
             self.assertNotIn('--ignore-missing-info', command)
             return 'shlibs:Depends=libc6 (>= 2.34), libgtk-3-0 (>= 3.24)\n'
@@ -208,7 +244,7 @@ class LinuxReleaseTests(unittest.TestCase):
         zenity.write_text('#!/bin/sh\nprintf "%s\\n" "$@" > "$RILLIGHT_DIALOG_MARKER"\n')
         zenity.chmod(0o755)
         if missing_core:
-            self.mpv.unlink()
+            self.core.unlink()
         launched, dialog = self.bundle / 'launched', self.bundle / 'dialog'
         env = {**os.environ, 'PATH': str(tools) + os.pathsep + os.environ['PATH'],
                'XDG_STATE_HOME': str(self.bundle / 'state'), 'LD_LIBRARY_PATH': '/old-lib',

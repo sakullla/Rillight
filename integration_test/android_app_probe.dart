@@ -1,5 +1,5 @@
 // Validation-only observer. Inputs still enter through Android adb/IME; this
-// entrypoint does not replace authentication, routes, controllers or Media3.
+// entrypoint does not replace authentication, routes, controllers or the core.
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';

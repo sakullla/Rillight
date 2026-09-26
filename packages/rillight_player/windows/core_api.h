@@ -21,6 +21,8 @@ class CoreApi {
     if (!module_) throw std::runtime_error("Rillight core DLL unavailable");
     try {
       abi_version = Resolve<decltype(abi_version)>("rillight_core_abi_version");
+      configure_hardware = Resolve<decltype(configure_hardware)>(
+          "rillight_core_configure_hardware");
       snapshot = Resolve<decltype(snapshot)>("rillight_core_snapshot");
       take_frame = Resolve<decltype(take_frame)>("rillight_core_take_frame");
       release_frame = Resolve<decltype(release_frame)>("rillight_core_release_frame");
@@ -48,6 +50,7 @@ class CoreApi {
   CoreApi& operator=(const CoreApi&) = delete;
 
   decltype(&rillight_core_abi_version) abi_version = nullptr;
+  decltype(&rillight_core_configure_hardware) configure_hardware = nullptr;
   decltype(&rillight_core_snapshot) snapshot = nullptr;
   decltype(&rillight_core_take_frame) take_frame = nullptr;
   decltype(&rillight_core_release_frame) release_frame = nullptr;

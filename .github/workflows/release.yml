@@ -29,6 +29,30 @@ jobs:
           channel: stable
           cache: true
 
+      - name: Verify pinned Windows core SDK
+        shell: pwsh
+        env:
+          CORE_SDK_URL: ${{ vars.WINDOWS_CORE_SDK_URL }}
+          CORE_SDK_SHA256: ${{ vars.WINDOWS_CORE_SDK_SHA256 }}
+        run: |
+          if (-not $env:CORE_SDK_URL -or -not $env:CORE_SDK_SHA256) {
+            throw 'Set WINDOWS_CORE_SDK_URL and WINDOWS_CORE_SDK_SHA256 before a release tag.'
+          }
+          $archive = Join-Path $env:RUNNER_TEMP 'rillight-windows-core-sdk.zip'
+          $extract = Join-Path $env:RUNNER_TEMP 'rillight-windows-core-sdk'
+          Invoke-WebRequest -Uri $env:CORE_SDK_URL -OutFile $archive
+          $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash.ToLowerInvariant()
+          if ($actual -ne $env:CORE_SDK_SHA256.ToLowerInvariant()) {
+            throw "Windows core SDK archive SHA256 mismatch: $actual"
+          }
+          Expand-Archive -LiteralPath $archive -DestinationPath $extract
+          $markers = @(Get-ChildItem -LiteralPath $extract -Filter 'rillight-core-dependencies.json' -File -Recurse)
+          if ($markers.Count -ne 1) { throw "Expected one pinned SDK marker, found $($markers.Count)" }
+          $prefix = $markers[0].DirectoryName
+          python packages/rillight_player/native/verify_core_dependencies.py --prefix "$prefix" --target windows-x64 --require-subtitles
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned Windows core SDK verification failed' }
+          "RILLIGHT_CORE_PREFIX_WINDOWS_X64=$prefix" >> $env:GITHUB_ENV
+
       - name: Install dependencies
         run: flutter pub get
 
@@ -61,6 +85,10 @@ jobs:
     with:
       version: ${{ github.ref_name }}
       signing: identity
+      core_sdk_url: ${{ vars.MACOS_CORE_SDK_URL }}
+      core_sdk_sha256: ${{ vars.MACOS_CORE_SDK_SHA256 }}
+      core_dylib_url: ${{ vars.MACOS_CORE_DYLIB_URL }}
+      core_dylib_sha256: ${{ vars.MACOS_CORE_DYLIB_SHA256 }}
     secrets: inherit
 
   linux:
@@ -133,8 +161,35 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      - name: Build pinned FFmpeg and libass for all Android ABIs
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +o pipefail
+          yes | sdkmanager --licenses > /dev/null
+          set -o pipefail
+          sdkmanager --install 'ndk;28.2.13676358' 'build-tools;36.0.0'
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config
+          python3 -m pip install meson==1.9.1 ninja==1.13.0
+          prefix="$RUNNER_TEMP/rillight-android-sdk"
+          work="$RUNNER_TEMP/rillight-android-sdk-work"
+          ndk="$ANDROID_HOME/ndk/28.2.13676358"
+          python3 packages/rillight_player/native/build_android_core_dependencies.py \
+            --prefix-root "$prefix" --work "$work" --ndk "$ndk"
+          python3 packages/rillight_player/native/build_android_libass.py \
+            --prefix-root "$prefix" --work "$work" --ndk "$ndk"
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            python3 packages/rillight_player/native/verify_core_dependencies.py \
+              --prefix "$prefix/$abi" --target "android-$abi" --require-subtitles
+          done
+          echo "RILLIGHT_CORE_SDK_ROOT=$prefix" >> "$GITHUB_ENV"
+
       - name: Build Android release APK
         run: flutter build apk --release
+
+      - name: Audit owned core APK closure
+        run: python3 tool/android_release_checks.py --apk build/app/outputs/flutter-apk/app-release.apk --output build/android-validation/release-apk-audit
 
       - name: Rename APK artifact
         shell: bash

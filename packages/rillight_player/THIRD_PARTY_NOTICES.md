@@ -1,49 +1,46 @@
-# Native dependencies
+# Native playback dependencies
 
-The Dart and native adapter code is maintained in this repository under MIT.
-The bundled media libraries have their own licenses; the adapter license does
-not relicense those binaries. `native/dependencies.json` locks Windows/Linux
-binary sources and hashes, vendored header sources, and measured version floors.
-macOS dylibs come from IINA's live file list. Distributors must ship applicable
-license texts and provide corresponding source under the component licenses.
+Rillight's owned Dart/native player adapter is maintained in this repository.
+The native media libraries retain their own licenses. The adapter license does
+not relicense those binaries.
 
-- **mpv**: https://github.com/mpv-player/mpv (GPL-2.0-or-later, or LGPL when
-  explicitly built that way). Windows source build recipes are maintained by
-  https://github.com/shinchiro/mpv-winbuild-cmake. macOS dylibs are provided by
-  IINA: https://github.com/iina/iina and https://iina.io/dylibs/universal/.
-  The full upstream build configuration must be retained when upgrading.
-  Linux builds apply `native/patches/mpv-zero-scaler-padding.patch` to the locked
-  v0.41.0 commit. It zero-initializes unused scaler LUT channels, preventing
-  uninitialized NaN values from contaminating OpenGL filtering. The patch is
-  LGPL-2.1-or-later, like the modified upstream file; its SHA256 is recorded in
-  `native/dependencies.json` and the installed source-version record. Linux
-  bundles include the patch under `data/rillight_player/patches/`.
-- **libmpv C API headers**: copied without modification from mpv v0.41.0,
-  ISC license and Copyright (C) 2017 the mpv developers preserved in each file.
-- **ANGLE**: https://github.com/google/angle (BSD-3-Clause, with third party
-  components); fixed Windows distribution by
-  https://github.com/alexmercerind/flutter-windows-ANGLE-OpenGL-ES/tree/v1.0.1.
-- **FFmpeg**: https://ffmpeg.org/legal.html (LGPL-2.1-or-later; GPL-enabled
-  configurations use GPL). Linux build pins n9.0.1. Windows and macOS component
-  versions are those in their fixed distributions, not the Dart package version.
-- **libplacebo**: https://code.videolan.org/videolan/libplacebo (LGPL-2.1-or-later).
-- **libass**: https://github.com/libass/libass (ISC).
-- macOS additionally downloads IINA's current universal dylib set, which
-  typically includes libarchive, Brotli, libbs2b, dav1d, fontconfig, FreeType,
-  FriBidi, HarfBuzz, libjpeg-turbo, libjxl, LittleCMS, LuaJIT, LZ4, MuJS,
-  Ogg/Vorbis, Rubber Band, libsharpyuv/WebP, libsoxr, Speex, SVT-AV1, uchardet,
-  libudfread, libunibreak, zimg and zstd. The live file list is the authority
-  for which libraries ship. Their source and license collection is maintained
-  with IINA's dependency build: https://github.com/iina/iina/tree/develop/other
-  and its application notices.
+The source, version, commit, patch hashes, target ABIs, and required FFmpeg
+libraries are declared in [`native/core_dependencies.json`](native/core_dependencies.json).
+Each SDK must also carry `rillight-core-dependencies.json`, which records the
+actual build configuration and SHA256 of its libraries. The platform packaging
+checks verify that marker and the libraries in the candidate package. A source
+pin alone does not certify that a bundled binary came from that source.
 
-The previous media_kit_video implementation was consulted for platform context.
-The adapter does not vendor that plugin. Acknowledgement: Copyright © 2021 &
-onwards, Hitesh Kumar Saini <saini123hitesh@gmail.com>, MIT license
-(https://github.com/media-kit/media-kit/blob/main/LICENSE).
+- **FFmpeg n9.0.1**: [source](https://github.com/FFmpeg/FFmpeg/tree/bf1b838f2ab88b4f8fd83443325c782ea0e0f7fa),
+  generally LGPL-2.1-or-later unless the actual build enables components that
+  change its license. The bundled configuration and component closure must be
+  reviewed for each package. License texts:
+  [`FFmpeg-LGPL-2.1.txt`](native/licenses/FFmpeg-LGPL-2.1.txt) and
+  [`FFmpeg-GPL-2.0.txt`](native/licenses/FFmpeg-GPL-2.0.txt).
+- **libass 0.17.5**: [source](https://github.com/libass/libass/tree/4a05d8127f525943ebf45fdc6497c9e665947f0d),
+  ISC. The pinned source's
+  [`COPYING`](native/licenses/libass-ISC.txt) is included with subtitle-enabled
+  packages (SHA256 `f7e30699d02798351e7f839e3d3bfeb29ce65e44efa7735c225464c4fd7dfe9c`).
+  libass has its own build dependencies; the SDK marker records the libraries
+  selected for a target. The Android source pins for FreeType, FriBidi and
+  HarfBuzz are also recorded in `native/core_dependencies.json`.
+- **dav1d 1.5.3**: [source](https://github.com/videolan/dav1d/tree/b546257f770768b2c88258c533da38b91a06f737),
+  BSD-2-Clause. It supplies software AV1 decoding when hardware decoding is
+  unavailable. The pinned source's [COPYING](native/licenses/dav1d-BSD-2-Clause.txt)
+  accompanies packages that bundle dav1d.
+- **Android subtitle dependency sources**: [FreeType 2.13.3](https://github.com/freetype/freetype/tree/42608f77f20749dd6ddc9e0536788eaad70ea4b5)
+  provides the [license choices](native/licenses/FreeType-LICENSE.txt) and
+  [FreeType License](native/licenses/FreeType-FTL.txt);
+  [FriBidi 1.0.16](https://github.com/fribidi/fribidi/tree/68162babff4f39c4e2dc164a5e825af93bda9983)
+  uses [LGPL 2.1](native/licenses/FriBidi-LGPL-2.1.txt);
+  [HarfBuzz 10.4.0](https://github.com/harfbuzz/harfbuzz/tree/3ef8709829a5884517ad91a97b32b9435b2f20d1)
+  has its [Old MIT notice](native/licenses/HarfBuzz-Old-MIT.txt). These texts
+  were copied from the pinned source commits. The actual linked source and
+  license closure must still be checked against each packaged ABI.
 
-The IINA download paths are mutable upstream endpoints. macOS dylibs are
-fetched from the live file list at prepare time and are not SHA256-locked in
-this repository. Windows archives, Linux sources, vendored libmpv headers and
-license texts remain hash-pinned. macOS native execution and signing require a
-Mac.
+Windows, macOS, Linux and Android may additionally use system hardware decode
+and output APIs. The release bundle's exact dependency list, loaded versions,
+source and license material must be checked for that target. The macOS SDK and
+core dylib have not yet been built or exercised on a target Mac; see
+[`macos/TESTING_HANDOFF.md`](macos/TESTING_HANDOFF.md). No libmpv or Media3
+runtime is part of the owned playback core.

@@ -50,7 +50,9 @@ class CacheRangeLease {
     }
     if (_closed || bytes == null) return null;
     final start = offset - block.key.offset;
+    if (start >= bytes.length) return null;
     final end = (start + maxLength).clamp(start, bytes.length);
+    if (end <= start) return null;
     final result = Uint8List.fromList(Uint8List.sublistView(bytes, start, end));
     if (source == CacheReadSource.memory) {
       _cache._memoryHits += result.length;
@@ -140,6 +142,8 @@ class SessionByteCache {
   int _appliedPendingLimitBytes;
   int _appliedDiskSessionLimitBytes;
   final _entries = <_BlockKey, _Entry>{};
+  int _revision = 0;
+  int get revision => _revision;
   final _memory = <_BlockKey, Uint8List>{};
   final _memoryPins = <_BlockKey, int>{};
   final _rangeLeases = <CacheRangeLease>{};
@@ -250,6 +254,7 @@ class SessionByteCache {
     final entry = _Entry(bytes.length);
     _forget(key);
     _entries[key] = entry;
+    _revision++;
     _indexBytes += _indexCost(key);
     _retain(key, bytes);
     while (_entries.length > maxEntries || _indexBytes > 4 * 1024 * 1024) {
@@ -274,12 +279,18 @@ class SessionByteCache {
           // A bounded wait can expire while the actual write still succeeds.
           // Publish that late result only into the same live representation.
           if (!_closed && identical(_entries[key], entry)) {
-            entry.diskToken = token;
+            if (entry.diskToken != token) {
+              entry.diskToken = token;
+              _revision++;
+            }
           }
         },
       );
       if (token != null && !_closed && identical(_entries[key], entry)) {
-        entry.diskToken = token;
+        if (entry.diskToken != token) {
+          entry.diskToken = token;
+          _revision++;
+        }
       }
     } finally {
       _releasePending(pendingCost);
@@ -351,7 +362,9 @@ class SessionByteCache {
     _entries.remove(key);
     _entries[key] = entry;
     final start = offset - key.offset;
+    if (start >= bytes.length) return null;
     final end = (start + maxLength).clamp(start, bytes.length);
+    if (end <= start) return null;
     final result = Uint8List.fromList(Uint8List.sublistView(bytes, start, end));
     if (countHit && source == CacheReadSource.memory) {
       _memoryHits += result.length;
@@ -648,6 +661,7 @@ class SessionByteCache {
       _evictions++;
     }
     _memory[key] = Uint8List.fromList(bytes);
+    _revision++;
     _memoryBytes += bytes.length;
     if (_memoryBytes > _memoryPeak) _memoryPeak = _memoryBytes;
   }
@@ -655,7 +669,10 @@ class SessionByteCache {
   void _removeMemory(_BlockKey key) {
     if (_memoryPins.containsKey(key)) return;
     final bytes = _memory.remove(key);
-    if (bytes != null) _memoryBytes -= bytes.length;
+    if (bytes != null) {
+      _memoryBytes -= bytes.length;
+      _revision++;
+    }
   }
 
   int _indexCost(_BlockKey key) => key.resource.length * 2 + 256;
@@ -674,7 +691,10 @@ class SessionByteCache {
   }
 
   void _forget(_BlockKey key) {
-    if (_entries.remove(key) != null) _indexBytes -= _indexCost(key);
+    if (_entries.remove(key) != null) {
+      _indexBytes -= _indexCost(key);
+      _revision++;
+    }
   }
 }
 

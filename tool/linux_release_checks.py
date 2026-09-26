@@ -6,6 +6,7 @@ Runtime ldd/packaging/version checks run only on the actual Linux host.
 from __future__ import annotations
 import argparse
 import configparser
+import ctypes
 import hashlib
 import json
 import os
@@ -18,12 +19,10 @@ import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
-MEDIA = ('libmpv.so', 'libavcodec.so', 'libavformat.so', 'libavutil.so',
-         'libavfilter.so', 'libswresample.so', 'libswscale.so', 'libplacebo.so')
-# Ubuntu's ffmpeg links libjpeg.so.8; Debian 13 only ships libjpeg.so.62.
-# The installer then depends on the Ubuntu-only libjpeg8 package and cannot
-# be installed. Vendor the SONAME into the private lib directory.
-VENDORED_SONAMES = ('libjpeg.so.8',)
+MEDIA = ('librillight_core.so', 'libavcodec.so', 'libavformat.so',
+         'libavutil.so', 'libavfilter.so', 'libswresample.so',
+         'libswscale.so', 'libass.so', 'libdav1d.so')
+VENDORED_SONAMES = ()
 
 def clean_environment():
     return {**{key: value for key, value in os.environ.items()
@@ -123,14 +122,65 @@ def parse_ldd(text):
         raise ValueError('Unresolved ELF dependency:\n' + text)
     return dict(re.findall(r'^\s*(\S+)\s+=>\s+(/\S+)', text, re.MULTILINE))
 
-def verify_bundle(bundle, *, runtime=True, desktop=None):
+
+def loaded_core_versions(bundle):
+    """Load the bundled core from its final RUNPATH, not a development SDK."""
+    core = ctypes.CDLL(str(Path(bundle) / 'lib/librillight_core.so'))
+    core.rillight_core_abi_version.restype = ctypes.c_uint32
+    core.rillight_core_ffmpeg_versions.restype = ctypes.c_char_p
+    abi = core.rillight_core_abi_version()
+    versions = core.rillight_core_ffmpeg_versions().decode('ascii')
+    expected_abi = int(re.search(r'#define RILLIGHT_CORE_ABI_VERSION (\d+)',
+                                 (ROOT / 'packages/rillight_player/native/core/rillight_core.h').read_text()).group(1))
+    expected_ffmpeg = json.loads((ROOT / 'packages/rillight_player/native/core_dependencies.json').read_text())['ffmpeg']['version'].removeprefix('n')
+    actual_ffmpeg, separator, _ = versions.partition(';')
+    if (abi != expected_abi or not separator or
+            not actual_ffmpeg.startswith('ffmpeg=') or
+            actual_ffmpeg.removeprefix('ffmpeg=').removeprefix('n') != expected_ffmpeg):
+        raise ValueError(f'Bundled core/version mismatch: ABI {abi}, {versions}')
+    return {'coreAbi': abi, 'versions': versions}
+
+
+def verify_integrity(bundle):
+    notices = Path(bundle) / 'data/rillight_player'
+    report_file = notices / 'loaded-versions.json'
+    marker_file = notices / 'rillight-core-dependencies.json'
+    if not report_file.is_file() or not marker_file.is_file():
+        raise ValueError('Missing bundled core provenance or loaded-version report')
+    report = json.loads(report_file.read_text())
+    marker = json.loads(marker_file.read_text())
+    spec = json.loads((ROOT / 'packages/rillight_player/native/core_dependencies.json').read_text())
+    if (marker.get('platform') != 'linux-x64' or
+            marker.get('ffmpeg_version') != spec['ffmpeg']['version'] or
+            marker.get('ffmpeg_commit') != spec['ffmpeg']['commit'] or
+            marker.get('ffmpeg_patches') != spec['ffmpeg']['patches'] or
+            marker.get('libass', {}).get('commit') != spec['libass']['commit'] or
+            marker.get('dav1d', {}).get('commit') != spec['dav1d']['commit']):
+        raise ValueError('Bundled core source provenance differs from lock')
+    hashes = report.get('bundledLibraries')
+    if not isinstance(hashes, dict) or not hashes:
+        raise ValueError('Missing final bundled library hashes')
+    for relative, expected in hashes.items():
+        path = (Path(bundle) / relative).resolve()
+        if not path.is_relative_to(Path(bundle).resolve()) or not path.is_file():
+            raise ValueError(f'Missing/unsafe bundled library: {relative}')
+        if hashlib.sha256(path.read_bytes()).hexdigest() != expected:
+            raise ValueError(f'Bundled library SHA256 mismatch: {relative}')
+    actual = {str(path.relative_to(bundle)) for path in (Path(bundle) / 'lib').glob('*.so*')
+              if path.is_file() and not path.is_symlink()}
+    if actual != set(hashes):
+        raise ValueError('Bundled library set differs from final hash report')
+    if report.get('coreAbi') is None or not str(report.get('versions', '')).startswith('ffmpeg='):
+        raise ValueError('Missing actual loaded core version evidence')
+
+def verify_bundle(bundle, *, runtime=True, desktop=None, integrity=True):
     bundle = Path(bundle).resolve()
     files = elf_files(bundle)
     if bundle / 'rillight' not in files:
         raise ValueError('Missing ELF application')
     for path, meta in files.items():
-        if path.name.startswith('libmpv.so.1') or any(name.startswith('libmpv.so.1') for name in meta['needed']):
-            raise ValueError(f'{path.name}: libmpv.so.1 is incompatible with this ABI2 bundle')
+        if 'libmpv' in path.name or any('libmpv' in name for name in meta['needed']):
+            raise ValueError(f'{path.name}: retired libmpv must not ship or load')
         expected = expected_runpath(path, bundle)
         if (meta['needed'] or meta['soname']) and (meta['runpath'] != [expected] or meta['rpath']):
             raise ValueError(f'{path.name}: RUNPATH must be {expected}; found {meta["runpath"]}/{meta["rpath"]}')
@@ -152,13 +202,15 @@ def verify_bundle(bundle, *, runtime=True, desktop=None):
                 if found and not (Path(found).resolve().is_relative_to(bundle) or
                                   found.startswith(('/lib/', '/lib64/', '/usr/lib/'))):
                     raise ValueError(f'{path.name}: dependency resolves to build machine: {found}')
-    mpv = bundle / 'lib/libmpv.so.2'
-    if mpv not in files or files[mpv]['soname'] != 'libmpv.so.2':
-        raise ValueError('Bundled libmpv.so.2 must have its real SONAME')
-    if not any('rillight_player' in path.name and 'libmpv.so.2' in meta['needed']
+    core = bundle / 'lib/librillight_core.so'
+    if core not in files or files[core]['soname'] != 'librillight_core.so':
+        raise ValueError('Bundled librillight_core.so must have its real SONAME')
+    if not any('rillight_player' in path.name and 'librillight_core.so' in meta['needed']
                for path, meta in files.items()):
-        raise ValueError('Player plugin must link to bundled libmpv.so.2')
+        raise ValueError('Player plugin must link to bundled librillight_core.so')
     verify_entrypoints(bundle, desktop)
+    if integrity:
+        verify_integrity(bundle)
     return files
 
 def _host_library(name, files):
@@ -172,7 +224,7 @@ def _host_library(name, files):
 
 
 def vendor_sonames(bundle, resolver=None):
-    """Copy Ubuntu-only SONAMEs next to libmpv so Debian can install the deb."""
+    """Copy explicitly listed private SONAMEs when a target requires them."""
     bundle = Path(bundle).resolve()
     libdir = bundle / 'lib'
     libdir.mkdir(parents=True, exist_ok=True)
@@ -200,19 +252,10 @@ def vendor_sonames(bundle, resolver=None):
 
 def prepare_bundle(prefix, bundle):
     prefix, bundle = Path(prefix).resolve(), Path(bundle).resolve()
-    if not (prefix / 'rillight-source-versions.txt').is_file():
-        raise ValueError('Use the fixed native/build_linux.sh output prefix, not system libmpv')
+    if not (prefix / 'rillight-core-dependencies.json').is_file():
+        raise ValueError('Use a verified pinned FFmpeg core SDK, not system media libraries')
     native = ROOT / 'packages/rillight_player/native'
-    manifest = json.loads((native / 'dependencies.json').read_text())
-    for patch in manifest['linux']['source_build']['mpv']['patches']:
-        digest = hashlib.sha256((native / patch['path']).read_bytes()).hexdigest()
-        if digest != patch['sha256']:
-            raise ValueError('Native source patch hash mismatch')
-        if f'mpv_patch_sha256={digest}' not in (prefix / 'rillight-source-versions.txt').read_text().splitlines():
-            raise ValueError('Native prefix lacks the required scaler padding patch; rebuild it')
     run([sys.executable, ROOT / 'packages/rillight_player/native/bundle_linux.py', prefix, bundle])
-    shutil.copytree(ROOT / 'packages/rillight_player/native/patches',
-                    bundle / 'data/rillight_player/patches', dirs_exist_ok=True)
     vendor_sonames(bundle)
     for path, meta in elf_files(bundle).items():
         if meta['needed'] or meta['soname']:
@@ -220,12 +263,15 @@ def prepare_bundle(prefix, bundle):
     wrapper = bundle / 'rillight-launch'
     shutil.copyfile(ROOT / 'linux/packaging/rillight-launch', wrapper)
     wrapper.chmod(0o755)
-    verify_bundle(bundle)
-    versions = run([sys.executable, ROOT / 'packages/rillight_player/native/check_mpv.py',
-                    bundle / 'lib/libmpv.so.2'])
-    report = json.loads(versions)
+    verify_bundle(bundle, integrity=False)
+    report = loaded_core_versions(bundle)
+    report['bundledLibraries'] = {
+        str(path.relative_to(bundle)): hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in sorted((bundle / 'lib').glob('*.so*')) if path.is_file() and not path.is_symlink()
+    }
     (bundle / 'data/rillight_player/loaded-versions.json').write_text(
-        json.dumps(report, indent=2) + '\n')
+        json.dumps(report, indent=2, sort_keys=True) + '\n')
+    verify_bundle(bundle)
     print(json.dumps(report))
 
 def package_dependencies(bundle, files):
@@ -242,6 +288,8 @@ def package_dependencies(bundle, files):
             match = re.fullmatch(r'(.+)\.so\.(.+)', meta['soname'] or '')
             if match:
                 local.append(f'{match[1]} {match[2]} rillight')
+            elif meta['soname'] == 'librillight_core.so':
+                local.append('librillight_core 0 rillight')
         (debian / 'shlibs.local').write_text('\n'.join(sorted(set(local))) + '\n')
         output = run(['dpkg-shlibdeps', '-O', '-xrillight', '-l' + str(Path(bundle) / 'lib'),
                       *['-e' + str(path) for path in files]], cwd=work)
@@ -250,7 +298,7 @@ def package_dependencies(bundle, files):
     if not dependencies:
         raise ValueError('dpkg-shlibdeps produced no system dependencies')
     if re.search(r'(^|,)\s*(mpv|libmpv\d)', dependencies):
-        raise ValueError('Deb must use its bundled libmpv, not a system media package')
+        raise ValueError('Deb must not depend on retired libmpv')
     return dependencies + ', ca-certificates, libc-bin, zenity, libgl1-mesa-dri, libglx-mesa0, libegl-mesa0'
 
 def package_deb(bundle, version, output):

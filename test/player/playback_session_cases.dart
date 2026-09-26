@@ -87,6 +87,20 @@ void main() {
   EmbyItem episode(String id) =>
       EmbyItem.fromJson({'Id': id, 'Type': 'Episode', 'Name': id});
 
+  test(
+    'resume follows confirmed controller state if backend flag leads it',
+    () async {
+      await controller.start();
+      await controller.togglePlay();
+      await _until(() => !controller.isPlaying);
+      // A native command may update this optimistic flag before a state event.
+      backend.isPlaying = true;
+      await controller.togglePlay();
+      await _until(() => controller.isPlaying);
+      expect(backend.isPlaying, isTrue);
+    },
+  );
+
   // 同一后台释放/恢复旅程的两个断言面合并:先验证正常恢复,
   // 再在同一控制器上验证换凭据后恢复被拒绝。
   test(
@@ -378,6 +392,38 @@ void main() {
         expect(controller.error, isNull, reason: stage);
         expect(backend.isPlaying, isTrue, reason: stage);
       }
+    },
+  );
+
+  test(
+    'failed restored external subtitle keeps selection uncommitted',
+    () async {
+      controller.itemId = 'movie-inception';
+      backend.failInitialization = 'subtitleUri';
+      await controller.start();
+      expect(controller.loading, isFalse);
+      expect(controller.error, isNull);
+      expect(controller.isPlaying, isTrue);
+      expect(controller.subtitleStreamIndex, isNull);
+      expect(controller.trackFailure, contains('subtitle failed'));
+    },
+  );
+
+  test(
+    'fatal media error during subtitle restore cannot commit selection',
+    () async {
+      controller.itemId = 'movie-inception';
+      final gate = backend.subtitleGate = Completer<void>();
+      final starting = controller.start();
+      await _untilElapsed(() => backend.subtitleWaiting);
+      backend.emitEvent(VideoEventKind.playing, false);
+      await _untilElapsed(() => !controller.isPlaying);
+      backend.emitEvent(VideoEventKind.error, 'Core playback failed (-5)');
+      await _untilElapsed(() => controller.disconnected);
+      gate.complete();
+      await starting;
+      expect(controller.subtitleStreamIndex, isNull);
+      expect(controller.disconnected, isTrue);
     },
   );
 
@@ -729,8 +775,11 @@ class _ControlledBackend extends FakeVideoBackend {
   }
 
   @override
-  Future<bool> setSubtitleUri(Uri uri, {String? title}) async {
-    final applied = await super.setSubtitleUri(uri, title: title);
+  Future<bool> setSubtitleUri(Uri uri, {String? title, int? index}) async {
+    if (failInitialization == 'subtitleUri') {
+      throw StateError('subtitle failed');
+    }
+    final applied = await super.setSubtitleUri(uri, title: title, index: index);
     final gate = subtitleGate;
     subtitleWaiting = gate != null;
     await gate?.future;

@@ -12,12 +12,43 @@ import unittest
 from unittest.mock import Mock, patch
 import urllib.error
 import urllib.request
+import zipfile
 
 from android_release_checks import Device, audio_metrics, pixel_check, playback_reports
 import android_release_checks as checks
 
 
 class EvidenceTests(unittest.TestCase):
+    def test_apk_rejects_legacy_media3_dex(self):
+        with tempfile.TemporaryDirectory() as folder:
+            apk = Path(folder) / 'legacy.apk'
+            with zipfile.ZipFile(apk, 'w') as archive:
+                archive.writestr('classes.dex', b'Landroidx/media3/exoplayer/ExoPlayer;')
+            with self.assertRaisesRegex(RuntimeError, 'Legacy Media3'):
+                checks.apk_native_check(apk)
+
+    def test_apk_rejects_missing_owned_core_for_flutter_abi(self):
+        with tempfile.TemporaryDirectory() as folder:
+            apk = Path(folder) / 'missing-core.apk'
+            with zipfile.ZipFile(apk, 'w') as archive:
+                archive.writestr('lib/x86_64/libflutter.so', b'engine')
+                archive.writestr('lib/x86_64/librillight_core.so', b'core')
+            with self.assertRaisesRegex(RuntimeError, 'missing owned core libraries'):
+                checks.apk_native_check(apk)
+
+    def test_apk_rejects_unresolved_native_dependency(self):
+        with tempfile.TemporaryDirectory() as folder:
+            apk = Path(folder) / 'missing-dependency.apk'
+            with zipfile.ZipFile(apk, 'w') as archive:
+                for name in ['libflutter.so', *checks.CORE_LIBRARIES]:
+                    archive.writestr('lib/x86_64/' + name, name.encode())
+            elf = b'Machine: Advanced Micro Devices X86-64\n' \
+                  b'(NEEDED) Shared library: [libavcodec.so]\n'
+            with patch.object(checks, 'readelf_path', return_value=Path('llvm-readelf')), \
+                 patch.object(checks, 'run', return_value=elf):
+                with self.assertRaisesRegex(RuntimeError, 'unresolved APK dependencies'):
+                    checks.apk_native_check(apk)
+
     def test_matrix_rejects_missing_and_failed_reports_after_first_device_passes(self):
         # Execute the real main decision path. Only Android/process boundaries
         # and app/native observations are replaced; this is not device evidence.
@@ -60,7 +91,7 @@ class EvidenceTests(unittest.TestCase):
 
             replacements = {'Device': FakeDevice, 'run': external_run, 'sdk_path': lambda: root,
                             'apk_check': lambda *a, **k: {}, 'fixture_state': lambda: state,
-                            'app_flow': observe_app, 'native_flow': lambda *a: {}}
+                            'app_flow': observe_app, 'native_flow': lambda *a: {'controls': True}}
             stack.enter_context(patch.multiple(checks, **replacements))
             stack.enter_context(patch.object(checks.subprocess, 'Popen', side_effect=process))
             stack.enter_context(patch.object(checks.time, 'sleep'))
@@ -150,6 +181,29 @@ class EvidenceTests(unittest.TestCase):
             ImageDraw.Draw(image).rectangle((200, 150, 700, 210), fill='blue')
             image.save(b)
             self.assertGreater(pixel_check(a, b)['mean_rgb_difference'], 2)
+
+    def test_tv_search_recovery_uses_result_key_without_title_label(self):
+        state = {'rows': [{'key': 'movie-01', 'label': None}]}
+        device = Device('synthetic', Path('.'))
+        device.wait = lambda predicate, _: state if predicate(state) else self.fail('Result not found')
+        self.assertEqual(checks.recovered_search_row(device, True)[1]['key'], 'movie-01')
+
+    def test_surface_reconnect_waits_for_two_colored_display_frames(self):
+        from PIL import Image, ImageDraw
+        with tempfile.TemporaryDirectory() as folder:
+            folder = Path(folder)
+            black, first, second = [folder / name for name in ('black.png', 'first.png', 'second.png')]
+            Image.new('RGB', (960, 540), 'black').save(black)
+            image = Image.new('RGB', (960, 540), 'red')
+            image.save(first)
+            ImageDraw.Draw(image).rectangle((170, 140, 790, 300), fill='blue')
+            image.save(second)
+            device = Mock()
+            device.screenshot.side_effect = [black, first, second]
+            with patch.object(checks.time, 'sleep'):
+                result = checks.reconnect_pixel_check(device)
+            self.assertGreater(result['mean_rgb_difference'], 2)
+            self.assertEqual(device.screenshot.call_count, 3)
 
 
 class FixtureTests(unittest.TestCase):

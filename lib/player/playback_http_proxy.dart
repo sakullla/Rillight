@@ -66,6 +66,7 @@ class PlaybackHttpProxy {
   MatroskaCacheIndex? _timelineIndex;
   Mp4CacheIndex? _mp4TimelineIndex;
   String? _timelineIdentity;
+  int _timelineCacheRevision = -1;
   List<CachedTimeRange> _cachedTimeline = const [];
   int _timelineSequence = 0;
   bool _refreshingTimeline = false;
@@ -128,6 +129,7 @@ class PlaybackHttpProxy {
     _timelineIndex = null;
     _mp4TimelineIndex = null;
     _timelineIdentity = null;
+    _timelineCacheRevision = -1;
     _cachedTimeline = const [];
     _timelineSequence++;
     if (_hlsPlaylists.isNotEmpty) _hlsUnknownReason = 'hlsTimingUnavailable';
@@ -242,7 +244,10 @@ class PlaybackHttpProxy {
     return end;
   }
 
-  Future<void> refreshTimeline(Duration duration) async {
+  Future<void> refreshTimeline(
+    Duration duration, {
+    bool verifyChecksum = true,
+  }) async {
     if (_hlsPlaylists.isNotEmpty) {
       await _refreshHlsTimeline(duration);
       return;
@@ -258,13 +263,22 @@ class PlaybackHttpProxy {
       }
       return;
     }
+    final identity = '${ahead.resource}:${ahead.generation}';
+    final snapshotRevision = cache!.revision;
+    if (!verifyChecksum &&
+        _timelineIdentity == identity &&
+        _timelineCacheRevision == snapshotRevision &&
+        _cachedTimeline.isNotEmpty &&
+        cache!.diagnostics['degradation'] == null) {
+      return;
+    }
     if (!_reserveCacheWorkspace(1024 * 1024)) return;
     _refreshingTimeline = true;
     _charge(1024 * 1024);
     try {
-      final identity = '${ahead.resource}:${ahead.generation}';
       if (_timelineIdentity != identity) {
         _timelineIdentity = identity;
+        _timelineCacheRevision = -1;
         _timelineIndex = null;
         _mp4TimelineIndex = null;
         _cachedTimeline = const [];
@@ -273,7 +287,7 @@ class PlaybackHttpProxy {
       final bytes = await cache!.availableRanges(
         resource: ahead.resource,
         generation: ahead.generation,
-        verifyChecksum: true,
+        verifyChecksum: verifyChecksum,
       );
       if (_closed || !identical(ahead, _readAhead)) return;
       if (bytes == null) {
@@ -287,10 +301,22 @@ class PlaybackHttpProxy {
           bytes.single.start == 0 &&
           bytes.single.end >= ahead.total) {
         _cachedTimeline = [CachedTimeRange(Duration.zero, duration)];
+        _timelineCacheRevision = snapshotRevision;
         _timelineSequence++;
         return;
       }
+      // Indexing a partially cached Matroska file can issue many immediate
+      // memory reads. Yield to the isolate event queue so seek/cancel and HTTP
+      // reads remain responsive, and bound this optional snapshot's work.
+      final indexWatch = Stopwatch()..start();
+      var indexReads = 0;
       Future<Uint8List?> read(int offset, int length) async {
+        if (++indexReads % 16 == 0) {
+          await Future<void>.delayed(Duration.zero);
+        }
+        if (indexWatch.elapsed > const Duration(milliseconds: 250)) {
+          throw TimeoutException('Cache timeline indexing budget exceeded');
+        }
         final output = BytesBuilder(copy: false);
         while (output.length < length) {
           final hit = await cache!.read(
@@ -300,7 +326,7 @@ class PlaybackHttpProxy {
             maxLength: length - output.length,
             countHit: false,
           );
-          if (hit == null) return null;
+          if (hit == null || hit.bytes.isEmpty) return null;
           output.add(hit.bytes);
         }
         return output.takeBytes();
@@ -320,6 +346,9 @@ class PlaybackHttpProxy {
         if (_closed || !identical(ahead, _readAhead)) return;
         _mp4TimelineIndex = mp4;
         _cachedTimeline = mp4?.ranges(bytes, duration) ?? const [];
+      }
+      if (_cachedTimeline.isNotEmpty) {
+        _timelineCacheRevision = snapshotRevision;
       }
       _timelineSequence++;
     } catch (_) {
@@ -1742,6 +1771,11 @@ class PlaybackHttpProxy {
               if (!read.outputStarted) return;
               throw const HttpException('Protected media data unavailable');
             }
+            if (hit.bytes.isEmpty) {
+              throw const HttpException(
+                'Protected media read made no progress',
+              );
+            }
             if (!read.outputStarted) {
               incoming.response.statusCode = rangeValue == null ? 200 : 206;
               for (final header in representation.headers.entries) {
@@ -1864,6 +1898,9 @@ class PlaybackHttpProxy {
                 if (!sent) return;
                 throw const HttpException('Media representation changed');
               }
+            }
+            if (bytes.isEmpty) {
+              throw const HttpException('Cached media read made no progress');
             }
             if (!sent) {
               incoming.response.statusCode = rangeValue == null ? 200 : 206;
@@ -2901,21 +2938,34 @@ class PlaybackHttpProxy {
     }
     _charge(512 * 1024);
     try {
+      final body = BytesBuilder(copy: false);
+      var streaming = false;
       await for (final line
           in source.transform(utf8.decoder).transform(const LineSplitter())) {
         read.check();
         final rewritten = rewrite(line);
+        final encoded = utf8.encode('$rewritten\n');
+        if (!streaming && body.length + encoded.length > 512 * 1024) {
+          streaming = true;
+          read.outputStarted = true;
+          output.add(body.takeBytes());
+          await output.flush();
+        }
+        if (streaming) {
+          read.outputStarted = true;
+          output.add(encoded);
+          await output.flush();
+        } else {
+          body.add(encoded);
+        }
         if (timelineText != null) {
-          timelineTextBytes += utf8.encode(rewritten).length + 1;
+          timelineTextBytes += encoded.length;
           if (timelineTextBytes <= 128 * 1024) {
             timelineText.write('$rewritten\n');
           } else {
             timelineText = null;
           }
         }
-        read.outputStarted = true;
-        output.add(utf8.encode('$rewritten\n'));
-        await output.flush();
       }
       await _classify(
         stable && !master
@@ -2925,6 +2975,13 @@ class PlaybackHttpProxy {
       if (!master) {
         if (stable) _replaceHlsIndex(parent, nextSegments);
         _setHlsPlaylist(parent, base, timelineText?.toString());
+      }
+      if (!streaming) {
+        read.check();
+        output.contentLength = body.length;
+        read.outputStarted = true;
+        output.add(body.takeBytes());
+        await output.flush();
       }
     } finally {
       _charge(-512 * 1024);

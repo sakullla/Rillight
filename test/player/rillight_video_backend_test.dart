@@ -15,6 +15,7 @@ class _CoreDriver implements CorePlayer {
   CorePlayerOpen? request;
   bool disposed = false;
   String? lastCommand;
+  int actualHardware = 0;
 
   @override
   Stream<CorePlayerEvent> get events => controller.stream;
@@ -27,6 +28,7 @@ class _CoreDriver implements CorePlayer {
     expect(value.url.userInfo, isEmpty);
     expect(value.url.queryParameters.containsKey('api_key'), isFalse);
     return {
+      'actualHardware': actualHardware,
       'audioIndex': 2,
       'subtitleIndex': null,
       'playableAudio': [2],
@@ -43,6 +45,7 @@ class _CoreDriver implements CorePlayer {
   ]) async {
     lastCommand = method;
     return {
+      'actualHardware': actualHardware,
       'audioIndex': 2,
       'subtitleIndex': null,
       'playableAudio': [2],
@@ -168,7 +171,9 @@ void main() {
       });
       final driver = _CoreDriver();
       final backend = RillightVideoBackend(
-        settingsStore: MemoryPlayerSettingsStore(),
+        settingsStore: MemoryPlayerSettingsStore(
+          const PlayerSettings(hardwareDecoding: HardwareDecodingMode.off),
+        ),
         diskCacheDirectory: temp,
         createPlayer: () async => driver,
       );
@@ -189,6 +194,15 @@ void main() {
         ),
       );
       expect(driver.request, isNotNull);
+      expect(driver.request!.hardware, CoreHardware.software);
+      var diagnostics = await backend.diagnostics();
+      expect(diagnostics['coreActualHardware'], 0);
+      expect(diagnostics['coreActualHardwareName'], 'software');
+      driver.actualHardware = 4;
+      await backend.setAudioIndex(2);
+      diagnostics = await backend.diagnostics();
+      expect(diagnostics['coreActualHardware'], 4);
+      expect(diagnostics['coreActualHardwareName'], 'vaapi');
       expect(
         driver.request!.url,
         isNot(
@@ -290,5 +304,40 @@ void main() {
       false,
       true,
     ]);
+  });
+
+  test('confirmed external subtitle retains its server track index', () async {
+    final temp = await Directory.systemTemp.createTemp('rillight-core-srt-');
+    final subtitleRoot = await Directory.systemTemp.createTemp(
+      'rillight-subtitles-',
+    );
+    final subtitle = File('${subtitleRoot.path}/selected.srt');
+    await subtitle.writeAsString('1\n00:00:00,000 --> 00:00:01,000\nHello\n');
+    final driver = _CoreDriver();
+    final backend = RillightVideoBackend(
+      settingsStore: MemoryPlayerSettingsStore(),
+      diskCacheDirectory: temp,
+      createPlayer: () async => driver,
+    );
+    addTearDown(() async {
+      await backend.dispose();
+      await subtitleRoot.delete(recursive: true);
+      await temp.delete(recursive: true);
+    });
+    await backend.open(
+      VideoOpenRequest(
+        sessionId: 5,
+        url: Uri.parse('http://127.0.0.1:8765/stream.mkv'),
+        mediaStreams: const [
+          MediaStreamInfo(index: 5, type: 'Subtitle', isExternal: true),
+        ],
+      ),
+    );
+    expect(await backend.setSubtitleUri(subtitle.uri, index: 5), isTrue);
+    expect(driver.lastCommand, 'subtitleUri');
+    expect(backend.selectedSubtitleIndex, 5);
+    expect((await backend.diagnostics())['selectedSubtitleIndex'], 5);
+    await backend.setSubtitleOff();
+    expect(backend.selectedSubtitleIndex, isNull);
   });
 }

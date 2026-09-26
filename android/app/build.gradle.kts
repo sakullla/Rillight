@@ -102,3 +102,26 @@ kotlin {
 flutter {
     source = "../.."
 }
+
+// Ship the pinned native core's notices with each APK. The source manifest and
+// license texts remain in packages/rillight_player; this task stages exact
+// copies as Android assets without maintaining a second tracked copy.
+val corePackage = rootProject.file("../packages/rillight_player")
+val coreNoticeAssets = layout.buildDirectory.dir("generated/rillight-core-assets")
+val stageCoreNotices = tasks.register<Sync>("stageCoreNotices") {
+    into(coreNoticeAssets)
+    from(corePackage.resolve("THIRD_PARTY_NOTICES.md")) { into("rillight-core") }
+    from(corePackage.resolve("native/core_dependencies.json")) { into("rillight-core") }
+    from(corePackage.resolve("native/licenses")) {
+        include(
+            "FFmpeg-LGPL-2.1.txt", "FFmpeg-GPL-2.0.txt", "libass-ISC.txt",
+            "FreeType-LICENSE.txt", "FreeType-FTL.txt",
+            "FriBidi-LGPL-2.1.txt", "HarfBuzz-Old-MIT.txt",
+        )
+        into("rillight-core/licenses")
+    }
+}
+android.sourceSets.getByName("main").assets.srcDir(coreNoticeAssets.get().asFile)
+tasks.matching { it.name.startsWith("merge") && it.name.endsWith("Assets") }.configureEach {
+    dependsOn(stageCoreNotices)
+}

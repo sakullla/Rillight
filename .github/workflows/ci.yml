@@ -34,7 +34,7 @@ jobs:
         run: flutter pub get
 
       - name: Check formatting
-        run: dart format --output=none --set-exit-if-changed lib test packages/rillight_player/lib packages/rillight_player/test packages/rillight_android_player/lib packages/rillight_android_player/test integration_test/android_app_probe.dart integration_test/android_player_smoke.dart
+        run: dart format --output=none --set-exit-if-changed lib test packages/rillight_player/lib packages/rillight_player/test integration_test/android_app_probe.dart integration_test/android_player_smoke.dart
 
       - name: Check test collection
         run: python3 tool/test_execution/generate_suites.py --check
@@ -48,7 +48,8 @@ jobs:
       - name: Native package and Linux installer contracts
         run: |
           flutter test packages/rillight_player/test
-          flutter test packages/rillight_android_player/test
+          python3 tool/player_core_release_checks_test.py
+          python3 tool/player_performance_checks_test.py
           python3 tool/linux_release_checks_test.py
           python3 macos/verify_bundle_test.py
           bash linux/packaging/launcher_contract_test.sh
@@ -57,7 +58,25 @@ jobs:
     uses: ./.github/workflows/linux-package.yml
 
   macos-package:
+    if: ${{ vars.MACOS_CORE_SDK_URL != '' && vars.MACOS_CORE_SDK_SHA256 != '' && vars.MACOS_CORE_DYLIB_URL != '' && vars.MACOS_CORE_DYLIB_SHA256 != '' }}
     uses: ./.github/workflows/macos-package.yml
+    with:
+      core_sdk_url: ${{ vars.MACOS_CORE_SDK_URL }}
+      core_sdk_sha256: ${{ vars.MACOS_CORE_SDK_SHA256 }}
+      core_dylib_url: ${{ vars.MACOS_CORE_DYLIB_URL }}
+      core_dylib_sha256: ${{ vars.MACOS_CORE_DYLIB_SHA256 }}
+
+  macos-handoff:
+    if: ${{ vars.MACOS_CORE_SDK_URL == '' || vars.MACOS_CORE_SDK_SHA256 == '' || vars.MACOS_CORE_DYLIB_URL == '' || vars.MACOS_CORE_DYLIB_SHA256 == '' }}
+    name: 'macOS candidate unverified: target-machine handoff'
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Record missing macOS SDK/core evidence
+        run: |
+          test -s packages/rillight_player/macos/TESTING_HANDOFF.md
+          echo 'macOS package, playback and hardware checks were not run: pinned universal SDK/core inputs are unavailable.' >> "$GITHUB_STEP_SUMMARY"
+          cat packages/rillight_player/macos/TESTING_HANDOFF.md >> "$GITHUB_STEP_SUMMARY"
 
   android:
     name: Android APK and native contracts
@@ -78,11 +97,34 @@ jobs:
           channel: stable
           cache: true
       - run: flutter pub get
+      - name: Build pinned FFmpeg and libass for all Android ABIs
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +o pipefail
+          yes | sdkmanager --licenses > /dev/null
+          set -o pipefail
+          sdkmanager --install 'ndk;28.2.13676358' 'build-tools;36.0.0'
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config
+          python3 -m pip install meson==1.9.1 ninja==1.13.0
+          prefix="$RUNNER_TEMP/rillight-android-sdk"
+          work="$RUNNER_TEMP/rillight-android-sdk-work"
+          ndk="$ANDROID_HOME/ndk/28.2.13676358"
+          python3 packages/rillight_player/native/build_android_core_dependencies.py \
+            --prefix-root "$prefix" --work "$work" --ndk "$ndk"
+          python3 packages/rillight_player/native/build_android_libass.py \
+            --prefix-root "$prefix" --work "$work" --ndk "$ndk"
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            python3 packages/rillight_player/native/verify_core_dependencies.py \
+              --prefix "$prefix/$abi" --target "android-$abi" --require-subtitles
+          done
+          echo "RILLIGHT_CORE_SDK_ROOT=$prefix" >> "$GITHUB_ENV"
       - name: Build ordinary application
         run: flutter build apk --debug
       - name: Native plugin tests
         working-directory: android
-        run: ./gradlew :rillight_android_player:testDebugUnitTest
+        run: ./gradlew :rillight_player:testDebugUnitTest
       - name: Host verifier regression and APK contract
         run: |
           python3 -m pip install Pillow==12.1.1

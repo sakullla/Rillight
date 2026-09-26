@@ -1,15 +1,17 @@
 # Linux package and playback regression
 
-Ubuntu's ffmpeg links `libjpeg.so.8`. Debian 13 only ships `libjpeg.so.62`, so
-`dpkg-shlibdeps` would otherwise emit an uninstallable `libjpeg8` Depends.
-`tool/linux_release_checks.py` copies that SONAME into the private `lib/`
-directory before packaging.
+Build the pinned FFmpeg/libass SDK with
+`packages/rillight_player/native/build_linux.sh ABS_PREFIX ABS_WORK`, then set
+`RILLIGHT_CORE_PREFIX=ABS_PREFIX` for Flutter. The SDK verifier requires the
+locked source commit, patch, library hashes, libass, VAAPI/DRM build inputs and
+HTTP/TCP input protocols. The package builder copies only verified libraries
+and records final ELF hashes after RUNPATH rewriting.
 
-`desktop_smoke.sh` launches the installed desktop entry, checks its actual
-process/window, closes it, removes only the private `libmpv.so.2` temporarily,
-then requires a visible diagnostic with the missing dependency and log path.
-The library is restored on exit. `assert_diagnostic.py` reads the dialog through
-AT-SPI; checking only a process exit code would miss a silent desktop failure.
+`tool/linux_release_checks.py verify BUNDLE` checks ELF dependencies, private
+RUNPATH resolution, absence of libmpv, bundled source provenance and final
+library hashes. The installed launcher diagnoses a missing
+`librillight_core.so` or transitive dependency visibly. Run the installed
+desktop check on Ubuntu 24.04:
 
 ```sh
 python3 tool/linux_release_checks.py verify /opt/rillight \
@@ -24,50 +26,19 @@ with `tool/player_fixtures.py`, and use a fresh output directory:
 flutter build linux --release --target tool/player_smoke.dart
 xvfb-run -a -s '-screen 0 1440x1000x24' dbus-run-session -- \
   bash linux/packaging/playback_smoke.sh build/linux/x64/release/bundle \
-  build/player-validation/media /tmp/rillight-playback-evidence
+  build/player-validation/media build/player-validation/linux-window-new
 ```
 
-The script uses the real main and child processes, a temporary Emby fixture
-server and a PulseAudio null sink. `capture_playback.py` verifies the child
-executable and captures its actual X11 window, not the desktop background or
-an mpv screenshot. H.264, HEVC, AV1 and VP9 must each show three consecutive
-colored video samples with at least two different video-region hashes during
-the same media phase. First visible video has a bounded three-second deadline.
-The audio stream must belong to that child PID. Both the app result and this
-independent window check must pass. Restore the ordinary `lib/main.dart` target
-before producing a release package. The reusable Linux CI runs both targets.
+The smoke uses Xvfb/software Mesa and a PulseAudio null sink.
+`capture_playback.py` captures the actual child-player X11 window and requires
+changing colored frames for H.264, HEVC, AV1 and VP9; it also verifies a
+sink input for the child PID. It does not establish physical audio output,
+hardware GPU performance, or a macOS/Windows result. Restore the ordinary
+`lib/main.dart` target before packaging a release.
 
-From Windows, a prepared Docker container can validate an exact snapshot of
-the current working tree, including uncommitted source edits:
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File tool/linux_playback_validation.ps1 -Container rillight-cache-validation-20260920
-```
-
-The container needs the pinned Flutter SDK at `/cache/flutter`, package cache
-at `/cache/pub`, pinned media prefix at `/cache/native`, build tools and the
-window-smoke dependencies above. Mount this repository read-only at `/source`
-with generated fixtures at `/source/build/player-validation/media`. The
-wrapper copies sources to a new `/work/rillight-validation-*` directory,
-builds both production and smoke targets, audits their ELF/RUNPATH resolution,
-runs the native package tests with the bundled real libmpv, and runs the
-unchanged window-pixel checks. Evidence, including the source archive hash and
-Git base, is copied to `build/player-validation/linux-current-*/`, including
-on failure. It does not rebuild media libraries, alter the host build, or
-claim an Ubuntu 24.04 install check from an Ubuntu 22.04 container.
-
-This catches the scaler-padding regression found during integration: mpv
-0.41.0 allocated a six-tap LUT in eight-channel rows without initializing the
-last two channels. Observed NaN padding contaminated GL linear filtering.
-Decoded CPU frames and the first chroma-merge pass were valid; the next scaling
-pass and window were black. An isolated release build with zero padding passed
-three H.264 and three HEVC runs; injecting NaN only into the unused channels made
-all six runs black. The fixed, hashed one-line patch is shipped with the bundle.
-The normal scaler, frame dropping, decoder direct rendering and automatic
-hardware selection remain enabled. This is not evidence about the earlier
-Windows flicker report.
-
-Xvfb/software Mesa and a virtual audio sink prove this tested path only.
-Record the three-second drop-count deltas, RSS, actual hardware decoder and
-mpv A/V samples; do not treat a colored window as proof of real-time throughput,
-physical audio output, GPU hardware decode or end-to-end synchronization.
+From Windows, `tool/linux_playback_validation.ps1 -Container NAME` copies a
+current source snapshot into a prepared Linux container, builds production and
+smoke targets, and saves logs under `build/player-validation/`. The container
+needs Flutter 3.47.4, a verified core SDK at `/cache/native`, and the listed
+window-smoke dependencies. The script reports failures as failures; it does
+not turn Docker/Xvfb evidence into a Linux hardware claim.

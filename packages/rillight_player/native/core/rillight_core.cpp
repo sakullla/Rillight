@@ -34,6 +34,7 @@ extern "C" {
 #include <libavutil/channel_layout.h>
 #include <libavutil/hwcontext.h>
 #include <libavutil/imgutils.h>
+#include <libavutil/pixdesc.h>
 #include <libswresample/swresample.h>
 #include <libswscale/swscale.h>
 #if RILLIGHT_HAVE_LIBASS
@@ -65,8 +66,11 @@ struct LoopbackIo {
 struct LoopbackHandle {
   LoopbackIo *owner;
   AVIOContext *io = nullptr;
+  std::string url;
+  int64_t position = 0;
   bool media = false;
   std::atomic<uint64_t> read_generation{0};
+  uint64_t open_generation = 0;
 };
 
 bool sealed_loopback_url(const char *url) {
@@ -92,12 +96,45 @@ int loopback_interrupted(void *opaque) {
                                handle->owner->media_generation.load());
 }
 
+int loopback_open_at(LoopbackHandle *handle, int64_t position) {
+  if (handle->owner->closing.load() || !sealed_loopback_url(handle->url.c_str()))
+    return AVERROR_EXIT;
+  const uint64_t generation = handle->owner->media_generation.load();
+  AVDictionary *options = nullptr;
+  av_dict_set(&options, "rw_timeout", "15000000", 0);
+  // Every reconnect must retain the same sealed route and redirect policy.
+  av_dict_set(&options, "max_redirects", "0", 0);
+  const AVIOInterruptCB interrupt{loopback_interrupted, handle};
+  AVIOContext *replacement = nullptr;
+  int result = avio_open2(&replacement, handle->url.c_str(), AVIO_FLAG_READ,
+                          &interrupt, &options);
+  av_dict_free(&options);
+  if (result < 0) return result;
+  if (position > 0) {
+    const int64_t seeked = avio_seek(replacement, position, SEEK_SET);
+    if (seeked != position) {
+      avio_closep(&replacement);
+      return seeked < 0 ? static_cast<int>(seeked) : AVERROR(EIO);
+    }
+  }
+  if (handle->media && handle->owner->media_generation.load() != generation) {
+    avio_closep(&replacement);
+    return AVERROR_EXIT;
+  }
+  if (handle->io) avio_closep(&handle->io);
+  handle->io = replacement;
+  handle->position = position;
+  handle->open_generation = generation;
+  return 0;
+}
+
 void *loopback_open(void *opaque, const char *url, int flags) {
   auto *owner = static_cast<LoopbackIo *>(opaque);
   if (!owner || owner->closing.load() || !sealed_loopback_url(url) ||
       !(flags & AVIO_FLAG_READ) || (flags & AVIO_FLAG_WRITE)) return nullptr;
   auto handle = std::make_unique<LoopbackHandle>();
   handle->owner = owner;
+  handle->url = url;
   {
     std::lock_guard lock(owner->thread_mutex);
     if (owner->media_thread == std::thread::id())
@@ -105,32 +142,46 @@ void *loopback_open(void *opaque, const char *url, int flags) {
     handle->media = owner->media_thread == std::this_thread::get_id();
   }
   handle->read_generation = owner->media_generation.load();
-  AVDictionary *options = nullptr;
-  av_dict_set(&options, "rw_timeout", "15000000", 0);
-  // FFmpeg's HTTP protocol otherwise follows Location itself, bypassing the
-  // per-open sealed route check on a redirect to a remote server.
-  av_dict_set(&options, "max_redirects", "0", 0);
-  const AVIOInterruptCB interrupt{loopback_interrupted, handle.get()};
-  const int result = avio_open2(&handle->io, url, AVIO_FLAG_READ,
-                                &interrupt, &options);
-  av_dict_free(&options);
-  if (result < 0) return nullptr;
+  if (loopback_open_at(handle.get(), 0) < 0) return nullptr;
   return handle.release();
 }
 
 int loopback_read(void *, void *pointer, uint8_t *data, int size) {
   auto *handle = static_cast<LoopbackHandle *>(pointer);
   if (!handle || !handle->io || size <= 0) return AVERROR(EINVAL);
-  handle->read_generation = handle->owner->media_generation.load();
-  return avio_read(handle->io, data, size);
+  const uint64_t generation = handle->owner->media_generation.load();
+  handle->read_generation = generation;
+  if (handle->media && handle->open_generation != generation) {
+    const int reopened = loopback_open_at(handle, handle->position);
+    if (reopened < 0) return reopened;
+  }
+  int result = avio_read(handle->io, data, size);
+  if (result > 0) handle->position += result;
+  if (result == AVERROR(EIO) && !handle->owner->closing.load() &&
+      handle->owner->media_generation.load() == generation &&
+      loopback_open_at(handle, handle->position) == 0) {
+    result = avio_read(handle->io, data, size);
+    if (result > 0) handle->position += result;
+  }
+  return result;
 }
 
 int64_t loopback_seek(void *, void *pointer, int64_t offset, int whence) {
   auto *handle = static_cast<LoopbackHandle *>(pointer);
   if (!handle || !handle->io) return AVERROR(EINVAL);
-  handle->read_generation = handle->owner->media_generation.load();
+  const uint64_t generation = handle->owner->media_generation.load();
+  const bool interrupted = handle->open_generation != generation;
   if (whence & AVSEEK_SIZE) return avio_size(handle->io);
-  return avio_seek(handle->io, offset, whence & ~AVSEEK_FORCE);
+  handle->read_generation = generation;
+  // An interrupted HTTP read may leave FFmpeg's nested AVIO in an error
+  // state. Seek on a fresh sealed route instead of reusing that connection.
+  if (interrupted && (whence & ~AVSEEK_FORCE) == SEEK_SET && offset >= 0) {
+    const int reopened = loopback_open_at(handle, offset);
+    return reopened < 0 ? reopened : offset;
+  }
+  const int64_t result = avio_seek(handle->io, offset, whence & ~AVSEEK_FORCE);
+  if (result >= 0) handle->position = result;
+  return result;
 }
 
 void loopback_close(void *, void *pointer) {
@@ -170,10 +221,15 @@ struct Source {
   bool encrypted_eof = false;
 };
 
+struct HardwareFormatSelection {
+  AVPixelFormat preferred = AV_PIX_FMT_NONE;
+  bool allow_software_fallback = true;
+};
+
 struct Decoder {
   AVCodecContext *context = nullptr;
   int stream = -1;
-  std::shared_ptr<AVPixelFormat> hw_format;
+  std::shared_ptr<HardwareFormatSelection> hw_format;
   uint32_t hardware = RILLIGHT_CORE_HW_NONE;
   int error = 0;
 };
@@ -634,8 +690,10 @@ int read_external_ass(RillightCoreImpl *core, const std::string &url,
       std::this_thread::sleep_for(std::chrono::milliseconds(20));
       continue;
     }
+    // AVIO returns AVERROR_EOF for a complete HTTP resource. The in-memory
+    // test source returns zero, so accept both successful EOF forms.
+    if (count == 0 || count == AVERROR_EOF) break;
     if (count < 0) { result = count; break; }
-    if (count == 0) break;
     if (count > static_cast<int>(sizeof(buffer))) {
       result = AVERROR(EINVAL);
       break;
@@ -1145,10 +1203,33 @@ const char *mediacodec_decoder_name(AVCodecID codec) {
 
 AVPixelFormat choose_hardware_format(AVCodecContext *context,
                                      const AVPixelFormat *formats) {
-  const auto wanted = *static_cast<AVPixelFormat *>(context->opaque);
+  const auto *selection =
+      static_cast<HardwareFormatSelection *>(context->opaque);
   for (const AVPixelFormat *format = formats; *format != AV_PIX_FMT_NONE;
        ++format) {
-    if (*format == wanted) return *format;
+    if (*format == selection->preferred) return *format;
+  }
+  // A device may initialize successfully yet reject a particular stream
+  // profile at the first frame (for example AV1 on software Mesa VAAPI).
+  // FFmpeg calls get_format again with the remaining software formats.
+  if (selection->allow_software_fallback) {
+    for (const AVPixelFormat *format = formats; *format != AV_PIX_FMT_NONE;
+         ++format) {
+      const AVPixFmtDescriptor *description = av_pix_fmt_desc_get(*format);
+      if (description && !(description->flags & AV_PIX_FMT_FLAG_HWACCEL))
+        return *format;
+    }
+  }
+  return AV_PIX_FMT_NONE;
+}
+
+AVPixelFormat choose_software_format(AVCodecContext *,
+                                     const AVPixelFormat *formats) {
+  for (const AVPixelFormat *format = formats; *format != AV_PIX_FMT_NONE;
+       ++format) {
+    const AVPixFmtDescriptor *description = av_pix_fmt_desc_get(*format);
+    if (description && !(description->flags & AV_PIX_FMT_FLAG_HWACCEL))
+      return *format;
   }
   return AV_PIX_FMT_NONE;
 }
@@ -1159,7 +1240,12 @@ Decoder make_decoder(AVFormatContext *format, int index,
   Decoder result;
   if (index < 0 || index >= static_cast<int>(format->nb_streams)) return result;
   const auto *parameters = format->streams[index]->codecpar;
-  const AVCodec *codec = avcodec_find_decoder(parameters->codec_id);
+  // FFmpeg's native AV1 decoder handles hardware surfaces only. A software
+  // request must select the separately bundled dav1d decoder explicitly.
+  const AVCodec *codec = preference == RILLIGHT_CORE_HW_NONE &&
+                                 parameters->codec_id == AV_CODEC_ID_AV1
+      ? avcodec_find_decoder_by_name("libdav1d")
+      : avcodec_find_decoder(parameters->codec_id);
   if (preference == RILLIGHT_CORE_HW_MEDIACODEC &&
       parameters->codec_type == AVMEDIA_TYPE_VIDEO) {
     const char *name = mediacodec_decoder_name(parameters->codec_id);
@@ -1176,6 +1262,9 @@ Decoder make_decoder(AVFormatContext *format, int index,
   }
   if (parameters->codec_type == AVMEDIA_TYPE_SUBTITLE)
     context->pkt_timebase = format->streams[index]->time_base;
+  if (preference == RILLIGHT_CORE_HW_NONE &&
+      parameters->codec_type == AVMEDIA_TYPE_VIDEO)
+    context->get_format = choose_software_format;
   if (preference != RILLIGHT_CORE_HW_NONE &&
       parameters->codec_type == AVMEDIA_TYPE_VIDEO) {
     const AVHWDeviceType device_type = hardware_device_type(preference);
@@ -1196,7 +1285,9 @@ Decoder make_decoder(AVFormatContext *format, int index,
                                              nullptr, 0);
       if (device_error >= 0) {
         context->hw_device_ctx = device;
-        result.hw_format = std::make_shared<AVPixelFormat>(selected->pix_fmt);
+        result.hw_format = std::make_shared<HardwareFormatSelection>(
+            HardwareFormatSelection{selected->pix_fmt,
+                                    allow_software_fallback});
         context->opaque = result.hw_format.get();
         context->get_format = choose_hardware_format;
         result.hardware = preference;
@@ -1609,7 +1700,7 @@ int decode_packet(RillightCoreImpl *core, AVFormatContext *format,
       bool decoded_with_hardware = false;
       // A MediaCodec CPU frame does not identify the selected codec as hardware.
       if (decoder.hardware != RILLIGHT_CORE_HW_NONE && decoder.hw_format &&
-          decoded->format == *decoder.hw_format) {
+          decoded->format == decoder.hw_format->preferred) {
         downloaded = av_frame_alloc();
         if (!downloaded) { result = AVERROR(ENOMEM); break; }
         result = av_hwframe_transfer_data(downloaded, decoded, 0);
@@ -1984,12 +2075,36 @@ void run(RillightCoreImpl *core, uint64_t session) {
       break;
     }
     if (result < 0) { av_packet_free(&packet); break; }
-    if (packet->stream_index == video.stream)
+    if (packet->stream_index == video.stream) {
       result = decode_packet(core, format, video, packet, video.stream,
                              &scale, &audio_filter, &subtitle_cues, &ass,
                              core->speed, session,
                              timeline);
-    else if (packet->stream_index == audio.stream)
+      if (result < 0 && video.hardware != RILLIGHT_CORE_HW_NONE &&
+          core->allow_software_fallback) {
+        // A configured device can still reject the stream profile when the
+        // first packet is decoded. Retry that retained packet in software;
+        // the replacement decoder has no device preference, so this is
+        // bounded to one fallback for this stream.
+        Decoder replacement = make_decoder(format, video.stream);
+        if (replacement.context) {
+          avcodec_free_context(&video.context);
+          video = replacement;
+          sws_freeContext(scale);
+          scale = nullptr;
+          {
+            std::lock_guard lock(core->mutex);
+            for (auto &track : core->tracks) {
+              if (track.stream_index == video.stream)
+                track.actual_hardware = RILLIGHT_CORE_HW_NONE;
+            }
+          }
+          result = decode_packet(core, format, video, packet, video.stream,
+                                 &scale, &audio_filter, &subtitle_cues, &ass,
+                                 core->speed, session, timeline);
+        }
+      }
+    } else if (packet->stream_index == audio.stream)
       result = decode_packet(core, format, audio, packet, video.stream,
                              &scale, &audio_filter, &subtitle_cues, &ass,
                              core->speed, session,
@@ -2218,6 +2333,7 @@ int rillight_core_select_audio(RillightCore *pointer, int stream_index,
       core->state == RILLIGHT_CORE_ENDED ||
       core->state == RILLIGHT_CORE_FAILED ||
       !accept_operation(core, operation_id)) return -1;
+  if (core->audio_index == stream_index && !core->audio_change) return 0;
   if (core->state == RILLIGHT_CORE_PLAYING && !core->audio_clock_active)
     core->base_position += static_cast<int64_t>(
         std::chrono::duration_cast<std::chrono::microseconds>(
@@ -2244,8 +2360,7 @@ int rillight_core_select_subtitle(RillightCore *pointer, int stream_index,
   if (core->state == RILLIGHT_CORE_IDLE ||
       core->state == RILLIGHT_CORE_OPENING ||
       core->state == RILLIGHT_CORE_ENDED ||
-      core->state == RILLIGHT_CORE_FAILED ||
-      core->input_exhausted) return -1;
+      core->state == RILLIGHT_CORE_FAILED) return -1;
   if (stream_index != -1 &&
       std::none_of(core->tracks.begin(), core->tracks.end(),
                    [stream_index](const RillightCoreTrack &track) {
@@ -2253,6 +2368,9 @@ int rillight_core_select_subtitle(RillightCore *pointer, int stream_index,
                             track.stream_index == stream_index;
                    })) return -1;
   if (!accept_operation(core, operation_id)) return -1;
+  if (core->subtitle_index == stream_index && !core->subtitle_change)
+    return 0;
+  if (core->input_exhausted) return -1;
   if (core->state == RILLIGHT_CORE_PLAYING && !core->audio_clock_active)
     core->base_position += static_cast<int64_t>(
         std::chrono::duration_cast<std::chrono::microseconds>(
@@ -2330,6 +2448,9 @@ int rillight_core_set_speed(RillightCore *pointer, double speed,
       core->state == RILLIGHT_CORE_ENDED ||
       core->state == RILLIGHT_CORE_FAILED ||
       !accept_operation(core, operation_id)) return -1;
+  // Restoring the default rate during startup must not tear down a healthy
+  // read timeline and wait for another network open.
+  if (core->requested_speed == speed) return 0;
   if (core->state == RILLIGHT_CORE_PLAYING && !core->audio_clock_active)
     core->base_position += static_cast<int64_t>(
         std::chrono::duration_cast<std::chrono::microseconds>(

@@ -36,7 +36,7 @@ void main() {
   });
 
   test(
-    'PlaybackInfo sends mpv DeviceProfile and returns Direct Stream',
+    'PlaybackInfo sends owned-core DeviceProfile and returns Direct Stream',
     () async {
       final info = await client.getPlaybackInfo(itemId: 'movie-inception');
       expect(info.playSessionId, isNotEmpty);
@@ -44,6 +44,7 @@ void main() {
       expect(info.primarySource?.directStreamUrl, contains('static=true'));
       // DirectPlayProfiles 的编解码内容细节由 device_profile_cases 覆盖。
       expect(server.lastDeviceProfile, isNotNull);
+      expect(server.lastDeviceProfile!['Name'], 'Rillight owned FFmpeg core');
     },
   );
 
@@ -54,7 +55,7 @@ void main() {
   });
 
   test(
-    'PlaybackInfo accepts the current backend profile without mutating desktop defaults',
+    'PlaybackInfo accepts Android capability profile without mutating defaults',
     () async {
       final profile = androidDeviceProfile(h264: true, aac: true);
       await client.getPlaybackInfo(
@@ -62,27 +63,34 @@ void main() {
         deviceProfile: profile,
         forceTranscode: true,
       );
-      expect(server.lastDeviceProfile!['Name'], 'Rillight Android Media3');
+      expect(
+        server.lastDeviceProfile!['Name'],
+        'Rillight Android owned FFmpeg core',
+      );
       await client.getPlaybackInfo(itemId: 'movie-inception');
+      expect(server.lastDeviceProfile!['Name'], 'Rillight owned FFmpeg core');
       expect(
         server.lastDeviceProfile!['DirectPlayProfiles'].toString(),
-        contains('hevc'),
+        isNot(contains('hevc')),
       );
     },
   );
 
-  test('PGS subtitle request stays direct with Embed declaration', () async {
-    // 设备声明 pgs/pgssub 为文档值 Embed 后,直连场景服务端不强制烧录,
-    // 仍返回 DirectStream,由 mpv 本地渲染内嵌位图轨道。
-    final info = await client.getPlaybackInfo(
-      itemId: 'movie-pgs',
-      subtitleStreamIndex: 2,
-    );
-    expect(info.primarySource?.supportsDirectStream, isTrue);
-    expect(info.primarySource?.transcodingUrl, isNull);
-    expect(info.primarySource?.directStreamUrl, isNotNull);
-    // SubtitleProfiles 的声明内容细节由 device_profile_cases 覆盖。
-  });
+  test(
+    'PGS subtitle request asks server to burn in unsupported bitmap',
+    () async {
+      final info = await client.getPlaybackInfo(
+        itemId: 'movie-pgs',
+        subtitleStreamIndex: 2,
+      );
+      expect(info.primarySource?.supportsDirectStream, isFalse);
+      expect(
+        info.primarySource?.transcodingUrl,
+        contains('SubtitleStreamIndex=2'),
+      );
+      // SubtitleProfiles 的声明内容细节由 device_profile_cases 覆盖。
+    },
+  );
 
   test('dvdsub bitmap subtitle still burns in via transcode', () async {
     // 设备未声明可本地渲染的位图格式(如 dvdsub)仍走烧录转码。

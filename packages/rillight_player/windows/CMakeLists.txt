@@ -47,4 +47,9 @@ set(rillight_player_bundled_libraries ${CORE_RUNTIME} PARENT_SCOPE)
 set(RILLIGHT_RUNTIME_NOTICES "$<TARGET_FILE_DIR:${BINARY_NAME}>/data/rillight_player")
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../native/core_dependencies.json"
               "${RILLIGHT_CORE_PREFIX_WINDOWS_X64}/rillight-core-dependencies.json"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../THIRD_PARTY_NOTICES.md"
         DESTINATION "${RILLIGHT_RUNTIME_NOTICES}" COMPONENT Runtime)
+install(CODE "file(REMOVE_RECURSE \"${RILLIGHT_RUNTIME_NOTICES}/licenses\")"
+        COMPONENT Runtime)
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../native/licenses/"
+        DESTINATION "${RILLIGHT_RUNTIME_NOTICES}/licenses" COMPONENT Runtime)
