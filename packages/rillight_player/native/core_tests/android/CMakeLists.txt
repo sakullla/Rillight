@@ -18,7 +18,8 @@ if(RILLIGHT_CORE_PREFIX)
                    "${CMAKE_CURRENT_BINARY_DIR}/rillight_core_build")
   foreach(component avformat avcodec avutil)
     find_library(hls_${component} NAMES ${component}
-      PATHS "${RILLIGHT_CORE_PREFIX}/lib" NO_DEFAULT_PATH REQUIRED)
+      PATHS "${RILLIGHT_CORE_PREFIX}/lib" NO_DEFAULT_PATH
+      NO_CMAKE_FIND_ROOT_PATH REQUIRED)
   endforeach()
   add_executable(rillight_android_encrypted_hls_test encrypted_hls_test.cpp)
   target_include_directories(rillight_android_encrypted_hls_test PRIVATE
