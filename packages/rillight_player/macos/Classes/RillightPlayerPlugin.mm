@@ -404,7 +404,7 @@ using Clock = std::chrono::steady_clock;
 }
 
 - (void)stop:(void (^)(void))done {
-  // Method calls and unregister callbacks are delivered on the main thread.
+  // Method calls and _closeBlocks access stay on Flutter's platform thread.
   if (done) [_closeBlocks addObject:[done copy]];
   if (stopped.exchange(true)) return;
   dispatch_async(_queue, ^{
@@ -422,15 +422,21 @@ using Clock = std::chrono::steady_clock;
 
 - (void)onTextureUnregistered:(NSObject<FlutterTexture>*)texture {
   (void)texture;
+  // Flutter calls this on its raster thread. Producer work is already drained
+  // before unregister, and the retained pixel buffer can be released here.
   [lock lock];
   if (latest) { CVPixelBufferRelease(latest); latest = nullptr; }
   [lock unlock];
-  NSArray* callbacks = [_closeBlocks copy];
-  [_closeBlocks removeAllObjects];
-  for (id entry in callbacks) {
-    void (^callback)(void) = entry;
-    callback();
-  }
+  dispatch_async(dispatch_get_main_queue(), ^{
+    // Complete dispose on the platform thread, after the raster callback has
+    // released its reference. This also serializes duplicate dispose calls.
+    NSArray* callbacks = [self->_closeBlocks copy];
+    [self->_closeBlocks removeAllObjects];
+    for (id entry in callbacks) {
+      void (^callback)(void) = entry;
+      callback();
+    }
+  });
 }
 @end
 
