@@ -114,7 +114,7 @@ void main() {
 
   Future<void> tapSheetText(WidgetTester tester, String text) async {
     final list = find.descendant(
-      of: find.byType(BottomSheet),
+      of: find.byKey(const Key('mobile-player-options')),
       matching: find.byType(Scrollable),
     );
     final target = find.text(text);
@@ -294,21 +294,21 @@ void main() {
       await tester.pumpAndSettle();
       expect(backend.position, greaterThan(const Duration(minutes: 70)));
 
-      // 音轨/字幕入口已收入"更多"底部面板(fca9712),不再有顶层 Tooltip。
+      // 更多面板随横竖屏选择侧边或底部布局，音轨字幕功能保持。
       final more = find.byKey(const Key('mobile-player-more'));
       await tester.ensureVisible(more);
       await tester.pumpAndSettle();
       await tester.tap(more);
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 400));
-      expect(find.byType(BottomSheet), findsOneWidget);
+      expect(find.byKey(const Key('mobile-player-options')), findsOneWidget);
       await tapSheetText(tester, '英文字幕');
       expect(current.subtitleStreamIndex, 4);
       expect(current.trackFailure, isNull);
       expect(backend.subtitleIndex, 4);
       await tester.binding.handlePopRoute();
       await tester.pumpAndSettle();
-      expect(find.byType(BottomSheet), findsNothing);
+      expect(find.byKey(const Key('mobile-player-options')), findsNothing);
       expect(find.byType(MobilePlayerPage), findsOneWidget);
       expectPhoneOnly(tester);
 
@@ -344,7 +344,7 @@ void main() {
       await tester.tap(find.byKey(const Key('mobile-player-more')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 400));
-      expect(find.byType(BottomSheet), findsOneWidget);
+      expect(find.byKey(const Key('mobile-player-options')), findsOneWidget);
       await tester.binding.handlePopRoute();
       await tester.pumpAndSettle();
       expect(find.byType(MobilePlayerPage), findsOneWidget);
@@ -395,11 +395,11 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('mobile-detail-play')));
     await tester.pumpAndSettle();
-    // 音轨/字幕入口已收入"更多"底部面板(fca9712),不再有顶层 Tooltip。
+    // 更多面板随横竖屏选择侧边或底部布局，音轨字幕功能保持。
     await tester.tap(find.byKey(const Key('mobile-player-more')));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
-    expect(find.byType(BottomSheet), findsOneWidget);
+    expect(find.byKey(const Key('mobile-player-options')), findsOneWidget);
     final token = app.auth.client.accessToken;
     server.issuedTokens.clear();
     unawaited(app.auth.client.getUser());
@@ -411,7 +411,7 @@ void main() {
     await tester.pump(const Duration(seconds: 4));
     await tester.pumpAndSettle();
     expect(app.auth.client.accessToken, isNot(token));
-    expect(find.byType(BottomSheet), findsNothing);
+    expect(find.byKey(const Key('mobile-player-options')), findsNothing);
     expect(find.byType(MobilePlayerPage), findsNothing);
     expect(find.byType(MobileDetailPage), findsOneWidget);
     await tester.binding.handlePopRoute();

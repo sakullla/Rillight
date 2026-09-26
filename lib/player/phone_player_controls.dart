@@ -13,12 +13,12 @@ import 'package:rillight/player/danmaku/danmaku_keys.dart';
 import 'package:rillight/player/phone_player_gestures.dart';
 import 'package:rillight/player/buffered_ranges_track.dart';
 import 'package:rillight/player/player_controller.dart';
+import 'package:rillight/player/player_cache_status.dart';
 import 'package:rillight/player/player_settings.dart';
 
-/// Control layer of the phone player: top bar (back / title / lock / more),
-/// a bottom-edge transport (play, progress, time) and the "more" panel that
-/// hosts picture scale, danmaku, tracks, speed, media source, mute and volume.
-/// Transport hit targets stay at least 48dp with an 8dp gap.
+/// Phone controls with a title bar, central transport and a full-width timeline.
+/// Common options have direct bottom shortcuts; the full settings panel keeps
+/// the less frequent picture, volume and media choices together.
 ///
 /// The video surface and control scrims extend to the screen edges. Buttons
 /// and center content avoid gesture regions and cutouts. In landscape an OEM
@@ -171,121 +171,276 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
     if (!_locked) _controller.onUserActivity();
   }
 
+  bool get _canControl =>
+      !_controller.loading &&
+      _controller.error == null &&
+      !_controller.disconnected &&
+      !_controller.sessionExpired;
+
   @override
   Widget build(BuildContext context) {
-    final insets = phonePlayerControlInsets(
-      MediaQuery.of(context),
-      androidSdkInt: _androidSdk,
-    );
-    return Column(
-      children: [
-        _buildTopBar(context, insets),
-        Expanded(
-          child: Padding(
-            padding: EdgeInsets.only(left: insets.left, right: insets.right),
-            child: widget.center,
-          ),
+    final media = MediaQuery.of(context);
+    final insets = phonePlayerControlInsets(media, androidSdkInt: _androidSdk);
+    final landscape = media.size.width > media.size.height;
+    return IconTheme(
+      data: const IconThemeData(color: Colors.white),
+      child: DefaultTextStyle.merge(
+        style: const TextStyle(color: Colors.white),
+        child: Column(
+          children: [
+            _buildTopBar(context, insets),
+            Expanded(
+              child: Padding(
+                padding: EdgeInsets.only(
+                  left: insets.left,
+                  right: insets.right,
+                ),
+                child: !_locked && _canControl
+                    ? Center(child: _buildTransport(context, landscape))
+                    : widget.center,
+              ),
+            ),
+            if (!_locked) _buildBottomBar(context, insets, landscape),
+          ],
         ),
-        if (!_locked) _buildBottomBar(context, insets),
-      ],
+      ),
+    );
+  }
+
+  BoxDecoration _scrim(BuildContext context, {required bool top}) {
+    return BoxDecoration(
+      gradient: LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: [
+          Colors.black.withValues(alpha: AppScrim.of(context, top ? .82 : 0)),
+          Colors.black.withValues(alpha: AppScrim.of(context, top ? .40 : .50)),
+          Colors.black.withValues(alpha: AppScrim.of(context, top ? 0 : .90)),
+        ],
+        stops: const [0, .55, 1],
+      ),
     );
   }
 
   Widget _buildTopBar(BuildContext context, EdgeInsets insets) {
     final l = AppLocalizations.of(context);
-    final c = _controller;
-    if (_locked) {
-      // Locked: only the unlock affordance stays on screen.
-      return DecoratedBox(
-        key: const Key('mobile-player-top-scrim'),
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [
-              Colors.black.withValues(
-                alpha: AppScrim.of(context, AppMobileControls.topAlpha),
-              ),
-              Colors.black.withValues(
-                alpha: AppScrim.of(context, AppMobileControls.topMidAlpha),
-              ),
-              Colors.black.withValues(alpha: AppScrim.of(context, 0)),
-            ],
-            stops: const [0, 0.55, 1],
-          ),
-        ),
-        child: Padding(
-          padding: EdgeInsets.only(
-            left: insets.left,
-            top: insets.top,
-            right: insets.right,
-          ),
-          child: Row(
-            children: [
-              IconButton(
-                key: const Key('mobile-player-unlock'),
-                tooltip: l.mobileUnlock,
-                style: _phoneChromeButton,
-                onPressed: toggleLock,
-                icon: const Icon(Icons.lock),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
     return DecoratedBox(
       key: const Key('mobile-player-top-scrim'),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            Colors.black.withValues(
-              alpha: AppScrim.of(context, AppMobileControls.topAlpha),
-            ),
-            Colors.black.withValues(
-              alpha: AppScrim.of(context, AppMobileControls.topMidAlpha),
-            ),
-            Colors.black.withValues(alpha: AppScrim.of(context, 0)),
-          ],
-          stops: const [0, 0.55, 1],
-        ),
-      ),
+      decoration: _scrim(context, top: true),
       child: Padding(
         padding: EdgeInsets.only(
           left: insets.left,
           top: insets.top,
           right: insets.right,
+          bottom: 12,
         ),
         child: Row(
+          children: _locked
+              ? [
+                  IconButton(
+                    key: const Key('mobile-player-unlock'),
+                    tooltip: l.mobileUnlock,
+                    style: _phoneChromeButton,
+                    onPressed: toggleLock,
+                    icon: const Icon(Icons.lock),
+                  ),
+                ]
+              : [
+                  IconButton(
+                    tooltip: l.closePlayer,
+                    style: _phoneChromeButton,
+                    onPressed: widget.onClose,
+                    icon: const Icon(Icons.arrow_back),
+                  ),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: Text(
+                      _controller.item?.name ?? l.playerLoading,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    key: const Key('mobile-player-lock'),
+                    tooltip: l.mobileLock,
+                    style: _phoneChromeButton,
+                    onPressed: toggleLock,
+                    icon: const Icon(Icons.lock_open),
+                  ),
+                ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTransport(BuildContext context, bool landscape) {
+    final l = AppLocalizations.of(context);
+    final c = _controller;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _transportButton(
+          key: const Key('mobile-player-rewind'),
+          tooltip: l.mobileRewind,
+          onPressed: () => c.seekRelative(const Duration(seconds: -10)),
+          icon: Icons.replay_10,
+        ),
+        SizedBox(width: landscape ? 40 : 28),
+        _transportButton(
+          key: const Key('mobile-player-toggle'),
+          tooltip: c.isPlaying ? l.pause : l.play,
+          onPressed: c.togglePlay,
+          icon: c.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+          primary: true,
+        ),
+        SizedBox(width: landscape ? 40 : 28),
+        _transportButton(
+          key: const Key('mobile-player-forward'),
+          tooltip: l.mobileForward,
+          onPressed: () => c.seekRelative(const Duration(seconds: 10)),
+          icon: Icons.forward_10,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildBottomBar(
+    BuildContext context,
+    EdgeInsets insets,
+    bool landscape,
+  ) {
+    final l = AppLocalizations.of(context);
+    final c = _controller;
+    final durationMs = c.duration.inMilliseconds.toDouble();
+    final cache = PlayerCacheStatus(
+      key: const Key('mobile-player-cache-status'),
+      snapshot: c.bufferSnapshot,
+      bytesPerSecond: c.cacheSpeedBytesPerSec,
+      position: c.position,
+      duration: c.duration,
+      textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+      color: Colors.white70,
+    );
+    final clock = Text(
+      '${phonePlayerClock(Duration(milliseconds: (_seek ?? c.position.inMilliseconds).round()))} / ${phonePlayerClock(c.duration)}',
+      key: const Key('mobile-player-clock'),
+      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+    );
+    final notices = [
+      if (c.progressSyncFailed) l.progressSyncFailed,
+      if (c.networkSlow) l.networkSlowHint,
+      if (c.trackFailure != null) l.mobileTrackUnavailable,
+      if (c.backgroundReleased) l.mobileBackgroundPaused,
+      if (c.playbackEnded) l.playbackEnded,
+    ];
+    return DecoratedBox(
+      key: const Key('mobile-player-bottom-scrim'),
+      decoration: _scrim(context, top: false),
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(
+          insets.left + 12,
+          12,
+          insets.right + 12,
+          insets.bottom + 4,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            IconButton(
-              tooltip: l.closePlayer,
-              style: _phoneChromeButton,
-              onPressed: widget.onClose,
-              icon: const Icon(Icons.arrow_back),
-            ),
-            Expanded(
-              child: Text(
-                c.item?.name ?? l.playerLoading,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+            if (notices.isNotEmpty)
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 40),
+                child: SingleChildScrollView(
+                  child: Text(
+                    notices.join(' · '),
+                    style: const TextStyle(fontSize: 12, color: Colors.white70),
+                  ),
+                ),
+              ),
+            if (c.isBuffering && !c.loading)
+              const LinearProgressIndicator(minHeight: 2),
+            BufferedRangesTrack(
+              snapshot: c.bufferSnapshot,
+              duration: c.duration,
+              child: Slider(
+                key: const Key('mobile-player-seek'),
+                value: (_seek ?? c.position.inMilliseconds.toDouble()).clamp(
+                  0,
+                  durationMs,
+                ),
+                max: durationMs.clamp(1, double.infinity),
+                onChangeStart: _canControl
+                    ? (_) => c.setControlsPinned(true)
+                    : null,
+                onChanged: _canControl
+                    ? (v) => setState(() => _seek = v)
+                    : null,
+                onChangeEnd: (v) {
+                  setState(() => _seek = null);
+                  c.seekTo(Duration(milliseconds: v.round()));
+                  c.setControlsPinned(false);
+                },
               ),
             ),
-            IconButton(
-              key: const Key('mobile-player-lock'),
-              tooltip: l.mobileLock,
-              style: _phoneChromeButton,
-              onPressed: toggleLock,
-              icon: const Icon(Icons.lock_open),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: landscape
+                  ? Row(
+                      children: [
+                        clock,
+                        const SizedBox(width: 24),
+                        Expanded(
+                          child: Align(
+                            alignment: Alignment.centerRight,
+                            child: cache,
+                          ),
+                        ),
+                      ],
+                    )
+                  : Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [clock, const SizedBox(height: 4), cache],
+                    ),
             ),
-            IconButton(
-              key: const Key('mobile-player-more'),
-              tooltip: l.mobileTracks,
-              style: _phoneChromeButton,
-              onPressed: c.loading ? null : () => unawaited(_openMore()),
-              icon: const Icon(Icons.more_vert),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                _shortcut(
+                  'mobile-player-speed',
+                  Icons.speed,
+                  '${c.playbackRate}x',
+                  () => _openMore(section: 'speed'),
+                ),
+                _shortcut(
+                  'mobile-player-quality',
+                  Icons.high_quality_outlined,
+                  l.quality,
+                  () => _openMore(section: 'quality'),
+                ),
+                _shortcut(
+                  'mobile-player-tracks',
+                  Icons.subtitles_outlined,
+                  l.mobileTracks,
+                  () => _openMore(section: 'tracks'),
+                ),
+                if (widget.danmaku != null)
+                  _shortcut(
+                    'mobile-player-danmaku',
+                    Icons.forum_outlined,
+                    l.danmaku,
+                    () => _openMore(section: 'danmaku'),
+                  ),
+                _shortcut(
+                  'mobile-player-more',
+                  Icons.tune,
+                  l.mobileMore,
+                  () => _openMore(),
+                ),
+              ],
             ),
           ],
         ),
@@ -293,97 +448,32 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
     );
   }
 
-  Widget _buildBottomBar(BuildContext context, EdgeInsets insets) {
-    final l = AppLocalizations.of(context);
-    final c = _controller;
-    final durationMs = c.duration.inMilliseconds.toDouble();
-    return DecoratedBox(
-      key: const Key('mobile-player-bottom-scrim'),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            Colors.black.withValues(alpha: AppScrim.of(context, 0)),
-            Colors.black.withValues(
-              alpha: AppScrim.of(context, AppMobileControls.bottomSoftAlpha),
-            ),
-            Colors.black.withValues(
-              alpha: AppScrim.of(context, AppMobileControls.bottomAlpha),
-            ),
-          ],
-          stops: const [0, 0.55, 1],
+  Widget _shortcut(
+    String key,
+    IconData icon,
+    String label,
+    Future<void> Function() action,
+  ) {
+    return Expanded(
+      child: TextButton(
+        key: Key(key),
+        style: TextButton.styleFrom(
+          foregroundColor: Colors.white,
+          minimumSize: const Size(48, 52),
+          padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 4),
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
         ),
-      ),
-      child: Padding(
-        padding: EdgeInsets.only(
-          left: insets.left,
-          right: insets.right + 4,
-          bottom: insets.bottom,
-        ),
+        onPressed: _controller.loading ? null : () => unawaited(action()),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (c.progressSyncFailed) Text(l.progressSyncFailed),
-            if (c.networkSlow) Text(l.networkSlowHint),
-            if (c.trackFailure != null) Text(l.mobileTrackUnavailable),
-            if (c.backgroundReleased) Text(l.mobileBackgroundPaused),
-            if (c.playbackEnded) Text(l.playbackEnded),
-            if (c.isBuffering && !c.loading) const LinearProgressIndicator(),
-            Row(
-              children: [
-                _transportButton(
-                  key: const Key('mobile-player-rewind'),
-                  tooltip: l.mobileRewind,
-                  onPressed: () => c.seekRelative(const Duration(seconds: -10)),
-                  icon: Icons.replay_10,
-                ),
-                const SizedBox(width: 8),
-                _transportButton(
-                  key: const Key('mobile-player-toggle'),
-                  tooltip: c.isPlaying ? l.pause : l.play,
-                  onPressed:
-                      c.loading ||
-                          c.error != null ||
-                          c.disconnected ||
-                          c.sessionExpired
-                      ? null
-                      : c.togglePlay,
-                  icon: c.isPlaying ? Icons.pause_circle : Icons.play_circle,
-                ),
-                const SizedBox(width: 8),
-                _transportButton(
-                  key: const Key('mobile-player-forward'),
-                  tooltip: l.mobileForward,
-                  onPressed: () => c.seekRelative(const Duration(seconds: 10)),
-                  icon: Icons.forward_10,
-                ),
-                Text(phonePlayerClock(c.position)),
-                Expanded(
-                  child: BufferedRangesTrack(
-                    snapshot: c.bufferSnapshot,
-                    duration: c.duration,
-                    child: Slider(
-                      key: const Key('mobile-player-seek'),
-                      value: (_seek ?? c.position.inMilliseconds.toDouble())
-                          .clamp(0, durationMs),
-                      max: durationMs.clamp(1, double.infinity),
-                      onChanged:
-                          c.loading ||
-                              c.error != null ||
-                              c.disconnected ||
-                              c.sessionExpired
-                          ? null
-                          : (v) => setState(() => _seek = v),
-                      onChangeEnd: (v) {
-                        setState(() => _seek = null);
-                        c.seekTo(Duration(milliseconds: v.round()));
-                      },
-                    ),
-                  ),
-                ),
-                Text(phonePlayerClock(c.duration)),
-              ],
+            Icon(icon, size: 21),
+            const SizedBox(height: 3),
+            Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 11),
             ),
           ],
         ),
@@ -396,17 +486,22 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
     required String tooltip,
     required VoidCallback? onPressed,
     required IconData icon,
+    bool primary = false,
   }) {
+    final size = primary ? 72.0 : 52.0;
     return SizedBox(
-      width: 48,
-      height: 48,
+      width: size,
+      height: size,
       child: IconButton(
         key: key,
         tooltip: tooltip,
         onPressed: onPressed,
-        icon: Icon(icon),
+        icon: Icon(icon, size: primary ? 46 : 30),
         style: IconButton.styleFrom(
-          fixedSize: const Size(48, 48),
+          foregroundColor: Colors.white,
+          backgroundColor: Colors.black.withValues(alpha: primary ? .36 : .18),
+          side: primary ? const BorderSide(color: Colors.white24) : null,
+          fixedSize: Size(size, size),
           minimumSize: const Size(48, 48),
           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
           visualDensity: VisualDensity.standard,
@@ -416,207 +511,284 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
     );
   }
 
-  Future<void> _openMore() async {
+  Future<void> _openMore({String? section}) async {
     final c = _controller;
     final danmaku = widget.danmaku;
     final route = ModalRoute.of(context);
     c.setControlsPinned(true);
-    await PhoneMotion.showBottomPanel<void>(
-      context: context,
-      useSafeArea: true,
-      isScrollControlled: true,
-      builder: (sheetContext) => FractionallySizedBox(
-        heightFactor: .8,
-        child: ListenableBuilder(
-          listenable: c,
-          builder: (context, _) => SingleChildScrollView(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
+    Widget panel(BuildContext sheetContext) => ListenableBuilder(
+      listenable: Listenable.merge([c, danmaku]),
+      builder: (context, _) => SingleChildScrollView(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
               children: [
-                Text(
-                  AppLocalizations.of(context).mobileMore,
-                  style: Theme.of(context).textTheme.titleLarge,
+                Expanded(
+                  child: Text(switch (section) {
+                    'speed' => AppLocalizations.of(context).mobileSpeed,
+                    'quality' => AppLocalizations.of(context).quality,
+                    'tracks' => AppLocalizations.of(context).mobileTracks,
+                    'danmaku' => AppLocalizations.of(context).danmaku,
+                    _ => AppLocalizations.of(context).mobileMore,
+                  }, style: Theme.of(context).textTheme.titleLarge),
                 ),
-                const SizedBox(height: 16),
-                _VideoScaleChoices(
-                  fill: widget.fillFrame,
-                  onChanged: (fill) => widget.onFillFrame?.call(fill),
-                ),
-                const SizedBox(height: 8),
-                if (danmaku != null) ...[
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(AppLocalizations.of(context).danmaku),
-                      ),
-                      Switch(
-                        key: DanmakuKeys.toggle,
-                        value: danmaku.danmakuOn,
-                        onChanged: (_) => unawaited(danmaku.toggleDanmaku()),
-                      ),
-                    ],
+                if (section == 'danmaku' && danmaku != null)
+                  Switch(
+                    key: DanmakuKeys.toggle,
+                    value: danmaku.danmakuOn,
+                    onChanged: (_) => unawaited(danmaku.toggleDanmaku()),
                   ),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      TextButton.icon(
-                        key: DanmakuKeys.search,
-                        onPressed: () {
-                          Navigator.pop(sheetContext);
-                          widget.onOpenDanmakuSearch();
-                        },
-                        icon: const Icon(Icons.search),
-                        label: Text(AppLocalizations.of(context).danmakuSearch),
-                      ),
-                      TextButton.icon(
-                        key: DanmakuKeys.panel,
-                        onPressed: () {
-                          Navigator.pop(sheetContext);
-                          widget.onOpenDanmakuPanel();
-                        },
-                        icon: const Icon(Icons.tune),
-                        label: Text(
-                          AppLocalizations.of(context).mobileDanmakuPanel,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const Divider(),
-                ],
-                Text(AppLocalizations.of(context).mobileTracks),
-                for (final track in c.audioTracks)
-                  ListTile(
-                    selected: c.audioStreamIndex == track.index,
-                    leading: Icon(
-                      c.audioStreamIndex == track.index
-                          ? Icons.check_circle
-                          : Icons.radio_button_unchecked,
+              ],
+            ),
+            const SizedBox(height: 16),
+            if (section == null)
+              _VideoScaleChoices(
+                fill: widget.fillFrame,
+                onChanged: (fill) => widget.onFillFrame?.call(fill),
+              ),
+            const SizedBox(height: 8),
+            if (danmaku != null &&
+                (section == null || section == 'danmaku')) ...[
+              if (section == null)
+                Row(
+                  children: [
+                    Expanded(child: Text(AppLocalizations.of(context).danmaku)),
+                    Switch(
+                      key: DanmakuKeys.toggle,
+                      value: danmaku.danmakuOn,
+                      onChanged: (_) => unawaited(danmaku.toggleDanmaku()),
                     ),
-                    title: Text(track.label),
-                    onTap: () => c.setAudio(track.index),
+                  ],
+                ),
+              Wrap(
+                alignment: WrapAlignment.end,
+                children: [
+                  TextButton.icon(
+                    key: DanmakuKeys.search,
+                    onPressed: () {
+                      Navigator.pop(sheetContext);
+                      widget.onOpenDanmakuSearch();
+                    },
+                    icon: const Icon(Icons.search),
+                    label: Text(AppLocalizations.of(context).danmakuSearch),
                   ),
-                const Divider(),
-                Text(AppLocalizations.of(context).subtitleTrack),
+                  TextButton.icon(
+                    key: DanmakuKeys.panel,
+                    onPressed: () {
+                      Navigator.pop(sheetContext);
+                      widget.onOpenDanmakuPanel();
+                    },
+                    icon: const Icon(Icons.tune),
+                    label: Text(
+                      AppLocalizations.of(context).mobileDanmakuPanel,
+                    ),
+                  ),
+                ],
+              ),
+              const Divider(),
+            ],
+            if (section == null || section == 'tracks') ...[
+              if (section == null)
+                Text(AppLocalizations.of(context).mobileTracks),
+              for (final track in c.audioTracks)
                 ListTile(
-                  selected: c.subtitleStreamIndex == null,
+                  selected: c.audioStreamIndex == track.index,
                   leading: Icon(
-                    c.subtitleStreamIndex == null
+                    c.audioStreamIndex == track.index
                         ? Icons.check_circle
                         : Icons.radio_button_unchecked,
                   ),
-                  title: Text(AppLocalizations.of(context).subtitleOff),
-                  onTap: () => c.setSubtitle(null),
+                  title: Text(track.label),
+                  onTap: () => c.setAudio(track.index),
                 ),
-                for (final track in c.subtitleTracks)
-                  ListTile(
-                    selected: c.subtitleStreamIndex == track.index,
-                    leading: Icon(
-                      c.subtitleStreamIndex == track.index
-                          ? Icons.check_circle
-                          : Icons.radio_button_unchecked,
+              const Divider(),
+              Text(AppLocalizations.of(context).subtitleTrack),
+              ListTile(
+                selected: c.subtitleStreamIndex == null,
+                leading: Icon(
+                  c.subtitleStreamIndex == null
+                      ? Icons.check_circle
+                      : Icons.radio_button_unchecked,
+                ),
+                title: Text(AppLocalizations.of(context).subtitleOff),
+                onTap: () => c.setSubtitle(null),
+              ),
+              for (final track in c.subtitleTracks)
+                ListTile(
+                  selected: c.subtitleStreamIndex == track.index,
+                  leading: Icon(
+                    c.subtitleStreamIndex == track.index
+                        ? Icons.check_circle
+                        : Icons.radio_button_unchecked,
+                  ),
+                  title: Text(track.label),
+                  onTap: () => c.setSubtitle(track.index),
+                ),
+              if (c.trackFailure != null)
+                Text(AppLocalizations.of(context).mobileTrackUnavailable),
+              const Divider(),
+            ],
+            if (section == null || section == 'quality') ...[
+              Text(AppLocalizations.of(context).mediaSource),
+              for (final source in c.mediaSources)
+                ListTile(
+                  selected: source.id == c.activeMediaSourceId,
+                  title: Text(source.name ?? source.id),
+                  onTap: () => c.switchMediaSource(source.id),
+                ),
+              const Divider(),
+              if (section == null) Text(AppLocalizations.of(context).quality),
+              Wrap(
+                spacing: 8,
+                children: [
+                  for (final bitrate in c.availableBitrates)
+                    ChoiceChip(
+                      key: ValueKey('mobile-quality-$bitrate'),
+                      label: Text(
+                        bitrate == kTranscodeBitrates.first
+                            ? AppLocalizations.of(context).qualityAuto
+                            : AppLocalizations.of(
+                                context,
+                              ).qualityMbps(bitrate ~/ 1000000),
+                      ),
+                      selected: c.maxStreamingBitrate == bitrate,
+                      onSelected: c.loading
+                          ? null
+                          : (_) => unawaited(c.setMaxBitrate(bitrate)),
                     ),
-                    title: Text(track.label),
-                    onTap: () => c.setSubtitle(track.index),
-                  ),
-                if (c.trackFailure != null)
-                  Text(AppLocalizations.of(context).mobileTrackUnavailable),
-                const Divider(),
-                Text(AppLocalizations.of(context).mediaSource),
-                for (final source in c.mediaSources)
-                  ListTile(
-                    selected: source.id == c.activeMediaSourceId,
-                    title: Text(source.name ?? source.id),
-                    onTap: () => c.switchMediaSource(source.id),
-                  ),
-                const Divider(),
-                Text(AppLocalizations.of(context).quality),
-                Wrap(
-                  spacing: 8,
-                  children: [
-                    for (final bitrate in c.availableBitrates)
-                      ChoiceChip(
-                        key: ValueKey('mobile-quality-$bitrate'),
-                        label: Text(
-                          bitrate == kTranscodeBitrates.first
-                              ? AppLocalizations.of(context).qualityAuto
-                              : AppLocalizations.of(
-                                  context,
-                                ).qualityMbps(bitrate ~/ 1000000),
-                        ),
-                        selected: c.maxStreamingBitrate == bitrate,
-                        onSelected: c.loading
-                            ? null
-                            : (_) => unawaited(c.setMaxBitrate(bitrate)),
-                      ),
-                  ],
-                ),
-                const Divider(),
+                ],
+              ),
+              const Divider(),
+            ],
+            if (section == null || section == 'speed') ...[
+              if (section == null)
                 Text(AppLocalizations.of(context).mobileSpeed),
-                Wrap(
-                  spacing: 8,
-                  children: [
-                    for (final rate in [.5, 1.0, 1.25, 1.5, 2.0])
-                      ChoiceChip(
-                        label: Text('${rate}x'),
-                        selected: c.playbackRate == rate,
-                        onSelected: (_) => c.setRate(rate),
-                      ),
-                  ],
-                ),
-                const Divider(),
-                Text(AppLocalizations.of(context).mobileAppVolume),
-                Row(
-                  children: [
-                    IconButton(
-                      key: const Key('mobile-player-mute'),
-                      tooltip: c.volume <= 0
-                          ? AppLocalizations.of(context).unmute
-                          : AppLocalizations.of(context).mute,
-                      onPressed:
+              Wrap(
+                spacing: 8,
+                children: [
+                  for (final rate in [.5, 1.0, 1.25, 1.5, 2.0])
+                    ChoiceChip(
+                      label: Text('${rate}x'),
+                      selected: c.playbackRate == rate,
+                      onSelected: (_) => c.setRate(rate),
+                    ),
+                ],
+              ),
+              const Divider(),
+            ],
+            if (section == null) ...[
+              Text(AppLocalizations.of(context).mobileAppVolume),
+              Row(
+                children: [
+                  IconButton(
+                    key: const Key('mobile-player-mute'),
+                    tooltip: c.volume <= 0
+                        ? AppLocalizations.of(context).unmute
+                        : AppLocalizations.of(context).mute,
+                    onPressed:
+                        c.loading ||
+                            c.error != null ||
+                            c.disconnected ||
+                            c.sessionExpired
+                        ? null
+                        : () => c.toggleMute(),
+                    icon: Icon(
+                      c.volume <= 0 ? Icons.volume_off : Icons.volume_up,
+                    ),
+                  ),
+                  Expanded(
+                    child: Slider(
+                      key: const Key('mobile-player-volume'),
+                      value: c.volume
+                          .clamp(0, PlayerSettings.volumeMax)
+                          .toDouble(),
+                      max: PlayerSettings.volumeMax.toDouble(),
+                      onChanged:
                           c.loading ||
                               c.error != null ||
                               c.disconnected ||
                               c.sessionExpired
                           ? null
-                          : () => c.toggleMute(),
-                      icon: Icon(
-                        c.volume <= 0 ? Icons.volume_off : Icons.volume_up,
-                      ),
+                          : (value) => c.setVolume(value.round()),
                     ),
-                    Expanded(
-                      child: Slider(
-                        key: const Key('mobile-player-volume'),
-                        value: c.volume
-                            .clamp(0, PlayerSettings.volumeMax)
-                            .toDouble(),
-                        max: PlayerSettings.volumeMax.toDouble(),
-                        onChanged:
-                            c.loading ||
-                                c.error != null ||
-                                c.disconnected ||
-                                c.sessionExpired
-                            ? null
-                            : (value) => c.setVolume(value.round()),
-                      ),
-                    ),
-                    Text(AppLocalizations.of(context).volumePercent(c.volume)),
-                  ],
-                ),
-                TextButton(
-                  onPressed: () => Navigator.pop(sheetContext),
-                  child: Text(AppLocalizations.of(context).mobileBack),
-                ),
-              ],
+                  ),
+                  Text(AppLocalizations.of(context).volumePercent(c.volume)),
+                ],
+              ),
+            ],
+            TextButton(
+              onPressed: () => Navigator.pop(sheetContext),
+              child: Text(AppLocalizations.of(context).mobileBack),
+            ),
+          ],
+        ),
+      ),
+    );
+    await _showOptionsPanel(panel);
+    if (mounted && (route == null || route.isCurrent)) {
+      _controller.setControlsPinned(false);
+    }
+  }
+
+  Future<void> _showOptionsPanel(WidgetBuilder builder) {
+    final media = MediaQuery.of(context);
+    if (media.size.width <= media.size.height) {
+      return PhoneMotion.showBottomPanel<void>(
+        context: context,
+        useSafeArea: true,
+        isScrollControlled: true,
+        builder: (context) => SafeArea(
+          top: false,
+          child: ConstrainedBox(
+            key: const Key('mobile-player-options'),
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.sizeOf(context).height * .8,
+            ),
+            child: builder(context),
+          ),
+        ),
+      );
+    }
+    return showGeneralDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
+      barrierColor: Colors.black54,
+      transitionDuration: AppMotion.durationOf(context),
+      pageBuilder: (context, animation, secondaryAnimation) => SafeArea(
+        child: Align(
+          alignment: Alignment.centerRight,
+          child: SizedBox(
+            width: math.min(360, MediaQuery.sizeOf(context).width * .65),
+            height: double.infinity,
+            child: Material(
+              key: const Key('mobile-player-options'),
+              color: Theme.of(context).colorScheme.surface,
+              borderRadius: const BorderRadius.horizontal(
+                left: Radius.circular(20),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: builder(context),
             ),
           ),
         ),
       ),
+      transitionBuilder: (context, animation, secondaryAnimation, child) =>
+          SlideTransition(
+            position: Tween(begin: const Offset(1, 0), end: Offset.zero)
+                .animate(
+                  CurvedAnimation(
+                    parent: animation,
+                    curve: AppMotion.emphasized,
+                    reverseCurve: AppMotion.exit,
+                  ),
+                ),
+            child: child,
+          ),
     );
-    if (mounted && (route == null || route.isCurrent)) {
-      _controller.setControlsPinned(false);
-    }
   }
 }
 

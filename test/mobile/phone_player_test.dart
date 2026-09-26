@@ -27,6 +27,8 @@ import 'package:rillight/player/player_controller.dart';
 import 'package:rillight/player/player_keys.dart';
 import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/video_backend.dart';
+import 'package:rillight/player/buffer_snapshot.dart';
+import 'package:rillight/player/buffered_ranges_track.dart';
 
 import '../emby/fake_emby_server.dart';
 
@@ -229,6 +231,7 @@ void main() {
       expect(denied.calls[1], const [DeviceOrientation.portraitUp]);
       expect(denied.calls.last, isNot(PhoneOrientation.unlocked));
     },
+    tags: ['integration'],
   );
 
   testWidgets(
@@ -297,6 +300,7 @@ void main() {
       expect(find.byKey(PlayerKeys.nextEpisode), findsNothing);
       await closePlayer(tester);
     },
+    tags: ['integration'],
   );
 
   testWidgets(
@@ -324,8 +328,8 @@ void main() {
       expect(view.controller.comments.single.text, '滚动评论');
       expect(backend.isPlaying, isTrue);
       expect(current.error, isNull);
-      // 顶栏不再有弹幕按钮;弹幕入口迁入"更多"面板(R11)。
-      expect(find.byKey(const Key('mobile-player-danmaku')), findsNothing);
+      // 底部提供弹幕快捷入口，完整设置仍保留原有选项。
+      expect(find.byKey(const Key('mobile-player-danmaku')), findsOneWidget);
       await tester.tap(find.byKey(const Key('mobile-player-more')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 400));
@@ -333,7 +337,7 @@ void main() {
       expect(find.byKey(DanmakuKeys.toggle), findsOneWidget);
       expect(find.byKey(DanmakuKeys.search), findsOneWidget);
       expect(find.byKey(DanmakuKeys.panel), findsOneWidget);
-      expect(find.text('音轨与字幕'), findsOneWidget);
+      expect(find.text('音轨与字幕'), findsWidgets);
       expect(find.text('字幕'), findsOneWidget);
       expect(find.text('播放速度'), findsOneWidget);
       expect(find.text('片源'), findsOneWidget);
@@ -409,6 +413,7 @@ void main() {
       await closePlayer(tester);
       expect(tester.takeException(), isNull);
     },
+    tags: ['integration'],
   );
 
   testWidgets(
@@ -443,7 +448,7 @@ void main() {
         2,
         '0',
       );
-      expect(find.text('$hours:$minutes:$seconds'), findsOneWidget);
+      expect(find.textContaining('$hours:$minutes:$seconds'), findsOneWidget);
       // 应用内音量 Slider 已移出控制层,收入"更多"面板(R10 能力不减)。
       await tester.tap(find.byKey(const Key('mobile-player-more')));
       await tester.pump();
@@ -489,6 +494,7 @@ void main() {
       await closePlayer(tester);
       expect(tester.takeException(), isNull);
     },
+    tags: ['integration'],
   );
 
   testWidgets('double-tap on the right and left half seeks ±10 seconds', (
@@ -517,7 +523,7 @@ void main() {
     expect(backend.position, initial);
     await closePlayer(tester);
     expect(tester.takeException(), isNull);
-  });
+  }, tags: ['integration']);
 
   testWidgets(
     'drives brightness, volume and seek previews with edge gestures',
@@ -593,6 +599,7 @@ void main() {
       await closePlayer(tester);
       expect(tester.takeException(), isNull);
     },
+    tags: ['integration'],
   );
 
   testWidgets('locked screen hides controls and gestures; tap unlocks', (
@@ -637,7 +644,7 @@ void main() {
     expect(find.byKey(const Key('mobile-player-toggle')), findsOneWidget);
     await closePlayer(tester);
     expect(tester.takeException(), isNull);
-  });
+  }, tags: ['integration']);
 
   testWidgets(
     'more panel hosts danmaku, tracks, speed, source, mute and volume',
@@ -650,14 +657,14 @@ void main() {
         wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
       );
       // 顶栏不再出现弹幕按钮（R11）。
-      expect(find.byKey(const Key('mobile-player-danmaku')), findsNothing);
+      expect(find.byKey(const Key('mobile-player-danmaku')), findsOneWidget);
       await tester.tap(find.byKey(const Key('mobile-player-more')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 400));
       expect(find.byKey(DanmakuKeys.toggle), findsOneWidget);
       expect(find.byKey(DanmakuKeys.search), findsOneWidget);
       expect(find.byKey(DanmakuKeys.panel), findsOneWidget);
-      expect(find.text('音轨与字幕'), findsOneWidget);
+      expect(find.text('音轨与字幕'), findsWidgets);
       expect(find.text('字幕'), findsOneWidget);
       expect(find.text('播放速度'), findsOneWidget);
       expect(find.text('片源'), findsOneWidget);
@@ -680,10 +687,11 @@ void main() {
       await closePlayer(tester);
       expect(tester.takeException(), isNull);
     },
+    tags: ['integration'],
   );
 
   testWidgets(
-    'fit is the default scale and transport sits on the bottom edge',
+    'fit is the default scale with central transport and a full-width timeline',
     (tester) async {
       final backend = FakeVideoBackend(
         duration: const Duration(hours: 1, minutes: 5),
@@ -700,8 +708,9 @@ void main() {
         find.byKey(const Key('mobile-player-toggle')),
       );
       final seek = tester.getRect(find.byKey(const Key('mobile-player-seek')));
-      expect(360 - toggle.bottom, lessThan(24));
-      expect((toggle.center.dy - seek.center.dy).abs(), lessThan(28));
+      expect(toggle.center.dx, closeTo(400, .2));
+      expect(toggle.bottom, lessThan(seek.top));
+      expect(seek.width, greaterThan(740));
 
       await tester.tap(find.byKey(const Key('mobile-player-more')));
       await tester.pump();
@@ -747,6 +756,7 @@ void main() {
       await closePlayer(tester);
       expect(tester.takeException(), isNull);
     },
+    tags: ['integration'],
   );
 
   testWidgets('player controls fade instead of popping', (tester) async {
@@ -794,7 +804,7 @@ void main() {
     expect(current.isPlaying, isFalse);
     await closePlayer(tester);
     expect(tester.takeException(), isNull);
-  });
+  }, tags: ['integration']);
 
   testWidgets(
     'playback hides system bars, stays landscape, and drops the rotate button',
@@ -840,6 +850,7 @@ void main() {
       expect(orientation.calls[1], const [DeviceOrientation.portraitUp]);
       expect(find.byType(MobilePlayerPage), findsNothing);
     },
+    tags: ['integration'],
   );
 
   testWidgets('transport targets are at least 48dp and still step 10 seconds', (
@@ -886,7 +897,7 @@ void main() {
     await tester.pump();
     expect(backend.position, start);
     await closePlayer(tester);
-  });
+  }, tags: ['integration']);
 
   testWidgets(
     'landscape controls use actual top obstruction while video stays full bleed',
@@ -944,9 +955,10 @@ void main() {
       expect(topDecoration.gradient!.colors.first.a, greaterThan(0));
       expect(back.top - picture.top, closeTo(0, 0.01));
       expect(back.left - picture.left, closeTo(24, 0.01));
-      expect(picture.right - more.right, closeTo(24, 0.01));
+      expect(picture.right - more.right, greaterThanOrEqualTo(24));
       expect(rewind.left - picture.left, greaterThanOrEqualTo(24));
-      expect(picture.bottom - rewind.bottom, closeTo(40, 0.01));
+      expect(picture.bottom - more.bottom, greaterThanOrEqualTo(40));
+      expect(rewind.bottom, lessThan(more.top));
       await tester.tap(find.byKey(const Key('mobile-player-lock')));
       await tester.pump();
       expect(tester.getRect(topScrim).top, closeTo(picture.top, 0.01));
@@ -960,6 +972,7 @@ void main() {
       await tester.pump();
       await closePlayer(tester);
     },
+    tags: ['integration'],
   );
 
   testWidgets(
@@ -1007,6 +1020,7 @@ void main() {
       expect(await backLeft(30), lessThan(1));
       expect(tester.takeException(), isNull);
     },
+    tags: ['integration'],
   );
 
   testWidgets('landscape top cutout still insets the top controls', (
@@ -1035,7 +1049,7 @@ void main() {
     );
     expect(tester.getTopLeft(find.byTooltip('关闭')).dy, closeTo(24, 0.01));
     await closePlayer(tester);
-  });
+  }, tags: ['integration']);
 
   testWidgets(
     'unsupported startup tracks stay silent and a manual choice is in Chinese',
@@ -1120,7 +1134,159 @@ void main() {
       await closePlayer(tester);
       expect(tester.takeException(), isNull);
     },
+    tags: ['integration'],
   );
+
+  for (final size in [const Size(320, 568), const Size(640, 320)]) {
+    testWidgets('phone shortcuts and cache remain usable at $size', (
+      tester,
+    ) async {
+      final backend = FakeVideoBackend();
+      final current = await showPlayer(
+        tester,
+        itemId: 'movie-inception',
+        backend: backend,
+        size: size,
+        wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
+      );
+      for (final key in ['speed', 'quality', 'tracks', 'danmaku', 'more']) {
+        final button = find.byKey(Key('mobile-player-$key'));
+        expect(tester.getSize(button).shortestSide, greaterThanOrEqualTo(48));
+      }
+      final timeline = find.byKey(const Key('mobile-player-seek'));
+      expect(tester.getSize(timeline).width, greaterThan(size.width - 50));
+      final cache = find.byKey(const Key('mobile-player-cache-status'));
+      final clock = find.byKey(const Key('mobile-player-clock'));
+      if (size.width < size.height) {
+        expect(
+          tester.getTopLeft(cache).dy,
+          greaterThan(tester.getBottomLeft(clock).dy),
+        );
+      } else {
+        expect(
+          tester.getTopLeft(cache).dy,
+          closeTo(tester.getTopLeft(clock).dy, 4),
+        );
+      }
+      backend.emitEvent(VideoEventKind.cacheSpeed, 1048576);
+      backend.emitEvent(
+        VideoEventKind.bufferSnapshot,
+        BufferSnapshot(
+          sessionId: current.bufferSnapshot.sessionId,
+          resourceId: 'phone-test',
+          representationVersion: 'v1',
+          trackVersion: 0,
+          sequence: 1,
+          ranges: const [BufferedRange(Duration.zero, Duration(minutes: 1))],
+        ),
+      );
+      await tester.pump();
+      expect(find.text('1.0 MB/s'), findsOneWidget);
+      expect(
+        tester
+            .widget<BufferedRangesTrack>(find.byType(BufferedRangesTrack))
+            .snapshot
+            .ranges,
+        hasLength(1),
+      );
+      backend.emitEvent(VideoEventKind.cacheSpeed, 0);
+      await tester.pump();
+      expect(find.text('0 KB/s'), findsOneWidget);
+      expect(
+        tester
+            .widget<BufferedRangesTrack>(find.byType(BufferedRangesTrack))
+            .snapshot
+            .ranges,
+        hasLength(1),
+      );
+
+      await tester.tap(find.byKey(const Key('mobile-player-speed')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      final options = tester.getRect(
+        find.byKey(const Key('mobile-player-options')),
+      );
+      expect(find.text('播放速度'), findsOneWidget);
+      if (size.width > size.height) {
+        expect(options.width, lessThanOrEqualTo(360));
+        expect(options.right, closeTo(size.width, .2));
+        expect(options.left, greaterThan(size.width * .3));
+      } else {
+        expect(options.bottom, closeTo(size.height, .2));
+        expect(options.height, lessThan(size.height * .8));
+      }
+      await tester.tap(find.widgetWithText(ChoiceChip, '1.5x'));
+      await tester.pump();
+      expect(current.playbackRate, 1.5);
+      await tester.binding.handlePopRoute();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('mobile-player-speed')),
+          matching: find.text('1.5x'),
+        ),
+        findsOneWidget,
+      );
+
+      for (final key in ['quality', 'tracks', 'danmaku']) {
+        await tester.tap(find.byKey(Key('mobile-player-$key')));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
+        expect(find.byKey(const Key('mobile-player-mute')), findsNothing);
+        if (key == 'quality') expect(find.byType(ChoiceChip), findsWidgets);
+        if (key == 'tracks') expect(find.text('字幕'), findsOneWidget);
+        if (key == 'danmaku') {
+          final toggle = find.byKey(DanmakuKeys.toggle);
+          final before = tester.widget<Switch>(toggle).value;
+          await tester.tap(toggle);
+          await tester.pump();
+          expect(tester.widget<Switch>(toggle).value, !before);
+          await tester.tap(toggle);
+          await tester.pump();
+          expect(tester.widget<Switch>(toggle).value, before);
+        }
+        expect(tester.takeException(), isNull);
+        await tester.binding.handlePopRoute();
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
+      }
+      // A long scrub must not lose its controls halfway through the gesture.
+      final gesture = await tester.startGesture(tester.getCenter(timeline));
+      await gesture.moveBy(const Offset(20, 0));
+      await tester.pump(const Duration(seconds: 5));
+      expect(current.controlsVisible, isTrue);
+      await gesture.up();
+      await tester.pump();
+      expect(backend.position, greaterThan(Duration.zero));
+      tester.platformDispatcher.accessibilityFeaturesTestValue =
+          const FakeAccessibilityFeatures(disableAnimations: true);
+      addTearDown(
+        tester.platformDispatcher.clearAccessibilityFeaturesTestValue,
+      );
+      await tester.pump();
+      current.toggleControls();
+      await tester.pump();
+      expect(
+        tester
+            .widget<AnimatedOpacity>(find.byKey(PhoneMotion.playerControlsKey))
+            .duration,
+        Duration.zero,
+      );
+      expect(
+        find.byKey(const Key('mobile-player-toggle')).hitTestable(),
+        findsNothing,
+      );
+      current.toggleControls();
+      await tester.pump();
+      expect(
+        find.byKey(const Key('mobile-player-toggle')).hitTestable(),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+      await closePlayer(tester);
+    }, tags: ['integration']);
+  }
 
   testWidgets('a video that cannot open still offers retry', (tester) async {
     await showPlayer(
@@ -1133,7 +1299,7 @@ void main() {
     expect(find.text('重试'), findsOneWidget);
     expect(find.textContaining('Bad state:'), findsNothing);
     await closePlayer(tester);
-  });
+  }, tags: ['integration']);
 }
 
 class _PhoneTrackBackend extends FakeVideoBackend
