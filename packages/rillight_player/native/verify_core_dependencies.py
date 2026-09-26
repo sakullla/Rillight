@@ -133,6 +133,22 @@ def verify(prefix: Path, target: str, require_subtitles: bool = False) -> list[s
     if not isinstance(libraries, dict) or not libraries:
         errors.append(f"{target}: missing library hashes")
     else:
+        if target == "windows-x64":
+            # The Windows plugin copies every bin/*.dll into the release bundle.
+            # Refuse SDK binaries that have no hash in the pinned marker.
+            expected_dlls = {
+                Path(relative).name.lower()
+                for relative in libraries
+                if Path(relative).parts[:1] == ("bin",)
+                and Path(relative).suffix.lower() == ".dll"
+            }
+            actual_dlls = {
+                path.name.lower() for path in (prefix / "bin").glob("*.dll")
+            }
+            for name in sorted(actual_dlls - expected_dlls):
+                errors.append(f"{target}: unpinned SDK runtime DLL bin/{name}")
+            for name in sorted(expected_dlls - actual_dlls):
+                errors.append(f"{target}: missing SDK runtime DLL bin/{name}")
         for name in SPEC["ffmpeg"]["libraries"]:
             if not any(Path(path).name.startswith((f"lib{name}.", f"{name}.")) for path in libraries):
                 errors.append(f"{target}: missing {name}")

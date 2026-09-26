@@ -76,6 +76,27 @@ if sys.platform == 'win32':
         path = bundle / Path(relative).name
         if not path.is_file() or sha256(path) != expected:
             raise RuntimeError(f'Missing or changed bundled DLL: {relative}')
+    plugin_cmake = (ROOT / 'windows/flutter/generated_plugins.cmake').read_text(encoding='utf-8')
+    plugin_list = re.search(r'list\(APPEND FLUTTER_PLUGIN_LIST\s*(.*?)\)',
+                            plugin_cmake, re.S)
+    if plugin_list is None:
+        raise RuntimeError('Missing generated Windows plugin list')
+    plugins = set(re.findall(r'^\s*([a-zA-Z0-9_]+)\s*$',
+                             plugin_list.group(1), re.M))
+    if 'rillight_player' not in plugins:
+        raise RuntimeError('Owned player is absent from generated Windows plugin list')
+    pinned_dlls = {Path(relative).name.lower()
+                   for relative in marker['libraries']
+                   if relative.startswith('bin/') and relative.lower().endswith('.dll')}
+    expected_dlls = pinned_dlls | {'flutter_windows.dll'} | {
+        f'{name}_plugin.dll'.lower() for name in plugins
+    }
+    bundled_dlls = {path.name.lower() for path in bundle.glob('*.dll')}
+    unexpected_dlls = sorted(bundled_dlls - expected_dlls)
+    missing_dlls = sorted(expected_dlls - bundled_dlls)
+    if unexpected_dlls or missing_dlls:
+        raise RuntimeError('Windows runtime DLL closure mismatch: '
+                           f'unexpected={unexpected_dlls}, missing={missing_dlls}')
     with os.add_dll_directory(str(bundle)):
         library = ctypes.WinDLL(str(core))
         library.rillight_core_abi_version.restype = ctypes.c_uint32

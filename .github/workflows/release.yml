@@ -59,6 +59,9 @@ jobs:
       - name: Build Windows
         run: flutter build windows --release
 
+      - name: Audit Windows release bundle
+        run: python tool/verify_player_dependencies.py
+
       - name: Install Inno Setup
         shell: pwsh
         run: choco install innosetup --yes --no-progress
