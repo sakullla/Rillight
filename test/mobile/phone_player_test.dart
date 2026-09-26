@@ -30,7 +30,7 @@ import 'package:rillight/player/video_backend.dart';
 
 import '../emby/fake_emby_server.dart';
 
-const _androidPlayerChannel = MethodChannel('rillight/android_player');
+const _androidPlayerChannel = MethodChannel('rillight/android_core');
 
 void _mockAndroidPlayerChannel(List<MethodCall> calls, {int sdk = 34}) {
   final messenger =
