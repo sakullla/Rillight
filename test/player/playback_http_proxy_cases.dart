@@ -834,6 +834,7 @@ void main() {
           role: PlaybackResourceRole.subtitle,
         );
         expect(sealed.host, '127.0.0.1');
+        expect(sealed.pathSegments.last, 'subtitle.srt');
         final first = await (await client.getUrl(sealed)).close();
         expect(first.statusCode, HttpStatus.ok);
         expect(await first.transform(utf8.decoder).join(), contains('hello'));

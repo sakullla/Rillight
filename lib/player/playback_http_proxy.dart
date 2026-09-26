@@ -329,8 +329,11 @@ class PlaybackHttpProxy {
       ).join();
       _privateSubtitles[token] = path;
       _roles[token] = PlaybackResourceRole.subtitle;
+      // The native subtitle decoder selects SRT/WebVTT/ASS from the sealed
+      // URL suffix. Preserve only the already validated file extension.
+      final extension = path.split('.').last.toLowerCase();
       return Uri.parse(
-        'http://127.0.0.1:${_server.port}/$_secret/$token/subtitle',
+        'http://127.0.0.1:${_server.port}/$_secret/$token/subtitle.$extension',
       );
     }
     if (url.scheme != 'http' && url.scheme != 'https') {
