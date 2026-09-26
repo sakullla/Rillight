@@ -66,6 +66,7 @@ class PlaybackHttpProxy {
   MatroskaCacheIndex? _timelineIndex;
   Mp4CacheIndex? _mp4TimelineIndex;
   String? _timelineIdentity;
+  String? _timelineResource;
   int _timelineCacheRevision = -1;
   List<CachedTimeRange> _cachedTimeline = const [];
   int _timelineSequence = 0;
@@ -160,7 +161,7 @@ class PlaybackHttpProxy {
     if (_hlsNext.isNotEmpty && _readAhead == null) {
       return 'hlsTimingUnavailable';
     }
-    if (_readAhead == null || _timelineIdentity == null) {
+    if (_timelineIdentity == null) {
       return 'indexUnavailable';
     }
     if (_cachedTimeline.isEmpty &&
@@ -205,6 +206,18 @@ class PlaybackHttpProxy {
     'cacheWorkspaceBytes': _cacheWorkspace,
     'timelineIdentity': _timelineIdentity ?? '',
     'timelineSequence': _timelineSequence,
+    'timelineResourcePresent': _timelineResource != null || _readAhead != null,
+    'timelineRepresentationPresent':
+        _representations[_timelineResource ?? _readAhead?.resource] != null,
+    'timelineRepresentationComplete':
+        _representations[_timelineResource ?? _readAhead?.resource]?.complete,
+    'timelineRepresentationStrongValidator':
+        _representations[_timelineResource ?? _readAhead?.resource]
+            ?.policy
+            .strongEtag !=
+        null,
+    'timelineRepresentationTotalBytes':
+        _representations[_timelineResource ?? _readAhead?.resource]?.total,
     'timelineUnknownReason': _timelineUnknownReason,
     'cachedTimeRanges': [
       for (final range in _visibleCachedTimeline)
@@ -261,18 +274,29 @@ class PlaybackHttpProxy {
       await _refreshHlsTimeline(duration);
       return;
     }
-    final ahead = _readAhead;
+    // Index validated session bytes independently of the optional disk
+    // read-ahead worker. A plain 200 response or small demuxer range can have
+    // complete media metadata and playable groups without creating that worker.
+    final resource = _timelineResource ?? _readAhead?.resource;
+    final representation = _representations[resource];
     if (_closed ||
         _refreshingTimeline ||
-        ahead == null ||
+        cache == null ||
+        resource == null ||
+        representation == null ||
+        !representation.complete ||
         duration <= Duration.zero) {
-      if (ahead == null && _cachedTimeline.isNotEmpty) {
+      if (representation == null && _cachedTimeline.isNotEmpty) {
         _cachedTimeline = const [];
         _timelineSequence++;
       }
       return;
     }
-    final identity = '${ahead.resource}:${ahead.generation}';
+    final identity = '$resource:${representation.generation}';
+    bool stillCurrent() =>
+        !_closed &&
+        resource == (_timelineResource ?? _readAhead?.resource) &&
+        _representations[resource]?.generation == representation.generation;
     final snapshotRevision = cache!.revision;
     if (!verifyChecksum &&
         _timelineIdentity == identity &&
@@ -294,11 +318,11 @@ class PlaybackHttpProxy {
         _timelineSequence++;
       }
       final bytes = await cache!.availableRanges(
-        resource: ahead.resource,
-        generation: ahead.generation,
+        resource: resource,
+        generation: representation.generation,
         verifyChecksum: verifyChecksum,
       );
-      if (_closed || !identical(ahead, _readAhead)) return;
+      if (!stillCurrent()) return;
       if (bytes == null) {
         // A busy or timed-out integrity snapshot cannot support a previously
         // published interval: its disk blocks may have changed since then.
@@ -308,7 +332,7 @@ class PlaybackHttpProxy {
       }
       if (bytes.length == 1 &&
           bytes.single.start == 0 &&
-          bytes.single.end >= ahead.total) {
+          bytes.single.end >= representation.total) {
         _cachedTimeline = [CachedTimeRange(Duration.zero, duration)];
         _timelineCacheRevision = snapshotRevision;
         _timelineSequence++;
@@ -329,8 +353,8 @@ class PlaybackHttpProxy {
         final output = BytesBuilder(copy: false);
         while (output.length < length) {
           final hit = await cache!.read(
-            resource: ahead.resource,
-            generation: ahead.generation,
+            resource: resource,
+            generation: representation.generation,
             offset: offset + output.length,
             maxLength: length - output.length,
             countHit: false,
@@ -343,16 +367,21 @@ class PlaybackHttpProxy {
 
       final index =
           _timelineIndex ??
-          await MatroskaCacheIndex.load(total: ahead.total, read: read);
-      if (_closed || !identical(ahead, _readAhead)) return;
+          await MatroskaCacheIndex.load(
+            total: representation.total,
+            read: read,
+          );
+      if (!stillCurrent()) return;
       _timelineIndex = index;
       if (index != null) {
-        _cachedTimeline = await index.ranges(bytes, duration, read: read);
+        final ranges = await index.ranges(bytes, duration, read: read);
+        if (!stillCurrent()) return;
+        _cachedTimeline = ranges;
       } else {
         final mp4 =
             _mp4TimelineIndex ??
-            await Mp4CacheIndex.load(total: ahead.total, read: read);
-        if (_closed || !identical(ahead, _readAhead)) return;
+            await Mp4CacheIndex.load(total: representation.total, read: read);
+        if (!stillCurrent()) return;
         _mp4TimelineIndex = mp4;
         _cachedTimeline = mp4?.ranges(bytes, duration) ?? const [];
       }
@@ -1220,7 +1249,7 @@ class PlaybackHttpProxy {
       _hlsUnknownReason = 'hlsResourceChanged';
       _timelineSequence++;
     }
-    if (_readAhead?.resource == key) {
+    if (_timelineResource == key || _readAhead?.resource == key) {
       _cachedTimeline = const [];
       _timelineIdentity = null;
       _timelineIndex = null;
@@ -1235,6 +1264,7 @@ class PlaybackHttpProxy {
     cache?.invalidate(key, generation: representation.generation);
     if (identical(_representations[key], representation)) {
       _representations.remove(key);
+      if (_timelineResource == key) _timelineResource = null;
     }
   }
 
@@ -2760,6 +2790,25 @@ class PlaybackHttpProxy {
               representation.complete = true;
             }
           } finally {
+            if (!complete &&
+                read.cancelled &&
+                assembled > 0 &&
+                representation != null &&
+                representation.policy.strongEtag != null &&
+                _representations[key]?.generation ==
+                    representation.generation) {
+              // A demuxer often reads only a small metadata prefix, then seeks
+              // to the tail. Keep its validated bytes even below the MiB write
+              // size; otherwise that file's initialization can remain absent
+              // from the cache for the entire session. Untagged interrupted
+              // responses still cannot publish a reusable partial snapshot.
+              _store(
+                key,
+                representation,
+                blockStart,
+                Uint8List.sublistView(assembly!, 0, assembled),
+              );
+            }
             if (assemblyReserved) {
               _charge(-blockSize);
               _cacheWorkspace -= blockSize;
@@ -2880,6 +2929,14 @@ class PlaybackHttpProxy {
       _invalidate(oldest, _representations[oldest]!);
     }
     _representations[key] = representation;
+    if (_roles[key] == PlaybackResourceRole.media && _timelineResource != key) {
+      _timelineResource = key;
+      _timelineIdentity = null;
+      _timelineIndex = null;
+      _mp4TimelineIndex = null;
+      _cachedTimeline = const [];
+      _timelineSequence++;
+    }
     return representation;
   }
 

@@ -67,6 +67,16 @@ Future<Map<String, Object?>> snapshot() async {
             'released': controller.backgroundReleased,
             'audio': controller.audioStreamIndex,
             'subtitle': controller.subtitleStreamIndex,
+            'cacheSpeedBytesPerSecond': controller.cacheSpeedBytesPerSec,
+            'bufferUnknownReason': controller.bufferSnapshot.unknownReason,
+            'bufferSequence': controller.bufferSnapshot.sequence,
+            'bufferRanges': [
+              for (final range in controller.bufferSnapshot.ranges)
+                {
+                  'startMs': range.start.inMilliseconds,
+                  'endMs': range.end.inMilliseconds,
+                },
+            ],
           };
         }
       }
@@ -111,8 +121,8 @@ Future<Map<String, Object?>> snapshot() async {
   final root = WidgetsBinding.instance.rootElement;
   if (root != null) visit(root);
   if (observedBackend != null && player != null) {
-    // Keep this observer usable with a real signed-in account. Only scalar
-    // transport/core facts are exposed; no URL, identity, or raw error text.
+    // Keep this observer usable with a real signed-in account. Only allowlisted
+    // transport/core facts are exposed; no media URL, credentials, or raw errors.
     try {
       final diagnostics = await observedBackend!.diagnostics();
       player!['diagnostics'] = {
@@ -142,6 +152,34 @@ Future<Map<String, Object?>> snapshot() async {
           'coreActualHardware',
           'coreActualHardwareName',
           'corePlaying',
+          'upstreamBytesPerSecond',
+          'timelineUnknownReason',
+          'timelineSequence',
+          'timelineResourcePresent',
+          'timelineRepresentationPresent',
+          'timelineRepresentationComplete',
+          'timelineRepresentationStrongValidator',
+          'timelineRepresentationTotalBytes',
+          'cachedTimeRanges',
+          'timelineCuePoints',
+          'bufferUnknownReason',
+          'bufferRanges',
+          'readAheadActive',
+          'readAheadWorkerActive',
+          'readAheadPublishedBytes',
+          'readAheadFailed',
+          'readAheadWaitingForDisk',
+          'readAheadBypassedResources',
+          'memoryBytes',
+          'memoryHitBytes',
+          'diskHitBytes',
+          'diskBytes',
+          'indexEntries',
+          'degradation',
+          'hlsIndexBytes',
+          'hlsPlaylists',
+          'hlsActivePlaylists',
+          'segmentPrefetchActive',
         ])
           key: diagnostics[key],
       };

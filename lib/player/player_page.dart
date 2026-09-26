@@ -23,7 +23,7 @@ import 'package:rillight/player/danmaku/danmaku_panel.dart';
 import 'package:rillight/player/danmaku/danmaku_renderer.dart';
 import 'package:rillight/player/danmaku/dandanplay_models.dart';
 import 'package:rillight/player/rillight_video_backend.dart';
-import 'package:rillight/player/network_throughput.dart';
+import 'package:rillight/player/player_cache_status.dart';
 import 'package:rillight/player/playback_models.dart';
 import 'package:rillight/player/playback_wake_lock.dart';
 import 'package:rillight/player/player_bindings.dart';
@@ -39,8 +39,8 @@ import 'package:rillight/player/video_backend.dart';
 const double kPlayerChromeBarExtent =
     AppSpacing.sm + kWindowChromeHeight + AppSpacing.sm + AppSpacing.lg;
 
-/// 顶栏实时网速占用宽度,给标题右侧留空,避免叠到读数上。
-const double kPlayerNetworkSpeedExtent = 96;
+/// 顶栏网速和缓存状态占用宽度,给标题右侧留空。
+const double kPlayerNetworkSpeedExtent = 276;
 
 /// 剧集行固定高度,给 ListView 按 index 做 O(1) jumpTo。
 ///
@@ -798,6 +798,10 @@ class _PlayerChromeBar extends StatelessWidget {
     final l10n = AppLocalizations.of(context);
     final scrim = theme.colorScheme.scrim;
     final title = controller.item?.displayName ?? '';
+    final statusWidth = (MediaQuery.sizeOf(context).width * 0.4).clamp(
+      148.0,
+      kPlayerNetworkSpeedExtent,
+    );
     // 标题和窗口钮必须在同一层全宽淡出。右上角单独一块小 Opacity
     // 叠在 mpv Texture 上时,Impeller 常常不把透明度合成进去,按钮会
     // 一直亮着。独立播放器没有系统关闭钮,指针移入画面会重新唤出 OSD。
@@ -835,7 +839,7 @@ class _PlayerChromeBar extends StatelessWidget {
                       AppSpacing.sm,
                       AppSpacing.sm +
                           kTitleBarIconConstraints.maxWidth * 3 +
-                          kPlayerNetworkSpeedExtent,
+                          statusWidth,
                       AppSpacing.lg,
                     ),
                     child: Align(
@@ -863,13 +867,16 @@ class _PlayerChromeBar extends StatelessWidget {
                   if (controller.resolved != null &&
                       !controller.playbackEnded &&
                       controller.error == null)
-                    Tooltip(
-                      message: l10n.playerNetworkSpeedTooltip,
-                      child: Padding(
-                        padding: const EdgeInsets.only(right: AppSpacing.sm),
-                        child: NetworkSpeedReadout(
+                    Padding(
+                      padding: const EdgeInsets.only(right: AppSpacing.sm),
+                      child: SizedBox(
+                        width: statusWidth,
+                        child: PlayerCacheStatus(
                           key: PlayerKeys.networkSpeed,
+                          snapshot: controller.bufferSnapshot,
                           bytesPerSecond: controller.cacheSpeedBytesPerSec,
+                          position: controller.position,
+                          duration: controller.duration,
                           color: theme.colorScheme.onSurface.withValues(
                             alpha: 0.86,
                           ),

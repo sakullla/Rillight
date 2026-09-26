@@ -29,31 +29,35 @@ class NetworkSpeedReadout extends StatelessWidget {
     super.key,
     required this.bytesPerSecond,
     this.color,
+    this.textStyle,
   });
 
   final num bytesPerSecond;
   final Color? color;
+  final TextStyle? textStyle;
 
   /// 与 bodySmall 字身齐高的细箭头,避免 24px 图标视口把字形挤小。
   static const markSize = Size(8, 11);
 
   @override
   Widget build(BuildContext context) {
-    final textStyle = Theme.of(context).textTheme.bodySmall;
+    final style = textStyle ?? Theme.of(context).textTheme.bodySmall;
     final resolved =
-        color ?? textStyle?.color ?? Theme.of(context).colorScheme.onSurface;
+        color ?? style?.color ?? Theme.of(context).colorScheme.onSurface;
+    final scale =
+        MediaQuery.textScalerOf(context).scale(style?.fontSize ?? 12) / 12;
     return Row(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         CustomPaint(
-          size: markSize,
+          size: markSize * scale,
           painter: InboundSpeedMarkPainter(color: resolved),
         ),
         const SizedBox(width: 5),
         Text(
           formatNetworkThroughput(bytesPerSecond),
-          style: textStyle?.copyWith(
+          style: style?.copyWith(
             color: resolved,
             height: 1,
             fontFeatures: const [FontFeature.tabularFigures()],
