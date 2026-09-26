@@ -26,6 +26,24 @@ The Linux CTest target sets `LD_LIBRARY_PATH` only for its process so the
 loader can find FFmpeg's transitive libraries in the verified SDK prefix.
 Release packaging must provide its own complete library closure and RUNPATH.
 
+For Android development builds, use the installed NDK and MSYS2 Bash on
+Windows (or Bash and a host C compiler on Linux):
+
+```sh
+python packages/rillight_player/native/build_android_core_dependencies.py \
+  --prefix-root build/android-core-sdk --work build/android-core-work \
+  --ndk /path/to/android-ndk --abis arm64-v8a armeabi-v7a x86_64
+```
+
+The builder verifies the pinned FFmpeg commit and HLS patch, each ABI's ELF
+machine, library hashes, and the SDK manifest. It builds FFmpeg without direct
+network access and enables MediaCodec. It omits libass, so this development SDK
+does not validate ASS/SSA composition or a distributable Android package.
+`RILLIGHT_CORE_SDK_ROOT` for the Android Gradle module is the parent directory
+of the per-ABI prefixes. The optional Gradle property
+`rillightCoreAbis=x86_64` restricts a local emulator build; the default still
+requires all three supported ABIs.
+
 The controlled-IO HLS regression also runs against the pinned SDK:
 
 ```sh
