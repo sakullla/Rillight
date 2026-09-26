@@ -177,9 +177,7 @@ void AudioOutput::Run() {
               continue;
             }
             offset = std::max(offset, rillight_windows::StartupSampleOffset(
-                *pending, state.position_us,
-                static_cast<int64_t>(stream_latency_us * state.playback_speed),
-                state.playback_speed));
+                *pending, state.position_us, state.playback_speed));
           }
           if (audio_clock_started && pending->pts_us >= 0 &&
               pending->pts_us > state.position_us + 50000) {

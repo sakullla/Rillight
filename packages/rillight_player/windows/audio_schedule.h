@@ -10,12 +10,11 @@
 namespace rillight_windows {
 
 inline int StartupSampleOffset(const RillightCoreFrame& frame,
-                               int64_t position_us, int64_t device_delay_us,
-                               double speed) {
+                               int64_t position_us, double speed) {
   if (frame.pts_us < 0 || frame.sample_count <= 0 || speed <= 0) return 0;
-  const int64_t lead = std::max<int64_t>(30000, device_delay_us + 10000);
+  // Device latency is queued time, not audio already played by the media clock.
   const double samples =
-      (position_us + lead - frame.pts_us) * 48000.0 / (1000000.0 * speed);
+      (position_us - frame.pts_us) * 48000.0 / (1000000.0 * speed);
   if (samples <= 0) return 0;
   if (samples >= frame.sample_count) return frame.sample_count;
   return static_cast<int>(std::ceil(samples));

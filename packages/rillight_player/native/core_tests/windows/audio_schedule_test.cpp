@@ -7,12 +7,16 @@ int main() {
   RillightCoreFrame frame{};
   frame.pts_us = 0;
   frame.sample_count = 48000;
-  assert(rillight_windows::StartupSampleOffset(frame, 500000, 20000, 1.0) ==
-         25440);
-  assert(rillight_windows::StartupSampleOffset(frame, 500000, 20000, 2.0) ==
-         12720);
-  assert(rillight_windows::StartupSampleOffset(frame, 2000000, 0, 1.0) ==
+  assert(rillight_windows::StartupSampleOffset(frame, 500000, 1.0) ==
+         24000);
+  assert(rillight_windows::StartupSampleOffset(frame, 500000, 2.0) ==
+         12000);
+  assert(rillight_windows::StartupSampleOffset(frame, 2000000, 1.0) ==
          frame.sample_count);
+  frame.sample_count = 960;  // A valid 20 ms first packet must reach WASAPI.
+  assert(rillight_windows::StartupSampleOffset(frame, 0, 1.0) == 0);
+  assert(rillight_windows::StartupSampleOffset(frame, 10000, 1.0) == 480);
+  assert(rillight_windows::StartupSampleOffset(frame, 50000, 1.0) == 960);
 
   RillightCoreSnapshot state{};
   state.state = RILLIGHT_CORE_PLAYING;
