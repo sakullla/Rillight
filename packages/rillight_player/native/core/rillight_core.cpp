@@ -1473,6 +1473,7 @@ int decode_packet(RillightCoreImpl *core, AVFormatContext *format,
       const AVFrame *picture = decoded;
       AVFrame *downloaded = nullptr;
       bool decoded_with_hardware = false;
+      // A MediaCodec CPU frame does not identify the selected codec as hardware.
       if (decoder.hardware != RILLIGHT_CORE_HW_NONE && decoder.hw_format &&
           decoded->format == *decoder.hw_format) {
         downloaded = av_frame_alloc();
@@ -1484,10 +1485,6 @@ int decode_packet(RillightCoreImpl *core, AVFormatContext *format,
           break;
         }
         picture = downloaded;
-        decoded_with_hardware = true;
-      } else if (decoder.hardware == RILLIGHT_CORE_HW_MEDIACODEC) {
-        // MediaCodec without a Surface copies the decoded output into a CPU
-        // frame. The decoder still ran through MediaCodec; no transfer is needed.
         decoded_with_hardware = true;
       }
       auto *output = convert_video(picture, pts, session, timeline,
