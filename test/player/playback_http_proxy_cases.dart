@@ -1,11 +1,25 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/player/playback_http_proxy.dart';
 import 'package:rillight/player/playback_resolver.dart';
 import 'package:rillight/player/cache/session_byte_cache.dart';
+
+import 'cache/mp4_fixture.dart';
+
+Uint8List _paddedProgressiveMp4() {
+  final movie = progressiveMp4Fixture();
+  const length = 2 * 1024 * 1024;
+  final bytes = Uint8List(length)..setRange(0, movie.length, movie);
+  final freeSize = length - movie.length;
+  final header = ByteData.sublistView(bytes, movie.length, movie.length + 8);
+  header.setUint32(0, freeSize);
+  bytes.setRange(movie.length + 4, movie.length + 8, ascii.encode('free'));
+  return bytes;
+}
 
 void main() {
   test(
@@ -789,15 +803,22 @@ void main() {
         sessionBuffering: true,
         readAheadBytes: 2 * 1024 * 1024,
       );
-      fixture.body = 'x' * (2 * 1024 * 1024);
-      await fixture.read('bytes=0-2097151');
+      fixture.binaryBody = _paddedProgressiveMp4();
+      await fixture.readBytes('bytes=0-2097151');
       await fixture.settle();
-      const duration = Duration(seconds: 30);
-      await fixture.proxy.refreshTimeline(duration);
+      const duration = Duration(seconds: 4);
+      fixture.proxy.selectContainerTracks(videoTrackId: 1, audioTrackId: 2);
+      for (var attempt = 0; attempt < 10; attempt++) {
+        await fixture.proxy.refreshTimeline(duration);
+        if ((fixture.proxy.diagnostics['cachedTimeRanges'] as List)
+            .isNotEmpty) {
+          break;
+        }
+      }
       expect(
         fixture.proxy.bufferedEnd(
-          const Duration(seconds: 5),
-          const Duration(seconds: 10),
+          const Duration(seconds: 1),
+          const Duration(seconds: 2),
         ),
         duration,
       );
@@ -806,23 +827,25 @@ void main() {
         pendingBytes: 0,
         diskBytes: 64 * 1024 * 1024,
       );
+      await Future<void>.delayed(const Duration(milliseconds: 2100));
       await fixture.proxy.refreshTimeline(duration);
       expect(
         fixture.proxy.bufferedEnd(
-          const Duration(seconds: 5),
-          const Duration(seconds: 10),
+          const Duration(seconds: 1),
+          const Duration(seconds: 2),
         ),
-        const Duration(seconds: 10),
+        const Duration(seconds: 2),
       );
       expect(fixture.cache.diagnostics['degradation'], null);
       await fixture.cache.close();
+      await Future<void>.delayed(const Duration(milliseconds: 2100));
       await fixture.proxy.refreshTimeline(duration);
       expect(
         fixture.proxy.bufferedEnd(
-          const Duration(seconds: 5),
-          const Duration(seconds: 10),
+          const Duration(seconds: 1),
+          const Duration(seconds: 2),
         ),
-        const Duration(seconds: 10),
+        const Duration(seconds: 2),
       );
     },
   );
@@ -834,13 +857,14 @@ void main() {
       sessionBuffering: true,
       readAheadBytes: 2 * 1024 * 1024,
     );
-    fixture.body = 'x' * (2 * 1024 * 1024);
-    await fixture.read('bytes=0-2097151');
+    fixture.binaryBody = _paddedProgressiveMp4();
+    await fixture.readBytes('bytes=0-2097151');
     await fixture.settle();
-    const duration = Duration(seconds: 30);
+    const duration = Duration(seconds: 4);
+    fixture.proxy.selectContainerTracks(videoTrackId: 1, audioTrackId: 2);
     // Integrity work is bounded per snapshot; the complete two-block range
     // becomes visible after the verifier has visited both blocks.
-    for (var attempt = 0; attempt < 3; attempt++) {
+    for (var attempt = 0; attempt < 10; attempt++) {
       await fixture.proxy.refreshTimeline(duration);
       if ((fixture.proxy.diagnostics['cachedTimeRanges'] as List).isNotEmpty) {
         break;
@@ -854,14 +878,23 @@ void main() {
         .where((file) => file.path.endsWith('.block'))
         .toList();
     expect(blocks, isNotEmpty);
-    final block = blocks.first;
-    final data = await block.readAsBytes();
-    data[0] ^= 0xff;
-    await block.writeAsBytes(data, flush: true);
-    // The worker memoizes only unchanged file metadata. Explicitly advance the
-    // mtime so this test is stable on filesystems with coarse timestamps.
-    await block.setLastModified(DateTime.now().add(const Duration(seconds: 2)));
-    await fixture.proxy.refreshTimeline(duration);
+    for (final block in blocks) {
+      final data = await block.readAsBytes();
+      data[0] ^= 0xff;
+      await block.writeAsBytes(data, flush: true);
+      // The worker memoizes only unchanged file metadata. Explicitly advance
+      // the mtime so this test is stable on filesystems with coarse timestamps.
+      await block.setLastModified(
+        DateTime.now().add(const Duration(seconds: 2)),
+      );
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 2100));
+    for (var attempt = 0; attempt < 10; attempt++) {
+      await fixture.proxy.refreshTimeline(duration);
+      if ((fixture.proxy.diagnostics['cachedTimeRanges'] as List).isEmpty) {
+        break;
+      }
+    }
     expect(fixture.proxy.diagnostics['cachedTimeRanges'], isEmpty);
     expect(fixture.cache.diagnostics['pendingBytes'], 0);
   });
@@ -872,10 +905,16 @@ void main() {
       sessionBuffering: true,
       readAheadBytes: 2 * 1024 * 1024,
     );
-    fixture.body = 'x' * (2 * 1024 * 1024);
-    await fixture.read('bytes=0-2097151');
+    fixture.binaryBody = _paddedProgressiveMp4();
+    await fixture.readBytes('bytes=0-2097151');
     await fixture.settle();
-    await fixture.proxy.refreshTimeline(const Duration(seconds: 30));
+    fixture.proxy.selectContainerTracks(videoTrackId: 1, audioTrackId: 2);
+    for (var attempt = 0; attempt < 10; attempt++) {
+      await fixture.proxy.refreshTimeline(const Duration(seconds: 4));
+      if ((fixture.proxy.diagnostics['cachedTimeRanges'] as List).isNotEmpty) {
+        break;
+      }
+    }
     final before = fixture.proxy.diagnostics;
     expect(before['timelineIdentity'], isNotEmpty);
     expect(before['cachedTimeRanges'], isNotEmpty);
@@ -1973,6 +2012,7 @@ class _CacheFixture {
   Uri get origin => Uri.parse('http://127.0.0.1:${server.port}');
   Uri get url => proxy.register(origin.resolve('/video'));
   String body = 'abcdefghijklmnopqrstuvwxyz';
+  Uint8List? binaryBody;
   String? etag = '"first"';
   String control = 'max-age=3600';
   String? vary;
@@ -2036,6 +2076,12 @@ class _CacheFixture {
     return (response.statusCode, await response.transform(utf8.decoder).join());
   }
 
+  Future<void> readBytes(String? range) async {
+    final request = await client.getUrl(url);
+    if (range != null) request.headers.set('range', range);
+    await (await request.close()).drain<void>();
+  }
+
   Future<void> _serve(HttpRequest request) async {
     requests++;
     methods.add(request.method);
@@ -2065,7 +2111,7 @@ class _CacheFixture {
       r'^bytes=(\d+)-(\d*)$',
     ).firstMatch(request.headers.value('range') ?? '');
     final ifRange = request.headers.value('if-range');
-    var bytes = utf8.encode(body);
+    var bytes = binaryBody ?? utf8.encode(body);
     if (!ignoreRange &&
         !(ignoreConditionalRange && ifRange != null) &&
         range != null &&

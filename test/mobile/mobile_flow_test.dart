@@ -26,7 +26,6 @@ import 'package:rillight/library/item_detail_page.dart';
 import 'package:rillight/library/library_page.dart';
 import 'package:rillight/library/mobile_detail_page.dart';
 import 'package:rillight/library/mobile_library_page.dart';
-import 'package:rillight/library/mobile_series_page.dart';
 import 'package:rillight/library/tv_detail_page.dart';
 import 'package:rillight/library/tv_library_page.dart';
 import 'package:rillight/player/mobile_player_page.dart';
@@ -210,7 +209,7 @@ void main() {
       await tester.ensureVisible(find.text('老友记'));
       await tester.tap(find.text('老友记'));
       await tester.pumpAndSettle();
-      expect(find.byType(MobileSeriesPage), findsOneWidget);
+      expect(find.byType(MobileDetailPage), findsOneWidget);
       expect(find.byKey(const Key('phone-season-list')), findsOneWidget);
       expect(find.text('The Pilot'), findsWidgets);
       // 已看集在分集列表有"已看"文字与缩略图角标。
@@ -233,7 +232,6 @@ void main() {
       await tester.tap(find.text('Inception').first);
       await tester.pumpAndSettle();
       expect(find.byType(MobileDetailPage), findsOneWidget);
-      expect(find.byType(MobileSeriesPage), findsNothing);
       expect(find.byTooltip('继续播放'), findsOneWidget);
       expect(find.byTooltip('从头播放'), findsOneWidget);
       expectPhoneOnly(tester);
