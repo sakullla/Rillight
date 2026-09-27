@@ -12,8 +12,8 @@ import 'package:rillight/player/danmaku/danmaku_controller.dart';
 import 'package:rillight/player/danmaku/danmaku_keys.dart';
 import 'package:rillight/player/phone_player_gestures.dart';
 import 'package:rillight/player/buffered_ranges_track.dart';
+import 'package:rillight/player/network_throughput.dart';
 import 'package:rillight/player/player_controller.dart';
-import 'package:rillight/player/player_cache_status.dart';
 import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/phone/phone_player_interaction.dart';
 
@@ -356,14 +356,14 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
     final c = _controller;
     final canSeek = widget.interaction.canSeek(c);
     final durationMs = c.duration.inMilliseconds.toDouble();
-    final cache = PlayerCacheStatus(
+    final cache = Tooltip(
       key: const Key('mobile-player-cache-status'),
-      snapshot: c.bufferSnapshot,
-      bytesPerSecond: c.cacheSpeedBytesPerSec,
-      position: c.position,
-      duration: c.duration,
-      textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
-      color: Colors.white70,
+      message: l.playerNetworkSpeedTooltip,
+      child: NetworkSpeedReadout(
+        bytesPerSecond: c.cacheSpeedBytesPerSec,
+        textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+        color: Colors.white70,
+      ),
     );
     final clock = Text(
       '${phonePlayerClock(Duration(milliseconds: (_seek ?? c.position.inMilliseconds).round()))} / ${phonePlayerClock(c.duration)}',
@@ -429,6 +429,14 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                 },
               ),
             ),
+            if (!c.bufferSnapshot.isKnown)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 0, 24, 4),
+                child: BufferedByteCoverageBar(
+                  key: const Key('mobile-player-byte-cache-track'),
+                  coverage: c.bufferSnapshot.byteCoverage,
+                ),
+              ),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 8),
               child: landscape

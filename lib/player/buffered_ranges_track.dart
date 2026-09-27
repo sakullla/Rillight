@@ -27,6 +27,83 @@ class BufferedRangesTrack extends StatelessWidget {
   );
 }
 
+/// A second, non-interactive track for downloaded bytes when media-time
+/// coverage is unknown. Its fill does not change Slider input or seekability.
+class BufferedByteCoverageBar extends StatelessWidget {
+  const BufferedByteCoverageBar({super.key, required this.coverage});
+
+  final BufferedByteCoverage? coverage;
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    height: 4,
+    width: double.infinity,
+    child: CustomPaint(
+      painter: _ByteCoveragePainter(
+        coverage: coverage,
+        textDirection: Directionality.of(context),
+      ),
+    ),
+  );
+}
+
+class _ByteCoveragePainter extends CustomPainter {
+  const _ByteCoveragePainter({
+    required this.coverage,
+    required this.textDirection,
+  });
+
+  final BufferedByteCoverage? coverage;
+  final TextDirection textDirection;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (size.width <= 0 || size.height <= 0) return;
+    final rect = Offset.zero & size;
+    final shape = RRect.fromRectAndRadius(
+      rect,
+      Radius.circular(size.height / 2),
+    );
+    canvas.drawRRect(shape, Paint()..color = const Color(0xff444b53));
+    final value = coverage;
+    if (value == null) return;
+    canvas.save();
+    canvas.clipRRect(shape);
+    for (final range in value.ranges) {
+      final start = range.start / value.totalBytes;
+      final end = range.end / value.totalBytes;
+      canvas.drawRect(
+        Rect.fromLTRB(
+          size.width * (textDirection == TextDirection.rtl ? 1 - end : start),
+          0,
+          size.width * (textDirection == TextDirection.rtl ? 1 - start : end),
+          size.height,
+        ),
+        Paint()..color = const Color(0xff42cbd3),
+      );
+    }
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(_ByteCoveragePainter oldDelegate) {
+    if (oldDelegate.textDirection != textDirection) return true;
+    final before = oldDelegate.coverage;
+    final after = coverage;
+    if (identical(before, after)) return false;
+    if (before == null ||
+        after == null ||
+        before.totalBytes != after.totalBytes ||
+        before.ranges.length != after.ranges.length) {
+      return true;
+    }
+    for (var i = 0; i < after.ranges.length; i++) {
+      if (before.ranges[i] != after.ranges[i]) return true;
+    }
+    return false;
+  }
+}
+
 class _BufferedSliderTrack extends RoundedRectSliderTrackShape {
   const _BufferedSliderTrack({required this.snapshot, required this.duration});
 

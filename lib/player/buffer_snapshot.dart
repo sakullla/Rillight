@@ -19,6 +19,59 @@ class BufferedRange {
   int get hashCode => Object.hash(start, end);
 }
 
+/// Downloaded byte offsets in one progressive media representation. These
+/// offsets do not establish playable time or seekability.
+class BufferedByteRange {
+  const BufferedByteRange(this.start, this.end);
+
+  final int start;
+  final int end;
+
+  @override
+  bool operator ==(Object other) =>
+      other is BufferedByteRange && start == other.start && end == other.end;
+
+  @override
+  int get hashCode => Object.hash(start, end);
+}
+
+class BufferedByteCoverage {
+  BufferedByteCoverage({
+    required this.totalBytes,
+    required Iterable<BufferedByteRange> ranges,
+  }) : assert(totalBytes > 0),
+       ranges = UnmodifiableListView(_normalize(ranges, totalBytes));
+
+  final int totalBytes;
+  final List<BufferedByteRange> ranges;
+
+  static List<BufferedByteRange> _normalize(
+    Iterable<BufferedByteRange> source,
+    int total,
+  ) {
+    final values = <BufferedByteRange>[
+      for (final range in source)
+        if (range.start >= 0 && range.end > range.start && range.start < total)
+          BufferedByteRange(range.start, range.end.clamp(0, total)),
+    ]..sort((a, b) => a.start.compareTo(b.start));
+    final merged = <BufferedByteRange>[];
+    for (final current in values) {
+      if (merged.isNotEmpty && current.start <= merged.last.end) {
+        final previous = merged.removeLast();
+        merged.add(
+          BufferedByteRange(
+            previous.start,
+            current.end > previous.end ? current.end : previous.end,
+          ),
+        );
+      } else {
+        merged.add(current);
+      }
+    }
+    return merged;
+  }
+}
+
 /// The one authoritative cache-timeline observation for a backend session.
 /// An empty [ranges] list with [unknownReason] means coverage cannot be
 /// established; it must not be replaced by a bitrate or byte-ratio estimate.
@@ -31,6 +84,7 @@ class BufferSnapshot {
     required this.sequence,
     required Iterable<BufferedRange> ranges,
     this.unknownReason,
+    this.byteCoverage,
     Duration? duration,
   }) : ranges = UnmodifiableListView(_normalize(ranges, duration: duration));
 
@@ -58,6 +112,7 @@ class BufferSnapshot {
   final int sequence;
   final List<BufferedRange> ranges;
   final String? unknownReason;
+  final BufferedByteCoverage? byteCoverage;
 
   bool get isKnown => unknownReason == null;
 

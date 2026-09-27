@@ -1584,6 +1584,51 @@ void main() {
         hasLength(1),
       );
 
+      backend.emitEvent(
+        VideoEventKind.bufferSnapshot,
+        BufferSnapshot(
+          sessionId: current.bufferSnapshot.sessionId,
+          resourceId: 'phone-test',
+          representationVersion: 'v1',
+          trackVersion: 0,
+          sequence: 2,
+          ranges: const [],
+          unknownReason: 'indexUnavailable',
+          byteCoverage: BufferedByteCoverage(
+            totalBytes: 1000,
+            ranges: const [
+              BufferedByteRange(0, 300),
+              BufferedByteRange(600, 800),
+            ],
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(find.text('缓存时间范围暂不可用'), findsNothing);
+      final byteTrack = find.byKey(const Key('mobile-player-byte-cache-track'));
+      expect(byteTrack, findsOneWidget);
+      expect(
+        tester.widget<BufferedByteCoverageBar>(byteTrack).coverage!.ranges,
+        const [BufferedByteRange(0, 300), BufferedByteRange(600, 800)],
+      );
+      backend.emitEvent(
+        VideoEventKind.bufferSnapshot,
+        BufferSnapshot.empty(
+          sessionId: current.bufferSnapshot.sessionId,
+          resourceId: 'phone-test',
+          representationVersion: 'v1',
+          trackVersion: 0,
+          sequence: 3,
+          unknownReason: 'cacheUncertain',
+        ),
+      );
+      await tester.pump();
+      expect(find.text('缓存时间范围暂不可用'), findsNothing);
+      expect(
+        tester.widget<BufferedByteCoverageBar>(byteTrack).coverage,
+        isNull,
+      );
+
       await tester.tap(find.byKey(const Key('mobile-player-speed')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 400));

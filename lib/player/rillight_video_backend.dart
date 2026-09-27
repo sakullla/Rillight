@@ -581,7 +581,9 @@ class RillightVideoBackend extends VideoBackend
           trackVersion != _trackVersion) {
         return;
       }
-      final identity = data['timelineIdentity']?.toString() ?? '';
+      final timeIdentity = data['timelineIdentity']?.toString() ?? '';
+      final byteIdentity = data['cachedByteIdentity']?.toString() ?? '';
+      final identity = byteIdentity.isNotEmpty ? byteIdentity : timeIdentity;
       final sequence = data['timelineSequence'] is num
           ? (data['timelineSequence'] as num).toInt()
           : 0;
@@ -605,6 +607,27 @@ class RillightVideoBackend extends VideoBackend
           );
         }
       }
+      BufferedByteCoverage? byteCoverage;
+      final byteTotal = data['cachedByteTotal'];
+      final rawByteRanges = data['cachedByteRanges'];
+      if (byteIdentity.isNotEmpty &&
+          byteTotal is int &&
+          byteTotal > 0 &&
+          rawByteRanges is List) {
+        final byteRanges = <BufferedByteRange>[];
+        for (final raw in rawByteRanges) {
+          if (raw is! Map || raw['start'] is! int || raw['end'] is! int) {
+            continue;
+          }
+          byteRanges.add(
+            BufferedByteRange(raw['start'] as int, raw['end'] as int),
+          );
+        }
+        byteCoverage = BufferedByteCoverage(
+          totalBytes: byteTotal,
+          ranges: byteRanges,
+        );
+      }
       bufferSnapshot = BufferSnapshot(
         sessionId: _sessionId,
         resourceId: identity.isEmpty ? '' : identity,
@@ -613,6 +636,7 @@ class RillightVideoBackend extends VideoBackend
         sequence: _bufferSequence,
         ranges: ranges,
         unknownReason: unknown,
+        byteCoverage: byteCoverage,
         duration: duration,
       );
       _emit(VideoEventKind.bufferSnapshot, bufferSnapshot, generation);

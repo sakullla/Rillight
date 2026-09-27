@@ -10,6 +10,71 @@ import 'package:rillight/player/playback_http_proxy.dart';
 import 'mp4_fixture.dart';
 
 void main() {
+  test('unknown timeline exposes only current verified byte islands', () async {
+    final bytes = Uint8List.fromList(List<int>.generate(1024, (i) => i % 251));
+    var etag = '"first"';
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    server.listen((request) async {
+      final range = MediaByteRange.resolve(
+        request.headers.value('range'),
+        bytes.length,
+      )!;
+      request.response
+        ..statusCode = HttpStatus.partialContent
+        ..contentLength = range.length;
+      request.response.headers
+        ..set('etag', etag)
+        ..set('cache-control', 'max-age=3600')
+        ..set(
+          'content-range',
+          'bytes ${range.start}-${range.end}/${bytes.length}',
+        );
+      request.response.add(bytes.sublist(range.start, range.end + 1));
+      await request.response.close();
+    });
+    final cache = await SessionByteCache.open();
+    final proxy = await PlaybackHttpProxy.create(
+      cache: cache,
+      sessionBuffering: true,
+    );
+    final client = HttpClient();
+    final route = proxy.register(
+      Uri.parse('http://127.0.0.1:${server.port}/opaque.bin'),
+    );
+    Future<void> read(int first, int last) async {
+      final request = await client.getUrl(route);
+      request.headers.set('range', 'bytes=$first-$last');
+      await (await request.close()).drain<void>();
+    }
+
+    try {
+      await read(0, 99);
+      await read(500, 599);
+      await proxy.refreshTimeline(const Duration(seconds: 4));
+      final first = proxy.diagnostics;
+      expect(first['cachedTimeRanges'], isEmpty);
+      expect(first['timelineUnknownReason'], isNotNull);
+      expect(first['cachedByteTotal'], 1024);
+      expect(first['cachedByteRanges'], [
+        {'start': 0, 'end': 100},
+        {'start': 500, 'end': 600},
+      ]);
+
+      etag = '"second"';
+      await read(700, 799);
+      final invalidated = proxy.diagnostics;
+      expect(invalidated['cachedByteRanges'], isEmpty);
+      await proxy.refreshTimeline(const Duration(seconds: 4));
+      expect(proxy.diagnostics['cachedByteRanges'], [
+        {'start': 700, 'end': 800},
+      ]);
+    } finally {
+      client.close(force: true);
+      await proxy.close();
+      await server.close(force: true);
+    }
+  });
+
   test(
     'full byte response does not fabricate playable time for unknown media',
     () async {
@@ -175,6 +240,10 @@ void main() {
                   ]
                 : isEmpty,
           );
+          if (!tagged) {
+            expect(proxy.diagnostics['cachedByteTotal'], isNull);
+            expect(proxy.diagnostics['cachedByteRanges'], isEmpty);
+          }
         } finally {
           release.complete();
           client.close(force: true);

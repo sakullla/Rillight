@@ -75,6 +75,11 @@ class PlaybackHttpProxy {
   int? _selectedAudioTrackId;
   int _trackSelectionVersion = 0;
   List<CachedTimeRange> _cachedTimeline = const [];
+  List<CachedByteRange> _cachedBytes = const [];
+  String? _byteIdentity;
+  int _byteRevision = -1;
+  DateTime? _lastByteIntegrityCheck;
+  bool _refreshingBytes = false;
   int _timelineSequence = 0;
   bool _refreshingTimeline = false;
   final FutureOr<void> Function(PlaybackCacheStream)? onStreamChanged;
@@ -145,6 +150,7 @@ class PlaybackHttpProxy {
     _lastIntegrityCheck = null;
     _mappingUnknownReason = null;
     _cachedTimeline = const [];
+    _clearByteCoverage();
     _timelineSequence++;
     if (_hlsPlaylists.isNotEmpty) _hlsUnknownReason = 'hlsTimingUnavailable';
     _readAheadBypass.clear();
@@ -183,6 +189,55 @@ class PlaybackHttpProxy {
         : const [];
   }
 
+  void _clearByteCoverage() {
+    _cachedBytes = const [];
+    _byteIdentity = null;
+    _byteRevision = -1;
+    _lastByteIntegrityCheck = null;
+    _timelineSequence++;
+  }
+
+  void _publishByteCoverage(
+    String resource,
+    _Representation representation,
+    List<CachedByteRange> ranges,
+  ) {
+    _cachedBytes = ranges;
+    _byteIdentity = '$resource:${representation.generation}';
+    _byteRevision = cache!.revision;
+    _lastByteIntegrityCheck = DateTime.now();
+    _timelineSequence++;
+  }
+
+  _Representation? get _byteRepresentation {
+    if (_closed ||
+        cache == null ||
+        !sessionBuffering ||
+        _hlsNext.isNotEmpty ||
+        _hlsPlaylists.isNotEmpty ||
+        cache!.diagnostics['degradation'] != null ||
+        cache!.diagnostics['closed'] == true) {
+      return null;
+    }
+    final resource = _timelineResource ?? _readAhead?.resource;
+    if (resource == null || _roles[resource] != PlaybackResourceRole.media) {
+      return null;
+    }
+    final representation = _representations[resource];
+    return representation != null && representation.total > 0
+        ? representation
+        : null;
+  }
+
+  bool get _byteCoverageCurrent {
+    final representation = _byteRepresentation;
+    final resource = _timelineResource ?? _readAhead?.resource;
+    return representation != null &&
+        resource != null &&
+        _byteIdentity == '$resource:${representation.generation}' &&
+        _byteRevision == cache!.revision;
+  }
+
   String? get _timelineUnknownReason {
     if (_closed) return 'closed';
     if (cache == null || !sessionBuffering) return 'cacheDisabled';
@@ -213,69 +268,80 @@ class PlaybackHttpProxy {
     return _samples.fold<int>(0, (sum, sample) => sum + sample.$2).toDouble();
   }
 
-  Map<String, Object?> get diagnostics => {
-    ...?cache?.diagnostics,
-    'upstreamBytes': _upstreamBytes,
-    'mediaDownloadBytes': _mediaDownloadBytes,
-    'controlDownloadBytes': _controlDownloadBytes,
-    'repeatedDownloadBytes': _repeatedDownloadBytes,
-    'recoveryAttempts': _recoveryAttempts,
-    'recoveries': _recoveries,
-    'recoveryFailures': _recoveryFailures,
-    'cancelledReads': _cancelled,
-    'lastValidationFailure': _lastValidationFailure,
-    'lastUpstreamStatus': _lastUpstreamStatus,
-    'upstreamConnectingRequests': _upstreamPhases['connect'] ?? 0,
-    'upstreamAwaitingHeadersRequests': _upstreamPhases['headers'] ?? 0,
-    'lastUpstreamPhase': _lastUpstreamPhase,
-    'lastUpstreamFailureKind': _lastUpstreamFailureKind,
-    'lastUpstreamPhaseElapsedMs': _lastUpstreamPhaseElapsedMs,
-    'authenticationStatus': _authenticationStatus,
-    'proxyInFlightBytes': _inFlight,
-    'proxyInFlightPeakBytes': _inFlightPeak,
-    'registeredResources': _roles.length,
-    'registryBudgetBytes': _roles.length * 4096,
-    'streamPolicy': _stream.name,
-    'sessionBuffering': sessionBuffering,
-    'activeRequests': _active,
-    'upstreamBytesPerSecond': upstreamBytesPerSecond,
-    'cacheWorkspaceBytes': _cacheWorkspace,
-    'timelineIdentity': _timelineIdentity ?? '',
-    'timelineSequence': _timelineSequence,
-    'timelineResourcePresent': _timelineResource != null || _readAhead != null,
-    'timelineRepresentationPresent':
-        _representations[_timelineResource ?? _readAhead?.resource] != null,
-    'timelineRepresentationComplete':
-        _representations[_timelineResource ?? _readAhead?.resource]?.complete,
-    'timelineRepresentationStrongValidator':
-        _representations[_timelineResource ?? _readAhead?.resource]
-            ?.policy
-            .strongEtag !=
-        null,
-    'timelineRepresentationTotalBytes':
-        _representations[_timelineResource ?? _readAhead?.resource]?.total,
-    'timelineUnknownReason': _timelineUnknownReason,
-    'cachedTimeRanges': [
-      for (final range in _visibleCachedTimeline)
-        {
-          'startMs': range.start.inMilliseconds,
-          'endMs': range.end.inMilliseconds,
-        },
-    ],
-    'timelineCuePoints': _timelineIndex?.points.length ?? 0,
-    'timelineTrackSelectionVersion': _trackSelectionVersion,
-    'timelineVideoTrackIdentified': _selectedVideoTrackId != null,
-    'timelineAudioTrackIdentified': _selectedAudioTrackId != null,
-    'readAheadBypassedResources': _readAheadBypass.length,
-    'hlsNextSegments': _hlsNext.length,
-    'hlsIndexBytes': _hlsIndexBytes,
-    'hlsPlaylists': _hlsPlaylists.length,
-    'hlsActivePlaylists': _hlsActiveOwners.length,
-    'segmentPrefetchActive': _segmentPrefetch != null,
-    'segmentPrefetchPending': _pendingSegmentPrefetch.length,
-    'playbackActive': _playbackActive,
-    ...?_readAhead?.diagnostics,
-  };
+  Map<String, Object?> get diagnostics {
+    final byteCurrent = _byteCoverageCurrent;
+    return {
+      ...?cache?.diagnostics,
+      'upstreamBytes': _upstreamBytes,
+      'mediaDownloadBytes': _mediaDownloadBytes,
+      'controlDownloadBytes': _controlDownloadBytes,
+      'repeatedDownloadBytes': _repeatedDownloadBytes,
+      'recoveryAttempts': _recoveryAttempts,
+      'recoveries': _recoveries,
+      'recoveryFailures': _recoveryFailures,
+      'cancelledReads': _cancelled,
+      'lastValidationFailure': _lastValidationFailure,
+      'lastUpstreamStatus': _lastUpstreamStatus,
+      'upstreamConnectingRequests': _upstreamPhases['connect'] ?? 0,
+      'upstreamAwaitingHeadersRequests': _upstreamPhases['headers'] ?? 0,
+      'lastUpstreamPhase': _lastUpstreamPhase,
+      'lastUpstreamFailureKind': _lastUpstreamFailureKind,
+      'lastUpstreamPhaseElapsedMs': _lastUpstreamPhaseElapsedMs,
+      'authenticationStatus': _authenticationStatus,
+      'proxyInFlightBytes': _inFlight,
+      'proxyInFlightPeakBytes': _inFlightPeak,
+      'registeredResources': _roles.length,
+      'registryBudgetBytes': _roles.length * 4096,
+      'streamPolicy': _stream.name,
+      'sessionBuffering': sessionBuffering,
+      'activeRequests': _active,
+      'upstreamBytesPerSecond': upstreamBytesPerSecond,
+      'cacheWorkspaceBytes': _cacheWorkspace,
+      'timelineIdentity': _timelineIdentity ?? '',
+      'timelineSequence': _timelineSequence,
+      'timelineResourcePresent':
+          _timelineResource != null || _readAhead != null,
+      'timelineRepresentationPresent':
+          _representations[_timelineResource ?? _readAhead?.resource] != null,
+      'timelineRepresentationComplete':
+          _representations[_timelineResource ?? _readAhead?.resource]?.complete,
+      'timelineRepresentationStrongValidator':
+          _representations[_timelineResource ?? _readAhead?.resource]
+              ?.policy
+              .strongEtag !=
+          null,
+      'timelineRepresentationTotalBytes':
+          _representations[_timelineResource ?? _readAhead?.resource]?.total,
+      'timelineUnknownReason': _timelineUnknownReason,
+      'cachedTimeRanges': [
+        for (final range in _visibleCachedTimeline)
+          {
+            'startMs': range.start.inMilliseconds,
+            'endMs': range.end.inMilliseconds,
+          },
+      ],
+      'cachedByteIdentity': byteCurrent ? _byteIdentity : '',
+      'cachedByteTotal': byteCurrent ? _byteRepresentation!.total : null,
+      'cachedByteRanges': [
+        if (byteCurrent)
+          for (final range in _cachedBytes)
+            {'start': range.start, 'end': range.end},
+      ],
+      'timelineCuePoints': _timelineIndex?.points.length ?? 0,
+      'timelineTrackSelectionVersion': _trackSelectionVersion,
+      'timelineVideoTrackIdentified': _selectedVideoTrackId != null,
+      'timelineAudioTrackIdentified': _selectedAudioTrackId != null,
+      'readAheadBypassedResources': _readAheadBypass.length,
+      'hlsNextSegments': _hlsNext.length,
+      'hlsIndexBytes': _hlsIndexBytes,
+      'hlsPlaylists': _hlsPlaylists.length,
+      'hlsActivePlaylists': _hlsActiveOwners.length,
+      'segmentPrefetchActive': _segmentPrefetch != null,
+      'segmentPrefetchPending': _pendingSegmentPrefetch.length,
+      'playbackActive': _playbackActive,
+      ...?_readAhead?.diagnostics,
+    };
+  }
 
   static Future<PlaybackHttpProxy> create({
     Uri? origin,
@@ -307,6 +373,68 @@ class PlaybackHttpProxy {
   }
 
   Future<void> refreshTimeline(
+    Duration duration, {
+    bool verifyChecksum = true,
+  }) async {
+    await _refreshTimeTimeline(duration, verifyChecksum: verifyChecksum);
+    if (_timelineUnknownReason == null) {
+      if (_byteIdentity != null) _clearByteCoverage();
+      return;
+    }
+    if (_mappingUnknownReason == 'integrityUnavailable' ||
+        _mappingUnknownReason == 'cacheChangedDuringIndex') {
+      if (_byteIdentity != null) _clearByteCoverage();
+      return;
+    }
+    await _refreshByteCoverage();
+  }
+
+  Future<void> _refreshByteCoverage() async {
+    final representation = _byteRepresentation;
+    final resource = _timelineResource ?? _readAhead?.resource;
+    if (representation == null || resource == null) {
+      if (_byteIdentity != null) _clearByteCoverage();
+      return;
+    }
+    if (_refreshingBytes) return;
+    final identity = '$resource:${representation.generation}';
+    final revision = cache!.revision;
+    if (_byteIdentity == identity &&
+        _byteRevision == revision &&
+        _lastByteIntegrityCheck != null &&
+        DateTime.now().difference(_lastByteIntegrityCheck!) <
+            const Duration(seconds: 2)) {
+      return;
+    }
+    _refreshingBytes = true;
+    try {
+      final ranges = await cache!.availableRanges(
+        resource: resource,
+        generation: representation.generation,
+        verifyChecksum: true,
+      );
+      if (_closed ||
+          !identical(_representations[resource], representation) ||
+          resource != (_timelineResource ?? _readAhead?.resource) ||
+          cache!.diagnostics['degradation'] != null) {
+        if (_byteIdentity == identity) _clearByteCoverage();
+        return;
+      }
+      if (ranges == null) {
+        _clearByteCoverage();
+        return;
+      }
+      // availableRanges filters entries against the live cache after its
+      // asynchronous disk check. Concurrent new writes are scanned next.
+      _publishByteCoverage(resource, representation, ranges);
+    } catch (_) {
+      _clearByteCoverage();
+    } finally {
+      _refreshingBytes = false;
+    }
+  }
+
+  Future<void> _refreshTimeTimeline(
     Duration duration, {
     bool verifyChecksum = true,
   }) async {
@@ -393,6 +521,12 @@ class PlaybackHttpProxy {
         _mappingUnknownReason = 'integrityUnavailable';
         _timelineSequence++;
         return;
+      }
+      // Reuse the already verified cache scan for the phone byte track.
+      // Running a second disk checksum pass would consume the same pending
+      // budget and delay both playback diagnostics and the foreground reads.
+      if (verifyChecksum) {
+        _publishByteCoverage(resource, representation, bytes);
       }
       // Indexing a partially cached Matroska file can issue many immediate
       // memory reads. Yield to the isolate event queue so seek/cancel and HTTP
@@ -1339,6 +1473,9 @@ class PlaybackHttpProxy {
           ).hasMatch(incoming.headers.value('range')!));
 
   void _invalidate(String key, _Representation representation) {
+    if (_byteIdentity == '$key:${representation.generation}') {
+      _clearByteCoverage();
+    }
     if (_hlsDependencyKeys.contains(key)) {
       _cachedTimeline = const [];
       _hlsUnknownReason = 'hlsResourceChanged';
@@ -1349,6 +1486,7 @@ class PlaybackHttpProxy {
       _timelineIdentity = null;
       _timelineIndex = null;
       _mp4TimelineIndex = null;
+      _mappingUnknownReason = null;
       _timelineSequence++;
     }
     if (_readAhead?.resource == key &&
@@ -3055,10 +3193,12 @@ class PlaybackHttpProxy {
     }
     _representations[key] = representation;
     if (_roles[key] == PlaybackResourceRole.media && _timelineResource != key) {
+      _clearByteCoverage();
       _timelineResource = key;
       _timelineIdentity = null;
       _timelineIndex = null;
       _mp4TimelineIndex = null;
+      _mappingUnknownReason = null;
       _cachedTimeline = const [];
       _timelineSequence++;
     }

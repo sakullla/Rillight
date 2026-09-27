@@ -7,6 +7,69 @@ import 'package:rillight/player/buffer_snapshot.dart';
 import 'package:rillight/player/buffered_ranges_track.dart';
 
 void main() {
+  test('byte coverage keeps real gaps and clips invalid offsets', () {
+    final coverage = BufferedByteCoverage(
+      totalBytes: 1000,
+      ranges: const [
+        BufferedByteRange(600, 1200),
+        BufferedByteRange(0, 200),
+        BufferedByteRange(200, 300),
+        BufferedByteRange(-5, 10),
+        BufferedByteRange(500, 400),
+      ],
+    );
+    expect(coverage.ranges, const [
+      BufferedByteRange(0, 300),
+      BufferedByteRange(600, 1000),
+    ]);
+    expect(() => coverage.ranges.clear(), throwsUnsupportedError);
+  });
+
+  for (final direction in TextDirection.values) {
+    testWidgets(
+      'byte-only track shows islands and a neutral fallback $direction',
+      (tester) async {
+        final key = GlobalKey();
+        final coverage = BufferedByteCoverage(
+          totalBytes: 1000,
+          ranges: const [
+            BufferedByteRange(0, 300),
+            BufferedByteRange(600, 800),
+          ],
+        );
+        Future<_Pixels> render(BufferedByteCoverage? value) async {
+          await tester.pumpWidget(
+            MaterialApp(
+              home: Directionality(
+                textDirection: direction,
+                child: Center(
+                  child: RepaintBoundary(
+                    key: key,
+                    child: SizedBox(
+                      width: 100,
+                      child: BufferedByteCoverageBar(coverage: value),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          );
+          return (await tester.runAsync(() => _capture(key)))!;
+        }
+
+        final pixels = await render(coverage);
+        int x(int position) =>
+            direction == TextDirection.rtl ? 99 - position : position;
+        expect(pixels.at(x(20), 2), const Color(0xff42cbd3));
+        expect(pixels.at(x(45), 2), const Color(0xff444b53));
+        expect(pixels.at(x(70), 2), const Color(0xff42cbd3));
+        expect(pixels.at(x(90), 2), const Color(0xff444b53));
+        final neutral = await render(null);
+        expect(neutral.at(x(20), 2), const Color(0xff444b53));
+      },
+    );
+  }
+
   test('normalizes ranges without filling a cache gap', () {
     final snapshot = BufferSnapshot(
       sessionId: 3,
