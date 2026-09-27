@@ -579,12 +579,21 @@ void main() {
           reduceMotion: false,
         );
 
-        // 详情:container transform 语义(fade-scale),时长走 AppMotion 中枢。
+        // 详情页保持不透明，和共享图一起做轻微位移。
         await tester.ensureVisible(find.byKey(PhoneHero.openKey));
         await tester.tap(find.byKey(PhoneHero.openKey));
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 80));
-        expect(find.byType(FadeScaleTransition), findsOneWidget);
+        expect(find.byType(FadeScaleTransition), findsNothing);
+        final detailSlide = find.ancestor(
+          of: find.byType(MobileDetailPage),
+          matching: find.byType(SlideTransition),
+        );
+        expect(detailSlide, findsWidgets);
+        expect(
+          tester.widget<SlideTransition>(detailSlide.first).position.value.dy,
+          inExclusiveRange(0, 0.025),
+        );
         expect(
           ModalRoute.of(
             tester.element(find.byType(MobileDetailPage)),

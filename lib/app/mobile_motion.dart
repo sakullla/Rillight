@@ -59,7 +59,8 @@ abstract final class PhoneMotion {
 
   /// 海报或横幅与页面顶部横幅共用一个 [Hero]。
   ///
-  /// 飞行中沿用出发时的那张图。减少动效时控制器时长已经是 0，画面直接就位。
+  /// 正向沿用卡片图片，返回时也使用目的卡片图片，避免详情大图在返回时
+  /// 突然换成另一种裁剪或请求宽度。
   static Widget sharedImage({
     required String itemId,
     required bool preferBackdrop,
@@ -69,14 +70,18 @@ abstract final class PhoneMotion {
       tag: imageTag(itemId, preferBackdrop: preferBackdrop),
       transitionOnUserGestures: true,
       flightShuttleBuilder: (context, animation, direction, from, to) {
-        return (from.widget as Hero).child;
+        return ((direction == HeroFlightDirection.push
+                    ? from.widget
+                    : to.widget)
+                as Hero)
+            .child;
       },
       child: child,
     );
   }
 
-  /// 详情页转场:container transform 语义,共享元素由 [sharedImage] 的 Hero
-  /// 承载,页面自身淡入并轻微放大;Hero 无匹配 tag 时天然退化为 fade。
+  /// 详情页与共享图一起轻微位移。整页透明度动画会让头图与背景同时露出，
+  /// 在往返时形成一帧闪白，因此页面保持不透明。
   static CustomTransitionPage<T> detailPage<T>({
     required BuildContext context,
     required GoRouterState state,
@@ -89,12 +94,19 @@ abstract final class PhoneMotion {
       reverseTransitionDuration: duration,
       child: child,
       transitionsBuilder: (context, animation, secondaryAnimation, child) {
+        if (duration == Duration.zero) return child;
         final curved = CurvedAnimation(
           parent: animation,
           curve: AppMotion.standard,
           reverseCurve: AppMotion.exit,
         );
-        return FadeScaleTransition(animation: curved, child: child);
+        return SlideTransition(
+          position: Tween<Offset>(
+            begin: const Offset(0, 0.025),
+            end: Offset.zero,
+          ).animate(curved),
+          child: child,
+        );
       },
     );
   }

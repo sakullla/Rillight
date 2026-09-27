@@ -421,10 +421,10 @@ class _MediaImageState extends State<MediaImage> {
             if (!probed && _viewportHit() == true) {
               probed = true;
               probing = true;
-              cache._beginViewportDiskProbe();
+              cache._beginViewportDiskProbe(turn);
               final disk = await _readDiskLoaded();
               probing = false;
-              cache._endViewportDiskProbe();
+              cache._endViewportDiskProbe(turn);
               if (!current()) {
                 return null;
               }
@@ -436,7 +436,7 @@ class _MediaImageState extends State<MediaImage> {
             if (turn.isReleased) {
               break;
             }
-            if (!cache.isScrollBusy && !cache._hasActiveViewportDiskProbe) {
+            if (!cache.isScrollBusy) {
               await turn.done.future;
               break;
             }
@@ -445,7 +445,7 @@ class _MediaImageState extends State<MediaImage> {
           ready = current();
         } finally {
           if (probing) {
-            cache._endViewportDiskProbe();
+            cache._endViewportDiskProbe(turn);
           }
           if (!ready) {
             cache._cancelPosterLoadTurn(turn);
@@ -662,6 +662,12 @@ class _MediaImageState extends State<MediaImage> {
       filterQuality: FilterQuality.low,
       gaplessPlayback: true,
       isAntiAlias: false,
+      frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+        if (frame == null && !wasSynchronouslyLoaded) {
+          return PosterPlaceholder(width: width, height: height);
+        }
+        return child;
+      },
       errorBuilder: (context, error, stackTrace) {
         return PosterPlaceholder(width: width, height: height);
       },
@@ -817,6 +823,7 @@ class _PosterLoadTurn {
   final bool Function() inViewport;
   final Completer<void> done = Completer<void>();
   bool cancelled = false;
+  bool probingDisk = false;
 
   bool get isReleased => done.isCompleted;
 }
@@ -992,9 +999,6 @@ class MediaImageCache {
     }
   }
 
-  bool get _hasActiveViewportDiskProbe => _viewportDiskProbes > 0;
-
-  int _viewportDiskProbes = 0;
   int _posterTurnSerial = 0;
   final List<_PosterLoadTurn> _posterTurns = [];
   bool _posterReleaseQueued = false;
@@ -1015,19 +1019,17 @@ class MediaImageCache {
     _posterTurns.remove(turn);
   }
 
-  void _beginViewportDiskProbe() {
-    _viewportDiskProbes++;
+  void _beginViewportDiskProbe(_PosterLoadTurn turn) {
+    turn.probingDisk = true;
   }
 
-  void _endViewportDiskProbe() {
-    if (_viewportDiskProbes > 0) {
-      _viewportDiskProbes--;
-    }
+  void _endViewportDiskProbe(_PosterLoadTurn turn) {
+    turn.probingDisk = false;
     _schedulePosterRelease();
   }
 
   void _schedulePosterRelease() {
-    if (_posterReleaseQueued || _viewportDiskProbes > 0) {
+    if (_posterReleaseQueued) {
       return;
     }
     if (_posterTurns.isEmpty) {
@@ -1036,9 +1038,6 @@ class MediaImageCache {
     _posterReleaseQueued = true;
     scheduleMicrotask(() {
       _posterReleaseQueued = false;
-      if (_viewportDiskProbes > 0) {
-        return;
-      }
       _releasePosterTurns();
     });
   }
@@ -1049,10 +1048,19 @@ class MediaImageCache {
     }
     final turns = List<_PosterLoadTurn>.from(_posterTurns);
     _posterTurns.clear();
+    // A visible disk hit should keep its place ahead of speculative offscreen
+    // work, while other visible images may proceed past its slow disk read.
+    final probingViewport = turns.any(
+      (turn) => turn.probingDisk && _turnInViewport(turn),
+    );
     final viewport = <_PosterLoadTurn>[];
     final offscreen = <_PosterLoadTurn>[];
     for (final turn in turns) {
       if (turn.cancelled || turn.done.isCompleted) {
+        continue;
+      }
+      if (turn.probingDisk) {
+        _posterTurns.add(turn);
         continue;
       }
       if (_turnInViewport(turn)) {
@@ -1065,11 +1073,11 @@ class MediaImageCache {
         a.sequence.compareTo(b.sequence);
     viewport.sort(bySequence);
     offscreen.sort(bySequence);
-    if (isScrollBusy) {
+    if (isScrollBusy || probingViewport) {
       _posterTurns.addAll(offscreen);
     }
     for (final turn in viewport.followedBy(
-      isScrollBusy ? const <_PosterLoadTurn>[] : offscreen,
+      isScrollBusy || probingViewport ? const <_PosterLoadTurn>[] : offscreen,
     )) {
       if (!turn.done.isCompleted) {
         turn.done.complete();
@@ -1086,7 +1094,6 @@ class MediaImageCache {
   }
 
   void _resetPosterTurns() {
-    _viewportDiskProbes = 0;
     _posterReleaseQueued = false;
     final turns = List<_PosterLoadTurn>.from(_posterTurns);
     _posterTurns.clear();

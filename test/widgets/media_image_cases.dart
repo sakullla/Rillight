@@ -1303,6 +1303,111 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(MediaImageCache.defaultFetchTimeout);
   });
+
+  testWidgets(
+    'a slow visible disk probe does not stall another visible poster',
+    (tester) async {
+      final slowRead = Completer<void>();
+      final disk = _SlowPosterReadStore(slowRead);
+      MediaImageCache.instance.debugSetDiskStore(disk);
+      final client = _ControlledImageClient()..hold = true;
+      final auth = detachedAuth(client);
+      await tester.pumpWidget(
+        wrap(
+          auth,
+          SizedBox(
+            width: 240,
+            height: 180,
+            child: Row(
+              children: [
+                for (var index = 0; index < 2; index++)
+                  Expanded(
+                    child: MediaImage(
+                      item: EmbyItem(
+                        id: 'poster-$index',
+                        name: '海报$index',
+                        type: 'Movie',
+                        primaryImageTag: 'tag-$index',
+                      ),
+                      width: 120,
+                      height: 180,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      );
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 30)),
+      );
+      await tester.pump();
+      expect(disk.blocked, isTrue);
+      expect(client.requested, contains('poster-1'));
+      expect(client.requested, isNot(contains('poster-0')));
+
+      slowRead.complete();
+      await tester.pumpWidget(const SizedBox.shrink());
+      for (final pending in client.pending.values) {
+        if (!pending.isCompleted) pending.complete(kTinyPng);
+      }
+      await tester.pump(MediaImageCache.defaultFetchTimeout);
+    },
+  );
+
+  testWidgets('visible grid posters fetch concurrently and decode to pixels', (
+    tester,
+  ) async {
+    final client = _ControlledImageClient()..hold = true;
+    final auth = detachedAuth(client);
+    await tester.pumpWidget(
+      wrap(
+        auth,
+        SizedBox(
+          width: 240,
+          height: 360,
+          child: Wrap(
+            children: [
+              for (var index = 0; index < 4; index++)
+                MediaImage(
+                  key: ValueKey('visible-poster-$index'),
+                  item: EmbyItem(
+                    id: 'poster-$index',
+                    name: '海报$index',
+                    type: 'Movie',
+                    primaryImageTag: 'tag-$index',
+                  ),
+                  width: 120,
+                  height: 180,
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 30)),
+    );
+    expect(client.requested.toSet(), {
+      'poster-0',
+      'poster-1',
+      'poster-2',
+      'poster-3',
+    });
+    expect(client.maxActive, 4);
+    for (final pending in client.pending.values) {
+      pending.complete(kTinyPng);
+    }
+    await pumpUntilImage(tester);
+    for (var index = 0; index < 4; index++) {
+      final image = find.descendant(
+        of: find.byKey(ValueKey('visible-poster-$index')),
+        matching: find.byType(RawImage),
+      );
+      expect(image, findsOneWidget);
+      expect(tester.renderObject<RenderImage>(image).image, isNotNull);
+    }
+  });
 }
 
 class _HangingWriteStore implements MediaImageDiskStore {
@@ -1315,6 +1420,31 @@ class _HangingWriteStore implements MediaImageDiskStore {
 
   @override
   Future<void> write(String key, Uint8List bytes) => hang.future;
+
+  @override
+  Future<void> remove(String key) async {}
+
+  @override
+  Future<void> clear() async {}
+}
+
+class _SlowPosterReadStore implements MediaImageDiskStore {
+  _SlowPosterReadStore(this.wait);
+
+  final Completer<void> wait;
+  bool blocked = false;
+
+  @override
+  Future<Uint8List?> read(String key) async {
+    if (key.contains('|poster-0|')) {
+      blocked = true;
+      await wait.future;
+    }
+    return null;
+  }
+
+  @override
+  Future<void> write(String key, Uint8List bytes) async {}
 
   @override
   Future<void> remove(String key) async {}

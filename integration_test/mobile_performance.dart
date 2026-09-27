@@ -1,6 +1,8 @@
 // Validation entry point. Launch with `flutter run -t` on a real phone or TV,
 // then `adb forward tcp:8798 tcp:8798`. POST /begin with label, cache=cold or
 // warm, device, build, and exact visible contentKey/actionKey before navigation.
+// For category grids, pass imageKeyPrefix=catalog-item- to record every visible
+// card's actual decoded-image completion, without exporting media item IDs.
 // GET /state is exploratory; POST /end consumes one active run and returns its
 // random runId for host-bound, one-time formal capture.
 // Repeat each scenario in the same build mode; keep cold/warm samples separate.
@@ -75,6 +77,7 @@ class _PageProbe {
               buildId: q['build']!,
               contentKey: q['contentKey']!,
               actionKey: q['actionKey']!,
+              imageKeyPrefix: q['imageKeyPrefix'],
               runId: List.generate(
                 16,
                 (_) =>
@@ -172,6 +175,10 @@ class _PageProbe {
       'actionKey': sample?.actionKey,
       'firstContentMs': sample?.contentMs,
       'firstRenderedImageMs': sample?.renderedImageMs,
+      'visibleImageCount': sample?.visibleImageKeys.length ?? 0,
+      'visibleImageCompletionMs':
+          (sample?.visibleImageCompletionMs.values.toList() ?? <double>[])
+            ..sort(),
       'renderedImageObserved': sample?.renderedImageMs != null,
       'firstDisplayedImageMs': sample?.displayedImageMs,
       'displayedImageEvidenceSha256': sample?.displayedImageEvidenceSha256,
@@ -236,6 +243,14 @@ class _PageProbe {
                 hasDecodedImage(element, viewport: viewport)) {
               sample.renderedImageMs = ms;
             }
+            final imagePrefix = sample.imageKeyPrefix;
+            if (imagePrefix != null && key.value.startsWith(imagePrefix)) {
+              sample.visibleImageKeys.add(key.value);
+              if (!sample.visibleImageCompletionMs.containsKey(key.value) &&
+                  hasDecodedImage(element, viewport: viewport)) {
+                sample.visibleImageCompletionMs[key.value] = ms;
+              }
+            }
             if (sample.operableMs == null &&
                 key.value == sample.actionKey &&
                 _enabled(widget)) {
@@ -277,6 +292,7 @@ class _PageSample {
     required this.buildId,
     required this.contentKey,
     required this.actionKey,
+    required this.imageKeyPrefix,
     required this.runId,
     required this.frames,
   }) {
@@ -284,6 +300,9 @@ class _PageSample {
   }
 
   final String label, cacheMode, device, buildId, contentKey, actionKey, runId;
+  final String? imageKeyPrefix;
+  final Set<String> visibleImageKeys = {};
+  final Map<String, double> visibleImageCompletionMs = {};
   final MobileFrameTimingWindow frames;
   final Stopwatch clock = Stopwatch();
   double? contentMs, renderedImageMs, operableMs, nativeFirstFrameMs;

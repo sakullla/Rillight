@@ -72,6 +72,10 @@ Map<String, Object?> summarizeMobileSamples(
 ) {
   final content = <double>[];
   final renderedImages = <double>[];
+  final visibleImageCompletion = <double>[];
+  final visibleImageSpread = <double>[];
+  var visibleImages = 0;
+  var decodedVisibleImages = 0;
   final displayedImages = <double>[];
   final displayedFrames = <double>[];
   final nativeFrames = <double>[];
@@ -96,6 +100,22 @@ Map<String, Object?> summarizeMobileSamples(
     final uncertainty = sample['displayedFrameClockUncertaintyMs'];
     if (sample['renderedImageObserved'] == true && rendered is num) {
       renderedImages.add(rendered.toDouble());
+    }
+    final visibleCount = sample['visibleImageCount'];
+    final completion = sample['visibleImageCompletionMs'];
+    if (visibleCount is int &&
+        visibleCount >= 0 &&
+        completion is List &&
+        completion.every((value) => value is num && value >= 0)) {
+      visibleImages += visibleCount;
+      decodedVisibleImages += completion.length;
+      final times =
+          completion.cast<num>().map((value) => value.toDouble()).toList()
+            ..sort();
+      visibleImageCompletion.addAll(times);
+      if (times.length >= 2) {
+        visibleImageSpread.add(times.last - times.first);
+      }
     }
     if (displayedImage is num &&
         sample['displayedImageEvidenceSha256'] is String &&
@@ -158,6 +178,10 @@ Map<String, Object?> summarizeMobileSamples(
     'failures': failures,
     'firstContentMs': _summary(content),
     'firstRenderedImageMs': _summary(renderedImages),
+    'visibleImages': visibleImages,
+    'decodedVisibleImages': decodedVisibleImages,
+    'visibleImageCompletionMs': _summary(visibleImageCompletion),
+    'visibleImageSpreadMs': _summary(visibleImageSpread),
     'firstDisplayedImageMs': _summary(displayedImages),
     'displayedImageSamples': displayedImages.length,
     'renderedImageSamples': renderedImages.length,

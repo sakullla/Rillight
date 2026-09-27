@@ -510,59 +510,81 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
                 slivers: [
                   SliverList.list(
                     children: [
-                      if (pending)
-                        _PhoneDetailPending(handoff: handoff)
+                      if (pending && imageSource == null)
+                        KeyedSubtree(
+                          key: _PhoneDetailPending.headerKey,
+                          child: SizedBox(
+                            height: _pendingHeaderHeight(context),
+                            child: SkeletonBlock(
+                              borderRadius: BorderRadius.zero,
+                              animated: !MediaQuery.disableAnimationsOf(
+                                context,
+                              ),
+                            ),
+                          ),
+                        )
                       else if (failed)
                         MobileFailureState(
                           message: embyFailureMessage(l, controller.error!),
                           onRetry: _refresh,
                         )
                       else if (imageSource != null)
-                        PhoneItemBanner(
-                          item: imageSource,
-                          title: (item ?? imageSource).name,
-                          titleHint: item != null && item.isEpisode
-                              ? item.seriesName
-                              : null,
-                          onTitleTap:
-                              item != null &&
-                                  item.isEpisode &&
-                                  item.seriesId != null &&
-                                  item.seriesId!.isNotEmpty
-                              ? () => _openSeries(item)
-                              : null,
-                          meta: item == null ? const [] : _bannerMeta(l, item),
-                          actions: item == null
-                              ? null
-                              : _DetailPlayActions(
-                                  label: target == null
-                                      ? l.noPlayableStream
-                                      : _playLabel(l, item, target),
-                                  enabled: target != null && target.isPlayable,
-                                  showRestart:
-                                      !item.isSeries &&
-                                      target?.canResume == true,
-                                  onPlay: target == null
-                                      ? null
-                                      : _openPreferredPlayer,
-                                  onRestart: target == null
-                                      ? null
-                                      : () => _openPlayer(
-                                          target.id,
-                                          fromStart: true,
-                                        ),
-                                  onPrevious:
-                                      item.isEpisode && _previousEpisode != null
-                                      ? () => _openItem(_previousEpisode!.id)
-                                      : null,
-                                  onNext: item.isEpisode && _nextEpisode != null
-                                      ? () => _openItem(_nextEpisode!.id)
-                                      : null,
-                                ),
-                          preferBackdrop: handoff?.preferBackdrop ?? true,
-                          maxWidth:
-                              handoff?.maxWidth ?? PhoneMotion.pageRequestWidth,
+                        KeyedSubtree(
+                          key: _PhoneDetailPending.headerKey,
+                          child: PhoneItemBanner(
+                            item: imageSource,
+                            title: (item ?? imageSource).name,
+                            titleHint: item != null && item.isEpisode
+                                ? item.seriesName
+                                : null,
+                            onTitleTap:
+                                item != null &&
+                                    item.isEpisode &&
+                                    item.seriesId != null &&
+                                    item.seriesId!.isNotEmpty
+                                ? () => _openSeries(item)
+                                : null,
+                            meta: item == null
+                                ? const []
+                                : _bannerMeta(l, item),
+                            actions: item == null
+                                ? null
+                                : _DetailPlayActions(
+                                    label: target == null
+                                        ? l.noPlayableStream
+                                        : _playLabel(l, item, target),
+                                    enabled:
+                                        target != null && target.isPlayable,
+                                    showRestart:
+                                        !item.isSeries &&
+                                        target?.canResume == true,
+                                    onPlay: target == null
+                                        ? null
+                                        : _openPreferredPlayer,
+                                    onRestart: target == null
+                                        ? null
+                                        : () => _openPlayer(
+                                            target.id,
+                                            fromStart: true,
+                                          ),
+                                    onPrevious:
+                                        item.isEpisode &&
+                                            _previousEpisode != null
+                                        ? () => _openItem(_previousEpisode!.id)
+                                        : null,
+                                    onNext:
+                                        item.isEpisode && _nextEpisode != null
+                                        ? () => _openItem(_nextEpisode!.id)
+                                        : null,
+                                  ),
+                            preferBackdrop: handoff?.preferBackdrop ?? true,
+                            maxWidth:
+                                handoff?.maxWidth ??
+                                PhoneMotion.pageRequestWidth,
+                            showCaption: !pending,
+                          ),
                         ),
+                      if (pending) _PhoneDetailPending(handoff: handoff),
                       if (item != null && controller.error != null)
                         MobileFailureState(
                           message: embyFailureMessage(l, controller.error!),
@@ -1093,21 +1115,6 @@ class _PhoneDetailPending extends StatelessWidget {
     final contentWidth = width - AppSpacing.md * 2;
     final animate = !MediaQuery.disableAnimationsOf(context);
     final name = source?.item.name.trim() ?? '';
-    final header = source == null
-        ? SizedBox(
-            height: _pendingHeaderHeight(context),
-            child: SkeletonBlock(
-              borderRadius: BorderRadius.zero,
-              animated: animate,
-            ),
-          )
-        : PhoneItemBanner(
-            item: source.item,
-            title: name,
-            showCaption: false,
-            preferBackdrop: source.preferBackdrop,
-            maxWidth: source.maxWidth,
-          );
     final title = name.isEmpty
         ? SkeletonBlock(
             key: titleKey,
@@ -1128,7 +1135,6 @@ class _PhoneDetailPending extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        KeyedSubtree(key: headerKey, child: header),
         Padding(
           padding: const EdgeInsets.fromLTRB(
             AppSpacing.md,
