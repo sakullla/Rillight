@@ -148,6 +148,26 @@ must match and initial median temperature must differ by at most 1 °C. Missing
 power rails need an identified fuel gauge method with its uncertainty recorded,
 not an emulator estimate presented as phone energy.
 
+The offline comparator above accepts recorded JSONL for analysis. The formal
+phone candidate gate additionally requires a unique `probeTraceId` on **every**
+baseline and candidate row, bound to a locally signed live capture/probe trace
+for the row's APK, device, phase and category. Collect a `page` or `animation`
+trace with `python tool/phone_player_validation.py --capture-performance page
+--capture-phase after --performance-phase candidate --serial SERIAL
+--evidence-root build/phone-player-validation` while the profile/release
+validation app and its port 8798 probe run on that phone. For `image` and
+`startup`, collect `before` and `after` with that category and attach their
+exact screenshot paths/hashes. Baseline capture uses `--performance-phase
+baseline --artifact PATH_TO_INSTALLED_BASELINE_APK`; collect it before replacing
+that APK with the candidate. The gate reads `/state` through an adb forward and
+requires row timings/frame arrays to match that stored probe trace. Display
+latency uses the probe's elapsed time after the live screen capture, an upper
+bound on the first visible pixel. Reusing a trace ID or supplying self-authored
+PNG/timing values fails. Network, power and thermal have no live sample
+collector in this gate and remain unverified even if the offline comparator
+reports improvement; they need independently bound collection before a formal
+measured-gain claim can pass.
+
 For the current phone candidate run `python tool/phone_player_validation.py
 --verify-candidate --evidence-root build/phone-player-validation`. It writes
 `result.json` with Git revision and working-tree content hashes and checks the

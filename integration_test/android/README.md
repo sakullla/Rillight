@@ -92,6 +92,20 @@ and temperature comparisons require repeated physical-device runs with the
 same brightness, volume, media, network and initial temperature conditions;
 emulator metrics are separate functional evidence.
 
+For formal paired performance evidence, run the profile/release probe on the
+physical phone and use `tool/phone_player_validation.py
+--capture-performance CATEGORY --capture-phase after --performance-phase
+candidate --serial SERIAL --evidence-root build/phone-player-validation`.
+`page` and `animation` use a live `/state` probe trace; `image` and `startup`
+also need a `before` capture and use the probe elapsed time after live screen
+capture as a conservative displayed-pixel bound. Put the returned unique ID in
+the JSONL row's `probeTraceId` and use the capture paths/hashes for visual rows.
+Collect baseline rows similarly with `--performance-phase baseline --artifact
+PATH_TO_INSTALLED_BASELINE_APK` before installing the candidate. Formal gate
+validation rejects free-form timings, reused traces, and network/power/thermal
+rows without a live collector; the offline comparator remains useful for
+exploration but cannot establish hardware gains alone.
+
 For the candidate physical-phone gate, capture each `SCREEN_EVENTS` scenario
 twice with `tool/phone_player_validation.py --capture-scenario SCENARIO
 --capture-phase before|after --serial SERIAL --evidence-root

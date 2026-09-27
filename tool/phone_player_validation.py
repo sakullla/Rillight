@@ -19,6 +19,7 @@ import sys
 import time
 import uuid
 import wave
+from urllib.request import urlopen
 
 from PIL import Image
 
@@ -43,6 +44,8 @@ SCREEN_EVENTS = {
     'background_resume': ('background', 'foreground_paused'),
 }
 _PNG_SIGNATURE = b'\x89PNG\r\n\x1a\n'
+PERFORMANCE_CATEGORIES = ('page', 'animation', 'image', 'startup')
+PERFORMANCE_SCREEN = ('image', 'startup')
 
 
 def command(*args):
@@ -212,7 +215,7 @@ def _validation_app_foreground(serial):
 
 def capture_live_screen(root, scenario, phase, identity, audited_apk, live_device):
     """Capture only adb output; caller cannot provide a PNG path or pixel bytes."""
-    if scenario not in SCREEN_EVENTS or phase not in ('before', 'after'):
+    if scenario not in (*SCREEN_EVENTS, *PERFORMANCE_CATEGORIES) or phase not in ('before', 'after'):
         raise ValueError('Unknown screen capture scenario or phase')
     if not audited_apk or not live_device or \
             live_device.get('installed_apk_sha256') != audited_apk['sha256']:
@@ -251,7 +254,56 @@ def capture_live_screen(root, scenario, phase, identity, audited_apk, live_devic
     return payload
 
 
+def capture_live_performance(root, category, phase, sample_phase, identity,
+                             artifact, live_device):
+    """Read the installed probe and screen from the selected live adb phone."""
+    if category not in PERFORMANCE_CATEGORIES or sample_phase not in ('baseline', 'candidate'):
+        raise ValueError('Unsupported performance category or sample phase')
+    if phase != 'after' and not (category in PERFORMANCE_SCREEN and phase == 'before'):
+        raise ValueError('Only image/startup have a before capture')
+    screenshot = capture_live_screen(root, category, phase, identity, artifact, live_device)
+    if phase == 'before':
+        return screenshot
+    serial = live_device['serial']
+    forwarded = command('adb', '-s', serial, 'forward', 'tcp:8798', 'tcp:8798')
+    if forwarded.returncode:
+        raise RuntimeError('Cannot forward the running app performance probe')
+    start_ns = time.monotonic_ns()
+    with urlopen('http://127.0.0.1:8798/state', timeout=10) as response:
+        state = json.loads(response.read())
+    end_ns = time.monotonic_ns()
+    if not _validation_app_foreground(serial) or not isinstance(state, dict) or \
+            state.get('platform') != 'android' or \
+            state.get('buildMode') not in ('profile', 'release') or \
+            not isinstance(state.get('elapsedMs'), (int, float)) or \
+            state['elapsedMs'] < 0:
+        raise RuntimeError('Live app probe state is unavailable or unsuitable')
+    trace = {'probe': state, 'screenshot': screenshot, 'probeStartNs': start_ns,
+             'probeEndNs': end_ns}
+    folder = root / 'captures'
+    path = folder / f'performance-probe-{uuid.uuid4().hex}.json'
+    path.write_text(json.dumps(trace, ensure_ascii=False), encoding='utf-8')
+    payload = {'id': uuid.uuid4().hex, 'phase': sample_phase, 'category': category,
+               'path': path.relative_to(root).as_posix(), 'sha256': sha256(path),
+               'device_serial': serial, 'device_fingerprint': live_device['fingerprint'],
+               'installed_apk_sha256': artifact['sha256'],
+               'candidate_head': identity['head'],
+               'working_tree_sha256': identity['working_tree_sha256']}
+    key = _capture_key(root, create=True)
+    if key is None:
+        raise RuntimeError('Capture ledger exists without its local signing key')
+    ledger_path = root / 'performance-ledger.json'
+    ledger = json.loads(ledger_path.read_text(encoding='utf-8')) if ledger_path.is_file() else []
+    ledger.append({'payload': payload, 'signature': _capture_signature(key, payload)})
+    ledger_path.write_text(json.dumps(ledger, indent=2), encoding='utf-8')
+    return payload
+
+
 def _screen_capture_bound(root, scenario, data, identity, audited_apk, live_device):
+    after_path_key = ('displayedImageEvidencePath' if scenario == 'image'
+                      else 'displayedFrameEvidencePath')
+    after_hash_key = ('displayedImageEvidenceSha256' if scenario == 'image'
+                      else 'displayedFrameEvidenceSha256')
     try:
         key = _capture_key(root)
         ledger = json.loads((root / 'capture-ledger.json').read_text(encoding='utf-8'))
@@ -280,16 +332,16 @@ def _screen_capture_bound(root, scenario, data, identity, audited_apk, live_devi
                 data.get('screenBeforePath') == payload['path'] and
                 data.get('screenBeforeSha256') == payload['sha256']) or \
                 (phase == 'after' and
-                 data.get('displayedFrameEvidencePath') == payload['path'] and
-                 data.get('displayedFrameEvidenceSha256') == payload['sha256']):
+                 data.get(after_path_key) == payload['path'] and
+                 data.get(after_hash_key) == payload['sha256']):
             matched[phase] = payload
     before, after = matched.get('before'), matched.get('after')
     return bool(before and after and
                 before['captured_unix_ns'] < after['captured_unix_ns'] and
                 data.get('screenBeforePath') == before['path'] and
                 data.get('screenBeforeSha256') == before['sha256'] and
-                data.get('displayedFrameEvidencePath') == after['path'] and
-                data.get('displayedFrameEvidenceSha256') == after['sha256'])
+                data.get(after_path_key) == after['path'] and
+                data.get(after_hash_key) == after['sha256'])
 
 
 def _wav_rms(file):
@@ -457,26 +509,132 @@ def validate_physical(record, identity, evidence_root, *, audited_apk=None,
     return errors
 
 
-def candidate_samples_match_apk(path, audited_apk, device_fingerprint, evidence_root):
-    if not audited_apk or not device_fingerprint:
+def _signed_performance_records(root):
+    try:
+        key = _capture_key(root)
+        rows = json.loads((root / 'performance-ledger.json').read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return {}
+    if key is None or not isinstance(rows, list):
+        return {}
+    records = {}
+    for record in rows:
+        if not isinstance(record, dict) or not isinstance(record.get('payload'), dict):
+            continue
+        payload = record['payload']
+        if (not hmac.compare_digest(str(record.get('signature', '')),
+                                    _capture_signature(key, payload)) or
+                not isinstance(payload.get('id'), str) or
+                _safe_file(root, payload.get('path'), payload.get('sha256')) is None):
+            continue
+        records[payload['id']] = payload
+    return records
+
+
+def _performance_row_bound(row, payload, root):
+    trace_file = _safe_file(root, payload.get('path'), payload.get('sha256'))
+    if trace_file is None:
         return False
-    expected = (evidence_root / audited_apk['path']).resolve()
+    try:
+        trace = json.loads(trace_file.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return False
+    if not isinstance(trace, dict) or not isinstance(trace.get('probe'), dict):
+        return False
+    probe = trace['probe']
+    if (payload.get('category') != row.get('category') or
+            payload.get('phase') != row.get('phase') or
+            payload.get('device_fingerprint') != row.get('device') or
+            payload.get('installed_apk_sha256') != row.get('artifactSha256') or
+            probe.get('buildMode') != row.get('buildMode') or
+            probe.get('label') != row.get('label') or
+            probe.get('cache') != row.get('cache') or
+            probe.get('device') != row.get('device') or
+            probe.get('complete') is not row.get('complete') or
+            probe.get('frameBudgetMs') != row.get('frameBudgetMs') or
+            not isinstance(trace.get('probeStartNs'), int) or
+            not isinstance(trace.get('probeEndNs'), int) or
+            trace['probeEndNs'] < trace['probeStartNs']):
+        return False
+    category = row['category']
+    if category not in PERFORMANCE_CATEGORIES:
+        # Network stalls and hardware rails/thermals need their own live
+        # collectors. Caller-authored JSON is analysis input, not gate evidence.
+        return False
+    if category == 'page':
+        return row.get('firstOperableMs') == probe.get('firstOperableMs') and \
+            isinstance(probe.get('firstOperableMs'), (int, float))
+    if category == 'animation':
+        return (row.get('uiFrameMs') == probe.get('uiFrameMs') and
+                row.get('rasterFrameMs') == probe.get('rasterFrameMs') and
+                row.get('elapsedMs') == probe.get('elapsedMs') and
+                row.get('frameTimingsComplete') == probe.get('frameTimingsComplete'))
+    screenshot = trace.get('screenshot')
+    if (not isinstance(screenshot, dict) or screenshot.get('scenario') != category or
+            screenshot.get('phase') != 'after' or
+            screenshot.get('path') != row.get(
+                'displayedImageEvidencePath' if category == 'image'
+                else 'displayedFrameEvidencePath') or
+            screenshot.get('sha256') != row.get(
+                'displayedImageEvidenceSha256' if category == 'image'
+                else 'displayedFrameEvidenceSha256')):
+        return False
+    identity = {'head': payload.get('candidate_head'),
+                'working_tree_sha256': payload.get('working_tree_sha256')}
+    artifact = {'sha256': payload.get('installed_apk_sha256')}
+    live = {'serial': payload.get('device_serial'),
+            'fingerprint': payload.get('device_fingerprint')}
+    if not _screen_capture_bound(root, category, row, identity, artifact, live):
+        return False
+    metric = 'firstDisplayedImageMs' if category == 'image' else 'firstDisplayedFrameMs'
+    return (row.get(metric) == probe.get('elapsedMs') and
+            isinstance(row.get(metric), (int, float)) and
+            row.get('elapsedMs') == probe.get('elapsedMs') and
+            (category != 'image' or row.get('renderedImageObserved') ==
+             probe.get('renderedImageObserved') is True))
+
+
+def samples_match_live_probes(path, phase, audited_apk, device_fingerprint,
+                              evidence_root, identity=None):
+    if not device_fingerprint or (phase == 'candidate' and not audited_apk):
+        return False
+    records = _signed_performance_records(evidence_root)
+    expected = ((evidence_root / audited_apk['path']).resolve()
+                if phase == 'candidate' else None)
+    seen = set()
     rows = 0
     try:
         for line in path.read_text(encoding='utf-8').splitlines():
             if not line.strip():
                 continue
             sample = json.loads(line)
-            if (not isinstance(sample, dict) or sample.get('phase') != 'candidate' or
+            if not isinstance(sample, dict):
+                return False
+            capture_id = sample.get('probeTraceId')
+            payload = records.get(capture_id)
+            if (capture_id in seen or payload is None or
+                    sample.get('phase') != phase or
                     sample.get('target') != 'android-phone' or
                     sample.get('device') != device_fingerprint or
-                    sample.get('artifactSha256') != audited_apk['sha256'] or
-                    (path.parent / sample.get('artifactPath', '')).resolve() != expected):
+                    (expected is not None and
+                     (sample.get('artifactSha256') != audited_apk['sha256'] or
+                      (path.parent / sample.get('artifactPath', '')).resolve() != expected)) or
+                    (identity is not None and phase == 'candidate' and
+                     (payload.get('candidate_head') != identity['head'] or
+                      payload.get('working_tree_sha256') != identity['working_tree_sha256'])) or
+                    not _performance_row_bound(sample, payload, evidence_root)):
                 return False
+            seen.add(capture_id)
             rows += 1
-    except (OSError, ValueError, TypeError):
+    except (OSError, ValueError, TypeError, KeyError):
         return False
     return rows > 0
+
+
+def candidate_samples_match_apk(path, audited_apk, device_fingerprint,
+                                evidence_root, identity=None):
+    return samples_match_live_probes(path, 'candidate', audited_apk,
+                                     device_fingerprint, evidence_root, identity)
 
 
 def verify_candidate(evidence_root, *, run_android=True):
@@ -545,8 +703,12 @@ def verify_candidate(evidence_root, *, run_android=True):
     candidate = evidence_root / 'candidate.jsonl'
     if baseline.is_file() and candidate.is_file():
         fingerprint = physical.get('device_fingerprint') if isinstance(physical, dict) else None
-        if not candidate_samples_match_apk(candidate, audited_apk, fingerprint, evidence_root):
-            errors.append('Candidate performance samples do not use the audited installed APK and phone')
+        if not candidate_samples_match_apk(candidate, audited_apk, fingerprint,
+                                            evidence_root, identity):
+            errors.append('Candidate performance samples lack audited live probe/capture provenance')
+        if not samples_match_live_probes(baseline, 'baseline', audited_apk,
+                                         fingerprint, evidence_root):
+            errors.append('Baseline performance samples lack live probe/capture provenance')
         compared = command(sys.executable, 'tool/player_performance_checks.py',
                            '--compare-baseline', '--target', 'android-phone',
                            '--baseline', str(baseline), '--candidate', str(candidate))
@@ -571,25 +733,44 @@ def main(argv=None):
     action = parser.add_mutually_exclusive_group(required=True)
     action.add_argument('--verify-candidate', action='store_true')
     action.add_argument('--capture-scenario', choices=tuple(SCREEN_EVENTS))
+    action.add_argument('--capture-performance', choices=PERFORMANCE_CATEGORIES)
     parser.add_argument('--capture-phase', choices=('before', 'after'))
+    parser.add_argument('--performance-phase', choices=('baseline', 'candidate'))
+    parser.add_argument('--artifact', type=Path,
+                        help='Baseline APK file currently installed on the phone')
     parser.add_argument('--serial', help='Connected physical Android phone for live capture')
     parser.add_argument('--evidence-root', type=Path,
                         default=ROOT / 'build/phone-player-validation')
     args = parser.parse_args(argv)
     root = args.evidence_root.resolve()
-    if args.capture_scenario:
+    if args.capture_scenario or args.capture_performance:
         if not args.capture_phase or not args.serial:
-            parser.error('--capture-scenario requires --capture-phase and --serial')
+            parser.error('Capture requires --capture-phase and --serial')
+        if args.capture_performance and not args.performance_phase:
+            parser.error('--capture-performance requires --performance-phase')
         root.mkdir(parents=True, exist_ok=True)
         identity = candidate_identity()
-        audited = audited_android_candidate(root, identity)
+        if args.capture_performance and args.performance_phase == 'baseline':
+            if args.artifact is None or not args.artifact.is_file():
+                parser.error('Baseline capture requires an existing --artifact APK')
+            audited = {'sha256': sha256(args.artifact)}
+        else:
+            audited = audited_android_candidate(root, identity)
         live = live_physical_devices([args.serial]).get(args.serial)
-        capture = capture_live_screen(root, args.capture_scenario,
-                                      args.capture_phase, identity, audited, live)
+        if args.capture_performance:
+            capture = capture_live_performance(root, args.capture_performance,
+                                               args.capture_phase,
+                                               args.performance_phase, identity,
+                                               audited, live)
+        else:
+            capture = capture_live_screen(root, args.capture_scenario,
+                                          args.capture_phase, identity, audited, live)
         if candidate_identity()['working_tree_sha256'] != identity['working_tree_sha256']:
             raise RuntimeError('Source candidate changed during live capture')
         print(json.dumps({'captured': capture['path'], 'sha256': capture['sha256'],
-                          'scenario': args.capture_scenario, 'phase': args.capture_phase}))
+                          'id': capture.get('id'),
+                          'scenario': args.capture_scenario or args.capture_performance,
+                          'phase': args.capture_phase}))
         return 0
     result = verify_candidate(root)
     print(json.dumps({'passed': result['passed'], 'evidence': str(args.evidence_root),
