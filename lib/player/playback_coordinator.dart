@@ -45,10 +45,22 @@ class PlaybackCoordinator {
 
   /// Stop must reach the backend immediately to cancel a pending open. New
   /// mutations still wait for both that cancellation and the previous command.
-  Future<void> interrupt(Future<void> Function() stop) {
+  Future<void> interrupt(
+    Future<void> Function() stop, {
+    bool ensureRetired = false,
+  }) {
     final previous = _commands;
     final stopping = Future<void>.sync(stop);
-    final barrier = Future.wait([previous, stopping]).then<void>((_) {});
+    final barrier = () async {
+      try {
+        await Future.wait([previous, stopping]);
+      } finally {
+        // A pending open can complete after the immediate cancellation stop.
+        // Keep the command barrier held until that open has exited and the
+        // handle has been stopped once more, including after an open error.
+        if (ensureRetired) await stop();
+      }
+    }();
     _commands = barrier.then<void>(
       (_) {},
       onError: (Object _, StackTrace _) {},

@@ -121,6 +121,7 @@ class PlayerController extends ChangeNotifier {
     this.controlsHideAfter = const Duration(seconds: 5),
     this.nextEpisodeCountdown = const Duration(seconds: 10),
     this.seekStep = const Duration(seconds: 10),
+    this.recoveryTimeout = const Duration(seconds: 45),
     this.onClose,
     this.onOpenItem,
     this.onOpenItemDetail,
@@ -155,6 +156,9 @@ class PlayerController extends ChangeNotifier {
   final Duration controlsHideAfter;
   final Duration nextEpisodeCountdown;
   final Duration seekStep;
+
+  /// Total wall-clock budget for a retry or media-source change.
+  final Duration recoveryTimeout;
   final VoidCallback? onClose;
   final ValueChanged<String>? onOpenItem;
 
@@ -209,6 +213,13 @@ class PlayerController extends ChangeNotifier {
   PlaybackOperation? _beginOperation() {
     final operation = _operations.begin();
     if (operation != null) {
+      if (_recoveryOperation != null) {
+        _recoveryOperation = null;
+        _recovery = null;
+        _recoveryBase = null;
+        isRecovering = false;
+        pendingMediaSourceId = null;
+      }
       _operationBaseUrl = client.baseUrl?.toString();
       _operationUserId = client.userId;
       _operationToken = client.accessToken;
@@ -298,6 +309,20 @@ class PlayerController extends ChangeNotifier {
   // --- 媒体源切换(R9) ---
   List<PlaybackMediaSource> mediaSources = const [];
   String? activeMediaSourceId;
+  String? pendingMediaSourceId;
+  bool isRecovering = false;
+  Future<void>? _recovery;
+  PlaybackOperation? _recoveryOperation;
+  Future<void>? _nativeRetirement;
+  ({
+    ResolvedPlayback? previous,
+    String? oldSourceId,
+    int startTicks,
+    int? audio,
+    int? subtitle,
+    bool paused,
+  })?
+  _recoveryBase;
 
   /// 按发行组/版本标签跨集对齐(Emby 每集 MediaSourceId 和文件名都不同)。
   String? _preferredSourceName;
@@ -356,10 +381,16 @@ class PlayerController extends ChangeNotifier {
     await _start(operation);
   }
 
-  Future<void> _start(PlaybackOperation operation) async {
-    final stopped = _stopSession();
-    await _operations.interrupt(backend.stop);
-    await stopped;
+  Future<void> _start(
+    PlaybackOperation operation, {
+    bool skipStop = false,
+    void Function(String stage)? onStage,
+  }) async {
+    if (!skipStop) {
+      final stopped = _stopSession();
+      await _operations.interrupt(backend.stop);
+      await stopped;
+    }
     if (!_accepts(operation)) return;
     state.phase = PlaybackPhase.loading;
     error = null;
@@ -394,6 +425,7 @@ class PlayerController extends ChangeNotifier {
       if (!_accepts(operation)) return;
       await _restoreSettings(operation);
       if (!_accepts(operation)) return;
+      onStage?.call('catalog metadata');
       final loadedItem = await client.getItem(itemId);
       if (!_accepts(operation)) {
         return;
@@ -402,6 +434,7 @@ class PlayerController extends ChangeNotifier {
       if (!item!.isPlayable) {
         error = PlayerErrorKind.notPlayable;
         loading = false;
+        state.phase = PlaybackPhase.failed;
         _emit();
         return;
       }
@@ -441,6 +474,7 @@ class PlayerController extends ChangeNotifier {
           audio: audioStreamIndex,
           subtitle: subtitleStreamIndex,
           subtitleOff: memorySubtitleOff,
+          onStage: onStage,
         );
         return;
       }
@@ -452,6 +486,7 @@ class PlayerController extends ChangeNotifier {
           audio: audioStreamIndex,
           subtitle: subtitleStreamIndex,
           subtitleOff: memorySubtitleOff,
+          onStage: onStage,
         );
         return;
       }
@@ -461,6 +496,7 @@ class PlayerController extends ChangeNotifier {
         audio: audioStreamIndex,
         subtitle: subtitleStreamIndex,
         subtitleOff: memorySubtitleOff,
+        onStage: onStage,
       );
     } on EmbyException catch (failure) {
       if (!_accepts(operation)) {
@@ -469,6 +505,7 @@ class PlayerController extends ChangeNotifier {
       error = PlayerErrorKind.load;
       loadFailure = failure;
       loading = false;
+      state.phase = PlaybackPhase.failed;
       _emit();
     }
   }
@@ -558,11 +595,221 @@ class PlayerController extends ChangeNotifier {
   /// Initial catalog failures still need the full startup sequence.
   Future<void> retryPlayback() async {
     if (_disposed || _operations.isClosed || sessionExpired) return;
-    if (item == null || resolved == null) {
-      await start();
-    } else {
-      await _reopen(startTicks: ticksFromDuration(position));
+    await _recover();
+  }
+
+  Future<void> _recover({String? sourceId}) {
+    if (_disposed || _operations.isClosed || sessionExpired) {
+      return Future<void>.value();
     }
+    final existing = _recoveryOperation == null ? null : _recovery;
+    final replacing = existing != null && pendingMediaSourceId != sourceId;
+    if (existing != null && !replacing) return existing;
+    if (_nativeRetirement != null && !replacing) {
+      loading = false;
+      state.phase = PlaybackPhase.failed;
+      disconnectDetail = 'Playback resources are still being released';
+      _emit();
+      return Future<void>.value();
+    }
+    final base = replacing
+        ? _recoveryBase!
+        : (
+            previous: resolved,
+            oldSourceId: activeMediaSourceId,
+            startTicks: ticksFromDuration(position),
+            audio: audioStreamIndex,
+            subtitle: subtitleStreamIndex,
+            paused: !isPlaying && !disconnected,
+          );
+    final priorRetirement = replacing ? _nativeRetirement : null;
+    if (replacing) {
+      // A newer user intent owns the result. The old request may finish its
+      // native cleanup, but none of its metadata or events can commit.
+      _operations.invalidate();
+      resolved = base.previous;
+    }
+    final operation = _beginOperation();
+    if (operation == null) return Future<void>.value();
+    _recoveryOperation = operation;
+    _recoveryBase = base;
+    isRecovering = true;
+    pendingMediaSourceId = sourceId;
+    loading = true;
+    error = null;
+    loadFailure = null;
+    disconnected = false;
+    disconnectDetail = null;
+    state.phase = PlaybackPhase.loading;
+    state.buffering = false;
+    isPlaying = false;
+    controlsVisible = true;
+    _emit();
+    final work = _runRecovery(
+      operation: operation,
+      previous: base.previous,
+      oldSourceId: base.oldSourceId,
+      sourceId: sourceId,
+      startTicks: base.startTicks,
+      audio: base.audio,
+      subtitle: base.subtitle,
+      paused: base.paused,
+      priorRetirement: priorRetirement,
+    );
+    _recovery = work;
+    unawaited(
+      work.whenComplete(() {
+        if (identical(_recovery, work)) _recovery = null;
+      }),
+    );
+    return work;
+  }
+
+  Future<void> _runRecovery({
+    required PlaybackOperation operation,
+    required ResolvedPlayback? previous,
+    required String? oldSourceId,
+    required String? sourceId,
+    required int startTicks,
+    required int? audio,
+    required int? subtitle,
+    required bool paused,
+    Future<void>? priorRetirement,
+  }) async {
+    final clock = Stopwatch()..start();
+    Duration remaining() => recoveryTimeout - clock.elapsed;
+    String stage = 'stop';
+    try {
+      if (priorRetirement != null) {
+        stage = 'retire previous operation';
+        await priorRetirement.timeout(remaining());
+        if (!_accepts(operation)) return;
+      }
+      stage = 'stop';
+      final stopped = _stopSession();
+      final retirement = _operations.interrupt(
+        backend.stop,
+        ensureRetired: true,
+      );
+      _trackNativeRetirement(retirement);
+      await Future.wait([retirement, stopped]).timeout(remaining());
+      if (!_accepts(operation)) return;
+      if (previous == null) {
+        stage = 'catalog metadata';
+        await _start(
+          operation,
+          skipStop: true,
+          onStage: (value) => stage = value,
+        ).timeout(remaining());
+      } else {
+        stage = 'open';
+        await _open(
+          operation: operation,
+          startTicks: startTicks,
+          audio: audio,
+          subtitle: subtitle,
+          subtitleOff: subtitle == null,
+          startPaused: paused,
+          requestedSourceId: sourceId,
+          onStage: (value) => stage = value,
+        ).timeout(remaining());
+      }
+      if (!_accepts(operation)) return;
+      if (state.phase != PlaybackPhase.failed &&
+          error == null &&
+          !loading &&
+          !disconnected) {
+        if (sourceId != null &&
+            ((audio != null && audio != audioStreamIndex) ||
+                (subtitle != null && subtitle != subtitleStreamIndex))) {
+          trackFailure =
+              'Previous track is unavailable on this source; '
+              'a compatible track was selected';
+          _emit();
+        }
+        return;
+      }
+      if (sourceId != null &&
+          oldSourceId != null &&
+          !sessionExpired &&
+          remaining() > Duration.zero) {
+        final sourceFailure = disconnectDetail ?? loadFailure?.toString();
+        stage = 'restore previous source';
+        resolved = previous;
+        await _open(
+          operation: operation,
+          startTicks: startTicks,
+          audio: audio,
+          subtitle: subtitle,
+          subtitleOff: subtitle == null,
+          startPaused: paused,
+          requestedSourceId: oldSourceId,
+          onStage: (value) => stage = value,
+        ).timeout(remaining());
+        if (!_accepts(operation)) return;
+        if (state.phase != PlaybackPhase.failed && !loading && !disconnected) {
+          trackFailure = sourceFailure == null
+              ? 'Source change failed; previous source restored'
+              : 'Source change failed; previous source restored: $sourceFailure';
+          _emit();
+          return;
+        }
+      }
+      resolved = previous;
+    } on TimeoutException {
+      if (!_accepts(operation)) return;
+      // Keep the command barrier and native handle owned until open/stop exits.
+      _operations.invalidate();
+      if (stage != 'stop' &&
+          stage != 'retire previous operation' &&
+          _nativeRetirement == null) {
+        _trackNativeRetirement(
+          _operations.interrupt(backend.stop, ensureRetired: true),
+        );
+      }
+      loading = false;
+      isPlaying = false;
+      state.phase = PlaybackPhase.failed;
+      error = PlayerErrorKind.load;
+      disconnectDetail = 'Playback recovery timed out during $stage';
+      resolved = previous;
+      _emit();
+    } catch (failure) {
+      if (!_accepts(operation)) return;
+      loading = false;
+      isPlaying = false;
+      state.phase = PlaybackPhase.failed;
+      error = PlayerErrorKind.load;
+      disconnectDetail = 'Playback recovery failed during $stage: $failure';
+      resolved = previous;
+      _emit();
+    } finally {
+      if (identical(_recoveryOperation, operation)) {
+        _recoveryOperation = null;
+        _recoveryBase = null;
+        isRecovering = false;
+        pendingMediaSourceId = null;
+        _emit();
+      }
+    }
+  }
+
+  void _trackNativeRetirement(Future<void> retirement) {
+    _nativeRetirement = retirement;
+    unawaited(
+      retirement.then<void>(
+        (_) {
+          if (identical(_nativeRetirement, retirement)) {
+            _nativeRetirement = null;
+          }
+        },
+        onError: (Object _, StackTrace _) {
+          if (identical(_nativeRetirement, retirement)) {
+            _nativeRetirement = null;
+          }
+        },
+      ),
+    );
   }
 
   void openEndedSeries() {
@@ -1622,16 +1869,8 @@ class PlayerController extends ChangeNotifier {
         mediaSources.every((source) => source.id != sourceId)) {
       return;
     }
-    final startTicks = ticksFromDuration(position);
-    activeMediaSourceId = sourceId;
-    for (final source in mediaSources) {
-      if (source.id == sourceId) {
-        _preferredSourceName = _sourceFingerprint(source);
-        break;
-      }
-    }
     onUserActivity();
-    await _reopen(startTicks: startTicks);
+    await _recover(sourceId: sourceId);
   }
 
   /// 关闭播放器:取消定时器 → 在 [stoppedTimeout] 内等待 Stopped 送达
@@ -1883,6 +2122,8 @@ class PlayerController extends ChangeNotifier {
   Future<void> _open({
     required PlaybackOperation operation,
     required int startTicks,
+    String? requestedSourceId,
+    void Function(String stage)? onStage,
     int? audio,
     int? subtitle,
     bool subtitleOff = false,
@@ -1916,6 +2157,7 @@ class PlayerController extends ChangeNotifier {
     _emit();
 
     try {
+      onStage?.call('metadata');
       // 不带 MediaSourceId 请求:部分服务端(含 Emby)收到该参数时只返回
       // 这一个源,播放器就再也列不出其它版本;全部源在本地用
       // [preferredPlaybackSourceId] 按 id/发行组标签挑选。
@@ -1940,11 +2182,16 @@ class PlayerController extends ChangeNotifier {
       mediaSources = info.mediaSources;
       final chosenId = preferredPlaybackSourceId(
         sources: info.mediaSources,
-        requestedId: activeMediaSourceId ?? preferredMediaSourceId,
+        requestedId:
+            requestedSourceId ?? activeMediaSourceId ?? preferredMediaSourceId,
         requestedName: _preferredSourceName,
       );
-      if (chosenId != null) {
-        activeMediaSourceId = chosenId;
+      if (requestedSourceId != null && chosenId != requestedSourceId) {
+        await _failOpen(
+          operation,
+          detail: 'Requested media source is no longer available',
+        );
+        return;
       }
       final next = resolvePlayback(
         info: info,
@@ -1962,7 +2209,20 @@ class PlayerController extends ChangeNotifier {
         return;
       }
       resolved = next;
+      final sourceRuntime =
+          next.mediaSource.runTimeTicks ?? item?.runTimeTicks ?? 0;
+      final boundedStartTicks = sourceRuntime > 0
+          ? startTicks.clamp(0, sourceRuntime).toInt()
+          : startTicks;
       final memory = _rememberedPreference;
+      final sourceAudioTracks = next.mediaSource.audioStreams;
+      final defaultAudio = next.mediaSource.defaultAudioStreamIndex;
+      final compatibleDefaultAudio =
+          sourceAudioTracks.any((stream) => stream.index == defaultAudio)
+          ? defaultAudio
+          : sourceAudioTracks.isEmpty
+          ? null
+          : sourceAudioTracks.first.index;
       final selectedAudio =
           matchPreferredStreamIndex(
             streams: next.mediaSource.audioStreams,
@@ -1971,7 +2231,7 @@ class PlayerController extends ChangeNotifier {
             language: memory?.audioLanguage,
             title: memory?.audioTitle,
           ) ??
-          next.mediaSource.defaultAudioStreamIndex;
+          compatibleDefaultAudio;
       final int? selectedSubtitle;
       if (subtitleOff) {
         selectedSubtitle = null;
@@ -2003,6 +2263,7 @@ class PlayerController extends ChangeNotifier {
       Future<void>? started;
       final subtitleRevision = ++_trackRevision;
       _trackRevisions['SubtitleTrackChange'] = subtitleRevision;
+      onStage?.call('native open');
       await _operations.run(operation, () async {
         await backend.open(
           VideoOpenRequest(
@@ -2019,7 +2280,7 @@ class PlayerController extends ChangeNotifier {
                   ]
                 : next.mediaSource.mediaStreams,
             startPaused: startPaused,
-            start: durationFromTicks(startTicks),
+            start: durationFromTicks(boundedStartTicks),
             credentialOrigin: client.baseUrl,
             credentialHeaders: client.sessionHeaders,
             // 仅当流地址与 Emby 服务器同源时附加会话头;strm 等远端
@@ -2053,21 +2314,30 @@ class PlayerController extends ChangeNotifier {
                     TranscodeSubtitleDelivery.burnIn
             ? selectedSubtitle
             : backend.selectedSubtitleIndex;
-        loading = false;
-        state.updatePlaying(isPlaying);
+        if (!isRecovering) {
+          loading = false;
+          state.updatePlaying(isPlaying);
+        }
         // Publish readiness before optional commands or Playing can block.
         _emit();
-        started = _beginSession(operation, startTicks: startTicks);
+        started = _beginSession(operation, startTicks: boundedStartTicks);
         if (_pendingCompletion) {
           _pendingCompletion = false;
           unawaited(_handleCompleted());
         }
-        await _restoreParameter(
+        onStage?.call('playback settings');
+        final volumeApplied = await _restoreParameter(
           operation,
           () => backend.setVolume(mpvVolumeForPercent(volume)),
         );
-        await _restoreParameter(operation, () => backend.setRate(playbackRate));
-        await _restoreParameter(operation, () async {
+        final rateApplied = await _restoreParameter(
+          operation,
+          () => backend.setRate(playbackRate),
+        );
+        if (isRecovering && (!volumeApplied || !rateApplied)) {
+          throw StateError('Required playback settings were not restored');
+        }
+        final audioApplied = await _restoreParameter(operation, () async {
           if (selectedAudio != null && !next.isTranscode) {
             await _selectDeviceTrack(
               audio: true,
@@ -2075,8 +2345,12 @@ class PlayerController extends ChangeNotifier {
               select: () => backend.setAudioIndex(selectedAudio),
             );
           }
-          if (_accepts(operation)) audioStreamIndex = selectedAudio;
         });
+        if (_accepts(operation)) {
+          audioStreamIndex = audioApplied
+              ? selectedAudio
+              : backend.selectedAudioIndex;
+        }
       });
       if (!_accepts(operation) || disconnected) return;
       final subtitleSession = _session;
@@ -2093,17 +2367,33 @@ class PlayerController extends ChangeNotifier {
       }, accepts: ownsSubtitle);
       if (subtitleApplied && ownsSubtitle()) {
         subtitleStreamIndex = selectedSubtitle;
+      } else if (ownsSubtitle() && !disconnected) {
+        subtitleStreamIndex = backend.selectedSubtitleIndex;
       }
       if (!_accepts(operation) || disconnected) return;
       // 换源/重开后部分后端会丢外挂字幕选择(字幕要等一会儿才出现),
       // 起流片刻后重断言一次,字幕晚显的问题即消失。
       if (subtitleApplied && ownsSubtitle()) _scheduleSubtitleReassert();
-      await started;
+      if (isRecovering) {
+        // Reporting is independent of whether the native stream is usable.
+        unawaited(started);
+      } else {
+        await started;
+      }
       if (!_accepts(operation) || disconnected) return;
       error = null;
+      activeMediaSourceId = chosenId;
       _preferredSourceName = _sourceFingerprint(next.mediaSource);
-      if (trackFailure == null) await _persistSeriesPreference();
+      if (trackFailure == null) {
+        if (isRecovering) {
+          unawaited(_persistSeriesPreference().catchError((Object _) {}));
+        } else {
+          await _persistSeriesPreference();
+        }
+      }
       if (!_accepts(operation)) return;
+      loading = false;
+      state.updatePlaying(isPlaying);
       // 续播落在片头/片尾或最后几分钟时,loading 期间的 position 不会弹出
       // 跳过/下一集;开流完成后再判一次。
       _updateActiveSkip();
@@ -2112,10 +2402,18 @@ class PlayerController extends ChangeNotifier {
       _emit();
     } on VideoCompatibilityException catch (failure) {
       if (!forceTranscode && _accepts(operation)) {
-        await backend.stop();
+        onStage?.call('compatibility stop');
+        final retirement = _operations.interrupt(
+          backend.stop,
+          ensureRetired: true,
+        );
+        if (isRecovering) _trackNativeRetirement(retirement);
+        await retirement;
         await _open(
           operation: operation,
           startTicks: startTicks,
+          requestedSourceId: requestedSourceId,
+          onStage: onStage,
           audio: audio,
           subtitle: subtitle,
           subtitleOff: subtitleOff,
