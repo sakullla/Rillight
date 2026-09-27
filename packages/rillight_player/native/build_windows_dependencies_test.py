@@ -8,7 +8,8 @@ import unittest
 from unittest.mock import patch
 
 from build_windows_dependencies import copy_runtime_dependencies, record_libraries
-from verify_core_dependencies import digest, matches_ffmpeg_version
+from build_windows_core import matches_ffmpeg_version
+from verify_core_dependencies import digest
 
 
 class WindowsSdkTest(unittest.TestCase):

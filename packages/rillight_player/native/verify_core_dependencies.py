@@ -23,14 +23,6 @@ ROOT = Path(__file__).resolve().parent
 SPEC = json.loads((ROOT / "core_dependencies.json").read_text(encoding="utf-8"))
 
 
-def matches_ffmpeg_version(versions: str) -> bool:
-    # Git-tag builds report n9.0.1; release tarballs report 9.0.1.
-    # Only normalize that tag prefix, not development/version suffixes.
-    name, separator, actual = versions.split(';', 1)[0].partition('=')
-    return (name == 'ffmpeg' and separator == '=' and
-            actual.removeprefix('n') == SPEC['ffmpeg']['version'].removeprefix('n'))
-
-
 def _input_protocols(prefix: Path, target: str) -> set[str] | None:
     prefix = prefix.resolve()
     if target == "windows-x64" and platform.system() == "Windows":

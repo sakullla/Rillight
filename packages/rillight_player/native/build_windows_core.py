@@ -15,10 +15,18 @@ import re
 import shutil
 import subprocess
 
-from verify_core_dependencies import matches_ffmpeg_version, verify
+from verify_core_dependencies import SPEC, verify
 
 
 NATIVE = Path(__file__).resolve().parent
+
+
+def matches_ffmpeg_version(versions: str) -> bool:
+    # Git-tag builds report n9.0.1; release tarballs report 9.0.1.
+    # Only normalize that tag prefix, not development/version suffixes.
+    name, separator, actual = versions.split(';', 1)[0].partition('=')
+    return (name == 'ffmpeg' and separator == '=' and
+            actual.removeprefix('n') == SPEC['ffmpeg']['version'].removeprefix('n'))
 
 
 def digest(path: Path) -> str:

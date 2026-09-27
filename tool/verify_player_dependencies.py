@@ -10,7 +10,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / 'packages/rillight_player/native'))
-from verify_core_dependencies import matches_ffmpeg_version
+from build_windows_core import matches_ffmpeg_version
 
 SPEC = json.loads((ROOT / 'packages/rillight_player/native/core_dependencies.json').read_text())
 
