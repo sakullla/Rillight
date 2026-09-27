@@ -160,10 +160,21 @@ reused on a later run without deleting previous evidence. Supply
 fingerprint. The physical phone must still be connected, and its installed APK
 hash must equal the audited build. Each check named by `PHYSICAL_CHECKS` in the
 validator needs a hashed schema-2 observation with scenario-specific measured
-fields. Screen checks contain independently hashed before/after PNGs and pixel
-change; physical audio contains ambient/playback WAV captures; power/thermal
-contains repeated timed readings. Plain `passed` flags and placeholder JSON
-cannot satisfy the gate.
+fields. Capture each screen check's before and after PNG through the live gate:
+`python tool/phone_player_validation.py --capture-scenario SCENARIO
+--capture-phase before --serial SERIAL --evidence-root build/phone-player-validation`
+and repeat with `--capture-phase after` while the audited `.validation` app is
+foreground on the same connected phone. Use a `SCREEN_EVENTS` scenario name.
+The gate captures `adb exec-out screencap -p` itself, binds the files to the
+installed APK and candidate in its local capture ledger, and accepts only those
+exact paths and hashes in the observation. It also checks visible pixel change.
+Caller-supplied PNGs cannot substitute for this live capture. Physical audio
+requires ambient/playback WAV amplitude plus a separate, hashed, named manual
+attestation that the built-in physical speaker was heard on that phone and
+candidate. WAV alone does not prove speaker output. Power/thermal contains
+repeated timed readings. Plain `passed` flags and placeholder JSON cannot
+satisfy the gate. The local capture ledger detects accidental substitution;
+it is not a tamper-proof or independent measurement authority.
 This gate fails closed when the verified native SDK, device, samples or a check
 is unavailable. Emulator control results remain separate from physical output,
 audio and energy evidence. Never put runtime server details in repository files

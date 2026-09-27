@@ -92,6 +92,16 @@ and temperature comparisons require repeated physical-device runs with the
 same brightness, volume, media, network and initial temperature conditions;
 emulator metrics are separate functional evidence.
 
+For the candidate physical-phone gate, capture each `SCREEN_EVENTS` scenario
+twice with `tool/phone_player_validation.py --capture-scenario SCENARIO
+--capture-phase before|after --serial SERIAL --evidence-root
+build/phone-player-validation`. The command requires the audited `.validation`
+APK installed and foreground on that same connected phone, and saves live adb
+screenshots with a candidate/device/APK-bound local ledger. Observations must
+reference those exact capture paths and hashes. The physical-speaker check also
+requires a separate named, hashed manual listening attestation bound to the
+phone and candidate; a WAV amplitude measurement alone is insufficient.
+
 Validation builds set `--android-project-arg=rillightValidation=true`. They use
 `com.rillight.rillight.validation`; only this disposable package is cleared.
 The ordinary application package is never cleared or replaced. The application

@@ -6,16 +6,21 @@ The gate never converts absent device observations into a passing result.
 """
 
 import argparse
+from datetime import datetime, timezone
 import hashlib
+import hmac
 import json
 import os
 from pathlib import Path
+import secrets
 import subprocess
 import struct
 import sys
 import time
 import uuid
 import wave
+
+from PIL import Image
 
 from player_performance_checks import _screen_evidence_valid
 
@@ -37,6 +42,7 @@ SCREEN_EVENTS = {
     'visible_images_and_scroll': ('scroll', 'image_visible'),
     'background_resume': ('background', 'foreground_paused'),
 }
+_PNG_SIGNATURE = b'\x89PNG\r\n\x1a\n'
 
 
 def command(*args):
@@ -176,6 +182,116 @@ def _safe_file(root, name, digest):
     return file
 
 
+def _capture_signature(key, payload):
+    canonical = json.dumps(payload, sort_keys=True, separators=(',', ':')).encode('utf-8')
+    return hmac.new(key, canonical, hashlib.sha256).hexdigest()
+
+
+def _capture_key(root, *, create=False):
+    path = root / '.capture-key'
+    if path.is_file():
+        return bytes.fromhex(path.read_text(encoding='ascii').strip())
+    if not create or (root / 'capture-ledger.json').exists():
+        return None
+    key = secrets.token_bytes(32)
+    path.write_text(key.hex(), encoding='ascii')
+    return key
+
+
+def _validation_app_foreground(serial):
+    try:
+        activity = command('adb', '-s', serial, 'shell',
+                           'dumpsys', 'activity', 'activities')
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    if activity.returncode:
+        return False
+    return any(PACKAGE + '/' in line for line in activity.stdout.splitlines()
+               if 'topResumedActivity' in line or 'mResumedActivity' in line)
+
+
+def capture_live_screen(root, scenario, phase, identity, audited_apk, live_device):
+    """Capture only adb output; caller cannot provide a PNG path or pixel bytes."""
+    if scenario not in SCREEN_EVENTS or phase not in ('before', 'after'):
+        raise ValueError('Unknown screen capture scenario or phase')
+    if not audited_apk or not live_device or \
+            live_device.get('installed_apk_sha256') != audited_apk['sha256']:
+        raise RuntimeError('Current audited APK is not installed on a live physical phone')
+    serial = live_device['serial']
+    if not _validation_app_foreground(serial):
+        raise RuntimeError('Validation APK is not the foreground activity')
+    captured = subprocess.run(['adb', '-s', serial, 'exec-out', 'screencap', '-p'],
+                              cwd=ROOT, capture_output=True, timeout=30, check=True)
+    if not _validation_app_foreground(serial):
+        raise RuntimeError('Validation APK left the foreground during screen capture')
+    if not captured.stdout.startswith(_PNG_SIGNATURE):
+        raise RuntimeError('adb did not return a PNG screenshot')
+    import io
+    with Image.open(io.BytesIO(captured.stdout)) as image:
+        image.verify()
+    folder = root / 'captures'
+    folder.mkdir(parents=True, exist_ok=True)
+    filename = f'{scenario}-{phase}-{uuid.uuid4().hex}.png'
+    path = folder / filename
+    path.write_bytes(captured.stdout)
+    payload = {'scenario': scenario, 'phase': phase,
+               'device_serial': serial, 'device_fingerprint': live_device['fingerprint'],
+               'installed_apk_sha256': audited_apk['sha256'],
+               'candidate_head': identity['head'],
+               'working_tree_sha256': identity['working_tree_sha256'],
+               'path': path.relative_to(root).as_posix(),
+               'sha256': sha256(path), 'captured_unix_ns': time.time_ns()}
+    key = _capture_key(root, create=True)
+    if key is None:
+        raise RuntimeError('Capture ledger exists without its local signing key')
+    ledger_path = root / 'capture-ledger.json'
+    ledger = json.loads(ledger_path.read_text(encoding='utf-8')) if ledger_path.is_file() else []
+    ledger.append({'payload': payload, 'signature': _capture_signature(key, payload)})
+    ledger_path.write_text(json.dumps(ledger, indent=2), encoding='utf-8')
+    return payload
+
+
+def _screen_capture_bound(root, scenario, data, identity, audited_apk, live_device):
+    try:
+        key = _capture_key(root)
+        ledger = json.loads((root / 'capture-ledger.json').read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return False
+    if key is None or not isinstance(ledger, list):
+        return False
+    matched = {}
+    for row in ledger:
+        if not isinstance(row, dict) or not isinstance(row.get('payload'), dict):
+            continue
+        payload = row['payload']
+        if not hmac.compare_digest(str(row.get('signature', '')),
+                                   _capture_signature(key, payload)):
+            continue
+        if (payload.get('scenario') != scenario or
+                payload.get('device_serial') != live_device['serial'] or
+                payload.get('device_fingerprint') != live_device['fingerprint'] or
+                payload.get('installed_apk_sha256') != audited_apk['sha256'] or
+                payload.get('candidate_head') != identity['head'] or
+                payload.get('working_tree_sha256') != identity['working_tree_sha256'] or
+                _safe_file(root, payload.get('path'), payload.get('sha256')) is None):
+            continue
+        phase = payload.get('phase')
+        if (phase == 'before' and
+                data.get('screenBeforePath') == payload['path'] and
+                data.get('screenBeforeSha256') == payload['sha256']) or \
+                (phase == 'after' and
+                 data.get('displayedFrameEvidencePath') == payload['path'] and
+                 data.get('displayedFrameEvidenceSha256') == payload['sha256']):
+            matched[phase] = payload
+    before, after = matched.get('before'), matched.get('after')
+    return bool(before and after and
+                before['captured_unix_ns'] < after['captured_unix_ns'] and
+                data.get('screenBeforePath') == before['path'] and
+                data.get('screenBeforeSha256') == before['sha256'] and
+                data.get('displayedFrameEvidencePath') == after['path'] and
+                data.get('displayedFrameEvidenceSha256') == after['sha256'])
+
+
 def _wav_rms(file):
     try:
         with wave.open(str(file), 'rb') as stream:
@@ -188,6 +304,17 @@ def _wav_rms(file):
                     count) ** .5 / 32768 if count else None
     except (OSError, wave.Error, struct.error):
         return None
+
+
+def _valid_utc_timestamp(value):
+    if not isinstance(value, str):
+        return False
+    try:
+        observed = datetime.fromisoformat(value.replace('Z', '+00:00'))
+    except ValueError:
+        return False
+    return observed.tzinfo is not None and observed.utcoffset().total_seconds() == 0 and \
+        observed <= datetime.now(timezone.utc)
 
 
 def _valid_observation(name, data, root):
@@ -228,11 +355,32 @@ def _valid_observation(name, data, root):
     if name == 'physical_audio':
         ambient = _safe_file(root, data.get('ambientWavPath'), data.get('ambientWavSha256'))
         playback = _safe_file(root, data.get('playbackWavPath'), data.get('playbackWavSha256'))
-        if ambient is None or playback is None or not data.get('microphoneDevice'):
+        attestation_file = _safe_file(root, data.get('manualAttestationPath'),
+                                      data.get('manualAttestationSha256'))
+        if ambient is None or playback is None or attestation_file is None or \
+                not data.get('microphoneDevice'):
             return False
         quiet = _wav_rms(ambient)
         audible = _wav_rms(playback)
-        return quiet is not None and audible is not None and audible > max(.01, quiet * 2)
+        try:
+            attestation = json.loads(attestation_file.read_text(encoding='utf-8'))
+        except (OSError, ValueError):
+            return False
+        # PCM amplitude is corroboration only. A person must separately attest
+        # that the candidate was audible through the physical device speaker.
+        return (quiet is not None and audible is not None and
+                audible > max(.01, quiet * 2) and
+                isinstance(attestation, dict) and
+                attestation.get('schema') == 1 and
+                attestation.get('kind') == 'physical-speaker-listening' and
+                attestation.get('physicalSpeakerAudible') is True and
+                attestation.get('speakerRoute') == 'built-in-speaker' and
+                isinstance(attestation.get('attestedBy'), str) and
+                len(attestation['attestedBy'].strip()) >= 3 and
+                _valid_utc_timestamp(attestation.get('observedAtUtc')) and
+                attestation.get('device_serial') == data.get('device_serial') and
+                attestation.get('apk_sha256') == data.get('apk_sha256') and
+                attestation.get('candidate_head') == data.get('candidate_head'))
     if name == 'power_and_thermal':
         samples = data.get('samples')
         if (data.get('environment') != 'physical' or
@@ -302,6 +450,8 @@ def validate_physical(record, identity, evidence_root, *, audited_apk=None,
                 data.get('device_serial') != live_device['serial'] or
                 data.get('apk_sha256') != audited_apk['sha256'] or
                 data.get('candidate_head') != identity['head'] or
+                (name in SCREEN_EVENTS and not _screen_capture_bound(
+                    evidence_root, name, data, identity, audited_apk, live_device)) or
                 not _valid_observation(name, data, evidence_root)):
             errors.append(f'{name}: measured observation is incomplete or invalid')
     return errors
@@ -418,11 +568,30 @@ def verify_candidate(evidence_root, *, run_android=True):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--verify-candidate', action='store_true', required=True)
+    action = parser.add_mutually_exclusive_group(required=True)
+    action.add_argument('--verify-candidate', action='store_true')
+    action.add_argument('--capture-scenario', choices=tuple(SCREEN_EVENTS))
+    parser.add_argument('--capture-phase', choices=('before', 'after'))
+    parser.add_argument('--serial', help='Connected physical Android phone for live capture')
     parser.add_argument('--evidence-root', type=Path,
                         default=ROOT / 'build/phone-player-validation')
     args = parser.parse_args(argv)
-    result = verify_candidate(args.evidence_root.resolve())
+    root = args.evidence_root.resolve()
+    if args.capture_scenario:
+        if not args.capture_phase or not args.serial:
+            parser.error('--capture-scenario requires --capture-phase and --serial')
+        root.mkdir(parents=True, exist_ok=True)
+        identity = candidate_identity()
+        audited = audited_android_candidate(root, identity)
+        live = live_physical_devices([args.serial]).get(args.serial)
+        capture = capture_live_screen(root, args.capture_scenario,
+                                      args.capture_phase, identity, audited, live)
+        if candidate_identity()['working_tree_sha256'] != identity['working_tree_sha256']:
+            raise RuntimeError('Source candidate changed during live capture')
+        print(json.dumps({'captured': capture['path'], 'sha256': capture['sha256'],
+                          'scenario': args.capture_scenario, 'phase': args.capture_phase}))
+        return 0
+    result = verify_candidate(root)
     print(json.dumps({'passed': result['passed'], 'evidence': str(args.evidence_root),
                       'errors': result['errors']}, ensure_ascii=False))
     return 0 if result['passed'] else 1

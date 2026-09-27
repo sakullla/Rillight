@@ -4,8 +4,10 @@ import json
 import math
 from pathlib import Path
 import struct
+import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 import wave
 
 from PIL import Image
@@ -102,6 +104,48 @@ class PhoneValidationTest(unittest.TestCase):
         return validation.validate_physical(record, self.identity, self.root,
             audited_apk=self.audited, live_device=self.live)
 
+    def bind_mock_adb_captures_and_attestation(self, record):
+        before = (self.root / 'before.png').read_bytes()
+        after = (self.root / 'after.png').read_bytes()
+        def fake_adb(args, **_):
+            self.assertEqual(args, ['adb', '-s', self.live['serial'],
+                                    'exec-out', 'screencap', '-p'])
+            phase = fake_adb.count % 2
+            fake_adb.count += 1
+            return subprocess.CompletedProcess(args, 0, before if phase == 0 else after, b'')
+        fake_adb.count = 0
+        foreground = subprocess.CompletedProcess([], 0,
+            'topResumedActivity=ActivityRecord{ com.rillight.rillight.validation/com.rillight.rillight.MainActivity }', '')
+        with patch.object(validation.subprocess, 'run', side_effect=fake_adb), \
+                patch.object(validation, 'command', return_value=foreground):
+            for name in validation.SCREEN_EVENTS:
+                captured = [validation.capture_live_screen(
+                    self.root, name, phase, self.identity, self.audited, self.live)
+                    for phase in ('before', 'after')]
+                file = self.root / f'{name}.json'
+                observation = json.loads(file.read_text(encoding='utf-8'))
+                observation.update(screenBeforePath=captured[0]['path'],
+                    screenBeforeSha256=captured[0]['sha256'],
+                    displayedFrameEvidencePath=captured[1]['path'],
+                    displayedFrameEvidenceSha256=captured[1]['sha256'])
+                file.write_text(json.dumps(observation), encoding='utf-8')
+                record['checks'][name]['sha256'] = validation.sha256(file)
+        attestation = self.root / 'physical-audio-attestation.json'
+        attestation.write_text(json.dumps({
+            'schema': 1, 'kind': 'physical-speaker-listening',
+            'physicalSpeakerAudible': True, 'speakerRoute': 'built-in-speaker',
+            'attestedBy': 'Contract Test Observer',
+            'observedAtUtc': '2026-09-27T00:00:00Z',
+            'device_serial': self.live['serial'],
+            'apk_sha256': self.audited['sha256'],
+            'candidate_head': self.identity['head']}), encoding='utf-8')
+        file = self.root / 'physical_audio.json'
+        observation = json.loads(file.read_text(encoding='utf-8'))
+        observation.update(manualAttestationPath=attestation.name,
+                           manualAttestationSha256=validation.sha256(attestation))
+        file.write_text(json.dumps(observation), encoding='utf-8')
+        record['checks']['physical_audio']['sha256'] = validation.sha256(file)
+
     def test_missing_or_disconnected_observations_fail_closed(self):
         self.assertIn('Physical phone evidence is missing', self.validate(None))
         record = self.record()
@@ -111,6 +155,9 @@ class PhoneValidationTest(unittest.TestCase):
 
     def test_typed_artifacts_bind_audited_and_installed_apk(self):
         record = self.record()
+        self.assertTrue(any('displayed_changing_video' in error for error in self.validate(record)))
+        self.assertTrue(any('physical_audio' in error for error in self.validate(record)))
+        self.bind_mock_adb_captures_and_attestation(record)
         self.assertEqual(self.validate(record), [])
         record['apk_path'] = 'other.apk'
         self.assertTrue(any('audited runner build' in error for error in self.validate(record)))
@@ -125,6 +172,7 @@ class PhoneValidationTest(unittest.TestCase):
         record['checks']['lock_and_unlock']['sha256'] = validation.sha256(evidence)
         self.assertTrue(any('lock_and_unlock' in error for error in self.validate(record)))
         record = self.record()
+        self.bind_mock_adb_captures_and_attestation(record)
         observation = self.root / 'displayed_changing_video.json'
         value = json.loads(observation.read_text())
         value['displayedFrameEvidencePath'] = 'before.png'
@@ -132,6 +180,35 @@ class PhoneValidationTest(unittest.TestCase):
         observation.write_text(json.dumps(value), encoding='utf-8')
         record['checks']['displayed_changing_video']['sha256'] = validation.sha256(observation)
         self.assertTrue(any('displayed_changing_video' in error for error in self.validate(record)))
+
+    def test_capture_ledger_tampering_and_unbound_wav_cannot_pass(self):
+        record = self.record()
+        self.bind_mock_adb_captures_and_attestation(record)
+        self.assertEqual(self.validate(record), [])
+        ledger = self.root / 'capture-ledger.json'
+        rows = json.loads(ledger.read_text())
+        rows[0]['payload']['sha256'] = '0' * 64
+        ledger.write_text(json.dumps(rows), encoding='utf-8')
+        self.assertTrue(any('installed_launch' in error for error in self.validate(record)))
+        record = self.record()
+        self.bind_mock_adb_captures_and_attestation(record)
+        audio = self.root / 'physical_audio.json'
+        observation = json.loads(audio.read_text())
+        observation.pop('manualAttestationPath')
+        observation.pop('manualAttestationSha256')
+        audio.write_text(json.dumps(observation), encoding='utf-8')
+        record['checks']['physical_audio']['sha256'] = validation.sha256(audio)
+        self.assertTrue(any('physical_audio' in error for error in self.validate(record)))
+
+    def test_capture_rejects_another_foreground_app(self):
+        other = subprocess.CompletedProcess([], 0,
+            'topResumedActivity=ActivityRecord{ com.example.other/.MainActivity }', '')
+        with patch.object(validation, 'command', return_value=other), \
+                patch.object(validation.subprocess, 'run') as screencap:
+            with self.assertRaisesRegex(RuntimeError, 'foreground'):
+                validation.capture_live_screen(self.root, 'displayed_changing_video',
+                    'before', self.identity, self.audited, self.live)
+            screencap.assert_not_called()
 
     def test_evidence_cannot_escape_root(self):
         record = self.record()
