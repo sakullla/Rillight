@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] /
                        'packages/rillight_player/native'))
 from bundle_macos import NATIVE_LICENSES, audit_binary
 from prepare_macos import REQUIRED, digest
+from player_helper import helper_path, verify_helper
 
 
 def deployment_versions(output: str) -> list[tuple[int, ...]]:
@@ -117,7 +118,8 @@ def verify(app_path, *, signed=False):
     if not (resources / 'rillight-native-notices.md').is_file():
         raise RuntimeError('Missing native third-party notices')
     executable = contents / 'MacOS' / info['CFBundleExecutable']
-    binaries = [executable, *(frameworks / name for name in libraries)]
+    verify_helper(app)
+    binaries = [executable, helper_path(app), *(frameworks / name for name in libraries)]
     for framework in frameworks.glob('*.framework'):
         binary = framework / framework.stem
         if binary.is_file():

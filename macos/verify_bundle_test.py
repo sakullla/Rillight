@@ -15,6 +15,7 @@ import prepare_macos
 from bundle_macos import NATIVE_LICENSES, audit_binary, bundle, otool_dependencies
 from sign_bundle import release_entitlements, sign, verify_signed_entitlements
 from verify_bundle import deployment_versions, verify
+from player_helper import ENTITLEMENTS, helper_path, stage_helper, verify_helper
 
 
 NAMES = ['libavformat.61.dylib', 'libavcodec.61.dylib',
@@ -23,8 +24,57 @@ NAMES = ['libavformat.61.dylib', 'libavcodec.61.dylib',
          'libass.9.dylib', 'libdav1d.7.dylib']
 
 
+class SwiftPackageContractTest(unittest.TestCase):
+    def test_staged_plugin_header_matches_owned_core(self):
+        source = ROOT / 'packages/rillight_player/native/core/rillight_core.h'
+        plugin = ROOT / ('packages/rillight_player/macos/rillight_player/'
+                         'Sources/rillight_player/include/rillight_player/'
+                         'rillight_core.h')
+        self.assertEqual(plugin.read_bytes(), source.read_bytes())
+
+
 def sha(data):
     return hashlib.sha256(data).hexdigest()
+
+
+class PlayerHelperTest(unittest.TestCase):
+    def test_stages_current_executable_and_signs_only_inherited_rights(self):
+        with tempfile.TemporaryDirectory() as temp:
+            app = Path(temp) / 'rillight.app'
+            executable = app / 'Contents/MacOS/rillight'
+            executable.parent.mkdir(parents=True)
+            executable.write_bytes(b'current-runner')
+            helper_path(app).write_bytes(b'stale-runner')
+            signatures = []
+
+            def checked(command):
+                if '--entitlements' in command:
+                    path = Path(command[command.index('--entitlements') + 1])
+                    signatures.append(plistlib.loads(path.read_bytes()))
+
+            with patch('player_helper.subprocess.check_call', side_effect=checked), \
+                 patch('player_helper.subprocess.check_output',
+                       return_value=plistlib.dumps(ENTITLEMENTS)):
+                stage_helper(app, 'rillight')
+            self.assertEqual(helper_path(app).read_bytes(), b'current-runner')
+            self.assertEqual(signatures, [ENTITLEMENTS])
+            self.assertEqual(set(signatures[0]), {
+                'com.apple.security.app-sandbox', 'com.apple.security.inherit'})
+
+    def test_missing_helper_or_standalone_sandbox_rights_are_rejected(self):
+        with tempfile.TemporaryDirectory() as temp:
+            app = Path(temp) / 'rillight.app'
+            with self.assertRaisesRegex(RuntimeError, 'Missing'):
+                verify_helper(app)
+            helper_path(app).parent.mkdir(parents=True)
+            helper_path(app).touch()
+            for rights in (release_entitlements(), {},
+                           {**ENTITLEMENTS, 'com.apple.security.network.client': True}):
+                with self.subTest(rights=rights), \
+                     patch('player_helper.subprocess.check_output',
+                           return_value=plistlib.dumps(rights)):
+                    with self.assertRaisesRegex(RuntimeError, 'only inherit'):
+                        verify_helper(app)
 
 
 class PreparedFixture:
@@ -193,6 +243,7 @@ class BundleVerificationTest(unittest.TestCase):
         executable = contents / 'MacOS/rillight'
         executable.parent.mkdir(parents=True)
         executable.write_bytes(b'executable')
+        helper_path(app).write_bytes(b'executable')
         frameworks.mkdir()
         resources.mkdir()
         (contents / 'Info.plist').write_bytes(plistlib.dumps({
@@ -241,9 +292,12 @@ class BundleVerificationTest(unittest.TestCase):
             def tool_output(command, **_):
                 if command[0] == 'lipo':
                     return 'x86_64 arm64'
+                if command[0] == 'codesign':
+                    return plistlib.dumps(ENTITLEMENTS)
                 return 'cmd LC_BUILD_VERSION\n  minos 12.0\n' \
                        'path @executable_path/../Frameworks (offset 12)\n'
             with patch('verify_bundle.subprocess.check_output', side_effect=tool_output), \
+                 patch('verify_bundle.subprocess.check_call'), \
                  patch('verify_bundle.audit_binary'):
                 self.assertEqual(verify(app)['target'], 'macos-universal')
                 (app / 'Contents/Frameworks/libmpv.2.dylib').write_bytes(b'mpv')
@@ -276,6 +330,8 @@ class BundleVerificationTest(unittest.TestCase):
             def output(command, **_):
                 if '--verbose=4' in command:
                     return 'Executable=rillight\nSignature=adhoc\n'
+                if Path(command[-1]).resolve() == helper_path(app).resolve():
+                    return plistlib.dumps(ENTITLEMENTS)
                 return plistlib.dumps(expected)
             with patch('sign_bundle.subprocess.check_call', side_effect=checked), \
                  patch('sign_bundle.subprocess.check_output', side_effect=output):

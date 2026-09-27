@@ -15,10 +15,18 @@ import re
 import shutil
 import subprocess
 
-from verify_core_dependencies import verify
+from verify_core_dependencies import SPEC, verify
 
 
 NATIVE = Path(__file__).resolve().parent
+
+
+def matches_ffmpeg_version(versions: str) -> bool:
+    # Git-tag builds report n9.0.1; release tarballs report 9.0.1.
+    # Only normalize that tag prefix, not development/version suffixes.
+    name, separator, actual = versions.split(';', 1)[0].partition('=')
+    return (name == 'ffmpeg' and separator == '=' and
+            actual.removeprefix('n') == SPEC['ffmpeg']['version'].removeprefix('n'))
 
 
 def digest(path: Path) -> str:
@@ -78,7 +86,7 @@ def main() -> None:
         versions = library.rillight_core_ffmpeg_versions().decode("ascii")
     header = (NATIVE / "core/rillight_core.h").read_text()
     expected_abi = int(re.search(r"#define RILLIGHT_CORE_ABI_VERSION (\d+)", header).group(1))
-    if abi != expected_abi or not versions.startswith("ffmpeg=9.0.1;"):
+    if abi != expected_abi or not matches_ffmpeg_version(versions):
         raise RuntimeError(f"Built core runtime mismatch: ABI {abi}, {versions}")
     print(json.dumps({"coreAbi": abi, "versions": versions,
                       "sha256": digest(published)}, sort_keys=True))

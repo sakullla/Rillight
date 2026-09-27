@@ -310,7 +310,9 @@ String _dartExecutable() {
 }
 
 class _ControlledProcess extends DesktopPlayerProcessControl {
-  _ControlledProcess({super.startupTimeout = const Duration(seconds: 2)})
+  // Ordinary handshake tests use the production deadline, including on busy
+  // CI filesystems. Timeout behavior is tested with an explicit short deadline.
+  _ControlledProcess({super.startupTimeout})
     : super(pollInterval: const Duration(milliseconds: 1));
   PlayerProcessProtocol? endpoint;
   bool alive = false;
