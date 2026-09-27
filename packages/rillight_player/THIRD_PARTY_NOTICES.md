@@ -11,7 +11,7 @@ actual build configuration and SHA256 of its libraries. The platform packaging
 checks verify that marker and the libraries in the candidate package. A source
 pin alone does not certify that a bundled binary came from that source.
 
-- **FFmpeg n9.0.1**: [source](https://github.com/FFmpeg/FFmpeg/tree/bf1b838f2ab88b4f8fd83443325c782ea0e0f7fa),
+- **FFmpeg n9.0.2**: [source](https://github.com/FFmpeg/FFmpeg/tree/946fcce07b6dcd0331c8cc609192aeff5e1924f8),
   generally LGPL-2.1-or-later unless the actual build enables components that
   change its license. The bundled configuration and component closure must be
   reviewed for each package. License texts:

@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 if(NOT RILLIGHT_CORE_PREFIX)
-  message(FATAL_ERROR "Set RILLIGHT_CORE_PREFIX to a verified FFmpeg n9.0.1 SDK")
+  message(FATAL_ERROR "Set RILLIGHT_CORE_PREFIX to a verified FFmpeg n9.0.2 SDK")
 endif()
 if(NOT EXISTS "${RILLIGHT_CORE_PREFIX}/rillight-core-dependencies.json")
   message(FATAL_ERROR "Run build_core_dependencies.py or provide a verified SDK")

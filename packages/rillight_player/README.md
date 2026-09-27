@@ -19,7 +19,7 @@ preference is not used as proof of actual hardware decoding.
 ## Pinned media SDK
 
 [`native/core_dependencies.json`](native/core_dependencies.json) pins FFmpeg
-n9.0.1, the local HLS I/O patch, libass 0.17.5, dav1d 1.5.3 and Android
+n9.0.2, the local HLS I/O patch, libass 0.17.5, dav1d 1.5.3 and Android
 subtitle build sources. Desktop SDKs enable dav1d for AV1 software fallback.
 Each SDK prefix must carry `rillight-core-dependencies.json` with
 actual build options and SHA256 of its libraries. Verify a target SDK with:

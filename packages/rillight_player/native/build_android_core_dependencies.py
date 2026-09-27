@@ -67,7 +67,8 @@ def verify_supplied_source(source: Path) -> None:
         raise RuntimeError("Android builder requires one locked FFmpeg patch")
     expected_diff = next(iter(patches.values())).read_bytes()
     actual_diff = subprocess.check_output(
-        ["git", "-c", "core.filemode=false", "diff", "--binary", "HEAD", "--"],
+        ["git", "-c", "core.filemode=false", "-c", "core.abbrev=7",
+         "diff", "--binary", "HEAD", "--"],
         cwd=source,
     )
     if actual_diff != expected_diff:

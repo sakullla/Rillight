@@ -225,6 +225,11 @@ RILLIGHT_CORE_API int rillight_core_report_output_drained(
     RillightCore *core, uint64_t session_id, uint64_t timeline_version);
 RILLIGHT_CORE_API int rillight_core_snapshot(RillightCore *core,
                                              RillightCoreSnapshot *snapshot);
+/* Selected ISO BMFF track_ID values from AVStream.id. Returns -1 per missing
+ * video/audio track or any format outside the MP4/MOV demuxer family. These
+ * are container identities, not FFmpeg stream-list indices. */
+RILLIGHT_CORE_API int rillight_core_container_track_ids(
+    RillightCore *core, int *video_track_id, int *audio_track_id);
 /* Ownership transfers to the caller. Discard frames with an old session or
  * timeline_version before publishing them to a platform surface. */
 RILLIGHT_CORE_API RillightCoreFrame *rillight_core_take_frame(RillightCore *core,

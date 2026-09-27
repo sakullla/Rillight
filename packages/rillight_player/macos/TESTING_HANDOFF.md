@@ -37,7 +37,7 @@ Intel macOS 12+：**未测**。
 
 ## 固定来源与构建输入
 
-`native/core_dependencies.json` 固定 FFmpeg n9.0.1、补丁、libass 0.17.5 和 dav1d 1.5.3。macOS 字幕依赖复用同一文件中的 FreeType 2.13.3、FriBidi 1.0.16、HarfBuzz 10.4.0 源钉，静态链入 `libass`，字体提供者为 CoreText。FFmpeg 配置含 `--enable-libdav1d`、`--enable-videotoolbox`、`--enable-network`、`--disable-autodetect`。运行库使用 `@rpath` 与 `@loader_path`，部署下限 macOS 12.0。
+`native/core_dependencies.json` 现固定 FFmpeg n9.0.2、补丁、libass 0.17.5 和 dav1d 1.5.3。此前本机 n9.0.1 构建与测试结果仍是历史记录，尚未验证 n9.0.2 的 macOS 实体播放。macOS 字幕依赖复用同一文件中的 FreeType 2.13.3、FriBidi 1.0.16、HarfBuzz 10.4.0 源钉，静态链入 `libass`，字体提供者为 CoreText。FFmpeg 配置含 `--enable-libdav1d`、`--enable-videotoolbox`、`--enable-network`、`--disable-autodetect`。运行库使用 `@rpath` 与 `@loader_path`，部署下限 macOS 12.0。
 
 仓库现在提供构建器：
 

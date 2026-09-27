@@ -439,7 +439,16 @@ class Device:
         self.adb('install', '--no-streaming', '-r', apk)
         # This fixed, validation-only package is deliberately disposable.
         self.adb('shell', 'am', 'force-stop', PACKAGE)
-        self.adb('shell', 'pm', 'clear', PACKAGE)
+        try:
+            self.adb('shell', 'pm', 'clear', PACKAGE)
+        except subprocess.CalledProcessError as error:
+            diagnostic = (error.stderr or b'').decode('utf-8', errors='replace')
+            if 'SecurityException' not in diagnostic or \
+                    'android.permission.CLEAR_APP_USER_DATA' not in diagnostic:
+                raise
+            raise RuntimeError(
+                'Fresh-state automation unavailable: this device denies adb pm clear '
+                'for the validation package (CLEAR_APP_USER_DATA)') from error
         self.adb('shell', 'am', 'start', '-W', '-n', ACTIVITY)
 
 

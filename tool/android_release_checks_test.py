@@ -9,7 +9,7 @@ import sys
 import tempfile
 import time
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 import urllib.error
 import urllib.request
 import zipfile
@@ -112,6 +112,48 @@ class EvidenceTests(unittest.TestCase):
         device.adb.return_value = b'mInputShown=true'
         device.hide_ime()
         device.key.assert_called_once_with(4)
+
+    def test_launch_uses_clear_when_allowed(self):
+        device = Device('synthetic', Path('.'))
+        device.adb = Mock(return_value=b'Success')
+        with patch.object(checks, 'apk_check') as apk_check:
+            device.launch(Path('validation.apk'))
+        apk_check.assert_called_once_with(Path('validation.apk'), validation=True)
+        self.assertEqual(device.adb.call_args_list, [
+            call('install', '--no-streaming', '-r', Path('validation.apk')),
+            call('shell', 'am', 'force-stop', checks.PACKAGE),
+            call('shell', 'pm', 'clear', checks.PACKAGE),
+            call('shell', 'am', 'start', '-W', '-n', checks.ACTIVITY),
+        ])
+
+    def test_launch_stops_without_reinstall_when_clear_permission_denied(self):
+        device = Device('synthetic', Path('.'))
+        denied = subprocess.CalledProcessError(
+            1, ['adb', 'shell', 'pm', 'clear', checks.PACKAGE],
+            stderr=b'java.lang.SecurityException: requires android.permission.CLEAR_APP_USER_DATA')
+        device.adb = Mock(side_effect=[b'Success', b'', denied])
+        with patch.object(checks, 'apk_check'), \
+                self.assertRaisesRegex(RuntimeError, 'Fresh-state automation unavailable'):
+            device.launch(Path('validation.apk'))
+        self.assertEqual(device.adb.call_args_list, [
+            call('install', '--no-streaming', '-r', Path('validation.apk')),
+            call('shell', 'am', 'force-stop', checks.PACKAGE),
+            call('shell', 'pm', 'clear', checks.PACKAGE),
+        ])
+
+    def test_launch_propagates_unrelated_clear_failure(self):
+        for diagnostic in (b'Error: package unavailable',
+                           b'java.lang.SecurityException: requires android.permission.WRITE_SECURE_SETTINGS',
+                           b'Error: android.permission.CLEAR_APP_USER_DATA unavailable'):
+            with self.subTest(diagnostic=diagnostic):
+                device = Device('synthetic', Path('.'))
+                failure = subprocess.CalledProcessError(
+                    1, ['adb', 'shell', 'pm', 'clear', checks.PACKAGE], stderr=diagnostic)
+                device.adb = Mock(side_effect=[b'Success', b'', failure])
+                with patch.object(checks, 'apk_check'), \
+                        self.assertRaises(subprocess.CalledProcessError):
+                    device.launch(Path('validation.apk'))
+                self.assertEqual(len(device.adb.call_args_list), 3)
 
     def test_tap_waits_for_rotated_target_to_settle(self):
         with tempfile.TemporaryDirectory() as folder:

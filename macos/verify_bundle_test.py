@@ -18,9 +18,9 @@ from verify_bundle import deployment_versions, verify
 from player_helper import ENTITLEMENTS, helper_path, stage_helper, verify_helper
 
 
-NAMES = ['libavformat.61.dylib', 'libavcodec.61.dylib',
-         'libavutil.59.dylib', 'libavfilter.10.dylib',
-         'libswresample.5.dylib', 'libswscale.8.dylib',
+NAMES = ['libavformat.63.dylib', 'libavcodec.63.dylib',
+         'libavutil.61.dylib', 'libavfilter.12.dylib',
+         'libswresample.7.dylib', 'libswscale.10.dylib',
          'libass.9.dylib', 'libdav1d.7.dylib']
 
 
@@ -86,9 +86,9 @@ class PreparedFixture:
         self.core.write_bytes(b'owned-core')
         self.marker = {
             'platform': 'macos-universal',
-            'ffmpeg_version': 'n9.0.1',
+            'ffmpeg_version': 'n9.0.2',
             'ffmpeg_commit': 'locked-ffmpeg',
-            'ffmpeg_tag': 'n9.0.1',
+            'ffmpeg_tag': 'n9.0.2',
             'ffmpeg_patches': {'patch': 'sha'},
             'libraries': {},
             'libass': {'version': '0.17.5', 'commit': 'locked-ass',
@@ -105,7 +105,7 @@ class PreparedFixture:
         (self.root / 'native/core/rillight_core.h').write_text(
             '#define RILLIGHT_CORE_ABI_VERSION 7\n', encoding='utf-8')
         (self.root / 'native/core_dependencies.json').write_text(
-            json.dumps({'ffmpeg': {'version': 'n9.0.1',
+            json.dumps({'ffmpeg': {'version': 'n9.0.2',
                                    'commit': 'locked-ffmpeg',
                                    'patches': {'patch': 'sha'}},
                         'libass': {'commit': 'locked-ass'}}), encoding='utf-8')
@@ -156,10 +156,10 @@ class PrepareTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             fixture = PreparedFixture(temp)
             marker = fixture.marker
-            marker['libraries'].pop('lib/libavcodec.61.dylib')
+            marker['libraries'].pop('lib/libavcodec.63.dylib')
             with self.assertRaisesRegex(RuntimeError, 'libavcodec'):
                 prepare_macos.runtime_paths(fixture.prefix, marker)
-            marker['libraries']['lib/libavcodec.61.dylib'] = 'hash'
+            marker['libraries']['lib/libavcodec.63.dylib'] = 'hash'
             path = fixture.prefix / 'lib/libmpv.2.dylib'
             path.write_bytes(b'mpv')
             marker['libraries']['lib/libmpv.2.dylib'] = sha(b'mpv')
@@ -180,10 +180,10 @@ class MachOTest(unittest.TestCase):
     def test_otool_fat_titles_are_not_dependencies(self):
         output = ''.join(
             f'/builder/libavcodec.dylib (architecture {arch}):\n'
-            '\t@rpath/libavformat.61.dylib (compatibility version 1.0.0)\n'
+            '\t@rpath/libavformat.63.dylib (compatibility version 1.0.0)\n'
             for arch in ('x86_64', 'arm64'))
         self.assertEqual(otool_dependencies(output),
-                         ['@rpath/libavformat.61.dylib'] * 2)
+                         ['@rpath/libavformat.63.dylib'] * 2)
 
     def test_rejects_unbundled_and_legacy_dependencies(self):
         with tempfile.TemporaryDirectory() as temp:

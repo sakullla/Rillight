@@ -3,7 +3,7 @@ project(rillight_player LANGUAGES CXX)
 
 set(PLUGIN_NAME rillight_player_plugin)
 set(RILLIGHT_CORE_PREFIX_WINDOWS_X64 "$ENV{RILLIGHT_CORE_PREFIX_WINDOWS_X64}"
-    CACHE PATH "Verified FFmpeg n9.0.1 Windows SDK with rillight_core.dll")
+    CACHE PATH "Verified FFmpeg n9.0.2 Windows SDK with rillight_core.dll")
 if(NOT EXISTS "${RILLIGHT_CORE_PREFIX_WINDOWS_X64}/rillight-core-dependencies.json")
   message(FATAL_ERROR "Set RILLIGHT_CORE_PREFIX_WINDOWS_X64 to the verified Windows core SDK")
 endif()

@@ -68,7 +68,7 @@ class LinuxReleaseTests(unittest.TestCase):
     def write_report(self):
         notices = self.bundle / 'data/rillight_player'
         (notices / 'loaded-versions.json').write_text(json.dumps({
-            'coreAbi': 8, 'versions': 'ffmpeg=9.0.1;avformat=1',
+            'coreAbi': 8, 'versions': 'ffmpeg=9.0.2;avformat=1',
             'bundledLibraries': {
                 str(path.relative_to(self.bundle)): hashlib.sha256(path.read_bytes()).hexdigest()
                 for path in (self.bundle / 'lib').glob('*.so*') if path.is_file() and not path.is_symlink()
@@ -91,13 +91,13 @@ class LinuxReleaseTests(unittest.TestCase):
 
         class Core:
             rillight_core_abi_version = Function(8)
-            rillight_core_ffmpeg_versions = Function(b'ffmpeg=n9.0.1;avformat=1')
+            rillight_core_ffmpeg_versions = Function(b'ffmpeg=n9.0.2;avformat=1')
 
         with patch.object(checks.ctypes, 'CDLL', return_value=Core()):
             self.assertEqual(checks.loaded_core_versions(self.bundle)['coreAbi'], 8)
-            Core.rillight_core_ffmpeg_versions.value = b'ffmpeg=9.0.1;avformat=1'
+            Core.rillight_core_ffmpeg_versions.value = b'ffmpeg=9.0.2;avformat=1'
             self.assertEqual(checks.loaded_core_versions(self.bundle)['coreAbi'], 8)
-            Core.rillight_core_ffmpeg_versions.value = b'ffmpeg=n9.0.2;avformat=1'
+            Core.rillight_core_ffmpeg_versions.value = b'ffmpeg=n9.0.1;avformat=1'
             with self.assertRaisesRegex(ValueError, 'version mismatch'):
                 checks.loaded_core_versions(self.bundle)
 
@@ -193,7 +193,7 @@ class LinuxReleaseTests(unittest.TestCase):
     def test_old_mpv_prefix_cannot_be_used(self):
         prefix = self.bundle / 'old-prefix'
         prefix.mkdir()
-        (prefix / 'rillight-source-versions.txt').write_text('mpv=0.41.0\nffmpeg=n9.0.1\n')
+        (prefix / 'rillight-source-versions.txt').write_text('mpv=0.41.0\nffmpeg=n9.0.2\n')
         with self.assertRaisesRegex(ValueError, 'verified pinned FFmpeg core SDK'):
             checks.prepare_bundle(prefix, self.bundle)
 

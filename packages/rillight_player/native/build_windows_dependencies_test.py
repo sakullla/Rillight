@@ -14,15 +14,15 @@ from verify_core_dependencies import digest
 
 class WindowsSdkTest(unittest.TestCase):
     def test_runtime_accepts_git_tag_and_release_version(self):
-        for version in ('n9.0.1', '9.0.1'):
+        for version in ('n9.0.2', '9.0.2'):
             with self.subTest(version=version):
                 self.assertTrue(matches_ffmpeg_version(
                     f'ffmpeg={version};avformat=4129125;avcodec=4129125;avutil=3998053'))
 
     def test_runtime_rejects_other_versions_and_malformed_reports(self):
-        for report in ('ffmpeg=n9.0.2;avformat=1', 'ffmpeg=9.0.10;avformat=1',
-                       'ffmpeg=n9.0.1-dev;avformat=1', 'ffmpeg=nn9.0.1;avformat=1',
-                       'avformat=9.0.1', 'n9.0.1', '', 'ffmpeg='):
+        for report in ('ffmpeg=n9.0.1;avformat=1', 'ffmpeg=9.0.10;avformat=1',
+                       'ffmpeg=n9.0.2-dev;avformat=1', 'ffmpeg=nn9.0.2;avformat=1',
+                       'avformat=9.0.2', 'n9.0.2', '', 'ffmpeg='):
             with self.subTest(report=report):
                 self.assertFalse(matches_ffmpeg_version(report))
 

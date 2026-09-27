@@ -156,7 +156,7 @@ assert evidence.is_file(), 'missing window-evidence.json'
 assert json.loads(result.read_text())['passed'] is True
 assert len(json.loads(evidence.read_text())) == 4
 core=json.loads((bundle/'data/rillight_player/loaded-versions.json').read_text())
-assert core['coreAbi'] > 0 and core['versions'].startswith(('ffmpeg=n9.0.1;', 'ffmpeg=9.0.1;'))
+assert core['coreAbi'] > 0 and core['versions'].startswith(('ffmpeg=n9.0.2;', 'ffmpeg=9.0.2;'))
 print('Owned-core production main/child playback, real window video, subtitles, switching, and virtual audio passed')
 PY
 then

@@ -6,10 +6,10 @@ pkg_check_modules(EPOXY REQUIRED IMPORTED_TARGET epoxy)
 pkg_check_modules(PULSE REQUIRED IMPORTED_TARGET libpulse)
 if(NOT RILLIGHT_CORE_PREFIX)
   set(RILLIGHT_CORE_PREFIX "$ENV{RILLIGHT_CORE_PREFIX}" CACHE PATH
-      "Verified FFmpeg n9.0.1 SDK prefix")
+      "Verified FFmpeg n9.0.2 SDK prefix")
 endif()
 if(NOT EXISTS "${RILLIGHT_CORE_PREFIX}/rillight-core-dependencies.json")
-  message(FATAL_ERROR "Set RILLIGHT_CORE_PREFIX to a verified FFmpeg n9.0.1 SDK")
+  message(FATAL_ERROR "Set RILLIGHT_CORE_PREFIX to a verified FFmpeg n9.0.2 SDK")
 endif()
 add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../native"
                  "${CMAKE_CURRENT_BINARY_DIR}/rillight_core")
