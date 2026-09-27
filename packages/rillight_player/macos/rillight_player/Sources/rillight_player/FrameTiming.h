@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../../native/core/rillight_core.h"
+#include "../../../../native/core/rillight_core.h"
 
 namespace rillight_macos {
 

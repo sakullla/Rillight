@@ -1,9 +1,9 @@
-#import "RillightPlayerPlugin.h"
+#import "include/rillight_player/RillightPlayerPlugin.h"
 #import <CoreVideo/CoreVideo.h>
 #import <IOSurface/IOSurface.h>
 #import <Foundation/Foundation.h>
 
-#include "../../native/core/rillight_core.h"
+#include "../../../../native/core/rillight_core.h"
 #include "CoreAudioOutput.h"
 #include "FrameOutput.h"
 #include "FrameTiming.h"

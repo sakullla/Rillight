@@ -71,9 +71,11 @@ emulator evidence, distinct from a physical phone or TV.
 ### macOS
 
 `native/build_macos.sh` builds the pinned universal x86_64+arm64 SDK with
-libass, dav1d and VideoToolbox. The podspec requires
+libass, dav1d and VideoToolbox. The plugin supports Swift Package Manager
+through `macos/rillight_player/Package.swift` and retains its CocoaPods
+podspec. Both paths use the same Objective-C++ sources and require
 `RILLIGHT_MACOS_CORE_PREFIX`, `RILLIGHT_MACOS_CORE_DYLIB` and
-`RILLIGHT_MACOS_CORE_SHA256`. Preparation and bundling verify dual-arch
+`RILLIGHT_MACOS_CORE_SHA256` before building. Preparation and bundling verify dual-arch
 slices, SDK source/hash markers, `@rpath` closure and signatures. A 2026-09-26
 Apple M3 host built, packaged and probed that core; GUI playback, physical
 audio, actual VideoToolbox decoder use and Intel remain open in

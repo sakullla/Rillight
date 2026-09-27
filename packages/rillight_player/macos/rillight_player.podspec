@@ -11,8 +11,8 @@ Pod::Spec.new do |s|
   s.license = { :file => '../LICENSE' }
   s.author = { 'Rillight' => 'https://github.com/sakullla/Rillight' }
   s.source = { :path => '.' }
-  s.source_files = 'Classes/**/*.{h,mm}'
-  s.public_header_files = 'Classes/RillightPlayerPlugin.h'
+  s.source_files = 'rillight_player/Sources/rillight_player/**/*.{h,mm}'
+  s.public_header_files = 'rillight_player/Sources/rillight_player/include/rillight_player/RillightPlayerPlugin.h'
   s.dependency 'FlutterMacOS'
   s.platform = :osx, '12.0'
   s.vendored_libraries = 'Libraries/*.dylib'
