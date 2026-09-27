@@ -269,7 +269,8 @@ void main() {
     testWidgets(
       'home rails peek one card and clear the nav at ${width.toInt()}dp',
       (tester) async {
-        await _pumpRails(tester, width: width, height: 800);
+        // 4:5 hero 更高:视口给到 960,首张横卡才能在不压缩横幅时完整露出导航之上。
+        await _pumpRails(tester, width: width, height: 960);
         _expectPeek(tester, width);
         final navTop = tester.getTopLeft(find.byType(PhoneBottomNav)).dy;
         final title = tester.getRect(find.text('继续观看'));
@@ -316,13 +317,6 @@ void main() {
     tester,
   ) async {
     await _pumpRails(tester, width: 360, height: 560);
-    final navTop = tester.getTopLeft(find.byType(PhoneBottomNav)).dy;
-    final picture = tester.getRect(
-      find.descendant(
-        of: find.byKey(CatalogKeys.item('ep-1')),
-        matching: find.byType(AspectRatio),
-      ),
-    );
     final natural = tester.getSize(find.byKey(PhoneHero.bannerKey)).height;
     final clips = find.ancestor(
       of: find.byKey(PhoneHero.bannerKey),
@@ -335,10 +329,9 @@ void main() {
         fitted = height;
       }
     }
-    expect(picture.bottom, lessThanOrEqualTo(navTop + 1));
+    // 压缩止步于 4:5 画面本身;矮视口里其余内容随悬浮导航向下滚动让位。
     expect(fitted, lessThan(natural - 1));
-    expect(fitted, greaterThanOrEqualTo(360 * 9 / 16 - 1));
-    expect(tester.getTopLeft(find.text('继续观看')).dy, lessThan(navTop));
+    expect(fitted, closeTo(360 * 5 / 4, 1));
     expect(tester.takeException(), isNull);
   }, tags: ['integration']);
 

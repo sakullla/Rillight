@@ -108,7 +108,7 @@ class _HomeLoading extends StatelessWidget {
             final top = MediaQuery.paddingOf(context).top;
             return SkeletonBlock(
               width: width,
-              height: top + 56 + width * 9 / 16,
+              height: top + 56 + width * 5 / 4,
               borderRadius: BorderRadius.zero,
               animated: animate,
             );

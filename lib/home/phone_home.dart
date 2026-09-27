@@ -364,7 +364,7 @@ double _wideBadgeHeight(BuildContext context) {
   return line + 2 * 2;
 }
 
-/// 横幅默认高度仍是顶栏延伸加 16:9。继续观看放不下时只缩短这段延伸。
+/// 横幅默认高度仍是顶栏延伸加 4:5 画面。继续观看放不下时只缩短这段延伸。
 class _BannerSlot {
   const _BannerSlot({required this.natural, required this.fitted});
 
@@ -380,7 +380,7 @@ _BannerSlot _bannerSlot({
   required _HomeSection? resume,
 }) {
   final extension = MediaQuery.paddingOf(context).top + 56;
-  final picture = width * 9 / 16;
+  final picture = width * 5 / 4;
   final natural = extension + picture;
   var bannerThenResume = false;
   for (final id in visible) {

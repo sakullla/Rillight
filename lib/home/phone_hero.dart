@@ -67,9 +67,9 @@ class _PhoneHeroState extends State<PhoneHero> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final width = constraints.maxWidth;
-        // 画面从状态栏背后铺下来。多出来的高度是顶栏，16:9 仍完整留在顶栏下面。
+        // 画面从状态栏背后铺下来。多出来的高度是顶栏,4:5 纵向构图完整留在顶栏下面。
         final top = MediaQuery.paddingOf(context).top + 56;
-        final height = top + width * 9 / 16;
+        final height = top + width * 5 / 4;
         _report(items[index]);
         return SizedBox(
           key: PhoneHero.bannerKey,
@@ -118,7 +118,7 @@ class _PhoneHeroState extends State<PhoneHero> {
                                 maxWidth: PhoneMotion.heroRequestWidth,
                               ),
                             ),
-                            const _HeroWash(),
+                            _HeroWash(),
                             Positioned(
                               left: AppSpacing.md,
                               right: AppSpacing.md,
@@ -167,18 +167,26 @@ class _HeroWash extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const DecoratedBox(
+    // 顶部压暗带保状态栏可读;底部从 AppMobileHero.bottomStart 起溶入
+    // 当前主题的表面色,与页面侧 ContentTheme 铺的底色同色,无可见接缝。
+    final surface = Theme.of(context).colorScheme.surface;
+    return DecoratedBox(
       decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
           colors: [
-            Color(0x8C000000),
-            Color(0x00000000),
-            Color(0x00000000),
-            Color(0x8C000000),
+            Colors.black.withValues(alpha: AppScrim.top),
+            Colors.transparent,
+            Colors.transparent,
+            surface,
           ],
-          stops: [0, 0.3, 0.55, 1],
+          stops: const [
+            AppMobileHero.topStart,
+            AppMobileHero.topEnd,
+            AppMobileHero.bottomStart,
+            AppMobileHero.bottomEnd,
+          ],
         ),
       ),
     );
@@ -244,9 +252,9 @@ class _HeroCaption extends StatelessWidget {
           title,
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
-          style: theme.textTheme.headlineSmall?.copyWith(
+          style: theme.textTheme.headlineMedium?.copyWith(
             color: ink,
-            fontWeight: FontWeight.w600,
+            fontWeight: FontWeight.w700,
             height: 1.15,
           ),
         ),
