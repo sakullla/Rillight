@@ -4,8 +4,8 @@ import 'dart:typed_data';
 import 'matroska_cache_index.dart';
 
 /// A deliberately bounded ISO BMFF index. Only files whose selected tracks
-/// have complete, non-reordered sample tables are accepted. A missing table,
-/// edit list, encryption, external data reference, or unsupported fragment
+/// have complete, verifiable sample tables are accepted. A missing table,
+/// complex edit list, encryption, external data reference, or unsupported fragment
 /// leaves the cache timeline unknown instead of estimating it from bitrate.
 class Mp4CacheIndex {
   Mp4CacheIndex._(
@@ -68,10 +68,15 @@ class Mp4CacheIndex {
         );
       }
       if (top.any((box) => box.type == 'moof')) return null;
+      final movieHeader = _child(data, root, 'mvhd');
+      final movieScale = movieHeader == null
+          ? null
+          : _movieScale(data, movieHeader);
       final tracks = <_Track>[];
       for (final box in children.where((box) => box.type == 'trak')) {
-        final track = _track(data, box, mdats);
+        final track = _track(data, box, mdats, movieScale);
         if (track == null) return null;
+        if (tracks.any((existing) => existing.id == track.id)) return null;
         if (track.kind == 'vide' || track.kind == 'soun') tracks.add(track);
       }
       final video = _selected(tracks, 'vide', selectedVideoTrackId);
@@ -106,9 +111,9 @@ class Mp4CacheIndex {
             ? starts[group + 1]
             : primary.samples.length;
         final segment = primary.samples.sublist(from, to);
-        if (!_continuous(segment)) continue;
-        final begin = segment.first.startUs;
-        final end = segment.last.endUs;
+        final timing = _presentationRange(segment);
+        if (timing == null) continue;
+        final (begin, end) = timing;
         final required = <CachedByteRange>[
           ...metadata,
           for (final sample in segment)
@@ -118,10 +123,11 @@ class Mp4CacheIndex {
           final matching = audio.samples
               .where((sample) => sample.endUs > begin && sample.startUs < end)
               .toList();
+          final audioTiming = _presentationRange(matching);
           if (matching.isEmpty ||
-              matching.first.startUs > begin ||
-              matching.last.endUs < end ||
-              !_continuous(matching)) {
+              audioTiming == null ||
+              audioTiming.$1 > begin ||
+              audioTiming.$2 < end) {
             continue;
           }
           required.addAll([
@@ -130,6 +136,9 @@ class Mp4CacheIndex {
           ]);
         }
         units.add(_PlayableUnit(begin, end, required));
+      }
+      for (var i = 1; i < units.length; i++) {
+        if (units[i].startUs < units[i - 1].endUs) return null;
       }
       if (units.isEmpty) return null;
       return Mp4CacheIndex._(
@@ -392,6 +401,7 @@ _FragmentTrack? _fragmentTrack(Uint8List bytes, _Box box) {
   final idOffset = tkhd.data + (tkhdVersion == 1 ? 20 : 12);
   if (idOffset + 4 > tkhd.end) return null;
   final id = _u32(bytes, idOffset);
+  if (id == 0) return null;
   final hdlr = _child(bytes, mdia, 'hdlr');
   final mdhd = _child(bytes, mdia, 'mdhd');
   final minf = _child(bytes, mdia, 'minf');
@@ -591,6 +601,21 @@ bool _continuous(List<_Sample> samples) {
   return true;
 }
 
+/// A complete decode group may have B-frame presentation order different from
+/// sample order. Only publish its interval when presentation covers every tick.
+(int, int)? _presentationRange(List<_Sample> samples) {
+  if (samples.isEmpty) return null;
+  final ordered = samples.toList()
+    ..sort((a, b) => a.startUs.compareTo(b.startUs));
+  if (ordered.first.startUs < 0) return null;
+  var end = ordered.first.endUs;
+  for (final sample in ordered.skip(1)) {
+    if (sample.startUs > end || sample.endUs <= sample.startUs) return null;
+    if (sample.endUs > end) end = sample.endUs;
+  }
+  return (ordered.first.startUs, end);
+}
+
 List<CachedByteRange> _mergeBytes(List<CachedByteRange> ranges) {
   final ordered = ranges.where((r) => r.start >= 0 && r.end > r.start).toList()
     ..sort((a, b) => a.start.compareTo(b.start));
@@ -670,8 +695,8 @@ _Box? _child(Uint8List bytes, _Box parent, String type) {
   return null;
 }
 
-_Track? _track(Uint8List bytes, _Box box, List<_Box> mdats) {
-  if (_child(bytes, box, 'edts') != null) return null;
+_Track? _track(Uint8List bytes, _Box box, List<_Box> mdats, int? movieScale) {
+  final edts = _child(bytes, box, 'edts');
   final tkhd = _child(bytes, box, 'tkhd');
   final mdia = _child(bytes, box, 'mdia');
   if (tkhd == null || mdia == null) return null;
@@ -680,6 +705,7 @@ _Track? _track(Uint8List bytes, _Box box, List<_Box> mdats) {
   final idOffset = tkhd.data + (version == 1 ? 20 : 12);
   if (idOffset + 4 > tkhd.end) return null;
   final id = _u32(bytes, idOffset);
+  if (id == 0) return null;
   final hdlr = _child(bytes, mdia, 'hdlr');
   final mdhd = _child(bytes, mdia, 'mdhd');
   final minf = _child(bytes, mdia, 'minf');
@@ -710,7 +736,7 @@ _Track? _track(Uint8List bytes, _Box box, List<_Box> mdats) {
     return null;
   }
   final tables = _children(bytes, stbl);
-  if (tables.any((b) => {'ctts', 'senc', 'saiz', 'saio'}.contains(b.type))) {
+  if (tables.any((b) => {'senc', 'saiz', 'saio'}.contains(b.type))) {
     return null;
   }
   _Box? table(String name) {
@@ -743,6 +769,14 @@ _Track? _track(Uint8List bytes, _Box box, List<_Box> mdats) {
   if (entryType == 'encv' || entryType == 'enca') return null;
   final durations = _durations(bytes, stts);
   final sizes = _sizes(bytes, stsz);
+  final composition = table('ctts') == null
+      ? null
+      : _compositionOffsets(bytes, table('ctts')!, sizes?.length ?? 0);
+  if (table('ctts') != null && composition == null) return null;
+  final edit = edts == null
+      ? null
+      : _simpleEdit(bytes, edts, movieScale, scale);
+  if (edts != null && edit == null) return null;
   final chunks = _chunks(bytes, offsets);
   final layout = _layout(bytes, stsc);
   if (durations == null ||
@@ -776,8 +810,19 @@ _Track? _track(Uint8List bytes, _Box box, List<_Box> mdats) {
         return null;
       }
       final endTicks = ticks + durations[sample];
-      final startUs = ticks * 1000000 ~/ scale;
-      final endUs = endTicks * 1000000 ~/ scale;
+      final startTicks = ticks + (composition?[sample] ?? 0);
+      final endPresentationTicks = endTicks + (composition?[sample] ?? 0);
+      final startUs =
+          (startTicks - (edit?.mediaStart ?? 0)) * 1000000 ~/ scale +
+          (edit?.timelineOffsetUs ?? 0);
+      final endUs =
+          (endPresentationTicks - (edit?.mediaStart ?? 0)) * 1000000 ~/ scale +
+          (edit?.timelineOffsetUs ?? 0);
+      if (edit != null &&
+          (startUs < edit.timelineOffsetUs ||
+              endUs > edit.timelineOffsetUs + edit.durationUs)) {
+        return null;
+      }
       if (endUs <= startUs) return null;
       samples.add(
         _Sample(
@@ -809,6 +854,88 @@ List<int>? _durations(Uint8List bytes, _Box box) {
     result.addAll(List.filled(amount, duration));
   }
   return result;
+}
+
+List<int>? _compositionOffsets(Uint8List bytes, _Box box, int samples) {
+  if (box.data + 8 > box.end) return null;
+  final version = bytes[box.data];
+  if (version != 0 && version != 1) return null;
+  final count = _u32(bytes, box.data + 4);
+  if (count > 200000 || box.data + 8 + count * 8 != box.end) return null;
+  final result = <int>[];
+  final data = ByteData.sublistView(bytes);
+  for (var i = 0; i < count; i++) {
+    final at = box.data + 8 + i * 8;
+    final amount = _u32(bytes, at);
+    final offset = version == 0 ? _u32(bytes, at + 4) : data.getInt32(at + 4);
+    if (amount == 0 || amount > samples - result.length) return null;
+    result.addAll(List.filled(amount, offset));
+  }
+  return result.length == samples ? result : null;
+}
+
+int? _movieScale(Uint8List bytes, _Box box) {
+  if (box.data + 4 > box.end) return null;
+  final version = bytes[box.data];
+  if (version != 0 && version != 1) return null;
+  final offset = box.data + (version == 1 ? 20 : 12);
+  if (offset + 4 > box.end) return null;
+  final scale = _u32(bytes, offset);
+  return scale > 0 ? scale : null;
+}
+
+class _SimpleEdit {
+  const _SimpleEdit(this.mediaStart, this.durationUs, this.timelineOffsetUs);
+  final int mediaStart;
+  final int durationUs;
+  final int timelineOffsetUs;
+}
+
+/// Accept one ordinary edit, optionally preceded by one empty dwell. Other
+/// edit sequences can repeat, crop, or reorder media and remain unknown.
+_SimpleEdit? _simpleEdit(
+  Uint8List bytes,
+  _Box edts,
+  int? movieScale,
+  int mediaScale,
+) {
+  if (movieScale == null || mediaScale <= 0) return null;
+  final edits = _children(bytes, edts);
+  if (edits.length != 1 || edits.single.type != 'elst') return null;
+  final box = edits.single;
+  if (box.data + 8 > box.end) return null;
+  final version = bytes[box.data];
+  if (version != 0 && version != 1) return null;
+  final count = _u32(bytes, box.data + 4);
+  final width = version == 0 ? 12 : 20;
+  if (count < 1 || count > 2 || box.data + 8 + count * width != box.end) {
+    return null;
+  }
+  final data = ByteData.sublistView(bytes);
+  var offsetUs = 0;
+  for (var i = 0; i < count; i++) {
+    final at = box.data + 8 + i * width;
+    final duration = version == 0 ? _u32(bytes, at) : _u64(bytes, at);
+    final mediaStart = version == 0
+        ? data.getInt32(at + 4)
+        : data.getInt64(at + 8);
+    final rateAt = at + (version == 0 ? 8 : 16);
+    if (duration == 0 ||
+        data.getInt16(rateAt) != 1 ||
+        data.getInt16(rateAt + 2) != 0) {
+      return null;
+    }
+    final durationUs = duration * 1000000 ~/ movieScale;
+    if (durationUs <= 0) return null;
+    if (i == 0 && count == 2) {
+      if (mediaStart != -1) return null;
+      offsetUs = durationUs;
+      continue;
+    }
+    if (mediaStart < 0) return null;
+    return _SimpleEdit(mediaStart, durationUs, offsetUs);
+  }
+  return null;
 }
 
 List<int>? _sizes(Uint8List bytes, _Box box) {

@@ -10,6 +10,110 @@ import 'package:rillight/player/playback_http_proxy.dart';
 import 'mp4_fixture.dart';
 
 void main() {
+  test(
+    'full byte response does not fabricate playable time for unknown media',
+    () async {
+      final bytes = Uint8List.fromList(List<int>.filled(1024, 0x6b));
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      server.listen((request) async {
+        request.response.headers
+          ..set('etag', '"unknown"')
+          ..set('cache-control', 'max-age=3600');
+        request.response
+          ..contentLength = bytes.length
+          ..add(bytes);
+        await request.response.close();
+      });
+      final cache = await SessionByteCache.open();
+      final proxy = await PlaybackHttpProxy.create(
+        cache: cache,
+        sessionBuffering: true,
+      );
+      final client = HttpClient();
+      try {
+        final route = proxy.register(
+          Uri.parse('http://127.0.0.1:${server.port}/unknown.bin'),
+        );
+        final response = await (await client.getUrl(route)).close();
+        await response.drain<void>();
+        await proxy.refreshTimeline(const Duration(seconds: 4));
+        expect(proxy.diagnostics['cachedTimeRanges'], isEmpty);
+        expect(proxy.diagnostics['timelineUnknownReason'], isNotNull);
+      } finally {
+        client.close(force: true);
+        await proxy.close();
+        await server.close(force: true);
+      }
+    },
+  );
+
+  test(
+    'track selection retracts old ranges until selected audio is readable',
+    () async {
+      final bytes = progressiveMp4Fixture(secondAudio: true);
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      server.listen((request) async {
+        final range = MediaByteRange.resolve(
+          request.headers.value('range'),
+          bytes.length,
+        )!;
+        request.response
+          ..statusCode = 206
+          ..contentLength = range.length;
+        request.response.headers
+          ..set('etag', '"two-audio"')
+          ..set('cache-control', 'max-age=3600')
+          ..set(
+            'content-range',
+            'bytes ${range.start}-${range.end}/${bytes.length}',
+          );
+        request.response.add(bytes.sublist(range.start, range.end + 1));
+        await request.response.close();
+      });
+      final cache = await SessionByteCache.open();
+      final proxy = await PlaybackHttpProxy.create(
+        cache: cache,
+        sessionBuffering: true,
+      );
+      final client = HttpClient();
+      final route = proxy.register(
+        Uri.parse('http://127.0.0.1:${server.port}/two-audio.mp4'),
+      );
+      Future<void> read(int start, int end) async {
+        final request = await client.getUrl(route);
+        request.headers.set('range', 'bytes=$start-$end');
+        await (await request.close()).drain<void>();
+      }
+
+      try {
+        await read(0, 27);
+        await read(52, bytes.length - 1);
+        await read(28, 43);
+        await proxy.refreshTimeline(const Duration(seconds: 4));
+        expect(proxy.diagnostics['cachedTimeRanges'], isEmpty);
+        expect(proxy.diagnostics['timelineUnknownReason'], isNotNull);
+        proxy.selectContainerTracks(videoTrackId: 1, audioTrackId: 2);
+        await proxy.refreshTimeline(const Duration(seconds: 4));
+        expect(proxy.diagnostics['cachedTimeRanges'], [
+          {'startMs': 0, 'endMs': 4000},
+        ]);
+        proxy.selectContainerTracks(videoTrackId: 1, audioTrackId: 3);
+        expect(proxy.diagnostics['cachedTimeRanges'], isEmpty);
+        await proxy.refreshTimeline(const Duration(seconds: 4));
+        expect(proxy.diagnostics['cachedTimeRanges'], isEmpty);
+        await read(44, 51);
+        await proxy.refreshTimeline(const Duration(seconds: 4));
+        expect(proxy.diagnostics['cachedTimeRanges'], [
+          {'startMs': 0, 'endMs': 4000},
+        ]);
+      } finally {
+        client.close(force: true);
+        await proxy.close();
+        await server.close(force: true);
+      }
+    },
+  );
+
   for (final tagged in [true, false]) {
     test(
       'cancelled metadata probe ${tagged ? 'retains validated' : 'rejects unvalidated'} prefix',

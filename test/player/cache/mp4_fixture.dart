@@ -5,13 +5,19 @@ import 'dart:typed_data';
 /// audio track. Byte layout: ftyp [0,20), mdat header [20,28), video [28,36),
 /// audio [36,44), moov [44,end). It contains no encoded media and must only
 /// be used for cache-index/proxy tests, not actual decode tests.
-Uint8List progressiveMp4Fixture() {
+Uint8List progressiveMp4Fixture({
+  int videoCompositionOffsetTicks = 0,
+  List<int>? videoCompositionOffsetsTicks,
+  int? videoEditStartTicks,
+  bool secondAudio = false,
+  bool includeAudio = true,
+}) {
   final ftyp = _box('ftyp', [
     ...ascii.encode('isom'),
     ..._u32(0),
     ...ascii.encode('isom'),
   ]);
-  final mdat = _box('mdat', List.generate(16, (i) => i));
+  final mdat = _box('mdat', List.generate(secondAudio ? 24 : 16, (i) => i));
 
   List<int> track(int id, String kind, int chunkOffset) {
     final tkhd = _box('tkhd', [...List.filled(12, 0), ..._u32(id)]);
@@ -25,6 +31,23 @@ Uint8List progressiveMp4Fixture() {
       ..._u32(4),
       ..._u32(1000),
     ]);
+    final offsets =
+        videoCompositionOffsetsTicks ??
+        List<int>.filled(4, videoCompositionOffsetTicks);
+    final ctts = kind == 'vide' && offsets.any((value) => value != 0)
+        ? _box('ctts', [
+            offsets.any((value) => value < 0) ? 1 : 0,
+            0,
+            0,
+            0,
+            ..._u32(videoCompositionOffsetsTicks == null ? 1 : 4),
+            if (videoCompositionOffsetsTicks == null) ...[
+              ..._u32(4),
+              ..._u32(videoCompositionOffsetTicks),
+            ] else
+              for (final value in offsets) ...[..._u32(1), ..._u32(value)],
+          ])
+        : <int>[];
     final stsc = _box('stsc', [
       ...List.filled(4, 0),
       ..._u32(1),
@@ -49,6 +72,7 @@ Uint8List progressiveMp4Fixture() {
     final stbl = _box('stbl', [
       ...stsd,
       ...stts,
+      ...ctts,
       ...stsc,
       ...stsz,
       ...stco,
@@ -57,11 +81,30 @@ Uint8List progressiveMp4Fixture() {
     final minf = _box('minf', [...dinf, ...stbl]);
     return _box('trak', [
       ...tkhd,
+      if (kind == 'vide' && videoEditStartTicks != null)
+        ..._box('edts', [
+          ..._box('elst', [
+            ...List.filled(4, 0),
+            ..._u32(1),
+            ..._u32(4000),
+            ..._u32(videoEditStartTicks),
+            0,
+            1,
+            0,
+            0,
+          ]),
+        ]),
       ..._box('mdia', [...mdhd, ...hdlr, ...minf]),
     ]);
   }
 
-  final moov = _box('moov', [...track(1, 'vide', 28), ...track(2, 'soun', 36)]);
+  final moov = _box('moov', [
+    if (videoEditStartTicks != null)
+      ..._box('mvhd', [...List.filled(12, 0), ..._u32(1000)]),
+    ...track(1, 'vide', 28),
+    if (includeAudio) ...track(2, 'soun', 36),
+    if (secondAudio) ...track(3, 'soun', 44),
+  ]);
   return Uint8List.fromList([...ftyp, ...mdat, ...moov]);
 }
 

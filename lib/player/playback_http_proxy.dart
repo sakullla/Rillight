@@ -67,7 +67,13 @@ class PlaybackHttpProxy {
   Mp4CacheIndex? _mp4TimelineIndex;
   String? _timelineIdentity;
   String? _timelineResource;
-  int _timelineCacheRevision = -1;
+  int _timelineAttemptRevision = -1;
+  Duration? _timelineAttemptDuration;
+  DateTime? _lastIntegrityCheck;
+  String? _mappingUnknownReason;
+  int? _selectedVideoTrackId;
+  int? _selectedAudioTrackId;
+  int _trackSelectionVersion = 0;
   List<CachedTimeRange> _cachedTimeline = const [];
   int _timelineSequence = 0;
   bool _refreshingTimeline = false;
@@ -124,6 +130,7 @@ class PlaybackHttpProxy {
   final _samples = <(DateTime, int)>[];
   PlaybackCacheStream _stream = PlaybackCacheStream.conservative;
   bool _closed = false;
+  bool _playbackActive = true;
 
   int get upstreamBytes => _upstreamBytes;
   void resumeAfterDiskRecovery() => _readAhead?.resumeAfterDiskRecovery();
@@ -134,7 +141,9 @@ class PlaybackHttpProxy {
     _timelineIndex = null;
     _mp4TimelineIndex = null;
     _timelineIdentity = null;
-    _timelineCacheRevision = -1;
+    _timelineAttemptRevision = -1;
+    _lastIntegrityCheck = null;
+    _mappingUnknownReason = null;
     _cachedTimeline = const [];
     _timelineSequence++;
     if (_hlsPlaylists.isNotEmpty) _hlsUnknownReason = 'hlsTimingUnavailable';
@@ -143,6 +152,30 @@ class PlaybackHttpProxy {
   }
 
   PlaybackCacheStream get stream => _stream;
+  void setPlaybackActive(bool active) {
+    if (_playbackActive == active) return;
+    _playbackActive = active;
+    _readAhead?.setPrefetchAllowed(active);
+    if (!active) _cancelSegmentPrefetch(clearPending: true);
+  }
+
+  void selectContainerTracks({int? videoTrackId, int? audioTrackId}) {
+    if (_selectedVideoTrackId == videoTrackId &&
+        _selectedAudioTrackId == audioTrackId) {
+      return;
+    }
+    _selectedVideoTrackId = videoTrackId;
+    _selectedAudioTrackId = audioTrackId;
+    _trackSelectionVersion++;
+    _timelineIndex = null;
+    _mp4TimelineIndex = null;
+    _timelineAttemptRevision = -1;
+    _lastIntegrityCheck = null;
+    _mappingUnknownReason = null;
+    _cachedTimeline = const [];
+    _timelineSequence++;
+  }
+
   List<CachedTimeRange> get _visibleCachedTimeline {
     final degradation = cache?.diagnostics['degradation'];
     return degradation == null || degradation == 'disk-timeout'
@@ -164,10 +197,13 @@ class PlaybackHttpProxy {
     if (_timelineIdentity == null) {
       return 'indexUnavailable';
     }
+    if (_cachedTimeline.isEmpty && _mappingUnknownReason != null) {
+      return _mappingUnknownReason;
+    }
     if (_cachedTimeline.isEmpty &&
         _timelineIndex == null &&
         _mp4TimelineIndex == null) {
-      return 'mediaMappingUnavailable';
+      return _mappingUnknownReason ?? 'mediaMappingUnavailable';
     }
     return null;
   }
@@ -227,6 +263,9 @@ class PlaybackHttpProxy {
         },
     ],
     'timelineCuePoints': _timelineIndex?.points.length ?? 0,
+    'timelineTrackSelectionVersion': _trackSelectionVersion,
+    'timelineVideoTrackIdentified': _selectedVideoTrackId != null,
+    'timelineAudioTrackIdentified': _selectedAudioTrackId != null,
     'readAheadBypassedResources': _readAheadBypass.length,
     'hlsNextSegments': _hlsNext.length,
     'hlsIndexBytes': _hlsIndexBytes,
@@ -234,6 +273,7 @@ class PlaybackHttpProxy {
     'hlsActivePlaylists': _hlsActiveOwners.length,
     'segmentPrefetchActive': _segmentPrefetch != null,
     'segmentPrefetchPending': _pendingSegmentPrefetch.length,
+    'playbackActive': _playbackActive,
     ...?_readAhead?.diagnostics,
   };
 
@@ -293,16 +333,33 @@ class PlaybackHttpProxy {
       return;
     }
     final identity = '$resource:${representation.generation}';
+    final trackSelectionVersion = _trackSelectionVersion;
     bool stillCurrent() =>
         !_closed &&
+        _timelineIdentity == identity &&
+        trackSelectionVersion == _trackSelectionVersion &&
         resource == (_timelineResource ?? _readAhead?.resource) &&
         _representations[resource]?.generation == representation.generation;
     final snapshotRevision = cache!.revision;
-    if (!verifyChecksum &&
-        _timelineIdentity == identity &&
-        _timelineCacheRevision == snapshotRevision &&
-        _cachedTimeline.isNotEmpty &&
-        cache!.diagnostics['degradation'] == null) {
+    bool revisionCurrent() {
+      if (cache!.revision == snapshotRevision) return true;
+      if (stillCurrent()) {
+        _cachedTimeline = const [];
+        _mappingUnknownReason = 'cacheChangedDuringIndex';
+        _timelineSequence++;
+      }
+      return false;
+    }
+
+    final lastIntegrityCheck = _lastIntegrityCheck;
+    if (_timelineIdentity == identity &&
+        _timelineAttemptRevision == snapshotRevision &&
+        _timelineAttemptDuration == duration &&
+        cache!.diagnostics['degradation'] == null &&
+        (!verifyChecksum ||
+            lastIntegrityCheck != null &&
+                DateTime.now().difference(lastIntegrityCheck) <
+                    const Duration(seconds: 2))) {
       return;
     }
     if (!_reserveCacheWorkspace(1024 * 1024)) return;
@@ -311,30 +368,29 @@ class PlaybackHttpProxy {
     try {
       if (_timelineIdentity != identity) {
         _timelineIdentity = identity;
-        _timelineCacheRevision = -1;
+        _timelineAttemptRevision = -1;
+        _lastIntegrityCheck = null;
         _timelineIndex = null;
         _mp4TimelineIndex = null;
+        _mappingUnknownReason = null;
         _cachedTimeline = const [];
         _timelineSequence++;
       }
+      _timelineAttemptRevision = snapshotRevision;
+      _timelineAttemptDuration = duration;
+      if (verifyChecksum) _lastIntegrityCheck = DateTime.now();
       final bytes = await cache!.availableRanges(
         resource: resource,
         generation: representation.generation,
         verifyChecksum: verifyChecksum,
       );
       if (!stillCurrent()) return;
+      if (!revisionCurrent()) return;
       if (bytes == null) {
         // A busy or timed-out integrity snapshot cannot support a previously
         // published interval: its disk blocks may have changed since then.
         _cachedTimeline = const [];
-        _timelineSequence++;
-        return;
-      }
-      if (bytes.length == 1 &&
-          bytes.single.start == 0 &&
-          bytes.single.end >= representation.total) {
-        _cachedTimeline = [CachedTimeRange(Duration.zero, duration)];
-        _timelineCacheRevision = snapshotRevision;
+        _mappingUnknownReason = 'integrityUnavailable';
         _timelineSequence++;
         return;
       }
@@ -374,24 +430,33 @@ class PlaybackHttpProxy {
       if (!stillCurrent()) return;
       _timelineIndex = index;
       if (index != null) {
+        _mappingUnknownReason = null;
         final ranges = await index.ranges(bytes, duration, read: read);
-        if (!stillCurrent()) return;
+        if (!stillCurrent() || !revisionCurrent()) return;
         _cachedTimeline = ranges;
       } else {
         final mp4 =
             _mp4TimelineIndex ??
-            await Mp4CacheIndex.load(total: representation.total, read: read);
-        if (!stillCurrent()) return;
+            await Mp4CacheIndex.load(
+              total: representation.total,
+              read: read,
+              selectedVideoTrackId: _selectedVideoTrackId,
+              selectedAudioTrackId: _selectedAudioTrackId,
+            );
+        if (!stillCurrent() || !revisionCurrent()) return;
         _mp4TimelineIndex = mp4;
         _cachedTimeline = mp4?.ranges(bytes, duration) ?? const [];
-      }
-      if (_cachedTimeline.isNotEmpty) {
-        _timelineCacheRevision = snapshotRevision;
+        _mappingUnknownReason = mp4 == null
+            ? 'containerTrackOrTimingUnknown'
+            : null;
       }
       _timelineSequence++;
     } catch (_) {
-      _cachedTimeline = const [];
-      _timelineSequence++;
+      if (stillCurrent()) {
+        _cachedTimeline = const [];
+        _mappingUnknownReason = 'indexBudgetOrReadUnavailable';
+        _timelineSequence++;
+      }
     } finally {
       _charge(-1024 * 1024);
       _cacheWorkspace -= 1024 * 1024;
@@ -1102,6 +1167,7 @@ class PlaybackHttpProxy {
   void _scheduleSegmentPrefetch(String current) {
     final next = _hlsNext[current];
     if (_closed ||
+        !_playbackActive ||
         next == null ||
         cache == null ||
         cache!.diagnostics['degradation'] != null ||
@@ -1124,6 +1190,7 @@ class PlaybackHttpProxy {
 
   void _pumpSegmentPrefetch() {
     if (_closed ||
+        !_playbackActive ||
         _segmentPrefetch != null ||
         _active >= _maxRequests - 1 ||
         _pendingSegmentPrefetch.isEmpty) {
@@ -1752,6 +1819,7 @@ class PlaybackHttpProxy {
             return ReadAheadTransfer(source(), producer.cancel);
           },
         );
+        ahead.setPrefetchAllowed(_playbackActive);
         _readAhead = ahead;
       }
       final range = MediaByteRange.resolve(

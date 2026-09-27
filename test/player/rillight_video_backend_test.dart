@@ -96,7 +96,52 @@ class _SlowDisposeCoreDriver extends _CoreDriver {
   }
 }
 
+class _TrackIdCoreDriver extends _CoreDriver {
+  int audioTrackId = 2;
+
+  @override
+  Future<Map<String, dynamic>> open(CorePlayerOpen value) async => {
+    ...await super.open(value),
+    'videoTrackId': 1,
+    'audioTrackId': audioTrackId,
+  };
+
+  @override
+  Future<Map<String, dynamic>> command(
+    String method, [
+    Map<String, Object?> args = const {},
+  ]) async => {
+    ...await super.command(method, args),
+    'videoTrackId': 1,
+    'audioTrackId': audioTrackId,
+  };
+}
+
 void main() {
+  test('container track IDs follow confirmed native audio changes', () async {
+    final core = _TrackIdCoreDriver();
+    final backend = RillightVideoBackend(
+      settingsStore: MemoryPlayerSettingsStore(),
+      createPlayer: () async => core,
+    );
+    addTearDown(backend.dispose);
+    await backend.open(
+      VideoOpenRequest(
+        sessionId: 71,
+        url: Uri.parse('http://127.0.0.1:8765/media.mp4'),
+      ),
+    );
+    var data = await backend.diagnostics();
+    expect(data['timelineVideoTrackIdentified'], true);
+    expect(data['timelineAudioTrackIdentified'], true);
+    expect(data['timelineTrackSelectionVersion'], 1);
+    core.audioTrackId = 3;
+    await backend.setAudioIndex(2);
+    data = await backend.diagnostics();
+    expect(data['timelineTrackSelectionVersion'], 2);
+    expect(backend.bufferSnapshot.ranges, isEmpty);
+  });
+
   test(
     'same-session reopen clears track cache before old core stops',
     () async {

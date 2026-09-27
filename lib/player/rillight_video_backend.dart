@@ -51,6 +51,9 @@ class RillightVideoBackend extends VideoBackend
   int _bufferSequence = 0;
   int _lastProxySequence = -1;
   int _trackVersion = 0;
+  int? _containerVideoTrackId;
+  int? _containerAudioTrackId;
+  int _cacheTrackPending = 0;
   Set<int> _playableAudio = const {};
   Set<int> _rejectedAudio = const {};
   Set<int> _playableSubtitle = const {};
@@ -254,6 +257,9 @@ class RillightVideoBackend extends VideoBackend
     }
     _lastProxySequence = -1;
     _trackSupportKnown = false;
+    _containerVideoTrackId = null;
+    _containerAudioTrackId = null;
+    _cacheTrackPending = 0;
     _opened = false;
     _lastFailure = null;
     _lastCoreEvent = null;
@@ -337,6 +343,9 @@ class RillightVideoBackend extends VideoBackend
       );
       if (_disposed || generation != _generation) return;
       _readTrackSupport(result);
+      await _syncContainerTracks(result, transport);
+      if (request.startPaused) await transport.setPlaybackActive(false);
+      if (_disposed || generation != _generation) return;
       selectedAudioIndex = result['audioIndex'] as int?;
       selectedSubtitleIndex = result['subtitleIndex'] as int?;
       _opened = true;
@@ -407,6 +416,16 @@ class RillightVideoBackend extends VideoBackend
         _emit(VideoEventKind.authenticationRequired, event.value, generation);
       case 'interruption':
         isPlaying = false;
+        final transport = _transport;
+        if (transport != null) {
+          unawaited(() async {
+            try {
+              await transport.setPlaybackActive(false);
+            } catch (_) {
+              // An interruption may race session retirement.
+            }
+          }());
+        }
         _emit(VideoEventKind.playing, false, generation);
       default:
         break;
@@ -507,7 +526,10 @@ class RillightVideoBackend extends VideoBackend
 
   Future<void> _refreshDiagnostics(int generation) async {
     final transport = _transport;
-    if (_diagnosticsBusy || transport == null || generation != _generation) {
+    if (_diagnosticsBusy ||
+        _cacheTrackPending > 0 ||
+        transport == null ||
+        generation != _generation) {
       return;
     }
     _diagnosticsBusy = true;
@@ -525,6 +547,7 @@ class RillightVideoBackend extends VideoBackend
       _reportAuthentication(data, generation);
       if (generation != _generation ||
           _disposed ||
+          _cacheTrackPending > 0 ||
           trackVersion != _trackVersion) {
         return;
       }
@@ -599,6 +622,30 @@ class RillightVideoBackend extends VideoBackend
     _rejectedSubtitle = _indices(result['rejectedSubtitle']);
   }
 
+  Future<void> _syncContainerTracks(
+    Map<String, dynamic> result,
+    PlaybackTransportSession transport,
+  ) async {
+    if (!identical(transport, _transport)) return;
+    if (!result.containsKey('videoTrackId') ||
+        !result.containsKey('audioTrackId')) {
+      return;
+    }
+    int? id(Object? value) => value is int && value > 0 ? value : null;
+    final video = id(result['videoTrackId']);
+    final audio = id(result['audioTrackId']);
+    if (_containerVideoTrackId == video && _containerAudioTrackId == audio) {
+      return;
+    }
+    await transport.selectContainerTracks(
+      videoTrackId: video,
+      audioTrackId: audio,
+    );
+    if (!identical(transport, _transport)) return;
+    _containerVideoTrackId = video;
+    _containerAudioTrackId = audio;
+  }
+
   Future<void> _command(
     String method, [
     Map<String, Object?> args = const {},
@@ -619,6 +666,16 @@ class RillightVideoBackend extends VideoBackend
       throw StateError('Superseded player command');
     }
     _readTrackSupport(result);
+    final transport = _transport;
+    if (transport != null) {
+      await _syncContainerTracks(result, transport);
+      if (method == 'play' || method == 'pause') {
+        await transport.setPlaybackActive(method == 'play');
+      }
+    }
+    if (generation != _generation) {
+      throw StateError('Superseded player command');
+    }
     selectedAudioIndex = result['audioIndex'] as int?;
     selectedSubtitleIndex = result['subtitleIndex'] as int?;
   }
@@ -685,8 +742,20 @@ class RillightVideoBackend extends VideoBackend
   @override
   Future<void> setAudioIndex(int index) async {
     if (audioTrackSupported(index) == false) throw const DeviceTrackRejected();
-    await _command('audio', {'index': index});
+    // Withdraw old selected-track coverage before the native command can wait.
+    final generation = _generation;
+    _cacheTrackPending++;
     _invalidateTrack();
+    try {
+      await _command('audio', {'index': index});
+    } finally {
+      if (generation == _generation) {
+        _cacheTrackPending--;
+        if (_cacheTrackPending == 0) {
+          unawaited(_refreshDiagnostics(generation));
+        }
+      }
+    }
   }
 
   @override

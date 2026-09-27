@@ -149,6 +149,17 @@ class PlaybackTransportSession {
     );
   }
 
+  Future<void> selectContainerTracks({
+    int? videoTrackId,
+    int? audioTrackId,
+  }) async {
+    await _request('tracks', [videoTrackId, audioTrackId]);
+  }
+
+  Future<void> setPlaybackActive(bool active) async {
+    await _request('playbackActive', active);
+  }
+
   Future<void> resizeCache({
     required int memoryBytes,
     required int pendingBytes,
@@ -238,7 +249,7 @@ Future<void> _serveTransport(List<Object?> arguments) async {
           try {
             await proxy!.refreshTimeline(
               Duration(microseconds: message[2] as int),
-              verifyChecksum: false,
+              verifyChecksum: true,
             );
             inbox.send([id, true, null]);
           } catch (error) {
@@ -271,6 +282,16 @@ Future<void> _serveTransport(List<Object?> arguments) async {
             break;
           case 'retry':
             await proxy.retryReadAhead();
+            break;
+          case 'tracks':
+            final value = message[2] as List;
+            proxy.selectContainerTracks(
+              videoTrackId: value[0] as int?,
+              audioTrackId: value[1] as int?,
+            );
+            break;
+          case 'playbackActive':
+            proxy.setPlaybackActive(message[2] as bool);
             break;
           case 'resize':
             final value = message[2] as List;

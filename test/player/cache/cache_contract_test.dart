@@ -677,6 +677,63 @@ void main() {
 
   group('session_read_ahead_test.dart', () {
     test(
+      'explicit pause stops surplus transfer and resume serves demand',
+      () async {
+        final root = await Directory.systemTemp.createTemp('rillight-paused-');
+        final cache = await SessionByteCache.open(
+          root: root,
+          memoryLimitBytes: 4 * 1024 * 1024,
+          diskLimitBytes: 8 * 1024 * 1024,
+        );
+        var fetches = 0;
+        var downloaded = 0;
+        final ahead = SessionReadAhead(
+          cache: cache,
+          resource: 'pause',
+          generation: 1,
+          total: 8 * 1024 * 1024,
+          aheadBytes: 4 * 1024 * 1024,
+          fetch: (start, end) async {
+            fetches++;
+            Stream<List<int>> chunks() async* {
+              for (var offset = start; offset <= end; offset += 64 * 1024) {
+                await Future<void>.delayed(const Duration(milliseconds: 1));
+                final length = (end - offset + 1).clamp(0, 64 * 1024);
+                downloaded += length;
+                yield Uint8List(length);
+              }
+            }
+
+            return ReadAheadTransfer(chunks(), () {});
+          },
+        );
+        final reader = StreamIterator(ahead.read(0, 8 * 1024 * 1024 - 1));
+        try {
+          expect(await reader.moveNext(), true);
+          ahead.setPrefetchAllowed(false);
+          await until(
+            () => ahead.diagnostics['readAheadWorkerActive'] == false,
+          );
+          expect(fetches, 1);
+          expect(downloaded, lessThan(4 * 1024 * 1024));
+          await reader.cancel();
+          ahead.setPrefetchAllowed(true);
+          final resumed = await ahead
+              .read(4 * 1024 * 1024, 4 * 1024 * 1024 + 31)
+              .expand((chunk) => chunk)
+              .toList();
+          expect(resumed, hasLength(32));
+          expect(fetches, 2);
+        } finally {
+          await reader.cancel();
+          await ahead.close();
+          await cache.close();
+          await root.delete(recursive: true);
+        }
+      },
+    );
+
+    test(
       'paused consumer still prefetches bounded disk window and reads it back',
       () async {
         final root = await Directory.systemTemp.createTemp(

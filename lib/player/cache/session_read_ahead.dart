@@ -49,6 +49,8 @@ class SessionReadAhead {
   bool _closed = false;
   bool _failed = false;
   bool _waitingForDisk = false;
+  bool _prefetchAllowed = true;
+  bool _readerWaiting = false;
   Future<void>? _worker;
   ReadAheadTransfer? _transfer;
   Completer<void> _changed = Completer<void>();
@@ -61,6 +63,7 @@ class SessionReadAhead {
     'readAheadPublishedBytes': _published,
     'readAheadFailed': _failed,
     'readAheadWaitingForDisk': _waitingForDisk,
+    'readAheadPrefetchAllowed': _prefetchAllowed,
   };
 
   void _notify() {
@@ -73,6 +76,7 @@ class SessionReadAhead {
     _active = false;
     _reader++;
     _transfer?.cancel();
+    _readerWaiting = false;
     _notify();
   }
 
@@ -83,12 +87,24 @@ class SessionReadAhead {
   }
 
   void _schedule() {
-    if (_worker != null || !_active || _closed || _failed) return;
+    if (_worker != null ||
+        !_active ||
+        _closed ||
+        _failed ||
+        (!_prefetchAllowed && !_readerWaiting)) {
+      return;
+    }
     _worker = _fill().whenComplete(() {
       _worker = null;
       _notify();
       // A seek may have cancelled the old producer while a new reader arrived.
-      if (_active && !_closed && !_failed && _missing() != null) _schedule();
+      if (_active &&
+          !_closed &&
+          !_failed &&
+          (_prefetchAllowed || _readerWaiting) &&
+          _missing() != null) {
+        _schedule();
+      }
     });
   }
 
@@ -97,6 +113,12 @@ class SessionReadAhead {
       _waitingForDisk = false;
       _schedule();
     }
+  }
+
+  void setPrefetchAllowed(bool allowed) {
+    if (_prefetchAllowed == allowed) return;
+    _prefetchAllowed = allowed;
+    if (allowed) _schedule();
   }
 
   int get _windowEnd {
@@ -122,7 +144,10 @@ class SessionReadAhead {
       if (!reserved) {
         throw const HttpException('Read-ahead workspace unavailable');
       }
-      while (_active && !_closed && reader == _reader) {
+      while (_active &&
+          !_closed &&
+          reader == _reader &&
+          (_prefetchAllowed || _readerWaiting)) {
         if (cache.diagnostics['degradation'] == 'disk-timeout') {
           _waitingForDisk = true;
         }
@@ -135,7 +160,10 @@ class SessionReadAhead {
         final end = min(start + requestBytes, _windowEnd) - 1;
         final transfer = await fetch(start, end);
         _transfer = transfer;
-        if (!_active || _closed || reader != _reader) {
+        if (!_active ||
+            _closed ||
+            reader != _reader ||
+            (!_prefetchAllowed && !_readerWaiting)) {
           transfer.cancel();
           return;
         }
@@ -177,6 +205,10 @@ class SessionReadAhead {
                 _published += length;
                 length = 0;
                 _notify();
+                // A confirmed pause may abandon the rest of this optional
+                // range; foreground demand can reopen from the next missing
+                // block without treating that cancellation as a failure.
+                if (!_prefetchAllowed && !_readerWaiting) return;
                 buffer = Uint8List(min(blockBytes, max(0, end - offset + 1)));
               }
             }
@@ -221,11 +253,13 @@ class SessionReadAhead {
         }
         if (hit == null) {
           if (_failed) throw const HttpException('Read-ahead failed');
+          _readerWaiting = true;
           _position = offset;
           _schedule();
           await changed.timeout(const Duration(seconds: 25));
           continue;
         }
+        _readerWaiting = false;
         if (hit.bytes.isEmpty) {
           throw const HttpException('Cached media read made no progress');
         }

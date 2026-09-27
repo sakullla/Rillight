@@ -11,6 +11,105 @@ import 'mp4_fixture.dart';
 
 void main() {
   group('progressive MP4 cache index', () {
+    test(
+      'selected container audio ID controls multi-track byte coverage',
+      () async {
+        final bytes = progressiveMp4Fixture(secondAudio: true);
+        Future<Mp4CacheIndex?> load(int? audioId) => Mp4CacheIndex.load(
+          total: bytes.length,
+          selectedVideoTrackId: 1,
+          selectedAudioTrackId: audioId,
+          read: (offset, length) async =>
+              Uint8List.sublistView(bytes, offset, offset + length),
+        );
+        expect(await load(null), isNull);
+        expect(await load(9), isNull);
+        final first = await load(2);
+        final second = await load(3);
+        expect(first, isNotNull);
+        expect(second, isNotNull);
+        final present = [
+          CachedByteRange(0, 28),
+          CachedByteRange(28, 44),
+          CachedByteRange(52, bytes.length),
+        ];
+        expect(first!.ranges(present, const Duration(seconds: 4)), isNotEmpty);
+        expect(second!.ranges(present, const Duration(seconds: 4)), isEmpty);
+      },
+    );
+
+    test('composition offset and one simple edit map verified time', () async {
+      Future<Mp4CacheIndex?> load(Uint8List bytes) => Mp4CacheIndex.load(
+        total: bytes.length,
+        read: (offset, length) async =>
+            Uint8List.sublistView(bytes, offset, offset + length),
+      );
+      final offsetOnly = progressiveMp4Fixture(
+        includeAudio: false,
+        videoCompositionOffsetTicks: 500,
+      );
+      final offsetIndex = await load(offsetOnly);
+      expect(offsetIndex, isNotNull);
+      expect(
+        offsetIndex!
+            .ranges([
+              CachedByteRange(0, offsetOnly.length),
+            ], const Duration(seconds: 5))
+            .map(
+              (range) => (range.start.inMilliseconds, range.end.inMilliseconds),
+            ),
+        [(500, 4500)],
+      );
+      final edited = progressiveMp4Fixture(
+        videoCompositionOffsetTicks: 500,
+        videoEditStartTicks: 500,
+      );
+      final editedIndex = await load(edited);
+      expect(editedIndex, isNotNull);
+      expect(
+        editedIndex!
+            .ranges([
+              CachedByteRange(0, edited.length),
+            ], const Duration(seconds: 4))
+            .map((range) => (range.start.inSeconds, range.end.inSeconds)),
+        [(0, 4)],
+      );
+    });
+
+    test(
+      'signed composition offsets require complete presentation groups',
+      () async {
+        final bytes = progressiveMp4Fixture(
+          videoCompositionOffsetsTicks: [1000, -1000, 1000, -1000],
+        );
+        final index = await Mp4CacheIndex.load(
+          total: bytes.length,
+          read: (offset, length) async =>
+              Uint8List.sublistView(bytes, offset, offset + length),
+        );
+        expect(index, isNotNull);
+        expect(
+          index!
+              .ranges([
+                CachedByteRange(0, bytes.length),
+              ], const Duration(seconds: 4))
+              .map((range) => (range.start.inSeconds, range.end.inSeconds)),
+          [(0, 4)],
+        );
+        final gapped = progressiveMp4Fixture(
+          videoCompositionOffsetsTicks: [2000, 0, 1000, -1000],
+        );
+        expect(
+          await Mp4CacheIndex.load(
+            total: gapped.length,
+            read: (offset, length) async =>
+                Uint8List.sublistView(gapped, offset, offset + length),
+          ),
+          isNull,
+        );
+      },
+    );
+
     test('CRC failure retracts only the affected disk-backed GOP', () async {
       final root = await Directory.systemTemp.createTemp('rillight-mp4-crc-');
       final cache = await SessionByteCache.open(
