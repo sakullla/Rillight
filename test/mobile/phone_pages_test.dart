@@ -911,6 +911,10 @@ void main() {
         find.byKey(CatalogKeys.shelfMore(CatalogKeys.shelfLatestMovies)),
         findsNothing,
       );
+      expect(
+        find.byKey(CatalogKeys.shelfMore(CatalogKeys.shelfLatestSeries)),
+        findsNothing,
+      );
 
       await Scrollable.ensureVisible(tester.element(retry), alignment: 0.2);
       await tester.pump();
@@ -940,6 +944,10 @@ void main() {
         expect(find.text('暂无内容'), findsOneWidget);
         expect(find.text('刷新'), findsOneWidget);
         expect(find.byType(MobileFailureState), findsNothing);
+        expect(
+          find.byKey(CatalogKeys.shelfMore(CatalogKeys.shelfLatestSeries)),
+          findsNothing,
+        );
         // 下拉刷新容器保留。
         expect(find.byType(RefreshIndicator), findsOneWidget);
 
@@ -951,79 +959,105 @@ void main() {
       tags: ['integration'],
     );
 
-    testWidgets(
-      'shelf more appears only for full rows and opens the phone shelf',
-      (tester) async {
-        final (_, server) = await _openPhone(tester, prepare: _addShelfMovies);
-        expect(find.text('冷门电影'), findsNothing);
-        // 电影行满员出现"更多"。继续观看只要有条目就出现，剧集行不满员不出现。
-        expect(
-          find.byKey(CatalogKeys.shelfMore(CatalogKeys.shelfLatestMovies)),
-          findsOneWidget,
-        );
-        expect(
-          find.byKey(CatalogKeys.shelfMore(CatalogKeys.shelfLatestSeries)),
-          findsNothing,
-        );
-        expect(
-          find.byKey(CatalogKeys.shelfMore(CatalogKeys.shelfResume)),
-          findsOneWidget,
-        );
-        expect(find.byType(ShelfGridPage), findsNothing);
+    testWidgets('full movie and short series rows open their phone shelves', (
+      tester,
+    ) async {
+      final (router, server) = await _openPhone(
+        tester,
+        prepare: _addShelfMovies,
+      );
+      expect(find.text('冷门电影'), findsNothing);
+      // 电影行满员出现“更多”；继续观看和最近剧集有条目即出现。
+      expect(
+        find.byKey(CatalogKeys.shelfMore(CatalogKeys.shelfLatestMovies)),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(CatalogKeys.shelfMore(CatalogKeys.shelfResume)),
+        findsOneWidget,
+      );
+      await _showOnHome(tester, find.byKey(CatalogKeys.latestSeriesRow));
+      expect(
+        find.byKey(CatalogKeys.shelfMore(CatalogKeys.shelfLatestSeries)),
+        findsOneWidget,
+      );
+      expect(find.byType(ShelfGridPage), findsNothing);
 
-        final more = find.byKey(
-          CatalogKeys.shelfMore(CatalogKeys.shelfLatestMovies),
-        );
-        await _showOnHome(tester, more);
-        await tester.tap(more);
-        await _homeSettle(tester);
+      final more = find.byKey(
+        CatalogKeys.shelfMore(CatalogKeys.shelfLatestMovies),
+      );
+      await _showOnHome(tester, more);
+      await tester.tap(more);
+      await _homeSettle(tester);
 
-        expect(find.byType(PhoneShelfPage), findsOneWidget);
-        expect(find.byType(ShelfGridPage), findsNothing);
-        expect(find.byType(HomeHero), findsNothing);
-        expect(
-          find.descendant(
-            of: find.byType(AppBar),
-            matching: find.text('最近更新的电影'),
-          ),
-          findsOneWidget,
-        );
-        expect(find.text('加载更多'), findsNothing);
-        expect(
-          server.requests.where(
-            (request) =>
-                request.contains('IncludeItemTypes=Movie') &&
-                request.contains('Limit=${PhoneShelfPage.pageSize}') &&
-                request.contains('StartIndex=0') &&
-                request.contains('SortBy=DateLastContentAdded') &&
-                request.contains('SortOrder=Descending'),
-          ),
-          isNotEmpty,
-        );
-        await tester.scrollUntilVisible(find.text('冷门电影'), 400);
-        expect(find.text('冷门电影'), findsOneWidget);
-        await tester.tap(find.byKey(const Key('phone-shelf-filter')));
-        await _homeSettle(tester);
-        expect(
-          find.byKey(const Key('catalog-filter-watch-unplayed')),
-          findsOneWidget,
-        );
-        await tester.tap(
-          find.byKey(const Key('catalog-filter-watch-unplayed')),
-        );
-        await _homeSettle(tester);
-        expect(
-          server.requests.where(
-            (request) =>
-                request.contains('IncludeItemTypes=Movie') &&
-                request.contains('Filters=IsUnplayed'),
-          ),
-          isNotEmpty,
-        );
-        expect(tester.takeException(), isNull);
-      },
-      tags: ['integration'],
-    );
+      expect(find.byType(PhoneShelfPage), findsOneWidget);
+      expect(find.byType(ShelfGridPage), findsNothing);
+      expect(find.byType(HomeHero), findsNothing);
+      expect(
+        find.descendant(
+          of: find.byType(AppBar),
+          matching: find.text('最近更新的电影'),
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('加载更多'), findsNothing);
+      expect(
+        server.requests.where(
+          (request) =>
+              request.contains('IncludeItemTypes=Movie') &&
+              request.contains('Limit=${PhoneShelfPage.pageSize}') &&
+              request.contains('StartIndex=0') &&
+              request.contains('SortBy=DateLastContentAdded') &&
+              request.contains('SortOrder=Descending'),
+        ),
+        isNotEmpty,
+      );
+      await tester.scrollUntilVisible(find.text('冷门电影'), 400);
+      expect(find.text('冷门电影'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('phone-shelf-filter')));
+      await _homeSettle(tester);
+      expect(
+        find.byKey(const Key('catalog-filter-watch-unplayed')),
+        findsOneWidget,
+      );
+      await tester.tap(find.byKey(const Key('catalog-filter-watch-unplayed')));
+      await _homeSettle(tester);
+      expect(
+        server.requests.where(
+          (request) =>
+              request.contains('IncludeItemTypes=Movie') &&
+              request.contains('Filters=IsUnplayed'),
+        ),
+        isNotEmpty,
+      );
+
+      router.pop();
+      await _homeSettle(tester);
+      final seriesMore = find.byKey(
+        CatalogKeys.shelfMore(CatalogKeys.shelfLatestSeries),
+      );
+      await _showOnHome(tester, seriesMore);
+      await tester.tap(seriesMore);
+      await _homeSettle(tester);
+      expect(find.byType(PhoneShelfPage), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byType(AppBar),
+          matching: find.text('最近更新的剧集'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        server.requests.where(
+          (request) =>
+              request.contains('IncludeItemTypes=Series') &&
+              request.contains('Limit=${PhoneShelfPage.pageSize}') &&
+              request.contains('SortBy=DateLastContentAdded'),
+        ),
+        isNotEmpty,
+      );
+      expect(tester.takeException(), isNull);
+    }, tags: ['integration']);
 
     // '/shelf/:source' 的环境分派在全 test/ 仅此处守护:desktop 建 ShelfGridPage,
     // phone 建 PhoneShelfPage。只断言路由分派,不泵页面内容。

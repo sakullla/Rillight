@@ -182,12 +182,9 @@ void main() {
   }
 
   testWidgets(
-    'orientation exit restores the entry direction; a denied request still plays',
+    'playback requests landscape and restores portrait; a denied request still plays',
     (tester) async {
-      final orientation = PhoneOrientation(
-        restoreTo: const [DeviceOrientation.portraitUp],
-        request: (orientations) async {},
-      );
+      final orientation = PhoneOrientation(request: (orientations) async {});
       final current = await showPlayer(
         tester,
         itemId: 'movie-inception',
@@ -195,24 +192,23 @@ void main() {
         wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
       );
       expect(current.error, isNull);
-      expect(orientation.calls.first, PhoneOrientation.unlocked);
+      expect(orientation.calls.first, PhoneOrientation.landscape);
       await closePlayer(tester);
       await orientation.settled;
       expect(find.byType(MobilePlayerPage), findsNothing);
       // The surface is still landscape. A trailing unlock would follow the
       // sensor and leave playback's landscape hold in place.
       expect(orientation.calls, hasLength(2));
-      expect(orientation.calls[1], const [DeviceOrientation.portraitUp]);
+      expect(orientation.calls[1], PhoneOrientation.portrait);
       expect(orientation.calls.last, isNot(PhoneOrientation.unlocked));
 
       tester.view.physicalSize = const Size(360, 800);
       await orientation.settled;
-      expect(orientation.calls[1], const [DeviceOrientation.portraitUp]);
+      expect(orientation.calls[1], PhoneOrientation.portrait);
       expect(orientation.calls.last, PhoneOrientation.unlocked);
 
-      // 系统拒绝方向请求时播放仍要能启动,退出仍恢复进入方向。
+      // 系统拒绝方向请求时播放仍要能启动，退出仍请求竖屏。
       final denied = PhoneOrientation(
-        restoreTo: const [DeviceOrientation.portraitUp],
         request: (_) async => throw StateError('orientation denied'),
       );
       final failed = await showPlayer(
@@ -223,17 +219,43 @@ void main() {
       );
       expect(failed.error, isNull);
       expect(failed.loading, isFalse);
-      expect(denied.calls.first, PhoneOrientation.unlocked);
+      expect(denied.calls.first, PhoneOrientation.landscape);
       expect(denied.lastError, isA<StateError>());
       expect(find.byType(MobilePlayerPage), findsOneWidget);
       await closePlayer(tester);
       await denied.settled;
       expect(find.byType(MobilePlayerPage), findsNothing);
-      expect(denied.calls[1], const [DeviceOrientation.portraitUp]);
+      expect(denied.calls[1], PhoneOrientation.portrait);
       expect(denied.calls.last, isNot(PhoneOrientation.unlocked));
     },
     tags: ['integration'],
   );
+
+  testWidgets('portrait viewport remains usable while landscape is pending', (
+    tester,
+  ) async {
+    final orientation = PhoneOrientation(request: (_) async {});
+    final player = await showPlayer(
+      tester,
+      itemId: 'movie-inception',
+      size: const Size(360, 800),
+      orientation: orientation,
+      wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
+    );
+    expect(orientation.calls.first, PhoneOrientation.landscape);
+    expect(player.error, isNull);
+    expect(find.byKey(const Key('mobile-player-lock')), findsOneWidget);
+    expect(find.byTooltip('关闭'), findsOneWidget);
+
+    await closePlayer(tester);
+    await tester.pump();
+    await orientation.settled;
+    expect(orientation.calls, [
+      PhoneOrientation.landscape,
+      PhoneOrientation.portrait,
+      PhoneOrientation.unlocked,
+    ]);
+  }, tags: ['integration']);
 
   testWidgets(
     'next episode countdown can be cancelled, played, or absent for movies',
@@ -1089,15 +1111,12 @@ void main() {
   }, tags: ['integration']);
 
   testWidgets(
-    'playback hides system bars, allows portrait, and drops the rotate button',
+    'playback hides system bars, reasserts landscape, and drops the rotate button',
     (tester) async {
       final channelCalls = <MethodCall>[];
       _mockAndroidPlayerChannel(channelCalls);
       final bars = PhoneSystemBars();
-      final orientation = PhoneOrientation(
-        restoreTo: const [DeviceOrientation.portraitUp],
-        request: (_) async {},
-      );
+      final orientation = PhoneOrientation(request: (_) async {});
       await showPlayer(
         tester,
         itemId: 'movie-inception',
@@ -1108,8 +1127,7 @@ void main() {
       await bars.settled;
       expect(bars.calls, [true]);
       expect(_systemBarHidden(channelCalls), [true]);
-      expect(orientation.calls.single, PhoneOrientation.unlocked);
-      expect(orientation.calls.single, contains(DeviceOrientation.portraitUp));
+      expect(orientation.calls.single, PhoneOrientation.landscape);
       expect(find.byIcon(Icons.screen_rotation), findsNothing);
       expect(find.byKey(const Key('mobile-player-lock')), findsOneWidget);
       expect(find.byKey(const Key('mobile-player-more')), findsOneWidget);
@@ -1120,13 +1138,18 @@ void main() {
       await bars.settled;
       expect(bars.calls, [true, true]);
       expect(_systemBarHidden(channelCalls), [true, true]);
+      await orientation.settled;
+      expect(orientation.calls, [
+        PhoneOrientation.landscape,
+        PhoneOrientation.landscape,
+      ]);
 
       await closePlayer(tester);
       await bars.settled;
       await orientation.settled;
       expect(bars.calls, [true, true, false]);
       expect(_systemBarHidden(channelCalls), [true, true, false]);
-      expect(orientation.calls[1], const [DeviceOrientation.portraitUp]);
+      expect(orientation.calls[2], PhoneOrientation.portrait);
       expect(find.byType(MobilePlayerPage), findsNothing);
     },
     tags: ['integration'],

@@ -48,8 +48,8 @@ class MobilePlayerPage extends StatefulWidget {
   final int? audioStreamIndex;
   final int? subtitleStreamIndex;
 
-  /// Replaceable landscape request. Null uses [SystemChrome] and the viewport
-  /// direction captured on entry.
+  /// Replaceable landscape request. Null uses [SystemChrome] and restores
+  /// portrait after playback.
   final PhoneOrientation? orientation;
 
   /// Replaceable status and navigation bar hide. Null uses
@@ -195,6 +195,7 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed && !_closing) {
       unawaited(_bars?.reassert());
+      unawaited(_orientation?.reassert());
     }
   }
 
@@ -210,11 +211,7 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
       auth.client.accessToken,
     );
     auth.addListener(_authChanged);
-    _orientation =
-        widget.orientation ??
-        PhoneOrientation(
-          restoreTo: phoneOrientationsFor(MediaQuery.orientationOf(context)),
-        );
+    _orientation = widget.orientation ?? PhoneOrientation();
     _bars = widget.systemBars ?? PhoneSystemBars();
     _wake = widget.wakeLock ?? PhonePlaybackWakeLock();
     _display = widget.displayControl ?? MethodChannelPhoneDisplayControl();

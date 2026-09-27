@@ -4,32 +4,32 @@ import 'package:flutter/widgets.dart';
 typedef PhoneOrientationRequest =
     Future<void> Function(List<DeviceOrientation> orientations);
 
-/// Allows both phone axes while a player is open, then restores the
-/// orientations captured at entry.
+/// Requests landscape for phone playback and portrait on exit.
 ///
 /// [request] is replaceable so tests can observe the calls without rotating
 /// a device. A failed request is recorded and swallowed; playback continues.
 /// This never writes an activity-wide manifest lock.
 ///
-/// Exit leaves [restoreTo] in place. Android treats all four orientations as
-/// sensor follow, so requesting them in the same step replaces the entry
-/// direction before the activity has turned back. A later rotation is released
-/// only after the viewport is observed on that entry direction.
+/// Exit leaves [restoreTo] in place until the viewport is portrait. Releasing
+/// all orientations in the same step could keep the player in landscape when
+/// the system's automatic rotation is disabled.
 class PhoneOrientation with WidgetsBindingObserver {
   PhoneOrientation({
     PhoneOrientationRequest? request,
     List<DeviceOrientation>? restoreTo,
   }) : _request = request ?? systemRequest,
-       restoreTo = List<DeviceOrientation>.unmodifiable(restoreTo ?? unlocked);
+       restoreTo = List<DeviceOrientation>.unmodifiable(restoreTo ?? portrait);
 
-  /// Landscape directions retained for matching the entry viewport.
+  static const portrait = <DeviceOrientation>[DeviceOrientation.portraitUp];
+
+  /// Android's userLandscape requests a landscape axis even when automatic
+  /// rotation is disabled, while allowing either side when it is enabled.
   static const landscape = <DeviceOrientation>[
     DeviceOrientation.landscapeLeft,
     DeviceOrientation.landscapeRight,
   ];
 
-  /// Browsing default: every orientation, so a later rotation is not locked.
-  /// Not requested until the viewport is already back on [restoreTo].
+  /// Browsing default: every orientation, released after portrait is visible.
   static const unlocked = <DeviceOrientation>[
     DeviceOrientation.portraitUp,
     DeviceOrientation.portraitDown,
@@ -43,7 +43,7 @@ class PhoneOrientation with WidgetsBindingObserver {
 
   final PhoneOrientationRequest _request;
 
-  /// Orientations that matched the viewport before playback opened.
+  /// Direction to restore when playback exits (portrait on phones by default).
   final List<DeviceOrientation> restoreTo;
 
   final List<List<DeviceOrientation>> calls = [];
@@ -60,7 +60,14 @@ class PhoneOrientation with WidgetsBindingObserver {
     _entered = true;
     _awaitingReturn = false;
     _stopObserving();
-    return _enqueue(() => _send(unlocked));
+    return _enqueue(() => _send(landscape));
+  }
+
+  /// Android may recreate its activity while the player is in the background.
+  /// Reapply the landscape request when playback becomes visible again.
+  Future<void> reassert() {
+    if (!_entered) return _queue;
+    return _enqueue(() => _send(landscape));
   }
 
   Future<void> leavePlayback() {
@@ -82,7 +89,7 @@ class PhoneOrientation with WidgetsBindingObserver {
       if (!_awaitingReturn) return;
       final current = _viewportOrientation();
       if (current != null && _isEntry(current)) {
-        // Already on the entry direction, so nothing still has to turn back.
+        // Already in portrait, so nothing still has to turn back.
         // Wait until after this callback so the four-direction request cannot
         // share the restore step.
         _releaseOnNextFrame();
@@ -174,18 +181,5 @@ class PhoneOrientation with WidgetsBindingObserver {
       if (a[i] != b[i]) return false;
     }
     return true;
-  }
-}
-
-/// Device orientations that match the viewport direction at player entry.
-List<DeviceOrientation> phoneOrientationsFor(Orientation orientation) {
-  switch (orientation) {
-    case Orientation.portrait:
-      return const [
-        DeviceOrientation.portraitUp,
-        DeviceOrientation.portraitDown,
-      ];
-    case Orientation.landscape:
-      return PhoneOrientation.landscape;
   }
 }

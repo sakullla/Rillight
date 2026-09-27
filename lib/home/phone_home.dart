@@ -542,7 +542,7 @@ class _PhoneHomeRow extends StatelessWidget {
     final problem = state.error ?? state.notice;
     final hasMore =
         state.error == null &&
-        (section.resume
+        ((section.resume || section.shelfId == CatalogKeys.shelfLatestSeries)
             ? state.items.isNotEmpty
             : state.items.length >= phoneHomeRowLimit);
     return Column(
