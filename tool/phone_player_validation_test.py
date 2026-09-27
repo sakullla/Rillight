@@ -2,14 +2,19 @@
 
 import json
 import io
+import http.client
 import math
 from pathlib import Path
+import socket
 import struct
 import subprocess
+import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 import wave
+from urllib.request import Request, urlopen
 
 from PIL import Image, ImageChops, ImageDraw
 
@@ -30,6 +35,84 @@ class PhoneValidationTest(unittest.TestCase):
                         'sha256': validation.sha256(self.apk)}
         self.live = {'serial': 'physical-test', 'fingerprint': 'physical/build',
                      'installed_apk_sha256': self.audited['sha256']}
+
+    def test_reuse_runner_rejects_wrong_installed_apk_before_control(self):
+        with patch.object(validation, 'live_physical_devices', return_value={
+                'physical-test': {**self.live,
+                                  'installed_apk_sha256': '0' * 64}}), \
+                patch.object(validation, 'command') as shell:
+            with self.assertRaisesRegex(RuntimeError, 'hash differs'):
+                validation.reuse_installed_flaky_network(
+                    'physical-test', self.apk, 'http://127.0.0.1:8784',
+                    self.root)
+            shell.assert_not_called()
+
+    def test_reuse_runner_rejects_nonfixture_origin(self):
+        with patch.object(validation, 'live_physical_devices') as devices:
+            with self.assertRaisesRegex(ValueError, 'local synthetic fixture'):
+                validation.reuse_installed_flaky_network(
+                    'physical-test', self.apk, 'http://example.invalid:8784',
+                    self.root)
+            devices.assert_not_called()
+
+    def test_synthetic_fixture_stalls_and_resets_exactly_once(self):
+        media = self.root / 'media'
+        media.mkdir()
+        (media / 'android-tracks.mkv').write_bytes(b'a' * 2048)
+        with socket.socket() as temporary:
+            temporary.bind(('127.0.0.1', 0))
+            port = temporary.getsockname()[1]
+        fixture = subprocess.Popen(
+            [sys.executable, str(validation.ROOT / 'tool/android_fixtures.py'),
+             '--port', str(port), '--media', str(media),
+             '--output', str(self.root / 'fixture')],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        try:
+            for _ in range(50):
+                try:
+                    with urlopen(f'http://127.0.0.1:{port}/__state',
+                                 timeout=.2):
+                        break
+                except OSError:
+                    time.sleep(.02)
+            else:
+                self.fail('Synthetic fixture did not start')
+            control = Request(f'http://127.0.0.1:{port}/__control',
+                              data=json.dumps({'media_stall_once_ms': 80,
+                                               'media_drop_once_after_bytes': 512,
+                                               'media_case': 'unstable'}).encode(),
+                              headers={'Content-Type': 'application/json'})
+            with urlopen(control, timeout=2):
+                pass
+            def fetch():
+                client = http.client.HTTPConnection('127.0.0.1', port, timeout=2)
+                try:
+                    client.request('GET', '/media/android-tracks.mkv?fault=unstable',
+                                   headers={'X-Emby-Token': 'synthetic-mobile-token'})
+                    response = client.getresponse()
+                    try:
+                        return response.read()
+                    except http.client.IncompleteRead as incomplete:
+                        return incomplete.partial
+                finally:
+                    client.close()
+            start = time.monotonic()
+            self.assertEqual(len(fetch()), 512)
+            self.assertGreaterEqual(time.monotonic() - start, .07)
+            self.assertEqual(len(fetch()), 2048)
+            with urlopen(f'http://127.0.0.1:{port}/__state', timeout=2) as response:
+                state = json.load(response)
+            requests = [row for row in state['requests'] if
+                        row['path'] == '/media/android-tracks.mkv']
+            self.assertEqual(requests[0]['mediaCase'], 'unstable')
+            self.assertEqual(requests[0]['drop_after_bytes'], 512)
+            self.assertEqual(requests[0]['stall_ms'], 80)
+            self.assertEqual(requests[1]['drop_after_bytes'], 0)
+            self.assertEqual(requests[1]['stall_ms'], 0)
+        finally:
+            fixture.terminate()
+            fixture.communicate(timeout=5)
 
     def _wav(self, name, amplitude):
         path = self.root / name

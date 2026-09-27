@@ -140,6 +140,8 @@ Future<Map<String, Object?>> snapshot() async {
           'backendSessionId',
           'coreSession',
           'coreLastEvent',
+          'coreErrorCode',
+          'coreOpenFailureKind',
           'upstreamBytes',
           'activeRequests',
           'lastUpstreamStatus',

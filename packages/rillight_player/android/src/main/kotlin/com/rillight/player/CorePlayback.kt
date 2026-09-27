@@ -152,7 +152,9 @@ internal class CorePlayback(
         lastDecoderCheckMs = 0L
         operation.set(0)
         handler.removeCallbacks(openTimeout)
-        handler.postDelayed(openTimeout, 22_000)
+        // Include one body-stall recovery plus cold decoder/first-frame work.
+        // Retirement and a new open still cancel this generation's timeout.
+        handler.postDelayed(openTimeout, 45_000)
         serial.execute {
             retire(previous)
             if (generation.get() != revision) return@execute

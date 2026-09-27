@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/widgets.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/player/buffer_snapshot.dart';
 import 'package:rillight/player/rillight_video_backend.dart';
@@ -86,6 +87,18 @@ class _UnauthorizedCoreDriver extends _CoreDriver {
   }
 }
 
+class _FailingCoreDriver extends _CoreDriver {
+  _FailingCoreDriver(this.failure);
+
+  final PlatformException failure;
+
+  @override
+  Future<Map<String, dynamic>> open(CorePlayerOpen value) async {
+    request = value;
+    throw failure;
+  }
+}
+
 class _SlowDisposeCoreDriver extends _CoreDriver {
   final releaseDispose = Completer<void>();
 
@@ -118,6 +131,59 @@ class _TrackIdCoreDriver extends _CoreDriver {
 }
 
 void main() {
+  test('probe diagnostics expose only a numeric core failure', () async {
+    final core = _FailingCoreDriver(
+      PlatformException(
+        code: 'playback',
+        message: 'FFmpeg core error -5 signed_url=SECRET',
+      ),
+    );
+    final backend = RillightVideoBackend(
+      settingsStore: MemoryPlayerSettingsStore(),
+      createPlayer: () async => core,
+    );
+    addTearDown(backend.dispose);
+    await expectLater(
+      backend.open(
+        VideoOpenRequest(
+          sessionId: 1,
+          url: Uri.parse('http://127.0.0.1:8765/media.mkv'),
+        ),
+      ),
+      throwsA(isA<PlatformException>()),
+    );
+    final diagnostics = await backend.diagnostics();
+    expect(diagnostics['coreErrorCode'], -5);
+    expect(diagnostics['coreOpenFailureKind'], 'ffmpeg');
+    expect(diagnostics['coreErrorCode'].toString(), isNot(contains('SECRET')));
+  });
+
+  test('probe diagnostics classify an Android first frame timeout', () async {
+    final core = _FailingCoreDriver(
+      PlatformException(
+        code: 'playback',
+        message: 'Media ready / first frame timed out',
+      ),
+    );
+    final backend = RillightVideoBackend(
+      settingsStore: MemoryPlayerSettingsStore(),
+      createPlayer: () async => core,
+    );
+    addTearDown(backend.dispose);
+    await expectLater(
+      backend.open(
+        VideoOpenRequest(
+          sessionId: 2,
+          url: Uri.parse('http://127.0.0.1:8765/media.mkv'),
+        ),
+      ),
+      throwsA(isA<PlatformException>()),
+    );
+    final diagnostics = await backend.diagnostics();
+    expect(diagnostics['coreErrorCode'], isNull);
+    expect(diagnostics['coreOpenFailureKind'], 'firstFrameTimeout');
+  });
+
   test('container track IDs follow confirmed native audio changes', () async {
     final core = _TrackIdCoreDriver();
     final backend = RillightVideoBackend(

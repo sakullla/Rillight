@@ -117,6 +117,147 @@ def live_physical_devices(serials):
     return devices
 
 
+def reuse_installed_flaky_network(serial, apk, fixture_url, evidence_root,
+                                  *, emulator=False):
+    """Exercise the synthetic media path without installing or clearing an app."""
+    from android_release_checks import Device, pixel_check
+
+    if fixture_url != 'http://127.0.0.1:8784':
+        raise ValueError('Only the local synthetic fixture on port 8784 is allowed')
+    apk = apk.resolve()
+    expected = sha256(apk)
+    if emulator:
+        if not serial.startswith('emulator-'):
+            raise RuntimeError('Emulator serial required for emulator validation')
+        package = command('adb', '-s', serial, 'shell', 'pm', 'path', PACKAGE)
+        paths = [line.removeprefix('package:').strip() for line in
+                 package.stdout.splitlines() if line.startswith('package:')]
+        digest = command('adb', '-s', serial, 'shell', 'sha256sum', paths[0]) \
+            if package.returncode == 0 and len(paths) == 1 else None
+        installed = digest.stdout.split()[0].lower() \
+            if digest is not None and digest.returncode == 0 else None
+    else:
+        live = live_physical_devices([serial]).get(serial)
+        installed = live['installed_apk_sha256'] if live else None
+    if installed != expected:
+        raise RuntimeError('Installed physical validation APK hash differs from candidate')
+    forward = command('adb', '-s', serial, 'forward',
+                      'tcp:18799', 'tcp:8799')
+    reverse = command('adb', '-s', serial, 'reverse',
+                      'tcp:8784', 'tcp:8784')
+    if forward.returncode or reverse.returncode:
+        raise RuntimeError('ADB tunnel could not reach the synthetic probe')
+    stamp = time.strftime('%Y%m%d-%H%M%S') + '-' + uuid.uuid4().hex[:6]
+    output = evidence_root / 'reuse-installed' / stamp
+    output.mkdir(parents=True, exist_ok=True)
+    device = Device(serial, output)
+    scenarios = (
+        ('zero_throughput', {'media_stall_once_ms': 12000}),
+        ('connection_reset', {'media_drop_once_after_bytes': 262144}),
+        ('jitter', {'media_chunk_delay_ms': 20}),
+    )
+    observations = []
+    for index, (name, fault) in enumerate(scenarios):
+        current = device.state()
+        if current.get('authenticated') is not True:
+            raise RuntimeError('Synthetic fixture account must already be signed in')
+        for page in ('MobilePlayerPage', 'MobileDetailPage'):
+            if page in current['pages']:
+                device.key(4)
+                current = device.wait(lambda s: page not in s['pages'],
+                                      f'exit {page}', 15)
+        payload = {'media_case': f'{stamp.replace("-", "")}-{index}',
+                   'media_stall_once_ms': 0,
+                   'media_drop_once_after_bytes': 0,
+                   'media_chunk_delay_ms': 0, 'media_etag': True, **fault}
+        request = Request(f'{fixture_url}/__control',
+                          data=json.dumps(payload).encode(),
+                          headers={'Content-Type': 'application/json'})
+        with urlopen(request, timeout=5) as response:
+            json.load(response)
+        target = 'catalog-item-multi-source'
+        initial = device.state()
+        height = int(initial['size'][1])
+        width = int(initial['size'][0])
+        # A previous run can leave Home at the bottom. Return to its first
+        # section, then find the card in the actual visible layout.
+        for _ in range(3):
+            device.adb('shell', 'input', 'swipe', str(width // 2),
+                       str(height // 5), str(width // 2),
+                       str(height * 4 // 5), '300')
+        for _ in range(9):
+            state = device.state()
+            row = next((r for r in state['rows'] if r['key'] == target), None)
+            direction = 'up'
+            if row is not None:
+                center_y = (row['rect'][1] + row['rect'][3]) / 2
+                if 120 < center_y < state['size'][1] / state['scale'] - 100:
+                    break
+                if center_y <= 120:
+                    direction = 'down'
+            start, end = (4, 2) if direction == 'up' else (2, 4)
+            device.adb('shell', 'input', 'swipe', str(width // 2),
+                       str(height * start // 5), str(width // 2),
+                       str(height * end // 5), '350')
+        else:
+            raise RuntimeError('Synthetic multi-source card not visible')
+        # A horizontal rail may expose only the left edge of a card. The
+        # generic tap helper uses the full card center, which can be offscreen.
+        time.sleep(.5)
+        state = device.state()
+        card = next(r for r in state['rows'] if r['key'] == target)
+        left, top, right, bottom = card['rect']
+        viewport_width = state['size'][0] / state['scale']
+        x = min((left + right) / 2, viewport_width - 40)
+        y = (top + bottom) / 2
+        device.adb('shell', 'input', 'tap', str(round(x * state['scale'])),
+                   str(round(y * state['scale'])))
+        device.wait(lambda s: 'MobileDetailPage' in s['pages'], 'detail', 15)
+        device.tap(key='mobile-detail-play')
+        state = device.wait(lambda s: s['player'] and
+                            not s['player']['loading'], 'playback settled', 65)
+        player = state['player']
+        passed = player['playing'] is True and player['error'] is None
+        pixels = None
+        if passed:
+            first = device.screenshot(f'{name}-a')
+            time.sleep(1)
+            second = device.screenshot(f'{name}-b')
+            pixels = pixel_check(first, second)
+            passed = pixels['mean_rgb_difference'] > 1 and \
+                pixels['colored_fraction'] > 0.02
+        with urlopen(f'{fixture_url}/__state', timeout=5) as response:
+            fixture = json.load(response)
+        media_requests = [row for row in fixture['requests']
+                          if row['path'].startswith('/media/') and
+                          row.get('mediaCase') == payload['media_case']]
+        injected = any(row.get('stall_ms') == fault.get('media_stall_once_ms', 0)
+                       and row.get('drop_after_bytes') ==
+                       fault.get('media_drop_once_after_bytes', 0)
+                       and row.get('chunk_delay_ms') ==
+                       fault.get('media_chunk_delay_ms', 0)
+                       for row in media_requests)
+        passed = passed and injected
+        observations.append({'scenario': name, 'passed': passed,
+                             'player': player, 'pixels': pixels,
+                             'injected': injected,
+                             'mediaRequests': media_requests[-12:]})
+        if not passed:
+            break
+    result = {'capturedAtUtc': datetime.now(timezone.utc).isoformat(),
+              'environment': 'emulator' if emulator else 'physical',
+              'deviceSerial': serial,
+              'installedApkSha256': expected,
+              'scenarios': observations,
+              'passed': len(observations) == len(scenarios) and
+              all(row['passed'] for row in observations),
+              'physicalAudioVerified': False,
+              'powerThermalVerified': False}
+    (output / 'result.json').write_text(json.dumps(result, ensure_ascii=False,
+                                                  indent=2), encoding='utf-8')
+    return output / 'result.json', result
+
+
 def audited_android_candidate(evidence_root, identity):
     manifest_path = evidence_root / 'candidate-build.json'
     try:
@@ -1344,6 +1485,7 @@ def main(argv=None):
     action.add_argument('--capture-performance', choices=PERFORMANCE_CATEGORIES)
     action.add_argument('--audit-baseline', action='store_true')
     action.add_argument('--audit-performance-candidate', action='store_true')
+    action.add_argument('--reuse-installed-flaky-network', action='store_true')
     parser.add_argument('--capture-phase', choices=('before', 'after'))
     parser.add_argument('--performance-phase', choices=('baseline', 'candidate'))
     parser.add_argument('--baseline-checkout', type=Path,
@@ -1351,10 +1493,25 @@ def main(argv=None):
     parser.add_argument('--measurement-file', type=Path,
                         help='Named physical meter attestation for power/thermal capture')
     parser.add_argument('--serial', help='Connected physical Android phone for live capture')
+    parser.add_argument('--apk', type=Path,
+                        help='Candidate validation APK whose hash must match the installed app')
+    parser.add_argument('--fixture-url', default='http://127.0.0.1:8784',
+                        help='Local synthetic fixture; never a real Emby server')
+    parser.add_argument('--emulator', action='store_true',
+                        help='Label reuse-installed weak-network evidence as emulator')
     parser.add_argument('--evidence-root', type=Path,
                         default=ROOT / 'build/phone-player-validation')
     args = parser.parse_args(argv)
     root = args.evidence_root.resolve()
+    if args.reuse_installed_flaky_network:
+        if args.serial is None or args.apk is None:
+            parser.error('--reuse-installed-flaky-network requires --serial and --apk')
+        path, result = reuse_installed_flaky_network(
+            args.serial, args.apk, args.fixture_url, root,
+            emulator=args.emulator)
+        print(json.dumps({'passed': result['passed'], 'evidence': str(path)},
+                         ensure_ascii=False))
+        return 0 if result['passed'] else 1
     if args.audit_baseline:
         if args.baseline_checkout is None:
             parser.error('--audit-baseline requires --baseline-checkout')

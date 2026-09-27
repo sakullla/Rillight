@@ -5,6 +5,7 @@ import json
 import mimetypes
 from pathlib import Path
 import re
+import socket
 import struct
 import subprocess
 import threading
@@ -63,7 +64,9 @@ lock = threading.RLock()
 conditions = dict(offline=False, expired=False, auth_fail=False, empty=False, report_fail=False,
                   media_fail=False, subtitle_delay_ms=0, catalog_delay_ms=0,
                   playback_info_delay_ms=0, alternate_media_fail=False,
-                  alternate_media_delay_ms=0)
+                  alternate_media_delay_ms=0, media_chunk_delay_ms=0,
+                  media_stall_once_ms=0, media_drop_once_after_bytes=0,
+                  media_case='base', media_etag=False)
 positions = {'movie-01': 20000000}
 played = set()
 reports = []
@@ -141,9 +144,13 @@ def source(identifier, force=False, variant='primary'):
     if hls:
         result['TranscodingUrl'] = '/media/stream.m3u8'
     else:
-        result['DirectStreamUrl'] = ('/media/missing.mkv' if identifier == 'broken' else
+        direct = ('/media/missing.mkv' if identifier == 'broken' else
                                      '/media/alternate.mkv' if variant == 'alternate' else
                                      '/media/android-tracks.mkv')
+        media_case = str(conditions['media_case'])
+        result['DirectStreamUrl'] = direct + (
+            '?fault=' + media_case if media_case != 'base' and
+            re.fullmatch(r'[a-zA-Z0-9_-]{1,32}', media_case) else '')
     return result
 
 
@@ -221,6 +228,9 @@ class Handler(BaseHTTPRequestHandler):
                                         'clientTag': hashlib.sha256(
                                             client_identity.encode()).hexdigest(),
                                         'ordinal': len(requests) + 1}
+                if path.startswith('/media/') and re.fullmatch(
+                        r'[a-zA-Z0-9_-]{1,32}', query.get('fault', '')):
+                    self._request_record['mediaCase'] = query['fault']
                 requests.append(self._request_record)
         return path, query
 
@@ -265,6 +275,16 @@ class Handler(BaseHTTPRequestHandler):
                 return
         if filename.endswith(('.srt', '.vtt')) and conditions['subtitle_delay_ms']:
             time.sleep(conditions['subtitle_delay_ms'] / 1000)
+        with lock:
+            stall_ms = max(0, int(conditions['media_stall_once_ms']))
+            drop_after = max(0, int(conditions['media_drop_once_after_bytes']))
+            chunk_delay_ms = max(0, int(conditions['media_chunk_delay_ms']))
+            with_etag = bool(conditions['media_etag'])
+            conditions['media_stall_once_ms'] = 0
+            conditions['media_drop_once_after_bytes'] = 0
+            self._request_record.update(stall_ms=stall_ms,
+                                        drop_after_bytes=drop_after,
+                                        chunk_delay_ms=chunk_delay_ms)
         target = (media / filename).resolve()
         if not target.is_relative_to(media) or not target.is_file():
             self.reply({'Error': 'missing synthetic media'}, 404)
@@ -290,20 +310,40 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('Content-Type', 'application/vnd.apple.mpegurl' if target.suffix == '.m3u8' else mimetypes.guess_type(target)[0] or 'application/octet-stream')
         self.send_header('Content-Length', str(end - start + 1))
         self.send_header('Accept-Ranges', 'bytes')
+        if with_etag:
+            fingerprint = hashlib.sha256(
+                f'{filename}:{size}:{target.stat().st_mtime_ns}'.encode()).hexdigest()[:24]
+            self.send_header('ETag', f'"synthetic-{fingerprint}"')
         if match:
             self.send_header('Content-Range', f'bytes {start}-{end}/{size}')
         self.end_headers()
+        if stall_ms:
+            time.sleep(stall_ms / 1000)
         try:
             with target.open('rb') as stream:
                 stream.seek(start)
                 remaining = end - start + 1
+                sent = 0
                 while remaining:
-                    data = stream.read(min(remaining, 65536))
+                    limit = min(remaining, 65536)
+                    if drop_after:
+                        limit = min(limit, drop_after - sent)
+                    if limit <= 0:
+                        break
+                    data = stream.read(limit)
                     if not data:
                         break
                     self.wfile.write(data)
                     remaining -= len(data)
-        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                    sent += len(data)
+                    if chunk_delay_ms:
+                        time.sleep(chunk_delay_ms / 1000)
+                    if drop_after and sent >= drop_after:
+                        self.wfile.flush()
+                        self.connection.shutdown(socket.SHUT_RDWR)
+                        self.connection.close()
+                        break
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
             pass
 
     def do_GET(self):

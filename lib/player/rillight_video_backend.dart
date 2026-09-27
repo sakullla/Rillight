@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:rillight/emby/device_profile.dart';
 import 'package:rillight/player/buffer_snapshot.dart';
@@ -61,6 +62,8 @@ class RillightVideoBackend extends VideoBackend
   bool _trackSupportKnown = false;
   String? _lastFailure;
   String? _lastCoreEvent;
+  int? _lastCoreErrorCode;
+  String? _coreOpenFailureKind;
   int? _actualHardware;
   Map<String, Object?> _lastTransportDiagnostics = const {};
   bool _authenticationReported = false;
@@ -127,6 +130,8 @@ class RillightVideoBackend extends VideoBackend
       'corePositionMs': position.inMilliseconds,
       'coreDurationMs': duration.inMilliseconds,
       'coreLastEvent': _lastCoreEvent,
+      'coreErrorCode': _lastCoreErrorCode,
+      'coreOpenFailureKind': _coreOpenFailureKind,
       'coreActualHardware': _actualHardware,
       'coreActualHardwareName': switch (_actualHardware) {
         0 => 'software',
@@ -263,6 +268,8 @@ class RillightVideoBackend extends VideoBackend
     _opened = false;
     _lastFailure = null;
     _lastCoreEvent = null;
+    _lastCoreErrorCode = null;
+    _coreOpenFailureKind = null;
     _actualHardware = null;
     _lastTransportDiagnostics = const {};
     _authenticationReported = false;
@@ -359,6 +366,7 @@ class RillightVideoBackend extends VideoBackend
     } catch (error) {
       if (generation == _generation) {
         _lastFailure = error.toString();
+        _recordCoreFailure(error);
         try {
           _lastTransportDiagnostics =
               await _transport?.diagnostics.timeout(
@@ -407,6 +415,7 @@ class RillightVideoBackend extends VideoBackend
       case 'error':
         isPlaying = false;
         _lastFailure = event.value.toString();
+        _recordCoreFailure(event.value);
         if (_opened) {
           unawaited(_recoverFromCoreError(event.value.toString(), generation));
         } else if (!_recovering) {
@@ -429,6 +438,27 @@ class RillightVideoBackend extends VideoBackend
         _emit(VideoEventKind.playing, false, generation);
       default:
         break;
+    }
+  }
+
+  // Only these fixed labels and an FFmpeg integer reach the validation probe.
+  // PlatformException.toString() can contain a source URL or request headers.
+  void _recordCoreFailure(Object failure) {
+    final message = failure is PlatformException
+        ? failure.message ?? ''
+        : failure.toString();
+    final match = RegExp(
+      r'FFmpeg core error (-?[0-9]{1,10})',
+    ).firstMatch(message);
+    if (match != null) {
+      _lastCoreErrorCode = int.tryParse(match.group(1)!);
+      _coreOpenFailureKind = 'ffmpeg';
+    } else if (message.contains('Media ready / first frame timed out')) {
+      _coreOpenFailureKind = 'firstFrameTimeout';
+    } else if (message.contains('Core rejected media open')) {
+      _coreOpenFailureKind = 'coreRejectedOpen';
+    } else {
+      _coreOpenFailureKind ??= 'other';
     }
   }
 

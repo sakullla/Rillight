@@ -112,7 +112,10 @@ internal class CoreInput(private val url: String?, private val file: File?) {
         request.instanceFollowRedirects = false
         request.useCaches = false
         request.connectTimeout = 10_000
-        request.readTimeout = 10_000
+        // The app proxy can spend 15 seconds detecting an upstream body stall
+        // before resuming a verified byte range. Do not turn that recovery into
+        // a premature FFmpeg EAGAIN during container probing.
+        request.readTimeout = 25_000
         request.setRequestProperty("Accept-Encoding", "identity")
         if (position > 0) request.setRequestProperty("Range", "bytes=$position-")
         val status = request.responseCode
