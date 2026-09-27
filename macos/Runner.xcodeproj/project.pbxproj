@@ -349,7 +349,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "set -e\necho \"$PRODUCT_NAME.app\" > \"$PROJECT_DIR\"/Flutter/ephemeral/.app_filename && \"$FLUTTER_ROOT\"/packages/flutter_tools/bin/macos_assemble.sh embed\npython3 \"$PROJECT_DIR/../packages/rillight_player/native/bundle_macos.py\" \"$TARGET_BUILD_DIR/$FULL_PRODUCT_NAME\"\n";
+			shellScript = "set -e\necho \"$PRODUCT_NAME.app\" > \"$PROJECT_DIR\"/Flutter/ephemeral/.app_filename && \"$FLUTTER_ROOT\"/packages/flutter_tools/bin/macos_assemble.sh embed\npython3 \"$PROJECT_DIR/../packages/rillight_player/native/bundle_macos.py\" \"$TARGET_BUILD_DIR/$FULL_PRODUCT_NAME\"\npython3 \"$PROJECT_DIR/player_helper.py\" \"$TARGET_BUILD_DIR/$FULL_PRODUCT_NAME\" \"$EXECUTABLE_NAME\"\n";
 		};
 		33CC111E2044C6BF0003C045 /* ShellScript */ = {
 			isa = PBXShellScriptBuildPhase;

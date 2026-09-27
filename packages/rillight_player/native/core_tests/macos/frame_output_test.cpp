@@ -1,5 +1,5 @@
-#include "../../../macos/Classes/FrameOutput.h"
-#include "../../../macos/Classes/FrameTiming.h"
+#include "../../../macos/rillight_player/Sources/rillight_player/FrameOutput.h"
+#include "../../../macos/rillight_player/Sources/rillight_player/FrameTiming.h"
 
 #include <cassert>
 #include <cstdint>

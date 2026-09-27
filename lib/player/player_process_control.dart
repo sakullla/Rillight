@@ -227,8 +227,13 @@ class PosixPlayerProcessControl extends DesktopPlayerProcessControl {
 
   @override
   Future<int> launch(String executable, String payloadPath) async {
+    // macOS helpers must inherit the existing sandbox. The main executable's
+    // app entitlements cannot be applied again inside a child process.
+    final playerExecutable = Platform.isMacOS
+        ? '${File(executable).parent.path}/rillight_player'
+        : executable;
     final process = await Process.start(
-      executable,
+      playerExecutable,
       ['player', payloadPath],
       environment: playerProcessEnvironment(),
       includeParentEnvironment: false,

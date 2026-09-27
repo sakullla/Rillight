@@ -7,6 +7,8 @@ import plistlib
 import subprocess
 import tempfile
 
+from player_helper import sign_helper
+
 RELEASE = Path(__file__).resolve().parent / 'Runner/Release.entitlements'
 REQUIRED = ('com.apple.security.app-sandbox',
             'com.apple.security.network.client', 'com.apple.security.network.server')
@@ -48,6 +50,7 @@ def sign(app, *, identity=None, without_server_for_test=False):
         seen.add(canonical)
         subprocess.check_call(['codesign', '--force', '--sign', signer,
                                '--timestamp=none', str(path)])
+    sign_helper(app, signer)
     record_path = app / 'Contents/Resources/rillight-macos-closure.json'
     if not record_path.is_file():
         raise ValueError('Missing owned-core macOS closure record before signing')
