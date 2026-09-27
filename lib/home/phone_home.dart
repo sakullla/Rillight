@@ -316,37 +316,9 @@ double _cardWidthOf(BuildContext context, {required bool wide}) {
       : phoneHomePosterCardWidth(screen);
 }
 
-/// 海报卡角标组的定位键:一张卡最多一组角标,测试据此把角标限定在卡内。
-Key phoneHomeBadgesKey(String itemId) => Key('phone-home-badges-$itemId');
-
-/// 角标文案:分集给季集编号、剧集给集数、已看给已看标记、可续播给已看
-/// 百分比(沿用 playbackProgress/resumeProgress 的既有语义)。
-///
-/// [includePlayback] 关闭时不给已看/进度角标:片库「最新入库」预览行只在
-/// 入场时取一次数据,不随 reloadHomeRows 刷新,播动态角标会停留旧值。
-List<String> _badgeLabels(
-  AppLocalizations l10n,
-  EmbyItem item, {
-  bool includePlayback = true,
-}) {
-  final labels = <String>[];
-  if (item.isEpisode) {
-    final code = seasonEpisodeCode(item);
-    if (code != null) {
-      labels.add(code);
-    }
-  } else if (item.isSeries && (item.childCount ?? 0) > 0) {
-    labels.add(l10n.episodeCount(item.childCount!));
-  }
-  if (includePlayback) {
-    if (item.userData.played) {
-      labels.add(l10n.mobileWatched);
-    } else if (item.canResume) {
-      labels.add(l10n.playbackProgress((item.playbackProgress * 100).round()));
-    }
-  }
-  return labels;
-}
+/// 海报卡角标组的定位键。实现已迁入 mobile_widgets(ADR-2),此处保留入口,
+/// 既有测试与调用方的 import 不变。
+Key phoneHomeBadgesKey(String itemId) => phoneCardBadgesKey(itemId);
 
 String _resumeTitle(EmbyItem item) {
   final series = item.seriesName?.trim();
@@ -593,63 +565,16 @@ class _PhoneHomeRow extends StatelessWidget {
                         : null,
                   );
                 }
-                return _PhonePoster(
+                return PhonePosterCard(
                   item: item,
-                  shared: shared,
                   width: cardWidth,
+                  hero: shared,
+                  pressKey: shared ? CatalogKeys.item(item.id) : null,
                 );
               },
             ),
           ),
       ],
-    );
-  }
-}
-
-/// 海报图角上的信息角标:半透明黑底胶囊,叠在图区上不遮挡点按。
-class _PosterBadge extends StatelessWidget {
-  const _PosterBadge({required this.label});
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: theme.colorScheme.scrim.withValues(alpha: 0.72),
-        borderRadius: BorderRadius.circular(AppRadii.sm),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-        child: Text(
-          label,
-          maxLines: 1,
-          style: theme.textTheme.labelSmall?.copyWith(
-            color: Colors.white,
-            fontWeight: FontWeight.w600,
-            height: 1.2,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// 一张卡的角标组,多个角标从左到右排列、超出换行。
-class _PosterBadges extends StatelessWidget {
-  const _PosterBadges({required this.itemId, required this.labels});
-
-  final String itemId;
-  final List<String> labels;
-
-  @override
-  Widget build(BuildContext context) {
-    return Wrap(
-      key: phoneHomeBadgesKey(itemId),
-      spacing: AppSpacing.xxs,
-      runSpacing: AppSpacing.xxs,
-      children: [for (final label in labels) _PosterBadge(label: label)],
     );
   }
 }
@@ -674,7 +599,7 @@ class _WideCard extends StatelessWidget {
     final progress = item.playbackProgress;
     final title = _resumeTitle(item);
     final meta = _resumeMeta(item, title);
-    final badges = _badgeLabels(l10n, item);
+    final badges = phoneCardBadgeLabels(l10n, item);
     final badgeHeight = _wideBadgeHeight(context);
     return Padding(
       padding: const EdgeInsets.only(right: AppSpacing.xs),
@@ -759,7 +684,7 @@ class _WideCard extends StatelessWidget {
                 SizedBox(
                   height: badgeHeight,
                   child: ClipRect(
-                    child: _PosterBadges(itemId: item.id, labels: badges),
+                    child: PhoneCardBadges(itemId: item.id, labels: badges),
                   ),
                 ),
               Text(
@@ -775,91 +700,6 @@ class _WideCard extends StatelessWidget {
               if (meta.isNotEmpty)
                 Text(
                   meta,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                    height: 1.2,
-                  ),
-                ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _PhonePoster extends StatelessWidget {
-  const _PhonePoster({
-    required this.item,
-    required this.shared,
-    required this.width,
-    this.playbackBadges = true,
-  });
-
-  final EmbyItem item;
-  final bool shared;
-  final double width;
-
-  /// 是否显示已看/进度角标。只取一次数据的行传 false,避免角标停留旧值。
-  final bool playbackBadges;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final l10n = AppLocalizations.of(context);
-    final badges = _badgeLabels(l10n, item, includePlayback: playbackBadges);
-    return Padding(
-      padding: const EdgeInsets.only(right: AppSpacing.xs),
-      child: SizedBox(
-        width: width,
-        child: MobilePressable(
-          key: shared ? CatalogKeys.item(item.id) : null,
-          onTap: () => PhoneMotion.openItem(context, item),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(AppRadii.md),
-                child: AspectRatio(
-                  aspectRatio: 2 / 3,
-                  // 图缺失时 MediaImage 落主题化占位,底衬与页面分层。
-                  child: ColoredBox(
-                    color: theme.colorScheme.surfaceContainerLow,
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        _sharedPosterImage(item, shared),
-                        if (badges.isNotEmpty)
-                          Positioned(
-                            top: AppSpacing.xs,
-                            left: AppSpacing.xs,
-                            right: AppSpacing.xs,
-                            child: _PosterBadges(
-                              itemId: item.id,
-                              labels: badges,
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                item.name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  fontWeight: FontWeight.w600,
-                  height: 1.2,
-                ),
-              ),
-              if (item.productionYear != null && item.productionYear! > 0)
-                Text(
-                  '${item.productionYear}',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.labelSmall?.copyWith(
@@ -1123,11 +963,13 @@ class _PhoneLibraryLatestState extends State<_PhoneLibraryLatest> {
               itemCount: _items.length,
               itemBuilder: (context, index) {
                 final item = _items[index];
-                return _PhonePoster(
+                final shared = widget.sharePoster(item.id);
+                return PhonePosterCard(
                   item: item,
-                  shared: widget.sharePoster(item.id),
                   width: _cardWidthOf(context, wide: false),
-                  playbackBadges: false,
+                  hero: shared,
+                  pressKey: shared ? CatalogKeys.item(item.id) : null,
+                  includePlaybackBadges: false,
                 );
               },
             ),
