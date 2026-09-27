@@ -52,6 +52,7 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
   int? _audioStreamIndex;
   int? _subtitleStreamIndex;
   final _scroll = ScrollController();
+  late final _episodeScrollCoordinator = EpisodeScrollCoordinator(_scroll);
   var _barSolid = false;
 
   @override
@@ -86,6 +87,7 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
   void dispose() {
     _extrasRevision++;
     _scroll.removeListener(_onDetailScroll);
+    _episodeScrollCoordinator.dispose();
     _scroll.dispose();
     _controller?.dispose();
     super.dispose();
@@ -589,6 +591,7 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
                       hasMore: controller.hasMore,
                       playTargetId: target?.id,
                       focusEpisodeId: widget.initialEpisodeId,
+                      scrollCoordinator: _episodeScrollCoordinator,
                       similar: _similar,
                       onPickEpisode: _pickEpisode,
                       onSelectSeason: _changeSeason,

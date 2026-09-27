@@ -50,7 +50,15 @@ void main() {
   ) async {
     final episodes = [
       for (var index = 0; index < 80; index++)
-        EmbyItem(id: 'episode-$index', name: '第 $index 集', type: 'Episode'),
+        EmbyItem(
+          id: 'episode-$index',
+          name: '第 $index 集',
+          type: 'Episode',
+          overview: index < 40
+              ? '前半季有较长的剧情介绍，用于模拟各集卡片高度变化。'
+                    '角色在不同场景中继续行动，并留下足够的文字让简介折成两行。'
+              : null,
+        ),
     ];
     await tester.pumpWidget(
       MaterialApp(
@@ -93,6 +101,71 @@ void main() {
     );
     expect(find.byKey(CatalogKeys.episode('episode-79')), findsOneWidget);
     expect(find.byKey(CatalogKeys.episode('episode-0')), findsNothing);
+  });
+
+  testWidgets('distant initial episode is located without eager rows', (
+    tester,
+  ) async {
+    final episodes = [
+      for (var index = 0; index < 80; index++)
+        EmbyItem(
+          id: 'episode-$index',
+          name: '第 $index 集',
+          type: 'Episode',
+          overview: index < 40
+              ? '前半季有较长的剧情介绍，用于模拟各集卡片高度变化。'
+                    '角色在不同场景中继续行动，并留下足够的文字让简介折成两行。'
+              : null,
+        ),
+    ];
+    final scroll = ScrollController();
+    final coordinator = EpisodeScrollCoordinator(scroll);
+    addTearDown(() {
+      coordinator.dispose();
+      scroll.dispose();
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        locale: const Locale('zh'),
+        supportedLocales: AppLocalizations.supportedLocales,
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        theme: AppTheme.dark(),
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => CustomScrollView(
+              controller: scroll,
+              slivers: MobileSeriesPage(
+                item: const EmbyItem(id: 'series', name: '剧', type: 'Series'),
+                seasons: const [],
+                seasonId: null,
+                episodes: episodes,
+                episodesLoading: false,
+                episodeError: null,
+                hasMore: false,
+                playTargetId: null,
+                focusEpisodeId: 'episode-75',
+                scrollCoordinator: coordinator,
+                similar: const [],
+                onSelectSeason: _ignore,
+                onOpenEpisode: _ignore,
+                onRetryEpisodes: _noop,
+                onLoadMore: _noop,
+                onOpenItem: _ignore,
+                onOpenSimilar: _noop,
+              ).buildSlivers(context),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final focused = find.byKey(CatalogKeys.episode('episode-75'));
+    expect(focused, findsOneWidget);
+    final rect = tester.getRect(focused);
+    expect(rect.top, greaterThanOrEqualTo(0));
+    expect(rect.top, lessThan(tester.view.physicalSize.height));
+    expect(find.byKey(CatalogKeys.episode('episode-0')), findsNothing);
+    expect(find.byType(MediaImage).evaluate().length, lessThan(20));
   });
 
   for (final width in [360.0, 412.0]) {

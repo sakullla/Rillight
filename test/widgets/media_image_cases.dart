@@ -459,6 +459,74 @@ void main() {
     },
   );
 
+  test(
+    'visible fetch preempts mounted offscreen fetches and retries them',
+    () async {
+      final cache = MediaImageCache.instance;
+      final blockers = List.generate(8, (_) => Completer<Uint8List?>());
+      final aborted = <int>[];
+      final started = <int>[];
+      final offscreen = [
+        for (var index = 0; index < blockers.length; index++)
+          cache.load(
+            serverId: 'scope',
+            itemId: 'offscreen-$index',
+            type: 'Primary',
+            maxWidth: 120,
+            inViewport: () => false,
+            onAbort: () {
+              aborted.add(index);
+              if (!blockers[index].isCompleted) blockers[index].complete(null);
+            },
+            fetch: () {
+              started.add(index);
+              return blockers[index].future;
+            },
+          ),
+      ];
+      await Future<void>.delayed(Duration.zero);
+      expect(started, hasLength(8));
+
+      final visible = cache.load(
+        serverId: 'scope',
+        itemId: 'visible',
+        type: 'Primary',
+        maxWidth: 120,
+        inViewport: () => true,
+        fetch: () async => kTinyPng,
+      );
+      // No blocker is released by the test before the visible request finishes.
+      expect(await visible, kTinyPng);
+      expect(aborted, hasLength(1));
+      final displaced = aborted.single;
+      expect(await offscreen[displaced], isNull);
+      expect(
+        cache.isNegativeCached(
+          serverId: 'scope',
+          itemId: 'offscreen-$displaced',
+          type: 'Primary',
+          maxWidth: 120,
+        ),
+        isFalse,
+      );
+      expect(
+        await cache.load(
+          serverId: 'scope',
+          itemId: 'offscreen-$displaced',
+          type: 'Primary',
+          maxWidth: 120,
+          inViewport: () => true,
+          fetch: () async => kTinyPng,
+        ),
+        kTinyPng,
+      );
+      for (final blocker in blockers) {
+        if (!blocker.isCompleted) blocker.complete(kTinyPng);
+      }
+      await Future.wait(offscreen);
+    },
+  );
+
   test('backdrop request width follows the window pixels and clamps', () {
     expect(
       mediaBackdropRequestWidth(layoutWidth: 960, devicePixelRatio: 1),

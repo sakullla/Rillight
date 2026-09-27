@@ -296,6 +296,7 @@ class MobileSeriesPage extends StatelessWidget {
     required this.hasMore,
     required this.playTargetId,
     this.focusEpisodeId,
+    this.scrollCoordinator,
     required this.similar,
     this.onPickEpisode,
     required this.onSelectSeason,
@@ -315,6 +316,7 @@ class MobileSeriesPage extends StatelessWidget {
   final bool hasMore;
   final String? playTargetId;
   final String? focusEpisodeId;
+  final EpisodeScrollCoordinator? scrollCoordinator;
   final List<EmbyItem> similar;
   final VoidCallback? onPickEpisode;
   final ValueChanged<String> onSelectSeason;
@@ -331,7 +333,8 @@ class MobileSeriesPage extends StatelessWidget {
       children: [
         for (final child in _content(context))
           if (child is _EpisodeListSlot)
-            for (final episode in episodes) _episodeWidget(episode)
+            for (var index = 0; index < episodes.length; index++)
+              _episodeWidget(episodes[index], index)
           else
             child,
       ],
@@ -343,18 +346,21 @@ class MobileSeriesPage extends StatelessWidget {
   List<Widget> buildSlivers(BuildContext context) {
     final content = _content(context);
     final split = content.indexWhere((child) => child is _EpisodeListSlot);
+    scrollCoordinator?.locate(episodes, focusEpisodeId);
     return [
       SliverList.list(children: content.sublist(0, split)),
       SliverList.builder(
         itemCount: episodes.length,
-        itemBuilder: (context, index) => _episodeWidget(episodes[index]),
+        itemBuilder: (context, index) => _episodeWidget(episodes[index], index),
       ),
       SliverList.list(children: content.sublist(split + 1)),
     ];
   }
 
-  Widget _episodeWidget(EmbyItem episode) => _RevealEpisode(
+  Widget _episodeWidget(EmbyItem episode, int index) => _RevealEpisode(
     key: ValueKey('episode-${episode.id}'),
+    index: index,
+    scrollCoordinator: scrollCoordinator,
     reveal: episode.id == focusEpisodeId,
     child: _EpisodeRow(
       episode: episode,
@@ -487,9 +493,91 @@ class _EpisodeListSlot extends StatelessWidget {
   Widget build(BuildContext context) => const SizedBox.shrink();
 }
 
-class _RevealEpisode extends StatefulWidget {
-  const _RevealEpisode({super.key, required this.reveal, required this.child});
+/// Finds a distant deep-linked episode without materializing every preceding
+/// row. Visible row geometry refines the estimate until the target is built;
+/// _RevealEpisode then performs the final alignment.
+class EpisodeScrollCoordinator {
+  EpisodeScrollCoordinator(this.scroll);
 
+  final ScrollController scroll;
+  final Map<int, BuildContext> _mountedRows = {};
+  String? _request;
+  int _generation = 0;
+  bool _disposed = false;
+
+  void locate(List<EmbyItem> episodes, String? episodeId) {
+    if (_disposed || episodeId == null || episodeId.isEmpty) return;
+    final target = episodes.indexWhere((episode) => episode.id == episodeId);
+    if (target < 0) return;
+    final request = '$episodeId:$target:${episodes.length}';
+    if (_request == request) return;
+    _request = request;
+    final generation = ++_generation;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _seek(target, generation, 0);
+    });
+  }
+
+  void register(int index, BuildContext context) {
+    _mountedRows[index] = context;
+  }
+
+  void unregister(int index, BuildContext context) {
+    if (identical(_mountedRows[index], context)) _mountedRows.remove(index);
+  }
+
+  void _seek(int target, int generation, int attempt) {
+    if (_disposed || generation != _generation || !scroll.hasClients) return;
+    if (_mountedRows[target]?.mounted == true) return;
+    if (attempt >= 24) return;
+    final rows = _mountedRows.entries.where((entry) => entry.value.mounted);
+    if (rows.isEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _seek(target, generation, attempt + 1);
+      });
+      return;
+    }
+    final indices = rows.map((entry) => entry.key).toList()..sort();
+    final nearest = target > indices.last ? indices.last : indices.first;
+    final heights = rows
+        .map((entry) => entry.value.findRenderObject())
+        .whereType<RenderBox>()
+        .where((box) => box.hasSize)
+        .map((box) => box.size.height)
+        .where((height) => height > 0)
+        .toList();
+    final rowHeight = heights.isEmpty
+        ? 120.0
+        : (heights.reduce((a, b) => a + b) / heights.length).clamp(80.0, 240.0);
+    final position = scroll.position;
+    final next = (position.pixels + (target - nearest) * rowHeight).clamp(
+      position.minScrollExtent,
+      position.maxScrollExtent,
+    );
+    if (next != position.pixels) position.jumpTo(next);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _seek(target, generation, attempt + 1);
+    });
+  }
+
+  void dispose() {
+    _disposed = true;
+    _generation++;
+    _mountedRows.clear();
+  }
+}
+
+class _RevealEpisode extends StatefulWidget {
+  const _RevealEpisode({
+    super.key,
+    required this.index,
+    required this.scrollCoordinator,
+    required this.reveal,
+    required this.child,
+  });
+
+  final int index;
+  final EpisodeScrollCoordinator? scrollCoordinator;
   final bool reveal;
   final Widget child;
 
@@ -501,12 +589,32 @@ class _RevealEpisodeState extends State<_RevealEpisode> {
   @override
   void initState() {
     super.initState();
-    if (widget.reveal) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        Scrollable.ensureVisible(context, alignment: 0.2);
-      });
+    widget.scrollCoordinator?.register(widget.index, context);
+    if (widget.reveal) _reveal();
+  }
+
+  void _reveal() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      Scrollable.ensureVisible(context, alignment: 0.2);
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant _RevealEpisode oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.index != widget.index ||
+        !identical(oldWidget.scrollCoordinator, widget.scrollCoordinator)) {
+      oldWidget.scrollCoordinator?.unregister(oldWidget.index, context);
+      widget.scrollCoordinator?.register(widget.index, context);
     }
+    if (!oldWidget.reveal && widget.reveal) _reveal();
+  }
+
+  @override
+  void dispose() {
+    widget.scrollCoordinator?.unregister(widget.index, context);
+    super.dispose();
   }
 
   @override

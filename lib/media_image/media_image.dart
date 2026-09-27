@@ -181,6 +181,8 @@ class _MediaImageState extends State<MediaImage> {
   ScrollPosition? _observedScroll;
   bool _frameWakeQueued = false;
   Completer<void>? _layoutWake;
+  Timer? _retryTimer;
+  Completer<void>? _retryWaiter;
 
   List<ItemImageRef> get _candidates {
     return widget.item.imageCandidates(
@@ -214,6 +216,7 @@ class _MediaImageState extends State<MediaImage> {
       _lastAccountScope = scope;
       _lastRequestWidth = requestWidth;
       _loadGeneration++;
+      _cancelRetryWait();
       _future = null;
     }
     if (_hasImageSource && scope != null) {
@@ -224,6 +227,7 @@ class _MediaImageState extends State<MediaImage> {
   @override
   void dispose() {
     _loadGeneration++;
+    _cancelRetryWait();
     MediaImageCache.instance._cancelStaleFetches();
     _observedScroll?.removeListener(_onObservedScroll);
     _observedScroll = null;
@@ -262,6 +266,7 @@ class _MediaImageState extends State<MediaImage> {
         maxWidthChanged ||
         widthChanged) {
       _loadGeneration++;
+      _cancelRetryWait();
       _future = _hasImageSource && _accountScope != null ? _load() : null;
     }
   }
@@ -334,6 +339,7 @@ class _MediaImageState extends State<MediaImage> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _frameWakeQueued = false;
       MediaImageCache.instance._schedulePosterRelease();
+      MediaImageCache.instance._preemptForVisibleWaiters();
       final wake = _layoutWake;
       if (wake != null && !wake.isCompleted) {
         wake.complete();
@@ -381,6 +387,7 @@ class _MediaImageState extends State<MediaImage> {
   }
 
   Future<_LoadedImage?> _load() async {
+    _cancelRetryWait();
     final generation = ++_loadGeneration;
     bool current() => mounted && generation == _loadGeneration;
     // 内存命中立刻返回,回滑已看过的海报不闪骨架、也不等停稳。
@@ -462,7 +469,7 @@ class _MediaImageState extends State<MediaImage> {
         if (!current() || !_canRetryLoad()) {
           return null;
         }
-        await Future<void>.delayed(Duration(milliseconds: 200 * (attempt + 1)));
+        await _waitBeforeRetry(Duration(milliseconds: 200 * (attempt + 1)));
       }
       return null;
     } finally {
@@ -474,6 +481,25 @@ class _MediaImageState extends State<MediaImage> {
         }
       }
     }
+  }
+
+  Future<void> _waitBeforeRetry(Duration delay) {
+    final done = Completer<void>();
+    _retryWaiter = done;
+    _retryTimer = Timer(delay, () {
+      if (identical(_retryWaiter, done)) _retryWaiter = null;
+      _retryTimer = null;
+      done.complete();
+    });
+    return done.future;
+  }
+
+  void _cancelRetryWait() {
+    _retryTimer?.cancel();
+    _retryTimer = null;
+    final waiter = _retryWaiter;
+    _retryWaiter = null;
+    if (waiter != null && !waiter.isCompleted) waiter.complete();
   }
 
   Future<_LoadedImage?> _readDiskLoaded() async {
@@ -818,6 +844,7 @@ class _ImageFetchRequest {
   final Completer<bool> slot = Completer<bool>();
   late final Future<Uint8List?> result;
   _ImageFetchConsumer? activeConsumer;
+  bool preempted = false;
 
   _ImageFetchConsumer? get currentConsumer {
     for (final consumer in consumers) {
@@ -1232,6 +1259,9 @@ class MediaImageCache {
         if (generation == _cacheGeneration) _release();
       }
       if (!current()) return null;
+      // A request displaced by visible work may still have mounted consumers.
+      // Cancellation is not a missing image and must remain retryable.
+      if (request.preempted) return null;
       if (bytes != null && bytes.isNotEmpty) {
         final loaded = bytes;
         _storeBytes(cacheKey, loaded);
@@ -1364,7 +1394,33 @@ class MediaImageCache {
       return Future<bool>.value(true);
     }
     _waiters.add(request);
+    _preemptForVisibleWaiters();
     return request.slot.future;
+  }
+
+  void _preemptForVisibleWaiters() {
+    final visibleWaiters = _waiters
+        .where((request) => request.isCurrent && request.inViewport)
+        .length;
+    if (visibleWaiters == 0) return;
+    final active = _inflight.values.where(
+      (request) => request.activeConsumer != null,
+    );
+    var pendingCancellations = active
+        .where((request) => request.preempted)
+        .length;
+    for (final request in active) {
+      if (pendingCancellations >= visibleWaiters) break;
+      final abort = request.activeConsumer?.onAbort;
+      if (request.preempted || request.inViewport || abort == null) continue;
+      request.preempted = true;
+      pendingCancellations++;
+      try {
+        abort();
+      } catch (_) {
+        // The request's timeout still bounds a failed cancellation.
+      }
+    }
   }
 
   void _cancelStaleFetches() {
