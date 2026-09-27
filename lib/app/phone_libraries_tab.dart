@@ -158,11 +158,11 @@ class _LibraryBlock extends StatelessWidget {
               ),
             ),
             const SizedBox(height: AppSpacing.xs),
+            // 标题左对齐,与全仓卡片规范一致(ADR-5)。
             Text(
               library.name,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
               style: theme.textTheme.bodyMedium,
             ),
           ],

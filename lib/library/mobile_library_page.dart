@@ -3,7 +3,6 @@ import 'package:flutter/rendering.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_chrome.dart';
-import 'package:rillight/app/mobile_motion.dart';
 import 'package:rillight/app/mobile_widgets.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme.dart';
@@ -13,7 +12,6 @@ import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/emby/catalog_cache.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_failure.dart';
-import 'package:rillight/home/media_shelf.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/library/browse_controller.dart';
 import 'package:rillight/library/shelf_sort.dart';
@@ -695,16 +693,10 @@ class _PhonePosterSliver extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context);
-    final theme = Theme.of(context);
     const spacing = AppSpacing.md;
     final columns = phoneLibraryColumnCount(gridWidth);
     final cellWidth = (gridWidth - spacing * (columns - 1)) / columns;
-    final label =
-        AppSpacing.xs +
-        MediaShelf.lineHeightOf(context, theme.textTheme.bodyMedium) +
-        MediaShelf.lineHeightOf(context, theme.textTheme.labelSmall) +
-        4;
+    final label = phonePosterCardLabelExtent(context);
     final imageWidth = catalogPosterMaxWidth(
       cellWidth,
       MediaQuery.devicePixelRatioOf(context),
@@ -716,35 +708,35 @@ class _PhonePosterSliver extends StatelessWidget {
         crossAxisSpacing: spacing,
         childAspectRatio: cellWidth / (cellWidth * 1.5 + label),
       ),
-      delegate: _PhonePosterDelegate(
-        items: items,
-        imageMaxWidth: imageWidth,
-        progressOf: (item) => item.canResume
-            ? l10n.playbackProgress((item.playbackProgress * 100).round())
-            : null,
-      ),
+      delegate: _PhonePosterDelegate(items: items, imageMaxWidth: imageWidth),
     );
   }
 }
 
 class _PhonePosterDelegate extends SliverChildBuilderDelegate {
-  _PhonePosterDelegate({
-    required this.items,
-    required this.imageMaxWidth,
-    required String? Function(EmbyItem item) progressOf,
-  }) : super(
-         (context, index) {
-           final item = items[index];
-           return _PhonePoster(
-             key: ValueKey('phone-library-poster-${item.id}'),
-             item: item,
-             imageMaxWidth: imageMaxWidth,
-             progressLabel: progressOf(item),
-           );
-         },
-         childCount: items.length,
-         addAutomaticKeepAlives: false,
-       );
+  _PhonePosterDelegate({required this.items, required this.imageMaxWidth})
+    : super(
+        (context, index) {
+          final item = items[index];
+          return PhoneGridPosterCard(
+            key: ValueKey('phone-library-poster-${item.id}'),
+            item: item,
+            imageMaxWidth: imageMaxWidth,
+            onTap: item.isPhotoAlbum
+                ? () => context.push(
+                    AppRoutes.shelfItems(
+                      parentId: item.id,
+                      includeItemTypes: 'Photo,PhotoAlbum',
+                      title: item.name,
+                      recursive: true,
+                    ),
+                  )
+                : null,
+          );
+        },
+        childCount: items.length,
+        addAutomaticKeepAlives: false,
+      );
 
   final List<EmbyItem> items;
   final int imageMaxWidth;
@@ -753,154 +745,5 @@ class _PhonePosterDelegate extends SliverChildBuilderDelegate {
   bool shouldRebuild(covariant _PhonePosterDelegate oldDelegate) {
     return !identical(oldDelegate.items, items) ||
         oldDelegate.imageMaxWidth != imageMaxWidth;
-  }
-}
-
-class _PhonePoster extends StatelessWidget {
-  const _PhonePoster({
-    super.key,
-    required this.item,
-    required this.imageMaxWidth,
-    required this.progressLabel,
-  });
-
-  final EmbyItem item;
-  final int imageMaxWidth;
-  final String? progressLabel;
-
-  bool get _hasImage {
-    bool tagged(String? tag) => tag != null && tag.isNotEmpty;
-    return tagged(item.primaryImageTag) ||
-        tagged(item.thumbImageTag) ||
-        tagged(item.backdropImageTag);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return RepaintBoundary(
-      child: MobilePressable(
-        onTap: () {
-          if (item.isPhotoAlbum) {
-            context.push(
-              AppRoutes.shelfItems(
-                parentId: item.id,
-                includeItemTypes: 'Photo,PhotoAlbum',
-                title: item.name,
-                recursive: true,
-              ),
-            );
-            return;
-          }
-          if (_hasImage) {
-            PhoneMotion.openItem(
-              context,
-              item,
-              preferBackdrop: false,
-              maxWidth: imageMaxWidth,
-            );
-            return;
-          }
-          context.push(AppRoutes.item(item.id));
-        },
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final artHeight = constraints.maxWidth * 1.5;
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                SizedBox(
-                  key: ValueKey('phone-library-art-${item.id}'),
-                  height: artHeight,
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(AppRadii.md),
-                      boxShadow: const [
-                        BoxShadow(
-                          color: Color.fromRGBO(
-                            0,
-                            0,
-                            0,
-                            AppMobileCard.shadowAlpha,
-                          ),
-                          blurRadius: AppMobileCard.shadowBlur,
-                          spreadRadius: AppMobileCard.shadowSpread,
-                          offset: Offset(0, AppMobileCard.shadowOffsetY),
-                        ),
-                      ],
-                    ),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(AppRadii.md),
-                      clipBehavior: Clip.hardEdge,
-                      child: Stack(
-                        fit: StackFit.expand,
-                        children: [
-                          if (_hasImage)
-                            PhoneMotion.sharedImage(
-                              itemId: item.id,
-                              preferBackdrop: false,
-                              child: MediaImage(
-                                item: item,
-                                maxWidth: imageMaxWidth,
-                              ),
-                            )
-                          else
-                            ColoredBox(
-                              color: theme.colorScheme.surfaceContainerHighest,
-                              child: Center(
-                                child: Padding(
-                                  padding: const EdgeInsets.all(AppSpacing.xs),
-                                  child: Text(
-                                    item.name,
-                                    textAlign: TextAlign.center,
-                                    maxLines: 3,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          if (progressLabel != null)
-                            Positioned(
-                              left: 0,
-                              right: 0,
-                              bottom: 0,
-                              child: Semantics(
-                                label: progressLabel,
-                                child: LinearProgressIndicator(
-                                  key: ValueKey(
-                                    'phone-library-progress-${item.id}',
-                                  ),
-                                  value: item.playbackProgress,
-                                  minHeight: 4,
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.xs),
-                Text(
-                  item.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodyMedium,
-                ),
-                if (item.productionYear != null)
-                  Text(
-                    '${item.productionYear}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-              ],
-            );
-          },
-        ),
-      ),
-    );
   }
 }

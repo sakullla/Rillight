@@ -6,12 +6,13 @@ import 'package:go_router/go_router.dart';
 import 'package:rillight/app/content_theme.dart';
 import 'package:rillight/library/detail_extras.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/app/mobile_chrome.dart';
 import 'package:rillight/app/mobile_motion.dart';
-import 'package:rillight/app/mobile_widgets.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/auth/auth_scope.dart';
+import 'package:rillight/auth/failure_message.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/emby/emby_errors.dart';
 import 'package:rillight/home/catalog_keys.dart';
@@ -509,7 +510,10 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
                   if (pending)
                     _PhoneDetailPending(handoff: handoff)
                   else if (failed)
-                    MobileFailure(error: controller.error!, retry: _refresh)
+                    MobileFailureState(
+                      message: embyFailureMessage(l, controller.error!),
+                      onRetry: _refresh,
+                    )
                   else if (imageSource != null)
                     PhoneItemBanner(
                       item: imageSource,
@@ -554,12 +558,15 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
                           handoff?.maxWidth ?? PhoneMotion.pageRequestWidth,
                     ),
                   if (item != null && controller.error != null)
-                    MobileFailure(error: controller.error!, retry: _refresh),
+                    MobileFailureState(
+                      message: embyFailureMessage(l, controller.error!),
+                      onRetry: _refresh,
+                    ),
                   if (item != null) DetailAlbumStrip(item: item),
                   if (item?.isSeries == true && controller.seasonError != null)
-                    MobileFailure(
-                      error: controller.seasonError!,
-                      retry: controller.loadSeasons,
+                    MobileFailureState(
+                      message: embyFailureMessage(l, controller.seasonError!),
+                      onRetry: controller.loadSeasons,
                     ),
                   if (item != null && item.isSeries)
                     MobileSeriesPage(
@@ -612,7 +619,10 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
                       onOpenSimilar: _openSimilarShelf,
                     ),
                   if (_similarError != null)
-                    MobileFailure(error: _similarError!, retry: _loadExtras),
+                    MobileFailureState(
+                      message: embyFailureMessage(l, _similarError!),
+                      onRetry: _loadExtras,
+                    ),
                 ],
               ),
             ),
@@ -777,9 +787,10 @@ class _ChapterStrip extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
+          // 分区间距统一 xl=24(ADR-5)。
           padding: const EdgeInsets.fromLTRB(
             AppSpacing.md,
-            AppSpacing.lg,
+            AppSpacing.xl,
             AppSpacing.md,
             AppSpacing.sm,
           ),
@@ -971,9 +982,10 @@ class _DetailSimilar extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
+          // 分区间距统一 xl=24(ADR-5)。
           padding: const EdgeInsets.fromLTRB(
             AppSpacing.md,
-            AppSpacing.lg,
+            AppSpacing.xl,
             AppSpacing.xs,
             AppSpacing.sm,
           ),
@@ -1015,7 +1027,8 @@ class _DetailSimilar extends StatelessWidget {
                     children: [
                       Expanded(
                         child: ClipRRect(
-                          borderRadius: BorderRadius.circular(AppRadii.sm),
+                          // 独立卡片圆角统一 AppRadii.md(ADR-5)。
+                          borderRadius: BorderRadius.circular(AppRadii.md),
                           child: MediaImage(item: item, maxWidth: 320),
                         ),
                       ),

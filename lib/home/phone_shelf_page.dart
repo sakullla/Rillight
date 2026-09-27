@@ -463,8 +463,10 @@ class _PhoneShelfPageState extends State<PhoneShelfPage> {
     }
     return LayoutBuilder(
       builder: (context, constraints) {
-        final scale = MediaQuery.textScalerOf(context).scale(14) / 14;
-        final metrics = _shelfGridMetrics(constraints.maxWidth, scale);
+        final metrics = _shelfGridMetrics(
+          constraints.maxWidth,
+          phonePosterCardLabelExtent(context),
+        );
         if (metrics.tileWidth <= 0 || metrics.tileHeight <= 0) {
           return const SizedBox.shrink();
         }
@@ -501,7 +503,7 @@ class _PhoneShelfPageState extends State<PhoneShelfPage> {
                   delegate: SliverChildBuilderDelegate(
                     (context, index) {
                       final item = _items[index];
-                      return MobilePoster(
+                      return PhoneGridPosterCard(
                         key: ValueKey(item.id),
                         item: item,
                         imageMaxWidth: imageWidth,
@@ -574,8 +576,9 @@ class _ShelfGridMetrics {
   final double tileHeight;
 }
 
-_ShelfGridMetrics _shelfGridMetrics(double outerWidth, double textScale) {
-  const spacing = AppSpacing.sm;
+_ShelfGridMetrics _shelfGridMetrics(double outerWidth, double labelExtent) {
+  // 网格间距统一 md(ADR-5),与搜索/片库网格一致。
+  const spacing = AppSpacing.md;
   final columns = PhoneShelfPage.columnCountFor(outerWidth);
   final content = math.max(0.0, outerWidth - AppSpacing.md * 2);
   final gaps = spacing * math.max(0, columns - 1);
@@ -586,7 +589,7 @@ _ShelfGridMetrics _shelfGridMetrics(double outerWidth, double textScale) {
     columns: columns,
     spacing: spacing,
     tileWidth: tileWidth,
-    tileHeight: tileWidth * 1.5 + 32 * textScale,
+    tileHeight: tileWidth * 1.5 + labelExtent,
   );
 }
 
@@ -597,8 +600,10 @@ class _ShelfGridSkeleton extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final scale = MediaQuery.textScalerOf(context).scale(14) / 14;
-        final metrics = _shelfGridMetrics(constraints.maxWidth, scale);
+        final metrics = _shelfGridMetrics(
+          constraints.maxWidth,
+          phonePosterCardLabelExtent(context),
+        );
         if (metrics.columns <= 0 ||
             metrics.tileWidth <= 0 ||
             metrics.tileHeight <= 0) {
@@ -622,7 +627,7 @@ class _ShelfGridSkeleton extends StatelessWidget {
                     aspectRatio: 2 / 3,
                     child: SkeletonBlock(animated: false),
                   ),
-                  const SizedBox(height: AppSpacing.xs),
+                  const SizedBox(height: 6),
                   SkeletonBlock(
                     width: metrics.tileWidth * 0.72,
                     height: 14,

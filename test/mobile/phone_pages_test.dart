@@ -1650,16 +1650,25 @@ void main() {
               .data,
           '电影',
         );
-        final arts = tester
-            .renderObjectList<RenderBox>(
-              find.byWidgetPredicate((widget) {
-                final key = widget.key;
-                return key is ValueKey<String> &&
-                    key.value.startsWith('phone-library-art-');
-              }),
-            )
+        final posterFinder = find.byWidgetPredicate((widget) {
+          final key = widget.key;
+          return key is ValueKey<String> &&
+              key.value.startsWith('phone-library-poster-');
+        });
+        final posterKeys = posterFinder
+            .evaluate()
+            .map((element) => element.widget.key!)
             .toList();
-        expect(arts.length, greaterThanOrEqualTo(3));
+        expect(posterKeys.length, greaterThanOrEqualTo(3));
+        final arts = [
+          for (final key in posterKeys)
+            tester.renderObject<RenderBox>(
+              find.descendant(
+                of: find.byKey(key),
+                matching: find.byType(AspectRatio),
+              ),
+            ),
+        ];
         final width = arts.first.size.width;
         expect(width, closeTo((360 - 32 - 2 * 16) / 3, 1));
         expect(
@@ -1675,27 +1684,43 @@ void main() {
             .toSet();
         expect(columns.length, 3);
         expect(find.byType(MobilePressable), findsWidgets);
-        final poster = tester.widget<DecoratedBox>(
-          find
-              .descendant(
-                of: find.byKey(
-                  const ValueKey('phone-library-art-movie-inception'),
-                ),
-                matching: find.byType(DecoratedBox),
-              )
-              .first,
+        // 网格卡不再有投影(ADR-2),图区圆角统一 AppRadii.md。
+        final inception = find.byKey(
+          const ValueKey('phone-library-poster-movie-inception'),
         );
-        final shadow = poster.decoration as BoxDecoration;
-        expect(shadow.boxShadow!.single.blurRadius, AppMobileCard.shadowBlur);
-        expect(shadow.borderRadius, BorderRadius.circular(AppRadii.md));
-        final progress = tester.widget<LinearProgressIndicator>(
-          find.byKey(const ValueKey('phone-library-progress-movie-inception')),
-        );
-        expect(progress.value, closeTo(0.4, 0.001));
         expect(
-          find.byKey(const ValueKey('phone-library-progress-movie-up')),
+          find.descendant(
+            of: inception,
+            matching: find.byWidgetPredicate(
+              (widget) =>
+                  widget is DecoratedBox &&
+                  widget.decoration is BoxDecoration &&
+                  (widget.decoration as BoxDecoration).boxShadow != null,
+            ),
+          ),
           findsNothing,
         );
+        expect(
+          tester
+              .widget<ClipRRect>(
+                find.descendant(
+                  of: inception,
+                  matching: find.byType(ClipRRect),
+                ),
+              )
+              .borderRadius,
+          BorderRadius.circular(AppRadii.md),
+        );
+        // 续播进度以图上胶囊角标呈现,不再有图底进度条。
+        final inceptionBadges = find.byKey(
+          phoneCardBadgesKey('movie-inception'),
+        );
+        expect(inceptionBadges, findsOneWidget);
+        expect(
+          find.descendant(of: inceptionBadges, matching: find.text('已看 40%')),
+          findsOneWidget,
+        );
+        expect(find.byKey(phoneCardBadgesKey('movie-up')), findsNothing);
 
         await _openFilters(tester);
         expect(find.text('更新日期'), findsWidgets);

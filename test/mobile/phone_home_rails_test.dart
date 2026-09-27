@@ -70,7 +70,7 @@ void main() {
 
         harness.hold.release();
         await tester.pumpAndSettle();
-        final posters = find.byType(MobilePoster);
+        final posters = find.byType(PhonePosterCard);
         expect(posters, findsAtLeastNWidgets(3));
         final first = tester.getRect(posters.at(0));
         final second = tester.getRect(posters.at(1));
@@ -79,7 +79,7 @@ void main() {
         expect(second.top, closeTo(third.top, 1));
         expect(first.left, closeTo(16, 1));
         expect(third.right, closeTo(width - 16, 1));
-        expect(second.left - first.right, closeTo(AppSpacing.sm, 1));
+        expect(second.left - first.right, closeTo(AppSpacing.md, 1));
         expect(tester.takeException(), isNull);
 
         harness.hold.holdLists = true;
@@ -111,7 +111,7 @@ void main() {
         await _expectPosterGrid(tester, width);
         harness.hold.release();
         await tester.pumpAndSettle();
-        final posters = find.byType(MobilePoster);
+        final posters = find.byType(PhonePosterCard);
         expect(posters, findsAtLeastNWidgets(1));
         expect(tester.getRect(posters.at(0)).left, closeTo(16, 1));
         expect(tester.takeException(), isNull);
@@ -494,7 +494,7 @@ Future<void> _expectPosterGrid(WidgetTester tester, double width) async {
   final third = images[2];
   expect(first.left, closeTo(16, 1));
   expect(third.right, closeTo(width - 16, 1));
-  expect(second.left - first.right, closeTo(AppSpacing.sm, 1));
+  expect(second.left - first.right, closeTo(AppSpacing.md, 1));
   expect(first.height / first.width, closeTo(1.5, 0.05));
   expect(tester.takeException(), isNull);
 }

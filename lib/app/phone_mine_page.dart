@@ -399,7 +399,7 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
               ).textTheme.bodyMedium?.copyWith(color: scheme.error),
             ),
           ],
-          const SizedBox(height: AppSpacing.lg),
+          const SizedBox(height: AppSpacing.xl),
           _group(
             context,
             title: l10n.mobileAccountServerGroup,
@@ -430,9 +430,9 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
               const SizedBox(height: AppSpacing.md),
             ],
           ),
-          const SizedBox(height: AppSpacing.lg),
+          const SizedBox(height: AppSpacing.xl),
           _floatingNav(context, l10n),
-          const SizedBox(height: AppSpacing.lg),
+          const SizedBox(height: AppSpacing.xl),
           _group(
             context,
             title: l10n.mobilePlaybackGroup,
@@ -543,7 +543,7 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
               const SizedBox(height: AppSpacing.md),
             ],
           ),
-          const SizedBox(height: AppSpacing.lg),
+          const SizedBox(height: AppSpacing.xl),
           _group(
             context,
             title: l10n.mobileCacheGroup,
@@ -585,7 +585,7 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
               const SizedBox(height: AppSpacing.md),
             ],
           ),
-          const SizedBox(height: AppSpacing.lg),
+          const SizedBox(height: AppSpacing.xl),
           _group(
             context,
             title: l10n.mobileAboutGroup,

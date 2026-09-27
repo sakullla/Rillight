@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/app/mobile_chrome.dart';
 import 'package:rillight/app/mobile_motion.dart';
-import 'package:rillight/app/mobile_widgets.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
+import 'package:rillight/auth/failure_message.dart';
 import 'package:rillight/emby/emby_errors.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_keys.dart';
@@ -410,7 +411,10 @@ class MobileSeriesPage extends StatelessWidget {
             },
           ),
         if (episodeError != null && onRetryEpisodes != null)
-          MobileFailure(error: episodeError!, retry: onRetryEpisodes!),
+          MobileFailureState(
+            message: embyFailureMessage(l, episodeError!),
+            onRetry: onRetryEpisodes!,
+          ),
         if (!episodesLoading &&
             episodeError == null &&
             episodes.isEmpty &&
@@ -669,9 +673,10 @@ class _SimilarRow extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
+          // 分区间距统一 xl=24(ADR-5)。
           padding: const EdgeInsets.fromLTRB(
             AppSpacing.md,
-            AppSpacing.lg,
+            AppSpacing.xl,
             AppSpacing.xs,
             AppSpacing.sm,
           ),
@@ -713,7 +718,8 @@ class _SimilarRow extends StatelessWidget {
                     children: [
                       Expanded(
                         child: ClipRRect(
-                          borderRadius: BorderRadius.circular(AppRadii.sm),
+                          // 独立卡片圆角统一 AppRadii.md(ADR-5)。
+                          borderRadius: BorderRadius.circular(AppRadii.md),
                           child: MediaImage(item: item, maxWidth: 320),
                         ),
                       ),

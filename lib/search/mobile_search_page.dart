@@ -8,12 +8,12 @@ import 'package:rillight/app/phone_bottom_nav.dart';
 import 'package:rillight/app/mobile_widgets.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme.dart';
+import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_failure.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/library/catalog_filter_button.dart';
-import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/search/search_controller.dart';
 
 /// 手机搜索：输入即搜。剧集和电影都走 [AppRoutes.item]，由详情页按类型分画面。
@@ -181,9 +181,8 @@ class _SearchBody extends StatelessWidget {
       );
     }
     if (c.refreshingFirstPage && c.items.isEmpty) {
-      return const Center(
-        child: CircularProgressIndicator(key: Key('mobile-search-loading')),
-      );
+      // 骨架屏替代 spinner,与全仓加载占位规范一致(ADR-4)。
+      return const SkeletonPosterGrid(key: Key('mobile-search-loading'));
     }
     if (c.items.isEmpty) {
       return MobileEmptyState(
@@ -286,90 +285,13 @@ class _ResultGrid extends StatelessWidget {
   Widget build(BuildContext context) {
     return MobileGrid(
       items: items,
-      itemBuilder: (context, item) =>
-          _ResultPoster(key: Key('mobile-search-item-${item.id}'), item: item),
-    );
-  }
-}
-
-class _ResultPoster extends StatelessWidget {
-  const _ResultPoster({super.key, required this.item});
-
-  final EmbyItem item;
-
-  @override
-  Widget build(BuildContext context) {
-    final l = AppLocalizations.of(context);
-    final progress = item.playbackProgress;
-    final showProgress = item.canResume && progress > 0;
-    return MobilePressable(
-      onTap: () => context.push(AppRoutes.item(item.id)),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Expanded(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(AppRadii.md),
-                boxShadow: const [
-                  BoxShadow(
-                    color: Color.fromRGBO(0, 0, 0, AppMobileCard.shadowAlpha),
-                    blurRadius: AppMobileCard.shadowBlur,
-                    spreadRadius: AppMobileCard.shadowSpread,
-                    offset: Offset(0, AppMobileCard.shadowOffsetY),
-                  ),
-                ],
-              ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(AppRadii.md),
-                clipBehavior: Clip.antiAlias,
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    MediaImage(item: item, maxWidth: 400),
-                    if (showProgress)
-                      Align(
-                        alignment: Alignment.bottomCenter,
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            LinearProgressIndicator(
-                              value: progress,
-                              minHeight: 4,
-                            ),
-                            ColoredBox(
-                              color: Theme.of(
-                                context,
-                              ).colorScheme.surface.withValues(alpha: 0.84),
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: AppSpacing.xxs,
-                                  vertical: 2,
-                                ),
-                                child: Text(
-                                  l.playbackProgress((progress * 100).round()),
-                                  style: Theme.of(context).textTheme.labelSmall,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: AppSpacing.xs),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xxs),
-            child: Text(
-              item.name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        ],
+      // 结果卡与首页同规范(ADR-3);搜索 tab 与首页同导航栈共存,且同一
+      // 条目可能同时出现在首页飞行海报里,这里不走 Hero、直 push 详情。
+      itemBuilder: (context, item) => PhoneGridPosterCard(
+        key: Key('mobile-search-item-${item.id}'),
+        item: item,
+        hero: false,
+        onTap: () => context.push(AppRoutes.item(item.id)),
       ),
     );
   }
