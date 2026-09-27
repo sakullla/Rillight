@@ -321,7 +321,7 @@ class BundleVerificationTest(unittest.TestCase):
             def output(command, **_):
                 if '--verbose=4' in command:
                     return 'Executable=rillight\nSignature=adhoc\n'
-                if command[-1] == str(helper_path(app)):
+                if Path(command[-1]).resolve() == helper_path(app).resolve():
                     return plistlib.dumps(ENTITLEMENTS)
                 return plistlib.dumps(expected)
             with patch('sign_bundle.subprocess.check_call', side_effect=checked), \
