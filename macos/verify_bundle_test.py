@@ -24,6 +24,15 @@ NAMES = ['libavformat.61.dylib', 'libavcodec.61.dylib',
          'libass.9.dylib', 'libdav1d.7.dylib']
 
 
+class SwiftPackageContractTest(unittest.TestCase):
+    def test_staged_plugin_header_matches_owned_core(self):
+        source = ROOT / 'packages/rillight_player/native/core/rillight_core.h'
+        plugin = ROOT / ('packages/rillight_player/macos/rillight_player/'
+                         'Sources/rillight_player/include/rillight_player/'
+                         'rillight_core.h')
+        self.assertEqual(plugin.read_bytes(), source.read_bytes())
+
+
 def sha(data):
     return hashlib.sha256(data).hexdigest()
 

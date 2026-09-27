@@ -1,2 +1,3 @@
 #include "../../Flutter/Flutter-Debug.xcconfig"
 #include "Warnings.xcconfig"
+LIBRARY_SEARCH_PATHS = $(inherited) "$(PROJECT_DIR)/../packages/rillight_player/macos/Libraries"
