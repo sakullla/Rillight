@@ -2,8 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter/services.dart';
-
 import 'package:rillight/player/player_host_command.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/player_process_protocol.dart';
@@ -34,8 +32,7 @@ class PlayerProcessStartupException implements Exception {
 PlayerProcessControl createPlayerProcessControl({String? operatingSystem}) {
   return switch (operatingSystem ?? Platform.operatingSystem) {
     'windows' => WindowsPlayerProcessControl(),
-    'macos' => MacOSPlayerProcessControl(),
-    'linux' => PosixPlayerProcessControl(),
+    'macos' || 'linux' => PosixPlayerProcessControl(),
     final platform => throw UnsupportedError(
       'Unsupported player platform: $platform',
     ),
@@ -224,78 +221,19 @@ class WindowsPlayerProcessControl extends DesktopPlayerProcessControl {
   }
 }
 
-/// LaunchServices starts a separate app instance with its own sandbox. Spawning
-/// our app executable directly would try to initialize a second sandbox inside
-/// the inherited parent sandbox and can exit before Dart starts.
-class MacOSPlayerProcessControl extends DesktopPlayerProcessControl {
-  MacOSPlayerProcessControl({
-    super.pollInterval,
-    super.startupTimeout,
-    MethodChannel? channel,
-  }) : _channel = channel ?? const MethodChannel('rillight/player_process');
-
-  final MethodChannel _channel;
-  final Set<int> _children = {};
-  // A very short-lived app may exit before the launch reply reaches Dart.
-  final Set<int> _exited = {};
-  bool _listening = false;
-
-  @override
-  Future<int> launch(String executable, String payloadPath) async {
-    if (!_listening) {
-      _channel.setMethodCallHandler((call) async {
-        if (call.method == 'exited') {
-          final child = call.arguments as int;
-          _exited.add(child);
-          _children.remove(child);
-        }
-      });
-      _listening = true;
-    }
-    final child = await _channel.invokeMethod<int>('launch', {
-      'payloadPath': payloadPath,
-      'environment': playerProcessEnvironment(),
-    });
-    if (child == null || child <= 0) {
-      throw StateError('LaunchServices returned no player process');
-    }
-    if (!_exited.contains(child)) _children.add(child);
-    return child;
-  }
-
-  @override
-  bool isAlive(int pid) => _children.contains(pid);
-
-  @override
-  Future<void> terminate(int pid) async {
-    if (!isAlive(pid)) return;
-    await _channel.invokeMethod<void>('terminate', pid);
-    final deadline = DateTime.now().add(const Duration(seconds: 2));
-    while (isAlive(pid) && DateTime.now().isBefore(deadline)) {
-      await Future<void>.delayed(pollInterval);
-    }
-    if (isAlive(pid)) throw StateError('Player process did not terminate');
-  }
-
-  @override
-  Future<void> release(int pid) async {
-    if (isAlive(pid)) {
-      throw StateError('Cannot release a running player process');
-    }
-    await super.release(pid);
-    await _channel.invokeMethod<void>('release', pid);
-    _exited.remove(pid);
-  }
-}
-
 class PosixPlayerProcessControl extends DesktopPlayerProcessControl {
   PosixPlayerProcessControl({super.pollInterval, super.startupTimeout});
   final Map<int, Process> _children = {};
 
   @override
   Future<int> launch(String executable, String payloadPath) async {
+    // macOS helpers must inherit the existing sandbox. The main executable's
+    // app entitlements cannot be applied again inside a child process.
+    final playerExecutable = Platform.isMacOS
+        ? '${File(executable).parent.path}/rillight_player'
+        : executable;
     final process = await Process.start(
-      executable,
+      playerExecutable,
       ['player', payloadPath],
       environment: playerProcessEnvironment(),
       includeParentEnvironment: false,

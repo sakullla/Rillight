@@ -22,7 +22,7 @@ void main() {
     );
     expect(
       createPlayerProcessControl(operatingSystem: 'macos'),
-      isA<MacOSPlayerProcessControl>(),
+      isA<PosixPlayerProcessControl>(),
     );
     expect(
       createPlayerProcessControl(operatingSystem: 'linux'),
