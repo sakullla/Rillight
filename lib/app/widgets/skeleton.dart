@@ -171,6 +171,7 @@ class SkeletonPosterGrid extends StatelessWidget {
     super.key,
     this.itemCount = 12,
     this.maxCrossAxisExtent = 180,
+    this.crossAxisCount,
     this.childAspectRatio = 2 / 3,
     this.spacing = AppSpacing.md,
     this.padding = const EdgeInsets.all(AppSpacing.md),
@@ -179,6 +180,10 @@ class SkeletonPosterGrid extends StatelessWidget {
   final int itemCount;
   final double maxCrossAxisExtent;
 
+  /// 显式列数;非空时优先于 [maxCrossAxisExtent],让骨架与结果网格
+  /// (固定列数的 SliverGridDelegate)逐列对齐。
+  final int? crossAxisCount;
+
   /// 网格项宽高比(宽/高),默认竖版 2:3。
   final double childAspectRatio;
   final double spacing;
@@ -186,15 +191,23 @@ class SkeletonPosterGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final columns = crossAxisCount;
     return GridView.builder(
       padding: padding,
       itemCount: itemCount,
-      gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
-        maxCrossAxisExtent: maxCrossAxisExtent,
-        mainAxisSpacing: spacing,
-        crossAxisSpacing: spacing,
-        childAspectRatio: childAspectRatio,
-      ),
+      gridDelegate: columns == null
+          ? SliverGridDelegateWithMaxCrossAxisExtent(
+              maxCrossAxisExtent: maxCrossAxisExtent,
+              mainAxisSpacing: spacing,
+              crossAxisSpacing: spacing,
+              childAspectRatio: childAspectRatio,
+            )
+          : SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: columns,
+              mainAxisSpacing: spacing,
+              crossAxisSpacing: spacing,
+              childAspectRatio: childAspectRatio,
+            ),
       itemBuilder: (context, index) => const SkeletonBlock(),
     );
   }

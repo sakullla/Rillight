@@ -182,7 +182,7 @@ class _SearchBody extends StatelessWidget {
     }
     if (c.refreshingFirstPage && c.items.isEmpty) {
       // 骨架屏替代 spinner,与全仓加载占位规范一致(ADR-4)。
-      return const SkeletonPosterGrid(key: Key('mobile-search-loading'));
+      return const _SearchSkeleton();
     }
     if (c.items.isEmpty) {
       return MobileEmptyState(
@@ -232,6 +232,32 @@ class _SearchBody extends StatelessWidget {
             ),
         ],
       ),
+    );
+  }
+}
+
+/// 搜索加载骨架与结果 [_ResultGrid] 同几何:同列数([mobileGridColumnCount])、
+/// 同 [MobileGrid] 按 [phonePosterCardLabelExtent] 推导的宽高比,消除
+/// 骨架→结果切换时的布局跳动。
+class _SearchSkeleton extends StatelessWidget {
+  const _SearchSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // 结果网格在 ListView 的水平 padding 之内取宽,这里先扣同样边距再算列。
+        final gridWidth = constraints.maxWidth - AppSpacing.md * 2;
+        const spacing = AppSpacing.md;
+        final columns = mobileGridColumnCount(gridWidth);
+        final cellWidth = (gridWidth - spacing * (columns - 1)) / columns;
+        final labelExtent = phonePosterCardLabelExtent(context);
+        return SkeletonPosterGrid(
+          key: const Key('mobile-search-loading'),
+          crossAxisCount: columns,
+          childAspectRatio: cellWidth / (cellWidth * 1.5 + labelExtent),
+        );
+      },
     );
   }
 }

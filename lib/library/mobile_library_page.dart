@@ -721,6 +721,9 @@ class _PhonePosterDelegate extends SliverChildBuilderDelegate {
           return PhoneGridPosterCard(
             key: ValueKey('phone-library-poster-${item.id}'),
             item: item,
+            // 与首页 rail 同 ShellRoute 子树,同条目会重复注册 Hero 标签;
+            // 与搜索页对齐关闭飞行,代价是片库→详情无 hero 动画(可接受)。
+            hero: false,
             imageMaxWidth: imageMaxWidth,
             onTap: item.isPhotoAlbum
                 ? () => context.push(

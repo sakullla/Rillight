@@ -30,6 +30,7 @@ import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/home/home_hero.dart';
 import 'package:rillight/home/phone_hero.dart';
 import 'package:rillight/home/phone_home.dart';
+import 'package:rillight/home/phone_home_sections.dart';
 import 'package:rillight/home/phone_shelf_page.dart';
 import 'package:rillight/library/browse_controller.dart';
 import 'package:rillight/library/mobile_detail_page.dart';
@@ -2153,6 +2154,141 @@ void main() {
       },
     );
   });
+
+  group('phone_home_edit_test.dart', () {
+    setUp(isolateImageCache);
+    tearDown(PhoneHomeSectionController.debugResetApp);
+
+    testWidgets(
+      'home library entries open the library page and latest rows render',
+      (tester) async {
+        final (router, _) = await _openPhone(tester);
+
+        // 首页片库入口:行键与每个片库卡都渲染。
+        final libraries = find.byKey(const Key('phone-home-libraries'));
+        await _showOnHome(tester, libraries);
+        expect(libraries, findsOneWidget);
+        expect(
+          find.byKey(const Key('phone-home-library-view-movies')),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(const Key('phone-home-library-view-tv')),
+          findsOneWidget,
+        );
+
+        // 点击片库卡进入片库页。
+        await tester.tap(
+          find.byKey(const Key('phone-home-library-view-movies')),
+        );
+        await _homeSettle(tester);
+        expect(find.byType(MobileLibraryPage), findsOneWidget);
+        expect(
+          tester
+              .widget<Text>(find.byKey(const Key('phone-library-title')))
+              .data,
+          '电影',
+        );
+        router.pop();
+        await _homeSettle(tester);
+        expect(find.byType(MobileLibraryPage), findsNothing);
+
+        // 片库「最近添加」行:行键渲染,行内海报来自该库最新条目。
+        final latest = find.byKey(
+          const Key('phone-home-library-latest-view-movies'),
+        );
+        await _showOnHome(tester, latest);
+        for (
+          var i = 0;
+          i < 20 &&
+              find
+                  .descendant(
+                    of: latest,
+                    matching: find.byType(PhonePosterCard),
+                  )
+                  .evaluate()
+                  .isEmpty;
+          i++
+        ) {
+          await tester.pump(const Duration(milliseconds: 100));
+        }
+        expect(latest, findsOneWidget);
+        expect(
+          find.descendant(of: latest, matching: find.byType(PhonePosterCard)),
+          findsWidgets,
+        );
+        expect(tester.takeException(), isNull);
+      },
+      tags: ['integration'],
+    );
+
+    testWidgets('editing reorders and hides home sections live', (
+      tester,
+    ) async {
+      final (router, _) = await _openPhone(tester);
+
+      // 基线:首页按缺省顺序渲染,电影行在剧集行之前。
+      expect(_homeRowOrder(tester), [
+        CatalogKeys.latestMoviesRow,
+        CatalogKeys.latestSeriesRow,
+      ]);
+
+      await tester.tap(find.byKey(const Key('phone-home-edit')));
+      await _homeSettle(tester);
+      final moviesTile = find.byKey(
+        PhoneHomeSectionEditor.tileKey(PhoneHomeSectionId.latestMovies),
+      );
+      final seriesTile = find.byKey(
+        PhoneHomeSectionEditor.tileKey(PhoneHomeSectionId.latestSeries),
+      );
+      expect(moviesTile, findsOneWidget);
+      expect(seriesTile, findsOneWidget);
+      expect(
+        tester.getTopLeft(moviesTile).dy,
+        lessThan(tester.getTopLeft(seriesTile).dy),
+      );
+
+      // 拖住手柄把剧集行移到电影行之上。
+      await tester.ensureVisible(seriesTile);
+      await tester.pumpAndSettle();
+      await _dragSectionUp(tester, seriesTile);
+      await tester.ensureVisible(seriesTile);
+      await tester.pumpAndSettle();
+      expect(
+        tester.getTopLeft(seriesTile).dy,
+        lessThan(tester.getTopLeft(moviesTile).dy),
+      );
+
+      // 关闭电影行:它归入「未显示」分组,首页立即消失。
+      await tester.tap(
+        find.byKey(
+          PhoneHomeSectionEditor.visibleKey(PhoneHomeSectionId.latestMovies),
+        ),
+      );
+      await _homeSettle(tester);
+      router.pop();
+      await _homeSettle(tester);
+      expect(find.byKey(CatalogKeys.latestMoviesRow), findsNothing);
+      expect(_homeRowOrder(tester), [CatalogKeys.latestSeriesRow]);
+
+      // 重新打开:行按编辑后的顺序恢复。
+      await tester.tap(find.byKey(const Key('phone-home-edit')));
+      await _homeSettle(tester);
+      await tester.tap(
+        find.byKey(
+          PhoneHomeSectionEditor.visibleKey(PhoneHomeSectionId.latestMovies),
+        ),
+      );
+      await _homeSettle(tester);
+      router.pop();
+      await _homeSettle(tester);
+      expect(_homeRowOrder(tester), [
+        CatalogKeys.latestSeriesRow,
+        CatalogKeys.latestMoviesRow,
+      ]);
+      expect(tester.takeException(), isNull);
+    }, tags: ['integration']);
+  });
 }
 
 Widget _harness(AuthController auth, {int generation = 0}) {
@@ -2234,6 +2370,39 @@ Future<void> _showOnHome(WidgetTester tester, Finder finder) async {
     await tester.drag(list, Offset(0, top > 640 ? -350 : 350));
     await tester.pump();
   }
+}
+
+/// 首页行键在滚动区的出现顺序(首页主体是单个 Column,行都会 build)。
+List<Key> _homeRowOrder(WidgetTester tester) {
+  return tester
+      .widgetList<Widget>(
+        find.descendant(
+          of: find.byKey(const PageStorageKey('mobile-home-scroll')),
+          matching: find.byWidgetPredicate((widget) {
+            final key = widget.key;
+            return key == CatalogKeys.latestMoviesRow ||
+                key == CatalogKeys.latestSeriesRow;
+          }),
+        ),
+      )
+      .map((widget) => widget.key!)
+      .toList();
+}
+
+/// 长按拖住编辑行手柄上移一格,触发 ReorderableListView 的 onReorder。
+Future<void> _dragSectionUp(WidgetTester tester, Finder tile) async {
+  final handle = find.descendant(
+    of: tile,
+    matching: find.byType(ReorderableDragStartListener),
+  );
+  final gesture = await tester.startGesture(tester.getCenter(handle));
+  await tester.pump(const Duration(milliseconds: 600));
+  await gesture.moveBy(const Offset(0, -60));
+  await tester.pump(const Duration(milliseconds: 100));
+  await gesture.moveBy(const Offset(0, -60));
+  await tester.pump(const Duration(milliseconds: 200));
+  await gesture.up();
+  await tester.pumpAndSettle();
 }
 
 void _usePhoneSurface(WidgetTester tester) {
