@@ -202,7 +202,13 @@ class PlaybackHttpProxy {
     _Representation representation,
     List<CachedByteRange> ranges,
   ) {
-    _cachedBytes = ranges;
+    _cachedBytes = [
+      for (final range in ranges)
+        if (range.start >= 0 &&
+            range.start < representation.total &&
+            range.end > range.start)
+          CachedByteRange(range.start, min(range.end, representation.total)),
+    ];
     _byteIdentity = '$resource:${representation.generation}';
     _byteRevision = cache!.revision;
     _lastByteIntegrityCheck = DateTime.now();
@@ -381,9 +387,18 @@ class PlaybackHttpProxy {
       if (_byteIdentity != null) _clearByteCoverage();
       return;
     }
-    if (_mappingUnknownReason == 'integrityUnavailable' ||
-        _mappingUnknownReason == 'cacheChangedDuringIndex') {
+    if (_mappingUnknownReason == 'integrityUnavailable') {
       if (_byteIdentity != null) _clearByteCoverage();
+      return;
+    }
+    if (_mappingUnknownReason == 'cacheChangedDuringIndex') {
+      // A time pass can lose its revision either during the integrity query
+      // or later while indexing. Keep its verified islands when still current;
+      // if another write made them stale, take one independent byte snapshot.
+      // An empty verified result needs no second disk query.
+      if (_cachedBytes.isNotEmpty && !_byteCoverageCurrent) {
+        await _refreshByteCoverage();
+      }
       return;
     }
     await _refreshByteCoverage();
@@ -513,13 +528,22 @@ class PlaybackHttpProxy {
         verifyChecksum: verifyChecksum,
       );
       if (!stillCurrent()) return;
-      if (!revisionCurrent()) return;
       if (bytes == null) {
         // A busy or timed-out integrity snapshot cannot support a previously
         // published interval: its disk blocks may have changed since then.
         _cachedTimeline = const [];
         _mappingUnknownReason = 'integrityUnavailable';
         _timelineSequence++;
+        return;
+      }
+      if (!revisionCurrent()) {
+        // availableRanges has already removed missing or replaced entries
+        // after its checksum pass. A newer write invalidates the time index,
+        // but these verified byte islands remain conservative for this exact
+        // representation and can be shown without another disk scan.
+        if (verifyChecksum && _byteRepresentation != null) {
+          _publishByteCoverage(resource, representation, bytes);
+        }
         return;
       }
       // Reuse the already verified cache scan for the phone byte track.

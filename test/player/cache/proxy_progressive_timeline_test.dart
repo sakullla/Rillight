@@ -60,6 +60,36 @@ void main() {
         {'start': 500, 'end': 600},
       ]);
 
+      // A time-index pass captures its cache revision before awaiting the
+      // integrity scan. A concurrent write invalidates that *time* pass, but
+      // a fresh byte-only scan can still publish its verified current islands.
+      final identity = first['timelineIdentity'] as String;
+      final separator = identity.lastIndexOf(':');
+      expect(separator, greaterThan(0));
+      proxy.selectContainerTracks(videoTrackId: 1, audioTrackId: 2);
+      final refreshing = proxy.refreshTimeline(const Duration(seconds: 4));
+      final write = cache.put(
+        resource: identity.substring(0, separator),
+        generation: int.parse(identity.substring(separator + 1)),
+        offset: 900,
+        bytes: Uint8List.fromList(bytes.sublist(900, 950)),
+      );
+      await write;
+      await refreshing;
+      final concurrent = proxy.diagnostics;
+      expect(concurrent['timelineUnknownReason'], 'cacheChangedDuringIndex');
+      expect(concurrent['cachedTimeRanges'], isEmpty);
+      expect(concurrent['cachedByteRanges'], [
+        {'start': 0, 'end': 100},
+        {'start': 500, 'end': 600},
+      ]);
+      await proxy.refreshTimeline(const Duration(seconds: 4));
+      expect(proxy.diagnostics['cachedByteRanges'], [
+        {'start': 0, 'end': 100},
+        {'start': 500, 'end': 600},
+        {'start': 900, 'end': 950},
+      ]);
+
       etag = '"second"';
       await read(700, 799);
       final invalidated = proxy.diagnostics;
