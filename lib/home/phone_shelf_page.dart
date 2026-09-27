@@ -54,6 +54,11 @@ class PhoneShelfPage extends StatefulWidget {
   }
 
   static const loadMoreKey = Key('phone-shelf-load-more');
+  static const imageGridKey = ValueKey<String>('phone-shelf-image-grid');
+  static const imageKeyPrefix = 'phone-shelf-image-';
+
+  static ValueKey<String> imageKey(String itemId) =>
+      ValueKey<String>('$imageKeyPrefix$itemId');
 
   factory PhoneShelfPage.fromState(GoRouterState state) {
     final query = state.uri.queryParameters;
@@ -494,6 +499,7 @@ class _PhoneShelfPageState extends State<PhoneShelfPage> {
               SliverPadding(
                 padding: const EdgeInsets.all(AppSpacing.md),
                 sliver: SliverGrid(
+                  key: PhoneShelfPage.imageGridKey,
                   gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                     crossAxisCount: metrics.columns,
                     mainAxisSpacing: metrics.spacing,
@@ -504,7 +510,7 @@ class _PhoneShelfPageState extends State<PhoneShelfPage> {
                     (context, index) {
                       final item = _items[index];
                       return PhoneGridPosterCard(
-                        key: ValueKey(item.id),
+                        key: PhoneShelfPage.imageKey(item.id),
                         item: item,
                         imageMaxWidth: imageWidth,
                       );
@@ -515,8 +521,16 @@ class _PhoneShelfPageState extends State<PhoneShelfPage> {
                       if (key is! ValueKey<String>) {
                         return null;
                       }
+                      if (!key.value.startsWith(
+                        PhoneShelfPage.imageKeyPrefix,
+                      )) {
+                        return null;
+                      }
+                      final itemId = key.value.substring(
+                        PhoneShelfPage.imageKeyPrefix.length,
+                      );
                       final index = _items.indexWhere(
-                        (item) => item.id == key.value,
+                        (item) => item.id == itemId,
                       );
                       return index < 0 ? null : index;
                     },

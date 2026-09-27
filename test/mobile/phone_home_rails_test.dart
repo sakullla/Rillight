@@ -26,6 +26,7 @@ import 'package:rillight/home/phone_home_sections.dart';
 import 'package:rillight/home/phone_shelf_page.dart';
 import 'package:rillight/library/mobile_detail_page.dart';
 
+import '../../integration_test/mobile_performance.dart' as probe;
 import '../emby/fake_emby_server.dart';
 import '../helpers/image_cache_fixture.dart';
 
@@ -71,6 +72,38 @@ void main() {
     expect(later, findsOneWidget);
   });
 
+  testWidgets('image sampling accepts only cards inside the shelf grid', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Column(
+          children: [
+            KeyedSubtree(
+              key: PhoneShelfPage.imageGridKey,
+              child: SizedBox(key: PhoneShelfPage.imageKey('inside')),
+            ),
+            SizedBox(key: PhoneShelfPage.imageKey('outside')),
+          ],
+        ),
+      ),
+    );
+    expect(
+      probe.imageWithinScope(
+        tester.element(find.byKey(PhoneShelfPage.imageKey('inside'))),
+        PhoneShelfPage.imageGridKey.value,
+      ),
+      isTrue,
+    );
+    expect(
+      probe.imageWithinScope(
+        tester.element(find.byKey(PhoneShelfPage.imageKey('outside'))),
+        PhoneShelfPage.imageGridKey.value,
+      ),
+      isFalse,
+    );
+  });
+
   for (final width in [360.0, 412.0]) {
     testWidgets(
       'shelf skeleton matches the poster grid at ${width.toInt()}dp',
@@ -95,6 +128,16 @@ void main() {
 
         harness.hold.release();
         await tester.pumpAndSettle();
+        expect(find.byKey(PhoneShelfPage.imageGridKey), findsOneWidget);
+        final measuredCard = PhoneShelfPage.imageKey('series-0');
+        expect(find.byKey(measuredCard), findsOneWidget);
+        expect(
+          probe.imageWithinScope(
+            tester.element(find.byKey(measuredCard)),
+            PhoneShelfPage.imageGridKey.value,
+          ),
+          isTrue,
+        );
         final posters = find.byType(PhonePosterCard);
         expect(posters, findsAtLeastNWidgets(3));
         final first = tester.getRect(posters.at(0));

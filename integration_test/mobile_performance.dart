@@ -1,8 +1,9 @@
 // Validation entry point. Launch with `flutter run -t` on a real phone or TV,
 // then `adb forward tcp:8798 tcp:8798`. POST /begin with label, cache=cold or
 // warm, device, build, and exact visible contentKey/actionKey before navigation.
-// For category grids, pass imageKeyPrefix=catalog-item- to record every visible
-// card's actual decoded-image completion, without exporting media item IDs.
+// For category grids, pass imageKeyPrefix=phone-shelf-image- and
+// imageScopeKey=phone-shelf-image-grid. Only cards inside that grid contribute
+// decoded-image timings; media item IDs are not exported.
 // GET /state is exploratory; POST /end consumes one active run and returns its
 // random runId for host-bound, one-time formal capture.
 // Repeat each scenario in the same build mode; keep cold/warm samples separate.
@@ -46,7 +47,12 @@ class _PageProbe {
       );
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _bindPhonePlayer(sample);
-        if (!sample.contentTimedOut && !sample.complete) _sample(sample);
+        // Category images can finish after text and actions are usable. Keep
+        // observing their decoded frames until /end, within the sample limit.
+        if (!sample.contentTimedOut &&
+            (!sample.complete || sample.imageKeyPrefix?.isNotEmpty == true)) {
+          _sample(sample);
+        }
       });
     });
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 8798);
@@ -59,7 +65,9 @@ class _PageProbe {
               (q['device'] ?? '').isEmpty ||
               (q['build'] ?? '').isEmpty ||
               (q['contentKey'] ?? '').isEmpty ||
-              (q['actionKey'] ?? '').isEmpty) {
+              (q['actionKey'] ?? '').isEmpty ||
+              ((q['imageKeyPrefix'] ?? '').isNotEmpty &&
+                  (q['imageScopeKey'] ?? '').isEmpty)) {
             request.response.statusCode = HttpStatus.badRequest;
             request.response.write(
               'label, cache, device, build, contentKey and actionKey required',
@@ -78,6 +86,7 @@ class _PageProbe {
               contentKey: q['contentKey']!,
               actionKey: q['actionKey']!,
               imageKeyPrefix: q['imageKeyPrefix'],
+              imageScopeKey: q['imageScopeKey'],
               runId: List.generate(
                 16,
                 (_) =>
@@ -173,6 +182,8 @@ class _PageProbe {
       'bufferingEvents': sample?.bufferingEvents ?? const [],
       'contentKey': sample?.contentKey,
       'actionKey': sample?.actionKey,
+      'imageKeyPrefix': sample?.imageKeyPrefix,
+      'imageScopeKey': sample?.imageScopeKey,
       'firstContentMs': sample?.contentMs,
       'firstRenderedImageMs': sample?.renderedImageMs,
       'visibleImageCount': sample?.visibleImageKeys.length ?? 0,
@@ -244,7 +255,10 @@ class _PageProbe {
               sample.renderedImageMs = ms;
             }
             final imagePrefix = sample.imageKeyPrefix;
-            if (imagePrefix != null && key.value.startsWith(imagePrefix)) {
+            if (imagePrefix != null &&
+                imagePrefix.isNotEmpty &&
+                key.value.startsWith(imagePrefix) &&
+                imageWithinScope(element, sample.imageScopeKey!)) {
               sample.visibleImageKeys.add(key.value);
               if (!sample.visibleImageCompletionMs.containsKey(key.value) &&
                   hasDecodedImage(element, viewport: viewport)) {
@@ -293,6 +307,7 @@ class _PageSample {
     required this.contentKey,
     required this.actionKey,
     required this.imageKeyPrefix,
+    required this.imageScopeKey,
     required this.runId,
     required this.frames,
   }) {
@@ -301,6 +316,7 @@ class _PageSample {
 
   final String label, cacheMode, device, buildId, contentKey, actionKey, runId;
   final String? imageKeyPrefix;
+  final String? imageScopeKey;
   final Set<String> visibleImageKeys = {};
   final Map<String, double> visibleImageCompletionMs = {};
   final MobileFrameTimingWindow frames;
@@ -363,6 +379,20 @@ class _PageSample {
   }
 
   bool get complete => contentMs != null && operableMs != null;
+}
+
+/// Ensures an image measurement belongs to the requested grid, even when
+/// another page or home rail uses a similar card key in the same navigator.
+bool imageWithinScope(Element element, String scopeKey) {
+  var inside = false;
+  element.visitAncestorElements((ancestor) {
+    if (ancestor.widget.key == ValueKey<String>(scopeKey)) {
+      inside = true;
+      return false;
+    }
+    return true;
+  });
+  return inside;
 }
 
 /// A decoded image counts only when its painted bounds survive visible clips.
