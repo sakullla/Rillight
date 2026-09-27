@@ -105,6 +105,7 @@ class PlaybackHttpProxy {
   int _segmentPrefetchGeneration = 0;
   final _segmentPrefetchJobs = <String, _SegmentPrefetchJob>{};
   final _pendingSegmentPrefetch = <String, _HlsNext>{};
+  Future<void>? _segmentPrefetchCapacityWakeup;
   int _segmentPrefetchPeak = 0;
   int _segmentPrefetchPreemptions = 0;
   int _segmentPrefetchDownloadedBytes = 0;
@@ -644,7 +645,7 @@ class PlaybackHttpProxy {
       }
     } finally {
       _charge(-1024 * 1024);
-      _cacheWorkspace -= 1024 * 1024;
+      _releaseCacheWorkspace(1024 * 1024);
       _refreshingTimeline = false;
     }
   }
@@ -747,7 +748,7 @@ class PlaybackHttpProxy {
                 }
               } finally {
                 _charge(-1024 * 1024);
-                _cacheWorkspace -= 1024 * 1024;
+                _releaseCacheWorkspace(1024 * 1024);
               }
               if (result != null) {
                 if (_hlsProbeCache.length >= 64) {
@@ -1292,6 +1293,11 @@ class PlaybackHttpProxy {
     return true;
   }
 
+  void _releaseCacheWorkspace(int bytes) {
+    _cacheWorkspace -= bytes;
+    if (_pendingSegmentPrefetch.isNotEmpty) _pumpSegmentPrefetch();
+  }
+
   Future<void> _discard(HttpClientResponse response, _ProxyRead read) async {
     final iterator = StreamIterator(response);
     read.iterators.add(iterator);
@@ -1389,8 +1395,30 @@ class PlaybackHttpProxy {
         _cacheWorkspace >= workspaceLimit;
   }
 
+  void _armSegmentPrefetchCapacityWakeup() {
+    final storage = cache;
+    if (storage == null ||
+        _pendingSegmentPrefetch.isEmpty ||
+        _segmentPrefetchCapacityWakeup != null) {
+      return;
+    }
+    final wakeup = storage.pendingChanged;
+    _segmentPrefetchCapacityWakeup = wakeup;
+    unawaited(
+      wakeup.whenComplete(() {
+        if (!identical(_segmentPrefetchCapacityWakeup, wakeup)) return;
+        _segmentPrefetchCapacityWakeup = null;
+        _pumpSegmentPrefetch();
+      }),
+    );
+  }
+
   void _pumpSegmentPrefetch() {
-    if (_closed || !_playbackActive || _segmentPrefetchPressured) return;
+    if (_closed || !_playbackActive) return;
+    if (_segmentPrefetchPressured) {
+      _armSegmentPrefetchCapacityWakeup();
+      return;
+    }
     // At most two playlist owners may speculate. Keep two of the eight proxy
     // request slots exclusively available to foreground playback/control.
     while (_segmentPrefetchJobs.length < 2 &&
@@ -1904,7 +1932,7 @@ class PlaybackHttpProxy {
           },
           releaseWorkspace: () {
             _charge(-SessionReadAhead.blockBytes);
-            _cacheWorkspace -= SessionReadAhead.blockBytes;
+            _releaseCacheWorkspace(SessionReadAhead.blockBytes);
           },
           fetch: (start, end) async {
             final producer = _ProxyRead();
@@ -2078,7 +2106,7 @@ class PlaybackHttpProxy {
       }
     } finally {
       _charge(-512 * 1024);
-      _cacheWorkspace -= 512 * 1024;
+      _releaseCacheWorkspace(512 * 1024);
     }
   }
 
@@ -2525,7 +2553,7 @@ class PlaybackHttpProxy {
         try {
           if (await _tryCached(incoming, key, url, read)) return;
         } finally {
-          _cacheWorkspace -= _cachedResponseWorkspace;
+          _releaseCacheWorkspace(_cachedResponseWorkspace);
         }
       }
       var (response, effective) = await _fetch(
@@ -3168,7 +3196,7 @@ class PlaybackHttpProxy {
             }
             if (assemblyReserved) {
               _charge(-blockSize);
-              _cacheWorkspace -= blockSize;
+              _releaseCacheWorkspace(blockSize);
             }
             if (!complete &&
                 representation != null &&
@@ -3450,7 +3478,7 @@ class PlaybackHttpProxy {
       }
     } finally {
       _charge(-512 * 1024);
-      _cacheWorkspace -= 512 * 1024;
+      _releaseCacheWorkspace(512 * 1024);
     }
   }
 

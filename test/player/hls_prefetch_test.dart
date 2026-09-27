@@ -203,6 +203,112 @@ void main() {
   });
 
   test(
+    'queued owner resumes when transient disk pending pressure clears',
+    () async {
+      final root = await Directory.systemTemp.createTemp(
+        'rillight-hls-prefetch-',
+      );
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final cache = await SessionByteCache.open(
+        root: root,
+        memoryLimitBytes: 2 * 1024 * 1024,
+        diskLimitBytes: 8 * 1024 * 1024,
+        pendingLimitBytes: 2 * 1024 * 1024,
+      );
+      final proxy = await PlaybackHttpProxy.create(cache: cache);
+      final client = HttpClient();
+      final releases = <String, Completer<void>>{};
+      final entered = <String>{};
+      server.listen((request) async {
+        final path = request.uri.path;
+        try {
+          if (path.endsWith('.m3u8')) {
+            final owner = path.substring(1, path.length - 5);
+            request.response.headers.contentType = ContentType(
+              'application',
+              'vnd.apple.mpegurl',
+            );
+            request.response.write(
+              '#EXTM3U\n#EXTINF:2,\n${owner}0.ts\n#EXTINF:2,\n${owner}1.ts\n#EXT-X-ENDLIST\n',
+            );
+          } else {
+            request.response.headers.set('etag', '"$path"');
+            request.response.headers.set('cache-control', 'max-age=120');
+            request.response.contentLength = 1024;
+            if (path.endsWith('1.ts')) {
+              entered.add(path);
+              await releases.putIfAbsent(path, Completer<void>.new).future;
+            }
+            request.response.add(List<int>.filled(1024, 7));
+          }
+          await request.response.close();
+        } catch (_) {}
+      });
+      final origin = Uri.parse('http://127.0.0.1:${server.port}/');
+
+      Future<List<Uri>> playlist(String owner) async {
+        final response = await (await client.getUrl(
+          proxy.register(origin.resolve('$owner.m3u8')),
+        )).close();
+        final text = await response.transform(utf8.decoder).join();
+        return text
+            .split('\n')
+            .where((line) => line.startsWith('http://'))
+            .map(Uri.parse)
+            .toList();
+      }
+
+      Future<void> read(Uri uri) async {
+        await (await (await client.getUrl(uri)).close()).drain<void>();
+      }
+
+      try {
+        for (final owner in ['a', 'b', 'c']) {
+          final segments = await playlist(owner);
+          await read(segments.first);
+        }
+        final activeDeadline = DateTime.now().add(const Duration(seconds: 3));
+        while ((entered.length < 2 ||
+                proxy.diagnostics['segmentPrefetchPending'] != 1) &&
+            DateTime.now().isBefore(activeDeadline)) {
+          await Future<void>.delayed(const Duration(milliseconds: 10));
+        }
+        expect(entered.length, 2);
+        expect(proxy.diagnostics['segmentPrefetchPending'], 1);
+
+        await cache.resize(
+          memoryBytes: 2 * 1024 * 1024,
+          pendingBytes: 0,
+          diskBytes: 8 * 1024 * 1024,
+        );
+        releases.values.first.complete();
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+        expect(entered.length, 2);
+        expect(proxy.diagnostics['segmentPrefetchPending'], 1);
+
+        await cache.resize(
+          memoryBytes: 2 * 1024 * 1024,
+          pendingBytes: 2 * 1024 * 1024,
+          diskBytes: 8 * 1024 * 1024,
+        );
+        final resumedDeadline = DateTime.now().add(const Duration(seconds: 3));
+        while (entered.length < 3 && DateTime.now().isBefore(resumedDeadline)) {
+          await Future<void>.delayed(const Duration(milliseconds: 10));
+        }
+        expect(entered.length, 3);
+      } finally {
+        for (final release in releases.values) {
+          if (!release.isCompleted) release.complete();
+        }
+        client.close(force: true);
+        await proxy.close();
+        await server.close(force: true);
+        await root.delete(recursive: true);
+      }
+    },
+  );
+
+  test(
     'a transient next-segment failure recovers before foreground consumption',
     () async {
       final fixture = await _SlowHls.open(nextFailures: 1);
