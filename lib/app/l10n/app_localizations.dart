@@ -1912,6 +1912,30 @@ abstract class AppLocalizations {
   /// **'来源'**
   String get mobileSource;
 
+  /// Visible feedback while a phone player source switch is pending.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在切换来源…'**
+  String get mobileSourceSwitching;
+
+  /// Shown before the active playback source is committed.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在确认当前来源…'**
+  String get mobileSourceConfirming;
+
+  /// Shown after a failed source switch returns to the previously playable source.
+  ///
+  /// In zh, this message translates to:
+  /// **'来源切换失败，原来源已恢复'**
+  String get mobileSourceSwitchFailed;
+
+  /// Shown when a phone player source switch fails without restoring playback.
+  ///
+  /// In zh, this message translates to:
+  /// **'来源切换失败，请重试'**
+  String get mobileSourceSwitchFailedRetry;
+
   /// Hint shown briefly beside the phone player's explicit unlock button.
   ///
   /// In zh, this message translates to:

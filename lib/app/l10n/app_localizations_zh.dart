@@ -964,6 +964,18 @@ class AppLocalizationsZh extends AppLocalizations {
   String get mobileSource => '来源';
 
   @override
+  String get mobileSourceSwitching => '正在切换来源…';
+
+  @override
+  String get mobileSourceConfirming => '正在确认当前来源…';
+
+  @override
+  String get mobileSourceSwitchFailed => '来源切换失败，原来源已恢复';
+
+  @override
+  String get mobileSourceSwitchFailedRetry => '来源切换失败，请重试';
+
+  @override
   String get mobileLockedHint => '已锁定 · 点右上角解锁';
 
   @override

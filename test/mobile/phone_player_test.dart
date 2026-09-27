@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui' show DisplayFeature, DisplayFeatureState, DisplayFeatureType;
 
 import 'package:dio/dio.dart';
@@ -611,10 +612,11 @@ void main() {
   testWidgets('failed system brightness gesture shows no invented percent', (
     tester,
   ) async {
+    final display = _FailDisplayControl();
     await showPlayer(
       tester,
       itemId: 'movie-inception',
-      display: _FailDisplayControl(),
+      display: display,
       wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
     );
     final drag = await tester.startGesture(const Offset(200, 170));
@@ -624,6 +626,45 @@ void main() {
     expect(find.text('系统调节暂不可用'), findsOneWidget);
     expect(find.byKey(const Key('mobile-player-gesture-value')), findsNothing);
     await drag.up();
+    final volume = await tester.startGesture(const Offset(600, 170));
+    await volume.moveBy(const Offset(0, -40));
+    await volume.moveBy(const Offset(0, -40));
+    await tester.pump();
+    expect(display.volumeValue, greaterThan(0.5));
+    expect(
+      find.byKey(const Key('mobile-player-gesture-value')),
+      findsOneWidget,
+    );
+    await volume.up();
+    await closePlayer(tester);
+  }, tags: ['integration']);
+
+  testWidgets('invalid brightness read leaves volume gesture available', (
+    tester,
+  ) async {
+    final display = _InvalidBrightnessDisplayControl();
+    await showPlayer(
+      tester,
+      itemId: 'movie-inception',
+      display: display,
+      wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
+    );
+    final brightness = await tester.startGesture(const Offset(200, 170));
+    await brightness.moveBy(const Offset(0, -40));
+    await brightness.moveBy(const Offset(0, -40));
+    await tester.pump();
+    expect(find.text('系统调节暂不可用'), findsOneWidget);
+    await brightness.up();
+    final volume = await tester.startGesture(const Offset(600, 170));
+    await volume.moveBy(const Offset(0, -40));
+    await volume.moveBy(const Offset(0, -40));
+    await tester.pump();
+    expect(display.volumeValue, greaterThan(0.5));
+    expect(
+      find.byKey(const Key('mobile-player-gesture-value')),
+      findsOneWidget,
+    );
+    await volume.up();
     await closePlayer(tester);
   }, tags: ['integration']);
 
@@ -732,12 +773,12 @@ void main() {
     tags: ['integration'],
   );
 
-  testWidgets('multiple sources appear only in more, never in quality', (
-    tester,
-  ) async {
+  testWidgets('source panel announces initial selection state', (tester) async {
     final current = await showPlayer(
       tester,
       itemId: 'movie-inception',
+      backend: FakeVideoBackend(),
+      size: const Size(360, 800),
       prepare: (server) {
         server.items
             .firstWhere((item) => item.id == 'movie-inception')
@@ -748,44 +789,143 @@ void main() {
       wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
     );
     expect(current.canSwitchMediaSource, isTrue);
-    expect(find.text('来源'), findsNothing);
-    await tester.tap(find.byKey(const Key('mobile-player-quality')));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 400));
-    expect(find.text('来源'), findsNothing);
-    expect(find.text('另一个版本'), findsNothing);
-    await tester.binding.handlePopRoute();
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 400));
     await tester.tap(find.byKey(const Key('mobile-player-more')));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
-    expect(find.text('来源'), findsOneWidget);
-    expect(find.text('另一个版本'), findsNothing);
-    final sourceEntry = find.byKey(const Key('mobile-player-source-entry'));
-    await tester.ensureVisible(sourceEntry);
+    await tester.tap(find.byKey(const Key('mobile-player-source-entry')));
     await tester.pump();
-    await tester.tap(sourceEntry);
-    await tester.pump();
-    expect(find.text('来源'), findsOneWidget);
     expect(find.text('另一个版本'), findsOneWidget);
-    final alternate = find.byKey(const Key('mobile-source-alternate'));
-    expect(alternate, findsOneWidget);
-    await tester.ensureVisible(alternate);
-    await tester.tap(alternate);
-    for (var i = 0; i < 40; i++) {
-      await tester.pump(const Duration(milliseconds: 20));
-      if (!current.loading && current.activeMediaSourceId == 'alternate') break;
+    expect(find.bySemanticsLabel(RegExp('另一个版本')), findsWidgets);
+    if (current.activeMediaSourceId == null) {
+      expect(find.text('正在确认当前来源…'), findsOneWidget);
+      for (final source in current.mediaSources) {
+        expect(
+          tester
+              .widget<ListTile>(
+                find.byKey(ValueKey('mobile-source-${source.id}')),
+              )
+              .selected,
+          isFalse,
+        );
+      }
     }
-    expect(current.activeMediaSourceId, 'alternate');
-    await tester.tap(find.widgetWithText(TextButton, '返回'));
-    await tester.pump();
-    expect(find.byKey(const Key('mobile-player-source-entry')), findsOneWidget);
     await tester.binding.handlePopRoute();
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
     await closePlayer(tester);
+    expect(tester.takeException(), isNull);
   }, tags: ['integration']);
+
+  testWidgets(
+    'multiple sources appear only in more, never in quality',
+    (tester) async {
+      final backend = _ControlledSourceBackend();
+      final current = await showPlayer(
+        tester,
+        itemId: 'movie-inception',
+        backend: backend,
+        size: const Size(360, 800),
+        prepare: (server) {
+          server.items
+              .firstWhere((item) => item.id == 'movie-inception')
+              .extraSources = const [
+            FakeMediaSource(id: 'alternate', name: '另一个版本'),
+          ];
+        },
+        wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
+      );
+      await tester.runAsync(
+        () async => Future<void>.delayed(const Duration(milliseconds: 100)),
+      );
+      await tester.pump();
+      expect(current.canSwitchMediaSource, isTrue);
+      expect(find.text('来源'), findsNothing);
+      await tester.tap(find.byKey(const Key('mobile-player-quality')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.text('来源'), findsNothing);
+      expect(find.text('另一个版本'), findsNothing);
+      await tester.binding.handlePopRoute();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.tap(find.byKey(const Key('mobile-player-more')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.text('来源'), findsOneWidget);
+      expect(find.text('另一个版本'), findsNothing);
+      final sourceEntry = find.byKey(const Key('mobile-player-source-entry'));
+      await tester.ensureVisible(sourceEntry);
+      await tester.pump();
+      await tester.tap(sourceEntry);
+      await tester.pump();
+      expect(find.text('来源'), findsOneWidget);
+      expect(find.text('另一个版本'), findsOneWidget);
+      final alternate = find.byKey(const Key('mobile-source-alternate'));
+      expect(alternate, findsOneWidget);
+      await tester.ensureVisible(alternate);
+      final originalId = current.resolved!.mediaSource.id;
+      await tester.tap(alternate);
+      for (var i = 0; i < 40; i++) {
+        await tester.pump(const Duration(milliseconds: 20));
+        if (!current.loading && current.activeMediaSourceId == 'alternate') {
+          break;
+        }
+      }
+      expect(current.activeMediaSourceId, 'alternate');
+      expect(current.pendingMediaSourceId, isNull);
+      expect(find.text('正在切换来源…'), findsNothing);
+      await tester.tap(find.widgetWithText(TextButton, '返回'));
+      await tester.pump();
+      await tester.binding.handlePopRoute();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.tap(find.byKey(const Key('mobile-player-more')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.tap(find.byKey(const Key('mobile-player-source-entry')));
+      await tester.pump();
+      final gate = Completer<void>();
+      backend.blockNext = gate;
+      backend.failNext = true;
+      final original = find.byKey(ValueKey('mobile-source-$originalId'));
+      await tester.ensureVisible(original);
+      await tester.tap(original);
+      await tester.pump();
+      expect(current.pendingMediaSourceId, originalId);
+      expect(current.activeMediaSourceId, 'alternate');
+      expect(find.text('正在切换来源…'), findsOneWidget);
+      expect(
+        tester
+            .widget<Icon>(
+              find.byKey(ValueKey('mobile-source-icon-$originalId')),
+            )
+            .icon,
+        Icons.hourglass_top,
+      );
+      expect(tester.widget<ListTile>(alternate).selected, isTrue);
+      expect(tester.widget<ListTile>(original).selected, isFalse);
+      gate.complete();
+      for (var i = 0; i < 40; i++) {
+        await tester.pump(const Duration(milliseconds: 20));
+        if (!current.isRecovering) break;
+      }
+      expect(current.activeMediaSourceId, 'alternate');
+      expect(current.error, isNull);
+      expect(find.text('来源切换失败，原来源已恢复'), findsOneWidget);
+      await tester.tap(find.widgetWithText(TextButton, '返回'));
+      await tester.pump();
+      expect(
+        find.byKey(const Key('mobile-player-source-entry')),
+        findsOneWidget,
+      );
+      await tester.binding.handlePopRoute();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      await closePlayer(tester);
+    },
+    tags: ['integration'],
+    semanticsEnabled: false,
+  );
 
   testWidgets(
     'fit is the default scale with central transport and a full-width timeline',
@@ -855,6 +995,51 @@ void main() {
     },
     tags: ['integration'],
   );
+
+  testWidgets('unknown duration disables every phone seek entry', (
+    tester,
+  ) async {
+    final backend = FakeVideoBackend(duration: Duration.zero);
+    final current = await showPlayer(
+      tester,
+      itemId: 'movie-inception',
+      backend: backend,
+      mediaDuration: Duration.zero,
+      prepare: (server) {
+        final movie = server.items.firstWhere(
+          (item) => item.id == 'movie-inception',
+        );
+        movie.runTimeTicks = 0;
+        movie.playbackPositionTicks = 0;
+      },
+      wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
+    );
+    expect(current.duration, Duration.zero);
+    expect(
+      tester
+          .widget<IconButton>(find.byKey(const Key('mobile-player-rewind')))
+          .onPressed,
+      isNull,
+    );
+    expect(
+      tester
+          .widget<IconButton>(find.byKey(const Key('mobile-player-forward')))
+          .onPressed,
+      isNull,
+    );
+    expect(
+      tester
+          .widget<Slider>(find.byKey(const Key('mobile-player-seek')))
+          .onChanged,
+      isNull,
+    );
+    await tester.tapAt(const Offset(600, 150));
+    await tester.pump(const Duration(milliseconds: 60));
+    await tester.tapAt(const Offset(600, 150));
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(backend.position, Duration.zero);
+    await closePlayer(tester);
+  }, tags: ['integration']);
 
   testWidgets('player controls fade instead of popping', (tester) async {
     final current = await showPlayer(
@@ -1474,6 +1659,23 @@ class _RetryOpenBackend extends FakeVideoBackend {
   }
 }
 
+class _ControlledSourceBackend extends FakeVideoBackend {
+  Completer<void>? blockNext;
+  bool failNext = false;
+
+  @override
+  Future<void> open(VideoOpenRequest request) async {
+    final gate = blockNext;
+    blockNext = null;
+    if (gate != null) await gate.future;
+    if (failNext) {
+      failNext = false;
+      throw StateError('selected source could not open');
+    }
+    await super.open(request);
+  }
+}
+
 class _FakeDisplayControl implements PhoneDisplayControl {
   double _brightness = 0.5;
   double _volume = 0.5;
@@ -1499,6 +1701,11 @@ class _FailDisplayControl extends _FakeDisplayControl {
   Future<void> setBrightness(double value) async {
     throw StateError('platform denied brightness');
   }
+}
+
+class _InvalidBrightnessDisplayControl extends _FakeDisplayControl {
+  @override
+  Future<double> brightness() async => -1;
 }
 
 class _NullHasher extends DanmakuStreamHasher {

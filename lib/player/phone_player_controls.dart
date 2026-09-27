@@ -314,13 +314,16 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
   Widget _buildTransport(BuildContext context, bool landscape) {
     final l = AppLocalizations.of(context);
     final c = _controller;
+    final canSeek = widget.interaction.canSeek(c);
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
         _transportButton(
           key: const Key('mobile-player-rewind'),
           tooltip: l.mobileRewind,
-          onPressed: () => c.seekRelative(const Duration(seconds: -10)),
+          onPressed: canSeek
+              ? () => c.seekRelative(const Duration(seconds: -10))
+              : null,
           icon: Icons.replay_10,
         ),
         SizedBox(width: landscape ? 40 : 28),
@@ -335,7 +338,9 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
         _transportButton(
           key: const Key('mobile-player-forward'),
           tooltip: l.mobileForward,
-          onPressed: () => c.seekRelative(const Duration(seconds: 10)),
+          onPressed: canSeek
+              ? () => c.seekRelative(const Duration(seconds: 10))
+              : null,
           icon: Icons.forward_10,
         ),
       ],
@@ -349,6 +354,7 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
   ) {
     final l = AppLocalizations.of(context);
     final c = _controller;
+    final canSeek = widget.interaction.canSeek(c);
     final durationMs = c.duration.inMilliseconds.toDouble();
     final cache = PlayerCacheStatus(
       key: const Key('mobile-player-cache-status'),
@@ -407,18 +413,16 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                   durationMs,
                 ),
                 max: durationMs.clamp(1, double.infinity),
-                onChangeStart: _canControl
+                onChangeStart: canSeek
                     ? (_) {
                         _seekRelease ??= widget.interaction.occupy();
                         c.setControlsPinned(true);
                       }
                     : null,
-                onChanged: _canControl
-                    ? (v) => setState(() => _seek = v)
-                    : null,
+                onChanged: canSeek ? (v) => setState(() => _seek = v) : null,
                 onChangeEnd: (v) {
                   setState(() => _seek = null);
-                  if (!locked && _canControl) {
+                  if (widget.interaction.canSeek(c)) {
                     c.seekTo(Duration(milliseconds: v.round()));
                   }
                   _releaseSeek();
@@ -555,6 +559,7 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
   Future<void> _openMore({String? section}) async {
     final c = _controller;
     final sectionState = ValueNotifier<String?>(section);
+    String? attemptedSourceId;
     final danmaku = widget.danmaku?.isConfigured == true
         ? widget.danmaku
         : null;
@@ -566,6 +571,19 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
       listenable: Listenable.merge([c, danmaku, sectionState]),
       builder: (context, _) {
         final section = sectionState.value;
+        final sourceSwitchFailed =
+            (attemptedSourceId != null &&
+                c.activeMediaSourceId != attemptedSourceId) ||
+            c.trackFailure?.startsWith('Source change failed') == true;
+        final sourceStatus = c.isRecovering && c.pendingMediaSourceId != null
+            ? AppLocalizations.of(context).mobileSourceSwitching
+            : sourceSwitchFailed
+            ? c.error == null
+                  ? AppLocalizations.of(context).mobileSourceSwitchFailed
+                  : AppLocalizations.of(context).mobileSourceSwitchFailedRetry
+            : c.activeMediaSourceId == null
+            ? AppLocalizations.of(context).mobileSourceConfirming
+            : '';
         return SingleChildScrollView(
           padding: const EdgeInsets.all(20),
           child: Column(
@@ -606,14 +624,35 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                 const Divider(),
               ],
               if (section == 'source' && c.canSwitchMediaSource) ...[
+                SizedBox(
+                  height: 40,
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      sourceStatus,
+                      key: const Key('mobile-source-status'),
+                    ),
+                  ),
+                ),
                 for (final source in c.mediaSources)
                   ListTile(
                     key: ValueKey('mobile-source-${source.id}'),
                     selected: source.id == c.activeMediaSourceId,
+                    leading: Icon(
+                      c.pendingMediaSourceId == source.id && c.isRecovering
+                          ? Icons.hourglass_top
+                          : source.id == c.activeMediaSourceId
+                          ? Icons.check_circle
+                          : Icons.radio_button_unchecked,
+                      key: ValueKey('mobile-source-icon-${source.id}'),
+                    ),
                     title: Text(source.name ?? source.id),
                     onTap: c.loading
                         ? null
-                        : () => unawaited(c.switchMediaSource(source.id)),
+                        : () {
+                            attemptedSourceId = source.id;
+                            unawaited(c.switchMediaSource(source.id));
+                          },
                   ),
                 const Divider(),
               ],

@@ -16,6 +16,15 @@ class PhonePlayerInteraction extends ChangeNotifier {
   bool get occupied => _occupancy > 0;
   String? get panel => _panel;
 
+  bool canSeek(PlayerController controller) =>
+      !_locked &&
+      !controller.loading &&
+      controller.error == null &&
+      !controller.disconnected &&
+      !controller.sessionExpired &&
+      !controller.playbackEnded &&
+      controller.duration > Duration.zero;
+
   bool controlsVisibleFor(PlayerController controller) {
     if (_locked) return _unlockVisible;
     return _occupancy > 0 ||

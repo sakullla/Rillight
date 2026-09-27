@@ -35,7 +35,9 @@ class MethodChannelPhoneDisplayControl implements PhoneDisplayControl {
   @override
   Future<double> brightness() async {
     final value = await _channel.invokeMethod<double>('getSystemBrightness');
-    if (value == null || value < 0) throw StateError('Brightness unavailable');
+    if (value == null || value < 0 || value > 1) {
+      throw StateError('Brightness unavailable');
+    }
     return value;
   }
 
@@ -47,7 +49,9 @@ class MethodChannelPhoneDisplayControl implements PhoneDisplayControl {
   @override
   Future<double> volume() async {
     final value = await _channel.invokeMethod<double>('getSystemVolume');
-    if (value == null || value < 0) throw StateError('Volume unavailable');
+    if (value == null || value < 0 || value > 1) {
+      throw StateError('Volume unavailable');
+    }
     return value;
   }
 
@@ -118,18 +122,12 @@ class _PhonePlayerGesturesState extends State<PhonePlayerGestures> {
   bool _dragAllowed = false;
   bool _verticalLeft = false;
   int _inputGeneration = 0;
-  bool _platformAvailable = true;
+  bool _brightnessAvailable = false;
+  bool _volumeAvailable = false;
   Object? _playbackIdentity;
   TapDownDetails? _doubleTapDown;
 
-  bool get _canSeek =>
-      !widget.interaction.locked &&
-      !_controller.loading &&
-      _controller.error == null &&
-      !_controller.disconnected &&
-      !_controller.sessionExpired &&
-      !_controller.playbackEnded &&
-      _controller.duration > Duration.zero;
+  bool get _canSeek => widget.interaction.canSeek(_controller);
 
   bool _inSystemEdge(Offset local) {
     final width = context.size?.width ?? 0;
@@ -172,7 +170,11 @@ class _PhonePlayerGesturesState extends State<PhonePlayerGestures> {
       );
     } catch (_) {
       if (!mounted || generation != _inputGeneration) return;
-      _platformAvailable = false;
+      if (brightness) {
+        _brightnessAvailable = false;
+      } else {
+        _volumeAvailable = false;
+      }
       _showOverlay(
         const _GestureOverlay(_GestureOverlayKind.unavailable, null),
       );
@@ -215,14 +217,28 @@ class _PhonePlayerGesturesState extends State<PhonePlayerGestures> {
   }
 
   Future<void> _readDisplay() async {
+    await Future.wait([_readBrightness(), _readVolume()]);
+  }
+
+  Future<void> _readBrightness() async {
     try {
       final brightness = await widget.display.brightness();
-      final volume = await widget.display.volume();
-      if (!mounted) return;
+      if (!mounted || brightness < 0 || brightness > 1) return;
       _brightness = brightness;
-      _systemVolume = volume;
+      _brightnessAvailable = true;
     } catch (_) {
-      _platformAvailable = false;
+      _brightnessAvailable = false;
+    }
+  }
+
+  Future<void> _readVolume() async {
+    try {
+      final volume = await widget.display.volume();
+      if (!mounted || volume < 0 || volume > 1) return;
+      _systemVolume = volume;
+      _volumeAvailable = true;
+    } catch (_) {
+      _volumeAvailable = false;
     }
   }
 
@@ -289,18 +305,18 @@ class _PhonePlayerGesturesState extends State<PhonePlayerGestures> {
     if (!_dragAllowed || widget.interaction.locked) return;
     final size = context.size;
     if (size == null || size.height <= 0) return;
-    if (!_platformAvailable) {
+    if (_verticalLeft ? !_brightnessAvailable : !_volumeAvailable) {
       _showOverlay(
         const _GestureOverlay(_GestureOverlayKind.unavailable, null),
       );
       return;
     }
     if (_verticalLeft) {
-      final base = _brightness ?? 0.5;
+      final base = _brightness!;
       final value = (base - details.delta.dy / size.height).clamp(0.0, 1.0);
       unawaited(_applyDisplay(value, brightness: true));
     } else {
-      final base = _systemVolume ?? 0.5;
+      final base = _systemVolume!;
       final value = (base - details.delta.dy / size.height).clamp(0.0, 1.0);
       unawaited(_applyDisplay(value, brightness: false));
     }

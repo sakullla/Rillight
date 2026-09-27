@@ -1206,6 +1206,22 @@
   "@mobileSource": {
     "description": "Phone player source section inside More, separate from quality."
   },
+  "mobileSourceSwitching": "正在切换来源…",
+  "@mobileSourceSwitching": {
+    "description": "Visible feedback while a phone player source switch is pending."
+  },
+  "mobileSourceConfirming": "正在确认当前来源…",
+  "@mobileSourceConfirming": {
+    "description": "Shown before the active playback source is committed."
+  },
+  "mobileSourceSwitchFailed": "来源切换失败，原来源已恢复",
+  "@mobileSourceSwitchFailed": {
+    "description": "Shown after a failed source switch returns to the previously playable source."
+  },
+  "mobileSourceSwitchFailedRetry": "来源切换失败，请重试",
+  "@mobileSourceSwitchFailedRetry": {
+    "description": "Shown when a phone player source switch fails without restoring playback."
+  },
   "mobileLockedHint": "已锁定 · 点右上角解锁",
   "@mobileLockedHint": {
     "description": "Hint shown briefly beside the phone player's explicit unlock button."
