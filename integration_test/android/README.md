@@ -1,7 +1,7 @@
 # Android device validation
 
 Use Flutter 3.47.4, Android SDK API 36/build-tools 36, NDK with
-`llvm-readelf`, JDK 17+ and FFmpeg on PATH. Set `RILLIGHT_CORE_SDK_ROOT` to the
+`llvm-readelf`, JDK 17+, FFmpeg and ffprobe on PATH. Set `RILLIGHT_CORE_SDK_ROOT` to the
 pinned Android core SDK containing `arm64-v8a`, `armeabi-v7a` and `x86_64`
 prefixes before building.
 Install Python dependencies in a virtual environment:
@@ -60,7 +60,9 @@ POST `/__control` accepts `offline`, `expired`, `auth_fail`, `empty`, `report_fa
 sanitized request paths and synthetic reports. Use both expired/auth_fail to
 exercise unrecoverable authentication, since normal synthetic refresh succeeds.
 The `multi-source` movie exposes two versions with separate IDs, tracks and
-durations. Its alternate URL serves the synthetic media and accepts source-only
+durations. Generation writes an independent 45-second alternate MKV with only
+the second audio track, and ffprobe verifies its actual EOF and track inventory.
+Its alternate URL serves those distinct bytes and accepts source-only
 failure or delay injection. Use it for switch, rollback, timeout and late-result
 checks; the external Emby server is a single-source runtime check only.
 
@@ -68,17 +70,21 @@ For timed page runs launch `integration_test/mobile_performance.dart` in profile
 or release mode and forward device port 8798. POST `/begin` with `label`,
 `cache`, `device`, `build`, `contentKey` and `actionKey`; GET `/state` and POST
 `/end` retain the attempted run even on timeout. `firstContentMs` is keyed
-content visibility, while `firstRenderedImageMs` requires a decoded image under
-that key. Flutter frame timings use the engine's `FrameTiming` callback and
+content visibility, while `firstRenderedImageMs` requires a decoded image in
+nontransparent, unclipped viewport bounds under that key. `firstDisplayedImageMs`
+requires independent before/after screen evidence. Flutter frame timings use
+the engine's `FrameTiming` callback and
 report missing tail batches. Widget-test timings prove the collector contract;
 they are not device performance measurements. Debug frame timings are not
 comparable to profile/release measurements.
 
-The optional POST `/observe` accepts `kind: nativeFirstFrame` or
-`kind: displayedFrame`, `elapsedMs` since `/begin`, and
-`clockUncertaintyMs`. Display observations additionally require the SHA-256 of
-the saved screenshot. Use a changing, unobscured video region across two screen
-captures before setting `screenPixelChangeObserved: true` in a startup sample.
+The optional POST `/observe` accepts `kind: nativeFirstFrame`,
+`kind: displayedImage` or `kind: displayedFrame`, `elapsedMs` since `/begin`,
+and `clockUncertaintyMs`. Display observations additionally require the SHA-256
+of the saved screenshot. Use a changing, unobscured image/video region across
+two screen captures; the comparator recomputes the pixel change from both PNGs
+and checks their hashes and `screenRegion` before accepting a startup or image
+sample.
 The host must retain screenshot files and its clock alignment measurements;
 the core callback alone never fills the visible-frame metric. Observations
 with uncertainty above 100 ms are rejected by the probe. Android phone energy

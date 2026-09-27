@@ -134,10 +134,12 @@ state. It never deletes outliers or treats missing samples as fast samples.
 
 Android phone additionally requires `image`, `startup`, `power` and `thermal`
 categories at the same minimum 20 attempts per matched scenario. Image samples
-need `firstRenderedImageMs` and `renderedImageObserved: true` from a decoded
-visible `RenderImage`; a keyed placeholder is only `firstContentMs`. Startup
-samples need `firstDisplayedFrameMs`, a hashed screen observation file,
-`screenPixelChangeObserved: true` and clock uncertainty at most 100 ms. Native
+need `firstDisplayedImageMs` plus `renderedImageObserved: true` from a decoded
+image whose bounds survive opacity, clipping and viewport checks. A keyed
+placeholder is only `firstContentMs`. Image and startup samples require hashed
+before/after PNG captures, a `screenRegion` of at least 48×48 pixels with
+computed mean RGB change of at least 2, `screenPixelChangeObserved: true` and
+clock uncertainty at most 100 ms. Startup uses `firstDisplayedFrameMs`. Native
 `firstFrame` is a separate timestamp, never a substitute for displayed pixels.
 Power and thermal attempts require a physical phone, at least five minutes per
 run, measured `energyMWh` or `tempRiseC`, method, initial temperature,
@@ -150,10 +152,18 @@ For the current phone candidate run `python tool/phone_player_validation.py
 --verify-candidate --evidence-root build/phone-player-validation`. It writes
 `result.json` with Git revision and working-tree content hashes and checks the
 current Android 360dp/412dp/TV runner, paired baseline/candidate samples and
-physical-phone observations. Supply `physical-phone.json` under that ignored
-root with the same `candidate_head`, `working_tree_sha256`, APK path/hash and
-physical device fingerprint. Each check named by `PHYSICAL_CHECKS` in the
-validator needs `passed: true`, a relative evidence path and its SHA-256.
+physical-phone observations. The runner's audited `.validation` APK hash and
+source identity are saved in `candidate-build.json`; a valid manifest can be
+reused on a later run without deleting previous evidence. Supply
+`physical-phone.json` under that ignored root with the same `candidate_head`,
+`working_tree_sha256`, exact audited APK path/hash, physical device serial and
+fingerprint. The physical phone must still be connected, and its installed APK
+hash must equal the audited build. Each check named by `PHYSICAL_CHECKS` in the
+validator needs a hashed schema-2 observation with scenario-specific measured
+fields. Screen checks contain independently hashed before/after PNGs and pixel
+change; physical audio contains ambient/playback WAV captures; power/thermal
+contains repeated timed readings. Plain `passed` flags and placeholder JSON
+cannot satisfy the gate.
 This gate fails closed when the verified native SDK, device, samples or a check
 is unavailable. Emulator control results remain separate from physical output,
 audio and energy evidence. Never put runtime server details in repository files

@@ -17,6 +17,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--port', type=int, default=8784)
 parser.add_argument('--generate', action='store_true')
 parser.add_argument('--ffmpeg', default='ffmpeg')
+parser.add_argument('--ffprobe', default='ffprobe')
 parser.add_argument('--media', type=Path, required=True)
 parser.add_argument('--output', type=Path, default=Path('build/android-validation/fixture'))
 args = parser.parse_args()
@@ -34,6 +35,27 @@ if args.generate:
         '-metadata:s:s:0', 'language=eng', str(media / 'android-tracks.mkv')], check=True, timeout=180)
     subprocess.run([args.ffmpeg, '-y', '-i', str(media / 'android-tracks.mkv'), '-map', '0:v', '-map', '0:a:0',
         '-t', '12', '-c', 'copy', '-hls_time', '2', '-hls_list_size', '0', str(media / 'stream.m3u8')], check=True, timeout=60)
+    # The second source is a real shorter file with a distinct audio inventory.
+    # Its advertised 45-second duration must match the container's actual EOF.
+    alternate = media / 'alternate.mkv'
+    subprocess.run([args.ffmpeg, '-y', '-i', str(media / 'android-tracks.mkv'),
+        '-map', '0:v:0', '-map', '0:a:1', '-t', '45', '-c', 'copy', str(alternate)],
+        check=True, timeout=120)
+    probe = subprocess.run([args.ffprobe, '-v', 'error', '-show_entries',
+        'format=duration:stream=codec_type', '-of', 'json', str(alternate)],
+        check=True, capture_output=True, text=True, timeout=30)
+    details = json.loads(probe.stdout)
+    duration = float(details['format']['duration'])
+    tracks = [stream['codec_type'] for stream in details['streams']]
+    def digest(path):
+        result = hashlib.sha256()
+        with path.open('rb') as stream:
+            for block in iter(lambda: stream.read(1024 * 1024), b''):
+                result.update(block)
+        return result.digest()
+    if not 44 <= duration <= 46 or tracks != ['video', 'audio'] or \
+            digest(alternate) == digest(media / 'android-tracks.mkv'):
+        raise RuntimeError('Alternate media does not match its 45-second source metadata')
     raise SystemExit(0)
 output = args.output.resolve()
 output.mkdir(parents=True, exist_ok=True)
@@ -101,8 +123,8 @@ def source(identifier, force=False, variant='primary'):
     # different track identities and a shorter duration for resume clamping.
     if identifier == 'multi-source' and variant == 'alternate':
         streams = [{'Index': 0, 'Type': 'Video', 'Codec': 'h264', 'Width': 1280, 'Height': 720},
-                   {'Index': 5, 'Type': 'Audio', 'Codec': 'aac', 'Language': 'zho', 'IsDefault': True},
-                   {'Index': 6, 'Type': 'Subtitle', 'Codec': 'vtt', 'Language': 'zho',
+                   {'Index': 1, 'Type': 'Audio', 'Codec': 'aac', 'Language': 'zho', 'IsDefault': True},
+                   {'Index': 2, 'Type': 'Subtitle', 'Codec': 'vtt', 'Language': 'zho',
                     'IsTextSubtitleStream': True, 'IsExternal': True,
                     'DeliveryMethod': 'External', 'DeliveryUrl': '/media/sample.vtt'}]
     suffix = '-alternate' if variant == 'alternate' else '-source'
@@ -112,8 +134,8 @@ def source(identifier, force=False, variant='primary'):
               'RunTimeTicks': 450000000 if variant == 'alternate' else 120000000 if hls else 600210000,
               'SupportsDirectPlay': not hls, 'SupportsDirectStream': not hls,
               'SupportsTranscoding': True,
-              'DefaultAudioStreamIndex': 5 if variant == 'alternate' else 1,
-              'DefaultSubtitleStreamIndex': 6 if variant == 'alternate' else 4 if hls else 3,
+              'DefaultAudioStreamIndex': 1,
+              'DefaultSubtitleStreamIndex': 2 if variant == 'alternate' else 4 if hls else 3,
               'MediaStreams': streams}
     if hls:
         result['TranscodingUrl'] = '/media/stream.m3u8'
@@ -224,7 +246,6 @@ class Handler(BaseHTTPRequestHandler):
             if conditions['alternate_media_fail']:
                 self.reply({'Error': 'synthetic alternate failure'}, 503)
                 return
-            filename = 'android-tracks.mkv'
         if filename.endswith(('.srt', '.vtt')) and conditions['subtitle_delay_ms']:
             time.sleep(conditions['subtitle_delay_ms'] / 1000)
         target = (media / filename).resolve()

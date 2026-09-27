@@ -72,6 +72,7 @@ Map<String, Object?> summarizeMobileSamples(
 ) {
   final content = <double>[];
   final renderedImages = <double>[];
+  final displayedImages = <double>[];
   final displayedFrames = <double>[];
   final nativeFrames = <double>[];
   final clockUncertainty = <double>[];
@@ -89,11 +90,17 @@ Map<String, Object?> summarizeMobileSamples(
     final first = sample['firstContentMs'];
     final action = sample['firstOperableMs'];
     final rendered = sample['firstRenderedImageMs'];
+    final displayedImage = sample['firstDisplayedImageMs'];
     final displayed = sample['firstDisplayedFrameMs'];
     final native = sample['nativeFirstFrameMs'];
     final uncertainty = sample['displayedFrameClockUncertaintyMs'];
     if (sample['renderedImageObserved'] == true && rendered is num) {
       renderedImages.add(rendered.toDouble());
+    }
+    if (displayedImage is num &&
+        sample['displayedImageEvidenceSha256'] is String &&
+        sample['displayedImageClockUncertaintyMs'] is num) {
+      displayedImages.add(displayedImage.toDouble());
     }
     if (displayed is num &&
         sample['displayedFrameEvidenceSha256'] is String &&
@@ -151,6 +158,8 @@ Map<String, Object?> summarizeMobileSamples(
     'failures': failures,
     'firstContentMs': _summary(content),
     'firstRenderedImageMs': _summary(renderedImages),
+    'firstDisplayedImageMs': _summary(displayedImages),
+    'displayedImageSamples': displayedImages.length,
     'renderedImageSamples': renderedImages.length,
     'firstDisplayedFrameMs': _summary(displayedFrames),
     'displayedFrameSamples': displayedFrames.length,

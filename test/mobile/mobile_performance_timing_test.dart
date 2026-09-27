@@ -28,6 +28,7 @@ void main() {
     expect(
       probe.hasDecodedImage(
         tester.element(find.byKey(const ValueKey('content'))),
+        viewport: const Rect.fromLTWH(0, 0, 800, 600),
       ),
       isFalse,
     );
@@ -48,8 +49,81 @@ void main() {
     expect(
       probe.hasDecodedImage(
         tester.element(find.byKey(const ValueKey('content'))),
+        viewport: const Rect.fromLTWH(0, 0, 800, 600),
       ),
       isTrue,
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SizedBox(
+          key: const ValueKey('content'),
+          child: Opacity(opacity: 0, child: RawImage(image: decoded)),
+        ),
+      ),
+    );
+    expect(
+      probe.hasDecodedImage(
+        tester.element(find.byKey(const ValueKey('content'))),
+        viewport: const Rect.fromLTWH(0, 0, 800, 600),
+      ),
+      isFalse,
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Align(
+          alignment: Alignment.topLeft,
+          child: SizedBox(
+            key: const ValueKey('content'),
+            width: 20,
+            height: 20,
+            child: ClipRect(
+              child: Stack(
+                children: [
+                  Positioned(
+                    left: 100,
+                    top: 100,
+                    width: 10,
+                    height: 10,
+                    child: RawImage(image: decoded),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(
+      probe.hasDecodedImage(
+        tester.element(find.byKey(const ValueKey('content'))),
+        viewport: const Rect.fromLTWH(0, 0, 800, 600),
+      ),
+      isFalse,
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Stack(
+          children: [
+            Positioned(
+              left: 1000,
+              top: 0,
+              width: 20,
+              height: 20,
+              child: SizedBox(
+                key: const ValueKey('content'),
+                child: RawImage(image: decoded),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+    expect(
+      probe.hasDecodedImage(
+        tester.element(find.byKey(const ValueKey('content'))),
+        viewport: const Rect.fromLTWH(0, 0, 800, 600),
+      ),
+      isFalse,
     );
     decoded!.dispose();
   });
@@ -127,6 +201,9 @@ void main() {
           'complete': true,
           'firstContentMs': 30,
           'firstRenderedImageMs': 35,
+          'firstDisplayedImageMs': 36,
+          'displayedImageEvidenceSha256': 'a' * 64,
+          'displayedImageClockUncertaintyMs': 4,
           'renderedImageObserved': true,
           'nativeFirstFrameMs': 28,
           'firstDisplayedFrameMs': 37,
@@ -145,6 +222,7 @@ void main() {
     expect(summary['failures'], 1);
     expect(summary['firstContentMs'], {'median': 30.0, 'p95': 30.0});
     expect(summary['firstRenderedImageMs'], {'median': 35.0, 'p95': 35.0});
+    expect(summary['firstDisplayedImageMs'], {'median': 36.0, 'p95': 36.0});
     expect(summary['firstDisplayedFrameMs'], {'median': 37.0, 'p95': 37.0});
     expect(summary['nativeFirstFrameMs'], {'median': 28.0, 'p95': 28.0});
     expect(summary['measuredFrames'], 3);

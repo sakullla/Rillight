@@ -147,6 +147,10 @@ class _PageProbe {
       'firstContentMs': sample?.contentMs,
       'firstRenderedImageMs': sample?.renderedImageMs,
       'renderedImageObserved': sample?.renderedImageMs != null,
+      'firstDisplayedImageMs': sample?.displayedImageMs,
+      'displayedImageEvidenceSha256': sample?.displayedImageEvidenceSha256,
+      'displayedImageClockUncertaintyMs':
+          sample?.displayedImageClockUncertaintyMs,
       'firstOperableMs': sample?.operableMs,
       'nativeFirstFrameMs': sample?.nativeFirstFrameMs,
       'firstDisplayedFrameMs': sample?.displayedFrameMs,
@@ -183,7 +187,7 @@ class _PageProbe {
             }
             if (sample.renderedImageMs == null &&
                 key.value == sample.contentKey &&
-                hasDecodedImage(element)) {
+                hasDecodedImage(element, viewport: viewport)) {
               sample.renderedImageMs = ms;
             }
             if (sample.operableMs == null &&
@@ -236,22 +240,36 @@ class _PageSample {
   final MobileFrameTimingWindow frames;
   final Stopwatch clock = Stopwatch();
   double? contentMs, renderedImageMs, operableMs, nativeFirstFrameMs;
+  double? displayedImageMs, displayedImageClockUncertaintyMs;
+  String? displayedImageEvidenceSha256;
   double? displayedFrameMs, displayedFrameClockUncertaintyMs;
   String? displayedFrameEvidenceSha256;
   bool contentTimedOut = false;
   bool get complete => contentMs != null && operableMs != null;
 }
 
-/// A keyed placeholder is content, but only a decoded RenderImage is an image.
-bool hasDecodedImage(Element element) {
+/// A decoded image counts only when its painted bounds survive visible clips.
+/// Device screenshot evidence separately confirms actual screen pixels.
+bool hasDecodedImage(Element element, {Rect? viewport}) {
+  final view = WidgetsBinding.instance.platformDispatcher.views.first;
+  final visibleViewport =
+      viewport ?? (Offset.zero & (view.physicalSize / view.devicePixelRatio));
   var found = false;
   void visit(Element child) {
-    if (found ||
-        child.widget is Offstage && (child.widget as Offstage).offstage) {
+    if (found) return;
+    if (child is RenderObjectElement &&
+        child.renderObject is RenderIndexedStack) {
+      final stack = child.renderObject as RenderIndexedStack;
+      var index = 0;
+      child.visitChildren((candidate) {
+        if (index++ == stack.index) visit(candidate);
+      });
       return;
     }
     final render = child.findRenderObject();
-    if (render is RenderImage && render.image != null) {
+    if (render is RenderImage &&
+        render.image != null &&
+        _imageBoundsVisible(child, render, visibleViewport)) {
       found = true;
       return;
     }
@@ -260,6 +278,45 @@ bool hasDecodedImage(Element element) {
 
   visit(element);
   return found;
+}
+
+bool _imageBoundsVisible(Element element, RenderImage image, Rect viewport) {
+  if (!image.attached || !image.hasSize) return false;
+  var visible = (image.localToGlobal(Offset.zero) & image.size).intersect(
+    viewport,
+  );
+  if (visible.isEmpty) return false;
+  var allowed = true;
+  element.visitAncestorElements((ancestor) {
+    final widget = ancestor.widget;
+    if (widget is Offstage && widget.offstage ||
+        widget is Visibility && !widget.visible ||
+        widget is Opacity && widget.opacity <= 0 ||
+        widget is AnimatedOpacity && widget.opacity <= 0 ||
+        widget is FadeTransition && widget.opacity.value <= 0) {
+      allowed = false;
+      return false;
+    }
+    if (widget is ClipRect || widget is ClipRRect || widget is ClipOval) {
+      final render = ancestor.findRenderObject();
+      if (render is RenderBox && render.attached && render.hasSize) {
+        visible = visible.intersect(
+          render.localToGlobal(Offset.zero) & render.size,
+        );
+        if (visible.isEmpty) {
+          allowed = false;
+          return false;
+        }
+      }
+    }
+    // Arbitrary paths can conceal all pixels; require screen evidence instead.
+    if (widget is ClipPath) {
+      allowed = false;
+      return false;
+    }
+    return true;
+  });
+  return allowed && !visible.isEmpty;
 }
 
 /// Host observations require a screenshot digest and bounded clock alignment.
@@ -284,11 +341,16 @@ bool _recordExternalObservation(
     return true;
   }
   final digest = value['evidenceSha256'];
-  if (kind != 'displayedFrame' ||
-      digest is! String ||
-      !RegExp(r'^[0-9a-f]{64}$').hasMatch(digest)) {
+  if (digest is! String || !RegExp(r'^[0-9a-f]{64}$').hasMatch(digest)) {
     return false;
   }
+  if (kind == 'displayedImage') {
+    sample.displayedImageMs ??= elapsed.toDouble();
+    sample.displayedImageClockUncertaintyMs ??= uncertainty.toDouble();
+    sample.displayedImageEvidenceSha256 ??= digest;
+    return true;
+  }
+  if (kind != 'displayedFrame') return false;
   sample.displayedFrameMs ??= elapsed.toDouble();
   sample.displayedFrameClockUncertaintyMs ??= uncertainty.toDouble();
   sample.displayedFrameEvidenceSha256 ??= digest;

@@ -715,6 +715,8 @@ def build(entry, output, validation):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--all-targets', action='store_true')
+    parser.add_argument('--emulators-only', action='store_true',
+                        help='Exclude connected physical phones from the AVD matrix')
     parser.add_argument('--native-only', action='store_true',
                         help='Run the owned-core native smoke without the catalog UI flow')
     parser.add_argument('--serial')
@@ -723,6 +725,7 @@ def main():
     parser.add_argument('--native-apk', type=Path, help='Reuse validation native smoke APK (port 8865)')
     parser.add_argument('--media', type=Path, default=ROOT / 'build/android-validation/media')
     parser.add_argument('--ffmpeg', default='ffmpeg')
+    parser.add_argument('--ffprobe', default='ffprobe')
     parser.add_argument('--output', type=Path)
     args = parser.parse_args()
     output = args.output or ROOT / 'build/android-validation/runs' / time.strftime('%Y%m%d-%H%M%S')
@@ -740,6 +743,11 @@ def main():
             adb = sdk_path() / ('platform-tools/adb.exe' if os.name == 'nt' else 'platform-tools/adb')
             serials = [args.serial] if args.serial else [line.split()[0] for line in run([adb, 'devices']).decode().splitlines()
                                                        if len(line.split()) == 2 and line.split()[1] == 'device']
+            if args.emulators_only and not args.serial:
+                # A physical phone may be connected for candidate observations.
+                # The three-device virtual audio matrix only applies to AVDs.
+                serials = [serial for serial in serials if serial.startswith('emulator-') or
+                           run([adb, '-s', serial, 'shell', 'getprop', 'ro.kernel.qemu']).decode().strip() == '1']
             if not serials:
                 raise RuntimeError('Devices unavailable; device/audio checks unverified')
             devices = []
@@ -754,8 +762,10 @@ def main():
                 devices.append((d, tv, width))
             if args.all_targets and not (any(tv for _, tv, _ in devices) and all(any(not tv and abs(width-target) <= 2 for _, tv, width in devices) for target in (360, 412))):
                 raise RuntimeError('Required AVD coverage unavailable: phone 360dp, phone 412dp, TV')
-            if not (args.media / 'android-tracks.mkv').exists():
-                run([sys.executable, ROOT / 'tool/android_fixtures.py', '--generate', '--media', args.media, '--ffmpeg', args.ffmpeg], timeout=240)
+            if not all((args.media / name).exists() for name in
+                       ('android-tracks.mkv', 'alternate.mkv')):
+                run([sys.executable, ROOT / 'tool/android_fixtures.py', '--generate', '--media', args.media,
+                     '--ffmpeg', args.ffmpeg, '--ffprobe', args.ffprobe], timeout=240)
             server_log = (output / 'fixture.log').open('wb')
             server = subprocess.Popen([sys.executable, str(ROOT / 'tool/android_fixtures.py'), '--media', str(args.media), '--output', str(output / 'fixture')], stdout=server_log, stderr=subprocess.STDOUT)
             for _ in range(50):

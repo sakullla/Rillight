@@ -5,6 +5,7 @@ import hashlib
 from pathlib import Path
 import tempfile
 import unittest
+from PIL import Image
 
 import player_performance_checks as performance
 
@@ -92,14 +93,25 @@ class PerformanceEvidenceTest(unittest.TestCase):
             self.assertFalse(by_category[category]["complete"])
 
     def test_android_phone_complete_physical_pairs_cover_all_categories(self):
-        screenshot = self.root / 'screen.png'
-        screenshot.write_bytes(b'synthetic screen evidence')
+        before_screen = self.root / 'screen-before.png'
+        screenshot = self.root / 'screen-after.png'
+        Image.new('RGB', (100, 100), 'black').save(before_screen)
+        Image.new('RGB', (100, 100), 'red').save(screenshot)
         rows = {'baseline': [], 'candidate': []}
         for phase, value in (('baseline', 30), ('candidate', 10)):
             for category in performance.REQUIRED['android-phone']:
                 for _ in range(20):
                     row = self.row(phase, category, value, target='android-phone')
-                    row.update(firstRenderedImageMs=value, renderedImageObserved=True,
+                    row.update(firstRenderedImageMs=value, firstDisplayedImageMs=value,
+                               renderedImageObserved=True,
+                               screenBeforePath=before_screen.name,
+                               screenBeforeSha256=hashlib.sha256(
+                                   before_screen.read_bytes()).hexdigest(),
+                               screenRegion=[0, 0, 100, 100],
+                               displayedImageEvidencePath=screenshot.name,
+                               displayedImageEvidenceSha256=hashlib.sha256(
+                                   screenshot.read_bytes()).hexdigest(),
+                               displayedImageClockUncertaintyMs=5,
                                firstDisplayedFrameMs=value,
                                displayedFrameEvidencePath=screenshot.name,
                                displayedFrameEvidenceSha256=hashlib.sha256(
@@ -120,6 +132,22 @@ class PerformanceEvidenceTest(unittest.TestCase):
         self.assertEqual(errors, [])
         self.assertEqual(len(comparisons), len(performance.REQUIRED['android-phone']))
         self.assertTrue(all(row['verdict'] == 'improved' for row in comparisons))
+
+    def test_unchanged_screen_pixels_do_not_prove_displayed_image(self):
+        screenshot = self.root / 'unchanged.png'
+        Image.new('RGB', (100, 100), 'black').save(screenshot)
+        digest = hashlib.sha256(screenshot.read_bytes()).hexdigest()
+        row = self.row('candidate', 'image', 10, target='android-phone',
+                       renderedImageObserved=True, firstDisplayedImageMs=10,
+                       screenPixelChangeObserved=True,
+                       screenBeforePath=screenshot.name, screenBeforeSha256=digest,
+                       displayedImageEvidencePath=screenshot.name,
+                       displayedImageEvidenceSha256=digest,
+                       displayedImageClockUncertaintyMs=5,
+                       screenRegion=[0, 0, 100, 100])
+        groups, errors = self.write('candidate', [row])
+        self.assertEqual(errors, [])
+        self.assertFalse(next(iter(groups.values()))[0]['complete'])
 
 
 if __name__ == "__main__":

@@ -22,11 +22,48 @@ CATEGORIES = ("page", "network", "animation", "image", "startup", "power", "ther
 REQUIRED = {target: (CATEGORIES if target == "android-phone" else CATEGORIES[:3])
             for target in TARGETS}
 METRIC = {"page": "firstOperableMs", "network": "stallMs",
-          "animation": "overBudgetRate", "image": "firstRenderedImageMs",
+          "animation": "overBudgetRate", "image": "firstDisplayedImageMs",
           "startup": "firstDisplayedFrameMs", "power": "energyMWh",
           "thermal": "tempRiseC"}
 KEY = ("target", "category", "label", "cache", "device", "buildMode",
        "media", "network", "quality", "frameBudgetMs")
+
+
+def _screen_evidence_valid(row: dict, sample_path: Path, *, prefix: str) -> bool:
+    if row.get("screenPixelChangeObserved") is not True:
+        return False
+    root = sample_path.parent.resolve()
+    files = []
+    for name, digest_name in (("screenBeforePath", "screenBeforeSha256"),
+                              (prefix + "EvidencePath", prefix + "EvidenceSha256")):
+        value, expected = row.get(name), row.get(digest_name)
+        if (not isinstance(value, str) or not isinstance(expected, str) or
+                not SHA256.fullmatch(expected)):
+            return False
+        file = (root / value).resolve()
+        if (not file.is_relative_to(root) or not file.is_file() or
+                hashlib.sha256(file.read_bytes()).hexdigest() != expected):
+            return False
+        files.append(file)
+    uncertainty = row.get(prefix + "ClockUncertaintyMs")
+    region = row.get("screenRegion")
+    if (not isinstance(uncertainty, (int, float)) or uncertainty < 0 or
+            uncertainty > 100 or not isinstance(region, list) or len(region) != 4 or
+            any(not isinstance(v, int) or v < 0 for v in region)):
+        return False
+    try:
+        from PIL import Image, ImageChops, ImageStat
+        with Image.open(files[0]) as before, Image.open(files[1]) as after:
+            if before.size != after.size:
+                return False
+            x1, y1, x2, y2 = region
+            if x2 - x1 < 48 or y2 - y1 < 48 or x2 > before.width or y2 > before.height:
+                return False
+            difference = ImageChops.difference(before.convert('RGB').crop(region),
+                                               after.convert('RGB').crop(region))
+            return sum(ImageStat.Stat(difference).mean) / 3 >= 2
+    except (ImportError, OSError, ValueError):
+        return False
 
 
 def percentile(values: list[float], fraction: float) -> float:
@@ -118,28 +155,15 @@ def load_rows(path: Path, expected_phase: str) -> tuple[dict[tuple, list[dict]],
                     x > budget or y > budget for x, y in zip(ui, raster)
                 ) / len(ui)
         elif row["category"] == "image":
-            # The page's content key can identify a placeholder. Only a
-            # decoded, visible image is eligible for this metric.
-            if row.get("renderedImageObserved") is not True:
+            # Tree eligibility alone cannot prove screen pixels. Require an
+            # independently captured, changing image-region screenshot.
+            if (row.get("renderedImageObserved") is not True or
+                    not _screen_evidence_valid(row, path, prefix='displayedImage')):
                 row["complete"] = False
         elif row["category"] == "startup":
             # A native firstFrame event cannot stand in for screen pixels.
-            evidence = row.get("displayedFrameEvidencePath")
-            digest = row.get("displayedFrameEvidenceSha256")
-            if (row.get("screenPixelChangeObserved") is not True or
-                    not isinstance(evidence, str) or not evidence or
-                    not isinstance(digest, str) or not SHA256.fullmatch(digest) or
-                    not isinstance(row.get("displayedFrameClockUncertaintyMs"), (int, float)) or
-                    row["displayedFrameClockUncertaintyMs"] < 0 or
-                    row["displayedFrameClockUncertaintyMs"] > 100):
+            if not _screen_evidence_valid(row, path, prefix='displayedFrame'):
                 row["complete"] = False
-            else:
-                screenshot = Path(evidence)
-                if not screenshot.is_absolute():
-                    screenshot = path.parent / screenshot
-                if (not screenshot.is_file() or
-                        hashlib.sha256(screenshot.read_bytes()).hexdigest() != digest):
-                    row["complete"] = False
         elif row["category"] in ("power", "thermal"):
             if (row.get("environment") != "physical" or
                     not isinstance(row.get("elapsedMs"), (int, float)) or
