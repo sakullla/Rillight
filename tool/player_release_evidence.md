@@ -184,10 +184,18 @@ synthetic host service). The `before` command injects `media_fail`, waits for an
 media request and a `PlayerController.isBuffering` transition, then captures
 the stalled screen. The `after` command clears the fault, waits for a successful
 media request and the controller's recovery transition, then captures the
-recovered screen. `stallMs` is the difference between those player event times.
-The gate requires the signed fixture controls, requests, event order and visible
-pixel change; a label, two arbitrary screenshots or screenshot interval cannot
-stand in for an observed stall. Power/thermal `after` capture additionally
+recovered screen and a later frame in its center video region. Both requests
+must have the same hashed client identity and media path; raw auth is never
+logged. The same player must remain actively playing without a terminal error
+or disconnect, and its position must advance at least 500 ms after recovery.
+The center video region must show changing colored pixels between the two
+recovery captures. `stallMs` is the difference between controller buffering
+event times. A failed capture clears the synthetic media fault in `finally`.
+The gate requires signed fixture controls, requests, event order, player state,
+position advance and video motion; screenshot interval alone is insufficient.
+The client digest correlates requests but cannot independently prove which
+process issued them; the player and display observations supply that context.
+Power/thermal `after` capture additionally
 requires `--measurement-file FILE`: a schema-1
 `physical-meter-attestation` with `category`, `runId`, `deviceSerial`,
 `apkSha256`, `method` (`power-rail` or `thermal-zone`), named `attestedBy`,

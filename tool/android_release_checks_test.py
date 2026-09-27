@@ -292,6 +292,9 @@ class FixtureTests(unittest.TestCase):
                     '/media/android-tracks.mkv']
         self.assertEqual([event['mediaFail'] for event in controls], [True, False])
         self.assertEqual([event['status'] for event in requests[-2:]], [503, 206])
+        self.assertEqual(requests[-2]['clientTag'], requests[-1]['clientTag'])
+        self.assertEqual(len(requests[-1]['clientTag']), 64)
+        self.assertNotIn('synthetic-mobile-token', json.dumps(requests[-2:]))
         self.assertGreater(requests[-2]['ordinal'], controls[0]['requestCount'])
         self.assertGreater(requests[-1]['ordinal'], controls[1]['requestCount'])
 

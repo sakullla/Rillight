@@ -22,7 +22,7 @@ import uuid
 import wave
 from urllib.request import Request, urlopen
 
-from PIL import Image
+from PIL import Image, ImageChops, ImageStat
 
 from player_performance_checks import _screen_evidence_valid
 
@@ -358,7 +358,9 @@ def _validation_app_foreground(serial):
 def capture_live_screen(root, scenario, phase, identity, audited_apk, live_device,
                         *, run_id=None, extra_payload=None):
     """Capture only adb output; caller cannot provide a PNG path or pixel bytes."""
-    if scenario not in (*SCREEN_EVENTS, *PERFORMANCE_CATEGORIES) or phase not in ('before', 'after'):
+    if scenario not in (*SCREEN_EVENTS, *PERFORMANCE_CATEGORIES) or \
+            phase not in (('before', 'after', 'motion') if scenario == 'network'
+                          else ('before', 'after')):
         raise ValueError('Unknown screen capture scenario or phase')
     if not audited_apk or not live_device or \
             live_device.get('installed_apk_sha256') != audited_apk['sha256']:
@@ -470,6 +472,16 @@ def _network_transition(serial, active, *, starting, before_capture=None):
         begin = before_capture.get('networkFault')
         if not isinstance(begin, dict) or begin.get('bufferEvent') not in active['bufferingEvents']:
             raise RuntimeError('Buffering start event is not present in this player run')
+        failed_request = begin.get('mediaRequest')
+        if (not isinstance(failed_request, dict) or
+                failed_request.get('path') not in
+                ('/media/android-tracks.mkv', '/media/alternate.mkv')):
+            raise RuntimeError('Fault media request is missing')
+        failed_client = failed_request.get('clientTag')
+        if not isinstance(failed_client, str) or len(failed_client) != 64:
+            raise RuntimeError('Fault media request has no client provenance')
+    else:
+        failed_client = None
     previous_events = len(active['bufferingEvents'])
     control, _ = _fixture_control_media_fail(run_id, starting)
     deadline = time.monotonic() + 20
@@ -486,12 +498,90 @@ def _network_transition(serial, active, *, starting, before_capture=None):
         media = _fixture_media_requests(fixture,
                                         after_count=control['requestCount'],
                                         status=wanted_status)
+        if failed_client is not None:
+            media = [request for request in media
+                     if request.get('clientTag') == failed_client and
+                     request.get('path') == failed_request['path']]
         if (state.get('runId') == run_id and state.get('playerItemId') == 'multi-source' and
                 matching and media and state.get('playerBuffering') is wanted_buffering):
             return {'control': control, 'mediaRequest': media[0],
                     'bufferEvent': matching[0], 'fixtureCondition': starting}
         time.sleep(.1)
     raise RuntimeError('No observed media fault/buffering transition on the player')
+
+
+def _actively_playing(state, run_id):
+    return (isinstance(state, dict) and state.get('runId') == run_id and
+            state.get('playerAttached') is True and
+            state.get('playerItemId') == 'multi-source' and
+            state.get('playerPlaying') is True and
+            state.get('playerBuffering') is False and
+            state.get('playerPhase') == 'playing' and
+            state.get('playerError') is None and
+            state.get('playerDisconnected') is False and
+            state.get('playerLoading') is False and
+            isinstance(state.get('playerPositionMs'), (int, float)) and
+            not isinstance(state.get('playerPositionMs'), bool))
+
+
+def _video_region(width, height):
+    top, bottom = (.22, .60) if width > height else (.44, .56)
+    return [int(width * .15), int(height * top),
+            int(width * .85), int(height * bottom)]
+
+
+def _video_motion_valid(first, second):
+    try:
+        with Image.open(first) as a, Image.open(second) as b:
+            if a.size != b.size:
+                return None
+            region = _video_region(*a.size)
+            x1, y1, x2, y2 = region
+            if x2 - x1 < 48 or y2 - y1 < 48:
+                return None
+            frame_a = a.convert('RGB').crop(region)
+            frame_b = b.convert('RGB').crop(region)
+            delta = ImageChops.difference(frame_a, frame_b)
+            motion = sum(ImageStat.Stat(delta).mean) / 3
+            texture = min(sum(ImageStat.Stat(frame).stddev) / 3
+                          for frame in (frame_a, frame_b))
+            changed = sum(max(pixel) > 20
+                          for pixel in delta.get_flattened_data()) / (
+                              frame_b.width * frame_b.height)
+            colored = sum(max(pixel) - min(pixel) > 35
+                          for pixel in frame_b.get_flattened_data()) / (
+                              frame_b.width * frame_b.height)
+            return region if (motion >= 2 and changed >= .08 and
+                              texture >= 12 and colored >= .1) else None
+    except (OSError, ValueError):
+        return None
+
+
+def _capture_network_motion(root, serial, identity, artifact, live_device,
+                            screenshot, run_id):
+    first = _read_live_probe(serial, 'state')
+    if not _actively_playing(first, run_id):
+        raise RuntimeError('Recovery did not leave the same player actively playing')
+    deadline = time.monotonic() + 8
+    while time.monotonic() < deadline:
+        latest = _read_live_probe(serial, 'state')
+        if not _actively_playing(latest, run_id):
+            raise RuntimeError('Player stopped, failed or disconnected after recovery')
+        if latest['playerPositionMs'] >= first['playerPositionMs'] + 500:
+            motion = capture_live_screen(root, 'network', 'motion', identity,
+                                         artifact, live_device, run_id=run_id)
+            final = _read_live_probe(serial, 'state')
+            if not _actively_playing(final, run_id) or \
+                    final['playerPositionMs'] < latest['playerPositionMs']:
+                raise RuntimeError('Player stopped during recovered video capture')
+            region = _video_motion_valid(root / screenshot['path'],
+                                         root / motion['path'])
+            if region is None:
+                raise RuntimeError('Recovered video region did not show changing colored frames')
+            return {'screenshot': motion, 'playerBefore': first,
+                    'playerAfter': final, 'videoRegion': region}
+        time.sleep(.1)
+    raise RuntimeError('Recovered player position did not advance')
 
 
 def _physical_measurement_valid(measurement, category, probe, artifact,
@@ -549,8 +639,8 @@ def _physical_measurement_valid(measurement, category, probe, artifact,
             'attestation': measurement}
 
 
-def capture_live_performance(root, category, phase, sample_phase, identity,
-                             artifact, live_device, *, measurement_file=None):
+def _capture_live_performance_impl(root, category, phase, sample_phase, identity,
+                                   artifact, live_device, *, measurement_file=None):
     """Read the installed probe and screen from the selected live adb phone."""
     if category not in PERFORMANCE_CATEGORIES or sample_phase not in ('baseline', 'candidate'):
         raise ValueError('Unsupported performance category or sample phase')
@@ -592,6 +682,11 @@ def capture_live_performance(root, category, phase, sample_phase, identity,
                        if network_transition is not None else None))
     if phase == 'before':
         return screenshot
+    video_motion = None
+    if category == 'network':
+        video_motion = _capture_network_motion(
+            root, serial, identity, artifact, live_device, screenshot,
+            active['runId'])
     start_ns = time.monotonic_ns()
     # /end atomically consumes the one active run. /state alone cannot mint
     # formal samples, including repeated reads of a completed run.
@@ -611,7 +706,8 @@ def capture_live_performance(root, category, phase, sample_phase, identity,
             raise RuntimeError('Physical measurement attestation is invalid')
     trace = {'probe': state, 'screenshot': screenshot,
              'beforeScreenshot': before_capture, 'probeStartNs': start_ns,
-             'probeEndNs': end_ns, 'measurement': measurement}
+             'probeEndNs': end_ns, 'measurement': measurement,
+             'videoMotion': video_motion}
     folder = root / 'captures'
     path = folder / f'performance-probe-{uuid.uuid4().hex}.json'
     path.write_text(json.dumps(trace, ensure_ascii=False), encoding='utf-8')
@@ -636,6 +732,31 @@ def capture_live_performance(root, category, phase, sample_phase, identity,
     ledger.append({'payload': payload, 'signature': _capture_signature(key, payload)})
     ledger_path.write_text(json.dumps(ledger, indent=2), encoding='utf-8')
     return payload
+
+
+def capture_live_performance(root, category, phase, sample_phase, identity,
+                             artifact, live_device, *, measurement_file=None):
+    completed = False
+    try:
+        result = _capture_live_performance_impl(
+            root, category, phase, sample_phase, identity, artifact, live_device,
+            measurement_file=measurement_file)
+        completed = True
+        return result
+    finally:
+        # A failed capture must never leave the synthetic server in outage mode.
+        # The successful before capture intentionally holds the fault for after.
+        if category == 'network' and not completed:
+            try:
+                state = _read_live_probe(live_device['serial'], 'state')
+                run_id = state.get('runId', 'capture-rollback')
+            except Exception:
+                run_id = 'capture-rollback'
+            try:
+                _fixture_json('__control', {'media_fail': False,
+                                            'validationRunId': run_id})
+            except Exception as exc:
+                raise RuntimeError('Network fixture fault rollback failed') from exc
 
 
 def _screen_capture_bound(root, scenario, data, identity, audited_apk,
@@ -872,7 +993,8 @@ def _signed_performance_records(root):
     return records
 
 
-def _network_fault_evidence_valid(before, after, probe, row, root):
+def _network_fault_evidence_valid(before, after, probe, row, root,
+                                  video_motion, payload):
     start = before.get('networkFault')
     recovered = after.get('networkRecovery')
     if not isinstance(start, dict) or not isinstance(recovered, dict):
@@ -888,9 +1010,7 @@ def _network_fault_evidence_valid(before, after, probe, row, root):
                 failed, succeeded)):
         return False
     events = probe.get('bufferingEvents')
-    if (probe.get('playerAttached') is not True or
-            probe.get('playerItemId') != 'multi-source' or
-            probe.get('playerBuffering') is not False or
+    if (not _actively_playing(probe, payload.get('run_id')) or
             not isinstance(events, list) or
             first_event not in events or last_event not in events or
             events.index(first_event) >= events.index(last_event) or
@@ -909,6 +1029,10 @@ def _network_fault_evidence_valid(before, after, probe, row, root):
             succeeded.get('path') not in ('/media/android-tracks.mkv', '/media/alternate.mkv') or
             failed.get('status') != 503 or
             succeeded.get('status') not in (200, 206) or
+            not isinstance(failed.get('clientTag'), str) or
+            len(failed['clientTag']) != 64 or
+            succeeded.get('clientTag') != failed['clientTag'] or
+            succeeded.get('path') != failed.get('path') or
             not isinstance(failed.get('response_time_ns'), int) or
             not isinstance(succeeded.get('response_time_ns'), int) or
             failed['response_time_ns'] < begin_control['timeNs'] or
@@ -919,6 +1043,44 @@ def _network_fault_evidence_valid(before, after, probe, row, root):
             succeeded['ordinal'] <= end_control.get('requestCount', -1) or
             not isinstance(first_event.get('elapsedMs'), (int, float)) or
             not isinstance(last_event.get('elapsedMs'), (int, float))):
+        return False
+    if not isinstance(video_motion, dict):
+        return False
+    motion = video_motion.get('screenshot')
+    player_before = video_motion.get('playerBefore')
+    player_after = video_motion.get('playerAfter')
+    if (not isinstance(motion, dict) or
+            not _actively_playing(player_before, payload.get('run_id')) or
+            not _actively_playing(player_after, payload.get('run_id')) or
+            player_after['playerPositionMs'] < player_before['playerPositionMs'] + 500 or
+            probe['playerPositionMs'] < player_after['playerPositionMs'] or
+            motion.get('scenario') != 'network' or
+            motion.get('phase') != 'motion' or
+            motion.get('run_id') != payload.get('run_id') or
+            not isinstance(motion.get('captured_unix_ns'), int) or
+            not isinstance(after.get('captured_unix_ns'), int) or
+            motion.get('captured_unix_ns', -1) <= after.get('captured_unix_ns', 0) or
+            motion.get('installed_apk_sha256') != payload.get('installed_apk_sha256') or
+            motion.get('device_serial') != payload.get('device_serial') or
+            motion.get('candidate_head') != payload.get('candidate_head') or
+            motion.get('working_tree_sha256') != payload.get('working_tree_sha256')):
+        return False
+    try:
+        key = _capture_key(root)
+        captures = json.loads((root / 'capture-ledger.json').read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return False
+    if (key is None or not any(isinstance(item, dict) and
+            item.get('payload') == motion and
+            hmac.compare_digest(str(item.get('signature', '')),
+                                _capture_signature(key, motion))
+            for item in captures)):
+        return False
+    motion_path = _safe_file(root, motion.get('path'), motion.get('sha256'))
+    recovery_path = _safe_file(root, after.get('path'), after.get('sha256'))
+    if (motion_path is None or recovery_path is None or
+            _video_motion_valid(recovery_path, motion_path) !=
+            video_motion.get('videoRegion')):
         return False
     stall_ms = last_event['elapsedMs'] - first_event['elapsedMs']
     return (0 < stall_ms <= probe.get('elapsedMs', -1) and
@@ -1001,7 +1163,9 @@ def _performance_row_bound(row, payload, root):
         if row.get('elapsedMs') != probe.get('elapsedMs') or span_ms > probe['elapsedMs']:
             return False
         if category == 'network':
-            return (_network_fault_evidence_valid(before, after, probe, row, root) and
+            return (_network_fault_evidence_valid(
+                before, after, probe, row, root, trace.get('videoMotion'),
+                payload) and
                     payload.get('observed_stall_ms') == row.get('stallMs'))
         if span_ms < 300000 or probe['elapsedMs'] < 300000:
             return False

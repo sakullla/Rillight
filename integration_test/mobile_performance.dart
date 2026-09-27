@@ -129,6 +129,7 @@ class _PageProbe {
   }
 
   Map<String, Object?> _record(_PageSample? sample) {
+    sample?.samplePlayerStatus();
     final view = WidgetsBinding.instance.platformDispatcher.views.first;
     final refreshRate = view.display.refreshRate;
     final frameBudgetMs = refreshRate > 0 ? 1000 / refreshRate : null;
@@ -160,6 +161,12 @@ class _PageProbe {
       'playerAttached': sample?.playerEverAttached ?? false,
       'playerItemId': sample?.playerItemId,
       'playerBuffering': sample?.lastBuffering,
+      'playerPlaying': sample?.lastPlaying,
+      'playerPositionMs': sample?.lastPositionMs,
+      'playerPhase': sample?.lastPhase,
+      'playerError': sample?.lastError,
+      'playerDisconnected': sample?.lastDisconnected,
+      'playerLoading': sample?.lastLoading,
       'bufferingEvents': sample?.bufferingEvents ?? const [],
       'contentKey': sample?.contentKey,
       'actionKey': sample?.actionKey,
@@ -291,6 +298,9 @@ class _PageSample {
   String? playerItemId;
   VoidCallback? _playerListener;
   bool? lastBuffering;
+  bool? lastPlaying, lastDisconnected, lastLoading;
+  int? lastPositionMs;
+  String? lastPhase, lastError;
   final List<Map<String, Object>> bufferingEvents = [];
 
   void bindPlayer(PlayerController player) {
@@ -299,10 +309,12 @@ class _PageSample {
     playerEverAttached = true;
     playerItemId = player.itemId;
     lastBuffering = player.isBuffering;
+    samplePlayerStatus();
     void observe() {
       final buffering = player.isBuffering;
       if (buffering == lastBuffering) return;
       lastBuffering = buffering;
+      samplePlayerStatus();
       bufferingEvents.add({
         'buffering': buffering,
         'elapsedMs': clock.elapsedMicroseconds / 1000,
@@ -314,9 +326,21 @@ class _PageSample {
   }
 
   void unbindPlayer() {
+    samplePlayerStatus();
     trackedPlayer?.removeListener(_playerListener!);
     trackedPlayer = null;
     _playerListener = null;
+  }
+
+  void samplePlayerStatus() {
+    final player = trackedPlayer;
+    if (player == null) return;
+    lastPlaying = player.isPlaying;
+    lastPositionMs = player.position.inMilliseconds;
+    lastPhase = player.state.phase.name;
+    lastError = player.error?.name;
+    lastDisconnected = player.disconnected;
+    lastLoading = player.loading;
   }
 
   bool get complete => contentMs != null && operableMs != null;

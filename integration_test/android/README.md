@@ -104,9 +104,13 @@ conservative bound. For `network`, play the local fixture's `multi-source`
 item after forwarding its loopback endpoint with `adb -s SERIAL reverse
 tcp:8784 tcp:8784`; keep the synthetic fixture running on host port 8784.
 The before/after commands inject and clear its media fault, require 503
-then successful media requests, and capture real phone player buffering and
-recovery events plus changing screen pixels. `stallMs` comes from those player
-event timestamps, not capture spacing. Put the returned unique ID in the JSONL row's
+then successful media requests from the same hashed client and media path.
+They capture real buffering/recovery events, verify the same player remains
+actively playing without error or disconnect, observe at least 500 ms of
+position advance, and capture changing colored pixels in the center video
+region after recovery. A failed capture clears the synthetic fault.
+The client digest correlates requests but does not identify a process by itself.
+`stallMs` comes from player event timestamps, not capture spacing. Put the returned unique ID in the JSONL row's
 `probeTraceId` and use the capture paths/hashes for visual rows. First run
 `--audit-baseline --baseline-checkout CHECKOUT` on a separate checkout of
 frozen commit `48316fc71c8c5e19ae3af34a59168e6f8eccaa8e` after copying

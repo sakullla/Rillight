@@ -11,7 +11,7 @@ import unittest
 from unittest.mock import patch
 import wave
 
-from PIL import Image
+from PIL import Image, ImageChops, ImageDraw
 
 import phone_player_validation as validation
 
@@ -479,10 +479,17 @@ class PhoneValidationTest(unittest.TestCase):
         self.assertEqual(result['control']['runId'], run_id)
 
     def test_live_network_stall_uses_fixture_and_player_events(self):
+        pattern = Image.new('RGB', (800, 400), 'red')
+        brush = ImageDraw.Draw(pattern)
+        for x in range(0, 800, 40):
+            for y in range(0, 400, 40):
+                brush.rectangle((x, y, x + 20, y + 20),
+                                fill='green' if (x + y) % 80 else 'blue')
         frames = []
-        for color in ('black', 'red'):
+        for picture in (Image.new('RGB', (800, 400), 'black'),
+                        pattern, ImageChops.offset(pattern, 20, 0)):
             frame = io.BytesIO()
-            Image.new('RGB', (100, 100), color).save(frame, format='PNG')
+            picture.save(frame, format='PNG')
             frames.append(frame.getvalue())
         def fake_adb(args, **_):
             response = subprocess.CompletedProcess(args, 0, frames[fake_adb.count], b'')
@@ -496,13 +503,17 @@ class PhoneValidationTest(unittest.TestCase):
                  'complete': True, 'frameBudgetMs': 16.67,
                  'label': 'outage', 'cache': 'cold', 'device': self.live['fingerprint'],
                  'playerAttached': True, 'playerItemId': 'multi-source',
-                 'playerBuffering': False,
+                 'playerBuffering': False, 'playerPlaying': True,
+                 'playerPhase': 'playing', 'playerError': None,
+                 'playerDisconnected': False, 'playerLoading': False,
+                 'playerPositionMs': 1000,
                  'bufferingEvents': [{'buffering': True, 'elapsedMs': 1000},
                                      {'buffering': False, 'elapsedMs': 2500}]}
         start = {'control': {'runId': probe['runId'], 'mediaFail': True,
                              'timeNs': 100, 'requestCount': 5},
                  'mediaRequest': {'path': '/media/android-tracks.mkv',
                                   'status': 503, 'ordinal': 6,
+                                  'clientTag': 'a' * 64,
                                   'response_time_ns': 150},
                  'bufferEvent': probe['bufferingEvents'][0],
                  'fixtureCondition': True}
@@ -510,16 +521,26 @@ class PhoneValidationTest(unittest.TestCase):
                                  'timeNs': 200, 'requestCount': 6},
                      'mediaRequest': {'path': '/media/android-tracks.mkv',
                                       'status': 206, 'ordinal': 7,
+                                      'clientTag': 'a' * 64,
                                       'response_time_ns': 250},
                      'bufferEvent': probe['bufferingEvents'][1],
                      'fixtureCondition': False}
+        state_reads = [0]
+        def live_probe(request, **_):
+            if request.get_method() != 'POST':
+                state_reads[0] += 1
+            current = dict(probe, ended=request.get_method() == 'POST',
+                           playerPositionMs=1000 + state_reads[0] * 600)
+            return io.BytesIO(json.dumps(current).encode())
         with patch.object(validation.subprocess, 'run', side_effect=fake_adb), \
                 patch.object(validation, 'command', return_value=foreground), \
-                patch.object(validation, 'urlopen', side_effect=self.probe_reply(probe)), \
+                patch.object(validation, 'urlopen', side_effect=live_probe), \
                 patch.object(validation, '_network_transition',
                              side_effect=[start, recovered]), \
+                patch.object(validation, '_fixture_json', return_value={}), \
                 patch.object(validation.time, 'time_ns', side_effect=
-                             [1000000000000000, 1000002000000000]):
+                             [1000000000000000, 1000002000000000,
+                              1000003000000000]):
             before = validation.capture_live_performance(
                 self.root, 'network', 'before', 'candidate', self.identity,
                 self.audited, self.live)
@@ -543,6 +564,31 @@ class PhoneValidationTest(unittest.TestCase):
         samples.write_text(json.dumps(row), encoding='utf-8')
         self.assertTrue(validation.candidate_samples_match_apk(
             samples, self.audited, self.live['fingerprint'], self.root, self.identity))
+        trace = json.loads((self.root / after['path']).read_text())
+        captures = json.loads((self.root / 'capture-ledger.json').read_text())
+        fault = next(item['payload'] for item in captures
+                     if item['payload'].get('networkFault') is not None)
+        recovery = next(item['payload'] for item in captures
+                        if item['payload'].get('networkRecovery') is not None)
+        def accepted(**changes):
+            terminal = dict(trace['probe'], **changes)
+            return validation._network_fault_evidence_valid(
+                fault, recovery, terminal, row, self.root,
+                trace['videoMotion'], after)
+        self.assertFalse(accepted(playerPhase='ended', playerPlaying=False))
+        self.assertFalse(accepted(playerPhase='failed', playerError='network'))
+        self.assertFalse(accepted(playerDisconnected=True))
+        self.assertFalse(accepted(playerPositionMs=0))
+        motion = json.loads(json.dumps(trace['videoMotion']))
+        motion['playerAfter']['playerPositionMs'] = \
+            motion['playerBefore']['playerPositionMs']
+        self.assertFalse(validation._network_fault_evidence_valid(
+            fault, recovery, trace['probe'], row, self.root, motion, after))
+        foreign_recovery = json.loads(json.dumps(recovery))
+        foreign_recovery['networkRecovery']['mediaRequest']['clientTag'] = 'b' * 64
+        self.assertFalse(validation._network_fault_evidence_valid(
+            fault, foreign_recovery, trace['probe'], row, self.root,
+            trace['videoMotion'], after))
         row['stallMs'] = 1
         samples.write_text(json.dumps(row), encoding='utf-8')
         self.assertFalse(validation.candidate_samples_match_apk(
@@ -559,6 +605,48 @@ class PhoneValidationTest(unittest.TestCase):
         ledger.write_text(json.dumps(records), encoding='utf-8')
         self.assertFalse(validation.candidate_samples_match_apk(
             samples, self.audited, self.live['fingerprint'], self.root, self.identity))
+
+    def test_network_video_region_rejects_ui_only_changes(self):
+        first = self.root / 'first-video.png'
+        second = self.root / 'second-video.png'
+        original = Image.new('RGB', (800, 400), 'red')
+        brush = ImageDraw.Draw(original)
+        for x in range(0, 800, 40):
+            for y in range(0, 400, 40):
+                brush.rectangle((x, y, x + 20, y + 20),
+                                fill='green' if (x + y) % 80 else 'blue')
+        original.save(first)
+        pixels = original.copy()
+        for x in range(800):
+            for y in range(0, 40):
+                pixels.putpixel((x, y), (0, 255, 0))
+        pixels.save(second)
+        self.assertIsNone(validation._video_motion_valid(first, second))
+        ImageChops.offset(original, 20, 0).save(second)
+        self.assertEqual(validation._video_motion_valid(first, second),
+                         validation._video_region(800, 400))
+        Image.new('RGB', (800, 400), 'green').save(second)
+        self.assertIsNone(validation._video_motion_valid(first, second))
+
+    def test_failed_network_capture_rolls_back_fixture_fault(self):
+        for phase in ('before', 'after'):
+            with self.subTest(phase=phase):
+                calls = []
+                def fixture(endpoint, body=None):
+                    calls.append((endpoint, body))
+                    return {}
+                with patch.object(validation, '_capture_live_performance_impl',
+                                  side_effect=RuntimeError('capture failed')), \
+                        patch.object(validation, '_read_live_probe',
+                                     return_value={'runId': 'r' * 32}), \
+                        patch.object(validation, '_fixture_json',
+                                     side_effect=fixture):
+                    with self.assertRaisesRegex(RuntimeError, 'capture failed'):
+                        validation.capture_live_performance(
+                            self.root, 'network', phase, 'candidate', self.identity,
+                            self.audited, self.live)
+                self.assertEqual(calls, [('__control',
+                    {'media_fail': False, 'validationRunId': 'r' * 32})])
 
     def test_physical_meter_log_attestation_derives_power_and_thermal(self):
         foreground = subprocess.CompletedProcess([], 0,

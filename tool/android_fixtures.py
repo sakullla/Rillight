@@ -209,9 +209,17 @@ class Handler(BaseHTTPRequestHandler):
             path = path[5:]
         query = {key.lower(): values[0] for key, values in parse_qs(parsed.query).items()}
         if not path.startswith('/__'):
+            # Store only a digest. It correlates fault/recovery requests from the
+            # same device/client without leaking the synthetic auth token.
+            client_identity = '\n'.join((self.client_address[0],
+                self.headers.get('User-Agent', ''),
+                self.headers.get('X-Emby-Token', '') or
+                self.headers.get('Authorization', '') or query.get('api_key', '')))
             with lock:
                 self._request_record = {'method': self.command, 'path': path,
                                         'time': time.time(),
+                                        'clientTag': hashlib.sha256(
+                                            client_identity.encode()).hexdigest(),
                                         'ordinal': len(requests) + 1}
                 requests.append(self._request_record)
         return path, query
