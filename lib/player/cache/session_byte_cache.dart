@@ -157,6 +157,9 @@ class SessionByteCache {
   int _pendingBytes = 0;
   Completer<void> _pendingChanged = Completer<void>();
   int _pendingPeak = 0;
+  int _pendingPublications = 0;
+  int _pendingPublicationPeak = 0;
+  int _publicationBackpressure = 0;
   int _memoryHits = 0;
   int _diskHits = 0;
   int _evictions = 0;
@@ -189,6 +192,9 @@ class SessionByteCache {
       'memoryPeakBytes': _memoryPeak,
       'pendingBytes': _pendingBytes,
       'pendingPeakBytes': _pendingPeak,
+      'pendingPublications': _pendingPublications,
+      'pendingPublicationPeak': _pendingPublicationPeak,
+      'publicationBackpressure': _publicationBackpressure,
       'indexEntries': _entries.length,
       'indexBudgetBytes': _indexBytes,
       'memoryHitBytes': _memoryHits,
@@ -280,9 +286,16 @@ class SessionByteCache {
     if (disk == null || disk.degradation != null) return true;
     // Include both the message copy and the disk isolate's working buffer.
     final pendingCost = bytes.length * 2;
-    if (_pendingBytes + pendingCost > pendingLimitBytes) return true;
+    if (_pendingBytes + pendingCost > pendingLimitBytes) {
+      _publicationBackpressure++;
+      return true;
+    }
     _pendingBytes += pendingCost;
+    _pendingPublications++;
     if (_pendingBytes > _pendingPeak) _pendingPeak = _pendingBytes;
+    if (_pendingPublications > _pendingPublicationPeak) {
+      _pendingPublicationPeak = _pendingPublications;
+    }
     final publication = Completer<void>();
     entry.publication = publication.future;
     try {
@@ -306,6 +319,7 @@ class SessionByteCache {
         }
       }
     } finally {
+      _pendingPublications--;
       _releasePending(pendingCost);
       entry.publication = null;
       publication.complete();

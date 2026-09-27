@@ -281,6 +281,7 @@ class RillightVideoBackend extends VideoBackend
       unknownReason: sameSession ? 'reconnecting' : 'preparing',
     );
     _emit(VideoEventKind.bufferSnapshot, bufferSnapshot, generation);
+    _emit(VideoEventKind.cacheSpeed, 0.0, generation);
     _openPhase = 'retiringPrevious';
     await _stopSession(keepAndroidPlayer: true);
     if (_disposed || generation != _generation) return;
@@ -296,7 +297,7 @@ class RillightVideoBackend extends VideoBackend
             : request.headers,
         cacheRoot: _diskCacheDirectory ?? PlayerDiskCache.defaultDirectory(),
         memoryLimitBytes: 8 * 1024 * 1024,
-        pendingLimitBytes: 2 * 1024 * 1024,
+        pendingLimitBytes: 8 * 1024 * 1024,
         diskLimitBytes: PlayerRuntimeOptions.effectiveDiskCacheLimitBytes(
           settings,
         ),
@@ -659,6 +660,7 @@ class RillightVideoBackend extends VideoBackend
           unknownReason: 'cacheUnavailable',
         );
         _emit(VideoEventKind.bufferSnapshot, bufferSnapshot, generation);
+        _emit(VideoEventKind.cacheSpeed, 0.0, generation);
       }
     } finally {
       _diagnosticsBusy = false;
@@ -881,6 +883,7 @@ class RillightVideoBackend extends VideoBackend
     _recovering = false;
     ++_generation;
     isPlaying = false;
+    _emit(VideoEventKind.cacheSpeed, 0.0, _generation);
     await _stopSession(keepAndroidPlayer: true);
   }
 

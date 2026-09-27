@@ -99,15 +99,15 @@ class PlaybackHttpProxy {
   final _loads = <String, _SharedLoad>{};
   final _writes = <Future<bool>>{};
   int _active = 0;
+  int _activeSegmentPrefetchRequests = 0;
   int _seekGeneration = 0;
   int _hlsIndexBytes = 0;
   int _segmentPrefetchGeneration = 0;
-  Future<void>? _segmentPrefetch;
-  _HlsNext? _activeSegmentPrefetch;
+  final _segmentPrefetchJobs = <String, _SegmentPrefetchJob>{};
   final _pendingSegmentPrefetch = <String, _HlsNext>{};
-  HttpClientRequest? _segmentPrefetchRequest;
-  StreamIterator<List<int>>? _segmentPrefetchIterator;
-  _ProxyRead? _segmentPrefetchRead;
+  int _segmentPrefetchPeak = 0;
+  int _segmentPrefetchPreemptions = 0;
+  int _segmentPrefetchDownloadedBytes = 0;
   // Demuxers keep their main response open while probing the index and seeking.
   // Limit connections separately from cache workspace: a stalled old response
   // must not queue all of the reads needed to start decoding.
@@ -170,6 +170,7 @@ class PlaybackHttpProxy {
         _selectedAudioTrackId == audioTrackId) {
       return;
     }
+    _cancelSegmentPrefetch(clearPending: true);
     _selectedVideoTrackId = videoTrackId;
     _selectedAudioTrackId = audioTrackId;
     _trackSelectionVersion++;
@@ -301,6 +302,7 @@ class PlaybackHttpProxy {
       'streamPolicy': _stream.name,
       'sessionBuffering': sessionBuffering,
       'activeRequests': _active,
+      'activeSegmentPrefetchRequests': _activeSegmentPrefetchRequests,
       'upstreamBytesPerSecond': upstreamBytesPerSecond,
       'cacheWorkspaceBytes': _cacheWorkspace,
       'timelineIdentity': _timelineIdentity ?? '',
@@ -342,8 +344,12 @@ class PlaybackHttpProxy {
       'hlsIndexBytes': _hlsIndexBytes,
       'hlsPlaylists': _hlsPlaylists.length,
       'hlsActivePlaylists': _hlsActiveOwners.length,
-      'segmentPrefetchActive': _segmentPrefetch != null,
+      'segmentPrefetchActive': _segmentPrefetchJobs.isNotEmpty,
+      'segmentPrefetchActiveSlots': _segmentPrefetchJobs.length,
+      'segmentPrefetchActivePeak': _segmentPrefetchPeak,
       'segmentPrefetchPending': _pendingSegmentPrefetch.length,
+      'segmentPrefetchPreemptions': _segmentPrefetchPreemptions,
+      'segmentPrefetchDownloadedBytes': _segmentPrefetchDownloadedBytes,
       'playbackActive': _playbackActive,
       ...?_readAhead?.diagnostics,
     };
@@ -1327,20 +1333,21 @@ class PlaybackHttpProxy {
   void _cancelSegmentPrefetch({
     bool clearPending = false,
     bool requeue = true,
+    String? owner,
   }) {
     if (clearPending) {
       _pendingSegmentPrefetch.clear();
-      _activeSegmentPrefetch = null;
-    } else if (requeue) {
-      if (_activeSegmentPrefetch case final active?) {
-        _queueSegmentPrefetch(active);
-      }
     }
-    _segmentPrefetchGeneration++;
-    _segmentPrefetchRead?.cancel();
-    _segmentPrefetchRequest?.abort();
-    final iterator = _segmentPrefetchIterator;
-    if (iterator != null) unawaited(iterator.cancel());
+    final jobs = owner == null
+        ? _segmentPrefetchJobs.values.toList()
+        : [
+            _segmentPrefetchJobs[owner],
+          ].whereType<_SegmentPrefetchJob>().toList();
+    for (final job in jobs) {
+      if (!clearPending && requeue) _queueSegmentPrefetch(job.next);
+      job.cancel();
+    }
+    if (owner == null) _segmentPrefetchGeneration++;
   }
 
   void _scheduleSegmentPrefetch(String current) {
@@ -1367,98 +1374,128 @@ class PlaybackHttpProxy {
     _pendingSegmentPrefetch[next.owner] = next;
   }
 
+  bool get _segmentPrefetchPressured {
+    final storage = cache;
+    if (storage == null) return true;
+    final data = storage.diagnostics;
+    final pending = data['pendingBytes'] as int? ?? 0;
+    final pendingLimit = data['pendingLimitBytes'] as int? ?? 0;
+    final workspaceLimit =
+        (_stream == PlaybackCacheStream.stable ? 3 : 1) * 1024 * 1024;
+    return data['degradation'] != null ||
+        data['pendingResizePending'] == true ||
+        pendingLimit <= 0 ||
+        pending >= pendingLimit ||
+        _cacheWorkspace >= workspaceLimit;
+  }
+
   void _pumpSegmentPrefetch() {
-    if (_closed ||
-        !_playbackActive ||
-        _segmentPrefetch != null ||
-        _active >= _maxRequests - 1 ||
-        _pendingSegmentPrefetch.isEmpty) {
-      return;
-    }
-    final owner = _pendingSegmentPrefetch.keys.first;
-    final next = _pendingSegmentPrefetch.remove(owner)!;
-    _activeSegmentPrefetch = next;
-    final generation = _segmentPrefetchGeneration;
-    late final Future<void> task;
-    task =
-        (() async {
-          await Future<void>.delayed(const Duration(milliseconds: 100));
-          if (_closed || generation != _segmentPrefetchGeneration) {
-            return;
-          }
-          // One speculative producer may overlap a slow foreground segment,
-          // but always leave a slot for a new demand (which can preempt it).
-          if (_active >= _maxRequests - 1) {
-            _queueSegmentPrefetch(next);
-            return;
-          }
-          final disk = cache!.diagnostics['diskLimitBytes'] is int;
-          final limit = min(
-            SessionReadAhead.requestBytes,
-            disk ? cache!.diskSessionLimitBytes ~/ 4 : cache!.memoryLimitBytes,
-          );
-          if (limit <= 0) return;
-          final client = HttpClient()
-            ..connectionTimeout = const Duration(seconds: 5)
-            ..maxConnectionsPerHost = 1;
-          try {
-            for (final url in [
-              if (next.initialization != null) next.initialization!,
-              next.url,
-            ]) {
-              if (_closed || generation != _segmentPrefetchGeneration) return;
-              final opening = client.getUrl(url);
-              final request = await opening.timeout(const Duration(seconds: 5));
-              _segmentPrefetchRequest = request;
-              request.headers.set('x-rillight-prefetch', '1');
-              request.headers.set('range', 'bytes=0-${limit - 1}');
-              final deadline = Timer(
-                const Duration(seconds: 20),
-                request.abort,
-              );
-              try {
-                final response = await request.close().timeout(
-                  const Duration(seconds: 20),
-                );
-                if (response.statusCode != 200 && response.statusCode != 206) {
+    if (_closed || !_playbackActive || _segmentPrefetchPressured) return;
+    // At most two playlist owners may speculate. Keep two of the eight proxy
+    // request slots exclusively available to foreground playback/control.
+    while (_segmentPrefetchJobs.length < 2 &&
+        _active + _segmentPrefetchJobs.length < _maxRequests - 2 &&
+        _pendingSegmentPrefetch.isNotEmpty) {
+      final owner = _pendingSegmentPrefetch.keys.first;
+      final next = _pendingSegmentPrefetch.remove(owner)!;
+      if (_segmentPrefetchJobs.containsKey(owner)) continue;
+      final job = _SegmentPrefetchJob(next);
+      _segmentPrefetchJobs[owner] = job;
+      _segmentPrefetchPeak = max(
+        _segmentPrefetchPeak,
+        _segmentPrefetchJobs.length,
+      );
+      final generation = _segmentPrefetchGeneration;
+      late final Future<void> task;
+      task =
+          (() async {
+            if (_closed ||
+                job.cancelled ||
+                generation != _segmentPrefetchGeneration) {
+              return;
+            }
+            final disk = cache!.diagnostics['diskLimitBytes'] is int;
+            final limit = min(
+              SessionReadAhead.requestBytes,
+              disk
+                  ? cache!.diskSessionLimitBytes ~/ 4
+                  : cache!.memoryLimitBytes,
+            );
+            if (limit <= 0) return;
+            final client = HttpClient()
+              ..connectionTimeout = const Duration(seconds: 5)
+              ..maxConnectionsPerHost = 1;
+            job.client = client;
+            try {
+              for (final url in [
+                if (next.initialization != null) next.initialization!,
+                next.url,
+              ]) {
+                if (_closed ||
+                    job.cancelled ||
+                    generation != _segmentPrefetchGeneration) {
                   return;
                 }
-                final iterator = StreamIterator<List<int>>(response);
-                _segmentPrefetchIterator = iterator;
-                var bytes = 0;
+                final request = await client
+                    .getUrl(url)
+                    .timeout(const Duration(seconds: 5));
+                job.request = request;
+                request.headers.set('x-rillight-prefetch', '1');
+                request.headers.set('range', 'bytes=0-${limit - 1}');
+                final deadline = Timer(
+                  const Duration(seconds: 20),
+                  request.abort,
+                );
                 try {
-                  while (bytes < limit &&
-                      await iterator.moveNext().timeout(
-                        const Duration(seconds: 15),
-                      )) {
-                    if (_closed || generation != _segmentPrefetchGeneration) {
-                      return;
+                  final response = await request.close().timeout(
+                    const Duration(seconds: 20),
+                  );
+                  if (response.statusCode != 200 &&
+                      response.statusCode != 206) {
+                    return;
+                  }
+                  final iterator = StreamIterator<List<int>>(response);
+                  job.iterator = iterator;
+                  var bytes = 0;
+                  try {
+                    while (bytes < limit &&
+                        await iterator.moveNext().timeout(
+                          const Duration(seconds: 15),
+                        )) {
+                      if (_closed ||
+                          job.cancelled ||
+                          generation != _segmentPrefetchGeneration) {
+                        return;
+                      }
+                      bytes += iterator.current.length;
+                      _segmentPrefetchDownloadedBytes +=
+                          iterator.current.length;
                     }
-                    bytes += iterator.current.length;
+                  } finally {
+                    job.iterator = null;
+                    await iterator.cancel();
                   }
                 } finally {
-                  _segmentPrefetchIterator = null;
-                  await iterator.cancel();
+                  deadline.cancel();
+                  job.request = null;
                 }
-              } finally {
-                deadline.cancel();
-                _segmentPrefetchRequest = null;
               }
+            } catch (_) {
+              // Prefetch is optional; the foreground request uses normal recovery.
+            } finally {
+              client.close(force: true);
+              job.client = null;
             }
-          } catch (_) {
-            // Prefetch is optional; the foreground request uses normal recovery.
-          } finally {
-            client.close(force: true);
-          }
-        })().whenComplete(() {
-          if (identical(_segmentPrefetch, task)) {
-            _segmentPrefetch = null;
-            _activeSegmentPrefetch = null;
-            _pumpSegmentPrefetch();
-          }
-        });
-    _segmentPrefetch = task;
-    unawaited(task);
+          })().whenComplete(() {
+            job.completed = true;
+            if (identical(_segmentPrefetchJobs[owner], job)) {
+              _segmentPrefetchJobs.remove(owner);
+              _pumpSegmentPrefetch();
+            }
+          });
+      job.task = task;
+      unawaited(task);
+    }
   }
 
   void cancelSubtitleReads() {
@@ -2297,33 +2334,62 @@ class PlaybackHttpProxy {
     try {
       final prefetch = incoming.headers.value('x-rillight-prefetch') == '1';
       if (!prefetch) {
-        final next = _activeSegmentPrefetch;
-        final sameResource =
-            next != null &&
-            (incoming.uri.path == next.url.path ||
-                incoming.uri.path == next.initialization?.path);
-        final pending = _segmentPrefetch;
-        if (sameResource && pending != null) {
-          // A nearly finished speculative download can publish its cache and
-          // satisfy demand without a duplicate GET. Never put playback behind
-          // a stalled speculative request's network timeout.
+        _SegmentPrefetchJob? matching;
+        for (final job in _segmentPrefetchJobs.values) {
+          if (!job.cancelled &&
+              (incoming.uri.path == job.next.url.path ||
+                  incoming.uri.path == job.next.initialization?.path)) {
+            matching = job;
+            break;
+          }
+        }
+        if (matching != null) {
+          // Give a completed publication one short handoff opportunity, then
+          // preempt the matching speculation so foreground never inherits its
+          // body timeout or downloads behind it indefinitely.
           await Future.any<void>([
-            pending,
+            matching.task,
             read.cancelledFuture,
             Future<void>.delayed(const Duration(milliseconds: 100)),
           ]);
           read.check();
+          if (!matching.completed) {
+            _segmentPrefetchPreemptions++;
+            _cancelSegmentPrefetch(owner: matching.next.owner, requeue: false);
+          }
+        } else if (_active >= _maxRequests - 2) {
+          _SegmentPrefetchJob? victim;
+          for (final job in _segmentPrefetchJobs.values) {
+            if (!job.cancelled) {
+              victim = job;
+              break;
+            }
+          }
+          if (victim != null) {
+            _segmentPrefetchPreemptions++;
+            _cancelSegmentPrefetch(owner: victim.next.owner, requeue: true);
+          }
         }
-        _cancelSegmentPrefetch(requeue: !sameResource);
-      } else {
-        _segmentPrefetchRead = read;
+        if (_active >= _maxRequests &&
+            (_activeSegmentPrefetchRequests > 0 ||
+                _segmentPrefetchJobs.values.any((job) => job.cancelled))) {
+          final deadline = DateTime.now().add(
+            const Duration(milliseconds: 100),
+          );
+          while (_active >= _maxRequests && DateTime.now().isBefore(deadline)) {
+            await Future<void>.delayed(const Duration(milliseconds: 1));
+            read.check();
+          }
+        }
       }
-      if (_active >= _maxRequests) {
+      final requestLimit = prefetch ? _maxRequests - 2 : _maxRequests;
+      if (_active >= requestLimit) {
         incoming.response.statusCode = HttpStatus.serviceUnavailable;
         await incoming.response.close();
         return;
       }
       _active++;
+      if (prefetch) _activeSegmentPrefetchRequests++;
       acquired = true;
       await _serveResponse(incoming, read);
       served = true;
@@ -2333,10 +2399,14 @@ class PlaybackHttpProxy {
       } catch (_) {}
     } finally {
       final key = read.resourceKey;
-      if (identical(_segmentPrefetchRead, read)) _segmentPrefetchRead = null;
       _reads.remove(read);
       read.cancel();
-      if (acquired) _active--;
+      if (acquired) {
+        _active--;
+        if (incoming.headers.value('x-rillight-prefetch') == '1') {
+          _activeSegmentPrefetchRequests--;
+        }
+      }
       if (served &&
           key != null &&
           incoming.method == 'GET' &&
@@ -3466,7 +3536,9 @@ class PlaybackHttpProxy {
     if (_closed) return;
     _closed = true;
     cancelPendingReads();
-    await _segmentPrefetch;
+    await Future.wait(
+      _segmentPrefetchJobs.values.map((job) => job.task).toList(),
+    );
     await _readAhead?.close();
     for (final load in _loads.values) {
       load.producer.cancel();
@@ -3536,6 +3608,27 @@ class _ProxyRead {
     for (final iterator in iterators.toList()) {
       unawaited(iterator.cancel());
     }
+  }
+}
+
+class _SegmentPrefetchJob {
+  _SegmentPrefetchJob(this.next);
+
+  final _HlsNext next;
+  late Future<void> task;
+  HttpClient? client;
+  HttpClientRequest? request;
+  StreamIterator<List<int>>? iterator;
+  bool cancelled = false;
+  bool completed = false;
+
+  void cancel() {
+    if (cancelled) return;
+    cancelled = true;
+    request?.abort();
+    final current = iterator;
+    if (current != null) unawaited(current.cancel());
+    client?.close(force: true);
   }
 }
 

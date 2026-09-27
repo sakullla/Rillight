@@ -131,6 +131,31 @@ class _TrackIdCoreDriver extends _CoreDriver {
 }
 
 void main() {
+  test('session reset clears stale cache speed before open failure', () async {
+    final core = _FailingCoreDriver(
+      PlatformException(code: 'playback', message: 'Core rejected media open'),
+    );
+    final backend = RillightVideoBackend(
+      settingsStore: MemoryPlayerSettingsStore(),
+      createPlayer: () async => core,
+    );
+    addTearDown(backend.dispose);
+    final cleared = backend.events
+        .where((event) => event.kind == VideoEventKind.cacheSpeed)
+        .map((event) => event.value as double)
+        .first;
+    await expectLater(
+      backend.open(
+        VideoOpenRequest(
+          sessionId: 99,
+          url: Uri.parse('http://127.0.0.1:8765/media.mkv'),
+        ),
+      ),
+      throwsA(isA<PlatformException>()),
+    );
+    expect(await cleared, 0.0);
+  });
+
   test('probe diagnostics expose only a numeric core failure', () async {
     final core = _FailingCoreDriver(
       PlatformException(

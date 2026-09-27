@@ -681,15 +681,13 @@ void main() {
         expect(counts['/a1.ts'], 1);
         expect(await get(video.first), 'data');
         final settled = DateTime.now().add(const Duration(seconds: 8));
-        while (((counts['/a1.ts'] ?? 0) < 2 ||
-                (counts['/v1.ts'] ?? 0) == 0 ||
-                proxy.diagnostics['segmentPrefetchActive'] == true ||
-                proxy.diagnostics['segmentPrefetchPending'] != 0) &&
+        while (((counts['/a1.ts'] ?? 0) == 0 || (counts['/v1.ts'] ?? 0) == 0) &&
             DateTime.now().isBefore(settled)) {
           await Future<void>.delayed(const Duration(milliseconds: 10));
         }
-        expect(counts['/a1.ts'], greaterThanOrEqualTo(2));
+        expect(counts['/a1.ts'], 1);
         expect(counts['/v1.ts'], 1);
+        expect(proxy.diagnostics['segmentPrefetchActivePeak'], 2);
         expect(proxy.diagnostics['segmentPrefetchPending'], 0);
         expect(await get(video.last), 'data');
         expect(counts['/v1.ts'], 1);
@@ -1490,6 +1488,13 @@ void main() {
       }
       expect((await get(routes.first)).$2, '/segment0.ts');
       expect(proxy.diagnostics['registeredResources'], lessThanOrEqualTo(256));
+      final prefetchSettled = DateTime.now().add(const Duration(seconds: 2));
+      while ((proxy.diagnostics['segmentPrefetchActive'] == true ||
+              proxy.diagnostics['activeSegmentPrefetchRequests'] != 0 ||
+              proxy.diagnostics['segmentPrefetchPending'] != 0) &&
+          DateTime.now().isBefore(prefetchSettled)) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
       final before = requests;
       final segments = routes.first.pathSegments.toList();
       final token = segments[1];

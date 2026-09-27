@@ -873,6 +873,69 @@ void main() {
       },
     );
 
+    test(
+      'publication pipeline stays bounded and grows stable range requests',
+      () async {
+        final root = await Directory.systemTemp.createTemp(
+          'rillight-pipeline-',
+        );
+        final cache = await SessionByteCache.open(
+          root: root,
+          memoryLimitBytes: 2 * 1024 * 1024,
+          pendingLimitBytes: 64 * 1024 * 1024,
+          diskLimitBytes: 64 * 1024 * 1024,
+        );
+        final requestLengths = <int>[];
+        final ahead = SessionReadAhead(
+          cache: cache,
+          resource: 'pipeline',
+          generation: 1,
+          total: 24 * 1024 * 1024,
+          aheadBytes: 24 * 1024 * 1024,
+          fetch: (start, end) async {
+            requestLengths.add(end - start + 1);
+            return ReadAheadTransfer(
+              (() async* {
+                for (var offset = start; offset <= end; offset += 64 * 1024) {
+                  yield Uint8List((end - offset + 1).clamp(0, 64 * 1024));
+                }
+              })(),
+              () {},
+            );
+          },
+        );
+        final reader = StreamIterator(ahead.read(0, 24 * 1024 * 1024 - 1));
+        try {
+          expect(await reader.moveNext(), true);
+          await until(
+            () =>
+                (ahead.diagnostics['readAheadPublishedBytes'] as int) >=
+                24 * 1024 * 1024,
+          );
+          expect(requestLengths, [
+            8 * 1024 * 1024,
+            8 * 1024 * 1024,
+            8 * 1024 * 1024,
+          ]);
+          expect(ahead.diagnostics['readAheadRequestBytes'], 16 * 1024 * 1024);
+          expect(
+            ahead.diagnostics['readAheadPublicationPeak'],
+            inInclusiveRange(2, 4),
+          );
+          expect(
+            cache.diagnostics['pendingPeakBytes'],
+            lessThanOrEqualTo(64 * 1024 * 1024),
+          );
+          expect(cache.diagnostics['pendingPublicationPeak'], greaterThan(1));
+        } finally {
+          await reader.cancel();
+          await ahead.close();
+          await cache.close();
+          await root.delete(recursive: true);
+        }
+      },
+    );
+
     test('truncated producer wakes a waiting reader with failure', () async {
       final cache = await SessionByteCache.open();
       final ahead = SessionReadAhead(

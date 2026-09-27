@@ -34,6 +34,7 @@ class SessionReadAhead {
   // Keep one bounded range request large enough to amortize WAN round trips,
   // while still yielding at each 1 MiB cache block for playback reads.
   static const requestBytes = 8 * 1024 * 1024;
+  static const maxRequestBytes = 32 * 1024 * 1024;
   final SessionByteCache cache;
   final String resource;
   final int generation;
@@ -51,6 +52,11 @@ class SessionReadAhead {
   bool _waitingForDisk = false;
   bool _prefetchAllowed = true;
   bool _readerWaiting = false;
+  int _requestBytes = requestBytes;
+  int _stableRequests = 0;
+  int _publicationActive = 0;
+  int _publicationPeak = 0;
+  int _publicationBackpressure = 0;
   Future<void>? _worker;
   ReadAheadTransfer? _transfer;
   Completer<void> _changed = Completer<void>();
@@ -66,6 +72,10 @@ class SessionReadAhead {
     'readAheadFailed': _failed,
     'readAheadWaitingForDisk': _waitingForDisk,
     'readAheadPrefetchAllowed': _prefetchAllowed,
+    'readAheadRequestBytes': _requestBytes,
+    'readAheadPublicationActive': _publicationActive,
+    'readAheadPublicationPeak': _publicationPeak,
+    'readAheadPublicationBackpressure': _publicationBackpressure,
   };
 
   void _notify() {
@@ -76,6 +86,7 @@ class SessionReadAhead {
 
   void stop() {
     _active = false;
+    _resetRequestSize();
     _reader++;
     _transfer?.cancel();
     _readerWaiting = false;
@@ -139,6 +150,24 @@ class SessionReadAhead {
     length: max(0, _windowEnd - _position),
   );
 
+  void _resetRequestSize() {
+    _stableRequests = 0;
+    _requestBytes = requestBytes;
+  }
+
+  Future<void> _waitForPublicationCapacity(int cost) async {
+    while (!_closed &&
+        cost <= cache.pendingLimitBytes &&
+        cache.diagnostics['degradation'] == null &&
+        (cache.diagnostics['pendingBytes'] as int) + cost >
+            cache.pendingLimitBytes) {
+      _publicationBackpressure++;
+      _resetRequestSize();
+      final changed = cache.pendingChanged;
+      await changed;
+    }
+  }
+
   Future<void> _fill() async {
     final reader = _reader;
     final reserved = reserveWorkspace?.call() ?? true;
@@ -152,6 +181,7 @@ class SessionReadAhead {
           (_prefetchAllowed || _readerWaiting)) {
         if (cache.diagnostics['degradation'] == 'disk-timeout') {
           _waitingForDisk = true;
+          _resetRequestSize();
         }
         if (_position < total && _windowEnd <= _position) {
           throw const HttpException('Read-ahead budget unavailable');
@@ -159,7 +189,8 @@ class SessionReadAhead {
         final missing = _missing();
         if (missing == null) return;
         final start = missing;
-        final end = min(start + requestBytes, _windowEnd) - 1;
+        final requestLength = min(_requestBytes, _windowEnd - start);
+        final end = start + requestLength - 1;
         final transfer = await fetch(start, end);
         _transfer = transfer;
         if (!_active ||
@@ -172,6 +203,52 @@ class SessionReadAhead {
         var offset = start;
         var buffer = Uint8List(min(blockBytes, end - offset + 1));
         var length = 0;
+        var pressured = false;
+        final publications = <Future<bool>>[];
+        final pendingPublications = <Future<bool>>{};
+        final publicationLimit = max(
+          1,
+          min(4, cache.pendingLimitBytes ~/ (2 * blockBytes)),
+        );
+        Future<void> publish(Uint8List bytes, int position) async {
+          while (pendingPublications.length >= publicationLimit) {
+            final pending = cache.diagnostics['pendingBytes'] as int;
+            if (pending >= cache.pendingLimitBytes) {
+              pressured = true;
+              _resetRequestSize();
+            }
+            _publicationBackpressure++;
+            await pendingPublications.first;
+          }
+          final cost = bytes.length * 2;
+          if ((cache.diagnostics['pendingBytes'] as int) + cost >
+              cache.pendingLimitBytes) {
+            pressured = true;
+          }
+          await _waitForPublicationCapacity(cost);
+          if (!_active || _closed || reader != _reader) return;
+          late final Future<bool> publication;
+          publication = cache
+              .put(
+                resource: resource,
+                generation: generation,
+                offset: position,
+                bytes: bytes,
+              )
+              .whenComplete(() {
+                pendingPublications.remove(publication);
+                _publicationActive--;
+                _notify();
+              });
+          publications.add(publication);
+          pendingPublications.add(publication);
+          _publicationActive++;
+          _publicationPeak = max(_publicationPeak, _publicationActive);
+          // put publishes RAM synchronously. Let playback and the network
+          // continue while bounded disk work is still in flight.
+          _notify();
+        }
+
         try {
           await for (final bytes in transfer.bytes) {
             if (!_active || _closed || reader != _reader) return;
@@ -185,20 +262,7 @@ class SessionReadAhead {
               length += count;
               cursor += count;
               if (length == buffer.length) {
-                final publication = cache.put(
-                  resource: resource,
-                  generation: generation,
-                  offset: offset,
-                  bytes: buffer,
-                );
-                // put publishes RAM synchronously. Let playback consume it
-                // while the independent disk operation is still in flight.
-                _notify();
-                if (!await publication) {
-                  throw const HttpException(
-                    'Read-ahead cache rejected a block',
-                  );
-                }
+                await publish(buffer, offset);
                 if (cache.diagnostics['degradation'] == 'disk-timeout') {
                   _waitingForDisk = true;
                 }
@@ -218,9 +282,22 @@ class SessionReadAhead {
           if (offset != end + 1 || length != 0) {
             throw const HttpException('Truncated prefetch range');
           }
+          if (pressured || cache.diagnostics['degradation'] != null) {
+            _resetRequestSize();
+          } else if (++_stableRequests >= 2) {
+            _stableRequests = 0;
+            _requestBytes = min(maxRequestBytes, _requestBytes * 2);
+          }
         } finally {
           transfer.cancel();
           if (identical(_transfer, transfer)) _transfer = null;
+          final results = await Future.wait(publications);
+          if (results.any((accepted) => !accepted) &&
+              _active &&
+              !_closed &&
+              reader == _reader) {
+            throw const HttpException('Read-ahead cache rejected a block');
+          }
         }
       }
     } catch (_) {
@@ -258,6 +335,7 @@ class SessionReadAhead {
         if (hit == null) {
           if (_failed) throw const HttpException('Read-ahead failed');
           _readerWaiting = true;
+          _resetRequestSize();
           _position = offset;
           // A cache index hit blocked by disk capacity is not a producer
           // miss. Starting an empty producer would repeatedly wake this read

@@ -42,6 +42,10 @@ void main() {
         );
         expect(fixture.nextReleased.isCompleted, isFalse);
         expect(fixture.counts['/b.ts'], 2);
+        expect(
+          fixture.proxy.diagnostics['segmentPrefetchPreemptions'],
+          greaterThanOrEqualTo(1),
+        );
         fixture.currentReleased.complete();
         await first.done;
         await fixture.waitPrefetch();
@@ -112,6 +116,91 @@ void main() {
       }
     },
   );
+
+  test('two owners prefetch concurrently while a third remains queued', () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final cache = await SessionByteCache.open(
+      memoryLimitBytes: 2 * 1024 * 1024,
+    );
+    final proxy = await PlaybackHttpProxy.create(cache: cache);
+    final client = HttpClient();
+    final releases = <String, Completer<void>>{};
+    final entered = <String, Completer<void>>{};
+    server.listen((request) async {
+      final path = request.uri.path;
+      try {
+        if (path.endsWith('.m3u8')) {
+          final owner = path.substring(1, path.length - 5);
+          request.response.headers.contentType = ContentType(
+            'application',
+            'vnd.apple.mpegurl',
+          );
+          request.response.write(
+            '#EXTM3U\n#EXTINF:2,\n${owner}0.ts\n#EXTINF:2,\n${owner}1.ts\n#EXT-X-ENDLIST\n',
+          );
+        } else {
+          request.response.headers.set('etag', '"$path"');
+          request.response.headers.set('cache-control', 'max-age=120');
+          request.response.contentLength = 1024;
+          if (path.endsWith('1.ts')) {
+            await request.response.flush();
+            entered.putIfAbsent(path, Completer<void>.new).complete();
+            await releases.putIfAbsent(path, Completer<void>.new).future;
+          }
+          request.response.add(List<int>.filled(1024, 7));
+        }
+        await request.response.close();
+      } catch (_) {}
+    });
+    final origin = Uri.parse('http://127.0.0.1:${server.port}/');
+    Future<List<Uri>> playlist(String owner) async {
+      final response = await (await client.getUrl(
+        proxy.register(origin.resolve('$owner.m3u8')),
+      )).close();
+      final text = await response.transform(utf8.decoder).join();
+      return text
+          .split('\n')
+          .where((line) => line.startsWith('http://'))
+          .map(Uri.parse)
+          .toList();
+    }
+
+    Future<void> read(Uri uri) async {
+      await (await (await client.getUrl(uri)).close()).drain<void>();
+    }
+
+    try {
+      final owners = <String, List<Uri>>{};
+      for (final owner in ['a', 'b', 'c']) {
+        owners[owner] = await playlist(owner);
+        await read(owners[owner]!.first);
+      }
+      final deadline = DateTime.now().add(const Duration(seconds: 3));
+      while (((proxy.diagnostics['segmentPrefetchActiveSlots'] as int) < 2 ||
+              entered.keys.length < 2) &&
+          DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      expect(proxy.diagnostics['segmentPrefetchActiveSlots'], 2);
+      expect(proxy.diagnostics['segmentPrefetchActivePeak'], 2);
+      expect(proxy.diagnostics['segmentPrefetchPending'], 1);
+      expect(entered.keys.length, 2);
+      releases.values.first.complete();
+      final thirdDeadline = DateTime.now().add(const Duration(seconds: 3));
+      while (entered.keys.length < 3 &&
+          DateTime.now().isBefore(thirdDeadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      expect(entered.keys.length, 3);
+    } finally {
+      for (final release in releases.values) {
+        if (!release.isCompleted) release.complete();
+      }
+      client.close(force: true);
+      await proxy.close();
+      await server.close(force: true);
+    }
+  });
 
   test(
     'a transient next-segment failure recovers before foreground consumption',
