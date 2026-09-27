@@ -3,7 +3,7 @@
 #import <IOSurface/IOSurface.h>
 #import <Foundation/Foundation.h>
 
-#include "../../../../native/core/rillight_core.h"
+#include "rillight_core.h"
 #include "CoreAudioOutput.h"
 #include "FrameOutput.h"
 #include "FrameTiming.h"
