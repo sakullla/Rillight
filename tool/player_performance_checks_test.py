@@ -40,8 +40,8 @@ class PerformanceEvidenceTest(unittest.TestCase):
         return performance.load_rows(path, phase)
 
     def test_failure_samples_are_kept_and_block_regression(self):
-        before = [self.row("baseline", kind, 30) for kind in performance.CATEGORIES for _ in range(20)]
-        after = [self.row("candidate", kind, 10) for kind in performance.CATEGORIES for _ in range(20)]
+        before = [self.row("baseline", kind, 30) for kind in performance.REQUIRED["android-tv"] for _ in range(20)]
+        after = [self.row("candidate", kind, 10) for kind in performance.REQUIRED["android-tv"] for _ in range(20)]
         after[0]["complete"] = False
         baseline, before_errors = self.write("baseline", before)
         candidate, after_errors = self.write("candidate", after)
@@ -50,8 +50,8 @@ class PerformanceEvidenceTest(unittest.TestCase):
         self.assertTrue(any("more failed" in error for error in errors))
 
     def test_matching_scenarios_with_20_runs_show_actual_gain(self):
-        before = [self.row("baseline", kind, 30) for kind in performance.CATEGORIES for _ in range(20)]
-        after = [self.row("candidate", kind, 10) for kind in performance.CATEGORIES for _ in range(20)]
+        before = [self.row("baseline", kind, 30) for kind in performance.REQUIRED["android-tv"] for _ in range(20)]
+        after = [self.row("candidate", kind, 10) for kind in performance.REQUIRED["android-tv"] for _ in range(20)]
         baseline, _ = self.write("baseline", before)
         candidate, _ = self.write("candidate", after)
         comparisons, errors = performance.compare(baseline, candidate, targets=("android-tv",))
@@ -71,6 +71,55 @@ class PerformanceEvidenceTest(unittest.TestCase):
         groups, errors = self.write("candidate", [invalid])
         self.assertFalse(groups)
         self.assertTrue(any("hash mismatch" in error for error in errors))
+
+    def test_android_phone_requires_visible_frame_image_and_physical_energy(self):
+        rows = []
+        for category in performance.REQUIRED["android-phone"]:
+            row = self.row("candidate", category, 10, target="android-phone")
+            if category == "image":
+                row.update(firstRenderedImageMs=10, renderedImageObserved=False)
+            if category == "startup":
+                row.update(firstDisplayedFrameMs=10, nativeFirstFrameMs=5)
+            if category in ("power", "thermal"):
+                row.update(energyMWh=10, tempRiseC=1,
+                           environment="emulator", measurementMethod="power-rail",
+                           initialTempC=30, brightnessPercent=50, volumePercent=50)
+            rows.append(row)
+        groups, errors = self.write("candidate", rows)
+        self.assertEqual(errors, [])
+        by_category = {key[1]: values[0] for key, values in groups.items()}
+        for category in ("image", "startup", "power", "thermal"):
+            self.assertFalse(by_category[category]["complete"])
+
+    def test_android_phone_complete_physical_pairs_cover_all_categories(self):
+        screenshot = self.root / 'screen.png'
+        screenshot.write_bytes(b'synthetic screen evidence')
+        rows = {'baseline': [], 'candidate': []}
+        for phase, value in (('baseline', 30), ('candidate', 10)):
+            for category in performance.REQUIRED['android-phone']:
+                for _ in range(20):
+                    row = self.row(phase, category, value, target='android-phone')
+                    row.update(firstRenderedImageMs=value, renderedImageObserved=True,
+                               firstDisplayedFrameMs=value,
+                               displayedFrameEvidencePath=screenshot.name,
+                               displayedFrameEvidenceSha256=hashlib.sha256(
+                                   screenshot.read_bytes()).hexdigest(),
+                               displayedFrameClockUncertaintyMs=5,
+                               screenPixelChangeObserved=True,
+                               energyMWh=value, tempRiseC=value,
+                               environment='physical', elapsedMs=300000,
+                               measurementMethod='thermal-zone' if category == 'thermal'
+                               else 'power-rail', initialTempC=30,
+                               brightnessPercent=50, volumePercent=40)
+                    rows[phase].append(row)
+        baseline, before_errors = self.write('baseline', rows['baseline'])
+        candidate, after_errors = self.write('candidate', rows['candidate'])
+        self.assertEqual(before_errors + after_errors, [])
+        comparisons, errors = performance.compare(
+            baseline, candidate, targets=('android-phone',))
+        self.assertEqual(errors, [])
+        self.assertEqual(len(comparisons), len(performance.REQUIRED['android-phone']))
+        self.assertTrue(all(row['verdict'] == 'improved' for row in comparisons))
 
 
 if __name__ == "__main__":

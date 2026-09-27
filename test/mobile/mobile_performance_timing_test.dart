@@ -1,5 +1,7 @@
+import 'dart:convert';
 import 'dart:ui' show FrameTiming;
 
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../../integration_test/mobile_performance.dart' as probe;
@@ -17,6 +19,41 @@ FrameTiming _timing(int start, {int ui = 4000, int raster = 5000}) {
 }
 
 void main() {
+  testWidgets('placeholder does not count as a decoded visible image', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      const MaterialApp(home: SizedBox(key: ValueKey('content'))),
+    );
+    expect(
+      probe.hasDecodedImage(
+        tester.element(find.byKey(const ValueKey('content'))),
+      ),
+      isFalse,
+    );
+    final pixel = base64Decode(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==',
+    );
+    final decoded = await tester.runAsync(() => decodeImageFromList(pixel));
+    expect(decoded, isNotNull);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SizedBox(
+          key: const ValueKey('content'),
+          child: RawImage(image: decoded),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      probe.hasDecodedImage(
+        tester.element(find.byKey(const ValueKey('content'))),
+      ),
+      isTrue,
+    );
+    decoded!.dispose();
+  });
+
   test(
     'tail batch stays with its frame window across a new scenario',
     () async {
@@ -78,6 +115,7 @@ void main() {
         {
           'complete': false,
           'firstContentMs': 20,
+          'firstRenderedImageMs': null,
           'firstOperableMs': null,
           'frameBudgetMs': 16,
           'frameTimingsComplete': true,
@@ -88,6 +126,12 @@ void main() {
         {
           'complete': true,
           'firstContentMs': 30,
+          'firstRenderedImageMs': 35,
+          'renderedImageObserved': true,
+          'nativeFirstFrameMs': 28,
+          'firstDisplayedFrameMs': 37,
+          'displayedFrameEvidenceSha256': 'a' * 64,
+          'displayedFrameClockUncertaintyMs': 4,
           'firstOperableMs': 40,
           'frameBudgetMs': 16,
           'frameTimingsComplete': false,
@@ -100,6 +144,9 @@ void main() {
     expect(summary['samples'], 2);
     expect(summary['failures'], 1);
     expect(summary['firstContentMs'], {'median': 30.0, 'p95': 30.0});
+    expect(summary['firstRenderedImageMs'], {'median': 35.0, 'p95': 35.0});
+    expect(summary['firstDisplayedFrameMs'], {'median': 37.0, 'p95': 37.0});
+    expect(summary['nativeFirstFrameMs'], {'median': 28.0, 'p95': 28.0});
     expect(summary['measuredFrames'], 3);
     expect(summary['overBudgetFrames'], 1);
     expect(summary['overBudgetRate'], closeTo(1 / 3, 0.0001));

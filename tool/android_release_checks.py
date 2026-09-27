@@ -531,6 +531,31 @@ def app_flow(device, tv):
     })
     if not post_audio['player'] or not post_audio['player']['playing']:
         raise RuntimeError('Playback paused during emulator virtual-audio capture; see post-audio-state.json')
+    lock_observation = None
+    if not tv:
+        state = d.state()
+        if not any(row['key'] == 'mobile-player-lock' for row in state['rows']):
+            d.adb('shell', 'input', 'tap', round(state['size'][0]/2), round(state['size'][1]/2))
+        _, lock = d.row(key='mobile-player-lock')
+        lock_rect = lock['rect']
+        d.tap(key='mobile-player-lock')
+        locked = d.wait(lambda s: any(row['key'] == 'mobile-player-unlock' for row in s['rows']),
+                        'explicit unlock entry')
+        unlock_rect = next(row['rect'] for row in locked['rows']
+                           if row['key'] == 'mobile-player-unlock')
+        if max(abs(a-b) for a, b in zip(lock_rect, unlock_rect)) > 2:
+            raise RuntimeError('Lock and unlock anchors moved')
+        d.screenshot('locked')
+        d.adb('shell', 'input', 'tap', round(locked['size'][0]/2), round(locked['size'][1]/2))
+        still_locked = d.wait(lambda s: any(row['key'] == 'mobile-player-unlock' for row in s['rows']) and
+                              s['player'] and s['player']['playing'], 'ordinary tap preserves lock')
+        d.tap(key='mobile-player-unlock')
+        d.wait(lambda s: any(row['key'] == 'mobile-player-lock' for row in s['rows']),
+               'explicit unlock restores controls')
+        lock_observation = {'anchor_delta_dp': max(abs(a-b) for a, b in zip(lock_rect, unlock_rect)),
+                            'ordinary_tap_preserved_lock': bool(still_locked['player']['playing']),
+                            'explicit_unlock': True}
+        save(d.output / 'lock-observation.json', lock_observation)
     if tv:
         d.key(85)
     else:
@@ -618,6 +643,7 @@ def app_flow(device, tv):
     recovered_search_row(d, tv)
     d.screenshot('search-recovered')
     return {'pixels': pixels, 'virtual_audio': audio, 'control_flow': True,
+            'phone_lock': lock_observation,
             'search_fault_recovery': True, 'rotation': True if not tv else 'not-applicable',
             'tv_native_remote_navigation': tv, 'tv_osk_only': False if tv else None}
 

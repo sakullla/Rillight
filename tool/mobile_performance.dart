@@ -71,6 +71,10 @@ Map<String, Object?> summarizeMobileSamples(
   List<Map<String, dynamic>> samples,
 ) {
   final content = <double>[];
+  final renderedImages = <double>[];
+  final displayedFrames = <double>[];
+  final nativeFrames = <double>[];
+  final clockUncertainty = <double>[];
   final operable = <double>[];
   final uiFrames = <double>[];
   final rasterFrames = <double>[];
@@ -84,6 +88,20 @@ Map<String, Object?> summarizeMobileSamples(
   for (final sample in samples) {
     final first = sample['firstContentMs'];
     final action = sample['firstOperableMs'];
+    final rendered = sample['firstRenderedImageMs'];
+    final displayed = sample['firstDisplayedFrameMs'];
+    final native = sample['nativeFirstFrameMs'];
+    final uncertainty = sample['displayedFrameClockUncertaintyMs'];
+    if (sample['renderedImageObserved'] == true && rendered is num) {
+      renderedImages.add(rendered.toDouble());
+    }
+    if (displayed is num &&
+        sample['displayedFrameEvidenceSha256'] is String &&
+        uncertainty is num) {
+      displayedFrames.add(displayed.toDouble());
+      clockUncertainty.add(uncertainty.toDouble());
+    }
+    if (native is num) nativeFrames.add(native.toDouble());
     if (sample['complete'] != true || first is! num || action is! num) {
       failures++;
     } else {
@@ -132,6 +150,12 @@ Map<String, Object?> summarizeMobileSamples(
     'samples': samples.length,
     'failures': failures,
     'firstContentMs': _summary(content),
+    'firstRenderedImageMs': _summary(renderedImages),
+    'renderedImageSamples': renderedImages.length,
+    'firstDisplayedFrameMs': _summary(displayedFrames),
+    'displayedFrameSamples': displayedFrames.length,
+    'nativeFirstFrameMs': _summary(nativeFrames),
+    'displayedFrameClockUncertaintyMs': _summary(clockUncertainty),
     'firstOperableMs': _summary(operable),
     'frameBudgetMs': frameBudgetMs,
     'measuredFrames': measuredFrames,

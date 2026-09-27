@@ -76,6 +76,21 @@ class _PageProbe {
           }
         } else if (request.method == 'GET' && request.uri.path == '/state') {
           request.response.write(jsonEncode(_record(_latest)));
+        } else if (request.method == 'POST' && request.uri.path == '/observe') {
+          final sample = _active;
+          if (sample == null) {
+            request.response.statusCode = HttpStatus.conflict;
+            request.response.write('No active scenario');
+          } else {
+            final value = jsonDecode(await utf8.decoder.bind(request).join());
+            if (value is! Map<String, dynamic> ||
+                !_recordExternalObservation(sample, value)) {
+              request.response.statusCode = HttpStatus.badRequest;
+              request.response.write('Invalid external observation');
+            } else {
+              request.response.write(jsonEncode(_record(sample)));
+            }
+          }
         } else if (request.method == 'POST' && request.uri.path == '/end') {
           final sample = _active;
           if (sample == null) {
@@ -130,7 +145,14 @@ class _PageProbe {
       'contentKey': sample?.contentKey,
       'actionKey': sample?.actionKey,
       'firstContentMs': sample?.contentMs,
+      'firstRenderedImageMs': sample?.renderedImageMs,
+      'renderedImageObserved': sample?.renderedImageMs != null,
       'firstOperableMs': sample?.operableMs,
+      'nativeFirstFrameMs': sample?.nativeFirstFrameMs,
+      'firstDisplayedFrameMs': sample?.displayedFrameMs,
+      'displayedFrameEvidenceSha256': sample?.displayedFrameEvidenceSha256,
+      'displayedFrameClockUncertaintyMs':
+          sample?.displayedFrameClockUncertaintyMs,
       'elapsedMs': (sample?.clock.elapsedMicroseconds ?? 0) / 1000,
       'complete': sample?.complete ?? false,
     };
@@ -158,6 +180,11 @@ class _PageProbe {
             final ms = sample.clock.elapsedMicroseconds / 1000;
             if (sample.contentMs == null && key.value == sample.contentKey) {
               sample.contentMs = ms;
+            }
+            if (sample.renderedImageMs == null &&
+                key.value == sample.contentKey &&
+                hasDecodedImage(element)) {
+              sample.renderedImageMs = ms;
             }
             if (sample.operableMs == null &&
                 key.value == sample.actionKey &&
@@ -208,9 +235,64 @@ class _PageSample {
   final String label, cacheMode, device, buildId, contentKey, actionKey;
   final MobileFrameTimingWindow frames;
   final Stopwatch clock = Stopwatch();
-  double? contentMs, operableMs;
+  double? contentMs, renderedImageMs, operableMs, nativeFirstFrameMs;
+  double? displayedFrameMs, displayedFrameClockUncertaintyMs;
+  String? displayedFrameEvidenceSha256;
   bool contentTimedOut = false;
   bool get complete => contentMs != null && operableMs != null;
+}
+
+/// A keyed placeholder is content, but only a decoded RenderImage is an image.
+bool hasDecodedImage(Element element) {
+  var found = false;
+  void visit(Element child) {
+    if (found ||
+        child.widget is Offstage && (child.widget as Offstage).offstage) {
+      return;
+    }
+    final render = child.findRenderObject();
+    if (render is RenderImage && render.image != null) {
+      found = true;
+      return;
+    }
+    child.visitChildren(visit);
+  }
+
+  visit(element);
+  return found;
+}
+
+/// Host observations require a screenshot digest and bounded clock alignment.
+/// The native callback is retained separately and never fills display timing.
+bool _recordExternalObservation(
+  _PageSample sample,
+  Map<String, dynamic> value,
+) {
+  final kind = value['kind'];
+  final elapsed = value['elapsedMs'];
+  final uncertainty = value['clockUncertaintyMs'];
+  if (elapsed is! num ||
+      elapsed < 0 ||
+      uncertainty is! num ||
+      uncertainty < 0 ||
+      uncertainty > 100 ||
+      elapsed > sample.clock.elapsedMicroseconds / 1000 + uncertainty) {
+    return false;
+  }
+  if (kind == 'nativeFirstFrame') {
+    sample.nativeFirstFrameMs ??= elapsed.toDouble();
+    return true;
+  }
+  final digest = value['evidenceSha256'];
+  if (kind != 'displayedFrame' ||
+      digest is! String ||
+      !RegExp(r'^[0-9a-f]{64}$').hasMatch(digest)) {
+    return false;
+  }
+  sample.displayedFrameMs ??= elapsed.toDouble();
+  sample.displayedFrameClockUncertaintyMs ??= uncertainty.toDouble();
+  sample.displayedFrameEvidenceSha256 ??= digest;
+  return true;
 }
 
 /// Matches delayed engine timing batches to the frame window where UI work ran.

@@ -39,7 +39,9 @@ output = args.output.resolve()
 output.mkdir(parents=True, exist_ok=True)
 lock = threading.RLock()
 conditions = dict(offline=False, expired=False, auth_fail=False, empty=False, report_fail=False,
-                  media_fail=False, subtitle_delay_ms=0, catalog_delay_ms=0)
+                  media_fail=False, subtitle_delay_ms=0, catalog_delay_ms=0,
+                  playback_info_delay_ms=0, alternate_media_fail=False,
+                  alternate_media_delay_ms=0)
 positions = {'movie-01': 20000000}
 played = set()
 reports = []
@@ -69,6 +71,7 @@ for i in range(1, 49):
 add('hls', 'Rillight HLS 字幕回退', 'Movie', ParentId='movies')
 add('broken', 'Rillight 播放失败', 'Movie', ParentId='movies')
 add('no-media', 'Rillight 无可播放媒体', 'Movie', ParentId='movies')
+add('multi-source', 'Rillight 多来源切换', 'Movie', ParentId='movies')
 for series in range(1, 5):
     sid = f'series-{series}'
     add(sid, f'Rillight 合成剧集 {series}', 'Series', ParentId='shows', ChildCount=2)
@@ -82,7 +85,7 @@ for series in range(1, 5):
                 SeriesName=items[sid]['Name'], IndexNumber=episode, ParentIndexNumber=season)
 
 
-def source(identifier, force=False):
+def source(identifier, force=False, variant='primary'):
     hls = identifier == 'hls' or force
     streams = [{'Index': 0, 'Type': 'Video', 'Codec': 'h264', 'Width': 1280, 'Height': 720},
                {'Index': 1, 'Type': 'Audio', 'Codec': 'aac', 'Language': 'eng', 'IsDefault': True}]
@@ -94,15 +97,37 @@ def source(identifier, force=False):
                  'DisplayTitle': '外挂测试字幕', 'IsTextSubtitleStream': True,
                  'IsExternal': True, 'DeliveryMethod': 'External',
                  'DeliveryUrl': '/media/sample.vtt'}]
-    result = {'Id': identifier + '-source', 'Name': '合成测试源',
-              'Container': 'ts' if hls else 'mkv', 'RunTimeTicks': 120000000 if hls else 600210000,
+    # Each version has a stable Emby identity. The alternate deliberately has
+    # different track identities and a shorter duration for resume clamping.
+    if identifier == 'multi-source' and variant == 'alternate':
+        streams = [{'Index': 0, 'Type': 'Video', 'Codec': 'h264', 'Width': 1280, 'Height': 720},
+                   {'Index': 5, 'Type': 'Audio', 'Codec': 'aac', 'Language': 'zho', 'IsDefault': True},
+                   {'Index': 6, 'Type': 'Subtitle', 'Codec': 'vtt', 'Language': 'zho',
+                    'IsTextSubtitleStream': True, 'IsExternal': True,
+                    'DeliveryMethod': 'External', 'DeliveryUrl': '/media/sample.vtt'}]
+    suffix = '-alternate' if variant == 'alternate' else '-source'
+    result = {'Id': identifier + suffix,
+              'Name': '合成备选版本' if variant == 'alternate' else '合成测试源',
+              'Container': 'ts' if hls else 'mkv',
+              'RunTimeTicks': 450000000 if variant == 'alternate' else 120000000 if hls else 600210000,
               'SupportsDirectPlay': not hls, 'SupportsDirectStream': not hls,
-              'SupportsTranscoding': True, 'DefaultAudioStreamIndex': 1,
-              'DefaultSubtitleStreamIndex': 4 if hls else 3, 'MediaStreams': streams}
+              'SupportsTranscoding': True,
+              'DefaultAudioStreamIndex': 5 if variant == 'alternate' else 1,
+              'DefaultSubtitleStreamIndex': 6 if variant == 'alternate' else 4 if hls else 3,
+              'MediaStreams': streams}
     if hls:
         result['TranscodingUrl'] = '/media/stream.m3u8'
     else:
-        result['DirectStreamUrl'] = '/media/missing.mkv' if identifier == 'broken' else '/media/android-tracks.mkv'
+        result['DirectStreamUrl'] = ('/media/missing.mkv' if identifier == 'broken' else
+                                     '/media/alternate.mkv' if variant == 'alternate' else
+                                     '/media/android-tracks.mkv')
+    return result
+
+
+def sources(identifier, force=False):
+    result = [source(identifier, force)]
+    if identifier == 'multi-source':
+        result.append(source(identifier, force, 'alternate'))
     return result
 
 
@@ -112,7 +137,7 @@ def item(identifier):
                           'Played': identifier in played, 'IsFavorite': False}
     if result['Type'] in ('Movie', 'Episode'):
         result['MediaType'] = 'Video'
-        result['MediaSources'] = [] if identifier == 'no-media' else [source(identifier)]
+        result['MediaSources'] = [] if identifier == 'no-media' else sources(identifier)
     return result
 
 
@@ -143,7 +168,7 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         try:
             self.wfile.write(body)
-        except (BrokenPipeError, ConnectionResetError):
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             pass
 
     def body(self):
@@ -193,6 +218,13 @@ class Handler(BaseHTTPRequestHandler):
         if conditions['media_fail']:
             self.reply({'Error': 'synthetic media failure'}, 503)
             return
+        if filename == 'alternate.mkv':
+            if conditions['alternate_media_delay_ms']:
+                time.sleep(conditions['alternate_media_delay_ms'] / 1000)
+            if conditions['alternate_media_fail']:
+                self.reply({'Error': 'synthetic alternate failure'}, 503)
+                return
+            filename = 'android-tracks.mkv'
         if filename.endswith(('.srt', '.vtt')) and conditions['subtitle_delay_ms']:
             time.sleep(conditions['subtitle_delay_ms'] / 1000)
         target = (media / filename).resolve()
@@ -228,7 +260,7 @@ class Handler(BaseHTTPRequestHandler):
                         break
                     self.wfile.write(data)
                     remaining -= len(data)
-        except (BrokenPipeError, ConnectionResetError):
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             pass
 
     def do_GET(self):
@@ -303,8 +335,10 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path.endswith('/PlaybackInfo'):
             identifier = path.split('/')[-2]
+            if conditions['playback_info_delay_ms']:
+                time.sleep(conditions['playback_info_delay_ms'] / 1000)
             self.reply({'PlaySessionId': identifier + '-session', 'MediaSources': [] if identifier == 'no-media'
-                        else [source(identifier, body.get('EnableDirectPlay') is False)]})
+                        else sources(identifier, body.get('EnableDirectPlay') is False)})
         elif path.startswith('/Sessions/Playing'):
             event = {'path': path, 'body': body, 'time': time.time(), 'accepted': not conditions['report_fail']}
             with lock:
@@ -338,5 +372,3 @@ server = ThreadingHTTPServer(('127.0.0.1', args.port), Handler)
     'username': 'mobile', 'password': 'test-only', 'synthetic': True}), encoding='utf-8')
 print(f'Synthetic mobile Emby ready on 127.0.0.1:{args.port}', flush=True)
 server.serve_forever()
-
-

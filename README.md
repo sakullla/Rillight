@@ -29,3 +29,5 @@ Android APK 在设置 `RILLIGHT_CORE_SDK_ROOT` 后使用 `flutter build apk --de
 Apple M3 目标机已从固定源构建通用 SDK/核心，并完成 Release 包审计、探针、adhoc 签名和沙箱代理；H.264/HEVC/VP9/AV1 窗口画面、物理声音、VideoToolbox 实际 decoder 和 Intel 仍见 [macOS 交接文档](packages/rillight_player/macos/TESTING_HANDOFF.md)。PR CI 在缺少输入时明确标为待验证；正式 macOS 发布构建仍要求固定 SDK/核心输入，不能静默跳过。
 
 网络、页面加载和动画优化需要与冻结基线在同一设备、媒体、网络条件和 profile/release 模式下比较。模拟器、Xvfb、虚拟音频、CI 配置和实体设备观察应分别报告；尚未采集的数据不宣称性能收益。
+
+本次手机候选验证运行 `python tool/phone_player_validation.py --verify-candidate --evidence-root build/phone-player-validation`；缺少 SDK、设备或配对样本时明确失败并列出未验证项。证据格式见 [播放器证据合同](tool/player_release_evidence.md)，本地多来源与故障夹具见 [Android 验证说明](integration_test/android/README.md)。

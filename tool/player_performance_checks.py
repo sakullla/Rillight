@@ -18,9 +18,13 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 TARGETS = ("windows", "macos", "linux", "android-phone", "android-tv")
 SHA256 = re.compile(r"[0-9a-f]{64}\Z")
-CATEGORIES = ("page", "network", "animation")
+CATEGORIES = ("page", "network", "animation", "image", "startup", "power", "thermal")
+REQUIRED = {target: (CATEGORIES if target == "android-phone" else CATEGORIES[:3])
+            for target in TARGETS}
 METRIC = {"page": "firstOperableMs", "network": "stallMs",
-          "animation": "overBudgetRate"}
+          "animation": "overBudgetRate", "image": "firstRenderedImageMs",
+          "startup": "firstDisplayedFrameMs", "power": "energyMWh",
+          "thermal": "tempRiseC"}
 KEY = ("target", "category", "label", "cache", "device", "buildMode",
        "media", "network", "quality", "frameBudgetMs")
 
@@ -113,6 +117,39 @@ def load_rows(path: Path, expected_phase: str) -> tuple[dict[tuple, list[dict]],
                 row["overBudgetRate"] = sum(
                     x > budget or y > budget for x, y in zip(ui, raster)
                 ) / len(ui)
+        elif row["category"] == "image":
+            # The page's content key can identify a placeholder. Only a
+            # decoded, visible image is eligible for this metric.
+            if row.get("renderedImageObserved") is not True:
+                row["complete"] = False
+        elif row["category"] == "startup":
+            # A native firstFrame event cannot stand in for screen pixels.
+            evidence = row.get("displayedFrameEvidencePath")
+            digest = row.get("displayedFrameEvidenceSha256")
+            if (row.get("screenPixelChangeObserved") is not True or
+                    not isinstance(evidence, str) or not evidence or
+                    not isinstance(digest, str) or not SHA256.fullmatch(digest) or
+                    not isinstance(row.get("displayedFrameClockUncertaintyMs"), (int, float)) or
+                    row["displayedFrameClockUncertaintyMs"] < 0 or
+                    row["displayedFrameClockUncertaintyMs"] > 100):
+                row["complete"] = False
+            else:
+                screenshot = Path(evidence)
+                if not screenshot.is_absolute():
+                    screenshot = path.parent / screenshot
+                if (not screenshot.is_file() or
+                        hashlib.sha256(screenshot.read_bytes()).hexdigest() != digest):
+                    row["complete"] = False
+        elif row["category"] in ("power", "thermal"):
+            if (row.get("environment") != "physical" or
+                    not isinstance(row.get("elapsedMs"), (int, float)) or
+                    row["elapsedMs"] < 300000 or
+                    not isinstance(row.get("initialTempC"), (int, float)) or
+                    not isinstance(row.get("brightnessPercent"), (int, float)) or
+                    not isinstance(row.get("volumePercent"), (int, float)) or
+                    row.get("measurementMethod") not in
+                    (("power-rail", "fuel-gauge") if row["category"] == "power" else ("thermal-zone",))):
+                row["complete"] = False
         groups[tuple(row[field] for field in KEY)].append(row)
     if not groups:
         errors.append(f"{expected_phase}: no valid measured scenarios")
@@ -125,7 +162,7 @@ def compare(baseline: dict[tuple, list[dict]], candidate: dict[tuple, list[dict]
     errors = []
     keys = {key for key in baseline if key[0] in targets} | {key for key in candidate if key[0] in targets}
     for target in targets:
-        for category in CATEGORIES:
+        for category in REQUIRED[target]:
             if not any(key[0] == target and key[1] == category for key in keys):
                 errors.append(f"{target}/{category}: missing baseline and candidate runs")
     improvements = defaultdict(int)
@@ -145,6 +182,20 @@ def compare(baseline: dict[tuple, list[dict]], candidate: dict[tuple, list[dict]
         if first["measured"] == 0 or second["measured"] == 0:
             errors.append(f"{name}: no successful metric samples")
             continue
+        if key[1] in ("power", "thermal"):
+            valid_controls = [row for row in before + after if row.get("complete") is True and
+                              isinstance(row.get("initialTempC"), (int, float))]
+            controls = ("brightnessPercent", "volumePercent", "measurementMethod")
+            if any(len({row.get(field) for row in valid_controls}) != 1
+                   for field in controls) or abs(
+                       statistics.median(row["initialTempC"] for row in before
+                                         if row.get("complete") is True and
+                                         isinstance(row.get("initialTempC"), (int, float))) -
+                       statistics.median(row["initialTempC"] for row in after
+                                         if row.get("complete") is True and
+                                         isinstance(row.get("initialTempC"), (int, float)))) > 1:
+                errors.append(f"{name}: power/thermal conditions differ")
+                continue
         if second["failures"] > first["failures"]:
             errors.append(f"{name}: candidate has more failed or timed-out runs")
             continue
@@ -161,7 +212,7 @@ def compare(baseline: dict[tuple, list[dict]], candidate: dict[tuple, list[dict]
         else:
             row["verdict"] = "indistinguishable"
     for target in targets:
-        for category in CATEGORIES:
+        for category in REQUIRED[target]:
             if improvements[(target, category)] == 0:
                 errors.append(f"{target}/{category}: no improvement beyond baseline variation")
     return results, errors

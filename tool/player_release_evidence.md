@@ -132,6 +132,33 @@ classifies improvement only when it exceeds baseline variation. Scenario
 identities must match exactly, including media, quality, network and cache
 state. It never deletes outliers or treats missing samples as fast samples.
 
+Android phone additionally requires `image`, `startup`, `power` and `thermal`
+categories at the same minimum 20 attempts per matched scenario. Image samples
+need `firstRenderedImageMs` and `renderedImageObserved: true` from a decoded
+visible `RenderImage`; a keyed placeholder is only `firstContentMs`. Startup
+samples need `firstDisplayedFrameMs`, a hashed screen observation file,
+`screenPixelChangeObserved: true` and clock uncertainty at most 100 ms. Native
+`firstFrame` is a separate timestamp, never a substitute for displayed pixels.
+Power and thermal attempts require a physical phone, at least five minutes per
+run, measured `energyMWh` or `tempRiseC`, method, initial temperature,
+brightness and volume. Candidate failures stay in the denominator; conditions
+must match and initial median temperature must differ by at most 1 °C. Missing
+power rails need an identified fuel gauge method with its uncertainty recorded,
+not an emulator estimate presented as phone energy.
+
+For the current phone candidate run `python tool/phone_player_validation.py
+--verify-candidate --evidence-root build/phone-player-validation`. It writes
+`result.json` with Git revision and working-tree content hashes and checks the
+current Android 360dp/412dp/TV runner, paired baseline/candidate samples and
+physical-phone observations. Supply `physical-phone.json` under that ignored
+root with the same `candidate_head`, `working_tree_sha256`, APK path/hash and
+physical device fingerprint. Each check named by `PHYSICAL_CHECKS` in the
+validator needs `passed: true`, a relative evidence path and its SHA-256.
+This gate fails closed when the verified native SDK, device, samples or a check
+is unavailable. Emulator control results remain separate from physical output,
+audio and energy evidence. Never put runtime server details in repository files
+or saved evidence.
+
 The same explicit `--macos-handoff` option is available for the comparator;
 it records Mac performance as pending. Missing other target data makes the
 check fail. Windows/Linux physical GPU/audio, Android phone and TV hardware,

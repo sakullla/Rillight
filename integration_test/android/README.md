@@ -52,11 +52,39 @@ the observation is not specific to TV. Image identity is saved per device.
 The tools generate testsrc2 video, two synthetic AAC sine tracks and subtitles.
 Ports 8784, 8865 and 8866 must be free for loopback fixtures; 18799 is used for
 an adb-forwarded observer. No personal Emby server is needed. HTTP fixtures cover
-login, views, 51-item pagination, search, seasons, playback metadata and reports.
+login, views, 52-item pagination, search, seasons, playback metadata and reports.
 POST `/__control` accepts `offline`, `expired`, `auth_fail`, `empty`, `report_fail`,
-`media_fail`, `subtitle_delay_ms` and `catalog_delay_ms`; GET `/__state` exposes
+`media_fail`, `subtitle_delay_ms`, `catalog_delay_ms`,
+`playback_info_delay_ms`, `alternate_media_fail` and
+`alternate_media_delay_ms`; GET `/__state` exposes
 sanitized request paths and synthetic reports. Use both expired/auth_fail to
 exercise unrecoverable authentication, since normal synthetic refresh succeeds.
+The `multi-source` movie exposes two versions with separate IDs, tracks and
+durations. Its alternate URL serves the synthetic media and accepts source-only
+failure or delay injection. Use it for switch, rollback, timeout and late-result
+checks; the external Emby server is a single-source runtime check only.
+
+For timed page runs launch `integration_test/mobile_performance.dart` in profile
+or release mode and forward device port 8798. POST `/begin` with `label`,
+`cache`, `device`, `build`, `contentKey` and `actionKey`; GET `/state` and POST
+`/end` retain the attempted run even on timeout. `firstContentMs` is keyed
+content visibility, while `firstRenderedImageMs` requires a decoded image under
+that key. Flutter frame timings use the engine's `FrameTiming` callback and
+report missing tail batches. Widget-test timings prove the collector contract;
+they are not device performance measurements. Debug frame timings are not
+comparable to profile/release measurements.
+
+The optional POST `/observe` accepts `kind: nativeFirstFrame` or
+`kind: displayedFrame`, `elapsedMs` since `/begin`, and
+`clockUncertaintyMs`. Display observations additionally require the SHA-256 of
+the saved screenshot. Use a changing, unobscured video region across two screen
+captures before setting `screenPixelChangeObserved: true` in a startup sample.
+The host must retain screenshot files and its clock alignment measurements;
+the core callback alone never fills the visible-frame metric. Observations
+with uncertainty above 100 ms are rejected by the probe. Android phone energy
+and temperature comparisons require repeated physical-device runs with the
+same brightness, volume, media, network and initial temperature conditions;
+emulator metrics are separate functional evidence.
 
 Validation builds set `--android-project-arg=rillightValidation=true`. They use
 `com.rillight.rillight.validation`; only this disposable package is cleared.

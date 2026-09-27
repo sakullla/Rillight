@@ -212,6 +212,7 @@ class FixtureTests(unittest.TestCase):
         cls.directory = tempfile.TemporaryDirectory()
         cls.path = Path(cls.directory.name)
         (cls.path / 'bytes.mkv').write_bytes(bytes(range(100)))
+        (cls.path / 'android-tracks.mkv').write_bytes(bytes(range(100)))
         with socket.socket() as sock:
             sock.bind(('127.0.0.1', 0))
             port = sock.getsockname()[1]
@@ -239,7 +240,9 @@ class FixtureTests(unittest.TestCase):
         return urllib.request.urlopen(request, timeout=5)
 
     def tearDown(self):
-        self.request('/__control', {'offline': False, 'expired': False, 'auth_fail': False, 'media_fail': False}).close()
+        self.request('/__control', {'offline': False, 'expired': False, 'auth_fail': False,
+            'media_fail': False, 'alternate_media_fail': False,
+            'alternate_media_delay_ms': 0, 'playback_info_delay_ms': 0}).close()
 
     def test_authentication_requires_fixture_password(self):
         with self.assertRaises(urllib.error.HTTPError) as caught:
@@ -269,8 +272,40 @@ class FixtureTests(unittest.TestCase):
     def test_pagination_keeps_total(self):
         with self.request('/Users/mobile-user/Items?ParentId=movies&StartIndex=50&Limit=50') as response:
             result = json.load(response)
-        self.assertEqual(result['TotalRecordCount'], 51)
-        self.assertEqual(len(result['Items']), 1)
+        self.assertEqual(result['TotalRecordCount'], 52)
+        self.assertEqual(len(result['Items']), 2)
+
+    def test_multi_source_metadata_failure_and_late_response(self):
+        with self.request('/Users/mobile-user/Items/multi-source') as response:
+            sources = json.load(response)['MediaSources']
+        self.assertEqual(len(sources), 2)
+        self.assertNotEqual(sources[0]['Id'], sources[1]['Id'])
+        self.assertNotEqual(sources[0]['RunTimeTicks'], sources[1]['RunTimeTicks'])
+        self.assertNotEqual(sources[0]['DefaultAudioStreamIndex'],
+                            sources[1]['DefaultAudioStreamIndex'])
+        with self.request('/Items/multi-source/PlaybackInfo', {}) as response:
+            self.assertEqual(len(json.load(response)['MediaSources']), 2)
+        self.request('/__control', {'alternate_media_fail': True}).close()
+        with self.assertRaises(urllib.error.HTTPError) as caught:
+            self.request('/media/alternate.mkv')
+        self.assertEqual(caught.exception.code, 503)
+        caught.exception.close()
+        self.request('/__control', {'alternate_media_fail': False,
+            'alternate_media_delay_ms': 80}).close()
+        started = time.monotonic()
+        with self.request('/media/alternate.mkv', headers={
+            'X-Emby-Token': 'synthetic-mobile-token', 'Range': 'bytes=0-9'}) as response:
+            self.assertEqual(response.status, 206)
+            self.assertEqual(response.read(), bytes(range(10)))
+        self.assertGreaterEqual(time.monotonic() - started, .06)
+        self.request('/__control', {'playback_info_delay_ms': 200}).close()
+        delayed = urllib.request.Request(self.base + '/Items/multi-source/PlaybackInfo',
+            data=b'{}', headers={'X-Emby-Token': 'synthetic-mobile-token'})
+        with self.assertRaises(TimeoutError):
+            urllib.request.urlopen(delayed, timeout=.03)
+        self.request('/__control', {'playback_info_delay_ms': 0}).close()
+        with self.request('/Items/multi-source/PlaybackInfo', {}) as response:
+            self.assertEqual(len(json.load(response)['MediaSources']), 2)
 
     def test_reports_have_monotonic_sequence_across_rolling_window(self):
         with self.request('/__state') as response:
