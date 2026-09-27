@@ -28,21 +28,37 @@ class _RecoveryBackend extends FakeVideoBackend {
   String? rejectedSource;
   bool rejectNextVolume = false;
   int stopCount = 0;
+  int openBegins = 0;
+  int activeOpens = 0;
+  int maxConcurrentOpens = 0;
+  final List<String> nativeOrder = [];
 
   @override
   Future<void> stop() async {
     stopCount++;
     await stopGate?.future;
     await super.stop();
+    nativeOrder.add('stop');
   }
 
   @override
   Future<void> open(VideoOpenRequest request) async {
-    await openGate?.future;
-    if (request.url.queryParameters['MediaSourceId'] == rejectedSource) {
-      throw StateError('Source rejected');
+    final openNumber = ++openBegins;
+    nativeOrder.add('open-start-$openNumber');
+    activeOpens++;
+    if (activeOpens > maxConcurrentOpens) {
+      maxConcurrentOpens = activeOpens;
     }
-    await super.open(request);
+    try {
+      await openGate?.future;
+      if (request.url.queryParameters['MediaSourceId'] == rejectedSource) {
+        throw StateError('Source rejected');
+      }
+      await super.open(request);
+    } finally {
+      activeOpens--;
+      nativeOrder.add('open-end-$openNumber');
+    }
   }
 
   @override
@@ -100,6 +116,7 @@ void main() {
       backend: backend,
       window: PlayerWindow(),
       recoveryTimeout: const Duration(milliseconds: 300),
+      disposeTimeout: const Duration(milliseconds: 50),
       snapshotStore: MemoryPlaybackSessionSnapshotStore(),
     );
     await controller.start();
@@ -337,4 +354,74 @@ void main() {
     expect(controller.activeMediaSourceId, source);
     expect(controller.state.phase, PlaybackPhase.closed);
   });
+
+  test(
+    'suspend timeout waits for old open to retire before foreground open',
+    () async {
+      backend.openGate = Completer<void>();
+      final retry = controller.retryPlayback();
+      final deadline = DateTime.now().add(const Duration(seconds: 2));
+      while (backend.openBegins < 2 && DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+      }
+      expect(backend.openBegins, 2);
+
+      await controller.suspendPlayback().timeout(const Duration(seconds: 1));
+      expect(controller.backgroundReleased, isTrue);
+      expect(controller.state.phase, PlaybackPhase.failed);
+      expect(controller.disconnectDetail, contains('still being released'));
+      await controller.retryPlayback();
+      expect(backend.openBegins, 2);
+
+      var restored = false;
+      final foreground = controller.restorePlayback().then((_) {
+        restored = true;
+      });
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      expect(restored, isFalse);
+      expect(backend.openBegins, 2);
+      backend.openGate!.complete();
+      backend.openGate = null;
+      await Future.wait([
+        retry,
+        foreground,
+      ]).timeout(const Duration(seconds: 2));
+      expect(backend.openBegins, 3);
+      expect(backend.maxConcurrentOpens, 1);
+      final oldOpenEnd = backend.nativeOrder.indexOf('open-end-2');
+      final foregroundOpenStart = backend.nativeOrder.indexOf('open-start-3');
+      expect(oldOpenEnd, isNonNegative);
+      expect(foregroundOpenStart, greaterThan(oldOpenEnd));
+      expect(
+        backend.nativeOrder.sublist(oldOpenEnd + 1, foregroundOpenStart),
+        contains('stop'),
+      );
+      expect(controller.backgroundReleased, isFalse);
+      expect(backend.openedPaused, isTrue);
+      expect(backend.isPlaying, isFalse);
+    },
+  );
+
+  test(
+    'a second background transition cancels the older foreground return',
+    () async {
+      backend.openGate = Completer<void>();
+      final retry = controller.retryPlayback();
+      final deadline = DateTime.now().add(const Duration(seconds: 2));
+      while (backend.openBegins < 2 && DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+      }
+      expect(backend.openBegins, 2);
+      await controller.suspendPlayback();
+      final oldForeground = controller.restorePlayback();
+      await controller.suspendPlayback();
+      final newForeground = controller.restorePlayback();
+      backend.openGate!.complete();
+      backend.openGate = null;
+      await Future.wait([retry, oldForeground, newForeground]);
+      expect(backend.openBegins, 3);
+      expect(backend.maxConcurrentOpens, 1);
+      expect(controller.backgroundReleased, isFalse);
+    },
+  );
 }

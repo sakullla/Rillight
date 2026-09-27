@@ -534,12 +534,21 @@ class PlayerController extends ChangeNotifier {
   String? _suspendedToken;
   int _suspendedTicks = 0;
   Future<void>? _suspending;
+  Future<void>? _suspendRetirement;
+  Future<void>? _restoring;
+  int? _restoringRevision;
+  bool _suspendReleasePending = false;
+  int _lifecycleRevision = 0;
   bool get backgroundReleased => _backgroundReleased;
 
   /// Android hosts call this on a real background transition, not rotation.
   /// Release media promptly; the existing session owns bounded Stopped/reporting.
-  Future<void> suspendPlayback() =>
-      _suspending ??= _suspendPlayback().whenComplete(() => _suspending = null);
+  Future<void> suspendPlayback() {
+    _lifecycleRevision++;
+    return _suspending ??= _suspendPlayback().whenComplete(
+      () => _suspending = null,
+    );
+  }
 
   Future<void> _suspendPlayback() async {
     if (_disposed || _backgroundReleased) return;
@@ -551,20 +560,65 @@ class PlayerController extends ChangeNotifier {
     isPlaying = false;
     final stopped = _stopSession();
     _beginOperation();
+    final retirement = _operations.interrupt(backend.stop, ensureRetired: true);
+    _suspendRetirement = retirement;
+    _suspendReleasePending = false;
     try {
-      await _operations.interrupt(backend.stop).timeout(disposeTimeout);
+      await retirement.timeout(disposeTimeout);
+    } on TimeoutException {
+      // The UI deadline does not transfer ownership of a still active handle.
+      _suspendReleasePending = true;
+    } catch (_) {
+      // Keep the failed retirement as the foreground gate. Closing remains
+      // possible, while a failed stop must never authorize another open.
+      _suspendReleasePending = true;
     } finally {
       await stopped;
       loading = false;
-      state.updatePlaying(false);
+      if (_suspendReleasePending) {
+        state.phase = PlaybackPhase.failed;
+        disconnectDetail = 'Playback resources are still being released';
+      } else {
+        state.updatePlaying(false);
+      }
       _emit();
     }
   }
 
   /// Recreate a released native session at its saved position, always paused.
   /// A changed identity must re-enter through the authentication/player host.
-  Future<void> restorePlayback() async {
-    await _suspending;
+  Future<void> restorePlayback() {
+    final existing = _restoring;
+    if (existing != null && _restoringRevision == _lifecycleRevision) {
+      return existing;
+    }
+    final revision = _lifecycleRevision;
+    final restoration = _restorePlayback(revision);
+    _restoring = restoration;
+    _restoringRevision = revision;
+    unawaited(
+      restoration.whenComplete(() {
+        if (identical(_restoring, restoration)) {
+          _restoring = null;
+          _restoringRevision = null;
+        }
+      }),
+    );
+    return restoration;
+  }
+
+  Future<void> _restorePlayback(int lifecycleRevision) async {
+    try {
+      await _suspending;
+    } catch (_) {
+      if (!_disposed && lifecycleRevision == _lifecycleRevision) {
+        loading = false;
+        state.phase = PlaybackPhase.failed;
+        disconnectDetail = 'Playback resources could not be released';
+        _emit();
+      }
+      return;
+    }
     if (_disposed || !_backgroundReleased) return;
     if (client.baseUrl != _suspendedServer ||
         client.userId != _suspendedUser ||
@@ -573,6 +627,29 @@ class PlayerController extends ChangeNotifier {
       _emit();
       return;
     }
+    final suspendedOperation = _operations.current;
+    final retirement = _suspendRetirement;
+    if (retirement != null) {
+      try {
+        await retirement;
+      } catch (_) {
+        if (!_disposed && lifecycleRevision == _lifecycleRevision) {
+          loading = false;
+          state.phase = PlaybackPhase.failed;
+          disconnectDetail = 'Playback resources could not be released';
+          _emit();
+        }
+        return;
+      }
+    }
+    if (_disposed ||
+        lifecycleRevision != _lifecycleRevision ||
+        !_backgroundReleased ||
+        !_accepts(suspendedOperation)) {
+      return;
+    }
+    _suspendRetirement = null;
+    _suspendReleasePending = false;
     _backgroundReleased = false;
     final operation = _beginOperation();
     if (operation == null) return;
@@ -599,7 +676,10 @@ class PlayerController extends ChangeNotifier {
   }
 
   Future<void> _recover({String? sourceId}) {
-    if (_disposed || _operations.isClosed || sessionExpired) {
+    if (_disposed ||
+        _operations.isClosed ||
+        sessionExpired ||
+        _backgroundReleased) {
       return Future<void>.value();
     }
     final existing = _recoveryOperation == null ? null : _recovery;
