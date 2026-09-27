@@ -23,6 +23,7 @@ import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_controller.dart';
 import 'package:rillight/player/player_keys.dart';
 import 'package:rillight/player/player_window.dart';
+import 'package:rillight/player/phone/phone_player_interaction.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 class MobilePlayerPage extends StatefulWidget {
@@ -175,13 +176,19 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
   bool _danmakuLayerPinned = false;
   String? _danmakuLayerItemId;
   PhoneDisplayControl? _display;
-  bool _controlsLocked = false;
+  final PhonePlayerInteraction _interaction = PhonePlayerInteraction();
+  Object? _visualSignature;
   bool _fillFrame = false;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _interaction.addListener(_onInteraction);
+  }
+
+  void _onInteraction() {
+    if (mounted) setState(() {});
   }
 
   @override
@@ -265,13 +272,15 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
     final playing =
         current != null && current.isPlaying && !current.backgroundReleased;
     unawaited(_wake?.hold(playing));
-    if (mounted) setState(() {});
+    _refreshVisuals();
   }
 
   void _onDanmaku() {
     final danmaku = _danmaku;
     final current = controller;
     if (danmaku != null &&
+        danmaku.isConfigured &&
+        danmaku.danmakuOn &&
         danmaku.hasComments &&
         current != null &&
         !current.loading &&
@@ -280,6 +289,28 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
       _danmakuLayerPinned = true;
       _danmakuLayerItemId = current.itemId;
     }
+    _refreshVisuals();
+  }
+
+  void _refreshVisuals() {
+    final current = controller;
+    if (current == null) return;
+    final danmaku = _danmaku;
+    final next = (
+      current.itemId,
+      current.loading,
+      current.error,
+      current.disconnected,
+      current.sessionExpired,
+      current.playbackEnded,
+      current.nextEpisode?.item.id,
+      current.nextEpisode?.remaining,
+      danmaku?.isConfigured,
+      danmaku == null ? false : _showDanmakuLayer(current),
+      danmaku == null ? false : _danmakuNeedsAttention(danmaku),
+    );
+    if (_visualSignature == next) return;
+    _visualSignature = next;
     if (mounted) setState(() {});
   }
 
@@ -361,51 +392,85 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
   Future<void> _openDanmakuPanel() async {
     final danmaku = _danmaku;
     final current = controller;
-    if (danmaku == null || current == null || _closing) return;
+    if (danmaku == null ||
+        !danmaku.isConfigured ||
+        current == null ||
+        _closing ||
+        _interaction.locked) {
+      return;
+    }
     await danmaku.refreshFromStore();
     if (!mounted || _closing) return;
+    final release = _interaction.occupy();
+    _interaction.setPanel('danmaku');
     current.setControlsPinned(true);
     var openSearch = false;
-    await showModalBottomSheet<void>(
-      context: context,
-      useSafeArea: true,
-      isScrollControlled: true,
-      builder: (sheetContext) {
-        final height = MediaQuery.sizeOf(sheetContext).height * .75;
-        return SizedBox(
-          height: height,
-          child: DanmakuPanel(
-            embedded: true,
-            topChromeExtent: 0,
-            danmaku: danmaku,
-            onClose: () => Navigator.pop(sheetContext),
-            onSearch: () {
-              openSearch = true;
-              Navigator.pop(sheetContext);
-            },
-          ),
-        );
-      },
-    );
-    if (!mounted || _closing) return;
-    if (openSearch) await _openDanmakuSearch();
-    if (mounted && !_closing) current.setControlsPinned(false);
+    try {
+      await showModalBottomSheet<void>(
+        context: context,
+        useSafeArea: true,
+        isScrollControlled: true,
+        builder: (sheetContext) {
+          final height = MediaQuery.sizeOf(sheetContext).height * .75;
+          return SizedBox(
+            height: height,
+            child: DanmakuPanel(
+              embedded: true,
+              topChromeExtent: 0,
+              danmaku: danmaku,
+              onClose: () => Navigator.pop(sheetContext),
+              onSearch: () {
+                openSearch = true;
+                Navigator.pop(sheetContext);
+              },
+            ),
+          );
+        },
+      );
+      if (mounted && !_closing && openSearch) await _openDanmakuSearch();
+    } finally {
+      if (mounted) {
+        if (_interaction.panel == 'danmaku') _interaction.setPanel(null);
+        release();
+      }
+      if (mounted && !_closing && !_interaction.occupied) {
+        current.setControlsPinned(false);
+      }
+    }
   }
 
   Future<void> _openDanmakuSearch() async {
     final danmaku = _danmaku;
     final current = controller;
-    if (danmaku == null || current == null || !danmaku.isConfigured) return;
+    if (danmaku == null ||
+        current == null ||
+        !danmaku.isConfigured ||
+        _interaction.locked) {
+      return;
+    }
+    final release = _interaction.occupy();
+    _interaction.setPanel('danmakuSearch');
     current.setControlsPinned(true);
     final keyword = _searchKeyword(danmaku, current);
-    await showModalBottomSheet<void>(
-      context: context,
-      useSafeArea: true,
-      isScrollControlled: true,
-      builder: (context) =>
-          _PhoneDanmakuSearch(danmaku: danmaku, initialKeyword: keyword),
-    );
-    if (mounted && !_closing) current.setControlsPinned(false);
+    try {
+      await showModalBottomSheet<void>(
+        context: context,
+        useSafeArea: true,
+        isScrollControlled: true,
+        builder: (context) =>
+            _PhoneDanmakuSearch(danmaku: danmaku, initialKeyword: keyword),
+      );
+    } finally {
+      if (mounted) {
+        if (_interaction.panel == 'danmakuSearch') {
+          _interaction.setPanel(null);
+        }
+        release();
+      }
+      if (mounted && !_closing && !_interaction.occupied) {
+        current.setControlsPinned(false);
+      }
+    }
   }
 
   String _searchKeyword(DanmakuController danmaku, PlayerController current) {
@@ -419,7 +484,7 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
   Future<void> _retryDanmaku() async {
     final danmaku = _danmaku;
     final current = controller;
-    if (danmaku == null || current == null) return;
+    if (danmaku == null || current == null || _interaction.locked) return;
     final episode = _danmakuContext(current);
     if (episode == null) return;
     await danmaku.startSession(episode);
@@ -428,6 +493,8 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
   bool _showDanmakuLayer(PlayerController current) {
     final danmaku = _danmaku;
     if (danmaku == null ||
+        !danmaku.isConfigured ||
+        !danmaku.danmakuOn ||
         current.loading ||
         current.error != null ||
         current.playbackEnded) {
@@ -469,21 +536,14 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
     if (orientation != null) unawaited(orientation.leavePlayback());
     if (wake != null) unawaited(wake.hold(false));
     _danmaku?.dispose();
+    _interaction.removeListener(_onInteraction);
+    _interaction.dispose();
     final c = controller;
     if (c != null) {
       unawaited(c.disposeAsync());
       c.dispose();
     }
     super.dispose();
-  }
-
-  void _onLockChanged(bool locked) {
-    setState(() => _controlsLocked = locked);
-  }
-
-  void _unlock() {
-    setState(() => _controlsLocked = false);
-    controller?.onUserActivity();
   }
 
   Widget _centerStatus(PlayerController c) {
@@ -531,7 +591,12 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (popped, _) {
-        if (!popped) _close();
+        if (popped) return;
+        if (_interaction.locked) {
+          _interaction.revealUnlock();
+        } else {
+          _close();
+        }
       },
       child: LiquidGlassBackdrop(
         enabled: false,
@@ -548,23 +613,14 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
               PhonePlayerGestures(
                 controller: c,
                 display: _display!,
-                locked: _controlsLocked,
-                onUnlock: _unlock,
+                interaction: _interaction,
               ),
               ListenableBuilder(
-                listenable: c,
+                listenable: Listenable.merge([c, _interaction]),
                 builder: (context, _) {
-                  final showControls =
-                      c.controlsVisible ||
-                      c.loading ||
-                      c.error != null ||
-                      c.disconnected ||
-                      c.sessionExpired ||
-                      c.progressSyncFailed ||
-                      c.trackFailure != null;
                   return PhoneMotion.reveal(
                     context: context,
-                    visible: showControls || _controlsLocked,
+                    visible: _interaction.controlsVisibleFor(c),
                     child: PhonePlayerControls(
                       controller: c,
                       danmaku: danmaku,
@@ -572,8 +628,7 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
                       onOpenDanmakuPanel: _openDanmakuPanel,
                       onOpenDanmakuSearch: _openDanmakuSearch,
                       center: _centerStatus(c),
-                      locked: _controlsLocked,
-                      onLockChanged: _onLockChanged,
+                      interaction: _interaction,
                       fillFrame: _fillFrame,
                       onFillFrame: (fill) {
                         if (_fillFrame == fill) return;
@@ -589,14 +644,19 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
                   );
                 },
               ),
-              if (c.nextEpisode != null && c.error == null && !c.sessionExpired)
+              if (!_interaction.locked &&
+                  c.nextEpisode != null &&
+                  c.error == null &&
+                  !c.sessionExpired)
                 Positioned(
                   left: 12,
                   right: 12,
                   bottom: 12,
                   child: SafeArea(child: _PhoneNextEpisode(controller: c)),
                 ),
-              if (danmaku != null &&
+              if (!_interaction.locked &&
+                  danmaku != null &&
+                  danmaku.isConfigured &&
                   c.error == null &&
                   !c.loading &&
                   _danmakuNeedsAttention(danmaku))

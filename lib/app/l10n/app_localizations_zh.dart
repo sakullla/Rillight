@@ -958,6 +958,15 @@ class AppLocalizationsZh extends AppLocalizations {
   String get mobileUnlock => '解锁屏幕';
 
   @override
+  String get mobileGestureUnavailable => '系统调节暂不可用';
+
+  @override
+  String get mobileSource => '来源';
+
+  @override
+  String get mobileLockedHint => '已锁定 · 点右上角解锁';
+
+  @override
   String get mobileMore => '更多';
 
   @override

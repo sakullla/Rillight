@@ -194,7 +194,7 @@ void main() {
         wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
       );
       expect(current.error, isNull);
-      expect(orientation.calls.first, PhoneOrientation.landscape);
+      expect(orientation.calls.first, PhoneOrientation.unlocked);
       await closePlayer(tester);
       await orientation.settled;
       expect(find.byType(MobilePlayerPage), findsNothing);
@@ -222,7 +222,7 @@ void main() {
       );
       expect(failed.error, isNull);
       expect(failed.loading, isFalse);
-      expect(denied.calls.first, PhoneOrientation.landscape);
+      expect(denied.calls.first, PhoneOrientation.unlocked);
       expect(denied.lastError, isA<StateError>());
       expect(find.byType(MobilePlayerPage), findsOneWidget);
       await closePlayer(tester);
@@ -253,6 +253,12 @@ void main() {
       }
       expect(current.nextEpisode?.remaining, const Duration(seconds: 10));
       expect(find.text('10 秒后播放下一集'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('mobile-player-lock')));
+      await tester.pump();
+      expect(find.byKey(PlayerKeys.nextEpisodePlay), findsNothing);
+      await tester.tap(find.byKey(const Key('mobile-player-unlock')));
+      await tester.pump();
+      expect(find.byKey(PlayerKeys.nextEpisodePlay), findsOneWidget);
       await tester.ensureVisible(find.byKey(PlayerKeys.nextEpisodeCancel));
       await tester.tap(find.byKey(PlayerKeys.nextEpisodeCancel));
       await tester.pump(const Duration(seconds: 12));
@@ -340,7 +346,7 @@ void main() {
       expect(find.text('音轨与字幕'), findsWidgets);
       expect(find.text('字幕'), findsOneWidget);
       expect(find.text('播放速度'), findsOneWidget);
-      expect(find.text('片源'), findsOneWidget);
+      expect(find.text('来源'), findsNothing);
       expect(find.byKey(const Key('mobile-player-mute')), findsOneWidget);
       expect(find.byKey(const Key('mobile-player-volume')), findsOneWidget);
 
@@ -602,7 +608,26 @@ void main() {
     tags: ['integration'],
   );
 
-  testWidgets('locked screen hides controls and gestures; tap unlocks', (
+  testWidgets('failed system brightness gesture shows no invented percent', (
+    tester,
+  ) async {
+    await showPlayer(
+      tester,
+      itemId: 'movie-inception',
+      display: _FailDisplayControl(),
+      wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
+    );
+    final drag = await tester.startGesture(const Offset(200, 170));
+    await drag.moveBy(const Offset(0, -40));
+    await drag.moveBy(const Offset(0, -40));
+    await tester.pump();
+    expect(find.text('系统调节暂不可用'), findsOneWidget);
+    expect(find.byKey(const Key('mobile-player-gesture-value')), findsNothing);
+    await drag.up();
+    await closePlayer(tester);
+  }, tags: ['integration']);
+
+  testWidgets('locked screen needs an explicit unlock button tap', (
     tester,
   ) async {
     final backend = FakeVideoBackend(duration: const Duration(hours: 2));
@@ -619,6 +644,22 @@ void main() {
     expect(find.byKey(const Key('mobile-player-more')), findsNothing);
     expect(find.byIcon(Icons.screen_rotation), findsNothing);
     expect(find.byKey(const Key('mobile-player-unlock')), findsOneWidget);
+    final lockCenter = tester.getCenter(
+      find.byKey(const Key('mobile-player-unlock')),
+    );
+    await tester.binding.handlePopRoute();
+    await tester.pump();
+    expect(find.byType(MobilePlayerPage), findsOneWidget);
+    expect(find.byKey(const Key('mobile-player-toggle')), findsNothing);
+    await tester.pump(const Duration(seconds: 5));
+    expect(find.byKey(const Key('mobile-player-unlock')), findsNothing);
+    await tester.tapAt(lockCenter);
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.byKey(const Key('mobile-player-toggle')), findsNothing);
+    expect(
+      tester.getCenter(find.byKey(const Key('mobile-player-unlock'))).dx,
+      closeTo(lockCenter.dx, 1),
+    );
 
     // Gestures are inert while locked: dragging must not seek or show
     // gesture feedback (single tap is the unlock affordance).
@@ -636,10 +677,13 @@ void main() {
     // 锁定态不隐藏锁钮。
     expect(find.byKey(const Key('mobile-player-unlock')), findsOneWidget);
 
-    // A single tap unlocks and reveals the controls again. The tap callback
-    // fires after the double-tap timeout, so pump past it.
+    // Tapping the picture reveals the entry but consumes that gesture.
     await tester.tapAt(const Offset(400, 150));
     await tester.pump(const Duration(milliseconds: 400));
+    expect(find.byKey(const Key('mobile-player-toggle')), findsNothing);
+    expect(find.byKey(const Key('mobile-player-unlock')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('mobile-player-unlock')));
+    await tester.pump();
     expect(find.byKey(const Key('mobile-player-unlock')), findsNothing);
     expect(find.byKey(const Key('mobile-player-toggle')), findsOneWidget);
     await closePlayer(tester);
@@ -657,17 +701,15 @@ void main() {
         wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
       );
       // 顶栏不再出现弹幕按钮（R11）。
-      expect(find.byKey(const Key('mobile-player-danmaku')), findsOneWidget);
+      expect(find.byKey(const Key('mobile-player-danmaku')), findsNothing);
       await tester.tap(find.byKey(const Key('mobile-player-more')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 400));
-      expect(find.byKey(DanmakuKeys.toggle), findsOneWidget);
-      expect(find.byKey(DanmakuKeys.search), findsOneWidget);
-      expect(find.byKey(DanmakuKeys.panel), findsOneWidget);
-      expect(find.text('音轨与字幕'), findsWidgets);
-      expect(find.text('字幕'), findsOneWidget);
+      expect(find.byKey(DanmakuKeys.toggle), findsNothing);
+      expect(find.byKey(DanmakuKeys.search), findsNothing);
+      expect(find.byKey(DanmakuKeys.panel), findsNothing);
       expect(find.text('播放速度'), findsOneWidget);
-      expect(find.text('片源'), findsOneWidget);
+      expect(find.text('来源'), findsNothing);
       expect(find.byKey(const Key('mobile-player-mute')), findsOneWidget);
       expect(find.byKey(const Key('mobile-player-volume')), findsOneWidget);
       // Mute from the more panel keeps the ability (R10).
@@ -689,6 +731,61 @@ void main() {
     },
     tags: ['integration'],
   );
+
+  testWidgets('multiple sources appear only in more, never in quality', (
+    tester,
+  ) async {
+    final current = await showPlayer(
+      tester,
+      itemId: 'movie-inception',
+      prepare: (server) {
+        server.items
+            .firstWhere((item) => item.id == 'movie-inception')
+            .extraSources = const [
+          FakeMediaSource(id: 'alternate', name: '另一个版本'),
+        ];
+      },
+      wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
+    );
+    expect(current.canSwitchMediaSource, isTrue);
+    expect(find.text('来源'), findsNothing);
+    await tester.tap(find.byKey(const Key('mobile-player-quality')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.text('来源'), findsNothing);
+    expect(find.text('另一个版本'), findsNothing);
+    await tester.binding.handlePopRoute();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.tap(find.byKey(const Key('mobile-player-more')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.text('来源'), findsOneWidget);
+    expect(find.text('另一个版本'), findsNothing);
+    final sourceEntry = find.byKey(const Key('mobile-player-source-entry'));
+    await tester.ensureVisible(sourceEntry);
+    await tester.pump();
+    await tester.tap(sourceEntry);
+    await tester.pump();
+    expect(find.text('来源'), findsOneWidget);
+    expect(find.text('另一个版本'), findsOneWidget);
+    final alternate = find.byKey(const Key('mobile-source-alternate'));
+    expect(alternate, findsOneWidget);
+    await tester.ensureVisible(alternate);
+    await tester.tap(alternate);
+    for (var i = 0; i < 40; i++) {
+      await tester.pump(const Duration(milliseconds: 20));
+      if (!current.loading && current.activeMediaSourceId == 'alternate') break;
+    }
+    expect(current.activeMediaSourceId, 'alternate');
+    await tester.tap(find.widgetWithText(TextButton, '返回'));
+    await tester.pump();
+    expect(find.byKey(const Key('mobile-player-source-entry')), findsOneWidget);
+    await tester.binding.handlePopRoute();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    await closePlayer(tester);
+  }, tags: ['integration']);
 
   testWidgets(
     'fit is the default scale with central transport and a full-width timeline',
@@ -807,7 +904,7 @@ void main() {
   }, tags: ['integration']);
 
   testWidgets(
-    'playback hides system bars, stays landscape, and drops the rotate button',
+    'playback hides system bars, allows portrait, and drops the rotate button',
     (tester) async {
       final channelCalls = <MethodCall>[];
       _mockAndroidPlayerChannel(channelCalls);
@@ -826,11 +923,8 @@ void main() {
       await bars.settled;
       expect(bars.calls, [true]);
       expect(_systemBarHidden(channelCalls), [true]);
-      expect(orientation.calls.single, PhoneOrientation.landscape);
-      expect(
-        orientation.calls.single,
-        isNot(contains(DeviceOrientation.portraitUp)),
-      );
+      expect(orientation.calls.single, PhoneOrientation.unlocked);
+      expect(orientation.calls.single, contains(DeviceOrientation.portraitUp));
       expect(find.byIcon(Icons.screen_rotation), findsNothing);
       expect(find.byKey(const Key('mobile-player-lock')), findsOneWidget);
       expect(find.byKey(const Key('mobile-player-more')), findsOneWidget);
@@ -1137,7 +1231,14 @@ void main() {
     tags: ['integration'],
   );
 
-  for (final size in [const Size(320, 568), const Size(640, 320)]) {
+  for (final size in [
+    const Size(320, 568),
+    const Size(360, 800),
+    const Size(412, 915),
+    const Size(640, 320),
+    const Size(800, 360),
+    const Size(915, 412),
+  ]) {
     testWidgets('phone shortcuts and cache remain usable at $size', (
       tester,
     ) async {
@@ -1149,7 +1250,7 @@ void main() {
         size: size,
         wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
       );
-      for (final key in ['speed', 'quality', 'tracks', 'danmaku', 'more']) {
+      for (final key in ['speed', 'more']) {
         final button = find.byKey(Key('mobile-player-$key'));
         expect(tester.getSize(button).shortestSide, greaterThanOrEqualTo(48));
       }
@@ -1229,28 +1330,17 @@ void main() {
         findsOneWidget,
       );
 
-      for (final key in ['quality', 'tracks', 'danmaku']) {
-        await tester.tap(find.byKey(Key('mobile-player-$key')));
-        await tester.pump();
-        await tester.pump(const Duration(milliseconds: 400));
-        expect(find.byKey(const Key('mobile-player-mute')), findsNothing);
-        if (key == 'quality') expect(find.byType(ChoiceChip), findsWidgets);
-        if (key == 'tracks') expect(find.text('字幕'), findsOneWidget);
-        if (key == 'danmaku') {
-          final toggle = find.byKey(DanmakuKeys.toggle);
-          final before = tester.widget<Switch>(toggle).value;
-          await tester.tap(toggle);
-          await tester.pump();
-          expect(tester.widget<Switch>(toggle).value, !before);
-          await tester.tap(toggle);
-          await tester.pump();
-          expect(tester.widget<Switch>(toggle).value, before);
-        }
-        expect(tester.takeException(), isNull);
-        await tester.binding.handlePopRoute();
-        await tester.pump();
-        await tester.pump(const Duration(milliseconds: 400));
-      }
+      expect(find.byKey(const Key('mobile-player-quality')), findsOneWidget);
+      expect(find.byKey(const Key('mobile-player-tracks')), findsOneWidget);
+      expect(find.byKey(const Key('mobile-player-danmaku')), findsNothing);
+      await tester.tap(find.byKey(const Key('mobile-player-quality')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.text('来源'), findsNothing);
+      expect(find.byType(ChoiceChip), findsWidgets);
+      await tester.binding.handlePopRoute();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
       // A long scrub must not lose its controls halfway through the gesture.
       final gesture = await tester.startGesture(tester.getCenter(timeline));
       await gesture.moveBy(const Offset(20, 0));
@@ -1298,6 +1388,37 @@ void main() {
     expect(find.text('无法播放'), findsOneWidget);
     expect(find.text('重试'), findsOneWidget);
     expect(find.textContaining('Bad state:'), findsNothing);
+    await tester.tap(find.byKey(const Key('mobile-player-lock')));
+    await tester.pump();
+    expect(find.text('重试'), findsNothing);
+    await tester.tapAt(const Offset(400, 160));
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.text('重试'), findsNothing);
+    await tester.tap(find.byKey(const Key('mobile-player-unlock')));
+    await tester.pump();
+    expect(find.text('重试'), findsOneWidget);
+    await closePlayer(tester);
+  }, tags: ['integration']);
+
+  testWidgets('retry button actually opens the failed phone playback', (
+    tester,
+  ) async {
+    final backend = _RetryOpenBackend();
+    final current = await showPlayer(
+      tester,
+      itemId: 'movie-inception',
+      backend: backend,
+      wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
+    );
+    expect(current.error, isNotNull);
+    await tester.tap(find.text('重试'));
+    await tester.pump();
+    expect(current.loading, isTrue);
+    for (var i = 0; i < 30 && current.loading; i++) {
+      await tester.pump(const Duration(milliseconds: 20));
+    }
+    expect(current.error, isNull);
+    expect(backend.attempts, 2);
     await closePlayer(tester);
   }, tags: ['integration']);
 }
@@ -1342,6 +1463,17 @@ class _FailOpenBackend extends FakeVideoBackend {
   }
 }
 
+class _RetryOpenBackend extends FakeVideoBackend {
+  int attempts = 0;
+
+  @override
+  Future<void> open(VideoOpenRequest request) async {
+    attempts++;
+    if (attempts == 1) throw StateError('first open failed');
+    await super.open(request);
+  }
+}
+
 class _FakeDisplayControl implements PhoneDisplayControl {
   double _brightness = 0.5;
   double _volume = 0.5;
@@ -1360,6 +1492,13 @@ class _FakeDisplayControl implements PhoneDisplayControl {
 
   @override
   Future<void> setVolume(double value) async => _volume = value;
+}
+
+class _FailDisplayControl extends _FakeDisplayControl {
+  @override
+  Future<void> setBrightness(double value) async {
+    throw StateError('platform denied brightness');
+  }
 }
 
 class _NullHasher extends DanmakuStreamHasher {

@@ -159,7 +159,10 @@ abstract final class PhoneMotion {
       opacity: visible ? 1 : 0,
       duration: duration,
       curve: visible ? AppMotion.standard : AppMotion.exit,
-      child: IgnorePointer(ignoring: !visible, child: child),
+      child: ExcludeSemantics(
+        excluding: !visible,
+        child: IgnorePointer(ignoring: !visible, child: child),
+      ),
     );
   }
 

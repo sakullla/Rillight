@@ -15,6 +15,7 @@ import 'package:rillight/player/buffered_ranges_track.dart';
 import 'package:rillight/player/player_controller.dart';
 import 'package:rillight/player/player_cache_status.dart';
 import 'package:rillight/player/player_settings.dart';
+import 'package:rillight/player/phone/phone_player_interaction.dart';
 
 /// Phone controls with a title bar, central transport and a full-width timeline.
 /// Common options have direct bottom shortcuts; the full settings panel keeps
@@ -27,9 +28,8 @@ import 'package:rillight/player/player_settings.dart';
 /// the screen edge. Below Android API 30 display cutouts are also applied to
 /// the other edges from [MediaQueryData.displayFeatures].
 ///
-/// The lock state is a state-machine field of this layer; the page mirrors
-/// it through [onLockChanged] to disable the gesture layer. `PlayerController`
-/// is not touched.
+/// The page-owned [PhonePlayerInteraction] governs lock and panel occupancy.
+/// Playback state still comes from [PlayerController].
 class PhonePlayerControls extends StatefulWidget {
   const PhonePlayerControls({
     super.key,
@@ -38,9 +38,8 @@ class PhonePlayerControls extends StatefulWidget {
     required this.onClose,
     required this.onOpenDanmakuPanel,
     required this.onOpenDanmakuSearch,
+    required this.interaction,
     this.center = const SizedBox.shrink(),
-    this.locked = false,
-    this.onLockChanged,
     this.fillFrame = false,
     this.onFillFrame,
   });
@@ -50,12 +49,10 @@ class PhonePlayerControls extends StatefulWidget {
   final VoidCallback onClose;
   final VoidCallback onOpenDanmakuPanel;
   final VoidCallback onOpenDanmakuSearch;
+  final PhonePlayerInteraction interaction;
 
   /// Loading spinner / error retry area, owned by the page lifecycle.
   final Widget center;
-
-  final bool locked;
-  final ValueChanged<bool>? onLockChanged;
 
   /// True when the picture is cropped to remove aspect-ratio black bars.
   final bool fillFrame;
@@ -135,10 +132,10 @@ final ButtonStyle _phoneChromeButton = IconButton.styleFrom(
 
 class PhonePlayerControlsState extends State<PhonePlayerControls> {
   double? _seek;
-  late bool _locked = widget.locked;
+  VoidCallback? _seekRelease;
   int? _androidSdk;
 
-  bool get locked => _locked;
+  bool get locked => widget.interaction.locked;
 
   PlayerController get _controller => widget.controller;
 
@@ -157,18 +154,39 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
   @override
   void didUpdateWidget(covariant PhonePlayerControls oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // 手势层单击解锁经页面回写,同步本层状态机。
-    if (oldWidget.locked != widget.locked && _locked != widget.locked) {
-      setState(() => _locked = widget.locked);
+    if (widget.interaction.locked ||
+        !_canControl ||
+        oldWidget.controller.itemId != widget.controller.itemId) {
+      _seek = null;
+      _releaseSeek();
     }
+  }
+
+  void _releaseSeek() {
+    final release = _seekRelease;
+    if (release == null) return;
+    release();
+    _seekRelease = null;
+    if (!widget.interaction.occupied) _controller.setControlsPinned(false);
+  }
+
+  @override
+  void dispose() {
+    _releaseSeek();
+    super.dispose();
   }
 
   /// Lock button tapped: hide every control and gesture except the unlock
   /// affordance. Unlocking re-shows the controls with the normal auto-hide.
   void toggleLock() {
-    setState(() => _locked = !_locked);
-    widget.onLockChanged?.call(_locked);
-    if (!_locked) _controller.onUserActivity();
+    if (locked) {
+      widget.interaction.unlock();
+      _controller.onUserActivity();
+    } else {
+      widget.interaction.lock();
+      _seek = null;
+      _controller.setControlsPinned(false);
+    }
   }
 
   bool get _canControl =>
@@ -195,12 +213,14 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                   left: insets.left,
                   right: insets.right,
                 ),
-                child: !_locked && _canControl
+                child: locked
+                    ? const SizedBox.shrink()
+                    : _canControl
                     ? Center(child: _buildTransport(context, landscape))
                     : widget.center,
               ),
             ),
-            if (!_locked) _buildBottomBar(context, insets, landscape),
+            if (!locked) _buildBottomBar(context, insets, landscape),
           ],
         ),
       ),
@@ -235,15 +255,29 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
           bottom: 12,
         ),
         child: Row(
-          children: _locked
+          children: locked
               ? [
-                  IconButton(
-                    key: const Key('mobile-player-unlock'),
-                    tooltip: l.mobileUnlock,
-                    style: _phoneChromeButton,
-                    onPressed: toggleLock,
-                    icon: const Icon(Icons.lock),
-                  ),
+                  if (widget.interaction.unlockVisible)
+                    Expanded(
+                      child: Text(
+                        l.mobileLockedHint,
+                        textAlign: TextAlign.right,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    )
+                  else
+                    const Spacer(),
+                  if (widget.interaction.unlockVisible)
+                    IconButton(
+                      key: const Key('mobile-player-unlock'),
+                      tooltip: l.mobileUnlock,
+                      style: _phoneChromeButton,
+                      onPressed: toggleLock,
+                      icon: const Icon(Icons.lock),
+                    ),
+                  if (!widget.interaction.unlockVisible)
+                    const SizedBox(width: 48, height: 48),
                 ]
               : [
                   IconButton(
@@ -374,15 +408,20 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                 ),
                 max: durationMs.clamp(1, double.infinity),
                 onChangeStart: _canControl
-                    ? (_) => c.setControlsPinned(true)
+                    ? (_) {
+                        _seekRelease ??= widget.interaction.occupy();
+                        c.setControlsPinned(true);
+                      }
                     : null,
                 onChanged: _canControl
                     ? (v) => setState(() => _seek = v)
                     : null,
                 onChangeEnd: (v) {
                   setState(() => _seek = null);
-                  c.seekTo(Duration(milliseconds: v.round()));
-                  c.setControlsPinned(false);
+                  if (!locked && _canControl) {
+                    c.seekTo(Duration(milliseconds: v.round()));
+                  }
+                  _releaseSeek();
                 },
               ),
             ),
@@ -415,19 +454,21 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                   '${c.playbackRate}x',
                   () => _openMore(section: 'speed'),
                 ),
-                _shortcut(
-                  'mobile-player-quality',
-                  Icons.high_quality_outlined,
-                  l.quality,
-                  () => _openMore(section: 'quality'),
-                ),
-                _shortcut(
-                  'mobile-player-tracks',
-                  Icons.subtitles_outlined,
-                  l.mobileTracks,
-                  () => _openMore(section: 'tracks'),
-                ),
-                if (widget.danmaku != null)
+                if (c.availableBitrates.length > 1)
+                  _shortcut(
+                    'mobile-player-quality',
+                    Icons.high_quality_outlined,
+                    l.quality,
+                    () => _openMore(section: 'quality'),
+                  ),
+                if (c.audioTracks.length > 1 || c.subtitleTracks.isNotEmpty)
+                  _shortcut(
+                    'mobile-player-tracks',
+                    Icons.subtitles_outlined,
+                    l.mobileTracks,
+                    () => _openMore(section: 'tracks'),
+                  ),
+                if (widget.danmaku?.isConfigured == true)
                   _shortcut(
                     'mobile-player-danmaku',
                     Icons.forum_outlined,
@@ -513,223 +554,272 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
 
   Future<void> _openMore({String? section}) async {
     final c = _controller;
-    final danmaku = widget.danmaku;
+    final sectionState = ValueNotifier<String?>(section);
+    final danmaku = widget.danmaku?.isConfigured == true
+        ? widget.danmaku
+        : null;
     final route = ModalRoute.of(context);
+    final release = widget.interaction.occupy();
+    widget.interaction.setPanel(section ?? 'more');
     c.setControlsPinned(true);
     Widget panel(BuildContext sheetContext) => ListenableBuilder(
-      listenable: Listenable.merge([c, danmaku]),
-      builder: (context, _) => SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(switch (section) {
-                    'speed' => AppLocalizations.of(context).mobileSpeed,
-                    'quality' => AppLocalizations.of(context).quality,
-                    'tracks' => AppLocalizations.of(context).mobileTracks,
-                    'danmaku' => AppLocalizations.of(context).danmaku,
-                    _ => AppLocalizations.of(context).mobileMore,
-                  }, style: Theme.of(context).textTheme.titleLarge),
-                ),
-                if (section == 'danmaku' && danmaku != null)
-                  Switch(
-                    key: DanmakuKeys.toggle,
-                    value: danmaku.danmakuOn,
-                    onChanged: (_) => unawaited(danmaku.toggleDanmaku()),
+      listenable: Listenable.merge([c, danmaku, sectionState]),
+      builder: (context, _) {
+        final section = sectionState.value;
+        return SingleChildScrollView(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(switch (section) {
+                      'speed' => AppLocalizations.of(context).mobileSpeed,
+                      'quality' => AppLocalizations.of(context).quality,
+                      'tracks' => AppLocalizations.of(context).mobileTracks,
+                      'danmaku' => AppLocalizations.of(context).danmaku,
+                      'source' => AppLocalizations.of(context).mobileSource,
+                      _ => AppLocalizations.of(context).mobileMore,
+                    }, style: Theme.of(context).textTheme.titleLarge),
                   ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            if (section == null)
-              _VideoScaleChoices(
-                fill: widget.fillFrame,
-                onChanged: (fill) => widget.onFillFrame?.call(fill),
-              ),
-            const SizedBox(height: 8),
-            if (danmaku != null &&
-                (section == null || section == 'danmaku')) ...[
-              if (section == null)
-                Row(
-                  children: [
-                    Expanded(child: Text(AppLocalizations.of(context).danmaku)),
+                  if (section == 'danmaku' && danmaku != null)
                     Switch(
                       key: DanmakuKeys.toggle,
                       value: danmaku.danmakuOn,
                       onChanged: (_) => unawaited(danmaku.toggleDanmaku()),
                     ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              if (section == null && c.canSwitchMediaSource) ...[
+                ListTile(
+                  key: const Key('mobile-player-source-entry'),
+                  title: Text(AppLocalizations.of(context).mobileSource),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () {
+                    sectionState.value = 'source';
+                    widget.interaction.setPanel('source');
+                  },
+                ),
+                const Divider(),
+              ],
+              if (section == 'source' && c.canSwitchMediaSource) ...[
+                for (final source in c.mediaSources)
+                  ListTile(
+                    key: ValueKey('mobile-source-${source.id}'),
+                    selected: source.id == c.activeMediaSourceId,
+                    title: Text(source.name ?? source.id),
+                    onTap: c.loading
+                        ? null
+                        : () => unawaited(c.switchMediaSource(source.id)),
+                  ),
+                const Divider(),
+              ],
+              if (section == null)
+                _VideoScaleChoices(
+                  fill: widget.fillFrame,
+                  onChanged: (fill) => widget.onFillFrame?.call(fill),
+                ),
+              const SizedBox(height: 8),
+              if (danmaku != null &&
+                  (section == null || section == 'danmaku')) ...[
+                if (section == null)
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(AppLocalizations.of(context).danmaku),
+                      ),
+                      Switch(
+                        key: DanmakuKeys.toggle,
+                        value: danmaku.danmakuOn,
+                        onChanged: (_) => unawaited(danmaku.toggleDanmaku()),
+                      ),
+                    ],
+                  ),
+                Wrap(
+                  alignment: WrapAlignment.end,
+                  children: [
+                    TextButton.icon(
+                      key: DanmakuKeys.search,
+                      onPressed: () {
+                        Navigator.pop(sheetContext);
+                        widget.onOpenDanmakuSearch();
+                      },
+                      icon: const Icon(Icons.search),
+                      label: Text(AppLocalizations.of(context).danmakuSearch),
+                    ),
+                    TextButton.icon(
+                      key: DanmakuKeys.panel,
+                      onPressed: () {
+                        Navigator.pop(sheetContext);
+                        widget.onOpenDanmakuPanel();
+                      },
+                      icon: const Icon(Icons.tune),
+                      label: Text(
+                        AppLocalizations.of(context).mobileDanmakuPanel,
+                      ),
+                    ),
                   ],
                 ),
-              Wrap(
-                alignment: WrapAlignment.end,
-                children: [
-                  TextButton.icon(
-                    key: DanmakuKeys.search,
-                    onPressed: () {
-                      Navigator.pop(sheetContext);
-                      widget.onOpenDanmakuSearch();
-                    },
-                    icon: const Icon(Icons.search),
-                    label: Text(AppLocalizations.of(context).danmakuSearch),
-                  ),
-                  TextButton.icon(
-                    key: DanmakuKeys.panel,
-                    onPressed: () {
-                      Navigator.pop(sheetContext);
-                      widget.onOpenDanmakuPanel();
-                    },
-                    icon: const Icon(Icons.tune),
-                    label: Text(
-                      AppLocalizations.of(context).mobileDanmakuPanel,
+                const Divider(),
+              ],
+              if ((section == null &&
+                      (c.audioTracks.length > 1 ||
+                          c.subtitleTracks.isNotEmpty)) ||
+                  section == 'tracks') ...[
+                if (section == null)
+                  Text(AppLocalizations.of(context).mobileTracks),
+                for (final track in c.audioTracks)
+                  ListTile(
+                    selected: c.audioStreamIndex == track.index,
+                    leading: Icon(
+                      c.audioStreamIndex == track.index
+                          ? Icons.check_circle
+                          : Icons.radio_button_unchecked,
                     ),
+                    title: Text(track.label),
+                    onTap: () => c.setAudio(track.index),
                   ),
-                ],
-              ),
-              const Divider(),
-            ],
-            if (section == null || section == 'tracks') ...[
-              if (section == null)
-                Text(AppLocalizations.of(context).mobileTracks),
-              for (final track in c.audioTracks)
-                ListTile(
-                  selected: c.audioStreamIndex == track.index,
-                  leading: Icon(
-                    c.audioStreamIndex == track.index
-                        ? Icons.check_circle
-                        : Icons.radio_button_unchecked,
+                if (c.subtitleTracks.isNotEmpty) const Divider(),
+                if (c.subtitleTracks.isNotEmpty)
+                  Text(AppLocalizations.of(context).subtitleTrack),
+                if (c.subtitleTracks.isNotEmpty)
+                  ListTile(
+                    selected: c.subtitleStreamIndex == null,
+                    leading: Icon(
+                      c.subtitleStreamIndex == null
+                          ? Icons.check_circle
+                          : Icons.radio_button_unchecked,
+                    ),
+                    title: Text(AppLocalizations.of(context).subtitleOff),
+                    onTap: () => c.setSubtitle(null),
                   ),
-                  title: Text(track.label),
-                  onTap: () => c.setAudio(track.index),
-                ),
-              const Divider(),
-              Text(AppLocalizations.of(context).subtitleTrack),
-              ListTile(
-                selected: c.subtitleStreamIndex == null,
-                leading: Icon(
-                  c.subtitleStreamIndex == null
-                      ? Icons.check_circle
-                      : Icons.radio_button_unchecked,
-                ),
-                title: Text(AppLocalizations.of(context).subtitleOff),
-                onTap: () => c.setSubtitle(null),
-              ),
-              for (final track in c.subtitleTracks)
-                ListTile(
-                  selected: c.subtitleStreamIndex == track.index,
-                  leading: Icon(
-                    c.subtitleStreamIndex == track.index
-                        ? Icons.check_circle
-                        : Icons.radio_button_unchecked,
+                for (final track in c.subtitleTracks)
+                  ListTile(
+                    selected: c.subtitleStreamIndex == track.index,
+                    leading: Icon(
+                      c.subtitleStreamIndex == track.index
+                          ? Icons.check_circle
+                          : Icons.radio_button_unchecked,
+                    ),
+                    title: Text(track.label),
+                    onTap: () => c.setSubtitle(track.index),
                   ),
-                  title: Text(track.label),
-                  onTap: () => c.setSubtitle(track.index),
-                ),
-              if (c.trackFailure != null)
-                Text(AppLocalizations.of(context).mobileTrackUnavailable),
-              const Divider(),
-            ],
-            if (section == null || section == 'quality') ...[
-              Text(AppLocalizations.of(context).mediaSource),
-              for (final source in c.mediaSources)
-                ListTile(
-                  selected: source.id == c.activeMediaSourceId,
-                  title: Text(source.name ?? source.id),
-                  onTap: () => c.switchMediaSource(source.id),
-                ),
-              const Divider(),
-              if (section == null) Text(AppLocalizations.of(context).quality),
-              Wrap(
-                spacing: 8,
-                children: [
-                  for (final bitrate in c.availableBitrates)
-                    ChoiceChip(
-                      key: ValueKey('mobile-quality-$bitrate'),
-                      label: Text(
-                        bitrate == kTranscodeBitrates.first
-                            ? AppLocalizations.of(context).qualityAuto
-                            : AppLocalizations.of(
-                                context,
-                              ).qualityMbps(bitrate ~/ 1000000),
+                if (c.trackFailure != null)
+                  Text(AppLocalizations.of(context).mobileTrackUnavailable),
+                const Divider(),
+              ],
+              if ((section == null && c.availableBitrates.length > 1) ||
+                  section == 'quality') ...[
+                if (section == null) Text(AppLocalizations.of(context).quality),
+                Wrap(
+                  spacing: 8,
+                  children: [
+                    for (final bitrate in c.availableBitrates)
+                      ChoiceChip(
+                        key: ValueKey('mobile-quality-$bitrate'),
+                        label: Text(
+                          bitrate == kTranscodeBitrates.first
+                              ? AppLocalizations.of(context).qualityAuto
+                              : AppLocalizations.of(
+                                  context,
+                                ).qualityMbps(bitrate ~/ 1000000),
+                        ),
+                        selected: c.maxStreamingBitrate == bitrate,
+                        onSelected: c.loading
+                            ? null
+                            : (_) => unawaited(c.setMaxBitrate(bitrate)),
                       ),
-                      selected: c.maxStreamingBitrate == bitrate,
-                      onSelected: c.loading
-                          ? null
-                          : (_) => unawaited(c.setMaxBitrate(bitrate)),
-                    ),
-                ],
-              ),
-              const Divider(),
-            ],
-            if (section == null || section == 'speed') ...[
-              if (section == null)
-                Text(AppLocalizations.of(context).mobileSpeed),
-              Wrap(
-                spacing: 8,
-                children: [
-                  for (final rate in [.5, 1.0, 1.25, 1.5, 2.0])
-                    ChoiceChip(
-                      label: Text('${rate}x'),
-                      selected: c.playbackRate == rate,
-                      onSelected: (_) => c.setRate(rate),
-                    ),
-                ],
-              ),
-              const Divider(),
-            ],
-            if (section == null) ...[
-              Text(AppLocalizations.of(context).mobileAppVolume),
-              Row(
-                children: [
-                  IconButton(
-                    key: const Key('mobile-player-mute'),
-                    tooltip: c.volume <= 0
-                        ? AppLocalizations.of(context).unmute
-                        : AppLocalizations.of(context).mute,
-                    onPressed:
-                        c.loading ||
-                            c.error != null ||
-                            c.disconnected ||
-                            c.sessionExpired
-                        ? null
-                        : () => c.toggleMute(),
-                    icon: Icon(
-                      c.volume <= 0 ? Icons.volume_off : Icons.volume_up,
-                    ),
-                  ),
-                  Expanded(
-                    child: Slider(
-                      key: const Key('mobile-player-volume'),
-                      value: c.volume
-                          .clamp(0, PlayerSettings.volumeMax)
-                          .toDouble(),
-                      max: PlayerSettings.volumeMax.toDouble(),
-                      onChanged:
+                  ],
+                ),
+                const Divider(),
+              ],
+              if (section == null || section == 'speed') ...[
+                if (section == null)
+                  Text(AppLocalizations.of(context).mobileSpeed),
+                Wrap(
+                  spacing: 8,
+                  children: [
+                    for (final rate in [.5, 1.0, 1.25, 1.5, 2.0])
+                      ChoiceChip(
+                        label: Text('${rate}x'),
+                        selected: c.playbackRate == rate,
+                        onSelected: (_) => c.setRate(rate),
+                      ),
+                  ],
+                ),
+                const Divider(),
+              ],
+              if (section == null) ...[
+                Text(AppLocalizations.of(context).mobileAppVolume),
+                Row(
+                  children: [
+                    IconButton(
+                      key: const Key('mobile-player-mute'),
+                      tooltip: c.volume <= 0
+                          ? AppLocalizations.of(context).unmute
+                          : AppLocalizations.of(context).mute,
+                      onPressed:
                           c.loading ||
                               c.error != null ||
                               c.disconnected ||
                               c.sessionExpired
                           ? null
-                          : (value) => c.setVolume(value.round()),
+                          : () => c.toggleMute(),
+                      icon: Icon(
+                        c.volume <= 0 ? Icons.volume_off : Icons.volume_up,
+                      ),
                     ),
-                  ),
-                  Text(AppLocalizations.of(context).volumePercent(c.volume)),
-                ],
+                    Expanded(
+                      child: Slider(
+                        key: const Key('mobile-player-volume'),
+                        value: c.volume
+                            .clamp(0, PlayerSettings.volumeMax)
+                            .toDouble(),
+                        max: PlayerSettings.volumeMax.toDouble(),
+                        onChanged:
+                            c.loading ||
+                                c.error != null ||
+                                c.disconnected ||
+                                c.sessionExpired
+                            ? null
+                            : (value) => c.setVolume(value.round()),
+                      ),
+                    ),
+                    Text(AppLocalizations.of(context).volumePercent(c.volume)),
+                  ],
+                ),
+              ],
+              TextButton(
+                onPressed: section == 'source'
+                    ? () {
+                        sectionState.value = null;
+                        widget.interaction.setPanel('more');
+                      }
+                    : () => Navigator.pop(sheetContext),
+                child: Text(AppLocalizations.of(context).mobileBack),
               ),
             ],
-            TextButton(
-              onPressed: () => Navigator.pop(sheetContext),
-              child: Text(AppLocalizations.of(context).mobileBack),
-            ),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
-    await _showOptionsPanel(panel);
-    if (mounted && (route == null || route.isCurrent)) {
-      _controller.setControlsPinned(false);
+    try {
+      await _showOptionsPanel(panel);
+    } finally {
+      if (mounted &&
+          widget.interaction.panel == (sectionState.value ?? 'more')) {
+        widget.interaction.setPanel(null);
+      }
+      sectionState.dispose();
+      if (mounted) release();
+      if (mounted &&
+          !widget.interaction.occupied &&
+          (route == null || route.isCurrent)) {
+        _controller.setControlsPinned(false);
+      }
     }
   }
 

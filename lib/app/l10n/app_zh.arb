@@ -1198,6 +1198,18 @@
   "@mobileUnlock": {
     "description": "Tooltip of the only visible control while the player screen is locked."
   },
+  "mobileGestureUnavailable": "系统调节暂不可用",
+  "@mobileGestureUnavailable": {
+    "description": "Shown when Android cannot read or apply a system brightness or volume gesture."
+  },
+  "mobileSource": "来源",
+  "@mobileSource": {
+    "description": "Phone player source section inside More, separate from quality."
+  },
+  "mobileLockedHint": "已锁定 · 点右上角解锁",
+  "@mobileLockedHint": {
+    "description": "Hint shown briefly beside the phone player's explicit unlock button."
+  },
   "mobileMore": "更多",
   "@mobileMore": {
     "description": "Player top-bar tooltip opening the bottom panel with danmaku, tracks, speed and volume."

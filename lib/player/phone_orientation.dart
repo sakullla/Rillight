@@ -4,7 +4,7 @@ import 'package:flutter/widgets.dart';
 typedef PhoneOrientationRequest =
     Future<void> Function(List<DeviceOrientation> orientations);
 
-/// Asks for landscape while a phone player is open, then restores the
+/// Allows both phone axes while a player is open, then restores the
 /// orientations captured at entry.
 ///
 /// [request] is replaceable so tests can observe the calls without rotating
@@ -22,8 +22,7 @@ class PhoneOrientation with WidgetsBindingObserver {
   }) : _request = request ?? systemRequest,
        restoreTo = List<DeviceOrientation>.unmodifiable(restoreTo ?? unlocked);
 
-  /// Playback stays on these two landscape directions, including when the
-  /// phone is held upright. Exit puts [restoreTo] back.
+  /// Landscape directions retained for matching the entry viewport.
   static const landscape = <DeviceOrientation>[
     DeviceOrientation.landscapeLeft,
     DeviceOrientation.landscapeRight,
@@ -44,7 +43,7 @@ class PhoneOrientation with WidgetsBindingObserver {
 
   final PhoneOrientationRequest _request;
 
-  /// Orientations that were current before playback requested landscape.
+  /// Orientations that matched the viewport before playback opened.
   final List<DeviceOrientation> restoreTo;
 
   final List<List<DeviceOrientation>> calls = [];
@@ -61,7 +60,7 @@ class PhoneOrientation with WidgetsBindingObserver {
     _entered = true;
     _awaitingReturn = false;
     _stopObserving();
-    return _enqueue(() => _send(landscape));
+    return _enqueue(() => _send(unlocked));
   }
 
   Future<void> leavePlayback() {

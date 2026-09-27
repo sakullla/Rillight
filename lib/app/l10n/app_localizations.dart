@@ -1900,6 +1900,24 @@ abstract class AppLocalizations {
   /// **'解锁屏幕'**
   String get mobileUnlock;
 
+  /// Shown when Android cannot read or apply a system brightness or volume gesture.
+  ///
+  /// In zh, this message translates to:
+  /// **'系统调节暂不可用'**
+  String get mobileGestureUnavailable;
+
+  /// Phone player source section inside More, separate from quality.
+  ///
+  /// In zh, this message translates to:
+  /// **'来源'**
+  String get mobileSource;
+
+  /// Hint shown briefly beside the phone player's explicit unlock button.
+  ///
+  /// In zh, this message translates to:
+  /// **'已锁定 · 点右上角解锁'**
+  String get mobileLockedHint;
+
   /// Player top-bar tooltip opening the bottom panel with danmaku, tracks, speed and volume.
   ///
   /// In zh, this message translates to:
