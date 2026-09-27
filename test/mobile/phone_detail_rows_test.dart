@@ -434,7 +434,7 @@ void main() {
       unawaited(harness.router.push(AppRoutes.shelfLatestMovies));
       await tester.pumpAndSettle();
 
-      final poster = find.byKey(const ValueKey('movie-inception'));
+      final poster = find.byKey(PhoneShelfPage.imageKey('movie-inception'));
       await tester.ensureVisible(poster);
       await tester.pumpAndSettle();
       final posterImage = tester.widget<MediaImage>(
@@ -513,7 +513,7 @@ void main() {
     unawaited(harness.router.push(AppRoutes.shelfLatestMovies));
     await tester.pumpAndSettle();
 
-    final poster = find.byKey(const ValueKey('movie-transcode'));
+    final poster = find.byKey(PhoneShelfPage.imageKey('movie-transcode'));
     await tester.scrollUntilVisible(
       poster,
       300,
