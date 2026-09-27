@@ -45,6 +45,56 @@ void main() {
 
   setUp(isolateImageCache);
 
+  testWidgets('long episode list builds only rows near the viewport', (
+    tester,
+  ) async {
+    final episodes = [
+      for (var index = 0; index < 80; index++)
+        EmbyItem(id: 'episode-$index', name: '第 $index 集', type: 'Episode'),
+    ];
+    await tester.pumpWidget(
+      MaterialApp(
+        locale: const Locale('zh'),
+        supportedLocales: AppLocalizations.supportedLocales,
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        theme: AppTheme.dark(),
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => CustomScrollView(
+              slivers: MobileSeriesPage(
+                item: const EmbyItem(id: 'series', name: '剧', type: 'Series'),
+                seasons: const [],
+                seasonId: null,
+                episodes: episodes,
+                episodesLoading: false,
+                episodeError: null,
+                hasMore: false,
+                playTargetId: null,
+                similar: const [],
+                onSelectSeason: _ignore,
+                onOpenEpisode: _ignore,
+                onRetryEpisodes: _noop,
+                onLoadMore: _noop,
+                onOpenItem: _ignore,
+                onOpenSimilar: _noop,
+              ).buildSlivers(context),
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(find.byKey(CatalogKeys.episode('episode-0')), findsOneWidget);
+    expect(find.byKey(CatalogKeys.episode('episode-79')), findsNothing);
+    expect(find.byType(MediaImage).evaluate().length, lessThan(20));
+    await tester.scrollUntilVisible(
+      find.byKey(CatalogKeys.episode('episode-79')),
+      500,
+      maxScrolls: 80,
+    );
+    expect(find.byKey(CatalogKeys.episode('episode-79')), findsOneWidget);
+    expect(find.byKey(CatalogKeys.episode('episode-0')), findsNothing);
+  });
+
   for (final width in [360.0, 412.0]) {
     testWidgets('cast rows settle on whole cards at ${width.toInt()}dp', (
       tester,

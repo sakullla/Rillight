@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/content_theme.dart';
 import 'package:rillight/library/detail_extras.dart';
@@ -499,77 +500,86 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
             ),
             body: RefreshIndicator(
               onRefresh: _refresh,
-              child: ListView(
+              child: CustomScrollView(
                 key: PageStorageKey('detail-${widget.itemId}'),
                 controller: _scroll,
                 physics: const AlwaysScrollableScrollPhysics(),
-                padding: EdgeInsets.only(
-                  bottom: MediaQuery.paddingOf(context).bottom + AppSpacing.lg,
-                ),
-                children: [
-                  if (pending)
-                    _PhoneDetailPending(handoff: handoff)
-                  else if (failed)
-                    MobileFailureState(
-                      message: embyFailureMessage(l, controller.error!),
-                      onRetry: _refresh,
-                    )
-                  else if (imageSource != null)
-                    PhoneItemBanner(
-                      item: imageSource,
-                      title: (item ?? imageSource).name,
-                      titleHint: item != null && item.isEpisode
-                          ? item.seriesName
-                          : null,
-                      onTitleTap:
-                          item != null &&
-                              item.isEpisode &&
-                              item.seriesId != null &&
-                              item.seriesId!.isNotEmpty
-                          ? () => _openSeries(item)
-                          : null,
-                      meta: item == null ? const [] : _bannerMeta(l, item),
-                      actions: item == null
-                          ? null
-                          : _DetailPlayActions(
-                              label: target == null
-                                  ? l.noPlayableStream
-                                  : _playLabel(l, item, target),
-                              enabled: target != null && target.isPlayable,
-                              showRestart:
-                                  !item.isSeries && target?.canResume == true,
-                              onPlay: target == null
-                                  ? null
-                                  : _openPreferredPlayer,
-                              onRestart: target == null
-                                  ? null
-                                  : () =>
-                                        _openPlayer(target.id, fromStart: true),
-                              onPrevious:
-                                  item.isEpisode && _previousEpisode != null
-                                  ? () => _openItem(_previousEpisode!.id)
-                                  : null,
-                              onNext: item.isEpisode && _nextEpisode != null
-                                  ? () => _openItem(_nextEpisode!.id)
-                                  : null,
-                            ),
-                      preferBackdrop: handoff?.preferBackdrop ?? true,
-                      maxWidth:
-                          handoff?.maxWidth ?? PhoneMotion.pageRequestWidth,
-                    ),
-                  if (item != null && controller.error != null)
-                    MobileFailureState(
-                      message: embyFailureMessage(l, controller.error!),
-                      onRetry: _refresh,
-                    ),
-                  if (item != null) DetailAlbumStrip(item: item),
-                  if (item?.isSeries == true && controller.seasonError != null)
-                    MobileFailureState(
-                      message: embyFailureMessage(l, controller.seasonError!),
-                      onRetry: controller.loadSeasons,
-                    ),
+                scrollCacheExtent: const ScrollCacheExtent.viewport(0.5),
+                slivers: [
+                  SliverList.list(
+                    children: [
+                      if (pending)
+                        _PhoneDetailPending(handoff: handoff)
+                      else if (failed)
+                        MobileFailureState(
+                          message: embyFailureMessage(l, controller.error!),
+                          onRetry: _refresh,
+                        )
+                      else if (imageSource != null)
+                        PhoneItemBanner(
+                          item: imageSource,
+                          title: (item ?? imageSource).name,
+                          titleHint: item != null && item.isEpisode
+                              ? item.seriesName
+                              : null,
+                          onTitleTap:
+                              item != null &&
+                                  item.isEpisode &&
+                                  item.seriesId != null &&
+                                  item.seriesId!.isNotEmpty
+                              ? () => _openSeries(item)
+                              : null,
+                          meta: item == null ? const [] : _bannerMeta(l, item),
+                          actions: item == null
+                              ? null
+                              : _DetailPlayActions(
+                                  label: target == null
+                                      ? l.noPlayableStream
+                                      : _playLabel(l, item, target),
+                                  enabled: target != null && target.isPlayable,
+                                  showRestart:
+                                      !item.isSeries &&
+                                      target?.canResume == true,
+                                  onPlay: target == null
+                                      ? null
+                                      : _openPreferredPlayer,
+                                  onRestart: target == null
+                                      ? null
+                                      : () => _openPlayer(
+                                          target.id,
+                                          fromStart: true,
+                                        ),
+                                  onPrevious:
+                                      item.isEpisode && _previousEpisode != null
+                                      ? () => _openItem(_previousEpisode!.id)
+                                      : null,
+                                  onNext: item.isEpisode && _nextEpisode != null
+                                      ? () => _openItem(_nextEpisode!.id)
+                                      : null,
+                                ),
+                          preferBackdrop: handoff?.preferBackdrop ?? true,
+                          maxWidth:
+                              handoff?.maxWidth ?? PhoneMotion.pageRequestWidth,
+                        ),
+                      if (item != null && controller.error != null)
+                        MobileFailureState(
+                          message: embyFailureMessage(l, controller.error!),
+                          onRetry: _refresh,
+                        ),
+                      if (item != null) DetailAlbumStrip(item: item),
+                      if (item?.isSeries == true &&
+                          controller.seasonError != null)
+                        MobileFailureState(
+                          message: embyFailureMessage(
+                            l,
+                            controller.seasonError!,
+                          ),
+                          onRetry: controller.loadSeasons,
+                        ),
+                    ],
+                  ),
                   if (item != null && item.isSeries)
-                    MobileSeriesPage(
+                    ...MobileSeriesPage(
                       item: item,
                       seasons: controller.seasons,
                       seasonId: controller.seasonId,
@@ -597,32 +607,42 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
                                 _changeSeason(controller.seasonId!, more: true),
                       onOpenItem: _openItem,
                       onOpenSimilar: _openSimilarShelf,
+                    ).buildSlivers(context),
+                  SliverList.list(
+                    children: [
+                      if (item != null && !item.isSeries)
+                        _PhoneItemDetail(
+                          item: item,
+                          similar: _similar,
+                          mediaSource: _source(item),
+                          selectedAudioIndex: _audioStreamIndex,
+                          selectedSubtitleIndex: _subtitleStreamIndex,
+                          onAudio: (index) =>
+                              setState(() => _audioStreamIndex = index),
+                          onSubtitle: (index) =>
+                              setState(() => _subtitleStreamIndex = index),
+                          onOpenItem: _openItem,
+                          onChapter: item.isPlayable
+                              ? (chapter) => _openPlayer(
+                                  item.id,
+                                  startTimeTicks: chapter.startPositionTicks,
+                                )
+                              : null,
+                          onOpenSimilar: _openSimilarShelf,
+                        ),
+                      if (_similarError != null)
+                        MobileFailureState(
+                          message: embyFailureMessage(l, _similarError!),
+                          onRetry: _loadExtras,
+                        ),
+                    ],
+                  ),
+                  SliverToBoxAdapter(
+                    child: SizedBox(
+                      height:
+                          MediaQuery.paddingOf(context).bottom + AppSpacing.lg,
                     ),
-                  if (item != null && !item.isSeries)
-                    _PhoneItemDetail(
-                      item: item,
-                      similar: _similar,
-                      mediaSource: _source(item),
-                      selectedAudioIndex: _audioStreamIndex,
-                      selectedSubtitleIndex: _subtitleStreamIndex,
-                      onAudio: (index) =>
-                          setState(() => _audioStreamIndex = index),
-                      onSubtitle: (index) =>
-                          setState(() => _subtitleStreamIndex = index),
-                      onOpenItem: _openItem,
-                      onChapter: item.isPlayable
-                          ? (chapter) => _openPlayer(
-                              item.id,
-                              startTimeTicks: chapter.startPositionTicks,
-                            )
-                          : null,
-                      onOpenSimilar: _openSimilarShelf,
-                    ),
-                  if (_similarError != null)
-                    MobileFailureState(
-                      message: embyFailureMessage(l, _similarError!),
-                      onRetry: _loadExtras,
-                    ),
+                  ),
                 ],
               ),
             ),

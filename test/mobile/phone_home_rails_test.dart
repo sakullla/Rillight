@@ -46,6 +46,31 @@ void main() {
 
   tearDown(PhoneHomeSectionController.debugResetApp);
 
+  testWidgets('home mounts a later rail only after it nears the viewport', (
+    tester,
+  ) async {
+    await _pumpRails(tester, width: 360, height: 560);
+    final catalog = CatalogScope.of(tester.element(find.byType(PhoneHome)));
+    catalog.latestSeries = CatalogRowState(
+      items: const [EmbyItem(id: 'series-lazy', name: '剧集', type: 'Series')],
+    );
+    catalog.notifyListeners();
+    await tester.pump();
+    final later = find.byKey(CatalogKeys.latestSeriesRow);
+    expect(later, findsNothing);
+    await tester.scrollUntilVisible(
+      later,
+      180,
+      scrollable: find
+          .descendant(
+            of: find.byType(PhoneHome),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    expect(later, findsOneWidget);
+  });
+
   for (final width in [360.0, 412.0]) {
     testWidgets(
       'shelf skeleton matches the poster grid at ${width.toInt()}dp',
@@ -255,6 +280,17 @@ void main() {
       find.byKey(CatalogKeys.resumeRow),
       wide: true,
       screen: 360,
+    );
+    // The final rail is now created only after it enters the vertical viewport.
+    await tester.scrollUntilVisible(
+      find.byKey(CatalogKeys.latestSeriesRow),
+      180,
+      scrollable: find
+          .descendant(
+            of: find.byType(PhoneHome),
+            matching: find.byType(Scrollable),
+          )
+          .first,
     );
     _expectRowShape(
       tester,

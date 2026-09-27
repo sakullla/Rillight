@@ -176,6 +176,7 @@ bool _isTransientImageFailure(Object error) {
 class _MediaImageState extends State<MediaImage> {
   Future<_LoadedImage?>? _future;
   String? _lastAccountScope;
+  int? _lastRequestWidth;
   int _loadGeneration = 0;
   ScrollPosition? _observedScroll;
   bool _frameWakeQueued = false;
@@ -191,7 +192,14 @@ class _MediaImageState extends State<MediaImage> {
 
   bool get _hasImageSource => _candidates.isNotEmpty;
 
-  int get _requestMaxWidth => widget.maxWidth ?? widget.width?.round() ?? 280;
+  int get _requestMaxWidth {
+    final explicit = widget.maxWidth;
+    if (explicit != null && explicit > 0) return explicit;
+    final logicalWidth = widget.width ?? 280;
+    return (logicalWidth * MediaQuery.devicePixelRatioOf(context))
+        .round()
+        .clamp(1, kMediaBackdropMaxRequestWidth);
+  }
 
   /// Protected artwork is scoped to both the server and authenticated user.
   String? get _accountScope => _imageAccountScope(AuthScope.maybeOf(context));
@@ -201,8 +209,10 @@ class _MediaImageState extends State<MediaImage> {
     super.didChangeDependencies();
     _trackScrollable();
     final scope = _accountScope;
-    if (scope != _lastAccountScope) {
+    final requestWidth = _requestMaxWidth;
+    if (scope != _lastAccountScope || requestWidth != _lastRequestWidth) {
       _lastAccountScope = scope;
+      _lastRequestWidth = requestWidth;
       _loadGeneration++;
       _future = null;
     }
@@ -214,6 +224,7 @@ class _MediaImageState extends State<MediaImage> {
   @override
   void dispose() {
     _loadGeneration++;
+    MediaImageCache.instance._cancelStaleFetches();
     _observedScroll?.removeListener(_onObservedScroll);
     _observedScroll = null;
     final wake = _layoutWake;
@@ -322,6 +333,7 @@ class _MediaImageState extends State<MediaImage> {
     _frameWakeQueued = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _frameWakeQueued = false;
+      MediaImageCache.instance._schedulePosterRelease();
       final wake = _layoutWake;
       if (wake != null && !wake.isCompleted) {
         wake.complete();
@@ -518,7 +530,12 @@ class _MediaImageState extends State<MediaImage> {
     final client = auth.client;
     final serverId = _accountScope;
     if (serverId == null) return null;
-    bool valid() => current() && _accountScope == serverId;
+    // This callback can be inspected while another image is unmounting. Do
+    // not look up inherited widgets on a deactivated element.
+    bool valid() =>
+        current() &&
+        _lastAccountScope == serverId &&
+        _imageAccountScope(auth) == serverId;
     final maxWidth = _requestMaxWidth;
     for (final candidate in _candidates) {
       if (!valid()) return null;
@@ -610,7 +627,7 @@ class _MediaImageState extends State<MediaImage> {
       image: _MediaMemoryImage(
         cacheKey: loaded.cacheKey,
         bytes: loaded.bytes,
-        targetWidth: widget.maxWidth,
+        targetWidth: _requestMaxWidth,
       ),
       width: width,
       height: height,
@@ -800,6 +817,7 @@ class _ImageFetchRequest {
   final List<_ImageFetchConsumer> consumers;
   final Completer<bool> slot = Completer<bool>();
   late final Future<Uint8List?> result;
+  _ImageFetchConsumer? activeConsumer;
 
   _ImageFetchConsumer? get currentConsumer {
     for (final consumer in consumers) {
@@ -954,8 +972,7 @@ class MediaImageCache {
   final List<_PosterLoadTurn> _posterTurns = [];
   bool _posterReleaseQueued = false;
 
-  /// 登记一次海报加载。滚动中或仍有视口磁盘探测时不放行。
-  /// 放行时视口内排在屏幕外之前。
+  /// 可见图片即使仍在滚动也进入有界网络队列，屏外预取等停滑。
   _PosterLoadTurn _claimPosterLoadTurn(bool Function() inViewport) {
     final turn = _PosterLoadTurn(
       sequence: _posterTurnSerial++,
@@ -983,7 +1000,7 @@ class MediaImageCache {
   }
 
   void _schedulePosterRelease() {
-    if (_posterReleaseQueued || _viewportDiskProbes > 0 || isScrollBusy) {
+    if (_posterReleaseQueued || _viewportDiskProbes > 0) {
       return;
     }
     if (_posterTurns.isEmpty) {
@@ -992,7 +1009,7 @@ class MediaImageCache {
     _posterReleaseQueued = true;
     scheduleMicrotask(() {
       _posterReleaseQueued = false;
-      if (_viewportDiskProbes > 0 || isScrollBusy) {
+      if (_viewportDiskProbes > 0) {
         return;
       }
       _releasePosterTurns();
@@ -1021,7 +1038,12 @@ class MediaImageCache {
         a.sequence.compareTo(b.sequence);
     viewport.sort(bySequence);
     offscreen.sort(bySequence);
-    for (final turn in viewport.followedBy(offscreen)) {
+    if (isScrollBusy) {
+      _posterTurns.addAll(offscreen);
+    }
+    for (final turn in viewport.followedBy(
+      isScrollBusy ? const <_PosterLoadTurn>[] : offscreen,
+    )) {
       if (!turn.done.isCompleted) {
         turn.done.complete();
       }
@@ -1195,6 +1217,7 @@ class MediaImageCache {
       try {
         final consumer = request.currentConsumer;
         if (consumer == null || !current()) return null;
+        request.activeConsumer = consumer;
         try {
           bytes = await consumer.fetch().timeout(fetchTimeout);
         } on TimeoutException {
@@ -1205,6 +1228,7 @@ class MediaImageCache {
           bytes = null;
         }
       } finally {
+        request.activeConsumer = null;
         if (generation == _cacheGeneration) _release();
       }
       if (!current()) return null;
@@ -1244,7 +1268,7 @@ class MediaImageCache {
     }
     _bytes[cacheKey] = bytes;
     _bytesTotal += bytes.length;
-    while (_bytesTotal > memoryLimitBytes && _bytes.length > 1) {
+    while (_bytesTotal > memoryLimitBytes && _bytes.isNotEmpty) {
       final eldest = _bytes.remove(_bytes.keys.first)!;
       _bytesTotal -= eldest.length;
     }
@@ -1341,6 +1365,22 @@ class MediaImageCache {
     }
     _waiters.add(request);
     return request.slot.future;
+  }
+
+  void _cancelStaleFetches() {
+    _waiters.removeWhere((request) {
+      if (request.isCurrent) return false;
+      if (!request.slot.isCompleted) request.slot.complete(false);
+      return true;
+    });
+    for (final request in _inflight.values) {
+      if (request.isCurrent) continue;
+      try {
+        request.activeConsumer?.onAbort?.call();
+      } catch (_) {
+        // Cancellation is best effort; the fetch timeout still bounds its slot.
+      }
+    }
   }
 
   void _release() {
@@ -1572,6 +1612,7 @@ class FileMediaImageDiskStore implements MediaImageDiskStore {
 
   @override
   Future<void> write(String key, Uint8List bytes) async {
+    if (bytes.length > limitBytes) return;
     final entries = await _ensureIndex();
     final name = _fileName(key);
     final file = File('${directory.path}/$name');

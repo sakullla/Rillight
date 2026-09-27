@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:cryptography/dart.dart';
 import 'package:dio/dio.dart';
@@ -582,6 +583,92 @@ void main() {
     expect(find.byType(Image), findsNWidgets(2));
   });
 
+  testWidgets('implicit image width uses the same DPR bounded request', (
+    tester,
+  ) async {
+    final auth = await connect(tester);
+    await tester.runAsync(() => tester.pumpWidget(buildSubject(auth, withTag)));
+    await pumpUntilImage(tester);
+    final expected = (120 * tester.view.devicePixelRatio).round().clamp(
+      1,
+      kMediaBackdropMaxRequestWidth,
+    );
+    expect(imageRequests().single, contains('maxWidth=$expected'));
+    expect(find.byType(Image), findsOneWidget);
+  });
+
+  testWidgets('missing width cannot request an unbounded original image', (
+    tester,
+  ) async {
+    final auth = await connect(tester);
+    await tester.runAsync(
+      () => tester.pumpWidget(
+        wrap(
+          auth,
+          const SizedBox(
+            width: 200,
+            height: 200,
+            child: MediaImage(item: withTag),
+          ),
+        ),
+      ),
+    );
+    await pumpUntilImage(tester);
+    final expected = (280 * tester.view.devicePixelRatio).round().clamp(
+      1,
+      kMediaBackdropMaxRequestWidth,
+    );
+    expect(imageRequests().single, contains('maxWidth=$expected'));
+    expect(find.byType(Image), findsOneWidget);
+  });
+
+  test('one oversized image does not exceed the memory byte budget', () async {
+    MediaImageCache.instance.memoryLimitBytes = kTinyPng.length - 1;
+    var fetches = 0;
+    Future<Uint8List?> fetch() async {
+      fetches++;
+      return kTinyPng;
+    }
+
+    Future<Uint8List?> load() => MediaImageCache.instance.load(
+      serverId: 'server-1',
+      itemId: 'oversized',
+      type: 'Primary',
+      maxWidth: 280,
+      fetch: fetch,
+    );
+
+    expect(await load(), kTinyPng);
+    expect(
+      MediaImageCache.instance.peek(
+        serverId: 'server-1',
+        itemId: 'oversized',
+        type: 'Primary',
+        maxWidth: 280,
+      ),
+      isNull,
+    );
+    await load();
+    expect(fetches, 2);
+  });
+
+  test('one oversized image does not exceed the disk byte budget', () async {
+    final directory = await Directory.systemTemp.createTemp(
+      'rillight-image-budget-',
+    );
+    try {
+      final store = FileMediaImageDiskStore(
+        directory,
+        limitBytes: kTinyPng.length - 1,
+      );
+      await store.write('oversized', kTinyPng);
+      expect(await store.read('oversized'), isNull);
+      expect(await directory.list().toList(), isEmpty);
+    } finally {
+      await directory.delete(recursive: true);
+    }
+  });
+
   test(
     'memory cache evicts least recently used above the byte limit',
     () async {
@@ -1007,9 +1094,7 @@ void main() {
     expect(MediaImageCache.instance.isScrollBusy, isFalse);
   });
 
-  testWidgets('uncached posters wait for scroll idle before fetching', (
-    tester,
-  ) async {
+  testWidgets('visible uncached posters fetch while scrolling', (tester) async {
     final auth = await connect(tester);
     await tester.runAsync(() async {
       MediaImageCache.instance.markScrollActivity();
@@ -1018,7 +1103,7 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 20));
     });
     await tester.pump();
-    expect(imageRequests(), isEmpty);
+    expect(imageRequests(), isNotEmpty);
     await tester.runAsync(() async {
       await Future<void>.delayed(const Duration(milliseconds: 150));
     });
@@ -1070,7 +1155,7 @@ void main() {
           itemId: 'poster-$index',
           type: 'Primary',
           tag: 'tag-$index',
-          maxWidth: 120,
+          maxWidth: (120 * tester.view.devicePixelRatio).round(),
           fetch: () async => kTinyPng,
         );
       }
@@ -1119,37 +1204,37 @@ void main() {
     },
   );
 
-  testWidgets(
-    'after scroll idle, viewport posters start before offscreen ones',
-    (tester) async {
-      addPosterItems(2);
-      final auth = await connect(tester);
-      await tester.runAsync(() async {
-        MediaImageCache.instance.markScrollActivity();
-        await pumpPosterStrip(tester, auth, count: 2);
-        MediaImageCache.instance.markScrollActivity();
-        await Future<void>.delayed(const Duration(milliseconds: 30));
-      });
-      await tester.pump();
-      expect(imageRequests(), isEmpty);
-      expect(find.byType(MediaImage), findsWidgets);
+  testWidgets('visible posters start during scrolling before offscreen ones', (
+    tester,
+  ) async {
+    addPosterItems(2);
+    final auth = await connect(tester);
+    await tester.runAsync(() async {
+      MediaImageCache.instance.markScrollActivity();
+      await pumpPosterStrip(tester, auth, count: 2);
+      MediaImageCache.instance.markScrollActivity();
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+    });
+    await tester.pump();
+    expect(imageRequests().map(requestedItemId), contains('poster-0'));
+    expect(imageRequests().map(requestedItemId), isNot(contains('poster-1')));
+    expect(find.byType(MediaImage), findsWidgets);
 
-      await tester.runAsync(() async {
-        await Future<void>.delayed(const Duration(milliseconds: 150));
-      });
-      await tester.pump();
-      await tester.pump();
-      final ids = imageRequests().map(requestedItemId).whereType<String>();
-      expect(ids, contains('poster-0'));
-      expect(ids, contains('poster-1'));
-      expect(
-        ids.toList().indexOf('poster-0'),
-        lessThan(ids.toList().indexOf('poster-1')),
-      );
-      await tester.pumpWidget(const SizedBox.shrink());
-      await tester.pump(MediaImageCache.defaultFetchTimeout);
-    },
-  );
+    await tester.runAsync(() async {
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+    });
+    await tester.pump();
+    await tester.pump();
+    final ids = imageRequests().map(requestedItemId).whereType<String>();
+    expect(ids, contains('poster-0'));
+    expect(ids, contains('poster-1'));
+    expect(
+      ids.toList().indexOf('poster-0'),
+      lessThan(ids.toList().indexOf('poster-1')),
+    );
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(MediaImageCache.defaultFetchTimeout);
+  });
 }
 
 class _HangingWriteStore implements MediaImageDiskStore {

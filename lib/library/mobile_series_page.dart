@@ -326,137 +326,169 @@ class MobileSeriesPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final l = AppLocalizations.of(context);
-    final showSeasons = seasons.isNotEmpty;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (plainOverview(item.overview) != null)
-          EpisodeOverviewSection(overview: item.overview, compact: true),
-        if (showSeasons || onPickEpisode != null)
-          SizedBox(
-            height: 48,
-            child: ListView.separated(
-              key: const Key('phone-season-list'),
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
-              itemCount: seasons.length,
-              separatorBuilder: (context, index) =>
-                  const SizedBox(width: AppSpacing.xs),
-              itemBuilder: (context, index) {
-                final season = seasons[index];
-                return ChoiceChip(
-                  key: CatalogKeys.season(season.id),
-                  label: Text(season.name),
-                  selected: season.id == seasonId,
-                  onSelected: (selected) {
-                    if (selected) onSelectSeason(season.id);
-                  },
-                );
-              },
-            ),
-          ),
-        if (episodes.isNotEmpty || episodesLoading)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(
-              AppSpacing.md,
-              AppSpacing.sm,
-              AppSpacing.md,
-              AppSpacing.xxs,
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    l.seasonEpisodes,
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                ),
-                if (onPickEpisode != null)
-                  TextButton.icon(
-                    key: CatalogKeys.locateEpisode,
-                    onPressed: onPickEpisode,
-                    icon: const Icon(Icons.apps_rounded, size: 18),
-                    label: Text(l.pickEpisode),
-                  ),
-              ],
-            ),
-          ),
-        if (episodesLoading && episodes.isEmpty)
-          LayoutBuilder(
-            builder: (context, constraints) {
-              // 三块固定 144 的 Row 在 360dp 上会横向溢出。卡片不超过内容宽，多的横滑。
-              final inner = constraints.maxWidth - AppSpacing.md * 2;
-              final cardWidth = inner >= 144
-                  ? 144.0
-                  : inner > 0
-                  ? inner
-                  : 0.0;
-              final cardHeight = cardWidth * 9 / 16;
-              return SizedBox(
-                height: cardHeight,
-                child: ListView.separated(
-                  key: const Key('phone-season-episode-placeholder'),
-                  scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: AppSpacing.md,
-                  ),
-                  itemCount: cardWidth <= 0 ? 0 : 3,
-                  separatorBuilder: (context, index) =>
-                      const SizedBox(width: AppSpacing.sm),
-                  itemBuilder: (context, index) =>
-                      SkeletonBlock(width: cardWidth, height: cardHeight),
-                ),
-              );
-            },
-          ),
-        if (episodeError != null && onRetryEpisodes != null)
-          MobileFailureState(
-            message: embyFailureMessage(l, episodeError!),
-            onRetry: onRetryEpisodes!,
-          ),
-        if (!episodesLoading &&
-            episodeError == null &&
-            episodes.isEmpty &&
-            showSeasons)
-          Padding(
-            padding: const EdgeInsets.all(AppSpacing.md),
-            child: Text(l.mobileEmpty),
-          ),
-        for (final episode in episodes)
-          _RevealEpisode(
-            reveal: episode.id == focusEpisodeId,
-            child: _EpisodeRow(
-              episode: episode,
-              current: episode.id == (focusEpisodeId ?? playTargetId),
-              onTap: () => onOpenEpisode(episode.id),
-            ),
-          ),
-        if (hasMore && onLoadMore != null)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
-            child: FilledButton(
-              onPressed: episodesLoading ? null : onLoadMore,
-              child: Text(l.mobileLoadMore),
-            ),
-          ),
-        EpisodePeopleSection(people: item.people),
-        EpisodeMetadataSection(item: item),
-        DetailExternalLinks(links: item.externalUrls, title: item.name),
-        if (similar.isNotEmpty)
-          _SimilarRow(
-            items: similar,
-            onOpenItem: onOpenItem,
-            onOpenSimilar: onOpenSimilar,
-          ),
-        const SizedBox(height: AppSpacing.lg),
+        for (final child in _content(context))
+          if (child is _EpisodeListSlot)
+            for (final episode in episodes) _episodeWidget(episode)
+          else
+            child,
       ],
     );
   }
+
+  /// Embeds long episode lists in the parent's viewport, so offscreen rows are
+  /// never built merely to determine the detail page's total height.
+  List<Widget> buildSlivers(BuildContext context) {
+    final content = _content(context);
+    final split = content.indexWhere((child) => child is _EpisodeListSlot);
+    return [
+      SliverList.list(children: content.sublist(0, split)),
+      SliverList.builder(
+        itemCount: episodes.length,
+        itemBuilder: (context, index) => _episodeWidget(episodes[index]),
+      ),
+      SliverList.list(children: content.sublist(split + 1)),
+    ];
+  }
+
+  Widget _episodeWidget(EmbyItem episode) => _RevealEpisode(
+    key: ValueKey('episode-${episode.id}'),
+    reveal: episode.id == focusEpisodeId,
+    child: _EpisodeRow(
+      episode: episode,
+      current: episode.id == (focusEpisodeId ?? playTargetId),
+      onTap: () => onOpenEpisode(episode.id),
+    ),
+  );
+
+  List<Widget> _content(BuildContext context) {
+    final l = AppLocalizations.of(context);
+    final showSeasons = seasons.isNotEmpty;
+    return [
+      if (plainOverview(item.overview) != null)
+        EpisodeOverviewSection(overview: item.overview, compact: true),
+      if (showSeasons || onPickEpisode != null)
+        SizedBox(
+          height: 48,
+          child: ListView.separated(
+            key: const Key('phone-season-list'),
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+            itemCount: seasons.length,
+            separatorBuilder: (context, index) =>
+                const SizedBox(width: AppSpacing.xs),
+            itemBuilder: (context, index) {
+              final season = seasons[index];
+              return ChoiceChip(
+                key: CatalogKeys.season(season.id),
+                label: Text(season.name),
+                selected: season.id == seasonId,
+                onSelected: (selected) {
+                  if (selected) onSelectSeason(season.id);
+                },
+              );
+            },
+          ),
+        ),
+      if (episodes.isNotEmpty || episodesLoading)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.md,
+            AppSpacing.sm,
+            AppSpacing.md,
+            AppSpacing.xxs,
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  l.seasonEpisodes,
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+              ),
+              if (onPickEpisode != null)
+                TextButton.icon(
+                  key: CatalogKeys.locateEpisode,
+                  onPressed: onPickEpisode,
+                  icon: const Icon(Icons.apps_rounded, size: 18),
+                  label: Text(l.pickEpisode),
+                ),
+            ],
+          ),
+        ),
+      if (episodesLoading && episodes.isEmpty)
+        LayoutBuilder(
+          builder: (context, constraints) {
+            // 三块固定 144 的 Row 在 360dp 上会横向溢出。卡片不超过内容宽，多的横滑。
+            final inner = constraints.maxWidth - AppSpacing.md * 2;
+            final cardWidth = inner >= 144
+                ? 144.0
+                : inner > 0
+                ? inner
+                : 0.0;
+            final cardHeight = cardWidth * 9 / 16;
+            return SizedBox(
+              height: cardHeight,
+              child: ListView.separated(
+                key: const Key('phone-season-episode-placeholder'),
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+                itemCount: cardWidth <= 0 ? 0 : 3,
+                separatorBuilder: (context, index) =>
+                    const SizedBox(width: AppSpacing.sm),
+                itemBuilder: (context, index) =>
+                    SkeletonBlock(width: cardWidth, height: cardHeight),
+              ),
+            );
+          },
+        ),
+      if (episodeError != null && onRetryEpisodes != null)
+        MobileFailureState(
+          message: embyFailureMessage(l, episodeError!),
+          onRetry: onRetryEpisodes!,
+        ),
+      if (!episodesLoading &&
+          episodeError == null &&
+          episodes.isEmpty &&
+          showSeasons)
+        Padding(
+          padding: const EdgeInsets.all(AppSpacing.md),
+          child: Text(l.mobileEmpty),
+        ),
+      const _EpisodeListSlot(),
+      if (hasMore && onLoadMore != null)
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+          child: FilledButton(
+            onPressed: episodesLoading ? null : onLoadMore,
+            child: Text(l.mobileLoadMore),
+          ),
+        ),
+      EpisodePeopleSection(people: item.people),
+      EpisodeMetadataSection(item: item),
+      DetailExternalLinks(links: item.externalUrls, title: item.name),
+      if (similar.isNotEmpty)
+        _SimilarRow(
+          items: similar,
+          onOpenItem: onOpenItem,
+          onOpenSimilar: onOpenSimilar,
+        ),
+      const SizedBox(height: AppSpacing.lg),
+    ];
+  }
+}
+
+class _EpisodeListSlot extends StatelessWidget {
+  const _EpisodeListSlot();
+
+  @override
+  Widget build(BuildContext context) => const SizedBox.shrink();
 }
 
 class _RevealEpisode extends StatefulWidget {
-  const _RevealEpisode({required this.reveal, required this.child});
+  const _RevealEpisode({super.key, required this.reveal, required this.child});
 
   final bool reveal;
   final Widget child;

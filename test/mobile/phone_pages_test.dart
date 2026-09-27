@@ -862,6 +862,7 @@ void main() {
       );
 
       // 剧集海报:集数角标。
+      await _showOnHome(tester, find.byKey(CatalogKeys.latestSeriesRow));
       expect(
         find.descendant(
           of: find.byKey(phoneHomeBadgesKey('series-long')),
@@ -911,6 +912,8 @@ void main() {
         findsNothing,
       );
 
+      await Scrollable.ensureVisible(tester.element(retry), alignment: 0.2);
+      await tester.pump();
       await tester.tap(retry);
       await tester.pump();
       expect(find.byKey(CatalogKeys.item('movie-b')), findsOneWidget);
@@ -2178,6 +2181,13 @@ void main() {
         );
 
         // 点击片库卡进入片库页。
+        await Scrollable.ensureVisible(
+          tester.element(
+            find.byKey(const Key('phone-home-library-view-movies')),
+          ),
+          alignment: 0.1,
+        );
+        await tester.pump();
         await tester.tap(
           find.byKey(const Key('phone-home-library-view-movies')),
         );
@@ -2361,32 +2371,30 @@ Future<void> _homeSettle(WidgetTester tester) async {
 
 Future<void> _showOnHome(WidgetTester tester, Finder finder) async {
   final list = find.byKey(const PageStorageKey('mobile-home-scroll'));
-  for (var i = 0; i < 8; i++) {
-    final top = tester.getTopLeft(finder).dy;
-    // 顶栏/AppBar 会压住滚动区上缘,留出余量再停。
-    if (top >= 96 && top < 640) {
-      return;
-    }
-    await tester.drag(list, Offset(0, top > 640 ? -350 : 350));
-    await tester.pump();
-  }
+  await tester.scrollUntilVisible(
+    finder,
+    250,
+    scrollable: find
+        .descendant(of: list, matching: find.byType(Scrollable))
+        .first,
+  );
+  await Scrollable.ensureVisible(tester.element(finder), alignment: 0.2);
+  await tester.pump();
 }
 
-/// 首页行键在滚动区的出现顺序(首页主体是单个 Column,行都会 build)。
+/// Inspect the lazy builder's section keys without triggering network work.
 List<Key> _homeRowOrder(WidgetTester tester) {
-  return tester
-      .widgetList<Widget>(
-        find.descendant(
-          of: find.byKey(const PageStorageKey('mobile-home-scroll')),
-          matching: find.byWidgetPredicate((widget) {
-            final key = widget.key;
-            return key == CatalogKeys.latestMoviesRow ||
-                key == CatalogKeys.latestSeriesRow;
-          }),
-        ),
-      )
-      .map((widget) => widget.key!)
-      .toList();
+  final list = find.byKey(const PageStorageKey('mobile-home-scroll'));
+  final view = tester.widget<ListView>(list);
+  final delegate = view.childrenDelegate as SliverChildBuilderDelegate;
+  final context = tester.element(list);
+  return [
+    for (var index = 0; index < delegate.childCount!; index++)
+      if (delegate.builder(context, index) case final widget?
+          when widget.key == CatalogKeys.latestMoviesRow ||
+              widget.key == CatalogKeys.latestSeriesRow)
+        widget.key!,
+  ];
 }
 
 /// 长按拖住编辑行手柄上移一格,触发 ReorderableListView 的 onReorder。

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/content_theme.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
@@ -160,6 +161,7 @@ class _PhoneHomeState extends State<PhoneHome> {
         // 四行、横幅、片库入口和最近添加都没有可展示内容时才用整页占位、失败或空。
         // 横幅候选来自被隐藏的行时，仍要画出横幅。
         final Widget body;
+        List<Widget>? sectionChildren;
         if (!hasItems && !hasBanner && firstError == null && loading) {
           body = const MobileLoadingPlaceholder.home();
         } else if (!hasItems && !hasBanner && firstError != null && !loading) {
@@ -178,7 +180,9 @@ class _PhoneHomeState extends State<PhoneHome> {
             },
           );
         } else {
-          final sharedPosterIds = <String>{};
+          // Keep each item's route hero owned by the same rail across lazy
+          // disposal and reconstruction when the user scrolls back.
+          final sharedPosterOwners = <String, String>{};
           final librariesById = {
             for (final library in catalog.libraries) library.id: library,
           };
@@ -218,6 +222,7 @@ class _PhoneHomeState extends State<PhoneHome> {
               }
               children.add(
                 Padding(
+                  key: section.rowKey,
                   padding: sectionMargin,
                   child: _PhoneHomeRow(
                     section: section,
@@ -225,7 +230,8 @@ class _PhoneHomeState extends State<PhoneHome> {
                       catalog.reloadHomeRows();
                     },
                     onRemoveFromResume: catalog.hideFromResume,
-                    sharePoster: sharedPosterIds.add,
+                    sharePoster: (itemId) =>
+                        sharedPosterOwners.putIfAbsent(itemId, () => id) == id,
                   ),
                 ),
               );
@@ -237,6 +243,7 @@ class _PhoneHomeState extends State<PhoneHome> {
               }
               children.add(
                 Padding(
+                  key: const ValueKey('home-section-libraries'),
                   padding: sectionMargin,
                   child: _PhoneLibraryEntry(libraries: catalog.libraries),
                 ),
@@ -247,39 +254,39 @@ class _PhoneHomeState extends State<PhoneHome> {
             if (libraryId != null && librariesById[libraryId] != null) {
               children.add(
                 Padding(
+                  key: ValueKey('home-section-library-$libraryId'),
                   padding: sectionMargin,
                   child: _PhoneLibraryLatest(
                     library: librariesById[libraryId]!,
-                    sharePoster: sharedPosterIds.add,
+                    sharePoster: (itemId) =>
+                        sharedPosterOwners.putIfAbsent(
+                          itemId,
+                          () => 'library-$libraryId',
+                        ) ==
+                        'library-$libraryId',
                   ),
                 ),
               );
             }
           }
-          body = Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              for (var i = 0; i < children.length; i++) ...[
-                if (i > 0) const SizedBox(height: AppSpacing.xl),
-                children[i],
-              ],
-            ],
-          );
+          sectionChildren = children;
+          body = const SizedBox.shrink();
         }
         final fullBleed =
-            body is Column ||
+            sectionChildren != null ||
             (body is MobileLoadingPlaceholder &&
                 body.variant == MobileLoadingVariant.home);
         final navClearance = phoneScrollClearance(context);
         // 横幅不出现时（被隐藏或暂无候选），首块内容要躲开状态栏和透明顶栏。
-        final topInset = body is Column && !hasBanner
+        final topInset = sectionChildren != null && !hasBanner
             ? MediaQuery.paddingOf(context).top + 56 + AppSpacing.md
             : 0.0;
         final page = RefreshIndicator(
           onRefresh: () => catalog.reload(showCachedFirst: false),
-          child: ListView(
+          child: ListView.builder(
             key: const PageStorageKey('mobile-home-scroll'),
             physics: const AlwaysScrollableScrollPhysics(),
+            scrollCacheExtent: const ScrollCacheExtent.viewport(0.5),
             padding: fullBleed
                 ? EdgeInsets.only(
                     top: topInset,
@@ -291,7 +298,19 @@ class _PhoneHomeState extends State<PhoneHome> {
                     AppSpacing.md,
                     AppSpacing.md + navClearance,
                   ),
-            children: [body],
+            itemCount: sectionChildren == null
+                ? 1
+                : sectionChildren.isEmpty
+                ? 0
+                : sectionChildren.length * 2 - 1,
+            itemBuilder: (context, index) {
+              final sections = sectionChildren;
+              if (sections == null) return body;
+              if (index.isOdd) {
+                return const SizedBox(height: AppSpacing.xl);
+              }
+              return sections[index ~/ 2];
+            },
           ),
         );
         final hero = _heroItem;
@@ -527,7 +546,6 @@ class _PhoneHomeRow extends StatelessWidget {
             ? state.items.isNotEmpty
             : state.items.length >= phoneHomeRowLimit);
     return Column(
-      key: section.rowKey,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _SectionTitle(
