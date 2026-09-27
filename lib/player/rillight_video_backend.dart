@@ -300,7 +300,13 @@ class RillightVideoBackend extends VideoBackend
         diskLimitBytes: PlayerRuntimeOptions.effectiveDiskCacheLimitBytes(
           settings,
         ),
-        readAheadBytes: 512 * 1024 * 1024,
+        readAheadBytes:
+            const int.fromEnvironment(
+              'RILLIGHT_VALIDATION_READ_AHEAD_MIB',
+              defaultValue: 512,
+            ) *
+            1024 *
+            1024,
         dynamicSource: request.dynamicSource,
         sessionBuffering: true,
       );

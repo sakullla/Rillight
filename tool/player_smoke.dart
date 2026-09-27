@@ -177,6 +177,164 @@ Future<void> main(List<String> args) async {
       }
 
       await loaded('baseline-loaded');
+      if (Platform.environment['RILLIGHT_SMOKE_LONG_CACHE'] == '1') {
+        await controller.setVolume(15);
+        final fixture =
+            jsonDecode(await File('${root.path}/server.json').readAsString())
+                as Map;
+        final server = Uri.parse(fixture['url'] as String);
+        final client = HttpClient();
+        Future<void> unstable(bool enabled) async {
+          final request = await client.postUrl(
+            server.resolve('/validation/network'),
+          );
+          request.headers.contentType = ContentType.json;
+          final body = jsonEncode({'unstable': enabled});
+          request.contentLength = utf8.encode(body).length;
+          request.write(body);
+          await (await request.close()).drain<void>();
+        }
+
+        try {
+          await unstable(true);
+          await controller.playEpisode(
+            EmbyItem.fromJson({
+              'Id': 'cache-long',
+              'Type': 'Movie',
+              'Name': 'cache-long',
+            }),
+          );
+          await loaded('cache-long-loaded');
+          var previous = controller.position;
+          var lastAdvance = DateTime.now();
+          var largestPublished = 0;
+          var recovered = false;
+          var sawIdleWindow = false;
+          final deadline = DateTime.now().add(const Duration(minutes: 2));
+          while (controller.position < const Duration(seconds: 78)) {
+            if (DateTime.now().isAfter(deadline)) {
+              throw StateError('Long cache playback exceeded its deadline');
+            }
+            await Future<void>.delayed(const Duration(seconds: 2));
+            final data = await backend.diagnostics();
+            final current = controller.position;
+            if (current > previous + const Duration(milliseconds: 100)) {
+              lastAdvance = DateTime.now();
+            }
+            previous = current;
+            final published =
+                (data['readAheadPublishedBytes'] as num?)?.toInt() ?? 0;
+            if (published > largestPublished) largestPublished = published;
+            recovered |= (data['recoveries'] as num? ?? 0) > 0;
+            sawIdleWindow |=
+                data['upstreamBytesPerSecond'] == 0 &&
+                data['readAheadWorkerActive'] == false &&
+                data['readAheadFailed'] == false &&
+                controller.isPlaying;
+            await record('cache-long-sample', {
+              'positionMs': current.inMilliseconds,
+              'playing': controller.isPlaying,
+              'loading': controller.loading,
+              'error': controller.error?.name,
+              'coreLastEvent': data['coreLastEvent'],
+              'coreErrorCode': data['coreErrorCode'],
+              'upstreamBytesPerSecond': data['upstreamBytesPerSecond'],
+              'upstreamBytes': data['upstreamBytes'],
+              'recoveryAttempts': data['recoveryAttempts'],
+              'recoveries': data['recoveries'],
+              'readAheadActive': data['readAheadActive'],
+              'readAheadWorkerActive': data['readAheadWorkerActive'],
+              'readAheadFailed': data['readAheadFailed'],
+              'readAheadWaitingForDisk': data['readAheadWaitingForDisk'],
+              'readAheadPublishedBytes': published,
+              'readAheadLimitBytes': data['readAheadLimitBytes'],
+              'readAheadPositionBytes': data['readAheadPositionBytes'],
+              'readAheadReaderWaiting': data['readAheadReaderWaiting'],
+              'pendingBytes': data['pendingBytes'],
+              'pendingPeakBytes': data['pendingPeakBytes'],
+              'transportDiagnosticsStatus': data['transportDiagnosticsStatus'],
+              'transportPendingCommands': data['transportPendingCommands'],
+              'diskBytes': data['diskBytes'],
+              'degradation': data['degradation'],
+              'cachedByteRanges': data['cachedByteRanges'],
+              'cachedTimeRanges': data['cachedTimeRanges'],
+            });
+            if (controller.error != null ||
+                DateTime.now().difference(lastAdvance) >
+                    const Duration(seconds: 22)) {
+              throw StateError('Long cache playback stopped progressing');
+            }
+          }
+          if (largestPublished < 3 * 8 * 1024 * 1024 || !recovered) {
+            throw StateError(
+              'Long cache did not cross three windows with recovery',
+            );
+          }
+          await record('cache-long-result', {
+            'positionMs': controller.position.inMilliseconds,
+            'largestPublishedBytes': largestPublished,
+            'recovered': recovered,
+            'sawIdleWindow': sawIdleWindow,
+          });
+          await record('cache-long-before-pause', await backend.diagnostics());
+          await controller.togglePlay().timeout(const Duration(seconds: 15));
+          await _until(() => !controller.isPlaying);
+          final paused = controller.position;
+          await Future<void>.delayed(const Duration(milliseconds: 500));
+          if (controller.position - paused >
+              const Duration(milliseconds: 100)) {
+            throw StateError('Long cache pause did not hold');
+          }
+          await record('cache-long-before-seek', await backend.diagnostics());
+          await controller
+              .seekTo(const Duration(seconds: 20))
+              .timeout(const Duration(seconds: 20));
+          await record('cache-long-after-seek', await backend.diagnostics());
+          if (!controller.isPlaying) {
+            await record(
+              'cache-long-before-resume',
+              await backend.diagnostics(),
+            );
+            await controller.togglePlay().timeout(const Duration(seconds: 15));
+            await record(
+              'cache-long-after-resume',
+              await backend.diagnostics(),
+            );
+          }
+          await _until(() => controller.position > const Duration(seconds: 22));
+          await record('cache-long-before-switch', await backend.diagnostics());
+          await controller
+              .playEpisode(
+                EmbyItem.fromJson({
+                  'Id': 'baseline',
+                  'Type': 'Movie',
+                  'Name': 'baseline',
+                }),
+              )
+              .timeout(const Duration(seconds: 40));
+          await loaded('cache-long-reopened-baseline');
+          await controller.playEpisode(
+            EmbyItem.fromJson({
+              'Id': 'cache-long',
+              'Type': 'Movie',
+              'Name': 'cache-long',
+            }),
+          );
+          await loaded('cache-long-reopened');
+          await record(
+            'cache-long-reopened-result',
+            await backend.diagnostics(),
+          );
+          await File(
+            '${root.path}/player-result.json',
+          ).writeAsString(jsonEncode({'passed': true}));
+          heartbeat.cancel();
+          return;
+        } finally {
+          await unstable(false);
+          client.close(force: true);
+        }
+      }
       await checkDisplayRequest('playing', true);
       if (controller.position < const Duration(seconds: 2)) {
         throw StateError('Server resume was not applied');
@@ -727,9 +885,10 @@ Future<void> main(List<String> args) async {
       await app!.windowHost.close();
       await settingsWrites;
       final settings = await (await openPlayerSettingsStore()).read();
-      if (settings.diskCacheLimitMiB != 531 ||
-          settings.volume != 15 ||
-          settings.playbackRate != 1) {
+      if (Platform.environment['RILLIGHT_SMOKE_LONG_CACHE'] != '1' &&
+          (settings.diskCacheLimitMiB != 531 ||
+              settings.volume != 15 ||
+              settings.playbackRate != 1)) {
         throw StateError('Cross-process settings merge failed');
       }
       await record('cross-process-settings', {

@@ -26,6 +26,7 @@ struct Media {
 struct CountingMedia {
   Bytes wav;
   std::atomic<int> reads{0};
+  std::atomic<int> media_cancels{0};
 };
 
 struct Blocking {
@@ -159,6 +160,12 @@ int counting_read(void *opaque, void *handle, uint8_t *buffer, int size) {
   media->reads.fetch_add(1);
   return read(nullptr, handle, buffer, size);
 }
+
+void counting_cancel_media(void *opaque) {
+  static_cast<CountingMedia *>(opaque)->media_cancels.fetch_add(1);
+}
+
+void counting_close(void *, void *) {}
 
 int64_t seek(void *, void *handle, int64_t offset, int whence) {
   auto *bytes = static_cast<Bytes *>(handle);
@@ -734,7 +741,7 @@ int main() {
 
   CountingMedia paused_media{make_wav(48000 * 8)};
   RillightCoreIo paused_io{&paused_media, counting_open, counting_read,
-                          seek, close, nullptr, cancel_media_io};
+                          seek, counting_close, nullptr, counting_cancel_media};
   core = rillight_core_create(&paused_io);
   assert(core && rillight_core_open(core, "paused.wav", 1) == 0);
   assert(rillight_core_set_playing(core, 0, 2) == 0);
@@ -747,7 +754,11 @@ int main() {
   const int paused_reads = paused_media.reads.load();
   std::this_thread::sleep_for(std::chrono::milliseconds(100));
   assert(paused_media.reads.load() == paused_reads);
+  const int cancels_before_seek = paused_media.media_cancels.load();
   assert(rillight_core_seek(core, 1000000, 3) == 0);
+  // The transport can cancel a paused HTTP response before the native seek.
+  // Even with no active read, native IO must retire the stale AVIO generation.
+  assert(paused_media.media_cancels.load() == cancels_before_seek + 1);
   assert(wait_for(core, [paused_snapshot](const auto &state) {
     return state.timeline_version > paused_snapshot.timeline_version &&
            state.first_audio_frame_ready && state.state == RILLIGHT_CORE_PAUSED;

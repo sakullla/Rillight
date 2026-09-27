@@ -61,6 +61,8 @@ class SessionReadAhead {
     'readAheadWorkerActive': _worker != null,
     'readAheadLimitBytes': aheadBytes,
     'readAheadPublishedBytes': _published,
+    'readAheadPositionBytes': _position,
+    'readAheadReaderWaiting': _readerWaiting,
     'readAheadFailed': _failed,
     'readAheadWaitingForDisk': _waitingForDisk,
     'readAheadPrefetchAllowed': _prefetchAllowed,
@@ -237,11 +239,13 @@ class SessionReadAhead {
     _position = start;
     try {
       var offset = start;
+      var progressDeadline = DateTime.now().add(const Duration(seconds: 25));
       while (offset <= end) {
         if (_closed || !_active || reader != _reader) {
           throw const HttpException('Media read cancelled');
         }
         final changed = _changed.future;
+        final pendingChanged = cache.pendingChanged;
         final hit = await cache.read(
           resource: resource,
           generation: generation,
@@ -255,8 +259,19 @@ class SessionReadAhead {
           if (_failed) throw const HttpException('Read-ahead failed');
           _readerWaiting = true;
           _position = offset;
-          _schedule();
-          await changed.timeout(const Duration(seconds: 25));
+          // A cache index hit blocked by disk capacity is not a producer
+          // miss. Starting an empty producer would repeatedly wake this read
+          // and starve the transport isolate's control messages.
+          if (_missing() != null) _schedule();
+          // An indexed disk block can be temporarily unreadable when the
+          // bounded pending budget is occupied by an optional checksum query.
+          // No producer will publish that block again, so also wake when disk
+          // capacity is released. Both futures were captured before read().
+          final remaining = progressDeadline.difference(DateTime.now());
+          if (remaining <= Duration.zero) {
+            throw const HttpException('Cached media read made no progress');
+          }
+          await Future.any([changed, pendingChanged]).timeout(remaining);
           continue;
         }
         _readerWaiting = false;
@@ -266,6 +281,7 @@ class SessionReadAhead {
         yield hit.bytes;
         offset += hit.bytes.length;
         _position = offset;
+        progressDeadline = DateTime.now().add(const Duration(seconds: 25));
         _schedule();
       }
     } finally {

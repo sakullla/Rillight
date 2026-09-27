@@ -155,12 +155,24 @@ class SessionByteCache {
   int _indexBytes = 0;
   int _memoryPeak = 0;
   int _pendingBytes = 0;
+  Completer<void> _pendingChanged = Completer<void>();
   int _pendingPeak = 0;
   int _memoryHits = 0;
   int _diskHits = 0;
   int _evictions = 0;
   int _invalidations = 0;
   Future<void>? _closing;
+
+  /// Completes when pending disk work releases capacity or its limit changes.
+  /// Capture this future before attempting a foreground read so a release
+  /// between the cache lookup and wait cannot be missed.
+  Future<void> get pendingChanged => _pendingChanged.future;
+
+  void _notifyPendingChanged() {
+    final changed = _pendingChanged;
+    _pendingChanged = Completer<void>();
+    changed.complete();
+  }
 
   Map<String, Object?> get diagnostics {
     _updateAppliedLimits();
@@ -217,6 +229,7 @@ class SessionByteCache {
     }
     memoryLimitBytes = memoryBytes;
     pendingLimitBytes = pendingBytes;
+    _notifyPendingChanged();
     diskSessionLimitBytes = diskBytes;
     _trimMemory();
     await _disk?.setSessionLimit(diskBytes);
@@ -413,9 +426,15 @@ class SessionByteCache {
       // reservation until outstanding filesystem work actually settles.
       final disk = _disk;
       if (disk != null) {
-        unawaited(disk.settled.then((_) => _pendingBytes -= cost));
+        unawaited(
+          disk.settled.then((_) {
+            _pendingBytes -= cost;
+            _notifyPendingChanged();
+          }),
+        );
       } else {
         _pendingBytes -= cost;
+        _notifyPendingChanged();
       }
     }
     if (_closed) return const [];
@@ -683,10 +702,12 @@ class SessionByteCache {
       unawaited(
         disk!.settled.then((_) {
           _pendingBytes -= bytes;
+          _notifyPendingChanged();
         }),
       );
     } else {
       _pendingBytes -= bytes;
+      _notifyPendingChanged();
     }
   }
 

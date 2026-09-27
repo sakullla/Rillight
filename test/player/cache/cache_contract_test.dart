@@ -677,6 +677,65 @@ void main() {
 
   group('session_read_ahead_test.dart', () {
     test(
+      'indexed disk hit resumes when pending read capacity returns',
+      () async {
+        final root = await Directory.systemTemp.createTemp('rillight-budget-');
+        final cache = await SessionByteCache.open(
+          root: root,
+          memoryLimitBytes: 0,
+          pendingLimitBytes: 2 * 1024 * 1024,
+          diskLimitBytes: 8 * 1024 * 1024,
+        );
+        final bytes = Uint8List(SessionReadAhead.blockBytes)
+          ..fillRange(0, 32, 7);
+        final ahead = SessionReadAhead(
+          cache: cache,
+          resource: 'cached',
+          generation: 1,
+          total: bytes.length,
+          aheadBytes: bytes.length,
+          fetch: (_, _) async =>
+              throw StateError('Indexed block was refetched'),
+        );
+        final reader = StreamIterator(ahead.read(0, 31));
+        try {
+          expect(
+            await cache.put(
+              resource: 'cached',
+              generation: 1,
+              offset: 0,
+              bytes: bytes,
+            ),
+            true,
+          );
+          expect(cache.diagnostics['diskBytes'], greaterThan(0));
+          await cache.resize(
+            memoryBytes: 0,
+            pendingBytes: 0,
+            diskBytes: 8 * 1024 * 1024,
+          );
+          final first = reader.moveNext();
+          await until(
+            () => ahead.diagnostics['readAheadReaderWaiting'] == true,
+          );
+          expect(ahead.diagnostics['readAheadWorkerActive'], false);
+          await cache.resize(
+            memoryBytes: 0,
+            pendingBytes: 2 * 1024 * 1024,
+            diskBytes: 8 * 1024 * 1024,
+          );
+          expect(await first.timeout(const Duration(seconds: 3)), true);
+          expect(reader.current, List.filled(32, 7));
+        } finally {
+          await reader.cancel();
+          await ahead.close();
+          await cache.close();
+          await root.delete(recursive: true);
+        }
+      },
+    );
+
+    test(
       'explicit pause stops surplus transfer and resume serves demand',
       () async {
         final root = await Directory.systemTemp.createTemp('rillight-paused-');

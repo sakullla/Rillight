@@ -2372,9 +2372,12 @@ int rillight_core_seek(RillightCore *pointer, int64_t position_us,
   core->base_time = Clock::now();
   core->state = RILLIGHT_CORE_RECOVERING;
   core->wake.notify_all();
+  // The proxy may already have cancelled the old HTTP response while this
+  // worker is paused (and no media read is active). Advance the loopback IO
+  // generation on every seek so its next AVIO seek reopens the sealed route
+  // rather than waiting on that stale connection.
   // The worker cannot start a new-timeline read until this callback returns.
-  if (core->media_io_active)
-    core->io.cancel_media_io(core->io.opaque);
+  core->io.cancel_media_io(core->io.opaque);
   return 0;
 }
 

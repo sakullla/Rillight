@@ -7,6 +7,8 @@ import re
 import subprocess
 import struct
 import time
+import threading
+import socket
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from socketserver import TCPServer
 from urllib.parse import urlsplit
@@ -30,7 +32,7 @@ def av1_encoder(ffmpeg):
     raise RuntimeError('Need libaom-av1 or libsvtav1 to generate AV1 fixtures')
 
 
-def generate(directory, ffmpeg):
+def generate(directory, ffmpeg, long_cache=False):
     directory.mkdir(parents=True, exist_ok=True)
     if not (directory / 'sample.sup').exists():
         # Synthetic PGS display set: a visible white rectangle (no borrowed media).
@@ -81,6 +83,17 @@ Dialogue: 0,0:00:00.00,0:00:12.00,Default,,0,0,0,,Rillight ASS validation
     for extension in ['srt', 'vtt', 'ssa']:
         subprocess.run([ffmpeg, '-y', '-i', str(directory / 'sample.ass'),
                         str(directory / ('sample.' + extension))], check=True, capture_output=True)
+    if long_cache and not (directory / 'cache-long.mp4').exists():
+        # A synthetic 90-second movie large enough to cross several 8 MiB
+        # transfer boundaries at normal playback speed.
+        subprocess.run([ffmpeg, '-y', '-f', 'lavfi', '-i', 'testsrc2=size=1280x720:rate=30',
+                        '-f', 'lavfi', '-i', 'sine=frequency=523:sample_rate=48000',
+                        '-t', '90', '-c:v', 'libx264', '-preset', 'ultrafast',
+                        '-b:v', '5M', '-minrate', '5M', '-maxrate', '5M',
+                        '-bufsize', '10M', '-pix_fmt', 'yuv420p', '-c:a', 'aac',
+                        '-movflags', '+faststart', str(directory / 'cache-long.mp4')], check=True)
+        if (directory / 'cache-long.mp4').stat().st_size < 3 * 8 * 1024 * 1024:
+            raise RuntimeError('Long cache fixture did not cross three read-ahead windows')
     # Existing synthetic PGS fixture is needed because FFmpeg has no PGS encoder.
     # Never substitute an ASS track and label it PGS.
     if not (directory / 'tracks-long.mkv').exists():
@@ -94,13 +107,15 @@ Dialogue: 0,0:00:00.00,0:00:12.00,Default,,0,0,0,,Rillight ASS validation
 
 
 def serve(media, output):
-    conditions = {'offline': False}
+    conditions = {'offline': False, 'unstable': False, 'faulted': False}
+    fault_lock = threading.Lock()
     paths = {'baseline': 'baseline.mp4', 'delayed-report': 'timeout.mp4', 'delayed-subtitle': 'timeout.mp4', 'tracks': 'tracks-long.mkv', 'hls': 'stream.m3u8',
              '1080p60': '1080p60.mp4', '4k-hevc': '4k-hevc.mkv', 'av1': 'av1.mkv',
-             'vp9': 'vp9.webm', 'broken': 'missing.mkv'}
+             'vp9': 'vp9.webm', 'cache-long': 'cache-long.mp4',
+             'broken': 'missing.mkv'}
     user = {'Id': 'validation-user', 'Name': 'validation', 'Configuration': {'EnableNextEpisodeAutoPlay': False}}
     def item(identifier):
-        return {'Id': identifier, 'Name': identifier, 'Type': 'Movie', 'RunTimeTicks': 300000000 if identifier.startswith('delayed-') or identifier == 'tracks' else 120000000,
+        return {'Id': identifier, 'Name': identifier, 'Type': 'Movie', 'RunTimeTicks': 900000000 if identifier == 'cache-long' else 300000000 if identifier.startswith('delayed-') or identifier == 'tracks' else 120000000,
                 'UserData': {'PlaybackPositionTicks': 20000000 if identifier == 'baseline' else 0}, 'MediaType': 'Video'}
 
     class Handler(BaseHTTPRequestHandler):
@@ -120,6 +135,8 @@ def serve(media, output):
             path = urlsplit(self.path).path
             if path == '/validation/network':
                 conditions['offline'] = body.get('offline') is True
+                if 'unstable' in body:
+                    conditions['unstable'] = body['unstable'] is True
                 self.send_json(conditions)
             elif path.endswith('/AuthenticateByName'):
                 self.send_json({'AccessToken': 'synthetic-validation-token', 'User': user, 'ServerId': 'validation-server'})
@@ -188,6 +205,18 @@ def serve(media, output):
                 match = re.fullmatch(r'bytes=(\d+)-(\d*)', self.headers.get('Range', ''))
                 if match:
                     start = int(match[1]); end = min(end, int(match[2])) if match[2] else end
+                long_media = filename == 'cache-long.mp4'
+                with fault_lock:
+                    fault = (long_media and conditions['unstable'] and not conditions['faulted']
+                             and self.command == 'GET' and start >= 8 * 1024 * 1024)
+                    if fault:
+                        conditions['faulted'] = True
+                if long_media:
+                    with (output / 'cache-long-requests.jsonl').open('a', encoding='utf-8') as log:
+                        log.write(json.dumps({'at': time.time(), 'method': self.command,
+                                              'start': start, 'end': end,
+                                              'ifRange': self.headers.get('If-Range') is not None,
+                                              'fault': fault}) + '\n')
                 self.send_response(206 if match else 200)
                 self.send_header('Content-Type', 'application/vnd.apple.mpegurl' if target.suffix == '.m3u8' else mimetypes.guess_type(target)[0] or 'application/octet-stream')
                 self.send_header('Accept-Ranges', 'bytes')
@@ -202,6 +231,13 @@ def serve(media, output):
                         left = end - start + 1
                         while left > 0:
                             chunk = stream.read(min(left, 65536)); self.wfile.write(chunk); left -= len(chunk)
+                            if long_media and conditions['unstable']:
+                                time.sleep(0.01 if (start + end + left) % 3 else 0.025)
+                            if fault and end - start + 1 - left >= 256 * 1024:
+                                time.sleep(12)
+                                self.connection.shutdown(socket.SHUT_RDWR)
+                                self.connection.close()
+                                return
                 except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
                     pass
             else:
@@ -218,6 +254,7 @@ if __name__ == '__main__':
     parser.add_argument('--media', type=Path, required=True)
     parser.add_argument('--output', type=Path)
     parser.add_argument('--ffmpeg')
+    parser.add_argument('--long-cache', action='store_true')
     args = parser.parse_args()
-    if args.ffmpeg: generate(args.media.resolve(), args.ffmpeg)
+    if args.ffmpeg: generate(args.media.resolve(), args.ffmpeg, args.long_cache)
     if args.output: serve(args.media.resolve(), args.output.resolve())

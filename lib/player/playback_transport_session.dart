@@ -39,6 +39,7 @@ class PlaybackTransportSession {
   final ReceivePort _inbox;
   final SendPort _worker;
   final _pending = <int, Completer<Object?>>{};
+  final _pendingOperations = <int, (String, DateTime)>{};
   int _nextId = 0;
   bool _closed = false;
   bool _closing = false;
@@ -50,6 +51,13 @@ class PlaybackTransportSession {
     'transportWorkerExited': _workerExited,
     'transportWorkerFailureKind': _workerFailure?.kind,
     'transportWorkerFailureFrames': _workerFailure?.frames ?? const <String>[],
+    'transportPendingCommands': [
+      for (final entry in _pendingOperations.entries)
+        {
+          'operation': entry.value.$1,
+          'ageMs': DateTime.now().difference(entry.value.$2).inMilliseconds,
+        },
+    ],
   };
 
   static Future<PlaybackTransportSession> start({
@@ -107,10 +115,14 @@ class PlaybackTransportSession {
     final id = ++_nextId;
     final pending = Completer<Object?>();
     _pending[id] = pending;
+    _pendingOperations[id] = (operation, DateTime.now());
     _worker.send([id, operation, value]);
-    if (deadline == null) return pending.future;
-    return pending.future.timeout(deadline).whenComplete(() {
+    final future = deadline == null
+        ? pending.future
+        : pending.future.timeout(deadline);
+    return future.whenComplete(() {
       _pending.remove(id);
+      _pendingOperations.remove(id);
     });
   }
 
