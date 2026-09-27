@@ -9,6 +9,9 @@ import re
 import sys
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / 'packages/rillight_player/native'))
+from verify_core_dependencies import matches_ffmpeg_version
+
 SPEC = json.loads((ROOT / 'packages/rillight_player/native/core_dependencies.json').read_text())
 
 
@@ -105,8 +108,7 @@ if sys.platform == 'win32':
         versions = library.rillight_core_ffmpeg_versions().decode('ascii')
     header = (ROOT / 'packages/rillight_player/native/core/rillight_core.h').read_text()
     expected_abi = int(re.search(r'#define RILLIGHT_CORE_ABI_VERSION (\d+)', header).group(1))
-    if abi != expected_abi or not versions.startswith(
-            'ffmpeg=' + SPEC['ffmpeg']['version'].removeprefix('n') + ';'):
+    if abi != expected_abi or not matches_ffmpeg_version(versions):
         raise RuntimeError(f'Loaded Windows core/version mismatch: ABI {abi}, {versions}')
     print(json.dumps({'coreAbi': abi, 'versions': versions}, sort_keys=True))
 else:

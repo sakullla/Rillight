@@ -15,7 +15,7 @@ import re
 import shutil
 import subprocess
 
-from verify_core_dependencies import verify
+from verify_core_dependencies import matches_ffmpeg_version, verify
 
 
 NATIVE = Path(__file__).resolve().parent
@@ -78,7 +78,7 @@ def main() -> None:
         versions = library.rillight_core_ffmpeg_versions().decode("ascii")
     header = (NATIVE / "core/rillight_core.h").read_text()
     expected_abi = int(re.search(r"#define RILLIGHT_CORE_ABI_VERSION (\d+)", header).group(1))
-    if abi != expected_abi or not versions.startswith("ffmpeg=9.0.1;"):
+    if abi != expected_abi or not matches_ffmpeg_version(versions):
         raise RuntimeError(f"Built core runtime mismatch: ABI {abi}, {versions}")
     print(json.dumps({"coreAbi": abi, "versions": versions,
                       "sha256": digest(published)}, sort_keys=True))

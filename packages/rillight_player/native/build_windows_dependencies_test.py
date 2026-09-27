@@ -8,10 +8,23 @@ import unittest
 from unittest.mock import patch
 
 from build_windows_dependencies import copy_runtime_dependencies, record_libraries
-from verify_core_dependencies import digest
+from verify_core_dependencies import digest, matches_ffmpeg_version
 
 
 class WindowsSdkTest(unittest.TestCase):
+    def test_runtime_accepts_git_tag_and_release_version(self):
+        for version in ('n9.0.1', '9.0.1'):
+            with self.subTest(version=version):
+                self.assertTrue(matches_ffmpeg_version(
+                    f'ffmpeg={version};avformat=4129125;avcodec=4129125;avutil=3998053'))
+
+    def test_runtime_rejects_other_versions_and_malformed_reports(self):
+        for report in ('ffmpeg=n9.0.2;avformat=1', 'ffmpeg=9.0.10;avformat=1',
+                       'ffmpeg=n9.0.1-dev;avformat=1', 'ffmpeg=nn9.0.1;avformat=1',
+                       'avformat=9.0.1', 'n9.0.1', '', 'ffmpeg='):
+            with self.subTest(report=report):
+                self.assertFalse(matches_ffmpeg_version(report))
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
