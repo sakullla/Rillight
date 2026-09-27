@@ -108,6 +108,103 @@ Uint8List progressiveMp4Fixture({
   return Uint8List.fromList([...ftyp, ...mdat, ...moov]);
 }
 
+/// Synthetic index workload: 1000 GOPs and 100000 audio samples by default.
+/// Payload bytes are placeholders and must never be used as decoded video.
+Uint8List longProgressiveMp4Fixture({
+  int videoGops = 1000,
+  int audioSamplesPerGop = 100,
+  bool manyAudioChunks = false,
+}) {
+  if (videoGops <= 0 ||
+      audioSamplesPerGop <= 0 ||
+      2000 % audioSamplesPerGop != 0 ||
+      videoGops * audioSamplesPerGop > 200000) {
+    throw ArgumentError('Unsupported synthetic timeline size');
+  }
+  final videoSamples = videoGops * 2;
+  final audioSamples = videoGops * audioSamplesPerGop;
+  final ftyp = _box('ftyp', [
+    ...ascii.encode('isom'),
+    ..._u32(0),
+    ...ascii.encode('isom'),
+  ]);
+  final videoBytes = videoSamples * 2;
+  final mdat = _box('mdat', List<int>.filled(videoBytes + audioSamples, 0));
+
+  List<int> track(
+    int id,
+    String kind,
+    int chunkOffset,
+    int sampleCount,
+    int sampleDuration,
+    int sampleSize,
+  ) {
+    final splitChunks = kind == 'soun' && manyAudioChunks;
+    final stbl = _box('stbl', [
+      ..._sampleDescription(kind),
+      ..._box('stts', [
+        ...List<int>.filled(4, 0),
+        ..._u32(1),
+        ..._u32(sampleCount),
+        ..._u32(sampleDuration),
+      ]),
+      ..._box('stsc', [
+        ...List<int>.filled(4, 0),
+        ..._u32(splitChunks ? sampleCount : 1),
+        if (splitChunks)
+          for (var i = 0; i < sampleCount; i++) ...[
+            ..._u32(i + 1),
+            ..._u32(1),
+            ..._u32(1),
+          ]
+        else ...[..._u32(1), ..._u32(sampleCount), ..._u32(1)],
+      ]),
+      ..._box('stsz', [
+        ...List<int>.filled(4, 0),
+        ..._u32(sampleSize),
+        ..._u32(sampleCount),
+      ]),
+      ..._box('stco', [
+        ...List<int>.filled(4, 0),
+        ..._u32(splitChunks ? sampleCount : 1),
+        if (splitChunks)
+          for (var i = 0; i < sampleCount; i++) ..._u32(chunkOffset + i)
+        else
+          ..._u32(chunkOffset),
+      ]),
+      if (kind == 'vide')
+        ..._box('stss', [
+          ...List<int>.filled(4, 0),
+          ..._u32(videoGops),
+          for (var i = 0; i < videoGops; i++) ..._u32(i * 2 + 1),
+        ]),
+    ]);
+    return _box('trak', [
+      ..._box('tkhd', [...List<int>.filled(12, 0), ..._u32(id)]),
+      ..._box('mdia', [
+        ..._box('mdhd', [...List<int>.filled(12, 0), ..._u32(1000)]),
+        ..._box('hdlr', [...List<int>.filled(8, 0), ...ascii.encode(kind)]),
+        ..._box('minf', [..._dataReference(), ...stbl]),
+      ]),
+    ]);
+  }
+
+  final videoOffset = ftyp.length + 8;
+  final audioOffset = videoOffset + videoBytes;
+  final moov = _box('moov', [
+    ...track(1, 'vide', videoOffset, videoSamples, 1000, 2),
+    ...track(
+      2,
+      'soun',
+      audioOffset,
+      audioSamples,
+      2000 ~/ audioSamplesPerGop,
+      1,
+    ),
+  ]);
+  return Uint8List.fromList([...ftyp, ...mdat, ...moov]);
+}
+
 class FragmentedMp4Fixture {
   const FragmentedMp4Fixture({
     required this.bytes,

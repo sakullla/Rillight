@@ -398,14 +398,26 @@ class PlaybackHttpProxy {
       // memory reads. Yield to the isolate event queue so seek/cancel and HTTP
       // reads remain responsive, and bound this optional snapshot's work.
       final indexWatch = Stopwatch()..start();
+      var lastYield = Duration.zero;
+      Future<void> checkpoint() async {
+        if (indexWatch.elapsed > const Duration(milliseconds: 250)) {
+          throw TimeoutException('Cache timeline indexing budget exceeded');
+        }
+        if (indexWatch.elapsed - lastYield >= const Duration(milliseconds: 4)) {
+          await Future<void>.delayed(Duration.zero);
+          lastYield = indexWatch.elapsed;
+          if (indexWatch.elapsed > const Duration(milliseconds: 250)) {
+            throw TimeoutException('Cache timeline indexing budget exceeded');
+          }
+        }
+      }
+
       var indexReads = 0;
       Future<Uint8List?> read(int offset, int length) async {
         if (++indexReads % 16 == 0) {
           await Future<void>.delayed(Duration.zero);
         }
-        if (indexWatch.elapsed > const Duration(milliseconds: 250)) {
-          throw TimeoutException('Cache timeline indexing budget exceeded');
-        }
+        await checkpoint();
         final output = BytesBuilder(copy: false);
         while (output.length < length) {
           final hit = await cache!.read(
@@ -442,10 +454,19 @@ class PlaybackHttpProxy {
               read: read,
               selectedVideoTrackId: _selectedVideoTrackId,
               selectedAudioTrackId: _selectedAudioTrackId,
+              checkpoint: checkpoint,
             );
         if (!stillCurrent() || !revisionCurrent()) return;
         _mp4TimelineIndex = mp4;
-        _cachedTimeline = mp4?.ranges(bytes, duration) ?? const [];
+        final ranges = mp4 == null
+            ? const <CachedTimeRange>[]
+            : await mp4.rangesWithBudget(
+                bytes,
+                duration,
+                checkpoint: checkpoint,
+              );
+        if (!stillCurrent() || !revisionCurrent()) return;
+        _cachedTimeline = ranges;
         _mappingUnknownReason = mp4 == null
             ? 'containerTrackOrTimingUnknown'
             : null;

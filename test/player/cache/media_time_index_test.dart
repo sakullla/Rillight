@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -11,6 +12,97 @@ import 'mp4_fixture.dart';
 
 void main() {
   group('progressive MP4 cache index', () {
+    test(
+      'long timeline matches audio linearly and yields during compute',
+      () async {
+        final bytes = longProgressiveMp4Fixture();
+        var checkpoints = 0;
+        var turns = 0;
+        Future<void> checkpoint() async {
+          checkpoints++;
+          await Future<void>.delayed(Duration.zero);
+          turns++;
+        }
+
+        final index = await Mp4CacheIndex.load(
+          total: bytes.length,
+          read: (offset, length) async =>
+              Uint8List.sublistView(bytes, offset, offset + length),
+          checkpoint: checkpoint,
+        );
+        expect(index, isNotNull);
+        expect(checkpoints, greaterThan(300));
+        expect(turns, checkpoints);
+        final ranges = await index!.rangesWithBudget(
+          [CachedByteRange(0, bytes.length)],
+          const Duration(seconds: 2000),
+          checkpoint: checkpoint,
+        );
+        expect(ranges, hasLength(1));
+        expect(ranges.single.start, Duration.zero);
+        expect(ranges.single.end, const Duration(seconds: 2000));
+        expect(turns, greaterThan(checkpoints - 1));
+      },
+    );
+
+    test(
+      'compute checkpoint can stop long index and range projection',
+      () async {
+        final bytes = longProgressiveMp4Fixture();
+        Future<Uint8List?> read(int offset, int length) async =>
+            Uint8List.sublistView(bytes, offset, offset + length);
+        var calls = 0;
+        Future<void> deadline() async {
+          if (++calls == 16) throw TimeoutException('index deadline');
+        }
+
+        await expectLater(
+          Mp4CacheIndex.load(
+            total: bytes.length,
+            read: read,
+            checkpoint: deadline,
+          ),
+          throwsA(isA<TimeoutException>()),
+        );
+        final index = await Mp4CacheIndex.load(total: bytes.length, read: read);
+        expect(index, isNotNull);
+        calls = 0;
+        await expectLater(
+          index!.rangesWithBudget(
+            [CachedByteRange(0, bytes.length)],
+            const Duration(seconds: 2000),
+            checkpoint: deadline,
+          ),
+          throwsA(isA<TimeoutException>()),
+        );
+      },
+    );
+
+    test(
+      'many chunk-layout entries remain indexable without rescanning',
+      () async {
+        final bytes = longProgressiveMp4Fixture(
+          videoGops: 10,
+          manyAudioChunks: true,
+        );
+        var checkpoints = 0;
+        final index = await Mp4CacheIndex.load(
+          total: bytes.length,
+          read: (offset, length) async =>
+              Uint8List.sublistView(bytes, offset, offset + length),
+          checkpoint: () async => checkpoints++,
+        );
+        expect(index, isNotNull);
+        expect(checkpoints, greaterThan(5));
+        expect(
+          index!.ranges([
+            CachedByteRange(0, bytes.length),
+          ], const Duration(seconds: 20)),
+          hasLength(1),
+        );
+      },
+    );
+
     test(
       'selected container audio ID controls multi-track byte coverage',
       () async {

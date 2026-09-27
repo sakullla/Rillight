@@ -25,6 +25,7 @@ class Mp4CacheIndex {
     required Future<Uint8List?> Function(int offset, int length) read,
     int? selectedVideoTrackId,
     int? selectedAudioTrackId,
+    Future<void> Function()? checkpoint,
   }) async {
     if (total < 16) return null;
     try {
@@ -65,6 +66,7 @@ class Mp4CacheIndex {
           mdats: mdats,
           selectedVideoTrackId: selectedVideoTrackId,
           selectedAudioTrackId: selectedAudioTrackId,
+          checkpoint: checkpoint,
         );
       }
       if (top.any((box) => box.type == 'moof')) return null;
@@ -74,7 +76,8 @@ class Mp4CacheIndex {
           : _movieScale(data, movieHeader);
       final tracks = <_Track>[];
       for (final box in children.where((box) => box.type == 'trak')) {
-        final track = _track(data, box, mdats, movieScale);
+        if (checkpoint != null) await checkpoint();
+        final track = await _track(data, box, mdats, movieScale, checkpoint);
         if (track == null) return null;
         if (tracks.any((existing) => existing.id == track.id)) return null;
         if (track.kind == 'vide' || track.kind == 'soun') tracks.add(track);
@@ -92,12 +95,27 @@ class Mp4CacheIndex {
       }
       if (selectedVideoTrackId != null && video == null) return null;
       if (selectedAudioTrackId != null && audio == null) return null;
+      if (audio != null) {
+        for (var i = 1; i < audio.samples.length; i++) {
+          if (audio.samples[i].startUs < audio.samples[i - 1].startUs) {
+            return null;
+          }
+          if (checkpoint != null && i % 256 == 0) await checkpoint();
+        }
+      }
       final primary = video ?? audio!;
       final starts = <int>[
         for (var i = 0; i < primary.samples.length; i++)
           if (primary.samples[i].sync) i,
       ];
       if (starts.isEmpty || starts.first != 0) return null;
+      // A stream with every frame marked random access still needs a bounded
+      // number of time units. Coalescing adjacent decode groups is conservative.
+      const maxUnits = 8192;
+      final stride = (starts.length + maxUnits - 1) ~/ maxUnits;
+      final groupStarts = [
+        for (var i = 0; i < starts.length; i += stride) starts[i],
+      ];
       final metadata = <CachedByteRange>[
         CachedByteRange(moov.start, moov.end),
         for (final box in top.where((box) => box.type == 'ftyp'))
@@ -105,36 +123,52 @@ class Mp4CacheIndex {
         for (final box in mdats) CachedByteRange(box.start, box.data),
       ];
       final units = <_PlayableUnit>[];
-      for (var group = 0; group < starts.length; group++) {
-        final from = starts[group];
-        final to = group + 1 < starts.length
-            ? starts[group + 1]
+      var audioCursor = 0;
+      var totalDependencies = 0;
+      var lastBegin = -1;
+      for (var group = 0; group < groupStarts.length; group++) {
+        if (checkpoint != null && group % 32 == 0) await checkpoint();
+        final from = groupStarts[group];
+        final to = group + 1 < groupStarts.length
+            ? groupStarts[group + 1]
             : primary.samples.length;
+        if (to - from > 8192) return null;
         final segment = primary.samples.sublist(from, to);
         final timing = _presentationRange(segment);
         if (timing == null) continue;
         final (begin, end) = timing;
+        if (begin < lastBegin) return null;
+        lastBegin = begin;
         final required = <CachedByteRange>[
           ...metadata,
           for (final sample in segment)
             CachedByteRange(sample.byteStart, sample.byteEnd),
         ];
         if (video != null && audio != null) {
-          final matching = audio.samples
-              .where((sample) => sample.endUs > begin && sample.startUs < end)
-              .toList();
-          final audioTiming = _presentationRange(matching);
-          if (matching.isEmpty ||
-              audioTiming == null ||
-              audioTiming.$1 > begin ||
-              audioTiming.$2 < end) {
-            continue;
+          final audioSamples = audio.samples;
+          while (audioCursor < audioSamples.length &&
+              audioSamples[audioCursor].endUs <= begin) {
+            audioCursor++;
+            if (checkpoint != null && audioCursor % 256 == 0) {
+              await checkpoint();
+            }
           }
-          required.addAll([
-            for (final sample in matching)
-              CachedByteRange(sample.byteStart, sample.byteEnd),
-          ]);
+          var cursor = audioCursor;
+          var covered = begin;
+          while (cursor < audioSamples.length &&
+              audioSamples[cursor].startUs < end) {
+            final sample = audioSamples[cursor];
+            if (sample.startUs > covered) break;
+            if (sample.endUs > covered) covered = sample.endUs;
+            required.add(CachedByteRange(sample.byteStart, sample.byteEnd));
+            cursor++;
+            if (required.length > 16384) return null;
+            if (checkpoint != null && cursor % 256 == 0) await checkpoint();
+          }
+          if (covered < end) continue;
         }
+        totalDependencies += required.length;
+        if (totalDependencies > 500000) return null;
         units.add(_PlayableUnit(begin, end, required));
       }
       for (var i = 1; i < units.length; i++) {
@@ -170,16 +204,51 @@ class Mp4CacheIndex {
           !unit.required.every((need) => _contains(bytes, need))) {
         continue;
       }
-      final start = Duration(microseconds: unit.startUs);
-      final end = Duration(microseconds: unit.endUs);
-      if (result.isNotEmpty && result.last.end == start) {
-        final previous = result.removeLast();
-        result.add(CachedTimeRange(previous.start, end));
-      } else {
-        result.add(CachedTimeRange(start, end));
-      }
+      _appendTime(result, unit);
     }
     return result;
+  }
+
+  /// Production timeline projection yields between bounded dependency batches.
+  /// The caller owns the wall-clock deadline and may cancel after any batch.
+  Future<List<CachedTimeRange>> rangesWithBudget(
+    List<CachedByteRange> available,
+    Duration duration, {
+    required Future<void> Function() checkpoint,
+  }) async {
+    if (duration <= Duration.zero) return const [];
+    final bytes = _mergeBytes(available);
+    final result = <CachedTimeRange>[];
+    for (var i = 0; i < _units.length; i++) {
+      if (i % 32 == 0) await checkpoint();
+      final unit = _units[i];
+      if (unit.startUs >= unit.endUs ||
+          unit.startUs < 0 ||
+          unit.endUs > duration.inMicroseconds) {
+        continue;
+      }
+      var complete = true;
+      for (var j = 0; j < unit.required.length; j++) {
+        if (j % 256 == 0) await checkpoint();
+        if (!_contains(bytes, unit.required[j])) {
+          complete = false;
+          break;
+        }
+      }
+      if (complete) _appendTime(result, unit);
+    }
+    return result;
+  }
+}
+
+void _appendTime(List<CachedTimeRange> result, _PlayableUnit unit) {
+  final start = Duration(microseconds: unit.startUs);
+  final end = Duration(microseconds: unit.endUs);
+  if (result.isNotEmpty && result.last.end == start) {
+    final previous = result.removeLast();
+    result.add(CachedTimeRange(previous.start, end));
+  } else {
+    result.add(CachedTimeRange(start, end));
   }
 }
 
@@ -243,6 +312,7 @@ Future<Mp4CacheIndex?> _loadFragmented({
   required List<_Box> mdats,
   required int? selectedVideoTrackId,
   required int? selectedAudioTrackId,
+  required Future<void> Function()? checkpoint,
 }) async {
   final mvexes = children.where((b) => b.type == 'mvex').toList();
   if (mvexes.length != 1) return null;
@@ -295,7 +365,9 @@ Future<Mp4CacheIndex?> _loadFragmented({
   final selectedIds = {video?.id, audio?.id}..remove(null);
   if (!selectedIds.every(defaults.containsKey)) return null;
   final fragments = <_FragmentSamples>[];
+  var totalSamples = 0;
   for (final moof in top.where((box) => box.type == 'moof')) {
+    if (checkpoint != null) await checkpoint();
     if (moof.end - moof.start > 8 * 1024 * 1024) return null;
     final bytes = await read(moof.start, moof.end - moof.start);
     if (bytes == null || bytes.length != moof.end - moof.start) return null;
@@ -305,6 +377,7 @@ Future<Mp4CacheIndex?> _loadFragmented({
       bytes,
       root,
     ).where((box) => box.type == 'traf')) {
+      if (checkpoint != null) await checkpoint();
       final tfhd = _child(bytes, traf, 'tfhd');
       if (tfhd == null || tfhd.data + 8 > tfhd.end) return null;
       final id = _u32(bytes, tfhd.data + 4);
@@ -319,22 +392,40 @@ Future<Mp4CacheIndex?> _loadFragmented({
         defaults: defaults[id]!,
       );
       if (parsed == null) return null;
+      totalSamples += parsed.samples.length;
+      if (totalSamples > 200000) return null;
       fragments.add(parsed);
     }
   }
   if (fragments.isEmpty) return null;
   final primaryId = (video ?? audio!).id;
-  final primary = fragments.where((fragment) => fragment.trackId == primaryId);
+  final primary =
+      fragments.where((fragment) => fragment.trackId == primaryId).toList()
+        ..sort(
+          (a, b) => a.samples.first.startUs.compareTo(b.samples.first.startUs),
+        );
   final audioFragments = audio == null
       ? <_FragmentSamples>[]
-      : fragments.where((fragment) => fragment.trackId == audio.id).toList();
+      : (fragments
+            .where(
+              (fragment) =>
+                  fragment.trackId == audio.id && fragment.samples.isNotEmpty,
+            )
+            .toList()
+          ..sort(
+            (a, b) =>
+                a.samples.first.startUs.compareTo(b.samples.first.startUs),
+          ));
   final init = <CachedByteRange>[
     CachedByteRange(moov.start, moov.end),
     for (final box in top.where((box) => box.type == 'ftyp'))
       CachedByteRange(box.start, box.end),
   ];
   final units = <_PlayableUnit>[];
+  var audioFragmentCursor = 0;
+  var totalDependencies = 0;
   for (final fragment in primary) {
+    if (checkpoint != null) await checkpoint();
     final samples = fragment.samples;
     if (samples.isEmpty || !samples.first.sync || !_continuous(samples)) {
       continue;
@@ -348,20 +439,34 @@ Future<Mp4CacheIndex?> _loadFragmented({
         CachedByteRange(sample.byteStart, sample.byteEnd),
     ];
     if (video != null && audio != null) {
-      final matchingFragments = audioFragments
-          .where(
-            (part) =>
-                part.samples.isNotEmpty &&
-                part.samples.last.endUs > begin &&
-                part.samples.first.startUs < end,
-          )
-          .toList();
-      final matching = [
-        for (final part in matchingFragments)
-          ...part.samples.where(
-            (sample) => sample.endUs > begin && sample.startUs < end,
-          ),
-      ]..sort((a, b) => a.startUs.compareTo(b.startUs));
+      while (audioFragmentCursor < audioFragments.length &&
+          (audioFragments[audioFragmentCursor].samples.isEmpty ||
+              audioFragments[audioFragmentCursor].samples.last.endUs <=
+                  begin)) {
+        audioFragmentCursor++;
+      }
+      final matchingFragments = <_FragmentSamples>[];
+      for (
+        var cursor = audioFragmentCursor;
+        cursor < audioFragments.length &&
+            audioFragments[cursor].samples.first.startUs < end;
+        cursor++
+      ) {
+        matchingFragments.add(audioFragments[cursor]);
+        if (matchingFragments.length > 256) return null;
+        if (checkpoint != null && cursor % 32 == 0) await checkpoint();
+      }
+      final matching = <_Sample>[];
+      for (final part in matchingFragments) {
+        for (final sample in part.samples) {
+          if (sample.endUs > begin && sample.startUs < end) {
+            matching.add(sample);
+            if (matching.length > 16384) return null;
+          }
+        }
+        if (checkpoint != null) await checkpoint();
+      }
+      matching.sort((a, b) => a.startUs.compareTo(b.startUs));
       if (matching.isEmpty ||
           matching.first.startUs > begin ||
           matching.last.endUs < end ||
@@ -375,7 +480,10 @@ Future<Mp4CacheIndex?> _loadFragmented({
         for (final sample in matching)
           CachedByteRange(sample.byteStart, sample.byteEnd),
       ]);
+      if (required.length > 16384) return null;
     }
+    totalDependencies += required.length;
+    if (units.length >= 8192 || totalDependencies > 500000) return null;
     units.add(_PlayableUnit(begin, end, required));
   }
   units.sort((a, b) => a.startUs.compareTo(b.startUs));
@@ -548,10 +656,7 @@ _FragmentSamples? _parseFragmentTrack({
     }
     if (sampleDuration <= 0 || sampleSize <= 0) return null;
     final endByte = byteOffset + sampleSize;
-    final containing = mdats.where(
-      (mdat) => byteOffset >= mdat.data && endByte <= mdat.end,
-    );
-    if (containing.length != 1) return null;
+    if (_mdatContaining(mdats, byteOffset, endByte) == null) return null;
     final nextTicks = ticks + sampleDuration;
     final startUs = ticks * 1000000 ~/ track.scale;
     final endUs = nextTicks * 1000000 ~/ track.scale;
@@ -570,14 +675,15 @@ _FragmentSamples? _parseFragmentTrack({
     byteOffset = endByte;
   }
   if (cursor != trun.end) return null;
+  final mdat = _mdatContaining(
+    mdats,
+    samples.first.byteStart,
+    samples.last.byteEnd,
+  );
+  if (mdat == null) return null;
   final headers = <CachedByteRange>[
     CachedByteRange(moof.start, moof.end),
-    for (final mdat in mdats.where(
-      (mdat) => samples.any(
-        (sample) => sample.byteStart >= mdat.data && sample.byteEnd <= mdat.end,
-      ),
-    ))
-      CachedByteRange(mdat.start, mdat.data),
+    CachedByteRange(mdat.start, mdat.data),
   ];
   return _FragmentSamples(track.id, samples, headers);
 }
@@ -599,6 +705,22 @@ bool _continuous(List<_Sample> samples) {
     if (samples[i - 1].endUs != samples[i].startUs) return false;
   }
   return true;
+}
+
+_Box? _mdatContaining(List<_Box> mdats, int start, int end) {
+  var low = 0;
+  var high = mdats.length;
+  while (low < high) {
+    final middle = (low + high) >> 1;
+    if (mdats[middle].data <= start) {
+      low = middle + 1;
+    } else {
+      high = middle;
+    }
+  }
+  if (low == 0) return null;
+  final mdat = mdats[low - 1];
+  return end <= mdat.end ? mdat : null;
 }
 
 /// A complete decode group may have B-frame presentation order different from
@@ -631,10 +753,19 @@ List<CachedByteRange> _mergeBytes(List<CachedByteRange> ranges) {
   return merged;
 }
 
-bool _contains(List<CachedByteRange> available, CachedByteRange need) =>
-    available.any(
-      (range) => range.start <= need.start && range.end >= need.end,
-    );
+bool _contains(List<CachedByteRange> available, CachedByteRange need) {
+  var low = 0;
+  var high = available.length;
+  while (low < high) {
+    final middle = (low + high) >> 1;
+    if (available[middle].start <= need.start) {
+      low = middle + 1;
+    } else {
+      high = middle;
+    }
+  }
+  return low > 0 && available[low - 1].end >= need.end;
+}
 
 class _Box {
   const _Box(this.type, this.start, this.data, this.end);
@@ -683,7 +814,7 @@ List<_Box> _children(Uint8List bytes, _Box parent) {
     }
     result.add(box);
     offset = box.end;
-    if (result.length > 65536) throw const FormatException('Too many boxes');
+    if (result.length > 8192) throw const FormatException('Too many boxes');
   }
   return result;
 }
@@ -695,7 +826,13 @@ _Box? _child(Uint8List bytes, _Box parent, String type) {
   return null;
 }
 
-_Track? _track(Uint8List bytes, _Box box, List<_Box> mdats, int? movieScale) {
+Future<_Track?> _track(
+  Uint8List bytes,
+  _Box box,
+  List<_Box> mdats,
+  int? movieScale,
+  Future<void> Function()? checkpoint,
+) async {
   final edts = _child(bytes, box, 'edts');
   final tkhd = _child(bytes, box, 'tkhd');
   final mdia = _child(bytes, box, 'mdia');
@@ -767,18 +904,23 @@ _Track? _track(Uint8List bytes, _Box box, List<_Box> mdats, int? movieScale) {
   if (entry == null || entry.end != stsd.end) return null;
   final entryType = entry.type;
   if (entryType == 'encv' || entryType == 'enca') return null;
-  final durations = _durations(bytes, stts);
-  final sizes = _sizes(bytes, stsz);
+  final durations = await _durations(bytes, stts, checkpoint);
+  final sizes = await _sizes(bytes, stsz, checkpoint);
   final composition = table('ctts') == null
       ? null
-      : _compositionOffsets(bytes, table('ctts')!, sizes?.length ?? 0);
+      : await _compositionOffsets(
+          bytes,
+          table('ctts')!,
+          sizes?.length ?? 0,
+          checkpoint,
+        );
   if (table('ctts') != null && composition == null) return null;
   final edit = edts == null
       ? null
       : _simpleEdit(bytes, edts, movieScale, scale);
   if (edts != null && edit == null) return null;
-  final chunks = _chunks(bytes, offsets);
-  final layout = _layout(bytes, stsc);
+  final chunks = await _chunks(bytes, offsets, checkpoint);
+  final layout = await _layout(bytes, stsc, checkpoint);
   if (durations == null ||
       sizes == null ||
       chunks == null ||
@@ -790,25 +932,29 @@ _Track? _track(Uint8List bytes, _Box box, List<_Box> mdats, int? movieScale) {
   final syncBox = table('stss');
   final sync = syncBox == null
       ? (kind == 'soun' ? null : <int>{})
-      : _sync(bytes, syncBox);
+      : await _sync(bytes, syncBox, checkpoint);
   if (kind == 'vide' && (sync == null || sync.isEmpty)) return null;
   final samples = <_Sample>[];
   var sample = 0;
   var ticks = 0;
+  var layoutIndex = 0;
   for (var chunk = 0; chunk < chunks.length; chunk++) {
-    final entry = layout.lastWhere(
-      (item) => item.$1 <= chunk + 1,
-      orElse: () => (0, 0),
-    );
-    if (entry.$1 == 0) return null;
+    while (layoutIndex + 1 < layout.length &&
+        layout[layoutIndex + 1].$1 <= chunk + 1) {
+      layoutIndex++;
+    }
+    final entry = layout[layoutIndex];
+    if (checkpoint != null && chunk % 256 == 0) await checkpoint();
+    if (entry.$1 > chunk + 1) return null;
     var cursor = chunks[chunk];
     for (var n = 0; n < entry.$2; n++) {
       if (sample >= sizes.length) return null;
       final size = sizes[sample];
       final endByte = cursor + size;
-      if (!mdats.any((m) => cursor >= m.data && endByte <= m.end)) {
+      if (_mdatContaining(mdats, cursor, endByte) == null) {
         return null;
       }
+      if (checkpoint != null && sample % 256 == 0) await checkpoint();
       final endTicks = ticks + durations[sample];
       final startTicks = ticks + (composition?[sample] ?? 0);
       final endPresentationTicks = endTicks + (composition?[sample] ?? 0);
@@ -842,7 +988,11 @@ _Track? _track(Uint8List bytes, _Box box, List<_Box> mdats, int? movieScale) {
   return _Track(id, kind, samples);
 }
 
-List<int>? _durations(Uint8List bytes, _Box box) {
+Future<List<int>?> _durations(
+  Uint8List bytes,
+  _Box box,
+  Future<void> Function()? checkpoint,
+) async {
   if (box.data + 8 > box.end) return null;
   final count = _u32(bytes, box.data + 4);
   if (count > 200000 || box.data + 8 + count * 8 != box.end) return null;
@@ -851,12 +1001,22 @@ List<int>? _durations(Uint8List bytes, _Box box) {
     final amount = _u32(bytes, box.data + 8 + i * 8);
     final duration = _u32(bytes, box.data + 12 + i * 8);
     if (duration == 0 || amount > 200000 - result.length) return null;
-    result.addAll(List.filled(amount, duration));
+    for (var j = 0; j < amount; j++) {
+      result.add(duration);
+      if (checkpoint != null && result.length % 256 == 0) {
+        await checkpoint();
+      }
+    }
   }
   return result;
 }
 
-List<int>? _compositionOffsets(Uint8List bytes, _Box box, int samples) {
+Future<List<int>?> _compositionOffsets(
+  Uint8List bytes,
+  _Box box,
+  int samples,
+  Future<void> Function()? checkpoint,
+) async {
   if (box.data + 8 > box.end) return null;
   final version = bytes[box.data];
   if (version != 0 && version != 1) return null;
@@ -869,7 +1029,12 @@ List<int>? _compositionOffsets(Uint8List bytes, _Box box, int samples) {
     final amount = _u32(bytes, at);
     final offset = version == 0 ? _u32(bytes, at + 4) : data.getInt32(at + 4);
     if (amount == 0 || amount > samples - result.length) return null;
-    result.addAll(List.filled(amount, offset));
+    for (var j = 0; j < amount; j++) {
+      result.add(offset);
+      if (checkpoint != null && result.length % 256 == 0) {
+        await checkpoint();
+      }
+    }
   }
   return result.length == samples ? result : null;
 }
@@ -938,7 +1103,11 @@ _SimpleEdit? _simpleEdit(
   return null;
 }
 
-List<int>? _sizes(Uint8List bytes, _Box box) {
+Future<List<int>?> _sizes(
+  Uint8List bytes,
+  _Box box,
+  Future<void> Function()? checkpoint,
+) async {
   if (box.data + 12 > box.end) return null;
   final fixed = _u32(bytes, box.data + 4);
   final count = _u32(bytes, box.data + 8);
@@ -952,24 +1121,37 @@ List<int>? _sizes(Uint8List bytes, _Box box) {
     final value = fixed == 0 ? _u32(bytes, box.data + 12 + i * 4) : fixed;
     if (value == 0) return null;
     result.add(value);
+    if (checkpoint != null && i % 256 == 0) await checkpoint();
   }
   return result;
 }
 
-List<int>? _chunks(Uint8List bytes, _Box box) {
+Future<List<int>?> _chunks(
+  Uint8List bytes,
+  _Box box,
+  Future<void> Function()? checkpoint,
+) async {
   if (box.data + 8 > box.end) return null;
   final count = _u32(bytes, box.data + 4);
   final width = box.type == 'co64' ? 8 : 4;
   if (count > 200000 || box.data + 8 + count * width != box.end) return null;
-  return [
-    for (var i = 0; i < count; i++)
+  final result = <int>[];
+  for (var i = 0; i < count; i++) {
+    result.add(
       box.type == 'co64'
           ? _u64(bytes, box.data + 8 + i * width)
           : _u32(bytes, box.data + 8 + i * width),
-  ];
+    );
+    if (checkpoint != null && i % 256 == 0) await checkpoint();
+  }
+  return result;
 }
 
-List<(int, int)>? _layout(Uint8List bytes, _Box box) {
+Future<List<(int, int)>?> _layout(
+  Uint8List bytes,
+  _Box box,
+  Future<void> Function()? checkpoint,
+) async {
   if (box.data + 8 > box.end) return null;
   final count = _u32(bytes, box.data + 4);
   if (count == 0 || count > 200000 || box.data + 8 + count * 12 != box.end) {
@@ -988,11 +1170,16 @@ List<(int, int)>? _layout(Uint8List bytes, _Box box) {
       return null;
     }
     result.add((first, amount));
+    if (checkpoint != null && i % 256 == 0) await checkpoint();
   }
   return result;
 }
 
-Set<int>? _sync(Uint8List bytes, _Box box) {
+Future<Set<int>?> _sync(
+  Uint8List bytes,
+  _Box box,
+  Future<void> Function()? checkpoint,
+) async {
   if (box.data + 8 > box.end) return null;
   final count = _u32(bytes, box.data + 4);
   if (count > 200000 || box.data + 8 + count * 4 != box.end) return null;
@@ -1003,6 +1190,7 @@ Set<int>? _sync(Uint8List bytes, _Box box) {
       return null;
     }
     result.add(number);
+    if (checkpoint != null && i % 256 == 0) await checkpoint();
   }
   return result;
 }
