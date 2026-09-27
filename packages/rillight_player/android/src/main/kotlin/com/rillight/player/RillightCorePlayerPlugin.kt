@@ -9,6 +9,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import android.view.View
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -22,6 +23,15 @@ import io.flutter.plugin.common.StandardMessageCodec
 import io.flutter.plugin.platform.PlatformView
 import io.flutter.plugin.platform.PlatformViewFactory
 import kotlin.math.roundToInt
+
+internal fun effectiveDisplayBrightness(
+    windowBrightness: Float, systemBrightness: Int
+): Double? {
+    if (windowBrightness.isFinite() && windowBrightness >= 0f)
+        return windowBrightness.coerceIn(0f, 1f).toDouble()
+    if (systemBrightness >= 0) return (systemBrightness / 255.0).coerceIn(0.0, 1.0)
+    return null
+}
 
 /** Android output for the owned FFmpeg core. It contains no Media3 player. */
 class RillightCorePlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandler,
@@ -161,7 +171,21 @@ class RillightCorePlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandler,
                 window.attributes = attrs
                 result.success(null)
             }
-            "getSystemBrightness" -> result.success(activity?.window?.attributes?.screenBrightness ?: -1f)
+            "getSystemBrightness" -> {
+                val current = activity ?: run { result.error("control", "No activity", null); return }
+                val windowBrightness = current.window.attributes.screenBrightness
+                // -1 means this window follows the system setting.
+                val systemBrightness = if (windowBrightness < 0f)
+                    runCatching { Settings.System.getInt(
+                        context.contentResolver, Settings.System.SCREEN_BRIGHTNESS, -1) }.getOrDefault(-1)
+                else -1
+                val effective = effectiveDisplayBrightness(windowBrightness, systemBrightness)
+                if (effective != null) {
+                    result.success(effective)
+                } else {
+                    result.error("control", "System brightness unavailable", null)
+                }
+            }
             "setSystemVolume" -> {
                 val audio = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
                 val max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
@@ -172,7 +196,7 @@ class RillightCorePlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandler,
             "getSystemVolume" -> {
                 val audio = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
                 val max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-                result.success(if (max > 0) audio.getStreamVolume(AudioManager.STREAM_MUSIC).toFloat() / max else 0f)
+                result.success(if (max > 0) audio.getStreamVolume(AudioManager.STREAM_MUSIC).toDouble() / max else 0.0)
             }
             "androidSdkInt" -> result.success(Build.VERSION.SDK_INT)
             "setSystemBarsHidden" -> {
