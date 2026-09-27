@@ -13,13 +13,14 @@ import json
 import os
 from pathlib import Path
 import secrets
+import shutil
 import subprocess
 import struct
 import sys
 import time
 import uuid
 import wave
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 from PIL import Image
 
@@ -44,8 +45,11 @@ SCREEN_EVENTS = {
     'background_resume': ('background', 'foreground_paused'),
 }
 _PNG_SIGNATURE = b'\x89PNG\r\n\x1a\n'
-PERFORMANCE_CATEGORIES = ('page', 'animation', 'image', 'startup')
-PERFORMANCE_SCREEN = ('image', 'startup')
+PERFORMANCE_CATEGORIES = ('page', 'network', 'animation', 'image',
+                          'startup', 'power', 'thermal')
+PERFORMANCE_SCREEN = ('network', 'image', 'startup', 'power', 'thermal')
+FROZEN_BASELINE_COMMIT = '48316fc71c8c5e19ae3af34a59168e6f8eccaa8e'
+FROZEN_BASELINE_TREE = '13bce9488125a3916761d624529864e4752b2dc8'
 
 
 def command(*args):
@@ -175,6 +179,144 @@ def audited_android_candidate(evidence_root, identity):
             'result_path': manifest['result_path']}
 
 
+def frozen_baseline_identity():
+    source = command('git', 'show', '-s', '--format=%T', FROZEN_BASELINE_COMMIT)
+    if source.returncode or source.stdout.strip() != FROZEN_BASELINE_TREE:
+        return None
+    return {'head': FROZEN_BASELINE_COMMIT, 'dirty': True,
+            'working_tree_sha256': sha256(ROOT / 'integration_test/mobile_performance.dart')}
+
+
+def performance_apk_artifact(evidence_root, phase, identity):
+    if identity is None:
+        return None
+    root = evidence_root / 'performance' / phase
+    try:
+        manifest = json.loads((root / 'build.json').read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return None
+    key = _capture_key(evidence_root)
+    if not isinstance(manifest, dict) or key is None:
+        return None
+    signed_fields = {field: value for field, value in manifest.items()
+                     if field != 'signature'}
+    if not hmac.compare_digest(str(manifest.get('signature', '')),
+                               _capture_signature(key, signed_fields)):
+        return None
+    source = command('git', 'show', '-s', '--format=%T', identity['head'])
+    if (not isinstance(manifest, dict) or source.returncode or
+            manifest.get('source_head') != identity['head'] or
+            manifest.get('source_tree') != source.stdout.strip() or
+            manifest.get('source_working_tree_sha256') != identity['working_tree_sha256'] or
+            manifest.get('probe_sha256') != sha256(ROOT / 'integration_test/mobile_performance.dart') or
+            manifest.get('build_mode') != 'profile' or
+            manifest.get('entrypoint') != 'integration_test/mobile_performance.dart'):
+        return None
+    apk = _safe_file(root, manifest.get('apk_path'), manifest.get('apk_sha256'))
+    audit_file = _safe_file(root, manifest.get('audit_path'), manifest.get('audit_sha256'))
+    build_log = _safe_file(root, manifest.get('build_log_path'),
+                           manifest.get('build_log_sha256'))
+    if apk is None or audit_file is None or build_log is None:
+        return None
+    try:
+        audit = json.loads(audit_file.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(audit, dict):
+        return None
+    native = audit.get('native')
+    if (audit.get('sha256') != manifest['apk_sha256'] or
+            audit.get('package') != PACKAGE or
+            not isinstance(native, dict) or
+            set(native.get('core_abis', [])) !=
+            {'arm64-v8a', 'armeabi-v7a', 'x86_64'} or
+            not native.get('notice_hashes')):
+        return None
+    return {'path': (Path('performance') / phase / manifest['apk_path']).as_posix(),
+            'sha256': manifest['apk_sha256'], 'source_head': identity['head']}
+
+
+def frozen_baseline_artifact(evidence_root):
+    return performance_apk_artifact(evidence_root, 'baseline',
+                                    frozen_baseline_identity())
+
+
+def audit_performance_apk(evidence_root, phase, checkout):
+    """Build the profile probe APK and audit its source and packaged core."""
+    identity = frozen_baseline_identity() if phase == 'baseline' else candidate_identity()
+    if identity is None:
+        raise RuntimeError('Source commit/tree unavailable')
+    checkout = checkout.resolve()
+    head = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=checkout,
+                          capture_output=True, text=True, check=True)
+    status = subprocess.run(['git', 'status', '--porcelain', '--untracked-files=all'], cwd=checkout,
+                            capture_output=True, text=True, check=True)
+    probe = checkout / 'integration_test/mobile_performance.dart'
+    if head.stdout.strip() != identity['head']:
+        raise RuntimeError('Performance checkout HEAD does not match source identity')
+    if phase == 'baseline':
+        if (status.stdout.strip() != 'M integration_test/mobile_performance.dart' or
+                sha256(probe) != identity['working_tree_sha256']):
+            raise RuntimeError('Frozen checkout must contain only the identical probe overlay')
+    elif checkout != ROOT or candidate_identity() != identity:
+        raise RuntimeError('Candidate source changed before performance build')
+    root = evidence_root / 'performance' / phase
+    run_root = root / 'runs' / (time.strftime('%Y%m%d-%H%M%S') + '-' + uuid.uuid4().hex[:8])
+    run_root.mkdir(parents=True, exist_ok=True)
+    build = subprocess.run(['flutter', 'build', 'apk', '--profile',
+                            '--target', 'integration_test/mobile_performance.dart',
+                            '--android-project-arg=rillightValidation=true'],
+                           cwd=checkout, capture_output=True)
+    log = run_root / 'build.log'
+    log.write_bytes(build.stdout + b'\n' + build.stderr)
+    if build.returncode:
+        raise RuntimeError('Profile performance APK build failed')
+    built = checkout / 'build/app/outputs/flutter-apk/app-profile.apk'
+    if not built.is_file():
+        raise RuntimeError('Profile performance APK was not produced')
+    apk = run_root / 'app-profile.apk'
+    shutil.copyfile(built, apk)
+    audit_code = ('import json,sys;from pathlib import Path;'
+                  'sys.path.insert(0,"tool");'
+                  'from android_release_checks import apk_check;'
+                  'print(json.dumps(apk_check(Path(sys.argv[1]),True)))')
+    audit_run = subprocess.run([sys.executable, '-c', audit_code, str(apk)],
+                               cwd=checkout, capture_output=True, text=True)
+    if audit_run.returncode:
+        raise RuntimeError('Profile performance APK native audit failed')
+    audit = json.loads(audit_run.stdout)
+    audit_file = run_root / 'apk-audit.json'
+    audit_file.write_text(json.dumps(audit, indent=2), encoding='utf-8')
+    if phase == 'candidate' and candidate_identity() != identity:
+        raise RuntimeError('Candidate source changed during performance build')
+    source_tree = command('git', 'show', '-s', '--format=%T', identity['head']).stdout.strip()
+    manifest = {'source_head': identity['head'], 'source_tree': source_tree,
+                'source_working_tree_sha256': identity['working_tree_sha256'],
+                'probe_sha256': sha256(ROOT / 'integration_test/mobile_performance.dart'),
+                'build_mode': 'profile',
+                'entrypoint': 'integration_test/mobile_performance.dart',
+                'apk_path': apk.relative_to(root).as_posix(), 'apk_sha256': sha256(apk),
+                'audit_path': audit_file.relative_to(root).as_posix(),
+                'audit_sha256': sha256(audit_file),
+                'build_log_path': log.relative_to(root).as_posix(),
+                'build_log_sha256': sha256(log)}
+    key = _capture_key(evidence_root, create=True)
+    if key is None:
+        raise RuntimeError('Local capture key unavailable for build audit')
+    manifest['signature'] = _capture_signature(key, manifest)
+    manifest_path = root / 'build.json'
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding='utf-8')
+    audited = performance_apk_artifact(evidence_root, phase, identity)
+    if audited is None:
+        manifest_path.unlink(missing_ok=True)
+        raise RuntimeError('Profile performance APK/source/native audit failed')
+    return audited
+
+
+def audit_frozen_baseline(evidence_root, checkout):
+    return audit_performance_apk(evidence_root, 'baseline', checkout)
+
+
 def _safe_file(root, name, digest):
     if (not isinstance(name, str) or Path(name).is_absolute() or
             not isinstance(digest, str) or len(digest) != 64):
@@ -213,7 +355,8 @@ def _validation_app_foreground(serial):
                if 'topResumedActivity' in line or 'mResumedActivity' in line)
 
 
-def capture_live_screen(root, scenario, phase, identity, audited_apk, live_device):
+def capture_live_screen(root, scenario, phase, identity, audited_apk, live_device,
+                        *, run_id=None):
     """Capture only adb output; caller cannot provide a PNG path or pixel bytes."""
     if scenario not in (*SCREEN_EVENTS, *PERFORMANCE_CATEGORIES) or phase not in ('before', 'after'):
         raise ValueError('Unknown screen capture scenario or phase')
@@ -244,6 +387,8 @@ def capture_live_screen(root, scenario, phase, identity, audited_apk, live_devic
                'working_tree_sha256': identity['working_tree_sha256'],
                'path': path.relative_to(root).as_posix(),
                'sha256': sha256(path), 'captured_unix_ns': time.time_ns()}
+    if run_id is not None:
+        payload['run_id'] = run_id
     key = _capture_key(root, create=True)
     if key is None:
         raise RuntimeError('Capture ledger exists without its local signing key')
@@ -254,41 +399,149 @@ def capture_live_screen(root, scenario, phase, identity, audited_apk, live_devic
     return payload
 
 
+def _read_live_probe(serial, endpoint):
+    forwarded = command('adb', '-s', serial, 'forward', 'tcp:8798', 'tcp:8798')
+    if forwarded.returncode:
+        raise RuntimeError('Cannot forward the running app performance probe')
+    request = Request('http://127.0.0.1:8798/' + endpoint,
+                      method='POST' if endpoint == 'end' else 'GET')
+    with urlopen(request, timeout=10) as response:
+        state = json.loads(response.read())
+    if (not isinstance(state, dict) or state.get('platform') != 'android' or
+            state.get('buildMode') not in ('profile', 'release') or
+            not isinstance(state.get('runId'), str) or
+            len(state['runId']) != 32 or
+            any(c not in '0123456789abcdef' for c in state['runId']) or
+            not isinstance(state.get('elapsedMs'), (int, float)) or
+            state['elapsedMs'] < 0):
+        raise RuntimeError('Live app probe state is unavailable or unsuitable')
+    return state
+
+
+def _physical_measurement_valid(measurement, category, probe, artifact,
+                                live_device, root):
+    if not isinstance(measurement, dict):
+        return None
+    method = 'power-rail' if category == 'power' else 'thermal-zone'
+    raw = _safe_file(root, measurement.get('rawLogPath'),
+                     measurement.get('rawLogSha256'))
+    if (raw is None or measurement.get('schema') != 1 or
+            measurement.get('kind') != 'physical-meter-attestation' or
+            measurement.get('category') != category or
+            measurement.get('method') != method or
+            measurement.get('runId') != probe['runId'] or
+            measurement.get('deviceSerial') != live_device['serial'] or
+            measurement.get('apkSha256') != artifact['sha256'] or
+            not isinstance(measurement.get('attestedBy'), str) or
+            len(measurement['attestedBy'].strip()) < 3 or
+            not isinstance(measurement.get('instrumentModel'), str) or
+            len(measurement['instrumentModel'].strip()) < 3 or
+            not isinstance(measurement.get('instrumentSerial'), str) or
+            not measurement['instrumentSerial'].strip() or
+            not _valid_utc_timestamp(measurement.get('observedAtUtc')) or
+            not isinstance(measurement.get('uncertaintyPercent'), (int, float)) or
+            not 0 <= measurement['uncertaintyPercent'] <= 20 or
+            not isinstance(measurement.get('initialTempC'), (int, float)) or
+            not isinstance(measurement.get('brightnessPercent'), (int, float)) or
+            not isinstance(measurement.get('volumePercent'), (int, float))):
+        return None
+    try:
+        samples = json.loads(raw.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return None
+    reading = 'energyMWh' if category == 'power' else 'tempC'
+    if (not isinstance(samples, list) or len(samples) < 20 or
+            any(not isinstance(item, dict) or
+                not isinstance(item.get('elapsedMs'), (int, float)) or
+                not isinstance(item.get(reading), (int, float))
+                for item in samples) or
+            any(b['elapsedMs'] <= a['elapsedMs'] for a, b in zip(samples, samples[1:])) or
+            samples[0]['elapsedMs'] < 0 or
+            samples[-1]['elapsedMs'] - samples[0]['elapsedMs'] < 300000 or
+            abs((samples[-1]['elapsedMs'] - samples[0]['elapsedMs']) -
+                probe['elapsedMs']) > 10000):
+        return None
+    value = samples[-1][reading] - samples[0][reading]
+    if value < 0:
+        return None
+    return {'metric': value, 'method': method,
+            'initialTempC': measurement['initialTempC'],
+            'brightnessPercent': measurement['brightnessPercent'],
+            'volumePercent': measurement['volumePercent'],
+            'rawLogPath': measurement['rawLogPath'],
+            'rawLogSha256': measurement['rawLogSha256'],
+            'attestation': measurement}
+
+
 def capture_live_performance(root, category, phase, sample_phase, identity,
-                             artifact, live_device):
+                             artifact, live_device, *, measurement_file=None):
     """Read the installed probe and screen from the selected live adb phone."""
     if category not in PERFORMANCE_CATEGORIES or sample_phase not in ('baseline', 'candidate'):
         raise ValueError('Unsupported performance category or sample phase')
     if phase != 'after' and not (category in PERFORMANCE_SCREEN and phase == 'before'):
-        raise ValueError('Only image/startup have a before capture')
-    screenshot = capture_live_screen(root, category, phase, identity, artifact, live_device)
+        raise ValueError('This category has no before capture')
+    serial = live_device['serial']
+    active = _read_live_probe(serial, 'state')
+    if active.get('ended') is True:
+        raise RuntimeError('Performance run has already ended')
+    before_capture = None
+    if phase == 'after' and category in PERFORMANCE_SCREEN:
+        try:
+            key = _capture_key(root)
+            captures = json.loads((root / 'capture-ledger.json').read_text(encoding='utf-8'))
+            before_capture = next(entry['payload'] for entry in reversed(captures)
+                if isinstance(entry, dict) and isinstance(entry.get('payload'), dict) and
+                entry['payload'].get('scenario') == category and
+                entry['payload'].get('phase') == 'before' and
+                entry['payload'].get('run_id') == active['runId'] and
+                entry['payload'].get('installed_apk_sha256') == artifact['sha256'] and
+                entry['payload'].get('device_serial') == serial and
+                entry['payload'].get('candidate_head') == identity['head'] and
+                hmac.compare_digest(str(entry.get('signature', '')),
+                                    _capture_signature(key, entry['payload'])) and
+                _safe_file(root, entry['payload'].get('path'),
+                           entry['payload'].get('sha256')) is not None)
+        except (OSError, ValueError, TypeError, StopIteration):
+            raise RuntimeError('Matching live before capture is required') from None
+    screenshot = capture_live_screen(root, category, phase, identity, artifact,
+                                     live_device, run_id=active['runId'])
     if phase == 'before':
         return screenshot
-    serial = live_device['serial']
-    forwarded = command('adb', '-s', serial, 'forward', 'tcp:8798', 'tcp:8798')
-    if forwarded.returncode:
-        raise RuntimeError('Cannot forward the running app performance probe')
     start_ns = time.monotonic_ns()
-    with urlopen('http://127.0.0.1:8798/state', timeout=10) as response:
-        state = json.loads(response.read())
+    # /end atomically consumes the one active run. /state alone cannot mint
+    # formal samples, including repeated reads of a completed run.
+    state = _read_live_probe(serial, 'end')
     end_ns = time.monotonic_ns()
-    if not _validation_app_foreground(serial) or not isinstance(state, dict) or \
-            state.get('platform') != 'android' or \
-            state.get('buildMode') not in ('profile', 'release') or \
-            not isinstance(state.get('elapsedMs'), (int, float)) or \
-            state['elapsedMs'] < 0:
-        raise RuntimeError('Live app probe state is unavailable or unsuitable')
-    trace = {'probe': state, 'screenshot': screenshot, 'probeStartNs': start_ns,
-             'probeEndNs': end_ns}
+    if not _validation_app_foreground(serial) or state.get('ended') is not True or \
+            state['runId'] != active['runId']:
+        raise RuntimeError('Live app probe did not end the captured active run')
+    measurement = None
+    if category in ('power', 'thermal'):
+        if measurement_file is None or not measurement_file.is_file():
+            raise RuntimeError('Physical power/thermal measurement file is required')
+        measurement = json.loads(measurement_file.read_text(encoding='utf-8'))
+        measurement = _physical_measurement_valid(measurement, category, state,
+                                                   artifact, live_device, root)
+        if measurement is None:
+            raise RuntimeError('Physical measurement attestation is invalid')
+    trace = {'probe': state, 'screenshot': screenshot,
+             'beforeScreenshot': before_capture, 'probeStartNs': start_ns,
+             'probeEndNs': end_ns, 'measurement': measurement}
     folder = root / 'captures'
     path = folder / f'performance-probe-{uuid.uuid4().hex}.json'
     path.write_text(json.dumps(trace, ensure_ascii=False), encoding='utf-8')
-    payload = {'id': uuid.uuid4().hex, 'phase': sample_phase, 'category': category,
+    payload = {'id': uuid.uuid4().hex, 'run_id': state['runId'],
+               'phase': sample_phase, 'category': category,
                'path': path.relative_to(root).as_posix(), 'sha256': sha256(path),
                'device_serial': serial, 'device_fingerprint': live_device['fingerprint'],
                'installed_apk_sha256': artifact['sha256'],
                'candidate_head': identity['head'],
                'working_tree_sha256': identity['working_tree_sha256']}
+    if category == 'network':
+        payload['observed_stall_ms'] = (
+            screenshot['captured_unix_ns'] - before_capture['captured_unix_ns']) / 1e6
+    if category in ('power', 'thermal'):
+        payload['observed_metric'] = measurement['metric']
     key = _capture_key(root, create=True)
     if key is None:
         raise RuntimeError('Capture ledger exists without its local signing key')
@@ -299,7 +552,8 @@ def capture_live_performance(root, category, phase, sample_phase, identity,
     return payload
 
 
-def _screen_capture_bound(root, scenario, data, identity, audited_apk, live_device):
+def _screen_capture_bound(root, scenario, data, identity, audited_apk,
+                          live_device, *, run_id=None):
     after_path_key = ('displayedImageEvidencePath' if scenario == 'image'
                       else 'displayedFrameEvidencePath')
     after_hash_key = ('displayedImageEvidenceSha256' if scenario == 'image'
@@ -325,6 +579,7 @@ def _screen_capture_bound(root, scenario, data, identity, audited_apk, live_devi
                 payload.get('installed_apk_sha256') != audited_apk['sha256'] or
                 payload.get('candidate_head') != identity['head'] or
                 payload.get('working_tree_sha256') != identity['working_tree_sha256'] or
+                (run_id is not None and payload.get('run_id') != run_id) or
                 _safe_file(root, payload.get('path'), payload.get('sha256')) is None):
             continue
         phase = payload.get('phase')
@@ -550,6 +805,8 @@ def _performance_row_bound(row, payload, root):
             probe.get('label') != row.get('label') or
             probe.get('cache') != row.get('cache') or
             probe.get('device') != row.get('device') or
+            probe.get('ended') is not True or
+            probe.get('runId') != payload.get('run_id') or
             probe.get('complete') is not row.get('complete') or
             probe.get('frameBudgetMs') != row.get('frameBudgetMs') or
             not isinstance(trace.get('probeStartNs'), int) or
@@ -557,10 +814,6 @@ def _performance_row_bound(row, payload, root):
             trace['probeEndNs'] < trace['probeStartNs']):
         return False
     category = row['category']
-    if category not in PERFORMANCE_CATEGORIES:
-        # Network stalls and hardware rails/thermals need their own live
-        # collectors. Caller-authored JSON is analysis input, not gate evidence.
-        return False
     if category == 'page':
         return row.get('firstOperableMs') == probe.get('firstOperableMs') and \
             isinstance(probe.get('firstOperableMs'), (int, float))
@@ -570,6 +823,7 @@ def _performance_row_bound(row, payload, root):
                 row.get('elapsedMs') == probe.get('elapsedMs') and
                 row.get('frameTimingsComplete') == probe.get('frameTimingsComplete'))
     screenshot = trace.get('screenshot')
+    before_screenshot = trace.get('beforeScreenshot')
     if (not isinstance(screenshot, dict) or screenshot.get('scenario') != category or
             screenshot.get('phase') != 'after' or
             screenshot.get('path') != row.get(
@@ -584,8 +838,45 @@ def _performance_row_bound(row, payload, root):
     artifact = {'sha256': payload.get('installed_apk_sha256')}
     live = {'serial': payload.get('device_serial'),
             'fingerprint': payload.get('device_fingerprint')}
-    if not _screen_capture_bound(root, category, row, identity, artifact, live):
+    if (not isinstance(before_screenshot, dict) or
+            before_screenshot.get('path') != row.get('screenBeforePath') or
+            before_screenshot.get('sha256') != row.get('screenBeforeSha256')):
         return False
+    if not _screen_capture_bound(root, category, row, identity, artifact, live,
+                                  run_id=payload['run_id']):
+        return False
+    if category in ('network', 'power', 'thermal'):
+        try:
+            capture_rows = json.loads((root / 'capture-ledger.json').read_text())
+            before = next(item['payload'] for item in capture_rows
+                          if item['payload'].get('path') == row['screenBeforePath'] and
+                          item['payload'].get('run_id') == payload['run_id'])
+            after = next(item['payload'] for item in capture_rows
+                         if item['payload'].get('path') == row['displayedFrameEvidencePath'] and
+                         item['payload'].get('run_id') == payload['run_id'])
+        except (OSError, ValueError, KeyError, StopIteration, TypeError):
+            return False
+        span_ms = (after['captured_unix_ns'] - before['captured_unix_ns']) / 1e6
+        if row.get('elapsedMs') != probe.get('elapsedMs') or span_ms > probe['elapsedMs']:
+            return False
+        if category == 'network':
+            return row.get('stallMs') == span_ms and \
+                payload.get('observed_stall_ms') == span_ms
+        if span_ms < 300000 or probe['elapsedMs'] < 300000:
+            return False
+        measurement = trace.get('measurement')
+        derived = _physical_measurement_valid(
+            measurement.get('attestation') if isinstance(measurement, dict) else None,
+            category, probe, artifact, live, root)
+        metric = 'energyMWh' if category == 'power' else 'tempRiseC'
+        return (derived == measurement and derived is not None and
+                payload.get('observed_metric') == derived['metric'] and
+                row.get(metric) == derived['metric'] and
+                row.get('measurementMethod') == derived['method'] and
+                row.get('initialTempC') == derived['initialTempC'] and
+                row.get('brightnessPercent') == derived['brightnessPercent'] and
+                row.get('volumePercent') == derived['volumePercent'] and
+                row.get('environment') == 'physical')
     metric = 'firstDisplayedImageMs' if category == 'image' else 'firstDisplayedFrameMs'
     return (row.get(metric) == probe.get('elapsedMs') and
             isinstance(row.get(metric), (int, float)) and
@@ -596,12 +887,12 @@ def _performance_row_bound(row, payload, root):
 
 def samples_match_live_probes(path, phase, audited_apk, device_fingerprint,
                               evidence_root, identity=None):
-    if not device_fingerprint or (phase == 'candidate' and not audited_apk):
+    if not device_fingerprint or not audited_apk:
         return False
     records = _signed_performance_records(evidence_root)
-    expected = ((evidence_root / audited_apk['path']).resolve()
-                if phase == 'candidate' else None)
+    expected = (evidence_root / audited_apk['path']).resolve()
     seen = set()
+    seen_runs = set()
     rows = 0
     try:
         for line in path.read_text(encoding='utf-8').splitlines():
@@ -613,18 +904,23 @@ def samples_match_live_probes(path, phase, audited_apk, device_fingerprint,
             capture_id = sample.get('probeTraceId')
             payload = records.get(capture_id)
             if (capture_id in seen or payload is None or
+                    (phase, payload.get('run_id')) in seen_runs or
                     sample.get('phase') != phase or
                     sample.get('target') != 'android-phone' or
                     sample.get('device') != device_fingerprint or
-                    (expected is not None and
-                     (sample.get('artifactSha256') != audited_apk['sha256'] or
-                      (path.parent / sample.get('artifactPath', '')).resolve() != expected)) or
+                    sample.get('artifactSha256') != audited_apk['sha256'] or
+                    (path.parent / sample.get('artifactPath', '')).resolve() != expected or
+                    (phase == 'baseline' and
+                     (payload.get('candidate_head') != FROZEN_BASELINE_COMMIT or
+                      payload.get('working_tree_sha256') !=
+                      frozen_baseline_identity()['working_tree_sha256'])) or
                     (identity is not None and phase == 'candidate' and
                      (payload.get('candidate_head') != identity['head'] or
                       payload.get('working_tree_sha256') != identity['working_tree_sha256'])) or
                     not _performance_row_bound(sample, payload, evidence_root)):
                 return False
             seen.add(capture_id)
+            seen_runs.add((phase, payload['run_id']))
             rows += 1
     except (OSError, ValueError, TypeError, KeyError):
         return False
@@ -703,10 +999,17 @@ def verify_candidate(evidence_root, *, run_android=True):
     candidate = evidence_root / 'candidate.jsonl'
     if baseline.is_file() and candidate.is_file():
         fingerprint = physical.get('device_fingerprint') if isinstance(physical, dict) else None
-        if not candidate_samples_match_apk(candidate, audited_apk, fingerprint,
+        performance_candidate = performance_apk_artifact(evidence_root,
+                                                          'candidate', identity)
+        if performance_candidate is None:
+            errors.append('Current source profile performance APK audit unavailable')
+        if not candidate_samples_match_apk(candidate, performance_candidate, fingerprint,
                                             evidence_root, identity):
             errors.append('Candidate performance samples lack audited live probe/capture provenance')
-        if not samples_match_live_probes(baseline, 'baseline', audited_apk,
+        baseline_apk = frozen_baseline_artifact(evidence_root)
+        if baseline_apk is None:
+            errors.append('Frozen baseline source/build/APK audit unavailable')
+        if not samples_match_live_probes(baseline, 'baseline', baseline_apk,
                                          fingerprint, evidence_root):
             errors.append('Baseline performance samples lack live probe/capture provenance')
         compared = command(sys.executable, 'tool/player_performance_checks.py',
@@ -734,26 +1037,48 @@ def main(argv=None):
     action.add_argument('--verify-candidate', action='store_true')
     action.add_argument('--capture-scenario', choices=tuple(SCREEN_EVENTS))
     action.add_argument('--capture-performance', choices=PERFORMANCE_CATEGORIES)
+    action.add_argument('--audit-baseline', action='store_true')
+    action.add_argument('--audit-performance-candidate', action='store_true')
     parser.add_argument('--capture-phase', choices=('before', 'after'))
     parser.add_argument('--performance-phase', choices=('baseline', 'candidate'))
-    parser.add_argument('--artifact', type=Path,
-                        help='Baseline APK file currently installed on the phone')
+    parser.add_argument('--baseline-checkout', type=Path,
+                        help='Clean isolated checkout at the frozen baseline commit')
+    parser.add_argument('--measurement-file', type=Path,
+                        help='Named physical meter attestation for power/thermal capture')
     parser.add_argument('--serial', help='Connected physical Android phone for live capture')
     parser.add_argument('--evidence-root', type=Path,
                         default=ROOT / 'build/phone-player-validation')
     args = parser.parse_args(argv)
     root = args.evidence_root.resolve()
+    if args.audit_baseline:
+        if args.baseline_checkout is None:
+            parser.error('--audit-baseline requires --baseline-checkout')
+        audited = audit_frozen_baseline(root, args.baseline_checkout)
+        print(json.dumps({'baseline_apk_sha256': audited['sha256'],
+                          'source_commit': FROZEN_BASELINE_COMMIT}))
+        return 0
+    if args.audit_performance_candidate:
+        audited = audit_performance_apk(root, 'candidate', ROOT)
+        print(json.dumps({'candidate_performance_apk_sha256': audited['sha256'],
+                          'source_commit': audited['source_head']}))
+        return 0
     if args.capture_scenario or args.capture_performance:
         if not args.capture_phase or not args.serial:
             parser.error('Capture requires --capture-phase and --serial')
         if args.capture_performance and not args.performance_phase:
             parser.error('--capture-performance requires --performance-phase')
         root.mkdir(parents=True, exist_ok=True)
-        identity = candidate_identity()
+        host_identity = candidate_identity()
+        identity = host_identity
         if args.capture_performance and args.performance_phase == 'baseline':
-            if args.artifact is None or not args.artifact.is_file():
-                parser.error('Baseline capture requires an existing --artifact APK')
-            audited = {'sha256': sha256(args.artifact)}
+            audited = frozen_baseline_artifact(root)
+            identity = frozen_baseline_identity()
+            if audited is None or identity is None:
+                raise RuntimeError('Frozen baseline APK/source audit unavailable')
+        elif args.capture_performance:
+            audited = performance_apk_artifact(root, 'candidate', identity)
+            if audited is None:
+                raise RuntimeError('Candidate profile performance APK audit unavailable')
         else:
             audited = audited_android_candidate(root, identity)
         live = live_physical_devices([args.serial]).get(args.serial)
@@ -761,14 +1086,17 @@ def main(argv=None):
             capture = capture_live_performance(root, args.capture_performance,
                                                args.capture_phase,
                                                args.performance_phase, identity,
-                                               audited, live)
+                                               audited, live,
+                                               measurement_file=args.measurement_file)
         else:
             capture = capture_live_screen(root, args.capture_scenario,
                                           args.capture_phase, identity, audited, live)
-        if candidate_identity()['working_tree_sha256'] != identity['working_tree_sha256']:
+        if candidate_identity()['working_tree_sha256'] != host_identity['working_tree_sha256']:
             raise RuntimeError('Source candidate changed during live capture')
         print(json.dumps({'captured': capture['path'], 'sha256': capture['sha256'],
                           'id': capture.get('id'),
+                          'observed_stall_ms': capture.get('observed_stall_ms'),
+                          'observed_metric': capture.get('observed_metric'),
                           'scenario': args.capture_scenario or args.capture_performance,
                           'phase': args.capture_phase}))
         return 0

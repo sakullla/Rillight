@@ -1,11 +1,13 @@
 // Validation entry point. Launch with `flutter run -t` on a real phone or TV,
 // then `adb forward tcp:8798 tcp:8798`. POST /begin with label, cache=cold or
 // warm, device, build, and exact visible contentKey/actionKey before navigation.
-// Poll GET /state and append POST /end JSON to a baseline or candidate JSONL.
+// GET /state is exploratory; POST /end consumes one active run and returns its
+// random runId for host-bound, one-time formal capture.
 // Repeat each scenario in the same build mode; keep cold/warm samples separate.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 import 'dart:ui' show FramePhase, FrameTiming;
 
 import 'package:flutter/foundation.dart';
@@ -24,6 +26,7 @@ Future<void> main() async {
 
 class _PageProbe {
   final MobileFrameTimingCollector _timings = MobileFrameTimingCollector();
+  final Random _runRandom = Random.secure();
   _PageSample? _active, _latest;
 
   Future<void> start() async {
@@ -69,6 +72,11 @@ class _PageProbe {
               buildId: q['build']!,
               contentKey: q['contentKey']!,
               actionKey: q['actionKey']!,
+              runId: List.generate(
+                16,
+                (_) =>
+                    _runRandom.nextInt(256).toRadixString(16).padLeft(2, '0'),
+              ).join(),
               frames: _timings.begin(),
             );
             _active = _latest = sample;
@@ -102,6 +110,7 @@ class _PageProbe {
             // Release/profile timing batches can arrive up to a second after
             // their frames. Keep this window alive while a new one begins.
             await _timings.end(sample.frames);
+            sample.ended = true;
             request.response.write(jsonEncode(_record(sample)));
           }
         } else {
@@ -121,6 +130,8 @@ class _PageProbe {
     final frameBudgetMs = refreshRate > 0 ? 1000 / refreshRate : null;
     return {
       'label': sample?.label,
+      'runId': sample?.runId,
+      'ended': sample?.ended ?? false,
       'cache': sample?.cacheMode,
       'device': sample?.device,
       'build': sample?.buildId,
@@ -231,12 +242,13 @@ class _PageSample {
     required this.buildId,
     required this.contentKey,
     required this.actionKey,
+    required this.runId,
     required this.frames,
   }) {
     clock.start();
   }
 
-  final String label, cacheMode, device, buildId, contentKey, actionKey;
+  final String label, cacheMode, device, buildId, contentKey, actionKey, runId;
   final MobileFrameTimingWindow frames;
   final Stopwatch clock = Stopwatch();
   double? contentMs, renderedImageMs, operableMs, nativeFirstFrameMs;
@@ -245,6 +257,7 @@ class _PageSample {
   double? displayedFrameMs, displayedFrameClockUncertaintyMs;
   String? displayedFrameEvidenceSha256;
   bool contentTimedOut = false;
+  bool ended = false;
   bool get complete => contentMs != null && operableMs != null;
 }
 

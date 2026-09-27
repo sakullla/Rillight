@@ -151,22 +151,50 @@ not an emulator estimate presented as phone energy.
 The offline comparator above accepts recorded JSONL for analysis. The formal
 phone candidate gate additionally requires a unique `probeTraceId` on **every**
 baseline and candidate row, bound to a locally signed live capture/probe trace
-for the row's APK, device, phase and category. Collect a `page` or `animation`
+for the row's APK, device, phase, app-generated run ID and category. First audit
+the frozen baseline from a separate checkout of
+`48316fc71c8c5e19ae3af34a59168e6f8eccaa8e` with
+`python tool/phone_player_validation.py --audit-baseline --baseline-checkout
+CHECKOUT --evidence-root build/phone-player-validation`. Copy the current
+`integration_test/mobile_performance.dart` into that checkout first; this is a
+**probe-only overlay**, so the measured baseline is the frozen application
+source plus the exact recorded instrumentation diff, not an unmodified frozen
+APK. The audit rejects any other checkout changes, builds the profile probe
+entrypoint and verifies the APK/native libraries and source tree. Audit the
+candidate's matching profile probe entrypoint with
+`--audit-performance-candidate`, then install the appropriate audited profile
+APK for each phase. The separate three-device `app-probe.apk` remains the
+functional validation APK and cannot supply port 8798 performance evidence.
+Collect a `page` or `animation`
 trace with `python tool/phone_player_validation.py --capture-performance page
 --capture-phase after --performance-phase candidate --serial SERIAL
 --evidence-root build/phone-player-validation` while the profile/release
-validation app and its port 8798 probe run on that phone. For `image` and
-`startup`, collect `before` and `after` with that category and attach their
-exact screenshot paths/hashes. Baseline capture uses `--performance-phase
-baseline --artifact PATH_TO_INSTALLED_BASELINE_APK`; collect it before replacing
-that APK with the candidate. The gate reads `/state` through an adb forward and
-requires row timings/frame arrays to match that stored probe trace. Display
+validation app and its port 8798 probe run on that phone. Start each scenario
+with probe `/begin` first; the `after` capture consumes that run through `/end`
+exactly once. For `image`, `startup`, `network`, `power` and `thermal`, collect
+`before` and `after` during the same active run and attach their exact screenshot
+paths/hashes. Baseline capture uses `--performance-phase baseline`; its installed
+APK must equal the frozen audited build. The gate requires row timings/frame
+arrays to match the stored one-time probe trace. Display
 latency uses the probe's elapsed time after the live screen capture, an upper
-bound on the first visible pixel. Reusing a trace ID or supplying self-authored
-PNG/timing values fails. Network, power and thermal have no live sample
-collector in this gate and remain unverified even if the offline comparator
-reports improvement; they need independently bound collection before a formal
-measured-gain claim can pass.
+bound on the first visible pixel. Network stall time is the signed host interval
+between live stalled/recovered captures, so it is an observed bound on the
+stall, not a decoder event timestamp. Power/thermal `after` capture additionally
+requires `--measurement-file FILE`: a schema-1
+`physical-meter-attestation` with `category`, `runId`, `deviceSerial`,
+`apkSha256`, `method` (`power-rail` or `thermal-zone`), named `attestedBy`,
+`observedAtUtc`, `instrumentModel`, `instrumentSerial`,
+`uncertaintyPercent`, `initialTempC`, `brightnessPercent`, `volumePercent`,
+and hashed `rawLogPath`/`rawLogSha256` under the evidence root. That log is a
+JSON array of at least 20 increasing `elapsedMs` readings spanning five
+minutes with cumulative `energyMWh` or `tempC`; the gate derives the row metric
+from its endpoints and checks duration against the live run. A named external
+physical meter and retained raw log are required; a virtual battery estimate
+or caller-authored metric row does not qualify. Reusing a run or trace ID,
+changing a raw log, or supplying self-authored PNG/timing values fails. The
+local signature and human meter attestation make the observation reviewable;
+they do not independently prove instrument calibration or an absence of human
+error.
 
 For the current phone candidate run `python tool/phone_player_validation.py
 --verify-candidate --evidence-root build/phone-player-validation`. It writes

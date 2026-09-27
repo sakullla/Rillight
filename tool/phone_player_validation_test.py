@@ -41,6 +41,12 @@ class PhoneValidationTest(unittest.TestCase):
                 math.sin(2 * math.pi * 440 * i / 8000))) for i in range(40000)))
         return path
 
+    def probe_reply(self, probe):
+        def respond(request, **_):
+            state = dict(probe, ended=request.get_method() == 'POST')
+            return io.BytesIO(json.dumps(state).encode())
+        return respond
+
     def record(self):
         before = self.root / 'before.png'
         after = self.root / 'after.png'
@@ -240,6 +246,39 @@ class PhoneValidationTest(unittest.TestCase):
         self.apk.write_bytes(b'changed APK')
         self.assertIsNone(validation.audited_android_candidate(self.root, self.identity))
 
+    def test_frozen_baseline_manifest_binds_source_tree_and_apk(self):
+        baseline_root = self.root / 'performance' / 'baseline'
+        baseline_root.mkdir(parents=True)
+        apk = baseline_root / 'frozen.apk'
+        apk.write_bytes(b'frozen source build')
+        audit = baseline_root / 'apk-audit.json'
+        audit.write_text(json.dumps({'sha256': validation.sha256(apk),
+            'package': validation.PACKAGE,
+            'native': {'core_abis': ['arm64-v8a', 'armeabi-v7a', 'x86_64'],
+                       'notice_hashes': {'synthetic': 'a' * 64}}}), encoding='utf-8')
+        log = baseline_root / 'build.log'
+        log.write_text('profile build completed', encoding='utf-8')
+        identity = validation.frozen_baseline_identity()
+        manifest = {'source_head': identity['head'],
+            'source_tree': validation.FROZEN_BASELINE_TREE,
+            'source_working_tree_sha256': identity['working_tree_sha256'],
+            'probe_sha256': identity['working_tree_sha256'],
+            'build_mode': 'profile',
+            'entrypoint': 'integration_test/mobile_performance.dart',
+            'apk_path': apk.name, 'apk_sha256': validation.sha256(apk),
+            'audit_path': audit.name, 'audit_sha256': validation.sha256(audit),
+            'build_log_path': log.name, 'build_log_sha256': validation.sha256(log)}
+        key = validation._capture_key(self.root, create=True)
+        manifest['signature'] = validation._capture_signature(key, manifest)
+        manifest_path = baseline_root / 'build.json'
+        manifest_path.write_text(json.dumps(manifest), encoding='utf-8')
+        self.assertIsNotNone(validation.frozen_baseline_artifact(self.root))
+        manifest['source_head'] = 'c' * 40
+        manifest.pop('signature')
+        manifest['signature'] = validation._capture_signature(key, manifest)
+        manifest_path.write_text(json.dumps(manifest), encoding='utf-8')
+        self.assertIsNone(validation.frozen_baseline_artifact(self.root))
+
     def test_performance_rows_must_use_audited_apk_and_live_phone(self):
         samples = self.root / 'candidate.jsonl'
         row = {'phase': 'candidate', 'target': 'android-phone',
@@ -258,13 +297,13 @@ class PhoneValidationTest(unittest.TestCase):
             'topResumedActivity=ActivityRecord{ com.rillight.rillight.validation/.MainActivity }', '')
         probe = {'platform': 'android', 'buildMode': 'profile',
                  'elapsedMs': 1000, 'firstOperableMs': 500,
+                 'runId': '1' * 32, 'ended': True,
                  'complete': True, 'frameBudgetMs': 16.67,
                  'label': 'home', 'cache': 'cold', 'device': self.live['fingerprint']}
         with patch.object(validation.subprocess, 'run', return_value=
                           subprocess.CompletedProcess([], 0, screen.getvalue(), b'')), \
                 patch.object(validation, 'command', return_value=foreground), \
-                patch.object(validation, 'urlopen', return_value=
-                             io.BytesIO(json.dumps(probe).encode())):
+                patch.object(validation, 'urlopen', side_effect=self.probe_reply(probe)):
             capture = validation.capture_live_performance(
                 self.root, 'page', 'after', 'candidate', self.identity,
                 self.audited, self.live)
@@ -300,12 +339,12 @@ class PhoneValidationTest(unittest.TestCase):
             'topResumedActivity=ActivityRecord{ com.rillight.rillight.validation/.MainActivity }', '')
         probe = {'platform': 'android', 'buildMode': 'profile',
                  'elapsedMs': 1000, 'renderedImageObserved': True,
+                 'runId': '2' * 32, 'ended': True,
                  'complete': True, 'frameBudgetMs': 16.67,
                  'label': 'home', 'cache': 'cold', 'device': self.live['fingerprint']}
         with patch.object(validation.subprocess, 'run', side_effect=fake_adb), \
                 patch.object(validation, 'command', return_value=foreground), \
-                patch.object(validation, 'urlopen', return_value=
-                             io.BytesIO(json.dumps(probe).encode())):
+                patch.object(validation, 'urlopen', side_effect=self.probe_reply(probe)):
             before = validation.capture_live_performance(
                 self.root, 'image', 'before', 'candidate', self.identity,
                 self.audited, self.live)
@@ -341,42 +380,204 @@ class PhoneValidationTest(unittest.TestCase):
             samples, self.audited, self.live['fingerprint'], self.root, self.identity))
 
     def test_baseline_trace_can_use_distinct_installed_apk(self):
-        baseline_apk = self.root / 'baseline.apk'
+        baseline_apk = self.root / 'baseline' / 'baseline.apk'
+        baseline_apk.parent.mkdir()
         baseline_apk.write_bytes(b'prior validation APK')
-        baseline_artifact = {'sha256': validation.sha256(baseline_apk)}
+        baseline_artifact = {'path': 'baseline/' + baseline_apk.name,
+                             'sha256': validation.sha256(baseline_apk)}
         baseline_live = dict(self.live, installed_apk_sha256=baseline_artifact['sha256'])
-        baseline_identity = dict(self.identity, head='c' * 40)
+        baseline_identity = validation.frozen_baseline_identity()
         screenshot = io.BytesIO()
         Image.new('RGB', (100, 100), 'blue').save(screenshot, format='PNG')
         foreground = subprocess.CompletedProcess([], 0,
             'topResumedActivity=ActivityRecord{ com.rillight.rillight.validation/.MainActivity }', '')
         probe = {'platform': 'android', 'buildMode': 'profile',
                  'elapsedMs': 1000, 'firstOperableMs': 800,
+                 'runId': '3' * 32, 'ended': True,
                  'complete': True, 'frameBudgetMs': 16.67,
                  'label': 'home', 'cache': 'cold', 'device': self.live['fingerprint']}
         with patch.object(validation.subprocess, 'run', return_value=
                           subprocess.CompletedProcess([], 0, screenshot.getvalue(), b'')), \
                 patch.object(validation, 'command', return_value=foreground), \
-                patch.object(validation, 'urlopen', return_value=
-                             io.BytesIO(json.dumps(probe).encode())):
+                patch.object(validation, 'urlopen', side_effect=self.probe_reply(probe)):
             capture = validation.capture_live_performance(
                 self.root, 'page', 'after', 'baseline', baseline_identity,
                 baseline_artifact, baseline_live)
         row = {'phase': 'baseline', 'target': 'android-phone',
                'category': 'page', 'label': 'home', 'cache': 'cold',
                'device': self.live['fingerprint'], 'buildMode': 'profile',
-               'artifactPath': baseline_apk.name,
+               'artifactPath': 'baseline/' + baseline_apk.name,
                'artifactSha256': baseline_artifact['sha256'],
                'probeTraceId': capture['id'], 'firstOperableMs': 800,
                'complete': True, 'frameBudgetMs': 16.67}
         samples = self.root / 'baseline.jsonl'
         samples.write_text(json.dumps(row), encoding='utf-8')
         self.assertTrue(validation.samples_match_live_probes(
-            samples, 'baseline', self.audited, self.live['fingerprint'], self.root))
+            samples, 'baseline', baseline_artifact, self.live['fingerprint'], self.root))
         row['artifactSha256'] = self.audited['sha256']
         samples.write_text(json.dumps(row), encoding='utf-8')
         self.assertFalse(validation.samples_match_live_probes(
-            samples, 'baseline', self.audited, self.live['fingerprint'], self.root))
+            samples, 'baseline', baseline_artifact, self.live['fingerprint'], self.root))
+
+    def test_replayed_run_id_is_rejected_even_with_new_trace_id(self):
+        frame = io.BytesIO()
+        Image.new('RGB', (100, 100), 'red').save(frame, format='PNG')
+        foreground = subprocess.CompletedProcess([], 0,
+            'topResumedActivity=ActivityRecord{ com.rillight.rillight.validation/.MainActivity }', '')
+        probe = {'platform': 'android', 'buildMode': 'profile',
+                 'elapsedMs': 1000, 'firstOperableMs': 500,
+                 'runId': '4' * 32, 'complete': True, 'frameBudgetMs': 16.67,
+                 'label': 'home', 'cache': 'cold', 'device': self.live['fingerprint']}
+        with patch.object(validation.subprocess, 'run', return_value=
+                          subprocess.CompletedProcess([], 0, frame.getvalue(), b'')), \
+                patch.object(validation, 'command', return_value=foreground), \
+                patch.object(validation, 'urlopen', side_effect=self.probe_reply(probe)):
+            traces = [validation.capture_live_performance(
+                self.root, 'page', 'after', 'candidate', self.identity,
+                self.audited, self.live) for _ in range(2)]
+        rows = [{'phase': 'candidate', 'target': 'android-phone',
+                 'device': self.live['fingerprint'],
+                 'artifactPath': self.audited['path'],
+                 'artifactSha256': self.audited['sha256'],
+                 'category': 'page', 'label': 'home', 'cache': 'cold',
+                 'buildMode': 'profile', 'firstOperableMs': 500,
+                 'complete': True, 'frameBudgetMs': 16.67,
+                 'probeTraceId': trace['id']} for trace in traces]
+        samples = self.root / 'candidate.jsonl'
+        samples.write_text('\n'.join(json.dumps(row) for row in rows), encoding='utf-8')
+        self.assertFalse(validation.candidate_samples_match_apk(
+            samples, self.audited, self.live['fingerprint'], self.root, self.identity))
+
+    def test_live_network_stall_uses_signed_capture_timestamps(self):
+        frames = []
+        for color in ('black', 'red'):
+            frame = io.BytesIO()
+            Image.new('RGB', (100, 100), color).save(frame, format='PNG')
+            frames.append(frame.getvalue())
+        def fake_adb(args, **_):
+            response = subprocess.CompletedProcess(args, 0, frames[fake_adb.count], b'')
+            fake_adb.count += 1
+            return response
+        fake_adb.count = 0
+        foreground = subprocess.CompletedProcess([], 0,
+            'topResumedActivity=ActivityRecord{ com.rillight.rillight.validation/.MainActivity }', '')
+        probe = {'platform': 'android', 'buildMode': 'profile',
+                 'elapsedMs': 3500, 'runId': '5' * 32,
+                 'complete': True, 'frameBudgetMs': 16.67,
+                 'label': 'outage', 'cache': 'cold', 'device': self.live['fingerprint']}
+        with patch.object(validation.subprocess, 'run', side_effect=fake_adb), \
+                patch.object(validation, 'command', return_value=foreground), \
+                patch.object(validation, 'urlopen', side_effect=self.probe_reply(probe)), \
+                patch.object(validation.time, 'time_ns', side_effect=
+                             [1000000000000000, 1000002000000000]):
+            before = validation.capture_live_performance(
+                self.root, 'network', 'before', 'candidate', self.identity,
+                self.audited, self.live)
+            after = validation.capture_live_performance(
+                self.root, 'network', 'after', 'candidate', self.identity,
+                self.audited, self.live)
+        screenshot = json.loads((self.root / after['path']).read_text())['screenshot']
+        row = {'phase': 'candidate', 'target': 'android-phone', 'category': 'network',
+               'label': 'outage', 'cache': 'cold', 'device': self.live['fingerprint'],
+               'buildMode': 'profile', 'complete': True, 'frameBudgetMs': 16.67,
+               'artifactPath': self.audited['path'],
+               'artifactSha256': self.audited['sha256'], 'probeTraceId': after['id'],
+               'elapsedMs': 3500, 'stallMs': 2000,
+               'screenBeforePath': before['path'], 'screenBeforeSha256': before['sha256'],
+               'displayedFrameEvidencePath': screenshot['path'],
+               'displayedFrameEvidenceSha256': screenshot['sha256']}
+        samples = self.root / 'candidate.jsonl'
+        samples.write_text(json.dumps(row), encoding='utf-8')
+        self.assertTrue(validation.candidate_samples_match_apk(
+            samples, self.audited, self.live['fingerprint'], self.root, self.identity))
+        row['stallMs'] = 1
+        samples.write_text(json.dumps(row), encoding='utf-8')
+        self.assertFalse(validation.candidate_samples_match_apk(
+            samples, self.audited, self.live['fingerprint'], self.root, self.identity))
+
+    def test_physical_meter_log_attestation_derives_power_and_thermal(self):
+        foreground = subprocess.CompletedProcess([], 0,
+            'topResumedActivity=ActivityRecord{ com.rillight.rillight.validation/.MainActivity }', '')
+        for category, run_id, field in (
+                ('power', '6' * 32, 'energyMWh'),
+                ('thermal', '7' * 32, 'tempC')):
+            with self.subTest(category=category):
+                frames = []
+                for color in ('black', 'red'):
+                    frame = io.BytesIO()
+                    Image.new('RGB', (100, 100), color).save(frame, format='PNG')
+                    frames.append(frame.getvalue())
+                def fake_adb(args, **_):
+                    response = subprocess.CompletedProcess(args, 0,
+                        frames[fake_adb.count], b'')
+                    fake_adb.count += 1
+                    return response
+                fake_adb.count = 0
+                probe = {'platform': 'android', 'buildMode': 'profile',
+                         'elapsedMs': 310000, 'runId': run_id,
+                         'complete': True, 'frameBudgetMs': 16.67,
+                         'label': category, 'cache': 'cold',
+                         'device': self.live['fingerprint']}
+                raw = self.root / f'{category}-meter-log.json'
+                raw.write_text(json.dumps([
+                    {'elapsedMs': i * 16000,
+                     field: (1000 + i * 2 if category == 'power' else 30 + i * .1)}
+                    for i in range(20)]), encoding='utf-8')
+                attestation = self.root / f'{category}-attestation.json'
+                attestation.write_text(json.dumps({
+                    'schema': 1, 'kind': 'physical-meter-attestation',
+                    'category': category,
+                    'method': 'power-rail' if category == 'power' else 'thermal-zone',
+                    'runId': run_id, 'deviceSerial': self.live['serial'],
+                    'apkSha256': self.audited['sha256'],
+                    'attestedBy': 'Meter Observer',
+                    'observedAtUtc': '2026-09-27T00:00:00Z',
+                    'instrumentModel': 'Physical Meter', 'instrumentSerial': 'M-1',
+                    'uncertaintyPercent': 3, 'initialTempC': 30,
+                    'brightnessPercent': 50, 'volumePercent': 40,
+                    'rawLogPath': raw.name, 'rawLogSha256': validation.sha256(raw)}),
+                    encoding='utf-8')
+                with patch.object(validation.subprocess, 'run', side_effect=fake_adb), \
+                        patch.object(validation, 'command', return_value=foreground), \
+                        patch.object(validation, 'urlopen',
+                                     side_effect=self.probe_reply(probe)), \
+                        patch.object(validation.time, 'time_ns', side_effect=
+                                     [1000000000000000, 1000304000000000]):
+                    before = validation.capture_live_performance(
+                        self.root, category, 'before', 'candidate', self.identity,
+                        self.audited, self.live)
+                    after = validation.capture_live_performance(
+                        self.root, category, 'after', 'candidate', self.identity,
+                        self.audited, self.live, measurement_file=attestation)
+                trace = json.loads((self.root / after['path']).read_text())
+                screenshot = trace['screenshot']
+                row = {'phase': 'candidate', 'target': 'android-phone',
+                       'category': category, 'label': category, 'cache': 'cold',
+                       'device': self.live['fingerprint'], 'buildMode': 'profile',
+                       'complete': True, 'frameBudgetMs': 16.67,
+                       'artifactPath': self.audited['path'],
+                       'artifactSha256': self.audited['sha256'],
+                       'probeTraceId': after['id'], 'elapsedMs': 310000,
+                       'environment': 'physical',
+                       'measurementMethod': ('power-rail' if category == 'power'
+                                             else 'thermal-zone'),
+                       'initialTempC': 30, 'brightnessPercent': 50,
+                       'volumePercent': 40,
+                       'screenBeforePath': before['path'],
+                       'screenBeforeSha256': before['sha256'],
+                       'displayedFrameEvidencePath': screenshot['path'],
+                       'displayedFrameEvidenceSha256': screenshot['sha256'],
+                       ('energyMWh' if category == 'power' else 'tempRiseC'):
+                           trace['measurement']['metric']}
+                samples = self.root / 'candidate.jsonl'
+                samples.write_text(json.dumps(row), encoding='utf-8')
+                self.assertTrue(validation.candidate_samples_match_apk(
+                    samples, self.audited, self.live['fingerprint'], self.root,
+                    self.identity))
+                raw.write_text('[]', encoding='utf-8')
+                self.assertFalse(validation.candidate_samples_match_apk(
+                    samples, self.audited, self.live['fingerprint'], self.root,
+                    self.identity))
 
 
 if __name__ == '__main__':

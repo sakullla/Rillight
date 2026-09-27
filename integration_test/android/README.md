@@ -96,15 +96,27 @@ For formal paired performance evidence, run the profile/release probe on the
 physical phone and use `tool/phone_player_validation.py
 --capture-performance CATEGORY --capture-phase after --performance-phase
 candidate --serial SERIAL --evidence-root build/phone-player-validation`.
-`page` and `animation` use a live `/state` probe trace; `image` and `startup`
-also need a `before` capture and use the probe elapsed time after live screen
-capture as a conservative displayed-pixel bound. Put the returned unique ID in
-the JSONL row's `probeTraceId` and use the capture paths/hashes for visual rows.
-Collect baseline rows similarly with `--performance-phase baseline --artifact
-PATH_TO_INSTALLED_BASELINE_APK` before installing the candidate. Formal gate
-validation rejects free-form timings, reused traces, and network/power/thermal
-rows without a live collector; the offline comparator remains useful for
-exploration but cannot establish hardware gains alone.
+Start each run with probe `/begin`. The `after` capture consumes `/end` once and
+binds its app-generated run ID to the APK and screenshot. `image`, `startup`,
+`network`, `power` and `thermal` also need a `before` capture in that same run.
+Display time uses the probe elapsed time after live screen capture as a
+conservative bound; network stall time uses the signed time between stalled and
+recovered captures. Put the returned unique ID in the JSONL row's
+`probeTraceId` and use the capture paths/hashes for visual rows. First run
+`--audit-baseline --baseline-checkout CHECKOUT` on a separate checkout of
+frozen commit `48316fc71c8c5e19ae3af34a59168e6f8eccaa8e` after copying
+the current `integration_test/mobile_performance.dart` into it as the sole
+probe overlay. Its diff/hash is audited; this is frozen application code with
+matching instrumentation, not an unmodified frozen APK. Also run
+`--audit-performance-candidate` to build/audit the candidate profile probe APK.
+Collect each phase while its respective audited profile APK is installed;
+the three-device functional `app-probe.apk` does not expose port 8798. For
+power/thermal pass `--measurement-file FILE` at `after`: a named
+physical-meter attestation and hashed 20-reading raw log as specified in
+`tool/player_release_evidence.md`. The gate derives the metric from those raw
+readings. Reused runs, arbitrary baseline APKs, free-form timings and virtual
+power numbers fail formal acceptance; the offline comparator remains useful
+for exploratory analysis.
 
 For the candidate physical-phone gate, capture each `SCREEN_EVENTS` scenario
 twice with `tool/phone_player_validation.py --capture-scenario SCENARIO
