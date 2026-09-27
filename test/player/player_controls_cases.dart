@@ -354,6 +354,9 @@ void main() {
     expect(find.byKey(PlayerKeys.resumeContinue), findsNothing);
     await waitFor(tester, find.byKey(PlayerKeys.playPause));
 
+    expect(find.byKey(PlayerKeys.networkSpeed), findsOneWidget);
+    expect(find.text('0 KB/s'), findsOneWidget);
+    expect(find.textContaining('缓存'), findsNothing);
     expect(find.byKey(PlayerKeys.volumePercent), findsOneWidget);
     expect(find.text('100%'), findsOneWidget);
     final volumeSlider = tester.widget<Slider>(find.byKey(PlayerKeys.volume));

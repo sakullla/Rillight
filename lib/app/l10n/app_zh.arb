@@ -666,15 +666,6 @@
   "@playerNetworkSpeedTooltip": {
     "description": "Tooltip for live stream download throughput on the player chrome."
   },
-  "playerCacheUnknown": "缓存时间范围暂不可用",
-  "playerCacheEmpty": "暂无可用缓存",
-  "playerCacheFragments": "已有缓存片段",
-  "playerCacheComplete": "已缓存全片",
-  "playerCacheAhead": "前方缓存 {time}",
-  "@playerCacheAhead": {
-    "description": "Verified continuous cached duration ahead of the current playback position.",
-    "placeholders": { "time": { "type": "String" } }
-  },
   "settings": "设置",
   "@settings": {
     "description": "Top-bar entry and page title for app settings."

@@ -505,23 +505,6 @@ class AppLocalizationsZh extends AppLocalizations {
   String get playerNetworkSpeedTooltip => '实时网速';
 
   @override
-  String get playerCacheUnknown => '缓存时间范围暂不可用';
-
-  @override
-  String get playerCacheEmpty => '暂无可用缓存';
-
-  @override
-  String get playerCacheFragments => '已有缓存片段';
-
-  @override
-  String get playerCacheComplete => '已缓存全片';
-
-  @override
-  String playerCacheAhead(String time) {
-    return '前方缓存 $time';
-  }
-
-  @override
   String get settings => '设置';
 
   @override

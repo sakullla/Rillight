@@ -1030,36 +1030,6 @@ abstract class AppLocalizations {
   /// **'实时网速'**
   String get playerNetworkSpeedTooltip;
 
-  /// No description provided for @playerCacheUnknown.
-  ///
-  /// In zh, this message translates to:
-  /// **'缓存时间范围暂不可用'**
-  String get playerCacheUnknown;
-
-  /// No description provided for @playerCacheEmpty.
-  ///
-  /// In zh, this message translates to:
-  /// **'暂无可用缓存'**
-  String get playerCacheEmpty;
-
-  /// No description provided for @playerCacheFragments.
-  ///
-  /// In zh, this message translates to:
-  /// **'已有缓存片段'**
-  String get playerCacheFragments;
-
-  /// No description provided for @playerCacheComplete.
-  ///
-  /// In zh, this message translates to:
-  /// **'已缓存全片'**
-  String get playerCacheComplete;
-
-  /// Verified continuous cached duration ahead of the current playback position.
-  ///
-  /// In zh, this message translates to:
-  /// **'前方缓存 {time}'**
-  String playerCacheAhead(String time);
-
   /// Top-bar entry and page title for app settings.
   ///
   /// In zh, this message translates to:

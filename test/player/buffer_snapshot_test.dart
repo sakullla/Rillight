@@ -25,51 +25,6 @@ void main() {
     expect(() => coverage.ranges.clear(), throwsUnsupportedError);
   });
 
-  for (final direction in TextDirection.values) {
-    testWidgets(
-      'byte-only track shows islands and a neutral fallback $direction',
-      (tester) async {
-        final key = GlobalKey();
-        final coverage = BufferedByteCoverage(
-          totalBytes: 1000,
-          ranges: const [
-            BufferedByteRange(0, 300),
-            BufferedByteRange(600, 800),
-          ],
-        );
-        Future<_Pixels> render(BufferedByteCoverage? value) async {
-          await tester.pumpWidget(
-            MaterialApp(
-              home: Directionality(
-                textDirection: direction,
-                child: Center(
-                  child: RepaintBoundary(
-                    key: key,
-                    child: SizedBox(
-                      width: 100,
-                      child: BufferedByteCoverageBar(coverage: value),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          );
-          return (await tester.runAsync(() => _capture(key)))!;
-        }
-
-        final pixels = await render(coverage);
-        int x(int position) =>
-            direction == TextDirection.rtl ? 99 - position : position;
-        expect(pixels.at(x(20), 2), const Color(0xff42cbd3));
-        expect(pixels.at(x(45), 2), const Color(0xff444b53));
-        expect(pixels.at(x(70), 2), const Color(0xff42cbd3));
-        expect(pixels.at(x(90), 2), const Color(0xff444b53));
-        final neutral = await render(null);
-        expect(neutral.at(x(20), 2), const Color(0xff444b53));
-      },
-    );
-  }
-
   test('normalizes ranges without filling a cache gap', () {
     final snapshot = BufferSnapshot(
       sessionId: 3,
@@ -214,13 +169,13 @@ void main() {
                             : fraction))
                 .round();
         expect(pixels.at(x(0.1), 40), Colors.white); // Played beats cache.
-        expect(pixels.at(x(0.4), 40), const Color(0xff8eafd0));
+        expect(pixels.at(x(0.4), 40), const Color(0xff697783));
         expect(pixels.at(x(0.6), 40), const Color(0xff363c44)); // Real gap.
-        expect(pixels.at(x(0.8), 40), const Color(0xff8eafd0));
+        expect(pixels.at(x(0.8), 40), const Color(0xff697783));
         expect(pixels.at(x(0.95), 40), const Color(0xff363c44));
         expect(pixels.at(x(0.69), 40), const Color(0xff363c44));
-        expect(pixels.at(x(0.71), 40), const Color(0xff8eafd0));
-        expect(pixels.at(x(0.89), 40), const Color(0xff8eafd0));
+        expect(pixels.at(x(0.71), 40), const Color(0xff697783));
+        expect(pixels.at(x(0.89), 40), const Color(0xff697783));
         expect(pixels.at(x(0.91), 40), const Color(0xff363c44));
         expect(pixels.at(x(0.4), 37), const Color(0xff111820));
         // The thumb extends beyond the track, and cache cannot cover its center.
@@ -268,9 +223,9 @@ void main() {
     );
     final pixels = (await tester.runAsync(() => _capture(boundaryKey)))!;
     expect(pixels.at(30, 3), Colors.white);
-    expect(pixels.at(120, 3), const Color(0xff8eafd0));
+    expect(pixels.at(120, 3), const Color(0xff697783));
     expect(pixels.at(180, 3), const Color(0xff363c44));
-    expect(pixels.at(240, 3), const Color(0xff8eafd0));
+    expect(pixels.at(240, 3), const Color(0xff697783));
     expect(
       tester
           .widget<Semantics>(

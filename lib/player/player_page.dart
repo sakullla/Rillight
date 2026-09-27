@@ -23,7 +23,7 @@ import 'package:rillight/player/danmaku/danmaku_panel.dart';
 import 'package:rillight/player/danmaku/danmaku_renderer.dart';
 import 'package:rillight/player/danmaku/dandanplay_models.dart';
 import 'package:rillight/player/rillight_video_backend.dart';
-import 'package:rillight/player/player_cache_status.dart';
+import 'package:rillight/player/network_throughput.dart';
 import 'package:rillight/player/playback_models.dart';
 import 'package:rillight/player/playback_wake_lock.dart';
 import 'package:rillight/player/player_bindings.dart';
@@ -39,8 +39,8 @@ import 'package:rillight/player/video_backend.dart';
 const double kPlayerChromeBarExtent =
     AppSpacing.sm + kWindowChromeHeight + AppSpacing.sm + AppSpacing.lg;
 
-/// 顶栏网速和缓存状态占用宽度,给标题右侧留空。
-const double kPlayerNetworkSpeedExtent = 276;
+/// 顶栏实时网速占用宽度,给标题右侧留空。
+const double kPlayerNetworkSpeedExtent = 148;
 
 /// 剧集行固定高度,给 ListView 按 index 做 O(1) jumpTo。
 ///
@@ -871,14 +871,14 @@ class _PlayerChromeBar extends StatelessWidget {
                       padding: const EdgeInsets.only(right: AppSpacing.sm),
                       child: SizedBox(
                         width: statusWidth,
-                        child: PlayerCacheStatus(
-                          key: PlayerKeys.networkSpeed,
-                          snapshot: controller.bufferSnapshot,
-                          bytesPerSecond: controller.cacheSpeedBytesPerSec,
-                          position: controller.position,
-                          duration: controller.duration,
-                          color: theme.colorScheme.onSurface.withValues(
-                            alpha: 0.86,
+                        child: Tooltip(
+                          message: l10n.playerNetworkSpeedTooltip,
+                          child: NetworkSpeedReadout(
+                            key: PlayerKeys.networkSpeed,
+                            bytesPerSecond: controller.cacheSpeedBytesPerSec,
+                            color: theme.colorScheme.onSurface.withValues(
+                              alpha: 0.86,
+                            ),
                           ),
                         ),
                       ),

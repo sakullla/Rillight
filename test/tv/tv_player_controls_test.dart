@@ -12,7 +12,7 @@ import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/player/buffer_snapshot.dart';
 import 'package:rillight/player/buffered_ranges_track.dart';
 import 'package:rillight/player/player_bindings.dart';
-import 'package:rillight/player/player_cache_status.dart';
+import 'package:rillight/player/network_throughput.dart';
 import 'package:rillight/player/player_controller.dart';
 import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
@@ -234,12 +234,12 @@ void main() {
       video.emitEvent(VideoEventKind.bufferSnapshot, snapshot);
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));
-      final status = tester.widget<PlayerCacheStatus>(
-        find.byType(PlayerCacheStatus),
+      final speed = tester.widget<NetworkSpeedReadout>(
+        find.byKey(const Key('tv-player-network-speed')),
       );
-      expect(status.snapshot, same(snapshot));
-      expect(status.bytesPerSecond, 0);
-      expect(status.textStyle!.fontSize, greaterThanOrEqualTo(20));
+      expect(speed.bytesPerSecond, 0);
+      expect(speed.textStyle!.fontSize, greaterThanOrEqualTo(20));
+      expect(find.textContaining('缓存'), findsNothing);
       expect(
         tester
             .widget<BufferedRangesProgressIndicator>(

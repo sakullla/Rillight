@@ -2,7 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:rillight/app/tv_widgets.dart';
-import 'package:rillight/player/player_cache_status.dart';
+import 'package:rillight/player/network_throughput.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
@@ -678,14 +678,18 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                       Text(c.trackFailure!),
                                     if (c.backgroundReleased)
                                       Text(l.mobileBackgroundPaused),
-                                    PlayerCacheStatus(
-                                      key: const Key('tv-player-cache-status'),
-                                      snapshot: c.bufferSnapshot,
-                                      bytesPerSecond: c.cacheSpeedBytesPerSec,
-                                      position: c.position,
-                                      duration: c.duration,
-                                      textStyle: const TextStyle(fontSize: 20),
-                                      color: Colors.white70,
+                                    Tooltip(
+                                      message: l.playerNetworkSpeedTooltip,
+                                      child: NetworkSpeedReadout(
+                                        key: const Key(
+                                          'tv-player-network-speed',
+                                        ),
+                                        bytesPerSecond: c.cacheSpeedBytesPerSec,
+                                        textStyle: const TextStyle(
+                                          fontSize: 20,
+                                        ),
+                                        color: Colors.white70,
+                                      ),
                                     ),
                                     const SizedBox(height: 12),
                                     _timeline(c),

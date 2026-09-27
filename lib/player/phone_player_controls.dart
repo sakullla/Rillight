@@ -402,7 +402,26 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                 ),
               ),
             if (c.isBuffering && !c.loading)
-              const LinearProgressIndicator(minHeight: 2),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const SizedBox.square(
+                      dimension: 12,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      l.playerBuffering,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Colors.white70,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             BufferedRangesTrack(
               snapshot: c.bufferSnapshot,
               duration: c.duration,
@@ -429,14 +448,6 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                 },
               ),
             ),
-            if (!c.bufferSnapshot.isKnown)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(24, 0, 24, 4),
-                child: BufferedByteCoverageBar(
-                  key: const Key('mobile-player-byte-cache-track'),
-                  coverage: c.bufferSnapshot.byteCoverage,
-                ),
-              ),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 8),
               child: landscape

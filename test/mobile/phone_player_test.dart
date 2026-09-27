@@ -1522,7 +1522,7 @@ void main() {
     const Size(800, 360),
     const Size(915, 412),
   ]) {
-    testWidgets('phone shortcuts and cache remain usable at $size', (
+    testWidgets('phone shortcuts and single timeline remain usable at $size', (
       tester,
     ) async {
       final backend = FakeVideoBackend();
@@ -1605,12 +1605,11 @@ void main() {
       );
       await tester.pump();
       expect(find.text('缓存时间范围暂不可用'), findsNothing);
-      final byteTrack = find.byKey(const Key('mobile-player-byte-cache-track'));
-      expect(byteTrack, findsOneWidget);
       expect(
-        tester.widget<BufferedByteCoverageBar>(byteTrack).coverage!.ranges,
-        const [BufferedByteRange(0, 300), BufferedByteRange(600, 800)],
+        find.byKey(const Key('mobile-player-byte-cache-track')),
+        findsNothing,
       );
+      expect(find.byType(BufferedRangesTrack), findsOneWidget);
       backend.emitEvent(
         VideoEventKind.bufferSnapshot,
         BufferSnapshot.empty(
@@ -1625,9 +1624,17 @@ void main() {
       await tester.pump();
       expect(find.text('缓存时间范围暂不可用'), findsNothing);
       expect(
-        tester.widget<BufferedByteCoverageBar>(byteTrack).coverage,
-        isNull,
+        find.byKey(const Key('mobile-player-byte-cache-track')),
+        findsNothing,
       );
+      expect(find.byType(BufferedRangesTrack), findsOneWidget);
+
+      backend.emitEvent(VideoEventKind.buffering, true);
+      await tester.pump();
+      expect(find.byType(LinearProgressIndicator), findsNothing);
+      expect(find.text('正在缓冲…'), findsOneWidget);
+      backend.emitEvent(VideoEventKind.buffering, false);
+      await tester.pump();
 
       await tester.tap(find.byKey(const Key('mobile-player-speed')));
       await tester.pump();
