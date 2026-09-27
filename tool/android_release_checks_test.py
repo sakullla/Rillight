@@ -270,6 +270,31 @@ class FixtureTests(unittest.TestCase):
         self.assertEqual(caught.exception.code, 404)
         caught.exception.close()
 
+    def test_media_fault_records_run_bound_503_and_recovery(self):
+        run_id = 'a' * 32
+        self.request('/__control', {'media_fail': True,
+                                    'validationRunId': run_id}).close()
+        with self.assertRaises(urllib.error.HTTPError) as caught:
+            self.request('/media/android-tracks.mkv')
+        self.assertEqual(caught.exception.code, 503)
+        caught.exception.close()
+        self.request('/__control', {'media_fail': False,
+                                    'validationRunId': run_id}).close()
+        with self.request('/media/android-tracks.mkv', headers={
+                'X-Emby-Token': 'synthetic-mobile-token',
+                'Range': 'bytes=0-9'}) as response:
+            self.assertEqual(response.status, 206)
+            self.assertEqual(len(response.read()), 10)
+        with self.request('/__state') as response:
+            state = json.load(response)
+        controls = [event for event in state['control_events'] if event['runId'] == run_id]
+        requests = [event for event in state['requests'] if event['path'] ==
+                    '/media/android-tracks.mkv']
+        self.assertEqual([event['mediaFail'] for event in controls], [True, False])
+        self.assertEqual([event['status'] for event in requests[-2:]], [503, 206])
+        self.assertGreater(requests[-2]['ordinal'], controls[0]['requestCount'])
+        self.assertGreater(requests[-1]['ordinal'], controls[1]['requestCount'])
+
     def test_pagination_keeps_total(self):
         with self.request('/Users/mobile-user/Items?ParentId=movies&StartIndex=50&Limit=50') as response:
             result = json.load(response)

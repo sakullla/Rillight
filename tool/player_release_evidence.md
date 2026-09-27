@@ -177,9 +177,17 @@ paths/hashes. Baseline capture uses `--performance-phase baseline`; its installe
 APK must equal the frozen audited build. The gate requires row timings/frame
 arrays to match the stored one-time probe trace. Display
 latency uses the probe's elapsed time after the live screen capture, an upper
-bound on the first visible pixel. Network stall time is the signed host interval
-between live stalled/recovered captures, so it is an observed bound on the
-stall, not a decoder event timestamp. Power/thermal `after` capture additionally
+bound on the first visible pixel. For `network`, play the synthetic
+`multi-source` item from the loopback fixture on port 8784 with an active player
+probe run (`adb -s SERIAL reverse tcp:8784 tcp:8784` routes the phone to that
+synthetic host service). The `before` command injects `media_fail`, waits for an actual 503
+media request and a `PlayerController.isBuffering` transition, then captures
+the stalled screen. The `after` command clears the fault, waits for a successful
+media request and the controller's recovery transition, then captures the
+recovered screen. `stallMs` is the difference between those player event times.
+The gate requires the signed fixture controls, requests, event order and visible
+pixel change; a label, two arbitrary screenshots or screenshot interval cannot
+stand in for an observed stall. Power/thermal `after` capture additionally
 requires `--measurement-file FILE`: a schema-1
 `physical-meter-attestation` with `category`, `runId`, `deviceSerial`,
 `apkSha256`, `method` (`power-rail` or `thermal-zone`), named `attestedBy`,

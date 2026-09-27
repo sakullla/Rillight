@@ -15,6 +15,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/main.dart' as production;
+import 'package:rillight/player/mobile_player_page.dart';
+import 'package:rillight/player/player_controller.dart';
 
 final _probe = _PageProbe();
 
@@ -40,9 +42,10 @@ class _PageProbe {
         sample.frames,
         WidgetsBinding.instance.currentSystemFrameTimeStamp.inMicroseconds,
       );
-      if (!sample.contentTimedOut && !sample.complete) {
-        WidgetsBinding.instance.addPostFrameCallback((_) => _sample(sample));
-      }
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _bindPhonePlayer(sample);
+        if (!sample.contentTimedOut && !sample.complete) _sample(sample);
+      });
     });
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 8798);
     server.listen((request) async {
@@ -111,6 +114,7 @@ class _PageProbe {
             // their frames. Keep this window alive while a new one begins.
             await _timings.end(sample.frames);
             sample.ended = true;
+            sample.unbindPlayer();
             request.response.write(jsonEncode(_record(sample)));
           }
         } else {
@@ -153,6 +157,10 @@ class _PageProbe {
       'pendingFrameTimings': sample?.frames.pendingFrameTimings ?? 0,
       'missingFrameTimings': sample?.frames.missingFrameTimings ?? 0,
       'frameTimingsComplete': sample?.frames.frameTimingsComplete ?? false,
+      'playerAttached': sample?.playerEverAttached ?? false,
+      'playerItemId': sample?.playerItemId,
+      'playerBuffering': sample?.lastBuffering,
+      'bufferingEvents': sample?.bufferingEvents ?? const [],
       'contentKey': sample?.contentKey,
       'actionKey': sample?.actionKey,
       'firstContentMs': sample?.contentMs,
@@ -171,6 +179,26 @@ class _PageProbe {
       'elapsedMs': (sample?.clock.elapsedMicroseconds ?? 0) / 1000,
       'complete': sample?.complete ?? false,
     };
+  }
+
+  void _bindPhonePlayer(_PageSample sample) {
+    if (!identical(_active, sample) || sample.trackedPlayer != null) return;
+    final root = WidgetsBinding.instance.rootElement;
+    if (root == null) return;
+    void visit(Element element) {
+      if (sample.trackedPlayer != null) return;
+      if (element is StatefulElement &&
+          element.state is MobilePlayerPageState) {
+        final controller = (element.state as MobilePlayerPageState).controller;
+        if (controller != null) {
+          sample.bindPlayer(controller);
+          return;
+        }
+      }
+      element.visitChildren(visit);
+    }
+
+    visit(root);
   }
 
   void _sample(_PageSample sample) {
@@ -258,6 +286,39 @@ class _PageSample {
   String? displayedFrameEvidenceSha256;
   bool contentTimedOut = false;
   bool ended = false;
+  PlayerController? trackedPlayer;
+  bool playerEverAttached = false;
+  String? playerItemId;
+  VoidCallback? _playerListener;
+  bool? lastBuffering;
+  final List<Map<String, Object>> bufferingEvents = [];
+
+  void bindPlayer(PlayerController player) {
+    if (trackedPlayer != null) return;
+    trackedPlayer = player;
+    playerEverAttached = true;
+    playerItemId = player.itemId;
+    lastBuffering = player.isBuffering;
+    void observe() {
+      final buffering = player.isBuffering;
+      if (buffering == lastBuffering) return;
+      lastBuffering = buffering;
+      bufferingEvents.add({
+        'buffering': buffering,
+        'elapsedMs': clock.elapsedMicroseconds / 1000,
+      });
+    }
+
+    _playerListener = observe;
+    player.addListener(observe);
+  }
+
+  void unbindPlayer() {
+    trackedPlayer?.removeListener(_playerListener!);
+    trackedPlayer = null;
+    _playerListener = null;
+  }
+
   bool get complete => contentMs != null && operableMs != null;
 }
 

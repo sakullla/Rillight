@@ -356,7 +356,7 @@ def _validation_app_foreground(serial):
 
 
 def capture_live_screen(root, scenario, phase, identity, audited_apk, live_device,
-                        *, run_id=None):
+                        *, run_id=None, extra_payload=None):
     """Capture only adb output; caller cannot provide a PNG path or pixel bytes."""
     if scenario not in (*SCREEN_EVENTS, *PERFORMANCE_CATEGORIES) or phase not in ('before', 'after'):
         raise ValueError('Unknown screen capture scenario or phase')
@@ -389,6 +389,8 @@ def capture_live_screen(root, scenario, phase, identity, audited_apk, live_devic
                'sha256': sha256(path), 'captured_unix_ns': time.time_ns()}
     if run_id is not None:
         payload['run_id'] = run_id
+    if extra_payload is not None:
+        payload.update(extra_payload)
     key = _capture_key(root, create=True)
     if key is None:
         raise RuntimeError('Capture ledger exists without its local signing key')
@@ -416,6 +418,80 @@ def _read_live_probe(serial, endpoint):
             state['elapsedMs'] < 0):
         raise RuntimeError('Live app probe state is unavailable or unsuitable')
     return state
+
+
+def _fixture_json(endpoint, body=None):
+    url = 'http://127.0.0.1:8784/' + endpoint
+    request = Request(url, method='POST' if body is not None else 'GET',
+                      data=json.dumps(body).encode('utf-8') if body is not None else None,
+                      headers={'Content-Type': 'application/json'} if body is not None else {})
+    with urlopen(request, timeout=10) as response:
+        return json.loads(response.read())
+
+
+def _fixture_media_requests(state, *, after_count, status):
+    requests = state.get('requests') if isinstance(state, dict) else None
+    if not isinstance(requests, list):
+        return []
+    # /__state keeps only the latest 80; losing the fault request fails closed.
+    return [row for row in requests if isinstance(row, dict) and
+            row.get('path') in ('/media/android-tracks.mkv', '/media/alternate.mkv') and
+            row.get('status') in status and
+            isinstance(row.get('ordinal'), int) and row['ordinal'] > after_count]
+
+
+def _fixture_control_media_fail(run_id, enabled):
+    before = _fixture_json('__state')
+    if not isinstance(before, dict) or not isinstance(before.get('conditions'), dict):
+        raise RuntimeError('Local synthetic media fixture is unavailable')
+    _fixture_json('__control', {'media_fail': enabled, 'validationRunId': run_id})
+    after = _fixture_json('__state')
+    events = after.get('control_events') if isinstance(after, dict) else None
+    if (not isinstance(events, list) or not events or
+            events[-1].get('runId') != run_id or
+            events[-1].get('mediaFail') is not enabled or
+            after.get('conditions', {}).get('media_fail') is not enabled):
+        raise RuntimeError('Local fixture fault transition was not recorded')
+    return events[-1], after
+
+
+def _network_transition(serial, active, *, starting, before_capture=None):
+    run_id = active['runId']
+    if (active.get('playerAttached') is not True or
+            active.get('playerItemId') != 'multi-source' or
+            active.get('playerBuffering') is not (not starting) or
+            not isinstance(active.get('bufferingEvents'), list)):
+        raise RuntimeError('Synthetic multi-source player is not in the expected state')
+    current_fixture = _fixture_json('__state')
+    expected_fault = not starting
+    if current_fixture.get('conditions', {}).get('media_fail') is not expected_fault:
+        raise RuntimeError('Synthetic media fixture begins in the wrong fault state')
+    if before_capture is not None:
+        begin = before_capture.get('networkFault')
+        if not isinstance(begin, dict) or begin.get('bufferEvent') not in active['bufferingEvents']:
+            raise RuntimeError('Buffering start event is not present in this player run')
+    previous_events = len(active['bufferingEvents'])
+    control, _ = _fixture_control_media_fail(run_id, starting)
+    deadline = time.monotonic() + 20
+    wanted_buffering = starting
+    wanted_status = (503,) if starting else (200, 206)
+    while time.monotonic() < deadline:
+        state = _read_live_probe(serial, 'state')
+        fixture = _fixture_json('__state')
+        events = state.get('bufferingEvents')
+        new_events = events[previous_events:] if isinstance(events, list) else []
+        matching = [event for event in new_events if isinstance(event, dict) and
+                    event.get('buffering') is wanted_buffering and
+                    isinstance(event.get('elapsedMs'), (int, float))]
+        media = _fixture_media_requests(fixture,
+                                        after_count=control['requestCount'],
+                                        status=wanted_status)
+        if (state.get('runId') == run_id and state.get('playerItemId') == 'multi-source' and
+                matching and media and state.get('playerBuffering') is wanted_buffering):
+            return {'control': control, 'mediaRequest': media[0],
+                    'bufferEvent': matching[0], 'fixtureCondition': starting}
+        time.sleep(.1)
+    raise RuntimeError('No observed media fault/buffering transition on the player')
 
 
 def _physical_measurement_valid(measurement, category, probe, artifact,
@@ -503,8 +579,17 @@ def capture_live_performance(root, category, phase, sample_phase, identity,
                            entry['payload'].get('sha256')) is not None)
         except (OSError, ValueError, TypeError, StopIteration):
             raise RuntimeError('Matching live before capture is required') from None
-    screenshot = capture_live_screen(root, category, phase, identity, artifact,
-                                     live_device, run_id=active['runId'])
+    network_transition = None
+    if category == 'network':
+        network_transition = _network_transition(serial, active,
+                                                 starting=phase == 'before',
+                                                 before_capture=before_capture)
+    screenshot = capture_live_screen(
+        root, category, phase, identity, artifact, live_device,
+        run_id=active['runId'],
+        extra_payload=({'networkFault' if phase == 'before' else
+                        'networkRecovery': network_transition}
+                       if network_transition is not None else None))
     if phase == 'before':
         return screenshot
     start_ns = time.monotonic_ns()
@@ -539,7 +624,8 @@ def capture_live_performance(root, category, phase, sample_phase, identity,
                'working_tree_sha256': identity['working_tree_sha256']}
     if category == 'network':
         payload['observed_stall_ms'] = (
-            screenshot['captured_unix_ns'] - before_capture['captured_unix_ns']) / 1e6
+            screenshot['networkRecovery']['bufferEvent']['elapsedMs'] -
+            before_capture['networkFault']['bufferEvent']['elapsedMs'])
     if category in ('power', 'thermal'):
         payload['observed_metric'] = measurement['metric']
     key = _capture_key(root, create=True)
@@ -786,6 +872,61 @@ def _signed_performance_records(root):
     return records
 
 
+def _network_fault_evidence_valid(before, after, probe, row, root):
+    start = before.get('networkFault')
+    recovered = after.get('networkRecovery')
+    if not isinstance(start, dict) or not isinstance(recovered, dict):
+        return False
+    first_event = start.get('bufferEvent')
+    last_event = recovered.get('bufferEvent')
+    begin_control = start.get('control')
+    end_control = recovered.get('control')
+    failed = start.get('mediaRequest')
+    succeeded = recovered.get('mediaRequest')
+    if not all(isinstance(value, dict) for value in
+               (first_event, last_event, begin_control, end_control,
+                failed, succeeded)):
+        return False
+    events = probe.get('bufferingEvents')
+    if (probe.get('playerAttached') is not True or
+            probe.get('playerItemId') != 'multi-source' or
+            probe.get('playerBuffering') is not False or
+            not isinstance(events, list) or
+            first_event not in events or last_event not in events or
+            events.index(first_event) >= events.index(last_event) or
+            first_event.get('buffering') is not True or
+            last_event.get('buffering') is not False or
+            start.get('fixtureCondition') is not True or
+            recovered.get('fixtureCondition') is not False or
+            begin_control.get('runId') != probe.get('runId') or
+            end_control.get('runId') != probe.get('runId') or
+            begin_control.get('mediaFail') is not True or
+            end_control.get('mediaFail') is not False or
+            not isinstance(begin_control.get('timeNs'), int) or
+            not isinstance(end_control.get('timeNs'), int) or
+            begin_control['timeNs'] >= end_control['timeNs'] or
+            failed.get('path') not in ('/media/android-tracks.mkv', '/media/alternate.mkv') or
+            succeeded.get('path') not in ('/media/android-tracks.mkv', '/media/alternate.mkv') or
+            failed.get('status') != 503 or
+            succeeded.get('status') not in (200, 206) or
+            not isinstance(failed.get('response_time_ns'), int) or
+            not isinstance(succeeded.get('response_time_ns'), int) or
+            failed['response_time_ns'] < begin_control['timeNs'] or
+            succeeded['response_time_ns'] < end_control['timeNs'] or
+            not isinstance(failed.get('ordinal'), int) or
+            not isinstance(succeeded.get('ordinal'), int) or
+            failed['ordinal'] <= begin_control.get('requestCount', -1) or
+            succeeded['ordinal'] <= end_control.get('requestCount', -1) or
+            not isinstance(first_event.get('elapsedMs'), (int, float)) or
+            not isinstance(last_event.get('elapsedMs'), (int, float))):
+        return False
+    stall_ms = last_event['elapsedMs'] - first_event['elapsedMs']
+    return (0 < stall_ms <= probe.get('elapsedMs', -1) and
+            row.get('stallMs') == stall_ms and
+            _screen_evidence_valid(row, root / 'candidate.jsonl',
+                                   prefix='displayedFrame'))
+
+
 def _performance_row_bound(row, payload, root):
     trace_file = _safe_file(root, payload.get('path'), payload.get('sha256'))
     if trace_file is None:
@@ -860,8 +1001,8 @@ def _performance_row_bound(row, payload, root):
         if row.get('elapsedMs') != probe.get('elapsedMs') or span_ms > probe['elapsedMs']:
             return False
         if category == 'network':
-            return row.get('stallMs') == span_ms and \
-                payload.get('observed_stall_ms') == span_ms
+            return (_network_fault_evidence_valid(before, after, probe, row, root) and
+                    payload.get('observed_stall_ms') == row.get('stallMs'))
         if span_ms < 300000 or probe['elapsedMs'] < 300000:
             return False
         measurement = trace.get('measurement')
@@ -946,7 +1087,7 @@ def verify_candidate(evidence_root, *, run_android=True):
     if not checks['native_sdk']:
         errors.append('Three-ABI Android core SDK input unavailable')
     try:
-        adb = command('adb', 'devices', '-l') if checks['native_sdk'] else None
+        adb = command('adb', 'devices', '-l')
     except OSError:
         adb = None
     serials = [] if adb is None or adb.returncode else [

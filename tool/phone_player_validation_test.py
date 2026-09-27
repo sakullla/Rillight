@@ -448,7 +448,37 @@ class PhoneValidationTest(unittest.TestCase):
         self.assertFalse(validation.candidate_samples_match_apk(
             samples, self.audited, self.live['fingerprint'], self.root, self.identity))
 
-    def test_live_network_stall_uses_signed_capture_timestamps(self):
+    def test_network_fault_injection_waits_for_failed_media_and_player_buffering(self):
+        run_id = '8' * 32
+        state = {'fault': False, 'control': []}
+        def fixture(endpoint, body=None):
+            if endpoint == '__control':
+                state['fault'] = body['media_fail']
+                state['control'].append({'runId': body['validationRunId'],
+                                         'mediaFail': state['fault'],
+                                         'timeNs': 100, 'requestCount': 0})
+                return {'media_fail': state['fault']}
+            return {'conditions': {'media_fail': state['fault']},
+                    'control_events': list(state['control']),
+                    'requests': ([{'path': '/media/android-tracks.mkv',
+                                   'status': 503, 'ordinal': 1}]
+                                 if state['fault'] else [])}
+        def probe(*_):
+            return {'runId': run_id, 'playerItemId': 'multi-source',
+                    'playerBuffering': True,
+                    'bufferingEvents': [{'buffering': True, 'elapsedMs': 800}]}
+        active = {'runId': run_id, 'playerAttached': True,
+                  'playerItemId': 'multi-source', 'playerBuffering': False,
+                  'bufferingEvents': []}
+        with patch.object(validation, '_fixture_json', side_effect=fixture), \
+                patch.object(validation, '_read_live_probe', side_effect=probe):
+            result = validation._network_transition('physical-test', active,
+                                                    starting=True)
+        self.assertEqual(result['mediaRequest']['status'], 503)
+        self.assertEqual(result['bufferEvent']['elapsedMs'], 800)
+        self.assertEqual(result['control']['runId'], run_id)
+
+    def test_live_network_stall_uses_fixture_and_player_events(self):
         frames = []
         for color in ('black', 'red'):
             frame = io.BytesIO()
@@ -464,10 +494,30 @@ class PhoneValidationTest(unittest.TestCase):
         probe = {'platform': 'android', 'buildMode': 'profile',
                  'elapsedMs': 3500, 'runId': '5' * 32,
                  'complete': True, 'frameBudgetMs': 16.67,
-                 'label': 'outage', 'cache': 'cold', 'device': self.live['fingerprint']}
+                 'label': 'outage', 'cache': 'cold', 'device': self.live['fingerprint'],
+                 'playerAttached': True, 'playerItemId': 'multi-source',
+                 'playerBuffering': False,
+                 'bufferingEvents': [{'buffering': True, 'elapsedMs': 1000},
+                                     {'buffering': False, 'elapsedMs': 2500}]}
+        start = {'control': {'runId': probe['runId'], 'mediaFail': True,
+                             'timeNs': 100, 'requestCount': 5},
+                 'mediaRequest': {'path': '/media/android-tracks.mkv',
+                                  'status': 503, 'ordinal': 6,
+                                  'response_time_ns': 150},
+                 'bufferEvent': probe['bufferingEvents'][0],
+                 'fixtureCondition': True}
+        recovered = {'control': {'runId': probe['runId'], 'mediaFail': False,
+                                 'timeNs': 200, 'requestCount': 6},
+                     'mediaRequest': {'path': '/media/android-tracks.mkv',
+                                      'status': 206, 'ordinal': 7,
+                                      'response_time_ns': 250},
+                     'bufferEvent': probe['bufferingEvents'][1],
+                     'fixtureCondition': False}
         with patch.object(validation.subprocess, 'run', side_effect=fake_adb), \
                 patch.object(validation, 'command', return_value=foreground), \
                 patch.object(validation, 'urlopen', side_effect=self.probe_reply(probe)), \
+                patch.object(validation, '_network_transition',
+                             side_effect=[start, recovered]), \
                 patch.object(validation.time, 'time_ns', side_effect=
                              [1000000000000000, 1000002000000000]):
             before = validation.capture_live_performance(
@@ -482,16 +532,31 @@ class PhoneValidationTest(unittest.TestCase):
                'buildMode': 'profile', 'complete': True, 'frameBudgetMs': 16.67,
                'artifactPath': self.audited['path'],
                'artifactSha256': self.audited['sha256'], 'probeTraceId': after['id'],
-               'elapsedMs': 3500, 'stallMs': 2000,
+               'elapsedMs': 3500, 'stallMs': 1500,
                'screenBeforePath': before['path'], 'screenBeforeSha256': before['sha256'],
                'displayedFrameEvidencePath': screenshot['path'],
-               'displayedFrameEvidenceSha256': screenshot['sha256']}
+               'displayedFrameEvidenceSha256': screenshot['sha256'],
+               'displayedFrameClockUncertaintyMs': 5,
+               'screenPixelChangeObserved': True,
+               'screenRegion': [0, 0, 100, 100]}
         samples = self.root / 'candidate.jsonl'
         samples.write_text(json.dumps(row), encoding='utf-8')
         self.assertTrue(validation.candidate_samples_match_apk(
             samples, self.audited, self.live['fingerprint'], self.root, self.identity))
         row['stallMs'] = 1
         samples.write_text(json.dumps(row), encoding='utf-8')
+        self.assertFalse(validation.candidate_samples_match_apk(
+            samples, self.audited, self.live['fingerprint'], self.root, self.identity))
+        row['stallMs'] = 1500
+        samples.write_text(json.dumps(row), encoding='utf-8')
+        ledger = self.root / 'capture-ledger.json'
+        records = json.loads(ledger.read_text())
+        network_start = next(record for record in records if
+                             record['payload'].get('networkFault') is not None)
+        network_start['payload']['networkFault']['mediaRequest']['status'] = 200
+        network_start['signature'] = validation._capture_signature(
+            validation._capture_key(self.root), network_start['payload'])
+        ledger.write_text(json.dumps(records), encoding='utf-8')
         self.assertFalse(validation.candidate_samples_match_apk(
             samples, self.audited, self.live['fingerprint'], self.root, self.identity))
 

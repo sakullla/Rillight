@@ -68,6 +68,7 @@ positions = {'movie-01': 20000000}
 played = set()
 reports = []
 requests = []
+control_events = []
 token = 'synthetic-mobile-token'
 user = {'Id': 'mobile-user', 'Name': 'mobile',
         'Configuration': {'EnableNextEpisodeAutoPlay': False},
@@ -183,6 +184,11 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     def reply(self, value, status=200, mime='application/json'):
+        record = getattr(self, '_request_record', None)
+        if record is not None:
+            with lock:
+                record['status'] = status
+                record['response_time_ns'] = time.time_ns()
         body = value if isinstance(value, bytes) else json.dumps(value, ensure_ascii=False).encode()
         self.send_response(status)
         self.send_header('Content-Type', mime)
@@ -204,7 +210,10 @@ class Handler(BaseHTTPRequestHandler):
         query = {key.lower(): values[0] for key, values in parse_qs(parsed.query).items()}
         if not path.startswith('/__'):
             with lock:
-                requests.append({'method': self.command, 'path': path, 'time': time.time()})
+                self._request_record = {'method': self.command, 'path': path,
+                                        'time': time.time(),
+                                        'ordinal': len(requests) + 1}
+                requests.append(self._request_record)
         return path, query
 
     def authorized(self, query):
@@ -259,11 +268,16 @@ class Handler(BaseHTTPRequestHandler):
             start = int(match[1])
             end = min(end, int(match[2])) if match[2] else end
         if start > end:
+            with lock:
+                self._request_record.update(status=416, response_time_ns=time.time_ns())
             self.send_response(416)
             self.send_header('Content-Range', f'bytes */{size}')
             self.send_header('Content-Length', '0')
             self.end_headers()
             return
+        with lock:
+            self._request_record.update(status=206 if match else 200,
+                                        response_time_ns=time.time_ns())
         self.send_response(206 if match else 200)
         self.send_header('Content-Type', 'application/vnd.apple.mpegurl' if target.suffix == '.m3u8' else mimetypes.guess_type(target)[0] or 'application/octet-stream')
         self.send_header('Content-Length', str(end - start + 1))
@@ -289,7 +303,8 @@ class Handler(BaseHTTPRequestHandler):
         if path == '/__state':
             with lock:
                 state = {'conditions': dict(conditions), 'request_count': len(requests),
-                         'report_count': len(reports), 'reports': reports[-40:], 'requests': requests[-80:]}
+                         'report_count': len(reports), 'reports': reports[-40:],
+                         'requests': requests[-80:], 'control_events': control_events[-80:]}
             self.reply(state)
             return
         if path == '/System/Info/Public':
@@ -341,6 +356,11 @@ class Handler(BaseHTTPRequestHandler):
                 for key, value in body.items():
                     if key in conditions:
                         conditions[key] = value
+                if 'media_fail' in body:
+                    control_events.append({'runId': body.get('validationRunId'),
+                                           'mediaFail': bool(conditions['media_fail']),
+                                           'timeNs': time.time_ns(),
+                                           'requestCount': len(requests)})
             self.reply(conditions)
             return
         if path.endswith('/AuthenticateByName'):

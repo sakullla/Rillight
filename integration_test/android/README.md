@@ -100,8 +100,13 @@ Start each run with probe `/begin`. The `after` capture consumes `/end` once and
 binds its app-generated run ID to the APK and screenshot. `image`, `startup`,
 `network`, `power` and `thermal` also need a `before` capture in that same run.
 Display time uses the probe elapsed time after live screen capture as a
-conservative bound; network stall time uses the signed time between stalled and
-recovered captures. Put the returned unique ID in the JSONL row's
+conservative bound. For `network`, play the local fixture's `multi-source`
+item after forwarding its loopback endpoint with `adb -s SERIAL reverse
+tcp:8784 tcp:8784`; keep the synthetic fixture running on host port 8784.
+The before/after commands inject and clear its media fault, require 503
+then successful media requests, and capture real phone player buffering and
+recovery events plus changing screen pixels. `stallMs` comes from those player
+event timestamps, not capture spacing. Put the returned unique ID in the JSONL row's
 `probeTraceId` and use the capture paths/hashes for visual rows. First run
 `--audit-baseline --baseline-checkout CHECKOUT` on a separate checkout of
 frozen commit `48316fc71c8c5e19ae3af34a59168e6f8eccaa8e` after copying
