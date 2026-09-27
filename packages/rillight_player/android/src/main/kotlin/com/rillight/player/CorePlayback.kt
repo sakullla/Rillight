@@ -12,9 +12,12 @@ import android.os.Handler
 import android.view.Surface
 import io.flutter.plugin.common.MethodChannel
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.locks.ReentrantLock
+import kotlin.concurrent.withLock
 
 /** One owner has at most one ABI6 core. Shutdown and reopen run off the UI thread. */
 internal class CorePlayback(
@@ -35,6 +38,8 @@ internal class CorePlayback(
     private val operation = AtomicLong()
     private val surfaceLock = Any()
     private val outputLock = Any()
+    private val outputWaitLock = ReentrantLock()
+    private val outputWake = outputWaitLock.newCondition()
     private var surface: Surface? = null
     private var audioOutput: CoreAudioOutput? = null
     private var running: Running? = null
@@ -62,6 +67,8 @@ internal class CorePlayback(
     private var lastPlaying = false
     private var scaleMode = "fit"
     private var lastHardware: Int? = null
+    private var preferredHardware = 8
+    private var lastDecoderCheckMs = 0L
     @Volatile private var volume = 1f
     @Volatile var session = ""
         private set
@@ -95,7 +102,10 @@ internal class CorePlayback(
 
     override fun setSurface(surface: Surface?) {
         synchronized(surfaceLock) { this.surface = surface }
+        wakeOutput()
     }
+
+    private fun wakeOutput() = outputWaitLock.withLock { outputWake.signalAll() }
 
     fun setScale(mode: String?) {
         scaleMode = if (mode == "fill") "fill" else "fit"
@@ -116,6 +126,7 @@ internal class CorePlayback(
         val revision = generation.incrementAndGet()
         val previous = running
         previous?.alive?.set(false)
+        wakeOutput()
         running = null
         cancelPending("superseded")
         abandonFocus()
@@ -137,6 +148,8 @@ internal class CorePlayback(
         lastPlaying = false
         mapping = emptyMap()
         lastHardware = null
+        this.preferredHardware = preferredHardware
+        lastDecoderCheckMs = 0L
         operation.set(0)
         handler.removeCallbacks(openTimeout)
         handler.postDelayed(openTimeout, 22_000)
@@ -179,6 +192,7 @@ internal class CorePlayback(
                 } else if (!requestFocus()) {
                     desiredPaused = true
                     CoreNative.play(handle, false, operation.incrementAndGet())
+                    abandonFocus()
                     emit("interruption", "audioFocus")
                 }
                 active.thread = Thread({ pump(active) }, "rillight-android-core-$revision").also { it.start() }
@@ -198,12 +212,19 @@ internal class CorePlayback(
                     if (!requestFocus()) {
                         desiredPaused = true
                         CoreNative.play(handle, false, operation.incrementAndGet())
+                        abandonFocus()
                         emit("interruption", "audioFocus")
                         -1
                     }
                     else CoreNative.play(handle, true, operation.incrementAndGet())
                 }
-                "pause" -> { desiredPaused = true; CoreNative.play(handle, false, operation.incrementAndGet()) }
+                "pause" -> {
+                    desiredPaused = true
+                    val code = CoreNative.play(handle, false, operation.incrementAndGet())
+                    abandonFocus()
+                    view?.keepScreenOn = false
+                    code
+                }
                 "seek" -> synchronized(outputLock) {
                     val code = CoreNative.seek(handle,
                         ((args["position"] as? Number)?.toLong() ?: -1L) * 1000,
@@ -260,6 +281,7 @@ internal class CorePlayback(
                 }
                 else -> { result.notImplemented(); return }
             }
+            wakeOutput()
             if (accepted != 0) result.error("control", "Core rejected $method", mapOf("sessionId" to session))
             else result.success(successMap(handle))
         } catch (error: Throwable) {
@@ -272,6 +294,7 @@ internal class CorePlayback(
         generation.incrementAndGet()
         val previous = running
         previous?.alive?.set(false)
+        wakeOutput()
         running = null
         cancelPending("cancelled")
         abandonFocus()
@@ -293,6 +316,8 @@ internal class CorePlayback(
         if (desiredPaused) return
         desiredPaused = true
         running?.let { CoreNative.play(it.handle, false, operation.incrementAndGet()) }
+        abandonFocus()
+        wakeOutput()
         view?.keepScreenOn = false
         emit("playing", false)
         emit("interruption", reason)
@@ -461,7 +486,14 @@ internal class CorePlayback(
                     handler.post { if (generation.get() == active.generation && !emittedCompletion) {
                         emittedCompletion = true; emit("completed", true) } }
                 }
-                Thread.sleep(15)
+                if (desiredPaused || (videoSurface == null && snap[6] < 0)) {
+                    // Poll metadata at 4 Hz while opening/paused, but wake
+                    // immediately for play, seek, surface changes or stop.
+                    outputWaitLock.withLock {
+                        if (active.alive.get() && generation.get() == active.generation)
+                            outputWake.await(250, TimeUnit.MILLISECONDS)
+                    }
+                } else Thread.sleep(15)
             }
         } catch (error: Throwable) {
             handler.post { if (generation.get() == active.generation) fail(error.message ?: "Native output failed") }
@@ -486,6 +518,17 @@ internal class CorePlayback(
         }
         val current = CoreNative.snapshot(active.handle)
         if (current == null || current[1] != snap[1] || current[3] != snap[3]) return
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (snap[5] >= 0 && snap[10] == 1L && now - lastDecoderCheckMs >= 1000) {
+            lastDecoderCheckMs = now
+            for (ordinal in 0 until CoreNative.trackCount(active.handle)) {
+                val video = CoreNative.track(active.handle, ordinal) ?: continue
+                if (video[1] == 1 && video[0].toLong() == snap[5]) {
+                    emitDecoderIfChanged(video)
+                    break
+                }
+            }
+        }
         val open = pendingOpen
         if (open != null && requestedStartApplied && snap[0] in 2L..6L &&
             (snap[5] < 0 && snap[11] == 1L && (desiredPaused || audioReady) || renderedFirst)) {
@@ -532,13 +575,7 @@ internal class CorePlayback(
             .mapNotNull { ordinal -> CoreNative.track(handle, ordinal)?.let {
                 Triple(it, CoreNative.trackLanguage(handle, ordinal)?.lowercase(), ordinal)
             } }
-        tracks.firstOrNull { it.first[1] == 1 }?.first?.let { video ->
-            if (lastHardware != video[4]) {
-                lastHardware = video[4]
-                emit("decoderHardware", mapOf("actual" to video[4],
-                    "capabilities" to video[3], "codecId" to video[2]))
-            }
-        }
+        tracks.firstOrNull { it.first[1] == 1 }?.first?.let(::emitDecoderIfChanged)
         val used = mutableSetOf<Int>()
         val result = mutableMapOf<Int, Int>()
         for (server in serverStreams) {
@@ -554,6 +591,15 @@ internal class CorePlayback(
         mapping = result
     }
 
+    private fun emitDecoderIfChanged(video: IntArray) {
+        if (lastHardware == video[4]) return
+        lastHardware = video[4]
+        emit("decoderHardware", mapOf("actual" to video[4],
+            "preferred" to preferredHardware,
+            "fallback" to (preferredHardware != 0 && video[4] == 0),
+            "capabilities" to video[3], "codecId" to video[2]))
+    }
+
     fun successMap(handle: Long? = running?.handle): Map<String, Any?> {
         val snap = handle?.let(CoreNative::snapshot)
         val actualHardware = handle?.let { core ->
@@ -566,10 +612,13 @@ internal class CorePlayback(
         val playableText = serverStreams.filter { it.type == "Subtitle" && it.index in mapping }.map { it.index }
         val rejectedAudio = serverStreams.filter { it.type == "Audio" && it.index !in mapping }.map { it.index }
         val rejectedText = serverStreams.filter { it.type == "Subtitle" && !it.external && it.index !in mapping }.map { it.index }
+        val containerIds = handle?.let(CoreNative::containerTrackIds)
         return mapOf("sessionId" to session, "audioIndex" to audioIndex,
             "subtitleIndex" to subtitleIndex, "playableAudio" to playableAudio,
             "rejectedAudio" to rejectedAudio, "playableSubtitle" to playableText,
             "rejectedSubtitle" to rejectedText,
+            "videoTrackId" to containerIds?.getOrNull(0)?.takeIf { it > 0 },
+            "audioTrackId" to containerIds?.getOrNull(1)?.takeIf { it > 0 },
             // Decoder actually used for the video track; 0 means software or no video.
             "actualHardware" to actualHardware)
     }

@@ -173,6 +173,14 @@ class CoreBindings {
         Int32 Function(Pointer<Void>, Pointer<NativeCoreSnapshot>),
         int Function(Pointer<Void>, Pointer<NativeCoreSnapshot>)
       >('rillight_core_snapshot');
+  late final int Function(Pointer<Void>, Pointer<Int32>, Pointer<Int32>)?
+  containerTrackIds =
+      _library.providesSymbol('rillight_core_container_track_ids')
+      ? _library.lookupFunction<
+          Int32 Function(Pointer<Void>, Pointer<Int32>, Pointer<Int32>),
+          int Function(Pointer<Void>, Pointer<Int32>, Pointer<Int32>)
+        >('rillight_core_container_track_ids')
+      : null;
   late final trackCount = _library
       .lookupFunction<
         Int32 Function(Pointer<Void>),

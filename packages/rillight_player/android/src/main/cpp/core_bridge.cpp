@@ -327,6 +327,19 @@ Java_com_rillight_player_CoreNative_trackCount(JNIEnv *, jobject, jlong handle) 
   return handle ? rillight_core_track_count(bridge(handle)->core) : -1;
 }
 JNIEXPORT jintArray JNICALL
+Java_com_rillight_player_CoreNative_containerTrackIds(JNIEnv *env, jobject,
+                                                     jlong handle) {
+  if (!handle) return nullptr;
+  int video = -1;
+  int audio = -1;
+  if (rillight_core_container_track_ids(bridge(handle)->core, &video,
+                                        &audio) != 0) return nullptr;
+  const jint ids[] = {video, audio};
+  auto *result = env->NewIntArray(2);
+  if (result) env->SetIntArrayRegion(result, 0, 2, ids);
+  return result;
+}
+JNIEXPORT jintArray JNICALL
 Java_com_rillight_player_CoreNative_track(JNIEnv *env, jobject, jlong handle,
                                          jint ordinal) {
   if (!handle) return nullptr;

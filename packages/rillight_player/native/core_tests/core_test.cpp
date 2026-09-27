@@ -1,6 +1,7 @@
 #include "../core/rillight_core.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cassert>
 #include <chrono>
 #include <condition_variable>
@@ -20,6 +21,11 @@ struct Bytes {
 struct Media {
   Bytes wav;
   Bytes bmp;
+};
+
+struct CountingMedia {
+  Bytes wav;
+  std::atomic<int> reads{0};
 };
 
 struct Blocking {
@@ -140,6 +146,18 @@ int read(void *, void *handle, uint8_t *buffer, int size) {
   std::memcpy(buffer, bytes->data.data() + bytes->offset, count);
   bytes->offset += count;
   return static_cast<int>(count);
+}
+
+void *counting_open(void *opaque, const char *, int) {
+  auto *media = static_cast<CountingMedia *>(opaque);
+  media->wav.offset = 0;
+  return &media->wav;
+}
+
+int counting_read(void *opaque, void *handle, uint8_t *buffer, int size) {
+  auto *media = static_cast<CountingMedia *>(opaque);
+  media->reads.fetch_add(1);
+  return read(nullptr, handle, buffer, size);
 }
 
 int64_t seek(void *, void *handle, int64_t offset, int whence) {
@@ -329,6 +347,11 @@ int main() {
     return state.first_audio_frame_ready && state.audio_stream_index >= 0;
   }));
   auto before = snapshot(core);
+  int video_track_id = 0;
+  int audio_track_id = 0;
+  assert(rillight_core_container_track_ids(core, &video_track_id,
+                                           &audio_track_id) == 0);
+  assert(video_track_id == -1 && audio_track_id == -1);
   assert(before.video_stream_index < 0);
   assert(before.session_id == 1);
   assert(rillight_core_track_count(core) == 1);
@@ -707,6 +730,33 @@ int main() {
   assert(unchanged_subtitle.timeline_version == original_rate.timeline_version);
   assert(unchanged_subtitle.state == original_rate.state);
   assert(unchanged_subtitle.subtitle_stream_index == -1);
+  rillight_core_destroy(core);
+
+  CountingMedia paused_media{make_wav(48000 * 8)};
+  RillightCoreIo paused_io{&paused_media, counting_open, counting_read,
+                          seek, close, nullptr, cancel_media_io};
+  core = rillight_core_create(&paused_io);
+  assert(core && rillight_core_open(core, "paused.wav", 1) == 0);
+  assert(rillight_core_set_playing(core, 0, 2) == 0);
+  assert(wait_for(core, [](const auto &state) {
+    return state.state == RILLIGHT_CORE_PAUSED &&
+           state.first_audio_frame_ready;
+  }));
+  const auto paused_snapshot = snapshot(core);
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  const int paused_reads = paused_media.reads.load();
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  assert(paused_media.reads.load() == paused_reads);
+  assert(rillight_core_seek(core, 1000000, 3) == 0);
+  assert(wait_for(core, [paused_snapshot](const auto &state) {
+    return state.timeline_version > paused_snapshot.timeline_version &&
+           state.first_audio_frame_ready && state.state == RILLIGHT_CORE_PAUSED;
+  }));
+  assert(rillight_core_set_playing(core, 1, 4) == 0);
+  assert(wait_for(core, [&paused_media, paused_reads](const auto &state) {
+    return state.state != RILLIGHT_CORE_FAILED &&
+           paused_media.reads.load() > paused_reads;
+  }, true));
   rillight_core_destroy(core);
   return 0;
 }

@@ -412,6 +412,22 @@ class DesktopCorePlayer implements CorePlayer {
   ) {
     final native = <int, (int, String?)>{};
     var actualHardware = 0;
+    int? videoTrackId;
+    int? audioTrackId;
+    final nativeIds = calloc<Int32>(2);
+    try {
+      if (_bindings.containerTrackIds?.call(
+            _handle,
+            nativeIds,
+            nativeIds + 1,
+          ) ==
+          0) {
+        videoTrackId = nativeIds[0] > 0 ? nativeIds[0] : null;
+        audioTrackId = nativeIds[1] > 0 ? nativeIds[1] : null;
+      }
+    } finally {
+      calloc.free(nativeIds);
+    }
     final track = calloc<NativeCoreTrack>();
     try {
       for (
@@ -469,6 +485,8 @@ class DesktopCorePlayer implements CorePlayer {
     return {
       // The decoded hardware of the selected video track, not the preference.
       'actualHardware': actualHardware,
+      'videoTrackId': videoTrackId,
+      'audioTrackId': audioTrackId,
       'audioIndex': mapped.entries
           .where((entry) => entry.value == snapshot.audioStreamIndex)
           .firstOrNull
