@@ -181,6 +181,81 @@ void main() {
     expect(find.byType(MobilePlayerPage), findsNothing);
   }
 
+  testWidgets('old player cannot unlock after a new player takes orientation', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(800, 360);
+    addTearDown(tester.view.resetPhysicalSize);
+    final portraitRequest = Completer<void>();
+    final a = PhoneOrientation(
+      request: (orientations) async {
+        if (orientations.length == 1 &&
+            orientations.single == DeviceOrientation.portraitUp) {
+          await portraitRequest.future;
+        }
+      },
+    );
+    final b = PhoneOrientation(request: (_) async {});
+
+    await a.enterPlayback();
+    final oldLeave = a.leavePlayback();
+    await tester.pump();
+    expect(a.calls, [PhoneOrientation.landscape, PhoneOrientation.portrait]);
+
+    // The old page has queued a delayed unlock while its portrait request is
+    // still pending. The new page takes the activity-wide orientation lease.
+    tester.view.physicalSize = const Size(360, 800);
+    final newEnter = b.enterPlayback();
+    portraitRequest.complete();
+    await oldLeave;
+    await newEnter;
+    await a.settled;
+    expect(a.calls, [PhoneOrientation.landscape, PhoneOrientation.portrait]);
+    expect(b.calls, [PhoneOrientation.landscape]);
+
+    await b.reassert();
+    expect(b.calls.last, PhoneOrientation.landscape);
+    await b.leavePlayback();
+    await tester.pump();
+    await b.settled;
+    expect(b.calls.last, PhoneOrientation.unlocked);
+  });
+
+  testWidgets('reentering the same orientation owner cancels its old exit', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(800, 360);
+    addTearDown(tester.view.resetPhysicalSize);
+    final portraitRequest = Completer<void>();
+    final orientation = PhoneOrientation(
+      request: (orientations) async {
+        if (orientations.length == 1 &&
+            orientations.single == DeviceOrientation.portraitUp &&
+            !portraitRequest.isCompleted) {
+          await portraitRequest.future;
+        }
+      },
+    );
+
+    await orientation.enterPlayback();
+    final oldLeave = orientation.leavePlayback();
+    await tester.pump();
+    final newEnter = orientation.enterPlayback();
+    portraitRequest.complete();
+    await oldLeave;
+    await newEnter;
+    expect(orientation.calls, [
+      PhoneOrientation.landscape,
+      PhoneOrientation.portrait,
+      PhoneOrientation.landscape,
+    ]);
+
+    await orientation.leavePlayback();
+    tester.view.physicalSize = const Size(360, 800);
+    await orientation.settled;
+    expect(orientation.calls.last, PhoneOrientation.unlocked);
+  });
+
   testWidgets(
     'playback requests landscape and restores portrait; a denied request still plays',
     (tester) async {

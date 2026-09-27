@@ -37,6 +37,11 @@ class PhoneOrientation with WidgetsBindingObserver {
     DeviceOrientation.landscapeRight,
   ];
 
+  // Orientation is activity-wide. A departing route must not release a newer
+  // player's landscape request after its own delayed metrics callback.
+  static PhoneOrientation? _owner;
+  static int _generation = 0;
+
   static Future<void> systemRequest(List<DeviceOrientation> orientations) {
     return SystemChrome.setPreferredOrientations(orientations);
   }
@@ -51,38 +56,45 @@ class PhoneOrientation with WidgetsBindingObserver {
   bool _entered = false;
   bool _awaitingReturn = false;
   bool _observing = false;
+  int? _lease;
   Future<void> _queue = Future<void>.value();
+
+  bool get _ownsLease => identical(_owner, this) && _lease == _generation;
 
   Future<void> get settled => _queue;
 
   Future<void> enterPlayback() {
     if (_entered) return _queue;
+    _owner?._cancelReturn();
+    _owner = this;
+    _lease = ++_generation;
     _entered = true;
-    _awaitingReturn = false;
-    _stopObserving();
-    return _enqueue(() => _send(landscape));
+    _cancelReturn();
+    return _enqueueCurrent(() => _send(landscape));
   }
 
   /// Android may recreate its activity while the player is in the background.
   /// Reapply the landscape request when playback becomes visible again.
   Future<void> reassert() {
     if (!_entered) return _queue;
-    return _enqueue(() => _send(landscape));
+    return _enqueueCurrent(() => _send(landscape));
   }
 
   Future<void> leavePlayback() {
     if (!_entered) return _queue;
     _entered = false;
-    return _enqueue(() async {
+    final leaveLease = _lease;
+    return _enqueueCurrent(() async {
       final releaseLater = !_same(restoreTo, unlocked);
       if (releaseLater) {
         _awaitingReturn = true;
         _startObserving();
       }
       await _send(restoreTo);
+      if (!_ownsLease || _lease != leaveLease) return;
       if (lastError != null || !releaseLater) {
-        _awaitingReturn = false;
-        _stopObserving();
+        _cancelReturn();
+        _dropLease();
         return;
       }
       // A metrics callback during [restoreTo] may already have released.
@@ -99,7 +111,7 @@ class PhoneOrientation with WidgetsBindingObserver {
 
   @override
   void didChangeMetrics() {
-    if (!_awaitingReturn) return;
+    if (!_awaitingReturn || !_ownsLease) return;
     final current = _viewportOrientation();
     if (current == null || !_isEntry(current)) return;
     _release();
@@ -107,7 +119,7 @@ class PhoneOrientation with WidgetsBindingObserver {
 
   void _releaseOnNextFrame() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_awaitingReturn) return;
+      if (!_awaitingReturn || !_ownsLease) return;
       final current = _viewportOrientation();
       if (current == null || !_isEntry(current)) return;
       _release();
@@ -116,10 +128,21 @@ class PhoneOrientation with WidgetsBindingObserver {
   }
 
   void _release() {
-    if (!_awaitingReturn) return;
+    if (!_awaitingReturn || !_ownsLease) return;
+    _cancelReturn();
+    _enqueueCurrent(() async {
+      await _send(unlocked);
+      _dropLease();
+    });
+  }
+
+  void _cancelReturn() {
     _awaitingReturn = false;
     _stopObserving();
-    _enqueue(() => _send(unlocked));
+  }
+
+  void _dropLease() {
+    if (_ownsLease && !_entered) _owner = null;
   }
 
   void _startObserving() {
@@ -160,6 +183,16 @@ class PhoneOrientation with WidgetsBindingObserver {
   Future<void> _enqueue(Future<void> Function() action) {
     _queue = _queue.then((_) => action());
     return _queue;
+  }
+
+  Future<void> _enqueueCurrent(Future<void> Function() action) {
+    final lease = _lease;
+    return _enqueue(() {
+      if (lease == null || !_ownsLease || _lease != lease) {
+        return Future<void>.value();
+      }
+      return action();
+    });
   }
 
   Future<void> _send(List<DeviceOrientation> orientations) async {
