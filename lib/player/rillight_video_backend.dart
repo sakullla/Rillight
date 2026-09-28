@@ -213,9 +213,6 @@ class RillightVideoBackend extends VideoBackend
     } else {
       probed = _desktopDecoderProbe();
     }
-    final limit = Platform.isAndroid
-        ? maxStreamingBitrate.clamp(1, 20000000)
-        : maxStreamingBitrate;
     return ownedCoreDeviceProfile(
       h264: probed['h264'] == true,
       hevc: probed['hevc'] == true,
@@ -223,7 +220,7 @@ class RillightVideoBackend extends VideoBackend
       ac3: probed['ac3'] == true,
       eac3: probed['eac3'] == true,
       truehd: probed['truehd'] == true,
-      maxStreamingBitrate: limit,
+      maxStreamingBitrate: maxStreamingBitrate,
     );
   }
 

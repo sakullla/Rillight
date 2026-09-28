@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "rillight_core.h"
+#include "decoder_probe.h"
 #include "media_io_roles.h"
 
 namespace {
@@ -190,6 +191,16 @@ extern "C" {
 JNIEXPORT jint JNICALL
 Java_com_rillight_player_CoreNative_abiVersion(JNIEnv *, jobject) {
   return static_cast<jint>(rillight_core_abi_version());
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_rillight_player_CoreNative_hasDecoder(JNIEnv *env, jobject, jstring name) {
+  if (!name) return JNI_FALSE;
+  const char *utf = env->GetStringUTFChars(name, nullptr);
+  if (!utf) return JNI_FALSE;
+  const int found = rillight_core_has_decoder(utf);
+  env->ReleaseStringUTFChars(name, utf);
+  return found == 1 ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT jlong JNICALL

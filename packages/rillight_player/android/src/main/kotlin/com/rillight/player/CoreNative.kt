@@ -14,6 +14,7 @@ internal object CoreNative {
     init { System.loadLibrary("rillight_android_core") }
 
     external fun abiVersion(): Int
+    external fun hasDecoder(name: String): Boolean
     external fun create(factory: CoreIoFactory): Long
     external fun destroy(handle: Long)
     external fun configureHardware(handle: Long, preferredHardware: Int, allowSoftwareFallback: Boolean): Int
