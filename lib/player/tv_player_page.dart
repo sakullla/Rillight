@@ -43,6 +43,8 @@ class TvPlayerPageState extends State<TvPlayerPage> {
   final _playFocus = FocusNode();
   final _surfaceFocus = FocusNode();
   final _retryFocus = FocusNode();
+  final _nextPlayFocus = FocusNode();
+  final _nextCancelFocus = FocusNode();
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -76,9 +78,11 @@ class TvPlayerPageState extends State<TvPlayerPage> {
   void _playerChanged() {
     final c = controller!;
     if (_closing) return;
+    final cardFocused = _nextPlayFocus.hasFocus || _nextCancelFocus.hasFocus;
     if (!c.controlsVisible &&
         _surfaceFocus.hasFocus &&
-        !_surfaceFocus.hasPrimaryFocus) {
+        !_surfaceFocus.hasPrimaryFocus &&
+        !cardFocused) {
       _requestFocus(_surfaceFocus);
     }
     if (c.loading) return;
@@ -224,7 +228,7 @@ class TvPlayerPageState extends State<TvPlayerPage> {
       if (key == LogicalKeyboardKey.arrowUp ||
           key == LogicalKeyboardKey.arrowDown) {
         c.onUserActivity();
-        _requestFocus(_playFocus);
+        _requestFocus(c.nextEpisode == null ? _playFocus : _nextPlayFocus);
         return KeyEventResult.handled;
       }
     }
@@ -401,6 +405,8 @@ class TvPlayerPageState extends State<TvPlayerPage> {
     _surfaceFocus.dispose();
     _retryFocus.dispose();
     _seekFocus.dispose();
+    _nextPlayFocus.dispose();
+    _nextCancelFocus.dispose();
     final c = controller;
     if (c != null) {
       c.removeListener(_playerChanged);
@@ -533,22 +539,6 @@ class TvPlayerPageState extends State<TvPlayerPage> {
             children: [
               // Keep this sibling mounted while loading, showing controls or panels.
               ExcludeFocus(child: c.backend.buildView()),
-              ListenableBuilder(
-                listenable: c,
-                builder: (context, _) {
-                  if (c.nextEpisode == null || c.error != null) {
-                    return const SizedBox.shrink();
-                  }
-                  return Positioned(
-                    top: 24,
-                    right: 24,
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 420),
-                      child: NextEpisodeCard(controller: c),
-                    ),
-                  );
-                },
-              ),
               ListenableBuilder(
                 listenable: c,
                 builder: (context, _) {
@@ -782,6 +772,23 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                           ),
                         ),
                       ),
+                    ),
+                  );
+                },
+              ),
+              ListenableBuilder(
+                listenable: c,
+                builder: (context, _) {
+                  if (c.nextEpisode == null || c.error != null) {
+                    return const SizedBox.shrink();
+                  }
+                  return Positioned(
+                    top: 24,
+                    right: 24,
+                    child: NextEpisodeCard(
+                      controller: c,
+                      playFocus: _nextPlayFocus,
+                      cancelFocus: _nextCancelFocus,
                     ),
                   );
                 },

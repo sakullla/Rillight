@@ -7,9 +7,16 @@ import 'package:rillight/player/player_keys.dart';
 /// Shared next-episode offer for desktop, phone, and TV.
 /// The episode name identifies the target; play and cancel stay separate.
 class NextEpisodeCard extends StatelessWidget {
-  const NextEpisodeCard({super.key, required this.controller});
+  const NextEpisodeCard({
+    super.key,
+    required this.controller,
+    this.playFocus,
+    this.cancelFocus,
+  });
 
   final PlayerController controller;
+  final FocusNode? playFocus;
+  final FocusNode? cancelFocus;
 
   @override
   Widget build(BuildContext context) {
@@ -37,7 +44,8 @@ class NextEpisodeCard extends StatelessWidget {
               maxWidth: 320,
             ),
             const SizedBox(width: 10),
-            Flexible(
+            SizedBox(
+              width: 168,
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -62,6 +70,7 @@ class NextEpisodeCard extends StatelessWidget {
                   const SizedBox(height: 6),
                   FilledButton.icon(
                     key: PlayerKeys.nextEpisodePlay,
+                    focusNode: playFocus,
                     onPressed: controller.playNextEpisode,
                     icon: const Icon(Icons.play_arrow_rounded, size: 18),
                     label: Text(l10n.playNextEpisode),
@@ -71,6 +80,7 @@ class NextEpisodeCard extends StatelessWidget {
             ),
             IconButton(
               key: PlayerKeys.nextEpisodeCancel,
+              focusNode: cancelFocus,
               tooltip: l10n.cancelNextEpisode,
               onPressed: controller.cancelNextEpisode,
               icon: const Icon(Icons.close_rounded, size: 18),

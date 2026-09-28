@@ -647,18 +647,9 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
                   c.error == null &&
                   !c.sessionExpired)
                 Positioned(
-                  left: 12,
                   right: 12,
-                  bottom: 12,
-                  child: SafeArea(
-                    child: Align(
-                      alignment: Alignment.bottomRight,
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 360),
-                        child: NextEpisodeCard(controller: c),
-                      ),
-                    ),
-                  ),
+                  bottom: 168,
+                  child: NextEpisodeCard(controller: c),
                 ),
               if (!_interaction.locked &&
                   danmaku != null &&
