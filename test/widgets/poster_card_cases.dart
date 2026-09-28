@@ -6,6 +6,8 @@ import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/theme.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_keys.dart';
+import 'package:rillight/home/media_shelf.dart';
+import 'package:rillight/library/shelf_grid_page.dart';
 import 'package:rillight/library/poster_card.dart';
 import 'package:rillight/player/player_window_host.dart';
 
@@ -44,6 +46,57 @@ void main() {
 
   setUp(() {
     host = OverlayPlayerWindowHost();
+  });
+
+  testWidgets('grid captions fit fractional widths and mixed fallback fonts', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1600, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    for (final scale in [1.0, 1.25, 1.5]) {
+      for (final width in [723.5, 987.25, 1537.0]) {
+        await tester.pumpWidget(
+          _wrap(
+            host: host,
+            child: MediaQuery(
+              data: MediaQueryData(textScaler: TextScaler.linear(scale)),
+              child: SizedBox(
+                width: width,
+                height: 550,
+                child: Builder(
+                  builder: (context) {
+                    return GridView.builder(
+                      gridDelegate: ShelfGridPage.gridDelegateFor(
+                        screenWidth: width,
+                        availableWidth: width,
+                        labelExtent: MediaShelf.posterLabelExtentFor(
+                          context,
+                          showProgress: false,
+                        ),
+                      ),
+                      itemCount: 12,
+                      itemBuilder: (context, index) => ShelfGridPage.gridCard(
+                        context,
+                        EmbyItem(
+                          id: 'grid-$index',
+                          name: '中文 日本語 Ag 🎬 Ⅰ $index',
+                          type: 'Series',
+                        ),
+                        onTap: () {},
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pump();
+        expect(tester.takeException(), isNull, reason: '$width at $scale');
+      }
+    }
   });
 
   testWidgets('hover on a playable poster reveals title, meta and play', (

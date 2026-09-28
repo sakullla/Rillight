@@ -70,6 +70,7 @@ class PlaybackHttpProxy {
   int _timelineAttemptRevision = -1;
   Duration? _timelineAttemptDuration;
   DateTime? _lastIntegrityCheck;
+  DateTime? _lastSuccessfulTimelineAt;
   String? _mappingUnknownReason;
   int? _selectedVideoTrackId;
   int? _selectedAudioTrackId;
@@ -78,6 +79,7 @@ class PlaybackHttpProxy {
   List<CachedByteRange> _cachedBytes = const [];
   String? _byteIdentity;
   int _byteRevision = -1;
+  int _byteCoverageRevision = -1;
   DateTime? _lastByteIntegrityCheck;
   bool _refreshingBytes = false;
   int _timelineSequence = 0;
@@ -195,6 +197,7 @@ class PlaybackHttpProxy {
     _cachedBytes = const [];
     _byteIdentity = null;
     _byteRevision = -1;
+    _byteCoverageRevision = -1;
     _lastByteIntegrityCheck = null;
     _timelineSequence++;
   }
@@ -213,6 +216,7 @@ class PlaybackHttpProxy {
     ];
     _byteIdentity = '$resource:${representation.generation}';
     _byteRevision = cache!.revision;
+    _byteCoverageRevision = cache!.coverageRevision;
     _lastByteIntegrityCheck = DateTime.now();
     _timelineSequence++;
   }
@@ -243,7 +247,7 @@ class PlaybackHttpProxy {
     return representation != null &&
         resource != null &&
         _byteIdentity == '$resource:${representation.generation}' &&
-        _byteRevision == cache!.revision;
+        _byteCoverageRevision == cache!.coverageRevision;
   }
 
   String? get _timelineUnknownReason {
@@ -411,6 +415,23 @@ class PlaybackHttpProxy {
     await _refreshByteCoverage();
   }
 
+  void _timelineRetry(String reason) {
+    final last = _lastSuccessfulTimelineAt;
+    // A busy optional snapshot is not evidence of eviction. Briefly retain
+    // the last verified display while retrying. A fresh complete scan retracts
+    // missing bytes; identity changes and close clear immediately. Unrelated
+    // uncommitted RAM eviction must not blank the whole display between scans.
+    // A persistent inability to verify expires the last snapshot.
+    if (last == null ||
+        DateTime.now().difference(last) > const Duration(seconds: 5) ||
+        cache?.diagnostics['closed'] == true) {
+      _cachedTimeline = const [];
+    }
+    _mappingUnknownReason = reason;
+    _timelineAttemptRevision = -1;
+    _timelineSequence++;
+  }
+
   Future<void> _refreshByteCoverage() async {
     final representation = _byteRepresentation;
     final resource = _timelineResource ?? _readAhead?.resource;
@@ -491,12 +512,11 @@ class PlaybackHttpProxy {
         resource == (_timelineResource ?? _readAhead?.resource) &&
         _representations[resource]?.generation == representation.generation;
     final snapshotRevision = cache!.revision;
+    final coverageRevision = cache!.coverageRevision;
     bool revisionCurrent() {
-      if (cache!.revision == snapshotRevision) return true;
+      if (cache!.coverageRevision == coverageRevision) return true;
       if (stillCurrent()) {
-        _cachedTimeline = const [];
-        _mappingUnknownReason = 'cacheChangedDuringIndex';
-        _timelineSequence++;
+        _timelineRetry('cacheChangedDuringIndex');
       }
       return false;
     }
@@ -536,16 +556,12 @@ class PlaybackHttpProxy {
       );
       if (!stillCurrent()) return;
       if (bytes == null) {
-        // A busy or timed-out integrity snapshot cannot support a previously
-        // published interval: its disk blocks may have changed since then.
-        _cachedTimeline = const [];
-        _mappingUnknownReason = 'integrityUnavailable';
-        _timelineSequence++;
+        _timelineRetry('integrityUnavailable');
         return;
       }
       if (!revisionCurrent()) {
         // availableRanges has already removed missing or replaced entries
-        // after its checksum pass. A newer write invalidates the time index,
+        // after its checksum pass. A retracted block invalidates the time index,
         // but these verified byte islands remain conservative for this exact
         // representation and can be shown without another disk scan.
         if (verifyChecksum && _byteRepresentation != null) {
@@ -636,12 +652,11 @@ class PlaybackHttpProxy {
             ? 'containerTrackOrTimingUnknown'
             : null;
       }
+      _lastSuccessfulTimelineAt = DateTime.now();
       _timelineSequence++;
     } catch (_) {
       if (stillCurrent()) {
-        _cachedTimeline = const [];
-        _mappingUnknownReason = 'indexBudgetOrReadUnavailable';
-        _timelineSequence++;
+        _timelineRetry('indexBudgetOrReadUnavailable');
       }
     } finally {
       _charge(-1024 * 1024);
@@ -1130,6 +1145,7 @@ class PlaybackHttpProxy {
     required _ProxyRead read,
     String? method,
     required Map<String, String?> overrides,
+    bool reportAuthentication = true,
   }) async {
     for (var redirects = 0; redirects <= 10; redirects++) {
       read.check();
@@ -1191,8 +1207,9 @@ class PlaybackHttpProxy {
       );
       read.check();
       _lastUpstreamStatus = response.statusCode;
-      if (response.statusCode == HttpStatus.unauthorized ||
-          response.statusCode == HttpStatus.forbidden) {
+      if (reportAuthentication &&
+          (response.statusCode == HttpStatus.unauthorized ||
+              response.statusCode == HttpStatus.forbidden)) {
         _authenticationStatus = response.statusCode;
       }
       final location = response.headers.value(HttpHeaders.locationHeader);
@@ -1284,10 +1301,11 @@ class PlaybackHttpProxy {
 
   bool _reserveCacheWorkspace(int bytes) {
     // Each live transport retains at most its current forwarding chunk. Leave
-    // 1 MiB for eight transports; the rest of the 2/4 MiB proxy budget is shared
+    // 1 MiB for eight transports; the rest of the 4/12 MiB proxy budget is shared
     // by assemblies, cached reads and playlist rewriting. Under pressure cache
     // work is bypassed, so an index probe can still reach its upstream source.
-    final limit = (_stream == PlaybackCacheStream.stable ? 3 : 1) * 1024 * 1024;
+    final limit =
+        (_stream == PlaybackCacheStream.stable ? 11 : 3) * 1024 * 1024;
     if (_cacheWorkspace + bytes > limit) return false;
     _cacheWorkspace += bytes;
     return true;
@@ -1387,7 +1405,7 @@ class PlaybackHttpProxy {
     final pending = data['pendingBytes'] as int? ?? 0;
     final pendingLimit = data['pendingLimitBytes'] as int? ?? 0;
     final workspaceLimit =
-        (_stream == PlaybackCacheStream.stable ? 3 : 1) * 1024 * 1024;
+        (_stream == PlaybackCacheStream.stable ? 11 : 3) * 1024 * 1024;
     return data['degradation'] != null ||
         data['pendingResizePending'] == true ||
         pendingLimit <= 0 ||
@@ -1922,7 +1940,7 @@ class PlaybackHttpProxy {
           resource: key,
           generation: rep.generation,
           total: rep.total,
-          aheadBytes: min(readAheadBytes, cache!.diskSessionLimitBytes ~/ 2),
+          aheadBytes: readAheadBytes,
           reserveWorkspace: () {
             if (!_reserveCacheWorkspace(SessionReadAhead.blockBytes)) {
               return false;
@@ -1949,6 +1967,7 @@ class PlaybackHttpProxy {
                       allowRange: true,
                       read: producer,
                       method: 'GET',
+                      reportAuthentication: false,
                       overrides: {
                         'range': 'bytes=$cursor-$end',
                         'if-range': rep.policy.strongEtag,
@@ -1956,6 +1975,15 @@ class PlaybackHttpProxy {
                         'if-modified-since': null,
                       },
                     );
+                    if (response.statusCode == HttpStatus.unauthorized ||
+                        response.statusCode == HttpStatus.forbidden) {
+                      // An optional future range may be rejected while the
+                      // player is still consuming valid cached bytes. Preserve
+                      // those bytes and surface authentication only on demand.
+                      throw _ReadAheadAuthenticationFailure(
+                        response.statusCode,
+                      );
+                    }
                     final range = MediaContentRange.parse(
                       response.headers.value('content-range'),
                     );
@@ -2088,10 +2116,15 @@ class PlaybackHttpProxy {
       }
       output.contentLength = range.length;
       Stream<List<int>> body() async* {
-        await for (final bytes in ahead!.read(range.start, range.end)) {
-          read.check();
-          read.outputStarted = true;
-          yield bytes;
+        try {
+          await for (final bytes in ahead!.read(range.start, range.end)) {
+            read.check();
+            read.outputStarted = true;
+            yield bytes;
+          }
+        } on _ReadAheadAuthenticationFailure catch (failure) {
+          _authenticationStatus = failure.status;
+          rethrow;
         }
       }
 
@@ -2916,8 +2949,16 @@ class PlaybackHttpProxy {
           // a fast 64 KiB socket exhausts file/index slots far below a GiB quota.
           final blockSize = min(
             min(
-              _stream == PlaybackCacheStream.stable ? 1024 * 1024 : 256 * 1024,
-              max(64 * 1024, cache?.memoryLimitBytes ?? 0),
+              _stream == PlaybackCacheStream.stable
+                  ? SessionByteCache.maxBlockBytes
+                  : 1024 * 1024,
+              max(
+                64 * 1024,
+                min(
+                  cache?.memoryLimitBytes ?? 0,
+                  (cache?.pendingLimitBytes ?? 0) ~/ 6,
+                ),
+              ),
             ),
             representation == null
                 ? 1
@@ -3587,6 +3628,11 @@ class PlaybackHttpProxy {
     _representations.clear();
     _roles.clear();
   }
+}
+
+class _ReadAheadAuthenticationFailure implements Exception {
+  const _ReadAheadAuthenticationFailure(this.status);
+  final int status;
 }
 
 class _Representation {

@@ -300,7 +300,7 @@ void main() {
     expect(resolved.streamUrl.queryParameters.containsKey('api_key'), isFalse);
   });
 
-  test('stream headers attach the session only for same-origin URLs', () {
+  test('stream headers retain UA for every origin and scope credentials', () {
     const sessionHeaders = {
       'X-Emby-Token': 'token-1',
       'Authorization': 'MediaBrowser Token="token-1"',
@@ -315,23 +315,23 @@ void main() {
       ),
       sessionHeaders,
     );
-    // strm 等远端直连地址不带令牌头(空 headers)。
+    // strm 等远端直连地址保留 UA，不带令牌头。
     expect(
       playbackStreamHeaders(
         streamUrl: Uri.parse('https://cdn.example.com/episode-01.mkv'),
         baseUrl: Uri.parse(base),
         sessionHeaders: sessionHeaders,
       ),
-      isEmpty,
+      {'User-Agent': 'test-agent'},
     );
-    // 同主机但协议或端口不同也视为不同源,保守不附加。
+    // 同主机但协议或端口不同时仍保留 UA。
     expect(
       playbackStreamHeaders(
         streamUrl: Uri.parse('https://emby.test:8096/Videos/movie/stream.mkv'),
         baseUrl: Uri.parse(base),
         sessionHeaders: sessionHeaders,
       ),
-      isEmpty,
+      {'User-Agent': 'test-agent'},
     );
     expect(
       playbackStreamHeaders(
@@ -339,7 +339,7 @@ void main() {
         baseUrl: Uri.parse(base),
         sessionHeaders: sessionHeaders,
       ),
-      isEmpty,
+      {'User-Agent': 'test-agent'},
     );
   });
 

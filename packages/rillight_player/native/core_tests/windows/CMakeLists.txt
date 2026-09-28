@@ -1,7 +1,8 @@
 cmake_minimum_required(VERSION 3.21)
 project(rillight_windows_pixel_output LANGUAGES CXX)
 enable_testing()
-add_executable(rillight_windows_pixel_output_test pixel_output_test.cpp)
+add_executable(rillight_windows_pixel_output_test pixel_output_test.cpp
+  ../../../windows/pixel_present.cpp)
 target_compile_features(rillight_windows_pixel_output_test PRIVATE cxx_std_17)
 if(MSVC)
   target_compile_options(rillight_windows_pixel_output_test PRIVATE /W4 /WX /UNDEBUG)

@@ -132,10 +132,7 @@ bool VideoSurface::Publish(const RillightCoreFrame& source, int width,
   frame->height = pixels.height;
   frame->session = session;
   frame->timeline = timeline;
-  frame->rgba = std::move(pixels.bgra);
-  for (size_t offset = 0; offset < frame->rgba.size(); offset += 4) {
-    std::swap(frame->rgba[offset], frame->rgba[offset + 2]);
-  }
+  frame->rgba = std::move(pixels.rgba);
   if (stopped_) return false;
   {
     std::lock_guard lock(mutex_);
@@ -154,8 +151,7 @@ bool VideoSurface::Publish(const RillightCoreFrame& source, int width,
 void VideoSurface::Run(std::function<void(std::string)> ready) {
   bool announced = false;
   RillightCoreFrame* pending = nullptr;
-  std::vector<uint8_t> previous_bytes;
-  RillightCoreFrame previous{};
+  RillightCoreFrame* previous = nullptr;
   uint64_t session = 0;
   uint64_t timeline = 0;
   int displayed_width = 0;
@@ -173,8 +169,8 @@ void VideoSurface::Run(std::function<void(std::string)> ready) {
       if (state.session_id != session || state.timeline_version != timeline) {
         if (pending) api_->release_frame(pending);
         pending = nullptr;
-        previous_bytes.clear();
-        previous = {};
+        if (previous) api_->release_frame(previous);
+        previous = nullptr;
         session = state.session_id;
         timeline = state.timeline_version;
         drained = false;
@@ -224,23 +220,20 @@ void VideoSurface::Run(std::function<void(std::string)> ready) {
             if (Publish(*pending, width, height, session, timeline)) {
               displayed_width = width;
               displayed_height = height;
-              if (pending->data_size > 0 &&
-                  pending->data_size <= 64 * 1024 * 1024) {
-                previous_bytes.assign(pending->data,
-                                      pending->data + pending->data_size);
-                previous = *pending;
-                previous.data = previous_bytes.data();
-              }
+              // Retain the decoded frame for resize instead of copying the
+              // full source RGBA buffer again (32 MiB per 4K frame).
+              if (previous) api_->release_frame(previous);
+              previous = pending;
+              pending = nullptr;
             }
           }
-          api_->release_frame(pending);
+          if (pending) api_->release_frame(pending);
           pending = nullptr;
         }
       }
-      if (!previous_bytes.empty() &&
+      if (previous &&
           (width != displayed_width || height != displayed_height)) {
-        previous.data = previous_bytes.data();
-        if (Publish(previous, width, height, session, timeline)) {
+        if (Publish(*previous, width, height, session, timeline, false)) {
           displayed_width = width;
           displayed_height = height;
         }
@@ -257,5 +250,6 @@ void VideoSurface::Run(std::function<void(std::string)> ready) {
     if (!announced) ready(exception.what());
   }
   if (pending) api_->release_frame(pending);
+  if (previous) api_->release_frame(previous);
   if (audio_) audio_->Stop();
 }

@@ -5,6 +5,9 @@ import 'dart:isolate';
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'cache_limits.dart';
+import 'directory_inventory.dart';
+
 /// One coordinator isolate per root in this process. Its queue is the local
 /// mutex; the nonblocking OS lock coordinates other player processes. Media
 /// bytes and filesystem calls never run on the playback isolate.
@@ -33,13 +36,16 @@ class DiskCacheSession {
     final result = await session._call('open', {
       'limit': limitBytes,
       'sessionLimit': sessionLimitBytes,
-    });
+    }, timeout: const Duration(seconds: 15));
     if (result?['ok'] != true) {
       await session.close();
-      throw const FileSystemException('Cache session unavailable');
+      throw FileSystemException(
+        'Cache session unavailable: ${session.degradation ?? result?['error'] ?? 'initialization'}',
+      );
     }
     try {
       session._verifier = await _Verifier.start();
+      session._reader = await _BlockReader.start();
     } catch (_) {
       // Playback still works when optional integrity snapshots are unavailable.
     }
@@ -55,13 +61,26 @@ class DiskCacheSession {
   Future<void>? _closing;
   final Map<String, Object?> _stats = {};
   final _operations = <Future<Map<String, Object?>>>{};
+  final _readOperations = <Future<Map<String, Object?>>>{};
   Future<Map<String, Object?>>? _verification;
+  ({Set<String> present, DateTime completed})? _lateVerification;
   _Verifier? _verifier;
-  Map<String, _VerifiedBlock> _verifiedFingerprints = {};
+  _BlockReader? _reader;
+  final Map<String, _VerifiedBlock> _verifiedFingerprints = {};
   Future<Map<String, Object?>>? _timedOutOperation;
   Map<String, Object?> get diagnostics => Map.unmodifiable(_stats);
 
   /// Finishes only when timed-out work has actually released its buffers.
+  bool get hasPendingReads => _readOperations.isNotEmpty;
+
+  Future<void> get readsSettled async => Future.wait(_readOperations);
+
+  bool get hasPendingIntegrity => _verification != null;
+
+  Future<void> get integritySettled async {
+    await _verification;
+  }
+
   Future<void> get settled async {
     await Future.wait(_operations);
   }
@@ -70,18 +89,72 @@ class DiskCacheSession {
     Uint8List bytes, {
     void Function(String?)? onPublished,
   }) async {
-    final result = await _call('put', {
-      'bytes': bytes,
-    }, onSettled: (result) => onPublished?.call(result['token'] as String?));
+    final result = await _call(
+      'put',
+      {'bytes': bytes},
+      onSettled: (result) {
+        _rememberVerified(result);
+        onPublished?.call(result['token'] as String?);
+      },
+    );
     return result?['token'] as String?;
   }
 
   Future<Uint8List?> read(String token, {void Function()? onMissing}) async {
-    final result = await _call('read', {'token': token});
+    if (_closed) return null;
+    final reader = _reader;
+    Map<String, Object?>? result;
+    if (reader == null) {
+      result = await _call('read', {
+        'token': token,
+      }, onSettled: _rememberVerified);
+    } else {
+      // Immutable block reads do not acquire the global quota lock or wait
+      // behind publication, eviction inventories, or optional CRC snapshots.
+      final operation = reader.read(_directory.path, token);
+      _operations.add(operation);
+      _readOperations.add(operation);
+      unawaited(
+        operation.then(
+          (value) {
+            _operations.remove(operation);
+            _readOperations.remove(operation);
+            _rememberVerified(value);
+          },
+          onError: (Object _) {
+            _operations.remove(operation);
+            _readOperations.remove(operation);
+          },
+        ),
+      );
+      try {
+        result = await operation.timeout(_timeout);
+      } catch (_) {
+        _stats['diskReadTimeouts'] =
+            (_stats['diskReadTimeouts'] as int? ?? 0) + 1;
+        return null;
+      }
+    }
+    if (result?['invalid'] == true) {
+      // Rare corrupt data is reclaimed by the quota owner under its lock.
+      await _call('read', {'token': token});
+    }
     if (result != null && result['error'] == null && result['bytes'] == null) {
       onMissing?.call();
     }
     return result?['bytes'] as Uint8List?;
+  }
+
+  void _rememberVerified(Map<String, Object?> result) {
+    if (_closed) return;
+    final token = result['token'];
+    final stamp = result['fingerprint'];
+    if (token is! String || stamp is! List || stamp.length != 3) return;
+    _verifiedFingerprints[_join(_directory.path, token)] = (
+      stamp[0] as int,
+      stamp[1] as int,
+      stamp[2] as int,
+    );
   }
 
   Future<void> setSessionLimit(int bytes) async {
@@ -107,7 +180,16 @@ class DiskCacheSession {
   /// Returns only blocks whose current on-disk contents pass the token CRC.
   /// The worker hashes bounded new data and never transfers media bytes here.
   Future<Set<String>?> verifiedTokens(List<String> tokens) async {
-    if (_closed || degradation != null || tokens.length > 8192) return null;
+    if (_closed || tokens.length > 8192) return null;
+    // A slow writer is not evidence that immutable cached blocks are unreadable.
+    // Integrity work has its own isolate and does not need the quota lock.
+    final late = _lateVerification;
+    _lateVerification = null;
+    if (late != null &&
+        DateTime.now().difference(late.completed) <
+            const Duration(seconds: 2)) {
+      return late.present.intersection(tokens.toSet());
+    }
     // Integrity snapshots are optional UI work. Keep filesystem requests off
     // the serialized worker that serves foreground media reads.
     if (_verification != null) return null;
@@ -117,15 +199,32 @@ class DiskCacheSession {
     final known = Map<String, _VerifiedBlock>.from(_verifiedFingerprints);
     final requested = List<String>.from(tokens);
     final operation = verifier.verify(directory, requested, known);
+    var timedOut = false;
     _verification = operation;
     _operations.add(operation);
     unawaited(
       operation.then(
         (result) {
           if (!_closed) {
-            _verifiedFingerprints = Map<String, _VerifiedBlock>.from(
+            if (timedOut) {
+              _lateVerification = (
+                present: Set<String>.from(result['present'] as List),
+                completed: DateTime.now(),
+              );
+            }
+            final verified = Map<String, _VerifiedBlock>.from(
               result['fingerprints'] as Map,
             );
+            // Retain successful publications/reads that arrived while this
+            // snapshot was running. Never overwrite a newer device fingerprint.
+            for (final entry in known.entries) {
+              if (_verifiedFingerprints[entry.key] == entry.value) {
+                _verifiedFingerprints.remove(entry.key);
+              }
+            }
+            for (final entry in verified.entries) {
+              _verifiedFingerprints.putIfAbsent(entry.key, () => entry.value);
+            }
           }
           _operations.remove(operation);
           if (identical(_verification, operation)) _verification = null;
@@ -144,8 +243,9 @@ class DiskCacheSession {
       );
       return Set<String>.from(result['present'] as List);
     } on TimeoutException {
-      verifier.close();
-      if (identical(_verifier, verifier)) _verifier = null;
+      // Do not permanently disable cache progress after one slow filesystem
+      // scan. Keep just this bounded request in flight and consume its result.
+      timedOut = true;
       return null;
     } catch (_) {
       return null;
@@ -196,6 +296,7 @@ class DiskCacheSession {
     String operation,
     Map<String, Object?> args, {
     bool optional = false,
+    Duration? timeout,
     void Function(Map<String, Object?>)? onSettled,
   }) async {
     if (_closed || degradation != null) return null;
@@ -238,7 +339,7 @@ class DiskCacheSession {
           },
         ),
       );
-      final result = await operationFuture.timeout(_timeout);
+      final result = await operationFuture.timeout(timeout ?? _timeout);
       final stats = result['stats'];
       if (stats is Map) _stats.addAll(Map<String, Object?>.from(stats));
       if (!optional && result['error'] != null) {
@@ -270,6 +371,8 @@ class DiskCacheSession {
 
   Future<void> _close() async {
     _closed = true;
+    _reader?.close();
+    _reader = null;
     _verifier?.close();
     _verifier = null;
     final cleanup = _coordinator.request({'op': 'close', 'id': _id});
@@ -405,6 +508,92 @@ _VerifiedBlock _blockFingerprint(FileStat stat) => (
   stat.changed.microsecondsSinceEpoch,
 );
 
+/// Dedicated foreground reader. Writers publish by atomic rename and cached
+/// blocks are immutable, so an open/read/CRC needs no quota mutation lock.
+class _BlockReader {
+  _BlockReader(this._isolate, this._requests);
+  final Isolate _isolate;
+  final SendPort _requests;
+  final _pending = <ReceivePort>{};
+  static Future<_BlockReader> start() async {
+    final ready = ReceivePort();
+    try {
+      final isolate = await Isolate.spawn(_serveBlockReader, ready.sendPort);
+      return _BlockReader(isolate, await ready.first as SendPort);
+    } finally {
+      ready.close();
+    }
+  }
+
+  Future<Map<String, Object?>> read(String directory, String token) async {
+    final response = ReceivePort();
+    _pending.add(response);
+    try {
+      _requests.send([directory, token, response.sendPort]);
+      return Map<String, Object?>.from(await response.first as Map);
+    } finally {
+      _pending.remove(response);
+      response.close();
+    }
+  }
+
+  void close() {
+    _isolate.kill(priority: Isolate.immediate);
+    for (final response in _pending.toList()) {
+      response.close();
+    }
+    _pending.clear();
+  }
+}
+
+void _serveBlockReader(SendPort ready) {
+  final requests = ReceivePort();
+  ready.send(requests.sendPort);
+  requests.listen((message) {
+    final parts = message as List;
+    final reply = parts[2] as SendPort;
+    try {
+      reply.send(_readImmutableBlock(parts[0] as String, parts[1] as String));
+    } on FileSystemException {
+      // Eviction may win before the file is opened. The caller falls back to
+      // the upstream range; already returned owned bytes remain valid.
+      reply.send(<String, Object?>{});
+    } catch (_) {
+      reply.send({'error': 'disk-read'});
+    }
+  });
+}
+
+Map<String, Object?> _readImmutableBlock(String directory, String token) {
+  if (!_blockPattern.hasMatch(token) ||
+      FileSystemEntity.typeSync(directory, followLinks: false) !=
+          FileSystemEntityType.directory) {
+    return {};
+  }
+  final file = File(_join(directory, token));
+  if (FileSystemEntity.typeSync(file.path, followLinks: false) !=
+      FileSystemEntityType.file) {
+    return {};
+  }
+  final parts = token.split('-');
+  final length = int.parse(parts[1]);
+  if (length <= 0 || length > maxCacheBlockBytes) return {};
+  final before = file.statSync();
+  if (before.size != length) return {'invalid': true};
+  final bytes = file.readAsBytesSync();
+  if (bytes.length != length ||
+      _crc32(bytes) != int.parse(parts[2].split('.').first, radix: 16)) {
+    return {'invalid': true};
+  }
+  final stamp = _blockFingerprint(before);
+  return {
+    'bytes': bytes,
+    'token': token,
+    if (_blockFingerprint(file.statSync()) == stamp)
+      'fingerprint': [stamp.$1, stamp.$2, stamp.$3],
+  };
+}
+
 class _Verifier {
   _Verifier(this._isolate, this._requests);
 
@@ -517,18 +706,21 @@ Map<String, Object?> _verifyTokenFiles(
   }
   // Verify one new block per snapshot. Repeated snapshots advance through a
   // large cache without a burst of disk reads during seek or track changes.
-  var remaining = 1024 * 1024;
+  var remaining = maxCacheBlockBytes;
+  final regular = directory.isEmpty
+      ? <String>{}
+      : readCacheDirectory(
+          Directory(directory),
+          maxEntries: _maxCacheFiles,
+        ).entries.whereType<File>().map((file) => file.path).toSet();
   for (final token in tokens) {
     if (!_blockPattern.hasMatch(token)) continue;
     final length = int.parse(token.split('-')[1]);
-    if (length <= 0 || length > 1024 * 1024) continue;
+    if (length <= 0 || length > maxCacheBlockBytes) continue;
     final file = File(_join(directory, token));
     if (!known.containsKey(file.path) && remaining < length) continue;
     try {
-      if (FileSystemEntity.typeSync(file.path, followLinks: false) !=
-          FileSystemEntityType.file) {
-        continue;
-      }
+      if (!regular.contains(file.path)) continue;
       final stat = file.statSync();
       if (stat.size != length) continue;
       final fingerprint = _blockFingerprint(stat);
@@ -567,8 +759,9 @@ class _DiskStore {
   // Reused only while the global lock is held. Other processes can change the
   // directory between operations, so no inventory survives a lock release.
   final _entryInventory = <String, List<FileSystemEntity>>{};
-  final _statInventory = <String, FileStat>{};
+  final _statInventory = <String, CacheFileStat>{};
   final _verifiedBlocks = <String, _VerifiedBlock>{};
+  final _accessed = <String, DateTime>{};
   static const _verificationBudgetBytes = 4 * 1024 * 1024;
 
   Future<Map<String, Object?>> handle(Map<String, Object?> message) async {
@@ -748,15 +941,15 @@ class _DiskStore {
   List<FileSystemEntity> _entries(Directory directory) {
     final cached = _entryInventory[directory.path];
     if (cached != null) return cached;
-    final entries = directory.listSync(followLinks: false);
-    if (entries.length > _maxCacheFiles) {
-      throw const FileSystemException('Cache file count limit');
-    }
-    return _entryInventory[directory.path] = entries;
+    final inventory = readCacheDirectory(directory, maxEntries: _maxCacheFiles);
+    _statInventory.addAll(inventory.stats);
+    return _entryInventory[directory.path] = inventory.entries;
   }
 
-  FileStat _stat(File file) =>
-      _statInventory.putIfAbsent(file.path, file.statSync);
+  CacheFileStat _stat(File file) => _statInventory.putIfAbsent(file.path, () {
+    final stat = file.statSync();
+    return (size: stat.size, modified: stat.modified);
+  });
 
   void _changed(File file) {
     // Directory.path and File.parent differ in trailing separator spelling.
@@ -764,6 +957,7 @@ class _DiskStore {
     _entryInventory.clear();
     _statInventory.remove(file.path);
     _verifiedBlocks.remove(file.path);
+    _accessed.remove(file.path);
   }
 
   Map<String, Object?> _verifiedTokens(String id, List<String> tokens) {
@@ -777,7 +971,7 @@ class _DiskStore {
     for (final token in tokens) {
       if (!_blockPattern.hasMatch(token)) continue;
       final length = int.parse(token.split('-')[1]);
-      if (length <= 0 || length > 1024 * 1024) continue;
+      if (length <= 0 || length > maxCacheBlockBytes) continue;
       final file = File(_join(lease.directory.path, token));
       if (FileSystemEntity.typeSync(file.path, followLinks: false) !=
           FileSystemEntityType.file) {
@@ -920,7 +1114,6 @@ class _DiskStore {
   }) {
     // Protection uses the owned session/block identity, not filesystem spelling
     // (Windows permits equivalent paths with different separators/casing).
-    final protected = _protectedBlocks()..addAll(protecting);
     final sessions = only == null ? _candidateDirectories() : [only];
     final candidates = <({File file, int length, DateTime modified})>[];
     // Include every entry, not just evictable blocks. Protected blocks, pin
@@ -931,18 +1124,28 @@ class _DiskStore {
     for (final directory in sessions) {
       final entries = _entries(directory);
       occupiedFiles += entries.length;
-      final owned = _metadata(directory) != null;
       for (final file in entries.whereType<File>()) {
+        occupied += _stat(file).size;
+      }
+    }
+    // Most publications are below quota. Do not parse pins or sort every
+    // cached block until an eviction is actually needed, on any platform.
+    if (occupied + required <= limit &&
+        occupiedFiles + requiredFiles <= _maxCacheFiles) {
+      return true;
+    }
+    final protected = _protectedBlocks()..addAll(protecting);
+    for (final directory in sessions) {
+      if (_metadata(directory) == null) continue;
+      for (final file in _entries(directory).whereType<File>()) {
         final stat = _stat(file);
-        occupied += stat.size;
-        if (owned &&
-            _blockPattern.hasMatch(_name(file)) &&
+        if (_blockPattern.hasMatch(_name(file)) &&
             !protected.contains('${_name(directory)}/${_name(file)}') &&
             candidates.length < _maxCacheFiles) {
           candidates.add((
             file: file,
             length: stat.size,
-            modified: stat.modified,
+            modified: _accessed[file.path] ?? stat.modified,
           ));
         }
       }
@@ -984,7 +1187,7 @@ class _DiskStore {
 
   Map<String, Object?> _put(String id, Uint8List bytes) {
     final lease = _leases[id];
-    if (lease == null || bytes.isEmpty || bytes.length > 1024 * 1024) {
+    if (lease == null || bytes.isEmpty || bytes.length > maxCacheBlockBytes) {
       return {'error': 'invalid-write'};
     }
     // A partial file becomes its immutable block through rename, so exactly one
@@ -1022,7 +1225,17 @@ class _DiskStore {
       }
       rethrow;
     }
-    return {'token': token, 'stats': _stats()};
+    // The writer just calculated the CRC and published these immutable bytes.
+    // Share its fingerprint with the verifier instead of re-reading every new
+    // block at only 1 MiB per UI refresh. Every snapshot still checks the stat.
+    final stamp = _blockFingerprint(
+      File(_join(lease.directory.path, token)).statSync(),
+    );
+    return {
+      'token': token,
+      'fingerprint': [stamp.$1, stamp.$2, stamp.$3],
+      'stats': _stats(),
+    };
   }
 
   Map<String, Object?> _read(String id, String token) {
@@ -1035,7 +1248,9 @@ class _DiskStore {
     }
     final parts = token.split('-');
     final length = int.parse(parts[1]);
-    if (length > 1024 * 1024 || length <= 0 || file.lengthSync() != length) {
+    if (length > maxCacheBlockBytes ||
+        length <= 0 ||
+        file.lengthSync() != length) {
       file.deleteSync();
       _changed(file);
       return {'stats': _stats()};
@@ -1047,14 +1262,20 @@ class _DiskStore {
       _changed(file);
       return {'stats': _stats()};
     }
-    file.setLastModifiedSync(DateTime.now());
-    // The read itself has just checked the CRC. Its access timestamp update
-    // must not force a redundant hash on the next timeline refresh.
-    _verifiedBlocks[file.path] = _blockFingerprint(file.statSync());
+    // Keep immutable file fingerprints stable during concurrent verification.
+    // Track local LRU reads separately; touching mtime creates false coverage
+    // holes whenever the verifier races a foreground read.
+    _accessed[file.path] = DateTime.now();
+    final stamp = _blockFingerprint(file.statSync());
+    _verifiedBlocks[file.path] = stamp;
     // Immutable owned bytes are sent before another command can evict the file.
     // Reads do not change quota. Avoid a full disk inventory on every 64 KiB
     // consumer slice; allocation/deletion operations refresh usage diagnostics.
-    return {'bytes': bytes};
+    return {
+      'bytes': bytes,
+      'token': token,
+      'fingerprint': [stamp.$1, stamp.$2, stamp.$3],
+    };
   }
 
   Map<String, Object?> _protect(
@@ -1089,7 +1310,9 @@ class _DiskStore {
       final file = File(path);
       final parts = token.split('-');
       final length = int.parse(parts[1]);
-      if (length <= 0 || length > 1024 * 1024 || file.lengthSync() != length) {
+      if (length <= 0 ||
+          length > maxCacheBlockBytes ||
+          file.lengthSync() != length) {
         return {};
       }
     }
@@ -1130,6 +1353,10 @@ class _DiskStore {
   Future<Map<String, Object?>> _close(String id) async {
     final lease = _leases.remove(id);
     if (lease == null) return {'ok': true};
+    _accessed.removeWhere(
+      (path, _) =>
+          path.startsWith('${lease.directory.path}${Platform.pathSeparator}'),
+    );
     _verifiedBlocks.removeWhere(
       (path, _) =>
           path.startsWith('${lease.directory.path}${Platform.pathSeparator}'),

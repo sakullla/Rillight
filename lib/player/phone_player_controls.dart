@@ -372,7 +372,6 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
     );
     final notices = [
       if (c.progressSyncFailed) l.progressSyncFailed,
-      if (c.networkSlow) l.networkSlowHint,
       if (c.trackFailure != null) l.mobileTrackUnavailable,
       if (c.backgroundReleased) l.mobileBackgroundPaused,
       if (c.playbackEnded) l.playbackEnded,
@@ -391,6 +390,28 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            if (c.networkSlow)
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      l.networkSlowHint,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Colors.white70,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    key: const Key('mobile-dismiss-network-hint'),
+                    tooltip: MaterialLocalizations.of(
+                      context,
+                    ).closeButtonTooltip,
+                    onPressed: c.dismissNetworkSlowHint,
+                    icon: const Icon(Icons.close, size: 18),
+                  ),
+                ],
+              ),
             if (notices.isNotEmpty)
               ConstrainedBox(
                 constraints: const BoxConstraints(maxHeight: 40),

@@ -397,7 +397,7 @@ class _MediaImageState extends State<MediaImage> {
     }
     final cache = MediaImageCache.instance;
     try {
-      for (var attempt = 0; attempt < 3; attempt++) {
+      for (var attempt = 0; current(); attempt++) {
         if (!current()) {
           return null;
         }
@@ -469,7 +469,18 @@ class _MediaImageState extends State<MediaImage> {
         if (!current() || !_canRetryLoad()) {
           return null;
         }
-        await _waitBeforeRetry(Duration(milliseconds: 200 * (attempt + 1)));
+        // Keep mounted cards recoverable after temporary server overload. Slow
+        // retries are bounded and only resume fetching when the card is visible.
+        await _waitBeforeRetry(
+          attempt < 2
+              ? Duration(milliseconds: 200 * (attempt + 1))
+              : Duration(seconds: math.min(30, 5 * (attempt - 1))),
+        );
+        while (current() && _viewportHit() != true) {
+          final wake = Completer<void>();
+          _layoutWake = wake;
+          await wake.future;
+        }
       }
       return null;
     } finally {
@@ -500,6 +511,9 @@ class _MediaImageState extends State<MediaImage> {
     final waiter = _retryWaiter;
     _retryWaiter = null;
     if (waiter != null && !waiter.isCompleted) waiter.complete();
+    final wake = _layoutWake;
+    _layoutWake = null;
+    if (wake != null && !wake.isCompleted) wake.complete();
   }
 
   Future<_LoadedImage?> _readDiskLoaded() async {
@@ -1248,10 +1262,12 @@ class MediaImageCache {
       if (!current() || !await _acquire(request)) return null;
       Uint8List? bytes;
       var retryable = false;
+      _ImageFetchConsumer? fetchedBy;
       try {
         final consumer = request.currentConsumer;
         if (consumer == null || !current()) return null;
         request.activeConsumer = consumer;
+        fetchedBy = consumer;
         try {
           bytes = await consumer.fetch().timeout(fetchTimeout);
         } on TimeoutException {
@@ -1281,7 +1297,9 @@ class MediaImageCache {
         }
         return loaded;
       }
-      if (!retryable) _recordMiss(cacheKey);
+      // A new card may join a request cancelled when its original card left.
+      // That cancellation says nothing about whether the image exists.
+      if (!retryable && fetchedBy.valid) _recordMiss(cacheKey);
       return null;
     } finally {
       if (identical(_inflight[cacheKey], request)) _inflight.remove(cacheKey);

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:isolate';
 import 'dart:io';
 
+import 'cache/cache_limits.dart';
 import 'cache/session_byte_cache.dart';
 import 'playback_http_proxy.dart';
 
@@ -66,7 +67,7 @@ class PlaybackTransportSession {
     Directory? cacheRoot,
     int memoryLimitBytes = 32 * 1024 * 1024,
     int diskLimitBytes = 2048 * 1024 * 1024,
-    int pendingLimitBytes = 8 * 1024 * 1024,
+    int pendingLimitBytes = defaultCachePendingBytes,
     int readAheadBytes = 512 * 1024 * 1024,
     bool dynamicSource = false,
     bool sessionBuffering = false,

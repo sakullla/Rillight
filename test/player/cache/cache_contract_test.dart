@@ -199,6 +199,45 @@ void main() {
     );
 
     test(
+      'index deadline retains verified later clusters and retracts missing bytes',
+      () async {
+        final (bytes, positions, cuesPosition) = fixture();
+        Future<Uint8List?> read(int offset, int length) async =>
+            Uint8List.sublistView(bytes, offset, offset + length);
+        final index = (await MatroskaCacheIndex.load(
+          total: bytes.length,
+          read: read,
+        ))!;
+        final metadata = [
+          CachedByteRange(0, positions.first),
+          CachedByteRange(cuesPosition, bytes.length),
+        ];
+        final prior = await index.ranges(
+          [...metadata, CachedByteRange(positions[1], positions[2])],
+          const Duration(seconds: 30),
+          read: read,
+        );
+        expect(prior.map((r) => (r.start.inSeconds, r.end.inSeconds)), [
+          (10, 20),
+        ]);
+        final timedOut = await index.ranges(
+          [CachedByteRange(0, bytes.length)],
+          const Duration(seconds: 30),
+          read: (_, _) async => throw TimeoutException('optional index budget'),
+        );
+        expect(timedOut.map((r) => (r.start.inSeconds, r.end.inSeconds)), [
+          (10, 20),
+        ]);
+        final removed = await index.ranges(
+          [...metadata, CachedByteRange(positions[0], positions[1])],
+          const Duration(seconds: 30),
+          read: (_, _) async => throw TimeoutException('optional index budget'),
+        );
+        expect(removed, isEmpty);
+      },
+    );
+
+    test(
       'evicted metadata clears previously verified cluster coverage',
       () async {
         final (bytes, positions, cuesPosition) = fixture();
@@ -288,6 +327,42 @@ void main() {
   });
 
   group('session_byte_cache_test.dart', () {
+    test(
+      'coverage survives append but detects eviction and replacement',
+      () async {
+        final cache = await SessionByteCache.open(memoryLimitBytes: 16);
+        addTearDown(cache.close);
+        Future<bool> put(int offset) => cache.put(
+          resource: 'media',
+          generation: 0,
+          offset: offset,
+          bytes: Uint8List(8),
+        );
+        await put(0);
+        final first = cache.coverageRevision;
+        await put(8);
+        expect(cache.coverageRevision, first);
+        expect(
+          (await cache.availableRanges(
+            resource: 'media',
+            generation: 0,
+          ))!.single.end,
+          16,
+        );
+        await put(16);
+        expect(cache.coverageRevision, greaterThan(first));
+        final evicted = cache.coverageRevision;
+        await put(16);
+        expect(cache.coverageRevision, greaterThan(evicted));
+        final replaced = cache.coverageRevision;
+        cache.invalidate('media');
+        expect(cache.coverageRevision, greaterThan(replaced));
+        expect(
+          await cache.availableRanges(resource: 'media', generation: 0),
+          isEmpty,
+        );
+      },
+    );
     late Directory root;
     final caches = <SessionByteCache>[];
 
@@ -387,6 +462,57 @@ void main() {
           generation: 1,
         );
         expect(ranges, isEmpty);
+      },
+    );
+
+    test(
+      'published disk blocks and reads retain continuous verified coverage',
+      () async {
+        const blockSize = 1024 * 1024;
+        final cache = await open(
+          memory: 0,
+          disk: 10 * blockSize,
+          pending: 8 * blockSize,
+        );
+        for (var i = 0; i < 6; i++) {
+          await put(cache, i * blockSize, Uint8List(blockSize));
+        }
+        Future<void> check() async {
+          final ranges = await cache.availableRanges(
+            resource: 'secret-url-not-on-disk',
+            generation: 1,
+            verifyChecksum: true,
+          );
+          expect(ranges!.map((r) => (r.start, r.end)), [(0, 6 * blockSize)]);
+        }
+
+        await check();
+        // Reading must not mutate the immutable files while the verifier can
+        // be inspecting the same blocks on its own isolate.
+        final before = {
+          for (final file in root.listSync(recursive: true).whereType<File>())
+            if (file.path.endsWith('.block'))
+              file.path: file.statSync().modified,
+        };
+        await read(cache, 2 * blockSize);
+        for (final entry in before.entries) {
+          expect(File(entry.key).statSync().modified, entry.value);
+        }
+        await check();
+        final removed = root
+            .listSync(recursive: true)
+            .whereType<File>()
+            .firstWhere((f) => f.path.endsWith('.block'));
+        await removed.delete();
+        final ranges = await cache.availableRanges(
+          resource: 'secret-url-not-on-disk',
+          generation: 1,
+          verifyChecksum: true,
+        );
+        expect(
+          ranges!.fold<int>(0, (sum, r) => sum + r.end - r.start),
+          5 * blockSize,
+        );
       },
     );
 
@@ -575,6 +701,37 @@ void main() {
       },
     );
 
+    test('foreground reads survive a blocked quota writer', () async {
+      // Windows byte-range locks also exclude another handle in this process.
+      // POSIX record locks are process-owned, so this contention fixture is
+      // intentionally Windows-only; immutable-read coverage above is portable.
+      if (!Platform.isWindows) return;
+      final cache = await open(memory: 0);
+      await put(cache, 0, [1, 2, 3, 4]);
+      final lock = File(
+        '${root.path}/quota.lock',
+      ).openSync(mode: FileMode.append);
+      lock.lockSync(FileLock.exclusive);
+      try {
+        await put(cache, 4, [5, 6, 7, 8]);
+        expect(cache.diagnostics['degradation'], 'disk-lock-timeout');
+        expect((await read(cache, 0))?.bytes, [1, 2, 3, 4]);
+        final verified = await cache.availableRanges(
+          resource: 'secret-url-not-on-disk',
+          generation: 1,
+          verifyChecksum: true,
+        );
+        expect(verified, isNotNull);
+        expect(
+          verified!.any((range) => range.start == 0 && range.end >= 4),
+          true,
+        );
+      } finally {
+        lock.unlockSync();
+        lock.closeSync();
+      }
+    });
+
     test('corrupt and truncated blocks cannot be returned', () async {
       final cache = await open(memory: 0);
       await put(cache, 0, [1, 2, 3, 4]);
@@ -677,6 +834,91 @@ void main() {
 
   group('session_read_ahead_test.dart', () {
     test(
+      'large blocks reduce file count without delaying first delivery',
+      () async {
+        const mib = 1024 * 1024;
+        const total = 16 * mib;
+        final root = await Directory.systemTemp.createTemp('rillight-density-');
+        final cache = await SessionByteCache.open(
+          root: root,
+          memoryLimitBytes: 8 * mib,
+          diskLimitBytes: 32 * mib,
+        );
+        var downloaded = 0;
+        final ahead = SessionReadAhead(
+          cache: cache,
+          resource: 'density',
+          generation: 1,
+          total: total,
+          aheadBytes: total,
+          fetch: (start, end) async {
+            Stream<List<int>> chunks() async* {
+              for (var offset = start; offset <= end; offset += 64 * 1024) {
+                final length = (end - offset + 1).clamp(0, 64 * 1024);
+                downloaded += length;
+                yield Uint8List(length)..fillRange(0, length, 7);
+                await Future<void>.delayed(Duration.zero);
+              }
+            }
+
+            return ReadAheadTransfer(chunks(), () {});
+          },
+        );
+        final reader = StreamIterator(ahead.read(0, total - 1));
+        try {
+          expect(await reader.moveNext(), true);
+          expect(downloaded, lessThan(4 * mib));
+          await until(
+            () =>
+                downloaded == total &&
+                ahead.diagnostics['readAheadWorkerActive'] == false,
+          );
+          final files = root
+              .listSync(recursive: true, followLinks: false)
+              .whereType<File>()
+              .where((file) => file.path.endsWith('.block'))
+              .toList();
+          expect(files, hasLength(5));
+          expect(
+            files.fold<int>(0, (sum, file) => sum + file.lengthSync()),
+            total,
+          );
+          expect(
+            cache.diagnostics['pendingPeakBytes'],
+            lessThanOrEqualTo(24 * mib),
+          );
+          final ranges = await cache.availableRanges(
+            resource: 'density',
+            generation: 1,
+            verifyChecksum: true,
+          );
+          expect(ranges?.map((range) => (range.start, range.end)).toList(), [
+            (0, total),
+          ]);
+          final hit = await cache.read(
+            resource: 'density',
+            generation: 1,
+            offset: 0,
+            maxLength: 32,
+          );
+          expect(hit?.bytes, List.filled(32, 7));
+        } finally {
+          await reader.cancel();
+          await ahead.close();
+          await cache.close();
+          expect(
+            root
+                .listSync(recursive: true)
+                .whereType<File>()
+                .where((file) => file.path.endsWith('.block')),
+            isEmpty,
+          );
+          await root.delete(recursive: true);
+        }
+      },
+    );
+
+    test(
       'indexed disk hit resumes when pending read capacity returns',
       () async {
         final root = await Directory.systemTemp.createTemp('rillight-budget-');
@@ -686,8 +928,7 @@ void main() {
           pendingLimitBytes: 2 * 1024 * 1024,
           diskLimitBytes: 8 * 1024 * 1024,
         );
-        final bytes = Uint8List(SessionReadAhead.blockBytes)
-          ..fillRange(0, 32, 7);
+        final bytes = Uint8List(1024 * 1024)..fillRange(0, 32, 7);
         final ahead = SessionReadAhead(
           cache: cache,
           resource: 'cached',
@@ -874,7 +1115,7 @@ void main() {
     );
 
     test(
-      'publication pipeline stays bounded and grows stable range requests',
+      'continuous prefetch reuses one request with bounded block publications',
       () async {
         final root = await Directory.systemTemp.createTemp(
           'rillight-pipeline-',
@@ -912,12 +1153,8 @@ void main() {
                 (ahead.diagnostics['readAheadPublishedBytes'] as int) >=
                 24 * 1024 * 1024,
           );
-          expect(requestLengths, [
-            8 * 1024 * 1024,
-            8 * 1024 * 1024,
-            8 * 1024 * 1024,
-          ]);
-          expect(ahead.diagnostics['readAheadRequestBytes'], 16 * 1024 * 1024);
+          expect(requestLengths, [24 * 1024 * 1024]);
+          expect(ahead.diagnostics['readAheadRequestBytes'], 24 * 1024 * 1024);
           expect(
             ahead.diagnostics['readAheadPublicationPeak'],
             inInclusiveRange(2, 4),

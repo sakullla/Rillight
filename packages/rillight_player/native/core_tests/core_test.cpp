@@ -437,12 +437,19 @@ int main() {
   assert(frame && frame->width == 32 && frame->height == 32 &&
          frame->data_size == 32 * 32 * 4);
   assert(frame->data[0] == 200);
-  rillight_core_release_frame(frame);
+  // A renderer can retain the last picture while a new source opens and even
+  // after the core is destroyed. Recycling must keep that allocation alive.
+  auto *retained_video = frame;
   assert(rillight_core_open(core, "synthetic.wav", 7) == 0);
   assert(wait_for(core, [](const auto &state) {
     return state.session_id == 3 && state.first_audio_frame_ready != 0;
   }));
   rillight_core_destroy(core);
+  assert(retained_video->data[0] == 200);
+  std::thread release_video([retained_video] {
+    rillight_core_release_frame(retained_video);
+  });
+  release_video.join();
   core = rillight_core_create(&io);
   assert(core && rillight_core_open(core, "synthetic.wav", 1) == 0);
   assert(wait_for(core, [](const auto &state) {
@@ -532,7 +539,9 @@ int main() {
          std::chrono::seconds(2));
 
   SeekBlockingMedia seek_media;
-  seek_media.wav = make_wav(48000 * 30);
+  // Exceed the bounded compressed-packet queue so demux still reads after
+  // the first decoded frame is ready.
+  seek_media.wav = make_wav(48000 * 120);
   RillightCoreIo seek_block_io{&seek_media, seek_block_open, seek_block_read,
                                seek, [](void *, void *) {}, seek_block_cancel,
                                seek_block_cancel};

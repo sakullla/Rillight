@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
@@ -212,18 +213,35 @@ class MatroskaCacheIndex {
         !_covers(bytes, _cuesOffset, _cuesOffset + _cuesLength)) {
       return result;
     }
+    final complete = <int>[];
     for (var i = 0; i < points.length; i++) {
       final start = points[i];
       final endByte = i + 1 < points.length ? points[i + 1].$1 : total;
       final endTime = i + 1 < points.length ? points[i + 1].$2 : duration;
-      if (!_covers(bytes, start.$1, endByte) ||
-          start.$2 >= endTime ||
-          endTime > duration ||
-          !(_verifiedClusters.contains(start.$1) ||
-              await _verifyCluster(start.$1, endByte, start.$2, read))) {
-        continue;
+      if (_covers(bytes, start.$1, endByte) &&
+          start.$2 < endTime &&
+          endTime <= duration) {
+        complete.add(i);
       }
-      _verifiedClusters.add(start.$1);
+    }
+    // Extend the verified index incrementally. An optional read deadline must
+    // not discard already verified clusters that still have complete bytes.
+    for (final i in complete) {
+      final start = points[i];
+      if (_verifiedClusters.contains(start.$1)) continue;
+      final endByte = i + 1 < points.length ? points[i + 1].$1 : total;
+      try {
+        if (await _verifyCluster(start.$1, endByte, start.$2, read)) {
+          _verifiedClusters.add(start.$1);
+        }
+      } on TimeoutException {
+        break;
+      }
+    }
+    for (final i in complete) {
+      final start = points[i];
+      if (!_verifiedClusters.contains(start.$1)) continue;
+      final endTime = i + 1 < points.length ? points[i + 1].$2 : duration;
       if (result.isNotEmpty && result.last.end == start.$2) {
         final previous = result.removeLast();
         result.add(CachedTimeRange(previous.start, endTime));

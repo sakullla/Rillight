@@ -1,4 +1,5 @@
 #include "rillight_core.h"
+#include "video_buffer_pool.h"
 
 #include <algorithm>
 #include <array>
@@ -11,6 +12,7 @@
 #include <cstdio>
 #include <cstring>
 #include <deque>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <new>
@@ -58,6 +60,7 @@ using Clock = std::chrono::steady_clock;
 
 struct LoopbackIo {
   std::atomic<uint64_t> media_generation{0};
+  std::atomic<int> media_open_error{0};
   std::atomic<bool> closing{false};
   std::mutex thread_mutex;
   std::thread::id media_thread;
@@ -101,7 +104,10 @@ int loopback_open_at(LoopbackHandle *handle, int64_t position) {
     return AVERROR_EXIT;
   const uint64_t generation = handle->owner->media_generation.load();
   AVDictionary *options = nullptr;
-  av_dict_set(&options, "rw_timeout", "15000000", 0);
+  // The local proxy allows 20 s for upstream headers and owns network recovery.
+  // A shorter loopback timeout aborts a healthy in-flight request first. The
+  // 45 s application open deadline and interrupt callback still bound/cancel it.
+  av_dict_set(&options, "rw_timeout", "45000000", 0);
   // Every reconnect must retain the same sealed route and redirect policy.
   av_dict_set(&options, "max_redirects", "0", 0);
   const AVIOInterruptCB interrupt{loopback_interrupted, handle};
@@ -142,7 +148,9 @@ void *loopback_open(void *opaque, const char *url, int flags) {
     handle->media = owner->media_thread == std::this_thread::get_id();
   }
   handle->read_generation = owner->media_generation.load();
-  if (loopback_open_at(handle.get(), 0) < 0) return nullptr;
+  const int result = loopback_open_at(handle.get(), 0);
+  if (handle->media) owner->media_open_error = result < 0 ? result : 0;
+  if (result < 0) return nullptr;
   return handle.release();
 }
 
@@ -236,12 +244,17 @@ struct Decoder {
 
 struct VideoScale {
   SwsContext *context = nullptr;
-  bool colors_configured = false;
-  int width = 0;
-  int height = 0;
-  int pixel_format = AV_PIX_FMT_NONE;
-  int color_space = SWS_CS_DEFAULT;
-  bool full_range = false;
+  std::shared_ptr<VideoBufferPool> buffers = std::make_shared<VideoBufferPool>();
+  AVFrame *downloaded = nullptr;
+  AVBufferRef *download_context = nullptr;
+  ~VideoScale() {
+    av_frame_free(&downloaded);
+    av_buffer_unref(&download_context);
+  }
+};
+
+struct VideoOutputFrame : RillightCoreFrame {
+  std::shared_ptr<VideoBufferPool> buffers;
 };
 
 struct AudioFilter {
@@ -252,9 +265,9 @@ struct AudioFilter {
   AVSampleFormat input_format = AV_SAMPLE_FMT_NONE;
   AVChannelLayout input_layout{};
   double speed = 1.0;
-  int64_t media_anchor = -1;
-  int64_t output_anchor = -1;
-  int64_t next_media_pts = -1;
+  int64_t media_anchor = AV_NOPTS_VALUE;
+  int64_t output_anchor = AV_NOPTS_VALUE;
+  int64_t next_media_pts = AV_NOPTS_VALUE;
 };
 
 struct SubtitleBitmap {
@@ -619,9 +632,9 @@ void close_audio_filter(AudioFilter *filter) {
   filter->sink = nullptr;
   filter->input_rate = 0;
   filter->input_format = AV_SAMPLE_FMT_NONE;
-  filter->media_anchor = -1;
-  filter->output_anchor = -1;
-  filter->next_media_pts = -1;
+  filter->media_anchor = AV_NOPTS_VALUE;
+  filter->output_anchor = AV_NOPTS_VALUE;
+  filter->next_media_pts = AV_NOPTS_VALUE;
 }
 
 struct RillightCoreImpl {
@@ -634,6 +647,8 @@ struct RillightCoreImpl {
   std::thread worker;
   std::thread subtitle_loader;
   std::atomic<bool> stop{false};
+  std::atomic<bool> decode_abort{false};
+  std::atomic<int> decode_error{0};
   std::atomic<uint64_t> timeline_signal{0};
   std::atomic<uint64_t> active_read_timeline{0};
   std::atomic<int> io_fatal_error{0};
@@ -990,7 +1005,7 @@ bool accept_operation(RillightCoreImpl *core, uint64_t operation) {
 
 int interrupt_read(void *opaque) {
   auto *core = static_cast<RillightCoreImpl *>(opaque);
-  return core->stop.load() ||
+  return core->stop.load() || core->decode_abort.load() ||
          core->timeline_signal.load() != core->active_read_timeline.load();
 }
 
@@ -1273,8 +1288,9 @@ Decoder make_decoder(AVFormatContext *format, int index,
     result.error = AVERROR(EINVAL);
     return result;
   }
-  if (parameters->codec_type == AVMEDIA_TYPE_SUBTITLE)
-    context->pkt_timebase = format->streams[index]->time_base;
+  // Audio decoders also need this to preserve timestamps when removing
+  // priming samples. Without it the audio clock can remain unavailable.
+  context->pkt_timebase = format->streams[index]->time_base;
   if (preference == RILLIGHT_CORE_HW_NONE &&
       parameters->codec_type == AVMEDIA_TYPE_VIDEO)
     context->get_format = choose_software_format;
@@ -1430,20 +1446,14 @@ RillightCoreFrame *convert_video(const AVFrame *frame, int64_t pts,
   const int bytes = av_image_get_buffer_size(AV_PIX_FMT_RGBA, frame->width,
                                               frame->height, 1);
   if (bytes <= 0 || static_cast<size_t>(bytes) > kMaxVideoBytes) return nullptr;
-  if (scale->width != frame->width || scale->height != frame->height ||
-      scale->pixel_format != frame->format) {
-    scale->colors_configured = false;
-    scale->width = frame->width;
-    scale->height = frame->height;
-    scale->pixel_format = frame->format;
-  }
-  scale->context = sws_getCachedContext(scale->context, frame->width, frame->height,
-                                 static_cast<AVPixelFormat>(frame->format),
-                                 frame->width, frame->height, AV_PIX_FMT_RGBA,
-                                 SWS_BILINEAR, nullptr, nullptr, nullptr);
   if (!scale->context) {
-    scale->colors_configured = false;
-    return nullptr;
+    scale->context = sws_alloc_context();
+    if (!scale->context) return nullptr;
+    // The dynamic frame API partitions conversion across workers without the
+    // legacy frame-start path retaining/copying the caller's RGBA allocation.
+    scale->context->threads = 4;
+    scale->context->flags = SWS_BILINEAR;
+    scale->context->backends = SWS_BACKEND_LEGACY;
   }
   const AVColorRange source_range =
       frame->color_range != AVCOL_RANGE_UNSPECIFIED ? frame->color_range :
@@ -1451,35 +1461,40 @@ RillightCoreFrame *convert_video(const AVFrame *frame, int64_t pts,
   const AVColorSpace source_space =
       frame->colorspace != AVCOL_SPC_UNSPECIFIED ? frame->colorspace :
       stream->codecpar->color_space;
-  int sws_space = SWS_CS_DEFAULT;
-  if (source_space == AVCOL_SPC_BT709) sws_space = SWS_CS_ITU709;
-  else if (source_space == AVCOL_SPC_BT2020_NCL) sws_space = SWS_CS_BT2020;
-  const bool full_range = source_range == AVCOL_RANGE_JPEG;
-  if (!scale->colors_configured || scale->color_space != sws_space ||
-      scale->full_range != full_range) {
-    const int *coefficients = sws_getCoefficients(sws_space);
-    if (sws_setColorspaceDetails(scale->context, coefficients, full_range,
-            coefficients, 1, 0, 1 << 16, 1 << 16) < 0) return nullptr;
-    scale->colors_configured = true;
-    scale->color_space = sws_space;
-    scale->full_range = full_range;
-  }
-  auto *output = new (std::nothrow) RillightCoreFrame{};
+  auto *output = new (std::nothrow) VideoOutputFrame{};
   if (!output) return nullptr;
-  output->data = new (std::nothrow) uint8_t[bytes];
+  output->buffers = scale->buffers;
+  output->data = output->buffers->Acquire(bytes);
   if (!output->data) {
     delete output;
     return nullptr;
   }
-  uint8_t *planes[4] = {output->data, nullptr, nullptr, nullptr};
-  int lines[4] = {stride, 0, 0, 0};
-  if (sws_scale(scale->context, frame->data, frame->linesize, 0, frame->height,
-                planes, lines) <= 0) {
+  // Borrow the decoded planes only for this synchronous conversion. Preserve
+  // the existing matrix/range policy and transfer/primaries; this is not HDR
+  // tone mapping or a change to Dolby output capabilities.
+  AVFrame source = *frame;
+  source.color_range = source_range == AVCOL_RANGE_JPEG
+                           ? AVCOL_RANGE_JPEG : AVCOL_RANGE_MPEG;
+  source.colorspace = source_space == AVCOL_SPC_BT709 ||
+                              source_space == AVCOL_SPC_BT2020_NCL
+                          ? source_space : AVCOL_SPC_SMPTE170M;
+  AVFrame destination{};
+  destination.width = frame->width;
+  destination.height = frame->height;
+  destination.format = AV_PIX_FMT_RGBA;
+  destination.data[0] = output->data;
+  destination.linesize[0] = stride;
+  destination.color_range = AVCOL_RANGE_JPEG;
+  destination.colorspace = AVCOL_SPC_RGB;
+  destination.color_primaries = source.color_primaries;
+  destination.color_trc = source.color_trc;
+  destination.flags = source.flags;
+  if (sws_scale_frame(scale->context, &destination, &source) < 0) {
     delete[] output->data;
     delete output;
     return nullptr;
   }
-  output->struct_size = sizeof(*output);
+  output->struct_size = sizeof(RillightCoreFrame);
   output->type = RILLIGHT_CORE_VIDEO_RGBA;
   output->session_id = session;
   output->timeline_version = timeline;
@@ -1591,7 +1606,7 @@ int prepare_audio_filter(AudioFilter *filter, const AVFrame *frame,
   filter->input_format = static_cast<AVSampleFormat>(frame->format);
   filter->speed = speed;
   filter->media_anchor = media_pts;
-  filter->output_anchor = -1;
+  filter->output_anchor = AV_NOPTS_VALUE;
   filter->next_media_pts = media_pts;
   return 0;
 }
@@ -1611,23 +1626,23 @@ RillightCoreFrame *convert_audio(const AVFrame *frame, AudioFilter *filter,
   }
   std::memcpy(output->data, frame->data[0], bytes);
   int64_t pts = filter->next_media_pts;
-  if (frame->pts != AV_NOPTS_VALUE && filter->media_anchor >= 0) {
+  if (frame->pts != AV_NOPTS_VALUE && filter->media_anchor != AV_NOPTS_VALUE) {
     const int64_t output_pts = av_rescale_q(
         frame->pts, av_buffersink_get_time_base(filter->sink),
         AVRational{1, 1000000});
-    if (filter->output_anchor < 0) filter->output_anchor = output_pts;
+    if (filter->output_anchor == AV_NOPTS_VALUE) filter->output_anchor = output_pts;
     pts = filter->media_anchor + static_cast<int64_t>(
                                      (output_pts - filter->output_anchor) *
                                      filter->speed);
   }
-  filter->next_media_pts = pts < 0 ? -1 :
+  filter->next_media_pts = pts == AV_NOPTS_VALUE ? AV_NOPTS_VALUE :
       pts + static_cast<int64_t>(frame->nb_samples * 1000000.0 /
                                  48000.0 * filter->speed);
   output->struct_size = sizeof(*output);
   output->type = RILLIGHT_CORE_AUDIO_S16;
   output->session_id = session;
   output->timeline_version = timeline;
-  output->pts_us = pts;
+  output->pts_us = pts == AV_NOPTS_VALUE ? -1 : pts;
   output->sample_rate = 48000;
   output->channels = 2;
   output->sample_count = frame->nb_samples;
@@ -1635,31 +1650,31 @@ RillightCoreFrame *convert_audio(const AVFrame *frame, AudioFilter *filter,
   return output;
 }
 
-void enqueue(RillightCoreImpl *core, RillightCoreFrame *frame,
+int enqueue(RillightCoreImpl *core, RillightCoreFrame *frame,
              int video_index, uint64_t timeline) {
-  if (!frame) return;
+  if (!frame) return 0;
   std::unique_lock lock(core->mutex);
   auto &queue = frame->type == RILLIGHT_CORE_VIDEO_RGBA ? core->video : core->audio;
   auto &bytes = frame->type == RILLIGHT_CORE_VIDEO_RGBA ? core->video_bytes : core->audio_bytes;
-  if (core->state == RILLIGHT_CORE_RECOVERING && frame->pts_us >= 0 &&
+  if (core->state == RILLIGHT_CORE_RECOVERING && frame->pts_us != -1 &&
       frame->pts_us + (frame->type == RILLIGHT_CORE_VIDEO_RGBA ? 5000 : 20000) <
           core->base_position) {
     lock.unlock();
     rillight_core_release_frame(frame);
-    return;
+    return 0;
   }
   const auto max_count = frame->type == RILLIGHT_CORE_VIDEO_RGBA
                              ? kMaxVideoFrames : kMaxAudioFrames;
   const auto max_bytes = frame->type == RILLIGHT_CORE_VIDEO_RGBA
                              ? kMaxVideoBytes : kMaxAudioBytes;
   core->wake.wait(lock, [&] {
-    return core->stop || core->timeline != timeline ||
+    return core->stop || core->decode_abort || core->timeline != timeline ||
            (queue.size() < max_count && bytes + frame->data_size <= max_bytes);
   });
-  if (core->stop || core->timeline != timeline) {
+  if (core->stop || core->decode_abort || core->timeline != timeline) {
     lock.unlock();
     rillight_core_release_frame(frame);
-    return;
+    return 0;
   }
   bytes += frame->data_size;
   queue.push_back(frame);
@@ -1678,6 +1693,7 @@ void enqueue(RillightCoreImpl *core, RillightCoreFrame *frame,
     }
   }
   core->wake.notify_all();
+  return 0;
 }
 
 int drain_audio_filter(RillightCoreImpl *core, AudioFilter *filter,
@@ -1699,7 +1715,8 @@ int drain_audio_filter(RillightCoreImpl *core, AudioFilter *filter,
       result = AVERROR(EINVAL);
       break;
     }
-    enqueue(core, output, video_index, timeline);
+    result = enqueue(core, output, video_index, timeline);
+    if (result < 0) break;
     std::lock_guard lock(core->mutex);
     if (core->timeline != timeline) break;
   }
@@ -1707,64 +1724,123 @@ int drain_audio_filter(RillightCoreImpl *core, AudioFilter *filter,
   return result;
 }
 
+int convert_video_frame(RillightCoreImpl *core, AVFormatContext *format,
+                        AVFrame *decoded, int stream_index, uint32_t hardware,
+                        VideoScale *scale, std::vector<SubtitleCue> *cues,
+                        AssRenderer *ass, uint64_t session, uint64_t timeline,
+                        std::mutex *subtitle_mutex) {
+  int result = 0;
+  const int64_t pts = frame_time(decoded, format->streams[stream_index]);
+  bool discard = false;
+  {
+    std::lock_guard lock(core->mutex);
+    int64_t clock = core->base_position;
+    if (!core->audio_clock_active && core->state == RILLIGHT_CORE_PLAYING)
+      clock += std::chrono::duration_cast<std::chrono::microseconds>(
+                   Clock::now() - core->base_time).count() * core->speed;
+    discard = core->timeline != timeline ||
+        (pts >= 0 &&
+         ((core->state == RILLIGHT_CORE_RECOVERING &&
+           pts + 5000 < core->base_position) ||
+          (core->state == RILLIGHT_CORE_PLAYING && core->first_video &&
+           pts + 100000 < clock)));
+  }
+  if (discard) {
+    // Decode reference frames, but skip GPU readback, RGBA conversion and
+    // subtitle composition for output that is already late. Doing all that
+    // work before the renderer drops it delays subsequent useful pictures.
+    return 0;
+  }
+  const AVFrame *picture = decoded;
+  bool decoded_with_hardware = false;
+  // A MediaCodec CPU frame does not identify the selected codec as hardware.
+  if (hardware != RILLIGHT_CORE_HW_NONE && decoded->hw_frames_ctx) {
+    // Retain the CPU planes between downloads. Allocating/freeing a new
+    // 4K staging frame on every transfer adds page faults to the video lane.
+    // A different hardware frames context invalidates both size and format.
+    if (!scale->download_context ||
+        scale->download_context->data != decoded->hw_frames_ctx->data) {
+      av_frame_free(&scale->downloaded);
+      av_buffer_unref(&scale->download_context);
+      scale->download_context = av_buffer_ref(decoded->hw_frames_ctx);
+    }
+    if (!scale->downloaded) scale->downloaded = av_frame_alloc();
+    if (!scale->downloaded || !scale->download_context) {
+      return AVERROR(ENOMEM);
+    }
+    result = av_hwframe_transfer_data(scale->downloaded, decoded, 0);
+    // copy_props appends side data; clear the preceding frame's metadata
+    // without releasing the reusable pixel allocation.
+    av_frame_side_data_free(&scale->downloaded->side_data,
+                            &scale->downloaded->nb_side_data);
+    av_dict_free(&scale->downloaded->metadata);
+    if (result >= 0)
+      result = av_frame_copy_props(scale->downloaded, decoded);
+    if (result < 0) return result;
+    picture = scale->downloaded;
+    decoded_with_hardware = true;
+  }
+  auto *output = convert_video(picture, pts, session, timeline,
+                               format->streams[stream_index], scale);
+  if (!output) return AVERROR(EINVAL);
+  if (decoded_with_hardware) {
+    std::lock_guard lock(core->mutex);
+    for (auto &track : core->tracks) {
+      if (track.stream_index == stream_index)
+        track.actual_hardware = hardware;
+    }
+  }
+  {
+    std::unique_lock<std::mutex> subtitle_lock;
+    if (subtitle_mutex) subtitle_lock = std::unique_lock(*subtitle_mutex);
+    blend_subtitles(output, *cues);
+    blend_ass(output, ass);
+    if (pts >= 0)
+      cues->erase(std::remove_if(cues->begin(), cues->end(),
+                                 [pts](const SubtitleCue &cue) {
+                                   return cue.end_us < pts;
+                                 }), cues->end());
+  }
+  return enqueue(core, output, stream_index, timeline);
+}
+
+using VideoSink = std::function<int(AVFrame *, int, uint32_t, uint64_t)>;
+
 int decode_packet(RillightCoreImpl *core, AVFormatContext *format,
                   Decoder &decoder, const AVPacket *packet, int video_index,
                   VideoScale *scale, AudioFilter *audio_filter,
                   std::vector<SubtitleCue> *cues, AssRenderer *ass,
                   double speed,
-                  uint64_t session, uint64_t timeline) {
+                  uint64_t session, uint64_t timeline, std::mutex *subtitle_mutex = nullptr,
+                  const VideoSink *video_sink = nullptr) {
   if (!decoder.context) return 0;
   int result = avcodec_send_packet(decoder.context, packet);
   if (result < 0) return result;
   AVFrame *decoded = av_frame_alloc();
   if (!decoded) return AVERROR(ENOMEM);
-  while (!core->stop) {
+  while (!core->stop && !core->decode_abort) {
     result = avcodec_receive_frame(decoder.context, decoded);
     if (result == AVERROR(EAGAIN) || result == AVERROR_EOF) break;
     if (result < 0) break;
     const int64_t pts = frame_time(decoded, format->streams[decoder.stream]);
     if (decoder.stream == video_index) {
-      const AVFrame *picture = decoded;
-      AVFrame *downloaded = nullptr;
-      bool decoded_with_hardware = false;
-      // A MediaCodec CPU frame does not identify the selected codec as hardware.
-      if (decoder.hardware != RILLIGHT_CORE_HW_NONE && decoder.hw_format &&
-          decoded->format == decoder.hw_format->preferred) {
-        downloaded = av_frame_alloc();
-        if (!downloaded) { result = AVERROR(ENOMEM); break; }
-        result = av_hwframe_transfer_data(downloaded, decoded, 0);
-        if (result >= 0) result = av_frame_copy_props(downloaded, decoded);
-        if (result < 0) {
-          av_frame_free(&downloaded);
-          break;
-        }
-        picture = downloaded;
-        decoded_with_hardware = true;
-      }
-      auto *output = convert_video(picture, pts, session, timeline,
-                                   format->streams[decoder.stream], scale);
-      av_frame_free(&downloaded);
+      result = video_sink
+          ? (*video_sink)(decoded, decoder.stream, decoder.hardware, timeline)
+          : convert_video_frame(core, format, decoded, decoder.stream,
+                                decoder.hardware, scale, cues, ass,
+                                session, timeline, subtitle_mutex);
       av_frame_unref(decoded);
-      if (!output) { result = AVERROR(EINVAL); break; }
-      if (decoded_with_hardware) {
-        std::lock_guard lock(core->mutex);
-        for (auto &track : core->tracks) {
-          if (track.stream_index == decoder.stream)
-            track.actual_hardware = decoder.hardware;
-        }
-      }
-      blend_subtitles(output, *cues);
-      blend_ass(output, ass);
-      if (pts >= 0)
-        cues->erase(std::remove_if(cues->begin(), cues->end(),
-                                   [pts](const SubtitleCue &cue) {
-                                     return cue.end_us < pts;
-                                   }), cues->end());
-      enqueue(core, output, video_index, timeline);
+      if (result < 0) break;
     } else {
-      result = prepare_audio_filter(audio_filter, decoded, speed, pts);
-      decoded->pts = pts < 0 ? AV_NOPTS_VALUE :
-          av_rescale_q(pts, AVRational{1, 1000000},
+      // Codec priming commonly gives the first audio frame a negative PTS.
+      // Keep that valid anchor distinct from missing timestamps; otherwise
+      // every filtered frame inherits "unknown" and seeking plays old audio
+      // while the video clock runs ahead and discards all following pictures.
+      const int64_t audio_pts = decoded->best_effort_timestamp == AV_NOPTS_VALUE
+                                    ? AV_NOPTS_VALUE : pts;
+      result = prepare_audio_filter(audio_filter, decoded, speed, audio_pts);
+      decoded->pts = audio_pts == AV_NOPTS_VALUE ? AV_NOPTS_VALUE :
+          av_rescale_q(audio_pts, AVRational{1, 1000000},
                        AVRational{1, decoded->sample_rate});
       if (result >= 0)
         result = av_buffersrc_add_frame_flags(audio_filter->source, decoded,
@@ -1783,14 +1859,285 @@ int decode_packet(RillightCoreImpl *core, AVFormatContext *format,
   return result < 0 ? result : 0;
 }
 
+// Compressed packets, not decoded pixels, separate demux I/O from each decoder.
+// The core mutex protects queue/control state only; codecs and conversion never
+// run under it. A timeline barrier retires in-flight work before codec mutation.
+class DecodeLane {
+ public:
+  using Decode = std::function<int(const AVPacket *, uint64_t)>;
+  DecodeLane(RillightCoreImpl *core, size_t budget, int type)
+      : core_(core), budget_(budget), type_(type) {}
+  ~DecodeLane() { Stop(); }
+  bool Start(Decode decode) {
+    decode_ = std::move(decode);
+    try { thread_ = std::thread([this] { Run(); }); }
+    catch (...) { return false; }
+    return true;
+  }
+  int Push(const AVPacket *packet, uint64_t timeline) {
+    size_t cost = sizeof(AVPacket);
+    if (packet) {
+      cost += std::max(0, packet->size);
+      for (int i = 0; i < packet->side_data_elems; ++i)
+        cost += packet->side_data[i].size;
+    }
+    if (cost > budget_) return AVERROR(ENOBUFS);
+    std::unique_lock lock(core_->mutex);
+    if (type_ == RILLIGHT_CORE_AUDIO_S16 && core_->video_index >= 0 &&
+        !core_->first_video && (bytes_ + cost > budget_ || queue_.size() >= 2048))
+      return AVERROR(ENOBUFS);
+    core_->wake.wait(lock, [&] {
+      return stopped_ || core_->stop || core_->decode_abort ||
+          core_->timeline != timeline ||
+          (enabled_ && bytes_ + cost <= budget_ && queue_.size() < 2048);
+    });
+    if (stopped_ || core_->stop || core_->decode_abort ||
+        core_->timeline != timeline) return 0;
+    auto *copy = packet ? av_packet_clone(packet) : nullptr;
+    if (packet && !copy) return AVERROR(ENOMEM);
+    queue_.push_back({copy, timeline, cost});
+    bytes_ += cost;
+    core_->wake.notify_all();
+    return 0;
+  }
+  void Quiesce() {
+    std::unique_lock lock(core_->mutex);
+    enabled_ = false;
+    Clear();
+    core_->wake.notify_all();
+    core_->wake.wait(lock, [&] { return !busy_; });
+  }
+  void Resume() {
+    std::lock_guard lock(core_->mutex);
+    enabled_ = true;
+    core_->wake.notify_all();
+  }
+  void Drain(uint64_t timeline) {
+    std::unique_lock lock(core_->mutex);
+    core_->wake.wait(lock, [&] {
+      return core_->stop || core_->decode_abort || core_->timeline != timeline ||
+          (queue_.empty() && !busy_);
+    });
+  }
+  void Stop() {
+    {
+      std::lock_guard lock(core_->mutex);
+      stopped_ = true;
+      Clear();
+      core_->wake.notify_all();
+    }
+    if (thread_.joinable()) thread_.join();
+  }
+ private:
+  struct Packet { AVPacket *value; uint64_t timeline; size_t cost; };
+  void Clear() {
+    for (auto &packet : queue_) av_packet_free(&packet.value);
+    queue_.clear();
+    bytes_ = 0;
+  }
+  void Run() {
+    for (;;) {
+      Packet packet{};
+      {
+        std::unique_lock lock(core_->mutex);
+        core_->wake.wait(lock, [&] {
+          const bool preview_needed = type_ == RILLIGHT_CORE_VIDEO_RGBA
+              ? !core_->first_video : type_ == RILLIGHT_CORE_AUDIO_S16
+              ? !core_->first_audio : !core_->first_video;
+          return stopped_ || core_->stop || core_->decode_abort ||
+              (enabled_ && !queue_.empty() &&
+               (queue_.front().timeline != core_->timeline ||
+                core_->play_intent || preview_needed));
+        });
+        if (stopped_ || core_->stop || core_->decode_abort) break;
+        packet = queue_.front();
+        queue_.pop_front();
+        bytes_ -= packet.cost;
+        core_->wake.notify_all();
+        if (packet.timeline != core_->timeline) {
+          av_packet_free(&packet.value);
+          continue;
+        }
+        busy_ = true;
+      }
+      int result;
+      try { result = decode_(packet.value, packet.timeline); }
+      catch (...) { result = AVERROR_UNKNOWN; }
+      av_packet_free(&packet.value);
+      bool failed = false;
+      {
+        std::lock_guard lock(core_->mutex);
+        busy_ = false;
+        if (result < 0 && packet.timeline == core_->timeline && !core_->stop) {
+          int expected = 0;
+          core_->decode_error.compare_exchange_strong(expected, result);
+          core_->decode_abort = true;
+          failed = true;
+        }
+        core_->wake.notify_all();
+      }
+      if (failed) {
+        core_->io.cancel_media_io(core_->io.opaque);
+        break;
+      }
+    }
+  }
+  RillightCoreImpl *core_;
+  const size_t budget_;
+  const int type_;
+  Decode decode_;
+  std::thread thread_;
+  std::deque<Packet> queue_;
+  size_t bytes_ = 0;
+  bool enabled_ = true, busy_ = false, stopped_ = false;
+};
+
+// Hardware receive submits work asynchronously. Keep a bounded decoded-frame
+// lane so GPU download / colorspace conversion cannot stop the decoder from
+// feeding the next pictures. Audio, subtitles and demux retain their own lanes.
+class VideoConvertLane {
+ public:
+  using Convert = std::function<int(AVFrame *, int, uint32_t, uint64_t)>;
+  explicit VideoConvertLane(RillightCoreImpl *core) : core_(core) {}
+  ~VideoConvertLane() { Stop(); }
+  bool Start(Convert convert) {
+    convert_ = std::move(convert);
+    try { thread_ = std::thread([this] { Run(); }); }
+    catch (...) { return false; }
+    return true;
+  }
+  int Push(AVFrame *frame, int stream, uint32_t hardware, uint64_t timeline) {
+    auto format = static_cast<AVPixelFormat>(frame->format);
+    if (frame->hw_frames_ctx)
+      format = reinterpret_cast<AVHWFramesContext *>(frame->hw_frames_ctx->data)->sw_format;
+    const int cost = av_image_get_buffer_size(format, frame->width, frame->height, 32);
+    if (cost <= 0 || static_cast<size_t>(cost) > kMaxVideoBytes) return AVERROR(ENOBUFS);
+    std::unique_lock lock(core_->mutex);
+    core_->wake.wait(lock, [&] {
+      return stopped_ || core_->stop || core_->decode_abort ||
+          core_->timeline != timeline ||
+          (enabled_ && queue_.size() < 3 && bytes_ + cost <= kMaxVideoBytes);
+    });
+    if (stopped_ || core_->stop || core_->decode_abort || core_->timeline != timeline) return 0;
+    auto *copy = av_frame_clone(frame);
+    if (!copy) return AVERROR(ENOMEM);
+    queue_.push_back({copy, stream, hardware, timeline, static_cast<size_t>(cost)});
+    bytes_ += cost;
+    core_->wake.notify_all();
+    return 0;
+  }
+  void Quiesce() {
+    std::unique_lock lock(core_->mutex);
+    enabled_ = false;
+    Clear();
+    core_->wake.notify_all();
+    core_->wake.wait(lock, [&] { return !busy_; });
+  }
+  void Resume() {
+    std::lock_guard lock(core_->mutex);
+    enabled_ = true;
+    core_->wake.notify_all();
+  }
+  void Drain(uint64_t timeline) {
+    std::unique_lock lock(core_->mutex);
+    core_->wake.wait(lock, [&] {
+      return core_->stop || core_->decode_abort || core_->timeline != timeline ||
+          (queue_.empty() && !busy_);
+    });
+  }
+  void Stop() {
+    {
+      std::lock_guard lock(core_->mutex);
+      stopped_ = true;
+      Clear();
+      core_->wake.notify_all();
+    }
+    if (thread_.joinable()) thread_.join();
+  }
+ private:
+  struct Picture { AVFrame *frame; int stream; uint32_t hardware; uint64_t timeline; size_t cost; };
+  void Clear() {
+    for (auto &picture : queue_) av_frame_free(&picture.frame);
+    queue_.clear();
+    bytes_ = 0;
+  }
+  void Run() {
+    for (;;) {
+      Picture picture{};
+      {
+        std::unique_lock lock(core_->mutex);
+        core_->wake.wait(lock, [&] {
+          return stopped_ || core_->stop || core_->decode_abort ||
+              (enabled_ && !queue_.empty() &&
+               (queue_.front().timeline != core_->timeline ||
+                core_->play_intent || !core_->first_video));
+        });
+        if (stopped_ || core_->stop || core_->decode_abort) break;
+        picture = queue_.front();
+        queue_.pop_front();
+        bytes_ -= picture.cost;
+        core_->wake.notify_all();
+        if (picture.timeline != core_->timeline) {
+          av_frame_free(&picture.frame);
+          continue;
+        }
+        busy_ = true;
+      }
+      int result;
+      try { result = convert_(picture.frame, picture.stream, picture.hardware, picture.timeline); }
+      catch (...) { result = AVERROR_UNKNOWN; }
+      av_frame_free(&picture.frame);
+      bool failed = false;
+      {
+        std::lock_guard lock(core_->mutex);
+        busy_ = false;
+        if (result < 0 && picture.timeline == core_->timeline && !core_->stop) {
+          int expected = 0;
+          core_->decode_error.compare_exchange_strong(expected, result);
+          core_->decode_abort = true;
+          failed = true;
+        }
+        core_->wake.notify_all();
+      }
+      if (failed) { core_->io.cancel_media_io(core_->io.opaque); break; }
+    }
+  }
+  RillightCoreImpl *core_;
+  Convert convert_;
+  std::thread thread_;
+  std::deque<Picture> queue_;
+  size_t bytes_ = 0;
+  bool enabled_ = true, busy_ = false, stopped_ = false;
+};
+
 void run(RillightCoreImpl *core, uint64_t session) {
   AVFormatContext *format = avformat_alloc_context();
   Source *main_source = nullptr;
   Decoder video, audio, subtitle;
   VideoScale scale;
+  VideoConvertLane conversion_lane(core);
   AudioFilter audio_filter;
   std::vector<SubtitleCue> subtitle_cues;
   AssRenderer ass;
+  std::mutex subtitle_mutex;
+  bool conversion_ready = false;
+  VideoSink video_sink = [&](AVFrame *frame, int stream, uint32_t hardware,
+                            uint64_t timeline) {
+    // Validate the first hardware download synchronously so an unsupported
+    // surface can still retry its retained packet with the software decoder.
+    // After success, scale and staging buffers belong to the conversion lane.
+    if (!conversion_ready) {
+      const int result = convert_video_frame(core, format, frame, stream,
+          hardware, &scale, &subtitle_cues, &ass, session, timeline,
+          &subtitle_mutex);
+      if (result >= 0) conversion_ready = true;
+      return result;
+    }
+    return conversion_lane.Push(frame, stream, hardware, timeline);
+  };
+  DecodeLane video_lane(core, 16u * 1024u * 1024u, RILLIGHT_CORE_VIDEO_RGBA);
+  DecodeLane audio_lane(core, 4u * 1024u * 1024u, RILLIGHT_CORE_AUDIO_S16);
+  DecodeLane subtitle_lane(core, 2u * 1024u * 1024u, 0);
   int result = AVERROR(ENOMEM);
   bool ended = false;
   if (!format) goto finish;
@@ -1800,7 +2147,11 @@ void run(RillightCoreImpl *core, uint64_t session) {
   format->io_open = nested_open;
   format->io_close2 = nested_close;
   main_source = open_source(core, core->url.c_str(), AVIO_FLAG_READ);
-  if (!main_source) { result = AVERROR(EACCES); goto finish; }
+  if (!main_source) {
+    result = core->owned_loopback ? core->owned_loopback->media_open_error.load() : 0;
+    if (result >= 0) result = AVERROR(EIO);
+    goto finish;
+  }
   format->pb = main_source->avio;
   format->flags |= AVFMT_FLAG_CUSTOM_IO;
   result = avformat_open_input(&format, core->url.c_str(), nullptr, nullptr);
@@ -1880,6 +2231,74 @@ void run(RillightCoreImpl *core, uint64_t session) {
       if (track.type != 0) core->tracks.push_back(track);
     }
   }
+  if (!conversion_lane.Start([&](AVFrame *frame, int stream, uint32_t hardware, uint64_t timeline) {
+    return convert_video_frame(core, format, frame, stream, hardware, &scale,
+                               &subtitle_cues, &ass, session, timeline, &subtitle_mutex);
+  })) { result = AVERROR(ENOMEM); goto finish; }
+  if (!video_lane.Start([&](const AVPacket *packet, uint64_t timeline) {
+
+      int result = decode_packet(core, format, video, packet, video.stream,
+                             &scale, &audio_filter, &subtitle_cues, &ass,
+                             core->speed, session,
+                             timeline, &subtitle_mutex, &video_sink);
+      if (packet && result < 0 && video.hardware != RILLIGHT_CORE_HW_NONE &&
+          core->allow_software_fallback) {
+        // A configured device can still reject the stream profile when the
+        // first packet is decoded. Retry that retained packet in software;
+        // the replacement decoder has no device preference, so this is
+        // bounded to one fallback for this stream.
+        Decoder replacement = make_decoder(format, video.stream);
+        if (replacement.context) {
+          avcodec_free_context(&video.context);
+          video = replacement;
+          {
+            std::lock_guard lock(core->mutex);
+            for (auto &track : core->tracks) {
+              if (track.stream_index == video.stream)
+                track.actual_hardware = RILLIGHT_CORE_HW_NONE;
+            }
+          }
+          result = decode_packet(core, format, video, packet, video.stream,
+                                 &scale, &audio_filter, &subtitle_cues, &ass,
+                                 core->speed, session, timeline, &subtitle_mutex, &video_sink);
+        }
+      }
+
+      return result;
+    }) || !audio_lane.Start([&](const AVPacket *packet, uint64_t timeline) {
+      int result = decode_packet(core, format, audio, packet, video.stream,
+          &scale, &audio_filter, &subtitle_cues, &ass, core->speed, session, timeline);
+      if (result >= 0 && !packet && audio_filter.graph) {
+        result = av_buffersrc_add_frame_flags(audio_filter.source, nullptr, 0);
+        if (result >= 0) result = drain_audio_filter(core, &audio_filter,
+            video.stream, session, timeline);
+      }
+      return result;
+    }) || !subtitle_lane.Start([&](const AVPacket *packet, uint64_t) {
+      if (!packet) return 0;
+      std::lock_guard lock(subtitle_mutex);
+      int result = 0;
+
+      if (subtitle.context) {
+        const auto codec =
+            format->streams[subtitle.stream]->codecpar->codec_id;
+        if (bitmap_subtitle_codec(codec))
+          result = decode_bitmap_subtitle(subtitle, packet,
+              format->streams[subtitle.stream]->time_base, &subtitle_cues);
+#if RILLIGHT_HAVE_LIBASS
+        else if (text_subtitle_codec(codec) && ass.track)
+          result = decode_text_subtitle(subtitle, packet,
+              format->streams[subtitle.stream]->time_base, &ass);
+#endif
+      }
+#if RILLIGHT_HAVE_LIBASS
+      else if (ass.track)
+        process_ass(&ass, packet,
+                    format->streams[subtitle.stream]->time_base);
+#endif
+
+      return result;
+    })) { result = AVERROR(ENOMEM); goto finish; }
   while (!core->stop) {
     uint64_t timeline;
     int64_t seek;
@@ -1896,12 +2315,12 @@ void run(RillightCoreImpl *core, uint64_t session) {
       // surface and audio device are idle. A seek resets first_* and changes
       // the timeline, so it can decode a fresh preview before sleeping again.
       core->wake.wait(lock, [&] {
-        return core->stop || core->play_intent ||
+        return core->stop || core->decode_abort || core->play_intent ||
                core->seek_target >= 0 || core->audio_change ||
                core->subtitle_change || core->speed_change ||
                !(video.stream >= 0 ? core->first_video : core->first_audio);
       });
-      if (core->stop) break;
+      if (core->stop || core->decode_abort) break;
       timeline = core->timeline;
       seek = core->seek_target;
       core->seek_target = -1;
@@ -1916,6 +2335,13 @@ void run(RillightCoreImpl *core, uint64_t session) {
       core->speed_change = false;
     }
     core->active_read_timeline = timeline;
+    const bool reconfigure = seek >= 0 || change_audio || change_subtitle || change_speed;
+    if (reconfigure) {
+      video_lane.Quiesce();
+      conversion_lane.Quiesce();
+      audio_lane.Quiesce();
+      subtitle_lane.Quiesce();
+    }
     if (seek >= 0) {
       {
         std::lock_guard lock(core->mutex);
@@ -2049,6 +2475,10 @@ void run(RillightCoreImpl *core, uint64_t session) {
       std::lock_guard lock(core->mutex);
       core->speed = selected_speed;
     }
+    conversion_lane.Resume();
+    video_lane.Resume();
+    audio_lane.Resume();
+    subtitle_lane.Resume();
     AVPacket *packet = av_packet_alloc();
     if (!packet) { result = AVERROR(ENOMEM); break; }
     {
@@ -2072,6 +2502,7 @@ void run(RillightCoreImpl *core, uint64_t session) {
         continue;
       }
     }
+    if (core->decode_abort) { av_packet_free(&packet); break; }
     const int fatal_io_error = core->io_fatal_error.load();
     if (fatal_io_error < 0) {
       av_packet_free(&packet);
@@ -2093,27 +2524,20 @@ void run(RillightCoreImpl *core, uint64_t session) {
       {
         std::lock_guard lock(core->mutex);
         if (core->timeline != timeline) continue;
-        core->input_exhausted = true;
+        // Decoder queues may still contain seconds of data. Keep track and
+        // subtitle commands available until both lanes have drained.
       }
-      result = decode_packet(core, format, video, nullptr, video.stream,
-                             &scale, &audio_filter, &subtitle_cues, &ass,
-                             core->speed, session,
-                             timeline);
+      result = video_lane.Push(nullptr, timeline);
+      if (result >= 0) result = audio_lane.Push(nullptr, timeline);
       if (result < 0) break;
-      result = decode_packet(core, format, audio, nullptr, video.stream,
-                             &scale, &audio_filter, &subtitle_cues, &ass,
-                             core->speed, session,
-                             timeline);
-      if (result < 0) break;
-      if (audio_filter.graph) {
-        result = av_buffersrc_add_frame_flags(audio_filter.source, nullptr, 0);
-        if (result < 0) break;
-        result = drain_audio_filter(core, &audio_filter, video.stream, session,
-                                    timeline);
-        if (result < 0) break;
-      }
+      video_lane.Drain(timeline);
+      conversion_lane.Drain(timeline);
+      audio_lane.Drain(timeline);
+      subtitle_lane.Drain(timeline);
+      if (core->decode_abort) { result = core->decode_error.load(); break; }
       std::unique_lock lock(core->mutex);
       if (core->timeline != timeline) continue;
+      core->input_exhausted = true;
       core->eof = true;
       core->wake.wait(lock, [&] {
         return core->stop || core->timeline != timeline ||
@@ -2127,66 +2551,24 @@ void run(RillightCoreImpl *core, uint64_t session) {
       break;
     }
     if (result < 0) { av_packet_free(&packet); break; }
-    if (packet->stream_index == video.stream) {
-      result = decode_packet(core, format, video, packet, video.stream,
-                             &scale, &audio_filter, &subtitle_cues, &ass,
-                             core->speed, session,
-                             timeline);
-      if (result < 0 && video.hardware != RILLIGHT_CORE_HW_NONE &&
-          core->allow_software_fallback) {
-        // A configured device can still reject the stream profile when the
-        // first packet is decoded. Retry that retained packet in software;
-        // the replacement decoder has no device preference, so this is
-        // bounded to one fallback for this stream.
-        Decoder replacement = make_decoder(format, video.stream);
-        if (replacement.context) {
-          avcodec_free_context(&video.context);
-          video = replacement;
-          sws_freeContext(scale.context);
-          scale.context = nullptr;
-          scale.colors_configured = false;
-          {
-            std::lock_guard lock(core->mutex);
-            for (auto &track : core->tracks) {
-              if (track.stream_index == video.stream)
-                track.actual_hardware = RILLIGHT_CORE_HW_NONE;
-            }
-          }
-          result = decode_packet(core, format, video, packet, video.stream,
-                                 &scale, &audio_filter, &subtitle_cues, &ass,
-                                 core->speed, session, timeline);
-        }
-      }
-    } else if (packet->stream_index == audio.stream)
-      result = decode_packet(core, format, audio, packet, video.stream,
-                             &scale, &audio_filter, &subtitle_cues, &ass,
-                             core->speed, session,
-                             timeline);
-    else if (packet->stream_index == subtitle.stream) {
-      if (subtitle.context) {
-        const auto codec =
-            format->streams[subtitle.stream]->codecpar->codec_id;
-        if (bitmap_subtitle_codec(codec))
-          result = decode_bitmap_subtitle(subtitle, packet,
-              format->streams[subtitle.stream]->time_base, &subtitle_cues);
-#if RILLIGHT_HAVE_LIBASS
-        else if (text_subtitle_codec(codec) && ass.track)
-          result = decode_text_subtitle(subtitle, packet,
-              format->streams[subtitle.stream]->time_base, &ass);
-#endif
-      }
-#if RILLIGHT_HAVE_LIBASS
-      else if (ass.track)
-        process_ass(&ass, packet,
-                    format->streams[subtitle.stream]->time_base);
-#endif
-    }
-    else
-      result = 0;
+    if (packet->stream_index == video.stream)
+      result = video_lane.Push(packet, timeline);
+    else if (packet->stream_index == audio.stream)
+      result = audio_lane.Push(packet, timeline);
+    else if (packet->stream_index == subtitle.stream)
+      result = subtitle_lane.Push(packet, timeline);
+    else result = 0;
     av_packet_free(&packet);
     if (result < 0) break;
   }
 finish:
+  core->decode_abort = true;
+  core->wake.notify_all();
+  video_lane.Stop();
+  conversion_lane.Stop();
+  audio_lane.Stop();
+  subtitle_lane.Stop();
+  if (core->decode_error < 0) result = core->decode_error.load();
   close_ass(&ass);
   close_audio_filter(&audio_filter);
   sws_freeContext(scale.context);
@@ -2297,6 +2679,8 @@ int rillight_core_open(RillightCore *pointer, const char *url,
     std::lock_guard lock(core->mutex);
     reset_frames(core);
     core->stop = false;
+    core->decode_abort = false;
+    core->decode_error = 0;
     core->media_io_active = false;
     ++core->session;
     ++core->timeline;
@@ -2696,6 +3080,12 @@ RillightCoreFrame *rillight_core_take_frame(RillightCore *pointer, int type) {
 
 void rillight_core_release_frame(RillightCoreFrame *frame) {
   if (!frame) return;
+  if (frame->type == RILLIGHT_CORE_VIDEO_RGBA) {
+    auto *video = static_cast<VideoOutputFrame *>(frame);
+    video->buffers->Recycle(video->data, video->data_size);
+    delete video;
+    return;
+  }
   delete[] frame->data;
   delete frame;
 }

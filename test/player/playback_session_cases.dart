@@ -8,6 +8,7 @@ import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/player/playback_models.dart';
+import 'package:rillight/player/playback_resolver.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/playback_state.dart';
 import 'package:rillight/player/player_controller.dart';
@@ -87,6 +88,42 @@ void main() {
   EmbyItem episode(String id) =>
       EmbyItem.fromJson({'Id': id, 'Type': 'Episode', 'Name': id});
 
+  test('network hint requires buffering and respects dismissal', () async {
+    await controller.start();
+    final playback = controller.resolved!;
+    controller.resolved = ResolvedPlayback(
+      playMethod: playback.playMethod,
+      streamUrl: playback.streamUrl,
+      playSessionId: playback.playSessionId,
+      mediaSource: PlaybackMediaSource(
+        id: playback.mediaSource.id,
+        bitrate: 8000000,
+      ),
+      itemId: playback.itemId,
+    );
+    backend.emitEvent(VideoEventKind.cacheSpeed, 0);
+    await Future<void>.delayed(const Duration(milliseconds: 6100));
+    backend.emitEvent(VideoEventKind.cacheSpeed, 0);
+    await Future<void>.delayed(Duration.zero);
+    expect(controller.networkSlow, isFalse);
+
+    backend.emitBuffering(true);
+    await Future<void>.delayed(const Duration(milliseconds: 6100));
+    backend.emitEvent(VideoEventKind.cacheSpeed, 0);
+    await Future<void>.delayed(Duration.zero);
+    expect(controller.networkSlow, isTrue);
+    backend.emitBuffering(false);
+    await Future<void>.delayed(Duration.zero);
+    expect(controller.networkSlow, isFalse);
+
+    controller.dismissNetworkSlowHint();
+    backend.emitBuffering(true);
+    await Future<void>.delayed(const Duration(milliseconds: 6100));
+    backend.emitEvent(VideoEventKind.cacheSpeed, 0);
+    await Future<void>.delayed(Duration.zero);
+    expect(controller.networkSlow, isFalse);
+  });
+
   test(
     'resume follows confirmed controller state if backend flag leads it',
     () async {
@@ -138,11 +175,16 @@ void main() {
     'native authentication failure stops media and exposes reconnect state',
     () async {
       await controller.start();
+      backend.emitEvent(VideoEventKind.buffering, true);
       backend.emitEvent(VideoEventKind.authenticationRequired, 401);
       await _until(() => controller.sessionExpired);
       expect(controller.disconnected, isTrue);
       expect(controller.controlsVisible, isTrue);
       expect(controller.loading, isFalse);
+      expect(controller.isBuffering, isFalse);
+      backend.emitEvent(VideoEventKind.buffering, true);
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.isBuffering, isFalse);
       expect(backend.isPlaying, isFalse);
     },
   );

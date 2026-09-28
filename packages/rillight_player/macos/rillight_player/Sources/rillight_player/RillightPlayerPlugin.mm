@@ -41,6 +41,12 @@ using Clock = std::chrono::steady_clock;
 @implementation RillightSurface {
   dispatch_queue_t _queue;
   dispatch_source_t _timer;
+  dispatch_queue_t _audioQueue;
+  dispatch_source_t _audioTimer;
+  uint64_t _audioSession, _audioTimeline;
+  // Protected by lock; no device objects are shared with the video queue.
+  uint64_t _outputSession, _outputTimeline;
+  bool _holdVideo, _audioDrained;
   NSMutableArray* _closeBlocks;
   std::unique_ptr<rillight_macos::CoreAudioOutput> _audio;
   RillightCoreFrame* _pendingAudio;
@@ -64,6 +70,7 @@ using Clock = std::chrono::steady_clock;
 - (instancetype)init {
   if ((self = [super init])) {
     _queue = dispatch_queue_create("app.rillight.core.macos", DISPATCH_QUEUE_SERIAL);
+    _audioQueue = dispatch_queue_create("app.rillight.core.macos.audio", DISPATCH_QUEUE_SERIAL);
     _closeBlocks = [NSMutableArray array];
     lock = [[NSLock alloc] init];
     latest = nullptr;
@@ -107,16 +114,27 @@ using Clock = std::chrono::steady_clock;
                               5 * NSEC_PER_MSEC, NSEC_PER_MSEC);
     dispatch_source_set_event_handler(_timer, ^{ [self tick]; });
     dispatch_resume(_timer);
+    dispatch_async(self->_audioQueue, ^{
+      if (self->stopped.load()) return;
+      self->_audioTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, self->_audioQueue);
+      dispatch_source_set_timer(self->_audioTimer, dispatch_time(DISPATCH_TIME_NOW, 0),
+                                2 * NSEC_PER_MSEC, NSEC_PER_MSEC);
+      dispatch_source_set_event_handler(self->_audioTimer, ^{ [self audioTick]; });
+      dispatch_resume(self->_audioTimer);
+    });
     dispatch_async(dispatch_get_main_queue(), ^{ ready(nil); });
   });
 }
 
-- (void)releasePending {
+- (void)releaseAudio {
   if (_pendingAudio) {
     rillight_core_release_frame(_pendingAudio);
     _pendingAudio = nullptr;
   }
   _audioOffset = 0;
+}
+
+- (void)releaseVideo {
   if (_pendingVideo) {
     rillight_core_release_frame(_pendingVideo);
     _pendingVideo = nullptr;
@@ -206,7 +224,7 @@ using Clock = std::chrono::steady_clock;
   }
 }
 
-- (void)tick {
+- (void)audioTick {
   if (stopped.load()) return;
   RillightCoreSnapshot snapshot{};
   snapshot.struct_size = sizeof(snapshot);
@@ -215,32 +233,15 @@ using Clock = std::chrono::steady_clock;
     [self setFailure:@"Core snapshot unavailable"];
     return;
   }
-  if (snapshot.session_id != _session || snapshot.timeline_version != _timeline) {
+  if (snapshot.session_id != _audioSession || snapshot.timeline_version != _audioTimeline) {
     if (_audio) _audio->Reset();
-    [self releasePending];
-    _session = snapshot.session_id;
-    _timeline = snapshot.timeline_version;
-    _renderedWidth = _renderedHeight = 0;
+    [self releaseAudio];
+    _audioSession = snapshot.session_id;
+    _audioTimeline = snapshot.timeline_version;
     _audioEndPts = -1;
     _audioClockStarted = _audioHandedOff = _audioPaused = false;
     _audioGapSince = _audioStartupSince = _firstAudioWriteSince = {};
-    [self clearImage];
   }
-
-  if (snapshot.video_stream_index >= 0) {
-    const int tracks = rillight_core_track_count(core);
-    for (int i = 0; i < tracks; ++i) {
-      RillightCoreTrack track{};
-      track.struct_size = sizeof(track);
-      if (rillight_core_get_track(core, i, &track) == 0 &&
-          track.type == RILLIGHT_CORE_TRACK_VIDEO &&
-          track.stream_index == snapshot.video_stream_index) {
-        [lock lock]; actualHardware = track.actual_hardware; [lock unlock];
-        break;
-      }
-    }
-  }
-
   if (snapshot.audio_stream_index >= 0 && !_audio &&
       snapshot.state == RILLIGHT_CORE_PLAYING) {
     _audio = std::make_unique<rillight_macos::CoreAudioOutput>();
@@ -282,7 +283,8 @@ using Clock = std::chrono::steady_clock;
         continue;
       }
       if (frame->pts_us >= 0 &&
-          frame->pts_us > snapshot.position_us + 50000) {
+          frame->pts_us > snapshot.position_us + 50000 &&
+          (!_audioClockStarted || _audioEndPts < 0 || frame->pts_us > _audioEndPts + 1000)) {
         waitingFutureAudio = true;
         break;
       }
@@ -361,6 +363,52 @@ using Clock = std::chrono::steady_clock;
                 _audioEndPts >= 0 ||
                 now - _audioStartupSince < std::chrono::milliseconds(150);
   } else _audioStartupSince = {};
+  [lock lock];
+  _outputSession = snapshot.session_id;
+  _outputTimeline = snapshot.timeline_version;
+  _holdVideo = holdVideo;
+  _audioDrained = snapshot.source_eof && snapshot.queued_audio_frames == 0 &&
+                  !_pendingAudio && delay >= 0 && delay < 10000;
+  [lock unlock];
+}
+
+- (void)tick {
+  if (stopped.load()) return;
+  RillightCoreSnapshot snapshot{};
+  snapshot.struct_size = sizeof(snapshot);
+  if (rillight_core_snapshot(core, &snapshot) != 0 ||
+      snapshot.abi_version != RILLIGHT_CORE_ABI_VERSION) {
+    [self setFailure:@"Core snapshot unavailable"];
+    return;
+  }
+  if (snapshot.session_id != _session || snapshot.timeline_version != _timeline) {
+    [self releaseVideo];
+    _session = snapshot.session_id;
+    _timeline = snapshot.timeline_version;
+    _renderedWidth = _renderedHeight = 0;
+    [self clearImage];
+  }
+  if (snapshot.video_stream_index >= 0) {
+    const int tracks = rillight_core_track_count(core);
+    for (int i = 0; i < tracks; ++i) {
+      RillightCoreTrack track{};
+      track.struct_size = sizeof(track);
+      if (rillight_core_get_track(core, i, &track) == 0 &&
+          track.type == RILLIGHT_CORE_TRACK_VIDEO &&
+          track.stream_index == snapshot.video_stream_index) {
+        [lock lock]; actualHardware = track.actual_hardware; [lock unlock];
+        break;
+      }
+    }
+  }
+
+  [lock lock];
+  const bool currentAudio = _outputSession == snapshot.session_id &&
+                            _outputTimeline == snapshot.timeline_version;
+  const bool holdVideo = snapshot.audio_stream_index >= 0 &&
+      snapshot.state == RILLIGHT_CORE_PLAYING && (!currentAudio || _holdVideo);
+  const bool drainedAudio = currentAudio && _audioDrained;
+  [lock unlock];
   if (!holdVideo && !_pendingVideo)
     _pendingVideo = rillight_core_take_frame(core, RILLIGHT_CORE_VIDEO_RGBA);
   if (_pendingVideo) {
@@ -397,8 +445,7 @@ using Clock = std::chrono::steady_clock;
   }
 
   if (snapshot.source_eof && snapshot.queued_video_frames == 0 &&
-      snapshot.queued_audio_frames == 0 && !_pendingAudio && !_pendingVideo &&
-      delay >= 0 && delay < 10000)
+      !_pendingVideo && drainedAudio)
     rillight_core_report_output_drained(core, snapshot.session_id,
                                        snapshot.timeline_version);
 }
@@ -426,7 +473,14 @@ using Clock = std::chrono::steady_clock;
       dispatch_source_cancel(self->_timer);
       self->_timer = nil;
     }
-    [self releasePending];
+    [self releaseVideo];
+  });
+  dispatch_sync(_audioQueue, ^{
+    if (self->_audioTimer) {
+      dispatch_source_cancel(self->_audioTimer);
+      self->_audioTimer = nil;
+    }
+    [self releaseAudio];
     self->_audio.reset();
   });
   [registry unregisterTexture:textureId];

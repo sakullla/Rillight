@@ -10,6 +10,72 @@ import 'package:rillight/player/playback_http_proxy.dart';
 import 'mp4_fixture.dart';
 
 void main() {
+  test(
+    'busy integrity refresh retains recent coverage then expires and recovers',
+    () async {
+      final bytes = progressiveMp4Fixture();
+      final root = await Directory.systemTemp.createTemp(
+        'rillight-timeline-retry-',
+      );
+      final cache = await SessionByteCache.open(
+        root: root,
+        memoryLimitBytes: 0,
+      );
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      server.listen((request) async {
+        request.response.contentLength = bytes.length;
+        request.response.headers.set('etag', '"immutable"');
+        request.response.add(bytes);
+        await request.response.close();
+      });
+      final proxy = await PlaybackHttpProxy.create(
+        cache: cache,
+        sessionBuffering: true,
+      );
+      final client = HttpClient();
+      try {
+        final route = proxy.register(
+          Uri.parse('http://127.0.0.1:${server.port}/movie.mp4'),
+        );
+        await (await (await client.getUrl(route)).close()).drain<void>();
+        final deadline = DateTime.now().add(const Duration(seconds: 2));
+        while ((cache.diagnostics['diskBytes'] as int? ?? 0) < bytes.length &&
+            DateTime.now().isBefore(deadline)) {
+          await Future<void>.delayed(const Duration(milliseconds: 5));
+        }
+        await proxy.refreshTimeline(const Duration(seconds: 4));
+        final expected = [
+          {'startMs': 0, 'endMs': 4000},
+        ];
+        expect(proxy.diagnostics['cachedTimeRanges'], expected);
+        await cache.resize(
+          memoryBytes: 0,
+          pendingBytes: 0,
+          diskBytes: 2048 * 1024 * 1024,
+        );
+        await proxy.refreshTimeline(
+          const Duration(seconds: 4, milliseconds: 1),
+        );
+        expect(proxy.diagnostics['cachedTimeRanges'], expected);
+        await Future<void>.delayed(const Duration(milliseconds: 5100));
+        await proxy.refreshTimeline(const Duration(seconds: 4));
+        expect(proxy.diagnostics['cachedTimeRanges'], isEmpty);
+        await cache.resize(
+          memoryBytes: 0,
+          pendingBytes: 8 * 1024 * 1024,
+          diskBytes: 2048 * 1024 * 1024,
+        );
+        await proxy.refreshTimeline(const Duration(seconds: 4));
+        expect(proxy.diagnostics['cachedTimeRanges'], expected);
+      } finally {
+        client.close(force: true);
+        await proxy.close();
+        await server.close(force: true);
+        await root.delete(recursive: true);
+      }
+    },
+  );
+
   test('unknown timeline exposes only current verified byte islands', () async {
     final bytes = Uint8List.fromList(List<int>.generate(1024, (i) => i % 251));
     var etag = '"first"';
@@ -60,9 +126,8 @@ void main() {
         {'start': 500, 'end': 600},
       ]);
 
-      // A time-index pass captures its cache revision before awaiting the
-      // integrity scan. A concurrent write invalidates that *time* pass, but
-      // a fresh byte-only scan can still publish its verified current islands.
+      // Appending bytes does not invalidate a time-index snapshot. This opaque
+      // container remains unmappable; the next scan includes the new island.
       final identity = first['timelineIdentity'] as String;
       final separator = identity.lastIndexOf(':');
       expect(separator, greaterThan(0));
@@ -77,7 +142,10 @@ void main() {
       await write;
       await refreshing;
       final concurrent = proxy.diagnostics;
-      expect(concurrent['timelineUnknownReason'], 'cacheChangedDuringIndex');
+      expect(
+        concurrent['timelineUnknownReason'],
+        'containerTrackOrTimingUnknown',
+      );
       expect(concurrent['cachedTimeRanges'], isEmpty);
       expect(concurrent['cachedByteRanges'], [
         {'start': 0, 'end': 100},

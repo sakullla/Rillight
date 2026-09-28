@@ -16,6 +16,7 @@ class Mp4CacheIndex {
   });
 
   final List<_PlayableUnit> _units;
+
   final int total;
   final bool hasVideo;
   final bool hasAudio;
@@ -158,21 +159,30 @@ class Mp4CacheIndex {
           while (cursor < audioSamples.length &&
               audioSamples[cursor].startUs < end) {
             final sample = audioSamples[cursor];
-            if (sample.startUs > covered) break;
+            if (sample.startUs > covered + sample.toleranceUs) break;
             if (sample.endUs > covered) covered = sample.endUs;
             required.add(CachedByteRange(sample.byteStart, sample.byteEnd));
             cursor++;
             if (required.length > 16384) return null;
             if (checkpoint != null && cursor % 256 == 0) await checkpoint();
           }
-          if (covered < end) continue;
+          if (covered + segment.last.toleranceUs < end) continue;
         }
         totalDependencies += required.length;
         if (totalDependencies > 500000) return null;
-        units.add(_PlayableUnit(begin, end, required));
+        units.add(
+          _PlayableUnit(
+            begin,
+            end,
+            _mergeBytes(required),
+            toleranceUs: segment.first.toleranceUs,
+          ),
+        );
       }
       for (var i = 1; i < units.length; i++) {
-        if (units[i].startUs < units[i - 1].endUs) return null;
+        if (units[i].startUs < units[i - 1].endUs - units[i].toleranceUs) {
+          return null;
+        }
       }
       if (units.isEmpty) return null;
       return Mp4CacheIndex._(
@@ -244,19 +254,29 @@ class Mp4CacheIndex {
 void _appendTime(List<CachedTimeRange> result, _PlayableUnit unit) {
   final start = Duration(microseconds: unit.startUs);
   final end = Duration(microseconds: unit.endUs);
-  if (result.isNotEmpty && result.last.end == start) {
+  if (result.isNotEmpty &&
+      start.inMicroseconds <=
+          result.last.end.inMicroseconds + unit.toleranceUs) {
     final previous = result.removeLast();
-    result.add(CachedTimeRange(previous.start, end));
+    result.add(
+      CachedTimeRange(previous.start, end > previous.end ? end : previous.end),
+    );
   } else {
     result.add(CachedTimeRange(start, end));
   }
 }
 
 class _PlayableUnit {
-  const _PlayableUnit(this.startUs, this.endUs, this.required);
+  const _PlayableUnit(
+    this.startUs,
+    this.endUs,
+    this.required, {
+    this.toleranceUs = 0,
+  });
   final int startUs;
   final int endUs;
   final List<CachedByteRange> required;
+  final int toleranceUs;
 }
 
 class _Sample {
@@ -265,13 +285,17 @@ class _Sample {
     this.endUs,
     this.byteStart,
     this.byteEnd,
-    this.sync,
-  );
+    this.sync, {
+    this.toleranceUs = 0,
+  });
   final int startUs;
   final int endUs;
   final int byteStart;
   final int byteEnd;
   final bool sync;
+  // Container timestamps can quantize a continuous frame boundary by one tick.
+  // This is a time-scale allowance, never a missing-byte or missing-frame estimate.
+  final int toleranceUs;
 }
 
 class _Track {
@@ -732,7 +756,10 @@ _Box? _mdatContaining(List<_Box> mdats, int start, int end) {
   if (ordered.first.startUs < 0) return null;
   var end = ordered.first.endUs;
   for (final sample in ordered.skip(1)) {
-    if (sample.startUs > end || sample.endUs <= sample.startUs) return null;
+    if (sample.startUs > end + sample.toleranceUs ||
+        sample.endUs <= sample.startUs) {
+      return null;
+    }
     if (sample.endUs > end) end = sample.endUs;
   }
   return (ordered.first.startUs, end);
@@ -934,6 +961,18 @@ Future<_Track?> _track(
       ? (kind == 'soun' ? null : <int>{})
       : await _sync(bytes, syncBox, checkpoint);
   if (kind == 'vide' && (sync == null || sync.isEmpty)) return null;
+  // Remuxing can preserve millisecond-rounded DTS/PTS in a higher-timescale
+  // track (for example 16 kHz). Infer that grid from the actual sample tables;
+  // the declared clock tick alone is too small. Never bridge a missing frame:
+  // rounding tolerance is capped at one millisecond.
+  var gridTicks = durations.first;
+  for (var i = 0; i < durations.length; i++) {
+    // The final duration may be clipped to an arbitrary movie end tick.
+    if (i + 1 < durations.length) gridTicks = gridTicks.gcd(durations[i]);
+    if (composition != null) gridTicks = gridTicks.gcd(composition[i].abs());
+    if (checkpoint != null && i % 256 == 0) await checkpoint();
+  }
+  final toleranceUs = min(1000, (gridTicks * 1000000 + scale - 1) ~/ scale);
   final samples = <_Sample>[];
   var sample = 0;
   var ticks = 0;
@@ -977,6 +1016,7 @@ Future<_Track?> _track(
           cursor,
           endByte,
           kind == 'soun' || sync!.contains(sample + 1),
+          toleranceUs: toleranceUs,
         ),
       );
       cursor = endByte;

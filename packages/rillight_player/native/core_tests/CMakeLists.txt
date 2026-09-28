@@ -11,6 +11,30 @@ else()
   target_compile_options(rillight_core_test PRIVATE -UNDEBUG)
 endif()
 add_test(NAME rillight_core_audio_session COMMAND rillight_core_test)
+add_executable(rillight_core_startup_test startup_interleave_test.cpp)
+target_include_directories(rillight_core_startup_test PRIVATE
+  "${RILLIGHT_CORE_PREFIX}/include")
+target_link_libraries(rillight_core_startup_test PRIVATE rillight_core
+  ${avformat_library} ${avcodec_library} ${avutil_library})
+set_target_properties(rillight_core_startup_test PROPERTIES
+  BUILD_RPATH "${core_lib_dir}")
+if(MSVC)
+  target_compile_options(rillight_core_startup_test PRIVATE /UNDEBUG)
+else()
+  target_compile_options(rillight_core_startup_test PRIVATE -UNDEBUG)
+endif()
+add_test(NAME rillight_core_startup_interleave COMMAND rillight_core_startup_test)
+set_tests_properties(rillight_core_startup_interleave PROPERTIES TIMEOUT 10)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  target_link_options(rillight_core_startup_test PRIVATE
+    "LINKER:-rpath-link,${core_lib_dir}")
+  set_tests_properties(rillight_core_startup_interleave PROPERTIES
+    ENVIRONMENT "LD_LIBRARY_PATH=${core_lib_dir}")
+endif()
+if(APPLE)
+  set_tests_properties(rillight_core_startup_interleave PROPERTIES
+    ENVIRONMENT "DYLD_LIBRARY_PATH=${core_lib_dir}")
+endif()
 set_tests_properties(rillight_core_audio_session PROPERTIES TIMEOUT 20)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   # CTest runs against the fixed SDK in the build tree. FFmpeg's own shared

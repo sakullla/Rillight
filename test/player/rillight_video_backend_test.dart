@@ -87,10 +87,27 @@ class _UnauthorizedCoreDriver extends _CoreDriver {
   }
 }
 
+class _PendingOpenCoreDriver extends _CoreDriver {
+  final releaseOpen = Completer<void>();
+
+  @override
+  Future<Map<String, dynamic>> open(CorePlayerOpen value) async {
+    request = value;
+    final client = HttpClient();
+    try {
+      await (await (await client.getUrl(value.url)).close()).drain<void>();
+      await releaseOpen.future;
+      return await super.open(value);
+    } finally {
+      client.close(force: true);
+    }
+  }
+}
+
 class _FailingCoreDriver extends _CoreDriver {
   _FailingCoreDriver(this.failure);
 
-  final PlatformException failure;
+  final Object failure;
 
   @override
   Future<Map<String, dynamic>> open(CorePlayerOpen value) async {
@@ -131,6 +148,57 @@ class _TrackIdCoreDriver extends _CoreDriver {
 }
 
 void main() {
+  for (final status in [HttpStatus.ok, HttpStatus.forbidden]) {
+    test(
+      'transport reports HTTP $status before the core finishes opening',
+      () async {
+        final temp = await Directory.systemTemp.createTemp('rillight-opening-');
+        final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+        String? receivedUa;
+        upstream.listen((request) async {
+          receivedUa = request.headers.value('user-agent');
+          request.response.statusCode = status;
+          request.response.add(List<int>.filled(1024, 7));
+          await request.response.close();
+        });
+        final driver = _PendingOpenCoreDriver();
+        final backend = RillightVideoBackend(
+          settingsStore: MemoryPlayerSettingsStore(),
+          diskCacheDirectory: temp,
+          createPlayer: () async => driver,
+        );
+        final reported = backend.events.firstWhere(
+          (event) => status == HttpStatus.ok
+              ? event.kind == VideoEventKind.cacheSpeed &&
+                    (event.value as num) > 0
+              : event.kind == VideoEventKind.authenticationRequired &&
+                    event.value == status,
+        );
+        final opening = backend.open(
+          VideoOpenRequest(
+            sessionId: 51,
+            url: Uri.parse('http://127.0.0.1:${upstream.port}/video.mp4'),
+            credentialOrigin: Uri.parse('http://emby.example'),
+            credentialHeaders: const {
+              'User-Agent': 'Configured UA',
+              'X-Emby-Token': 'secret',
+            },
+          ),
+        );
+        try {
+          await reported.timeout(const Duration(seconds: 4));
+          expect(driver.releaseOpen.isCompleted, isFalse);
+          expect(receivedUa, 'Configured UA');
+        } finally {
+          driver.releaseOpen.complete();
+          await opening;
+          await backend.dispose();
+          await upstream.close(force: true);
+          await temp.delete(recursive: true);
+        }
+      },
+    );
+  }
   test('session reset clears stale cache speed before open failure', () async {
     final core = _FailingCoreDriver(
       PlatformException(code: 'playback', message: 'Core rejected media open'),
@@ -207,6 +275,27 @@ void main() {
     final diagnostics = await backend.diagnostics();
     expect(diagnostics['coreErrorCode'], isNull);
     expect(diagnostics['coreOpenFailureKind'], 'firstFrameTimeout');
+  });
+
+  test('probe diagnostics classify a desktop first frame timeout', () async {
+    final core = _FailingCoreDriver(
+      TimeoutException('Core did not render the first frame'),
+    );
+    final backend = RillightVideoBackend(
+      settingsStore: MemoryPlayerSettingsStore(),
+      createPlayer: () async => core,
+    );
+    addTearDown(backend.dispose);
+    await expectLater(
+      backend.open(
+        VideoOpenRequest(url: Uri.parse('http://127.0.0.1:8765/media.mkv')),
+      ),
+      throwsA(isA<TimeoutException>()),
+    );
+    expect(
+      (await backend.diagnostics())['coreOpenFailureKind'],
+      'firstFrameTimeout',
+    );
   });
 
   test('container track IDs follow confirmed native audio changes', () async {

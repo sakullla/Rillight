@@ -63,7 +63,11 @@ struct Surface : std::enable_shared_from_this<Surface> {
   RillightCore* core;
   FlTextureRegistrar* registrar;
   RillightTexture* texture = nullptr;
-  std::thread worker;
+  std::thread worker, audio_worker;
+  // Only this small status crosses output threads; PCM/Pulse objects remain
+  // exclusively owned by audio_worker, and pixels by worker.
+  uint64_t audio_session = 0, audio_timeline = 0;
+  bool hold_video = true, audio_drained = false;
   std::mutex mutex;
   std::condition_variable wake;
   bool stopped = false, registered = false;
@@ -95,6 +99,7 @@ struct Surface : std::enable_shared_from_this<Surface> {
       : core(p), registrar(FL_TEXTURE_REGISTRAR(g_object_ref(r))) {}
   ~Surface() {
     if (worker.joinable()) worker.join();
+    if (audio_worker.joinable()) audio_worker.join();
     g_object_unref(registrar);
   }
   void Notify() {
@@ -118,7 +123,7 @@ struct Surface : std::enable_shared_from_this<Surface> {
       std::lock_guard<std::mutex> lock(mutex);
       error = "Core returned invalid RGBA frame";
       stopped = true;
-      wake.notify_one();
+      wake.notify_all();
       return;
     }
     auto frame = std::make_shared<Frame>(rillight_linux::Present(source, w, h));
@@ -134,7 +139,7 @@ struct Surface : std::enable_shared_from_this<Surface> {
     Notify();
   }
   void Start(std::function<void(std::string)> ready) {
-    worker = std::thread([this, ready] {
+    audio_worker = std::thread([this] {
       std::unique_ptr<rillight_linux::PulseOutput> audio;
       RillightCoreFrame* pending_audio = nullptr;
       int pending_offset = 0;
@@ -143,20 +148,15 @@ struct Surface : std::enable_shared_from_this<Surface> {
       bool audio_clock_started = false;
       bool audio_handed_off = false;
       std::chrono::steady_clock::time_point first_audio_write{};
-      RillightCoreFrame* last_video = nullptr;
       RillightCoreState previous_state = RILLIGHT_CORE_IDLE;
       bool audio_corked = false;
       rillight_linux::AudioStartupGate startup_gate;
       rillight_linux::AudioHandoffPolicy handoff_policy;
       uint64_t last_session = 0, last_timeline = 0;
-      { std::lock_guard<std::mutex> lock(mutex); latest = std::make_shared<Frame>(); }
-      ready("");
       while (true) {
-        int w, h;
         {
           std::unique_lock<std::mutex> lock(mutex);
           if (stopped) break;
-          w = width; h = height;
         }
         RillightCoreSnapshot snapshot{};
         snapshot.struct_size = sizeof(snapshot);
@@ -182,20 +182,8 @@ struct Surface : std::enable_shared_from_this<Surface> {
             pending_audio = nullptr;
             pending_offset = 0;
           }
-          if (last_video) { rillight_core_release_frame(last_video); last_video = nullptr; }
-          {
-            std::lock_guard<std::mutex> lock(mutex);
-            session = snapshot.session_id; timeline = snapshot.timeline_version;
-            latest = std::make_shared<Frame>();
-            rendered_width = rendered_height = 0;
-            actual_hardware = 0;
-            decoded_video = false;
-            has_video = false;
-            frames = 0;
-          }
           last_session = snapshot.session_id;
           last_timeline = snapshot.timeline_version;
-          Notify();
         }
         auto report_audio_clock = [&](int64_t end_pts, int64_t delay,
                                       double speed) {
@@ -226,26 +214,6 @@ struct Surface : std::enable_shared_from_this<Surface> {
           audio_corked = false;
         }
         previous_state = snapshot.state;
-        {
-          std::lock_guard<std::mutex> lock(mutex);
-          decoded_video = snapshot.first_video_frame_ready;
-          has_video = snapshot.video_stream_index >= 0;
-        }
-
-        if (snapshot.video_stream_index >= 0) {
-          const int count = rillight_core_track_count(core);
-          for (int i = 0; i < count; ++i) {
-            RillightCoreTrack track{};
-            track.struct_size = sizeof(track);
-            if (rillight_core_get_track(core, i, &track) == 0 &&
-                track.stream_index == snapshot.video_stream_index &&
-                track.type == RILLIGHT_CORE_TRACK_VIDEO) {
-              std::lock_guard<std::mutex> lock(mutex);
-              actual_hardware = track.actual_hardware;
-              break;
-            }
-          }
-        }
         if (snapshot.state == RILLIGHT_CORE_PLAYING &&
             snapshot.audio_stream_index >= 0 && !audio)
           audio = std::make_unique<rillight_linux::PulseOutput>();
@@ -360,11 +328,92 @@ struct Surface : std::enable_shared_from_this<Surface> {
             first_audio_write = {};
           }
         }
-        auto* video = startup_gate.HoldVideo(
+        const int64_t delay = audio ? audio->Latency() : 0;
+        const bool hold = startup_gate.HoldVideo(
             snapshot, pending_audio, audio_clock_started || audio_handed_off,
-            audio_end_pts >= 0,
-            std::chrono::steady_clock::now())
-            ? nullptr : rillight_core_take_frame(core, RILLIGHT_CORE_VIDEO_RGBA);
+            audio_end_pts >= 0, std::chrono::steady_clock::now());
+        std::unique_lock<std::mutex> lock(mutex);
+        audio_session = snapshot.session_id;
+        audio_timeline = snapshot.timeline_version;
+        hold_video = hold;
+        audio_drained = snapshot.source_eof && !pending_audio &&
+            snapshot.queued_audio_frames == 0 && delay >= 0 && delay < 10000;
+        const int wait_ms = audio_progress &&
+            (pending_audio || snapshot.queued_audio_frames > 0) ? 0 : 2;
+        wake.wait_for(lock, std::chrono::milliseconds(wait_ms),
+                      [this] { return stopped; });
+      }
+      if (pending_audio) rillight_core_release_frame(pending_audio);
+      audio.reset();
+    });
+    worker = std::thread([this, ready] {
+      RillightCoreFrame* last_video = nullptr;
+      uint64_t last_session = 0, last_timeline = 0;
+      { std::lock_guard<std::mutex> guard(mutex); latest = std::make_shared<Frame>(); }
+      ready("");
+      while (true) {
+        int w, h;
+        {
+          std::lock_guard<std::mutex> guard(mutex);
+          if (stopped) break;
+          w = width; h = height;
+        }
+        RillightCoreSnapshot snapshot{};
+        snapshot.struct_size = sizeof(snapshot);
+        if (rillight_core_snapshot(core, &snapshot) != 0 ||
+            snapshot.abi_version != RILLIGHT_CORE_ABI_VERSION) {
+          std::lock_guard<std::mutex> guard(mutex);
+          error = "Core snapshot or ABI unavailable";
+          stopped = true;
+          wake.notify_all();
+          break;
+        }
+        if (last_session != snapshot.session_id || last_timeline != snapshot.timeline_version) {
+          if (last_video) { rillight_core_release_frame(last_video); last_video = nullptr; }
+          {
+            std::lock_guard<std::mutex> guard(mutex);
+            session = snapshot.session_id; timeline = snapshot.timeline_version;
+            latest = std::make_shared<Frame>();
+            rendered_width = rendered_height = 0;
+            actual_hardware = 0;
+            decoded_video = false;
+            has_video = false;
+            frames = 0;
+          }
+          last_session = snapshot.session_id;
+          last_timeline = snapshot.timeline_version;
+          Notify();
+        }
+        {
+          std::lock_guard<std::mutex> lock(mutex);
+          decoded_video = snapshot.first_video_frame_ready;
+          has_video = snapshot.video_stream_index >= 0;
+        }
+
+        if (snapshot.video_stream_index >= 0) {
+          const int count = rillight_core_track_count(core);
+          for (int i = 0; i < count; ++i) {
+            RillightCoreTrack track{};
+            track.struct_size = sizeof(track);
+            if (rillight_core_get_track(core, i, &track) == 0 &&
+                track.stream_index == snapshot.video_stream_index &&
+                track.type == RILLIGHT_CORE_TRACK_VIDEO) {
+              std::lock_guard<std::mutex> lock(mutex);
+              actual_hardware = track.actual_hardware;
+              break;
+            }
+          }
+        }
+        bool hold, drained;
+        {
+          std::lock_guard<std::mutex> guard(mutex);
+          const bool current = audio_session == snapshot.session_id &&
+                               audio_timeline == snapshot.timeline_version;
+          hold = snapshot.audio_stream_index >= 0 && snapshot.state == RILLIGHT_CORE_PLAYING &&
+                 (!current || hold_video);
+          drained = current && audio_drained;
+        }
+        auto* video = hold ? nullptr : rillight_core_take_frame(core, RILLIGHT_CORE_VIDEO_RGBA);
         if (video) {
           if (video->session_id == snapshot.session_id &&
               video->timeline_version == snapshot.timeline_version) {
@@ -378,23 +427,11 @@ struct Surface : std::enable_shared_from_this<Surface> {
                    (rendered_width != w || rendered_height != h)) {
           Render(*last_video, w, h, false);
         }
-        if (snapshot.source_eof && snapshot.queued_video_frames == 0 &&
-            snapshot.queued_audio_frames == 0 && !pending_audio) {
-          const int64_t delay = audio ? audio->Latency() : 0;
-          if (delay >= 0 && delay < 10000)
-            rillight_core_report_output_drained(core, snapshot.session_id,
-                                                snapshot.timeline_version);
-        }
-        std::unique_lock<std::mutex> lock(mutex);
-        const int wait_ms = audio_progress &&
-            (pending_audio || snapshot.queued_audio_frames > 0) ? 0 :
-            audio && snapshot.state == RILLIGHT_CORE_PLAYING &&
-                snapshot.audio_stream_index >= 0 ? 2 : 10;
-        wake.wait_for(lock, std::chrono::milliseconds(wait_ms),
-                      [this] { return stopped; });
+        if (snapshot.source_eof && snapshot.queued_video_frames == 0 && drained)
+          rillight_core_report_output_drained(core, snapshot.session_id, snapshot.timeline_version);
+        std::unique_lock<std::mutex> guard(mutex);
+        wake.wait_for(guard, std::chrono::milliseconds(5), [this] { return stopped; });
       }
-      if (pending_audio) rillight_core_release_frame(pending_audio);
-      audio.reset();
       if (last_video) rillight_core_release_frame(last_video);
       {
         std::unique_lock<std::mutex> lock(mutex);
@@ -409,7 +446,7 @@ struct Surface : std::enable_shared_from_this<Surface> {
   }
   void Quiesce() {
     { std::lock_guard<std::mutex> lock(mutex); stopped = true; ++generation; }
-    wake.notify_one();
+    wake.notify_all();
   }
   // GTK thread only. Return after queuing unregister; retain our GObject ref.
   bool Detach() {
@@ -433,10 +470,11 @@ struct Surface : std::enable_shared_from_this<Surface> {
       if (joining) return;
       joining = true; stopped = retired = true; registered = false; ++generation;
     }
-    wake.notify_one();
+    wake.notify_all();
     auto self = shared_from_this();
     std::thread([self] {
       if (self->worker.joinable()) self->worker.join();
+      if (self->audio_worker.joinable()) self->audio_worker.join();
       Main([self] {
         std::vector<std::function<void()>> callbacks;
         { std::lock_guard<std::mutex> lock(self->mutex); callbacks.swap(self->release_callbacks); }
@@ -598,7 +636,7 @@ static void Handle(FlMethodChannel*, FlMethodCall* call, gpointer data) {
         surface->height = std::clamp(static_cast<int>(Number(args, "height")), 1, 4320);
       }
     }
-    surface->wake.notify_one(); RespondSuccess(call);
+    surface->wake.notify_all(); RespondSuccess(call);
   } else if (method == "status") {
     std::lock_guard<std::mutex> lock(surface->mutex);
     g_autoptr(FlValue) status = fl_value_new_map();

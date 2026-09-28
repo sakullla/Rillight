@@ -1245,6 +1245,11 @@ class FakeEmbyServer {
         .where((value) => value.isNotEmpty)
         .toSet();
     var matched = items.where((item) {
+      final filters = (options.uri.queryParameters['Filters'] ?? '').split(',');
+      if (filters.contains('IsResumable') &&
+          (item.played || item.playbackPositionTicks <= 0)) {
+        return false;
+      }
       if (searchTerm != null &&
           !item.name.toLowerCase().contains(searchTerm.toLowerCase())) {
         return false;

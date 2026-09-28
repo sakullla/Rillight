@@ -321,7 +321,7 @@ void main() {
   );
 
   testWidgets(
-    'repeated transient failures stop after three attempts and remount can recover',
+    'repeated transient failures back off and recover without remounting',
     (tester) async {
       final client = _ControlledImageClient()
         ..failures.addAll(
@@ -336,12 +336,9 @@ void main() {
       for (final delay in [201, 401, 601]) {
         await tester.pump(Duration(milliseconds: delay));
       }
-      await tester.pump(const Duration(seconds: 5));
       expect(client.requested, hasLength(3));
-      expect(find.byType(PosterPlaceholder), findsOneWidget);
-      await tester.pumpWidget(const SizedBox.shrink());
       client.failures.clear();
-      await tester.pumpWidget(buildSubject(auth, withTag));
+      await tester.pump(const Duration(seconds: 5));
       await pumpUntilImage(tester);
       expect(client.requested, hasLength(4));
       expect(find.byType(Image), findsOneWidget);
@@ -456,6 +453,47 @@ void main() {
         ),
         isFalse,
       );
+    },
+  );
+
+  test(
+    'cancelled shared fetch cannot negative-cache a replacement consumer',
+    () async {
+      final cache = MediaImageCache.instance;
+      var originalCurrent = true;
+      final original = Completer<Uint8List?>();
+      final started = Completer<void>();
+      Future<Uint8List?> load(
+        Future<Uint8List?> Function() fetch, {
+        bool Function()? current,
+      }) => cache.load(
+        serverId: 'scope',
+        itemId: 'replacement',
+        type: 'Primary',
+        maxWidth: 120,
+        fetch: fetch,
+        isCurrent: current,
+      );
+      final first = load(() {
+        started.complete();
+        return original.future;
+      }, current: () => originalCurrent);
+      await started.future;
+      originalCurrent = false;
+      final replacement = load(() async => kTinyPng);
+      original.complete(null);
+      await first;
+      await replacement;
+      expect(
+        cache.isNegativeCached(
+          serverId: 'scope',
+          itemId: 'replacement',
+          type: 'Primary',
+          maxWidth: 120,
+        ),
+        isFalse,
+      );
+      expect(await load(() async => kTinyPng), kTinyPng);
     },
   );
 

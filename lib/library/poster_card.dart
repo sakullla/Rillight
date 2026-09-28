@@ -363,6 +363,10 @@ class _Caption extends StatelessWidget {
           overflow: TextOverflow.ellipsis,
           textAlign: TextAlign.center,
           style: style,
+          strutStyle: StrutStyle.fromTextStyle(
+            style ?? const TextStyle(),
+            forceStrutHeight: true,
+          ),
         ),
       ),
     );

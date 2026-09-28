@@ -9,6 +9,15 @@
 
 namespace rillight_windows {
 
+inline bool WaitForFutureAudio(int64_t pts_us, int64_t position_us,
+                               int64_t submitted_end_us) {
+  if (pts_us < 0 || pts_us <= position_us + 50000) return false;
+  // Contiguous PCM can fill the endpoint's buffer regardless of its queued
+  // duration. Comparing every packet with the playback clock limits useful
+  // buffering to 50 ms and mistakes rounding at that boundary for a gap.
+  return submitted_end_us < 0 || pts_us > submitted_end_us + 1000;
+}
+
 inline int StartupSampleOffset(const RillightCoreFrame& frame,
                                int64_t position_us, double speed) {
   if (frame.pts_us < 0 || frame.sample_count <= 0 || speed <= 0) return 0;

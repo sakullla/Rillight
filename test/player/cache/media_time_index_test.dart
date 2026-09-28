@@ -202,6 +202,50 @@ void main() {
       },
     );
 
+    test(
+      'one container tick of PTS quantization keeps a complete GOP visible',
+      () async {
+        final bytes = progressiveMp4Fixture(
+          includeAudio: false,
+          videoCompositionOffsetsTicks: [0, 1, 0, 1],
+        );
+        final index = await Mp4CacheIndex.load(
+          total: bytes.length,
+          read: (offset, length) async =>
+              Uint8List.sublistView(bytes, offset, offset + length),
+        );
+        expect(index, isNotNull);
+        final ranges = index!.ranges([
+          CachedByteRange(0, bytes.length),
+        ], const Duration(seconds: 5));
+        expect(ranges, isNotEmpty);
+        expect(ranges.first.start, Duration.zero);
+        expect(ranges.last.end, const Duration(milliseconds: 4001));
+      },
+    );
+    test(
+      'millisecond-rounded PTS in a 16 kHz track keeps GOPs visible',
+      () async {
+        final bytes = progressiveMp4Fixture(
+          videoTimescale: 16000,
+          includeAudio: false,
+          videoCompositionOffsetsTicks: [0, 16, 0, 16],
+        );
+        final index = await Mp4CacheIndex.load(
+          total: bytes.length,
+          read: (offset, length) async =>
+              Uint8List.sublistView(bytes, offset, offset + length),
+        );
+        expect(index, isNotNull);
+        final ranges = index!.ranges([
+          CachedByteRange(0, bytes.length),
+        ], const Duration(seconds: 5));
+        expect(ranges, isNotEmpty);
+        expect(ranges.first.start, Duration.zero);
+        expect(ranges.last.end, const Duration(milliseconds: 4001));
+      },
+    );
+
     test('CRC failure retracts only the affected disk-backed GOP', () async {
       final root = await Directory.systemTemp.createTemp('rillight-mp4-crc-');
       final cache = await SessionByteCache.open(

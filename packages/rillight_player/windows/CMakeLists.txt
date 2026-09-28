@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.21)
+cmake_minimum_required(VERSION 3.22)
 project(rillight_player LANGUAGES CXX)
 
 set(PLUGIN_NAME rillight_player_plugin)
@@ -33,8 +33,15 @@ if(NOT CORE_DLL_FOUND)
 endif()
 
 add_library(${PLUGIN_NAME} SHARED
-  rillight_player_plugin.cpp video_surface.cpp audio_output.cpp)
+  rillight_player_plugin.cpp video_surface.cpp audio_output.cpp pixel_present.cpp)
 apply_standard_settings(${PLUGIN_NAME})
+# Keep the per-pixel presentation kernel optimized during flutter run as well.
+# Plugin lifecycle/control code retains the ordinary Debug configuration.
+if(MSVC AND CMAKE_GENERATOR MATCHES "Visual Studio")
+  set_source_files_properties(pixel_present.cpp PROPERTIES COMPILE_OPTIONS
+    "$<$<CONFIG:Debug>:/O2>;$<$<CONFIG:Debug>:/Ob2>"
+    VS_SETTINGS "BasicRuntimeChecks=Default")
+endif()
 target_compile_features(${PLUGIN_NAME} PRIVATE cxx_std_17)
 target_compile_definitions(${PLUGIN_NAME} PRIVATE
   FLUTTER_PLUGIN_IMPL NOMINMAX _DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR)

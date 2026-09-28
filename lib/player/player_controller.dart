@@ -264,6 +264,7 @@ class PlayerController extends ChangeNotifier {
   /// HTTP 代理的上游接收速度，字节/秒；本地缓存命中不计入，无下载时为 0。
   double cacheSpeedBytesPerSec = 0;
   bool networkSlow = false;
+  bool _networkSlowDismissed = false;
   DateTime? _slowSince;
   DateTime _lastPlaybackUi = DateTime.fromMillisecondsSinceEpoch(0);
   PlayerErrorKind? error;
@@ -2103,6 +2104,7 @@ class PlayerController extends ChangeNotifier {
               : 0;
           _updateNetworkSlow();
         case VideoEventKind.buffering:
+          if (disconnected || state.phase == PlaybackPhase.failed) return;
           state.buffering = event.value as bool;
           _updateNetworkSlow();
           if (!loading) state.updatePlaying(isPlaying);
@@ -2146,6 +2148,7 @@ class PlayerController extends ChangeNotifier {
           sessionExpired = true;
           disconnected = true;
           loading = false;
+          state.buffering = false;
           isPlaying = false;
           controlsVisible = true;
           state.phase = PlaybackPhase.failed;
@@ -2169,25 +2172,15 @@ class PlayerController extends ChangeNotifier {
         isTranscode && maxStreamingBitrate < kCoreMaxStreamingBitrate
         ? maxStreamingBitrate
         : sourceBitrate;
-    var availableAhead = Duration.zero;
-    if (bufferSnapshot.isKnown) {
-      for (final range in bufferSnapshot.ranges) {
-        if (range.start <= position && position < range.end) {
-          availableAhead = range.end - position;
-          break;
-        }
-      }
-    }
-    final needsNetwork =
-        isBuffering ||
-        (bufferSnapshot.isKnown &&
-            availableAhead < const Duration(seconds: 10));
+    // A quiet network is normal while reading cached media. Incomplete time
+    // mapping also cannot establish a stall: require actual buffering.
     final slow =
+        !_networkSlowDismissed &&
         !loading &&
         !disconnected &&
         expected != null &&
         expected > 0 &&
-        needsNetwork &&
+        isBuffering &&
         cacheSpeedBytesPerSec * 8 < expected * 0.7;
     if (!slow) {
       _slowSince = null;
@@ -2197,6 +2190,13 @@ class PlayerController extends ChangeNotifier {
     _slowSince ??= DateTime.now();
     networkSlow =
         DateTime.now().difference(_slowSince!) >= const Duration(seconds: 6);
+  }
+
+  void dismissNetworkSlowHint() {
+    _networkSlowDismissed = true;
+    networkSlow = false;
+    _slowSince = null;
+    notifyListeners();
   }
 
   Future<void> _open({
@@ -2225,6 +2225,7 @@ class PlayerController extends ChangeNotifier {
     );
     cacheSpeedBytesPerSec = 0;
     networkSlow = false;
+    _networkSlowDismissed = false;
     _slowSince = null;
     nextEpisode = null;
     playbackEnded = false;
@@ -2363,8 +2364,7 @@ class PlayerController extends ChangeNotifier {
             start: durationFromTicks(boundedStartTicks),
             credentialOrigin: client.baseUrl,
             credentialHeaders: client.sessionHeaders,
-            // 仅当流地址与 Emby 服务器同源时附加会话头;strm 等远端
-            // 直连地址传空 headers,避免令牌泄漏给第三方主机。
+            // 所有媒体地址保留 UA，会话凭据仅发往 Emby 同源地址。
             headers: playbackStreamHeaders(
               streamUrl: next.streamUrl,
               baseUrl: client.baseUrl!,

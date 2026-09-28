@@ -258,9 +258,7 @@ Uri embyResourceUri(Uri baseUrl, String pathOrUrl, String accessToken) {
   return resolved.replace(queryParameters: params);
 }
 
-/// 播放流请求头:仅当流地址与 Emby 服务器同源(协议/主机/端口一致)时
-/// 附加会话头(X-Emby-Token/Authorization 等);strm 等远端直连地址
-/// 返回空 headers,避免服务器访问令牌被送达第三方主机。
+/// 自定义 UA 对所有媒体地址生效；会话凭据只发往 Emby 同源地址。
 Map<String, String> playbackStreamHeaders({
   required Uri streamUrl,
   required Uri baseUrl,
@@ -270,7 +268,11 @@ Map<String, String> playbackStreamHeaders({
       streamUrl.scheme == baseUrl.scheme &&
       streamUrl.host == baseUrl.host &&
       streamUrl.port == baseUrl.port;
-  return sameOrigin ? sessionHeaders : const {};
+  return {
+    for (final entry in sessionHeaders.entries)
+      if (sameOrigin || entry.key.toLowerCase() == 'user-agent')
+        entry.key: entry.value,
+  };
 }
 
 /// 跨集对齐音轨/字幕:语言+标题优先,序号只作兜底(每集 Index 常变)。

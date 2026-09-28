@@ -283,6 +283,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
       String? seriesId;
       EmbyItem? previousEpisode;
       EmbyItem? nextEpisode;
+      EmbyItem? resumeEpisode;
       final reuseCatalog =
           keep &&
           !refreshCatalog &&
@@ -314,7 +315,27 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
         if (item.isEpisode) {
           seasonId = _preferredSeasonId(item, seasons);
         } else if (seasons.isNotEmpty) {
-          seasonId = _requestedSeasonId() ?? seasons.first.id;
+          seasonId = _requestedSeasonId() ?? (keep ? _seasonId : null);
+          if (seasonId == null) {
+            try {
+              resumeEpisode = await DetailRepository(
+                client,
+                _cache,
+              ).resumeEpisode(item.id);
+            } on EmbyException {
+              // A progress lookup failure must not hide the series itself.
+            }
+            if (!mounted || gen != _loadGen) return;
+            if (resumeEpisode != null) {
+              seasonId = _preferredSeasonId(resumeEpisode, seasons);
+            }
+          }
+          seasonId ??=
+              seasons
+                  .where((season) => season.indexNumber != 0)
+                  .firstOrNull
+                  ?.id ??
+              seasons.first.id;
         }
         if (reuseCatalog &&
             seasonId == _seasonId &&
@@ -333,7 +354,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
             final window = await _loadEpisodeWindow(
               client,
               seasonId: seasonId,
-              current: item.isEpisode ? item : null,
+              current: resumeEpisode,
             );
             if (!mounted || gen != _loadGen) {
               return;
@@ -432,7 +453,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
   Future<EmbyItem> _fetchItem(EmbyClient client, String itemId) =>
       DetailRepository(client, _cache).item(itemId);
 
-  /// 剧集页预选季:路由 `season` 有值则用之,缺省仍是第一季。
+  /// 路由指定的季优先于自动续播定位。
   String? _requestedSeasonId() {
     final requested = widget.initialSeasonId?.trim();
     if (requested == null || requested.isEmpty) {

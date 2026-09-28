@@ -145,7 +145,7 @@ class ShelfGridPage extends StatefulWidget {
       crossAxisCount: count,
       mainAxisSpacing: spacing,
       crossAxisSpacing: spacing,
-      childAspectRatio: cellWidth / (imageHeight + labelExtent),
+      mainAxisExtent: (imageHeight + labelExtent).ceilToDouble(),
     );
   }
 

@@ -6,6 +6,7 @@ import 'dart:typed_data';
 /// audio [36,44), moov [44,end). It contains no encoded media and must only
 /// be used for cache-index/proxy tests, not actual decode tests.
 Uint8List progressiveMp4Fixture({
+  int videoTimescale = 1000,
   int videoCompositionOffsetTicks = 0,
   List<int>? videoCompositionOffsetsTicks,
   int? videoEditStartTicks,
@@ -21,7 +22,10 @@ Uint8List progressiveMp4Fixture({
 
   List<int> track(int id, String kind, int chunkOffset) {
     final tkhd = _box('tkhd', [...List.filled(12, 0), ..._u32(id)]);
-    final mdhd = _box('mdhd', [...List.filled(12, 0), ..._u32(1000)]);
+    final mdhd = _box('mdhd', [
+      ...List.filled(12, 0),
+      ..._u32(kind == 'vide' ? videoTimescale : 1000),
+    ]);
     final hdlr = _box('hdlr', [...List.filled(8, 0), ...ascii.encode(kind)]);
     final dinf = _dataReference();
     final stsd = _sampleDescription(kind);
@@ -29,7 +33,7 @@ Uint8List progressiveMp4Fixture({
       ...List.filled(4, 0),
       ..._u32(1),
       ..._u32(4),
-      ..._u32(1000),
+      ..._u32(kind == 'vide' ? videoTimescale : 1000),
     ]);
     final offsets =
         videoCompositionOffsetsTicks ??

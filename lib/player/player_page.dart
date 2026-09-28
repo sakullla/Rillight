@@ -639,6 +639,7 @@ class PlayerPageState extends State<PlayerPage> {
                       _Banner(
                         key: const ValueKey('player-network-slow'),
                         text: l10n.networkSlowHint,
+                        onDismiss: current.dismissNetworkSlowHint,
                       ),
                     if (current.progressSyncFailed &&
                         !(current.disconnected && !current.isPlaying))
@@ -871,13 +872,16 @@ class _PlayerChromeBar extends StatelessWidget {
                       padding: const EdgeInsets.only(right: AppSpacing.sm),
                       child: SizedBox(
                         width: statusWidth,
-                        child: Tooltip(
-                          message: l10n.playerNetworkSpeedTooltip,
-                          child: NetworkSpeedReadout(
-                            key: PlayerKeys.networkSpeed,
-                            bytesPerSecond: controller.cacheSpeedBytesPerSec,
-                            color: theme.colorScheme.onSurface.withValues(
-                              alpha: 0.86,
+                        child: Align(
+                          alignment: Alignment.centerRight,
+                          child: Tooltip(
+                            message: l10n.playerNetworkSpeedTooltip,
+                            child: NetworkSpeedReadout(
+                              key: PlayerKeys.networkSpeed,
+                              bytesPerSecond: controller.cacheSpeedBytesPerSec,
+                              color: theme.colorScheme.onSurface.withValues(
+                                alpha: 0.86,
+                              ),
                             ),
                           ),
                         ),

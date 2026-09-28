@@ -28,7 +28,9 @@ internal class CorePlayback(
 ) : SurfaceOwner {
     private data class Running(val handle: Long, val generation: Int,
                                val alive: AtomicBoolean = AtomicBoolean(true),
-                               var thread: Thread? = null)
+                               var thread: Thread? = null,
+                               var audioThread: Thread? = null,
+                               val drainedAudioTimeline: AtomicLong = AtomicLong(-1))
     private data class TrackRequest(val result: MethodChannel.Result, val expected: Int,
                                     val subtitle: Boolean, val timeline: Long)
     private data class ServerStream(val index: Int, val type: String,
@@ -197,6 +199,7 @@ internal class CorePlayback(
                     abandonFocus()
                     emit("interruption", "audioFocus")
                 }
+                active.audioThread = Thread({ pumpAudio(active) }, "rillight-android-audio-$revision").also { it.start() }
                 active.thread = Thread({ pump(active) }, "rillight-android-core-$revision").also { it.start() }
             }
         }
@@ -371,35 +374,32 @@ internal class CorePlayback(
         if (previous == null) return
         previous.alive.set(false)
         previous.thread?.join()
+        previous.audioThread?.join()
         CoreNative.destroy(previous.handle)
     }
 
-    private fun pump(active: Running) {
+    // AudioTrack owns a dedicated feeder: a blocked surface must never delay PCM.
+    private fun pumpAudio(active: Running) {
         var audio: CoreAudioOutput? = null
         var pending: CoreAudioFrame? = null
         var pendingOffset = 0
         var timeline = -1L
         var audioClockActive = false
-        var lastTick = 0L
-        var lastEnded = false
         try {
+            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_AUDIO)
             while (active.alive.get() && generation.get() == active.generation) {
                 val snap = CoreNative.snapshot(active.handle) ?: throw IllegalStateException("Core snapshot unavailable")
+                if (snap[0] == 8L) throw IllegalStateException("FFmpeg core error ${snap[4]}")
                 if (snap[3] != timeline) {
                     timeline = snap[3]
                     pending = null; pendingOffset = 0
                     audioReady = false
                     audioClockActive = false
+                    active.drainedAudioTimeline.set(-1)
                     synchronized(outputLock) { audio?.flush() }
-                    handler.post { if (generation.get() == active.generation) renderedFirst = false }
                 }
-                if (snap[0] == 8L) throw IllegalStateException("FFmpeg core error ${snap[4]}")
-                if (!requestedStartApplied && snap[0] in 2L..6L && snap[10] == 1L) {
-                    if (synchronized(outputLock) {
-                        CoreNative.seek(active.handle, requestedStartUs, operation.incrementAndGet())
-                    } != 0)
-                        throw IllegalStateException("Start position unavailable")
-                    requestedStartApplied = true
+                if (!requestedStartApplied) {
+                    Thread.sleep(4)
                     continue
                 }
                 if (snap[6] >= 0 && snap[11] == 1L && audio == null) {
@@ -455,6 +455,49 @@ internal class CorePlayback(
                             audioClockActive = false
                     }
                 }
+                synchronized(outputLock) {
+                    if (snap[12] == 1L && snap[14] == 0L && pending == null) {
+                        audio?.finishInput()
+                        if (audio == null || audio.drained())
+                            active.drainedAudioTimeline.set(timeline)
+                    }
+                }
+                outputWaitLock.withLock {
+                    if (active.alive.get())
+                        outputWake.await(if (desiredPaused) 100L else 4L, TimeUnit.MILLISECONDS)
+                }
+            }
+        } catch (error: Throwable) {
+            handler.post { if (generation.get() == active.generation) fail(error.message ?: "Native audio failed") }
+        } finally {
+            synchronized(outputLock) {
+                audioOutput = null
+                audio?.release()
+            }
+        }
+    }
+
+    private fun pump(active: Running) {
+        var timeline = -1L
+        var lastTick = 0L
+        var lastEnded = false
+        try {
+            while (active.alive.get() && generation.get() == active.generation) {
+                val snap = CoreNative.snapshot(active.handle) ?: throw IllegalStateException("Core snapshot unavailable")
+                if (snap[0] == 8L) throw IllegalStateException("FFmpeg core error ${snap[4]}")
+                if (snap[3] != timeline) {
+                    timeline = snap[3]
+                    lastEnded = false
+                    handler.post { if (generation.get() == active.generation) renderedFirst = false }
+                }
+                if (!requestedStartApplied && snap[0] in 2L..6L && snap[10] == 1L) {
+                    if (synchronized(outputLock) {
+                        CoreNative.seek(active.handle, requestedStartUs, operation.incrementAndGet())
+                    } != 0)
+                        throw IllegalStateException("Start position unavailable")
+                    requestedStartApplied = true
+                    continue
+                }
                 val videoSurface = synchronized(surfaceLock) { surface }
                 val frame = videoSurface?.takeIf { it.isValid }
                     ?.let { CoreNative.renderVideo(active.handle, it) }
@@ -470,13 +513,9 @@ internal class CorePlayback(
                         }
                     }
                 }
-                if (snap[12] == 1L && snap[13] == 0L && snap[14] == 0L && pending == null) {
-                    synchronized(outputLock) {
-                        audio?.finishInput()
-                        if (audio == null || audio.drained())
-                            CoreNative.reportDrained(active.handle, snap[1], snap[3])
-                    }
-                }
+                if (snap[12] == 1L && snap[13] == 0L && snap[14] == 0L &&
+                    active.drainedAudioTimeline.get() == snap[3])
+                    CoreNative.reportDrained(active.handle, snap[1], snap[3])
                 val now = android.os.SystemClock.elapsedRealtime()
                 if (now - lastTick >= 250) {
                     lastTick = now
@@ -499,11 +538,6 @@ internal class CorePlayback(
             }
         } catch (error: Throwable) {
             handler.post { if (generation.get() == active.generation) fail(error.message ?: "Native output failed") }
-        } finally {
-            synchronized(outputLock) {
-                audioOutput = null
-                audio?.release()
-            }
         }
     }
 

@@ -212,6 +212,80 @@ void main() {
     );
   }, tags: ['integration']);
 
+  for (final explicit in [false, true]) {
+    testWidgets(
+      'series opens ${explicit ? 'requested' : 'resuming'} season with specials first',
+      (tester) async {
+        server.setSeasons(_series, const [
+          FakeSeason(id: 'specials', name: '特别篇', indexNumber: 0),
+          FakeSeason(id: _season1, name: '第 1 季', indexNumber: 1),
+          FakeSeason(id: 'season-3', name: '第 3 季', indexNumber: 3),
+        ]);
+        server.setEpisodes(_series, const [
+          FakeEpisode(
+            id: 'special-e1',
+            name: '特别篇',
+            seasonId: 'specials',
+            indexNumber: 1,
+          ),
+          FakeEpisode(
+            id: 'first-e1',
+            name: '第一季首集',
+            seasonId: _season1,
+            indexNumber: 1,
+          ),
+          FakeEpisode(
+            id: 'resume-e13',
+            name: '续播第13集',
+            seasonId: 'season-3',
+            indexNumber: 13,
+            parentIndexNumber: 3,
+            playbackPositionTicks: 100000000,
+            runTimeTicks: 200000000,
+          ),
+        ]);
+        final app = await pumpApp(tester);
+        app.router.go(
+          AppRoutes.item(_series, seasonId: explicit ? _season1 : null),
+        );
+        await tester.pumpWidget(app);
+        await settle(tester);
+        expect(_episodeCardIds(tester), [explicit ? 'first-e1' : 'resume-e13']);
+        expect(tester.takeException(), isNull);
+      },
+      tags: ['integration'],
+    );
+  }
+
+  testWidgets('view series from an episode keeps its season', (tester) async {
+    server.setSeasons(_series, const [
+      FakeSeason(id: 'specials', name: '特别篇', indexNumber: 0),
+      FakeSeason(id: 'season-3', name: '第 3 季', indexNumber: 3),
+    ]);
+    server.setEpisodes(_series, const [
+      FakeEpisode(
+        id: 'special-e1',
+        name: '特别篇',
+        seasonId: 'specials',
+        indexNumber: 1,
+      ),
+      FakeEpisode(
+        id: 'third-e13',
+        name: '第三季第13集',
+        seasonId: 'season-3',
+        indexNumber: 13,
+        parentIndexNumber: 3,
+      ),
+    ]);
+    final app = await pumpApp(tester);
+    await openItem(tester, app, 'third-e13');
+    await tester.ensureVisible(find.byKey(CatalogKeys.viewSeries));
+    await tester.tap(find.byKey(CatalogKeys.viewSeries));
+    await settle(tester);
+    expect(app.router.state.uri.queryParameters['season'], 'season-3');
+    expect(_episodeCardIds(tester), ['third-e13']);
+  }, tags: ['integration']);
+
   testWidgets(
     'episode load-more failure keeps the window and retry appends without duplicates',
     (tester) async {

@@ -14,6 +14,20 @@ class DetailRepository {
   final Map<String, Future<EmbyItemPage>> _episodesInFlight = {};
   final Map<String, Future<List<EmbyItem>>> _similarInFlight = {};
 
+  /// Resolve progress within this series even when it was opened outside Home.
+  Future<EmbyItem?> resumeEpisode(String seriesId) async {
+    final items = await client.getItems(
+      parentId: seriesId,
+      includeItemTypes: 'Episode',
+      recursive: true,
+      filters: const ['IsResumable'],
+      sortBy: 'DatePlayed',
+      sortOrder: 'Descending',
+      limit: 1,
+    );
+    return items.where((item) => item.canResume).firstOrNull;
+  }
+
   String _key(String path) =>
       '${cache.identityToken}|${client.baseUrl}|${client.userId}|$path';
 

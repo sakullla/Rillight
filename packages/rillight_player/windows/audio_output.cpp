@@ -83,6 +83,12 @@ void AudioOutput::Run() {
       std::this_thread::sleep_for(std::chrono::milliseconds(milliseconds));
     }
 #endif
+    // Keep the event alive until the audio client has been released, including
+    // exception paths after Start().
+    const auto close_event = [](void* handle) { if (handle) CloseHandle(handle); };
+    std::unique_ptr<void, decltype(close_event)> ready_event(
+        CreateEventW(nullptr, FALSE, FALSE, nullptr), close_event);
+    if (!ready_event) throw std::runtime_error("WASAPI event creation failed");
     ComPtr<IMMDeviceEnumerator> enumerator;
     Check(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
                            IID_PPV_ARGS(&enumerator)),
@@ -103,9 +109,11 @@ void AudioOutput::Run() {
     format.nAvgBytesPerSec = format.nSamplesPerSec * format.nBlockAlign;
     Check(client->Initialize(AUDCLNT_SHAREMODE_SHARED,
                              AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM |
+                                 AUDCLNT_STREAMFLAGS_EVENTCALLBACK |
                                  AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY,
-                             500000, 0, &format, nullptr),
+                             1200000, 0, &format, nullptr),
           "WASAPI 48 kHz stereo output initialization failed");
+    Check(client->SetEventHandle(ready_event.get()), "WASAPI event registration failed");
     UINT32 capacity = 0;
     Check(client->GetBufferSize(&capacity), "WASAPI buffer size unavailable");
     REFERENCE_TIME stream_latency_ticks = 0;
@@ -160,6 +168,7 @@ void AudioOutput::Run() {
         offset = 0;
       }
       bool waiting_future_audio = false;
+      bool wrote_audio = false;
       if (pending) {
         if (pending->session_id != session ||
             pending->timeline_version != timeline || !pending->data ||
@@ -179,8 +188,9 @@ void AudioOutput::Run() {
             offset = std::max(offset, rillight_windows::StartupSampleOffset(
                 *pending, state.position_us, state.playback_speed));
           }
-          if (audio_clock_started && pending->pts_us >= 0 &&
-              pending->pts_us > state.position_us + 50000) {
+          if (audio_clock_started &&
+              rillight_windows::WaitForFutureAudio(pending->pts_us,
+                  state.position_us, submitted_media_end)) {
             waiting_future_audio = true;
           }
           if (!waiting_future_audio) {
@@ -205,6 +215,7 @@ void AudioOutput::Run() {
                 Check(render->ReleaseBuffer(count, 0),
                       "WASAPI buffer commit failed");
                 offset += count;
+                wrote_audio = true;
                 device_padding_ = padding + count;
                 if (pending->pts_us >= 0) {
                   submitted_media_end = pending->pts_us + static_cast<int64_t>(
@@ -252,7 +263,11 @@ void AudioOutput::Run() {
           }
         }
       }
-      std::this_thread::sleep_for(std::chrono::milliseconds(4));
+      // Fill available device space across packet boundaries before sleeping.
+      // Device callbacks drive steady playback; the bounded timeout also handles
+      // a newly decoded packet, pause/seek, and shutdown without a device event.
+      if (!wrote_audio || device_padding_ >= capacity)
+        WaitForSingleObject(ready_event.get(), running ? 5 : 4);
     }
     if (running) client->Stop();
   } catch (const std::exception& exception) {

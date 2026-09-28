@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'cache_limits.dart';
 import 'disk_cache_coordinator.dart';
 import 'matroska_cache_index.dart';
 
@@ -44,7 +45,7 @@ class CacheRangeLease {
       try {
         bytes = await _cache._disk?.read(block.token!);
       } finally {
-        _cache._releasePending(cost);
+        _cache._releasePending(cost, foregroundRead: true);
       }
       source = CacheReadSource.disk;
     }
@@ -95,14 +96,14 @@ class SessionByteCache {
        _appliedPendingLimitBytes = pendingLimitBytes,
        _appliedDiskSessionLimitBytes = diskSessionLimitBytes;
 
-  static const maxBlockBytes = 1024 * 1024;
+  static const maxBlockBytes = maxCacheBlockBytes;
 
   static Future<SessionByteCache> open({
     Directory? root,
     int memoryLimitBytes = 32 * 1024 * 1024,
     int diskLimitBytes = 2048 * 1024 * 1024,
     int? diskSessionLimitBytes,
-    int pendingLimitBytes = 8 * 1024 * 1024,
+    int pendingLimitBytes = defaultCachePendingBytes,
     int maxEntries = 8192,
     Duration diskTimeout = const Duration(milliseconds: 750),
   }) async {
@@ -127,8 +128,11 @@ class SessionByteCache {
           sessionLimitBytes: cache.diskSessionLimitBytes,
           timeout: diskTimeout,
         );
-      } catch (_) {
+      } catch (error) {
         cache._degradation = 'disk-unavailable';
+        cache._diskOpenFailure = error is FileSystemException
+            ? error.message
+            : error.runtimeType.toString();
       }
     }
     return cache;
@@ -144,12 +148,18 @@ class SessionByteCache {
   final _entries = <_BlockKey, _Entry>{};
   int _revision = 0;
   int get revision => _revision;
+  int _coverageRevision = 0;
+
+  /// Changes that can retract already available bytes. Appending new blocks
+  /// or moving an immutable block between RAM and disk cannot retract coverage.
+  int get coverageRevision => _coverageRevision;
   final _memory = <_BlockKey, Uint8List>{};
   final _memoryPins = <_BlockKey, int>{};
   final _rangeLeases = <CacheRangeLease>{};
   int _acquiringLeases = 0;
   DiskCacheSession? _disk;
   String? _degradation;
+  String? _diskOpenFailure;
   bool _closed = false;
   int _memoryBytes = 0;
   int _indexBytes = 0;
@@ -202,6 +212,7 @@ class SessionByteCache {
       'evictions': _evictions,
       'invalidations': _invalidations,
       'protectedRanges': _rangeLeases.length,
+      if (_diskOpenFailure != null) 'diskOpenFailure': _diskOpenFailure,
       'degradation': _degradation ?? _disk?.degradation,
       'closed': _closed,
       ...?_disk?.diagnostics,
@@ -374,7 +385,7 @@ class SessionByteCache {
           onMissing: () => confirmedMissing = true,
         );
       } finally {
-        _releasePending(pendingCost);
+        _releasePending(pendingCost, foregroundRead: true);
       }
       source = CacheReadSource.disk;
       if (_closed || !identical(_entries[key], entry)) return null;
@@ -403,16 +414,14 @@ class SessionByteCache {
 
   /// A physical availability snapshot. With [verifyChecksum], disk blocks must
   /// pass a bounded worker-side CRC check before they can appear in the result.
-  /// Null means the optional query is busy or timed out; timeline callers must
-  /// fail closed rather than keep a previously published interval.
+  /// Null means the optional query is busy or timed out; timeline callers may
+  /// retain their last successful snapshot for a bounded retry interval.
   Future<List<CachedByteRange>?> availableRanges({
     required String resource,
     required int generation,
     bool verifyChecksum = false,
   }) async {
     if (_closed) return const [];
-    if (diagnostics['degradation'] == 'disk-timeout') return null;
-    if (diagnostics['degradation'] != null) return const [];
     final entries = _entries.entries
         .where(
           (entry) =>
@@ -439,9 +448,9 @@ class SessionByteCache {
       // Optional queries may time out without degrading the disk. Keep their
       // reservation until outstanding filesystem work actually settles.
       final disk = _disk;
-      if (disk != null) {
+      if (disk != null && (!verifyChecksum || disk.hasPendingIntegrity)) {
         unawaited(
-          disk.settled.then((_) {
+          (verifyChecksum ? disk.integritySettled : disk.settled).then((_) {
             _pendingBytes -= cost;
             _notifyPendingChanged();
           }),
@@ -452,8 +461,6 @@ class SessionByteCache {
       }
     }
     if (_closed) return const [];
-    if (diagnostics['degradation'] == 'disk-timeout') return null;
-    if (diagnostics['degradation'] != null) return const [];
     if (present == null) return null;
     if (entries.any(
       (entry) =>
@@ -673,6 +680,7 @@ class SessionByteCache {
 
   Future<void> _close() async {
     _closed = true;
+    _coverageRevision++;
     await Future.wait(_rangeLeases.toList().map((lease) => lease.close()));
     _entries.clear();
     _indexBytes = 0;
@@ -705,14 +713,24 @@ class SessionByteCache {
     if (bytes != null) {
       _memoryBytes -= bytes.length;
       _revision++;
+      if (_entries[key]?.diskToken == null) _coverageRevision++;
     }
   }
 
   int _indexCost(_BlockKey key) => key.resource.length * 2 + 256;
 
-  void _releasePending(int bytes) {
+  void _releasePending(int bytes, {bool foregroundRead = false}) {
     final disk = _disk;
-    if (disk?.degradation == 'disk-timeout') {
+    if (foregroundRead && disk != null && disk.hasPendingReads) {
+      unawaited(
+        disk.readsSettled.then((_) {
+          _pendingBytes -= bytes;
+          _notifyPendingChanged();
+        }),
+      );
+      return;
+    }
+    if (!foregroundRead && disk?.degradation == 'disk-timeout') {
       unawaited(
         disk!.settled.then((_) {
           _pendingBytes -= bytes;
@@ -729,6 +747,7 @@ class SessionByteCache {
     if (_entries.remove(key) != null) {
       _indexBytes -= _indexCost(key);
       _revision++;
+      _coverageRevision++;
     }
   }
 }

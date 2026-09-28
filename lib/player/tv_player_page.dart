@@ -673,7 +673,24 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                     ),
                                     if (c.progressSyncFailed)
                                       Text(l.progressSyncFailed),
-                                    if (c.networkSlow) Text(l.networkSlowHint),
+                                    if (c.networkSlow)
+                                      Row(
+                                        children: [
+                                          Expanded(
+                                            child: Text(l.networkSlowHint),
+                                          ),
+                                          IconButton(
+                                            key: const Key(
+                                              'tv-dismiss-network-hint',
+                                            ),
+                                            tooltip: MaterialLocalizations.of(
+                                              context,
+                                            ).closeButtonTooltip,
+                                            onPressed: c.dismissNetworkSlowHint,
+                                            icon: const Icon(Icons.close),
+                                          ),
+                                        ],
+                                      ),
                                     if (c.trackFailure != null)
                                       Text(c.trackFailure!),
                                     if (c.backgroundReleased)

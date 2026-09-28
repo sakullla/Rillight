@@ -14,6 +14,8 @@ import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/video_backend.dart';
 import 'package:rillight_player/rillight_player.dart';
 
+import 'cache/cache_limits.dart';
+
 typedef CorePlayerFactory = Future<CorePlayer> Function();
 
 /// A single app contract for the owned FFmpeg core on desktop and Android.
@@ -297,17 +299,16 @@ class RillightVideoBackend extends VideoBackend
             : request.headers,
         cacheRoot: _diskCacheDirectory ?? PlayerDiskCache.defaultDirectory(),
         memoryLimitBytes: 8 * 1024 * 1024,
-        pendingLimitBytes: 8 * 1024 * 1024,
+        pendingLimitBytes: defaultCachePendingBytes,
         diskLimitBytes: PlayerRuntimeOptions.effectiveDiskCacheLimitBytes(
           settings,
         ),
         readAheadBytes:
-            const int.fromEnvironment(
-              'RILLIGHT_VALIDATION_READ_AHEAD_MIB',
-              defaultValue: 512,
-            ) *
-            1024 *
-            1024,
+            const bool.hasEnvironment('RILLIGHT_VALIDATION_READ_AHEAD_MIB')
+            ? const int.fromEnvironment('RILLIGHT_VALIDATION_READ_AHEAD_MIB') *
+                  1024 *
+                  1024
+            : PlayerRuntimeOptions.effectiveDiskCacheLimitBytes(settings),
         dynamicSource: request.dynamicSource,
         sessionBuffering: true,
       );
@@ -328,6 +329,13 @@ class RillightVideoBackend extends VideoBackend
       _coreEvents = player.events.listen(
         (event) => _onCoreEvent(event, generation),
       );
+      // Opening the core can wait for network bytes or fail on HTTP auth.
+      // Publish transport progress during that wait, before the first frame.
+      _diagnosticsTimer = Timer.periodic(const Duration(milliseconds: 250), (
+        _,
+      ) {
+        unawaited(_refreshDiagnostics(generation));
+      });
       _openPhase = 'openingCore';
       final result = await player.open(
         CorePlayerOpen(
@@ -364,11 +372,6 @@ class RillightVideoBackend extends VideoBackend
       selectedSubtitleIndex = result['subtitleIndex'] as int?;
       _opened = true;
       _openPhase = 'opened';
-      _diagnosticsTimer = Timer.periodic(const Duration(milliseconds: 250), (
-        _,
-      ) {
-        unawaited(_refreshDiagnostics(generation));
-      });
       unawaited(_refreshDiagnostics(generation));
     } catch (error) {
       if (generation == _generation) {
@@ -460,7 +463,8 @@ class RillightVideoBackend extends VideoBackend
     if (match != null) {
       _lastCoreErrorCode = int.tryParse(match.group(1)!);
       _coreOpenFailureKind = 'ffmpeg';
-    } else if (message.contains('Media ready / first frame timed out')) {
+    } else if (message.contains('Media ready / first frame timed out') ||
+        message.contains('Core did not render the first frame')) {
       _coreOpenFailureKind = 'firstFrameTimeout';
     } else if (message.contains('Core rejected media open')) {
       _coreOpenFailureKind = 'coreRejectedOpen';

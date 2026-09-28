@@ -158,11 +158,15 @@ class MediaShelf extends StatefulWidget {
   static double lineHeightOf(BuildContext context, TextStyle? style) {
     final painter = TextPainter(
       text: TextSpan(text: 'Ag', style: style),
+      strutStyle: StrutStyle.fromTextStyle(
+        style ?? const TextStyle(),
+        forceStrutHeight: true,
+      ),
       textDirection: Directionality.of(context),
       textScaler: MediaQuery.textScalerOf(context),
       maxLines: 1,
     )..layout();
-    final height = painter.height;
+    final height = painter.height.ceilToDouble();
     painter.dispose();
     return height;
   }

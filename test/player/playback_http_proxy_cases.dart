@@ -793,8 +793,36 @@ void main() {
     },
   );
 
+  test('appending cache blocks does not erase a verified timeline', () async {
+    final fixture = await _CacheFixture.open(
+      memoryBytes: 4 * 1024 * 1024,
+      sessionBuffering: true,
+    );
+    fixture.binaryBody = _paddedProgressiveMp4();
+    await fixture.readBytes('bytes=0-2097151');
+    await fixture.settle();
+    const duration = Duration(seconds: 4);
+    fixture.proxy.selectContainerTracks(videoTrackId: 1, audioTrackId: 2);
+    await fixture.proxy.refreshTimeline(duration);
+    expect(fixture.proxy.diagnostics['cachedTimeRanges'], isNotEmpty);
+    for (var index = 0; index < 5; index++) {
+      Future<bool> append(int offset) => fixture.cache.put(
+        resource: 'concurrent-download',
+        generation: 0,
+        offset: offset,
+        bytes: Uint8List(16),
+      );
+      await append(index * 32);
+      final refresh = fixture.proxy.refreshTimeline(duration);
+      await append(index * 32 + 16);
+      await refresh;
+      expect(fixture.proxy.diagnostics['timelineUnknownReason'], isNull);
+      expect(fixture.proxy.diagnostics['cachedTimeRanges'], isNotEmpty);
+    }
+  });
+
   test(
-    'busy integrity snapshot withdraws timeline without degrading disk',
+    'busy integrity snapshot retains briefly then expires without degrading disk',
     () async {
       final fixture = await _CacheFixture.open(
         disk: true,
@@ -826,6 +854,15 @@ void main() {
         diskBytes: 64 * 1024 * 1024,
       );
       await Future<void>.delayed(const Duration(milliseconds: 2100));
+      await fixture.proxy.refreshTimeline(duration);
+      expect(
+        fixture.proxy.bufferedEnd(
+          const Duration(seconds: 1),
+          const Duration(seconds: 2),
+        ),
+        duration,
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 3100));
       await fixture.proxy.refreshTimeline(duration);
       expect(
         fixture.proxy.bufferedEnd(
@@ -1167,6 +1204,82 @@ void main() {
     },
   );
 
+  test(
+    'rejected read-ahead preserves cached playback until demand fails',
+    () async {
+      const mib = 1024 * 1024;
+      final fixture = await _CacheFixture.open(
+        memoryBytes: 8 * mib,
+        disk: true,
+        sessionBuffering: true,
+        readAheadBytes: 16 * mib,
+      );
+      fixture.binaryBody = Uint8List(16 * mib)..fillRange(0, 16 * mib, 120);
+      fixture.forbiddenOffset = 8 * mib;
+      // Start with a validated cached prefix, then reject the first continuous
+      // future request. Playback may consume that prefix before surfacing 403.
+      await fixture.readBytes('bytes=0-0');
+      await fixture.proxy.refreshTimeline(const Duration(seconds: 4));
+      final identity = fixture.proxy.diagnostics['timelineIdentity'] as String;
+      final split = identity.lastIndexOf(':');
+      for (var offset = 0; offset < 8 * mib; offset += mib) {
+        await fixture.cache.put(
+          resource: identity.substring(0, split),
+          generation: int.parse(identity.substring(split + 1)),
+          offset: offset,
+          bytes: Uint8List(mib)..fillRange(0, mib, 120),
+        );
+      }
+      final request = await fixture.client.getUrl(fixture.url);
+      request.headers.set('range', 'bytes=0-${16 * mib - 1}');
+      final response = await request.close();
+      final received = Completer<void>();
+      final finished = Completer<void>();
+      var receivedBytes = 0;
+      late StreamSubscription<List<int>> subscription;
+      subscription = response.listen(
+        (bytes) {
+          receivedBytes += bytes.length;
+          if (!received.isCompleted) {
+            subscription.pause();
+            received.complete();
+          }
+        },
+        onError: (Object _) {
+          if (!finished.isCompleted) finished.complete();
+        },
+        onDone: () {
+          if (!finished.isCompleted) finished.complete();
+        },
+      );
+      try {
+        await received.future.timeout(const Duration(seconds: 3));
+        final deadline = DateTime.now().add(const Duration(seconds: 5));
+        while (fixture.proxy.diagnostics['readAheadFailed'] != true &&
+            DateTime.now().isBefore(deadline)) {
+          await Future<void>.delayed(const Duration(milliseconds: 10));
+        }
+        expect(fixture.proxy.diagnostics['readAheadFailed'], true);
+        expect(fixture.proxy.diagnostics['lastUpstreamStatus'], 403);
+        expect(fixture.proxy.diagnostics['authenticationStatus'], isNull);
+        expect(fixture.cache.diagnostics['invalidations'], 0);
+        expect((await fixture.read('bytes=0-1023')).$2, 'x' * 1024);
+        expect(fixture.proxy.diagnostics['authenticationStatus'], isNull);
+        subscription.resume();
+        await finished.future.timeout(const Duration(seconds: 5));
+        expect(receivedBytes, 8 * mib);
+        expect(fixture.proxy.diagnostics['authenticationStatus'], 403);
+        expect(
+          (await fixture.read('bytes=${8 * mib}-${8 * mib + 63}')).$1,
+          403,
+        );
+        expect(fixture.proxy.diagnostics['authenticationStatus'], 403);
+      } finally {
+        await subscription.cancel();
+      }
+    },
+  );
+
   // The uncached 200 probe/recovery path has a separate async* cancellation
   // boundary. Its isolate-survival coverage lives in
   // playback_transport_session_test.dart, alongside the cached-prefix case here.
@@ -1209,10 +1322,10 @@ void main() {
         }, onError: (Object _) {});
         await received.future.timeout(const Duration(seconds: 2));
       }
-      expect(proxy.diagnostics['cacheWorkspaceBytes'], 3 * 1024 * 1024);
+      expect(proxy.diagnostics['cacheWorkspaceBytes'], 8 * 1024 * 1024);
       expect(
         proxy.diagnostics['proxyInFlightPeakBytes'],
-        lessThanOrEqualTo(4 * 1024 * 1024),
+        lessThanOrEqualTo(12 * 1024 * 1024),
       );
       final overloaded = await (await client.getUrl(
         route('tail'),
@@ -1328,7 +1441,7 @@ void main() {
     },
   );
   test(
-    'stable socket fragments aggregate into MiB blocks without delaying output',
+    'stable socket fragments aggregate into 4 MiB blocks without delaying output',
     () async {
       final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
       final client = HttpClient();
@@ -1337,7 +1450,7 @@ void main() {
       );
       final proxy = await PlaybackHttpProxy.create(cache: cache);
       final continueBody = Completer<void>();
-      const size = 2 * 1024 * 1024 + 32 * 1024;
+      const size = 8 * 1024 * 1024 + 32 * 1024;
       server.listen((request) async {
         request.response.headers.set('cache-control', 'max-age=600');
         request.response.headers.set('etag', '"blocks"');
@@ -1370,7 +1483,7 @@ void main() {
         expect(cache.diagnostics['memoryBytes'], size);
         expect(
           proxy.diagnostics['proxyInFlightPeakBytes'],
-          lessThanOrEqualTo(2 * 1024 * 1024),
+          lessThanOrEqualTo(5 * 1024 * 1024),
         );
         final before = proxy.upstreamBytes;
         await (await (await client.getUrl(uri)).close()).drain<void>();
@@ -1916,7 +2029,7 @@ void main() {
   });
 
   test(
-    'redirects, HLS segments, keys and subtitles authorize each origin',
+    'redirects, HLS segments, keys and subtitles preserve UA and scope credentials',
     () async {
       final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
       final foreign = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
@@ -1987,6 +2100,8 @@ void main() {
         await get(Uri.parse(line));
       }
       await get(proxy.register(upstreamUrl.resolve('/subtitle.ass')));
+      await get(proxy.register(foreignUrl.resolve('/subtitle.ass')));
+      await get(proxy.register(foreignUrl.resolve('/direct.mp4')));
       expect(
         authenticated,
         containsAll([
@@ -2024,6 +2139,7 @@ class _CacheFixture {
   bool ignoreRange = false;
   bool ignoreConditionalRange = false;
   int? headStatus;
+  int? forbiddenOffset;
   int? redirectVersion;
   Duration delay = Duration.zero;
   int requests = 0;
@@ -2116,6 +2232,13 @@ class _CacheFixture {
       r'^bytes=(\d+)-(\d*)$',
     ).firstMatch(request.headers.value('range') ?? '');
     final ifRange = request.headers.value('if-range');
+    if (forbiddenOffset != null &&
+        range != null &&
+        int.parse(range[1]!) >= forbiddenOffset!) {
+      output.statusCode = HttpStatus.forbidden;
+      await output.close();
+      return;
+    }
     var bytes = binaryBody ?? utf8.encode(body);
     if (!ignoreRange &&
         !(ignoreConditionalRange && ifRange != null) &&

@@ -4,6 +4,12 @@
 #include <chrono>
 
 int main() {
+  // Adjacent PCM packets differ by rounding at most; fill the device buffer
+  // even when its tail is ahead of the audible clock. A real gap still waits.
+  assert(!rillight_windows::WaitForFutureAudio(418474667, 418424666, 418474666));
+  assert(!rillight_windows::WaitForFutureAudio(120000, 0, 120000));
+  assert(rillight_windows::WaitForFutureAudio(250000, 0, 120000));
+  assert(rillight_windows::WaitForFutureAudio(120000, 0, -1));
   RillightCoreFrame frame{};
   frame.pts_us = 0;
   frame.sample_count = 48000;
