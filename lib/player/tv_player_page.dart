@@ -783,8 +783,8 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                     return const SizedBox.shrink();
                   }
                   return Positioned(
-                    top: 24,
-                    right: 24,
+                    left: 48,
+                    bottom: 220,
                     child: NextEpisodeCard(
                       controller: c,
                       playFocus: _nextPlayFocus,

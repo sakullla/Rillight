@@ -38,14 +38,14 @@ class NextEpisodeCard extends StatelessWidget {
           children: [
             MediaImage(
               item: offer.item,
-              width: 112,
-              height: 63,
+              width: 72,
+              height: 40,
               preferThumb: true,
-              maxWidth: 320,
+              maxWidth: 240,
             ),
-            const SizedBox(width: 10),
+            const SizedBox(width: 8),
             SizedBox(
-              width: 168,
+              width: 120,
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,

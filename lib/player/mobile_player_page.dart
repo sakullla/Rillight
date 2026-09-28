@@ -647,8 +647,8 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
                   c.error == null &&
                   !c.sessionExpired)
                 Positioned(
-                  right: 12,
-                  bottom: 168,
+                  left: 12,
+                  top: 64,
                   child: NextEpisodeCard(controller: c),
                 ),
               if (!_interaction.locked &&
