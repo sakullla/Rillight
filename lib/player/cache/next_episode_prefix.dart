@@ -4,7 +4,6 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import 'cache_limits.dart';
-import 'session_byte_cache.dart';
 
 /// One bounded response from the next episode's existing stream URL.
 class NextPrefixSlice {
@@ -24,24 +23,32 @@ typedef NextPrefixFetch =
       required int endInclusive,
     });
 
-/// Fetches at most [NextEpisodePrefix.maxBytes] of one next episode into the
-/// current session cache, under that episode's own resource key.
+/// Holds at most [maxBytes] of the next episode in memory until the current
+/// transport is asked to play that item. It does not open a second disk session.
 class NextEpisodePrefix {
-  NextEpisodePrefix({required this.cache, NextPrefixFetch? fetch})
+  NextEpisodePrefix({NextPrefixFetch? fetch})
     : fetch = fetch ?? fetchNextPrefixSlice;
 
   static const maxBytes = 32 * 1024 * 1024;
 
-  final SessionByteCache cache;
   final NextPrefixFetch fetch;
+  final _chunks = <Uint8List>[];
   int storedBytes = 0;
   String? itemId;
+  Uint8List? _joined;
   int _ticket = 0;
-  HttpClient? _client;
 
-  static String resourceFor(String itemId) {
-    final bounded = itemId.length > 240 ? itemId.substring(0, 240) : itemId;
-    return 'next-prefix:$bounded';
+  Uint8List? get bytes {
+    if (itemId == null || storedBytes == 0) return null;
+    final joined = _joined;
+    if (joined != null && joined.length == storedBytes) return joined;
+    final out = Uint8List(storedBytes);
+    var offset = 0;
+    for (final chunk in _chunks) {
+      out.setRange(offset, offset + chunk.length, chunk);
+      offset += chunk.length;
+    }
+    return _joined = out;
   }
 
   Future<void> start({
@@ -51,11 +58,9 @@ class NextEpisodePrefix {
     required bool Function() yieldToForeground,
   }) async {
     final ticket = ++_ticket;
-    await _drop(itemId: this.itemId, ticket: ticket);
+    _clear();
     if (ticket != _ticket) return;
     this.itemId = itemId;
-    storedBytes = 0;
-    final resource = resourceFor(itemId);
     var offset = 0;
     while (offset < maxBytes && ticket == _ticket) {
       while (ticket == _ticket && yieldToForeground()) {
@@ -73,62 +78,35 @@ class NextEpisodePrefix {
           endInclusive: endInclusive,
         );
       } catch (_) {
-        if (ticket == _ticket) await discard();
+        if (ticket == _ticket) _clear();
         return;
       }
       if (ticket != _ticket) return;
       if (slice == null || !slice.rangeSupported || slice.bytes.isEmpty) {
-        await discard();
+        _clear();
         return;
       }
-      final stored = await cache.putPreservingReadable(
-        resource: resource,
-        generation: 1,
-        offset: offset,
-        bytes: slice.bytes,
-      );
-      if (!stored || ticket != _ticket) return;
+      _chunks.add(slice.bytes);
       storedBytes += slice.bytes.length;
+      _joined = null;
       offset += slice.bytes.length;
       if (slice.bytes.length < requested) return;
     }
   }
 
-  Future<Uint8List?> readStored() async {
-    final id = itemId;
-    if (id == null || storedBytes == 0) return null;
-    final builder = BytesBuilder(copy: false);
-    var offset = 0;
-    while (offset < storedBytes) {
-      final hit = await cache.read(
-        resource: resourceFor(id),
-        generation: 1,
-        offset: offset,
-      );
-      if (hit == null || hit.bytes.isEmpty) return null;
-      builder.add(hit.bytes);
-      offset += hit.bytes.length;
-    }
-    return builder.takeBytes();
-  }
+  Future<Uint8List?> readStored() async => bytes;
 
   Future<void> discard() async {
-    final ticket = ++_ticket;
-    final id = itemId;
+    _ticket++;
+    _clear();
+  }
+
+  void _clear() {
     itemId = null;
     storedBytes = 0;
-    await _drop(itemId: id, ticket: ticket);
+    _chunks.clear();
+    _joined = null;
   }
-
-  Future<void> _drop({required String? itemId, required int ticket}) async {
-    _client?.close(force: true);
-    _client = null;
-    if (itemId == null) return;
-    await cache.discardResource(resourceFor(itemId));
-    if (ticket != _ticket) return;
-  }
-
-  HttpClient openClient() => _client = HttpClient();
 }
 
 Future<NextPrefixSlice?> fetchNextPrefixSlice({

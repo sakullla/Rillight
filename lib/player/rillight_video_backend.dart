@@ -344,6 +344,14 @@ class RillightVideoBackend extends VideoBackend
       _transport = transport;
       _openPhase = 'register';
       final sealed = await transport.register(request.url);
+      final warmed = request.warmedPrefix;
+      if (warmed != null && warmed.isNotEmpty) {
+        try {
+          await transport.installWarmPrefix(request.url, warmed);
+        } catch (_) {
+          // A missing prefix leaves the new item on its normal cold start.
+        }
+      }
       if (_disposed || generation != _generation) return;
       _openPhase = 'player';
       final player = _player ??= await _createPlayer();

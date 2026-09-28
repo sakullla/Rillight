@@ -777,11 +777,6 @@ void main() {
     () async {
       await controller.disposeAsync();
       controller.dispose();
-      final cache = await SessionByteCache.open(
-        memoryLimitBytes: 1024 * 1024,
-        diskLimitBytes: 0,
-      );
-      addTearDown(cache.close);
       var fetches = 0;
       var releaseFetch = Completer<void>();
       controller = PlayerController(
@@ -791,7 +786,6 @@ void main() {
         window: PlayerWindow(),
         settingsStore: settings,
         snapshotStore: snapshots,
-        nextPrefixCache: cache,
         nextPrefixFetch:
             ({
               required url,
@@ -819,25 +813,14 @@ void main() {
       releaseFetch.complete();
       await _untilElapsed(() => controller.preparedNextPrefixBytes == 4);
       expect(await controller.readPreparedNextPrefix(), [9, 8, 7, 6]);
-      final cold = await SessionByteCache.open(
-        memoryLimitBytes: 1024,
-        diskLimitBytes: 0,
-      );
-      addTearDown(cold.close);
-      expect(
-        await cold.read(
-          resource: NextEpisodePrefix.resourceFor('episode-friends-s1e2'),
-          generation: 1,
-          offset: 0,
-        ),
-        isNull,
-      );
+      expect(backend.warmedPrefix, isNull);
 
       backend.openStarted = false;
       backend.openGate = Completer<void>();
       final opening = controller.playNextEpisode();
       await _until(() => backend.openStarted);
       expect(controller.preparedNextPrefixBytes, 4);
+      expect(backend.warmedPrefix, [9, 8, 7, 6]);
       backend.openGate!.complete();
       await opening;
       await _untilElapsed(() => controller.preparedNextPrefixBytes == 0);
@@ -847,11 +830,6 @@ void main() {
   test('cancelling or pausing drops the next episode prefix', () async {
     await controller.disposeAsync();
     controller.dispose();
-    final cache = await SessionByteCache.open(
-      memoryLimitBytes: 1024 * 1024,
-      diskLimitBytes: 0,
-    );
-    addTearDown(cache.close);
     var fetches = 0;
     final releaseFetch = Completer<void>();
     controller = PlayerController(
@@ -861,7 +839,6 @@ void main() {
       window: PlayerWindow(),
       settingsStore: settings,
       snapshotStore: snapshots,
-      nextPrefixCache: cache,
       nextPrefixFetch:
           ({
             required url,
@@ -917,26 +894,15 @@ void main() {
         ),
         isTrue,
       );
-      final prefix = NextEpisodePrefix(
-        cache: cache,
-        fetch:
-            ({
-              required url,
-              required headers,
-              required start,
-              required endInclusive,
-            }) async {
-              return NextPrefixSlice(
-                Uint8List.fromList(List<int>.filled(200, 9)),
-              );
-            },
+      expect(
+        await cache.putPreservingReadable(
+          resource: 'next-prefix:episode-friends-s1e2',
+          generation: 1,
+          offset: 0,
+          bytes: Uint8List.fromList(List<int>.filled(200, 9)),
+        ),
+        isFalse,
       );
-      await prefix.start(
-        itemId: 'episode-friends-s1e2',
-        url: Uri.parse('http://127.0.0.1/next'),
-        yieldToForeground: () => false,
-      );
-      expect(prefix.storedBytes, 0);
       expect(
         (await cache.read(
           resource: 'current',
@@ -945,20 +911,17 @@ void main() {
         ))?.bytes,
         current,
       );
-      await prefix.discard();
-      expect(await prefix.readStored(), isNull);
+      await cache.discardResource('current');
+      expect(
+        await cache.read(resource: 'current', generation: 1, offset: 0),
+        isNull,
+      );
     },
   );
 
   test('next episode prefix stops at 32 MiB and pause drops it', () async {
-    final cache = await SessionByteCache.open(
-      memoryLimitBytes: NextEpisodePrefix.maxBytes,
-      diskLimitBytes: 0,
-    );
-    addTearDown(cache.close);
     var highestEnd = 0;
     final prefix = NextEpisodePrefix(
-      cache: cache,
       fetch:
           ({
             required url,
@@ -982,11 +945,6 @@ void main() {
 
     await controller.disposeAsync();
     controller.dispose();
-    final pausedCache = await SessionByteCache.open(
-      memoryLimitBytes: 1024 * 1024,
-      diskLimitBytes: 0,
-    );
-    addTearDown(pausedCache.close);
     controller = PlayerController(
       client: client,
       itemId: 'episode-friends-s1e1',
@@ -994,7 +952,6 @@ void main() {
       window: PlayerWindow(),
       settingsStore: settings,
       snapshotStore: snapshots,
-      nextPrefixCache: pausedCache,
       nextPrefixFetch:
           ({
             required url,
@@ -1021,6 +978,7 @@ class _ControlledBackend extends FakeVideoBackend {
   Completer<void>? openGate;
   Completer<void>? disposeGate;
   bool openStarted = false;
+  Uint8List? warmedPrefix;
   bool _openCancelled = false;
   bool failAudio = false;
   final audioGates = <int, Completer<void>>{};
@@ -1036,6 +994,7 @@ class _ControlledBackend extends FakeVideoBackend {
   @override
   Future<void> open(VideoOpenRequest request) async {
     openStarted = true;
+    warmedPrefix = request.warmedPrefix;
     _openCancelled = false;
     await openGate?.future;
     if (!_openCancelled) await super.open(request);

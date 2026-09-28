@@ -9,12 +9,9 @@ import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_errors.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/emby/media_source_format.dart';
-import 'package:rillight/player/cache/cache_limits.dart';
 import 'package:rillight/player/cache/next_episode_prefix.dart';
-import 'package:rillight/player/cache/session_byte_cache.dart';
 import 'package:rillight/player/playback_check_in.dart';
 import 'package:rillight/player/buffer_snapshot.dart';
-import 'package:rillight/player/player_runtime_options.dart';
 import 'package:rillight/player/playback_coordinator.dart';
 import 'package:rillight/player/playback_session.dart';
 import 'package:rillight/player/playback_state.dart';
@@ -134,7 +131,6 @@ class PlayerController extends ChangeNotifier {
     this.preferredSubtitleStreamIndex,
     this.startTimeTicks,
     this.settingsStore,
-    this.nextPrefixCache,
     this.nextPrefixFetch,
     PlaybackSessionSnapshotStore? snapshotStore,
   }) : snapshotStore =
@@ -173,12 +169,8 @@ class PlayerController extends ChangeNotifier {
   final void Function(String itemId, {String? seasonId})? onOpenItemDetail;
   PlayerSettingsStore? settingsStore;
 
-  /// Session cache that receives the next episode's disposable prefix.
-  /// Tests inject one; production opens the shared player disk cache.
-  final SessionByteCache? nextPrefixCache;
   final NextPrefixFetch? nextPrefixFetch;
   NextEpisodePrefix? _nextPrefix;
-  SessionByteCache? _ownedPrefixCache;
   bool _userPausedPrefix = false;
   bool _prefixYield = false;
 
@@ -2408,6 +2400,9 @@ class PlayerController extends ChangeNotifier {
               baseUrl: client.baseUrl!,
               sessionHeaders: client.sessionHeaders,
             ),
+            warmedPrefix: _nextPrefix?.itemId == itemId
+                ? _nextPrefix!.bytes
+                : null,
           ),
         );
         if (!_accepts(operation)) return;
@@ -3372,12 +3367,8 @@ class PlayerController extends ChangeNotifier {
         ),
       );
       if (playback == null) return;
-      final cache = nextPrefixCache ?? await _prefixCache();
       if (!_accepts(operation) || nextEpisode?.item.id != next.id) return;
-      final prefix = _nextPrefix ??= NextEpisodePrefix(
-        cache: cache,
-        fetch: nextPrefixFetch,
-      );
+      final prefix = _nextPrefix ??= NextEpisodePrefix(fetch: nextPrefixFetch);
       await prefix.start(
         itemId: next.id,
         url: playback.streamUrl,
@@ -3393,31 +3384,10 @@ class PlayerController extends ChangeNotifier {
     }
   }
 
-  Future<SessionByteCache> _prefixCache() async {
-    final existing = _ownedPrefixCache;
-    if (existing != null) return existing;
-    final settings = await (await _settings()).read();
-    final cache = await SessionByteCache.open(
-      root: PlayerDiskCache.defaultDirectory(),
-      memoryLimitBytes: 8 * 1024 * 1024,
-      diskLimitBytes: PlayerRuntimeOptions.effectiveDiskCacheLimitBytes(
-        settings,
-      ),
-      diskSessionLimitBytes: NextEpisodePrefix.maxBytes,
-      pendingLimitBytes: defaultCachePendingBytes,
-    );
-    return _ownedPrefixCache = cache;
-  }
-
   Future<void> _discardNextPrefix() async {
     final prefix = _nextPrefix;
     _nextPrefix = null;
     if (prefix != null) await prefix.discard();
-    final owned = _ownedPrefixCache;
-    _ownedPrefixCache = null;
-    if (owned != null && !identical(owned, nextPrefixCache)) {
-      await owned.close();
-    }
   }
 
   Future<PlayerSettingsStore> _settings() async {

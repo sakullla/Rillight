@@ -51,6 +51,8 @@ class PlaybackHttpProxy {
 
   final HttpServer _server;
   final HttpClient _client = HttpClient();
+  Uint8List? _warmPrefix;
+  String? _warmIdentity;
   final Uri? origin;
   final Map<String, String> headers;
   final String _secret;
@@ -947,6 +949,40 @@ class PlaybackHttpProxy {
       output.add(hit.bytes);
     }
     return output.takeBytes();
+  }
+
+  /// Remembers [bytes] for [url] so a later range that stays inside them is
+  /// answered without another upstream request.
+  void installWarmPrefix(Uri url, Uint8List bytes) {
+    if (bytes.isEmpty || bytes.length > 32 * 1024 * 1024) return;
+    final token = _routes.seal(url, PlaybackResourceRole.media.index, '');
+    final identity = _routes.open(token)?.identity;
+    if (identity == null) return;
+    _warmIdentity = identity;
+    _warmPrefix = Uint8List.fromList(bytes);
+  }
+
+  bool _serveWarmPrefix(HttpRequest incoming, String key, _ProxyRead read) {
+    final warm = _warmPrefix;
+    if (warm == null || key != _warmIdentity || incoming.method != 'GET') {
+      return false;
+    }
+    final header = incoming.headers.value(HttpHeaders.rangeHeader);
+    final match = header == null
+        ? null
+        : RegExp(r'^bytes=(\d+)-(\d+)$').firstMatch(header);
+    if (match == null) return false;
+    final start = int.parse(match.group(1)!);
+    final end = int.parse(match.group(2)!);
+    if (start < 0 || end < start || end >= warm.length) return false;
+    final output = incoming.response;
+    output.statusCode = HttpStatus.partialContent;
+    output.headers.set('accept-ranges', 'bytes');
+    output.headers.set('content-range', 'bytes $start-$end/*');
+    output.contentLength = end - start + 1;
+    output.add(Uint8List.sublistView(warm, start, end + 1));
+    read.outputStarted = true;
+    return true;
   }
 
   Uri register(
@@ -2639,6 +2675,7 @@ class PlaybackHttpProxy {
         }
         _roles[key] = PlaybackResourceRole.values[route.role];
       }
+      if (_serveWarmPrefix(incoming, key, read)) return;
       if (allowRange && await _tryReadAhead(incoming, key, url, read)) return;
       if (allowRange &&
           cache != null &&

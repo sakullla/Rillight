@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/widgets.dart';
 import 'package:rillight/player/playback_models.dart';
@@ -15,6 +16,7 @@ class VideoOpenRequest {
     this.isInfiniteStream = false,
     this.mediaStreams = const [],
     this.startPaused = false,
+    this.warmedPrefix,
   });
 
   final int sessionId;
@@ -27,6 +29,10 @@ class VideoOpenRequest {
   final bool isInfiniteStream;
   final List<MediaStreamInfo> mediaStreams;
   final bool startPaused;
+
+  /// Bytes already fetched for [url], served by the new transport when a
+  /// request stays inside them. Null leaves startup on the network.
+  final Uint8List? warmedPrefix;
   bool get dynamicSource =>
       isInfiniteStream || playMethod == PlayMethod.transcode;
 }

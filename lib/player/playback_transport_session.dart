@@ -173,6 +173,10 @@ class PlaybackTransportSession {
     await _request('playbackActive', active);
   }
 
+  Future<void> installWarmPrefix(Uri url, Uint8List bytes) async {
+    await _request('warmPrefix', [url.toString(), bytes]);
+  }
+
   Future<void> resizeCache({
     required int memoryBytes,
     required int pendingBytes,
@@ -305,6 +309,13 @@ Future<void> _serveTransport(List<Object?> arguments) async {
             break;
           case 'playbackActive':
             proxy.setPlaybackActive(message[2] as bool);
+            break;
+          case 'warmPrefix':
+            final value = message[2] as List;
+            proxy.installWarmPrefix(
+              Uri.parse(value[0] as String),
+              value[1] as Uint8List,
+            );
             break;
           case 'resize':
             final value = message[2] as List;

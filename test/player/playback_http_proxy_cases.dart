@@ -22,6 +22,37 @@ Uint8List _paddedProgressiveMp4() {
 }
 
 void main() {
+  test('a warmed prefix answers a contained range without upstream', () async {
+    final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    var upstreamHits = 0;
+    upstream.listen((request) async {
+      upstreamHits++;
+      await request.response.close();
+    });
+    final proxy = await PlaybackHttpProxy.create();
+    final client = HttpClient();
+    final origin = Uri.parse('http://127.0.0.1:${upstream.port}/episode.mp4');
+    final warmed = Uint8List.fromList(List<int>.generate(64, (index) => index));
+    try {
+      proxy.installWarmPrefix(origin, warmed);
+      final sealed = proxy.register(origin);
+      final request = await client.getUrl(sealed);
+      request.headers.set(HttpHeaders.rangeHeader, 'bytes=0-15');
+      final response = await request.close();
+      final body = await response.fold<List<int>>(
+        <int>[],
+        (bytes, chunk) => bytes..addAll(chunk),
+      );
+      expect(response.statusCode, HttpStatus.partialContent);
+      expect(body, warmed.sublist(0, 16));
+      expect(upstreamHits, 0);
+    } finally {
+      client.close(force: true);
+      await proxy.close();
+      await upstream.close(force: true);
+    }
+  });
+
   test(
     'upstream diagnostics distinguish waiting headers without secrets',
     () async {
