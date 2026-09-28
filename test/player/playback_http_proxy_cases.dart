@@ -70,6 +70,18 @@ void main() {
       expect(containedResponse.headers.value('content-range'), 'bytes 0-15/80');
       expect(containedBody, warmed.sublist(0, 16));
       expect(ranges, ['bytes=64-', 'bytes=64-64']);
+
+      final bounded = await client.getUrl(sealed);
+      bounded.headers.set(HttpHeaders.rangeHeader, 'bytes=0-70');
+      final boundedResponse = await bounded.close();
+      final boundedBody = await boundedResponse.fold<List<int>>(
+        <int>[],
+        (bytes, chunk) => bytes..addAll(chunk),
+      );
+      expect(boundedResponse.headers.value('content-range'), 'bytes 0-70/80');
+      expect(boundedBody.length, 71);
+      expect(boundedBody.sublist(0, 64), warmed);
+      expect(ranges, ['bytes=64-', 'bytes=64-64', 'bytes=64-70']);
     } finally {
       client.close(force: true);
       await proxy.close();

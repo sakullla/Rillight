@@ -983,6 +983,11 @@ class PlaybackHttpProxy {
     if (start < 0 || start >= warm.length) return false;
     if (requestedEnd != null && requestedEnd < start) return false;
     final inside = requestedEnd != null && requestedEnd < warm.length;
+    final upstreamRange = requestedEnd == null
+        ? 'bytes=${warm.length}-'
+        : inside
+        ? 'bytes=${warm.length}-${warm.length}'
+        : 'bytes=${warm.length}-$requestedEnd';
     HttpClientResponse upstream;
     try {
       final fetched = await _fetch(
@@ -990,11 +995,7 @@ class PlaybackHttpProxy {
         url,
         allowRange: true,
         read: read,
-        overrides: {
-          'range': inside
-              ? 'bytes=${warm.length}-${warm.length}'
-              : 'bytes=${warm.length}-',
-        },
+        overrides: {'range': upstreamRange},
       );
       upstream = fetched.$1;
     } catch (_) {
@@ -1003,7 +1004,13 @@ class PlaybackHttpProxy {
     final parsed = MediaContentRange.parse(
       upstream.headers.value('content-range'),
     );
-    if (upstream.statusCode != HttpStatus.partialContent || parsed == null) {
+    if (upstream.statusCode != HttpStatus.partialContent ||
+        parsed == null ||
+        parsed.start != warm.length) {
+      await upstream.drain<void>();
+      return false;
+    }
+    if (!inside && requestedEnd != null && parsed.end > requestedEnd) {
       await upstream.drain<void>();
       return false;
     }
@@ -1025,17 +1032,28 @@ class PlaybackHttpProxy {
     );
     output.contentLength = responseEnd - start + 1;
     final warmEnd = min(warm.length, responseEnd + 1);
+    var sent = 0;
     if (start < warmEnd) {
-      output.add(Uint8List.sublistView(warm, start, warmEnd));
+      final piece = Uint8List.sublistView(warm, start, warmEnd);
+      output.add(piece);
+      await output.flush();
+      sent += piece.length;
     }
     read.outputStarted = true;
     if (inside) {
       await upstream.drain<void>();
       return true;
     }
+    final limit = responseEnd - start + 1;
     await for (final chunk in upstream) {
       read.check();
-      output.add(chunk);
+      final room = limit - sent;
+      if (room <= 0) break;
+      final slice = chunk.length <= room ? chunk : chunk.sublist(0, room);
+      output.add(slice);
+      await output.flush();
+      sent += slice.length;
+      if (sent >= limit) break;
     }
     return true;
   }
