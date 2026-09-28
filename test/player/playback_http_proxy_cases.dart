@@ -22,11 +22,22 @@ Uint8List _paddedProgressiveMp4() {
 }
 
 void main() {
-  test('a warmed prefix answers a contained range without upstream', () async {
+  test('a warmed prefix answers the open-ended startup range', () async {
     final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-    var upstreamHits = 0;
+    final ranges = <String?>[];
+    const total = 80;
     upstream.listen((request) async {
-      upstreamHits++;
+      ranges.add(request.headers.value('range'));
+      final header = request.headers.value('range') ?? '';
+      final match = RegExp(r'^bytes=(\d+)-(\d*)$').firstMatch(header);
+      final start = match == null ? 0 : int.parse(match.group(1)!);
+      final endText = match?.group(2) ?? '';
+      final end = endText.isEmpty ? total - 1 : int.parse(endText);
+      final length = end - start + 1;
+      request.response.statusCode = HttpStatus.partialContent;
+      request.response.headers.set('content-range', 'bytes $start-$end/$total');
+      request.response.contentLength = length;
+      request.response.add(Uint8List.fromList(List<int>.filled(length, 7)));
       await request.response.close();
     });
     final proxy = await PlaybackHttpProxy.create();
@@ -36,16 +47,29 @@ void main() {
     try {
       proxy.installWarmPrefix(origin, warmed);
       final sealed = proxy.register(origin);
-      final request = await client.getUrl(sealed);
-      request.headers.set(HttpHeaders.rangeHeader, 'bytes=0-15');
-      final response = await request.close();
-      final body = await response.fold<List<int>>(
+      final openEnded = await client.getUrl(sealed);
+      openEnded.headers.set(HttpHeaders.rangeHeader, 'bytes=0-');
+      final openResponse = await openEnded.close();
+      final openBody = await openResponse.fold<List<int>>(
         <int>[],
         (bytes, chunk) => bytes..addAll(chunk),
       );
-      expect(response.statusCode, HttpStatus.partialContent);
-      expect(body, warmed.sublist(0, 16));
-      expect(upstreamHits, 0);
+      expect(openResponse.statusCode, HttpStatus.partialContent);
+      expect(openResponse.headers.value('content-range'), 'bytes 0-79/80');
+      expect(openBody.length, 80);
+      expect(openBody.sublist(0, 64), warmed);
+      expect(ranges, ['bytes=64-']);
+
+      final contained = await client.getUrl(sealed);
+      contained.headers.set(HttpHeaders.rangeHeader, 'bytes=0-15');
+      final containedResponse = await contained.close();
+      final containedBody = await containedResponse.fold<List<int>>(
+        <int>[],
+        (bytes, chunk) => bytes..addAll(chunk),
+      );
+      expect(containedResponse.headers.value('content-range'), 'bytes 0-15/80');
+      expect(containedBody, warmed.sublist(0, 16));
+      expect(ranges, ['bytes=64-', 'bytes=64-64']);
     } finally {
       client.close(force: true);
       await proxy.close();

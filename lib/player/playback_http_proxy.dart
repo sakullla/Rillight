@@ -962,7 +962,12 @@ class PlaybackHttpProxy {
     _warmPrefix = Uint8List.fromList(bytes);
   }
 
-  bool _serveWarmPrefix(HttpRequest incoming, String key, _ProxyRead read) {
+  Future<bool> _serveWarmPrefix(
+    HttpRequest incoming,
+    String key,
+    Uri url,
+    _ProxyRead read,
+  ) async {
     final warm = _warmPrefix;
     if (warm == null || key != _warmIdentity || incoming.method != 'GET') {
       return false;
@@ -970,18 +975,68 @@ class PlaybackHttpProxy {
     final header = incoming.headers.value(HttpHeaders.rangeHeader);
     final match = header == null
         ? null
-        : RegExp(r'^bytes=(\d+)-(\d+)$').firstMatch(header);
+        : RegExp(r'^bytes=(\d+)-(\d*)$').firstMatch(header);
     if (match == null) return false;
     final start = int.parse(match.group(1)!);
-    final end = int.parse(match.group(2)!);
-    if (start < 0 || end < start || end >= warm.length) return false;
+    final endText = match.group(2)!;
+    final requestedEnd = endText.isEmpty ? null : int.parse(endText);
+    if (start < 0 || start >= warm.length) return false;
+    if (requestedEnd != null && requestedEnd < start) return false;
+    final inside = requestedEnd != null && requestedEnd < warm.length;
+    HttpClientResponse upstream;
+    try {
+      final fetched = await _fetch(
+        incoming,
+        url,
+        allowRange: true,
+        read: read,
+        overrides: {
+          'range': inside
+              ? 'bytes=${warm.length}-${warm.length}'
+              : 'bytes=${warm.length}-',
+        },
+      );
+      upstream = fetched.$1;
+    } catch (_) {
+      return false;
+    }
+    final parsed = MediaContentRange.parse(
+      upstream.headers.value('content-range'),
+    );
+    if (upstream.statusCode != HttpStatus.partialContent || parsed == null) {
+      await upstream.drain<void>();
+      return false;
+    }
+    final responseEnd = inside ? requestedEnd : parsed.end;
+    if (responseEnd < start || responseEnd >= parsed.total) {
+      await upstream.drain<void>();
+      return false;
+    }
     final output = incoming.response;
     output.statusCode = HttpStatus.partialContent;
     output.headers.set('accept-ranges', 'bytes');
-    output.headers.set('content-range', 'bytes $start-$end/*');
-    output.contentLength = end - start + 1;
-    output.add(Uint8List.sublistView(warm, start, end + 1));
+    final type = upstream.headers.contentType;
+    if (type != null) output.headers.contentType = type;
+    final etag = upstream.headers.value('etag');
+    if (etag != null && etag.length <= 1024) output.headers.set('etag', etag);
+    output.headers.set(
+      'content-range',
+      'bytes $start-$responseEnd/${parsed.total}',
+    );
+    output.contentLength = responseEnd - start + 1;
+    final warmEnd = min(warm.length, responseEnd + 1);
+    if (start < warmEnd) {
+      output.add(Uint8List.sublistView(warm, start, warmEnd));
+    }
     read.outputStarted = true;
+    if (inside) {
+      await upstream.drain<void>();
+      return true;
+    }
+    await for (final chunk in upstream) {
+      read.check();
+      output.add(chunk);
+    }
     return true;
   }
 
@@ -2675,7 +2730,7 @@ class PlaybackHttpProxy {
         }
         _roles[key] = PlaybackResourceRole.values[route.role];
       }
-      if (_serveWarmPrefix(incoming, key, read)) return;
+      if (await _serveWarmPrefix(incoming, key, url, read)) return;
       if (allowRange && await _tryReadAhead(incoming, key, url, read)) return;
       if (allowRange &&
           cache != null &&

@@ -571,6 +571,7 @@ class RillightVideoBackend extends VideoBackend
               isInfiniteStream: request.isInfiniteStream,
               mediaStreams: request.mediaStreams,
               startPaused: !_wantsPlayback,
+              warmedPrefix: request.warmedPrefix,
             ),
           );
           if (epoch != _recoveryEpoch || _disposed) return;
