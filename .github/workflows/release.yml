@@ -191,26 +191,36 @@ jobs:
       - name: Provision verified Android core SDK
         uses: ./.github/actions/android-core
 
-      - name: Build Android release APK
-        run: flutter build apk --release --no-pub
+      - name: Build Android ABI release APKs
+        run: flutter build apk --release --split-per-abi --no-pub
 
       - name: Audit owned core APK closure
-        run: python3 tool/android_release_checks.py --apk build/app/outputs/flutter-apk/app-release.apk --output build/android-validation/release-apk-audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          for abi in armeabi-v7a arm64-v8a x86_64; do
+            python3 tool/android_release_checks.py \
+              --apk "build/app/outputs/flutter-apk/app-${abi}-release.apk" \
+              --expected-abi "$abi" \
+              --output "build/android-validation/release-apk-${abi}-audit"
+          done
 
       - name: Rename APK artifact
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p dist/android
-          cp build/app/outputs/flutter-apk/app-release.apk \
-            "dist/android/Rillight-android-${GITHUB_REF_NAME}.apk"
+          for abi in armeabi-v7a arm64-v8a x86_64; do
+            cp "build/app/outputs/flutter-apk/app-${abi}-release.apk" \
+              "dist/android/Rillight-android-${abi}-${GITHUB_REF_NAME}.apk"
+          done
 
       - name: Upload Android package
         uses: actions/upload-artifact@v6
         with:
           name: release-android
           compression-level: 0
-          path: dist/android/Rillight-android-${{ github.ref_name }}.apk
+          path: dist/android/Rillight-android-*-${{ github.ref_name }}.apk
           if-no-files-found: error
 
   release:
@@ -275,7 +285,9 @@ jobs:
 
           grep -Fqx "Rillight-windows-x64-${GITHUB_REF_NAME}-setup.exe" <<< "$assets"
           grep -Fqx "Rillight-linux-x64-${GITHUB_REF_NAME}.deb" <<< "$assets"
-          grep -Fqx "Rillight-android-${GITHUB_REF_NAME}.apk" <<< "$assets"
+          for abi in armeabi-v7a arm64-v8a x86_64; do
+            grep -Fqx "Rillight-android-${abi}-${GITHUB_REF_NAME}.apk" <<< "$assets"
+          done
           grep -Fqx "SHA256SUMS" <<< "$assets"
           grep -Eq "^Rillight-macos-.*-signed\.dmg$" <<< "$assets"
 
@@ -295,23 +307,25 @@ jobs:
           apk_dir="$(mktemp -d)"
           gh release download "${GITHUB_REF_NAME}" \
             --repo "${GITHUB_REPOSITORY}" \
-            --pattern "Rillight-android-${GITHUB_REF_NAME}.apk" \
+            --pattern "Rillight-android-*-${GITHUB_REF_NAME}.apk" \
             --dir "$apk_dir" \
             --clobber
 
-          apk="${apk_dir}/Rillight-android-${GITHUB_REF_NAME}.apk"
           apksigner_bin="$(find "${ANDROID_HOME}/build-tools" -name apksigner -type f | sort -V | tail -n 1)"
           if [ -z "$apksigner_bin" ]; then
             echo "::error::apksigner not found under ${ANDROID_HOME}/build-tools"
             exit 1
           fi
 
-          certs="$("$apksigner_bin" verify --print-certs "$apk")"
-          echo "$certs"
-          if grep -qi "Android Debug" <<< "$certs"; then
-            echo "::error::Rillight-android-${GITHUB_REF_NAME}.apk is signed with the Android debug certificate"
-            exit 1
-          fi
+          for abi in armeabi-v7a arm64-v8a x86_64; do
+            apk="${apk_dir}/Rillight-android-${abi}-${GITHUB_REF_NAME}.apk"
+            certs="$("$apksigner_bin" verify --print-certs "$apk")"
+            echo "$certs"
+            if grep -qi "Android Debug" <<< "$certs"; then
+              echo "::error::${apk} is signed with the Android debug certificate"
+              exit 1
+            fi
+          done
 
       - name: Verify macOS DMG carries the fixed self signature
         shell: bash
@@ -337,9 +351,9 @@ jobs:
           cleanup() { hdiutil detach "$mount_point" -force > /dev/null 2>&1 || true; }
           trap cleanup EXIT
 
-          signature="$(codesign -dv "$mount_point/rillight.app" 2>&1 || true)"
+          signature="$(codesign -dvv "$mount_point/rillight.app" 2>&1 || true)"
           echo "$signature"
-          if ! grep -q "Rillight Self Sign" <<< "$signature"; then
+          if ! grep -Fq "Authority=Rillight Self Sign" <<< "$signature"; then
             echo "::error::Rillight-macos-${GITHUB_REF_NAME} does not carry the fixed self signature"
             exit 1
           fi

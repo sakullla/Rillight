@@ -100,7 +100,7 @@ def readelf_path():
     return tool
 
 
-def apk_native_check(apk):
+def apk_native_check(apk, expected_abi=None):
     """Audit the packaged core for every ABI supported by the Flutter engine."""
     with zipfile.ZipFile(apk) as archive:
         entries = archive.namelist()
@@ -125,6 +125,10 @@ def apk_native_check(apk):
             raise RuntimeError('APK has no Flutter engine ABI')
         core_abis = sorted(abi for abi, files in libraries.items()
                            if any(name not in ('libflutter.so', 'libapp.so') for name in files))
+        if expected_abi is not None and (active_abis != [expected_abi] or
+                                         core_abis != [expected_abi]):
+            raise RuntimeError(f'APK ABI split mismatch: expected {expected_abi}; '
+                               f'Flutter {active_abis}; core {core_abis}')
         unknown = set(core_abis) - ELF_MACHINES.keys()
         if unknown:
             raise RuntimeError('Unsupported packaged native ABI: ' + ', '.join(sorted(unknown)))
@@ -175,7 +179,7 @@ def apk_native_check(apk):
                 'libraries': audited, 'notice_hashes': notices}
 
 
-def apk_check(apk, validation=False):
+def apk_check(apk, validation=False, expected_abi=None):
     tools = sorted((sdk_path() / 'build-tools').glob('*/aapt*'))
     aapt = next((p for p in reversed(tools) if p.name in ('aapt', 'aapt.exe')), None)
     if not aapt:
@@ -197,7 +201,7 @@ def apk_check(apk, validation=False):
             hasher.update(chunk)
         digest = hasher.hexdigest()
     return {'sha256': digest, 'package': package, 'badging': text,
-            'native': apk_native_check(apk)}
+            'native': apk_native_check(apk, expected_abi=expected_abi)}
 
 
 def pixel_check(first, second):
@@ -730,6 +734,8 @@ def main():
                         help='Run the owned-core native smoke without the catalog UI flow')
     parser.add_argument('--serial')
     parser.add_argument('--apk', type=Path, help='Audit a normal production APK only')
+    parser.add_argument('--expected-abi', choices=sorted(ELF_MACHINES),
+                        help='Require a single ABI in a release split APK')
     parser.add_argument('--app-apk', type=Path, help='Reuse an explicitly supplied validation observer APK')
     parser.add_argument('--native-apk', type=Path, help='Reuse validation native smoke APK (port 8865)')
     parser.add_argument('--media', type=Path, default=ROOT / 'build/android-validation/media')
@@ -747,7 +753,7 @@ def main():
     server_log = native_log = None
     try:
         if args.apk:
-            result['apk'] = apk_check(args.apk)
+            result['apk'] = apk_check(args.apk, expected_abi=args.expected_abi)
         else:
             adb = sdk_path() / ('platform-tools/adb.exe' if os.name == 'nt' else 'platform-tools/adb')
             serials = [args.serial] if args.serial else [line.split()[0] for line in run([adb, 'devices']).decode().splitlines()

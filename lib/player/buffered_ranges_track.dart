@@ -142,6 +142,16 @@ void _paintTrack(
         const Color(0xff697783),
       );
     }
+  } else if (snapshot.byteCoverage case final bytes?) {
+    // A byte ratio is download progress, not a promise that the same media
+    // time can be sought. Use a distinct color on the one existing track.
+    for (final range in bytes.ranges) {
+      segment(
+        range.start / bytes.totalBytes,
+        range.end / bytes.totalBytes,
+        const Color(0xff75bed2),
+      );
+    }
   }
   // Played coverage takes precedence; cache never paints over the thumb.
   segment(0, value.clamp(0.0, 1.0), Colors.white);

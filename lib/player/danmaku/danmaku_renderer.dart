@@ -37,6 +37,7 @@ class DanmakuViewState extends State<DanmakuView>
   Duration? _lastDisplayClock;
   DanmakuGlyphStyle? _appliedStyle;
   List<DanmakuEntry>? _preparedEntries;
+  double? _preparedAtSeconds;
   int _fixedIdentity = Object.hash(0, 0);
 
   /// 当前 ticker 是否在转;暂停后再播必须重新 start。
@@ -89,6 +90,7 @@ class DanmakuViewState extends State<DanmakuView>
       widget.controller.addListener(_onControllerChanged);
       _appliedStyle = null;
       _preparedEntries = null;
+      _preparedAtSeconds = null;
       _fixedIdentity = 0;
     }
     _syncTicker();
@@ -190,6 +192,10 @@ class DanmakuViewState extends State<DanmakuView>
     final source = widget.controller.layout.entries;
     final styleChanged = _appliedStyle != next;
     final sourceChanged = !identical(_preparedEntries, source);
+    final atSeconds = _prepareFromTime();
+    final windowChanged =
+        _preparedAtSeconds == null ||
+        (atSeconds - _preparedAtSeconds!).abs() >= 30;
 
     void apply({required bool clearForSource}) {
       _resizeDebounce?.cancel();
@@ -200,10 +206,11 @@ class DanmakuViewState extends State<DanmakuView>
       }
       _appliedStyle = next;
       _preparedEntries = source;
-      _cache.prepare(source, fromTime: _prepareFromTime());
+      _preparedAtSeconds = atSeconds;
+      _cache.prepare(source, fromTime: atSeconds);
     }
 
-    if (!styleChanged && !sourceChanged) {
+    if (!styleChanged && !sourceChanged && !windowChanged) {
       return;
     }
     if (styleChanged && sizeChanged && _appliedStyle != null) {

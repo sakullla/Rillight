@@ -13,6 +13,11 @@ const int kDanmakuGlyphCacheLimit = 6000;
 /// idle 预布局每块最多处理的唯一键数。
 const int kDanmakuGlyphPrepareChunkSize = 200;
 
+/// Only prepare glyphs that can appear soon; a full episode can contain tens
+/// of thousands of unique comments and would keep the UI isolate busy.
+const double kDanmakuGlyphPrepareAheadSeconds = 90;
+const double kDanmakuGlyphPrepareBehindSeconds = 15;
+
 /// idle 预布局每块时间上限。
 const Duration kDanmakuGlyphPrepareChunkLimit = Duration(milliseconds: 4);
 
@@ -147,6 +152,7 @@ class DanmakuGlyphCache {
 
   DanmakuGlyphStyle _style = DanmakuGlyphStyle.unset;
   List<DanmakuGlyphKey> _pending = const [];
+  int _pendingIndex = 0;
   int _prepareGeneration = 0;
   bool _preparing = false;
 
@@ -218,14 +224,9 @@ class DanmakuGlyphCache {
       return;
     }
     final keys = <DanmakuGlyphKey>{};
-    final snapshot = List<DanmakuEntry>.of(timeline);
-    for (final entry in snapshot) {
-      if (entry.time >= fromTime) {
-        keys.add(keyOf(entry));
-      }
-    }
-    for (final entry in snapshot) {
-      if (entry.time < fromTime) {
+    for (final entry in timeline) {
+      if (entry.time >= fromTime - kDanmakuGlyphPrepareBehindSeconds &&
+          entry.time <= fromTime + kDanmakuGlyphPrepareAheadSeconds) {
         keys.add(keyOf(entry));
       }
     }
@@ -233,6 +234,7 @@ class DanmakuGlyphCache {
       for (final key in keys)
         if (!_entries.containsKey(key)) key,
     ];
+    _pendingIndex = 0;
     if (_pending.isEmpty) {
       return;
     }
@@ -242,7 +244,7 @@ class DanmakuGlyphCache {
     } finally {
       _preparing = false;
     }
-    if (_pending.isNotEmpty) {
+    if (_pendingIndex < _pending.length) {
       _scheduleChunk(generation);
     }
   }
@@ -263,7 +265,7 @@ class DanmakuGlyphCache {
     _prepareGeneration++;
     _preparing = true;
     try {
-      while (_pending.isNotEmpty) {
+      while (_pendingIndex < _pending.length) {
         _layoutNextPending();
       }
     } finally {
@@ -283,7 +285,7 @@ class DanmakuGlyphCache {
       } finally {
         _preparing = false;
       }
-      if (generation == _prepareGeneration && _pending.isNotEmpty) {
+      if (generation == _prepareGeneration && _pendingIndex < _pending.length) {
         _scheduleChunk(generation);
       }
     }
@@ -303,7 +305,8 @@ class DanmakuGlyphCache {
     final limit = kDanmakuGlyphPrepareChunkLimit.inMicroseconds;
     final watch = Stopwatch()..start();
     var n = 0;
-    while (_pending.isNotEmpty && n < kDanmakuGlyphPrepareChunkSize) {
+    while (_pendingIndex < _pending.length &&
+        n < kDanmakuGlyphPrepareChunkSize) {
       _layoutNextPending();
       n++;
       // FakeAsync 下 Stopwatch 可能一开始就超过 4ms;至少处理 1 个键以免空转死循环.
@@ -314,10 +317,10 @@ class DanmakuGlyphCache {
   }
 
   void _layoutNextPending() {
-    if (_pending.isEmpty) {
+    if (_pendingIndex >= _pending.length) {
       return;
     }
-    final key = _pending.removeAt(0);
+    final key = _pending[_pendingIndex++];
     if (_entries.containsKey(key)) {
       return;
     }

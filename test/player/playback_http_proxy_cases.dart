@@ -1090,7 +1090,7 @@ void main() {
   });
 
   test(
-    'rotating signed redirect revalidates bytes instead of discarding disk',
+    'session playback reuses cached bytes across signed redirect changes',
     () async {
       final fixture = await _CacheFixture.open(
         memoryBytes: 4,
@@ -1106,14 +1106,15 @@ void main() {
       final mediaBefore =
           fixture.proxy.diagnostics['mediaDownloadBytes'] as int;
       expect((await fixture.read('bytes=0-7')).$2, 'abcdefgh');
-      expect(fixture.proxy.upstreamBytes - before, 1);
+      expect(fixture.proxy.upstreamBytes - before, 0);
       expect(fixture.proxy.diagnostics['mediaDownloadBytes'], mediaBefore);
-      expect(fixture.proxy.diagnostics['controlDownloadBytes'], greaterThan(0));
       expect(fixture.cache.diagnostics['diskHitBytes'], 8);
       expect(fixture.cache.diagnostics['invalidations'], 0);
       fixture.redirectVersion = 3;
       fixture.etag = '"other-content"';
       fixture.body = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+      expect((await fixture.read('bytes=0-7')).$2, 'abcdefgh');
+      expect((await fixture.read('bytes=8-11')).$2, 'IJKL');
       expect((await fixture.read('bytes=0-7')).$2, 'ABCDEFGH');
     },
   );
@@ -1124,9 +1125,9 @@ void main() {
       final fixture = await _CacheFixture.open(
         memoryBytes: 4,
         disk: true,
-        sessionBuffering: true,
+        sessionBuffering: false,
       );
-      fixture.control = 'no-store';
+      fixture.control = 'no-cache';
       fixture.headStatus = 502;
       expect((await fixture.read('bytes=0-7')).$2, 'abcdefgh');
       await fixture.settle();
@@ -1143,10 +1144,48 @@ void main() {
     },
   );
 
+  test(
+    'HEAD 403 probes with GET without expiring media authentication',
+    () async {
+      final fixture = await _CacheFixture.open(
+        memoryBytes: 4,
+        disk: true,
+        sessionBuffering: false,
+      );
+      fixture.control = 'no-cache';
+      fixture.headStatus = HttpStatus.forbidden;
+      expect((await fixture.read('bytes=0-7')).$2, 'abcdefgh');
+      await fixture.settle();
+      expect((await fixture.read('bytes=0-7')).$2, 'abcdefgh');
+      expect(fixture.methods, ['GET', 'HEAD', 'GET']);
+      expect(fixture.ranges.last, 'bytes=0-0');
+      expect(fixture.proxy.diagnostics['authenticationStatus'], isNull);
+      expect(fixture.cache.diagnostics['invalidations'], 0);
+      expect((await fixture.read('bytes=0-7')).$2, 'abcdefgh');
+      expect(fixture.methods, ['GET', 'HEAD', 'GET', 'GET']);
+    },
+  );
+
+  test(
+    'upstream 403 on an uncached seek preserves earlier cached bytes',
+    () async {
+      final fixture = await _CacheFixture.open(sessionBuffering: true);
+      fixture.control = 'no-store';
+      expect((await fixture.read('bytes=0-7')).$2, 'abcdefgh');
+      await fixture.settle();
+      fixture.forbiddenOffset = 8;
+      expect((await fixture.read('bytes=8-15')).$1, HttpStatus.forbidden);
+      expect(fixture.cache.diagnostics['invalidations'], 0);
+      final requests = fixture.requests;
+      expect((await fixture.read('bytes=0-7')).$2, 'abcdefgh');
+      expect(fixture.requests, requests);
+    },
+  );
+
   // 同配置(read-ahead + 磁盘 + 会话缓冲)的两个场景共用一次 socket/缓存
   // 生命周期:磁盘字节服务与不重下 seek、变更内容重校验、无盘旁路。
   test(
-    'read-ahead serves disk bytes, revalidates changes and bypasses no disk',
+    'read-ahead serves disk bytes without probing cached seek targets',
     () async {
       final fixture = await _CacheFixture.open(
         memoryBytes: 256 * 1024,
@@ -1172,9 +1211,11 @@ void main() {
         greaterThan(4 * 1024 * 1024),
       );
       final before = fixture.proxy.upstreamBytes;
+      final methodCount = fixture.methods.length;
       expect((await fixture.read('bytes=0-1048575')).$2, 'x' * 1024 * 1024);
       expect(fixture.cache.diagnostics['diskHitBytes'], greaterThan(0));
       expect(fixture.proxy.upstreamBytes, before);
+      expect(fixture.methods.length, methodCount);
       final rangeCount = fixture.ranges.length;
       expect(
         (await fixture.read('bytes=2097152-3145727')).$2,
@@ -1188,10 +1229,6 @@ void main() {
           greaterThanOrEqualTo(4 * 1024 * 1024),
         );
       }
-      // 变更内容:不得把磁盘上的旧 'x' 当作命中返回。
-      fixture.etag = '"changed"';
-      fixture.body = 'b' * (4 * 1024 * 1024);
-      expect((await fixture.read('bytes=0-1048575')).$2, 'b' * 1024 * 1024);
       await fixture.proxy.close();
       expect(fixture.cache.diagnostics['diskBytes'], 0);
       final memoryOnly = await _CacheFixture.open(
@@ -1790,7 +1827,7 @@ void main() {
   );
 
   test(
-    'opt-in no-store session buffer writes disk and validates reuse',
+    'opt-in no-store session buffer reuses bytes until a changed gap',
     () async {
       final fixture = await _CacheFixture.open(
         memoryBytes: 4,
@@ -1803,13 +1840,15 @@ void main() {
       expect(fixture.cache.diagnostics['diskBytes'], greaterThan(8));
       final before = fixture.proxy.upstreamBytes;
       expect((await fixture.read('bytes=0-7')).$2, 'abcdefgh');
-      expect(fixture.methods, ['GET', 'HEAD']);
+      expect(fixture.methods, ['GET']);
       expect(fixture.cache.diagnostics['diskHitBytes'], 8);
       expect(fixture.proxy.upstreamBytes, before);
       fixture.etag = '"changed"';
       fixture.body = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+      expect((await fixture.read('bytes=0-7')).$2, 'abcdefgh');
+      expect((await fixture.read('bytes=8-11')).$2, 'IJKL');
       expect((await fixture.read('bytes=0-7')).$2, 'ABCDEFGH');
-      expect(fixture.proxy.upstreamBytes, before + 8);
+      expect(fixture.proxy.upstreamBytes, before + 12);
       await fixture.proxy.close();
       expect(fixture.cache.diagnostics['closed'], true);
       expect(fixture.cache.diagnostics['diskBytes'], 0);

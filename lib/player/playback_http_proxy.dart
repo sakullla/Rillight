@@ -394,7 +394,7 @@ class PlaybackHttpProxy {
     bool verifyChecksum = true,
   }) async {
     await _refreshTimeTimeline(duration, verifyChecksum: verifyChecksum);
-    if (_timelineUnknownReason == null) {
+    if (_timelineUnknownReason == null && _cachedTimeline.isNotEmpty) {
       if (_byteIdentity != null) _clearByteCoverage();
       return;
     }
@@ -1033,6 +1033,7 @@ class PlaybackHttpProxy {
     required _ProxyRead read,
     String? method,
     Map<String, String?> overrides = const {},
+    bool reportAuthentication = true,
   }) async {
     final started = DateTime.now();
     Object? lastFailure;
@@ -1046,6 +1047,7 @@ class PlaybackHttpProxy {
           read: read,
           method: method,
           overrides: overrides,
+          reportAuthentication: reportAuthentication,
         );
         final status = result.$1.statusCode;
         if ((method ?? incoming.method) == 'HEAD' ||
@@ -1341,7 +1343,14 @@ class PlaybackHttpProxy {
       _timelineSequence++;
     }
     _cancelSegmentPrefetch(clearPending: true);
-    _readAhead?.stop();
+    final ahead = _readAhead;
+    if (ahead?.failed == true) {
+      _readAhead = null;
+      _readAheadBypass.remove(ahead!.resource);
+      unawaited(ahead.close());
+    } else {
+      ahead?.stop();
+    }
     for (final read in _reads.toList()) {
       if (preserveSubtitles &&
           _roles[read.resourceKey] == PlaybackResourceRole.subtitle) {
@@ -1646,11 +1655,68 @@ class PlaybackHttpProxy {
     final etag = representation.policy.etag;
     final modified = representation.policy.lastModified;
     if (etag == null && modified == null) return false;
+    Future<bool> validateRange() async {
+      final (probe, effectiveProbe) = await _fetch(
+        incoming,
+        url,
+        read: read,
+        method: 'GET',
+        overrides: {
+          'range': 'bytes=0-0',
+          'if-range': representation.policy.strongEtag,
+          'if-none-match': null,
+          'if-modified-since': null,
+        },
+      );
+      final range = MediaContentRange.parse(
+        probe.headers.value('content-range'),
+      );
+      final policy = MediaCachePolicy(
+        probe.headers,
+        allowSessionBuffering: sessionBuffering,
+      );
+      final valid =
+          probe.statusCode == 206 &&
+          range != null &&
+          range.start == 0 &&
+          range.end == 0 &&
+          range.total == representation.total &&
+          probe.contentLength == 1 &&
+          (effectiveProbe == representation.effective || sessionBuffering) &&
+          policy.storable &&
+          policy.strongEtag == representation.policy.strongEtag &&
+          probe.compressionState !=
+              HttpClientResponseCompressionState.decompressed;
+      if (valid) {
+        await _discard(probe, read);
+        representation.policy = policy;
+        representation.effective = effectiveProbe;
+      } else {
+        for (final request in read.requests.toList()) {
+          request.abort();
+        }
+        read.requests.clear();
+      }
+      return valid;
+    }
+
+    if (representation.headUnsupported &&
+        representation.policy.strongEtag != null) {
+      final valid = await validateRange();
+      if (!valid) {
+        _lastValidationFailure = 'rangeProbeFailed';
+        _invalidate(key, representation);
+      } else {
+        _lastValidationFailure = null;
+      }
+      return valid;
+    }
     final (response, effective) = await _fetch(
       incoming,
       url,
       read: read,
       method: 'HEAD',
+      reportAuthentication: false,
       overrides: {
         'range': null,
         'if-range': null,
@@ -1680,49 +1746,16 @@ class PlaybackHttpProxy {
     if (!valid &&
         representation.policy.strongEtag != null &&
         (response.statusCode >= 500 ||
+            response.statusCode == HttpStatus.forbidden ||
             response.statusCode == 405 ||
             (sessionBuffering && effective != representation.effective) ||
             (response.statusCode == 200 && newPolicy.strongEtag == null))) {
-      final (probe, effectiveProbe) = await _fetch(
-        incoming,
-        url,
-        read: read,
-        method: 'GET',
-        overrides: {
-          'range': 'bytes=0-0',
-          'if-range': representation.policy.strongEtag,
-          'if-none-match': null,
-          'if-modified-since': null,
-        },
-      );
-      final range = MediaContentRange.parse(
-        probe.headers.value('content-range'),
-      );
-      final policy = MediaCachePolicy(
-        probe.headers,
-        allowSessionBuffering: sessionBuffering,
-      );
-      valid =
-          probe.statusCode == 206 &&
-          range != null &&
-          range.start == 0 &&
-          range.end == 0 &&
-          range.total == representation.total &&
-          probe.contentLength == 1 &&
-          (effectiveProbe == representation.effective || sessionBuffering) &&
-          policy.storable &&
-          policy.strongEtag == representation.policy.strongEtag &&
-          probe.compressionState !=
-              HttpClientResponseCompressionState.decompressed;
+      valid = await validateRange();
       if (valid) {
-        await _discard(probe, read);
-        validatedPolicy = policy;
-        representation.effective = effectiveProbe;
-      } else {
-        for (final request in read.requests.toList()) {
-          request.abort();
-        }
-        read.requests.clear();
+        representation.headUnsupported =
+            response.statusCode == HttpStatus.forbidden ||
+            response.statusCode == HttpStatus.methodNotAllowed;
+        validatedPolicy = representation.policy;
       }
     }
     if (!valid) {
@@ -1800,7 +1833,11 @@ class PlaybackHttpProxy {
                 response.contentLength != end - start + 1 ||
                 response.compressionState ==
                     HttpClientResponseCompressionState.decompressed) {
-              _invalidate(key, representation);
+              if (policy.strongEtag != null &&
+                      policy.strongEtag != representation.policy.strongEtag ||
+                  range != null && range.total != representation.total) {
+                _invalidate(key, representation);
+              }
               return null;
             }
             representation.policy = policy;
@@ -1918,7 +1955,14 @@ class PlaybackHttpProxy {
     final rep = _representations[key];
     if (rep == null || !_canReadAhead(incoming, key, rep)) return false;
     if (_readAhead?.resource == key && _readAhead!.failed) return false;
-    if (!validated && !await _validate(incoming, key, url, rep, read)) {
+    // A VOD representation already tied to this private playback session has
+    // a strong validator. Its cached blocks need no extra HEAD/GET probe on
+    // each seek; each newly fetched gap still checks that validator.
+    if (!validated &&
+        !(sessionBuffering &&
+            !dynamicSource &&
+            rep.policy.strongEtag != null) &&
+        !await _validate(incoming, key, url, rep, read)) {
       return false;
     }
     read.check();
@@ -2022,7 +2066,11 @@ class PlaybackHttpProxy {
                         response.contentLength != end - cursor + 1 ||
                         response.compressionState ==
                             HttpClientResponseCompressionState.decompressed) {
-                      _invalidate(key, rep);
+                      if (policy.strongEtag != null &&
+                              policy.strongEtag != rep.policy.strongEtag ||
+                          range != null && range.total != rep.total) {
+                        _invalidate(key, rep);
+                      }
                       throw const FormatException(
                         'Read-ahead representation changed',
                       );
@@ -2034,7 +2082,6 @@ class PlaybackHttpProxy {
                       producer.check();
                       if (_representations[key]?.generation != rep.generation ||
                           cursor + bytes.length > end + 1) {
-                        _invalidate(key, rep);
                         throw const FormatException(
                           'Read-ahead representation changed',
                         );
@@ -2152,7 +2199,10 @@ class PlaybackHttpProxy {
     if (!_cacheableRequest(incoming, key)) return false;
     final representation = _representations[key];
     if (representation == null || !representation.complete) return false;
-    if (!await _validate(incoming, key, url, representation, read)) {
+    if (!(sessionBuffering &&
+            !dynamicSource &&
+            representation.policy.strongEtag != null) &&
+        !await _validate(incoming, key, url, representation, read)) {
       return false;
     }
     final rangeValue = incoming.headers.value('range');
@@ -2277,9 +2327,16 @@ class PlaybackHttpProxy {
     _charge(prefetchedLength);
     try {
       Stream<List<int>> body() async* {
+        var firstGapLoaded = prefetched != null;
         while (position <= range.end) {
           read.check();
-          final length = min(256 * 1024, range.end - position + 1);
+          // The first missing piece stays small for a quick seek response.
+          // Once that piece is available, coalesce subsequent gaps to the
+          // reserved 1 MiB workspace instead of issuing 256 KiB HTTP ranges.
+          final length = min(
+            firstGapLoaded ? _cachedResponseWorkspace : 256 * 1024,
+            range.end - position + 1,
+          );
           _charge(length);
           try {
             final hit = position == missing
@@ -2325,6 +2382,7 @@ class PlaybackHttpProxy {
                 if (!sent) return;
                 throw const HttpException('Media representation changed');
               }
+              firstGapLoaded = true;
             }
             if (bytes.isEmpty) {
               throw const HttpException('Cached media read made no progress');
@@ -2575,7 +2633,9 @@ class PlaybackHttpProxy {
           _roles.remove(oldest);
           _readAheadBypass.remove(oldest);
           final previous = _representations[oldest];
-          if (previous != null) _invalidate(oldest, previous);
+          if (previous != null) {
+            _invalidate(oldest, previous);
+          }
         }
         _roles[key] = PlaybackResourceRole.values[route.role];
       }
@@ -3292,8 +3352,17 @@ class PlaybackHttpProxy {
                 contentRange != null &&
                 contentRange.end - contentRange.start + 1 ==
                     response.contentLength)) {
+      // A 403, a temporary 502, or a rejected/ignored Range says nothing
+      // about the identity of bytes already verified for this session.
+      // Keep them available for a later seek or source retry.
       final previous = _representations[key];
-      if (previous != null) _invalidate(key, previous);
+      if (previous != null &&
+          response.statusCode >= 200 &&
+          response.statusCode < 300 &&
+          policy.strongEtag != null &&
+          policy.strongEtag != previous.policy.strongEtag) {
+        _invalidate(key, previous);
+      }
       return null;
     }
     final total = contentRange?.total ?? response.contentLength;
@@ -3314,7 +3383,9 @@ class PlaybackHttpProxy {
         previous.policy.strongEtag == policy.strongEtag &&
         (previous.effective == effective || sessionBuffering) &&
         previous.total == total;
-    if (previous != null && !same) _invalidate(key, previous);
+    if (previous != null && !same) {
+      _invalidate(key, previous);
+    }
     final safeHeaders = <String, String>{};
     for (final name in ['content-type', 'etag', 'last-modified']) {
       final value = response.headers.value(name);
@@ -3333,7 +3404,6 @@ class PlaybackHttpProxy {
     // Sealed routing remains available even when a resource's cache metadata
     // would exceed its reserved share of the management budget.
     if (metadataCost > 4096) {
-      if (previous != null) _invalidate(key, previous);
       return null;
     }
     final representation = _Representation(
@@ -3655,6 +3725,7 @@ class _Representation {
   final int responseEnd;
   final bool rangeSupported;
   bool complete = false;
+  bool headUnsupported = false;
 }
 
 class _ProxyRead {

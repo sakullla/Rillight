@@ -19,6 +19,17 @@ import android_release_checks as checks
 
 
 class EvidenceTests(unittest.TestCase):
+    def test_split_apk_rejects_second_flutter_abi(self):
+        with tempfile.TemporaryDirectory() as folder:
+            apk = Path(folder) / 'mixed.apk'
+            with zipfile.ZipFile(apk, 'w') as archive:
+                for abi in ('arm64-v8a', 'x86_64'):
+                    archive.writestr(f'lib/{abi}/libflutter.so', b'engine')
+                    for name in checks.CORE_LIBRARIES:
+                        archive.writestr(f'lib/{abi}/{name}', b'core')
+            with self.assertRaisesRegex(RuntimeError, 'APK ABI split mismatch'):
+                checks.apk_native_check(apk, expected_abi='arm64-v8a')
+
     def test_apk_rejects_legacy_media3_dex(self):
         with tempfile.TemporaryDirectory() as folder:
             apk = Path(folder) / 'legacy.apk'

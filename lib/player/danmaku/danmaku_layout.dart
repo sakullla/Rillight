@@ -390,7 +390,15 @@ class DanmakuLayout {
     while (lanes.length < laneCount) {
       lanes.add(null);
     }
-    for (var lane = 0; lane < laneCount; lane++) {
+    // Spread scrolling comments over the selected area even when traffic is
+    // sparse. Starting every search at lane zero made "full screen" look
+    // identical to "half screen" until the upper lanes became crowded.
+    final stride = laneCount == 2 ? 1 : laneCount ~/ 2 + 1;
+    final start = mode == DanmakuMode.scroll
+        ? ((_lastAssigned[mode] ?? -stride) + stride) % laneCount
+        : 0;
+    for (var index = 0; index < laneCount; index++) {
+      final lane = (start + index) % laneCount;
       if (_laneFree(lanes, lane, mode, width, lifespan, spawn)) {
         _commit(entry, lane, width, spawn, lifespan, lanes);
         return;
@@ -399,11 +407,11 @@ class DanmakuLayout {
     if (settings.preventOverlap) {
       return;
     }
-    final start = ((_lastAssigned[mode] ?? -1) + 1) % laneCount;
-    var bestLane = start;
-    var bestFree = _freeAt(lanes[start], spawn);
+    final stackedStart = ((_lastAssigned[mode] ?? -1) + 1) % laneCount;
+    var bestLane = stackedStart;
+    var bestFree = _freeAt(lanes[stackedStart], spawn);
     for (var i = 1; i < laneCount; i++) {
-      final lane = (start + i) % laneCount;
+      final lane = (stackedStart + i) % laneCount;
       final at = _freeAt(lanes[lane], spawn);
       if (at < bestFree) {
         bestFree = at;

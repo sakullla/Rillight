@@ -922,6 +922,10 @@ class PlayerController extends ChangeNotifier {
       return;
     }
     onUserActivity();
+    if (disconnected && !sessionExpired) {
+      await _reopen(startTicks: ticksFromDuration(target));
+      return;
+    }
     if (playbackEnded) {
       playbackEnded = false;
       await _reopen(startTicks: ticksFromDuration(target));
@@ -3466,6 +3470,8 @@ bool isFatalPlaybackError(String message, {required bool playing}) {
     return false;
   }
   const network = [
+    'media http 403',
+    'ffmpeg core error',
     'connection',
     'network',
     'http error',

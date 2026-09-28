@@ -476,7 +476,9 @@ class RillightVideoBackend extends VideoBackend
   void _reportAuthentication(Map<String, Object?> data, int generation) {
     if (_authenticationReported || generation != _generation) return;
     final status = data['authenticationStatus'];
-    if (status != 401 && status != 403) return;
+    // A media 403 may be a source-specific or expired signed URL. It does not
+    // prove the Emby session expired, and must leave source retry available.
+    if (status != 401) return;
     _authenticationReported = true;
     _nativeEvents.add({'kind': 'authenticationRequired', 'value': status});
     _emit(VideoEventKind.authenticationRequired, status as int, generation);
@@ -556,7 +558,7 @@ class RillightVideoBackend extends VideoBackend
           failure = error.toString();
           if (epoch != _recoveryEpoch || _disposed) return;
           final auth = _lastTransportDiagnostics['authenticationStatus'];
-          if (auth == 401 || auth == 403) return;
+          if (auth == 401) return;
         }
       }
       _emit(VideoEventKind.error, failure, _generation);
@@ -577,9 +579,14 @@ class RillightVideoBackend extends VideoBackend
     final trackVersion = _trackVersion;
     try {
       if (duration > Duration.zero) {
-        await transport
-            .refreshTimeline(duration)
-            .timeout(const Duration(seconds: 5));
+        try {
+          await transport
+              .refreshTimeline(duration)
+              .timeout(const Duration(seconds: 5));
+        } catch (_) {
+          // Timeline indexing is optional. Read the latest transport snapshot
+          // even when its disk scan is still running or times out.
+        }
       }
       final data = await transport.diagnostics.timeout(
         const Duration(seconds: 2),
@@ -656,16 +663,8 @@ class RillightVideoBackend extends VideoBackend
         _emit(VideoEventKind.cacheSpeed, rate.toDouble(), generation);
       }
     } catch (_) {
-      if (generation == _generation && !_disposed) {
-        bufferSnapshot = BufferSnapshot.empty(
-          sessionId: _sessionId,
-          trackVersion: _trackVersion,
-          sequence: ++_bufferSequence,
-          unknownReason: 'cacheUnavailable',
-        );
-        _emit(VideoEventKind.bufferSnapshot, bufferSnapshot, generation);
-        _emit(VideoEventKind.cacheSpeed, 0.0, generation);
-      }
+      // A failed optional diagnostics poll is not evidence that validated
+      // cache blocks were removed. The next successful poll replaces them.
     } finally {
       _diagnosticsBusy = false;
     }

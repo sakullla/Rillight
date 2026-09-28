@@ -239,6 +239,44 @@ void main() {
       '25%',
     );
   });
+
+  testWidgets('unmapped byte cache uses the existing seek track', (
+    tester,
+  ) async {
+    final boundaryKey = GlobalKey();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Center(
+          child: RepaintBoundary(
+            key: boundaryKey,
+            child: SizedBox(
+              width: 300,
+              child: BufferedRangesProgressIndicator(
+                snapshot: BufferSnapshot(
+                  sessionId: 1,
+                  resourceId: 'media',
+                  representationVersion: 'v1',
+                  trackVersion: 0,
+                  sequence: 1,
+                  ranges: const [],
+                  unknownReason: 'containerTrackOrTimingUnknown',
+                  byteCoverage: BufferedByteCoverage(
+                    totalBytes: 100,
+                    ranges: const [BufferedByteRange(0, 60)],
+                  ),
+                ),
+                duration: const Duration(seconds: 100),
+                value: 0.2,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    final pixels = (await tester.runAsync(() => _capture(boundaryKey)))!;
+    expect(pixels.at(120, 3), const Color(0xff75bed2));
+    expect(pixels.at(240, 3), const Color(0xff363c44));
+  });
 }
 
 BufferSnapshot _pixelSnapshot({String? unknownReason}) => BufferSnapshot(

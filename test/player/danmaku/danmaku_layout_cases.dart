@@ -200,6 +200,28 @@ void main() {
     expect(bottom.top, closeTo(100 - lineHeight, 0.1));
   });
 
+  test(
+    'scrolling comments use the selected area without filling every upper lane',
+    () {
+      const viewport = Size(800, 400);
+      final comments = [
+        comment(1, 1, text: 'first'),
+        comment(2, 1.1, text: 'second'),
+      ];
+      final half = layoutWith(
+        comments: comments,
+        settings: const DanmakuDisplaySettings(areaFraction: 0.5),
+      )..update(const Duration(seconds: 2), viewport);
+      final full = layoutWith(
+        comments: comments,
+        settings: const DanmakuDisplaySettings(areaFraction: 1),
+      )..update(const Duration(seconds: 2), viewport);
+      expect(full.activeEntries.length, 2);
+      expect(full.activeEntries[1].top, greaterThan(half.activeEntries[1].top));
+      expect(full.activeEntries[1].top, greaterThan(viewport.height / 2));
+    },
+  );
+
   test('blocked keywords filter matching comments (case-insensitive)', () {
     final layout = layoutWith(
       comments: [

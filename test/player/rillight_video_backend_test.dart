@@ -148,7 +148,7 @@ class _TrackIdCoreDriver extends _CoreDriver {
 }
 
 void main() {
-  for (final status in [HttpStatus.ok, HttpStatus.forbidden]) {
+  for (final status in [HttpStatus.ok, HttpStatus.unauthorized]) {
     test(
       'transport reports HTTP $status before the core finishes opening',
       () async {

@@ -190,6 +190,21 @@ void main() {
   );
 
   test(
+    'media 403 keeps seeking available through a fresh source open',
+    () async {
+      await controller.start();
+      final before = backend.openCount;
+      backend.emitEvent(VideoEventKind.error, 'Media HTTP 403');
+      await _until(() => controller.disconnected);
+      expect(controller.sessionExpired, isFalse);
+      await controller.seekTo(const Duration(seconds: 5));
+      expect(backend.openCount, before + 1);
+      expect(backend.openedStart, const Duration(seconds: 5));
+      expect(controller.disconnected, isFalse);
+    },
+  );
+
+  test(
     'immediate item switch preserves debounced volume and rate changes',
     () async {
       await settings.write(

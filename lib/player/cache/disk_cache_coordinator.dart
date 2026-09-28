@@ -396,6 +396,8 @@ class _Coordinator {
   static final _roots = <String, Future<_Coordinator>>{};
   final String root;
   final _responses = ReceivePort();
+  final _exits = ReceivePort();
+  final _exited = Completer<void>();
   final _pending = <int, Completer<Map<String, Object?>>>{};
   late SendPort _requests;
   late Isolate _isolate;
@@ -416,6 +418,7 @@ class _Coordinator {
 
   Future<void> _start() async {
     final ready = Completer<void>();
+    _exits.listen((_) => _exited.complete());
     _responses.listen((dynamic message) {
       if (message is SendPort) {
         _requests = message;
@@ -425,7 +428,10 @@ class _Coordinator {
         completion?.complete(Map<String, Object?>.from(message[1] as Map));
       }
     });
-    _isolate = await Isolate.spawn(_diskMain, [root, _responses.sendPort]);
+    _isolate = await Isolate.spawn(_diskMain, [
+      root,
+      _responses.sendPort,
+    ], onExit: _exits.sendPort);
     await ready.future;
   }
 
@@ -443,6 +449,8 @@ class _Coordinator {
     await request({'op': 'shutdown'});
     _responses.close();
     _isolate.kill();
+    await _exited.future;
+    _exits.close();
   }
 }
 
