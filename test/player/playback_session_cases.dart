@@ -1,6 +1,10 @@
 import 'dart:async';
+import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rillight/player/cache/next_episode_prefix.dart';
+import 'package:rillight/player/cache/session_byte_cache.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/server_list_store.dart';
@@ -767,6 +771,250 @@ void main() {
       expect(controller.isPlaying, isFalse);
     },
   );
+
+  test(
+    'next episode prefix stays inside 32 MiB and yields to playback',
+    () async {
+      await controller.disposeAsync();
+      controller.dispose();
+      final cache = await SessionByteCache.open(
+        memoryLimitBytes: 1024 * 1024,
+        diskLimitBytes: 0,
+      );
+      addTearDown(cache.close);
+      var fetches = 0;
+      var releaseFetch = Completer<void>();
+      controller = PlayerController(
+        client: client,
+        itemId: 'episode-friends-s1e1',
+        backend: backend,
+        window: PlayerWindow(),
+        settingsStore: settings,
+        snapshotStore: snapshots,
+        nextPrefixCache: cache,
+        nextPrefixFetch:
+            ({
+              required url,
+              required headers,
+              required start,
+              required endInclusive,
+            }) async {
+              fetches++;
+              await releaseFetch.future;
+              return NextPrefixSlice(Uint8List.fromList(const [9, 8, 7, 6]));
+            },
+      );
+      await controller.start();
+      controller.cacheSpeedBytesPerSec = 1;
+      backend.emitEvent(
+        VideoEventKind.position,
+        controller.duration - const Duration(minutes: 1),
+      );
+      await _untilElapsed(
+        () => controller.nextEpisode?.item.id == 'episode-friends-s1e2',
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(fetches, 0);
+      controller.cacheSpeedBytesPerSec = 0;
+      releaseFetch.complete();
+      await _untilElapsed(() => controller.preparedNextPrefixBytes == 4);
+      expect(await controller.readPreparedNextPrefix(), [9, 8, 7, 6]);
+      final cold = await SessionByteCache.open(
+        memoryLimitBytes: 1024,
+        diskLimitBytes: 0,
+      );
+      addTearDown(cold.close);
+      expect(
+        await cold.read(
+          resource: NextEpisodePrefix.resourceFor('episode-friends-s1e2'),
+          generation: 1,
+          offset: 0,
+        ),
+        isNull,
+      );
+
+      backend.openStarted = false;
+      backend.openGate = Completer<void>();
+      final opening = controller.playNextEpisode();
+      await _until(() => backend.openStarted);
+      expect(controller.preparedNextPrefixBytes, 4);
+      backend.openGate!.complete();
+      await opening;
+      await _untilElapsed(() => controller.preparedNextPrefixBytes == 0);
+    },
+  );
+
+  test('cancelling or pausing drops the next episode prefix', () async {
+    await controller.disposeAsync();
+    controller.dispose();
+    final cache = await SessionByteCache.open(
+      memoryLimitBytes: 1024 * 1024,
+      diskLimitBytes: 0,
+    );
+    addTearDown(cache.close);
+    var fetches = 0;
+    final releaseFetch = Completer<void>();
+    controller = PlayerController(
+      client: client,
+      itemId: 'episode-friends-s1e1',
+      backend: backend,
+      window: PlayerWindow(),
+      settingsStore: settings,
+      snapshotStore: snapshots,
+      nextPrefixCache: cache,
+      nextPrefixFetch:
+          ({
+            required url,
+            required headers,
+            required start,
+            required endInclusive,
+          }) async {
+            fetches++;
+            await releaseFetch.future;
+            return NextPrefixSlice(Uint8List.fromList(const [1, 2, 3, 4]));
+          },
+    );
+    await controller.start();
+    controller.cacheSpeedBytesPerSec = 1;
+    backend.emitEvent(
+      VideoEventKind.position,
+      controller.duration - const Duration(minutes: 1),
+    );
+    await _untilElapsed(
+      () => controller.nextEpisode?.item.id == 'episode-friends-s1e2',
+    );
+    controller.cacheSpeedBytesPerSec = 0;
+    releaseFetch.complete();
+    await _untilElapsed(() => controller.preparedNextPrefixBytes == 4);
+    expect(fetches, 1);
+    controller.cancelNextEpisode();
+    await _untilElapsed(() => controller.preparedNextPrefixBytes == 0);
+    expect(await controller.readPreparedNextPrefix(), isNull);
+    expect(controller.error, isNull);
+    expect(controller.isPlaying, isTrue);
+  });
+
+  test(
+    'a full session keeps current bytes when the prefix does not fit',
+    () async {
+      final temp = await Directory.systemTemp.createTemp('rillight-prefix-');
+      addTearDown(() => temp.delete(recursive: true));
+      final cache = await SessionByteCache.open(
+        root: temp,
+        memoryLimitBytes: 1024 * 1024,
+        diskLimitBytes: 1000,
+        diskSessionLimitBytes: 300,
+        pendingLimitBytes: 1024 * 1024,
+      );
+      addTearDown(cache.close);
+      final current = Uint8List.fromList(List<int>.filled(200, 3));
+      expect(
+        await cache.putPreservingReadable(
+          resource: 'current',
+          generation: 1,
+          offset: 0,
+          bytes: current,
+        ),
+        isTrue,
+      );
+      final prefix = NextEpisodePrefix(
+        cache: cache,
+        fetch:
+            ({
+              required url,
+              required headers,
+              required start,
+              required endInclusive,
+            }) async {
+              return NextPrefixSlice(
+                Uint8List.fromList(List<int>.filled(200, 9)),
+              );
+            },
+      );
+      await prefix.start(
+        itemId: 'episode-friends-s1e2',
+        url: Uri.parse('http://127.0.0.1/next'),
+        yieldToForeground: () => false,
+      );
+      expect(prefix.storedBytes, 0);
+      expect(
+        (await cache.read(
+          resource: 'current',
+          generation: 1,
+          offset: 0,
+        ))?.bytes,
+        current,
+      );
+      await prefix.discard();
+      expect(await prefix.readStored(), isNull);
+    },
+  );
+
+  test('next episode prefix stops at 32 MiB and pause drops it', () async {
+    final cache = await SessionByteCache.open(
+      memoryLimitBytes: NextEpisodePrefix.maxBytes,
+      diskLimitBytes: 0,
+    );
+    addTearDown(cache.close);
+    var highestEnd = 0;
+    final prefix = NextEpisodePrefix(
+      cache: cache,
+      fetch:
+          ({
+            required url,
+            required headers,
+            required start,
+            required endInclusive,
+          }) async {
+            if (endInclusive > highestEnd) highestEnd = endInclusive;
+            return NextPrefixSlice(Uint8List(endInclusive - start + 1));
+          },
+    );
+    await prefix.start(
+      itemId: 'episode-friends-s1e2',
+      url: Uri.parse('http://127.0.0.1/next'),
+      yieldToForeground: () => false,
+    );
+    expect(prefix.storedBytes, NextEpisodePrefix.maxBytes);
+    expect(highestEnd, NextEpisodePrefix.maxBytes - 1);
+    await prefix.discard();
+    expect(await prefix.readStored(), isNull);
+
+    await controller.disposeAsync();
+    controller.dispose();
+    final pausedCache = await SessionByteCache.open(
+      memoryLimitBytes: 1024 * 1024,
+      diskLimitBytes: 0,
+    );
+    addTearDown(pausedCache.close);
+    controller = PlayerController(
+      client: client,
+      itemId: 'episode-friends-s1e1',
+      backend: backend,
+      window: PlayerWindow(),
+      settingsStore: settings,
+      snapshotStore: snapshots,
+      nextPrefixCache: pausedCache,
+      nextPrefixFetch:
+          ({
+            required url,
+            required headers,
+            required start,
+            required endInclusive,
+          }) async {
+            return NextPrefixSlice(Uint8List.fromList(const [4, 5, 6, 7]));
+          },
+    );
+    await controller.start();
+    backend.emitEvent(
+      VideoEventKind.position,
+      controller.duration - const Duration(minutes: 1),
+    );
+    await _untilElapsed(() => controller.preparedNextPrefixBytes == 4);
+    await controller.togglePlay();
+    await _untilElapsed(() => controller.preparedNextPrefixBytes == 0);
+    expect(controller.error, isNull);
+  });
 }
 
 class _ControlledBackend extends FakeVideoBackend {

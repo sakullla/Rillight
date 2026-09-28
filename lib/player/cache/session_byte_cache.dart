@@ -262,6 +262,130 @@ class SessionByteCache {
     }
   }
 
+  /// Stores a disposable prefix block only when every already readable block
+  /// still fits. A refusal writes nothing and evicts nothing.
+  Future<bool> putPreservingReadable({
+    required String resource,
+    required int generation,
+    required int offset,
+    required Uint8List bytes,
+  }) async {
+    if (_closed ||
+        offset < 0 ||
+        resource.length > 1024 ||
+        bytes.isEmpty ||
+        bytes.length > maxBlockBytes) {
+      return false;
+    }
+    final limit = _disk == null ? memoryLimitBytes : diskSessionLimitBytes;
+    if (_readableBytes() + bytes.length > limit) return false;
+    final disk = _disk;
+    if (disk != null && disk.degradation == null) {
+      final used = disk.diagnostics['diskBytes'];
+      final global = disk.diagnostics['diskLimitBytes'];
+      if (used is int && global is int && used + bytes.length > global) {
+        return false;
+      }
+    }
+    if (disk == null) {
+      if (!_fitsWithoutDisplacing(resource, bytes.length)) return false;
+    } else if (_pendingBytes + bytes.length * 2 > pendingLimitBytes) {
+      return false;
+    }
+    final key = _BlockKey(resource, generation, offset);
+    final entry = _Entry(bytes.length);
+    _forget(key);
+    _entries[key] = entry;
+    _revision++;
+    _indexBytes += _indexCost(key);
+    if (disk == null || disk.degradation != null) {
+      _retainSameResource(key, bytes);
+      return true;
+    }
+    final pendingCost = bytes.length * 2;
+    _pendingBytes += pendingCost;
+    _pendingPublications++;
+    if (_pendingBytes > _pendingPeak) _pendingPeak = _pendingBytes;
+    if (_pendingPublications > _pendingPublicationPeak) {
+      _pendingPublicationPeak = _pendingPublications;
+    }
+    final publication = Completer<void>();
+    entry.publication = publication.future;
+    String? token;
+    try {
+      token = await disk.put(bytes);
+      if (token != null && !_closed && identical(_entries[key], entry)) {
+        entry.diskToken = token;
+        _revision++;
+      }
+    } finally {
+      _pendingPublications--;
+      _releasePending(pendingCost);
+      entry.publication = null;
+      publication.complete();
+    }
+    if (token == null || _closed || !identical(_entries[key], entry)) {
+      _forget(key);
+      return false;
+    }
+    return true;
+  }
+
+  /// Drops one resource from memory and deletes its disk blocks.
+  Future<void> discardResource(String resource) async {
+    if (resource.isEmpty) return;
+    final tokens = <String>[];
+    for (final item in _entries.entries) {
+      if (item.key.resource != resource) continue;
+      final token = item.value.diskToken;
+      if (token != null) tokens.add(token);
+      _removeMemory(item.key);
+    }
+    invalidate(resource);
+    if (tokens.isNotEmpty) await _disk?.drop(tokens);
+  }
+
+  int _readableBytes() {
+    var total = 0;
+    for (final item in _entries.entries) {
+      final readable =
+          _memory.containsKey(item.key) || item.value.diskToken != null;
+      if (readable) total += item.value.length;
+    }
+    return total;
+  }
+
+  bool _fitsWithoutDisplacing(String resource, int bytes) {
+    if (bytes > memoryLimitBytes) return false;
+    var free = memoryLimitBytes - _memoryBytes;
+    for (final item in _memory.entries) {
+      if (item.key.resource == resource && !_memoryPins.containsKey(item.key)) {
+        free += item.value.length;
+      }
+    }
+    return bytes <= free;
+  }
+
+  void _retainSameResource(_BlockKey key, Uint8List bytes) {
+    _removeMemory(key);
+    while (_memoryBytes + bytes.length > memoryLimitBytes) {
+      final oldest = _memory.keys
+          .where(
+            (candidate) =>
+                candidate.resource == key.resource &&
+                !_memoryPins.containsKey(candidate),
+          )
+          .firstOrNull;
+      if (oldest == null) return;
+      _removeMemory(oldest);
+      _evictions++;
+    }
+    _memory[key] = Uint8List.fromList(bytes);
+    _revision++;
+    _memoryBytes += bytes.length;
+    if (_memoryBytes > _memoryPeak) _memoryPeak = _memoryBytes;
+  }
+
   /// Publishes only caller-validated, complete bytes. A producer must await this
   /// call or respect [pendingLimitBytes]; excess writes are skipped, never queued.
   /// Resource identifiers are bounded and only held in memory, never on disk.

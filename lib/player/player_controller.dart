@@ -9,8 +9,12 @@ import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_errors.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/emby/media_source_format.dart';
+import 'package:rillight/player/cache/cache_limits.dart';
+import 'package:rillight/player/cache/next_episode_prefix.dart';
+import 'package:rillight/player/cache/session_byte_cache.dart';
 import 'package:rillight/player/playback_check_in.dart';
 import 'package:rillight/player/buffer_snapshot.dart';
+import 'package:rillight/player/player_runtime_options.dart';
 import 'package:rillight/player/playback_coordinator.dart';
 import 'package:rillight/player/playback_session.dart';
 import 'package:rillight/player/playback_state.dart';
@@ -130,6 +134,8 @@ class PlayerController extends ChangeNotifier {
     this.preferredSubtitleStreamIndex,
     this.startTimeTicks,
     this.settingsStore,
+    this.nextPrefixCache,
+    this.nextPrefixFetch,
     PlaybackSessionSnapshotStore? snapshotStore,
   }) : snapshotStore =
            snapshotStore ??
@@ -166,6 +172,15 @@ class PlayerController extends ChangeNotifier {
   /// 独立播放进程在 [onOpenItem] 之外提供该回调。
   final void Function(String itemId, {String? seasonId})? onOpenItemDetail;
   PlayerSettingsStore? settingsStore;
+
+  /// Session cache that receives the next episode's disposable prefix.
+  /// Tests inject one; production opens the shared player disk cache.
+  final SessionByteCache? nextPrefixCache;
+  final NextPrefixFetch? nextPrefixFetch;
+  NextEpisodePrefix? _nextPrefix;
+  SessionByteCache? _ownedPrefixCache;
+  bool _userPausedPrefix = false;
+  bool _prefixYield = false;
 
   /// 会话快照:Playing/Progress 成功后写入,Stopped 成功后删除,
   /// 供宿主在播放进程被终止后代发 Stopped。
@@ -210,7 +225,7 @@ class PlayerController extends ChangeNotifier {
   String? _operationUserId;
   String? _operationToken;
 
-  PlaybackOperation? _beginOperation() {
+  PlaybackOperation? _beginOperation({bool keepNextPrefix = false}) {
     final operation = _operations.begin();
     if (operation != null) {
       if (_recoveryOperation != null) {
@@ -231,6 +246,7 @@ class PlayerController extends ChangeNotifier {
       _nextTimer?.cancel();
       _nextTimer = null;
       nextEpisode = null;
+      if (!keepNextPrefix) unawaited(_discardNextPrefix());
       trackFailure = null;
     }
     return operation;
@@ -525,7 +541,14 @@ class PlayerController extends ChangeNotifier {
       // may update the backend optimistically before its state event arrives,
       // so toggling the backend's own flag can issue the opposite command.
       final resume = !isPlaying;
+      if (resume) {
+        _userPausedPrefix = false;
+      } else {
+        _userPausedPrefix = true;
+        unawaited(_discardNextPrefix());
+      }
       await _operations.run(operation, resume ? backend.play : backend.pause);
+      if (resume) _noteNextOffer();
     }
   }
 
@@ -937,7 +960,12 @@ class PlayerController extends ChangeNotifier {
     }
     final operation = _operations.current;
     if (operation == null) return;
-    await _operations.run(operation, () => backend.seek(target));
+    _prefixYield = true;
+    try {
+      await _operations.run(operation, () => backend.seek(target));
+    } finally {
+      _prefixYield = false;
+    }
     if (!_accepts(operation)) return;
     _setPosition(target);
     _emit();
@@ -1315,6 +1343,7 @@ class PlayerController extends ChangeNotifier {
     _nextTimer?.cancel();
     _nextTimer = null;
     nextEpisode = null;
+    unawaited(_discardNextPrefix());
     onUserActivity();
   }
 
@@ -1354,7 +1383,8 @@ class PlayerController extends ChangeNotifier {
     required bool fromStart,
     bool finishCurrent = false,
   }) async {
-    final operation = _beginOperation();
+    final handoff = _nextPrefix?.itemId == targetId;
+    final operation = _beginOperation(keepNextPrefix: handoff);
     if (operation == null || _disposed) return;
     final finishedId = itemId;
     final stopped = _stopSession(
@@ -1393,6 +1423,7 @@ class PlayerController extends ChangeNotifier {
     startTimeTicks = null;
     autoResume = !fromStart;
     await _start(operation);
+    if (handoff) await _discardNextPrefix();
   }
 
   // ---------------------------------------------------------------------
@@ -1902,6 +1933,7 @@ class PlayerController extends ChangeNotifier {
         return;
       }
       nextEpisode = NextEpisodeOffer(item: next);
+      _noteNextOffer();
       _emit();
     } on EmbyException {
       if (_accepts(operation)) {
@@ -1919,6 +1951,7 @@ class PlayerController extends ChangeNotifier {
     final operation = _operations.current;
     if (!_accepts(operation)) return;
     nextEpisode = NextEpisodeOffer(item: next, remaining: nextEpisodeCountdown);
+    _noteNextOffer();
     _emit();
     _nextTimer?.cancel();
     _nextTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
@@ -2012,6 +2045,7 @@ class PlayerController extends ChangeNotifier {
   Future<void> disposeAsync() => _disposing ??= _disposeResources();
 
   Future<void> _disposeResources({bool reportStopped = true}) async {
+    unawaited(_discardNextPrefix());
     _operations.close();
     state.phase = PlaybackPhase.closing;
     _cancelPlaybackTimers();
@@ -3274,6 +3308,7 @@ class PlayerController extends ChangeNotifier {
     final autoplay = user?.enableNextEpisodeAutoPlay ?? true;
     if (!autoplay) {
       nextEpisode = NextEpisodeOffer(item: next);
+      _noteNextOffer();
       _emit();
       return;
     }
@@ -3286,9 +3321,103 @@ class PlayerController extends ChangeNotifier {
     }
     playbackEnded = true;
     nextEpisode = null;
+    unawaited(_discardNextPrefix());
     controlsVisible = true;
     _hideTimer?.cancel();
     _emit();
+  }
+
+  int get preparedNextPrefixBytes => _nextPrefix?.storedBytes ?? 0;
+
+  @visibleForTesting
+  Future<Uint8List?> readPreparedNextPrefix() =>
+      _nextPrefix?.readStored() ?? Future<Uint8List?>.value(null);
+
+  void _noteNextOffer() {
+    final next = nextEpisode?.item;
+    if (next == null || _userPausedPrefix || _disposed) return;
+    unawaited(_armNextPrefix(next));
+  }
+
+  Future<void> _armNextPrefix(EmbyItem next) async {
+    final operation = _operations.current;
+    if (!_accepts(operation) || _userPausedPrefix) return;
+    if (nextEpisode?.item.id != next.id) return;
+    final base = client.baseUrl;
+    final token = client.accessToken;
+    if (base == null || token == null || token.isEmpty) return;
+    try {
+      final info = await client.getPlaybackInfo(
+        itemId: next.id,
+        maxStreamingBitrate: maxStreamingBitrate,
+        deviceProfile: backend is VideoBackendCapabilities
+            ? await (backend as VideoBackendCapabilities).deviceProfile(
+                maxStreamingBitrate,
+              )
+            : null,
+      );
+      if (!_accepts(operation) ||
+          _userPausedPrefix ||
+          nextEpisode?.item.id != next.id) {
+        return;
+      }
+      final playback = resolvePlayback(
+        info: info,
+        baseUrl: base,
+        accessToken: token,
+        itemId: next.id,
+        mediaSourceId: preferredPlaybackSourceId(
+          sources: info.mediaSources,
+          requestedName: _preferredSourceName,
+        ),
+      );
+      if (playback == null) return;
+      final cache = nextPrefixCache ?? await _prefixCache();
+      if (!_accepts(operation) || nextEpisode?.item.id != next.id) return;
+      final prefix = _nextPrefix ??= NextEpisodePrefix(
+        cache: cache,
+        fetch: nextPrefixFetch,
+      );
+      await prefix.start(
+        itemId: next.id,
+        url: playback.streamUrl,
+        headers: playbackStreamHeaders(
+          streamUrl: playback.streamUrl,
+          baseUrl: base,
+          sessionHeaders: client.sessionHeaders,
+        ),
+        yieldToForeground: () => _prefixYield || cacheSpeedBytesPerSec > 0,
+      );
+    } catch (_) {
+      // A failed prefix never changes the current episode.
+    }
+  }
+
+  Future<SessionByteCache> _prefixCache() async {
+    final existing = _ownedPrefixCache;
+    if (existing != null) return existing;
+    final settings = await (await _settings()).read();
+    final cache = await SessionByteCache.open(
+      root: PlayerDiskCache.defaultDirectory(),
+      memoryLimitBytes: 8 * 1024 * 1024,
+      diskLimitBytes: PlayerRuntimeOptions.effectiveDiskCacheLimitBytes(
+        settings,
+      ),
+      diskSessionLimitBytes: NextEpisodePrefix.maxBytes,
+      pendingLimitBytes: defaultCachePendingBytes,
+    );
+    return _ownedPrefixCache = cache;
+  }
+
+  Future<void> _discardNextPrefix() async {
+    final prefix = _nextPrefix;
+    _nextPrefix = null;
+    if (prefix != null) await prefix.discard();
+    final owned = _ownedPrefixCache;
+    _ownedPrefixCache = null;
+    if (owned != null && !identical(owned, nextPrefixCache)) {
+      await owned.close();
+    }
   }
 
   Future<PlayerSettingsStore> _settings() async {

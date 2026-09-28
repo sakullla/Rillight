@@ -85,6 +85,11 @@ class DiskCacheSession {
     await Future.wait(_operations);
   }
 
+  Future<void> drop(List<String> tokens) async {
+    if (_closed || tokens.isEmpty) return;
+    await _call('drop', {'tokens': tokens});
+  }
+
   Future<String?> put(
     Uint8List bytes, {
     void Function(String?)? onPublished,
@@ -821,6 +826,8 @@ class _DiskStore {
           );
         case 'put':
           return _put(id, message['bytes'] as Uint8List);
+        case 'drop':
+          return _drop(id, List<String>.from(message['tokens'] as List));
         case 'resize':
           final lease = _leases[id];
           if (lease == null) return {};
@@ -1244,6 +1251,22 @@ class _DiskStore {
       'fingerprint': [stamp.$1, stamp.$2, stamp.$3],
       'stats': _stats(),
     };
+  }
+
+  Map<String, Object?> _drop(String id, List<String> tokens) {
+    final lease = _leases[id];
+    if (lease == null || tokens.length > 8192) return {};
+    for (final token in tokens) {
+      if (!_blockPattern.hasMatch(token)) continue;
+      final file = File(_join(lease.directory.path, token));
+      if (FileSystemEntity.typeSync(file.path, followLinks: false) !=
+          FileSystemEntityType.file) {
+        continue;
+      }
+      file.deleteSync();
+      _changed(file);
+    }
+    return {'ok': true, 'stats': _stats()};
   }
 
   Map<String, Object?> _read(String id, String token) {
