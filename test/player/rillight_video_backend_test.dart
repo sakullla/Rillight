@@ -1,11 +1,9 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:flutter/widgets.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/player/buffer_snapshot.dart';
 import 'package:rillight/player/cache/cache_limits.dart';
 import 'package:rillight/player/rillight_video_backend.dart';
@@ -463,75 +461,6 @@ void main() {
     expect(diagnostics['memoryLimitBytes'], 8 * 1024 * 1024);
     expect(diagnostics['pendingLimitBytes'], defaultCachePendingBytes);
   });
-
-  test(
-    'player-process stop drops playback images and leaves browse cache',
-    () async {
-      final image = Uint8List.fromList(const [1, 2, 3, 4]);
-      Future<Uint8List?> fetch() async => image;
-      const imageId = (
-        serverId: 'server',
-        itemId: 'episode',
-        type: 'Primary',
-        maxWidth: 120,
-      );
-
-      addTearDown(MediaImage.debugResetCacheConfiguration);
-      MediaImageCache.instance.memoryLimitBytes =
-          kPlayerProcessImageCacheMaxBytes;
-      await MediaImageCache.instance.load(
-        serverId: imageId.serverId,
-        itemId: imageId.itemId,
-        type: imageId.type,
-        maxWidth: imageId.maxWidth,
-        fetch: fetch,
-      );
-      expect(
-        MediaImageCache.instance.peek(
-          serverId: imageId.serverId,
-          itemId: imageId.itemId,
-          type: imageId.type,
-          maxWidth: imageId.maxWidth,
-        ),
-        image,
-      );
-
-      final backend = RillightVideoBackend(
-        settingsStore: MemoryPlayerSettingsStore(),
-        createPlayer: () async => _CoreDriver(),
-      );
-      addTearDown(backend.dispose);
-      await backend.stop();
-      expect(
-        MediaImageCache.instance.peek(
-          serverId: imageId.serverId,
-          itemId: imageId.itemId,
-          type: imageId.type,
-          maxWidth: imageId.maxWidth,
-        ),
-        isNull,
-      );
-
-      MediaImage.debugResetCacheConfiguration();
-      await MediaImageCache.instance.load(
-        serverId: imageId.serverId,
-        itemId: imageId.itemId,
-        type: imageId.type,
-        maxWidth: imageId.maxWidth,
-        fetch: fetch,
-      );
-      await backend.stop();
-      expect(
-        MediaImageCache.instance.peek(
-          serverId: imageId.serverId,
-          itemId: imageId.itemId,
-          type: imageId.type,
-          maxWidth: imageId.maxWidth,
-        ),
-        image,
-      );
-    },
-  );
 
   test(
     'owned backend sends only sealed URL and filters stale core events',

@@ -926,11 +926,12 @@ class RillightVideoBackend extends VideoBackend
 
   /// The desktop playback process owns a 16 MiB image cache. Android keeps
   /// posters in the shared browse cache, which is outside this session.
+  /// The binding is initialized before that process opens playback.
+  /// [BindingBase.debugBindingType] stays null in release builds.
   void _releasePlaybackImages() {
     final images = MediaImageCache.instance;
     if (images.memoryLimitBytes != kPlayerProcessImageCacheMaxBytes) return;
     images.clearMemory();
-    if (BindingBase.debugBindingType() == null) return;
     final painting = PaintingBinding.instance.imageCache;
     painting.clear();
     painting.clearLiveImages();
