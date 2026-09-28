@@ -1,93 +1,77 @@
 const int kCoreMaxStreamingBitrate = 140000000;
 
-/// Only the verified baseline is advertised, gated by native decoder discovery.
+/// Codecs are advertised only when the caller has probed the owned core.
+/// Direct play is not limited to 8-bit, 1080p, or two audio channels.
 Map<String, dynamic> androidDeviceProfile({
   required bool h264,
   required bool aac,
+  bool hevc = false,
+  bool ac3 = false,
+  bool eac3 = false,
+  bool truehd = false,
   int maxStreamingBitrate = 20000000,
-}) => {
-  'Name': 'Rillight Android owned FFmpeg core',
-  'MaxStreamingBitrate': maxStreamingBitrate,
-  'MaxStaticBitrate': maxStreamingBitrate,
-  'DirectPlayProfiles': [
-    if (h264 && aac)
-      {
-        'Container': 'mp4,m4v,mkv',
-        'Type': 'Video',
-        'VideoCodec': 'h264',
-        'AudioCodec': 'aac',
-      },
-  ],
-  'TranscodingProfiles': [
-    if (h264 && aac)
-      {
-        'Container': 'ts',
-        'Type': 'Video',
-        'VideoCodec': 'h264',
-        'AudioCodec': 'aac',
-        'Protocol': 'hls',
-        'Context': 'Streaming',
-        'MaxAudioChannels': '2',
-        'ManifestSubtitles': 'vtt',
-        'MinSegments': '1',
-      },
-  ],
-  'CodecProfiles': [
-    {
-      'Type': 'Video',
-      'Codec': 'h264',
-      'Conditions': [
+}) {
+  final video = [if (h264) 'h264', if (hevc) 'hevc'];
+  final audio = [
+    if (aac) 'aac',
+    if (ac3) 'ac3',
+    if (eac3) 'eac3',
+    if (truehd) 'truehd',
+  ];
+  return {
+    'Name': 'Rillight Android owned FFmpeg core',
+    'MaxStreamingBitrate': maxStreamingBitrate,
+    'MaxStaticBitrate': maxStreamingBitrate,
+    'DirectPlayProfiles': [
+      if (video.isNotEmpty && audio.isNotEmpty)
         {
-          'Condition': 'LessThanEqual',
-          'Property': 'VideoBitDepth',
-          'Value': '8',
-          'IsRequired': true,
+          'Container': 'mp4,m4v,mkv',
+          'Type': 'Video',
+          'VideoCodec': video.join(','),
+          'AudioCodec': audio.join(','),
         },
+    ],
+    'TranscodingProfiles': [
+      if (h264 && aac)
         {
-          'Condition': 'LessThanEqual',
-          'Property': 'Width',
-          'Value': '1920',
-          'IsRequired': true,
+          'Container': 'ts',
+          'Type': 'Video',
+          'VideoCodec': 'h264',
+          'AudioCodec': 'aac',
+          'Protocol': 'hls',
+          'Context': 'Streaming',
+          'MaxAudioChannels': '2',
+          'ManifestSubtitles': 'vtt',
+          'MinSegments': '1',
         },
-        {
-          'Condition': 'LessThanEqual',
-          'Property': 'Height',
-          'Value': '1080',
-          'IsRequired': true,
-        },
-      ],
-    },
-    {
-      'Type': 'VideoAudio',
-      'Codec': 'aac',
-      'Conditions': [
-        {
-          'Condition': 'LessThanEqual',
-          'Property': 'AudioChannels',
-          'Value': '2',
-          'IsRequired': true,
-        },
-      ],
-    },
-  ],
-  'SubtitleProfiles': [
-    for (final format in ['srt', 'subrip', 'vtt', 'webvtt'])
-      {'Format': format, 'Method': 'External'},
-    for (final format in ['ass', 'ssa', 'pgs', 'pgssub', 'dvdsub', 'dvbsub'])
-      {'Format': format, 'Method': 'Encode'},
-  ],
-};
+    ],
+    'SubtitleProfiles': [
+      for (final format in ['srt', 'subrip', 'vtt', 'webvtt'])
+        {'Format': format, 'Method': 'External'},
+      for (final format in ['ass', 'ssa', 'pgs', 'pgssub', 'dvdsub', 'dvbsub'])
+        {'Format': format, 'Method': 'Encode'},
+    ],
+  };
+}
 
 /// Conservative profile shared by the owned core on desktop and Android.
 /// A platform advertises this baseline only when its required decoders exist.
 Map<String, dynamic> ownedCoreDeviceProfile({
   required bool h264,
   required bool aac,
+  bool hevc = false,
+  bool ac3 = false,
+  bool eac3 = false,
+  bool truehd = false,
   int maxStreamingBitrate = kCoreMaxStreamingBitrate,
 }) => {
   ...androidDeviceProfile(
     h264: h264,
     aac: aac,
+    hevc: hevc,
+    ac3: ac3,
+    eac3: eac3,
+    truehd: truehd,
     maxStreamingBitrate: maxStreamingBitrate,
   ),
   'Name': 'Rillight owned FFmpeg core',

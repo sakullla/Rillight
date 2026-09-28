@@ -13,6 +13,7 @@ import 'package:rillight/player/player_runtime_options.dart';
 import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/video_backend.dart';
 import 'package:rillight_player/rillight_player.dart';
+import 'package:rillight_player/src/core_bindings.dart';
 
 import 'cache/cache_limits.dart';
 
@@ -180,23 +181,49 @@ class RillightVideoBackend extends VideoBackend
     }
   }
 
+  Map<String, bool>? _desktopDecoders;
+
+  Map<String, bool> _desktopDecoderProbe() {
+    final cached = _desktopDecoders;
+    if (cached != null) return cached;
+    const names = ['h264', 'hevc', 'aac', 'ac3', 'eac3', 'truehd'];
+    try {
+      final bindings = CoreBindings();
+      final probed = {
+        for (final name in names) name: bindings.decoderAvailable(name),
+      };
+      return _desktopDecoders = probed;
+    } catch (_) {
+      return _desktopDecoders = const {};
+    }
+  }
+
   @override
   Future<Map<String, dynamic>> deviceProfile(int maxStreamingBitrate) async {
+    final Map<String, bool> probed;
     if (Platform.isAndroid) {
       final player = _player;
       final capabilities = player is AndroidCorePlayer
           ? await player.capabilities()
           : const <String, dynamic>{};
-      return ownedCoreDeviceProfile(
-        h264: capabilities['h264'] == true,
-        aac: capabilities['aac'] == true,
-        maxStreamingBitrate: maxStreamingBitrate.clamp(1, 20000000),
-      );
+      probed = {
+        for (final name in ['h264', 'hevc', 'aac', 'ac3', 'eac3', 'truehd'])
+          name: capabilities[name] == true,
+      };
+    } else {
+      probed = _desktopDecoderProbe();
     }
+    final limit = Platform.isAndroid
+        ? maxStreamingBitrate.clamp(1, 20000000)
+        : maxStreamingBitrate;
     return ownedCoreDeviceProfile(
-      h264: true,
-      aac: true,
-      maxStreamingBitrate: maxStreamingBitrate,
+      h264: probed['h264'] == true,
+      hevc: probed['hevc'] == true,
+      aac: probed['aac'] == true,
+      ac3: probed['ac3'] == true,
+      eac3: probed['eac3'] == true,
+      truehd: probed['truehd'] == true,
+      maxStreamingBitrate: limit,
     );
   }
 

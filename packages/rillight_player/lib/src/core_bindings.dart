@@ -181,6 +181,25 @@ class CoreBindings {
           int Function(Pointer<Void>, Pointer<Int32>, Pointer<Int32>)
         >('rillight_core_container_track_ids')
       : null;
+  late final int Function(Pointer<Utf8>)? hasDecoder =
+      _library.providesSymbol('rillight_core_has_decoder')
+      ? _library.lookupFunction<
+          Int32 Function(Pointer<Utf8>),
+          int Function(Pointer<Utf8>)
+        >('rillight_core_has_decoder')
+      : null;
+
+  bool decoderAvailable(String name) {
+    final probe = hasDecoder;
+    if (probe == null || name.isEmpty) return false;
+    final native = name.toNativeUtf8();
+    try {
+      return probe(native) == 1;
+    } finally {
+      malloc.free(native);
+    }
+  }
+
   late final trackCount = _library
       .lookupFunction<
         Int32 Function(Pointer<Void>),

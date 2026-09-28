@@ -35,6 +35,35 @@ void main() {
     expect(video['AudioCodec'], 'aac');
     expect(direct.toString(), isNot(contains('hevc')));
     expect(direct.toString(), isNot(contains('ac3')));
+    expect(profile.containsKey('CodecProfiles'), isFalse);
+  });
+
+  test('probed HEVC and Dolby audio are direct and not capped at 1080p', () {
+    final profile = ownedCoreDeviceProfile(
+      h264: true,
+      aac: true,
+      hevc: true,
+      ac3: true,
+      eac3: true,
+      truehd: true,
+    );
+    final direct = (profile['DirectPlayProfiles'] as List).single as Map;
+    expect(direct['VideoCodec'], 'h264,hevc');
+    expect(direct['AudioCodec'], 'aac,ac3,eac3,truehd');
+    expect(profile.containsKey('CodecProfiles'), isFalse);
+    expect(direct.toString(), isNot(contains('dts')));
+
+    final ac3Only = ownedCoreDeviceProfile(
+      h264: false,
+      aac: false,
+      hevc: true,
+      ac3: true,
+    );
+    final narrowed = (ac3Only['DirectPlayProfiles'] as List).single as Map;
+    expect(narrowed['VideoCodec'], 'hevc');
+    expect(narrowed['AudioCodec'], 'ac3');
+    expect(narrowed['AudioCodec'], isNot(contains('eac3')));
+    expect(narrowed['AudioCodec'], isNot(contains('truehd')));
   });
 
   test('text subtitles are External and bitmap subtitles require burn-in', () {

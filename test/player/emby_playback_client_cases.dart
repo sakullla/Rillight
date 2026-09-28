@@ -3,6 +3,7 @@ import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/emby/device_profile.dart';
 import 'package:rillight/player/playback_models.dart';
+import 'package:rillight/player/playback_resolver.dart';
 
 import '../emby/fake_emby_server.dart';
 
@@ -47,6 +48,58 @@ void main() {
       expect(server.lastDeviceProfile!['Name'], 'Rillight owned FFmpeg core');
     },
   );
+
+  test('Dolby audio transcode is not a playable stream', () {
+    ResolvedPlayback? resolve(Map<String, Object?> source) {
+      return resolvePlayback(
+        info: PlaybackInfo.fromJson({
+          'PlaySessionId': 'play-dolby',
+          'MediaSources': [source],
+        }),
+        baseUrl: Uri.parse('https://emby.example'),
+        accessToken: 'token',
+        itemId: 'episode-1',
+      );
+    }
+
+    expect(
+      resolve({
+        'Id': 'src-ac3',
+        'SupportsDirectPlay': false,
+        'SupportsDirectStream': false,
+        'SupportsTranscoding': true,
+        'TranscodingUrl': '/videos/episode-1/master.m3u8',
+        'MediaStreams': [
+          {'Index': 1, 'Type': 'Audio', 'Codec': 'ac3'},
+        ],
+      }),
+      isNull,
+    );
+    expect(
+      resolve({
+        'Id': 'src-truehd',
+        'SupportsDirectPlay': true,
+        'SupportsDirectStream': false,
+        'MediaStreams': [
+          {'Index': 1, 'Type': 'Audio', 'Codec': 'truehd'},
+        ],
+      })?.playMethod,
+      PlayMethod.directPlay,
+    );
+    expect(
+      resolve({
+        'Id': 'src-aac',
+        'SupportsDirectPlay': false,
+        'SupportsDirectStream': false,
+        'SupportsTranscoding': true,
+        'TranscodingUrl': '/videos/episode-1/master.m3u8',
+        'MediaStreams': [
+          {'Index': 1, 'Type': 'Audio', 'Codec': 'aac'},
+        ],
+      })?.playMethod,
+      PlayMethod.transcode,
+    );
+  });
 
   test('forced transcode source exposes TranscodingUrl', () async {
     final info = await client.getPlaybackInfo(itemId: 'movie-transcode');

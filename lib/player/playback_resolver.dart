@@ -195,6 +195,13 @@ ResolvedPlayback? resolvePlayback({
 
   final transcoding = source.transcodingUrl;
   if (transcoding != null && transcoding.isNotEmpty) {
+    // AC-3, E-AC-3 and TrueHD must stay on the original track. An AAC
+    // transcode of that source is not a successful Dolby playback.
+    if (source.audioStreams.any(
+      (stream) => isOriginalDolbyAudioCodec(stream.codec),
+    )) {
+      return null;
+    }
     return ResolvedPlayback(
       playMethod: PlayMethod.transcode,
       streamUrl: embyResourceUri(baseUrl, transcoding, accessToken),
@@ -222,6 +229,22 @@ ResolvedPlayback _direct(
     mediaSource: source,
     itemId: itemId,
   );
+}
+
+/// True for AC-3, E-AC-3, TrueHD and the short names servers use for them.
+bool isOriginalDolbyAudioCodec(String? codec) {
+  final value = codec?.trim().toLowerCase() ?? '';
+  return value == 'ac3' ||
+      value == 'ac-3' ||
+      value == 'dd' ||
+      value == 'eac3' ||
+      value == 'ec-3' ||
+      value == 'ec3' ||
+      value == 'ddp' ||
+      value == 'dd+' ||
+      value == 'truehd' ||
+      value == 'true-hd' ||
+      value.contains('atmos');
 }
 
 String _staticStreamPath(

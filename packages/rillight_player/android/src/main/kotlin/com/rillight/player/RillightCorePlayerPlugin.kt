@@ -4,7 +4,6 @@ import android.app.Activity
 import android.app.Application
 import android.content.Context
 import android.media.AudioManager
-import android.media.MediaCodecList
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -128,11 +127,19 @@ class RillightCorePlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandler,
                 result.error("native", error.message ?: "Native core unavailable", null)
                 return
             }
-            val types = MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos
-                .filter { !it.isEncoder }.flatMap { it.supportedTypes.toList() }
+            fun has(name: String) = try {
+                CoreNative.hasDecoder(name)
+            } catch (_: Throwable) {
+                false
+            }
             result.success(mapOf("sessionId" to (args["sessionId"] as? String ?: ""),
-                "abiVersion" to abi, "h264" to ("video/avc" in types),
-                "aac" to ("audio/mp4a-latm" in types)))
+                "abiVersion" to abi,
+                "h264" to has("h264"),
+                "hevc" to has("hevc"),
+                "aac" to has("aac"),
+                "ac3" to has("ac3"),
+                "eac3" to has("eac3"),
+                "truehd" to has("truehd")))
             return
         }
         if (call.method in setOf("setSystemBrightness", "getSystemBrightness",

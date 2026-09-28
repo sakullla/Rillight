@@ -43,7 +43,7 @@ foreach(component avformat avcodec avutil avfilter swresample swscale)
     PATHS "${core_lib_dir}" NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH REQUIRED)
 endforeach()
 
-add_library(rillight_core SHARED core/rillight_core.cpp)
+add_library(rillight_core SHARED core/rillight_core.cpp core/decoder_probe.cpp)
 target_include_directories(rillight_core PRIVATE "${RILLIGHT_CORE_PREFIX}/include")
 set_target_properties(rillight_core PROPERTIES BUILD_RPATH "${core_lib_dir}")
 # Android SDKs may gain libass after the first Gradle/CMake configure. Track
