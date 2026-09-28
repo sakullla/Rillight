@@ -1253,11 +1253,20 @@ void main() {
     fixture.holdAfterBytes = mib;
     fixture.hold = Completer<void>();
     try {
-      await fixture
-          .readBytes('bytes=0-${mib - 1}')
+      final (status, body) = await fixture
+          .read('bytes=0-${mib - 1}')
           .timeout(const Duration(seconds: 5));
+      expect(status, 206);
+      expect(body, String.fromCharCode(9) * mib);
+      expect(fixture.holdEntered, isTrue);
       expect(fixture.hold!.isCompleted, isFalse);
-      expect(fixture.proxy.upstreamBytes, lessThan(8 * mib));
+      expect(
+        fixture.ranges.whereType<String>().any((range) {
+          final match = RegExp(r'^bytes=\d+-(\d+)$').firstMatch(range);
+          return match != null && int.parse(match.group(1)!) >= 8 * mib - 1;
+        }),
+        isTrue,
+      );
     } finally {
       if (fixture.hold != null && !fixture.hold!.isCompleted) {
         fixture.hold!.complete();
@@ -2208,6 +2217,7 @@ class _CacheFixture {
   Duration delay = Duration.zero;
   int? holdAfterBytes;
   Completer<void>? hold;
+  bool holdEntered = false;
   int requests = 0;
   final ranges = <String?>[];
   final methods = <String>[];
@@ -2320,6 +2330,7 @@ class _CacheFixture {
     if (request.method != 'HEAD') {
       final holdAt = holdAfterBytes;
       if (holdAt != null && hold != null && bytes.length > holdAt) {
+        holdEntered = true;
         output.add(bytes.sublist(0, holdAt));
         await output.flush();
         await hold!.future;
