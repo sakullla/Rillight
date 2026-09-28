@@ -10,6 +10,12 @@ import 'package:flutter/widgets.dart';
 import 'core_bindings.dart';
 import 'surface_retirement.dart';
 
+/// Loads the desktop core once and reports which decoder names it has.
+Map<String, bool> probeDesktopDecoders(Iterable<String> names) {
+  final bindings = CoreBindings();
+  return {for (final name in names) name: bindings.decoderAvailable(name)};
+}
+
 class CorePlayerEvent {
   const CorePlayerEvent(this.session, this.kind, this.value);
   final String session;

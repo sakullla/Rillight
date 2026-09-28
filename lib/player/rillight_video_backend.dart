@@ -14,7 +14,6 @@ import 'package:rillight/player/player_runtime_options.dart';
 import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/video_backend.dart';
 import 'package:rillight_player/rillight_player.dart';
-import 'package:rillight_player/src/core_bindings.dart';
 
 import 'cache/cache_limits.dart';
 
@@ -189,11 +188,7 @@ class RillightVideoBackend extends VideoBackend
     if (cached != null) return cached;
     const names = ['h264', 'hevc', 'aac', 'ac3', 'eac3', 'truehd'];
     try {
-      final bindings = CoreBindings();
-      final probed = {
-        for (final name in names) name: bindings.decoderAvailable(name),
-      };
-      return _desktopDecoders = probed;
+      return _desktopDecoders = probeDesktopDecoders(names);
     } catch (_) {
       return _desktopDecoders = const {};
     }

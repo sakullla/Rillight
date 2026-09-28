@@ -32,6 +32,26 @@ const _device = EmbyDeviceInfo(
   version: '0.1.0',
 );
 
+void _useAacSource(FakeEmbyServer server) {
+  final item = server.items.firstWhere((entry) => entry.id == 'movie-up');
+  item.mediaStreams = const [
+    FakeMediaStream(
+      index: 0,
+      type: 'Video',
+      codec: 'h264',
+      displayTitle: '1080p',
+    ),
+    FakeMediaStream(
+      index: 1,
+      type: 'Audio',
+      codec: 'aac',
+      language: 'eng',
+      displayTitle: 'English',
+      isDefault: true,
+    ),
+  ];
+}
+
 class _FailOneOpenBackend extends FakeVideoBackend {
   bool failNext = false;
 
@@ -763,6 +783,8 @@ void main() {
   test(
     'failed quality switch restores selected quality and pause intent',
     () async {
+      // Dolby audio is refused before open, so this switch must be AAC.
+      _useAacSource(server);
       final failing = _FailOneOpenBackend();
       backend = failing;
       final controller = await startStandaloneController();
@@ -785,6 +807,8 @@ void main() {
   test(
     'server output above requested quality restores prior selection',
     () async {
+      // Dolby audio is refused before open, so this switch must be AAC.
+      _useAacSource(server);
       server.forcedTranscodeOutputBitrate = 8000000;
       final controller = await startStandaloneController();
       addTearDown(controller.dispose);
