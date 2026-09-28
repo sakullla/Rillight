@@ -2662,9 +2662,11 @@ double display_linear(double nits) {
 RILLIGHT_DOVI_TEST_API int rillight_dovi_base_rejected(int profile,
                                                        int compatibility) {
   if (profile < 0) return 0;
-  // Profile 5 is IPT with no base. Compatibility 1/2/4 are HDR10, SDR, HLG.
+  // Profile 5 is IPT with no base. Compatibility 1 and 6 are HDR10
+  // (Profile 7 uses 6), 2 is SDR, and 4 is HLG.
   if (profile == 5) return 1;
-  return compatibility != 1 && compatibility != 2 && compatibility != 4;
+  return compatibility != 1 && compatibility != 2 && compatibility != 4 &&
+         compatibility != 6;
 }
 
 RILLIGHT_DOVI_TEST_API uint8_t rillight_tonemap_channel(int transfer,

@@ -355,6 +355,8 @@ int main() {
   assert(rillight_dovi_base_rejected(8, 1) == 0);
   assert(rillight_dovi_base_rejected(8, 2) == 0);
   assert(rillight_dovi_base_rejected(8, 4) == 0);
+  assert(rillight_dovi_base_rejected(7, 6) == 0);
+  assert(rillight_dovi_base_rejected(7, 0) == 1);
   // AVCOL_TRC_BT709 = 1, SMPTE2084 = 16, ARIB_STD_B67 = 18.
   assert(rillight_tonemap_channel(1, 40) == 40);
   assert(rillight_tonemap_channel(16, 0) == 0);
