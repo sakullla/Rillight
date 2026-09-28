@@ -34,6 +34,7 @@ extern "C" {
 #include <libavutil/avutil.h>
 #include <libavutil/aes.h>
 #include <libavutil/channel_layout.h>
+#include <libavutil/dovi_meta.h>
 #include <libavutil/hwcontext.h>
 #include <libavutil/imgutils.h>
 #include <libavutil/pixdesc.h>
@@ -43,6 +44,10 @@ extern "C" {
 #include <ass/ass.h>
 #endif
 }
+
+int rillight_dovi_base_rejected(int profile, int compatibility);
+void tonemap_rgba(uint8_t *data, int stride, int width, int height,
+                  int transfer);
 
 namespace {
 constexpr int kIoBufferSize = 32768;
@@ -1443,6 +1448,17 @@ RillightCoreFrame *convert_video(const AVFrame *frame, int64_t pts,
   if (frame->width <= 0 || frame->height <= 0 ||
       frame->width > static_cast<int>(kMaxVideoBytes / 4))
     return nullptr;
+  const AVPacketSideData *dovi = av_packet_side_data_get(
+      stream->codecpar->coded_side_data, stream->codecpar->nb_coded_side_data,
+      AV_PKT_DATA_DOVI_CONF);
+  if (dovi && dovi->data && dovi->size >= 8) {
+    const auto *record =
+        reinterpret_cast<const AVDOVIDecoderConfigurationRecord *>(dovi->data);
+    if (rillight_dovi_base_rejected(record->dv_profile,
+                                    record->dv_bl_signal_compatibility_id)) {
+      return nullptr;
+    }
+  }
   const int stride = frame->width * 4;
   const int bytes = av_image_get_buffer_size(AV_PIX_FMT_RGBA, frame->width,
                                               frame->height, 1);
@@ -1471,8 +1487,8 @@ RillightCoreFrame *convert_video(const AVFrame *frame, int64_t pts,
     return nullptr;
   }
   // Borrow the decoded planes only for this synchronous conversion. Preserve
-  // the existing matrix/range policy and transfer/primaries; this is not HDR
-  // tone mapping or a change to Dolby output capabilities.
+  // the existing matrix/range policy. PQ and HLG are then mapped into the
+  // 8-bit RGBA buffer; this does not read Dolby Vision dynamic metadata.
   AVFrame source = *frame;
   source.color_range = source_range == AVCOL_RANGE_JPEG
                            ? AVCOL_RANGE_JPEG : AVCOL_RANGE_MPEG;
@@ -1495,6 +1511,10 @@ RillightCoreFrame *convert_video(const AVFrame *frame, int64_t pts,
     delete output;
     return nullptr;
   }
+  const int transfer = frame->color_trc != AVCOL_TRC_UNSPECIFIED
+                           ? frame->color_trc
+                           : stream->codecpar->color_trc;
+  tonemap_rgba(output->data, stride, frame->width, frame->height, transfer);
   output->struct_size = sizeof(RillightCoreFrame);
   output->type = RILLIGHT_CORE_VIDEO_RGBA;
   output->session_id = session;
@@ -2595,6 +2615,93 @@ void stop_worker(RillightCoreImpl *core) {
   if (core->subtitle_loader.joinable()) core->subtitle_loader.join();
 }
 }  // namespace
+
+#if defined(_WIN32)
+#define RILLIGHT_DOVI_TEST_API __declspec(dllexport)
+#else
+#define RILLIGHT_DOVI_TEST_API __attribute__((visibility("default")))
+#endif
+
+namespace {
+double srgb_encode(double linear) {
+  if (linear <= 0) return 0;
+  if (linear >= 1) return 1;
+  if (linear <= 0.0031308) return 12.92 * linear;
+  return 1.055 * std::pow(linear, 1.0 / 2.4) - 0.055;
+}
+
+double pq_nits(double code) {
+  constexpr double m1 = 0.1593017578125;
+  constexpr double m2 = 78.84375;
+  constexpr double c1 = 0.8359375;
+  constexpr double c2 = 18.8515625;
+  constexpr double c3 = 18.6875;
+  const double vp = std::pow(std::clamp(code, 0.0, 1.0), 1.0 / m2);
+  const double num = std::max(vp - c1, 0.0);
+  const double den = std::max(c2 - c3 * vp, 1e-9);
+  return 10000.0 * std::pow(num / den, 1.0 / m1);
+}
+
+double hlg_nits(double code) {
+  constexpr double a = 0.17883277;
+  constexpr double b = 0.28466892;
+  constexpr double c = 0.55991073;
+  const double e = std::clamp(code, 0.0, 1.0);
+  const double scene = e <= 0.5 ? (e * e) / 3.0
+                                 : (std::exp((e - c) / a) + b) / 12.0;
+  return scene * 1000.0;
+}
+
+double display_linear(double nits) {
+  constexpr double white = 203.0;
+  constexpr double peak = 1000.0;
+  return std::clamp(nits * (1.0 + white / peak) / (white + nits), 0.0, 1.0);
+}
+}  // namespace
+
+RILLIGHT_DOVI_TEST_API int rillight_dovi_base_rejected(int profile,
+                                                       int compatibility) {
+  if (profile < 0) return 0;
+  // Profile 5 is IPT with no base. Compatibility 1/2/4 are HDR10, SDR, HLG.
+  if (profile == 5) return 1;
+  return compatibility != 1 && compatibility != 2 && compatibility != 4;
+}
+
+RILLIGHT_DOVI_TEST_API uint8_t rillight_tonemap_channel(int transfer,
+                                                        uint8_t code) {
+  if (transfer != AVCOL_TRC_SMPTE2084 && transfer != AVCOL_TRC_ARIB_STD_B67) {
+    return code;
+  }
+  static uint8_t pq[256];
+  static uint8_t hlg[256];
+  static std::once_flag once;
+  std::call_once(once, [] {
+    for (int index = 0; index < 256; ++index) {
+      const double unit = index / 255.0;
+      pq[index] = static_cast<uint8_t>(std::lround(
+          255.0 * srgb_encode(display_linear(pq_nits(unit)))));
+      hlg[index] = static_cast<uint8_t>(std::lround(
+          255.0 * srgb_encode(display_linear(hlg_nits(unit)))));
+    }
+  });
+  return transfer == AVCOL_TRC_SMPTE2084 ? pq[code] : hlg[code];
+}
+
+void tonemap_rgba(uint8_t *data, int stride, int width, int height,
+                  int transfer) {
+  if (transfer != AVCOL_TRC_SMPTE2084 && transfer != AVCOL_TRC_ARIB_STD_B67) {
+    return;
+  }
+  for (int y = 0; y < height; ++y) {
+    uint8_t *row = data + static_cast<ptrdiff_t>(y) * stride;
+    for (int x = 0; x < width; ++x) {
+      uint8_t *pixel = row + static_cast<ptrdiff_t>(x) * 4;
+      pixel[0] = rillight_tonemap_channel(transfer, pixel[0]);
+      pixel[1] = rillight_tonemap_channel(transfer, pixel[1]);
+      pixel[2] = rillight_tonemap_channel(transfer, pixel[2]);
+    }
+  }
+}
 
 extern "C" {
 uint32_t rillight_core_abi_version(void) { return RILLIGHT_CORE_ABI_VERSION; }

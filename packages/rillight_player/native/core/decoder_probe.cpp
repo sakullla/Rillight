@@ -1,6 +1,8 @@
 #include "decoder_probe.h"
 
+extern "C" {
 #include <libavcodec/avcodec.h>
+}
 
 #if defined(_WIN32)
 #define RILLIGHT_DECODER_API __declspec(dllexport)

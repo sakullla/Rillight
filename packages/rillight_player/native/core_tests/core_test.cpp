@@ -339,7 +339,29 @@ bool wait_for(RillightCore *core, Predicate predicate,
 }
 }  // namespace
 
+#if defined(_WIN32)
+#define RILLIGHT_DOVI_TEST_API __declspec(dllimport)
+#else
+#define RILLIGHT_DOVI_TEST_API
+#endif
+RILLIGHT_DOVI_TEST_API int rillight_dovi_base_rejected(int profile, int compatibility);
+RILLIGHT_DOVI_TEST_API uint8_t rillight_tonemap_channel(int transfer, uint8_t code);
+
 int main() {
+  assert(rillight_dovi_base_rejected(-1, 0) == 0);
+  assert(rillight_dovi_base_rejected(5, 0) == 1);
+  assert(rillight_dovi_base_rejected(8, 0) == 1);
+  assert(rillight_dovi_base_rejected(8, 3) == 1);
+  assert(rillight_dovi_base_rejected(8, 1) == 0);
+  assert(rillight_dovi_base_rejected(8, 2) == 0);
+  assert(rillight_dovi_base_rejected(8, 4) == 0);
+  // AVCOL_TRC_BT709 = 1, SMPTE2084 = 16, ARIB_STD_B67 = 18.
+  assert(rillight_tonemap_channel(1, 40) == 40);
+  assert(rillight_tonemap_channel(16, 0) == 0);
+  assert(rillight_tonemap_channel(16, 255) == 255);
+  assert(rillight_tonemap_channel(16, 40) == 19);
+  assert(rillight_tonemap_channel(16, 100) == 109);
+  assert(rillight_tonemap_channel(18, 80) == 114);
   assert(rillight_core_abi_version() == RILLIGHT_CORE_ABI_VERSION);
   const char *versions = rillight_core_ffmpeg_versions();
   assert(versions && std::strstr(versions, "avformat=") != nullptr);
