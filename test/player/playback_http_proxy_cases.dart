@@ -1241,6 +1241,30 @@ void main() {
     },
   );
 
+  test('startup read returns before the read-ahead window is filled', () async {
+    const mib = 1024 * 1024;
+    final fixture = await _CacheFixture.open(
+      memoryBytes: 8 * mib,
+      disk: true,
+      sessionBuffering: true,
+      readAheadBytes: 8 * mib,
+    );
+    fixture.binaryBody = Uint8List(8 * mib)..fillRange(0, 8 * mib, 9);
+    fixture.holdAfterBytes = mib;
+    fixture.hold = Completer<void>();
+    try {
+      await fixture
+          .readBytes('bytes=0-${mib - 1}')
+          .timeout(const Duration(seconds: 5));
+      expect(fixture.hold!.isCompleted, isFalse);
+      expect(fixture.proxy.upstreamBytes, lessThan(8 * mib));
+    } finally {
+      if (fixture.hold != null && !fixture.hold!.isCompleted) {
+        fixture.hold!.complete();
+      }
+    }
+  });
+
   test(
     'rejected read-ahead preserves cached bytes and reports demand failure',
     () async {
@@ -2182,6 +2206,8 @@ class _CacheFixture {
   int? forbiddenOffset;
   int? redirectVersion;
   Duration delay = Duration.zero;
+  int? holdAfterBytes;
+  Completer<void>? hold;
   int requests = 0;
   final ranges = <String?>[];
   final methods = <String>[];
@@ -2291,7 +2317,17 @@ class _CacheFixture {
       bytes = bytes.sublist(start, end + 1);
     }
     output.contentLength = bytes.length;
-    if (request.method != 'HEAD') output.add(bytes);
+    if (request.method != 'HEAD') {
+      final holdAt = holdAfterBytes;
+      if (holdAt != null && hold != null && bytes.length > holdAt) {
+        output.add(bytes.sublist(0, holdAt));
+        await output.flush();
+        await hold!.future;
+        output.add(bytes.sublist(holdAt));
+      } else {
+        output.add(bytes);
+      }
+    }
     try {
       await output.close();
     } catch (_) {}
