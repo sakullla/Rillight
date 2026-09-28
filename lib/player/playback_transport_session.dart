@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:isolate';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'cache/cache_limits.dart';
 import 'cache/session_byte_cache.dart';
