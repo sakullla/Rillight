@@ -11,6 +11,7 @@ import 'package:rillight/player/rillight_video_backend.dart';
 import 'package:rillight/player/buffered_ranges_track.dart';
 import 'package:rillight/player/android_playback_lifecycle.dart';
 import 'package:rillight/player/player_bindings.dart';
+import 'package:rillight/player/next_episode_card.dart';
 import 'package:rillight/player/player_controller.dart';
 import 'package:rillight/player/player_window.dart';
 
@@ -532,6 +533,22 @@ class TvPlayerPageState extends State<TvPlayerPage> {
             children: [
               // Keep this sibling mounted while loading, showing controls or panels.
               ExcludeFocus(child: c.backend.buildView()),
+              ListenableBuilder(
+                listenable: c,
+                builder: (context, _) {
+                  if (c.nextEpisode == null || c.error != null) {
+                    return const SizedBox.shrink();
+                  }
+                  return Positioned(
+                    top: 24,
+                    right: 24,
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 420),
+                      child: NextEpisodeCard(controller: c),
+                    ),
+                  );
+                },
+              ),
               ListenableBuilder(
                 listenable: c,
                 builder: (context, _) {

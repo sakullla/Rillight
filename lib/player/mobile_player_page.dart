@@ -21,6 +21,7 @@ import 'package:rillight/player/phone_player_gestures.dart';
 import 'package:rillight/player/playback_models.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_controller.dart';
+import 'package:rillight/player/next_episode_card.dart';
 import 'package:rillight/player/player_keys.dart';
 import 'package:rillight/player/player_window.dart';
 import 'package:rillight/player/phone/phone_player_interaction.dart';
@@ -649,7 +650,15 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
                   left: 12,
                   right: 12,
                   bottom: 12,
-                  child: SafeArea(child: _PhoneNextEpisode(controller: c)),
+                  child: SafeArea(
+                    child: Align(
+                      alignment: Alignment.bottomRight,
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 360),
+                        child: NextEpisodeCard(controller: c),
+                      ),
+                    ),
+                  ),
                 ),
               if (!_interaction.locked &&
                   danmaku != null &&
@@ -671,68 +680,6 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
                 ),
             ],
           ),
-        ),
-      ),
-    );
-  }
-}
-
-class _PhoneNextEpisode extends StatelessWidget {
-  const _PhoneNextEpisode({required this.controller});
-
-  final PlayerController controller;
-
-  @override
-  Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context);
-    final offer = controller.nextEpisode!;
-    final seconds = offer.remaining?.inSeconds;
-    return Material(
-      key: PlayerKeys.nextEpisode,
-      color: Colors.black.withValues(alpha: 0.88),
-      borderRadius: BorderRadius.circular(12),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              children: [
-                const Icon(Icons.skip_next, size: 20),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    seconds == null
-                        ? l10n.playNextEpisode
-                        : l10n.nextEpisodeIn(seconds),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                IconButton(
-                  key: PlayerKeys.nextEpisodeCancel,
-                  tooltip: l10n.cancelNextEpisode,
-                  onPressed: controller.cancelNextEpisode,
-                  icon: const Icon(Icons.close, size: 18),
-                ),
-              ],
-            ),
-            Text(
-              offer.item.displayName,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-            Align(
-              alignment: Alignment.centerRight,
-              child: FilledButton.icon(
-                key: PlayerKeys.nextEpisodePlay,
-                onPressed: controller.playNextEpisode,
-                icon: const Icon(Icons.play_arrow),
-                label: Text(l10n.playNextEpisode),
-              ),
-            ),
-          ],
         ),
       ),
     );
