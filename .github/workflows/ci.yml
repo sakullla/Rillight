@@ -47,6 +47,7 @@ jobs:
 
       - name: Native package and Linux installer contracts
         run: |
+          python3 -m pip install Pillow==12.1.1
           flutter test packages/rillight_player/test
           python3 tool/player_core_release_checks_test.py
           python3 tool/player_performance_checks_test.py
