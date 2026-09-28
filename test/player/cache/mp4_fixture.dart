@@ -10,6 +10,7 @@ Uint8List progressiveMp4Fixture({
   int videoCompositionOffsetTicks = 0,
   List<int>? videoCompositionOffsetsTicks,
   int? videoEditStartTicks,
+  int? audioEditStartTicks,
   bool secondAudio = false,
   bool includeAudio = true,
 }) {
@@ -18,7 +19,21 @@ Uint8List progressiveMp4Fixture({
     ..._u32(0),
     ...ascii.encode('isom'),
   ]);
-  final mdat = _box('mdat', List.generate(secondAudio ? 24 : 16, (i) => i));
+  if (audioEditStartTicks != null && secondAudio) {
+    throw ArgumentError('Audio edit fixture requires one audio track');
+  }
+  final audioSamples = audioEditStartTicks == null ? 4 : 6;
+  final mdat = _box(
+    'mdat',
+    List.generate(
+      secondAudio
+          ? 24
+          : audioEditStartTicks == null
+          ? 16
+          : 8 + audioSamples * 2,
+      (i) => i,
+    ),
+  );
 
   List<int> track(int id, String kind, int chunkOffset) {
     final tkhd = _box('tkhd', [...List.filled(12, 0), ..._u32(id)]);
@@ -32,7 +47,7 @@ Uint8List progressiveMp4Fixture({
     final stts = _box('stts', [
       ...List.filled(4, 0),
       ..._u32(1),
-      ..._u32(4),
+      ..._u32(kind == 'soun' ? audioSamples : 4),
       ..._u32(kind == 'vide' ? videoTimescale : 1000),
     ]);
     final offsets =
@@ -56,10 +71,14 @@ Uint8List progressiveMp4Fixture({
       ...List.filled(4, 0),
       ..._u32(1),
       ..._u32(1),
-      ..._u32(4),
+      ..._u32(kind == 'soun' ? audioSamples : 4),
       ..._u32(1),
     ]);
-    final stsz = _box('stsz', [...List.filled(4, 0), ..._u32(2), ..._u32(4)]);
+    final stsz = _box('stsz', [
+      ...List.filled(4, 0),
+      ..._u32(2),
+      ..._u32(kind == 'soun' ? audioSamples : 4),
+    ]);
     final stco = _box('stco', [
       ...List.filled(4, 0),
       ..._u32(1),
@@ -85,13 +104,16 @@ Uint8List progressiveMp4Fixture({
     final minf = _box('minf', [...dinf, ...stbl]);
     return _box('trak', [
       ...tkhd,
-      if (kind == 'vide' && videoEditStartTicks != null)
+      if (kind == 'vide' && videoEditStartTicks != null ||
+          kind == 'soun' && audioEditStartTicks != null)
         ..._box('edts', [
           ..._box('elst', [
             ...List.filled(4, 0),
             ..._u32(1),
             ..._u32(4000),
-            ..._u32(videoEditStartTicks),
+            ..._u32(
+              kind == 'vide' ? videoEditStartTicks! : audioEditStartTicks!,
+            ),
             0,
             1,
             0,
@@ -103,7 +125,7 @@ Uint8List progressiveMp4Fixture({
   }
 
   final moov = _box('moov', [
-    if (videoEditStartTicks != null)
+    if (videoEditStartTicks != null || audioEditStartTicks != null)
       ..._box('mvhd', [...List.filled(12, 0), ..._u32(1000)]),
     ...track(1, 'vide', 28),
     if (includeAudio) ...track(2, 'soun', 36),

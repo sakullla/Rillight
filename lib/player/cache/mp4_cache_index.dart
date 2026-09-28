@@ -142,6 +142,7 @@ class Mp4CacheIndex {
         lastBegin = begin;
         final required = <CachedByteRange>[
           ...metadata,
+          if (group == 0 && audio != null) ...audio.leadingBytes,
           for (final sample in segment)
             CachedByteRange(sample.byteStart, sample.byteEnd),
         ];
@@ -299,10 +300,16 @@ class _Sample {
 }
 
 class _Track {
-  const _Track(this.id, this.kind, this.samples);
+  const _Track(
+    this.id,
+    this.kind,
+    this.samples, {
+    this.leadingBytes = const [],
+  });
   final int id;
   final String kind;
   final List<_Sample> samples;
+  final List<CachedByteRange> leadingBytes;
 }
 
 class _FragmentTrack {
@@ -974,6 +981,7 @@ Future<_Track?> _track(
   }
   final toleranceUs = min(1000, (gridTicks * 1000000 + scale - 1) ~/ scale);
   final samples = <_Sample>[];
+  final leadingBytes = <CachedByteRange>[];
   var sample = 0;
   var ticks = 0;
   var layoutIndex = 0;
@@ -997,16 +1005,36 @@ Future<_Track?> _track(
       final endTicks = ticks + durations[sample];
       final startTicks = ticks + (composition?[sample] ?? 0);
       final endPresentationTicks = endTicks + (composition?[sample] ?? 0);
-      final startUs =
+      var startUs =
           (startTicks - (edit?.mediaStart ?? 0)) * 1000000 ~/ scale +
           (edit?.timelineOffsetUs ?? 0);
-      final endUs =
+      var endUs =
           (endPresentationTicks - (edit?.mediaStart ?? 0)) * 1000000 ~/ scale +
           (edit?.timelineOffsetUs ?? 0);
-      if (edit != null &&
-          (startUs < edit.timelineOffsetUs ||
-              endUs > edit.timelineOffsetUs + edit.durationUs)) {
-        return null;
+      if (edit != null) {
+        final editStart = edit.timelineOffsetUs;
+        final editEnd = editStart + edit.durationUs;
+        if (kind == 'soun') {
+          // AAC encoder priming is stored before the edit's audible start.
+          // It must be present for the first playable group, but contributes
+          // no audible time. Encoder padding after the edit contributes none.
+          if (endUs <= editStart || startUs >= editEnd) {
+            if (endUs <= editStart) {
+              if (leadingBytes.length >= 64 || editStart - startUs > 1000000) {
+                return null;
+              }
+              leadingBytes.add(CachedByteRange(cursor, endByte));
+            }
+            cursor = endByte;
+            ticks = endTicks;
+            sample++;
+            continue;
+          }
+          startUs = max(startUs, editStart);
+          endUs = min(endUs, editEnd);
+        } else if (startUs < editStart || endUs > editEnd) {
+          return null;
+        }
       }
       if (endUs <= startUs) return null;
       samples.add(
@@ -1025,7 +1053,7 @@ Future<_Track?> _track(
     }
   }
   if (sample != sizes.length) return null;
-  return _Track(id, kind, samples);
+  return _Track(id, kind, samples, leadingBytes: leadingBytes);
 }
 
 Future<List<int>?> _durations(

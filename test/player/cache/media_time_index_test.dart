@@ -169,6 +169,34 @@ void main() {
     });
 
     test(
+      'AAC edit keeps priming bytes for first GOP and ignores tail padding',
+      () async {
+        final bytes = progressiveMp4Fixture(audioEditStartTicks: 1000);
+        final index = await Mp4CacheIndex.load(
+          total: bytes.length,
+          read: (offset, length) async =>
+              Uint8List.sublistView(bytes, offset, offset + length),
+        );
+        expect(index, isNotNull);
+        List<(int, int)> times(List<CachedByteRange> available) => index!
+            .ranges(available, const Duration(seconds: 4))
+            .map((range) => (range.start.inSeconds, range.end.inSeconds))
+            .toList();
+        expect(times([CachedByteRange(0, bytes.length)]), [(0, 4)]);
+        // The primer is outside audible time but first-GOP decoding needs it.
+        expect(
+          times([CachedByteRange(0, 36), CachedByteRange(38, bytes.length)]),
+          [(2, 4)],
+        );
+        // Trailing encoder padding never expands or invalidates playable time.
+        expect(
+          times([CachedByteRange(0, 46), CachedByteRange(48, bytes.length)]),
+          [(0, 4)],
+        );
+      },
+    );
+
+    test(
       'signed composition offsets require complete presentation groups',
       () async {
         final bytes = progressiveMp4Fixture(
