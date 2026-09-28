@@ -248,6 +248,7 @@ struct VideoScale {
   AVFrame *downloaded = nullptr;
   AVBufferRef *download_context = nullptr;
   ~VideoScale() {
+    buffers->Release();
     av_frame_free(&downloaded);
     av_buffer_unref(&download_context);
   }

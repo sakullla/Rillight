@@ -33,6 +33,15 @@ class VideoBufferPool {
     }
   }
 
+  // Drop retained frames when a playback session ends. Outstanding frames
+  // still return through Recycle and are freed instead of kept for the next
+  // episode.
+  void Release() {
+    std::lock_guard lock(mutex_);
+    available_.clear();
+    size_ = 0;
+  }
+
  private:
   std::mutex mutex_;
   size_t size_ = 0;

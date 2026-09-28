@@ -1,10 +1,13 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/widgets.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/player/buffer_snapshot.dart';
+import 'package:rillight/player/cache/cache_limits.dart';
 import 'package:rillight/player/rillight_video_backend.dart';
 import 'package:rillight/player/playback_models.dart';
 import 'package:rillight/player/player_settings.dart';
@@ -381,6 +384,151 @@ void main() {
       expect(
         snapshots.last.trackVersion,
         greaterThanOrEqualTo(cleared.trackVersion),
+      );
+      expect(backend.bufferSnapshot.unknownReason, isNot('stopped'));
+    },
+  );
+
+  test('stop releases the previous transport before the next open', () async {
+    final temp = await Directory.systemTemp.createTemp('rillight-core-stop-');
+    final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    upstream.listen((request) async {
+      request.response.add(List<int>.filled(1024, 0));
+      await request.response.close();
+    });
+    final drivers = <_CoreDriver>[
+      _CoreDriver(),
+      _CoreDriver(),
+      _CoreDriver(),
+      _CoreDriver(),
+    ];
+    var created = 0;
+    final backend = RillightVideoBackend(
+      settingsStore: MemoryPlayerSettingsStore(),
+      diskCacheDirectory: temp,
+      createPlayer: () async => drivers[created++],
+    );
+    addTearDown(() async {
+      await backend.dispose();
+      await upstream.close(force: true);
+      await temp.delete(recursive: true);
+    });
+
+    Future<void> openEpisode(int sessionId) {
+      return backend.open(
+        VideoOpenRequest(
+          sessionId: sessionId,
+          url: Uri.parse('http://127.0.0.1:${upstream.port}/episode.mp4'),
+        ),
+      );
+    }
+
+    await openEpisode(1);
+    var diagnostics = await backend.diagnostics();
+    expect(diagnostics['transportAttached'], isTrue);
+    expect(diagnostics['memoryLimitBytes'], 8 * 1024 * 1024);
+    expect(diagnostics['pendingLimitBytes'], defaultCachePendingBytes);
+    backend.bufferSnapshot = BufferSnapshot(
+      sessionId: backend.bufferSnapshot.sessionId,
+      resourceId: backend.bufferSnapshot.resourceId,
+      representationVersion: backend.bufferSnapshot.representationVersion,
+      trackVersion: backend.bufferSnapshot.trackVersion,
+      sequence: backend.bufferSnapshot.sequence,
+      ranges: const [BufferedRange(Duration(seconds: 1), Duration(seconds: 2))],
+    );
+
+    await openEpisode(2);
+    expect(drivers[0].disposed, isTrue);
+    expect(drivers[1].disposed, isFalse);
+    diagnostics = await backend.diagnostics();
+    expect(diagnostics['transportAttached'], isTrue);
+    expect(diagnostics['memoryLimitBytes'], 8 * 1024 * 1024);
+    expect(diagnostics['pendingLimitBytes'], defaultCachePendingBytes);
+
+    await openEpisode(3);
+    expect(drivers[1].disposed, isTrue);
+    expect(drivers[2].disposed, isFalse);
+    await backend.stop();
+    expect(drivers[2].disposed, isTrue);
+    expect(backend.bufferSnapshot.ranges, isEmpty);
+    expect(backend.bufferSnapshot.unknownReason, 'stopped');
+    diagnostics = await backend.diagnostics();
+    expect(diagnostics['transportAttached'], isFalse);
+    expect(diagnostics['transportDiagnosticsStatus'], 'detached');
+
+    await openEpisode(4);
+    expect(diagnostics['transportAttached'], isFalse);
+    diagnostics = await backend.diagnostics();
+    expect(diagnostics['transportAttached'], isTrue);
+    expect(diagnostics['memoryLimitBytes'], 8 * 1024 * 1024);
+    expect(diagnostics['pendingLimitBytes'], defaultCachePendingBytes);
+  });
+
+  test(
+    'player-process stop drops playback images and leaves browse cache',
+    () async {
+      final image = Uint8List.fromList(const [1, 2, 3, 4]);
+      Future<Uint8List?> fetch() async => image;
+      const imageId = (
+        serverId: 'server',
+        itemId: 'episode',
+        type: 'Primary',
+        maxWidth: 120,
+      );
+
+      addTearDown(MediaImage.debugResetCacheConfiguration);
+      MediaImageCache.instance.memoryLimitBytes =
+          kPlayerProcessImageCacheMaxBytes;
+      await MediaImageCache.instance.load(
+        serverId: imageId.serverId,
+        itemId: imageId.itemId,
+        type: imageId.type,
+        maxWidth: imageId.maxWidth,
+        fetch: fetch,
+      );
+      expect(
+        MediaImageCache.instance.peek(
+          serverId: imageId.serverId,
+          itemId: imageId.itemId,
+          type: imageId.type,
+          maxWidth: imageId.maxWidth,
+        ),
+        image,
+      );
+
+      final backend = RillightVideoBackend(
+        settingsStore: MemoryPlayerSettingsStore(),
+        createPlayer: () async => _CoreDriver(),
+      );
+      addTearDown(backend.dispose);
+      await backend.stop();
+      expect(
+        MediaImageCache.instance.peek(
+          serverId: imageId.serverId,
+          itemId: imageId.itemId,
+          type: imageId.type,
+          maxWidth: imageId.maxWidth,
+        ),
+        isNull,
+      );
+
+      MediaImage.debugResetCacheConfiguration();
+      await MediaImageCache.instance.load(
+        serverId: imageId.serverId,
+        itemId: imageId.itemId,
+        type: imageId.type,
+        maxWidth: imageId.maxWidth,
+        fetch: fetch,
+      );
+      await backend.stop();
+      expect(
+        MediaImageCache.instance.peek(
+          serverId: imageId.serverId,
+          itemId: imageId.itemId,
+          type: imageId.type,
+          maxWidth: imageId.maxWidth,
+        ),
+        image,
       );
     },
   );

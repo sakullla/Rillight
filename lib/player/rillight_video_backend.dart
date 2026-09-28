@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:rillight/emby/device_profile.dart';
+import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/player/buffer_snapshot.dart';
 import 'package:rillight/player/playback_http_proxy.dart';
 import 'package:rillight/player/playback_models.dart';
@@ -309,7 +310,7 @@ class RillightVideoBackend extends VideoBackend
     _emit(VideoEventKind.bufferSnapshot, bufferSnapshot, generation);
     _emit(VideoEventKind.cacheSpeed, 0.0, generation);
     _openPhase = 'retiringPrevious';
-    await _stopSession(keepAndroidPlayer: true);
+    await _stopSession(keepAndroidPlayer: true, releaseRetainedSnapshot: false);
     if (_disposed || generation != _generation) return;
     try {
       _openPhase = 'settings';
@@ -414,7 +415,10 @@ class RillightVideoBackend extends VideoBackend
             ...?_transport?.localDiagnostics,
           };
         }
-        await _stopSession(keepAndroidPlayer: true);
+        await _stopSession(
+          keepAndroidPlayer: true,
+          releaseRetainedSnapshot: false,
+        );
       }
       rethrow;
     }
@@ -885,7 +889,10 @@ class RillightVideoBackend extends VideoBackend
     _invalidateTrack();
   }
 
-  Future<void> _stopSession({required bool keepAndroidPlayer}) async {
+  Future<void> _stopSession({
+    required bool keepAndroidPlayer,
+    required bool releaseRetainedSnapshot,
+  }) async {
     _diagnosticsTimer?.cancel();
     _diagnosticsTimer = null;
     await _coreEvents?.cancel();
@@ -901,7 +908,32 @@ class RillightVideoBackend extends VideoBackend
     }
     final transport = _transport;
     _transport = null;
+    // Opening the next item already published a reconnecting snapshot.
+    // Only an explicit stop or dispose replaces that with an empty one.
+    if (releaseRetainedSnapshot) {
+      bufferSnapshot = BufferSnapshot.empty(
+        sessionId: _sessionId,
+        resourceId: '',
+        trackVersion: _trackVersion,
+        sequence: _bufferSequence,
+        unknownReason: 'stopped',
+      );
+      _emit(VideoEventKind.bufferSnapshot, bufferSnapshot, _generation);
+    }
+    _releasePlaybackImages();
     await transport?.close();
+  }
+
+  /// The desktop playback process owns a 16 MiB image cache. Android keeps
+  /// posters in the shared browse cache, which is outside this session.
+  void _releasePlaybackImages() {
+    final images = MediaImageCache.instance;
+    if (images.memoryLimitBytes != kPlayerProcessImageCacheMaxBytes) return;
+    images.clearMemory();
+    if (BindingBase.debugBindingType() == null) return;
+    final painting = PaintingBinding.instance.imageCache;
+    painting.clear();
+    painting.clearLiveImages();
   }
 
   @override
@@ -911,7 +943,7 @@ class RillightVideoBackend extends VideoBackend
     ++_generation;
     isPlaying = false;
     _emit(VideoEventKind.cacheSpeed, 0.0, _generation);
-    await _stopSession(keepAndroidPlayer: true);
+    await _stopSession(keepAndroidPlayer: true, releaseRetainedSnapshot: true);
   }
 
   @override
@@ -920,7 +952,7 @@ class RillightVideoBackend extends VideoBackend
     _disposed = true;
     ++_recoveryEpoch;
     ++_generation;
-    await _stopSession(keepAndroidPlayer: false);
+    await _stopSession(keepAndroidPlayer: false, releaseRetainedSnapshot: true);
     await _events.close();
     await _nativeEvents.close();
   }
