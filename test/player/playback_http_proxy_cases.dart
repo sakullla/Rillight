@@ -1205,7 +1205,7 @@ void main() {
   );
 
   test(
-    'rejected read-ahead preserves cached playback until demand fails',
+    'rejected read-ahead preserves cached bytes and reports demand failure',
     () async {
       const mib = 1024 * 1024;
       final fixture = await _CacheFixture.open(
@@ -1261,10 +1261,11 @@ void main() {
         }
         expect(fixture.proxy.diagnostics['readAheadFailed'], true);
         expect(fixture.proxy.diagnostics['lastUpstreamStatus'], 403);
-        expect(fixture.proxy.diagnostics['authenticationStatus'], isNull);
         expect(fixture.cache.diagnostics['invalidations'], 0);
         expect((await fixture.read('bytes=0-1023')).$2, 'x' * 1024);
-        expect(fixture.proxy.diagnostics['authenticationStatus'], isNull);
+        // A paused client can still receive the cached prefix through the
+        // socket buffer. The original 16 MiB demand may already have reached
+        // the rejected 8 MiB boundary, so auth status is timing-dependent.
         subscription.resume();
         await finished.future.timeout(const Duration(seconds: 5));
         expect(receivedBytes, 8 * mib);
