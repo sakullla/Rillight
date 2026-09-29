@@ -178,13 +178,13 @@ abstract class AppLocalizations {
   /// **'隐藏密码'**
   String get hidePassword;
 
-  /// Optional HTTP User-Agent for a server line.
+  /// Optional HTTP User-Agent for a saved server.
   ///
   /// In zh, this message translates to:
   /// **'User-Agent'**
   String get userAgent;
 
-  /// Hint that a line User-Agent is optional.
+  /// Hint that the server User-Agent is optional.
   ///
   /// In zh, this message translates to:
   /// **'可选，留空则使用默认'**

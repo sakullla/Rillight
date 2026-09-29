@@ -599,7 +599,8 @@ class EmbyClient {
   }
 
   /// 整文件下载。字幕提取不走播放代理,避免 Range 和短超时把转换请求掐掉。
-  /// 请求头用 [sessionHeaders],其中 User-Agent 是这条服务器线路上配置的值。
+  /// 请求头用 [sessionHeaders],其中 User-Agent 是该服务器级配置的值;
+  /// 跨域跳转后仍携带同一 User-Agent,但不再携带会话鉴权头。
   /// 服务器第一次提取会跑 ffmpeg,失败后缓存往往已就绪,因此超时和 5xx 再试。
   Future<List<int>> readAuthorizedBytes(
     Uri uri, {
@@ -651,6 +652,7 @@ class EmbyClient {
                         {301, 302, 303, 307, 308}.contains(status)),
                 headers: {
                   if (sameOrigin) ...authorizedHeaders,
+                  'User-Agent': userAgent,
                   'Accept': '*/*',
                 },
               ),

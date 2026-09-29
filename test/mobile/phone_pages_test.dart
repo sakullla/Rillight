@@ -177,10 +177,7 @@ void main() {
           auth.savedServers.single.lines.map((line) => line.address),
           contains('http://backup.test:8096'),
         );
-        expect(
-          auth.savedServers.single.activeLine?.normalizedUserAgent,
-          'CustomUA/1.0',
-        );
+        expect(auth.savedServers.single.normalizedUserAgent, 'CustomUA/1.0');
         expect(server.lastUserAgent, 'CustomUA/1.0');
         expect(tester.takeException(), isNull);
       },

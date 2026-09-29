@@ -358,7 +358,7 @@ void main() {
 
     expect(server.lastUserAgent, 'Rillight/0.1.0');
     expect(auth.client.userAgent, 'Rillight/0.1.0');
-    expect(auth.savedServers.single.lines.single.normalizedUserAgent, isNull);
+    expect(auth.savedServers.single.normalizedUserAgent, isNull);
   });
 
   test(
@@ -398,7 +398,7 @@ void main() {
   );
 
   test(
-    'switchTo a line with a different UA sends that UA on later requests',
+    'switchTo a line keeps the server User-Agent on later requests',
     () async {
       final wan = FakeEmbyServer(
         serverId: server.serverId,
@@ -420,6 +420,7 @@ void main() {
         userAgent: 'WanUA/2',
       );
       expect(auth.client.userAgent, 'WanUA/2');
+      expect(auth.savedServers.single.normalizedUserAgent, 'WanUA/2');
 
       final lanLine = auth.savedServers.single.lines.firstWhere(
         (line) => line.address == server.baseUrl.toString(),
@@ -428,41 +429,12 @@ void main() {
 
       expect(auth.isLoggedIn, isTrue);
       expect(auth.client.baseUrl, server.baseUrl);
-      expect(auth.client.userAgent, 'LanUA/1');
+      // User-Agent is server-level: switching lines keeps the server's UA.
+      expect(auth.client.userAgent, 'WanUA/2');
       await auth.client.getJson('/System/Info');
-      expect(server.lastUserAgent, 'LanUA/1');
+      expect(server.lastUserAgent, 'WanUA/2');
     },
   );
-
-  test('switchTo an empty-UA line uses Rillight/version', () async {
-    final wan = FakeEmbyServer(
-      serverId: server.serverId,
-      serverName: server.serverName,
-      baseUrl: Uri.parse('http://emby-wan.test:8096'),
-    );
-    adapter.add(wan);
-    final auth = controller();
-    await auth.connect(
-      address: server.baseUrl.toString(),
-      username: 'alice',
-      password: 'correct-horse',
-    );
-    await auth.connect(
-      address: wan.baseUrl.toString(),
-      username: 'alice',
-      password: 'correct-horse',
-      userAgent: 'WanUA/2',
-    );
-
-    final lanLine = auth.savedServers.single.lines.firstWhere(
-      (line) => line.address == server.baseUrl.toString(),
-    );
-    await auth.switchTo(server.serverId, lineId: lanLine.id);
-
-    expect(auth.client.userAgent, 'Rillight/0.1.0');
-    await auth.client.getJson('/System/Info');
-    expect(server.lastUserAgent, 'Rillight/0.1.0');
-  });
 
   test(
     'deleteLine of the active line remounts client onto the remaining line',
@@ -497,9 +469,10 @@ void main() {
       expect(auth.isLoggedIn, isTrue);
       expect(auth.savedServers.single.lines, hasLength(1));
       expect(auth.client.baseUrl, server.baseUrl);
-      expect(auth.client.userAgent, 'LanUA/1');
+      // Deleting a line keeps the server-level User-Agent.
+      expect(auth.client.userAgent, 'WanUA/2');
       await auth.client.getJson('/System/Info');
-      expect(server.lastUserAgent, 'LanUA/1');
+      expect(server.lastUserAgent, 'WanUA/2');
     },
   );
 

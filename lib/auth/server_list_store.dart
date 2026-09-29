@@ -3,19 +3,10 @@ import 'dart:io';
 import 'dart:math';
 
 class ServerLine {
-  const ServerLine({required this.id, required this.address, this.userAgent});
+  const ServerLine({required this.id, required this.address});
 
   final String id;
   final String address;
-  final String? userAgent;
-
-  String? get normalizedUserAgent {
-    final value = userAgent?.trim();
-    if (value == null || value.isEmpty) {
-      return null;
-    }
-    return value;
-  }
 
   String get hostLabel {
     final uri = Uri.tryParse(address);
@@ -25,11 +16,7 @@ class ServerLine {
     return uri.hasPort ? '${uri.host}:${uri.port}' : uri.host;
   }
 
-  Map<String, dynamic> toJson() => {
-    'id': id,
-    'address': address,
-    if (normalizedUserAgent != null) 'userAgent': normalizedUserAgent,
-  };
+  Map<String, dynamic> toJson() => {'id': id, 'address': address};
 
   factory ServerLine.fromJson(Map<String, dynamic> json) {
     final id = json['id']?.toString() ?? '';
@@ -38,16 +25,11 @@ class ServerLine {
     return ServerLine(
       id: id.isNotEmpty ? id : 'line-$address',
       address: address,
-      userAgent: json['userAgent']?.toString(),
     );
   }
 
-  ServerLine copyWith({String? id, String? address, String? userAgent}) {
-    return ServerLine(
-      id: id ?? this.id,
-      address: address ?? this.address,
-      userAgent: userAgent ?? this.userAgent,
-    );
+  ServerLine copyWith({String? id, String? address}) {
+    return ServerLine(id: id ?? this.id, address: address ?? this.address);
   }
 }
 
@@ -58,6 +40,7 @@ class SavedServer {
     required this.username,
     required this.lines,
     this.activeLineId,
+    this.userAgent,
   });
 
   final String id;
@@ -65,6 +48,17 @@ class SavedServer {
   final String username;
   final List<ServerLine> lines;
   final String? activeLineId;
+
+  /// Server-level HTTP User-Agent; every line of this server shares it.
+  final String? userAgent;
+
+  String? get normalizedUserAgent {
+    final value = userAgent?.trim();
+    if (value == null || value.isEmpty) {
+      return null;
+    }
+    return value;
+  }
 
   ServerLine? get activeLine {
     if (lines.isEmpty) {
@@ -87,6 +81,7 @@ class SavedServer {
     'name': name,
     'username': username,
     'activeLineId': activeLineId,
+    if (normalizedUserAgent != null) 'userAgent': normalizedUserAgent,
     'lines': lines.map((line) => line.toJson()).toList(),
   };
 
@@ -110,15 +105,54 @@ class SavedServer {
       }
     }
     final activeLineId = json['activeLineId']?.toString();
+    final resolvedActiveLineId =
+        (activeLineId != null && activeLineId.isNotEmpty)
+        ? activeLineId
+        : (lines.isNotEmpty ? lines.first.id : null);
     return SavedServer(
       id: json['id']?.toString() ?? '',
       name: json['name']?.toString() ?? '',
       username: json['username']?.toString() ?? '',
       lines: lines,
-      activeLineId: (activeLineId != null && activeLineId.isNotEmpty)
-          ? activeLineId
-          : (lines.isNotEmpty ? lines.first.id : null),
+      activeLineId: resolvedActiveLineId,
+      userAgent: _resolveUserAgent(json, resolvedActiveLineId),
     );
+  }
+
+  /// Old JSON stored User-Agent per line; migrate the active line's value to
+  /// the server level and leave lines carrying only addresses.
+  static String? _resolveUserAgent(
+    Map<String, dynamic> json,
+    String? activeLineId,
+  ) {
+    final serverLevel = json['userAgent']?.toString().trim();
+    if (serverLevel != null && serverLevel.isNotEmpty) {
+      return serverLevel;
+    }
+    final rawLines = json['lines'];
+    if (rawLines is! List) {
+      return null;
+    }
+    String? first;
+    for (var i = 0; i < rawLines.length; i++) {
+      final item = rawLines[i];
+      if (item is! Map) {
+        continue;
+      }
+      final value = item['userAgent']?.toString().trim();
+      if (value == null || value.isEmpty) {
+        continue;
+      }
+      first ??= value;
+      final id = item['id']?.toString();
+      final address =
+          item['address']?.toString() ?? item['baseUrl']?.toString() ?? '';
+      final lineId = (id != null && id.isNotEmpty) ? id : 'line-$address';
+      if (lineId == activeLineId) {
+        return value;
+      }
+    }
+    return first;
   }
 
   SavedServer copyWith({
@@ -127,6 +161,7 @@ class SavedServer {
     String? username,
     List<ServerLine>? lines,
     String? activeLineId,
+    String? userAgent,
   }) {
     return SavedServer(
       id: id ?? this.id,
@@ -134,6 +169,7 @@ class SavedServer {
       username: username ?? this.username,
       lines: lines ?? this.lines,
       activeLineId: activeLineId ?? this.activeLineId,
+      userAgent: userAgent ?? this.userAgent,
     );
   }
 }

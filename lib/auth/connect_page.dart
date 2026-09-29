@@ -122,7 +122,7 @@ class _ConnectPageState extends State<ConnectPage> {
     _selectedLineId = server.activeLine?.id;
     _address.text = server.baseUrl;
     _path.clear();
-    _userAgent.text = server.activeLine?.normalizedUserAgent ?? '';
+    _userAgent.text = server.normalizedUserAgent ?? '';
     _username.text = server.username;
     _password.clear();
     _saveDraft();
@@ -195,7 +195,7 @@ class _ConnectPageState extends State<ConnectPage> {
         if (extra.text.trim().isNotEmpty) extra.text,
     ];
     if (extras.isNotEmpty) {
-      await auth.appendLines(extras, userAgent: _userAgent.text);
+      await auth.appendLines(extras);
     }
     if (!mounted || !auth.isLoggedIn) {
       return;
@@ -757,7 +757,8 @@ class _ConnectPageState extends State<ConnectPage> {
       _selectedLineId = line.id;
       _address.text = line.address;
       _path.clear();
-      _userAgent.text = line.normalizedUserAgent ?? '';
+      // User-Agent is server-level; selecting a line only changes the address.
+      _userAgent.text = server.normalizedUserAgent ?? '';
       _username.text = server.username;
       _password.clear();
       _saveDraft();

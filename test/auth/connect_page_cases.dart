@@ -217,4 +217,53 @@ void main() {
     expect(auth.isLoggedIn, isFalse);
     expect(auth.client.baseUrl, isNull);
   }, tags: ['integration']);
+
+  testWidgets('login saves the User-Agent at the server level', (tester) async {
+    final auth = controller();
+    await tester.pumpWidget(RillightApp(auth: auth));
+    await _settle(tester);
+
+    await _enter(
+      tester,
+      address: server.baseUrl.toString(),
+      username: 'alice',
+      password: 'correct-horse',
+    );
+    await _tapVisible(tester, find.byKey(ConnectFormKeys.more));
+    await tester.enterText(
+      find.byKey(ConnectFormKeys.userAgent),
+      '  CustomUA/1.0  ',
+    );
+    await tester.tap(find.byKey(ConnectFormKeys.submit));
+    await _settle(tester);
+
+    expect(auth.isLoggedIn, isTrue);
+    final saved = auth.savedServers.single;
+    expect(saved.normalizedUserAgent, 'CustomUA/1.0');
+    for (final line in saved.lines) {
+      expect(line.toJson().containsKey('userAgent'), isFalse);
+    }
+    expect(auth.client.sessionHeaders['User-Agent'], 'CustomUA/1.0');
+
+    await tester.tap(find.byKey(SessionActions.serverMenuKey));
+    await _settle(tester);
+    await tester.tap(find.text('退出登录'));
+    await _settle(tester);
+
+    // Selecting the saved server fills the server-level UA back into the form.
+    await tester.enterText(find.byKey(ConnectFormKeys.address), '');
+    await _tapVisible(
+      tester,
+      find.byKey(Key('saved-server-${server.serverId}')),
+    );
+    await _settle(tester);
+    await _tapVisible(tester, find.byKey(ConnectFormKeys.more));
+    expect(
+      tester
+          .widget<TextField>(find.byKey(ConnectFormKeys.userAgent))
+          .controller
+          ?.text,
+      'CustomUA/1.0',
+    );
+  }, tags: ['integration']);
 }

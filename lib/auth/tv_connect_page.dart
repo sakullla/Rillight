@@ -34,7 +34,7 @@ class _TvConnectPageState extends State<TvConnectPage> {
       final server = auth.prefill!;
       draft.address = server.baseUrl;
       draft.username = server.username;
-      draft.userAgent = server.activeLine?.normalizedUserAgent ?? '';
+      draft.userAgent = server.normalizedUserAgent ?? '';
       draft.selectedServerId = server.id;
       draft.selectedLineId = server.activeLine?.id;
     }
@@ -63,7 +63,7 @@ class _TvConnectPageState extends State<TvConnectPage> {
     _address.text = server.baseUrl;
     _username.text = server.username;
     _password.clear();
-    _userAgent.text = server.activeLine?.normalizedUserAgent ?? '';
+    _userAgent.text = server.normalizedUserAgent ?? '';
     AuthScope.of(context).selectSavedServer(server.id);
   }
 

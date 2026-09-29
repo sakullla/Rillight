@@ -49,11 +49,11 @@
   },
   "userAgent": "User-Agent",
   "@userAgent": {
-    "description": "Optional HTTP User-Agent for a server line."
+    "description": "Optional HTTP User-Agent for a saved server."
   },
   "userAgentHint": "可选，留空则使用默认",
   "@userAgentHint": {
-    "description": "Hint that a line User-Agent is optional."
+    "description": "Hint that the server User-Agent is optional."
   },
   "connect": "连接",
   "@connect": {

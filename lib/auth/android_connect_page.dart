@@ -46,7 +46,7 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
       final server = auth.prefill!;
       draft.address = server.baseUrl;
       draft.username = server.username;
-      draft.userAgent = server.activeLine?.normalizedUserAgent ?? '';
+      draft.userAgent = server.normalizedUserAgent ?? '';
       draft.selectedServerId = server.id;
       draft.selectedLineId = server.activeLine?.id;
     }
@@ -113,7 +113,7 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
     _path.clear();
     _username.text = server.username;
     _password.clear();
-    _userAgent.text = server.activeLine?.normalizedUserAgent ?? '';
+    _userAgent.text = server.normalizedUserAgent ?? '';
   }
 
   void _select(SavedServer server) {
@@ -156,7 +156,7 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
         if (extra.text.trim().isNotEmpty) extra.text,
     ];
     if (extras.isNotEmpty) {
-      await auth.appendLines(extras, userAgent: _userAgent.text);
+      await auth.appendLines(extras);
     }
     if (!mounted || !auth.isLoggedIn) {
       return;

@@ -206,7 +206,7 @@ class AuthController extends ChangeNotifier {
     final changingLine = sameServer && requestedLineId != currentLineId;
     if (stored != null && stored.accessToken.isNotEmpty) {
       if (changingLine) {
-        client.setUserAgent(server.activeLine?.userAgent);
+        // User-Agent is server-level: switching lines keeps the server's UA.
         try {
           await client.getPublicInfo(Uri.parse(server.baseUrl));
         } on EmbyException catch (error) {
@@ -254,10 +254,7 @@ class AuthController extends ChangeNotifier {
   }
 
   /// 给当前已登录服务器追加备用线路,不切换正在使用的地址。
-  Future<void> appendLines(
-    Iterable<String> addresses, {
-    String? userAgent,
-  }) async {
+  Future<void> appendLines(Iterable<String> addresses) async {
     final current = _session?.server;
     if (current == null) {
       return;
@@ -280,7 +277,6 @@ class AuthController extends ChangeNotifier {
           name: server.name,
           username: server.username,
           address: url,
-          userAgent: userAgent,
         ).copyWith(activeLineId: current.activeLineId);
         changed = true;
       } on EmbyException {
@@ -369,7 +365,10 @@ class AuthController extends ChangeNotifier {
     String? userAgent,
     String? lineId,
   }) {
-    final normalizedUa = normalizeUserAgent(userAgent);
+    // The form's User-Agent belongs to the server, not to a single line.
+    final normalizedUa = userAgent != null
+        ? normalizeUserAgent(userAgent)
+        : existing?.userAgent;
     final lines = existing == null
         ? <ServerLine>[]
         : [for (final line in existing.lines) line];
@@ -382,17 +381,12 @@ class AuthController extends ChangeNotifier {
     }
     late final ServerLine line;
     if (index >= 0) {
-      line = ServerLine(
-        id: lines[index].id,
-        address: address,
-        userAgent: normalizedUa,
-      );
+      line = ServerLine(id: lines[index].id, address: address);
       lines[index] = line;
     } else {
       line = ServerLine(
         id: (lineId != null && lineId.isNotEmpty) ? lineId : generateLineId(),
         address: address,
-        userAgent: normalizedUa,
       );
       lines.add(line);
     }
@@ -402,6 +396,7 @@ class AuthController extends ChangeNotifier {
       username: username,
       lines: lines,
       activeLineId: line.id,
+      userAgent: normalizedUa,
     );
   }
 
@@ -416,7 +411,7 @@ class AuthController extends ChangeNotifier {
       baseUrl: Uri.parse(server.baseUrl),
       accessToken: stored.accessToken,
       userId: stored.userId,
-      userAgent: server.activeLine?.userAgent,
+      userAgent: server.normalizedUserAgent,
     );
   }
 
@@ -452,7 +447,7 @@ class AuthController extends ChangeNotifier {
       return false;
     }
     try {
-      client.setUserAgent(session.server.activeLine?.userAgent);
+      client.setUserAgent(session.server.normalizedUserAgent);
       final auth = await client.authenticateByName(
         baseUrl: Uri.parse(session.server.baseUrl),
         username: stored.username,
