@@ -3,8 +3,11 @@ import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/emby_mark.dart';
 import 'package:rillight/app/widgets/liquid_glass.dart';
+import 'package:rillight/auth/library_counts_panel.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/auth/session_actions.dart';
+import 'package:rillight/emby/emby_client.dart';
+import 'package:rillight/emby/emby_errors.dart';
 
 /// 可搜索的服务器切换面板,按条目构建,面向上百台服务器。
 class ServerSwitcherDialog extends StatefulWidget {
@@ -18,6 +21,9 @@ class ServerSwitcherDialog extends StatefulWidget {
     required this.onLogout,
     required this.onDelete,
     required this.onChangePassword,
+    this.libraryCounts,
+    this.libraryCountsLoading = false,
+    this.libraryCountsFailure,
   });
 
   final List<SavedServer> servers;
@@ -32,6 +38,11 @@ class ServerSwitcherDialog extends StatefulWidget {
 
   /// 修改当前登录用户的密码。
   final VoidCallback onChangePassword;
+
+  /// 当前服务器的库规模;三者全空时不展示该块。
+  final LibraryCounts? libraryCounts;
+  final bool libraryCountsLoading;
+  final EmbyException? libraryCountsFailure;
 
   static const searchField = Key('server-switcher-search');
   static const deleteConfirmKey = Key('server-delete-confirm');
@@ -109,6 +120,16 @@ class _ServerSwitcherDialogState extends State<ServerSwitcherDialog> {
                   l10n.switchServer,
                   style: Theme.of(context).textTheme.titleLarge,
                 ),
+                if (widget.libraryCounts != null ||
+                    widget.libraryCountsLoading ||
+                    widget.libraryCountsFailure != null) ...[
+                  const SizedBox(height: AppSpacing.xs),
+                  LibraryCountsPanel(
+                    counts: widget.libraryCounts,
+                    loading: widget.libraryCountsLoading,
+                    failure: widget.libraryCountsFailure,
+                  ),
+                ],
                 const SizedBox(height: AppSpacing.sm),
                 TextField(
                   key: ServerSwitcherDialog.searchField,

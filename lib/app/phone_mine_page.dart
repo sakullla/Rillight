@@ -12,6 +12,7 @@ import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/auth/change_password_dialog.dart';
 import 'package:rillight/auth/failure_message.dart';
+import 'package:rillight/auth/library_counts_panel.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/player/player_bindings.dart';
@@ -517,6 +518,21 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
                 child: Text(l10n.logout),
               ),
               const SizedBox(height: AppSpacing.md),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.xl),
+          _group(
+            context,
+            title: l10n.librarySize,
+            children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
+                child: LibraryCountsPanel(
+                  counts: auth.libraryCounts,
+                  loading: auth.libraryCountsLoading,
+                  failure: auth.libraryCountsFailure,
+                ),
+              ),
             ],
           ),
           const SizedBox(height: AppSpacing.xl),

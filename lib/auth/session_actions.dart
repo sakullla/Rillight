@@ -67,6 +67,9 @@ class SessionActions extends StatelessWidget {
               servers: auth.savedServers,
               activeServerId: auth.session?.server.id,
               activeLineId: auth.session?.server.activeLineId,
+              libraryCounts: auth.libraryCounts,
+              libraryCountsLoading: auth.libraryCountsLoading,
+              libraryCountsFailure: auth.libraryCountsFailure,
               onSelect: (serverId, lineId) {
                 Navigator.of(dialogContext).pop();
                 unawaited(

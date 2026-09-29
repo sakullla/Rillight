@@ -40,6 +40,67 @@ Dio _createEmbyDio({
   return dio;
 }
 
+/// `/Items/Counts` 返回中除电影/剧集/单集外的一类条目数量。
+class LibraryCountEntry {
+  const LibraryCountEntry({required this.type, required this.count});
+
+  /// 服务器返回的类型名(字段名去掉 `Count` 后缀),如 `MusicAlbum`、`Photo`。
+  final String type;
+
+  /// 该类型的条目数量;为 0 也保留,由界面照常展示。
+  final int count;
+}
+
+/// 当前登录用户可见的库规模,来自 `GET /Items/Counts`。
+///
+/// 电影/剧集/单集固定成员,响应缺失时按 0 处理;其余类型仅收录服务器
+/// 实际返回的字段(0 也收录),顺序与响应一致。
+class LibraryCounts {
+  const LibraryCounts({
+    required this.movie,
+    required this.series,
+    required this.episode,
+    required this.others,
+  });
+
+  final int movie;
+  final int series;
+  final int episode;
+  final List<LibraryCountEntry> others;
+
+  factory LibraryCounts.fromJson(Map<String, dynamic> json) {
+    var movie = 0, series = 0, episode = 0;
+    final others = <LibraryCountEntry>[];
+    for (final entry in json.entries) {
+      final value = entry.value;
+      if (value is! num || !entry.key.endsWith('Count')) {
+        continue;
+      }
+      final type = entry.key.substring(0, entry.key.length - 'Count'.length);
+      if (type.isEmpty) {
+        continue;
+      }
+      final count = value.toInt();
+      switch (type) {
+        case 'Movie':
+          movie = count;
+        case 'Series':
+          series = count;
+        case 'Episode':
+          episode = count;
+        default:
+          others.add(LibraryCountEntry(type: type, count: count));
+      }
+    }
+    return LibraryCounts(
+      movie: movie,
+      series: series,
+      episode: episode,
+      others: others,
+    );
+  }
+}
+
 class EmbyClient {
   EmbyClient({
     required this.device,
@@ -443,6 +504,13 @@ class EmbyClient {
   Future<EmbyUser> getUser() async {
     final data = await getJson('/Users/${_requireUserId()}');
     return EmbyUser.fromJson(data);
+  }
+
+  /// 当前登录用户可见的库规模统计。失败/无权限按 [EmbyException] 抛出,
+  /// 由调用方决定留在原界面并展示原因。
+  Future<LibraryCounts> getItemCounts() async {
+    final data = await getJson('/Items/Counts');
+    return LibraryCounts.fromJson(data);
   }
 
   /// 修改当前登录用户的密码。旧密码可留空照常提交,是否要求由服务器裁决。

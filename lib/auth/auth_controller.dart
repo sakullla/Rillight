@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:rillight/auth/connect_draft.dart';
 import 'package:rillight/auth/credential_store.dart';
@@ -68,6 +70,12 @@ class AuthController extends ChangeNotifier {
   LineSwitchFailure? _lineSwitchFailure;
   bool _busy = false;
   bool _handlingExpiry = false;
+  LibraryCounts? _libraryCounts;
+  EmbyException? _libraryCountsFailure;
+  String? _libraryCountsServerId;
+  bool _libraryCountsLoading = false;
+  int _libraryCountsSeq = 0;
+  bool _disposed = false;
 
   AuthSession? get session => _session;
   List<SavedServer> get savedServers => _savedServers;
@@ -76,6 +84,79 @@ class AuthController extends ChangeNotifier {
   LineSwitchFailure? get lineSwitchFailure => _lineSwitchFailure;
   bool get isBusy => _busy;
   bool get isLoggedIn => _session != null;
+
+  /// 当前服务器的库规模;加载中为 null,界面不得把加载态显示成 0。
+  LibraryCounts? get libraryCounts => _libraryCounts;
+
+  /// 最近一次库规模拉取失败的原因;成功或开始新一次拉取时清空。
+  EmbyException? get libraryCountsFailure => _libraryCountsFailure;
+
+  /// 库规模所属的服务器;切换服务器后随新一轮拉取更新。
+  String? get libraryCountsServerId => _libraryCountsServerId;
+
+  bool get libraryCountsLoading => _libraryCountsLoading;
+
+  /// 拉取当前服务器的库规模,供服务器管理界面展示。
+  ///
+  /// 独立于登录/切换的 busy 状态:失败只记录原因,会话与登录态不变;
+  /// 加载期间 [libraryCounts] 置空,避免把未知显示成 0。切换服务器使
+  /// 序号失效后,旧响应直接丢弃。
+  Future<void> loadLibraryCounts() async {
+    final session = _session;
+    if (_disposed || session == null) {
+      return;
+    }
+    final seq = ++_libraryCountsSeq;
+    _libraryCounts = null;
+    _libraryCountsFailure = null;
+    _libraryCountsLoading = true;
+    notifyListeners();
+    try {
+      final counts = await client.getItemCounts();
+      if (_disposed || !_countsStillCurrent(seq, session)) {
+        return;
+      }
+      _libraryCounts = counts;
+      _libraryCountsServerId = session.server.id;
+    } on EmbyException catch (error) {
+      if (_disposed || !_countsStillCurrent(seq, session)) {
+        return;
+      }
+      _libraryCountsFailure = error;
+    } catch (error) {
+      if (_disposed || !_countsStillCurrent(seq, session)) {
+        return;
+      }
+      _libraryCountsFailure = EmbyException(
+        EmbyFailureKind.unknown,
+        detail: error.toString(),
+        cause: error,
+      );
+    } finally {
+      if (!_disposed && _countsStillCurrent(seq, session)) {
+        _libraryCountsLoading = false;
+        notifyListeners();
+      }
+    }
+  }
+
+  bool _countsStillCurrent(int seq, AuthSession captured) {
+    if (seq != _libraryCountsSeq) {
+      return false;
+    }
+    final current = _session;
+    return current != null &&
+        current.server.id == captured.server.id &&
+        current.userId == captured.userId;
+  }
+
+  void _resetLibraryCounts() {
+    _libraryCountsSeq++;
+    _libraryCounts = null;
+    _libraryCountsFailure = null;
+    _libraryCountsServerId = null;
+    _libraryCountsLoading = false;
+  }
 
   Future<void> restore() async {
     final snapshot = await servers.load();
@@ -147,6 +228,7 @@ class AuthController extends ChangeNotifier {
       _failure = error;
       _session = null;
       client.clearSession();
+      _resetLibraryCounts();
     } catch (error) {
       _failure = EmbyException(
         EmbyFailureKind.unknown,
@@ -155,6 +237,7 @@ class AuthController extends ChangeNotifier {
       );
       _session = null;
       client.clearSession();
+      _resetLibraryCounts();
     } finally {
       _busy = false;
       notifyListeners();
@@ -177,6 +260,7 @@ class AuthController extends ChangeNotifier {
       _session = null;
       _failure = null;
       connectDraft = null;
+      _resetLibraryCounts();
       if (current != null) {
         await credentials.delete(current.server.id);
       }
@@ -254,6 +338,7 @@ class AuthController extends ChangeNotifier {
     _prefill = server;
     _failure = null;
     _lineSwitchFailure = null;
+    _resetLibraryCounts();
     notifyListeners();
   }
 
@@ -389,6 +474,7 @@ class AuthController extends ChangeNotifier {
       _failure = null;
       _lineSwitchFailure = null;
       connectDraft = null;
+      _resetLibraryCounts();
     }
     notifyListeners();
   }
@@ -534,6 +620,8 @@ class AuthController extends ChangeNotifier {
       userId: stored.userId,
       userAgent: server.normalizedUserAgent,
     );
+    // 会话指向(或换到)一台服务器后刷新库规模;后台进行,不阻塞登录/切换。
+    unawaited(loadLibraryCounts());
   }
 
   SavedServer? _serverById(String id) {
@@ -616,12 +704,15 @@ class AuthController extends ChangeNotifier {
     client.clearSession();
     _prefill = current.server;
     _failure = const EmbyException(EmbyFailureKind.sessionExpired);
+    _resetLibraryCounts();
     notifyListeners();
     _handlingExpiry = false;
   }
 
   @override
   void dispose() {
+    _disposed = true;
+    _resetLibraryCounts();
     connectDraft = null;
     super.dispose();
   }

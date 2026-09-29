@@ -328,6 +328,102 @@ abstract class AppLocalizations {
   /// **'{count} 条线路'**
   String lineCount(int count);
 
+  /// Server management section for the current server's item counts.
+  ///
+  /// In zh, this message translates to:
+  /// **'库规模'**
+  String get librarySize;
+
+  /// Busy label while item counts are loading; must not show 0.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在获取库规模…'**
+  String get libraryCountLoading;
+
+  /// Movie count label in the server library size section.
+  ///
+  /// In zh, this message translates to:
+  /// **'电影'**
+  String get libraryCountMovie;
+
+  /// Series count label in the server library size section.
+  ///
+  /// In zh, this message translates to:
+  /// **'剧集'**
+  String get libraryCountSeries;
+
+  /// Episode count label in the server library size section.
+  ///
+  /// In zh, this message translates to:
+  /// **'单集'**
+  String get libraryCountEpisode;
+
+  /// Season count label in the server library size section.
+  ///
+  /// In zh, this message translates to:
+  /// **'季'**
+  String get libraryTypeSeason;
+
+  /// Trailer count label in the server library size section.
+  ///
+  /// In zh, this message translates to:
+  /// **'预告片'**
+  String get libraryTypeTrailer;
+
+  /// Music album count label in the server library size section.
+  ///
+  /// In zh, this message translates to:
+  /// **'音乐专辑'**
+  String get libraryTypeMusicAlbum;
+
+  /// Music artist count label in the server library size section.
+  ///
+  /// In zh, this message translates to:
+  /// **'音乐艺人'**
+  String get libraryTypeMusicArtist;
+
+  /// Song count label in the server library size section.
+  ///
+  /// In zh, this message translates to:
+  /// **'歌曲'**
+  String get libraryTypeSong;
+
+  /// Music video count label in the server library size section.
+  ///
+  /// In zh, this message translates to:
+  /// **'音乐视频'**
+  String get libraryTypeMusicVideo;
+
+  /// Book count label in the server library size section.
+  ///
+  /// In zh, this message translates to:
+  /// **'图书'**
+  String get libraryTypeBook;
+
+  /// Photo count label in the server library size section.
+  ///
+  /// In zh, this message translates to:
+  /// **'照片'**
+  String get libraryTypePhoto;
+
+  /// Box set count label in the server library size section.
+  ///
+  /// In zh, this message translates to:
+  /// **'合集'**
+  String get libraryTypeBoxSet;
+
+  /// Game count label in the server library size section.
+  ///
+  /// In zh, this message translates to:
+  /// **'游戏'**
+  String get libraryTypeGame;
+
+  /// Audio podcast count label in the server library size section.
+  ///
+  /// In zh, this message translates to:
+  /// **'播客'**
+  String get libraryTypeAudioPodcast;
+
   /// Volume slider on the player controls.
   ///
   /// In zh, this message translates to:

@@ -157,6 +157,70 @@
       }
     }
   },
+  "librarySize": "库规模",
+  "@librarySize": {
+    "description": "Server management section for the current server's item counts."
+  },
+  "libraryCountLoading": "正在获取库规模…",
+  "@libraryCountLoading": {
+    "description": "Busy label while item counts are loading; must not show 0."
+  },
+  "libraryCountMovie": "电影",
+  "@libraryCountMovie": {
+    "description": "Movie count label in the server library size section."
+  },
+  "libraryCountSeries": "剧集",
+  "@libraryCountSeries": {
+    "description": "Series count label in the server library size section."
+  },
+  "libraryCountEpisode": "单集",
+  "@libraryCountEpisode": {
+    "description": "Episode count label in the server library size section."
+  },
+  "libraryTypeSeason": "季",
+  "@libraryTypeSeason": {
+    "description": "Season count label in the server library size section."
+  },
+  "libraryTypeTrailer": "预告片",
+  "@libraryTypeTrailer": {
+    "description": "Trailer count label in the server library size section."
+  },
+  "libraryTypeMusicAlbum": "音乐专辑",
+  "@libraryTypeMusicAlbum": {
+    "description": "Music album count label in the server library size section."
+  },
+  "libraryTypeMusicArtist": "音乐艺人",
+  "@libraryTypeMusicArtist": {
+    "description": "Music artist count label in the server library size section."
+  },
+  "libraryTypeSong": "歌曲",
+  "@libraryTypeSong": {
+    "description": "Song count label in the server library size section."
+  },
+  "libraryTypeMusicVideo": "音乐视频",
+  "@libraryTypeMusicVideo": {
+    "description": "Music video count label in the server library size section."
+  },
+  "libraryTypeBook": "图书",
+  "@libraryTypeBook": {
+    "description": "Book count label in the server library size section."
+  },
+  "libraryTypePhoto": "照片",
+  "@libraryTypePhoto": {
+    "description": "Photo count label in the server library size section."
+  },
+  "libraryTypeBoxSet": "合集",
+  "@libraryTypeBoxSet": {
+    "description": "Box set count label in the server library size section."
+  },
+  "libraryTypeGame": "游戏",
+  "@libraryTypeGame": {
+    "description": "Game count label in the server library size section."
+  },
+  "libraryTypeAudioPodcast": "播客",
+  "@libraryTypeAudioPodcast": {
+    "description": "Audio podcast count label in the server library size section."
+  },
   "volume": "音量",
   "@volume": {
     "description": "Volume slider on the player controls."

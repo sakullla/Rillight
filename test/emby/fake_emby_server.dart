@@ -455,6 +455,16 @@ class FakeEmbyServer {
   /// 改密端点写入的新密码;未改过则回落到 [FakeEmbyUser.password]。
   final Map<String, String> passwordOverrides = {};
 
+  /// /Items/Counts 的状态码;为 null 时返回按 [items] 统计的计数。
+  int? itemCountsStatus;
+
+  /// 显式覆盖 /Items/Counts 响应(键为类型名,不含 Count 后缀)。
+  /// 覆盖之外的类型仍按 [items] 统计,可借此配置 0 值字段。
+  Map<String, int>? itemCountsOverride;
+
+  /// 非 null 时 /Items/Counts 在响应前等待该 Completer,用于加载态测试。
+  Completer<void>? itemCountsHold;
+
   /// POST /Users/{uid}/Password 收到的请求体,按顺序记录。
   final List<Map<String, dynamic>> changePasswordRequests = [];
 
@@ -658,6 +668,13 @@ class FakeEmbyServer {
       });
     }
 
+    if (segments.length == 2 &&
+        segments[0] == 'Items' &&
+        segments[1] == 'Counts' &&
+        method == 'GET') {
+      return _handleItemCounts();
+    }
+
     final playback = await _handlePlayback(
       options,
       method,
@@ -745,6 +762,30 @@ class FakeEmbyServer {
       issuedTokens.remove(token);
     }
     return _json(200, {});
+  }
+
+  /// GET /Items/Counts:默认按 [items] 的 Type 逐类统计(键为 `{Type}Count`,
+  /// 按首次出现顺序),[itemCountsOverride] 覆盖或补充字段(含 0 值)。
+  Future<ResponseBody> _handleItemCounts() async {
+    final hold = itemCountsHold;
+    if (hold != null) {
+      await hold.future;
+    }
+    if (itemCountsStatus != null) {
+      return _json(itemCountsStatus!, {'error': 'counts unavailable'});
+    }
+    final counts = <String, int>{};
+    for (final item in items) {
+      final key = '${item.type}Count';
+      counts[key] = (counts[key] ?? 0) + 1;
+    }
+    final override = itemCountsOverride;
+    if (override != null) {
+      counts.addAll({
+        for (final entry in override.entries) '${entry.key}Count': entry.value,
+      });
+    }
+    return _json(200, counts);
   }
 
   ResponseBody _handleUser(String userId) {

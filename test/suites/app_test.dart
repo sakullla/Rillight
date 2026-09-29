@@ -16,6 +16,10 @@ void main() {
     caseEntrypoints['auth/connect_page_cases.dart']!,
   );
   group(
+    'auth/library_counts_test.dart',
+    caseEntrypoints['auth/library_counts_cases.dart']!,
+  );
+  group(
     'home/home_page_test.dart',
     caseEntrypoints['home/home_page_cases.dart']!,
   );

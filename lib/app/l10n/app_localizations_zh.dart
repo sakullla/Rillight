@@ -130,6 +130,54 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
+  String get librarySize => '库规模';
+
+  @override
+  String get libraryCountLoading => '正在获取库规模…';
+
+  @override
+  String get libraryCountMovie => '电影';
+
+  @override
+  String get libraryCountSeries => '剧集';
+
+  @override
+  String get libraryCountEpisode => '单集';
+
+  @override
+  String get libraryTypeSeason => '季';
+
+  @override
+  String get libraryTypeTrailer => '预告片';
+
+  @override
+  String get libraryTypeMusicAlbum => '音乐专辑';
+
+  @override
+  String get libraryTypeMusicArtist => '音乐艺人';
+
+  @override
+  String get libraryTypeSong => '歌曲';
+
+  @override
+  String get libraryTypeMusicVideo => '音乐视频';
+
+  @override
+  String get libraryTypeBook => '图书';
+
+  @override
+  String get libraryTypePhoto => '照片';
+
+  @override
+  String get libraryTypeBoxSet => '合集';
+
+  @override
+  String get libraryTypeGame => '游戏';
+
+  @override
+  String get libraryTypeAudioPodcast => '播客';
+
+  @override
   String get volume => '音量';
 
   @override
