@@ -5,10 +5,12 @@ import 'dart:async';
 import 'package:fake_async/fake_async.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:rillight/app/app.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/server_list_store.dart';
+import 'package:rillight/auth/server_switcher_dialog.dart';
 import 'package:rillight/auth/session_actions.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
@@ -673,6 +675,107 @@ void main() {
       );
       expect(host.current, isNull);
     }, tags: ['integration']);
+
+    testWidgets(
+      'a failed line switch keeps the player window; success closes it',
+      (tester) async {
+        final lan = FakeEmbyServer(
+          baseUrl: Uri.parse('http://host-lan.test:8096'),
+        );
+        final wan = FakeEmbyServer(
+          serverId: lan.serverId,
+          serverName: lan.serverName,
+          baseUrl: Uri.parse('http://host-wan.test:8096'),
+        );
+        final auth = _TrackingAuth(
+          client: EmbyClient(
+            device: _device,
+            dio: dioForFakeEmby(FakeEmbyAdapter([lan, wan])),
+          ),
+          credentials: MemoryCredentialStore(),
+          servers: MemoryServerListStore(),
+          calls: calls,
+        );
+        await tester.runAsync(() async {
+          await auth.connect(
+            address: lan.baseUrl.toString(),
+            username: 'alice',
+            password: 'correct-horse',
+          );
+          await auth.connect(
+            address: wan.baseUrl.toString(),
+            username: 'alice',
+            password: 'correct-horse',
+          );
+        });
+        expect(auth.client.baseUrl, wan.baseUrl);
+        late DesktopPlayerWindowHost host;
+        await pumpLoggedIn(
+          tester,
+          hostFor: (auth) => host = newHost(auth),
+          authFor: () async => auth,
+        );
+        addTearDown(() {
+          host.dispose();
+          auth.dispose();
+        });
+
+        await host.open(const PlayerOpenRequest(itemId: 'movie-up'));
+        final pid = control.lastPid;
+        await tester.pump();
+        expect(host.current?.itemId, 'movie-up');
+
+        lan.publicInfoStatus = 500;
+        lan.publicInfoRawBody = 'upstream timeout';
+        await tester.tap(find.byKey(SessionActions.serverMenuKey));
+        await settle(tester);
+        final saved = auth.savedServers.single;
+        final lanLine = saved.lines.firstWhere(
+          (line) => line.address == lan.baseUrl.toString(),
+        );
+
+        // 切换失败:播放窗口保留,不触发停播,会话仍在原线路。
+        await tester.tap(
+          find.byKey(ServerSwitcherDialog.lineOptionKey(saved.id, lanLine.id)),
+        );
+        await settle(tester);
+        expect(auth.isLoggedIn, isTrue);
+        expect(auth.client.baseUrl, wan.baseUrl);
+        expect(host.current?.itemId, 'movie-up');
+        expect(
+          calls.where(
+            (entry) =>
+                entry.startsWith('requestClose:') || entry.startsWith('kill:'),
+          ),
+          isEmpty,
+        );
+        expect(find.byKey(SessionActions.lineSwitchFailureKey), findsOneWidget);
+        expect(find.textContaining('切换线路失败'), findsOneWidget);
+
+        // 恢复后同一入口切换成功:播放窗口被关闭,路由回到首页。
+        lan.publicInfoStatus = null;
+        lan.publicInfoRawBody = null;
+        await tester.tap(find.byKey(SessionActions.serverMenuKey));
+        await settle(tester);
+        await tester.tap(
+          find.byKey(ServerSwitcherDialog.lineOptionKey(saved.id, lanLine.id)),
+        );
+        await pumpUntil(tester, () => host.current == null);
+        await settle(tester);
+        expect(auth.client.baseUrl, lan.baseUrl);
+        expect(auth.lineSwitchFailure, isNull);
+        expect(host.current, isNull);
+        expect(calls, contains('requestClose:$pid'));
+        expect(
+          GoRouter.of(
+            tester.element(find.byKey(SessionActions.serverMenuKey)),
+          ).state.uri.path,
+          '/',
+        );
+        expect(tester.takeException(), isNull);
+      },
+      tags: ['integration'],
+    );
 
     testWidgets('MainWindowCloseGuard closes the player before destroying', (
       tester,

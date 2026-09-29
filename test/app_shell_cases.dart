@@ -16,6 +16,7 @@ import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/connect_page.dart';
 import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/server_list_store.dart';
+import 'package:rillight/auth/server_switcher_dialog.dart';
 import 'package:rillight/auth/session_actions.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
@@ -215,6 +216,92 @@ void main() {
           first.requests.where(isHomeCatalog).length,
           greaterThan(firstHomeBefore),
         );
+      },
+      tags: ['integration'],
+    );
+
+    testWidgets(
+      'a failed line switch keeps the current page and explains the reason',
+      (tester) async {
+        final lineA = FakeEmbyServer(
+          serverName: '家庭影院',
+          baseUrl: Uri.parse('http://line-a.test:8096'),
+        );
+        final lineB = FakeEmbyServer(
+          serverId: lineA.serverId,
+          serverName: lineA.serverName,
+          baseUrl: Uri.parse('http://line-b.test:8096'),
+        );
+        final adapter = FakeEmbyAdapter([lineA, lineB]);
+        final auth = AuthController(
+          client: EmbyClient(device: _device, dio: dioForFakeEmby(adapter)),
+          credentials: MemoryCredentialStore(),
+          servers: MemoryServerListStore(),
+        );
+        await tester.runAsync(() async {
+          await auth.connect(
+            address: lineA.baseUrl.toString(),
+            username: 'alice',
+            password: 'correct-horse',
+          );
+          await auth.connect(
+            address: lineB.baseUrl.toString(),
+            username: 'alice',
+            password: 'correct-horse',
+          );
+        });
+        expect(auth.client.baseUrl, lineB.baseUrl);
+
+        await tester.pumpWidget(RillightApp(auth: auth));
+        await settle(tester);
+
+        // 离开首页:失败的切换不应把用户带回首页。
+        await tester.tap(find.byKey(AppShell.libraryNavKey('view-movies')));
+        await settle(tester);
+        expect(find.byType(LibraryPage), findsOneWidget);
+
+        bool isHomeCatalog(String request) {
+          return request.contains('Items/Resume') ||
+              request.contains('Items/Latest') ||
+              request.contains('Views') ||
+              request.contains('NextUp');
+        }
+
+        lineA.publicInfoStatus = 500;
+        lineA.publicInfoRawBody = 'upstream timeout';
+        final homeBefore = lineB.requests.where(isHomeCatalog).length;
+
+        await tester.tap(find.byKey(SessionActions.serverMenuKey));
+        await settle(tester);
+        final server = auth.savedServers.single;
+        final lineATarget = server.lines.firstWhere(
+          (line) => line.address == lineA.baseUrl.toString(),
+        );
+        await tester.tap(
+          find.byKey(
+            ServerSwitcherDialog.lineOptionKey(server.id, lineATarget.id),
+          ),
+        );
+        await settle(tester);
+
+        // 原线路、原会话、当前页面与已加载目录都保持。
+        expect(auth.lineSwitchFailure?.detail, 'HTTP 500: upstream timeout');
+        expect(auth.client.baseUrl, lineB.baseUrl);
+        expect(
+          auth.session?.server.activeLine?.address,
+          lineB.baseUrl.toString(),
+        );
+        expect(find.byType(LibraryPage), findsOneWidget);
+        expect(find.byType(HomePage), findsNothing);
+        expect(lineB.requests.where(isHomeCatalog).length, homeBefore);
+        // 失败原因以 SnackBar 可见。
+        expect(find.byKey(SessionActions.lineSwitchFailureKey), findsOneWidget);
+        expect(find.textContaining('切换线路失败'), findsOneWidget);
+        expect(
+          find.textContaining('HTTP 500: upstream timeout'),
+          findsOneWidget,
+        );
+        expect(tester.takeException(), isNull);
       },
       tags: ['integration'],
     );

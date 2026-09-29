@@ -340,6 +340,12 @@ abstract class AppLocalizations {
   /// **'{count} 条线路'**
   String lineCount(int count);
 
+  /// Visible reason when switching to another access line fails and the previous line stays active.
+  ///
+  /// In zh, this message translates to:
+  /// **'切换线路失败：{detail}'**
+  String lineSwitchFailed(String detail);
+
   /// Server management section for the current server's item counts.
   ///
   /// In zh, this message translates to:

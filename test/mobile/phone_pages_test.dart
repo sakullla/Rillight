@@ -2034,6 +2034,7 @@ void main() {
         lineB.publicInfoStatus = 500;
         lineB.publicInfoRawBody = 'upstream timeout';
         final beforeFail = _itemRequests(lineB);
+        final beforeFailA = _itemRequests(lineA);
         await _mineTap(
           tester,
           find.byKey(PhoneMinePage.lineOptionKey(lineBTarget.id)),
@@ -2050,6 +2051,15 @@ void main() {
         );
         expect(catalog.latestMovies.items.map((item) => item.name), ['甲线电影']);
         expect(_itemRequests(lineB), beforeFail);
+        // 原线路也未被刷新:失败后不再无条件 reload 目录。
+        expect(_itemRequests(lineA), beforeFailA);
+        // 失败原因在页面顶部以错误行可见。
+        expect(find.byKey(PhoneMinePage.lineSwitchFailureKey), findsOneWidget);
+        expect(find.textContaining('切换线路失败'), findsOneWidget);
+        expect(
+          find.textContaining('HTTP 500: upstream timeout'),
+          findsOneWidget,
+        );
         expect(tester.takeException(), isNull);
       },
     );

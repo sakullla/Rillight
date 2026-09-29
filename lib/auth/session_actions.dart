@@ -20,6 +20,7 @@ class SessionActions extends StatelessWidget {
 
   static const serverMenuKey = Key('session-current-server');
   static const addServerKey = Key('session-add-server');
+  static const lineSwitchFailureKey = Key('session-line-switch-failure');
 
   @override
   Widget build(BuildContext context) {
@@ -206,6 +207,9 @@ class SessionActions extends StatelessWidget {
     }
   }
 
+  /// 切换服务器/线路:成功后才停播、刷新目录并回首页。目标线路不可达或
+  /// 身份不一致时保持原线路、原会话与正在进行的播放,不刷新目录、不离开
+  /// 当前页面,只以 SnackBar 展示 lineSwitchFailure 的原因。
   Future<void> _switchTo(
     BuildContext context,
     AuthController auth,
@@ -219,8 +223,26 @@ class SessionActions extends StatelessWidget {
     }
     final catalog = CatalogScope.maybeOf(context);
     final router = GoRouter.of(context);
-    await _closePlayer(playerHost);
     await auth.switchTo(serverId, lineId: lineId);
+    final failure = auth.lineSwitchFailure;
+    final switched =
+        auth.session?.server.id == serverId &&
+        auth.session?.server.activeLineId == lineId;
+    if (!switched && failure != null) {
+      if (!context.mounted) {
+        return;
+      }
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        SnackBar(
+          key: SessionActions.lineSwitchFailureKey,
+          content: Text(
+            AppLocalizations.of(context).lineSwitchFailed(failure.detail),
+          ),
+        ),
+      );
+      return;
+    }
+    await _closePlayer(playerHost);
     catalog?.reload();
     router.go(AppRoutes.home);
   }

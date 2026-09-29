@@ -136,6 +136,11 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
+  String lineSwitchFailed(String detail) {
+    return '切换线路失败：$detail';
+  }
+
+  @override
   String get librarySize => '库规模';
 
   @override

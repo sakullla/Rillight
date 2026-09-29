@@ -165,6 +165,15 @@
       }
     }
   },
+  "lineSwitchFailed": "切换线路失败：{detail}",
+  "@lineSwitchFailed": {
+    "description": "Visible reason when switching to another access line fails and the previous line stays active.",
+    "placeholders": {
+      "detail": {
+        "type": "String"
+      }
+    }
+  },
   "librarySize": "库规模",
   "@librarySize": {
     "description": "Server management section for the current server's item counts."

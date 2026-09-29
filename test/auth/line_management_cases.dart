@@ -865,4 +865,103 @@ void main() {
     expect(auth.savedServers.single.lines, hasLength(1));
     expect(tester.takeException(), isNull);
   }, tags: ['integration']);
+
+  testWidgets(
+    'tv settings pane explains why a failed line switch kept the line',
+    (tester) async {
+      isolateImageCache();
+      tester.view.physicalSize = const Size(960, 540);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final lan = FakeEmbyServer(
+        baseUrl: Uri.parse('http://tv-fail-lan.test:8096'),
+      );
+      final wan = FakeEmbyServer(
+        serverId: lan.serverId,
+        serverName: lan.serverName,
+        baseUrl: Uri.parse('http://tv-fail-wan.test:8096'),
+      );
+      final auth = AuthController.memory(
+        client: EmbyClient(
+          device: _device,
+          dio: dioForFakeEmby(FakeEmbyAdapter([lan, wan])),
+        ),
+      );
+      addTearDown(auth.dispose);
+      await tester.runAsync(() async {
+        await auth.connect(
+          address: lan.baseUrl.toString(),
+          username: 'alice',
+          password: 'correct-horse',
+        );
+        await auth.connect(
+          address: wan.baseUrl.toString(),
+          username: 'alice',
+          password: 'correct-horse',
+        );
+      });
+      expect(auth.client.baseUrl, wan.baseUrl);
+
+      final app = RillightApp(
+        auth: auth,
+        environment: PresentationEnvironment.tv,
+        playerBindings: PlayerBindings(
+          createBackend: () => FakeVideoBackend(),
+          snapshotStore: MemoryPlaybackSessionSnapshotStore(),
+          settingsStore: MemoryPlayerSettingsStore(),
+        ),
+      );
+      addTearDown(() async {
+        await tester.pumpWidget(const SizedBox.shrink());
+        app.router.dispose();
+      });
+      await tester.pumpWidget(app);
+      await tester.pumpAndSettle();
+
+      final navFocus = tester
+          .widget<FocusableActionDetector>(
+            find.descendant(
+              of: find.byKey(const ValueKey('tv-nav-3')),
+              matching: find.byType(FocusableActionDetector),
+            ),
+          )
+          .focusNode!;
+      navFocus.requestFocus();
+      FocusManager.instance.applyFocusChangesIfNeeded();
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await tester.pumpAndSettle();
+
+      final serverId = auth.savedServers.single.id;
+      final lanLine = auth.savedServers.single.lines.firstWhere(
+        (line) => line.address == lan.baseUrl.toString(),
+      );
+      lan.publicInfoStatus = 500;
+      lan.publicInfoRawBody = 'upstream timeout';
+
+      final tvScrollable = find
+          .descendant(
+            of: find.byKey(const PageStorageKey('tv-session')),
+            matching: find.byType(Scrollable),
+          )
+          .first;
+      tester.state<ScrollableState>(tvScrollable).position.jumpTo(0);
+      await tester.pumpAndSettle();
+      final lanOption = find.byKey(ValueKey('$serverId-${lanLine.id}'));
+      await tester.scrollUntilVisible(lanOption, 200, scrollable: tvScrollable);
+      await tester.pumpAndSettle();
+      await tester.tap(lanOption);
+      await tester.pumpAndSettle();
+
+      // 原线路与会话保持,失败原因在设置面板内可见。
+      expect(auth.lineSwitchFailure?.detail, 'HTTP 500: upstream timeout');
+      expect(auth.client.baseUrl, wan.baseUrl);
+      expect(auth.session?.server.activeLine?.address, wan.baseUrl.toString());
+      expect(find.byKey(const Key('tv-line-switch-failure')), findsOneWidget);
+      expect(find.textContaining('切换线路失败'), findsOneWidget);
+      expect(find.textContaining('HTTP 500: upstream timeout'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+    tags: ['integration'],
+  );
 }

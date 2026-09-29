@@ -281,6 +281,9 @@ class _TvSession extends StatelessWidget {
 
   static const changePasswordKey = Key('tv-change-password');
 
+  /// 线路切换失败时的原因行;成功或开始新的切换后随控制器清空。
+  static const lineSwitchFailureKey = Key('tv-line-switch-failure');
+
   static Key lineAddKey(String serverId) => ValueKey('tv-line-add-$serverId');
 
   static Key lineEditKey(String serverId, String lineId) =>
@@ -308,6 +311,14 @@ class _TvSession extends StatelessWidget {
           ),
           const SizedBox(height: 16),
           Text(l.mobileLine),
+          if (auth.lineSwitchFailure != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              l.lineSwitchFailed(auth.lineSwitchFailure!.detail),
+              key: _TvSession.lineSwitchFailureKey,
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+          ],
           for (final server in auth.savedServers) ...[
             for (final line in server.lines) ...[
               TvAction(

@@ -29,6 +29,7 @@ class PhoneMinePage extends StatefulWidget {
   static const currentLineKey = Key('phone-mine-current-line');
   static const lineKey = Key('phone-mine-line');
   static const failureKey = Key('phone-mine-line-failure');
+  static const lineSwitchFailureKey = Key('phone-mine-line-switch-failure');
   static const danmakuServerKey = Key('phone-mine-danmaku-server');
   static const danmakuAppIdKey = Key('phone-mine-danmaku-app-id');
   static const danmakuTokenKey = Key('phone-mine-danmaku-token');
@@ -229,10 +230,12 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
     } catch (_) {}
   }
 
+  /// 切换线路:成功后刷新目录。失败时保持当前线路、会话与已加载目录,
+  /// 原因经 [AuthController.lineSwitchFailure] 在页面顶部以错误行展示。
   Future<void> _switchLine(String serverId, String lineId) async {
     final auth = AuthScope.of(context);
     await auth.switchTo(serverId, lineId: lineId);
-    if (!mounted || !auth.isLoggedIn) {
+    if (!mounted || !auth.isLoggedIn || auth.lineSwitchFailure != null) {
       return;
     }
     await _reloadCatalog();
@@ -518,6 +521,7 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
     final session = auth.session;
     final lineLabel = session?.server.activeLine?.hostLabel ?? '';
     final failure = auth.failure;
+    final lineSwitchFailure = auth.lineSwitchFailure;
     final cacheLimit =
         _settings.diskCacheLimitMiB ?? PlayerRuntimeDefaults.diskCacheLimitMiB;
     return Scaffold(
@@ -573,6 +577,16 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
             Text(
               embyFailureMessage(l10n, failure),
               key: PhoneMinePage.failureKey,
+              style: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(color: scheme.error),
+            ),
+          ],
+          if (lineSwitchFailure != null) ...[
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              l10n.lineSwitchFailed(lineSwitchFailure.detail),
+              key: PhoneMinePage.lineSwitchFailureKey,
               style: Theme.of(
                 context,
               ).textTheme.bodyMedium?.copyWith(color: scheme.error),
