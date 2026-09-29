@@ -43,45 +43,50 @@ class RillightApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return AppearanceScope(
       controller: appearance,
-      child: ListenableBuilder(
-        listenable: appearance,
-        builder: (context, _) {
-          final mode = appearance.themeMode;
-          if (!environment.isDesktop) {
-            final app = PresentationScope(
-              environment: environment,
-              child: AuthScope(
-                controller: auth,
-                child: PlayerScope(
-                  bindings: playerBindings,
-                  child: MaterialApp.router(
-                    title: kProductName,
-                    debugShowCheckedModeBanner: false,
-                    locale: const Locale('zh', 'CN'),
-                    supportedLocales: AppLocalizations.supportedLocales,
-                    localizationsDelegates:
-                        AppLocalizations.localizationsDelegates,
-                    theme: AppTheme.light(),
-                    darkTheme: AppTheme.dark(),
-                    themeMode: mode,
-                    scrollBehavior: environment.isTv
-                        ? null
-                        : const PhoneScrollBehavior(),
-                    routerConfig: router,
+      child: _SystemBrightnessObserver(
+        controller: appearance,
+        child: ListenableBuilder(
+          listenable: appearance,
+          builder: (context, _) {
+            // themeMode 已含「跟随系统且平台无偏好时深色」的判定:
+            // 引擎亮度变化由 _SystemBrightnessObserver 触发重判。
+            final mode = appearance.themeMode;
+            if (!environment.isDesktop) {
+              final app = PresentationScope(
+                environment: environment,
+                child: AuthScope(
+                  controller: auth,
+                  child: PlayerScope(
+                    bindings: playerBindings,
+                    child: MaterialApp.router(
+                      title: kProductName,
+                      debugShowCheckedModeBanner: false,
+                      locale: const Locale('zh', 'CN'),
+                      supportedLocales: AppLocalizations.supportedLocales,
+                      localizationsDelegates:
+                          AppLocalizations.localizationsDelegates,
+                      theme: AppTheme.light(),
+                      darkTheme: AppTheme.dark(),
+                      themeMode: mode,
+                      scrollBehavior: environment.isTv
+                          ? null
+                          : const PhoneScrollBehavior(),
+                      routerConfig: router,
+                    ),
                   ),
                 ),
-              ),
-            );
-            if (environment.isTv) {
-              return app;
+              );
+              if (environment.isTv) {
+                return app;
+              }
+              return PhoneNavStyleHost(child: app);
             }
-            return PhoneNavStyleHost(child: app);
-          }
-          return PresentationScope(
-            environment: environment,
-            child: _buildDesktop(context, mode),
-          );
-        },
+            return PresentationScope(
+              environment: environment,
+              child: _buildDesktop(context, mode),
+            );
+          },
+        ),
       ),
     );
   }
@@ -127,6 +132,48 @@ class RillightApp extends StatelessWidget {
       ),
     );
   }
+}
+
+/// 系统亮度变化时重判「跟随系统」的落点。
+///
+/// 引擎 platformBrightness 变化不代表偏好已确认(Android 无深色设置的
+/// 设备恒报 light),交给 [AppearanceController.refreshSystemChoice] 按
+/// 平台重新确认;无法确认保持深色。
+class _SystemBrightnessObserver extends StatefulWidget {
+  const _SystemBrightnessObserver({
+    required this.controller,
+    required this.child,
+  });
+
+  final AppearanceController controller;
+  final Widget child;
+
+  @override
+  State<_SystemBrightnessObserver> createState() =>
+      _SystemBrightnessObserverState();
+}
+
+class _SystemBrightnessObserverState extends State<_SystemBrightnessObserver>
+    with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangePlatformBrightness() {
+    unawaited(widget.controller.refreshSystemChoice());
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }
 
 /// 主窗口关闭时先关闭播放窗口(含优雅关闭与代发 Stopped)再销毁窗口。

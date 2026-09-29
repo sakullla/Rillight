@@ -51,16 +51,83 @@ void main() {
     expect(dark.colorScheme.scrim, Colors.black);
   });
 
+  test('system choice falls back to dark unless light is confirmed', () {
+    // 引擎报告深色:所有平台的深色报告都来自真实设置,直接落深色。
+    expect(
+      resolveSystemChoice(
+        engineBrightness: Brightness.dark,
+        isAndroid: true,
+        isLinux: false,
+        androidNightMode: null,
+      ),
+      SystemBrightnessChoice.dark,
+    );
+    // Android:仅 NIGHT_NO 确认浅色;NIGHT_UNDEFINED(API 24–27 无系统
+    // 深色设置)与通道无响应都无法确认,回落深色。
+    expect(
+      resolveSystemChoice(
+        engineBrightness: Brightness.light,
+        isAndroid: true,
+        isLinux: false,
+        androidNightMode: 'no',
+      ),
+      SystemBrightnessChoice.light,
+    );
+    for (final nightMode in ['undefined', null, 'nonsense']) {
+      expect(
+        resolveSystemChoice(
+          engineBrightness: Brightness.light,
+          isAndroid: true,
+          isLinux: false,
+          androidNightMode: nightMode,
+        ),
+        SystemBrightnessChoice.unknown,
+        reason: 'nightMode=$nightMode',
+      );
+    }
+    expect(
+      resolveSystemChoice(
+        engineBrightness: Brightness.light,
+        isAndroid: true,
+        isLinux: false,
+        androidNightMode: 'yes',
+      ),
+      SystemBrightnessChoice.dark,
+    );
+    // Linux:GTK color-scheme 未配置时引擎恒报浅色,无法确认。
+    expect(
+      resolveSystemChoice(
+        engineBrightness: Brightness.light,
+        isAndroid: false,
+        isLinux: true,
+        androidNightMode: null,
+      ),
+      SystemBrightnessChoice.unknown,
+    );
+    // Windows/macOS:系统外观设置总可判定,引擎浅色可信。
+    expect(
+      resolveSystemChoice(
+        engineBrightness: Brightness.light,
+        isAndroid: false,
+        isLinux: false,
+        androidNightMode: null,
+      ),
+      SystemBrightnessChoice.light,
+    );
+  });
+
   test(
-    'without a stored preference the appearance follows the system',
+    'without a stored preference an unconfirmed system falls back to dark',
     () async {
       final controller = AppearanceController(
         store: MemoryPlayerSettingsStore(),
       );
       await Future<void>.delayed(Duration.zero);
 
+      // 跟随系统且未确认浅色偏好:呈深色,不是 ThemeMode.system。
       expect(controller.style, AppearanceStyle.system);
-      expect(controller.themeMode, ThemeMode.system);
+      expect(controller.systemChoice, SystemBrightnessChoice.unknown);
+      expect(controller.themeMode, ThemeMode.dark);
     },
   );
 
@@ -130,10 +197,10 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(ConnectFormKeys.connectAppearanceKey), findsOneWidget);
-    // 首次启动(无偏好)跟随系统。
+    // 首次启动(无偏好、系统未确认浅色)呈深色。
     expect(
       tester.widget<MaterialApp>(find.byType(MaterialApp)).themeMode,
-      ThemeMode.system,
+      ThemeMode.dark,
     );
 
     await tester.tap(find.byKey(ConnectFormKeys.connectAppearanceKey));

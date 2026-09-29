@@ -5,16 +5,26 @@ import 'package:rillight/app/widgets/scrim_icon_button.dart';
 
 const _key = Key('scrim-button');
 
+/// WCAG 对比度。
+double _contrast(Color a, Color b) {
+  final first = a.computeLuminance();
+  final second = b.computeLuminance();
+  final lighter = first > second ? first : second;
+  final darker = first > second ? second : first;
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
 Future<void> _pump(
   WidgetTester tester,
   Widget button, {
   bool disableAnimations = false,
+  ThemeData? theme,
 }) async {
   await tester.pumpWidget(
     MediaQuery(
       data: MediaQueryData(disableAnimations: disableAnimations),
       child: MaterialApp(
-        theme: AppTheme.dark(),
+        theme: theme ?? AppTheme.dark(),
         home: Scaffold(
           body: Stack(
             children: [
@@ -40,7 +50,7 @@ ButtonStyle _styleOf(WidgetTester tester) {
 }
 
 void main() {
-  testWidgets('ScrimIconButton has solid scrim backing and onSurface icon', (
+  testWidgets('ScrimIconButton has solid scrim backing and white icon', (
     tester,
   ) async {
     var taps = 0;
@@ -64,7 +74,8 @@ void main() {
     final background = style.backgroundColor!.resolve({})!;
     expect(background.a, closeTo(AppScrim.control, 0.01));
     expect(background.withValues(alpha: 1), scheme.scrim.withValues(alpha: 1));
-    expect(style.foregroundColor!.resolve({}), scheme.onSurface);
+    // 图标固定白色:叠在黑色 scrim 上,不随主题 onSurface 换色。
+    expect(style.foregroundColor!.resolve({}), Colors.white);
     expect(style.shape!.resolve({}), isA<CircleBorder>());
     final side = style.side!.resolve({})!;
     expect(side.width, 1);
@@ -74,11 +85,39 @@ void main() {
       find.descendant(of: find.byKey(_key), matching: find.byType(Icon)),
     );
     final iconTheme = IconTheme.of(tester.element(find.byWidget(icon)));
-    expect(iconTheme.color, scheme.onSurface);
+    expect(iconTheme.color, Colors.white);
     expect(iconTheme.size, 20);
 
     await tester.tap(find.byKey(_key));
     expect(taps, 1);
+  });
+
+  testWidgets('ScrimIconButton keeps a white icon under the light theme', (
+    tester,
+  ) async {
+    // 浅色主题:底衬仍是黑色 scrim,深色 onSurface 图标会不可读;
+    // 前景必须保持白色(对比 ≥ 3:1)。
+    await _pump(
+      tester,
+      ScrimIconButton(
+        key: _key,
+        icon: const Icon(Icons.chevron_left_rounded),
+        onPressed: () {},
+      ),
+      theme: AppTheme.light(),
+    );
+
+    final scheme = AppTheme.light().colorScheme;
+    final style = _styleOf(tester);
+    final background = style.backgroundColor!.resolve({})!;
+    expect(background.withValues(alpha: 1), scheme.scrim.withValues(alpha: 1));
+    final foreground = style.foregroundColor!.resolve({})!;
+    expect(foreground, Colors.white);
+    // 白图标与黑色 scrim 底衬的对比度。
+    expect(
+      _contrast(Colors.white, background.withValues(alpha: 1)),
+      greaterThan(3),
+    );
   });
 
   testWidgets('ScrimIconButton large size is 48 with a 24 icon', (
@@ -116,13 +155,13 @@ void main() {
     );
     expect(button.onPressed, isNull);
 
-    final scheme = AppTheme.dark().colorScheme;
     final icon = tester.widget<Icon>(
       find.descendant(of: find.byKey(_key), matching: find.byType(Icon)),
     );
     final color = IconTheme.of(tester.element(find.byWidget(icon))).color!;
     expect(color.a, closeTo(AppScrim.controlDisabledIcon, 0.01));
-    expect(color.withValues(alpha: 1), scheme.onSurface.withValues(alpha: 1));
+    // 禁用态也是白色图标降 alpha,底衬保持黑色 scrim。
+    expect(color.withValues(alpha: 1), Colors.white);
     expect(
       _styleOf(tester).backgroundColor!.resolve({WidgetState.disabled}),
       isNotNull,

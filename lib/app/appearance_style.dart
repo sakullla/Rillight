@@ -1,24 +1,56 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/player/player_settings.dart';
 
 /// 外观三态:跟随系统(默认)、浅色、深色。
 enum AppearanceStyle { system, light, dark }
 
-extension AppearanceStyleThemeMode on AppearanceStyle {
-  ThemeMode get themeMode {
-    switch (this) {
-      case AppearanceStyle.system:
-        return ThemeMode.system;
-      case AppearanceStyle.light:
-        return ThemeMode.light;
-      case AppearanceStyle.dark:
-        return ThemeMode.dark;
+/// 「跟随系统」的落点亮度确认结果。
+///
+/// 引擎的 platformBrightness 把「平台无偏好」与「浅色」混同为 light,
+/// 因此浅色报告需逐平台确认;[unknown] 表示无法确认,呈现深色。
+enum SystemBrightnessChoice { light, dark, unknown }
+
+/// 判定「跟随系统」的落点亮度(R12:平台无偏好时呈深色)。
+///
+/// - 引擎报告深色:可信,直接落深色(所有平台深色报告都来自真实设置)。
+/// - 引擎报告浅色:逐平台确认。
+///   - Android 读 uiMode 的 NIGHT 掩码(`com.rillight/environment` 的
+///     `nightMode`,返回 yes/no/undefined):NIGHT_NO 才确认浅色;
+///     NIGHT_UNDEFINED(API 24–27 无系统深色设置)与读取失败无法确认。
+///   - Linux 的 GTK color-scheme 未配置时引擎恒报浅色,无法确认。
+///   - Windows/macOS 的系统外观设置总可判定,引擎值可信。
+@visibleForTesting
+SystemBrightnessChoice resolveSystemChoice({
+  required Brightness engineBrightness,
+  required bool isAndroid,
+  required bool isLinux,
+  required String? androidNightMode,
+}) {
+  if (engineBrightness == Brightness.dark) {
+    return SystemBrightnessChoice.dark;
+  }
+  if (isAndroid) {
+    switch (androidNightMode) {
+      case 'no':
+        return SystemBrightnessChoice.light;
+      case 'yes':
+        return SystemBrightnessChoice.dark;
+      default:
+        return SystemBrightnessChoice.unknown;
     }
   }
+  if (isLinux) {
+    return SystemBrightnessChoice.unknown;
+  }
+  return SystemBrightnessChoice.light;
+}
 
+extension AppearanceStyleThemeMode on AppearanceStyle {
   static AppearanceStyle? fromStorage(String? raw) {
     if (raw == null) {
       return null;
@@ -49,8 +81,9 @@ extension AppearanceStyleThemeMode on AppearanceStyle {
 /// 合并写互不清除);读取失败/无偏好时保持 [AppearanceStyle.system]。
 class AppearanceController extends ChangeNotifier {
   AppearanceController({PlayerSettingsStore? store}) : _store = store {
-    if (_store != null) {
-      unawaited(_load());
+    final injected = _store;
+    if (injected != null) {
+      _initialLoad = _applyStored(Future.value(injected));
     }
     // 缺省存储不在这里打开:等 [ready]/[setStyle] 首次需要时再开,
     // 避免只构建应用的场合(如测试)留下定时器或未完成的平台调用。
@@ -62,20 +95,70 @@ class AppearanceController extends ChangeNotifier {
 
   final PlayerSettingsStore? _store;
   Future<PlayerSettingsStore>? _ready;
+  Future<void>? _initialLoad;
 
   AppearanceStyle _style = AppearanceStyle.system;
 
+  /// 「跟随系统」的落点亮度。未确认前是 [SystemBrightnessChoice.unknown],
+  /// 即 R12 要求的「平台无偏好时呈深色」;ready/系统亮度变化时刷新。
+  SystemBrightnessChoice _systemChoice = SystemBrightnessChoice.unknown;
+
   AppearanceStyle get style => _style;
 
-  ThemeMode get themeMode => _style.themeMode;
+  SystemBrightnessChoice get systemChoice => _systemChoice;
 
-  /// 外观就绪:默认构造后等待持久化偏好加载完成(桌面/Android 启动前
-  /// await,避免先闪一种亮度再切换);失败/超时静默保持跟随系统。
-  Future<void> get ready {
-    if (_store != null) {
-      return Future<void>.value();
+  /// 生效主题:浅色/深色直接落;跟随系统时只有确认了浅色偏好才用浅色,
+  /// 深色与「无法确认」都落深色。
+  ThemeMode get themeMode {
+    switch (_style) {
+      case AppearanceStyle.light:
+        return ThemeMode.light;
+      case AppearanceStyle.dark:
+        return ThemeMode.dark;
+      case AppearanceStyle.system:
+        return _systemChoice == SystemBrightnessChoice.light
+            ? ThemeMode.light
+            : ThemeMode.dark;
     }
-    return _applyStored(_ready ??= _openDefault());
+  }
+
+  /// 外观就绪:默认构造后等待持久化偏好与系统亮度判定完成(桌面/Android
+  /// 启动前 await,避免先闪一种亮度再切换);失败/超时静默保持深色回落。
+  Future<void> get ready {
+    final initial = _initialLoad;
+    if (initial != null) {
+      return initial.then((_) => refreshSystemChoice());
+    }
+    return _applyStored(
+      _ready ??= _openDefault(),
+    ).then((_) => refreshSystemChoice());
+  }
+
+  /// 重新判定「跟随系统」的落点亮度;引擎亮度变化时由外壳调用。
+  Future<void> refreshSystemChoice() async {
+    final choice = await _readSystemChoice();
+    if (choice != _systemChoice) {
+      _systemChoice = choice;
+      notifyListeners();
+    }
+  }
+
+  Future<SystemBrightnessChoice> _readSystemChoice() async {
+    String? nightMode;
+    if (Platform.isAndroid) {
+      try {
+        nightMode = await const MethodChannel(
+          'com.rillight/environment',
+        ).invokeMethod<String>('nightMode').timeout(_ioTimeout);
+      } catch (_) {}
+    }
+    return resolveSystemChoice(
+      engineBrightness:
+          WidgetsBinding.instance.platformDispatcher.platformBrightness,
+      isAndroid: Platform.isAndroid,
+      isLinux: Platform.isLinux,
+      androidNightMode: nightMode,
+    );
   }
 
   Future<void> _applyStored(Future<PlayerSettingsStore> opening) async {
@@ -98,19 +181,6 @@ class AppearanceController extends ChangeNotifier {
     } catch (_) {
       return MemoryPlayerSettingsStore();
     }
-  }
-
-  Future<void> _load() async {
-    try {
-      final settings = await _store!.read().timeout(_ioTimeout);
-      final stored = AppearanceStyleThemeMode.fromStorage(
-        settings.appearanceStyle,
-      );
-      if (stored != null && stored != _style) {
-        _style = stored;
-        notifyListeners();
-      }
-    } catch (_) {}
   }
 
   /// 切换外观:先即时生效,再合并写入存储;写失败不回滚(下次启动回落)。

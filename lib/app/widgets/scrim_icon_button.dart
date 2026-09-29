@@ -12,8 +12,10 @@ enum ScrimIconButtonSize {
   final double iconSize;
 }
 
-/// 铺在海报/剧照上的圆形图标按钮:实色 scrim 底衬 + `onSurface` 图标 +
-/// 1px 白色细边。不含 [BackdropFilter],在任意亮度的底图上对比度稳定。
+/// 铺在海报/剧照上的圆形图标按钮:实色 scrim 底衬 + 白色图标 + 1px 细边。
+/// 不含 [BackdropFilter],在任意亮度的底图上对比度稳定。底衬永远是黑色
+/// scrim(两种主题下 [ColorScheme.scrim] 均为黑),图标因此固定用白色,
+/// 与叠图白字一致;不随主题 onSurface 走,浅色主题下深色图标会不可读。
 ///
 /// 用于顶栏返回钮、hero 翻页钮、货架/章节滚动钮与详情操作圆钮。
 /// [onPressed] 为空时呈禁用态(图标降 alpha,底衬保留)。
@@ -55,8 +57,9 @@ class ScrimIconButton extends StatelessWidget {
       style: IconButton.styleFrom(
         backgroundColor: backing,
         disabledBackgroundColor: backing,
-        foregroundColor: scheme.onSurface,
-        disabledForegroundColor: scheme.onSurface.withValues(
+        // 白色图标叠黑色 scrim:与叠图白字同规则,不随主题亮度换色。
+        foregroundColor: Colors.white,
+        disabledForegroundColor: Colors.white.withValues(
           alpha: AppScrim.controlDisabledIcon,
         ),
         side: BorderSide(

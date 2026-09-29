@@ -19,6 +19,23 @@ class MainActivity : FlutterActivity() {
         super.configureFlutterEngine(flutterEngine)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.rillight/environment")
             .setMethodCallHandler { call, result ->
+                if (call.method == "nightMode") {
+                    // 外观「跟随系统」需要区分「明确浅色」与「无偏好」:
+                    // 引擎把 NIGHT_UNDEFINED 也上报为浅色,这里给原始 NIGHT 掩码。
+                    try {
+                        val night = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
+                        result.success(
+                            when (night) {
+                                Configuration.UI_MODE_NIGHT_YES -> "yes"
+                                Configuration.UI_MODE_NIGHT_NO -> "no"
+                                else -> "undefined"
+                            }
+                        )
+                    } catch (_: Exception) {
+                        result.error("appearance_detection", "Unable to read night mode", null)
+                    }
+                    return@setMethodCallHandler
+                }
                 if (call.method != "isTelevision") {
                     result.notImplemented()
                     return@setMethodCallHandler
