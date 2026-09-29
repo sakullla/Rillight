@@ -9,6 +9,7 @@ import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/auth/change_password_dialog.dart';
+import 'package:rillight/auth/line_address_dialog.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/auth/server_switcher_dialog.dart';
 import 'package:rillight/home/catalog_scope.dart';
@@ -88,6 +89,30 @@ class SessionActions extends StatelessWidget {
                 Navigator.of(dialogContext).pop();
                 unawaited(_deleteServer(auth, playerHost, serverId));
               },
+              onAddLine: (serverId) {
+                Navigator.of(dialogContext).pop();
+                unawaited(
+                  _editLineAddress(context, auth, playerHost, serverId),
+                );
+              },
+              onEditLine: (serverId, line) {
+                Navigator.of(dialogContext).pop();
+                unawaited(
+                  _editLineAddress(
+                    context,
+                    auth,
+                    playerHost,
+                    serverId,
+                    line: line,
+                  ),
+                );
+              },
+              onDeleteLine: (serverId, line) {
+                Navigator.of(dialogContext).pop();
+                unawaited(
+                  _deleteLine(context, auth, playerHost, serverId, line),
+                );
+              },
               onChangePassword: () {
                 Navigator.of(dialogContext).pop();
                 unawaited(
@@ -123,6 +148,62 @@ class SessionActions extends StatelessWidget {
       await _closePlayer(playerHost);
     }
     await auth.deleteServer(serverId);
+  }
+
+  /// 线路地址编辑:添加只录地址、不改当前线路;修改仅改地址,无
+  /// User-Agent 输入项。改的是当前线路时先停掉走旧地址的播放窗口,
+  /// 成功后刷新目录,之后浏览与播放走新地址。
+  Future<void> _editLineAddress(
+    BuildContext context,
+    AuthController auth,
+    PlayerWindowHost? playerHost,
+    String serverId, {
+    ServerLine? line,
+  }) async {
+    final catalog = CatalogScope.maybeOf(context);
+    final address = await showLineAddressDialog(
+      context,
+      initialAddress: line?.address,
+    );
+    if (address == null || address == line?.address) {
+      return;
+    }
+    final wasActive =
+        auth.session?.server.id == serverId &&
+        auth.session?.server.activeLineId == line?.id;
+    if (wasActive) {
+      await _closePlayer(playerHost);
+    }
+    if (line == null) {
+      await auth.addLine(serverId, address);
+      return;
+    }
+    final changed = await auth.updateLineAddress(serverId, line.id, address);
+    if (changed && wasActive) {
+      catalog?.reload();
+    }
+  }
+
+  /// 删除一条线路;删除当前线路时先停播,随后客户端挂到剩余线路并
+  /// 刷新目录。只剩一条线路时界面不会给出可点的删除入口。
+  Future<void> _deleteLine(
+    BuildContext context,
+    AuthController auth,
+    PlayerWindowHost? playerHost,
+    String serverId,
+    ServerLine line,
+  ) async {
+    final catalog = CatalogScope.maybeOf(context);
+    final wasActive =
+        auth.session?.server.id == serverId &&
+        auth.session?.server.activeLineId == line.id;
+    if (wasActive) {
+      await _closePlayer(playerHost);
+    }
+    await auth.deleteLine(serverId, line.id);
+    if (wasActive) {
+      catalog?.reload();
+    }
   }
 
   Future<void> _switchTo(

@@ -13,6 +13,7 @@ import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/auth/change_password_dialog.dart';
 import 'package:rillight/auth/failure_message.dart';
 import 'package:rillight/auth/library_counts_panel.dart';
+import 'package:rillight/auth/line_address_dialog.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/player/player_bindings.dart';
@@ -37,6 +38,15 @@ class PhoneMinePage extends StatefulWidget {
   static const playbackRates = <double>[0.5, 1.0, 1.25, 1.5, 2.0];
 
   static Key lineOptionKey(String lineId) => Key('phone-mine-line-$lineId');
+
+  static Key lineAddKey(String serverId) =>
+      Key('phone-mine-line-add-$serverId');
+
+  static Key lineEditKey(String serverId, String lineId) =>
+      Key('phone-mine-line-edit-$serverId-$lineId');
+
+  static Key lineDeleteKey(String serverId, String lineId) =>
+      Key('phone-mine-line-delete-$serverId-$lineId');
 
   static Key serverDeleteKey(String serverId) =>
       Key('phone-mine-server-delete-$serverId');
@@ -225,6 +235,10 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
     if (!mounted || !auth.isLoggedIn) {
       return;
     }
+    await _reloadCatalog();
+  }
+
+  Future<void> _reloadCatalog() async {
     final catalog = CatalogScope.maybeOf(context);
     if (catalog == null) {
       return;
@@ -278,7 +292,16 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
                     ),
                   ),
                   for (final line in server.lines)
-                    _lineOption(auth, server.id, line),
+                    _lineOption(auth, sheetL10n, server, line),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      key: PhoneMinePage.lineAddKey(server.id),
+                      onPressed: () => unawaited(_addLine(auth, server)),
+                      icon: const Icon(Icons.add, size: 18),
+                      label: Text(sheetL10n.addLine),
+                    ),
+                  ),
                 ],
               ],
             ),
@@ -330,7 +353,13 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
     }
   }
 
-  Widget _lineOption(AuthController auth, String serverId, ServerLine line) {
+  Widget _lineOption(
+    AuthController auth,
+    AppLocalizations l10n,
+    SavedServer server,
+    ServerLine line,
+  ) {
+    final serverId = server.id;
     final selected =
         auth.session?.server.id == serverId &&
         auth.session?.server.activeLine?.id == line.id;
@@ -340,12 +369,83 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
       contentPadding: EdgeInsets.zero,
       title: Text(line.hostLabel),
       selected: selected,
-      trailing: selected ? const Icon(Icons.check) : null,
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconButton(
+            key: PhoneMinePage.lineEditKey(server.id, line.id),
+            tooltip: l10n.editLine,
+            icon: const Icon(Icons.edit_outlined, size: 20),
+            onPressed: () => unawaited(_editLine(auth, server, line)),
+          ),
+          IconButton(
+            key: PhoneMinePage.lineDeleteKey(server.id, line.id),
+            tooltip: l10n.deleteLine,
+            icon: const Icon(Icons.link_off, size: 20),
+            onPressed: server.lines.length > 1
+                ? () => unawaited(_deleteLine(auth, server, line))
+                : null,
+          ),
+          if (selected) const Icon(Icons.check),
+        ],
+      ),
       onTap: () {
         Navigator.pop(context);
         unawaited(_switchLine(serverId, line.id));
       },
     );
+  }
+
+  /// 添加线路:只录地址,不改变当前线路,面板内列表即时刷新。
+  Future<void> _addLine(AuthController auth, SavedServer server) async {
+    final address = await showLineAddressDialog(context);
+    if (address == null || !mounted) {
+      return;
+    }
+    await auth.addLine(server.id, address);
+  }
+
+  /// 修改线路地址:仅地址变化,无 UA 输入项;改的是当前线路时,
+  /// 之后浏览与播放走新地址并刷新目录。
+  Future<void> _editLine(
+    AuthController auth,
+    SavedServer server,
+    ServerLine line,
+  ) async {
+    final address = await showLineAddressDialog(
+      context,
+      initialAddress: line.address,
+    );
+    if (address == null || !mounted) {
+      return;
+    }
+    final wasActive =
+        auth.session?.server.id == server.id &&
+        auth.session?.server.activeLineId == line.id;
+    final changed = await auth.updateLineAddress(server.id, line.id, address);
+    if (!changed || !mounted) {
+      return;
+    }
+    if (wasActive) {
+      await _reloadCatalog();
+    }
+  }
+
+  /// 删除线路:只剩一条时不执行(按钮已不可用,控制器同样兜底);
+  /// 删除当前线路后客户端挂到剩余线路并刷新目录。
+  Future<void> _deleteLine(
+    AuthController auth,
+    SavedServer server,
+    ServerLine line,
+  ) async {
+    final wasActive =
+        auth.session?.server.id == server.id &&
+        auth.session?.server.activeLineId == line.id;
+    await auth.deleteLine(server.id, line.id);
+    if (!mounted || !wasActive) {
+      return;
+    }
+    await _reloadCatalog();
   }
 
   Widget _group(

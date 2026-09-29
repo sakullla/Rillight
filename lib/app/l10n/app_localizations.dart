@@ -244,6 +244,18 @@ abstract class AppLocalizations {
   /// **'删除线路'**
   String get deleteLine;
 
+  /// Action to edit the address of one access line of a saved server.
+  ///
+  /// In zh, this message translates to:
+  /// **'修改线路地址'**
+  String get editLine;
+
+  /// Confirm action in the line address dialog used to add or edit a line.
+  ///
+  /// In zh, this message translates to:
+  /// **'保存'**
+  String get lineAddressSave;
+
   /// Action to remove a saved Emby server from this device.
   ///
   /// In zh, this message translates to:

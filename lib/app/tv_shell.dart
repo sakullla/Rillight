@@ -10,6 +10,7 @@ import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/auth/change_password_dialog.dart';
 import 'package:rillight/auth/library_counts_panel.dart';
+import 'package:rillight/auth/line_address_dialog.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/home/tv_home_page.dart';
@@ -280,6 +281,14 @@ class _TvSession extends StatelessWidget {
 
   static const changePasswordKey = Key('tv-change-password');
 
+  static Key lineAddKey(String serverId) => ValueKey('tv-line-add-$serverId');
+
+  static Key lineEditKey(String serverId, String lineId) =>
+      ValueKey('tv-line-edit-$serverId-$lineId');
+
+  static Key lineDeleteKey(String serverId, String lineId) =>
+      ValueKey('tv-line-delete-$serverId-$lineId');
+
   @override
   Widget build(BuildContext context) {
     final auth = AuthScope.of(context), l = AppLocalizations.of(context);
@@ -300,7 +309,7 @@ class _TvSession extends StatelessWidget {
           const SizedBox(height: 16),
           Text(l.mobileLine),
           for (final server in auth.savedServers) ...[
-            for (final line in server.lines)
+            for (final line in server.lines) ...[
               TvAction(
                 key: ValueKey('${server.id}-${line.id}'),
                 selected:
@@ -311,6 +320,28 @@ class _TvSession extends StatelessWidget {
                     : () => auth.switchTo(server.id, lineId: line.id),
                 child: Text('${server.name} · ${line.hostLabel}'),
               ),
+              TvAction(
+                key: lineEditKey(server.id, line.id),
+                onPressed: auth.isBusy
+                    ? null
+                    : () => _editLine(context, auth, server, line),
+                child: Text('${l.editLine} · ${line.hostLabel}'),
+              ),
+              TvAction(
+                key: lineDeleteKey(server.id, line.id),
+                onPressed: auth.isBusy || server.lines.length <= 1
+                    ? null
+                    : () => _deleteLine(context, auth, server, line),
+                child: Text('${l.deleteLine} · ${line.hostLabel}'),
+              ),
+            ],
+            TvAction(
+              key: lineAddKey(server.id),
+              onPressed: auth.isBusy
+                  ? null
+                  : () => _addLine(context, auth, server.id),
+              child: Text('${l.addLine} · ${server.name}'),
+            ),
             TvAction(
               key: serverDeleteKey(server.id),
               onPressed: auth.isBusy
@@ -341,6 +372,62 @@ class _TvSession extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  /// 添加线路:只录地址,不改变当前线路。
+  Future<void> _addLine(
+    BuildContext context,
+    AuthController auth,
+    String serverId,
+  ) async {
+    final address = await showLineAddressDialog(context);
+    if (address == null) {
+      return;
+    }
+    await auth.addLine(serverId, address);
+  }
+
+  /// 修改线路地址:仅地址变化,无 UA 输入项;改的是当前线路时,
+  /// 之后浏览与播放走新地址并刷新目录。
+  Future<void> _editLine(
+    BuildContext context,
+    AuthController auth,
+    SavedServer server,
+    ServerLine line,
+  ) async {
+    final catalog = CatalogScope.maybeOf(context);
+    final address = await showLineAddressDialog(
+      context,
+      initialAddress: line.address,
+    );
+    if (address == null) {
+      return;
+    }
+    final wasActive =
+        auth.session?.server.id == server.id &&
+        auth.session?.server.activeLineId == line.id;
+    final changed = await auth.updateLineAddress(server.id, line.id, address);
+    if (changed && wasActive) {
+      catalog?.reload();
+    }
+  }
+
+  /// 删除线路:只剩一条时入口不可用,控制器同样兜底保留最后一条;
+  /// 删除当前线路后客户端挂到剩余线路并刷新目录。
+  Future<void> _deleteLine(
+    BuildContext context,
+    AuthController auth,
+    SavedServer server,
+    ServerLine line,
+  ) async {
+    final catalog = CatalogScope.maybeOf(context);
+    final wasActive =
+        auth.session?.server.id == server.id &&
+        auth.session?.server.activeLineId == line.id;
+    await auth.deleteLine(server.id, line.id);
+    if (wasActive) {
+      catalog?.reload();
+    }
   }
 
   /// 先确认再删除;取消不改动任何内容。删除当前服务器时路由会回登录页。

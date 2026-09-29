@@ -84,6 +84,12 @@ class AppLocalizationsZh extends AppLocalizations {
   String get deleteLine => '删除线路';
 
   @override
+  String get editLine => '修改线路地址';
+
+  @override
+  String get lineAddressSave => '保存';
+
+  @override
   String get deleteServer => '删除服务器';
 
   @override

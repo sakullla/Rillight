@@ -398,6 +398,113 @@ class AuthController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 给已保存服务器添加一条线路:只录入地址,不改变当前线路、用户名与
+  /// 服务器 User-Agent,浏览与播放继续走原地址。返回是否实际写入。
+  Future<bool> addLine(String serverId, String address) async {
+    final server = _serverById(serverId);
+    if (server == null) {
+      return false;
+    }
+    final url = _normalizeLineAddress(address);
+    if (url == null || server.lines.any((line) => line.address == url)) {
+      return false;
+    }
+    final next = server.copyWith(
+      lines: [
+        ...server.lines,
+        ServerLine(id: generateLineId(), address: url),
+      ],
+    );
+    await _persistLineEdit(next, remountSession: false);
+    return true;
+  }
+
+  /// 修改一条线路的地址:线路 id、当前线路选择、用户名与服务器
+  /// User-Agent 都不变;改的是当前会话的活跃线路时,客户端改挂新地址,
+  /// 之后浏览与播放走新地址。返回是否实际写入。
+  Future<bool> updateLineAddress(
+    String serverId,
+    String lineId,
+    String address,
+  ) async {
+    final server = _serverById(serverId);
+    if (server == null) {
+      return false;
+    }
+    final url = _normalizeLineAddress(address);
+    if (url == null) {
+      return false;
+    }
+    final lines = <ServerLine>[...server.lines];
+    var found = false;
+    var active = false;
+    for (var i = 0; i < lines.length; i++) {
+      if (lines[i].id != lineId) {
+        continue;
+      }
+      if (lines[i].address == url) {
+        return false;
+      }
+      lines[i] = ServerLine(id: lines[i].id, address: url);
+      found = true;
+      active = server.activeLineId == lineId;
+      break;
+    }
+    if (!found) {
+      return false;
+    }
+    final next = server.copyWith(lines: lines);
+    await _persistLineEdit(
+      next,
+      remountSession: active && _session?.server.id == serverId,
+    );
+    return true;
+  }
+
+  /// 管理界面录入的线路地址:空白或非法地址返回 null,不写入。
+  String? _normalizeLineAddress(String raw) {
+    final trimmed = raw.trim();
+    if (trimmed.isEmpty) {
+      return null;
+    }
+    try {
+      return normalizeEmbyBaseUrl(trimmed).toString();
+    } on EmbyException {
+      return null;
+    }
+  }
+
+  /// 线路增删改后的共同落盘路径:走与登录一致的 server_list_store 保存,
+  /// 并同步 prefill 与当前会话引用;[remountSession] 为真时按已存凭据把
+  /// 客户端挂到(可能已变化的)新地址,用户名与服务器 UA 保持不变。
+  Future<void> _persistLineEdit(
+    SavedServer next, {
+    required bool remountSession,
+  }) async {
+    await _upsertServer(next);
+    if (_prefill?.id == next.id) {
+      _prefill = next;
+    }
+    final session = _session;
+    if (session != null && session.server.id == next.id) {
+      if (remountSession) {
+        final stored = await credentials.read(next.id);
+        if (stored != null && stored.accessToken.isNotEmpty) {
+          _activate(next, stored);
+          notifyListeners();
+          return;
+        }
+      }
+      _session = AuthSession(
+        server: next,
+        userId: session.userId,
+        username: session.username,
+        accessToken: session.accessToken,
+      );
+    }
+    notifyListeners();
+  }
+
   Future<void> deleteLine(String serverId, String lineId) async {
     final server = _serverById(serverId);
     if (server == null || server.lines.length <= 1) {

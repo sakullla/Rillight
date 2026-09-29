@@ -91,6 +91,14 @@
   "@deleteLine": {
     "description": "Action to delete the selected extra access line."
   },
+  "editLine": "修改线路地址",
+  "@editLine": {
+    "description": "Action to edit the address of one access line of a saved server."
+  },
+  "lineAddressSave": "保存",
+  "@lineAddressSave": {
+    "description": "Confirm action in the line address dialog used to add or edit a line."
+  },
   "deleteServer": "删除服务器",
   "@deleteServer": {
     "description": "Action to remove a saved Emby server from this device."

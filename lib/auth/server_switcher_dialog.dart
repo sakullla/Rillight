@@ -21,6 +21,9 @@ class ServerSwitcherDialog extends StatefulWidget {
     required this.onLogout,
     required this.onDelete,
     required this.onChangePassword,
+    required this.onAddLine,
+    required this.onEditLine,
+    required this.onDeleteLine,
     this.libraryCounts,
     this.libraryCountsLoading = false,
     this.libraryCountsFailure,
@@ -39,6 +42,15 @@ class ServerSwitcherDialog extends StatefulWidget {
   /// 修改当前登录用户的密码。
   final VoidCallback onChangePassword;
 
+  /// 给一台已保存服务器添加线路;只录地址,不改变当前线路。
+  final void Function(String serverId) onAddLine;
+
+  /// 修改一条线路的地址;仅地址变化,无 User-Agent 输入项。
+  final void Function(String serverId, ServerLine line) onEditLine;
+
+  /// 删除一条线路;只剩一条时按钮不可用,不会回调。
+  final void Function(String serverId, ServerLine line) onDeleteLine;
+
   /// 当前服务器的库规模;三者全空时不展示该块。
   final LibraryCounts? libraryCounts;
   final bool libraryCountsLoading;
@@ -50,6 +62,17 @@ class ServerSwitcherDialog extends StatefulWidget {
   static const changePasswordKey = Key('server-change-password');
 
   static Key deleteKey(String serverId) => Key('server-delete-$serverId');
+
+  static Key addLineKey(String serverId) => Key('server-add-line-$serverId');
+
+  static Key editLineKey(String serverId, String lineId) =>
+      Key('server-edit-line-$serverId-$lineId');
+
+  static Key deleteLineKey(String serverId, String lineId) =>
+      Key('server-delete-line-$serverId-$lineId');
+
+  static Key lineOptionKey(String serverId, String lineId) =>
+      Key('server-line-$serverId-$lineId');
 
   @override
   State<ServerSwitcherDialog> createState() => _ServerSwitcherDialogState();
@@ -155,6 +178,9 @@ class _ServerSwitcherDialogState extends State<ServerSwitcherDialog> {
                               activeLineId: widget.activeLineId,
                               onSelect: widget.onSelect,
                               onDelete: widget.onDelete,
+                              onAddLine: widget.onAddLine,
+                              onEditLine: widget.onEditLine,
+                              onDeleteLine: widget.onDeleteLine,
                             );
                           },
                         ),
@@ -193,6 +219,9 @@ class _ServerTile extends StatelessWidget {
     required this.activeLineId,
     required this.onSelect,
     required this.onDelete,
+    required this.onAddLine,
+    required this.onEditLine,
+    required this.onDeleteLine,
   });
 
   final SavedServer server;
@@ -200,65 +229,127 @@ class _ServerTile extends StatelessWidget {
   final String? activeLineId;
   final void Function(String serverId, String lineId) onSelect;
   final void Function(String serverId) onDelete;
+  final void Function(String serverId) onAddLine;
+  final void Function(String serverId, ServerLine line) onEditLine;
+  final void Function(String serverId, ServerLine line) onDeleteLine;
 
   @override
   Widget build(BuildContext context) {
     final selectedServer = server.id == activeServerId;
     final l10n = AppLocalizations.of(context);
-    final trailing = Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        IconButton(
-          key: ServerSwitcherDialog.deleteKey(server.id),
-          tooltip: l10n.deleteServer,
-          icon: const Icon(Icons.delete_outline, size: 20),
-          onPressed: () => _confirmDelete(context, l10n),
-        ),
-        if (selectedServer)
-          Icon(Icons.check, color: Theme.of(context).colorScheme.primary),
-      ],
+    final scheme = Theme.of(context).colorScheme;
+    final deleteServerButton = IconButton(
+      key: ServerSwitcherDialog.deleteKey(server.id),
+      tooltip: l10n.deleteServer,
+      icon: const Icon(Icons.delete_outline, size: 20),
+      onPressed: () => _confirmDelete(context, l10n),
     );
-    if (server.lines.length <= 1) {
-      final line = server.activeLine ?? server.lines.first;
+    final active = server.activeLine;
+    if (active != null && server.lines.length <= 1) {
+      // 单线路服务器:点击条目直接切换;行内提供添加与改址入口。
+      // 删除线路在只剩一条时不提供。
       return ListTile(
         leading: const EmbyMark(size: 28),
         title: Text(server.name, maxLines: 1, overflow: TextOverflow.ellipsis),
         subtitle: Text(
-          line.hostLabel,
+          active.hostLabel,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
-        trailing: trailing,
-        onTap: () => onSelect(server.id, line.id),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              key: ServerSwitcherDialog.addLineKey(server.id),
+              tooltip: l10n.addLine,
+              icon: const Icon(Icons.add, size: 20),
+              onPressed: () => onAddLine(server.id),
+            ),
+            IconButton(
+              key: ServerSwitcherDialog.editLineKey(server.id, active.id),
+              tooltip: l10n.editLine,
+              icon: const Icon(Icons.edit_outlined, size: 20),
+              onPressed: () => onEditLine(server.id, active),
+            ),
+            deleteServerButton,
+            if (selectedServer) Icon(Icons.check, color: scheme.primary),
+          ],
+        ),
+        onTap: () => onSelect(server.id, active.id),
       );
     }
     return ExpansionTile(
       leading: const EmbyMark(size: 28),
       initiallyExpanded: selectedServer,
       title: Text(server.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-      subtitle: Text(l10n.lineCount(server.lines.length)),
-      trailing: trailing,
-      children: [
-        for (final line in server.lines)
-          ListTile(
-            contentPadding: const EdgeInsets.only(
-              left: AppSpacing.xxxl,
-              right: AppSpacing.md,
-            ),
-            title: Text(
-              line.hostLabel,
+      subtitle: server.lines.length > 1 || active == null
+          ? Text(l10n.lineCount(server.lines.length))
+          : Text(
+              active.hostLabel,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
-            trailing: selectedServer && line.id == activeLineId
-                ? Icon(
-                    Icons.check,
-                    color: Theme.of(context).colorScheme.primary,
-                  )
-                : null,
-            onTap: () => onSelect(server.id, line.id),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          deleteServerButton,
+          if (selectedServer)
+            Icon(Icons.check, color: Theme.of(context).colorScheme.primary),
+        ],
+      ),
+      children: [
+        for (final line in server.lines)
+          _lineTile(context, line, selectedServer: selectedServer),
+        ListTile(
+          key: ServerSwitcherDialog.addLineKey(server.id),
+          contentPadding: const EdgeInsets.only(
+            left: AppSpacing.xxxl,
+            right: AppSpacing.md,
           ),
+          leading: const Icon(Icons.add, size: 20),
+          title: Text(l10n.addLine),
+          onTap: () => onAddLine(server.id),
+        ),
       ],
+    );
+  }
+
+  /// 一条线路:点击切换;行内可改地址、删线路(只剩一条时删除不可用)。
+  Widget _lineTile(
+    BuildContext context,
+    ServerLine line, {
+    required bool selectedServer,
+  }) {
+    final l10n = AppLocalizations.of(context);
+    return ListTile(
+      key: ServerSwitcherDialog.lineOptionKey(server.id, line.id),
+      contentPadding: const EdgeInsets.only(
+        left: AppSpacing.xxxl,
+        right: AppSpacing.md,
+      ),
+      title: Text(line.hostLabel, maxLines: 1, overflow: TextOverflow.ellipsis),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconButton(
+            key: ServerSwitcherDialog.editLineKey(server.id, line.id),
+            tooltip: l10n.editLine,
+            icon: const Icon(Icons.edit_outlined, size: 20),
+            onPressed: () => onEditLine(server.id, line),
+          ),
+          IconButton(
+            key: ServerSwitcherDialog.deleteLineKey(server.id, line.id),
+            tooltip: l10n.deleteLine,
+            icon: const Icon(Icons.link_off, size: 20),
+            onPressed: server.lines.length > 1
+                ? () => onDeleteLine(server.id, line)
+                : null,
+          ),
+          if (selectedServer && line.id == activeLineId)
+            Icon(Icons.check, color: Theme.of(context).colorScheme.primary),
+        ],
+      ),
+      onTap: () => onSelect(server.id, line.id),
     );
   }
 

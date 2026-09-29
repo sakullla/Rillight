@@ -326,6 +326,9 @@ void main() {
                     onAddServer: () {},
                     onLogout: () {},
                     onDelete: (_) {},
+                    onAddLine: (_) {},
+                    onEditLine: (_, _) {},
+                    onDeleteLine: (_, _) {},
                     // 宿主(session_actions)在回调里先收起切换面板。
                     onChangePassword: () {
                       requested = true;
