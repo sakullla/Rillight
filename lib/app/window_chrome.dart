@@ -259,14 +259,17 @@ class _WindowChromeHostState extends State<WindowChromeHost> {
           children: [
             widget.child,
             if (windowChromeShowsCaptionButtons)
-              const Positioned(
+              Positioned(
                 top: 0,
                 left: 0,
                 right: 0,
                 height: kWindowChromeHeight,
                 child: _CaptionButtonHitTarget(
                   trailingWidth: kWindowChromeTrailingInset,
-                  child: WindowChromeButtons(),
+                  // 标题按钮外观随外观偏好走:浅色主题下按钮图标用深色。
+                  child: WindowChromeButtons(
+                    brightness: Theme.of(context).brightness,
+                  ),
                 ),
               ),
           ],

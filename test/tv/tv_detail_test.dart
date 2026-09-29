@@ -76,6 +76,8 @@ void main() {
     await key(tester, LogicalKeyboardKey.arrowDown);
     await edit(tester, 'correct-horse');
     await key(tester, LogicalKeyboardKey.arrowDown);
+    // User-Agent 与提交之间隔了外观三态行,多按一次向下才到提交。
+    await key(tester, LogicalKeyboardKey.arrowDown);
     await key(tester, LogicalKeyboardKey.arrowDown);
     await key(tester, LogicalKeyboardKey.select);
     expect(find.byType(TvShell), findsOneWidget);

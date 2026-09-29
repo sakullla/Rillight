@@ -4,72 +4,126 @@ import 'theme/tokens.dart';
 
 export 'theme/tokens.dart';
 
-/// 应用唯一视觉权威:近黑表面、暖白文字,克制高光仅用于播放/焦点/进度。
+/// 应用唯一视觉权威:分层表面 + 暖色文字,克制高光仅用于播放/焦点/进度。
 ///
-/// 所有页面与组件应从 [AppTheme.dark] 与 token 类
+/// 所有页面与组件应从 [AppTheme.dark] / [AppTheme.light] 与 token 类
 /// ([AppSpacing] / [AppRadii] / [AppMotion] / [AppBreakpoints]) 取视觉值,
 /// 不得散落硬编码颜色。
 abstract final class AppTheme {
-  // ---- 基础色板(近黑分层 + 暖白文字) ----
-  static const Color _base = Color(0xFF0A0A0C);
-  static const Color _surfaceLowest = Color(0xFF0F0F12);
-  static const Color _surfaceLow = Color(0xFF141418);
-  static const Color _surface = Color(0xFF1A1A1F);
-  static const Color _surfaceHigh = Color(0xFF202027);
-  static const Color _surfaceHighest = Color(0xFF292931);
-  static const Color _surfaceBright = Color(0xFF33333C);
+  /// 一套主题的全部取色。浅色/深色共用同一套组件样式,只换色调。
+  @visibleForTesting
+  static const Tones darkTones = Tones._(
+    base: Color(0xFF0A0A0C),
+    surfaceLowest: Color(0xFF0F0F12),
+    surfaceLow: Color(0xFF141418),
+    surface: Color(0xFF1A1A1F),
+    surfaceHigh: Color(0xFF202027),
+    surfaceHighest: Color(0xFF292931),
+    surfaceBright: Color(0xFF33333C),
+    onSurface: Color(0xFFF5F2EC),
+    onSurfaceVariant: Color(0xFFB3AFA6),
+    outline: Color(0xFF3D3D45),
+    outlineVariant: Color(0xFF26262C),
+    accent: Color(0xFFD8CFC4),
+    onAccent: Color(0xFF161410),
+    accentContainer: Color(0xFF2E2B27),
+    onAccentContainer: Color(0xFFE8E2D8),
+    secondary: Color(0xFFA8A29A),
+    onSecondary: Color(0xFF161410),
+    secondaryContainer: Color(0xFF2C2A27),
+    onSecondaryContainer: Color(0xFFD8D2C8),
+    tertiary: Color(0xFF8FA3BF),
+    onTertiary: Color(0xFF121A26),
+    tertiaryContainer: Color(0xFF2C3A4E),
+    onTertiaryContainer: Color(0xFFD4E0F2),
+    error: Color(0xFFE8786F),
+    onError: Color(0xFF2A0A08),
+    errorContainer: Color(0xFF5C2320),
+    onErrorContainer: Color(0xFFFFD2CD),
+    inverseSurface: Color(0xFFF5F2EC),
+    onInverseSurface: Color(0xFF141418),
+    inversePrimary: Color(0xFF6F675C),
+    scrim: Colors.black,
+  );
 
-  static const Color _onSurface = Color(0xFFF5F2EC);
-  static const Color _onSurfaceVariant = Color(0xFFB3AFA6);
-  static const Color _outline = Color(0xFF3D3D45);
-  static const Color _outlineVariant = Color(0xFF26262C);
+  /// 浅色调:暖白分层表面 + 深暖文字;正文/控件对比度不低于 4.5:1。
+  @visibleForTesting
+  static const Tones lightTones = Tones._(
+    base: Color(0xFFF6F4F0),
+    surfaceLowest: Color(0xFFFBFAF7),
+    surfaceLow: Color(0xFFF2EFEA),
+    surface: Color(0xFFECE8E1),
+    surfaceHigh: Color(0xFFE4DFD6),
+    surfaceHighest: Color(0xFFDCD6CB),
+    surfaceBright: Color(0xFFD2CCC0),
+    onSurface: Color(0xFF1F1C17),
+    onSurfaceVariant: Color(0xFF555046),
+    outline: Color(0xFF8A8478),
+    outlineVariant: Color(0xFFD5CFC4),
+    accent: Color(0xFF6F6557),
+    onAccent: Color(0xFFF6F4F0),
+    accentContainer: Color(0xFFDDD6CB),
+    onAccentContainer: Color(0xFF262119),
+    secondary: Color(0xFF6B665D),
+    onSecondary: Color(0xFFF6F4F0),
+    secondaryContainer: Color(0xFFE0DBD1),
+    onSecondaryContainer: Color(0xFF262119),
+    tertiary: Color(0xFF4E6076),
+    onTertiary: Color(0xFFF6F4F0),
+    tertiaryContainer: Color(0xFFD4DEEC),
+    onTertiaryContainer: Color(0xFF1B2838),
+    error: Color(0xFFB03A32),
+    onError: Color(0xFFFFFFFF),
+    errorContainer: Color(0xFFF5D4D0),
+    onErrorContainer: Color(0xFF4A120E),
+    inverseSurface: Color(0xFF322F29),
+    onInverseSurface: Color(0xFFF5F2EC),
+    inversePrimary: Color(0xFFD8CFC4),
+    scrim: Colors.black,
+  );
 
-  /// 克制高光,只用于播放/焦点/进度,不涂导航与主按钮。
-  static const Color _accent = Color(0xFFD8CFC4);
-  static const Color _onAccent = Color(0xFF161410);
-  static const Color _accentContainer = Color(0xFF2E2B27);
-  static const Color _onAccentContainer = Color(0xFFE8E2D8);
+  /// 近黑深色主题(默认)。
+  static ThemeData dark() => _theme(darkTones);
 
-  static const Color _secondary = Color(0xFFA8A29A);
-  static const Color _tertiary = Color(0xFF8FA3BF);
-  static const Color _error = Color(0xFFE8786F);
+  /// 浅色主题:同一分层结构,只换浅色调。
+  static ThemeData light() => _theme(lightTones);
 
-  static ThemeData dark() {
-    const scheme = ColorScheme(
-      brightness: Brightness.dark,
-      primary: _accent,
-      onPrimary: _onAccent,
-      primaryContainer: _accentContainer,
-      onPrimaryContainer: _onAccentContainer,
-      secondary: _secondary,
-      onSecondary: _onAccent,
-      secondaryContainer: Color(0xFF2C2A27),
-      onSecondaryContainer: Color(0xFFD8D2C8),
-      tertiary: _tertiary,
-      onTertiary: Color(0xFF121A26),
-      tertiaryContainer: Color(0xFF2C3A4E),
-      onTertiaryContainer: Color(0xFFD4E0F2),
-      error: _error,
-      onError: Color(0xFF2A0A08),
-      errorContainer: Color(0xFF5C2320),
-      onErrorContainer: Color(0xFFFFD2CD),
-      surface: _surfaceLow,
-      onSurface: _onSurface,
-      onSurfaceVariant: _onSurfaceVariant,
-      surfaceDim: _base,
-      surfaceBright: _surfaceBright,
-      surfaceContainerLowest: _surfaceLowest,
-      surfaceContainerLow: _surfaceLow,
-      surfaceContainer: _surface,
-      surfaceContainerHigh: _surfaceHigh,
-      surfaceContainerHighest: _surfaceHighest,
-      outline: _outline,
-      outlineVariant: _outlineVariant,
+  static ThemeData _theme(Tones t) {
+    final scheme = ColorScheme(
+      brightness: t.brightness,
+      primary: t.accent,
+      onPrimary: t.onAccent,
+      primaryContainer: t.accentContainer,
+      onPrimaryContainer: t.onAccentContainer,
+      secondary: t.secondary,
+      onSecondary: t.onSecondary,
+      secondaryContainer: t.secondaryContainer,
+      onSecondaryContainer: t.onSecondaryContainer,
+      tertiary: t.tertiary,
+      onTertiary: t.onTertiary,
+      tertiaryContainer: t.tertiaryContainer,
+      onTertiaryContainer: t.onTertiaryContainer,
+      error: t.error,
+      onError: t.onError,
+      errorContainer: t.errorContainer,
+      onErrorContainer: t.onErrorContainer,
+      surface: t.surfaceLow,
+      onSurface: t.onSurface,
+      onSurfaceVariant: t.onSurfaceVariant,
+      surfaceDim: t.base,
+      surfaceBright: t.surfaceBright,
+      surfaceContainerLowest: t.surfaceLowest,
+      surfaceContainerLow: t.surfaceLow,
+      surfaceContainer: t.surface,
+      surfaceContainerHigh: t.surfaceHigh,
+      surfaceContainerHighest: t.surfaceHighest,
+      outline: t.outline,
+      outlineVariant: t.outlineVariant,
       shadow: Colors.black,
-      scrim: Colors.black,
-      inverseSurface: _onSurface,
-      onInverseSurface: _surfaceLow,
-      inversePrimary: Color(0xFF6F675C),
+      scrim: t.scrim,
+      inverseSurface: t.inverseSurface,
+      onInverseSurface: t.onInverseSurface,
+      inversePrimary: t.inversePrimary,
       surfaceTint: Colors.transparent,
     );
 
@@ -156,8 +210,8 @@ abstract final class AppTheme {
       borderRadius: BorderRadius.circular(AppRadii.md),
     );
     final textTheme = baseTextTheme.apply(
-      bodyColor: _onSurface,
-      displayColor: _onSurface,
+      bodyColor: t.onSurface,
+      displayColor: t.onSurface,
       fontFamily: 'Segoe UI',
       fontFamilyFallback: const [
         'Microsoft YaHei UI',
@@ -169,24 +223,24 @@ abstract final class AppTheme {
 
     return ThemeData(
       useMaterial3: true,
-      brightness: Brightness.dark,
+      brightness: t.brightness,
       colorScheme: scheme,
       textTheme: textTheme,
-      scaffoldBackgroundColor: _base,
-      canvasColor: _base,
-      dividerColor: _outlineVariant,
+      scaffoldBackgroundColor: t.base,
+      canvasColor: t.base,
+      dividerColor: t.outlineVariant,
       splashFactory: InkSparkle.splashFactory,
       highlightColor: Colors.transparent,
-      appBarTheme: const AppBarTheme(
-        backgroundColor: _base,
-        foregroundColor: _onSurface,
+      appBarTheme: AppBarTheme(
+        backgroundColor: t.base,
+        foregroundColor: t.onSurface,
         elevation: 0,
         scrolledUnderElevation: 0,
         surfaceTintColor: Colors.transparent,
         centerTitle: false,
       ),
       cardTheme: CardThemeData(
-        color: _surfaceLow,
+        color: t.surfaceLow,
         elevation: 0,
         margin: EdgeInsets.zero,
         clipBehavior: Clip.antiAlias,
@@ -196,10 +250,10 @@ abstract final class AppTheme {
       ),
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
-          backgroundColor: _onSurface,
-          foregroundColor: _base,
-          disabledBackgroundColor: _surfaceHigh,
-          disabledForegroundColor: _onSurfaceVariant,
+          backgroundColor: t.onSurface,
+          foregroundColor: t.base,
+          disabledBackgroundColor: t.surfaceHigh,
+          disabledForegroundColor: t.onSurfaceVariant,
           padding: const EdgeInsets.symmetric(
             horizontal: AppSpacing.xl,
             vertical: AppSpacing.sm,
@@ -210,10 +264,10 @@ abstract final class AppTheme {
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
-          backgroundColor: _onSurface,
-          foregroundColor: _base,
-          disabledBackgroundColor: _surfaceHigh,
-          disabledForegroundColor: _onSurfaceVariant,
+          backgroundColor: t.onSurface,
+          foregroundColor: t.base,
+          disabledBackgroundColor: t.surfaceHigh,
+          disabledForegroundColor: t.onSurfaceVariant,
           elevation: 0,
           padding: const EdgeInsets.symmetric(
             horizontal: AppSpacing.xl,
@@ -225,8 +279,8 @@ abstract final class AppTheme {
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
-          foregroundColor: _onSurface,
-          side: const BorderSide(color: _outline),
+          foregroundColor: t.onSurface,
+          side: BorderSide(color: t.outline),
           padding: const EdgeInsets.symmetric(
             horizontal: AppSpacing.xl,
             vertical: AppSpacing.sm,
@@ -237,7 +291,7 @@ abstract final class AppTheme {
       ),
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
-          foregroundColor: _onSurface,
+          foregroundColor: t.onSurface,
           padding: const EdgeInsets.symmetric(
             horizontal: AppSpacing.md,
             vertical: AppSpacing.xs,
@@ -248,41 +302,41 @@ abstract final class AppTheme {
       ),
       inputDecorationTheme: InputDecorationThemeData(
         filled: true,
-        fillColor: _surface,
+        fillColor: t.surface,
         contentPadding: const EdgeInsets.symmetric(
           horizontal: AppSpacing.md,
           vertical: AppSpacing.sm,
         ),
-        hintStyle: bodyMedium.copyWith(color: _onSurfaceVariant),
+        hintStyle: bodyMedium.copyWith(color: t.onSurfaceVariant),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(AppRadii.md),
           borderSide: BorderSide.none,
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(AppRadii.md),
-          borderSide: const BorderSide(color: _outlineVariant),
+          borderSide: BorderSide(color: t.outlineVariant),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(AppRadii.md),
-          borderSide: const BorderSide(color: _accent, width: 1.5),
+          borderSide: BorderSide(color: t.accent, width: 1.5),
         ),
         errorBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(AppRadii.md),
-          borderSide: const BorderSide(color: _error),
+          borderSide: BorderSide(color: t.error),
         ),
         focusedErrorBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(AppRadii.md),
-          borderSide: const BorderSide(color: _error, width: 1.5),
+          borderSide: BorderSide(color: t.error, width: 1.5),
         ),
       ),
-      sliderTheme: const SliderThemeData(
-        activeTrackColor: _accent,
-        inactiveTrackColor: _surfaceHighest,
-        thumbColor: _accent,
-        overlayColor: Color(0x29D8CFC4),
+      sliderTheme: SliderThemeData(
+        activeTrackColor: t.accent,
+        inactiveTrackColor: t.surfaceHighest,
+        thumbColor: t.accent,
+        overlayColor: t.accent.withValues(alpha: 0.16),
         trackHeight: 3,
-        thumbShape: RoundSliderThumbShape(enabledThumbRadius: 6),
-        overlayShape: RoundSliderOverlayShape(overlayRadius: 12),
+        thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+        overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
         showValueIndicator: ShowValueIndicator.never,
       ),
       dialogTheme: DialogThemeData(
@@ -293,12 +347,12 @@ abstract final class AppTheme {
           borderRadius: BorderRadius.circular(AppRadii.xl),
         ),
         titleTextStyle: titleLarge,
-        contentTextStyle: bodyMedium.copyWith(color: _onSurfaceVariant),
+        contentTextStyle: bodyMedium.copyWith(color: t.onSurfaceVariant),
       ),
       snackBarTheme: SnackBarThemeData(
-        backgroundColor: _surfaceHighest,
+        backgroundColor: t.surfaceHighest,
         contentTextStyle: textTheme.bodyMedium,
-        actionTextColor: _onSurface,
+        actionTextColor: t.onSurface,
         behavior: SnackBarBehavior.floating,
         elevation: 0,
         shape: RoundedRectangleBorder(
@@ -307,13 +361,13 @@ abstract final class AppTheme {
       ),
       tooltipTheme: TooltipThemeData(
         decoration: BoxDecoration(
-          color: _surfaceHighest,
+          color: t.surfaceHighest,
           borderRadius: BorderRadius.circular(AppRadii.sm),
         ),
         // 桌面默认 minHeight 24 + 竖向 4 点内边距会裁切雅黑体;顶栏靠右
         // 时「取消置顶」最后一个字看起来缺笔。
         textStyle: labelMedium.copyWith(
-          color: _onSurface,
+          color: t.onSurface,
           fontWeight: FontWeight.w400,
           height: 1.35,
         ),
@@ -325,14 +379,14 @@ abstract final class AppTheme {
       ),
       iconButtonTheme: IconButtonThemeData(
         style: IconButton.styleFrom(
-          foregroundColor: _onSurface,
-          disabledForegroundColor: _onSurfaceVariant,
+          foregroundColor: t.onSurface,
+          disabledForegroundColor: t.onSurfaceVariant,
         ),
       ),
       // 弹出菜单的唯一样式来源;页面内 PopupMenuButton 不再覆盖
       // color/shape/surfaceTintColor。
       popupMenuTheme: PopupMenuThemeData(
-        color: _surfaceHigh,
+        color: t.surfaceHigh,
         surfaceTintColor: Colors.transparent,
         elevation: 6,
         shadowColor: Colors.black.withValues(alpha: 0.36),
@@ -342,36 +396,117 @@ abstract final class AppTheme {
         labelTextStyle: WidgetStatePropertyAll(textTheme.bodyMedium),
       ),
       navigationRailTheme: NavigationRailThemeData(
-        backgroundColor: _base,
-        indicatorColor: _surfaceHigh,
-        selectedIconTheme: const IconThemeData(color: _onSurface),
-        unselectedIconTheme: const IconThemeData(color: _onSurfaceVariant),
-        selectedLabelTextStyle: labelMedium.copyWith(color: _onSurface),
+        backgroundColor: t.base,
+        indicatorColor: t.surfaceHigh,
+        selectedIconTheme: IconThemeData(color: t.onSurface),
+        unselectedIconTheme: IconThemeData(color: t.onSurfaceVariant),
+        selectedLabelTextStyle: labelMedium.copyWith(color: t.onSurface),
         unselectedLabelTextStyle: labelMedium.copyWith(
-          color: _onSurfaceVariant,
+          color: t.onSurfaceVariant,
         ),
       ),
       // 手机底部导航:透明底 + 胶囊选中指示器;动效时长档走
       // AppMobileNav.pillDuration(NavigationBar.animationDuration 引用)。
       // 桌面 NavigationRail 样式见上方 navigationRailTheme,互不影响。
       navigationBarTheme: NavigationBarThemeData(
-        backgroundColor: _base.withValues(alpha: AppMobileNav.backgroundAlpha),
+        backgroundColor: t.base.withValues(alpha: AppMobileNav.backgroundAlpha),
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         height: 64,
-        indicatorColor: _surfaceHigh,
+        indicatorColor: t.surfaceHigh,
         indicatorShape: const StadiumBorder(),
         labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
         labelTextStyle: WidgetStatePropertyAll(labelMedium),
-        iconTheme: const WidgetStatePropertyAll(
-          IconThemeData(color: _onSurfaceVariant),
+        iconTheme: WidgetStatePropertyAll(
+          IconThemeData(color: t.onSurfaceVariant),
         ),
       ),
-      progressIndicatorTheme: const ProgressIndicatorThemeData(
-        color: _accent,
-        linearTrackColor: _surfaceHighest,
-        circularTrackColor: _surfaceHighest,
+      progressIndicatorTheme: ProgressIndicatorThemeData(
+        color: t.accent,
+        linearTrackColor: t.surfaceHighest,
+        circularTrackColor: t.surfaceHighest,
       ),
     );
   }
+}
+
+/// [AppTheme] 的一套完整取色(表面分层/文字/高光/出错)。
+///
+/// 组件样式统一在 [AppTheme._theme] 中按色调生成;浅色与深色的正文
+/// 与控件对比度都不低于 WCAG AA(4.5:1)。
+@visibleForTesting
+class Tones {
+  const Tones._({
+    required this.base,
+    required this.surfaceLowest,
+    required this.surfaceLow,
+    required this.surface,
+    required this.surfaceHigh,
+    required this.surfaceHighest,
+    required this.surfaceBright,
+    required this.onSurface,
+    required this.onSurfaceVariant,
+    required this.outline,
+    required this.outlineVariant,
+    required this.accent,
+    required this.onAccent,
+    required this.accentContainer,
+    required this.onAccentContainer,
+    required this.secondary,
+    required this.onSecondary,
+    required this.secondaryContainer,
+    required this.onSecondaryContainer,
+    required this.tertiary,
+    required this.onTertiary,
+    required this.tertiaryContainer,
+    required this.onTertiaryContainer,
+    required this.error,
+    required this.onError,
+    required this.errorContainer,
+    required this.onErrorContainer,
+    required this.inverseSurface,
+    required this.onInverseSurface,
+    required this.inversePrimary,
+    required this.scrim,
+  });
+
+  /// 页面底色(最深层)。深色近黑,浅色暖白。
+  final Color base;
+  final Color surfaceLowest;
+  final Color surfaceLow;
+  final Color surface;
+  final Color surfaceHigh;
+  final Color surfaceHighest;
+  final Color surfaceBright;
+  final Color onSurface;
+  final Color onSurfaceVariant;
+  final Color outline;
+  final Color outlineVariant;
+
+  /// 克制高光,只用于播放/焦点/进度,不涂导航与主按钮。
+  final Color accent;
+  final Color onAccent;
+  final Color accentContainer;
+  final Color onAccentContainer;
+  final Color secondary;
+  final Color onSecondary;
+  final Color secondaryContainer;
+  final Color onSecondaryContainer;
+  final Color tertiary;
+  final Color onTertiary;
+  final Color tertiaryContainer;
+  final Color onTertiaryContainer;
+  final Color error;
+  final Color onError;
+  final Color errorContainer;
+  final Color onErrorContainer;
+  final Color inverseSurface;
+  final Color onInverseSurface;
+  final Color inversePrimary;
+
+  /// 叠在海报/画面上的遮罩底色;两种亮度下都保持黑色,画面颜色不变。
+  final Color scrim;
+
+  Brightness get brightness =>
+      base.computeLuminance() < 0.5 ? Brightness.dark : Brightness.light;
 }

@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/widgets.dart';
 import 'package:rillight/app/app.dart';
 import 'package:rillight/app/android_bootstrap.dart';
+import 'package:rillight/app/appearance_style.dart';
 import 'package:rillight/app/router.dart';
 import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/auth/auth_bootstrap.dart';
@@ -31,6 +32,9 @@ Future<void> main(List<String> args) async {
   final auth = await createProductionAuth();
   final router = createAppRouter(auth: auth);
   final playerHost = DesktopPlayerWindowHost(auth: auth);
+  // 外观先读持久化偏好再上屏,避免启动闪一下错误亮度。
+  final appearance = AppearanceController();
+  await appearance.ready;
   // 播放器进程请求打开条目详情(播放结束"查看剧集"):
   // 主窗口路由到详情页并前置主窗口。
   playerHost.onOpenItemRoute = (itemId, {seasonId}) {
@@ -43,6 +47,7 @@ Future<void> main(List<String> args) async {
         auth: auth,
         router: router,
         playerBindings: PlayerBindings(windowHost: playerHost),
+        appearance: appearance,
       ),
     ),
   );

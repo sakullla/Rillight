@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:rillight/app/appearance_style.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme/tokens.dart';
@@ -28,6 +29,7 @@ abstract final class ConnectFormKeys {
   static const addLine = Key('connect-add-line');
   static const deleteLine = Key('connect-delete-line');
   static const serverSearch = Key('connect-server-search');
+  static const connectAppearanceKey = Key('connect-appearance');
   static Key extraLine(int index) => Key('connect-extra-line-$index');
 }
 
@@ -318,6 +320,14 @@ class _ConnectPageState extends State<ConnectPage> {
                       children: [
                         _BrandHeader(l10n: l10n),
                         const SizedBox(height: AppSpacing.xl),
+                        // 登录前也能切外观;偏好持久化,设置页同源。
+                        const Align(
+                          alignment: Alignment.centerRight,
+                          child: AppearanceMenuButton(
+                            buttonKey: ConnectFormKeys.connectAppearanceKey,
+                          ),
+                        ),
+                        const SizedBox(height: AppSpacing.sm),
                         _buildFormCard(context, l10n, auth),
                         const SizedBox(height: AppSpacing.xxl),
                         _buildSavedServers(context, l10n, auth),

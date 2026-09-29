@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:rillight/app/appearance_style.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_chrome.dart';
 import 'package:rillight/app/phone_nav_style.dart';
@@ -23,7 +24,9 @@ class RillightApp extends StatelessWidget {
     GoRouter? router,
     this.environment = PresentationEnvironment.desktop,
     this.playerBindings = const PlayerBindings(),
+    AppearanceController? appearance,
   }) : auth = auth ?? AuthController.memory(),
+       appearance = appearance ?? AppearanceController(),
        windowHost = playerBindings.windowHost ?? OverlayPlayerWindowHost() {
     this.router =
         router ?? createAppRouter(auth: this.auth, environment: environment);
@@ -32,45 +35,58 @@ class RillightApp extends StatelessWidget {
   final AuthController auth;
   final PresentationEnvironment environment;
   final PlayerBindings playerBindings;
+  final AppearanceController appearance;
   final PlayerWindowHost windowHost;
   late final GoRouter router;
 
   @override
   Widget build(BuildContext context) {
-    if (!environment.isDesktop) {
-      final app = PresentationScope(
-        environment: environment,
-        child: AuthScope(
-          controller: auth,
-          child: PlayerScope(
-            bindings: playerBindings,
-            child: MaterialApp.router(
-              title: kProductName,
-              debugShowCheckedModeBanner: false,
-              locale: const Locale('zh', 'CN'),
-              supportedLocales: AppLocalizations.supportedLocales,
-              localizationsDelegates: AppLocalizations.localizationsDelegates,
-              theme: AppTheme.dark(),
-              scrollBehavior: environment.isTv
-                  ? null
-                  : const PhoneScrollBehavior(),
-              routerConfig: router,
-            ),
-          ),
-        ),
-      );
-      if (environment.isTv) {
-        return app;
-      }
-      return PhoneNavStyleHost(child: app);
-    }
-    return PresentationScope(
-      environment: environment,
-      child: _buildDesktop(context),
+    return AppearanceScope(
+      controller: appearance,
+      child: ListenableBuilder(
+        listenable: appearance,
+        builder: (context, _) {
+          final mode = appearance.themeMode;
+          if (!environment.isDesktop) {
+            final app = PresentationScope(
+              environment: environment,
+              child: AuthScope(
+                controller: auth,
+                child: PlayerScope(
+                  bindings: playerBindings,
+                  child: MaterialApp.router(
+                    title: kProductName,
+                    debugShowCheckedModeBanner: false,
+                    locale: const Locale('zh', 'CN'),
+                    supportedLocales: AppLocalizations.supportedLocales,
+                    localizationsDelegates:
+                        AppLocalizations.localizationsDelegates,
+                    theme: AppTheme.light(),
+                    darkTheme: AppTheme.dark(),
+                    themeMode: mode,
+                    scrollBehavior: environment.isTv
+                        ? null
+                        : const PhoneScrollBehavior(),
+                    routerConfig: router,
+                  ),
+                ),
+              ),
+            );
+            if (environment.isTv) {
+              return app;
+            }
+            return PhoneNavStyleHost(child: app);
+          }
+          return PresentationScope(
+            environment: environment,
+            child: _buildDesktop(context, mode),
+          );
+        },
+      ),
     );
   }
 
-  Widget _buildDesktop(BuildContext context) {
+  Widget _buildDesktop(BuildContext context, ThemeMode mode) {
     return AuthScope(
       controller: auth,
       child: PlayerScope(
@@ -85,9 +101,9 @@ class RillightApp extends StatelessWidget {
               locale: const Locale('zh', 'CN'),
               supportedLocales: AppLocalizations.supportedLocales,
               localizationsDelegates: AppLocalizations.localizationsDelegates,
-              theme: AppTheme.dark(),
+              theme: AppTheme.light(),
               darkTheme: AppTheme.dark(),
-              themeMode: ThemeMode.dark,
+              themeMode: mode,
               routerConfig: router,
               builder: (context, child) {
                 return PlayerScope(

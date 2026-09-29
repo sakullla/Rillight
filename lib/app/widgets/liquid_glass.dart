@@ -132,6 +132,10 @@ class LiquidGlass extends StatelessWidget {
     final fill = scheme.surface.withValues(
       alpha: skipBlur ? AppGlass.reducedTint : (tint ?? _tint),
     );
+    // 描边与高光随亮度取反:深色主题提白,浅色主题压深,两种亮度下都可见。
+    final edge = scheme.brightness == Brightness.dark
+        ? Colors.white
+        : Colors.black;
     Widget body = child;
     if (padding != null) {
       body = Padding(padding: padding!, child: body);
@@ -164,23 +168,19 @@ class LiquidGlass extends StatelessWidget {
                     border: kind == LiquidGlassKind.bar
                         ? Border(
                             bottom: BorderSide(
-                              color: Colors.white.withValues(
-                                alpha: AppGlass.edgeLight,
-                              ),
+                              color: edge.withValues(alpha: AppGlass.edgeLight),
                             ),
                           )
                         : Border.all(
-                            color: Colors.white.withValues(
-                              alpha: AppGlass.edgeLight,
-                            ),
+                            color: edge.withValues(alpha: AppGlass.edgeLight),
                           ),
                     gradient: LinearGradient(
                       begin: Alignment.topCenter,
                       end: Alignment.bottomCenter,
                       stops: const [0, 0.2, 1],
                       colors: [
-                        Colors.white.withValues(alpha: AppGlass.specular),
-                        Colors.white.withValues(alpha: 0.04),
+                        edge.withValues(alpha: AppGlass.specular),
+                        edge.withValues(alpha: 0.04),
                         Colors.transparent,
                       ],
                     ),

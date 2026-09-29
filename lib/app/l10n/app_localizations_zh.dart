@@ -600,6 +600,21 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsPlayback => '播放';
 
   @override
+  String get settingsAppearance => '外观';
+
+  @override
+  String get settingsAppearanceHint => '浅色、深色或跟随系统';
+
+  @override
+  String get appearanceSystem => '跟随系统';
+
+  @override
+  String get appearanceLight => '浅色';
+
+  @override
+  String get appearanceDark => '深色';
+
+  @override
   String get settingsDiskCacheLimit => '磁盘缓冲上限';
 
   @override

@@ -60,7 +60,9 @@ class ScrimIconButton extends StatelessWidget {
           alpha: AppScrim.controlDisabledIcon,
         ),
         side: BorderSide(
-          color: Colors.white.withValues(alpha: AppGlass.edgeLight),
+          color: scheme.brightness == Brightness.dark
+              ? Colors.white.withValues(alpha: AppGlass.edgeLight)
+              : Colors.black.withValues(alpha: AppGlass.edgeLight),
         ),
         shape: const CircleBorder(),
         fixedSize: Size.square(dimension),

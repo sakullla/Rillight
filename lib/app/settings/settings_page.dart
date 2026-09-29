@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:rillight/app/appearance_style.dart';
 import 'package:rillight/app/app_shell.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/theme/tokens.dart';
@@ -12,20 +13,30 @@ import 'package:rillight/player/danmaku/danmaku_keys.dart';
 import 'package:rillight/player/player_runtime_options.dart';
 import 'package:rillight/player/player_settings.dart';
 
-/// 设置页:播放器运行时选项(磁盘缓冲上限、硬件解码)与弹幕服务来源的查看与修改。
+/// 设置页:外观(浅色/深色/跟随系统)、播放器运行时选项(磁盘缓冲上限、
+/// 硬件解码)与弹幕服务来源的查看与修改。
 ///
 /// 读写统一走 [PlayerSettingsStore];更改即时持久化,对新起播生效。
 /// 音量不入本页,由播放器控制层维护。
 class SettingsPage extends StatefulWidget {
-  const SettingsPage({super.key, this.settingsStore, this.platform});
+  const SettingsPage({
+    super.key,
+    this.settingsStore,
+    this.platform,
+    this.appearance,
+  });
 
   /// 测试注入;运行时留空用当前平台。
   final PlayerSettingsStore? settingsStore;
   final TargetPlatform? platform;
 
+  /// 测试注入的外观控制器;运行时留空走 [AppearanceScope]。
+  final AppearanceController? appearance;
+
   static const diskCacheLimitKey = Key('settings-disk-cache-limit');
   static const hardwareDecodingKey = Key('settings-hardware-decoding');
   static const decoderBackendKey = Key('settings-decoder-backend');
+  static const appearanceKey = Key('settings-appearance');
   static const danmakuServerFieldKey = Key('settings-danmaku-server');
   static const danmakuAppIdFieldKey = Key('settings-danmaku-app-id');
   static const danmakuTokenFieldKey = Key('settings-danmaku-token');
@@ -230,6 +241,7 @@ class _SettingsPageState extends State<SettingsPage> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
+    final appearance = widget.appearance ?? AppearanceScope.maybeOf(context);
     final backends = PlayerRuntimeOptions.availableBackends(_platform);
     final limitChoices = <int>[...SettingsPage.diskCacheLimitChoices];
     final effectiveLimit = PlayerRuntimeOptions.effectiveDiskCacheLimitMiB(
@@ -271,6 +283,35 @@ class _SettingsPageState extends State<SettingsPage> {
                   ),
                   const SizedBox(height: AppSpacing.xl),
                 ],
+                _SettingsSection(
+                  icon: Icons.brightness_6_outlined,
+                  title: l10n.settingsAppearance,
+                  children: [
+                    _SettingsChoiceRow(
+                      label: l10n.settingsAppearance,
+                      hint: l10n.settingsAppearanceHint,
+                      child: _SettingsDropdown<AppearanceStyle>(
+                        dropdownKey: SettingsPage.appearanceKey,
+                        value: appearance?.style ?? AppearanceStyle.system,
+                        items: [
+                          for (final value in AppearanceStyle.values)
+                            DropdownMenuItem(
+                              value: value,
+                              child: Text(value.label(l10n)),
+                            ),
+                        ],
+                        onChanged: appearance == null
+                            ? null
+                            : (value) {
+                                if (value != null) {
+                                  unawaited(appearance.setStyle(value));
+                                }
+                              },
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: AppSpacing.lg),
                 _SettingsSection(
                   icon: Icons.play_circle_outline_rounded,
                   title: l10n.settingsPlayback,

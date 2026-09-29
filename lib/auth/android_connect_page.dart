@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:rillight/app/appearance_style.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
@@ -244,7 +245,13 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
     final auth = AuthScope.of(context);
     final l10n = AppLocalizations.of(context);
     return Scaffold(
-      appBar: AppBar(title: Text(l10n.connectTitle)),
+      appBar: AppBar(
+        title: Text(l10n.connectTitle),
+        // 登录前也能切外观;偏好持久化,设置页同源。
+        actions: const [
+          AppearanceMenuButton(buttonKey: Key('android-connect-appearance')),
+        ],
+      ),
       body: SafeArea(
         child: Center(
           child: ConstrainedBox(

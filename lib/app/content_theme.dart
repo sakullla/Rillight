@@ -9,7 +9,7 @@ import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/media_image/media_image.dart';
 
-/// 从当前海报取出的深色方案。页面局部套用，不改应用外壳。
+/// 从当前海报取出的内容方案(亮度跟随当前主题)。页面局部套用，不改应用外壳。
 ///
 /// 用 Material 的内容取色：小图量化出一个主色，再生成成对的按钮色和表面色，
 /// 保证字和按钮对比度。出错色沿用应用主题，避免失败提示被海报带偏。
@@ -208,7 +208,9 @@ void _remember(String token, ColorScheme scheme) {
   }
 }
 
-/// 把图片字节收成深色 [ColorScheme]。出错色、表面着色保持应用自己的约定。
+/// 把图片字节收成随当前亮度的 [ColorScheme]:跟随应用主题的
+/// [ColorScheme.brightness],浅色主题派生浅色内容色。出错色、表面着色
+/// 保持应用自己的约定;海报与视频画面本身不受影响。
 @visibleForTesting
 Future<ColorScheme> contentSchemeFromBytes(
   Uint8List bytes,
@@ -216,7 +218,7 @@ Future<ColorScheme> contentSchemeFromBytes(
 ) async {
   final extracted = await ColorScheme.fromImageProvider(
     provider: MemoryImage(bytes),
-    brightness: Brightness.dark,
+    brightness: fallback.brightness,
     dynamicSchemeVariant: DynamicSchemeVariant.content,
   );
   return extracted.copyWith(

@@ -795,6 +795,26 @@
   "@settingsPlayback": {
     "description": "Settings section title for playback options."
   },
+  "settingsAppearance": "外观",
+  "@settingsAppearance": {
+    "description": "Settings section title and login-page entry for light/dark/system appearance."
+  },
+  "settingsAppearanceHint": "浅色、深色或跟随系统",
+  "@settingsAppearanceHint": {
+    "description": "Short explanation under the appearance row."
+  },
+  "appearanceSystem": "跟随系统",
+  "@appearanceSystem": {
+    "description": "Appearance choice that follows the system brightness."
+  },
+  "appearanceLight": "浅色",
+  "@appearanceLight": {
+    "description": "Appearance choice that forces the light theme."
+  },
+  "appearanceDark": "深色",
+  "@appearanceDark": {
+    "description": "Appearance choice that forces the dark theme."
+  },
   "settingsDiskCacheLimit": "磁盘缓冲上限",
   "@settingsDiskCacheLimit": {
     "description": "Setting row label for the on-disk playback cache size limit."

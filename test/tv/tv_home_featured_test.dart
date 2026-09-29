@@ -73,6 +73,8 @@ void main() {
     await key(tester, LogicalKeyboardKey.arrowDown);
     await edit(tester, 'correct-horse');
     await key(tester, LogicalKeyboardKey.arrowDown);
+    // User-Agent 与提交之间隔了外观三态行,多按一次向下才到提交。
+    await key(tester, LogicalKeyboardKey.arrowDown);
     await key(tester, LogicalKeyboardKey.arrowDown);
     await key(tester, LogicalKeyboardKey.select);
     expect(find.byType(TvShell), findsOneWidget);
@@ -168,7 +170,11 @@ void main() {
       final border =
           (focusedContainer.decoration as BoxDecoration).border! as Border;
       expect(border.top.width, greaterThanOrEqualTo(4));
-      expect(border.top.color, Colors.white);
+      // 焦点环取主题前景色:深色主题是暖白,浅色主题是深色,均高对比。
+      expect(
+        border.top.color,
+        Theme.of(tester.element(focusedAction())).colorScheme.onSurface,
+      );
 
       // Unfocused action stays at rest scale.
       final navScale = tester.widget<AnimatedScale>(

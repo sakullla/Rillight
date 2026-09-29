@@ -93,6 +93,7 @@ class PlayerSettings {
     this.danmakuToken,
     this.danmakuAppId,
     this.danmakuSeriesMemories = const {},
+    this.appearanceStyle,
   });
 
   /// 音量百分比;100 为原片 0 dB,超过 100 为额外增益。
@@ -131,6 +132,10 @@ class PlayerSettings {
   /// 弹幕按剧匹配记忆，key 为 seriesId。
   final Map<String, DanmakuSeriesMemory> danmakuSeriesMemories;
 
+  /// 外观偏好(浅色/深色/跟随系统的枚举名);null 表示未选择过,
+  /// 由应用外壳按「跟随系统」解析。仅存字符串,播放进程不消费。
+  final String? appearanceStyle;
+
   int get clampedVolume => (volume ?? 100).clamp(0, volumeMax);
 
   double get effectivePlaybackRate {
@@ -168,6 +173,7 @@ class PlayerSettings {
         for (final entry in danmakuSeriesMemories.entries)
           entry.key: entry.value.toJson(),
       },
+    if (appearanceStyle != null) 'appearanceStyle': appearanceStyle,
   };
 
   factory PlayerSettings.fromJson(Map<String, dynamic> json) {
@@ -212,6 +218,9 @@ class PlayerSettings {
       danmakuSeriesMemories: _readDanmakuMemories(
         json['danmakuSeriesMemories'],
       ),
+      appearanceStyle: json['appearanceStyle'] is String
+          ? json['appearanceStyle'] as String
+          : null,
     );
   }
 }

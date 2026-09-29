@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/app.dart';
+import 'package:rillight/app/appearance_style.dart';
 import 'package:rillight/app/app_shell.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/routes.dart';
@@ -12,6 +13,7 @@ import 'package:rillight/app/widgets/app_error_view.dart';
 import 'package:rillight/app/widgets/poster_placeholder.dart';
 import 'package:rillight/app/widgets/scrim_icon_button.dart';
 import 'package:rillight/auth/auth_controller.dart';
+import 'package:rillight/auth/connect_page.dart';
 import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/auth/session_actions.dart';
@@ -21,6 +23,7 @@ import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/home_page.dart';
 import 'package:rillight/library/item_detail_page.dart';
 import 'package:rillight/library/library_page.dart';
+import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/search/search_overlay.dart';
 import 'package:rillight/search/search_page.dart';
 
@@ -64,6 +67,81 @@ void main() {
   });
 
   group('app shell logged-in', () {
+    testWidgets(
+      'stored appearance applies on startup and switching keeps the login '
+      'page and its inputs',
+      (tester) async {
+        final auth = AuthController.memory();
+        final appearance = AppearanceController(
+          store: MemoryPlayerSettingsStore(
+            const PlayerSettings(appearanceStyle: 'light'),
+          ),
+        );
+        await tester.pumpWidget(
+          RillightApp(auth: auth, appearance: appearance),
+        );
+        await settle(tester);
+
+        // 重启后保持上次选择:持久化的 light 在首屏生效。
+        expect(appearance.style, AppearanceStyle.light);
+        expect(
+          tester.widget<MaterialApp>(find.byType(MaterialApp)).themeMode,
+          ThemeMode.light,
+        );
+        expect(find.byType(ConnectPage), findsOneWidget);
+        expect(find.byKey(ConnectFormKeys.address), findsOneWidget);
+
+        await tester.enterText(
+          find.byKey(ConnectFormKeys.address),
+          'http://emby.test:8096',
+        );
+        await settle(tester);
+
+        await appearance.setStyle(AppearanceStyle.dark);
+        await settle(tester);
+
+        // 切换外观:登录页与已输入内容保持不变,只有亮度变化。
+        expect(
+          tester.widget<MaterialApp>(find.byType(MaterialApp)).themeMode,
+          ThemeMode.dark,
+        );
+        expect(find.byType(ConnectPage), findsOneWidget);
+        expect(
+          tester
+              .widget<TextField>(find.byKey(ConnectFormKeys.address))
+              .controller
+              ?.text,
+          'http://emby.test:8096',
+        );
+      },
+      tags: ['integration'],
+    );
+
+    testWidgets('switching appearance keeps the logged-in home page mounted', (
+      tester,
+    ) async {
+      final auth = await _connect(tester);
+      final appearance = AppearanceController(
+        store: MemoryPlayerSettingsStore(),
+      );
+      await tester.pumpWidget(RillightApp(auth: auth, appearance: appearance));
+      await settle(tester);
+
+      expect(find.byType(HomePage), findsOneWidget);
+      expect(find.text('Inception'), findsWidgets);
+
+      await appearance.setStyle(AppearanceStyle.dark);
+      await settle(tester);
+
+      // 页面不因外观切换重建/丢状态,首页内容原样保留。
+      expect(
+        tester.widget<MaterialApp>(find.byType(MaterialApp)).themeMode,
+        ThemeMode.dark,
+      );
+      expect(find.byType(HomePage), findsOneWidget);
+      expect(find.text('Inception'), findsWidgets);
+    }, tags: ['integration']);
+
     testWidgets(
       'logged-in shell is full-width and switching servers reloads home',
       (tester) async {

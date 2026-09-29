@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:rillight/app/appearance_style.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/auth/connect_draft.dart';
@@ -93,6 +94,7 @@ class _TvConnectPageState extends State<TvConnectPage> {
   Widget build(BuildContext context) {
     final auth = AuthScope.of(context);
     final l10n = AppLocalizations.of(context);
+    final appearance = AppearanceScope.maybeOf(context);
     return TvFrame(
       title: l10n.connectTitle,
       back: widget.addingAnother,
@@ -100,7 +102,9 @@ class _TvConnectPageState extends State<TvConnectPage> {
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 680),
           child: ListenableBuilder(
-            listenable: auth,
+            listenable: appearance == null
+                ? auth
+                : Listenable.merge([auth, appearance]),
             builder: (context, _) => ListView(
               children: [
                 TvInput(
@@ -121,6 +125,27 @@ class _TvConnectPageState extends State<TvConnectPage> {
                   secret: true,
                 ),
                 TvInput(label: l10n.userAgent, controller: _userAgent),
+                const SizedBox(height: 8),
+                // TV 外观三态:方向键在三个选项间移动,选中即生效并持久化。
+                Text(l10n.settingsAppearance),
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    for (final value in AppearanceStyle.values) ...[
+                      TvAction(
+                        key: Key('tv-appearance-${value.name}'),
+                        selected:
+                            (appearance?.style ?? AppearanceStyle.system) ==
+                            value,
+                        onPressed: appearance == null
+                            ? null
+                            : () => appearance.setStyle(value),
+                        child: Text(value.label(l10n)),
+                      ),
+                      const SizedBox(width: 8),
+                    ],
+                  ],
+                ),
                 if (auth.failure != null)
                   Text(embyFailureMessage(l10n, auth.failure!)),
                 TvAction(

@@ -1216,6 +1216,36 @@ abstract class AppLocalizations {
   /// **'播放'**
   String get settingsPlayback;
 
+  /// Settings section title and login-page entry for light/dark/system appearance.
+  ///
+  /// In zh, this message translates to:
+  /// **'外观'**
+  String get settingsAppearance;
+
+  /// Short explanation under the appearance row.
+  ///
+  /// In zh, this message translates to:
+  /// **'浅色、深色或跟随系统'**
+  String get settingsAppearanceHint;
+
+  /// Appearance choice that follows the system brightness.
+  ///
+  /// In zh, this message translates to:
+  /// **'跟随系统'**
+  String get appearanceSystem;
+
+  /// Appearance choice that forces the light theme.
+  ///
+  /// In zh, this message translates to:
+  /// **'浅色'**
+  String get appearanceLight;
+
+  /// Appearance choice that forces the dark theme.
+  ///
+  /// In zh, this message translates to:
+  /// **'深色'**
+  String get appearanceDark;
+
   /// Setting row label for the on-disk playback cache size limit.
   ///
   /// In zh, this message translates to:

@@ -25,6 +25,24 @@ void main() {
       expect(scheme.surfaceTint, Colors.transparent);
     },
   );
+
+  testWidgets('a light app fallback derives a light content scheme', (
+    tester,
+  ) async {
+    final scheme = await tester.runAsync(() async {
+      final bytes = await _solidPng(const Color(0xFFE23B3B));
+      final fallback = AppTheme.light().colorScheme;
+      return contentSchemeFromBytes(bytes, fallback);
+    });
+    final fallback = AppTheme.light().colorScheme;
+
+    expect(scheme, isNotNull);
+    // 内容色亮度跟随应用主题:浅色主题下派生浅色方案。
+    expect(scheme!.brightness, Brightness.light);
+    expect(scheme.error, fallback.error);
+    expect(scheme.onSurface, fallback.onSurface);
+    expect(scheme.surfaceTint, Colors.transparent);
+  });
 }
 
 Future<Uint8List> _solidPng(Color color) async {

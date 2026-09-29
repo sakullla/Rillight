@@ -4,6 +4,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/app/app.dart';
+import 'package:rillight/app/appearance_style.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/theme.dart';
@@ -80,11 +81,19 @@ class _AndroidBootstrapState extends State<AndroidBootstrap> {
         auth.dispose();
         return;
       }
+      // 外观先读持久化偏好再上屏,避免启动闪一下错误亮度。
+      final appearance = AppearanceController();
+      await appearance.ready;
+      if (!mounted) {
+        auth.dispose();
+        return;
+      }
       setState(
         () => _app = RillightApp(
           auth: auth,
           environment: environment,
           playerBindings: PlayerBindings(snapshotStore: snapshotStore),
+          appearance: appearance,
         ),
       );
     } catch (_) {

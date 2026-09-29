@@ -201,10 +201,10 @@ class _TvActionState extends State<TvAction>
     final fill = widget.emphasized
         ? (_focused ? scheme.primary : scheme.primaryContainer)
         : _focused
-        ? const Color(0xff315d8c)
+        ? scheme.primaryContainer
         : widget.selected
-        ? const Color(0xff253a50)
-        : const Color(0xff20252d);
+        ? scheme.surfaceContainerHighest
+        : scheme.surfaceContainerHigh;
     final foreground = widget.emphasized
         ? (_focused ? scheme.onPrimary : scheme.onPrimaryContainer)
         : null;
@@ -249,7 +249,8 @@ class _TvActionState extends State<TvAction>
                 decoration: BoxDecoration(
                   color: fill,
                   border: Border.all(
-                    color: _focused ? Colors.white : Colors.transparent,
+                    // 高对比焦点环:深色主题下是暖白,浅色主题下是深色。
+                    color: _focused ? scheme.onSurface : Colors.transparent,
                     width: TvAction.focusRingWidth,
                   ),
                   borderRadius: BorderRadius.circular(10),
@@ -293,8 +294,8 @@ class TvFrame extends StatelessWidget {
     final vertical = math.max(48.0, viewSize.height * 0.05);
     return Theme(
       data: Theme.of(context).copyWith(
-        dialogTheme: const DialogThemeData(
-          backgroundColor: Color(0xff151a22),
+        dialogTheme: DialogThemeData(
+          backgroundColor: Theme.of(context).colorScheme.surfaceContainerLow,
           surfaceTintColor: Colors.transparent,
         ),
         textTheme: Theme.of(context).textTheme.apply(fontSizeFactor: 1.15),
