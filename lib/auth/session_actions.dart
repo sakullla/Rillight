@@ -8,6 +8,7 @@ import 'package:rillight/app/settings/settings_action.dart';
 import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
+import 'package:rillight/auth/change_password_dialog.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/auth/server_switcher_dialog.dart';
 import 'package:rillight/home/catalog_scope.dart';
@@ -83,6 +84,15 @@ class SessionActions extends StatelessWidget {
               onDelete: (serverId) {
                 Navigator.of(dialogContext).pop();
                 unawaited(_deleteServer(auth, playerHost, serverId));
+              },
+              onChangePassword: () {
+                Navigator.of(dialogContext).pop();
+                unawaited(
+                  showDialog<void>(
+                    context: context,
+                    builder: (_) => ChangePasswordDialog(auth: auth),
+                  ),
+                );
               },
             );
           },

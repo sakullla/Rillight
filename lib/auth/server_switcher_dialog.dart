@@ -17,6 +17,7 @@ class ServerSwitcherDialog extends StatefulWidget {
     required this.onAddServer,
     required this.onLogout,
     required this.onDelete,
+    required this.onChangePassword,
   });
 
   final List<SavedServer> servers;
@@ -29,9 +30,13 @@ class ServerSwitcherDialog extends StatefulWidget {
   /// 删除一台已保存服务器;先弹确认框,确认后才回调。
   final void Function(String serverId) onDelete;
 
+  /// 修改当前登录用户的密码。
+  final VoidCallback onChangePassword;
+
   static const searchField = Key('server-switcher-search');
   static const deleteConfirmKey = Key('server-delete-confirm');
   static const deleteCancelKey = Key('server-delete-cancel');
+  static const changePasswordKey = Key('server-change-password');
 
   static Key deleteKey(String serverId) => Key('server-delete-$serverId');
 
@@ -139,6 +144,12 @@ class _ServerSwitcherDialogState extends State<ServerSwitcherDialog> {
                   leading: const Icon(Icons.add),
                   title: Text(l10n.addServer),
                   onTap: widget.onAddServer,
+                ),
+                ListTile(
+                  key: ServerSwitcherDialog.changePasswordKey,
+                  leading: const Icon(Icons.password_outlined),
+                  title: Text(l10n.changePassword),
+                  onTap: widget.onChangePassword,
                 ),
                 ListTile(
                   leading: const Icon(Icons.logout),

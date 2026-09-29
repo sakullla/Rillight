@@ -8,6 +8,7 @@ import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
+import 'package:rillight/auth/change_password_dialog.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/home/tv_home_page.dart';
@@ -276,6 +277,8 @@ class _TvSession extends StatelessWidget {
 
   static const serverDeleteCancelKey = Key('tv-server-delete-cancel');
 
+  static const changePasswordKey = Key('tv-change-password');
+
   @override
   Widget build(BuildContext context) {
     final auth = AuthScope.of(context), l = AppLocalizations.of(context);
@@ -312,6 +315,17 @@ class _TvSession extends StatelessWidget {
           TvAction(
             onPressed: () => context.push('${AppRoutes.connect}?add=1'),
             child: Text(l.mobileAddServer),
+          ),
+          TvAction(
+            key: changePasswordKey,
+            onPressed: auth.isBusy
+                ? null
+                : () => showDialog<void>(
+                    context: context,
+                    builder: (dialogContext) =>
+                        ChangePasswordDialog(auth: auth),
+                  ),
+            child: Text(l.changePassword),
           ),
           TvAction(
             onPressed: auth.isBusy ? null : auth.logout,

@@ -95,6 +95,27 @@ class AppLocalizationsZh extends AppLocalizations {
   String get deleteServerConfirm => '删除';
 
   @override
+  String get changePassword => '修改密码';
+
+  @override
+  String get changePasswordCurrent => '旧密码';
+
+  @override
+  String get changePasswordCurrentHint => '可留空，由服务器决定是否校验';
+
+  @override
+  String get changePasswordNew => '新密码';
+
+  @override
+  String get changePasswordConfirm => '确认新密码';
+
+  @override
+  String get changePasswordMismatch => '两次输入的新密码不一致';
+
+  @override
+  String get changePasswordSubmit => '提交';
+
+  @override
   String get cancelAction => '取消';
 
   @override

@@ -4,6 +4,7 @@ const caseModules = <String>[
   'app/window_geometry_cases.dart',
   'app_shell_cases.dart',
   'auth/auth_controller_cases.dart',
+  'auth/change_password_cases.dart',
   'auth/connect_page_cases.dart',
   'auth/server_list_store_cases.dart',
   'auth/server_management_cases.dart',

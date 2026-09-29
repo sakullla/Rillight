@@ -452,6 +452,21 @@ class FakeEmbyServer {
   List<FakeEmbyItem> views;
   List<FakeEmbyItem> items;
 
+  /// 改密端点写入的新密码;未改过则回落到 [FakeEmbyUser.password]。
+  final Map<String, String> passwordOverrides = {};
+
+  /// POST /Users/{uid}/Password 收到的请求体,按顺序记录。
+  final List<Map<String, dynamic>> changePasswordRequests = [];
+
+  /// 非 null 时改密端点直接返回该状态码,不修改密码。
+  int? changePasswordStatus;
+
+  /// [changePasswordStatus] 生效时返回的错误文案。
+  String? changePasswordMessage;
+
+  /// 改密成功后吊销调用方 token,模拟服务器结束当前会话。
+  bool revokeSessionOnChangePassword = false;
+
   bool hangPublicInfo = false;
   bool publicInfoHtml = false;
   int? publicInfoStatus;
@@ -500,6 +515,20 @@ class FakeEmbyServer {
   final Set<String> loggedOutTokens = {};
   int _tokenSeq = 0;
   int _playSeq = 0;
+
+  /// 该用户当前生效的密码:改密成功后为覆盖值,否则为注入的原始密码。
+  String effectivePassword(String userId) {
+    final override = passwordOverrides[userId];
+    if (override != null) {
+      return override;
+    }
+    for (final user in users) {
+      if (user.userId == userId) {
+        return user.password;
+      }
+    }
+    throw StateError('unknown user: $userId');
+  }
 
   /// 替换 [seriesId] 下的全部季:先移除该剧现有 Season 条目,再按给定顺序写入。
   ///
@@ -610,6 +639,17 @@ class FakeEmbyServer {
       return _json(200, {});
     }
 
+    if (segments.length == 3 &&
+        segments[0] == 'Users' &&
+        segments[2] == 'Password' &&
+        method == 'POST') {
+      return _handleChangePassword(
+        segments[1],
+        await _readBody(options, requestStream),
+        token,
+      );
+    }
+
     if (path.endsWith('/System/Info') && method == 'GET') {
       return _json(200, {
         'Id': serverId,
@@ -666,6 +706,45 @@ class FakeEmbyServer {
       return _handleVideoResource(segments);
     }
     return null;
+  }
+
+  /// POST /Users/{uid}/Password:CurrentPw 缺省或为空表示不校验旧密码;
+  /// 校验失败或 [changePasswordStatus] 覆盖时拒绝,成功则写入新密码。
+  ResponseBody _handleChangePassword(String userId, String raw, String token) {
+    Map<String, dynamic> body = const {};
+    if (raw.isNotEmpty) {
+      final decoded = jsonDecode(raw);
+      if (decoded is Map) {
+        body = Map<String, dynamic>.from(decoded);
+      }
+    }
+    changePasswordRequests.add(body);
+    if (changePasswordStatus != null) {
+      return _json(changePasswordStatus!, {
+        'error': changePasswordMessage ?? 'change password rejected',
+      });
+    }
+    var known = false;
+    for (final user in users) {
+      if (user.userId == userId) {
+        known = true;
+        break;
+      }
+    }
+    if (!known) {
+      return _json(404, {'error': 'not found'});
+    }
+    final currentPw = body['CurrentPw']?.toString();
+    if (currentPw != null &&
+        currentPw.isNotEmpty &&
+        currentPw != effectivePassword(userId)) {
+      return _json(400, {'error': '旧密码不正确'});
+    }
+    passwordOverrides[userId] = body['NewPw']?.toString() ?? '';
+    if (revokeSessionOnChangePassword) {
+      issuedTokens.remove(token);
+    }
+    return _json(200, {});
   }
 
   ResponseBody _handleUser(String userId) {
@@ -1485,7 +1564,8 @@ class FakeEmbyServer {
     final password = body['Pw']?.toString() ?? '';
     FakeEmbyUser? user;
     for (final item in users) {
-      if (item.username == username && item.password == password) {
+      if (item.username == username &&
+          effectivePassword(item.userId) == password) {
         user = item;
         break;
       }

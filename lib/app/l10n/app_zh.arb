@@ -108,6 +108,34 @@
   "@deleteServerConfirm": {
     "description": "Destructive confirm action in the delete-server dialog."
   },
+  "changePassword": "修改密码",
+  "@changePassword": {
+    "description": "Action to change the signed-in Emby user's password."
+  },
+  "changePasswordCurrent": "旧密码",
+  "@changePasswordCurrent": {
+    "description": "Optional current-password field in the change-password dialog."
+  },
+  "changePasswordCurrentHint": "可留空，由服务器决定是否校验",
+  "@changePasswordCurrentHint": {
+    "description": "Hint that an empty current password is submitted as-is."
+  },
+  "changePasswordNew": "新密码",
+  "@changePasswordNew": {
+    "description": "New-password field in the change-password dialog."
+  },
+  "changePasswordConfirm": "确认新密码",
+  "@changePasswordConfirm": {
+    "description": "Repeat-new-password field in the change-password dialog."
+  },
+  "changePasswordMismatch": "两次输入的新密码不一致",
+  "@changePasswordMismatch": {
+    "description": "Local check when the repeated new password differs."
+  },
+  "changePasswordSubmit": "提交",
+  "@changePasswordSubmit": {
+    "description": "Submit action in the change-password dialog."
+  },
   "cancelAction": "取消",
   "@cancelAction": {
     "description": "Dismiss a confirmation dialog without any change."

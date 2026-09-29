@@ -445,6 +445,21 @@ class EmbyClient {
     return EmbyUser.fromJson(data);
   }
 
+  /// 修改当前登录用户的密码。旧密码可留空照常提交,是否要求由服务器裁决。
+  Future<void> changePassword({
+    String? currentPassword,
+    required String newPassword,
+  }) async {
+    await postJson(
+      '/Users/${_requireUserId()}/Password',
+      body: {
+        'Id': _requireUserId(),
+        'CurrentPw': ?currentPassword,
+        'NewPw': newPassword,
+      },
+    );
+  }
+
   Future<PlaybackInfo> getPlaybackInfo({
     required String itemId,
     int? maxStreamingBitrate,

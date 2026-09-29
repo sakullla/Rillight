@@ -7,6 +7,10 @@ import 'modules.dart';
 void main() {
   verifySuiteManifest();
   group(
+    'auth/change_password_test.dart',
+    caseEntrypoints['auth/change_password_cases.dart']!,
+  );
+  group(
     'auth/server_management_test.dart',
     caseEntrypoints['auth/server_management_cases.dart']!,
   );

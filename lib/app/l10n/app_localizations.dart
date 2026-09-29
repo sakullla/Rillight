@@ -262,6 +262,48 @@ abstract class AppLocalizations {
   /// **'删除'**
   String get deleteServerConfirm;
 
+  /// Action to change the signed-in Emby user's password.
+  ///
+  /// In zh, this message translates to:
+  /// **'修改密码'**
+  String get changePassword;
+
+  /// Optional current-password field in the change-password dialog.
+  ///
+  /// In zh, this message translates to:
+  /// **'旧密码'**
+  String get changePasswordCurrent;
+
+  /// Hint that an empty current password is submitted as-is.
+  ///
+  /// In zh, this message translates to:
+  /// **'可留空，由服务器决定是否校验'**
+  String get changePasswordCurrentHint;
+
+  /// New-password field in the change-password dialog.
+  ///
+  /// In zh, this message translates to:
+  /// **'新密码'**
+  String get changePasswordNew;
+
+  /// Repeat-new-password field in the change-password dialog.
+  ///
+  /// In zh, this message translates to:
+  /// **'确认新密码'**
+  String get changePasswordConfirm;
+
+  /// Local check when the repeated new password differs.
+  ///
+  /// In zh, this message translates to:
+  /// **'两次输入的新密码不一致'**
+  String get changePasswordMismatch;
+
+  /// Submit action in the change-password dialog.
+  ///
+  /// In zh, this message translates to:
+  /// **'提交'**
+  String get changePasswordSubmit;
+
   /// Dismiss a confirmation dialog without any change.
   ///
   /// In zh, this message translates to:

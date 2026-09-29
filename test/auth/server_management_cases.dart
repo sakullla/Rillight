@@ -193,6 +193,7 @@ void main() {
                 onAddServer: () {},
                 onLogout: () {},
                 onDelete: deleted.add,
+                onChangePassword: () {},
               ),
             ),
           ),

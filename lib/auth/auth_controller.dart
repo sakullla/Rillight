@@ -397,6 +397,78 @@ class AuthController extends ChangeNotifier {
     return (await credentials.read(serverId))?.password;
   }
 
+  EmbyException? _passwordChangeFailure;
+
+  /// 最近一次改密被服务器拒绝的原因;开始新的改密或改密成功时清空。
+  EmbyException? get passwordChangeFailure => _passwordChangeFailure;
+
+  /// 修改当前登录用户的密码;旧密码留空照常提交,客户端不做拦截。
+  ///
+  /// 成功:本机凭据换成新密码,会话保持可用。
+  /// 失败:本机保留旧密码,用户仍处于登录态,原因经
+  /// [passwordChangeFailure] 暴露。服务器改密后吊销当前会话时,
+  /// 复用会话过期路径回到登录页,本机已存的新密码可直接重新进入。
+  Future<bool> changePassword({
+    String? currentPassword,
+    required String newPassword,
+  }) async {
+    final session = _session;
+    if (_busy || session == null || newPassword.isEmpty) {
+      return false;
+    }
+    _busy = true;
+    _passwordChangeFailure = null;
+    notifyListeners();
+    try {
+      await client.changePassword(
+        currentPassword: (currentPassword == null || currentPassword.isEmpty)
+            ? null
+            : currentPassword,
+        newPassword: newPassword,
+      );
+      final stored = await credentials.read(session.server.id);
+      await credentials.write(
+        session.server.id,
+        StoredCredentials(
+          accessToken: stored?.accessToken ?? session.accessToken,
+          userId: stored?.userId ?? session.userId,
+          username: stored?.username ?? session.username,
+          password: newPassword,
+        ),
+      );
+      await _verifySessionAfterPasswordChange();
+      return true;
+    } on EmbyException catch (error) {
+      _passwordChangeFailure = error;
+      return false;
+    } catch (error) {
+      _passwordChangeFailure = EmbyException(
+        EmbyFailureKind.unknown,
+        detail: error.toString(),
+        cause: error,
+      );
+      return false;
+    } finally {
+      _busy = false;
+      notifyListeners();
+    }
+  }
+
+  /// 部分服务器改密后会吊销当前 token。探测期间禁用静默重登:
+  /// 会话已失效时走 [_onSessionExpired] 回到登录页;其它探测失败
+  /// (如瞬时网络错误)不影响已完成的改密结果。
+  Future<void> _verifySessionAfterPasswordChange() async {
+    final refresh = client.onRefreshSession;
+    client.onRefreshSession = null;
+    try {
+      await client.getUser();
+    } on EmbyException {
+      // 会话过期时回调已把用户带回登录页,这里只需吞掉探测异常。
+    } finally {
+      client.onRefreshSession = refresh;
+    }
+  }
+
   void clearFailure() {
     if (_failure == null) {
       return;

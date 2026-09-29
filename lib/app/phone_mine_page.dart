@@ -10,6 +10,7 @@ import 'package:rillight/app/settings/settings_page.dart';
 import 'package:rillight/app/theme.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
+import 'package:rillight/auth/change_password_dialog.dart';
 import 'package:rillight/auth/failure_message.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/home/catalog_scope.dart';
@@ -42,6 +43,8 @@ class PhoneMinePage extends StatefulWidget {
   static const serverDeleteConfirmKey = Key('phone-mine-server-delete-confirm');
 
   static const serverDeleteCancelKey = Key('phone-mine-server-delete-cancel');
+
+  static const changePasswordKey = Key('phone-mine-change-password');
 
   static Key rateKey(double rate) => Key('phone-mine-rate-$rate');
 
@@ -493,6 +496,17 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
                 leading: const Icon(Icons.add),
                 title: Text(l10n.mobileAddServer),
                 onTap: () => context.push('${AppRoutes.connect}?add=1'),
+              ),
+              ListTile(
+                key: PhoneMinePage.changePasswordKey,
+                minTileHeight: AppSpacing.huge,
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.password_outlined),
+                title: Text(l10n.changePassword),
+                onTap: () => showDialog<void>(
+                  context: context,
+                  builder: (dialogContext) => ChangePasswordDialog(auth: auth),
+                ),
               ),
               const SizedBox(height: AppSpacing.sm),
               OutlinedButton(
