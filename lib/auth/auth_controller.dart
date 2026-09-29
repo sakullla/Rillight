@@ -21,6 +21,13 @@ class AuthSession {
   final String accessToken;
 }
 
+class LineSwitchFailure {
+  const LineSwitchFailure({required this.address, required this.detail});
+
+  final String address;
+  final String detail;
+}
+
 class AuthController extends ChangeNotifier {
   AuthController({
     required this.client,
@@ -58,6 +65,7 @@ class AuthController extends ChangeNotifier {
   List<SavedServer> _savedServers = const [];
   SavedServer? _prefill;
   EmbyException? _failure;
+  LineSwitchFailure? _lineSwitchFailure;
   bool _busy = false;
   bool _handlingExpiry = false;
 
@@ -65,6 +73,7 @@ class AuthController extends ChangeNotifier {
   List<SavedServer> get savedServers => _savedServers;
   SavedServer? get prefill => _prefill;
   EmbyException? get failure => _failure;
+  LineSwitchFailure? get lineSwitchFailure => _lineSwitchFailure;
   bool get isBusy => _busy;
   bool get isLoggedIn => _session != null;
 
@@ -207,28 +216,32 @@ class AuthController extends ChangeNotifier {
     if (stored != null && stored.accessToken.isNotEmpty) {
       if (changingLine) {
         // User-Agent is server-level: switching lines keeps the server's UA.
+        // The current line and session stay active unless the target line is
+        // reachable and proves it belongs to the same server.
+        _lineSwitchFailure = null;
+        String detail;
         try {
-          await client.getPublicInfo(Uri.parse(server.baseUrl));
+          final info = await client.getPublicInfo(Uri.parse(server.baseUrl));
+          if (info.id != server.id) {
+            detail = '线路返回的服务器身份与当前服务器不一致';
+          } else {
+            detail = '';
+          }
         } on EmbyException catch (error) {
-          _failure = error;
-          _session = null;
-          client.clearSession();
-          _prefill = server;
-          notifyListeners();
-          return;
+          detail = error.detail ?? error.toString();
         } catch (error) {
-          _failure = EmbyException(
-            EmbyFailureKind.unknown,
-            detail: error.toString(),
-            cause: error,
+          detail = error.toString();
+        }
+        if (detail.isNotEmpty) {
+          _lineSwitchFailure = LineSwitchFailure(
+            address: server.baseUrl,
+            detail: detail,
           );
-          _session = null;
-          client.clearSession();
-          _prefill = server;
           notifyListeners();
           return;
         }
       }
+      _lineSwitchFailure = null;
       _failure = null;
       await _upsertServer(server);
       _activate(server, stored);
@@ -240,6 +253,7 @@ class AuthController extends ChangeNotifier {
     client.clearSession();
     _prefill = server;
     _failure = null;
+    _lineSwitchFailure = null;
     notifyListeners();
   }
 

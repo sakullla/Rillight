@@ -362,7 +362,86 @@ void main() {
   });
 
   test(
-    'switching a line with a token probes and failure returns to login',
+    'switching to an unreachable line keeps the current line and session',
+    () async {
+      final wan = FakeEmbyServer(
+        serverId: server.serverId,
+        serverName: server.serverName,
+        baseUrl: Uri.parse('http://emby-wan.test:8096'),
+      );
+      adapter.add(wan);
+      final auth = controller();
+      await auth.connect(
+        address: server.baseUrl.toString(),
+        username: 'alice',
+        password: 'correct-horse',
+      );
+      await auth.connect(
+        address: wan.baseUrl.toString(),
+        username: 'alice',
+        password: 'correct-horse',
+      );
+      final wanLineId = auth.savedServers.single.activeLineId;
+      final lanLine = auth.savedServers.single.lines.firstWhere(
+        (line) => line.address == server.baseUrl.toString(),
+      );
+      final token = auth.session!.accessToken;
+      server.publicInfoStatus = 500;
+      server.publicInfoRawBody = 'upstream timeout';
+
+      await auth.switchTo(server.serverId, lineId: lanLine.id);
+
+      expect(auth.isLoggedIn, isTrue);
+      expect(auth.session?.accessToken, token);
+      expect(auth.client.baseUrl, wan.baseUrl);
+      expect(auth.savedServers.single.activeLineId, wanLineId);
+      expect(auth.prefill, isNull);
+      expect(auth.failure, isNull);
+      expect(auth.lineSwitchFailure, isNotNull);
+      expect(auth.lineSwitchFailure?.address, server.baseUrl.toString());
+      expect(auth.lineSwitchFailure?.detail, 'HTTP 500: upstream timeout');
+    },
+  );
+
+  test(
+    'switching to a line with a different server id keeps line and session',
+    () async {
+      final impostor = FakeEmbyServer(
+        serverId: 'server-id-impostor',
+        serverName: '伪装服务器',
+        baseUrl: Uri.parse('http://emby-impostor.test:8096'),
+      );
+      adapter.add(impostor);
+      final auth = controller();
+      await auth.connect(
+        address: server.baseUrl.toString(),
+        username: 'alice',
+        password: 'correct-horse',
+      );
+      await auth.appendLines([impostor.baseUrl.toString()]);
+      final lineId = auth.savedServers.single.activeLineId;
+      final impostorLine = auth.savedServers.single.lines.firstWhere(
+        (line) => line.address == impostor.baseUrl.toString(),
+      );
+      final token = auth.session!.accessToken;
+
+      await auth.switchTo(server.serverId, lineId: impostorLine.id);
+
+      expect(auth.isLoggedIn, isTrue);
+      expect(auth.session?.accessToken, token);
+      expect(auth.client.baseUrl, server.baseUrl);
+      expect(auth.savedServers.single.activeLineId, lineId);
+      expect(auth.prefill, isNull);
+      expect(auth.failure, isNull);
+      expect(auth.lineSwitchFailure, isNotNull);
+      expect(auth.lineSwitchFailure?.detail, '线路返回的服务器身份与当前服务器不一致');
+      // The failure state is UI-readable and specific to the target line.
+      expect(auth.lineSwitchFailure?.address, impostor.baseUrl.toString());
+    },
+  );
+
+  test(
+    'switching to a valid line clears any previous line switch failure',
     () async {
       final wan = FakeEmbyServer(
         serverId: server.serverId,
@@ -385,15 +464,16 @@ void main() {
         (line) => line.address == server.baseUrl.toString(),
       );
       server.publicInfoStatus = 500;
-      server.publicInfoRawBody = 'upstream timeout';
+      await auth.switchTo(server.serverId, lineId: lanLine.id);
+      expect(auth.lineSwitchFailure, isNotNull);
+      server.publicInfoStatus = null;
 
       await auth.switchTo(server.serverId, lineId: lanLine.id);
 
-      expect(auth.isLoggedIn, isFalse);
-      expect(auth.client.baseUrl, isNull);
-      expect(auth.prefill?.activeLineId, lanLine.id);
-      expect(auth.savedServers.single.baseUrl, wan.baseUrl.toString());
-      expect(auth.failure?.detail, 'HTTP 500: upstream timeout');
+      expect(auth.isLoggedIn, isTrue);
+      expect(auth.client.baseUrl, server.baseUrl);
+      expect(auth.savedServers.single.activeLineId, lanLine.id);
+      expect(auth.lineSwitchFailure, isNull);
     },
   );
 
