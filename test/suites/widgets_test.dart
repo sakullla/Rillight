@@ -7,6 +7,10 @@ import 'modules.dart';
 void main() {
   verifySuiteManifest();
   group(
+    'auth/server_management_test.dart',
+    caseEntrypoints['auth/server_management_cases.dart']!,
+  );
+  group(
     'catalog/catalog_controller_test.dart',
     caseEntrypoints['catalog/catalog_controller_cases.dart']!,
   );

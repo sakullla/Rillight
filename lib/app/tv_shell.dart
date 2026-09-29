@@ -6,7 +6,9 @@ import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/app/tv_widgets.dart';
+import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
+import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/home/tv_home_page.dart';
 import 'package:rillight/player/android_session_recovery.dart';
@@ -266,39 +268,102 @@ class _TvLibraries extends StatelessWidget {
 
 class _TvSession extends StatelessWidget {
   const _TvSession();
+
+  static Key serverDeleteKey(String serverId) =>
+      ValueKey('tv-server-delete-$serverId');
+
+  static const serverDeleteConfirmKey = Key('tv-server-delete-confirm');
+
+  static const serverDeleteCancelKey = Key('tv-server-delete-cancel');
+
   @override
   Widget build(BuildContext context) {
     final auth = AuthScope.of(context), l = AppLocalizations.of(context);
-    return ListView(
-      key: const PageStorageKey('tv-session'),
-      children: [
-        Text(
-          '${auth.session?.server.name ?? ''} · ${auth.session?.username ?? ''}',
-        ),
-        const SizedBox(height: 16),
-        Text(l.mobileLine),
-        for (final server in auth.savedServers)
-          for (final line in server.lines)
+    return ListenableBuilder(
+      listenable: auth,
+      builder: (context, _) => ListView(
+        key: const PageStorageKey('tv-session'),
+        children: [
+          Text(
+            '${auth.session?.server.name ?? ''} · ${auth.session?.username ?? ''}',
+          ),
+          const SizedBox(height: 16),
+          Text(l.mobileLine),
+          for (final server in auth.savedServers) ...[
+            for (final line in server.lines)
+              TvAction(
+                key: ValueKey('${server.id}-${line.id}'),
+                selected:
+                    auth.session?.server.id == server.id &&
+                    auth.session?.server.activeLine?.id == line.id,
+                onPressed: auth.isBusy
+                    ? null
+                    : () => auth.switchTo(server.id, lineId: line.id),
+                child: Text('${server.name} · ${line.hostLabel}'),
+              ),
             TvAction(
-              key: ValueKey('${server.id}-${line.id}'),
-              selected:
-                  auth.session?.server.id == server.id &&
-                  auth.session?.server.activeLine?.id == line.id,
+              key: serverDeleteKey(server.id),
               onPressed: auth.isBusy
                   ? null
-                  : () => auth.switchTo(server.id, lineId: line.id),
-              child: Text('${server.name} · ${line.hostLabel}'),
+                  : () => _confirmDelete(context, auth, server),
+              child: Text('${l.deleteServer} · ${server.name}'),
             ),
-        TvAction(
-          onPressed: () => context.push('${AppRoutes.connect}?add=1'),
-          child: Text(l.mobileAddServer),
-        ),
-        TvAction(
-          onPressed: auth.isBusy ? null : auth.logout,
-          child: Text(l.logout),
-        ),
-      ],
+          ],
+          TvAction(
+            onPressed: () => context.push('${AppRoutes.connect}?add=1'),
+            child: Text(l.mobileAddServer),
+          ),
+          TvAction(
+            onPressed: auth.isBusy ? null : auth.logout,
+            child: Text(l.logout),
+          ),
+        ],
+      ),
     );
+  }
+
+  /// 先确认再删除;取消不改动任何内容。删除当前服务器时路由会回登录页。
+  Future<void> _confirmDelete(
+    BuildContext context,
+    AuthController auth,
+    SavedServer server,
+  ) async {
+    final l10n = AppLocalizations.of(context);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return SimpleDialog(
+          title: Text(l10n.deleteServer),
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: Text(l10n.deleteServerConfirmMessage(server.name)),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                TvAction(
+                  key: serverDeleteCancelKey,
+                  onPressed: () => Navigator.of(dialogContext).pop(false),
+                  child: Text(l10n.cancelAction),
+                ),
+                const SizedBox(width: 12),
+                TvAction(
+                  key: serverDeleteConfirmKey,
+                  onPressed: () => Navigator.of(dialogContext).pop(true),
+                  child: Text(l10n.deleteServerConfirm),
+                ),
+                const SizedBox(width: 24),
+              ],
+            ),
+          ],
+        );
+      },
+    );
+    if (confirmed == true) {
+      await auth.deleteServer(server.id);
+    }
   }
 }
 

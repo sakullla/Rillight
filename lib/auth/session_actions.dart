@@ -80,6 +80,10 @@ class SessionActions extends StatelessWidget {
                 Navigator.of(dialogContext).pop();
                 unawaited(_logout(auth, playerHost));
               },
+              onDelete: (serverId) {
+                Navigator.of(dialogContext).pop();
+                unawaited(_deleteServer(auth, playerHost, serverId));
+              },
             );
           },
         );
@@ -94,6 +98,18 @@ class SessionActions extends StatelessWidget {
   ) async {
     await _closePlayer(playerHost);
     await auth.logout();
+  }
+
+  /// 删除当前登录的服务器前同样先停播;删除其它服务器不影响播放与会话。
+  Future<void> _deleteServer(
+    AuthController auth,
+    PlayerWindowHost? playerHost,
+    String serverId,
+  ) async {
+    if (auth.session?.server.id == serverId) {
+      await _closePlayer(playerHost);
+    }
+    await auth.deleteServer(serverId);
   }
 
   Future<void> _switchTo(

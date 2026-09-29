@@ -36,6 +36,13 @@ class PhoneMinePage extends StatefulWidget {
 
   static Key lineOptionKey(String lineId) => Key('phone-mine-line-$lineId');
 
+  static Key serverDeleteKey(String serverId) =>
+      Key('phone-mine-server-delete-$serverId');
+
+  static const serverDeleteConfirmKey = Key('phone-mine-server-delete-confirm');
+
+  static const serverDeleteCancelKey = Key('phone-mine-server-delete-cancel');
+
   static Key rateKey(double rate) => Key('phone-mine-rate-$rate');
 
   static Key cacheLimitKey(int limitMiB) =>
@@ -228,27 +235,95 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
       context: context,
       useSafeArea: true,
       isScrollControlled: true,
-      builder: (sheetContext) => FractionallySizedBox(
-        heightFactor: .65,
-        child: ListView(
-          padding: const EdgeInsets.all(AppSpacing.lg),
-          children: [
-            Text(
-              l10n.mobileLine,
-              style: Theme.of(sheetContext).textTheme.titleLarge,
+      builder: (sheetContext) => ListenableBuilder(
+        listenable: auth,
+        builder: (sheetContext, _) {
+          final sheetL10n = AppLocalizations.of(sheetContext);
+          return FractionallySizedBox(
+            heightFactor: .65,
+            child: ListView(
+              padding: const EdgeInsets.all(AppSpacing.lg),
+              children: [
+                Text(
+                  l10n.mobileLine,
+                  style: Theme.of(sheetContext).textTheme.titleLarge,
+                ),
+                for (final server in auth.savedServers) ...[
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      vertical: AppSpacing.sm,
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            '${server.name} · ${server.username}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        IconButton(
+                          key: PhoneMinePage.serverDeleteKey(server.id),
+                          tooltip: sheetL10n.deleteServer,
+                          icon: const Icon(Icons.delete_outline, size: 20),
+                          onPressed: () => unawaited(
+                            _confirmDeleteServer(sheetContext, auth, server),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  for (final line in server.lines)
+                    _lineOption(auth, server.id, line),
+                ],
+              ],
             ),
-            for (final server in auth.savedServers) ...[
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
-                child: Text('${server.name} · ${server.username}'),
-              ),
-              for (final line in server.lines)
-                _lineOption(auth, server.id, line),
-            ],
-          ],
-        ),
+          );
+        },
       ),
     );
+  }
+
+  /// 先确认再删除;取消不改动任何内容。删除当前服务器时回到登录页。
+  Future<void> _confirmDeleteServer(
+    BuildContext sheetContext,
+    AuthController auth,
+    SavedServer server,
+  ) async {
+    final l10n = AppLocalizations.of(sheetContext);
+    final confirmed = await showDialog<bool>(
+      context: sheetContext,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: Text(l10n.deleteServer),
+          content: Text(l10n.deleteServerConfirmMessage(server.name)),
+          actions: [
+            TextButton(
+              key: PhoneMinePage.serverDeleteCancelKey,
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: Text(l10n.cancelAction),
+            ),
+            FilledButton(
+              key: PhoneMinePage.serverDeleteConfirmKey,
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: Text(l10n.deleteServerConfirm),
+            ),
+          ],
+        );
+      },
+    );
+    if (confirmed != true) {
+      return;
+    }
+    final wasCurrent = auth.session?.server.id == server.id;
+    await auth.deleteServer(server.id);
+    if (!mounted) {
+      return;
+    }
+    // 删除当前服务器后路由已回登录页,收起底部面板避免盖住登录表单。
+    if (wasCurrent) {
+      Navigator.of(context).pop();
+    }
   }
 
   Widget _lineOption(AuthController auth, String serverId, ServerLine line) {

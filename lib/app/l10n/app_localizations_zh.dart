@@ -84,6 +84,20 @@ class AppLocalizationsZh extends AppLocalizations {
   String get deleteLine => '删除线路';
 
   @override
+  String get deleteServer => '删除服务器';
+
+  @override
+  String deleteServerConfirmMessage(String name) {
+    return '删除「$name」会同时清除本机保存的登录凭据，服务器端账号不受影响，之后可重新登录。';
+  }
+
+  @override
+  String get deleteServerConfirm => '删除';
+
+  @override
+  String get cancelAction => '取消';
+
+  @override
   String get extraLineAddress => '线路地址';
 
   @override

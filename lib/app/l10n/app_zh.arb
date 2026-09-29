@@ -91,6 +91,27 @@
   "@deleteLine": {
     "description": "Action to delete the selected extra access line."
   },
+  "deleteServer": "删除服务器",
+  "@deleteServer": {
+    "description": "Action to remove a saved Emby server from this device."
+  },
+  "deleteServerConfirmMessage": "删除「{name}」会同时清除本机保存的登录凭据，服务器端账号不受影响，之后可重新登录。",
+  "@deleteServerConfirmMessage": {
+    "description": "Confirmation body before removing a saved Emby server locally.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "deleteServerConfirm": "删除",
+  "@deleteServerConfirm": {
+    "description": "Destructive confirm action in the delete-server dialog."
+  },
+  "cancelAction": "取消",
+  "@cancelAction": {
+    "description": "Dismiss a confirmation dialog without any change."
+  },
   "extraLineAddress": "线路地址",
   "@extraLineAddress": {
     "description": "Address field for an extra access line on the connect form."

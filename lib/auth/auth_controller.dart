@@ -358,6 +358,41 @@ class AuthController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 删除已保存的服务器与本机凭据。删除当前登录的服务器时结束本地会话,
+  /// 路由会随之回到登录页;删除其它服务器不影响当前会话与播放。
+  /// 服务器端账号不会被删除,之后可重新登录。
+  Future<void> deleteServer(String serverId) async {
+    final target = _serverById(serverId);
+    if (target == null) {
+      return;
+    }
+    final current = _session?.server.id;
+    final next = <SavedServer>[
+      for (final item in _savedServers)
+        if (item.id != serverId) item,
+    ];
+    _savedServers = next;
+    // 删除的是当前服务器时不再保留 lastServerId,避免下次启动凭空预选。
+    await servers.save(
+      ServerListSnapshot(
+        servers: next,
+        lastServerId: (current != null && current != serverId) ? current : null,
+      ),
+    );
+    await credentials.delete(serverId);
+    if (_prefill?.id == serverId) {
+      _prefill = null;
+    }
+    if (current == serverId) {
+      _session = null;
+      client.clearSession();
+      _failure = null;
+      _lineSwitchFailure = null;
+      connectDraft = null;
+    }
+    notifyListeners();
+  }
+
   Future<String?> savedPassword(String serverId) async {
     return (await credentials.read(serverId))?.password;
   }

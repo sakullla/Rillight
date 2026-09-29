@@ -2039,10 +2039,11 @@ void main() {
           find.byKey(PhoneMinePage.lineOptionKey(lineBTarget.id)),
         );
 
-        // 失败提示在头部下方:先滚回列表顶部。
-        await _scrollToTop(tester);
-        expect(find.text('HTTP 500: upstream timeout'), findsOneWidget);
-        expect(auth.session, isNull);
+        // 失败的线路切换保持当前线路、会话与已加载目录,原因经 lineSwitchFailure 暴露。
+        expect(auth.lineSwitchFailure?.address, lineB.baseUrl.toString());
+        expect(auth.lineSwitchFailure?.detail, 'HTTP 500: upstream timeout');
+        expect(auth.failure, isNull);
+        expect(auth.session, isNotNull);
         expect(
           auth.savedServers.single.activeLine?.address,
           lineA.baseUrl.toString(),

@@ -16,6 +16,7 @@ class ServerSwitcherDialog extends StatefulWidget {
     required this.onSelect,
     required this.onAddServer,
     required this.onLogout,
+    required this.onDelete,
   });
 
   final List<SavedServer> servers;
@@ -25,7 +26,14 @@ class ServerSwitcherDialog extends StatefulWidget {
   final VoidCallback onAddServer;
   final VoidCallback onLogout;
 
+  /// 删除一台已保存服务器;先弹确认框,确认后才回调。
+  final void Function(String serverId) onDelete;
+
   static const searchField = Key('server-switcher-search');
+  static const deleteConfirmKey = Key('server-delete-confirm');
+  static const deleteCancelKey = Key('server-delete-cancel');
+
+  static Key deleteKey(String serverId) => Key('server-delete-$serverId');
 
   @override
   State<ServerSwitcherDialog> createState() => _ServerSwitcherDialogState();
@@ -120,6 +128,7 @@ class _ServerSwitcherDialogState extends State<ServerSwitcherDialog> {
                               activeServerId: widget.activeServerId,
                               activeLineId: widget.activeLineId,
                               onSelect: widget.onSelect,
+                              onDelete: widget.onDelete,
                             );
                           },
                         ),
@@ -151,17 +160,32 @@ class _ServerTile extends StatelessWidget {
     required this.activeServerId,
     required this.activeLineId,
     required this.onSelect,
+    required this.onDelete,
   });
 
   final SavedServer server;
   final String? activeServerId;
   final String? activeLineId;
   final void Function(String serverId, String lineId) onSelect;
+  final void Function(String serverId) onDelete;
 
   @override
   Widget build(BuildContext context) {
     final selectedServer = server.id == activeServerId;
     final l10n = AppLocalizations.of(context);
+    final trailing = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        IconButton(
+          key: ServerSwitcherDialog.deleteKey(server.id),
+          tooltip: l10n.deleteServer,
+          icon: const Icon(Icons.delete_outline, size: 20),
+          onPressed: () => _confirmDelete(context, l10n),
+        ),
+        if (selectedServer)
+          Icon(Icons.check, color: Theme.of(context).colorScheme.primary),
+      ],
+    );
     if (server.lines.length <= 1) {
       final line = server.activeLine ?? server.lines.first;
       return ListTile(
@@ -172,9 +196,7 @@ class _ServerTile extends StatelessWidget {
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
-        trailing: selectedServer
-            ? Icon(Icons.check, color: Theme.of(context).colorScheme.primary)
-            : null,
+        trailing: trailing,
         onTap: () => onSelect(server.id, line.id),
       );
     }
@@ -183,6 +205,7 @@ class _ServerTile extends StatelessWidget {
       initiallyExpanded: selectedServer,
       title: Text(server.name, maxLines: 1, overflow: TextOverflow.ellipsis),
       subtitle: Text(l10n.lineCount(server.lines.length)),
+      trailing: trailing,
       children: [
         for (final line in server.lines)
           ListTile(
@@ -204,6 +227,34 @@ class _ServerTile extends StatelessWidget {
             onTap: () => onSelect(server.id, line.id),
           ),
       ],
+    );
+  }
+
+  /// 先确认再删除;取消不改动任何内容。
+  Future<void> _confirmDelete(BuildContext context, AppLocalizations l10n) {
+    return showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: Text(l10n.deleteServer),
+          content: Text(l10n.deleteServerConfirmMessage(server.name)),
+          actions: [
+            TextButton(
+              key: ServerSwitcherDialog.deleteCancelKey,
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: Text(l10n.cancelAction),
+            ),
+            FilledButton(
+              key: ServerSwitcherDialog.deleteConfirmKey,
+              onPressed: () {
+                Navigator.of(dialogContext).pop();
+                onDelete(server.id);
+              },
+              child: Text(l10n.deleteServerConfirm),
+            ),
+          ],
+        );
+      },
     );
   }
 }

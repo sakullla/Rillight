@@ -244,6 +244,30 @@ abstract class AppLocalizations {
   /// **'删除线路'**
   String get deleteLine;
 
+  /// Action to remove a saved Emby server from this device.
+  ///
+  /// In zh, this message translates to:
+  /// **'删除服务器'**
+  String get deleteServer;
+
+  /// Confirmation body before removing a saved Emby server locally.
+  ///
+  /// In zh, this message translates to:
+  /// **'删除「{name}」会同时清除本机保存的登录凭据，服务器端账号不受影响，之后可重新登录。'**
+  String deleteServerConfirmMessage(String name);
+
+  /// Destructive confirm action in the delete-server dialog.
+  ///
+  /// In zh, this message translates to:
+  /// **'删除'**
+  String get deleteServerConfirm;
+
+  /// Dismiss a confirmation dialog without any change.
+  ///
+  /// In zh, this message translates to:
+  /// **'取消'**
+  String get cancelAction;
+
   /// Address field for an extra access line on the connect form.
   ///
   /// In zh, this message translates to:
