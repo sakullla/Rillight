@@ -247,4 +247,90 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets(
+    'switcher panel paints an opaque surface above background content in both themes',
+    (tester) async {
+      Future<void> pump(ThemeData theme) {
+        return tester.pumpWidget(
+          MaterialApp(
+            theme: theme,
+            locale: const Locale('zh'),
+            supportedLocales: AppLocalizations.supportedLocales,
+            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            home: Scaffold(
+              // 模拟详情页背景:海报占位与简介露出在切换面板之外。
+              body: Stack(
+                children: [
+                  const Positioned.fill(
+                    child: ColoredBox(color: Color(0xFF29486B)),
+                  ),
+                  const Padding(
+                    padding: EdgeInsets.all(16),
+                    child: Text('背景简介', key: Key('switcher-backdrop-overview')),
+                  ),
+                  Center(
+                    child: ServerSwitcherDialog(
+                      servers: [
+                        _saved('server-id-1', '家庭影院', [
+                          'http://emby.test:8096',
+                        ]),
+                      ],
+                      activeServerId: 'server-id-1',
+                      activeLineId: 'line-1',
+                      onSelect: (_, _) {},
+                      onAddServer: () {},
+                      onLogout: () {},
+                      onDelete: (_) {},
+                      onChangePassword: () {},
+                      onAddLine: (_) {},
+                      onEditLine: (_, _) {},
+                      onDeleteLine: (_, _) {},
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      }
+
+      for (final theme in [AppTheme.light(), AppTheme.dark()]) {
+        await pump(theme);
+        await tester.pumpAndSettle();
+        final scheme = theme.colorScheme;
+
+        // 面板底色来自 colorScheme 且完全不透明:背景海报/简介/播放控件
+        // 被面板完全隔开,不会透到服务器名/地址/搜索/添加/退出的文字层。
+        final panel = tester.widget<Material>(
+          find.byKey(ServerSwitcherDialog.panelKey),
+        );
+        final panelColor = panel.color!;
+        expect(panelColor, scheme.surface);
+        expect(panelColor.a, 1.0);
+
+        // 背景内容仍在面板之外可见,不与面板文字同层。
+        final backdropRect = tester.getRect(
+          find.byKey(const Key('switcher-backdrop-overview')),
+        );
+        final panelRect = tester.getRect(
+          find.byKey(ServerSwitcherDialog.panelKey),
+        );
+        expect(backdropRect.overlaps(panelRect), isFalse);
+
+        // 面板文字与底色满足 R12 的 3:1 对比要求。
+        final nameContext = tester.element(find.text('家庭影院'));
+        final nameColor = DefaultTextStyle.of(nameContext).style.color!;
+        final lighter =
+            nameColor.computeLuminance() > panelColor.computeLuminance()
+            ? nameColor
+            : panelColor;
+        final darker = lighter == nameColor ? panelColor : nameColor;
+        final contrast =
+            (lighter.computeLuminance() + 0.05) /
+            (darker.computeLuminance() + 0.05);
+        expect(contrast, greaterThan(3));
+      }
+    },
+  );
 }

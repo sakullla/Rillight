@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/emby_mark.dart';
-import 'package:rillight/app/widgets/liquid_glass.dart';
 import 'package:rillight/auth/library_counts_panel.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/auth/session_actions.dart';
@@ -57,6 +56,7 @@ class ServerSwitcherDialog extends StatefulWidget {
   final EmbyException? libraryCountsFailure;
 
   static const searchField = Key('server-switcher-search');
+  static const panelKey = Key('server-switcher-panel');
   static const deleteConfirmKey = Key('server-delete-confirm');
   static const deleteCancelKey = Key('server-delete-cancel');
   static const changePasswordKey = Key('server-change-password');
@@ -117,6 +117,7 @@ class _ServerSwitcherDialogState extends State<ServerSwitcherDialog> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
+    final scheme = Theme.of(context).colorScheme;
     final filtered = _filtered;
     return Dialog(
       backgroundColor: Colors.transparent,
@@ -125,8 +126,18 @@ class _ServerSwitcherDialogState extends State<ServerSwitcherDialog> {
         horizontal: AppSpacing.xxl,
         vertical: AppSpacing.xxl,
       ),
-      child: LiquidGlass(
-        kind: LiquidGlassKind.panel,
+      // 不透明 surface 底色:面板与背景海报/简介/播放控件不同层,
+      // 浅色与深色下服务器名/地址/搜索/添加/退出都清晰可读(R12)。
+      child: Material(
+        key: ServerSwitcherDialog.panelKey,
+        color: scheme.surface,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadii.xl),
+          side: BorderSide(color: scheme.outlineVariant),
+        ),
+        clipBehavior: Clip.antiAlias,
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 440, maxHeight: 560),
           child: Padding(
