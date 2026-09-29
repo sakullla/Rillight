@@ -629,6 +629,46 @@ void main() {
     },
   );
 
+  // R8:同域节目(手机/桌面/TV 共用该控制器)起播时,凭据只发往同域媒体
+  // 地址:URL 带上 api_key,请求头带完整会话头(令牌与 UA)。
+  test(
+    'same-origin program open carries session credentials to the backend',
+    () async {
+      await controller.start();
+      expect(controller.state.phase, PlaybackPhase.playing);
+      expect(controller.error, isNull);
+      final opened = backend.openedUrl!;
+      expect(opened.origin, client.baseUrl!.origin);
+      expect(opened.queryParameters['api_key'], client.accessToken);
+      expect(opened.queryParameters['static'], 'true');
+      for (final entry in client.sessionHeaders.entries) {
+        expect(backend.openedHeaders[entry.key], entry.value);
+      }
+    },
+  );
+
+  // R8:同域节目起播后流断开,按既有 PlaybackPhase.failed 呈现诊断
+  // (不再静止画面),重试同一节目可恢复播放。
+  test(
+    'same-origin fatal stream failure surfaces failed and retries',
+    () async {
+      await controller.start();
+      expect(controller.state.phase, PlaybackPhase.playing);
+      backend.emitError('FFmpeg core error -5: Media HTTP 403');
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.state.phase, PlaybackPhase.failed);
+      expect(controller.disconnected, isTrue);
+      expect(controller.loading, isFalse);
+      expect(controller.disconnectDetail, isNotNull);
+      await controller.retryPlayback();
+      expect(controller.disconnected, isFalse);
+      expect(controller.error, isNull);
+      expect(controller.state.phase, PlaybackPhase.playing);
+      expect(backend.openedUrl!.origin, client.baseUrl!.origin);
+      expect(backend.openedUrl!.queryParameters['api_key'], client.accessToken);
+    },
+  );
+
   test('rapid A B C exposes only C while old metadata finishes late', () async {
     await controller.start();
     final gate = client.itemGates['episode-friends-s1e1'] = Completer<void>();

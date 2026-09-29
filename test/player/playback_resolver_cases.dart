@@ -537,4 +537,75 @@ void main() {
       2,
     );
   });
+
+  // R8:同域直播(IsInfiniteStream)与普通节目共用现有选择规则,
+  // 选中后地址必须留在同域并携带令牌,手机/桌面/TV 起播行为一致。
+  test('same-origin live stream follows the existing selection rules', () {
+    final baseUri = Uri.parse(base);
+    // 直播可直连:DirectStreamUrl 拼上 baseUrl,api_key 保留。
+    final directLive = resolvePlayback(
+      info: PlaybackInfo.fromJson({
+        'PlaySessionId': 'play-live-direct',
+        'MediaSources': [
+          {
+            'Id': 'src-live-1',
+            'Container': 'ts',
+            'IsInfiniteStream': true,
+            'SupportsDirectPlay': true,
+            'SupportsDirectStream': true,
+            'DirectStreamUrl':
+                '/LiveStreams/channel.ts?MediaSourceId=src-live-1',
+          },
+        ],
+      }),
+      baseUrl: baseUri,
+      accessToken: token,
+      itemId: 'channel-1',
+    );
+    expect(directLive, isNotNull);
+    expect(directLive!.playMethod, PlayMethod.directStream);
+    expect(directLive.isTranscode, isFalse);
+    expect(directLive.mediaSource.isInfiniteStream, isTrue);
+    expect(directLive.streamUrl.origin, baseUri.origin);
+    expect(directLive.streamUrl.queryParameters['api_key'], token);
+    expect(directLive.streamUrl.queryParameters['MediaSourceId'], 'src-live-1');
+    // 直播不可直连但有转码地址:按现有规则选转码,同域令牌保留。
+    final transcodedLive = resolvePlayback(
+      info: PlaybackInfo.fromJson({
+        'PlaySessionId': 'play-live-transcode',
+        'MediaSources': [
+          {
+            'Id': 'src-live-2',
+            'Container': 'ts',
+            'IsInfiniteStream': true,
+            'SupportsDirectPlay': false,
+            'SupportsDirectStream': false,
+            'SupportsTranscoding': true,
+            'TranscodingUrl':
+                '/videos/channel-2/master.m3u8?MediaSourceId=src-live-2',
+          },
+        ],
+      }),
+      baseUrl: baseUri,
+      accessToken: token,
+      itemId: 'channel-2',
+    );
+    expect(transcodedLive, isNotNull);
+    expect(transcodedLive!.isTranscode, isTrue);
+    expect(transcodedLive.mediaSource.isInfiniteStream, isTrue);
+    expect(transcodedLive.streamUrl.origin, baseUri.origin);
+    expect(transcodedLive.streamUrl.queryParameters['api_key'], token);
+    // 起播请求头照常:同域携带全部会话头(含令牌与 UA)。
+    expect(
+      playbackStreamHeaders(
+        streamUrl: transcodedLive.streamUrl,
+        baseUrl: baseUri,
+        sessionHeaders: const {
+          'X-Emby-Token': token,
+          'User-Agent': 'rillight-test-ua',
+        },
+      ),
+      const {'X-Emby-Token': token, 'User-Agent': 'rillight-test-ua'},
+    );
+  });
 }
