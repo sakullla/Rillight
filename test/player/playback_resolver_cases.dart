@@ -343,6 +343,101 @@ void main() {
     );
   });
 
+  test('embyResourceUri scopes api_key to the base origin', () {
+    final baseUri = Uri.parse(base);
+    // 同源相对地址照常附加 api_key。
+    final sameOrigin = embyResourceUri(
+      baseUri,
+      '/Videos/movie/stream.mkv?static=true',
+      token,
+    );
+    expect(sameOrigin.origin, baseUri.origin);
+    expect(sameOrigin.queryParameters['api_key'], token);
+    // 同源绝对地址保留既有 api_key,不重复附加。
+    final sameOriginAbsolute = embyResourceUri(
+      baseUri,
+      '$base/videos/movie/master.m3u8?MediaSourceId=src-1&api_key=$token',
+      token,
+    );
+    expect(sameOriginAbsolute.queryParameters['api_key'], token);
+    expect(sameOriginAbsolute.queryParameters['MediaSourceId'], 'src-1');
+    // 跨域绝对地址:查询里等于令牌的 api_key 被剥掉,其余参数保留。
+    final crossOrigin = embyResourceUri(
+      baseUri,
+      'https://cdn.example.com/video/master.m3u8?api_key=$token&MediaSourceId=src-1',
+      token,
+    );
+    expect(crossOrigin.origin, isNot(baseUri.origin));
+    expect(crossOrigin.queryParameters.containsKey('api_key'), isFalse);
+    expect(crossOrigin.queryParameters['MediaSourceId'], 'src-1');
+    // 跨域地址上与令牌无关的签名参数原样保留。
+    final foreignSigned = embyResourceUri(
+      baseUri,
+      'https://cdn.example.com/video/master.m3u8?api_key=cdn-signature&x=1',
+      token,
+    );
+    expect(foreignSigned.queryParameters['api_key'], 'cdn-signature');
+    // 仅协议或端口不同的同源主机仍视为跨域,不附带令牌。
+    final otherScheme = embyResourceUri(
+      baseUri,
+      'https://emby.test:8096/videos/movie/master.m3u8?api_key=$token',
+      token,
+    );
+    expect(otherScheme.queryParameters.containsKey('api_key'), isFalse);
+  });
+
+  test(
+    'transcoding URL on a foreign host drops the token while same origin keeps it',
+    () {
+      final foreign = resolvePlayback(
+        info: PlaybackInfo.fromJson({
+          'PlaySessionId': 'play-foreign',
+          'MediaSources': [
+            {
+              'Id': 'src-foreign',
+              'Container': 'ts',
+              'SupportsDirectPlay': false,
+              'SupportsDirectStream': false,
+              'SupportsTranscoding': true,
+              'TranscodingUrl':
+                  'https://transcode.example.com/videos/movie/master.m3u8?MediaSourceId=src-foreign&api_key=$token',
+            },
+          ],
+        }),
+        baseUrl: Uri.parse(base),
+        accessToken: token,
+        itemId: 'movie',
+      );
+      expect(foreign, isNotNull);
+      expect(foreign!.isTranscode, isTrue);
+      expect(foreign.streamUrl.origin, 'https://transcode.example.com');
+      expect(foreign.streamUrl.queryParameters.containsKey('api_key'), isFalse);
+      expect(foreign.streamUrl.queryParameters['MediaSourceId'], 'src-foreign');
+      final own = resolvePlayback(
+        info: PlaybackInfo.fromJson({
+          'PlaySessionId': 'play-own',
+          'MediaSources': [
+            {
+              'Id': 'src-own',
+              'Container': 'ts',
+              'SupportsDirectPlay': false,
+              'SupportsDirectStream': false,
+              'SupportsTranscoding': true,
+              'TranscodingUrl':
+                  '/videos/movie/master.m3u8?MediaSourceId=src-own',
+            },
+          ],
+        }),
+        baseUrl: Uri.parse(base),
+        accessToken: token,
+        itemId: 'movie',
+      );
+      expect(own, isNotNull);
+      expect(own!.streamUrl.origin, Uri.parse(base).origin);
+      expect(own.streamUrl.queryParameters['api_key'], token);
+    },
+  );
+
   test('strm source without remote path falls back to the static stream', () {
     final resolved = resolvePlayback(
       info: PlaybackInfo.fromJson({

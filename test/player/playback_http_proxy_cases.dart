@@ -804,6 +804,132 @@ void main() {
   );
 
   test(
+    'cross-origin upstream receives only the UA and never the session token',
+    () async {
+      final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final foreign = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final proxy = await PlaybackHttpProxy.create(
+        origin: Uri.parse('http://127.0.0.1:${upstream.port}'),
+        headers: {'X-Emby-Token': 'secret', 'User-Agent': 'rillight-test-ua'},
+      );
+      final client = HttpClient();
+      final seen = <String, Map<String, List<String>>>{};
+      final uris = <String, Uri>{};
+      void record(HttpRequest request) {
+        uris[request.uri.path] = request.uri;
+        final headers = <String, List<String>>{};
+        request.headers.forEach((name, values) {
+          headers[name.toLowerCase()] = values;
+        });
+        seen[request.uri.path] = headers;
+      }
+
+      upstream.listen((request) async {
+        record(request);
+        request.response.write('emby-body');
+        await request.response.close();
+      });
+      foreign.listen((request) async {
+        record(request);
+        request.response.write('foreign-body');
+        await request.response.close();
+      });
+      try {
+        // 同源:令牌头与自定义 UA 都带上,api_key 查询透传。
+        final sameOrigin = proxy.register(
+          Uri.parse('http://127.0.0.1:${upstream.port}/media?api_key=secret'),
+        );
+        final sameResponse = await (await client.getUrl(sameOrigin)).close();
+        expect(await sameResponse.transform(utf8.decoder).join(), 'emby-body');
+        expect(seen['/media'], isNotNull);
+        expect(seen['/media']!['x-emby-token'], ['secret']);
+        expect(seen['/media']!['user-agent'], ['rillight-test-ua']);
+
+        // 跨域:查询里的令牌参数被剥掉,只发送 UA,不带会话鉴权头。
+        final crossOrigin = proxy.register(
+          Uri.parse(
+            'http://127.0.0.1:${foreign.port}/video?api_key=secret&keep=1',
+          ),
+        );
+        final crossResponse = await (await client.getUrl(crossOrigin)).close();
+        expect(
+          await crossResponse.transform(utf8.decoder).join(),
+          'foreign-body',
+        );
+        final foreignSeen = seen['/video']!;
+        expect(foreignSeen['user-agent'], ['rillight-test-ua']);
+        expect(foreignSeen.containsKey('x-emby-token'), isFalse);
+        expect(foreignSeen.containsKey('authorization'), isFalse);
+        expect(foreignSeen.containsKey('cookie'), isFalse);
+        // 到达上游的查询必须不再携带令牌,非令牌参数保留。
+        final foreignUri = uris['/video']!;
+        expect(foreignUri.queryParameters.containsKey('api_key'), isFalse);
+        expect(foreignUri.queryParameters['keep'], '1');
+      } finally {
+        client.close(force: true);
+        await proxy.close();
+        await upstream.close(force: true);
+        await foreign.close(force: true);
+      }
+    },
+  );
+
+  test(
+    'cross-origin redirect still follows but re-scopes credentials each hop',
+    () async {
+      final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final foreign = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final proxy = await PlaybackHttpProxy.create(
+        origin: Uri.parse('http://127.0.0.1:${upstream.port}'),
+        headers: {'X-Emby-Token': 'secret', 'User-Agent': 'rillight-test-ua'},
+      );
+      final client = HttpClient();
+      final foreignRequests = <HttpRequest>[];
+      upstream.listen((request) async {
+        request.response.write('emby-body');
+        await request.response.close();
+      });
+      foreign.listen((request) async {
+        foreignRequests.add(request);
+        if (request.uri.path == '/start') {
+          request.response.statusCode = HttpStatus.found;
+          request.response.headers.set(
+            HttpHeaders.locationHeader,
+            '/final?api_key=secret&keep=1',
+          );
+          await request.response.close();
+          return;
+        }
+        request.response.write('foreign-final');
+        await request.response.close();
+      });
+      try {
+        final url = proxy.register(
+          Uri.parse('http://127.0.0.1:${foreign.port}/start?api_key=secret'),
+        );
+        final response = await (await client.getUrl(url)).close();
+        expect(await response.transform(utf8.decoder).join(), 'foreign-final');
+        expect(foreignRequests, hasLength(2));
+        // 重定向两个跳转都到达,且每一跳都不再带令牌查询与会话头。
+        expect(foreignRequests[0].uri.path, '/start');
+        expect(foreignRequests[1].uri.path, '/final');
+        for (final request in foreignRequests) {
+          expect(request.uri.queryParameters.containsKey('api_key'), isFalse);
+          expect(request.headers.value('x-emby-token'), isNull);
+          expect(request.headers.value('user-agent'), 'rillight-test-ua');
+        }
+        // 第二跳由 Location 带出的非令牌参数必须保留。
+        expect(foreignRequests[1].uri.queryParameters['keep'], '1');
+      } finally {
+        client.close(force: true);
+        await proxy.close();
+        await upstream.close(force: true);
+        await foreign.close(force: true);
+      }
+    },
+  );
+
+  test(
     'seek cancellation preserves a pending subtitle but close cancels it',
     () async {
       final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
