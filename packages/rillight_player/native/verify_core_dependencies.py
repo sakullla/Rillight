@@ -95,7 +95,9 @@ def verify(prefix: Path, target: str, require_subtitles: bool = False) -> list[s
         errors.append(f"{target}: FFmpeg source commit mismatch")
     if marker.get("ffmpeg_tag") != SPEC["ffmpeg"]["version"]:
         errors.append(f"{target}: FFmpeg release tag mismatch")
-    patches = SPEC["ffmpeg"].get("patches", {})
+    patches = dict(SPEC["ffmpeg"].get("patches", {}))
+    if target.startswith("android-"):
+        patches.update(SPEC["ffmpeg"].get("platform_patches", {}).get("android", {}))
     if marker.get("ffmpeg_patches") != patches:
         errors.append(f"{target}: FFmpeg patch provenance mismatch")
     if target in ("windows-x64", "linux-x64", "macos-universal"):

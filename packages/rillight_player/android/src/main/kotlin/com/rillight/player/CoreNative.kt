@@ -9,6 +9,11 @@ internal class CoreAudioFrame(
     val bytes: ByteArray,
 )
 
+internal class CoreVideoOverlay(
+    val x: Int, val y: Int, val width: Int, val height: Int,
+    val videoWidth: Int, val videoHeight: Int, val bytes: ByteArray,
+)
+
 /** JNI calls use the versioned core ABI; the wrapper never owns a decoded frame. */
 internal object CoreNative {
     init { System.loadLibrary("rillight_android_core") }
@@ -19,6 +24,8 @@ internal object CoreNative {
     external fun destroy(handle: Long)
     external fun configureHardware(handle: Long, preferredHardware: Int, allowSoftwareFallback: Boolean): Int
     external fun videoOutputSize(handle: Long, width: Int, height: Int): Int
+    external fun outputSurface(handle: Long, surface: Surface?, doviProfiles: Int): Int
+    external fun takeVideoOverlay(handle: Long): CoreVideoOverlay?
     external fun open(handle: Long, url: String, positionUs: Long, operation: Long): Int
     external fun play(handle: Long, playing: Boolean, operation: Long): Int
     external fun seek(handle: Long, positionUs: Long, operation: Long): Int

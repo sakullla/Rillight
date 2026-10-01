@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_motion.dart';
@@ -113,6 +114,9 @@ class _MobileShellState extends State<MobileShell> with WidgetsBindingObserver {
         extendBody: floating && !keyboardOpen,
         extendBodyBehindAppBar: _index == 0,
         appBar: AppBar(
+          systemOverlayStyle: Theme.of(context).brightness == Brightness.dark
+              ? SystemUiOverlayStyle.light
+              : SystemUiOverlayStyle.dark,
           toolbarHeight: 56,
           centerTitle: false,
           forceMaterialTransparency: immersive,

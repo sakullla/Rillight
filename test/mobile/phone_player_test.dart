@@ -1558,17 +1558,14 @@ void main() {
       expect(tester.getSize(timeline).width, greaterThan(size.width - 50));
       final cache = find.byKey(const Key('mobile-player-cache-status'));
       final clock = find.byKey(const Key('mobile-player-clock'));
-      if (size.width < size.height) {
-        expect(
-          tester.getTopLeft(cache).dy,
-          greaterThan(tester.getBottomLeft(clock).dy),
-        );
-      } else {
-        expect(
-          tester.getTopLeft(cache).dy,
-          closeTo(tester.getTopLeft(clock).dy, 4),
-        );
-      }
+      expect(
+        tester.getCenter(cache).dy,
+        closeTo(tester.getCenter(clock).dy, 2),
+      );
+      expect(
+        tester.getTopLeft(cache).dx,
+        greaterThan(tester.getTopRight(clock).dx),
+      );
       backend.emitEvent(VideoEventKind.cacheSpeed, 1048576);
       backend.emitEvent(
         VideoEventKind.bufferSnapshot,
@@ -1671,7 +1668,13 @@ void main() {
       await tester.tap(find.widgetWithText(ChoiceChip, '1.5x'));
       await tester.pump();
       expect(current.playbackRate, 1.5);
-      await tester.binding.handlePopRoute();
+      await tester.tap(find.byKey(const Key('mobile-player-panel-back')));
+      await tester.pump();
+      expect(
+        find.byKey(const Key('mobile-player-section-speed')),
+        findsOneWidget,
+      );
+      await tester.tap(find.byKey(const Key('mobile-player-panel-close')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 400));
       expect(
@@ -1698,6 +1701,7 @@ void main() {
       await gesture.moveBy(const Offset(20, 0));
       await tester.pump(const Duration(seconds: 5));
       expect(current.controlsVisible, isTrue);
+      expect(tester.widget<Slider>(timeline).label, isNotEmpty);
       await gesture.up();
       await tester.pump();
       expect(backend.position, greaterThan(Duration.zero));

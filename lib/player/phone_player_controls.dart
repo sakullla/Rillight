@@ -447,79 +447,101 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
             BufferedRangesTrack(
               snapshot: c.bufferSnapshot,
               duration: c.duration,
-              child: Slider(
-                key: const Key('mobile-player-seek'),
-                value: (_seek ?? c.position.inMilliseconds.toDouble()).clamp(
-                  0,
-                  durationMs,
+              child: SliderTheme(
+                data: SliderTheme.of(context).copyWith(
+                  showValueIndicator: ShowValueIndicator.always,
+                  valueIndicatorColor: Colors.white,
+                  valueIndicatorTextStyle: const TextStyle(
+                    color: Colors.black,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
-                max: durationMs.clamp(1, double.infinity),
-                onChangeStart: canSeek
-                    ? (_) {
-                        _seekRelease ??= widget.interaction.occupy();
-                        c.setControlsPinned(true);
-                      }
-                    : null,
-                onChanged: canSeek ? (v) => setState(() => _seek = v) : null,
-                onChangeEnd: (v) {
-                  setState(() => _seek = null);
-                  if (widget.interaction.canSeek(c)) {
-                    c.seekTo(Duration(milliseconds: v.round()));
-                  }
-                  _releaseSeek();
-                },
+                child: Slider(
+                  key: const Key('mobile-player-seek'),
+                  value: (_seek ?? c.position.inMilliseconds.toDouble()).clamp(
+                    0,
+                    durationMs,
+                  ),
+                  max: durationMs.clamp(1, double.infinity),
+                  label: phonePlayerClock(
+                    Duration(
+                      milliseconds: (_seek ?? c.position.inMilliseconds)
+                          .round(),
+                    ),
+                  ),
+                  onChangeStart: canSeek
+                      ? (_) {
+                          _seekRelease ??= widget.interaction.occupy();
+                          c.setControlsPinned(true);
+                        }
+                      : null,
+                  onChanged: canSeek ? (v) => setState(() => _seek = v) : null,
+                  onChangeEnd: (v) {
+                    setState(() => _seek = null);
+                    if (widget.interaction.canSeek(c)) {
+                      c.seekTo(Duration(milliseconds: v.round()));
+                    }
+                    _releaseSeek();
+                  },
+                ),
               ),
             ),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 8),
-              child: landscape
-                  ? Row(
-                      children: [
-                        clock,
-                        const SizedBox(width: 24),
-                        Expanded(
-                          child: Align(
-                            alignment: Alignment.centerRight,
-                            child: cache,
-                          ),
-                        ),
-                      ],
-                    )
-                  : Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [clock, const SizedBox(height: 4), cache],
+              child: Row(
+                children: [
+                  clock,
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Align(
+                      alignment: Alignment.centerRight,
+                      child: FittedBox(fit: BoxFit.scaleDown, child: cache),
                     ),
+                  ),
+                ],
+              ),
             ),
             const SizedBox(height: 8),
             Row(
               children: [
-                _shortcut(
-                  'mobile-player-speed',
-                  Icons.speed,
-                  '${c.playbackRate}x',
-                  () => _openMore(section: 'speed'),
+                Expanded(
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: [
+                        _shortcut(
+                          'mobile-player-speed',
+                          Icons.speed,
+                          '${c.playbackRate}x',
+                          () => _openMore(section: 'speed'),
+                        ),
+                        if (c.availableBitrates.length > 1)
+                          _shortcut(
+                            'mobile-player-quality',
+                            Icons.high_quality_outlined,
+                            l.quality,
+                            () => _openMore(section: 'quality'),
+                          ),
+                        if (c.audioTracks.length > 1 ||
+                            c.subtitleTracks.isNotEmpty)
+                          _shortcut(
+                            'mobile-player-tracks',
+                            Icons.subtitles_outlined,
+                            l.mobileTracks,
+                            () => _openMore(section: 'tracks'),
+                          ),
+                        if (widget.danmaku?.isConfigured == true)
+                          _shortcut(
+                            'mobile-player-danmaku',
+                            Icons.forum_outlined,
+                            l.danmaku,
+                            () => _openMore(section: 'danmaku'),
+                          ),
+                      ],
+                    ),
+                  ),
                 ),
-                if (c.availableBitrates.length > 1)
-                  _shortcut(
-                    'mobile-player-quality',
-                    Icons.high_quality_outlined,
-                    l.quality,
-                    () => _openMore(section: 'quality'),
-                  ),
-                if (c.audioTracks.length > 1 || c.subtitleTracks.isNotEmpty)
-                  _shortcut(
-                    'mobile-player-tracks',
-                    Icons.subtitles_outlined,
-                    l.mobileTracks,
-                    () => _openMore(section: 'tracks'),
-                  ),
-                if (widget.danmaku?.isConfigured == true)
-                  _shortcut(
-                    'mobile-player-danmaku',
-                    Icons.forum_outlined,
-                    l.danmaku,
-                    () => _openMore(section: 'danmaku'),
-                  ),
                 _shortcut(
                   'mobile-player-more',
                   Icons.tune,
@@ -540,28 +562,27 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
     String label,
     Future<void> Function() action,
   ) {
-    return Expanded(
-      child: TextButton(
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: TextButton.icon(
         key: Key(key),
         style: TextButton.styleFrom(
           foregroundColor: Colors.white,
-          minimumSize: const Size(48, 52),
-          padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 4),
+          minimumSize: const Size(48, 48),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          backgroundColor: Colors.white.withValues(alpha: .10),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
         ),
         onPressed: _controller.loading ? null : () => unawaited(action()),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 21),
-            const SizedBox(height: 3),
-            Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 11),
-            ),
-          ],
+        icon: Icon(icon, size: 20),
+        label: Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontSize: 13),
         ),
       ),
     );
@@ -634,6 +655,16 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
               children: [
                 Row(
                   children: [
+                    if (section != null)
+                      IconButton(
+                        key: const Key('mobile-player-panel-back'),
+                        tooltip: AppLocalizations.of(context).mobileBack,
+                        onPressed: () {
+                          panelSetState(() => panelSection = null);
+                          widget.interaction.setPanel('more');
+                        },
+                        icon: const Icon(Icons.arrow_back_rounded),
+                      ),
                     Expanded(
                       child: Text(switch (section) {
                         'skip' => AppLocalizations.of(
@@ -653,6 +684,14 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                         value: danmaku.danmakuOn,
                         onChanged: (_) => unawaited(danmaku.toggleDanmaku()),
                       ),
+                    IconButton(
+                      key: const Key('mobile-player-panel-close'),
+                      tooltip: MaterialLocalizations.of(
+                        context,
+                      ).closeButtonTooltip,
+                      onPressed: () => Navigator.pop(sheetContext),
+                      icon: const Icon(Icons.close_rounded),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 16),

@@ -727,17 +727,25 @@ class _DetailPlayActions extends StatelessWidget {
     ];
     return Row(
       children: [
-        Tooltip(
-          message: label,
-          child: FilledButton(
-            key: const Key('mobile-detail-play'),
-            style: FilledButton.styleFrom(
-              minimumSize: const Size(48, 48),
-              padding: EdgeInsets.zero,
-              shape: const CircleBorder(),
+        Expanded(
+          child: Tooltip(
+            message: label,
+            child: FilledButton.icon(
+              key: const Key('mobile-detail-play'),
+              style: FilledButton.styleFrom(
+                minimumSize: const Size(48, 48),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+              onPressed: enabled ? onPlay : null,
+              icon: const Icon(Icons.play_arrow_rounded, size: 24),
+              label: Text(label, maxLines: 2, overflow: TextOverflow.ellipsis),
             ),
-            onPressed: enabled ? onPlay : null,
-            child: const Icon(Icons.play_arrow, size: 28),
           ),
         ),
         if (extras.isNotEmpty) ...[

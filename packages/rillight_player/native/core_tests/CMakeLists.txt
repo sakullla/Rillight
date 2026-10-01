@@ -1,3 +1,13 @@
+add_executable(rillight_video_frame_cost_test video_frame_cost_test.cpp)
+target_include_directories(rillight_video_frame_cost_test PRIVATE "${RILLIGHT_CORE_PREFIX}/include")
+target_link_libraries(rillight_video_frame_cost_test PRIVATE ${avutil_library})
+if(MSVC)
+  target_compile_options(rillight_video_frame_cost_test PRIVATE /W4 /WX /UNDEBUG)
+else()
+  target_compile_options(rillight_video_frame_cost_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+endif()
+add_test(NAME rillight_video_frame_cost COMMAND rillight_video_frame_cost_test)
+
 add_executable(rillight_core_test core_test.cpp)
 target_link_libraries(rillight_core_test PRIVATE rillight_core Threads::Threads)
 set_target_properties(rillight_core_test PROPERTIES BUILD_RPATH "${core_lib_dir}")

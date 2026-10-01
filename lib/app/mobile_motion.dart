@@ -34,7 +34,7 @@ abstract final class PhoneMotion {
   static const Duration pageTransition = Duration(milliseconds: 250);
 
   /// 底部导航 tab 切换时长档,与路由转场同区间。
-  static const Duration tabTransition = Duration(milliseconds: 250);
+  static const Duration tabTransition = Duration(milliseconds: 200);
 
   static Object imageTag(String itemId, {required bool preferBackdrop}) {
     final kind = preferBackdrop ? 'backdrop' : 'poster';
@@ -204,10 +204,10 @@ abstract final class PhoneMotion {
   }
 }
 
-/// 底部导航 tab 切换:shared axis X。
+/// 底部导航 tab 切换：短距离位移，保持页面不透明。
 ///
 /// tab 内容状态(滚动位置、搜索草稿)保留在 IndexedStack 里,这里只对入场
-/// 整页做横向位移加淡入,不复制出场页,避免 Hero tag 重复。时长经
+/// 整页做横向位移，静态内容单独缓存绘制；不复制出场页，避免 Hero tag 重复。时长经
 /// [AppMotion.durationOf] 求值,减少动效时即时就位。
 class PhoneTabTransition extends StatefulWidget {
   const PhoneTabTransition({
@@ -269,15 +269,12 @@ class _PhoneTabTransitionState extends State<PhoneTabTransition>
 
   @override
   Widget build(BuildContext context) {
-    return FadeTransition(
-      opacity: _curve,
-      child: SlideTransition(
-        position: Tween<Offset>(
-          begin: Offset(0.06 * _direction, 0),
-          end: Offset.zero,
-        ).animate(_curve),
-        child: widget.child,
-      ),
+    return SlideTransition(
+      position: Tween<Offset>(
+        begin: Offset(0.025 * _direction, 0),
+        end: Offset.zero,
+      ).animate(_curve),
+      child: RepaintBoundary(child: widget.child),
     );
   }
 }

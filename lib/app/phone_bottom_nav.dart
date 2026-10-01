@@ -36,38 +36,41 @@ class PhoneBottomNav extends StatelessWidget {
         ? BorderRadius.circular(AppMobileNav.floatRadius)
         : BorderRadius.zero;
     final bottom = MediaQuery.viewPaddingOf(context).bottom;
-    Widget bar = LiquidGlass(
-      kind: floating ? LiquidGlassKind.panel : LiquidGlassKind.bar,
-      borderRadius: radius,
-      tint: floating ? 0.86 : null,
-      child: MediaQuery.removePadding(
-        context: context,
-        removeBottom: floating,
-        child: NavigationBar(
-          animationDuration: AppMotion.durationOf(
-            context,
-            AppMobileNav.pillDuration,
+    Widget bar = LiquidGlassBackdrop(
+      enabled: false,
+      child: LiquidGlass(
+        kind: floating ? LiquidGlassKind.panel : LiquidGlassKind.bar,
+        borderRadius: radius,
+        tint: 1,
+        child: MediaQuery.removePadding(
+          context: context,
+          removeBottom: floating,
+          child: NavigationBar(
+            animationDuration: AppMotion.durationOf(
+              context,
+              AppMobileNav.pillDuration,
+            ),
+            backgroundColor: Colors.transparent,
+            elevation: 0,
+            selectedIndex: index,
+            onDestinationSelected: onSelected,
+            destinations: [
+              NavigationDestination(
+                icon: const Icon(Icons.home_outlined),
+                selectedIcon: const Icon(Icons.home),
+                label: l.home,
+              ),
+              NavigationDestination(
+                icon: const Icon(Icons.video_library_outlined),
+                selectedIcon: const Icon(Icons.video_library),
+                label: l.libraries,
+              ),
+              NavigationDestination(
+                icon: const Icon(Icons.search),
+                label: l.search,
+              ),
+            ],
           ),
-          backgroundColor: Colors.transparent,
-          elevation: 0,
-          selectedIndex: index,
-          onDestinationSelected: onSelected,
-          destinations: [
-            NavigationDestination(
-              icon: const Icon(Icons.home_outlined),
-              selectedIcon: const Icon(Icons.home),
-              label: l.home,
-            ),
-            NavigationDestination(
-              icon: const Icon(Icons.video_library_outlined),
-              selectedIcon: const Icon(Icons.video_library),
-              label: l.libraries,
-            ),
-            NavigationDestination(
-              icon: const Icon(Icons.search),
-              label: l.search,
-            ),
-          ],
         ),
       ),
     );
@@ -78,8 +81,8 @@ class PhoneBottomNav extends StatelessWidget {
           boxShadow: const [
             BoxShadow(
               color: Color(0x47000000),
-              blurRadius: 24,
-              offset: Offset(0, 8),
+              blurRadius: 12,
+              offset: Offset(0, 4),
             ),
           ],
         ),

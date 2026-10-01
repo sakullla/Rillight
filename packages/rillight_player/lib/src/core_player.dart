@@ -5,6 +5,8 @@ import 'dart:isolate';
 
 import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
+import 'package:flutter/rendering.dart' show PlatformViewHitTestBehavior;
 import 'package:flutter/services.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
@@ -136,7 +138,7 @@ abstract class CorePlayer {
   }
 }
 
-/// One Android owner has one mounted TextureView even while media is opening.
+/// One Android owner keeps its native SurfaceView mounted while media opens.
 class AndroidCorePlayer implements CorePlayer {
   AndroidCorePlayer()
     : owner = 'core-${++_nextOwner}-${DateTime.now().microsecondsSinceEpoch}' {
@@ -211,11 +213,25 @@ class AndroidCorePlayer implements CorePlayer {
   }
 
   @override
-  Widget buildView({Key? key}) => AndroidView(
+  Widget buildView({Key? key}) => PlatformViewLink(
     key: key,
     viewType: 'rillight/android_core/view',
-    creationParams: {'owner': owner},
-    creationParamsCodec: const StandardMessageCodec(),
+    surfaceFactory: (context, controller) => AndroidViewSurface(
+      controller: controller as AndroidViewController,
+      gestureRecognizers: const <Factory<OneSequenceGestureRecognizer>>{},
+      hitTestBehavior: PlatformViewHitTestBehavior.opaque,
+    ),
+    onCreatePlatformView: (params) =>
+        PlatformViewsService.initExpensiveAndroidView(
+            id: params.id,
+            viewType: params.viewType,
+            layoutDirection: TextDirection.ltr,
+            creationParams: {'owner': owner},
+            creationParamsCodec: const StandardMessageCodec(),
+            onFocus: () => params.onFocusChanged(true),
+          )
+          ..addOnPlatformViewCreatedListener(params.onPlatformViewCreated)
+          ..create(),
   );
 
   @override

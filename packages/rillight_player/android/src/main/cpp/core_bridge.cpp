@@ -50,6 +50,9 @@ struct Bridge {
   jmethodID interrupt = nullptr;
   std::mutex sources_mutex;
   std::mutex presentation_mutex;
+  std::vector<uint8_t> overlay;
+  int overlay_geometry[6] = {};
+  bool overlay_changed = false;
   std::unordered_map<Source *, std::shared_ptr<Source>> sources;
   MediaIoRoles roles;
   RillightCore *core = nullptr;
@@ -431,16 +434,17 @@ Java_com_rillight_player_CoreNative_renderVideo(JNIEnv *env, jobject,
     ANativeWindow_release(window);
     return nullptr;
   }
-  RillightCoreFrame *frame = rillight_core_take_frame(core, RILLIGHT_CORE_VIDEO_RGBA);
+  RillightCoreFrame *frame = rillight_core_take_frame(core, RILLIGHT_CORE_VIDEO_MEDIACODEC);
   if (!frame) { ANativeWindow_release(window); return nullptr; }
   if (frame->session_id != snapshot.session_id ||
       frame->timeline_version != snapshot.timeline_version ||
       frame->width <= 0 || frame->height <= 0 ||
-      frame->stride < frame->width * 4) {
+      (frame->type == RILLIGHT_CORE_VIDEO_RGBA && frame->stride < frame->width * 4)) {
     rillight_core_release_frame(frame);
     ANativeWindow_release(window);
     return nullptr;
   }
+  if (frame->type == RILLIGHT_CORE_VIDEO_RGBA) {
   const int geometry = ANativeWindow_getWidth(window) == frame->width &&
           ANativeWindow_getHeight(window) == frame->height &&
           ANativeWindow_getFormat(window) == WINDOW_FORMAT_RGBA_8888
@@ -481,6 +485,36 @@ Java_com_rillight_player_CoreNative_renderVideo(JNIEnv *env, jobject,
     rillight_core_release_frame(frame);
     return nullptr;
   }
+  } else {
+    std::lock_guard lock(bridge(handle)->presentation_mutex);
+    RillightCoreSnapshot latest{};
+    latest.struct_size = sizeof(latest);
+    const bool current = rillight_core_snapshot(core, &latest) == 0 &&
+        latest.session_id == frame->session_id && latest.timeline_version == frame->timeline_version;
+    const int rendered = current ? rillight_core_render_mediacodec_frame(frame) : -1;
+    ANativeWindow_release(window);
+    if (rendered != 0) {
+      rillight_core_release_frame(frame);
+      return nullptr;
+    }
+  }
+  {
+    std::lock_guard lock(bridge(handle)->presentation_mutex);
+    auto* owner = bridge(handle);
+    RillightCoreSubtitleOverlay plane{};
+    plane.struct_size = sizeof(plane);
+    const bool present = rillight_core_frame_subtitle_overlay(frame, &plane) == 0 && plane.data;
+    const int geometry[] = {plane.x, plane.y, plane.width, plane.height, frame->width, frame->height};
+    const size_t bytes = present ? static_cast<size_t>(plane.stride) * plane.height : 0;
+    const bool changed = !std::equal(std::begin(geometry), std::end(geometry), owner->overlay_geometry) ||
+        owner->overlay.size() != bytes || (bytes && std::memcmp(owner->overlay.data(), plane.data, bytes));
+    if (changed) {
+      std::copy(std::begin(geometry), std::end(geometry), owner->overlay_geometry);
+      if (bytes) owner->overlay.assign(plane.data, plane.data + bytes);
+      else owner->overlay.clear();
+      owner->overlay_changed = true;
+    }
+  }
   // FFmpeg's display matrix uses 16.16 fixed point for the first two rows.
   int rotation = 0;
   if (frame->has_display_matrix) {
@@ -494,6 +528,40 @@ Java_com_rillight_player_CoreNative_renderVideo(JNIEnv *env, jobject,
                           static_cast<jlong>(frame->timeline_version)};
   auto *result = numbers(env, values, sizeof(values) / sizeof(values[0]));
   rillight_core_release_frame(frame);
+  return result;
+}
+
+JNIEXPORT jint JNICALL
+Java_com_rillight_player_CoreNative_outputSurface(JNIEnv* env, jobject,
+                                                 jlong handle, jobject surface,
+                                                 jint dovi_profiles) {
+  if (!handle) return -1;
+  ANativeWindow* window = surface ? ANativeWindow_fromSurface(env, surface) : nullptr;
+  if (env->ExceptionCheck()) { env->ExceptionClear(); return -1; }
+  std::lock_guard lock(bridge(handle)->presentation_mutex);
+  const int code = rillight_core_set_android_window(bridge(handle)->core, window,
+      static_cast<uint32_t>(dovi_profiles));
+  if (window) ANativeWindow_release(window);
+  return code;
+}
+
+JNIEXPORT jobject JNICALL
+Java_com_rillight_player_CoreNative_takeVideoOverlay(JNIEnv* env, jobject, jlong handle) {
+  if (!handle) return nullptr;
+  auto* owner = bridge(handle);
+  std::lock_guard lock(owner->presentation_mutex);
+  if (!owner->overlay_changed) return nullptr;
+  jbyteArray bytes = env->NewByteArray(static_cast<jsize>(owner->overlay.size()));
+  if (bytes && !owner->overlay.empty())
+    env->SetByteArrayRegion(bytes, 0, static_cast<jsize>(owner->overlay.size()),
+        reinterpret_cast<const jbyte*>(owner->overlay.data()));
+  jclass cls = env->FindClass("com/rillight/player/CoreVideoOverlay");
+  jmethodID ctor = cls ? env->GetMethodID(cls, "<init>", "(IIIIII[B)V") : nullptr;
+  const int* g = owner->overlay_geometry;
+  jobject result = bytes && ctor ? env->NewObject(cls, ctor, g[0], g[1], g[2], g[3], g[4], g[5], bytes) : nullptr;
+  if (cls) env->DeleteLocalRef(cls);
+  if (bytes) env->DeleteLocalRef(bytes);
+  if (result) owner->overlay_changed = false;
   return result;
 }
 

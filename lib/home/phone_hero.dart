@@ -23,7 +23,7 @@ class PhoneHero extends StatefulWidget {
   static List<EmbyItem> featuredItemsOf(CatalogController catalog) =>
       featuredHomeItems(catalog, limit: maxFeatured);
   static double contentHeightFor(double width, {double textScale = 1}) =>
-      (width - 32) * 9 / 16 + 176 * textScale + 16;
+      (width - 32) * 9 / 16 + 144 * textScale + 44;
 
   @override
   State<PhoneHero> createState() => _PhoneHeroState();
@@ -81,67 +81,81 @@ class _PhoneHeroState extends State<PhoneHero> {
           height: height,
           child: Padding(
             padding: EdgeInsets.only(top: top),
-            child: PageView.builder(
-              controller: _page,
-              physics: items.length > 1
-                  ? const PageScrollPhysics()
-                  : const NeverScrollableScrollPhysics(),
-              itemCount: items.length,
-              onPageChanged: (value) {
-                setState(() => _index = value);
-                _report(items[value]);
-              },
-              itemBuilder: (context, page) {
-                final item = items[page];
-                final artwork = heroArtworkSources(
-                  item,
-                  series: widget.catalog.latestSeries.items,
-                );
-                return ContentTheme(
-                  key: PhoneHero.itemKey(item.id),
-                  item: artwork.themeItem,
-                  fillSurface: false,
-                  child: Material(
-                    type: MaterialType.transparency,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          AspectRatio(
-                            aspectRatio: 16 / 9,
-                            child: GestureDetector(
-                              key: page == index ? PhoneHero.openKey : null,
-                              onTap: () => _open(item),
-                              child: ClipRRect(
-                                borderRadius: BorderRadius.circular(18),
-                                child: PhoneMotion.sharedImage(
-                                  itemId: item.id,
-                                  preferBackdrop: true,
-                                  child: HeroArtwork(
-                                    sources: artwork,
-                                    requestWidth: PhoneMotion.heroRequestWidth,
-                                    compact: true,
+            child: Column(
+              children: [
+                Expanded(
+                  child: PageView.builder(
+                    controller: _page,
+                    physics: items.length > 1
+                        ? const PageScrollPhysics()
+                        : const NeverScrollableScrollPhysics(),
+                    itemCount: items.length,
+                    onPageChanged: (value) {
+                      setState(() => _index = value);
+                      _report(items[value]);
+                    },
+                    itemBuilder: (context, page) {
+                      final item = items[page];
+                      final artwork = heroArtworkSources(
+                        item,
+                        series: widget.catalog.latestSeries.items,
+                      );
+                      return ContentTheme(
+                        key: PhoneHero.itemKey(item.id),
+                        item: artwork.themeItem,
+                        fillSurface: false,
+                        child: Material(
+                          type: MaterialType.transparency,
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                AspectRatio(
+                                  aspectRatio: 16 / 9,
+                                  child: GestureDetector(
+                                    key: page == index
+                                        ? PhoneHero.openKey
+                                        : null,
+                                    onTap: () => _open(item),
+                                    child: ClipRRect(
+                                      borderRadius: BorderRadius.circular(18),
+                                      child: RepaintBoundary(
+                                        child: PhoneMotion.sharedImage(
+                                          itemId: item.id,
+                                          preferBackdrop: true,
+                                          child: HeroArtwork(
+                                            sources: artwork,
+                                            requestWidth:
+                                                PhoneMotion.heroRequestWidth,
+                                            compact: true,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
                                   ),
                                 ),
-                              ),
+                                Expanded(
+                                  child: _HeroCaption(
+                                    item: item,
+                                    onOpen: () => _open(item),
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
-                          Expanded(
-                            child: _HeroCaption(
-                              item: item,
-                              onOpen: () => _open(item),
-                              index: index,
-                              count: items.length,
-                              onSelect: _goTo,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
+                        ),
+                      );
+                    },
                   ),
-                );
-              },
+                ),
+                if (items.length > 1)
+                  _PageIndicator(
+                    index: index,
+                    count: items.length,
+                    onSelect: _goTo,
+                  ),
+              ],
             ),
           ),
         );
@@ -160,18 +174,9 @@ class _PhoneHeroState extends State<PhoneHero> {
 }
 
 class _HeroCaption extends StatelessWidget {
-  const _HeroCaption({
-    required this.item,
-    required this.onOpen,
-    required this.index,
-    required this.count,
-    required this.onSelect,
-  });
+  const _HeroCaption({required this.item, required this.onOpen});
   final EmbyItem item;
   final VoidCallback onOpen;
-  final int index;
-  final int count;
-  final ValueChanged<int> onSelect;
 
   @override
   Widget build(BuildContext context) {
@@ -215,47 +220,57 @@ class _HeroCaption extends StatelessWidget {
             ),
           ],
           const Spacer(),
-          Wrap(
-            alignment: WrapAlignment.spaceBetween,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            spacing: 12,
-            children: [
-              HeroPlaybackActions(item: item, onDetails: onOpen),
-              if (count > 1)
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    for (var i = 0; i < count; i++)
-                      Semantics(
-                        selected: i == index,
-                        label: '${i + 1} / $count',
-                        child: InkResponse(
-                          key: CatalogKeys.heroDot(i),
-                          onTap: () => onSelect(i),
-                          radius: 20,
-                          child: SizedBox(
-                            width: 44,
-                            height: 44,
-                            child: Center(
-                              child: AnimatedContainer(
-                                duration: AppMotion.durationOf(context),
-                                width: i == index ? 16 : 5,
-                                height: 5,
-                                decoration: BoxDecoration(
-                                  color: i == index
-                                      ? scheme.primary
-                                      : scheme.onSurface.withValues(alpha: 0.3),
-                                  borderRadius: BorderRadius.circular(99),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
+          HeroPlaybackActions(item: item, onDetails: onOpen),
+        ],
+      ),
+    );
+  }
+}
+
+class _PageIndicator extends StatelessWidget {
+  const _PageIndicator({
+    required this.index,
+    required this.count,
+    required this.onSelect,
+  });
+  final int index;
+  final int count;
+  final ValueChanged<int> onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      type: MaterialType.transparency,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          for (var i = 0; i < count; i++)
+            Semantics(
+              selected: i == index,
+              label: '${i + 1} / $count',
+              child: InkResponse(
+                key: CatalogKeys.heroDot(i),
+                onTap: () => onSelect(i),
+                child: SizedBox(
+                  width: 44,
+                  height: 44,
+                  child: Center(
+                    child: AnimatedContainer(
+                      duration: AppMotion.durationOf(context, AppMotion.fast),
+                      width: i == index ? 18 : 5,
+                      height: 5,
+                      decoration: BoxDecoration(
+                        color: i == index
+                            ? scheme.primary
+                            : scheme.onSurface.withValues(alpha: .25),
+                        borderRadius: BorderRadius.circular(99),
                       ),
-                  ],
+                    ),
+                  ),
                 ),
-            ],
-          ),
+              ),
+            ),
         ],
       ),
     );

@@ -1,18 +1,26 @@
 package com.rillight.player
 
 import android.content.Context
-import android.graphics.Matrix
-import android.graphics.SurfaceTexture
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.RectF
+import android.view.Gravity
 import android.view.Surface
-import android.view.TextureView
+import android.view.SurfaceHolder
+import android.view.SurfaceView
+import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import java.nio.ByteBuffer
+import kotlin.math.roundToInt
 
-/** Stable TextureView: Flutter keeps this mounted through loading transitions. */
+/** Hybrid-composed native layer: HDR decoder buffers never enter an SDR texture. */
 internal class CoreSurfaceView(context: Context, private val owner: SurfaceOwner) : FrameLayout(context),
-    TextureView.SurfaceTextureListener {
-    private val texture = TextureView(context)
-    private var surface: Surface? = null
+    SurfaceHolder.Callback {
+    private val video = SurfaceView(context)
+    private val subtitles = SubtitlePlane(context)
     private var widthPx = 0
     private var heightPx = 0
     private var sarNum = 1
@@ -21,16 +29,18 @@ internal class CoreSurfaceView(context: Context, private val owner: SurfaceOwner
     private var fill = false
 
     init {
+        setBackgroundColor(Color.BLACK)
         isFocusable = false
         isFocusableInTouchMode = false
         descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
-        texture.isFocusable = false
-        texture.isFocusableInTouchMode = false
-        texture.surfaceTextureListener = this
-        addView(texture, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        video.isFocusable = false
+        video.isFocusableInTouchMode = false
+        video.holder.addCallback(this)
+        addView(video, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT, Gravity.CENTER))
+        addView(subtitles, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
     }
 
-    fun scale(mode: String?) { fill = mode == "fill"; updateTransform() }
+    fun scale(mode: String?) { fill = mode == "fill"; updateGeometry() }
 
     fun frame(width: Int, height: Int, numerator: Int, denominator: Int, degrees: Int) {
         if (width == widthPx && height == heightPx && numerator == sarNum &&
@@ -39,48 +49,77 @@ internal class CoreSurfaceView(context: Context, private val owner: SurfaceOwner
         sarNum = numerator.takeIf { it > 0 } ?: 1
         sarDen = denominator.takeIf { it > 0 } ?: 1
         rotation = degrees
-        updateTransform()
+        updateGeometry()
     }
 
-    private fun updateTransform() {
-        val vw = texture.width.toFloat()
-        val vh = texture.height.toFloat()
-        if (vw <= 0 || vh <= 0 || widthPx <= 0 || heightPx <= 0) return
+    fun overlay(plane: CoreVideoOverlay) { subtitles.update(plane) }
+    fun clearOverlay() { subtitles.clear() }
+
+    private fun updateGeometry() {
+        if (width <= 0 || height <= 0 || widthPx <= 0 || heightPx <= 0) return
         val pixelWidth = widthPx.toFloat() * sarNum / sarDen
         val effectiveWidth = if (rotation % 180 == 0) pixelWidth else heightPx.toFloat()
         val effectiveHeight = if (rotation % 180 == 0) heightPx.toFloat() else pixelWidth
-        val factor = if (fill) maxOf(vw / effectiveWidth, vh / effectiveHeight)
-                     else minOf(vw / effectiveWidth, vh / effectiveHeight)
-        val desiredWidth = pixelWidth * factor
-        val desiredHeight = heightPx * factor
-        val matrix = Matrix()
-        // TextureView's default mapping stretches the buffer to the view.
-        matrix.setScale(desiredWidth / vw, desiredHeight / vh, vw / 2f, vh / 2f)
-        if (rotation != 0) matrix.postRotate(rotation.toFloat(), vw / 2f, vh / 2f)
-        texture.setTransform(matrix)
+        val factor = if (fill) maxOf(width / effectiveWidth, height / effectiveHeight)
+                     else minOf(width / effectiveWidth, height / effectiveHeight)
+        val desiredWidth = (pixelWidth * factor).roundToInt().coerceAtLeast(1)
+        val desiredHeight = (heightPx * factor).roundToInt().coerceAtLeast(1)
+        val params = video.layoutParams as LayoutParams
+        if (params.width != desiredWidth || params.height != desiredHeight) {
+            params.width = desiredWidth; params.height = desiredHeight
+            video.layoutParams = params
+        }
+        video.rotation = rotation.toFloat()
+        subtitles.destination = RectF((width - desiredWidth) / 2f, (height - desiredHeight) / 2f,
+            (width + desiredWidth) / 2f, (height + desiredHeight) / 2f)
+        subtitles.rotation = rotation.toFloat()
+        subtitles.invalidate()
     }
 
-    override fun onSurfaceTextureAvailable(source: SurfaceTexture, width: Int, height: Int) {
-        owner.setViewport(width, height)
-        surface = Surface(source).also(owner::setSurface)
-        updateTransform()
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        owner.setViewport(w, h)
+        updateGeometry()
     }
-    override fun onSurfaceTextureSizeChanged(source: SurfaceTexture, width: Int, height: Int) {
-        owner.setViewport(width, height)
-        updateTransform()
-    }
-    override fun onSurfaceTextureDestroyed(source: SurfaceTexture): Boolean {
-        if (surface != null) owner.setSurface(null)
-        surface?.release(); surface = null
-        return true
-    }
-    override fun onSurfaceTextureUpdated(source: SurfaceTexture) = Unit
+    override fun surfaceCreated(holder: SurfaceHolder) { owner.setSurface(holder.surface) }
+    override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) = Unit
+    override fun surfaceDestroyed(holder: SurfaceHolder) { owner.setSurface(null); clearOverlay() }
 
     fun detach(clearOwner: Boolean = true) {
-        // A retired PlatformView may be disposed after its replacement mounted.
         if (clearOwner) owner.setSurface(null)
-        surface?.release(); surface = null
-        texture.surfaceTextureListener = null
+        video.holder.removeCallback(this)
+        clearOverlay()
+    }
+
+    private class SubtitlePlane(context: Context) : View(context) {
+        var destination = RectF()
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+        private var bitmap: Bitmap? = null
+        private var plane: CoreVideoOverlay? = null
+        fun update(next: CoreVideoOverlay) {
+            if (next.bytes.isEmpty()) { clear(); return }
+            var image = bitmap
+            if (image == null || image.width != next.width || image.height != next.height) {
+                image = Bitmap.createBitmap(next.width, next.height, Bitmap.Config.ARGB_8888)
+                bitmap = image
+            }
+            image.copyPixelsFromBuffer(ByteBuffer.wrap(next.bytes))
+            plane = next
+            invalidate()
+        }
+        // RenderThread may still reference the previous display list. Let its
+        // retained bitmap finish naturally instead of recycling under a draw.
+        fun clear() { bitmap = null; plane = null; invalidate() }
+        override fun onDraw(canvas: Canvas) {
+            val p = plane ?: return
+            val image = bitmap ?: return
+            if (p.videoWidth <= 0 || p.videoHeight <= 0) return
+            val sx = destination.width() / p.videoWidth
+            val sy = destination.height() / p.videoHeight
+            canvas.drawBitmap(image, null, RectF(destination.left + p.x * sx,
+                destination.top + p.y * sy, destination.left + (p.x + p.width) * sx,
+                destination.top + (p.y + p.height) * sy), paint)
+        }
     }
 }
 

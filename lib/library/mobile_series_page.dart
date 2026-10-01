@@ -23,7 +23,7 @@ class PhoneMetaEntry {
   final VoidCallback? onTap;
 }
 
-/// 沉浸头部:全宽 16:9 背图,标题和元数据落在底部渐变上,主操作紧贴画面。
+/// 图片、标题、元数据与播放操作各占一层，窄屏和大字体均可自然增高。
 /// 背图缺失时以占位底色兜底,不出现空白区。
 class PhoneItemBanner extends StatelessWidget {
   const PhoneItemBanner({
@@ -85,13 +85,15 @@ class PhoneItemBanner extends StatelessWidget {
             fit: StackFit.expand,
             children: [
               ColoredBox(color: theme.colorScheme.surfaceContainerHigh),
-              PhoneMotion.sharedImage(
-                itemId: item.id,
-                preferBackdrop: preferBackdrop,
-                child: MediaImage(
-                  item: item,
+              RepaintBoundary(
+                child: PhoneMotion.sharedImage(
+                  itemId: item.id,
                   preferBackdrop: preferBackdrop,
-                  maxWidth: maxWidth,
+                  child: MediaImage(
+                    item: item,
+                    preferBackdrop: preferBackdrop,
+                    maxWidth: maxWidth,
+                  ),
                 ),
               ),
               // 顶带:保护透明顶栏与返回钮,向下溶到透明。
@@ -113,7 +115,7 @@ class PhoneItemBanner extends StatelessWidget {
                 left: 0,
                 right: 0,
                 bottom: 0,
-                height: imageHeight * 0.62,
+                height: imageHeight * 0.24,
                 child: DecoratedBox(
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
@@ -129,60 +131,53 @@ class PhoneItemBanner extends StatelessWidget {
                   ),
                 ),
               ),
-              if (showCaption)
-                Positioned(
-                  left: AppSpacing.md,
-                  right: AppSpacing.md,
-                  bottom: AppSpacing.sm,
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            _BannerTitle(
-                              title: title,
-                              hint: onTitleTap == null ? null : titleHint,
-                              onTap: onTitleTap,
-                            ),
-                            if (meta.isNotEmpty) ...[
-                              const SizedBox(height: AppSpacing.xs),
-                              Wrap(
-                                key: metaKey,
-                                spacing: AppSpacing.xs,
-                                runSpacing: AppSpacing.xxs,
-                                crossAxisAlignment: WrapCrossAlignment.center,
-                                children: [
-                                  for (var i = 0; i < meta.length; i++) ...[
-                                    if (i > 0)
-                                      Text(
-                                        '·',
-                                        style: theme.textTheme.labelMedium
-                                            ?.copyWith(
-                                              color: theme
-                                                  .colorScheme
-                                                  .onSurfaceVariant,
-                                            ),
-                                      ),
-                                    _MetaChip(entry: meta[i]),
-                                  ],
-                                ],
-                              ),
-                            ],
-                          ],
-                        ),
-                      ),
-                      if (actions != null) ...[
-                        const SizedBox(width: AppSpacing.sm),
-                        actions!,
-                      ],
-                    ],
-                  ),
-                ),
             ],
           ),
         ),
+        if (showCaption)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              AppSpacing.md,
+              AppSpacing.sm,
+              AppSpacing.md,
+              AppSpacing.md,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _BannerTitle(
+                  title: title,
+                  hint: onTitleTap == null ? null : titleHint,
+                  onTap: onTitleTap,
+                ),
+                if (meta.isNotEmpty) ...[
+                  const SizedBox(height: AppSpacing.xs),
+                  Wrap(
+                    key: metaKey,
+                    spacing: AppSpacing.xs,
+                    runSpacing: AppSpacing.xxs,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      for (var i = 0; i < meta.length; i++) ...[
+                        if (i > 0)
+                          Text(
+                            '·',
+                            style: theme.textTheme.labelMedium?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        _MetaChip(entry: meta[i]),
+                      ],
+                    ],
+                  ),
+                ],
+                if (actions != null) ...[
+                  const SizedBox(height: AppSpacing.md),
+                  actions!,
+                ],
+              ],
+            ),
+          ),
       ],
     );
   }

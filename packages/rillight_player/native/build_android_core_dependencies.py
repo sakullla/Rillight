@@ -16,6 +16,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 
 from build_core_dependencies import (
     SPEC,
@@ -44,7 +45,7 @@ def posix_path(path: Path, bash: Path) -> str:
 
 
 def prepare_source(source: Path) -> None:
-    patches = locked_ffmpeg_patches()
+    patches = locked_ffmpeg_patches("android")
     if (source / ".git").is_dir():
         for patch in patches.values():
             if subprocess.run(
@@ -62,10 +63,20 @@ def prepare_source(source: Path) -> None:
 def verify_supplied_source(source: Path) -> None:
     if run(["git", "rev-parse", "HEAD"], source) != SPEC["ffmpeg"]["commit"]:
         raise RuntimeError("supplied FFmpeg source is not the locked commit")
-    patches = locked_ffmpeg_patches()
-    if len(patches) != 1:
-        raise RuntimeError("Android builder requires one locked FFmpeg patch")
-    expected_diff = next(iter(patches.values())).read_bytes()
+    patches = locked_ffmpeg_patches("android")
+    # Reconstruct the exact locked patch union in an isolated Git index. This
+    # leaves the caller's checkout/index untouched and rejects any extra edits.
+    with tempfile.TemporaryDirectory() as temporary:
+        env = dict(os.environ, GIT_INDEX_FILE=str(Path(temporary) / "index"))
+        subprocess.run(["git", "read-tree", "HEAD"], cwd=source, env=env, check=True)
+        for patch in patches.values():
+            subprocess.run(["git", "apply", "--cached", str(patch)], cwd=source, env=env, check=True)
+        expected_diff = subprocess.check_output(
+            ["git", "-c", "core.filemode=false", "-c", "core.abbrev=7",
+             "diff", "--cached", "--binary", "HEAD", "--"], cwd=source, env=env)
+        expected_files = subprocess.check_output(
+            ["git", "diff", "--cached", "--name-only", "HEAD"],
+            cwd=source, env=env, text=True).splitlines()
     actual_diff = subprocess.check_output(
         ["git", "-c", "core.filemode=false", "-c", "core.abbrev=7",
          "diff", "--binary", "HEAD", "--"],
@@ -77,7 +88,7 @@ def verify_supplied_source(source: Path) -> None:
         ["git", "-c", "core.filemode=false", "status", "--porcelain"],
         cwd=source, text=True,
     )
-    if changed.splitlines() != [" M libavformat/hls.c"]:
+    if sorted(changed.splitlines()) != sorted(" M " + name for name in expected_files):
         raise RuntimeError(f"unexpected files in supplied FFmpeg source: {changed}")
 
 
@@ -143,7 +154,8 @@ def build_abi(
         "ffmpeg_version": SPEC["ffmpeg"]["version"],
         "ffmpeg_commit": SPEC["ffmpeg"]["commit"],
         "ffmpeg_tag": SPEC["ffmpeg"]["version"],
-        "ffmpeg_patches": SPEC["ffmpeg"].get("patches", {}),
+        "ffmpeg_patches": {**SPEC["ffmpeg"].get("patches", {}),
+                          **SPEC["ffmpeg"].get("platform_patches", {}).get("android", {})},
         "configure": args,
         "libraries": libraries,
     }

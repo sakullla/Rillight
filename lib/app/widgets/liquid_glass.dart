@@ -130,7 +130,7 @@ class LiquidGlass extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final radius = _radius;
     final fill = scheme.surface.withValues(
-      alpha: skipBlur ? AppGlass.reducedTint : (tint ?? _tint),
+      alpha: skipBlur ? (tint ?? AppGlass.reducedTint) : (tint ?? _tint),
     );
     // 描边与高光随亮度取反:深色主题提白,浅色主题压深,两种亮度下都可见。
     final edge = scheme.brightness == Brightness.dark

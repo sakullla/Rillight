@@ -1,0 +1,67 @@
+diff --git a/libavcodec/mediacodecdec.c b/libavcodec/mediacodecdec.c
+index bc176d8..d555d0d 100644
+--- a/libavcodec/mediacodecdec.c
++++ b/libavcodec/mediacodecdec.c
+@@ -59,6 +59,8 @@ typedef struct MediaCodecH264DecContext {
+     int use_ndk_codec;
+     // Ref. MediaFormat KEY_OPERATING_RATE
+     int operating_rate;
++    char *codec_mime;
++    int dolby_profile;
+ } MediaCodecH264DecContext;
+ 
+ static av_cold int mediacodec_decode_close(AVCodecContext *avctx)
+@@ -429,6 +431,26 @@ static av_cold int mediacodec_decode_init(AVCodecContext *avctx)
+         av_assert0(0);
+     }
+ 
++    if (s->codec_mime) {
++        if (avctx->codec_id != AV_CODEC_ID_HEVC ||
++            strcmp(s->codec_mime, "video/dolby-vision")) {
++            ret = AVERROR(EINVAL);
++            goto done;
++        }
++        codec_mime = s->codec_mime;
++    }
++    if (s->codec_mime && s->dolby_profile > 0)
++        ff_AMediaFormat_setInt32(format, "profile", s->dolby_profile);
++    if (avctx->color_primaries == AVCOL_PRI_BT2020)
++        ff_AMediaFormat_setInt32(format, "color-standard", 6);
++    else if (avctx->color_primaries == AVCOL_PRI_BT709)
++        ff_AMediaFormat_setInt32(format, "color-standard", 1);
++    if (avctx->color_trc == AVCOL_TRC_SMPTE2084 || s->codec_mime)
++        ff_AMediaFormat_setInt32(format, "color-transfer", 6);
++    else if (avctx->color_trc == AVCOL_TRC_ARIB_STD_B67)
++        ff_AMediaFormat_setInt32(format, "color-transfer", 7);
++    if (avctx->color_range != AVCOL_RANGE_UNSPECIFIED)
++        ff_AMediaFormat_setInt32(format, "color-range", avctx->color_range == AVCOL_RANGE_JPEG ? 1 : 2);
+     ff_AMediaFormat_setString(format, "mime", codec_mime);
+ 
+     if (avctx->codec_type == AVMEDIA_TYPE_VIDEO) {
+@@ -594,6 +616,10 @@ static const AVCodecHWConfigInternal *const mediacodec_hw_configs[] = {
+ #define OFFSET(x) offsetof(MediaCodecH264DecContext, x)
+ #define VD AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_DECODING_PARAM
+ static const AVOption ff_mediacodec_vdec_options[] = {
++    { "dolby_profile", "Android Dolby Vision CodecProfileLevel bitmask",
++                      OFFSET(dolby_profile), AV_OPT_TYPE_INT, {.i64 = 0}, 0, 512, VD },
++    { "codec_mime", "Native Dolby Vision output MIME for HEVC streams",
++                   OFFSET(codec_mime), AV_OPT_TYPE_STRING, {.str = NULL}, 0, 0, VD },
+     { "delay_flush", "Delay flush until hw output buffers are returned to the decoder",
+                      OFFSET(delay_flush), AV_OPT_TYPE_BOOL, {.i64 = 0}, 0, 1, VD },
+     { "ndk_codec", "Use MediaCodec from NDK",
+diff --git a/libavcodec/mediacodecdec_common.c b/libavcodec/mediacodecdec_common.c
+index 9a627c0..bf5a259 100644
+--- a/libavcodec/mediacodecdec_common.c
++++ b/libavcodec/mediacodecdec_common.c
+@@ -772,7 +772,10 @@ static int mediacodec_dec_get_video_codec(AVCodecContext *avctx, MediaCodecDecCo
+         }
+     }
+ 
+-    profile = ff_AMediaCodecProfile_getProfileFromAVCodecContext(avctx);
++    /* HEVC profile enums do not describe Dolby Vision decoder profiles.
++     * Let the Dolby decoder select the profile from VPS/SPS/RPU instead. */
++    profile = !strcmp(mime, "video/dolby-vision") ? -1 :
++              ff_AMediaCodecProfile_getProfileFromAVCodecContext(avctx);
+     if (profile < 0) {
+         av_log(avctx, AV_LOG_WARNING, "Unsupported or unknown profile\n");
+     }

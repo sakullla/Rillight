@@ -456,7 +456,7 @@ class Device:
         self.adb('shell', 'am', 'start', '-W', '-n', ACTIVITY)
 
 
-def app_flow(device, tv):
+def app_flow(device, tv, *, capture_virtual_audio=True):
     d = device
     d.wait(lambda s: s['tv'] == tv and not s['authenticated'], 'platform connection page')
     if tv:
@@ -527,7 +527,12 @@ def app_flow(device, tv):
     second = d.screenshot('playing-b')
     pixels = pixel_check(first, second)
     try:
-        audio = capture_audio(d.serial, d.output / 'audio', 48000 if tv else 44100)
+        if capture_virtual_audio:
+            audio = capture_audio(d.serial, d.output / 'audio', 48000 if tv else 44100)
+        else:
+            audio = {'passed': False, 'status': 'unverified',
+                     'reason': 'Physical device: emulator virtual-audio capture is not applicable'}
+            save(d.output / 'audio.json', audio)
     except Exception as error:
         # Keep independent UI/control observations, but never pass the device
         # or overall run without its required audio evidence.

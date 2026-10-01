@@ -80,6 +80,9 @@ find_package(Threads REQUIRED)
 target_link_libraries(rillight_core PRIVATE
   ${avformat_library} ${avcodec_library} ${avutil_library} ${avfilter_library}
   ${swresample_library} ${swscale_library} Threads::Threads)
+if(ANDROID)
+  target_link_libraries(rillight_core PRIVATE android log)
+endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   # The fixed SDK's shared FFmpeg libraries depend on one another. The linker
   # must resolve that closure while linking the core and its test executable.

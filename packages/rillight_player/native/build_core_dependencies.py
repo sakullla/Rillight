@@ -30,9 +30,11 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def locked_ffmpeg_patches() -> dict[str, Path]:
+def locked_ffmpeg_patches(platform_name: str | None = None) -> dict[str, Path]:
     patches: dict[str, Path] = {}
-    for relative, expected in SPEC["ffmpeg"].get("patches", {}).items():
+    hashes = dict(SPEC["ffmpeg"].get("patches", {}))
+    hashes.update(SPEC["ffmpeg"].get("platform_patches", {}).get(platform_name, {}))
+    for relative, expected in hashes.items():
         path = (ROOT / relative).resolve()
         if ROOT.resolve() not in path.parents or not path.is_file():
             raise RuntimeError(f"Missing/unsafe FFmpeg patch: {relative}")

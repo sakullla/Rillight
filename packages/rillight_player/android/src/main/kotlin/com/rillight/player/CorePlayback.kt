@@ -7,6 +7,7 @@ import android.content.IntentFilter
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
+import android.media.MediaCodecList
 import android.os.Build
 import android.os.Handler
 import android.view.Surface
@@ -19,7 +20,7 @@ import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 
-/** One owner has at most one ABI6 core. Shutdown and reopen run off the UI thread. */
+/** One owner has at most one owned core. Shutdown and reopen run off the UI thread. */
 internal class CorePlayback(
     private val context: Context,
     val id: String,
@@ -39,10 +40,21 @@ internal class CorePlayback(
     private val generation = AtomicInteger()
     private val operation = AtomicLong()
     private val surfaceLock = Any()
+    private val surfaceRevision = AtomicInteger()
     private val outputLock = Any()
     private val outputWaitLock = ReentrantLock()
     private val outputWake = outputWaitLock.newCondition()
     private var surface: Surface? = null
+    // Some NDK implementations accept Dolby MIME through an ordinary HEVC
+    // decoder. Only advertised Dolby profiles establish a native color path.
+    private val doviProfiles: Int by lazy {
+        runCatching {
+            MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos
+                .filter { !it.isEncoder && it.supportedTypes.contains("video/dolby-vision") }
+                .flatMap { it.getCapabilitiesForType("video/dolby-vision").profileLevels.toList() }
+                .fold(0) { profiles, level -> profiles or level.profile }
+        }.getOrDefault(0)
+    }
     @Volatile private var viewport = Pair(0, 0)
     private var audioOutput: CoreAudioOutput? = null
     private var running: Running? = null
@@ -102,7 +114,7 @@ internal class CorePlayback(
     }
 
     override fun setSurface(surface: Surface?) {
-        synchronized(surfaceLock) { this.surface = surface }
+        synchronized(surfaceLock) { this.surface = surface; surfaceRevision.incrementAndGet() }
         wakeOutput()
     }
 
@@ -175,7 +187,15 @@ internal class CorePlayback(
                 return@execute
             }
             val accepted = try {
-                CoreNative.configureHardware(handle, preferredHardware, true) == 0 &&
+                // Wait off the UI thread for the mounted native view's Surface.
+                var target = synchronized(surfaceLock) { surface }
+                while (target?.isValid != true && generation.get() == revision) {
+                    outputWaitLock.withLock { outputWake.await(100, TimeUnit.MILLISECONDS) }
+                    target = synchronized(surfaceLock) { surface }
+                }
+                generation.get() == revision && target?.isValid == true &&
+                    CoreNative.outputSurface(handle, target, doviProfiles) == 0 &&
+                    CoreNative.configureHardware(handle, preferredHardware, true) == 0 &&
                     CoreNative.open(handle, address, initialStartUs, operation.incrementAndGet()) == 0 &&
                     (!desiredPaused || CoreNative.play(handle, false, operation.incrementAndGet()) == 0)
             } catch (error: Throwable) {
@@ -479,11 +499,18 @@ internal class CorePlayback(
 
     private fun pump(active: Running) {
         var timeline = -1L
+        var outputSurfaceRevision = -1
         var outputViewport = Pair(-1, -1)
         var lastTick = 0L
         var lastEnded = false
         try {
             while (active.alive.get() && generation.get() == active.generation) {
+                val surfaceState = synchronized(surfaceLock) { Pair(surface, surfaceRevision.get()) }
+                val videoSurface = surfaceState.first
+                if (surfaceState.second != outputSurfaceRevision) {
+                    CoreNative.outputSurface(active.handle, videoSurface, doviProfiles)
+                    outputSurfaceRevision = surfaceState.second
+                }
                 val requestedViewport = viewport
                 if (requestedViewport != outputViewport) {
                     CoreNative.videoOutputSize(active.handle,
@@ -495,18 +522,21 @@ internal class CorePlayback(
                 if (snap[3] != timeline) {
                     timeline = snap[3]
                     lastEnded = false
-                    handler.post { if (generation.get() == active.generation) renderedFirst = false }
+                    handler.post { if (generation.get() == active.generation) {
+                        renderedFirst = false; view?.clearOverlay()
+                    } }
                 }
-                val videoSurface = synchronized(surfaceLock) { surface }
                 val frame = videoSurface?.takeIf { it.isValid }
                     ?.let { CoreNative.renderVideo(active.handle, it) }
                 if (frame != null && frame[6] == snap[1] && frame[7] == snap[3]) {
+                    val overlay = CoreNative.takeVideoOverlay(active.handle)
                     handler.post {
                         if (generation.get() == active.generation) {
                             val current = CoreNative.snapshot(active.handle)
                             if (current != null && current[1] == frame[6] && current[3] == frame[7]) {
                                 view?.frame(frame[1].toInt(), frame[2].toInt(), frame[3].toInt(),
                                     frame[4].toInt(), frame[5].toInt())
+                                if (overlay != null) view?.overlay(overlay)
                                 if (!renderedFirst) { renderedFirst = true; emit("firstFrame", true) }
                             }
                         }
@@ -533,7 +563,14 @@ internal class CorePlayback(
                         if (active.alive.get() && generation.get() == active.generation)
                             outputWake.await(250, TimeUnit.MILLISECONDS)
                     }
-                } else Thread.sleep(15)
+                } else {
+                    // Surface posts already pace output. A fixed 15 ms sleep
+                    // after every post further reduces effective frame rate.
+                    outputWaitLock.withLock {
+                        if (active.alive.get() && generation.get() == active.generation)
+                            outputWake.await(if (frame == null) 2 else 1, TimeUnit.MILLISECONDS)
+                    }
+                }
             }
         } catch (error: Throwable) {
             handler.post { if (generation.get() == active.generation) fail(error.message ?: "Native output failed") }

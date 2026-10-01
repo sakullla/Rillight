@@ -45,7 +45,8 @@ typedef enum RillightCoreState {
 typedef enum RillightCoreFrameType {
   RILLIGHT_CORE_VIDEO_RGBA = 1,
   RILLIGHT_CORE_AUDIO_S16 = 2,
-  RILLIGHT_CORE_VIDEO_D3D11 = 3
+  RILLIGHT_CORE_VIDEO_D3D11 = 3,
+  RILLIGHT_CORE_VIDEO_MEDIACODEC = 4
 } RillightCoreFrameType;
 
 typedef enum RillightCoreTrackType {
@@ -196,6 +197,16 @@ RILLIGHT_CORE_API int rillight_core_configure_hardware(
  * The next converted frame adopts the new size; sinks still fit/rotate it. */
 RILLIGHT_CORE_API int rillight_core_set_video_output_size(
     RillightCore *core, int width, int height);
+/* Android owned-core output. The core retains an ANativeWindow reference.
+ * Replacing the window advances the timeline and recreates MediaCodec at the
+ * current position. NULL detaches output; callers must never present an old
+ * timeline to a replacement Surface. Other platforms reject this API.
+ * MEDIACODEC frames retain decoder output buffers, with no CPU pixel copy. */
+RILLIGHT_CORE_API int rillight_core_set_android_window(RillightCore *core,
+                                                      void *native_window,
+                                                      uint32_t dovi_profiles);
+RILLIGHT_CORE_API int rillight_core_render_mediacodec_frame(
+    const RillightCoreFrame *frame);
 /* Optional Windows GPU sink, enabled while idle; disabling it is allowed
  * during playback to recover from unavailable cross-adapter sharing.
  * VIDEO_D3D11 requests

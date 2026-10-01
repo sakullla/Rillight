@@ -7,6 +7,11 @@
     "patches": {
       "patches/ffmpeg-hls-custom-io-http.patch": "2cc65a9a408cb1e0c840ef7dfd6b454d6f54d85272dfff714eb4c86446d34b49"
     },
+    "platform_patches": {
+      "android": {
+        "patches/ffmpeg-android-dolby-surface.patch": "5cad4150a0ea1818716c96d11429bf15f0043b144056e98b08858c1278986e7b"
+      }
+    },
     "libraries": ["avformat", "avcodec", "avutil", "swresample", "swscale", "avfilter"]
   },
   "dav1d": {
