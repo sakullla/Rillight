@@ -8,9 +8,11 @@ import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.media.MediaCodecList
+import android.hardware.display.DisplayManager
 import android.os.Build
 import android.os.Handler
 import android.view.Surface
+import android.view.Display
 import io.flutter.plugin.common.MethodChannel
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -196,6 +198,7 @@ internal class CorePlayback(
                 generation.get() == revision && target?.isValid == true &&
                     CoreNative.outputSurface(handle, target, doviProfiles) == 0 &&
                     CoreNative.configureHardware(handle, preferredHardware, true) == 0 &&
+                    CoreNative.configureExternalAudioSpeed(handle, true) == 0 &&
                     CoreNative.open(handle, address, initialStartUs, operation.incrementAndGet()) == 0 &&
                     (!desiredPaused || CoreNative.play(handle, false, operation.incrementAndGet()) == 0)
             } catch (error: Throwable) {
@@ -262,10 +265,12 @@ internal class CorePlayback(
                     code
                 }
                 "rate" -> synchronized(outputLock) {
-                    val code = CoreNative.speed(handle,
-                        (args["value"] as? Number)?.toDouble() ?: Double.NaN,
-                        operation.incrementAndGet())
-                    if (code == 0) audioOutput?.flush()
+                    val rate = (args["value"] as? Number)?.toDouble() ?: Double.NaN
+                    require(rate.isFinite() && rate in .5..3.0)
+                    val previous = CoreNative.snapshot(handle)?.getOrNull(16)?.div(1000.0) ?: 1.0
+                    audioOutput?.setSpeed(rate.toFloat())
+                    val code = CoreNative.speed(handle, rate, operation.incrementAndGet())
+                    if (code != 0) audioOutput?.setSpeed(previous.toFloat())
                     code
                 }
                 "volume" -> {
@@ -437,6 +442,7 @@ internal class CorePlayback(
                             pendingOffset = 0
                             audio.flush()
                         } else {
+                            audio.setSpeed((latest[16] / 1000.0).toFloat())
                             if (pending == null) {
                                 pending = CoreNative.takeAudio(active.handle)
                                 pendingOffset = 0
@@ -446,7 +452,9 @@ internal class CorePlayback(
                                 if (frame.session != snap[1] || frame.timeline != snap[3]) {
                                     pending = null; pendingOffset = 0
                                 } else {
-                                    val written = audio.write(frame, pendingOffset, snap[16] / 1000.0)
+                                    // PCM carries source-time samples. AudioTrack applies
+                                    // tempo; multiplying this clock by rate counts it twice.
+                                    val written = audio.write(frame, pendingOffset, 1.0)
                                     if (written > 0) audioReady = true
                                     pendingOffset += written
                                     if (pendingOffset >= frame.bytes.size) {
@@ -503,13 +511,21 @@ internal class CorePlayback(
         var outputViewport = Pair(-1, -1)
         var lastTick = 0L
         var lastEnded = false
+        var hdrDisplaySupported = false
+        var hintedFrameRate = 0f
         try {
             while (active.alive.get() && generation.get() == active.generation) {
                 val surfaceState = synchronized(surfaceLock) { Pair(surface, surfaceRevision.get()) }
                 val videoSurface = surfaceState.first
                 if (surfaceState.second != outputSurfaceRevision) {
+                    CoreNative.releaseColorRenderer()
+                    val display = view?.display ?: context.getSystemService(DisplayManager::class.java)
+                        ?.getDisplay(Display.DEFAULT_DISPLAY)
+                    hdrDisplaySupported = display?.hdrCapabilities?.supportedHdrTypes
+                        ?.contains(Display.HdrCapabilities.HDR_TYPE_HDR10) == true
                     CoreNative.outputSurface(active.handle, videoSurface, doviProfiles)
                     outputSurfaceRevision = surfaceState.second
+                    hintedFrameRate = 0f
                 }
                 val requestedViewport = viewport
                 if (requestedViewport != outputViewport) {
@@ -527,7 +543,7 @@ internal class CorePlayback(
                     } }
                 }
                 val frame = videoSurface?.takeIf { it.isValid }
-                    ?.let { CoreNative.renderVideo(active.handle, it) }
+                    ?.let { CoreNative.renderVideo(active.handle, it, hdrDisplaySupported) }
                 if (frame != null && frame[6] == snap[1] && frame[7] == snap[3]) {
                     val overlay = CoreNative.takeVideoOverlay(active.handle)
                     handler.post {
@@ -548,6 +564,19 @@ internal class CorePlayback(
                 val now = android.os.SystemClock.elapsedRealtime()
                 if (now - lastTick >= 250) {
                     lastTick = now
+                    if (Build.VERSION.SDK_INT >= 30 && videoSurface?.isValid == true) {
+                        val rate = (CoreNative.videoFrameRate(active.handle) * snap[16] / 1000.0).toFloat()
+                        if (rate.isFinite() && rate in 1f..240f && rate != hintedFrameRate) {
+                            try {
+                                videoSurface.setFrameRate(rate, Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE)
+                                hintedFrameRate = rate
+                            } catch (_: IllegalArgumentException) {
+                                // Display hint rejection does not invalidate decoded video.
+                            } catch (_: IllegalStateException) {
+                                // The Surface can be retired during a display/lock transition.
+                            }
+                        }
+                    }
                     val copy = snap.copyOf()
                     handler.post { if (generation.get() == active.generation) update(active, copy) }
                 }
@@ -574,6 +603,8 @@ internal class CorePlayback(
             }
         } catch (error: Throwable) {
             handler.post { if (generation.get() == active.generation) fail(error.message ?: "Native output failed") }
+        } finally {
+            CoreNative.releaseColorRenderer()
         }
     }
 

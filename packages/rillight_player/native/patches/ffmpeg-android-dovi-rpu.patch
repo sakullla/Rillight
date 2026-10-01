@@ -1,0 +1,414 @@
+diff --git a/configure b/configure
+index 374bd5c..c00c6b2 100755
+--- a/configure
++++ b/configure
+@@ -3658,7 +3658,7 @@ hevc_cuvid_decoder_deps="cuvid"
+ hevc_cuvid_decoder_select="hevc_mp4toannexb_bsf"
+ hevc_d3d12va_encoder_select="cbs_h265 d3d12va_encode"
+ hevc_mediacodec_decoder_deps="mediacodec"
+-hevc_mediacodec_decoder_select="hevc_mp4toannexb_bsf hevc_parser"
++hevc_mediacodec_decoder_select="hevc_mp4toannexb_bsf hevc_parser dovi_rpudec"
+ hevc_mediacodec_encoder_deps="mediacodec"
+ hevc_mediacodec_encoder_select="extract_extradata_bsf hevc_metadata"
+ hevc_mf_encoder_deps="mediafoundation"
+diff --git a/libavcodec/mediacodecdec.c b/libavcodec/mediacodecdec.c
+index d555d0d..d7c4567 100644
+--- a/libavcodec/mediacodecdec.c
++++ b/libavcodec/mediacodecdec.c
+@@ -37,14 +37,24 @@
+ #include "codec_internal.h"
+ #include "decode.h"
+ #include "h264_parse.h"
++#include "h2645_parse.h"
+ #include "h264_ps.h"
+ #include "hevc/parse.h"
++#include "dovi_rpu.h"
+ #include "hwconfig.h"
+ #include "internal.h"
+ #include "jni.h"
+ #include "mediacodec_wrapper.h"
+ #include "mediacodecdec_common.h"
+ 
++#define MC_DOVI_MAX_PENDING 128
++#define MC_DOVI_MAX_BYTES (4 * 1024 * 1024)
++typedef struct MediaCodecDoviFrame {
++    int64_t pts_us;
++    uint8_t *metadata;
++    int size;
++} MediaCodecDoviFrame;
++
+ typedef struct MediaCodecH264DecContext {
+ 
+     AVClass *avclass;
+@@ -61,8 +71,128 @@ typedef struct MediaCodecH264DecContext {
+     int operating_rate;
+     char *codec_mime;
+     int dolby_profile;
++    int export_dovi;
++    int64_t discard_before_us;
++#if CONFIG_HEVC_MEDIACODEC_DECODER
++    DOVIContext dovi;
++    H2645Packet dovi_nals;
++    MediaCodecDoviFrame dovi_frames[MC_DOVI_MAX_PENDING];
++    int dovi_count;
++    int dovi_bytes;
++#endif
+ } MediaCodecH264DecContext;
+ 
++#if CONFIG_HEVC_MEDIACODEC_DECODER
++static void mediacodec_dovi_reset(MediaCodecH264DecContext *s)
++{
++    for (int i = 0; i < s->dovi_count; i++)
++        av_free(s->dovi_frames[i].metadata);
++    s->dovi_count = s->dovi_bytes = 0;
++    if (s->ctx)
++        s->ctx->discard_before_us = s->export_dovi ? s->discard_before_us : -1;
++    ff_dovi_ctx_flush(&s->dovi);
++}
++
++static int mediacodec_dovi_packet(AVCodecContext *avctx, const AVPacket *packet)
++{
++    MediaCodecH264DecContext *s = avctx->priv_data;
++    AVDOVIMetadata *metadata = NULL;
++    int ret, has_picture = 0, has_rpu = 0;
++    if (!s->export_dovi)
++        return 0;
++    ret = ff_h2645_packet_split(&s->dovi_nals, packet->data, packet->size,
++                               avctx, 0, AV_CODEC_ID_HEVC, 0);
++    if (ret < 0)
++        return ret;
++    for (int i = 0; i < s->dovi_nals.nb_nals; i++) {
++        const H2645NAL *nal = &s->dovi_nals.nals[i];
++        if (nal->nuh_layer_id)
++            continue;
++        if (nal->type <= 31)
++            has_picture = 1;
++        if (nal->type == 62 && nal->size > 2) {
++            // Use unescaped RBSP, just as the native HEVC decoder does.
++            ret = ff_dovi_rpu_parse(&s->dovi, nal->data + 2, nal->size - 2,
++                                    avctx->err_recognition);
++            if (ret < 0)
++                return ret;
++            has_rpu = 1;
++        }
++    }
++    if (!has_picture || !has_rpu)
++        return 0;
++    // Missing presentation timestamps cannot safely associate reordered output.
++    if (packet->pts == AV_NOPTS_VALUE || !avctx->pkt_timebase.num ||
++        !avctx->pkt_timebase.den)
++        return AVERROR_INVALIDDATA;
++    if (s->discard_before_us >= 0 &&
++        av_rescale_q(packet->pts, avctx->pkt_timebase, AV_TIME_BASE_Q) < s->discard_before_us)
++        return 0; // Parse reference RPU state, but do not retain discarded preroll.
++    ret = ff_dovi_get_metadata(&s->dovi, &metadata);
++    if (ret <= 0)
++        return ret < 0 ? ret : AVERROR_INVALIDDATA;
++    if (ret > MC_DOVI_MAX_BYTES) {
++        av_free(metadata);
++        return AVERROR(ENOBUFS);
++    }
++    // Codecs may discard a damaged prefix before the first complete keyframe.
++    // Keep bounded recent metadata instead of accumulating those lost outputs.
++    // If an evicted timestamp later appears, receive still rejects the frame:
++    // never attach metadata belonging to a different presentation timestamp.
++    while (s->dovi_count && (s->dovi_count == MC_DOVI_MAX_PENDING ||
++                            ret > MC_DOVI_MAX_BYTES - s->dovi_bytes)) {
++        s->dovi_bytes -= s->dovi_frames[0].size;
++        av_free(s->dovi_frames[0].metadata);
++        memmove(s->dovi_frames, s->dovi_frames + 1,
++                --s->dovi_count * sizeof(s->dovi_frames[0]));
++    }
++    s->dovi_frames[s->dovi_count++] = (MediaCodecDoviFrame) {
++        .pts_us = av_rescale_q(packet->pts, avctx->pkt_timebase, AV_TIME_BASE_Q),
++        .metadata = (uint8_t *)metadata,
++        .size = ret,
++    };
++    s->dovi_bytes += ret;
++    return 0;
++}
++
++static int mediacodec_dovi_receive(AVCodecContext *avctx, AVFrame *frame, int wait)
++{
++    MediaCodecH264DecContext *s = avctx->priv_data;
++    int ret = ff_mediacodec_dec_receive(avctx, s->ctx, frame, wait);
++    int64_t pts_us;
++    if (ret < 0 || !s->export_dovi)
++        return ret;
++    // A timestamp match, never the most recently parsed RPU, handles B frames.
++    pts_us = av_rescale_q(frame->pts, avctx->pkt_timebase, AV_TIME_BASE_Q);
++    for (int i = 0; i < s->dovi_count; i++) {
++        MediaCodecDoviFrame *entry = &s->dovi_frames[i];
++        AVFrameSideData *side;
++        if (entry->pts_us != pts_us)
++            continue;
++        if (frame->format != AV_PIX_FMT_P010LE) {
++            av_frame_unref(frame);
++            return AVERROR_INVALIDDATA;
++        }
++        side = av_frame_new_side_data(frame, AV_FRAME_DATA_DOVI_METADATA, entry->size);
++        if (!side)
++            return AVERROR(ENOMEM);
++        memcpy(side->data, entry->metadata, entry->size);
++        s->dovi_bytes -= entry->size;
++        av_free(entry->metadata);
++        memmove(entry, entry + 1, (--s->dovi_count - i) * sizeof(*entry));
++        // Profile 5 IPT is full range; ordinary YUV range conversion corrupts it.
++        frame->color_range = AVCOL_RANGE_JPEG;
++        frame->color_primaries = AVCOL_PRI_BT2020;
++        return 0;
++    }
++    av_frame_unref(frame);
++    return AVERROR_INVALIDDATA;
++}
++#else
++#define mediacodec_dovi_receive(avctx, frame, wait) \
++    ff_mediacodec_dec_receive(avctx, ((MediaCodecH264DecContext *)(avctx)->priv_data)->ctx, frame, wait)
++#endif
++
+ static av_cold int mediacodec_decode_close(AVCodecContext *avctx)
+ {
+     MediaCodecH264DecContext *s = avctx->priv_data;
+@@ -71,6 +201,11 @@ static av_cold int mediacodec_decode_close(AVCodecContext *avctx)
+     s->ctx = NULL;
+ 
+     av_packet_unref(&s->buffered_pkt);
++#if CONFIG_HEVC_MEDIACODEC_DECODER
++    mediacodec_dovi_reset(s);
++    ff_dovi_ctx_unref(&s->dovi);
++    ff_h2645_packet_uninit(&s->dovi_nals);
++#endif
+ 
+     return 0;
+ }
+@@ -431,6 +566,24 @@ static av_cold int mediacodec_decode_init(AVCodecContext *avctx)
+         av_assert0(0);
+     }
+ 
++    if (s->export_dovi) {
++#if CONFIG_HEVC_MEDIACODEC_DECODER
++        const AVPacketSideData *side = av_packet_side_data_get(avctx->coded_side_data,
++                avctx->nb_coded_side_data, AV_PKT_DATA_DOVI_CONF);
++        if (avctx->codec_id != AV_CODEC_ID_HEVC || s->codec_mime ||
++            !side || side->size < sizeof(s->dovi.cfg) ||
++            ((AVDOVIDecoderConfigurationRecord *)side->data)->dv_profile != 5) {
++            ret = AVERROR(EINVAL);
++            goto done;
++        }
++        s->dovi.logctx = avctx;
++        s->dovi.cfg = *(AVDOVIDecoderConfigurationRecord *)side->data;
++        ff_AMediaFormat_setInt32(format, "color-format", 54); // COLOR_FormatYUVP010
++#else
++        ret = AVERROR(ENOSYS);
++        goto done;
++#endif
++    }
+     if (s->codec_mime) {
+         if (avctx->codec_id != AV_CODEC_ID_HEVC ||
+             strcmp(s->codec_mime, "video/dolby-vision")) {
+@@ -472,6 +625,7 @@ static av_cold int mediacodec_decode_init(AVCodecContext *avctx)
+ 
+     s->ctx->delay_flush = s->delay_flush;
+     s->ctx->use_ndk_codec = s->use_ndk_codec;
++    s->ctx->discard_before_us = s->export_dovi ? s->discard_before_us : -1;
+ 
+     if ((ret = ff_mediacodec_dec_init(avctx, s->ctx, codec_mime, format)) < 0) {
+         s->ctx = NULL;
+@@ -523,7 +677,7 @@ static int mediacodec_receive_frame(AVCodecContext *avctx, AVFrame *frame)
+     }
+ 
+     /* poll for new frame */
+-    ret = ff_mediacodec_dec_receive(avctx, s->ctx, frame, false);
++    ret = mediacodec_dovi_receive(avctx, frame, false);
+     if (ret != AVERROR(EAGAIN))
+         return ret;
+ 
+@@ -534,7 +688,7 @@ static int mediacodec_receive_frame(AVCodecContext *avctx, AVFrame *frame)
+             index = ff_AMediaCodec_dequeueInputBuffer(s->ctx->codec, 0);
+             if (index < 0) {
+                 /* no space, block for an output frame to appear */
+-                ret = ff_mediacodec_dec_receive(avctx, s->ctx, frame, true);
++                ret = mediacodec_dovi_receive(avctx, frame, true);
+                 /* Try again if both input port and output port return EAGAIN.
+                  * If no data is consumed and no frame in output, it can make
+                  * both avcodec_send_packet() and avcodec_receive_frame()
+@@ -580,12 +734,17 @@ static int mediacodec_receive_frame(AVCodecContext *avctx, AVFrame *frame)
+             ret = ff_mediacodec_dec_send(avctx, s->ctx, &null_pkt, true);
+             if (ret < 0)
+                 return ret;
+-            return ff_mediacodec_dec_receive(avctx, s->ctx, frame, true);
++            return mediacodec_dovi_receive(avctx, frame, true);
+         } else if (ret == AVERROR(EAGAIN) && s->ctx->current_input_buffer < 0) {
+-            return ff_mediacodec_dec_receive(avctx, s->ctx, frame, true);
++            return mediacodec_dovi_receive(avctx, frame, true);
+         } else if (ret < 0) {
+             return ret;
+         }
++#if CONFIG_HEVC_MEDIACODEC_DECODER
++        ret = mediacodec_dovi_packet(avctx, &s->buffered_pkt);
++        if (ret < 0)
++            return ret;
++#endif
+     }
+ 
+     return AVERROR(EAGAIN);
+@@ -598,6 +757,9 @@ static void mediacodec_decode_flush(AVCodecContext *avctx)
+     av_packet_unref(&s->buffered_pkt);
+ 
+     ff_mediacodec_dec_flush(avctx, s->ctx);
++#if CONFIG_HEVC_MEDIACODEC_DECODER
++    mediacodec_dovi_reset(s);
++#endif
+ }
+ 
+ static const AVCodecHWConfigInternal *const mediacodec_hw_configs[] = {
+@@ -616,6 +778,10 @@ static const AVCodecHWConfigInternal *const mediacodec_hw_configs[] = {
+ #define OFFSET(x) offsetof(MediaCodecH264DecContext, x)
+ #define VD AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_DECODING_PARAM
+ static const AVOption ff_mediacodec_vdec_options[] = {
++    { "discard_before", "Skip P010 copying before this presentation timestamp in microseconds",
++                       OFFSET(discard_before_us), AV_OPT_TYPE_INT64, {.i64 = -1}, -1, INT64_MAX, VD },
++    { "export_dovi", "Export timestamp-matched Profile 5 RPU with P010 byte buffers",
++                    OFFSET(export_dovi), AV_OPT_TYPE_BOOL, {.i64 = 0}, 0, 1, VD },
+     { "dolby_profile", "Android Dolby Vision CodecProfileLevel bitmask",
+                       OFFSET(dolby_profile), AV_OPT_TYPE_INT, {.i64 = 0}, 0, 512, VD },
+     { "codec_mime", "Native Dolby Vision output MIME for HEVC streams",
+diff --git a/libavcodec/mediacodecdec_common.c b/libavcodec/mediacodecdec_common.c
+index bf5a259..d5c19ba 100644
+--- a/libavcodec/mediacodecdec_common.c
++++ b/libavcodec/mediacodecdec_common.c
+@@ -189,6 +189,7 @@ static uint64_t mcdec_map_channel_mask(AVCodecContext *avctx,
+ }
+ 
+ enum {
++    COLOR_FormatYUVP010                                   = 54,
+     COLOR_FormatYUV420Planar                              = 0x13,
+     COLOR_FormatYUV420SemiPlanar                          = 0x15,
+     COLOR_FormatYCbYCr                                    = 0x19,
+@@ -207,6 +208,7 @@ static const struct {
+ 
+ } color_formats[] = {
+ 
++    { COLOR_FormatYUVP010,                                  AV_PIX_FMT_P010LE  },
+     { COLOR_FormatYUV420Planar,                              AV_PIX_FMT_YUV420P },
+     { COLOR_FormatYUV420SemiPlanar,                          AV_PIX_FMT_NV12    },
+     { COLOR_QCOM_FormatYUV420SemiPlanar,                     AV_PIX_FMT_NV12    },
+@@ -441,6 +443,44 @@ done:
+     return ret;
+ }
+ 
++// Android KEY_STRIDE is bytes, KEY_SLICE_HEIGHT is rows. Validate both
++// planes before copying; padding/cropping must never read outside BufferInfo.
++static int mediacodec_copy_p010(AVCodecContext *avctx, MediaCodecDecContext *s,
++                               const uint8_t *data, size_t size,
++                               const FFAMediaCodecBufferInfo *info, AVFrame *frame)
++{
++    size_t offsets[2], row_bytes[2], rows[2], end, available;
++    if (!data || info->offset < 0 || info->size < 0 ||
++        (size_t)info->offset > size || (size_t)info->size > size - info->offset ||
++        s->stride <= 0 || s->slice_height <= 0 || s->crop_left < 0 || s->crop_top < 0 ||
++        (s->crop_left & 1) || (s->crop_top & 1) ||
++        avctx->width <= 0 || avctx->height <= 0 ||
++        (int64_t)s->crop_left + avctx->width > s->width ||
++        (int64_t)s->crop_top + avctx->height > s->slice_height)
++        return AVERROR_INVALIDDATA;
++    row_bytes[0] = (size_t)avctx->width * 2;
++    row_bytes[1] = ((size_t)avctx->width + 1) / 2 * 4;
++    rows[0] = avctx->height;
++    rows[1] = ((size_t)avctx->height + 1) / 2;
++    if ((size_t)s->stride < (size_t)s->crop_left * 2 + row_bytes[1])
++        return AVERROR_INVALIDDATA;
++    offsets[0] = (size_t)s->crop_top * s->stride + (size_t)s->crop_left * 2;
++    offsets[1] = (size_t)s->slice_height * s->stride +
++                 (size_t)(s->crop_top / 2) * s->stride + (size_t)s->crop_left * 2;
++    available = info->size;
++    for (int plane = 0; plane < 2; plane++) {
++        end = offsets[plane] + (rows[plane] - 1) * s->stride + row_bytes[plane];
++        if (end < offsets[plane] || end > available ||
++            frame->linesize[plane] < row_bytes[plane])
++            return AVERROR_INVALIDDATA;
++    }
++    for (int plane = 0; plane < 2; plane++)
++        for (size_t row = 0; row < rows[plane]; row++)
++            memcpy(frame->data[plane] + row * frame->linesize[plane],
++                   data + info->offset + offsets[plane] + row * s->stride, row_bytes[plane]);
++    return 0;
++}
++
+ static int mediacodec_wrap_sw_video_buffer(AVCodecContext *avctx,
+                                            MediaCodecDecContext *s,
+                                            uint8_t *data,
+@@ -476,6 +516,8 @@ static int mediacodec_wrap_sw_video_buffer(AVCodecContext *avctx,
+         frame->pts = info->presentationTimeUs;
+     }
+     frame->pkt_dts = AV_NOPTS_VALUE;
++    if ((ret = av_dict_set(&frame->metadata, "rillight.mediacodec.name", s->codec_name, 0)) < 0)
++        goto done;
+ 
+     av_log(avctx, AV_LOG_TRACE,
+             "Frame: width=%d stride=%d height=%d slice-height=%d "
+@@ -486,6 +528,11 @@ static int mediacodec_wrap_sw_video_buffer(AVCodecContext *avctx,
+             frame->linesize[0], frame->linesize[1], frame->linesize[2]);
+ 
+     switch (s->color_format) {
++    case COLOR_FormatYUVP010:
++        ret = mediacodec_copy_p010(avctx, s, data, size, info, frame);
++        if (ret < 0)
++            goto done;
++        break;
+     case COLOR_FormatYUV420Planar:
+         ff_mediacodec_sw_buffer_copy_yuv420_planar(avctx, s, data, size, info, frame);
+         break;
+@@ -574,7 +621,7 @@ static int mediacodec_dec_parse_video_format(AVCodecContext *avctx, MediaCodecDe
+     AMEDIAFORMAT_GET_INT32(s->height, "height", 1);
+ 
+     AMEDIAFORMAT_GET_INT32(s->stride, "stride", 0);
+-    s->stride = s->stride > 0 ? s->stride : s->width;
++    // Default depends on the output pixel size, resolved below.
+ 
+     AMEDIAFORMAT_GET_INT32(s->slice_height, "slice-height", 0);
+ 
+@@ -597,6 +644,14 @@ static int mediacodec_dec_parse_video_format(AVCodecContext *avctx, MediaCodecDe
+         goto fail;
+     }
+ 
++    if (s->stride <= 0) {
++        if (s->color_format == COLOR_FormatYUVP010 && s->width > INT_MAX / 2) {
++            ret = AVERROR_INVALIDDATA;
++            goto fail;
++        }
++        s->stride = s->color_format == COLOR_FormatYUVP010 ? s->width * 2 : s->width;
++    }
++
+     /* Optional fields */
+     AMEDIAFORMAT_GET_INT32(s->crop_top,    "crop-top",    0);
+     AMEDIAFORMAT_GET_INT32(s->crop_bottom, "crop-bottom", 0);
+@@ -1027,6 +1082,16 @@ int ff_mediacodec_dec_receive(AVCodecContext *avctx, MediaCodecDecContext *s,
+         }
+ 
+         if (info.size) {
++            if (!s->surface && s->discard_before_us >= 0 &&
++                info.presentationTimeUs < s->discard_before_us) {
++                // Reference decoding remains active; no CPU plane allocation,
++                // 4K copy or output frame is needed before the seek target.
++                status = ff_AMediaCodec_releaseOutputBuffer(codec, index, 0);
++                if (status < 0)
++                    return AVERROR_EXTERNAL;
++                s->output_buffer_count++;
++                return AVERROR(EAGAIN);
++            }
+             if (s->surface) {
+                 if ((ret = mediacodec_wrap_hw_buffer(avctx, s, index, &info, frame)) < 0) {
+                     av_log(avctx, AV_LOG_ERROR, "Failed to wrap MediaCodec buffer\n");
+diff --git a/libavcodec/mediacodecdec_common.h b/libavcodec/mediacodecdec_common.h
+index 0ab2903..82fec3c 100644
+--- a/libavcodec/mediacodecdec_common.h
++++ b/libavcodec/mediacodecdec_common.h
+@@ -71,6 +71,7 @@ typedef struct MediaCodecDecContext {
+     atomic_int serial;
+ 
+     bool use_ndk_codec;
++    int64_t discard_before_us;
+ } MediaCodecDecContext;
+ 
+ int ff_mediacodec_dec_init(AVCodecContext *avctx,

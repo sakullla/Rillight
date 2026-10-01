@@ -1,5 +1,13 @@
 # macOS 自主播放核心目标机交接
 
+## 2026-10-01 Android 自有 GPU 管线后续候选
+
+共用 ABI 8 头文件已同步 additive external-audio-speed API。默认关闭，macOS 的 atempo 和音频时钟语义保持原路径；macOS 适配若启用，必须由音频 sink 实施保音高调速，报告源 PCM 的媒体时长，不能再乘 rate。公开结构布局未改。
+
+Android 无原生 Profile 5 codec 时现在使用真实 HEVC MediaCodec + P010/RPU + 自有 GLES3，具备条件时输出 10 位 BT.2020 PQ；该 GLES 呈现仅编译进 Android，不是 macOS EDR 实现。当前手机短窗口 HDR60 与杜比倍速/重挂载已有变化画面，但长 GOP forward seek 仍约 2.3 秒预解码，组合检查整体失败，物理 HDR/声音及持续性能仍未验收。最新候选与失败证据见 [Android 播放记录](../../../docs/android-player-ui-2026-10-01.md)。
+
+本轮未运行 macOS 构建、GUI、VideoToolbox、物理音频或 EDR 验证；目标机须按下方协议单独验证。以下早期交接和历史记录保留其当时范围。
+
 ## 2026-10-01 播放器与界面候选交接
 
 本轮 Windows 工作区的实现、验证结果、构建命令和目标机适配顺序见 [macOS 播放器交接](../../../docs/macos-player-handoff-2026-10-01.md)。候选为包含该文档的提交，基准 `ea12d3a`。Swift Package 的核心头文件已同步 ABI 8；当前 macOS 仍发布 8 位 BGRA Flutter 纹理，真正 EDR/HDR 输出尚待实现。共用核心包含 1×音频过滤优化与 Android MediaCodec 恢复修改；本轮没有执行 macOS 原生编译、GUI 帧、物理音频或 VideoToolbox 实际路径验收。Android 已补做真机重试并修复传输 isolate 退出：基本原生检查通过，但杜比倍速/seek 后的变化画面检查失败；真正 HDR、实际 60fps 和物理音频仍未验收，详细结果见交接文档新增章节。以下历史记录保持原有证据边界。

@@ -46,7 +46,8 @@ typedef enum RillightCoreFrameType {
   RILLIGHT_CORE_VIDEO_RGBA = 1,
   RILLIGHT_CORE_AUDIO_S16 = 2,
   RILLIGHT_CORE_VIDEO_D3D11 = 3,
-  RILLIGHT_CORE_VIDEO_MEDIACODEC = 4
+  RILLIGHT_CORE_VIDEO_MEDIACODEC = 4,
+  RILLIGHT_CORE_VIDEO_ANDROID_P010 = 5
 } RillightCoreFrameType;
 
 typedef enum RillightCoreTrackType {
@@ -192,14 +193,21 @@ RILLIGHT_CORE_API void rillight_core_destroy_loopback(RillightCore *core);
 RILLIGHT_CORE_API int rillight_core_configure_hardware(
     RillightCore *core, RillightCoreHardware preference,
     int allow_software_fallback);
+/* Idle only. When enabled, PCM remains at source rate and the sink must apply
+ * playback_speed with pitch preservation. Audio delay reports remain in media
+ * time (PCM samples / sample_rate); rate changes keep queues and the timeline.
+ * Disabled by default: other sinks retain the core's atempo/seek behavior. */
+RILLIGHT_CORE_API int rillight_core_configure_external_audio_speed(
+    RillightCore *core, int enabled);
 /* Bound RGBA conversion to the physical output viewport without changing the
  * decoded source, timestamps, or timeline. Zero dimensions keep source size.
  * The next converted frame adopts the new size; sinks still fit/rotate it. */
 RILLIGHT_CORE_API int rillight_core_set_video_output_size(
     RillightCore *core, int width, int height);
 /* Android owned-core output. The core retains an ANativeWindow reference.
- * Replacing the window advances the timeline and recreates MediaCodec at the
- * current position. NULL detaches output; callers must never present an old
+ * Direct decoder Surface replacement advances the timeline and recreates
+ * MediaCodec at the current position. P010/EGL replacement preserves decoding.
+ * NULL detaches output; callers must never present an old
  * timeline to a replacement Surface. Other platforms reject this API.
  * MEDIACODEC frames retain decoder output buffers, with no CPU pixel copy. */
 RILLIGHT_CORE_API int rillight_core_set_android_window(RillightCore *core,
@@ -207,6 +215,12 @@ RILLIGHT_CORE_API int rillight_core_set_android_window(RillightCore *core,
                                                       uint32_t dovi_profiles);
 RILLIGHT_CORE_API int rillight_core_render_mediacodec_frame(
     const RillightCoreFrame *frame);
+/* Owned GLES presentation on the caller's output thread. Release on the same
+ * thread before returning the Surface. HDR requires display/EGL support. */
+RILLIGHT_CORE_API int rillight_core_render_android_color_frame(
+    const RillightCoreFrame *frame, void *native_window, int hdr_display_supported);
+RILLIGHT_CORE_API void rillight_core_release_android_color_renderer(void);
+RILLIGHT_CORE_API double rillight_core_video_frame_rate(RillightCore *core);
 /* Optional Windows GPU sink, enabled while idle; disabling it is allowed
  * during playback to recover from unavailable cross-adapter sharing.
  * VIDEO_D3D11 requests

@@ -23,6 +23,7 @@ internal object CoreNative {
     external fun create(factory: CoreIoFactory): Long
     external fun destroy(handle: Long)
     external fun configureHardware(handle: Long, preferredHardware: Int, allowSoftwareFallback: Boolean): Int
+    external fun configureExternalAudioSpeed(handle: Long, enabled: Boolean): Int
     external fun videoOutputSize(handle: Long, width: Int, height: Int): Int
     external fun outputSurface(handle: Long, surface: Surface?, doviProfiles: Int): Int
     external fun takeVideoOverlay(handle: Long): CoreVideoOverlay?
@@ -41,7 +42,9 @@ internal object CoreNative {
     external fun trackLanguage(handle: Long, ordinal: Int): String?
     external fun takeAudio(handle: Long): CoreAudioFrame?
     /** Returns PTS, geometry, SAR, rotation, session and timeline after Surface post. */
-    external fun renderVideo(handle: Long, surface: Surface): LongArray?
+    external fun renderVideo(handle: Long, surface: Surface, hdrDisplaySupported: Boolean): LongArray?
+    external fun releaseColorRenderer()
+    external fun videoFrameRate(handle: Long): Double
     external fun reportAudio(handle: Long, session: Long, timeline: Long, queuedEndPtsUs: Long, remainingMediaDelayUs: Long): Int
     external fun reportAudioUnavailable(handle: Long, session: Long, timeline: Long): Int
     external fun reportDrained(handle: Long, session: Long, timeline: Long): Int

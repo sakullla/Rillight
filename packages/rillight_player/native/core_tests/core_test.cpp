@@ -810,6 +810,54 @@ int main() {
   rillight_core_destroy(core);
 
   CountingMedia paused_media{make_wav(48000 * 8)};
+
+  // A rate-capable sink receives unmodified source PCM. Changing tempo must
+  // preserve a paused queue, timeline, readiness and its transport connection.
+  CountingMedia external_media{make_wav(48000 * 2)};
+  RillightCoreIo external_io{&external_media, counting_open, counting_read,
+                            seek, counting_close, nullptr, counting_cancel_media};
+  core = rillight_core_create(&external_io);
+  assert(core);
+  assert(rillight_core_configure_external_audio_speed(nullptr, 1) != 0);
+  assert(rillight_core_configure_external_audio_speed(core, 2) != 0);
+  assert(rillight_core_configure_external_audio_speed(core, 1) == 0);
+  assert(rillight_core_open(core, "external-rate.wav", 1) == 0);
+  assert(rillight_core_set_playing(core, 0, 2) == 0);
+  assert(wait_for(core, [](const auto &state) {
+    return state.state == RILLIGHT_CORE_PAUSED && state.first_audio_frame_ready;
+  }));
+  assert(rillight_core_configure_external_audio_speed(core, 0) != 0);
+  const auto external_before = snapshot(core);
+  const int external_cancels = external_media.media_cancels.load();
+  assert(rillight_core_set_speed(core, 2.0, 3) == 0);
+  const auto external_after = snapshot(core);
+  assert(external_after.playback_speed == 2.0);
+  assert(external_after.timeline_version == external_before.timeline_version);
+  assert(external_after.state == RILLIGHT_CORE_PAUSED);
+  assert(external_after.first_audio_frame_ready);
+  assert(external_after.queued_audio_frames >= external_before.queued_audio_frames);
+  assert(external_after.position_us == external_before.position_us);
+  assert(external_media.media_cancels.load() == external_cancels);
+  assert(rillight_core_set_playing(core, 1, 4) == 0);
+  int external_samples = 0;
+  const auto external_deadline = std::chrono::steady_clock::now() +
+                                 std::chrono::seconds(5);
+  while (std::chrono::steady_clock::now() < external_deadline) {
+    if (auto *pcm = rillight_core_take_frame(core, RILLIGHT_CORE_AUDIO_S16)) {
+      external_samples += pcm->sample_count;
+      rillight_core_release_frame(pcm);
+    } else {
+      const auto state = snapshot(core);
+      assert(state.state != RILLIGHT_CORE_FAILED);
+      if (state.source_eof && state.queued_audio_frames == 0) break;
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+  }
+  assert(external_samples == 48000 * 2);
+  assert(external_media.media_cancels.load() == external_cancels);
+  assert(snapshot(core).timeline_version == external_before.timeline_version);
+  rillight_core_destroy(core);
+
   RillightCoreIo paused_io{&paused_media, counting_open, counting_read,
                           seek, counting_close, nullptr, counting_cancel_media};
   core = rillight_core_create(&paused_io);

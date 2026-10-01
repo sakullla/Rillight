@@ -19,6 +19,8 @@ int main() {
   assert(video_frame_cost(&frame) < 0);
   frame.format = AV_PIX_FMT_YUV420P10LE;
   assert(video_frame_cost(&frame) == 3840 * 2160 * 3);
+  frame.format = AV_PIX_FMT_P010LE;
+  assert(video_frame_cost(&frame) == 3840 * 2160 * 3);
   frame.width = 0;
   assert(video_frame_cost(&frame) < 0);
   assert(video_frame_cost(nullptr) < 0);

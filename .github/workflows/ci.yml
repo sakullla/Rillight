@@ -55,6 +55,7 @@ jobs:
           python3 macos/verify_bundle_test.py
           python3 packages/rillight_player/native/build_macos_core_dependencies_test.py
           python3 packages/rillight_player/native/build_windows_dependencies_test.py
+          python3 packages/rillight_player/native/android_dovi_patch_test.py
           python3 tool/workflow_contracts_test.py
           python3 tool/player_fixtures_test.py
           python3 macos/player_smoke_test.py

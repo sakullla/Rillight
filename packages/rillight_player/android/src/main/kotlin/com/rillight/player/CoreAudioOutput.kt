@@ -3,6 +3,7 @@ package com.rillight.player
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
+import android.media.PlaybackParams
 import android.os.Build
 
 /** AudioTrack is the only audio consumer; every queued sample belongs to one core timeline. */
@@ -15,6 +16,7 @@ internal class CoreAudioOutput {
     private val track: AudioTrack
     private val clock = CoreQueueClock()
     private var endOfInput = false
+    private var playbackSpeed = 1f
     private val eofSilence by lazy { ByteArray(track.bufferCapacityInFrames * 4) }
 
     init {
@@ -36,6 +38,21 @@ internal class CoreAudioOutput {
     fun play() { if (track.playState != AudioTrack.PLAYSTATE_PLAYING) track.play() }
     fun pause() { if (track.playState == AudioTrack.PLAYSTATE_PLAYING) track.pause() }
     fun setVolume(value: Float) { track.setVolume(value.coerceIn(0f, 1f)) }
+
+    fun setSpeed(value: Float) {
+        require(value.isFinite() && value in .5f..3f)
+        if (value == playbackSpeed) return
+        val wasPlaying = track.playState == AudioTrack.PLAYSTATE_PLAYING
+        try {
+            track.playbackParams = PlaybackParams().allowDefaults()
+                .setAudioFallbackMode(PlaybackParams.AUDIO_FALLBACK_MODE_FAIL)
+                .setPitch(1f).setSpeed(value)
+            playbackSpeed = value
+        } finally {
+            // Setting a nonzero speed can resume a paused AudioTrack.
+            if (!wasPlaying) pause()
+        }
+    }
 
     fun flush() {
         pause()

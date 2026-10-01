@@ -19,6 +19,10 @@ import android_release_checks as checks
 
 
 class EvidenceTests(unittest.TestCase):
+    def test_owned_color_uses_only_public_ndk_graphics_dependencies(self):
+        self.assertTrue({'libEGL.so', 'libGLESv3.so'} <= checks.ANDROID_SYSTEM_LIBRARIES)
+        self.assertNotIn('libvulkan_vendor.so', checks.ANDROID_SYSTEM_LIBRARIES)
+
     def test_split_apk_rejects_second_flutter_abi(self):
         with tempfile.TemporaryDirectory() as folder:
             apk = Path(folder) / 'mixed.apk'

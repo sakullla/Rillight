@@ -25,6 +25,8 @@ ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = 'com.rillight.rillight.validation'
 ACTIVITY = PACKAGE + '/com.rillight.rillight.MainActivity'
 ANDROID_SYSTEM_LIBRARIES = {
+    # Public NDK graphics libraries, available before the supported API 24 floor.
+    'libEGL.so', 'libGLESv3.so',
     'libandroid.so', 'libc.so', 'libcamera2ndk.so', 'libdl.so', 'liblog.so',
     'libm.so', 'libmediandk.so', 'libnativewindow.so',
 }

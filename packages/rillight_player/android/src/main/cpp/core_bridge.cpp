@@ -18,25 +18,46 @@
 
 namespace {
 struct AttachedEnv {
-  explicit AttachedEnv(JavaVM *vm) : vm(vm) {
-    if (vm->GetEnv(reinterpret_cast<void **>(&env), JNI_VERSION_1_6) != JNI_OK) {
-      if (vm->AttachCurrentThread(&env, nullptr) == JNI_OK) attached = true;
+  struct ThreadAttachment {
+    explicit ThreadAttachment(JavaVM *vm) : vm(vm) {
+      if (vm->GetEnv(reinterpret_cast<void **>(&env), JNI_VERSION_1_6) != JNI_OK) {
+        if (vm->AttachCurrentThread(&env, nullptr) == JNI_OK) attached = true;
+      }
     }
+    ~ThreadAttachment() { if (attached) vm->DetachCurrentThread(); }
+    JavaVM *vm;
+    JNIEnv *env = nullptr;
+    bool attached = false;
+  };
+  explicit AttachedEnv(JavaVM *vm) {
+    // Demux performs many short reads. Repeated attachment creates ART thread
+    // state on every read/seek and adds GC pauses during 4K preroll. Native
+    // workers attach once and detach at thread exit; Java-owned threads remain
+    // owned by the VM. JNIEnv is never shared with a different thread.
+    thread_local std::unique_ptr<ThreadAttachment> attachment;
+    if (!attachment || attachment->vm != vm || !attachment->env)
+      attachment = std::make_unique<ThreadAttachment>(vm);
+    env = attachment->env;
   }
-  ~AttachedEnv() { if (attached) vm->DetachCurrentThread(); }
-  JavaVM *vm;
   JNIEnv *env = nullptr;
-  bool attached = false;
 };
 
 struct Source {
   Source(JavaVM *vm, jobject object) : vm(vm), object(object) {}
   ~Source() {
     AttachedEnv thread(vm);
-    if (thread.env) thread.env->DeleteGlobalRef(object);
+    if (thread.env) {
+      if (read_buffer) thread.env->DeleteGlobalRef(read_buffer);
+      thread.env->DeleteGlobalRef(object);
+    }
   }
   JavaVM *vm;
   jobject object;
+  // AVIO permits short reads. Reuse bounded storage instead of allocating a
+  // Java array sized to each large demux request and provoking loading GC.
+  static constexpr int kReadBufferBytes = 64 * 1024;
+  std::mutex read_mutex;
+  jbyteArray read_buffer = nullptr;
   bool media = false;
 };
 
@@ -113,8 +134,20 @@ struct Bridge {
     if (!source || size <= 0) return -EINVAL;
     AttachedEnv thread(bridge->vm);
     if (!thread.env) return -EIO;
-    jbyteArray buffer = thread.env->NewByteArray(size);
-    if (!buffer) return -ENOMEM;
+    std::lock_guard read_lock(source->read_mutex);
+    size = std::min(size, Source::kReadBufferBytes);
+    if (!source->read_buffer) {
+      auto local = thread.env->NewByteArray(Source::kReadBufferBytes);
+      if (local) {
+        source->read_buffer = static_cast<jbyteArray>(thread.env->NewGlobalRef(local));
+        thread.env->DeleteLocalRef(local);
+      }
+      if (!source->read_buffer) {
+        if (thread.env->ExceptionCheck()) thread.env->ExceptionClear();
+        return -ENOMEM;
+      }
+    }
+    jbyteArray buffer = source->read_buffer;
     jint count = thread.env->CallIntMethod(source->object, bridge->read, buffer,
                                           static_cast<jint>(size));
     if (thread.env->ExceptionCheck()) {
@@ -125,7 +158,10 @@ struct Bridge {
     if (count > 0)
       thread.env->GetByteArrayRegion(buffer, 0, count,
                                      reinterpret_cast<jbyte *>(data));
-    thread.env->DeleteLocalRef(buffer);
+    if (thread.env->ExceptionCheck()) {
+      thread.env->ExceptionClear();
+      return -EIO;
+    }
     return count;
   }
 
@@ -296,6 +332,12 @@ Java_com_rillight_player_CoreNative_speed(JNIEnv *, jobject, jlong handle,
   return rillight_core_set_speed(owner->core, speed, operation);
 }
 JNIEXPORT jint JNICALL
+Java_com_rillight_player_CoreNative_configureExternalAudioSpeed(
+    JNIEnv *, jobject, jlong handle, jboolean enabled) {
+  return handle ? rillight_core_configure_external_audio_speed(
+      bridge(handle)->core, enabled == JNI_TRUE) : -1;
+}
+JNIEXPORT jint JNICALL
 Java_com_rillight_player_CoreNative_selectAudio(JNIEnv *, jobject, jlong handle,
                                                jint stream, jlong operation) {
   if (!handle) return -1;
@@ -419,7 +461,8 @@ Java_com_rillight_player_CoreNative_takeAudio(JNIEnv *env, jobject,
 
 JNIEXPORT jlongArray JNICALL
 Java_com_rillight_player_CoreNative_renderVideo(JNIEnv *env, jobject,
-                                               jlong handle, jobject surface) {
+                                               jlong handle, jobject surface,
+                                               jboolean hdr_supported) {
   if (!handle || !surface) return nullptr;
   ANativeWindow *window = ANativeWindow_fromSurface(env, surface);
   if (env->ExceptionCheck()) {
@@ -491,7 +534,9 @@ Java_com_rillight_player_CoreNative_renderVideo(JNIEnv *env, jobject,
     latest.struct_size = sizeof(latest);
     const bool current = rillight_core_snapshot(core, &latest) == 0 &&
         latest.session_id == frame->session_id && latest.timeline_version == frame->timeline_version;
-    const int rendered = current ? rillight_core_render_mediacodec_frame(frame) : -1;
+    const int rendered = !current ? -1 : frame->type == RILLIGHT_CORE_VIDEO_ANDROID_P010
+        ? rillight_core_render_android_color_frame(frame, window, hdr_supported == JNI_TRUE)
+        : rillight_core_render_mediacodec_frame(frame);
     ANativeWindow_release(window);
     if (rendered != 0) {
       rillight_core_release_frame(frame);
@@ -543,6 +588,16 @@ Java_com_rillight_player_CoreNative_outputSurface(JNIEnv* env, jobject,
       static_cast<uint32_t>(dovi_profiles));
   if (window) ANativeWindow_release(window);
   return code;
+}
+
+JNIEXPORT void JNICALL
+Java_com_rillight_player_CoreNative_releaseColorRenderer(JNIEnv*, jobject) {
+  rillight_core_release_android_color_renderer();
+}
+
+JNIEXPORT jdouble JNICALL
+Java_com_rillight_player_CoreNative_videoFrameRate(JNIEnv*, jobject, jlong handle) {
+  return handle ? rillight_core_video_frame_rate(bridge(handle)->core) : 0;
 }
 
 JNIEXPORT jobject JNICALL

@@ -3,7 +3,7 @@
 This package owns the FFmpeg-based playback core used by the Flutter desktop
 and Android app. `CorePlayer` supplies one session per open, native media
 decode, audio/video clocks, subtitle/track control and a platform video
-surface. Android uses an in-process TextureView; desktop uses the native core
+surface. Android uses an in-process, hybrid-composed SurfaceView; desktop uses the native core
 and platform texture bridge. There is one production player path; the retired
 libmpv and Media3 adapters are not runtime fallbacks.
 
@@ -21,6 +21,28 @@ preference is not used as proof of actual hardware decoding.
 [`native/core_dependencies.json`](native/core_dependencies.json) pins FFmpeg
 n9.0.2, the local HLS I/O patch, libass 0.17.5, dav1d 1.5.3 and Android
 subtitle build sources. Desktop SDKs enable dav1d for AV1 software fallback.
+Android additionally locks the native Dolby Surface and RPU/P010 patches.
+On devices without a declared native Profile 5 decoder, the latter keeps
+HEVC MediaCodec decoding and associates RPU with output presentation
+timestamps before owned color conversion. Byte output must be P010; unknown
+timestamps, unmatched RPU and invalid plane layouts fail rather than display
+IPT as ordinary YUV. The owned GLES path retains P010 and applies RPU on the
+GPU. It negotiates a 10-bit BT.2020 PQ native window on an HDR10 display with
+the corresponding EGL support, otherwise renders SDR. Configured HDR output
+does not establish physical display brightness/color or device performance
+acceptance.
+P010 decoding keeps its timeline when the EGL presentation Surface is replaced.
+P010 seeks flush the existing MediaCodec instance so it retains HEVC parameter
+sets learned in-band, and discard preroll pixels before copying the planes.
+Direct decoder Surface seeks still recreate the codec for Codec2 compatibility.
+Accurate seeks must decode references from the preceding random-access point;
+long-GOP recovery time remains a separate device performance measurement.
+Android also enables the additive external-audio-speed API: AudioTrack applies
+tempo with pitch preservation to source-rate PCM, so speed changes preserve
+video/RPU and audio queues. Its clock reports source-sample media duration;
+desktop adapters retain the default FFmpeg atempo path.
+Run `python packages/rillight_player/native/android_dovi_patch_test.py` for
+the locked helper checks; actual decoding/color/performance require a device.
 Each SDK prefix must carry `rillight-core-dependencies.json` with
 actual build options and SHA256 of its libraries. Verify a target SDK with:
 

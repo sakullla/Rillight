@@ -7,6 +7,19 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CoreQueueClockTest {
+    @Test fun deviceTempoKeepsSourceSampleDurationAcrossRateChanges() {
+        val clock = CoreQueueClock()
+        clock.reset(0)
+        // AudioTrack changes wall-time consumption. Queued PCM stays at the
+        // source rate: 4,800 samples still span 100 ms of media at any speed.
+        clock.submitted(1_000_000, 19_200, 19_200, 1.0)
+        assertEquals(1_100_000L to 100_000L, clock.snapshot(0))
+        assertEquals(1_100_000L to 50_000L, clock.snapshot(2_400))
+        clock.submitted(1_100_000, 19_200, 19_200, 1.0)
+        assertEquals(1_200_000L to 150_000L, clock.snapshot(2_400))
+        assertEquals(1_200_000L to 0L, clock.snapshot(9_600))
+    }
+
     @Test fun queueDelayUsesMediaTimeAtDoubleSpeed() {
         val clock = CoreQueueClock()
         clock.reset(120)

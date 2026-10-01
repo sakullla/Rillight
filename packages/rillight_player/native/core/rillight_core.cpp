@@ -3,6 +3,9 @@
 #include "video_frame_cost.h"
 #include "dovi_profile.h"
 #include "portable_color_pipeline.h"
+#if defined(__ANDROID__)
+#include "android_color_pipeline.h"
+#endif
 #if defined(_WIN32)
 #include "windows_color_pipeline.h"
 #include <d3d11.h>
@@ -258,6 +261,7 @@ struct Decoder {
   int stream = -1;
   std::shared_ptr<HardwareFormatSelection> hw_format;
   uint32_t hardware = RILLIGHT_CORE_HW_NONE;
+  bool android_color_buffers = false;
   int error = 0;
 };
 
@@ -781,6 +785,8 @@ struct RillightCoreImpl {
   int output_height = 0;
   bool gpu_video = false;
   bool hdr_video = false;
+  bool android_color_buffers = false;
+  double video_frame_rate = 0;
   int audio_index = -1;
   bool is_mp4_container = false;
   int video_track_id = -1;
@@ -810,6 +816,7 @@ struct RillightCoreImpl {
 #endif
   double speed = 1.0;
   double volume = 1.0;
+  bool external_audio_speed = false;
   double requested_speed = 1.0;
   bool speed_change = false;
   RillightCoreHardware hardware_preference = RILLIGHT_CORE_HW_NONE;
@@ -1400,11 +1407,13 @@ Decoder make_decoder(AVFormatContext *format, int index,
                      RillightCoreHardware preference = RILLIGHT_CORE_HW_NONE,
                      bool allow_software_fallback = true,
                      const std::shared_ptr<void>& android_window = {},
-                     uint32_t android_dovi_profiles = 0) {
+                     uint32_t android_dovi_profiles = 0,
+                     int64_t discard_before_us = -1) {
   Decoder result;
   if (index < 0 || index >= static_cast<int>(format->nb_streams)) return result;
   const auto *parameters = format->streams[index]->codecpar;
   bool native_dovi = false;
+  bool export_dovi = false;
 #if defined(__ANDROID__)
   if (parameters->codec_type == AVMEDIA_TYPE_VIDEO)
     __android_log_print(ANDROID_LOG_INFO, "RillightDecoder", "requested=%u surface=%d codec=%d tag=%u",
@@ -1420,31 +1429,31 @@ Decoder make_decoder(AVFormatContext *format, int index,
     const AVClass* options = platform ? platform->priv_class : nullptr;
     const bool dolby_surface = android_dovi_profiles && android_window && options &&
         av_opt_find(&options, "codec_mime", nullptr, 0, AV_OPT_SEARCH_FAKE_OBJ);
+    const bool dovi_buffers = options && av_opt_find(
+        &options, "export_dovi", nullptr, 0, AV_OPT_SEARCH_FAKE_OBJ);
     if (declared_dovi && (!side || side->size < sizeof(AVDOVIDecoderConfigurationRecord))) {
-      // Remuxers can preserve dvh1/dvhe but lose dvcC/dvvC. HEVC MediaCodec
-      // byte-buffer output then contains IPT, not ordinary YUV. Parse RPU with
-      // the software decoder rather than silently displaying green pictures.
-      if (dolby_surface) native_dovi = true;
-      else if (!allow_software_fallback) {
+      // Without the recovered profile, neither a Dolby MIME nor ordinary
+      // HEVC output establishes the correct color interpretation.
+      if (!allow_software_fallback) {
         result.error = RILLIGHT_CORE_ERROR_UNSUPPORTED_DOVI;
         return result;
       }
-      if (!native_dovi) preference = RILLIGHT_CORE_HW_NONE;
+      preference = RILLIGHT_CORE_HW_NONE;
     } else if (side && side->size >= sizeof(AVDOVIDecoderConfigurationRecord)) {
       const auto* record = reinterpret_cast<const AVDOVIDecoderConfigurationRecord*>(side->data);
       const bool supports_profile = android_dovi_profile_supported(
           record->dv_profile, android_dovi_profiles);
-      // FFmpeg's standalone MediaCodec decoder does not parse or export the
-      // per-frame RPU. Profile 5 has no ordinary HDR10 base to display instead.
-      // Keep explicit hardware-only requests honest; automatic mode can use
-      // the native HEVC decoder with RPU metadata and high precision color.
+      // Profile 5 has no ordinary HDR10 base. Prefer a supported native Dolby
+      // Surface; otherwise retain HEVC decoding with timestamp-matched RPU
+      // and high precision P010 buffers for our color pipeline.
       if (record->dv_profile == 5) {
         if (dolby_surface && supports_profile) native_dovi = true;
+        else if (dovi_buffers) export_dovi = true;
         else if (!allow_software_fallback) {
           result.error = RILLIGHT_CORE_ERROR_UNSUPPORTED_DOVI;
           return result;
         }
-        if (!native_dovi) preference = RILLIGHT_CORE_HW_NONE;
+        if (!native_dovi && !export_dovi) preference = RILLIGHT_CORE_HW_NONE;
       } else if (dolby_surface && supports_profile) {
         native_dovi = true;
       }
@@ -1493,7 +1502,7 @@ Decoder make_decoder(AVFormatContext *format, int index,
     if (selected) {
       AVBufferRef *device = nullptr;
 #if defined(__ANDROID__)
-      if (preference == RILLIGHT_CORE_HW_MEDIACODEC && android_window) {
+      if (preference == RILLIGHT_CORE_HW_MEDIACODEC && android_window && !export_dovi) {
         device = av_hwdevice_ctx_alloc(device_type);
         if (device) {
           auto* device_context = reinterpret_cast<AVHWDeviceContext*>(device->data);
@@ -1535,8 +1544,23 @@ Decoder make_decoder(AVFormatContext *format, int index,
     // Stay in native buffers even on hosts which installed a Java VM.
     av_opt_set_int(context->priv_data, "ndk_codec", 1, 0);
     av_opt_set_int(context->priv_data, "delay_flush", 1, 0);
+    if (export_dovi) {
+      const int configured = av_opt_set_int(context->priv_data, "export_dovi", 1, 0);
+      if (configured < 0) {
+        avcodec_free_context(&context);
+        result.error = configured;
+        return result;
+      }
+      if (discard_before_us >= 0)
+        av_opt_set_int(context->priv_data, "discard_before", discard_before_us, 0);
+    }
     if (native_dovi) {
       const int configured = av_opt_set(context->priv_data, "codec_mime", "video/dolby-vision", 0);
+      if (configured < 0) {
+        avcodec_free_context(&context);
+        result.error = configured;
+        return result;
+      }
       const auto* side = av_packet_side_data_get(parameters->coded_side_data,
           parameters->nb_coded_side_data, AV_PKT_DATA_DOVI_CONF);
       if (side && side->size >= sizeof(AVDOVIDecoderConfigurationRecord)) {
@@ -1564,6 +1588,7 @@ Decoder make_decoder(AVFormatContext *format, int index,
   }
   result.context = context;
   result.stream = index;
+  result.android_color_buffers = export_dovi;
   return result;
 }
 
@@ -2152,8 +2177,11 @@ int convert_video_frame(RillightCoreImpl *core, AVFormatContext *format,
   bool decoded_with_hardware = false;
   RillightCoreFrame *output = nullptr;
 #if defined(__ANDROID__)
-  if (hardware == RILLIGHT_CORE_HW_MEDIACODEC &&
-      decoded->format == AV_PIX_FMT_MEDIACODEC && decoded->data[3]) {
+  const bool android_color = hardware == RILLIGHT_CORE_HW_MEDIACODEC &&
+      decoded->format == AV_PIX_FMT_P010LE &&
+      av_frame_get_side_data(decoded, AV_FRAME_DATA_DOVI_METADATA);
+  if (android_color || (hardware == RILLIGHT_CORE_HW_MEDIACODEC &&
+      decoded->format == AV_PIX_FMT_MEDIACODEC && decoded->data[3])) {
     auto* native = new (std::nothrow) VideoOutputFrame{};
     AVFrame* retained = av_frame_clone(decoded);
     if (!native || !retained) {
@@ -2164,7 +2192,7 @@ int convert_video_frame(RillightCoreImpl *core, AVFormatContext *format,
     native->codec_frame = std::shared_ptr<AVFrame>(retained,
         [](AVFrame* frame) { av_frame_free(&frame); });
     native->struct_size = sizeof(RillightCoreFrame);
-    native->type = RILLIGHT_CORE_VIDEO_MEDIACODEC;
+    native->type = android_color ? RILLIGHT_CORE_VIDEO_ANDROID_P010 : RILLIGHT_CORE_VIDEO_MEDIACODEC;
     native->session_id = session;
     native->timeline_version = timeline;
     native->pts_us = pts;
@@ -2172,7 +2200,12 @@ int convert_video_frame(RillightCoreImpl *core, AVFormatContext *format,
     native->height = decoded->height;
     native->sar_num = decoded->sample_aspect_ratio.num > 0 ? decoded->sample_aspect_ratio.num : 1;
     native->sar_den = decoded->sample_aspect_ratio.den > 0 ? decoded->sample_aspect_ratio.den : 1;
-    native->data_size = 1;  // Count buffers; MediaCodec owns the pixel allocation.
+    const int64_t cost = video_frame_cost(decoded);
+    if (cost <= 0 || cost > std::numeric_limits<int>::max()) {
+      delete native;
+      return AVERROR_INVALIDDATA;
+    }
+    native->data_size = static_cast<int>(cost);
     native->source_color_range = decoded->color_range;
     native->source_color_space = decoded->colorspace;
     native->source_color_primaries = decoded->color_primaries;
@@ -2201,7 +2234,13 @@ int convert_video_frame(RillightCoreImpl *core, AVFormatContext *format,
     decoded_with_hardware = output != nullptr;
   }
 #endif
-  // A MediaCodec CPU frame does not identify the selected codec as hardware.
+  // CPU planes alone do not identify the decoder backend. Our locked
+  // MediaCodec wrapper carries its actual component name on byte output.
+#if defined(__ANDROID__)
+  if (hardware == RILLIGHT_CORE_HW_MEDIACODEC && av_dict_get(
+      decoded->metadata, "rillight.mediacodec.name", nullptr, 0))
+    decoded_with_hardware = true;
+#endif
   if (!output && hardware != RILLIGHT_CORE_HW_NONE && decoded->hw_frames_ctx) {
     // Retain the CPU planes between downloads. Allocating/freeing a new
     // 4K staging frame on every transfer adds page faults to the video lane.
@@ -2245,7 +2284,8 @@ int convert_video_frame(RillightCoreImpl *core, AVFormatContext *format,
     if (output->data) {
       blend_subtitles(output, *cues);
       blend_ass(output, ass);
-    } else if (hdr_video || output->type == RILLIGHT_CORE_VIDEO_MEDIACODEC) {
+    } else if (hdr_video || output->type == RILLIGHT_CORE_VIDEO_MEDIACODEC ||
+               output->type == RILLIGHT_CORE_VIDEO_ANDROID_P010) {
       render_gpu_subtitles(static_cast<VideoOutputFrame*>(output), *cues, ass);
     }
     if (pts >= 0)
@@ -2685,6 +2725,12 @@ void run(RillightCoreImpl *core, uint64_t session) {
     }
     std::lock_guard lock(core->mutex);
     core->video_index = video.stream;
+    core->android_color_buffers = video.android_color_buffers;
+    const AVRational rate = video.stream >= 0
+        ? av_guess_frame_rate(format, format->streams[video.stream], nullptr) : AVRational{0, 1};
+    const double source_frame_rate = rate.den > 0 ? av_q2d(rate) : 0;
+    core->video_frame_rate = std::isfinite(source_frame_rate) && source_frame_rate > 0 &&
+        source_frame_rate <= 240 ? source_frame_rate : 0;
     core->audio_index = audio.stream;
     const char *demuxer = format->iformat ? format->iformat->name : nullptr;
     core->is_mp4_container = demuxer &&
@@ -2729,7 +2775,7 @@ void run(RillightCoreImpl *core, uint64_t session) {
 
       int result = decode_packet(core, format, video, packet, video.stream,
                              &scale, &audio_filter, &subtitle_cues, &ass,
-                             core->speed, session,
+                             core->external_audio_speed ? 1.0 : core->speed, session,
                              timeline, &subtitle_mutex, &video_sink);
       if (packet && result < 0 && video.hardware != RILLIGHT_CORE_HW_NONE &&
           core->allow_software_fallback) {
@@ -2746,6 +2792,7 @@ void run(RillightCoreImpl *core, uint64_t session) {
           video = replacement;
           {
             std::lock_guard lock(core->mutex);
+            core->android_color_buffers = video.android_color_buffers;
             for (auto &track : core->tracks) {
               if (track.stream_index == video.stream)
                 track.actual_hardware = RILLIGHT_CORE_HW_NONE;
@@ -2753,14 +2800,15 @@ void run(RillightCoreImpl *core, uint64_t session) {
           }
           result = decode_packet(core, format, video, packet, video.stream,
                                  &scale, &audio_filter, &subtitle_cues, &ass,
-                                 core->speed, session, timeline, &subtitle_mutex, &video_sink);
+                                 core->external_audio_speed ? 1.0 : core->speed, session, timeline, &subtitle_mutex, &video_sink);
         }
       }
 
       return result;
     }) || !audio_lane.Start([&](const AVPacket *packet, uint64_t timeline) {
       int result = decode_packet(core, format, audio, packet, video.stream,
-          &scale, &audio_filter, &subtitle_cues, &ass, core->speed, session, timeline);
+          &scale, &audio_filter, &subtitle_cues, &ass,
+          core->external_audio_speed ? 1.0 : core->speed, session, timeline);
       if (result >= 0 && !packet && audio_filter.graph) {
         result = av_buffersrc_add_frame_flags(audio_filter.source, nullptr, 0);
         if (result >= 0) result = drain_audio_filter(core, &audio_filter,
@@ -2866,7 +2914,8 @@ void run(RillightCoreImpl *core, uint64_t session) {
         }
       }
       if (result < 0) break;
-      if (video.context && video.hardware == RILLIGHT_CORE_HW_MEDIACODEC) {
+      if (video.context && video.hardware == RILLIGHT_CORE_HW_MEDIACODEC &&
+          !video.android_color_buffers) {
         // Some Android Codec2 implementations stop producing pictures after
         // flush during an audio/subtitle/rate seek. All decode/conversion lanes
         // are quiescent here, so retire the codec and create a fresh instance
@@ -2877,7 +2926,8 @@ void run(RillightCoreImpl *core, uint64_t session) {
           std::shared_ptr<void> window;
           { std::lock_guard lock(core->mutex); window = core->android_window; }
           video = make_decoder(format, stream, core->hardware_preference,
-                               core->allow_software_fallback, window, core->android_dovi_profiles);
+                               core->allow_software_fallback, window, core->android_dovi_profiles,
+                               std::max<int64_t>(0, seek - 5000));
         }
         if (!video.context) {
           result = video.error < 0 ? video.error : AVERROR_DECODER_NOT_FOUND;
@@ -2885,11 +2935,20 @@ void run(RillightCoreImpl *core, uint64_t session) {
         }
         conversion_ready = false;
         std::lock_guard lock(core->mutex);
+        core->android_color_buffers = video.android_color_buffers;
         for (auto& track : core->tracks) {
           if (track.stream_index == stream)
             track.actual_hardware = RILLIGHT_CORE_HW_NONE;
         }
       } else if (video.context) {
+        if (video.android_color_buffers) {
+          // Byte output owns its pixels; no outstanding decoder Surface buffers
+          // delay flushing. Preserve parameter sets learned from in-band HEVC,
+          // and update the preroll cutoff in both directions on every seek.
+          result = av_opt_set_int(video.context->priv_data, "discard_before",
+                                   std::max<int64_t>(0, seek - 5000), 0);
+          if (result < 0) break;
+        }
         avcodec_flush_buffers(video.context);
       }
       if (audio.context) avcodec_flush_buffers(audio.context);
@@ -3250,6 +3309,16 @@ RillightCore *rillight_core_create_loopback(void) {
   return core;
 }
 
+int rillight_core_configure_external_audio_speed(RillightCore* pointer,
+                                                int enabled) {
+  if (!pointer || (enabled != 0 && enabled != 1)) return -1;
+  auto* core = impl(pointer);
+  std::lock_guard lock(core->mutex);
+  if (core->state != RILLIGHT_CORE_IDLE) return -1;
+  core->external_audio_speed = enabled != 0;
+  return 0;
+}
+
 void rillight_core_destroy_loopback(RillightCore *core) {
   rillight_core_destroy(core);
 }
@@ -3281,6 +3350,13 @@ int rillight_core_set_android_window(RillightCore* pointer, void* window,
     });
   }
   core->android_window = std::move(retained);
+  if (core->android_color_buffers) {
+    // P010 decoding has no Surface producer. Replacing only its EGL output
+    // must preserve the decoder, queued frames, audio and current timeline;
+    // seeking back to a long GOP here caused several seconds of black output.
+    core->wake.notify_all();
+    return 0;
+  }
   if (core->state == RILLIGHT_CORE_IDLE || core->state == RILLIGHT_CORE_OPENING ||
       core->state == RILLIGHT_CORE_ENDED || core->state == RILLIGHT_CORE_FAILED) return 0;
   const int64_t position = playback_position(core);
@@ -3313,6 +3389,41 @@ int rillight_core_render_mediacodec_frame(const RillightCoreFrame* frame) {
   (void)frame;
   return -1;
 #endif
+}
+
+#if defined(__ANDROID__)
+namespace {
+thread_local std::unique_ptr<AndroidColorPipeline> android_color_renderer;
+}
+#endif
+
+int rillight_core_render_android_color_frame(const RillightCoreFrame* frame,
+                                            void* native_window,
+                                            int hdr_display_supported) {
+#if defined(__ANDROID__)
+  if (!frame || !native_window || frame->type != RILLIGHT_CORE_VIDEO_ANDROID_P010) return -1;
+  const auto& decoded = static_cast<const VideoOutputFrame*>(frame)->codec_frame;
+  if (!decoded) return -1;
+  if (!android_color_renderer) android_color_renderer = std::make_unique<AndroidColorPipeline>();
+  return android_color_renderer->Render(decoded.get(), static_cast<ANativeWindow*>(native_window),
+                                        hdr_display_supported != 0) ? 0 : -1;
+#else
+  (void)frame; (void)native_window; (void)hdr_display_supported;
+  return -1;
+#endif
+}
+
+void rillight_core_release_android_color_renderer(void) {
+#if defined(__ANDROID__)
+  android_color_renderer.reset();
+#endif
+}
+
+double rillight_core_video_frame_rate(RillightCore* pointer) {
+  if (!pointer) return 0;
+  auto* core = impl(pointer);
+  std::lock_guard lock(core->mutex);
+  return core->video_frame_rate;
 }
 
 int rillight_core_configure_hardware(RillightCore *pointer,
@@ -3390,7 +3501,8 @@ int rillight_core_frame_subtitle_overlay(const RillightCoreFrame* frame,
                                         RillightCoreSubtitleOverlay* overlay) {
   if (!frame || !overlay || overlay->struct_size < sizeof(*overlay) ||
       (frame->type != RILLIGHT_CORE_VIDEO_D3D11 &&
-       frame->type != RILLIGHT_CORE_VIDEO_MEDIACODEC)) return -1;
+       frame->type != RILLIGHT_CORE_VIDEO_MEDIACODEC &&
+       frame->type != RILLIGHT_CORE_VIDEO_ANDROID_P010)) return -1;
   *overlay = static_cast<const VideoOutputFrame*>(frame)->subtitle_overlay;
   overlay->struct_size = sizeof(*overlay);
   return 0;
@@ -3424,6 +3536,8 @@ int rillight_core_open_at(RillightCore *pointer, const char *url,
     core->timeline_signal = core->timeline;
     core->url = url;
     core->video_index = core->audio_index = core->subtitle_index = -1;
+    core->video_frame_rate = 0;
+    core->android_color_buffers = false;
     core->is_mp4_container = false;
     core->video_track_id = core->audio_track_id = -1;
     core->duration = -1;
@@ -3622,6 +3736,14 @@ int rillight_core_set_speed(RillightCore *pointer, double speed,
   if (core->requested_speed == speed) return 0;
   core->base_position = playback_position(core);
   core->requested_speed = speed;
+  if (core->external_audio_speed) {
+    // The sink changes the rate of unmodified PCM already in its queue.
+    // Re-anchor clock interpolation without seeking or retiring video/RPU.
+    core->speed = speed;
+    core->base_time = Clock::now();
+    core->wake.notify_all();
+    return 0;
+  }
   core->speed_change = true;
   ++core->timeline;
   core->timeline_signal = core->timeline;
@@ -3765,7 +3887,8 @@ RillightCoreFrame *rillight_core_take_frame(RillightCore *pointer, int type) {
   auto *core = impl(pointer);
   std::lock_guard lock(core->mutex);
   if (type != RILLIGHT_CORE_VIDEO_RGBA && type != RILLIGHT_CORE_VIDEO_D3D11 &&
-      type != RILLIGHT_CORE_VIDEO_MEDIACODEC && type != RILLIGHT_CORE_AUDIO_S16)
+      type != RILLIGHT_CORE_VIDEO_MEDIACODEC && type != RILLIGHT_CORE_VIDEO_ANDROID_P010 &&
+      type != RILLIGHT_CORE_AUDIO_S16)
     return nullptr;
   if (type == RILLIGHT_CORE_AUDIO_S16 &&
       core->state == RILLIGHT_CORE_RECOVERING && core->video_index >= 0 &&
