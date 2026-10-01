@@ -15,8 +15,19 @@ extern "C" {
 
 #define RILLIGHT_CORE_ABI_VERSION 8
 
+/* Non-FFmpeg failure: the Dolby Vision base layer cannot be displayed with
+ * the currently implemented color pipeline. Reported in ffmpeg_error. */
+#define RILLIGHT_CORE_ERROR_UNSUPPORTED_DOVI (-20001)
+
 typedef struct RillightCore RillightCore;
 typedef struct RillightCoreFrame RillightCoreFrame;
+/* Cropped premultiplied sRGB subtitle plane, borrowed from its video frame.
+ * x/y locate it within the converted video image, before SAR/rotation/fit. */
+typedef struct RillightCoreSubtitleOverlay {
+  uint32_t struct_size;
+  int x, y, width, height, stride;
+  const uint8_t *data;
+} RillightCoreSubtitleOverlay;
 
 typedef enum RillightCoreState {
   RILLIGHT_CORE_IDLE = 0,
@@ -33,7 +44,8 @@ typedef enum RillightCoreState {
 
 typedef enum RillightCoreFrameType {
   RILLIGHT_CORE_VIDEO_RGBA = 1,
-  RILLIGHT_CORE_AUDIO_S16 = 2
+  RILLIGHT_CORE_AUDIO_S16 = 2,
+  RILLIGHT_CORE_VIDEO_D3D11 = 3
 } RillightCoreFrameType;
 
 typedef enum RillightCoreTrackType {
@@ -179,11 +191,42 @@ RILLIGHT_CORE_API void rillight_core_destroy_loopback(RillightCore *core);
 RILLIGHT_CORE_API int rillight_core_configure_hardware(
     RillightCore *core, RillightCoreHardware preference,
     int allow_software_fallback);
+/* Bound RGBA conversion to the physical output viewport without changing the
+ * decoded source, timestamps, or timeline. Zero dimensions keep source size.
+ * The next converted frame adopts the new size; sinks still fit/rotate it. */
+RILLIGHT_CORE_API int rillight_core_set_video_output_size(
+    RillightCore *core, int width, int height);
+/* Optional Windows GPU sink, enabled while idle; disabling it is allowed
+ * during playback to recover from unavailable cross-adapter sharing.
+ * VIDEO_D3D11 requests
+ * consume the video queue and may also return CPU RGBA fallback frames.
+ * GPU frames have NULL data, with data_size accounting for GPU allocation.
+ * frame_d3d11_texture returns a borrowed immutable ID3D11Texture2D valid until
+ * release_frame. All frames retain session/timeline/display metadata.
+ * Existing CPU sinks keep the default RGBA output contract. */
+RILLIGHT_CORE_API int rillight_core_configure_gpu_video(RillightCore *core,
+                                                       int enabled);
+RILLIGHT_CORE_API void *rillight_core_frame_d3d11_texture(
+    const RillightCoreFrame *frame);
+/* Opt-in native Windows scRGB output, enabled while idle after GPU video.
+ * HDR/DV GPU frames become immutable FP16, with 1.0 = 80 nits. CPU fallback
+ * remains sRGB RGBA8888. A sink must inspect the native texture's format and
+ * must not pass FP16 through Flutter's 8-bit external-texture contract. */
+RILLIGHT_CORE_API int rillight_core_configure_hdr_video(RillightCore *core,
+                                                       int enabled);
+RILLIGHT_CORE_API int rillight_core_frame_subtitle_overlay(
+    const RillightCoreFrame *frame, RillightCoreSubtitleOverlay *overlay);
 /* Open accepts an operation and starts a worker. First-frame completion is
  * reported by snapshot state/flags; acceptance alone is not playback success.
  * Calls with a stale operation_id fail. Each accepted open creates a session. */
 RILLIGHT_CORE_API int rillight_core_open(RillightCore *core, const char *url,
                                         uint64_t operation_id);
+/* Open at a resume position before decoding/publishing the initial timeline.
+ * This avoids displaying a frame from the beginning before a later seek.
+ * position_us must be nonnegative; zero preserves ordinary open behavior. */
+RILLIGHT_CORE_API int rillight_core_open_at(RillightCore *core, const char *url,
+                                           int64_t position_us,
+                                           uint64_t operation_id);
 RILLIGHT_CORE_API int rillight_core_set_playing(RillightCore *core, int playing,
                                                uint64_t operation_id);
 RILLIGHT_CORE_API int rillight_core_seek(RillightCore *core, int64_t position_us,

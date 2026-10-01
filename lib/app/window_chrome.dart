@@ -191,9 +191,10 @@ class WindowChromeButtons extends StatelessWidget {
 /// 拖拽等价 HTCAPTION(slop 后再 [windowManager.startDragging])。
 /// 标题按钮只占右侧条,其余顶带把单击交给下层。
 class WindowChromeHost extends StatefulWidget {
-  const WindowChromeHost({super.key, required this.child});
+  const WindowChromeHost({super.key, required this.child, this.brightness});
 
   final Widget child;
+  final Brightness? brightness;
 
   @override
   State<WindowChromeHost> createState() => _WindowChromeHostState();
@@ -268,7 +269,8 @@ class _WindowChromeHostState extends State<WindowChromeHost> {
                   trailingWidth: kWindowChromeTrailingInset,
                   // 标题按钮外观随外观偏好走:浅色主题下按钮图标用深色。
                   child: WindowChromeButtons(
-                    brightness: Theme.of(context).brightness,
+                    brightness:
+                        widget.brightness ?? Theme.of(context).brightness,
                   ),
                 ),
               ),

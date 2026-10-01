@@ -128,6 +128,11 @@ class CoreBindings {
         Int32 Function(Pointer<Void>, Pointer<Utf8>, Uint64),
         int Function(Pointer<Void>, Pointer<Utf8>, int)
       >('rillight_core_open');
+  late final openAt = _library
+      .lookupFunction<
+        Int32 Function(Pointer<Void>, Pointer<Utf8>, Int64, Uint64),
+        int Function(Pointer<Void>, Pointer<Utf8>, int, int)
+      >('rillight_core_open_at');
   late final configureHardware = _library
       .lookupFunction<
         Int32 Function(Pointer<Void>, Int32, Int32),

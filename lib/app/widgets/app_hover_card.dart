@@ -143,7 +143,11 @@ class _AppHoverCardState extends State<AppHoverCard> {
         borderRadius: radius,
         boxShadow: [
           BoxShadow(
-            color: colorScheme.shadow.withValues(alpha: highlighted ? 0.5 : 0),
+            color: colorScheme.shadow.withValues(
+              alpha: highlighted
+                  ? (colorScheme.brightness == Brightness.light ? 0.16 : 0.5)
+                  : 0,
+            ),
             blurRadius: highlighted ? widget.shadowBlurRadius : 0,
           ),
         ],

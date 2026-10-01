@@ -254,6 +254,8 @@ class PlayerController extends ChangeNotifier {
 
   int volume = 100;
   int _unmutedVolume = 100;
+  int _volumeRevision = 0;
+  int _rateRevision = 0;
   double playbackRate = 1.0;
   int maxStreamingBitrate = kCoreMaxStreamingBitrate;
   int? audioStreamIndex;
@@ -306,6 +308,8 @@ class PlayerController extends ChangeNotifier {
   List<PlayerSkipSegment> _skipSegments = const [];
   PlayerSkipSegment? activeSkipSegment;
   bool skipPromptVisible = false;
+  bool skipIntroEnabled = true;
+  bool skipOutroEnabled = true;
   bool controlsPinned = false;
   bool _nextUpOffered = false;
 
@@ -966,18 +970,35 @@ class PlayerController extends ChangeNotifier {
 
   static const volumeWheelStep = 5;
 
+  bool get _canSendPlaybackParameters =>
+      !loading &&
+      switch (state.phase) {
+        PlaybackPhase.playing ||
+        PlaybackPhase.paused ||
+        PlaybackPhase.buffering ||
+        PlaybackPhase.ended => true,
+        _ => false,
+      };
+
   Future<void> setVolume(int value) async {
     final operation = _operations.current;
     if (!_accepts(operation)) return;
     volume = value.clamp(0, PlayerSettings.volumeMax);
+    _volumeRevision++;
     if (volume > 0) {
       _unmutedVolume = volume;
     }
     final selected = volume;
-    await _operations.run(
-      operation!,
-      () => backend.setVolume(mpvVolumeForPercent(selected)),
-    );
+    if (!_canSendPlaybackParameters) {
+      onUserActivity();
+      _scheduleSettingsSave();
+      return;
+    }
+    await _operations.run(operation!, () async {
+      if (_canSendPlaybackParameters) {
+        await backend.setVolume(mpvVolumeForPercent(selected));
+      }
+    });
     if (!_accepts(operation)) return;
     onUserActivity();
     _scheduleSettingsSave();
@@ -1002,12 +1023,21 @@ class PlayerController extends ChangeNotifier {
     final value = rate
         .clamp(kPlaybackRateLadder.first, kPlaybackRateLadder.last)
         .toDouble();
+    _rateRevision++;
     if (playbackRate == value) {
       onUserActivity();
+      if (!_canSendPlaybackParameters) _scheduleSettingsSave();
       return;
     }
     playbackRate = value;
-    await _operations.run(operation!, () => backend.setRate(value));
+    if (!_canSendPlaybackParameters) {
+      onUserActivity();
+      _scheduleSettingsSave();
+      return;
+    }
+    await _operations.run(operation!, () async {
+      if (_canSendPlaybackParameters) await backend.setRate(value);
+    });
     if (!_accepts(operation)) return;
     onUserActivity();
     _scheduleSettingsSave();
@@ -1824,6 +1854,10 @@ class PlayerController extends ChangeNotifier {
   void _updateActiveSkip() {
     PlayerSkipSegment? next;
     for (final segment in _skipSegments) {
+      if (segment.kind == PlayerSkipKind.intro && !skipIntroEnabled ||
+          segment.kind == PlayerSkipKind.outro && !skipOutroEnabled) {
+        continue;
+      }
       if (position >= segment.start &&
           position < segment.end &&
           segment.end - segment.start >= kMinSkipSegment) {
@@ -1863,7 +1897,7 @@ class PlayerController extends ChangeNotifier {
   }
 
   void _showSkipPrompt() {
-    skipPromptVisible = true;
+    skipPromptVisible = activeSkipSegment != null;
   }
 
   void _setPosition(Duration value) {
@@ -1875,6 +1909,7 @@ class PlayerController extends ChangeNotifier {
   /// 片尾标记处,或无标记时片长最后约 3 分钟,提前给出下一集(不倒计时)。
   void _maybeOfferNextUp() {
     if (_disposed ||
+        !skipOutroEnabled ||
         loading ||
         playbackEnded ||
         nextEpisode != null ||
@@ -1922,6 +1957,10 @@ class PlayerController extends ChangeNotifier {
       }
       if (playbackEnded || _handlingCompleted) {
         _presentCompletedNext(next);
+        return;
+      }
+      if (!skipOutroEnabled) {
+        _nextUpOffered = false;
         return;
       }
       nextEpisode = NextEpisodeOffer(item: next);
@@ -2238,6 +2277,7 @@ class PlayerController extends ChangeNotifier {
     int? subtitle,
     bool subtitleOff = false,
     bool forceTranscode = false,
+    String? compatibilityReason,
     bool startPaused = false,
     int? requestedBitrate,
   }) async {
@@ -2313,6 +2353,10 @@ class PlayerController extends ChangeNotifier {
         forceTranscode: forceTranscode,
       );
       if (next == null) {
+        if (compatibilityReason != null) {
+          await _failOpen(operation, detail: compatibilityReason);
+          return;
+        }
         error = PlayerErrorKind.noStream;
         loading = false;
         state.phase = PlaybackPhase.failed;
@@ -2438,11 +2482,12 @@ class PlayerController extends ChangeNotifier {
           _pendingCompletion = false;
           unawaited(_handleCompleted());
         }
-        onStage?.call('playback settings');
+        onStage?.call('restore volume');
         final volumeApplied = await _restoreParameter(
           operation,
           () => backend.setVolume(mpvVolumeForPercent(volume)),
         );
+        onStage?.call('restore playback rate');
         final rateApplied = await _restoreParameter(
           operation,
           () => backend.setRate(playbackRate),
@@ -2450,6 +2495,7 @@ class PlayerController extends ChangeNotifier {
         if (isRecovering && (!volumeApplied || !rateApplied)) {
           throw StateError('Required playback settings were not restored');
         }
+        onStage?.call('restore audio track');
         final audioApplied = await _restoreParameter(operation, () async {
           if (selectedAudio != null && !next.isTranscode) {
             await _selectDeviceTrack(
@@ -2470,6 +2516,7 @@ class PlayerController extends ChangeNotifier {
       bool ownsSubtitle() =>
           identical(subtitleSession, _session) &&
           subtitleRevision == _trackRevisions['SubtitleTrackChange'];
+      onStage?.call('restore subtitle track');
       final subtitleApplied = await _restoreParameter(operation, () async {
         await _applySubtitle(
           next,
@@ -2531,6 +2578,7 @@ class PlayerController extends ChangeNotifier {
           subtitle: subtitle,
           subtitleOff: subtitleOff,
           forceTranscode: true,
+          compatibilityReason: failure.message,
           startPaused: startPaused,
           requestedBitrate: requestedBitrate,
         );
@@ -3396,19 +3444,21 @@ class PlayerController extends ChangeNotifier {
 
   /// 读取音量/倍速与按剧记忆,起播与换集前恢复。
   Future<void> _restoreSettings(PlaybackOperation operation) async {
+    final volumeRevision = _volumeRevision;
+    final rateRevision = _rateRevision;
     try {
       final settings = await (await _settings()).read();
       if (!_accepts(operation)) return;
-      volume = settings.clampedVolume;
-      playbackRate = settings.effectivePlaybackRate;
+      if (volumeRevision == _volumeRevision) volume = settings.clampedVolume;
+      if (rateRevision == _rateRevision) {
+        playbackRate = settings.effectivePlaybackRate;
+      }
+      skipIntroEnabled = settings.isSkipIntroEnabled;
+      skipOutroEnabled = settings.isSkipOutroEnabled;
       _seriesPreferences = Map.of(settings.seriesPreferences);
       if (volume > 0) {
         _unmutedVolume = volume;
       }
-      await _operations.run(
-        operation,
-        () => backend.setVolume(mpvVolumeForPercent(volume)),
-      );
     } catch (_) {}
   }
 
@@ -3417,6 +3467,27 @@ class PlayerController extends ChangeNotifier {
     _settingsSaveTimer = Timer(const Duration(milliseconds: 250), () {
       unawaited(_writeSettings());
     });
+  }
+
+  Future<void> setSkipEnabled(PlayerSkipKind kind, bool enabled) async {
+    if (kind == PlayerSkipKind.intro) {
+      skipIntroEnabled = enabled;
+    } else {
+      skipOutroEnabled = enabled;
+      if (!enabled && nextEpisode?.autoplay == false) cancelNextEpisode();
+      // Re-enabling can offer the next episode again at the closing marker.
+      if (enabled) _nextUpOffered = false;
+    }
+    _updateActiveSkip();
+    _emit();
+    try {
+      await (await _settings()).write(
+        PlayerSettings(
+          skipIntroEnabled: kind == PlayerSkipKind.intro ? enabled : null,
+          skipOutroEnabled: kind == PlayerSkipKind.outro ? enabled : null,
+        ),
+      );
+    } catch (_) {}
   }
 
   Future<void> _persistSettings() async {

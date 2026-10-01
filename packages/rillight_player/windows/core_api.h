@@ -23,6 +23,12 @@ class CoreApi {
       abi_version = Resolve<decltype(abi_version)>("rillight_core_abi_version");
       configure_hardware = Resolve<decltype(configure_hardware)>(
           "rillight_core_configure_hardware");
+      set_video_output_size = Resolve<decltype(set_video_output_size)>(
+          "rillight_core_set_video_output_size");
+      configure_gpu_video = Resolve<decltype(configure_gpu_video)>("rillight_core_configure_gpu_video");
+      configure_hdr_video = Resolve<decltype(configure_hdr_video)>("rillight_core_configure_hdr_video");
+      frame_subtitle_overlay = Resolve<decltype(frame_subtitle_overlay)>("rillight_core_frame_subtitle_overlay");
+      frame_d3d11_texture = Resolve<decltype(frame_d3d11_texture)>("rillight_core_frame_d3d11_texture");
       snapshot = Resolve<decltype(snapshot)>("rillight_core_snapshot");
       take_frame = Resolve<decltype(take_frame)>("rillight_core_take_frame");
       release_frame = Resolve<decltype(release_frame)>("rillight_core_release_frame");
@@ -51,6 +57,11 @@ class CoreApi {
 
   decltype(&rillight_core_abi_version) abi_version = nullptr;
   decltype(&rillight_core_configure_hardware) configure_hardware = nullptr;
+  decltype(&rillight_core_set_video_output_size) set_video_output_size = nullptr;
+  decltype(&rillight_core_configure_gpu_video) configure_gpu_video = nullptr;
+  decltype(&rillight_core_configure_hdr_video) configure_hdr_video = nullptr;
+  decltype(&rillight_core_frame_subtitle_overlay) frame_subtitle_overlay = nullptr;
+  decltype(&rillight_core_frame_d3d11_texture) frame_d3d11_texture = nullptr;
   decltype(&rillight_core_snapshot) snapshot = nullptr;
   decltype(&rillight_core_take_frame) take_frame = nullptr;
   decltype(&rillight_core_release_frame) release_frame = nullptr;

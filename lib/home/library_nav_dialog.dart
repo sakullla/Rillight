@@ -16,7 +16,7 @@ Future<String?> showMoreLibrariesDialog({
       final theme = Theme.of(context);
       final l10n = AppLocalizations.of(context);
       return Dialog(
-        backgroundColor: Colors.transparent,
+        backgroundColor: theme.colorScheme.surface,
         elevation: 0,
         child: LiquidGlass(
           kind: LiquidGlassKind.panel,
@@ -171,7 +171,7 @@ class _LibraryNavDialogState extends State<_LibraryNavDialog> {
     final pinnedLibraries = _pinnedLibraries;
     final unchecked = _uncheckedLibraries;
     return AlertDialog(
-      backgroundColor: Colors.transparent,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       elevation: 0,
       contentPadding: EdgeInsets.zero,
       content: LiquidGlass(

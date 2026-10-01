@@ -1,3 +1,4 @@
+import 'package:rillight/player/playback_skip_settings.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -249,6 +250,7 @@ class TvPlayerPageState extends State<TvPlayerPage> {
       _TvPanel.quality => l.quality,
       _TvPanel.source => l.mediaSource,
       _TvPanel.speed => l.mobileSpeed,
+      _TvPanel.skip => l.playerSkipSettings,
     };
     await showDialog<void>(
       context: context,
@@ -359,8 +361,10 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                           : l.qualityMbps(bitrate ~/ 1000000),
                                     ),
                                   ),
+                              if (panel == _TvPanel.skip)
+                                PlaybackSkipSettings(controller: c),
                               if (panel == _TvPanel.speed)
-                                for (final rate in [.5, 1.0, 1.25, 1.5, 2.0])
+                                for (final rate in kPlaybackRateLadder)
                                   TvAction(
                                     key: ValueKey('tv-rate-$rate'),
                                     autofocus: rate == c.playbackRate,
@@ -756,6 +760,12 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                               : null,
                                         ),
                                         _action(
+                                          'tv-player-skip',
+                                          Icons.fast_forward_rounded,
+                                          l.playerSkipSettings,
+                                          () => _panel(_TvPanel.skip),
+                                        ),
+                                        _action(
                                           'tv-player-speed',
                                           Icons.speed_rounded,
                                           '${c.playbackRate}x',
@@ -801,7 +811,7 @@ class TvPlayerPageState extends State<TvPlayerPage> {
   }
 }
 
-enum _TvPanel { tracks, quality, source, speed }
+enum _TvPanel { tracks, quality, source, speed, skip }
 
 /// Playback controls update their focus ring immediately, including reduced motion.
 /// The timeline stays transparent so the video remains the visual backdrop.

@@ -1309,11 +1309,26 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                             ),
                     ),
                   ],
-                  DetailGenreRow(item: item),
-                  DetailAlbumStrip(item: item),
-                  DetailExternalLinks(
-                    links: item.externalUrls,
-                    title: item.name,
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.page,
+                      vertical: AppSpacing.sm,
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        DetailGenreRow(item: item),
+                        DetailAlbumStrip(
+                          item: item,
+                          thumbnailWidth: (MediaQuery.sizeOf(context).width / 4)
+                              .clamp(240.0, 360.0),
+                        ),
+                        DetailExternalLinks(
+                          links: item.externalUrls,
+                          title: item.name,
+                        ),
+                      ],
+                    ),
                   ),
                   if (showSimilar)
                     MediaShelf(
@@ -2175,6 +2190,7 @@ class _DetailHeader extends StatelessWidget {
         final width = constraints.maxWidth;
         final viewportHeight = MediaQuery.sizeOf(context).height;
         final billboard = !item.isSeries;
+        final light = Theme.of(context).brightness == Brightness.light;
         final minHeight =
             heightFor(
               width,
@@ -2191,24 +2207,28 @@ class _DetailHeader extends StatelessWidget {
               alignment: AlignmentDirectional.bottomStart,
               children: [
                 Positioned.fill(
-                  child: BackdropScrim(
-                    topBandHeight: math.max(
-                      AppScrim.topBandHeight,
-                      topOverlap + _topBandFade,
-                    ),
-                    backdrop: MediaImage(
-                      key: ValueKey('detail-hero-${item.id}'),
-                      item: item,
-                      preferBackdrop: !item.isEpisode,
-                      preferParentBackdrop: item.isEpisode,
-                      maxWidth: mediaBackdropRequestWidth(
-                        layoutWidth: width,
-                        devicePixelRatio: MediaQuery.devicePixelRatioOf(
-                          context,
+                  child: light
+                      ? ColoredBox(
+                          color: Theme.of(context).scaffoldBackgroundColor,
+                        )
+                      : BackdropScrim(
+                          topBandHeight: math.max(
+                            AppScrim.topBandHeight,
+                            topOverlap + _topBandFade,
+                          ),
+                          backdrop: MediaImage(
+                            key: ValueKey('detail-hero-${item.id}'),
+                            item: item,
+                            preferBackdrop: !item.isEpisode,
+                            preferParentBackdrop: item.isEpisode,
+                            maxWidth: mediaBackdropRequestWidth(
+                              layoutWidth: width,
+                              devicePixelRatio: MediaQuery.devicePixelRatioOf(
+                                context,
+                              ),
+                            ),
+                          ),
                         ),
-                      ),
-                    ),
-                  ),
                 ),
                 Padding(
                   padding: EdgeInsets.fromLTRB(

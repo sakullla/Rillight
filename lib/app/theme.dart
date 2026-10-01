@@ -340,13 +340,14 @@ abstract final class AppTheme {
         showValueIndicator: ShowValueIndicator.never,
       ),
       dialogTheme: DialogThemeData(
-        backgroundColor: Colors.transparent,
+        backgroundColor: t.surfaceLow,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppRadii.xl),
+          side: BorderSide(color: t.outlineVariant),
         ),
-        titleTextStyle: titleLarge,
+        titleTextStyle: titleLarge.copyWith(color: t.onSurface),
         contentTextStyle: bodyMedium.copyWith(color: t.onSurfaceVariant),
       ),
       snackBarTheme: SnackBarThemeData(

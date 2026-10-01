@@ -161,7 +161,7 @@ class EmbyClient {
   }
 
   Future<PublicServerInfo> getPublicInfo(Uri baseUrl) async {
-    final uri = joinEmbyPath(baseUrl, '/System/Info/Public');
+    final uri = joinEmbyApiPath(baseUrl, '/System/Info/Public');
     try {
       final response = await _dio.getUri<dynamic>(
         uri,
@@ -184,7 +184,7 @@ class EmbyClient {
     required String password,
     required String serverId,
   }) async {
-    final uri = joinEmbyPath(baseUrl, '/Users/AuthenticateByName');
+    final uri = joinEmbyApiPath(baseUrl, '/Users/AuthenticateByName');
     try {
       final response = await _dio.postUri<dynamic>(
         uri,
@@ -837,6 +837,20 @@ class EmbyClient {
     );
   }
 
+  Future<List<int>> getOriginalItemImage(
+    String itemId, {
+    String type = 'Backdrop',
+    String? tag,
+    int? index,
+    CancelToken? cancelToken,
+  }) => _requestBytes(
+    index == null
+        ? '/Items/$itemId/Images/$type'
+        : '/Items/$itemId/Images/$type/$index',
+    queryParameters: {if (tag != null && tag.isNotEmpty) 'tag': tag},
+    cancelToken: cancelToken,
+  );
+
   Future<Map<String, dynamic>> getJson(
     String path, {
     Map<String, dynamic>? queryParameters,
@@ -921,7 +935,7 @@ class EmbyClient {
     if (!hasSession) {
       throw const EmbyException(EmbyFailureKind.sessionExpired);
     }
-    final uri = joinEmbyPath(
+    final uri = joinEmbyApiPath(
       _baseUrl!,
       path,
     ).replace(queryParameters: _stringifyQuery(queryParameters));
@@ -947,7 +961,7 @@ class EmbyClient {
     if (!hasSession) {
       throw const EmbyException(EmbyFailureKind.sessionExpired);
     }
-    final uri = joinEmbyPath(
+    final uri = joinEmbyApiPath(
       _baseUrl!,
       path,
     ).replace(queryParameters: _stringifyQuery(queryParameters));

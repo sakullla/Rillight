@@ -193,8 +193,42 @@ void main() {
     final info = await client().getPublicInfo(server.baseUrl);
     expect(info.id, 'server-id-1');
     expect(info.serverName, '灯川测试');
-    expect(server.requests, contains('GET /System/Info/Public'));
+    expect(server.requests, contains('GET /emby/System/Info/Public'));
   });
+
+  test(
+    'host-only login and playback use /emby and preserve custom UA',
+    () async {
+      const configuredUserAgent = 'ConfiguredClient/1.0';
+      final emby = client()..setUserAgent(configuredUserAgent);
+      await emby.getPublicInfo(server.baseUrl);
+      final auth = await emby.authenticateByName(
+        baseUrl: server.baseUrl,
+        username: 'alice',
+        password: 'correct-horse',
+        serverId: server.serverId,
+      );
+      emby.attachSession(
+        baseUrl: server.baseUrl,
+        accessToken: auth.accessToken,
+        userId: auth.user.id,
+        userAgent: configuredUserAgent,
+      );
+      await emby.getPlaybackInfo(itemId: 'movie-inception');
+      expect(server.requests, [
+        'GET /emby/System/Info/Public',
+        'POST /emby/Users/AuthenticateByName',
+        'POST /emby/Items/movie-inception/PlaybackInfo?UserId=user-alice',
+      ]);
+      expect(server.requestUserAgents, everyElement(configuredUserAgent));
+      expect(
+        emby
+            .subtitleStreamUrl(itemId: 'movie', mediaSourceId: 'src', index: 2)
+            .path,
+        '/emby/Videos/movie/src/Subtitles/2/0/Stream.srt',
+      );
+    },
+  );
 
   test('non-Emby Public Info stays as notEmby', () async {
     server.publicInfoHtml = true;
@@ -407,7 +441,7 @@ void main() {
     );
     await emby.logout();
     expect(server.loggedOutTokens, contains(auth.accessToken));
-    expect(server.requests, contains('POST /Sessions/Logout'));
+    expect(server.requests, contains('POST /emby/Sessions/Logout'));
   });
 
   test('queryItems sends Filters, Genres and Years when provided', () async {

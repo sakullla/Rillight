@@ -492,6 +492,13 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
     unawaited(_closeWindow());
   }
 
+  @override
+  void onWindowFocus() {
+    if (_closing == null) {
+      _playerKey.currentState?.restoreWindowInteraction();
+    }
+  }
+
   AuthController _authFor(PlayerWindowLaunch launch) {
     final client = EmbyClient(device: launch.device);
     client.attachSession(

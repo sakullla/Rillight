@@ -1,4 +1,5 @@
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
+import 'package:rillight/app/theme.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/app_shell.dart';
 import 'package:rillight/app/mobile_motion.dart';
@@ -82,12 +83,15 @@ GoRouter createAppRouter({
                 return PhoneMotion.fadeThroughPage(
                   context: context,
                   state: state,
-                  child: MobilePlayerPage(
-                    itemId: state.pathParameters['itemId']!,
-                    mediaSourceId: request?.mediaSourceId,
-                    autoResume: request?.autoResume ?? true,
-                    audioStreamIndex: request?.audioStreamIndex,
-                    subtitleStreamIndex: request?.subtitleStreamIndex,
+                  child: Theme(
+                    data: AppTheme.dark(),
+                    child: MobilePlayerPage(
+                      itemId: state.pathParameters['itemId']!,
+                      mediaSourceId: request?.mediaSourceId,
+                      autoResume: request?.autoResume ?? true,
+                      audioStreamIndex: request?.audioStreamIndex,
+                      subtitleStreamIndex: request?.subtitleStreamIndex,
+                    ),
                   ),
                 );
               },
@@ -201,10 +205,13 @@ GoRouter createAppRouter({
               path: '/play/:itemId',
               builder: (context, state) {
                 final request = state.extra as PlayerOpenRequest?;
-                return TvPlayerPage(
-                  itemId: state.pathParameters['itemId']!,
-                  mediaSourceId: request?.mediaSourceId,
-                  autoResume: request?.autoResume ?? true,
+                return Theme(
+                  data: AppTheme.dark(),
+                  child: TvPlayerPage(
+                    itemId: state.pathParameters['itemId']!,
+                    mediaSourceId: request?.mediaSourceId,
+                    autoResume: request?.autoResume ?? true,
+                  ),
                 );
               },
             ),

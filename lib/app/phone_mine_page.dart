@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
-import 'package:rillight/app/phone_nav_style.dart';
 import 'package:rillight/app/product.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/settings/settings_page.dart';
@@ -17,8 +16,6 @@ import 'package:rillight/auth/line_address_dialog.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/player/player_bindings.dart';
-import 'package:rillight/player/player_runtime_options.dart';
-import 'package:rillight/player/player_settings.dart';
 
 /// 手机「我的」：当前身份、线路、倍速和弹幕来源。
 class PhoneMinePage extends StatefulWidget {
@@ -68,168 +65,6 @@ class PhoneMinePage extends StatefulWidget {
 }
 
 class _PhoneMinePageState extends State<PhoneMinePage> {
-  final _danmakuServer = TextEditingController();
-  final _danmakuAppId = TextEditingController();
-  final _danmakuToken = TextEditingController();
-  final _danmakuServerFocus = FocusNode();
-  final _danmakuAppIdFocus = FocusNode();
-  final _danmakuTokenFocus = FocusNode();
-
-  PlayerSettingsStore? _store;
-  PlayerSettings _settings = const PlayerSettings();
-  PhoneNavStyleController? _localNav;
-  double _rate = 1;
-  bool _loaded = false;
-  bool _tokenVisible = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _danmakuServerFocus.addListener(_onDanmakuServerFocus);
-    _danmakuAppIdFocus.addListener(_onDanmakuAppIdFocus);
-    _danmakuTokenFocus.addListener(_onDanmakuTokenFocus);
-  }
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    if (_loaded) {
-      return;
-    }
-    _loaded = true;
-    unawaited(_load());
-    if (PhoneNavStyle.maybeOf(context) == null) {
-      final local = PhoneNavStyleController();
-      _localNav = local;
-      unawaited(local.load());
-    }
-  }
-
-  @override
-  void dispose() {
-    _danmakuServerFocus.removeListener(_onDanmakuServerFocus);
-    _danmakuAppIdFocus.removeListener(_onDanmakuAppIdFocus);
-    _danmakuTokenFocus.removeListener(_onDanmakuTokenFocus);
-    _danmakuServerFocus.dispose();
-    _danmakuAppIdFocus.dispose();
-    _danmakuTokenFocus.dispose();
-    _danmakuServer.dispose();
-    _danmakuAppId.dispose();
-    _danmakuToken.dispose();
-    _localNav?.dispose();
-    super.dispose();
-  }
-
-  Future<void> _load() async {
-    final injected = PlayerScope.of(context).settingsStore;
-    final inner = injected ?? await openPlayerSettingsStore();
-    final store = _MergingPlayerSettingsStore(inner);
-    final settings = await store.read();
-    if (!mounted) {
-      return;
-    }
-    setState(() {
-      _store = store;
-      _settings = settings;
-      _rate = settings.effectivePlaybackRate;
-    });
-    _syncDanmakuFields();
-  }
-
-  void _onDanmakuServerFocus() {
-    if (!_danmakuServerFocus.hasFocus) {
-      unawaited(_commitDanmaku());
-    }
-  }
-
-  void _onDanmakuAppIdFocus() {
-    if (!_danmakuAppIdFocus.hasFocus) {
-      unawaited(_commitDanmaku());
-    }
-  }
-
-  void _onDanmakuTokenFocus() {
-    if (!_danmakuTokenFocus.hasFocus) {
-      unawaited(_commitDanmaku());
-    }
-  }
-
-  void _syncDanmakuFields() {
-    if (!_danmakuServerFocus.hasFocus) {
-      final server = _settings.danmakuServer ?? '';
-      if (_danmakuServer.text != server) {
-        _danmakuServer.text = server;
-      }
-    }
-    if (!_danmakuAppIdFocus.hasFocus) {
-      final appId = _settings.danmakuAppId ?? '';
-      if (_danmakuAppId.text != appId) {
-        _danmakuAppId.text = appId;
-      }
-    }
-    if (!_danmakuTokenFocus.hasFocus) {
-      final token = _settings.danmakuToken ?? '';
-      if (_danmakuToken.text != token) {
-        _danmakuToken.text = token;
-      }
-    }
-  }
-
-  /// 空地址写入空串，读取时表示继续用官方源。
-  Future<void> _commitDanmaku() async {
-    final store = _store;
-    if (store == null) {
-      return;
-    }
-    final server = _danmakuServer.text.trim();
-    final appId = _danmakuAppId.text.trim();
-    final token = _danmakuToken.text.trim();
-    if (server == (_settings.danmakuServer ?? '') &&
-        appId == (_settings.danmakuAppId ?? '') &&
-        token == (_settings.danmakuToken ?? '')) {
-      return;
-    }
-    try {
-      await store.write(
-        PlayerSettings(
-          danmakuServer: server,
-          danmakuAppId: appId,
-          danmakuToken: token,
-        ),
-      );
-      _settings = await store.read();
-    } catch (_) {}
-  }
-
-  Future<void> _saveRate(double rate) async {
-    final store = _store;
-    if (store == null) {
-      return;
-    }
-    try {
-      await store.write(PlayerSettings(playbackRate: rate));
-      if (!mounted) {
-        return;
-      }
-      setState(() => _rate = rate);
-    } catch (_) {}
-  }
-
-  Future<void> _saveCacheLimit(int limitMiB) async {
-    final store = _store;
-    if (store == null) {
-      return;
-    }
-    try {
-      await store.write(PlayerSettings(diskCacheLimitMiB: limitMiB));
-      final settings = await store.read();
-      if (!mounted) {
-        return;
-      }
-      setState(() => _settings = settings);
-    } catch (_) {}
-  }
-
   /// 切换线路:成功后刷新目录。失败时保持当前线路、会话与已加载目录,
   /// 原因经 [AuthController.lineSwitchFailure] 在页面顶部以错误行展示。
   Future<void> _switchLine(String serverId, String lineId) async {
@@ -479,40 +314,6 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
     );
   }
 
-  Widget _floatingNav(BuildContext context, AppLocalizations l10n) {
-    final shared = PhoneNavStyle.maybeOf(context);
-    final nav = shared ?? _localNav;
-    if (nav == null) {
-      return const SizedBox.shrink();
-    }
-    return ListenableBuilder(
-      listenable: nav,
-      builder: (context, _) {
-        return _group(
-          context,
-          title: l10n.phoneAppearanceGroup,
-          children: [
-            SwitchListTile(
-              key: PhoneMinePage.floatingNavKey,
-              contentPadding: EdgeInsets.zero,
-              title: Text(l10n.phoneFloatingNav),
-              subtitle: Text(l10n.phoneFloatingNavHint),
-              value: nav.floating,
-              onChanged: (value) => unawaited(nav.setFloating(value)),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  Widget _fieldLabel(BuildContext context, String label) {
-    return Padding(
-      padding: const EdgeInsets.only(top: AppSpacing.md),
-      child: Align(alignment: Alignment.centerLeft, child: Text(label)),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final auth = AuthScope.of(context);
@@ -522,8 +323,6 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
     final lineLabel = session?.server.activeLine?.hostLabel ?? '';
     final failure = auth.failure;
     final lineSwitchFailure = auth.lineSwitchFailure;
-    final cacheLimit =
-        _settings.diskCacheLimitMiB ?? PlayerRuntimeDefaults.diskCacheLimitMiB;
     return Scaffold(
       appBar: AppBar(title: Text(l10n.mobileMine)),
       body: ListView(
@@ -650,158 +449,26 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
             ],
           ),
           const SizedBox(height: AppSpacing.xl),
-          _floatingNav(context, l10n),
-          const SizedBox(height: AppSpacing.xl),
           _group(
             context,
-            title: l10n.mobilePlaybackGroup,
+            title: l10n.settings,
             children: [
-              Padding(
-                padding: const EdgeInsets.only(top: AppSpacing.sm),
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    l10n.mobileSpeed,
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                ),
-              ),
-              const SizedBox(height: AppSpacing.xxs),
-              Text(
-                l10n.settingsAppliesToNewPlayback,
-                style: Theme.of(
-                  context,
-                ).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
-              ),
-              const SizedBox(height: AppSpacing.sm),
-              Wrap(
-                spacing: AppSpacing.xs,
-                runSpacing: AppSpacing.xs,
-                children: [
-                  for (final rate in PhoneMinePage.playbackRates)
-                    ChoiceChip(
-                      key: PhoneMinePage.rateKey(rate),
-                      label: Text('${rate}x'),
-                      selected: _rate == rate,
-                      materialTapTargetSize: MaterialTapTargetSize.padded,
-                      onSelected: _store == null
-                          ? null
-                          : (_) => unawaited(_saveRate(rate)),
-                    ),
-                ],
-              ),
-              const SizedBox(height: AppSpacing.md),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  l10n.settingsDanmakuService,
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-              ),
-              const SizedBox(height: AppSpacing.xxs),
-              Text(
-                l10n.settingsDanmakuServiceHint,
-                style: Theme.of(
-                  context,
-                ).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
-              ),
-              _fieldLabel(context, l10n.settingsDanmakuServer),
-              const SizedBox(height: AppSpacing.xs),
-              TextField(
-                key: PhoneMinePage.danmakuServerKey,
-                controller: _danmakuServer,
-                focusNode: _danmakuServerFocus,
-                enabled: _store != null,
-                keyboardType: TextInputType.url,
-                textInputAction: TextInputAction.next,
-                onSubmitted: (_) => unawaited(_commitDanmaku()),
-                decoration: InputDecoration(
-                  hintText: l10n.settingsDanmakuServerHint,
-                ),
-              ),
-              _fieldLabel(context, l10n.settingsDanmakuAppId),
-              const SizedBox(height: AppSpacing.xs),
-              TextField(
-                key: PhoneMinePage.danmakuAppIdKey,
-                controller: _danmakuAppId,
-                focusNode: _danmakuAppIdFocus,
-                enabled: _store != null,
-                textInputAction: TextInputAction.next,
-                onSubmitted: (_) => unawaited(_commitDanmaku()),
-                decoration: InputDecoration(
-                  hintText: l10n.settingsDanmakuAppIdHint,
-                ),
-              ),
-              _fieldLabel(context, l10n.settingsDanmakuToken),
-              const SizedBox(height: AppSpacing.xs),
-              TextField(
-                key: PhoneMinePage.danmakuTokenKey,
-                controller: _danmakuToken,
-                focusNode: _danmakuTokenFocus,
-                enabled: _store != null,
-                obscureText: !_tokenVisible,
-                textInputAction: TextInputAction.done,
-                onSubmitted: (_) => unawaited(_commitDanmaku()),
-                decoration: InputDecoration(
-                  hintText: l10n.settingsDanmakuTokenHint,
-                  suffixIcon: IconButton(
-                    key: PhoneMinePage.tokenVisibilityKey,
-                    tooltip: _tokenVisible
-                        ? l10n.settingsHideToken
-                        : l10n.settingsShowToken,
-                    onPressed: () =>
-                        setState(() => _tokenVisible = !_tokenVisible),
-                    icon: Icon(
-                      _tokenVisible
-                          ? Icons.visibility_off_outlined
-                          : Icons.visibility_outlined,
+              ListTile(
+                leading: const Icon(Icons.tune_rounded),
+                title: Text(l10n.settings),
+                subtitle: Text(l10n.settingsCategoriesHint),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (context) => Scaffold(
+                      appBar: AppBar(title: Text(l10n.settings)),
+                      body: SettingsPage(
+                        settingsStore: PlayerScope.of(context).settingsStore,
+                      ),
                     ),
                   ),
                 ),
               ),
-              const SizedBox(height: AppSpacing.md),
-            ],
-          ),
-          const SizedBox(height: AppSpacing.xl),
-          _group(
-            context,
-            title: l10n.mobileCacheGroup,
-            children: [
-              Padding(
-                padding: const EdgeInsets.only(top: AppSpacing.sm),
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    l10n.settingsDiskCacheLimit,
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                ),
-              ),
-              const SizedBox(height: AppSpacing.xxs),
-              Text(
-                l10n.settingsDiskCacheLimitHint,
-                style: Theme.of(
-                  context,
-                ).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
-              ),
-              const SizedBox(height: AppSpacing.sm),
-              Wrap(
-                spacing: AppSpacing.xs,
-                runSpacing: AppSpacing.xs,
-                children: [
-                  for (final limit in SettingsPage.diskCacheLimitChoices)
-                    ChoiceChip(
-                      key: PhoneMinePage.cacheLimitKey(limit),
-                      label: Text(l10n.settingsCacheSize(limit / 1024)),
-                      selected: cacheLimit == limit,
-                      materialTapTargetSize: MaterialTapTargetSize.padded,
-                      onSelected: _store == null
-                          ? null
-                          : (_) => unawaited(_saveCacheLimit(limit)),
-                    ),
-                ],
-              ),
-              const SizedBox(height: AppSpacing.md),
             ],
           ),
           const SizedBox(height: AppSpacing.xl),
@@ -832,31 +499,5 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
         ],
       ),
     );
-  }
-}
-
-/// 注入的内存存储会整份替换。先合并再写，只改倍速或弹幕地址时保留其它字段。
-class _MergingPlayerSettingsStore implements PlayerSettingsStore {
-  _MergingPlayerSettingsStore(this._inner);
-
-  final PlayerSettingsStore _inner;
-
-  @override
-  Future<PlayerSettings> read() => _inner.read();
-
-  @override
-  Future<void> write(PlayerSettings settings) async {
-    final current = await _inner.read();
-    final merged = Map<String, dynamic>.from(current.toJson());
-    for (final entry in settings.toJson().entries) {
-      final existing = merged[entry.key];
-      merged[entry.key] = existing is Map && entry.value is Map
-          ? <String, dynamic>{
-              ...Map<String, dynamic>.from(existing),
-              ...Map<String, dynamic>.from(entry.value as Map),
-            }
-          : entry.value;
-    }
-    await _inner.write(PlayerSettings.fromJson(merged));
   }
 }

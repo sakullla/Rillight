@@ -43,6 +43,7 @@ internal class CorePlayback(
     private val outputWaitLock = ReentrantLock()
     private val outputWake = outputWaitLock.newCondition()
     private var surface: Surface? = null
+    @Volatile private var viewport = Pair(0, 0)
     private var audioOutput: CoreAudioOutput? = null
     private var running: Running? = null
     private var pendingOpen: MethodChannel.Result? = null
@@ -59,8 +60,6 @@ internal class CorePlayback(
     }
     private var serverStreams = emptyList<ServerStream>()
     private var mapping = emptyMap<Int, Int>()
-    @Volatile private var requestedStartUs = 0L
-    @Volatile private var requestedStartApplied = false
     @Volatile private var desiredPaused = false
     @Volatile private var audioReady = false
     private var renderedFirst = false
@@ -107,6 +106,12 @@ internal class CorePlayback(
         wakeOutput()
     }
 
+    override fun setViewport(width: Int, height: Int) {
+        if (width <= 0 || height <= 0) return
+        viewport = Pair(width.coerceAtMost(8192), height.coerceAtMost(8192))
+        wakeOutput()
+    }
+
     private fun wakeOutput() = outputWaitLock.withLock { outputWake.signalAll() }
 
     fun setScale(mode: String?) {
@@ -140,8 +145,7 @@ internal class CorePlayback(
                 stream["type"] as? String ?: return@mapNotNull null,
                 stream["language"] as? String, stream["external"] == true)
         } ?: emptyList()
-        requestedStartUs = ((args["start"] as? Number)?.toLong() ?: 0).coerceAtLeast(0) * 1000
-        requestedStartApplied = requestedStartUs == 0L
+        val initialStartUs = ((args["start"] as? Number)?.toLong() ?: 0).coerceAtLeast(0) * 1000
         desiredPaused = args["paused"] == true
         audioReady = false
         renderedFirst = false
@@ -172,7 +176,7 @@ internal class CorePlayback(
             }
             val accepted = try {
                 CoreNative.configureHardware(handle, preferredHardware, true) == 0 &&
-                    CoreNative.open(handle, address, operation.incrementAndGet()) == 0 &&
+                    CoreNative.open(handle, address, initialStartUs, operation.incrementAndGet()) == 0 &&
                     (!desiredPaused || CoreNative.play(handle, false, operation.incrementAndGet()) == 0)
             } catch (error: Throwable) {
                 CoreNative.destroy(handle)
@@ -398,10 +402,6 @@ internal class CorePlayback(
                     active.drainedAudioTimeline.set(-1)
                     synchronized(outputLock) { audio?.flush() }
                 }
-                if (!requestedStartApplied) {
-                    Thread.sleep(4)
-                    continue
-                }
                 if (snap[6] >= 0 && snap[11] == 1L && audio == null) {
                     audio = CoreAudioOutput()
                     audio.setVolume(volume)
@@ -479,24 +479,23 @@ internal class CorePlayback(
 
     private fun pump(active: Running) {
         var timeline = -1L
+        var outputViewport = Pair(-1, -1)
         var lastTick = 0L
         var lastEnded = false
         try {
             while (active.alive.get() && generation.get() == active.generation) {
+                val requestedViewport = viewport
+                if (requestedViewport != outputViewport) {
+                    CoreNative.videoOutputSize(active.handle,
+                        requestedViewport.first, requestedViewport.second)
+                    outputViewport = requestedViewport
+                }
                 val snap = CoreNative.snapshot(active.handle) ?: throw IllegalStateException("Core snapshot unavailable")
                 if (snap[0] == 8L) throw IllegalStateException("FFmpeg core error ${snap[4]}")
                 if (snap[3] != timeline) {
                     timeline = snap[3]
                     lastEnded = false
                     handler.post { if (generation.get() == active.generation) renderedFirst = false }
-                }
-                if (!requestedStartApplied && snap[0] in 2L..6L && snap[10] == 1L) {
-                    if (synchronized(outputLock) {
-                        CoreNative.seek(active.handle, requestedStartUs, operation.incrementAndGet())
-                    } != 0)
-                        throw IllegalStateException("Start position unavailable")
-                    requestedStartApplied = true
-                    continue
                 }
                 val videoSurface = synchronized(surfaceLock) { surface }
                 val frame = videoSurface?.takeIf { it.isValid }
@@ -566,7 +565,7 @@ internal class CorePlayback(
             }
         }
         val open = pendingOpen
-        if (open != null && requestedStartApplied && snap[0] in 2L..6L &&
+        if (open != null && snap[0] in 2L..6L &&
             (snap[5] < 0 && snap[11] == 1L && (desiredPaused || audioReady) || renderedFirst)) {
             handler.removeCallbacks(openTimeout)
             updateTrackMapping(active.handle)

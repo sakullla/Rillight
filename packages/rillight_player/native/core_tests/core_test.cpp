@@ -729,6 +729,18 @@ int main() {
              200000, 50000) == 0);
   assert(snapshot(core).position_us == 150000);
   assert(rillight_core_set_playing(core, 1, 3) == 0);
+  // Device reports may arrive in batches. The media clock must advance
+  // smoothly between reports, but never past the submitted PCM endpoint.
+  std::this_thread::sleep_for(std::chrono::milliseconds(30));
+  const auto interpolated = snapshot(core).position_us;
+  assert(interpolated >= 170000 && interpolated <= 200000);
+  std::this_thread::sleep_for(std::chrono::milliseconds(40));
+  assert(snapshot(core).position_us == 200000);
+  assert(rillight_core_set_playing(core, 0, 4) == 0);
+  const auto paused_position = snapshot(core).position_us;
+  std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  assert(snapshot(core).position_us == paused_position);
+  assert(rillight_core_set_playing(core, 1, 5) == 0);
   assert(rillight_core_report_audio_unavailable(
              core, clock_identity.session_id, clock_identity.timeline_version) == 0);
   const auto handed_off = snapshot(core).position_us;

@@ -14,6 +14,11 @@ from socketserver import TCPServer
 from urllib.parse import urlsplit
 
 
+def emby_api_path(raw_url):
+    path = urlsplit(raw_url).path
+    return path[5:] if path.startswith('/emby/') else path
+
+
 class LoopbackHTTPServer(ThreadingHTTPServer):
     def server_bind(self):
         # This fixture uses a numeric loopback address. HTTPServer's reverse DNS
@@ -132,7 +137,7 @@ def serve(media, output):
         def do_POST(self):
             length = int(self.headers.get('Content-Length', 0))
             body = json.loads(self.rfile.read(length) or b'{}')
-            path = urlsplit(self.path).path
+            path = emby_api_path(self.path)
             if path == '/validation/network':
                 conditions['offline'] = body.get('offline') is True
                 if 'unstable' in body:
@@ -174,7 +179,7 @@ def serve(media, output):
             else:
                 self.send_json({})
         def do_GET(self):
-            path = urlsplit(self.path).path
+            path = emby_api_path(self.path)
             if path == '/System/Info/Public':
                 self.send_json({'Id': 'validation-server', 'ServerName': 'Rillight validation', 'Version': '4.9.0'})
             elif path == '/Users/validation-user':

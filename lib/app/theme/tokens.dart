@@ -73,6 +73,9 @@ abstract final class AppScrim {
   static const double topBarMid = 0.10;
   static const List<double> topBarStops = [0, 0.55, 1];
 
+  /// 浅色顶栏在控件行内保留足够的表面色，避免深色图标叠在暗图上。
+  static const double lightTopBar = 0.96;
+
   /// 顶带默认高度 = 顶栏 56 + 溶入 36;有窗口铬时由调用方传入实际值。
   static const double topBandHeight = 92;
 

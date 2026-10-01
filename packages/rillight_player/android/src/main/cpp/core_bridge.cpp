@@ -251,13 +251,21 @@ Java_com_rillight_player_CoreNative_configureHardware(
 }
 
 JNIEXPORT jint JNICALL
+Java_com_rillight_player_CoreNative_videoOutputSize(
+    JNIEnv *, jobject, jlong handle, jint width, jint height) {
+  return handle ? rillight_core_set_video_output_size(
+      bridge(handle)->core, width, height) : -1;
+}
+
+JNIEXPORT jint JNICALL
 Java_com_rillight_player_CoreNative_open(JNIEnv *env, jobject, jlong handle,
-                                        jstring address, jlong operation) {
+                                        jstring address, jlong position,
+                                        jlong operation) {
   if (!handle || !address) return -1;
   const char *url = env->GetStringUTFChars(address, nullptr);
   auto *owner = bridge(handle);
   std::lock_guard lock(owner->presentation_mutex);
-  int result = rillight_core_open(owner->core, url, operation);
+  int result = rillight_core_open_at(owner->core, url, position, operation);
   env->ReleaseStringUTFChars(address, url);
   return result;
 }

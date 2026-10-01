@@ -5,10 +5,16 @@ import socket
 import unittest
 from unittest.mock import patch
 
-from player_fixtures import LoopbackHTTPServer
+from player_fixtures import LoopbackHTTPServer, emby_api_path
 
 
 class FixtureServerTest(unittest.TestCase):
+    def test_fixture_accepts_canonical_api_and_media_paths(self):
+        for path in ('/System/Info/Public', '/Sessions/Playing', '/media/sample.mp4'):
+            self.assertEqual(emby_api_path('/emby' + path + '?api_key=synthetic'), path)
+            self.assertEqual(emby_api_path(path), path)
+        self.assertEqual(emby_api_path('/embywebsocket'), '/embywebsocket')
+
     def test_server_listens_without_reverse_dns(self):
         with patch('socket.getfqdn', side_effect=AssertionError('DNS must not run')):
             with LoopbackHTTPServer(('127.0.0.1', 0), BaseHTTPRequestHandler) as server:

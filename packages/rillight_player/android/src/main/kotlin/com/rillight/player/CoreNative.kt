@@ -18,7 +18,8 @@ internal object CoreNative {
     external fun create(factory: CoreIoFactory): Long
     external fun destroy(handle: Long)
     external fun configureHardware(handle: Long, preferredHardware: Int, allowSoftwareFallback: Boolean): Int
-    external fun open(handle: Long, url: String, operation: Long): Int
+    external fun videoOutputSize(handle: Long, width: Int, height: Int): Int
+    external fun open(handle: Long, url: String, positionUs: Long, operation: Long): Int
     external fun play(handle: Long, playing: Boolean, operation: Long): Int
     external fun seek(handle: Long, positionUs: Long, operation: Long): Int
     external fun speed(handle: Long, speed: Double, operation: Long): Int

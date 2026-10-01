@@ -36,6 +36,11 @@ int main() {
                               now + std::chrono::milliseconds(150)));
   assert(!policy.ShouldHandoff(state, true, false, 0, true,
                                now + std::chrono::milliseconds(151)));
+  state.queued_video_frames = 0;
+  assert(!policy.ShouldHandoff(state, false, false, 0, true,
+                               now + std::chrono::seconds(10)));
+  assert(!policy.ShouldHandoff(state, false, false, 0, true,
+                               now + std::chrono::seconds(20)));
   state.source_eof = 1;
   assert(policy.ShouldHandoff(state, false, false, 0, true,
                               now + std::chrono::milliseconds(152)));

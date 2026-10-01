@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:rillight/app/appearance_style.dart';
+import 'package:rillight/app/phone_nav_style.dart';
 import 'package:rillight/app/app_shell.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/theme/tokens.dart';
@@ -13,8 +14,7 @@ import 'package:rillight/player/danmaku/danmaku_keys.dart';
 import 'package:rillight/player/player_runtime_options.dart';
 import 'package:rillight/player/player_settings.dart';
 
-/// 设置页:外观(浅色/深色/跟随系统)、播放器运行时选项(磁盘缓冲上限、
-/// 硬件解码)与弹幕服务来源的查看与修改。
+/// 设置页:展开/收起外观、播放与弹幕配置,按需调整二级选项。
 ///
 /// 读写统一走 [PlayerSettingsStore];更改即时持久化,对新起播生效。
 /// 音量不入本页,由播放器控制层维护。
@@ -69,6 +69,8 @@ class _SettingsPageState extends State<SettingsPage> {
   PlayerSettings _settings = const PlayerSettings();
   var _loaded = false;
   var _tokenVisible = false;
+  var _saveRevision = 0;
+  Future<void> _pendingWrites = Future<void>.value();
 
   @override
   void initState() {
@@ -114,15 +116,38 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Future<void> _save(PlayerSettings next) async {
-    setState(() => _settings = _mergeSettings(_settings, next));
+    if (_store == null) {
+      _saveFailed();
+      return;
+    }
+    final previous = _settings;
+    final revision = ++_saveRevision;
+    final merged = _mergeSettings(_settings, next);
+    setState(() => _settings = merged);
     _syncDanmakuControllers();
     final store = _store;
     if (store == null) {
       return;
     }
     try {
-      await store.write(next);
-    } catch (_) {}
+      final write = _pendingWrites.then((_) => store.writePatch(next));
+      _pendingWrites = write.then<void>((_) {}, onError: (Object _) {});
+      await write;
+    } catch (_) {
+      if (mounted) {
+        if (revision == _saveRevision) {
+          setState(() => _settings = previous);
+          _syncDanmakuControllers();
+        }
+        _saveFailed();
+      }
+    }
+  }
+
+  void _saveFailed() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(AppLocalizations.of(context).settingsSaveFailed)),
+    );
   }
 
   /// 弹幕显示只携带 [PlayerSettings.danmakuDisplay],其余字段留 null 走合并写。
@@ -164,19 +189,13 @@ class _SettingsPageState extends State<SettingsPage> {
     unawaited(_saveDanmakuService(server, appId, token));
   }
 
-  /// 弹幕服务保存:与本页既有行一致,携带本页管理的全部字段做整页写。
+  /// 弹幕服务保存:只写入本次输入,保留播放进程管理的音量等字段。
   ///
   /// 未由本页写入的字段(弹幕显示参数、按剧记忆等)由 store 合并写保留;
   /// 空串显式覆盖旧值即清除(回官方源),弹幕控制器读取时把空串按未配置解析。
   Future<void> _saveDanmakuService(String server, String appId, String token) {
     return _save(
       PlayerSettings(
-        volume: _settings.clampedVolume,
-        diskCacheLimitMiB: _settings.diskCacheLimitMiB,
-        hardwareDecoding:
-            _settings.hardwareDecoding ?? HardwareDecodingMode.auto,
-        hardwareDecoder:
-            _settings.hardwareDecoder ?? HardwareDecoderBackend.auto,
         danmakuServer: server,
         danmakuAppId: appId,
         danmakuToken: token,
@@ -185,17 +204,15 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Future<void> _restoreDefaults() {
-    // 与 PlayerRuntimeOptions.defaultSettings 一致的显式默认值,
-    // 另以空串清除自定义弹幕服务(合并写下 null 不覆盖旧值)。
+    // 只恢复播放分类,弹幕服务与显示样式由各自分类维护。
     return _save(
       PlayerSettings(
-        volume: _settings.clampedVolume,
         diskCacheLimitMiB: PlayerRuntimeDefaults.diskCacheLimitMiB,
         hardwareDecoding: HardwareDecodingMode.auto,
         hardwareDecoder: HardwareDecoderBackend.auto,
-        danmakuServer: '',
-        danmakuAppId: '',
-        danmakuToken: '',
+        playbackRate: 1,
+        skipIntroEnabled: true,
+        skipOutroEnabled: true,
       ),
     );
   }
@@ -242,6 +259,7 @@ class _SettingsPageState extends State<SettingsPage> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final appearance = widget.appearance ?? AppearanceScope.maybeOf(context);
+    final nav = PhoneNavStyle.maybeOf(context);
     final backends = PlayerRuntimeOptions.availableBackends(_platform);
     final limitChoices = <int>[...SettingsPage.diskCacheLimitChoices];
     final effectiveLimit = PlayerRuntimeOptions.effectiveDiskCacheLimitMiB(
@@ -283,10 +301,30 @@ class _SettingsPageState extends State<SettingsPage> {
                   ),
                   const SizedBox(height: AppSpacing.xl),
                 ],
+                Text(
+                  l10n.settingsCategoriesHint,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 20),
                 _SettingsSection(
                   icon: Icons.brightness_6_outlined,
                   title: l10n.settingsAppearance,
+                  subtitle: l10n.settingsAppearanceHint,
                   children: [
+                    if (nav != null)
+                      ListenableBuilder(
+                        listenable: nav,
+                        builder: (context, _) => SwitchListTile.adaptive(
+                          contentPadding: EdgeInsets.zero,
+                          title: Text(l10n.phoneFloatingNav),
+                          subtitle: Text(l10n.phoneFloatingNavHint),
+                          value: nav.floating,
+                          onChanged: (value) =>
+                              unawaited(nav.setFloating(value)),
+                        ),
+                      ),
                     _SettingsChoiceRow(
                       label: l10n.settingsAppearance,
                       hint: l10n.settingsAppearanceHint,
@@ -330,6 +368,62 @@ class _SettingsPageState extends State<SettingsPage> {
                   ),
                   children: [
                     _SettingsChoiceRow(
+                      label: l10n.playbackRate,
+                      hint: l10n.settingsAppliesToNewPlayback,
+                      child: _SettingsDropdown<double>(
+                        dropdownKey: const Key('settings-playback-rate'),
+                        value: _settings.effectivePlaybackRate,
+                        items: [
+                          for (final rate in {
+                            .5,
+                            .75,
+                            1.0,
+                            1.25,
+                            1.5,
+                            2.0,
+                            2.5,
+                            3.0,
+                            _settings.effectivePlaybackRate,
+                          })
+                            DropdownMenuItem(
+                              value: rate,
+                              child: Text('${rate}x'),
+                            ),
+                        ],
+                        onChanged: !_loaded
+                            ? null
+                            : (value) {
+                                if (value != null) {
+                                  unawaited(
+                                    _save(PlayerSettings(playbackRate: value)),
+                                  );
+                                }
+                              },
+                      ),
+                    ),
+                    SwitchListTile.adaptive(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(l10n.settingsSkipIntro),
+                      subtitle: Text(l10n.settingsSkipIntroHint),
+                      value: _settings.isSkipIntroEnabled,
+                      onChanged: !_loaded
+                          ? null
+                          : (value) => unawaited(
+                              _save(PlayerSettings(skipIntroEnabled: value)),
+                            ),
+                    ),
+                    SwitchListTile.adaptive(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(l10n.settingsSkipOutro),
+                      subtitle: Text(l10n.settingsSkipOutroHint),
+                      value: _settings.isSkipOutroEnabled,
+                      onChanged: !_loaded
+                          ? null
+                          : (value) => unawaited(
+                              _save(PlayerSettings(skipOutroEnabled: value)),
+                            ),
+                    ),
+                    _SettingsChoiceRow(
                       label: l10n.settingsDiskCacheLimit,
                       hint: l10n.settingsDiskCacheLimitHint,
                       child: _SettingsDropdown<int>(
@@ -346,15 +440,7 @@ class _SettingsPageState extends State<SettingsPage> {
                             ? (value) {
                                 if (value != null) {
                                   _save(
-                                    PlayerSettings(
-                                      volume: _settings.clampedVolume,
-                                      diskCacheLimitMiB: value,
-                                      hardwareDecoding: decoding,
-                                      hardwareDecoder: backend,
-                                      danmakuServer: _settings.danmakuServer,
-                                      danmakuAppId: _settings.danmakuAppId,
-                                      danmakuToken: _settings.danmakuToken,
-                                    ),
+                                    PlayerSettings(diskCacheLimitMiB: value),
                                   );
                                 }
                               }
@@ -385,16 +471,7 @@ class _SettingsPageState extends State<SettingsPage> {
                             ? (value) {
                                 if (value != null) {
                                   _save(
-                                    PlayerSettings(
-                                      volume: _settings.clampedVolume,
-                                      diskCacheLimitMiB:
-                                          _settings.diskCacheLimitMiB,
-                                      hardwareDecoding: value,
-                                      hardwareDecoder: backend,
-                                      danmakuServer: _settings.danmakuServer,
-                                      danmakuAppId: _settings.danmakuAppId,
-                                      danmakuToken: _settings.danmakuToken,
-                                    ),
+                                    PlayerSettings(hardwareDecoding: value),
                                   );
                                 }
                               }
@@ -419,18 +496,7 @@ class _SettingsPageState extends State<SettingsPage> {
                         onChanged: _loaded && backends.length > 1
                             ? (value) {
                                 if (value != null) {
-                                  _save(
-                                    PlayerSettings(
-                                      volume: _settings.clampedVolume,
-                                      diskCacheLimitMiB:
-                                          _settings.diskCacheLimitMiB,
-                                      hardwareDecoding: decoding,
-                                      hardwareDecoder: value,
-                                      danmakuServer: _settings.danmakuServer,
-                                      danmakuAppId: _settings.danmakuAppId,
-                                      danmakuToken: _settings.danmakuToken,
-                                    ),
-                                  );
+                                  _save(PlayerSettings(hardwareDecoder: value));
                                 }
                               }
                             : null,
@@ -441,7 +507,8 @@ class _SettingsPageState extends State<SettingsPage> {
                 const SizedBox(height: AppSpacing.lg),
                 _SettingsSection(
                   icon: Icons.chat_bubble_outline_rounded,
-                  title: l10n.danmakuSettings,
+                  title: l10n.settingsDanmakuConfiguration,
+                  subtitle: l10n.settingsDanmakuConfigurationSummary,
                   trailing: TextButton.icon(
                     key: DanmakuKeys.restoreDefaults,
                     onPressed: _loaded
@@ -466,14 +533,31 @@ class _SettingsPageState extends State<SettingsPage> {
                       onChanged: _loaded ? _saveDanmakuDisplay : (_) {},
                       layout: DanmakuFormLayout.settings,
                     ),
-                  ],
-                ),
-                const SizedBox(height: AppSpacing.lg),
-                _SettingsSection(
-                  icon: Icons.subtitles_outlined,
-                  title: l10n.settingsDanmakuService,
-                  subtitle: l10n.settingsDanmakuServiceHint,
-                  children: [
+                    Padding(
+                      padding: const EdgeInsets.only(
+                        top: AppSpacing.lg,
+                        bottom: AppSpacing.sm,
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            l10n.settingsDanmakuService,
+                            style: Theme.of(context).textTheme.titleSmall,
+                          ),
+                          const SizedBox(height: AppSpacing.xs),
+                          Text(
+                            l10n.settingsDanmakuServiceHint,
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.onSurfaceVariant,
+                                ),
+                          ),
+                        ],
+                      ),
+                    ),
                     _SettingsField(
                       label: l10n.settingsDanmakuServer,
                       child: TextField(
@@ -570,6 +654,8 @@ PlayerSettings _mergeSettings(PlayerSettings current, PlayerSettings patch) {
     hardwareDecoding: patch.hardwareDecoding ?? current.hardwareDecoding,
     hardwareDecoder: patch.hardwareDecoder ?? current.hardwareDecoder,
     playbackRate: patch.playbackRate ?? current.playbackRate,
+    skipIntroEnabled: patch.skipIntroEnabled ?? current.skipIntroEnabled,
+    skipOutroEnabled: patch.skipOutroEnabled ?? current.skipOutroEnabled,
     seriesPreferences: patch.seriesPreferences.isNotEmpty
         ? patch.seriesPreferences
         : current.seriesPreferences,
@@ -604,71 +690,53 @@ class _SettingsSection extends StatelessWidget {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     return Material(
-      color: scheme.surfaceContainer,
+      color: scheme.surfaceContainerLow,
       borderRadius: BorderRadius.circular(AppRadii.lg),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(
-          AppSpacing.lg,
-          AppSpacing.md,
-          AppSpacing.lg,
-          AppSpacing.sm,
+      clipBehavior: Clip.antiAlias,
+      child: ExpansionTile(
+        key: ValueKey('settings-section-$title'),
+        tilePadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+        childrenPadding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+        shape: const Border(),
+        collapsedShape: const Border(),
+        onExpansionChanged: (expanded) {
+          if (!expanded) FocusScope.of(context).unfocus();
+        },
+        leading: CircleAvatar(
+          backgroundColor: scheme.surfaceContainerHighest,
+          foregroundColor: scheme.onSurface,
+          child: Icon(icon, size: 22),
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              children: [
-                DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: scheme.surfaceContainerHighest,
-                    borderRadius: BorderRadius.circular(AppRadii.sm),
-                  ),
-                  child: SizedBox(
-                    width: 36,
-                    height: 36,
-                    child: Center(
-                      child: Icon(icon, size: 20, color: scheme.onSurface),
-                    ),
+        title: Text(title, style: theme.textTheme.titleMedium),
+        subtitle: subtitle == null
+            ? null
+            : Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  subtitle!,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
                   ),
                 ),
-                const SizedBox(width: AppSpacing.sm),
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.only(top: 2),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(title, style: theme.textTheme.titleMedium),
-                        if (subtitle != null) ...[
-                          const SizedBox(height: 2),
-                          Text(
-                            subtitle!,
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: scheme.onSurfaceVariant,
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
+              ),
+        children: [
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (trailing != null)
+                Align(alignment: Alignment.centerRight, child: trailing),
+              const SizedBox(height: AppSpacing.sm),
+              for (var i = 0; i < children.length; i++) ...[
+                if (i > 0)
+                  Divider(
+                    height: 1,
+                    color: scheme.outlineVariant.withValues(alpha: 0.8),
                   ),
-                ),
-                if (trailing != null) ...[
-                  const SizedBox(width: AppSpacing.sm),
-                  Flexible(child: trailing!),
-                ],
+                children[i],
               ],
-            ),
-            const SizedBox(height: AppSpacing.sm),
-            for (var i = 0; i < children.length; i++) ...[
-              if (i > 0)
-                Divider(
-                  height: 1,
-                  color: scheme.outlineVariant.withValues(alpha: 0.8),
-                ),
-              children[i],
             ],
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -688,29 +756,41 @@ class _SettingsChoiceRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final description = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: theme.textTheme.titleSmall),
+        const SizedBox(height: 2),
+        Text(
+          hint,
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+      ],
+    );
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          if (constraints.maxWidth < 400) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text(label, style: theme.textTheme.titleSmall),
-                const SizedBox(height: 2),
-                Text(
-                  hint,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                ),
+                description,
+                const SizedBox(height: AppSpacing.sm),
+                child,
               ],
-            ),
-          ),
-          const SizedBox(width: AppSpacing.md),
-          SizedBox(width: SettingsPage.choiceControlWidth, child: child),
-        ],
+            );
+          }
+          return Row(
+            children: [
+              Expanded(child: description),
+              const SizedBox(width: AppSpacing.md),
+              SizedBox(width: SettingsPage.choiceControlWidth, child: child),
+            ],
+          );
+        },
       ),
     );
   }

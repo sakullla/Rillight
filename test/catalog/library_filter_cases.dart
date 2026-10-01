@@ -64,7 +64,7 @@ class _FilteringEmbyServer extends FakeEmbyServer {
         query.containsKey('Genres') ||
         query.containsKey('Years');
     if (method == 'GET' &&
-        options.uri.path == '/Users/user-alice/Items' &&
+        options.uri.path == '/emby/Users/user-alice/Items' &&
         hasFilterParams) {
       requests.add(
         options.uri.query.isEmpty

@@ -264,8 +264,10 @@ Uri embyResourceUri(Uri baseUrl, String pathOrUrl, String accessToken) {
   final Uri resolved;
   if (parsed.hasScheme) {
     resolved = parsed;
+  } else if (parsed.hasAuthority) {
+    resolved = baseUrl.resolveUri(parsed);
   } else {
-    resolved = joinEmbyPath(
+    resolved = joinEmbyApiPath(
       baseUrl,
       parsed.path,
     ).replace(queryParameters: parsed.queryParameters);

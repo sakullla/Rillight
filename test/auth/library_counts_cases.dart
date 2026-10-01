@@ -12,7 +12,6 @@ import 'package:rillight/app/tv_shell.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/auth/library_counts_panel.dart';
-import 'package:rillight/auth/server_switcher_dialog.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/emby/emby_errors.dart';
@@ -165,7 +164,7 @@ void main() {
   );
 
   testWidgets(
-    'switcher shows per-type counts including zeros, loading and failure',
+    'count panel shows per-type counts including zeros, loading and failure',
     (tester) async {
       Widget host({
         LibraryCounts? counts,
@@ -178,21 +177,10 @@ void main() {
           supportedLocales: AppLocalizations.supportedLocales,
           localizationsDelegates: AppLocalizations.localizationsDelegates,
           home: Scaffold(
-            body: ServerSwitcherDialog(
-              servers: const [],
-              activeServerId: 'server-id-1',
-              activeLineId: 'line-1',
-              onSelect: (_, _) {},
-              onAddServer: () {},
-              onLogout: () {},
-              onDelete: (_) {},
-              onChangePassword: () {},
-              onAddLine: (_) {},
-              onEditLine: (_, _) {},
-              onDeleteLine: (_, _) {},
-              libraryCounts: counts,
-              libraryCountsLoading: loading,
-              libraryCountsFailure: failure,
+            body: LibraryCountsPanel(
+              counts: counts,
+              loading: loading,
+              failure: failure,
             ),
           ),
         );

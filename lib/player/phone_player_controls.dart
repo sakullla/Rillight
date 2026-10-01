@@ -15,6 +15,7 @@ import 'package:rillight/player/buffered_ranges_track.dart';
 import 'package:rillight/player/network_throughput.dart';
 import 'package:rillight/player/player_controller.dart';
 import 'package:rillight/player/player_settings.dart';
+import 'package:rillight/player/playback_skip_settings.dart';
 import 'package:rillight/player/phone/phone_player_interaction.dart';
 
 /// Phone controls with a title bar, central transport and a full-width timeline.
@@ -635,6 +636,9 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                   children: [
                     Expanded(
                       child: Text(switch (section) {
+                        'skip' => AppLocalizations.of(
+                          context,
+                        ).playerSkipSettings,
                         'speed' => AppLocalizations.of(context).mobileSpeed,
                         'quality' => AppLocalizations.of(context).quality,
                         'tracks' => AppLocalizations.of(context).mobileTracks,
@@ -652,6 +656,45 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                   ],
                 ),
                 const SizedBox(height: 16),
+                if (section == null) ...[
+                  for (final entry in <String, (IconData, String)>{
+                    'speed': (
+                      Icons.speed,
+                      AppLocalizations.of(context).playbackRate,
+                    ),
+                    'tracks': (
+                      Icons.subtitles_outlined,
+                      AppLocalizations.of(context).mobileTracks,
+                    ),
+                    'quality': (
+                      Icons.high_quality_outlined,
+                      AppLocalizations.of(context).quality,
+                    ),
+                    'picture': (
+                      Icons.aspect_ratio,
+                      AppLocalizations.of(context).playerPictureSettings,
+                    ),
+                    'skip': (
+                      Icons.fast_forward_rounded,
+                      AppLocalizations.of(context).playerSkipSettings,
+                    ),
+                    if (danmaku != null)
+                      'danmaku': (
+                        Icons.chat_bubble_outline,
+                        AppLocalizations.of(context).danmaku,
+                      ),
+                  }.entries)
+                    ListTile(
+                      leading: Icon(entry.value.$1),
+                      title: Text(entry.value.$2),
+                      trailing: const Icon(Icons.chevron_right_rounded),
+                      onTap: () {
+                        panelSetState(() => panelSection = entry.key);
+                        widget.interaction.setPanel(entry.key);
+                      },
+                    ),
+                ],
+                if (section == 'skip') PlaybackSkipSettings(controller: c),
                 if (section == null && c.canSwitchMediaSource) ...[
                   ListTile(
                     key: const Key('mobile-player-source-entry'),
@@ -697,14 +740,13 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                     ),
                   const Divider(),
                 ],
-                if (section == null)
+                if (section == 'picture')
                   _VideoScaleChoices(
                     fill: widget.fillFrame,
                     onChanged: (fill) => widget.onFillFrame?.call(fill),
                   ),
                 const SizedBox(height: 8),
-                if (danmaku != null &&
-                    (section == null || section == 'danmaku')) ...[
+                if (danmaku != null && section == 'danmaku') ...[
                   if (section == null)
                     Row(
                       children: [
@@ -745,10 +787,7 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                   ),
                   const Divider(),
                 ],
-                if ((section == null &&
-                        (c.audioTracks.length > 1 ||
-                            c.subtitleTracks.isNotEmpty)) ||
-                    section == 'tracks') ...[
+                if (section == 'tracks') ...[
                   if (section == null)
                     Text(AppLocalizations.of(context).mobileTracks),
                   for (final track in c.audioTracks)
@@ -791,8 +830,7 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                     Text(AppLocalizations.of(context).mobileTrackUnavailable),
                   const Divider(),
                 ],
-                if ((section == null && c.availableBitrates.length > 1) ||
-                    section == 'quality') ...[
+                if (section == 'quality') ...[
                   if (section == null)
                     Text(AppLocalizations.of(context).quality),
                   Wrap(
@@ -817,13 +855,13 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                   ),
                   const Divider(),
                 ],
-                if (section == null || section == 'speed') ...[
+                if (section == 'speed') ...[
                   if (section == null)
                     Text(AppLocalizations.of(context).mobileSpeed),
                   Wrap(
                     spacing: 8,
                     children: [
-                      for (final rate in [.5, 1.0, 1.25, 1.5, 2.0])
+                      for (final rate in kPlaybackRateLadder)
                         ChoiceChip(
                           label: Text('${rate}x'),
                           selected: c.playbackRate == rate,
@@ -833,7 +871,7 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                   ),
                   const Divider(),
                 ],
-                if (section == null) ...[
+                if (section == 'picture') ...[
                   Text(AppLocalizations.of(context).mobileAppVolume),
                   Row(
                     children: [
@@ -876,7 +914,7 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                   ),
                 ],
                 TextButton(
-                  onPressed: section == 'source'
+                  onPressed: section != null
                       ? () {
                           panelSetState(() => panelSection = null);
                           widget.interaction.setPanel('more');

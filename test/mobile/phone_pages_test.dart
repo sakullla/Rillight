@@ -2748,7 +2748,7 @@ class _FilteringEmbyServer extends FakeEmbyServer {
   ) async {
     final query = options.uri.queryParameters;
     if (options.method.toUpperCase() == 'GET' &&
-        options.uri.path == '/Users/user-alice/Items' &&
+        options.uri.path == '/emby/Users/user-alice/Items' &&
         query.containsKey('Filters')) {
       return _filteredItems(options);
     }

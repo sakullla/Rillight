@@ -1,7 +1,7 @@
 import 'dart:async';
-import 'dart:typed_data';
 
 import 'package:flutter/widgets.dart';
+import 'package:flutter/foundation.dart';
 import 'package:rillight/player/playback_models.dart';
 
 class VideoOpenRequest {
@@ -72,6 +72,11 @@ class DeviceTrackRejected implements Exception {
 abstract interface class VideoBackendTrackSupport {
   bool? audioTrackSupported(int index);
   bool? subtitleTrackSupported(int index);
+}
+
+/// Native video can be composed behind the transparent Flutter controls.
+abstract interface class VideoBackendNativeOverlay {
+  ValueListenable<bool> get nativeOverlay;
 }
 
 enum VideoEventKind {

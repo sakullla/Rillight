@@ -245,7 +245,8 @@ void main() {
 
     final resumeRequests = server.requests
         .where(
-          (entry) => entry.startsWith('GET /Users/user-alice/Items/Resume'),
+          (entry) =>
+              entry.startsWith('GET /emby/Users/user-alice/Items/Resume'),
         )
         .length;
     expect(resumeRequests, 3, reason: '每次 fetch 都走网络,不吃缓存');

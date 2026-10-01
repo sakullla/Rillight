@@ -1456,5 +1456,29 @@
   "playerFill": "填充",
   "@playerFill": {
     "description": "Player scale mode that crops the frame so aspect-ratio black bars are gone."
-  }
+  },
+  "settingsCategoriesHint": "展开分类调整设置，再次点击可收起。修改会自动保存。",
+  "settingsBackToCategories": "返回设置分类",
+  "settingsPlaybackSummary": "倍速、片头片尾、缓冲与硬件解码",
+  "settingsDanmakuDisplaySummary": "字号、不透明度、显示区域与屏蔽词",
+  "settingsSkipIntro": "片头跳过提示",
+  "settingsSkipIntroHint": "在标记的片头显示跳过按钮，关闭后完整播放",
+  "settingsSkipOutro": "片尾跳过提示",
+  "settingsSkipOutroHint": "在片尾显示跳过或下一集提示，关闭后播放结束再提示下一集",
+  "playerSkipSettings": "片头与片尾",
+  "nextEpisodeHeading": "接下来播放",
+  "nextEpisodeKeepWatching": "继续看本集",
+  "nextEpisodeStay": "暂不播放",
+  "settingsSaveFailed": "设置保存失败，请重试",
+  "playerPictureSettings": "画面与音量",
+  "albumDownload": "下载原图",
+  "albumDownloadSaved": "图片已保存",
+  "albumDownloadFailed": "图片保存失败，请重试",
+  "albumPrevious": "上一张",
+  "albumNext": "下一张",
+  "playbackDolbyVisionUnsupported": "此杜比视界版本需要专用色彩处理，当前无法播放，服务器也未提供兼容转码。请切换 HDR10 或 SDR 版本。",
+  "settingsDanmakuConfiguration": "弹幕配置",
+  "settingsDanmakuConfigurationSummary": "显示样式、屏蔽词与服务连接",
+  "danmakuPreview": "样式预览",
+  "danmakuPreviewText": "一起看剧，弹幕也清晰舒适"
 }

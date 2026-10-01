@@ -65,7 +65,8 @@ requires the real pinned FFmpeg libraries and exercises decoding, stream
 metadata, first-frame readiness, pause, seek, 2.0x audio sample reduction,
 stale operation rejection, session change, EOF drain, frame ownership, and
 strict hardware failure versus explicit software fallback. It also checks
-audio-clock handoff to monotonic time, repeated handoff calls, and rejection
+audio-clock interpolation between device reports, the submitted-audio limit,
+pause stability, handoff to monotonic time, repeated handoff calls, and rejection
 of an old audio position after handoff. A controlled IO
 read blocks after decoded audio is ready; seek must cancel that old read,
 produce frames on the new timeline, and tolerate a second seek. A gated EOF

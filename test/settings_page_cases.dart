@@ -31,6 +31,13 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  Future<void> expandSection(WidgetTester tester, String title) async {
+    final section = find.byKey(ValueKey('settings-section-$title'));
+    await tester.ensureVisible(section);
+    await tester.tap(find.descendant(of: section, matching: find.text(title)));
+    await tester.pumpAndSettle();
+  }
+
   testWidgets('shows the stored settings and changing the disk cache limit '
       'persists and echoes', (tester) async {
     final store = MemoryPlayerSettingsStore(
@@ -41,6 +48,8 @@ void main() {
       ),
     );
     await pumpPage(tester, store: store);
+
+    await expandSection(tester, '播放');
 
     // 读:控件回显已存设置。
     expect(
@@ -99,6 +108,8 @@ void main() {
     );
     await pumpPage(tester, store: store);
 
+    await expandSection(tester, '播放');
+
     await tester.tap(find.byKey(SettingsPage.restoreDefaultsKey));
     await tester.pumpAndSettle();
 
@@ -109,4 +120,94 @@ void main() {
     // 音量不属于本页管理,恢复默认不覆盖已存音量。
     expect(settings.volume, 40);
   }, tags: ['integration']);
+
+  testWidgets('sections collapse and skip switches persist independently', (
+    tester,
+  ) async {
+    final store = MemoryPlayerSettingsStore(const PlayerSettings(volume: 40));
+    await pumpPage(tester, store: store);
+    expect(find.byKey(SettingsPage.diskCacheLimitKey), findsNothing);
+    await expandSection(tester, '播放');
+    final switches = find.descendant(
+      of: find.byKey(const ValueKey('settings-section-播放')),
+      matching: find.byType(SwitchListTile),
+    );
+    expect(switches, findsNWidgets(2));
+    await tester.tap(switches.first);
+    await tester.pumpAndSettle();
+    expect((await store.read()).isSkipIntroEnabled, isFalse);
+    expect((await store.read()).isSkipOutroEnabled, isTrue);
+    await tester.tap(switches.last);
+    await tester.pumpAndSettle();
+    expect((await store.read()).isSkipOutroEnabled, isFalse);
+    expect((await store.read()).volume, 40);
+    await expandSection(tester, '播放');
+    expect(find.byKey(SettingsPage.diskCacheLimitKey), findsNothing);
+    await expandSection(tester, '播放');
+    expect(tester.widget<SwitchListTile>(switches.first).value, isFalse);
+    expect(tester.widget<SwitchListTile>(switches.last).value, isFalse);
+  }, tags: ['integration']);
+
+  testWidgets('settings changes preserve volume updated by the player', (
+    tester,
+  ) async {
+    final store = MemoryPlayerSettingsStore(const PlayerSettings(volume: 40));
+    await pumpPage(tester, store: store);
+    await store.write(const PlayerSettings(volume: 75));
+    await expandSection(tester, '播放');
+    await tester.tap(find.byType(SwitchListTile).first);
+    await tester.pumpAndSettle();
+    expect((await store.read()).volume, 75);
+    expect((await store.read()).isSkipIntroEnabled, isFalse);
+  }, tags: ['integration']);
+
+  testWidgets(
+    'danmaku shows preview and folds advanced options on narrow page',
+    (tester) async {
+      await pumpPage(tester, store: MemoryPlayerSettingsStore());
+      tester.view.physicalSize = const Size(360, 1600);
+      await tester.pumpAndSettle();
+      await expandSection(tester, '弹幕配置');
+      expect(find.text('样式预览'), findsOneWidget);
+      expect(find.text('一起看剧，弹幕也清晰舒适'), findsOneWidget);
+      final advanced = find.byKey(const ValueKey('danmaku-advanced-settings'));
+      await tester.ensureVisible(advanced);
+      await tester.tap(
+        find.descendant(of: advanced, matching: find.byType(ListTile)),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(SwitchListTile), findsWidgets);
+      expect(tester.takeException(), isNull);
+    },
+    tags: ['integration'],
+  );
+
+  testWidgets(
+    'danmaku configuration combines display and service and saves input on collapse',
+    (tester) async {
+      final store = MemoryPlayerSettingsStore(const PlayerSettings(volume: 40));
+      await pumpPage(tester, store: store);
+      expect(find.text('弹幕配置'), findsOneWidget);
+      expect(find.text('弹幕服务'), findsNothing);
+      await expandSection(tester, '弹幕配置');
+      expect(find.text('样式预览'), findsOneWidget);
+      expect(find.text('弹幕服务'), findsOneWidget);
+      final field = find.byKey(SettingsPage.danmakuServerFieldKey);
+      await tester.ensureVisible(field);
+      await tester.enterText(field, 'https://danmaku.example.test');
+      await expandSection(tester, '弹幕配置');
+      expect(find.byKey(SettingsPage.danmakuServerFieldKey), findsNothing);
+      expect(
+        (await store.read()).danmakuServer,
+        'https://danmaku.example.test',
+      );
+      expect((await store.read()).volume, 40);
+      await expandSection(tester, '弹幕配置');
+      expect(
+        tester.widget<TextField>(field).controller!.text,
+        'https://danmaku.example.test',
+      );
+    },
+    tags: ['integration'],
+  );
 }

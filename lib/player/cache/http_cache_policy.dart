@@ -64,10 +64,12 @@ class MediaCachePolicy {
     bool allowSessionBuffering = false,
   }) {
     final current = now ?? DateTime.now();
-    final control = headers.value('cache-control')?.toLowerCase() ?? '';
+    // List-valued HTTP fields may be split across several header lines by
+    // Emby and its reverse proxy. HttpHeaders.value throws for those responses.
+    final control = headers['cache-control']?.join(',').toLowerCase() ?? '';
     final directives = control.split(',').map((s) => s.trim()).toList();
     final noStore = directives.contains('no-store');
-    final vary = headers.value('vary')?.toLowerCase().split(',') ?? [];
+    final vary = headers['vary']?.join(',').toLowerCase().split(',') ?? [];
     // Unknown Vary fields are bypassed, including conditional/range fields.
     const fixedHeaders = {
       'accept-encoding',

@@ -142,6 +142,7 @@ class _HomeHeroState extends State<HomeHero> {
           );
         }
         final featured = item!;
+        final light = Theme.of(context).brightness == Brightness.light;
         return SizedBox(
           height: height,
           width: double.infinity,
@@ -160,6 +161,13 @@ class _HomeHeroState extends State<HomeHero> {
                       fit: StackFit.expand,
                       children: [
                         BackdropScrim(
+                          lightTextSurface: true,
+                          textBandWidthFactor: light
+                              ? ((math.min(constraints.maxWidth * 0.44, 560) +
+                                            AppSpacing.page * 2) /
+                                        constraints.maxWidth)
+                                    .clamp(0.0, 1.0)
+                              : AppScrim.textBandWidthFactor,
                           topBandHeight: math.max(
                             AppScrim.topBandHeight,
                             widget.topOverlap + HomeHero.topBandFade,
@@ -195,34 +203,58 @@ class _HomeHeroState extends State<HomeHero> {
                 ),
               ),
               if (items.length > 1) ...[
-                Positioned(
-                  left: AppSpacing.sm,
-                  top: 0,
-                  bottom: 0,
-                  child: Center(
-                    child: ScrimIconButton(
-                      key: CatalogKeys.heroPrev,
-                      tooltip: AppLocalizations.of(context).scrollLeft,
-                      icon: const Icon(Icons.chevron_left),
-                      size: ScrimIconButtonSize.large,
-                      onPressed: () => _go(-1),
+                if (light)
+                  Positioned(
+                    right: AppSpacing.page,
+                    bottom: AppSpacing.xs,
+                    child: Row(
+                      children: [
+                        IconButton.filledTonal(
+                          key: CatalogKeys.heroPrev,
+                          tooltip: AppLocalizations.of(context).scrollLeft,
+                          icon: const Icon(Icons.chevron_left),
+                          onPressed: () => _go(-1),
+                        ),
+                        const SizedBox(width: AppSpacing.xs),
+                        IconButton.filledTonal(
+                          key: CatalogKeys.heroNext,
+                          tooltip: AppLocalizations.of(context).scrollRight,
+                          icon: const Icon(Icons.chevron_right),
+                          onPressed: () => _go(1),
+                        ),
+                      ],
                     ),
                   ),
-                ),
-                Positioned(
-                  right: AppSpacing.sm,
-                  top: 0,
-                  bottom: 0,
-                  child: Center(
-                    child: ScrimIconButton(
-                      key: CatalogKeys.heroNext,
-                      tooltip: AppLocalizations.of(context).scrollRight,
-                      icon: const Icon(Icons.chevron_right),
-                      size: ScrimIconButtonSize.large,
-                      onPressed: () => _go(1),
+                if (!light)
+                  Positioned(
+                    left: AppSpacing.sm,
+                    top: 0,
+                    bottom: 0,
+                    child: Center(
+                      child: ScrimIconButton(
+                        key: CatalogKeys.heroPrev,
+                        tooltip: AppLocalizations.of(context).scrollLeft,
+                        icon: const Icon(Icons.chevron_left),
+                        size: ScrimIconButtonSize.large,
+                        onPressed: () => _go(-1),
+                      ),
                     ),
                   ),
-                ),
+                if (!light)
+                  Positioned(
+                    right: AppSpacing.sm,
+                    top: 0,
+                    bottom: 0,
+                    child: Center(
+                      child: ScrimIconButton(
+                        key: CatalogKeys.heroNext,
+                        tooltip: AppLocalizations.of(context).scrollRight,
+                        icon: const Icon(Icons.chevron_right),
+                        size: ScrimIconButtonSize.large,
+                        onPressed: () => _go(1),
+                      ),
+                    ),
+                  ),
                 Positioned(
                   left: AppSpacing.page,
                   bottom: AppSpacing.xs,
@@ -322,7 +354,10 @@ class _HeroContent extends StatelessWidget {
       if (item.canResume)
         l10n.playbackProgress((item.playbackProgress * 100).round()),
     ];
-    final textBlockWidth = HomeHero.textBlockWidthFor(width);
+    final light = theme.brightness == Brightness.light;
+    final textBlockWidth = light
+        ? math.min(width * 0.44, 560.0)
+        : HomeHero.textBlockWidthFor(width);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -396,6 +431,7 @@ class _HeroContent extends StatelessWidget {
           ),
           child: Text(l10n.details),
         ),
+        if (light) const Spacer(),
       ],
     );
   }

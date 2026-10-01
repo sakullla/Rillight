@@ -14,6 +14,7 @@ class BackdropScrim extends StatelessWidget {
     this.backdrop,
     this.topBandHeight = AppScrim.topBandHeight,
     this.textBandWidthFactor = AppScrim.textBandWidthFactor,
+    this.lightTextSurface = false,
   }) : assert(topBandHeight >= 0),
        assert(textBandWidthFactor > 0 && textBandWidthFactor <= 1);
 
@@ -26,6 +27,9 @@ class BackdropScrim extends StatelessWidget {
   /// 左侧文字带占宽比例。
   final double textBandWidthFactor;
 
+  /// 浅色首页给左侧文字铺表面色，右侧图片保持原色。
+  final bool lightTextSurface;
+
   static const Key topBandKey = Key('backdrop-scrim-top');
   static const Key textBandKey = Key('backdrop-scrim-text');
   static const Key bottomBandKey = Key('backdrop-scrim-bottom');
@@ -34,6 +38,8 @@ class BackdropScrim extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final reduce = MediaQuery.disableAnimationsOf(context);
+    final light = theme.brightness == Brightness.light;
+    final lightSurface = light && lightTextSurface;
     final scrim = theme.colorScheme.scrim;
     final pageBg = theme.scaffoldBackgroundColor;
 
@@ -58,25 +64,35 @@ class BackdropScrim extends StatelessWidget {
               gradient: LinearGradient(
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
-                colors: [scrimAt(AppScrim.top), scrimAt(0)],
+                colors: lightSurface
+                    ? [pageBgAt(AppScrim.top), pageBgAt(0)]
+                    : [scrimAt(AppScrim.top), scrimAt(0)],
               ),
             ),
           ),
           Positioned.fill(
             child: FractionallySizedBox(
               alignment: Alignment.centerLeft,
-              widthFactor: textBandWidthFactor,
+              widthFactor: lightSurface ? 1 : textBandWidthFactor,
               child: _Band(
                 key: textBandKey,
                 gradient: LinearGradient(
                   begin: Alignment.centerLeft,
                   end: Alignment.centerRight,
-                  stops: AppScrim.textStops,
-                  colors: [
-                    scrimAt(AppScrim.textStart),
-                    scrimAt(AppScrim.textMid),
-                    scrimAt(0),
-                  ],
+                  stops: lightSurface
+                      ? [
+                          0,
+                          textBandWidthFactor,
+                          (textBandWidthFactor + 0.20).clamp(0.0, 1.0),
+                        ]
+                      : AppScrim.textStops,
+                  colors: lightSurface
+                      ? [pageBg, pageBgAt(0.96), pageBgAt(0)]
+                      : [
+                          scrimAt(AppScrim.textStart),
+                          scrimAt(AppScrim.textMid),
+                          scrimAt(0),
+                        ],
                 ),
               ),
             ),

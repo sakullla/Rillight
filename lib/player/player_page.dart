@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -32,6 +33,7 @@ import 'package:rillight/player/player_controller.dart';
 import 'package:rillight/player/buffered_ranges_track.dart';
 import 'package:rillight/player/player_keys.dart';
 import 'package:rillight/player/player_settings.dart';
+import 'package:rillight/player/playback_skip_settings.dart';
 import 'package:rillight/player/player_window.dart';
 import 'package:rillight/player/player_window_host.dart';
 import 'package:rillight/player/video_backend.dart';
@@ -108,6 +110,11 @@ class PlayerPage extends StatefulWidget {
 
 class PlayerPageState extends State<PlayerPage> {
   PlayerController? controller;
+  ValueListenable<bool>? _nativePresentation;
+  void _onNativePresentation() {
+    if (mounted) setState(() {});
+  }
+
   final PlaybackWakeLock _wakeLock = PlaybackWakeLock();
   DanmakuController? _danmaku;
   bool _dragSeeking = false;
@@ -121,6 +128,15 @@ class PlayerPageState extends State<PlayerPage> {
   bool _danmakuLayerPinned = false;
   String? _danmakuLayerItemId;
   final FocusNode _playerShortcuts = FocusNode(debugLabel: 'player-shortcuts');
+
+  /// 系统重新激活窗口时，恢复控制栏及播放器键盘入口。
+  void restoreWindowInteraction() {
+    if (!mounted) return;
+    controller?.onUserActivity();
+    if (!_danmakuSearchOpen && !_danmakuPanelOpen) {
+      _playerShortcuts.requestFocus();
+    }
+  }
 
   bool _pointerNearWindowEdge(Offset local) {
     final size = MediaQuery.sizeOf(context);
@@ -158,6 +174,12 @@ class PlayerPageState extends State<PlayerPage> {
       onOpenItemDetail: widget.onOpenItemDetail,
     );
     controller = created;
+    final backend = created.backend;
+    if (backend is VideoBackendNativeOverlay) {
+      _nativePresentation =
+          (backend as VideoBackendNativeOverlay).nativeOverlay;
+      _nativePresentation!.addListener(_onNativePresentation);
+    }
     created.addListener(_onController);
     final danmaku = DanmakuController(
       settingsStore: bindings.settingsStore,
@@ -170,6 +192,7 @@ class PlayerPageState extends State<PlayerPage> {
 
   @override
   void dispose() {
+    _nativePresentation?.removeListener(_onNativePresentation);
     _danmaku?.removeListener(_onDanmakuChanged);
     _danmaku?.dispose();
     final current = controller;
@@ -414,6 +437,9 @@ class PlayerPageState extends State<PlayerPage> {
         focusNode: _playerShortcuts,
         autofocus: true,
         descendantsAreFocusable: _danmakuSearchOpen || _danmakuPanelOpen,
+        onFocusChange: (focused) {
+          if (focused) controller?.onUserActivity();
+        },
         onKeyEvent: (node, event) {
           if (event is! KeyDownEvent) {
             return KeyEventResult.ignored;
@@ -478,7 +504,9 @@ class PlayerPageState extends State<PlayerPage> {
             }
           },
           child: Scaffold(
-            backgroundColor: Colors.black,
+            backgroundColor: _nativePresentation?.value == true
+                ? Colors.transparent
+                : Colors.black,
             body: Listener(
               behavior: HitTestBehavior.translucent,
               onPointerSignal: (event) {
@@ -499,6 +527,7 @@ class PlayerPageState extends State<PlayerPage> {
                 unawaited(current.nudgeVolume(delta));
               },
               child: MouseRegion(
+                onEnter: (_) => current.onUserActivity(),
                 onHover: (event) {
                   if (_pointerNearWindowEdge(event.localPosition)) {
                     return;
@@ -751,6 +780,9 @@ class PlayerPageState extends State<PlayerPage> {
           return catalogFailureMessage(l10n, current.loadFailure!);
         }
         final detail = current.disconnectDetail?.trim();
+        if (detail == 'unsupportedDolbyVision') {
+          return l10n.playbackDolbyVisionUnsupported;
+        }
         if (detail != null && detail.isNotEmpty) {
           return '${l10n.playbackFailed}\n$detail';
         }
@@ -2303,6 +2335,14 @@ class _PlaybackOverflowMenu extends StatelessWidget {
               valueKey: PlayerKeys.speedLabel,
             ),
           ),
+          PopupMenuItem(
+            value: _PlaybackOverflowAction.skip,
+            child: _PlaybackSettingRow(
+              label: l10n.playerSkipSettings,
+              value: '',
+              valueKey: const Key('player-skip-settings-label'),
+            ),
+          ),
           if (controller.audioTracks.length > 1)
             PopupMenuItem(
               key: PlayerKeys.audio,
@@ -2348,6 +2388,25 @@ class _PlaybackOverflowMenu extends StatelessWidget {
     }
     final position = _buttonMenuPosition(context);
     switch (action) {
+      case _PlaybackOverflowAction.skip:
+        await showDialog<void>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: Text(AppLocalizations.of(context).playerSkipSettings),
+            content: SizedBox(
+              width: 440,
+              child: PlaybackSkipSettings(controller: controller),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: Text(
+                  MaterialLocalizations.of(context).closeButtonTooltip,
+                ),
+              ),
+            ],
+          ),
+        );
       case _PlaybackOverflowAction.speed:
         final rate = await showMenu<double>(
           context: context,
@@ -2432,7 +2491,7 @@ class _PlaybackOverflowMenu extends StatelessWidget {
   }
 }
 
-enum _PlaybackOverflowAction { speed, quality, audio, mediaSource }
+enum _PlaybackOverflowAction { speed, quality, audio, mediaSource, skip }
 
 /// 溢出菜单第一层:左侧类别,右侧当前值。
 class _PlaybackSettingRow extends StatelessWidget {

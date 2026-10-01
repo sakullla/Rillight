@@ -51,7 +51,10 @@ class RillightPlayerPlugin : public flutter::Plugin {
     // Keep the stable child HWND, but resolve its parent only when posting.
     window_ = registrar_->GetView()->GetNativeWindow();
     dispatch_ = std::make_shared<DispatchQueue>(window_);
-    delegate_ = registrar_->RegisterTopLevelWindowProcDelegate([dispatch = dispatch_](HWND, UINT message, WPARAM owner, LPARAM task) -> std::optional<LRESULT> {
+    delegate_ = registrar_->RegisterTopLevelWindowProcDelegate([this, dispatch = dispatch_](HWND, UINT message, WPARAM owner, LPARAM task) -> std::optional<LRESULT> {
+      if (message == WM_WINDOWPOSCHANGED || message == WM_ACTIVATE || message == WM_DISPLAYCHANGE || message == WM_SHOWWINDOW) {
+        for (auto& entry : surfaces_) entry.second->UpdateNativeOverlay();
+      }
       if (message != kDispatch ||
           owner != reinterpret_cast<WPARAM>(dispatch.get())) return std::nullopt;
       std::function<void()> callback;
@@ -81,7 +84,10 @@ class RillightPlayerPlugin : public flutter::Plugin {
     outstanding_.clear();
     // Normal ownership is Dart dispose -> unregister -> renderer free -> core
     // destroy. This is only an engine shutdown safety net.
-    for (auto& entry : surfaces_) entry.second->Stop([] {});
+    for (auto& entry : surfaces_) {
+      entry.second->HideNativeOverlay();
+      entry.second->Stop([] {});
+    }
     registrar_->UnregisterTopLevelWindowProcDelegate(delegate_);
   }
  private:
@@ -98,9 +104,11 @@ class RillightPlayerPlugin : public flutter::Plugin {
                                      RILLIGHT_CORE_HW_D3D11, 1) != 0) {
           throw std::runtime_error("Could not configure D3D11 decoding with software fallback");
         }
+        Microsoft::WRL::ComPtr<IDXGIAdapter> adapter;
+        registrar_->GetGraphicsAdapter(adapter.GetAddressOf());
         auto surface = std::make_shared<VideoSurface>(
             reinterpret_cast<RillightCore*>(handle), api_,
-            registrar_->texture_registrar());
+            registrar_->texture_registrar(), adapter.Get(), window_);
         surfaces_[handle] = surface;
         const uint64_t request = next_result_id_++;
         outstanding_[request] = result;
@@ -131,6 +139,9 @@ class RillightPlayerPlugin : public flutter::Plugin {
       if (method == "resize") {
         surface->Resize(static_cast<int>(Number(args, "width")), static_cast<int>(Number(args, "height")));
         result->Success();
+      } else if (method == "activateOverlay") {
+        surface->ActivateNativeOverlay();
+        result->Success();
       } else if (method == "status") {
         uint32_t actual_hardware = 0;
         const int count = api_->track_count(reinterpret_cast<RillightCore*>(handle));
@@ -144,13 +155,31 @@ class RillightPlayerPlugin : public flutter::Plugin {
             break;
           }
         }
+        const auto hdr = surface->hdr_display();
+        const auto stats = surface->hdr_stats();
         result->Success(Value(Map{
+            {Value("presentStatsValid"), Value(stats.valid)},
+            {Value("presentCount"), Value(static_cast<int64_t>(stats.present_count))},
+            {Value("presentRefreshCount"), Value(static_cast<int64_t>(stats.present_refresh))},
+            {Value("syncRefreshCount"), Value(static_cast<int64_t>(stats.sync_refresh))},
+            {Value("syncQpc"), Value(stats.sync_qpc)},
+            {Value("qpcFrequency"), Value(stats.qpc_frequency)},
+            {Value("nativeOverlay"), Value(surface->native_overlay_available())},
+            {Value("hdrDisplayActive"), Value(hdr.active)},
+            {Value("hdrSourceFrames"), Value(static_cast<int64_t>(surface->hdr_source_frames()))},
+            {Value("sdrWhiteNits"), Value(static_cast<double>(hdr.sdr_white_nits))},
+            {Value("displayPeakNits"), Value(static_cast<double>(hdr.peak_nits))},
+            {Value("outputColorSpace"), Value(surface->native_overlay_available() ? "scRGB" : "sRGB")},
             {Value("frames"), Value(surface->frames())},
+            {Value("acquiredFrames"), Value(surface->acquired_frames())},
+            {Value("textureCallbacks"), Value(surface->texture_callbacks())},
+            {Value("timeline"), Value(static_cast<int64_t>(surface->acquired_timeline()))},
             {Value("error"), Value(surface->error())},
             {Value("audioWarning"), Value(surface->audio_warning())},
             {Value("actualHardware"), Value(static_cast<int32_t>(actual_hardware))},
         }));
       } else if (method == "dispose") {
+        surface->HideNativeOverlay();
         const uint64_t request = next_result_id_++;
         outstanding_[request] = result;
         auto dispatch = dispatch_;

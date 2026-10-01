@@ -615,7 +615,12 @@ class FakeEmbyServer {
   ) async {
     final path = options.uri.path;
     final method = options.method.toUpperCase();
-    final segments = options.uri.pathSegments;
+    final apiPrefix = baseUrl.path.replaceFirst(RegExp(r'/+$'), '');
+    final apiPath = apiPrefix.endsWith('/emby') ? apiPrefix : '$apiPrefix/emby';
+    if (!path.startsWith('$apiPath/')) {
+      return _json(404, {'error': 'Emby API prefix required'});
+    }
+    final segments = Uri.parse(path.substring(apiPath.length)).pathSegments;
     final query = options.uri.query;
     requests.add(query.isEmpty ? '$method $path' : '$method $path?$query');
     lastUserAgent = _headerValue(options, 'user-agent');

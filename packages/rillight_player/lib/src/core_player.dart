@@ -4,7 +4,9 @@ import 'dart:io';
 import 'dart:isolate';
 
 import 'package:ffi/ffi.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
 
 import 'core_bindings.dart';
@@ -21,6 +23,13 @@ class CorePlayerEvent {
   final String session;
   final String kind;
   final Object value;
+}
+
+class CoreVideoCompatibilityException implements Exception {
+  const CoreVideoCompatibilityException();
+  static const errorCode = -20001;
+  @override
+  String toString() => 'Unsupported Dolby Vision color pipeline';
 }
 
 class CorePlayerTrack {
@@ -225,13 +234,49 @@ class AndroidCorePlayer implements CorePlayer {
   }
 }
 
-class DesktopCorePlayer implements CorePlayer {
+abstract interface class CoreNativeOverlay {
+  ValueListenable<bool> get nativeOverlay;
+  Future<Map<String, dynamic>> presentationStatus();
+}
+
+class DesktopCorePlayer implements CorePlayer, CoreNativeOverlay {
   DesktopCorePlayer._(this._bindings, this._handle, this._textureId);
 
   static const _channel = MethodChannel('rillight_player');
   final CoreBindings _bindings;
   final Pointer<Void> _handle;
   final int _textureId;
+  final _nativeOverlay = ValueNotifier(false);
+  bool _overlayActivated = false;
+  @override
+  ValueListenable<bool> get nativeOverlay => _nativeOverlay;
+  @override
+  Future<Map<String, dynamic>> presentationStatus() async =>
+      await _channel.invokeMapMethod<String, dynamic>('status', {
+        'handle': _handle.address,
+      }) ??
+      const {};
+
+  Future<void> _activateOverlay() async {
+    if (!_nativeOverlay.value || _overlayActivated || _disposed) return;
+    _overlayActivated = true;
+    try {
+      await _channel.invokeMethod<void>('activateOverlay', {
+        'handle': _handle.address,
+      });
+    } catch (_) {
+      if (!_disposed) {
+        _events.add(
+          CorePlayerEvent(
+            _session,
+            'error',
+            'Native HDR overlay could not be activated',
+          ),
+        );
+      }
+    }
+  }
+
   final _events = StreamController<CorePlayerEvent>.broadcast();
   String _session = '';
   int _operation = 0;
@@ -251,7 +296,12 @@ class DesktopCorePlayer implements CorePlayer {
         'handle': handle.address,
       });
       if (texture == null) throw StateError('Core texture was not created');
-      return DesktopCorePlayer._(bindings, handle, texture);
+      final player = DesktopCorePlayer._(bindings, handle, texture);
+      if (Platform.isWindows) {
+        final status = await player.presentationStatus();
+        player._nativeOverlay.value = status['nativeOverlay'] == true;
+      }
+      return player;
     } catch (_) {
       // A renderer may have been registered before create reported failure.
       // Keep its core alive if retirement cannot be acknowledged.
@@ -286,7 +336,18 @@ class DesktopCorePlayer implements CorePlayer {
     );
     final url = request.url.toString().toNativeUtf8();
     try {
-      _check(_bindings.open(_handle, url, ++_operation), 'open');
+      // The first published picture must already belong to the resume point.
+      // Opening at zero and seeking after first-frame readiness briefly shows
+      // the opening logo behind the loading UI before clearing it again.
+      _check(
+        _bindings.openAt(
+          _handle,
+          url,
+          request.start.inMicroseconds.clamp(0, 1 << 62),
+          ++_operation,
+        ),
+        'open',
+      );
     } finally {
       calloc.free(url);
     }
@@ -295,13 +356,15 @@ class DesktopCorePlayer implements CorePlayer {
     }
     _poll = Timer.periodic(const Duration(milliseconds: 100), (_) => _tick());
     final deadline = DateTime.now().add(const Duration(seconds: 45));
-    var seekApplied = request.start <= Duration.zero;
     while (DateTime.now().isBefore(deadline)) {
       if (_disposed || _session != request.session) {
         throw StateError('Superseded core open');
       }
       final snapshot = _readSnapshot();
       if (snapshot.state == 8) {
+        if (snapshot.ffmpegError == CoreVideoCompatibilityException.errorCode) {
+          throw const CoreVideoCompatibilityException();
+        }
         throw StateError('Core media open failed (${snapshot.ffmpegError})');
       }
       final videoReady =
@@ -313,15 +376,6 @@ class DesktopCorePlayer implements CorePlayer {
       if (snapshot.state >= 2 &&
           snapshot.state <= 6 &&
           (videoReady || audioReady)) {
-        if (!seekApplied) {
-          seekApplied = true;
-          _check(
-            _bindings.seek(_handle, request.start.inMicroseconds, ++_operation),
-            'seek',
-          );
-          await Future<void>.delayed(const Duration(milliseconds: 50));
-          continue;
-        }
         if (videoReady) {
           final status = await _channel.invokeMapMethod<String, dynamic>(
             'status',
@@ -728,6 +782,7 @@ class DesktopCorePlayer implements CorePlayer {
     );
     await _destroyCore((_handle.address, _bindings.libraryPath));
     await _events.close();
+    _nativeOverlay.dispose();
   }
 }
 
@@ -743,8 +798,64 @@ class _DesktopCoreView extends StatefulWidget {
   State<_DesktopCoreView> createState() => _DesktopCoreViewState();
 }
 
-class _DesktopCoreViewState extends State<_DesktopCoreView> {
+class _DesktopCoreViewState extends State<_DesktopCoreView>
+    with SingleTickerProviderStateMixin {
   Size? _lastSize;
+  final _textureKey = GlobalKey();
+  late final Ticker _textureTicker;
+  StreamSubscription<CorePlayerEvent>? _surfaceEvents;
+
+  @override
+  void initState() {
+    super.initState();
+    _textureTicker = createTicker((_) {
+      // Keep the texture participating in Windows vsync while playing.
+      // Native notifications arriving during rasterization can be coalesced;
+      // repaint only the texture, without rebuilding player controls.
+      _textureKey.currentContext?.findRenderObject()?.markNeedsPaint();
+    });
+    _listenToPlayer();
+  }
+
+  void _listenToPlayer() {
+    widget.player.nativeOverlay.addListener(_onPresentationChanged);
+    _setTexturePlaying(widget.player._previousState == 3);
+    _surfaceEvents = widget.player.events.listen((event) {
+      if (event.kind == 'playing') _setTexturePlaying(event.value == true);
+    }, onDone: () => _setTexturePlaying(false));
+  }
+
+  void _setTexturePlaying(bool playing) {
+    if (Platform.isWindows && playing && !widget.player._nativeOverlay.value) {
+      if (!_textureTicker.isActive) _textureTicker.start();
+    } else {
+      _textureTicker.stop();
+    }
+  }
+
+  void _onPresentationChanged() {
+    _setTexturePlaying(widget.player._previousState == 3);
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void didUpdateWidget(covariant _DesktopCoreView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.player != widget.player) {
+      oldWidget.player.nativeOverlay.removeListener(_onPresentationChanged);
+      unawaited(_surfaceEvents?.cancel());
+      _listenToPlayer();
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.player.nativeOverlay.removeListener(_onPresentationChanged);
+    unawaited(_surfaceEvents?.cancel());
+    _textureTicker.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
@@ -763,9 +874,18 @@ class _DesktopCoreViewState extends State<_DesktopCoreView> {
           }
         });
       }
+      if (widget.player._nativeOverlay.value) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) unawaited(widget.player._activateOverlay());
+        });
+        return const SizedBox.expand();
+      }
       return Texture(
+        key: _textureKey,
         textureId: widget.player._textureId,
-        filterQuality: FilterQuality.medium,
+        // The core already scales to the physical viewport. Bilinear sampling
+        // avoids generating mipmaps for every uploaded video frame.
+        filterQuality: FilterQuality.low,
       );
     },
   );

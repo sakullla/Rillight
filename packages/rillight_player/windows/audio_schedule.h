@@ -44,6 +44,13 @@ class AudioHandoffPolicy {
       return false;
     }
     if (state.source_eof || future_audio) return true;
+    // A remote read/decode stall empties both lanes. Keep the audio clock
+    // bounded in that case; switching to wall time makes every arriving
+    // video frame late and can leave the picture permanently frozen.
+    if (state.queued_video_frames == 0) {
+      since_ = {};
+      return false;
+    }
     if (since_ == std::chrono::steady_clock::time_point{}) since_ = now;
     return now - since_ >= std::chrono::milliseconds(150);
   }

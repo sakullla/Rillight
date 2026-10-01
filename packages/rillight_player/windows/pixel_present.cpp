@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 
 namespace rillight_windows {
 
@@ -18,8 +19,6 @@ PixelFrame Present(const RillightCoreFrame& source, int requested_width,
   output.height = std::clamp(requested_height, 1, 2304);
   output.rgba.resize(static_cast<size_t>(output.width) * output.height * 4);
   uint8_t* target = output.rgba.data();
-  for (size_t index = 3; index < output.rgba.size(); index += 4)
-    target[index] = 255;
 
   const double sar = source.sar_num > 0 && source.sar_den > 0
                          ? std::clamp(static_cast<double>(source.sar_num) /
@@ -34,6 +33,16 @@ PixelFrame Present(const RillightCoreFrame& source, int requested_width,
     rotation = (rotation % 4 + 4) % 4;
   }
   const bool quarter_turn = rotation % 2 != 0;
+  if (rotation == 0 && sar == 1.0 && source.width == output.width &&
+      source.height == output.height) {
+    const size_t row_bytes = static_cast<size_t>(output.width) * 4;
+    for (int y = 0; y < output.height; ++y)
+      std::memcpy(target + static_cast<size_t>(y) * row_bytes,
+                  source.data + static_cast<size_t>(y) * source.stride, row_bytes);
+    return output;
+  }
+  for (size_t index = 3; index < output.rgba.size(); index += 4)
+    target[index] = 255;
   const double display_width = quarter_turn ? source.height : source.width * sar;
   const double display_height = quarter_turn ? source.width * sar : source.height;
   const double scale = std::min(output.width / display_width,
@@ -44,6 +53,17 @@ PixelFrame Present(const RillightCoreFrame& source, int requested_width,
       static_cast<int>(std::lround(display_height * scale)), 1, output.height);
   const int left = (output.width - content_width) / 2;
   const int top = (output.height - content_height) / 2;
+  if (rotation == 0 && content_width == source.width &&
+      content_height == source.height) {
+    // The core has already scaled this frame. Letterboxing needs row copies,
+    // even when the viewport has a different aspect ratio or rounded SAR.
+    const size_t row_bytes = static_cast<size_t>(source.width) * 4;
+    for (int y = 0; y < source.height; ++y)
+      std::memcpy(target +
+                      (static_cast<size_t>(top + y) * output.width + left) * 4,
+                  source.data + static_cast<size_t>(y) * source.stride, row_bytes);
+    return output;
+  }
   // Resolve scale/rotation once per row or column. In debug builds, doing
   // divisions, clamp calls and checked vector access for every pixel can make
   // presentation slower than the media clock even when hardware decode is fast.

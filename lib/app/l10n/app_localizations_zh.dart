@@ -1133,4 +1133,77 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get playerFill => '填充';
+
+  @override
+  String get settingsCategoriesHint => '展开分类调整设置，再次点击可收起。修改会自动保存。';
+
+  @override
+  String get settingsBackToCategories => '返回设置分类';
+
+  @override
+  String get settingsPlaybackSummary => '倍速、片头片尾、缓冲与硬件解码';
+
+  @override
+  String get settingsDanmakuDisplaySummary => '字号、不透明度、显示区域与屏蔽词';
+
+  @override
+  String get settingsSkipIntro => '片头跳过提示';
+
+  @override
+  String get settingsSkipIntroHint => '在标记的片头显示跳过按钮，关闭后完整播放';
+
+  @override
+  String get settingsSkipOutro => '片尾跳过提示';
+
+  @override
+  String get settingsSkipOutroHint => '在片尾显示跳过或下一集提示，关闭后播放结束再提示下一集';
+
+  @override
+  String get playerSkipSettings => '片头与片尾';
+
+  @override
+  String get nextEpisodeHeading => '接下来播放';
+
+  @override
+  String get nextEpisodeKeepWatching => '继续看本集';
+
+  @override
+  String get nextEpisodeStay => '暂不播放';
+
+  @override
+  String get settingsSaveFailed => '设置保存失败，请重试';
+
+  @override
+  String get playerPictureSettings => '画面与音量';
+
+  @override
+  String get albumDownload => '下载原图';
+
+  @override
+  String get albumDownloadSaved => '图片已保存';
+
+  @override
+  String get albumDownloadFailed => '图片保存失败，请重试';
+
+  @override
+  String get albumPrevious => '上一张';
+
+  @override
+  String get albumNext => '下一张';
+
+  @override
+  String get playbackDolbyVisionUnsupported =>
+      '此杜比视界版本需要专用色彩处理，当前无法播放，服务器也未提供兼容转码。请切换 HDR10 或 SDR 版本。';
+
+  @override
+  String get settingsDanmakuConfiguration => '弹幕配置';
+
+  @override
+  String get settingsDanmakuConfigurationSummary => '显示样式、屏蔽词与服务连接';
+
+  @override
+  String get danmakuPreview => '样式预览';
+
+  @override
+  String get danmakuPreviewText => '一起看剧，弹幕也清晰舒适';
 }

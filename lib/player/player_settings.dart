@@ -94,6 +94,8 @@ class PlayerSettings {
     this.danmakuAppId,
     this.danmakuSeriesMemories = const {},
     this.appearanceStyle,
+    this.skipIntroEnabled,
+    this.skipOutroEnabled,
   });
 
   /// 音量百分比;100 为原片 0 dB,超过 100 为额外增益。
@@ -136,6 +138,11 @@ class PlayerSettings {
   /// 由应用外壳按「跟随系统」解析。仅存字符串,播放进程不消费。
   final String? appearanceStyle;
 
+  final bool? skipIntroEnabled;
+  final bool? skipOutroEnabled;
+  bool get isSkipIntroEnabled => skipIntroEnabled ?? true;
+  bool get isSkipOutroEnabled => skipOutroEnabled ?? true;
+
   int get clampedVolume => (volume ?? 100).clamp(0, volumeMax);
 
   double get effectivePlaybackRate {
@@ -174,6 +181,8 @@ class PlayerSettings {
           entry.key: entry.value.toJson(),
       },
     if (appearanceStyle != null) 'appearanceStyle': appearanceStyle,
+    if (skipIntroEnabled != null) 'skipIntroEnabled': skipIntroEnabled,
+    if (skipOutroEnabled != null) 'skipOutroEnabled': skipOutroEnabled,
   };
 
   factory PlayerSettings.fromJson(Map<String, dynamic> json) {
@@ -197,6 +206,12 @@ class PlayerSettings {
         json['hardwareDecoder'],
       ),
       playbackRate: _readDouble(json['playbackRate']),
+      skipIntroEnabled: json['skipIntroEnabled'] is bool
+          ? json['skipIntroEnabled'] as bool
+          : null,
+      skipOutroEnabled: json['skipOutroEnabled'] is bool
+          ? json['skipOutroEnabled'] as bool
+          : null,
       seriesPreferences: _readSeriesPreferences(json['seriesPreferences']),
       danmakuEnabled: json['danmakuEnabled'] is bool
           ? json['danmakuEnabled'] as bool
@@ -297,9 +312,17 @@ abstract class PlayerSettingsStore {
   Future<PlayerSettings> read();
 
   Future<void> write(PlayerSettings settings);
+
+  /// Preserve fields owned by other pages or the active playback process.
+  Future<void> writePatch(PlayerSettings patch) async {
+    final current = await read();
+    await write(
+      PlayerSettings.fromJson({...current.toJson(), ...patch.toJson()}),
+    );
+  }
 }
 
-class MemoryPlayerSettingsStore implements PlayerSettingsStore {
+class MemoryPlayerSettingsStore extends PlayerSettingsStore {
   MemoryPlayerSettingsStore([this._value = const PlayerSettings()]);
 
   PlayerSettings _value;
@@ -313,7 +336,7 @@ class MemoryPlayerSettingsStore implements PlayerSettingsStore {
   }
 }
 
-class FilePlayerSettingsStore implements PlayerSettingsStore {
+class FilePlayerSettingsStore extends PlayerSettingsStore {
   FilePlayerSettingsStore(this.file);
 
   final File file;
@@ -351,6 +374,9 @@ class FilePlayerSettingsStore implements PlayerSettingsStore {
   @override
   Future<void> write(PlayerSettings settings) =>
       _serialize(() => _writeLocked(settings));
+
+  @override
+  Future<void> writePatch(PlayerSettings patch) => write(patch);
 
   Future<T> _serialize<T>(Future<T> Function() operation) {
     final key = file.absolute.path;

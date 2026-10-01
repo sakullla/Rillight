@@ -351,31 +351,34 @@ class _PlayerWindowLayer extends StatelessWidget {
             Positioned.fill(
               child: FocusScope(
                 autofocus: true,
-                child: Navigator(
-                  key: ObjectKey(request),
-                  onGenerateRoute: (settings) {
-                    return PageRouteBuilder<void>(
-                      settings: settings,
-                      pageBuilder: (context, animation, secondaryAnimation) {
-                        return PlayerPage(
-                          itemId: request.itemId,
-                          autoResume: request.autoResume,
-                          mediaSourceId: request.mediaSourceId,
-                          audioStreamIndex: request.audioStreamIndex,
-                          subtitleStreamIndex: request.subtitleStreamIndex,
-                          startTimeTicks: request.startTimeTicks,
-                          onOpenItemDetail: (itemId, {seasonId}) {
-                            unawaited(() async {
-                              await host.close();
-                              router.push(
-                                AppRoutes.item(itemId, seasonId: seasonId),
-                              );
-                            }());
-                          },
-                        );
-                      },
-                    );
-                  },
+                child: Theme(
+                  data: AppTheme.dark(),
+                  child: Navigator(
+                    key: ObjectKey(request),
+                    onGenerateRoute: (settings) {
+                      return PageRouteBuilder<void>(
+                        settings: settings,
+                        pageBuilder: (context, animation, secondaryAnimation) {
+                          return PlayerPage(
+                            itemId: request.itemId,
+                            autoResume: request.autoResume,
+                            mediaSourceId: request.mediaSourceId,
+                            audioStreamIndex: request.audioStreamIndex,
+                            subtitleStreamIndex: request.subtitleStreamIndex,
+                            startTimeTicks: request.startTimeTicks,
+                            onOpenItemDetail: (itemId, {seasonId}) {
+                              unawaited(() async {
+                                await host.close();
+                                router.push(
+                                  AppRoutes.item(itemId, seasonId: seasonId),
+                                );
+                              }());
+                            },
+                          );
+                        },
+                      );
+                    },
+                  ),
                 ),
               ),
             ),

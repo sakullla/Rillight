@@ -3,6 +3,7 @@ package com.rillight.player
 import android.app.Activity
 import android.app.Application
 import android.content.Context
+import android.content.Intent
 import android.media.AudioManager
 import android.os.Build
 import android.os.Bundle
@@ -19,6 +20,7 @@ import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.StandardMessageCodec
+import io.flutter.plugin.common.PluginRegistry
 import io.flutter.plugin.platform.PlatformView
 import io.flutter.plugin.platform.PlatformViewFactory
 import kotlin.math.roundToInt
@@ -34,13 +36,17 @@ internal fun effectiveDisplayBrightness(
 
 /** Android output for the owned FFmpeg core. It contains no Media3 player. */
 class RillightCorePlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandler,
-    EventChannel.StreamHandler, ActivityAware {
+    EventChannel.StreamHandler, ActivityAware, PluginRegistry.ActivityResultListener {
     private lateinit var context: Context
     private lateinit var channel: MethodChannel
     private lateinit var events: EventChannel
     private val handler = Handler(Looper.getMainLooper())
     private var sink: EventChannel.EventSink? = null
     private var activity: Activity? = null
+    private var activityBinding: ActivityPluginBinding? = null
+    private var imageSaveResult: MethodChannel.Result? = null
+    private var imageSaveBytes: ByteArray? = null
+    private val imageWriter = java.util.concurrent.Executors.newSingleThreadExecutor()
     private var activityCallbacks: Application.ActivityLifecycleCallbacks? = null
     private val owners = mutableMapOf<String, CorePlayback>()
 
@@ -66,6 +72,8 @@ class RillightCorePlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandler,
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
+        finishImageSave(false)
+        imageWriter.shutdown()
         detachActivity()
         owners.values.forEach { it.dispose() }
         owners.clear()
@@ -76,15 +84,20 @@ class RillightCorePlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandler,
     override fun onListen(arguments: Any?, events: EventChannel.EventSink) { sink = events }
     override fun onCancel(arguments: Any?) { sink = null }
 
-    override fun onAttachedToActivity(binding: ActivityPluginBinding) { attachActivity(binding.activity) }
-    override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
+    override fun onAttachedToActivity(binding: ActivityPluginBinding) {
         attachActivity(binding.activity)
+        activityBinding = binding
+        binding.addActivityResultListener(this)
+    }
+    override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
+        onAttachedToActivity(binding)
     }
     override fun onDetachedFromActivityForConfigChanges() {
         owners.values.forEach { it.pauseForActivity() }
         detachActivity()
     }
     override fun onDetachedFromActivity() {
+        finishImageSave(false)
         owners.values.forEach { it.stop() }
         detachActivity()
     }
@@ -108,6 +121,8 @@ class RillightCorePlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandler,
     }
 
     private fun detachActivity() {
+        activityBinding?.removeActivityResultListener(this)
+        activityBinding = null
         val previous = activity
         val callbacks = activityCallbacks
         if (previous != null && callbacks != null)
@@ -122,6 +137,32 @@ class RillightCorePlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandler,
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         val args = call.arguments as? Map<*, *> ?: emptyMap<Any, Any>()
+        if (call.method == "saveAlbumImage") {
+            val current = activity
+            val bytes = args["bytes"] as? ByteArray
+            if (current == null || bytes == null || bytes.isEmpty()) {
+                result.error("save", "Image or activity unavailable", null)
+                return
+            }
+            if (imageSaveResult != null) {
+                result.error("save", "A save dialog is already open", null)
+                return
+            }
+            imageSaveResult = result
+            imageSaveBytes = bytes
+            try {
+                current.startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                    type = args["mime"] as? String ?: "image/jpeg"
+                    putExtra(Intent.EXTRA_TITLE, args["name"] as? String ?: "rillight-image.jpg")
+                }, 54652)
+            } catch (_: Exception) {
+                imageSaveResult = null
+                imageSaveBytes = null
+                result.error("save", "Save dialog unavailable", null)
+            }
+            return
+        }
         if (call.method == "capabilities") {
             val abi = try { CoreNative.abiVersion() } catch (error: Throwable) {
                 result.error("native", error.message ?: "Native core unavailable", null)
@@ -216,5 +257,35 @@ class RillightCorePlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandler,
             }
             else -> result.notImplemented()
         }
+    }
+
+    private fun finishImageSave(saved: Boolean) {
+        val pending = imageSaveResult
+        imageSaveResult = null
+        imageSaveBytes = null
+        pending?.success(saved)
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
+        if (requestCode != 54652) return false
+        val bytes = imageSaveBytes
+        val pending = imageSaveResult
+        val uri = data?.data
+        if (resultCode != Activity.RESULT_OK || uri == null || bytes == null || pending == null) {
+            finishImageSave(false)
+            return true
+        }
+        imageSaveResult = null
+        imageSaveBytes = null
+        imageWriter.execute {
+            try {
+                context.contentResolver.openOutputStream(uri, "w")?.use { it.write(bytes) }
+                    ?: throw java.io.IOException("Cannot open image destination")
+                handler.post { pending.success(true) }
+            } catch (_: Exception) {
+                handler.post { pending.error("save", "Cannot write image", null) }
+            }
+        }
+        return true
     }
 }

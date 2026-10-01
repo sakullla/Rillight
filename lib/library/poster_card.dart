@@ -47,7 +47,7 @@ class PosterCard extends StatelessWidget {
       child: _HoverHighlight(
         inkKey: CatalogKeys.item(item.id),
         onTap: onTap,
-        hoverScale: hoverScale,
+        hoverScale: wide ? 1 : hoverScale,
         borderRadius: BorderRadius.circular(AppRadii.md),
         builder: (context, highlighted) {
           return Column(
@@ -152,7 +152,7 @@ class EpisodeThumbCard extends StatelessWidget {
         onTap: onTap,
         hoverScale: 1,
         borderRadius: BorderRadius.circular(AppRadii.sm),
-        // selected 卡片自带白色 3px 描边,抑制悬停/焦点环避免双层。
+        // selected 卡片自带主题色描边,抑制悬停/焦点环避免双层。
         showRing: !selected,
         builder: (context, highlighted) {
           return Column(
@@ -198,7 +198,7 @@ class EpisodeThumbCard extends StatelessWidget {
                                   AppRadii.sm,
                                 ),
                                 border: Border.all(
-                                  color: Colors.white,
+                                  color: Theme.of(context).colorScheme.primary,
                                   width: 3,
                                 ),
                               ),
@@ -215,7 +215,7 @@ class EpisodeThumbCard extends StatelessWidget {
                 width: width,
                 style: Theme.of(context).textTheme.titleSmall?.copyWith(
                   fontWeight: selected ? FontWeight.w700 : null,
-                  color: selected ? Colors.white : null,
+                  color: Theme.of(context).colorScheme.onSurface,
                 ),
               ),
             ],
@@ -300,9 +300,7 @@ class SeasonPosterCard extends StatelessWidget {
                                     style: Theme.of(context)
                                         .textTheme
                                         .labelMedium
-                                        ?.copyWith(
-                                          color: colorScheme.onSurface,
-                                        ),
+                                        ?.copyWith(color: Colors.white),
                                   ),
                                 ),
                               ),
@@ -449,8 +447,21 @@ class _PosterRevealOverlay extends StatelessWidget {
         opacity: revealed ? 1 : 0,
         duration: AppMotion.durationOf(context, AppMotion.fast),
         curve: AppMotion.standard,
-        child: ColoredBox(
-          color: Colors.black.withValues(alpha: revealed ? 0.42 : 0),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              stops: const [0, 0.6, 1],
+              colors: [
+                Colors.transparent,
+                Colors.black.withValues(alpha: 0.08),
+                Colors.black.withValues(
+                  alpha: showMeta || overview != null ? 0.72 : 0,
+                ),
+              ],
+            ),
+          ),
           child: revealed
               ? Stack(
                   children: [

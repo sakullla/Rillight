@@ -239,7 +239,9 @@ class _TopBar extends StatelessWidget {
           AppRoutes.shelfLatestSeries => l10n.latestSeriesRow,
           _ => l10n.details,
         };
-    final scrim = Theme.of(context).colorScheme.scrim;
+    final scheme = Theme.of(context).colorScheme;
+    final light = scheme.brightness == Brightness.light;
+    final scrim = light ? scheme.surface : scheme.scrim;
     final overlayHeight = height + AppShell.topFadeHeight;
     return SizedBox(
       height: height,
@@ -257,15 +259,21 @@ class _TopBar extends StatelessWidget {
                   gradient: LinearGradient(
                     begin: Alignment.topCenter,
                     end: Alignment.bottomCenter,
-                    stops: AppScrim.topBarStops,
+                    stops: light
+                        ? [0, height / overlayHeight, 1]
+                        : AppScrim.topBarStops,
                     colors: [
                       scrim.withValues(
-                        alpha: opaque
+                        alpha: light
+                            ? AppScrim.of(context, AppScrim.lightTopBar)
+                            : opaque
                             ? 0.98
                             : AppScrim.of(context, AppScrim.topBar),
                       ),
                       scrim.withValues(
-                        alpha: opaque
+                        alpha: light
+                            ? AppScrim.of(context, AppScrim.lightTopBar)
+                            : opaque
                             ? 0.94
                             : AppScrim.of(context, AppScrim.topBarMid),
                       ),

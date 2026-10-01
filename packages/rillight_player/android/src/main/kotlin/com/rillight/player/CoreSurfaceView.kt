@@ -61,10 +61,12 @@ internal class CoreSurfaceView(context: Context, private val owner: SurfaceOwner
     }
 
     override fun onSurfaceTextureAvailable(source: SurfaceTexture, width: Int, height: Int) {
+        owner.setViewport(width, height)
         surface = Surface(source).also(owner::setSurface)
         updateTransform()
     }
     override fun onSurfaceTextureSizeChanged(source: SurfaceTexture, width: Int, height: Int) {
+        owner.setViewport(width, height)
         updateTransform()
     }
     override fun onSurfaceTextureDestroyed(source: SurfaceTexture): Boolean {
@@ -82,4 +84,7 @@ internal class CoreSurfaceView(context: Context, private val owner: SurfaceOwner
     }
 }
 
-internal interface SurfaceOwner { fun setSurface(surface: Surface?) }
+internal interface SurfaceOwner {
+    fun setSurface(surface: Surface?)
+    fun setViewport(width: Int, height: Int)
+}

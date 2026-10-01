@@ -1,4 +1,6 @@
-import 'dart:typed_data';
+import 'dart:io';
+import 'package:file_selector/file_selector.dart';
+import 'package:flutter/services.dart';
 
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -322,9 +324,14 @@ class _ExternalLinkPageState extends State<ExternalLinkPage> {
 }
 
 class DetailAlbumStrip extends StatelessWidget {
-  const DetailAlbumStrip({super.key, required this.item});
+  const DetailAlbumStrip({
+    super.key,
+    required this.item,
+    this.thumbnailWidth = 170,
+  });
 
   final EmbyItem item;
+  final double thumbnailWidth;
 
   @override
   Widget build(BuildContext context) {
@@ -342,24 +349,31 @@ class DetailAlbumStrip extends StatelessWidget {
           Text(l10n.phoneAlbum, style: theme.textTheme.titleMedium),
           const SizedBox(height: AppSpacing.sm),
           SizedBox(
-            height: 96,
+            height: thumbnailWidth * 9 / 16,
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
               itemCount: album.tags.length,
               separatorBuilder: (context, index) =>
                   const SizedBox(width: AppSpacing.sm),
               itemBuilder: (context, index) {
-                return GestureDetector(
-                  onTap: () => _open(context, album.itemId, album.tags, index),
-                  child: ClipRRect(
+                return Material(
+                  clipBehavior: Clip.antiAlias,
+                  borderRadius: BorderRadius.circular(AppRadii.sm),
+                  child: InkWell(
+                    onTap: () =>
+                        _open(context, album.itemId, album.tags, index),
                     borderRadius: BorderRadius.circular(AppRadii.sm),
                     child: SizedBox(
-                      width: 170,
+                      width: thumbnailWidth,
                       child: _AlbumStill(
                         itemId: album.itemId,
                         tag: album.tags[index],
                         index: index,
-                        maxWidth: 480,
+                        maxWidth:
+                            (thumbnailWidth *
+                                    MediaQuery.devicePixelRatioOf(context))
+                                .ceil()
+                                .clamp(480, 1280),
                       ),
                     ),
                   ),
@@ -380,28 +394,8 @@ class DetailAlbumStrip extends StatelessWidget {
   ) {
     showDialog<void>(
       context: context,
-      builder: (context) {
-        final page = PageController(initialPage: index);
-        return Dialog(
-          backgroundColor: Colors.black,
-          insetPadding: const EdgeInsets.all(AppSpacing.md),
-          child: AspectRatio(
-            aspectRatio: 16 / 9,
-            child: PageView.builder(
-              controller: page,
-              itemCount: tags.length,
-              itemBuilder: (context, pageIndex) {
-                return _AlbumStill(
-                  itemId: itemId,
-                  tag: tags[pageIndex],
-                  index: pageIndex,
-                  maxWidth: 1280,
-                );
-              },
-            ),
-          ),
-        );
-      },
+      builder: (context) =>
+          _AlbumViewer(itemId: itemId, tags: tags, initialIndex: index),
     );
   }
 }
@@ -412,12 +406,16 @@ class _AlbumStill extends StatefulWidget {
     required this.tag,
     required this.index,
     required this.maxWidth,
+    this.fit = BoxFit.cover,
+    this.load,
   });
 
   final String itemId;
   final String tag;
   final int index;
-  final int maxWidth;
+  final int? maxWidth;
+  final BoxFit fit;
+  final Future<List<int>> Function()? load;
 
   @override
   State<_AlbumStill> createState() => _AlbumStillState();
@@ -429,13 +427,26 @@ class _AlbumStillState extends State<_AlbumStill> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _bytes ??= AuthScope.of(context).client.getItemImage(
-      widget.itemId,
-      type: 'Backdrop',
-      tag: widget.tag,
-      index: widget.index,
-      maxWidth: widget.maxWidth,
-    );
+    _bytes ??= _load();
+  }
+
+  Future<List<int>> _load() {
+    if (widget.load != null) return widget.load!();
+    final client = AuthScope.of(context).client;
+    return widget.maxWidth == null
+        ? client.getOriginalItemImage(
+            widget.itemId,
+            type: 'Backdrop',
+            tag: widget.tag,
+            index: widget.index,
+          )
+        : client.getItemImage(
+            widget.itemId,
+            type: 'Backdrop',
+            tag: widget.tag,
+            index: widget.index,
+            maxWidth: widget.maxWidth!,
+          );
   }
 
   @override
@@ -443,17 +454,285 @@ class _AlbumStillState extends State<_AlbumStill> {
     return FutureBuilder<List<int>>(
       future: _bytes,
       builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          final l10n = AppLocalizations.of(context);
+          return Center(
+            child: TextButton.icon(
+              onPressed: () {
+                final next = _load();
+                setState(() {
+                  _bytes = next;
+                });
+              },
+              icon: const Icon(Icons.refresh_rounded),
+              label: Text('${l10n.errorLoadFailed} · ${l10n.retry}'),
+            ),
+          );
+        }
         final bytes = snapshot.data;
         if (bytes == null || bytes.isEmpty) {
           return ColoredBox(
             color: Theme.of(context).colorScheme.surfaceContainerHigh,
+            child: const Center(
+              child: SizedBox(
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            ),
           );
         }
         return Image.memory(
           bytes is Uint8List ? bytes : Uint8List.fromList(bytes),
-          fit: BoxFit.cover,
+          fit: widget.fit,
+          errorBuilder: (context, error, stack) =>
+              Center(child: Text(AppLocalizations.of(context).errorLoadFailed)),
         );
       },
+    );
+  }
+}
+
+class _AlbumViewer extends StatefulWidget {
+  const _AlbumViewer({
+    required this.itemId,
+    required this.tags,
+    required this.initialIndex,
+  });
+  final String itemId;
+  final List<String> tags;
+  final int initialIndex;
+  @override
+  State<_AlbumViewer> createState() => _AlbumViewerState();
+}
+
+class _AlbumViewerState extends State<_AlbumViewer> {
+  late final PageController _pages = PageController(
+    initialPage: widget.initialIndex,
+  );
+  late int _index = widget.initialIndex;
+  bool _saving = false;
+  final _originals = <int, Future<List<int>>>{};
+
+  Future<List<int>> _loadOriginal(int index) =>
+      _originals.putIfAbsent(index, () async {
+        try {
+          return await AuthScope.of(context).client.getOriginalItemImage(
+            widget.itemId,
+            type: 'Backdrop',
+            index: index,
+            tag: widget.tags[index],
+          );
+        } catch (_) {
+          _originals.remove(index);
+          rethrow;
+        }
+      });
+
+  @override
+  void dispose() {
+    _pages.dispose();
+    super.dispose();
+  }
+
+  Future<void> _download() async {
+    if (_saving) return;
+    final index = _index;
+    final l10n = AppLocalizations.of(context);
+    setState(() => _saving = true);
+    try {
+      final bytes = Uint8List.fromList(await _loadOriginal(index));
+      if (!mounted) return;
+      final (extension, mime) = _imageFormat(bytes);
+      final name = 'rillight-${widget.itemId}-${index + 1}.$extension';
+      if (Platform.isAndroid) {
+        final saved = await const MethodChannel('rillight/android_core')
+            .invokeMethod<bool>('saveAlbumImage', {
+              'bytes': bytes,
+              'name': name,
+              'mime': mime,
+            });
+        if (saved != true) return;
+      } else {
+        final location = await getSaveLocation(
+          suggestedName: name,
+          acceptedTypeGroups: [
+            XTypeGroup(label: extension.toUpperCase(), extensions: [extension]),
+          ],
+        );
+        if (location == null) return;
+        await XFile.fromData(
+          bytes,
+          name: name,
+          mimeType: mime,
+        ).saveTo(location.path);
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(l10n.albumDownloadSaved)));
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(l10n.albumDownloadFailed)));
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  (String, String) _imageFormat(Uint8List bytes) {
+    bool startsWith(List<int> signature, [int offset = 0]) {
+      if (bytes.length < offset + signature.length) return false;
+      for (var i = 0; i < signature.length; i++) {
+        if (bytes[offset + i] != signature[i]) return false;
+      }
+      return true;
+    }
+
+    if (startsWith([137, 80, 78, 71, 13, 10, 26, 10])) {
+      return ('png', 'image/png');
+    }
+    if (startsWith([82, 73, 70, 70]) && startsWith([87, 69, 66, 80], 8)) {
+      return ('webp', 'image/webp');
+    }
+    if (startsWith([255, 216, 255])) return ('jpg', 'image/jpeg');
+    if (startsWith([71, 73, 70, 56, 55, 97]) ||
+        startsWith([71, 73, 70, 56, 57, 97])) {
+      return ('gif', 'image/gif');
+    }
+    if (startsWith([66, 77])) return ('bmp', 'image/bmp');
+    throw const FormatException('Unsupported image response');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    return Theme(
+      data: ThemeData.dark(useMaterial3: true),
+      child: CallbackShortcuts(
+        bindings: {
+          const SingleActivator(LogicalKeyboardKey.arrowLeft): () {
+            if (_index > 0) {
+              _pages.previousPage(
+                duration: const Duration(milliseconds: 200),
+                curve: Curves.easeOut,
+              );
+            }
+          },
+          const SingleActivator(LogicalKeyboardKey.arrowRight): () {
+            if (_index + 1 < widget.tags.length) {
+              _pages.nextPage(
+                duration: const Duration(milliseconds: 200),
+                curve: Curves.easeOut,
+              );
+            }
+          },
+        },
+        child: Focus(
+          autofocus: true,
+          child: Dialog(
+            backgroundColor: Colors.black,
+            insetPadding: const EdgeInsets.all(16),
+            clipBehavior: Clip.antiAlias,
+            child: SizedBox(
+              width: 1200,
+              height: MediaQuery.sizeOf(context).height * .85,
+              child: Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            '${_index + 1} / ${widget.tags.length}',
+                            style: const TextStyle(color: Colors.white70),
+                          ),
+                        ),
+                        TextButton.icon(
+                          onPressed: _saving ? null : _download,
+                          style: TextButton.styleFrom(
+                            foregroundColor: Colors.white,
+                          ),
+                          icon: _saving
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(Icons.download_rounded),
+                          label: Text(l10n.albumDownload),
+                        ),
+                        IconButton(
+                          color: Colors.white,
+                          tooltip: MaterialLocalizations.of(
+                            context,
+                          ).closeButtonTooltip,
+                          onPressed: () => Navigator.pop(context),
+                          icon: const Icon(Icons.close_rounded),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    child: Stack(
+                      children: [
+                        PageView.builder(
+                          controller: _pages,
+                          itemCount: widget.tags.length,
+                          onPageChanged: (value) =>
+                              setState(() => _index = value),
+                          itemBuilder: (context, index) => InteractiveViewer(
+                            minScale: 1,
+                            maxScale: 5,
+                            child: _AlbumStill(
+                              itemId: widget.itemId,
+                              tag: widget.tags[index],
+                              index: index,
+                              maxWidth: null,
+                              fit: BoxFit.contain,
+                              load: () => _loadOriginal(index),
+                            ),
+                          ),
+                        ),
+                        if (_index > 0)
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: IconButton.filledTonal(
+                              tooltip: l10n.albumPrevious,
+                              onPressed: () => _pages.previousPage(
+                                duration: const Duration(milliseconds: 200),
+                                curve: Curves.easeOut,
+                              ),
+                              icon: const Icon(Icons.chevron_left_rounded),
+                            ),
+                          ),
+                        if (_index + 1 < widget.tags.length)
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: IconButton.filledTonal(
+                              tooltip: l10n.albumNext,
+                              onPressed: () => _pages.nextPage(
+                                duration: const Duration(milliseconds: 200),
+                                curve: Curves.easeOut,
+                              ),
+                              icon: const Icon(Icons.chevron_right_rounded),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

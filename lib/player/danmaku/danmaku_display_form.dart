@@ -4,7 +4,7 @@ import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/player/danmaku/danmaku_display_settings.dart';
 import 'package:rillight/player/danmaku/danmaku_keys.dart';
 
-/// 弹幕显示表单的三种布局:播放器常用 / 播放器高级 / 设置页全量展开。
+/// 弹幕显示表单的三种布局:播放器常用 / 播放器高级 / 设置页分组。
 enum DanmakuFormLayout { playerBasic, playerAdvanced, settings }
 
 /// 受控弹幕显示表单:每次改动立即 [onChanged],无单独保存。
@@ -35,17 +35,99 @@ class DanmakuDisplayForm extends StatelessWidget {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            _DanmakuPreview(value: value),
+            const SizedBox(height: AppSpacing.md),
             _BasicGroup(value: value, onChanged: onChanged, compact: false),
             const SizedBox(height: AppSpacing.md),
-            _AdvancedGroup(
-              value: value,
-              onChanged: onChanged,
-              compact: false,
-              showRestore: false,
+            ExpansionTile(
+              key: const ValueKey('danmaku-advanced-settings'),
+              title: Text(AppLocalizations.of(context).danmakuAdvanced),
+              tilePadding: EdgeInsets.zero,
+              childrenPadding: const EdgeInsets.only(bottom: 8),
+              shape: const Border(),
+              collapsedShape: const Border(),
+              children: [
+                _AdvancedGroup(
+                  value: value,
+                  onChanged: onChanged,
+                  compact: false,
+                  showRestore: false,
+                ),
+              ],
             ),
           ],
         );
     }
+  }
+}
+
+class _DanmakuPreview extends StatelessWidget {
+  const _DanmakuPreview({required this.value});
+  final DanmakuDisplaySettings value;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      height: 116,
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        color: const Color(0xff161a20),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    scheme.primary.withValues(alpha: .16),
+                    Colors.transparent,
+                  ],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            left: 16,
+            top: 14,
+            right: 16,
+            child: Opacity(
+              opacity: value.opacity.clamp(0, 1),
+              child: Text(
+                l10n.danmakuPreviewText,
+                maxLines: 1,
+                overflow: TextOverflow.fade,
+                style: TextStyle(
+                  color: value.colorful
+                      ? const Color(0xffffd78c)
+                      : Colors.white,
+                  fontSize: 18 * value.fontScale,
+                  fontWeight: FontWeight.w600,
+                  shadows: value.outline
+                      ? const [Shadow(color: Colors.black, blurRadius: 3)]
+                      : null,
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            left: 16,
+            bottom: 14,
+            child: Text(
+              l10n.danmakuPreview,
+              style: Theme.of(
+                context,
+              ).textTheme.labelSmall?.copyWith(color: Colors.white60),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 

@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
 import 'package:rillight/app/app.dart';
 import 'package:rillight/app/android_bootstrap.dart';
 import 'package:rillight/app/appearance_style.dart';
@@ -42,7 +42,14 @@ Future<void> main(List<String> args) async {
     unawaited(windowManager.focus());
   };
   runApp(
-    WindowChromeHost(
+    ListenableBuilder(
+      listenable: appearance,
+      builder: (context, child) => WindowChromeHost(
+        brightness: appearance.themeMode == ThemeMode.light
+            ? Brightness.light
+            : Brightness.dark,
+        child: child!,
+      ),
       child: RillightApp(
         auth: auth,
         router: router,

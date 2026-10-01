@@ -154,7 +154,7 @@ class FakeHasher extends DanmakuStreamHasher {
 
 /// 可控时序的设置存储:[writeGate] 非空时 write 挂起直到测试放行,
 /// 模拟文件锁写慢完成,复现“记忆落盘期间换集”的竞态。
-class GatedPlayerSettingsStore implements PlayerSettingsStore {
+class GatedPlayerSettingsStore extends PlayerSettingsStore {
   GatedPlayerSettingsStore([PlayerSettings initial = const PlayerSettings()])
     : _inner = MemoryPlayerSettingsStore(initial);
 

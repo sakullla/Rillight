@@ -6,6 +6,45 @@ void main() {
   const base = 'http://emby.test:8096';
   const token = 'token-1';
 
+  test('server media URLs use the API prefix for root and mounted servers', () {
+    for (final basePath in ['', '/emby', '/gateway', '/gateway/emby']) {
+      final mount = basePath.startsWith('/gateway') ? '/gateway' : '';
+      for (final resource in [
+        '/videos/movie/original.mp4',
+        '/emby/videos/movie/original.mp4',
+        '$mount/emby/videos/movie/original.mp4',
+      ]) {
+        final uri = embyResourceUri(
+          Uri.parse('$base$basePath'),
+          '$resource?MediaSourceId=source&PlaySessionId=play',
+          token,
+        );
+        expect(uri.path, '$mount/emby/videos/movie/original.mp4');
+        expect(uri.queryParameters, {
+          'MediaSourceId': 'source',
+          'PlaySessionId': 'play',
+          'api_key': token,
+        });
+      }
+    }
+  });
+
+  test('absolute media and CDN URLs keep their server-selected paths', () {
+    for (final url in [
+      '$base/custom/stream.mp4?signature=signed',
+      'https://cdn.example.com/custom/stream.mp4?signature=signed',
+      '//cdn.example.com/custom/stream.mp4?signature=signed',
+    ]) {
+      final uri = embyResourceUri(Uri.parse(base), url, token);
+      expect(uri.path, '/custom/stream.mp4');
+      expect(uri.queryParameters['signature'], 'signed');
+      expect(
+        uri.queryParameters['api_key'],
+        uri.host == 'emby.test' ? token : isNull,
+      );
+    }
+  });
+
   test(
     'explicit compatibility fallback cannot silently choose direct again',
     () {
@@ -115,7 +154,7 @@ void main() {
       itemId: 'movie-2',
     );
     expect(resolved!.playMethod, PlayMethod.directStream);
-    expect(resolved.streamUrl.path, '/Videos/movie-2/stream.mp4');
+    expect(resolved.streamUrl.path, '/emby/Videos/movie-2/stream.mp4');
     expect(resolved.streamUrl.queryParameters['static'], 'true');
   });
 
@@ -458,7 +497,7 @@ void main() {
       itemId: 'episode-strm2',
     );
     expect(resolved, isNotNull);
-    expect(resolved!.streamUrl.path, '/Videos/episode-strm2/stream.mkv');
+    expect(resolved!.streamUrl.path, '/emby/Videos/episode-strm2/stream.mkv');
     expect(resolved.streamUrl.queryParameters['api_key'], token);
   });
 

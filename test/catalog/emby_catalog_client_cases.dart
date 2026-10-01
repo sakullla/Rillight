@@ -43,7 +43,8 @@ void main() {
       expect(items.single.playbackProgress, closeTo(0.4, 0.001));
       expect(
         server.requests.any(
-          (request) => request.startsWith('GET /Users/user-alice/Items/Resume'),
+          (request) =>
+              request.startsWith('GET /emby/Users/user-alice/Items/Resume'),
         ),
         isTrue,
       );
@@ -118,7 +119,7 @@ void main() {
       server.requests.any(
         (request) =>
             request.startsWith(
-              'POST /Users/user-alice/Items/movie-inception/HideFromResume',
+              'POST /emby/Users/user-alice/Items/movie-inception/HideFromResume',
             ) &&
             request.contains('Hide=true'),
       ),
@@ -172,7 +173,7 @@ void main() {
     expect(movies.map((item) => item.type).toSet(), {'Movie'});
     expect(
       server.requests.any(
-        (request) => request.startsWith('GET /Users/user-alice/Views'),
+        (request) => request.startsWith('GET /emby/Users/user-alice/Views'),
       ),
       isTrue,
     );

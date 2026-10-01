@@ -23,7 +23,8 @@ struct Bytes {
 // Valid container ordering: an audio chunk precedes the first video packet.
 // Platform audio sinks do not consume PCM while the core is still OPENING.
 Bytes make_media(int audio_packets = 40, int audio_start_samples = 0,
-                 bool video_before_audio = false, bool regular_video = false) {
+                 bool video_before_audio = false, bool regular_video = false,
+                 bool resume_colors = false) {
   AVFormatContext *format = nullptr;
   assert(avformat_alloc_output_context2(&format, nullptr, "matroska", nullptr) == 0);
   format->avoid_negative_ts = AVFMT_AVOID_NEG_TS_DISABLED;
@@ -57,6 +58,18 @@ Bytes make_media(int audio_packets = 40, int audio_start_samples = 0,
     std::memset(frame->data[plane], plane == 0 ? 80 : 128,
                 frame->linesize[plane] * (plane == 0 ? 64 : 32));
   auto write_video = [&](int pts) {
+    assert(av_frame_make_writable(frame) == 0);
+    if (resume_colors) {
+      // A red opening card followed by green content reproduces the unwanted
+      // opening-card flash when resume is implemented as open-then-seek.
+      const uint8_t color[] = {
+          static_cast<uint8_t>(pts < 5 ? 81 : 145),
+          static_cast<uint8_t>(pts < 5 ? 90 : 54),
+          static_cast<uint8_t>(pts < 5 ? 240 : 34)};
+      for (int plane = 0; plane < 3; ++plane)
+        std::memset(frame->data[plane], color[plane],
+                    frame->linesize[plane] * (plane == 0 ? 64 : 32));
+    }
     frame->pts = pts;
     assert(avcodec_send_frame(encoder, frame) == 0);
     assert(avcodec_receive_packet(encoder, packet) == 0);
@@ -116,6 +129,30 @@ void cancel(void *) {}
 }  // namespace
 
 int main() {
+  auto resume_media = make_media(120, 0, false, true, true);
+  for (const int64_t start : {int64_t{0}, int64_t{700000}}) {
+    RillightCoreIo io{&resume_media, open, read, seek, close, cancel, cancel};
+    auto* core = rillight_core_create(&io);
+    assert(core);
+    assert(rillight_core_open_at(core, "resume-colors.mkv", -1, 1) != 0);
+    assert(rillight_core_open_at(core, "resume-colors.mkv", start, 1) == 0);
+    assert(rillight_core_set_playing(core, 0, 2) == 0);
+    RillightCoreFrame* first = nullptr;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (!first && std::chrono::steady_clock::now() < deadline) {
+      first = rillight_core_take_frame(core, RILLIGHT_CORE_VIDEO_RGBA);
+      if (!first) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    assert(first && first->pts_us + 5000 >= start);
+    const auto* pixel = first->data + first->stride * 32 + 32 * 4;
+    if (start == 0) assert(pixel[0] > 180 && pixel[1] < 80);
+    else assert(pixel[1] > 180 && pixel[0] < 80);
+    std::printf("atomic startup: start=%lld first_pts=%lld rgb=%d,%d,%d\n",
+        static_cast<long long>(start), static_cast<long long>(first->pts_us),
+        pixel[0], pixel[1], pixel[2]);
+    rillight_core_release_frame(first);
+    rillight_core_destroy(core);
+  }
   // A blocked renderer must not starve audio. Never consume the video queue;
   // audio past its third queued picture must still decode, then close must join
   // the blocked video lane without waiting for a renderer.

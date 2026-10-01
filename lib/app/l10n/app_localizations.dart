@@ -2241,6 +2241,150 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'填充'**
   String get playerFill;
+
+  /// No description provided for @settingsCategoriesHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'展开分类调整设置，再次点击可收起。修改会自动保存。'**
+  String get settingsCategoriesHint;
+
+  /// No description provided for @settingsBackToCategories.
+  ///
+  /// In zh, this message translates to:
+  /// **'返回设置分类'**
+  String get settingsBackToCategories;
+
+  /// No description provided for @settingsPlaybackSummary.
+  ///
+  /// In zh, this message translates to:
+  /// **'倍速、片头片尾、缓冲与硬件解码'**
+  String get settingsPlaybackSummary;
+
+  /// No description provided for @settingsDanmakuDisplaySummary.
+  ///
+  /// In zh, this message translates to:
+  /// **'字号、不透明度、显示区域与屏蔽词'**
+  String get settingsDanmakuDisplaySummary;
+
+  /// No description provided for @settingsSkipIntro.
+  ///
+  /// In zh, this message translates to:
+  /// **'片头跳过提示'**
+  String get settingsSkipIntro;
+
+  /// No description provided for @settingsSkipIntroHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'在标记的片头显示跳过按钮，关闭后完整播放'**
+  String get settingsSkipIntroHint;
+
+  /// No description provided for @settingsSkipOutro.
+  ///
+  /// In zh, this message translates to:
+  /// **'片尾跳过提示'**
+  String get settingsSkipOutro;
+
+  /// No description provided for @settingsSkipOutroHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'在片尾显示跳过或下一集提示，关闭后播放结束再提示下一集'**
+  String get settingsSkipOutroHint;
+
+  /// No description provided for @playerSkipSettings.
+  ///
+  /// In zh, this message translates to:
+  /// **'片头与片尾'**
+  String get playerSkipSettings;
+
+  /// No description provided for @nextEpisodeHeading.
+  ///
+  /// In zh, this message translates to:
+  /// **'接下来播放'**
+  String get nextEpisodeHeading;
+
+  /// No description provided for @nextEpisodeKeepWatching.
+  ///
+  /// In zh, this message translates to:
+  /// **'继续看本集'**
+  String get nextEpisodeKeepWatching;
+
+  /// No description provided for @nextEpisodeStay.
+  ///
+  /// In zh, this message translates to:
+  /// **'暂不播放'**
+  String get nextEpisodeStay;
+
+  /// No description provided for @settingsSaveFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'设置保存失败，请重试'**
+  String get settingsSaveFailed;
+
+  /// No description provided for @playerPictureSettings.
+  ///
+  /// In zh, this message translates to:
+  /// **'画面与音量'**
+  String get playerPictureSettings;
+
+  /// No description provided for @albumDownload.
+  ///
+  /// In zh, this message translates to:
+  /// **'下载原图'**
+  String get albumDownload;
+
+  /// No description provided for @albumDownloadSaved.
+  ///
+  /// In zh, this message translates to:
+  /// **'图片已保存'**
+  String get albumDownloadSaved;
+
+  /// No description provided for @albumDownloadFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'图片保存失败，请重试'**
+  String get albumDownloadFailed;
+
+  /// No description provided for @albumPrevious.
+  ///
+  /// In zh, this message translates to:
+  /// **'上一张'**
+  String get albumPrevious;
+
+  /// No description provided for @albumNext.
+  ///
+  /// In zh, this message translates to:
+  /// **'下一张'**
+  String get albumNext;
+
+  /// No description provided for @playbackDolbyVisionUnsupported.
+  ///
+  /// In zh, this message translates to:
+  /// **'此杜比视界版本需要专用色彩处理，当前无法播放，服务器也未提供兼容转码。请切换 HDR10 或 SDR 版本。'**
+  String get playbackDolbyVisionUnsupported;
+
+  /// No description provided for @settingsDanmakuConfiguration.
+  ///
+  /// In zh, this message translates to:
+  /// **'弹幕配置'**
+  String get settingsDanmakuConfiguration;
+
+  /// No description provided for @settingsDanmakuConfigurationSummary.
+  ///
+  /// In zh, this message translates to:
+  /// **'显示样式、屏蔽词与服务连接'**
+  String get settingsDanmakuConfigurationSummary;
+
+  /// No description provided for @danmakuPreview.
+  ///
+  /// In zh, this message translates to:
+  /// **'样式预览'**
+  String get danmakuPreview;
+
+  /// No description provided for @danmakuPreviewText.
+  ///
+  /// In zh, this message translates to:
+  /// **'一起看剧，弹幕也清晰舒适'**
+  String get danmakuPreviewText;
 }
 
 class _AppLocalizationsDelegate

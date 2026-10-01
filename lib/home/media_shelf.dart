@@ -519,7 +519,7 @@ class _MediaShelfState extends State<MediaShelf> {
                                         horizontal: MediaShelf.hoverGutter,
                                       ),
                                       child: Align(
-                                        alignment: Alignment.center,
+                                        alignment: Alignment.topCenter,
                                         child: Listener(
                                           onPointerSignal:
                                               _onVerticalWheelToParent,

@@ -1,6 +1,17 @@
 cmake_minimum_required(VERSION 3.21)
 project(rillight_windows_pixel_output LANGUAGES CXX)
 enable_testing()
+add_executable(rillight_windows_gpu_present_test gpu_present_test.cpp
+  ../../../windows/gpu_present.cpp)
+target_compile_features(rillight_windows_gpu_present_test PRIVATE cxx_std_17)
+target_compile_definitions(rillight_windows_gpu_present_test PRIVATE NOMINMAX)
+target_link_libraries(rillight_windows_gpu_present_test PRIVATE d3d11 d3dcompiler dxgi)
+if(MSVC)
+  target_compile_options(rillight_windows_gpu_present_test PRIVATE /W4 /WX /UNDEBUG)
+else()
+  target_compile_options(rillight_windows_gpu_present_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+endif()
+add_test(NAME rillight_windows_gpu_present COMMAND rillight_windows_gpu_present_test)
 add_executable(rillight_windows_pixel_output_test pixel_output_test.cpp
   ../../../windows/pixel_present.cpp)
 target_compile_features(rillight_windows_pixel_output_test PRIVATE cxx_std_17)

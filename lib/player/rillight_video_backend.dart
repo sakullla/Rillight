@@ -26,7 +26,10 @@ class RillightVideoBackend extends VideoBackend
     implements
         VideoBackendCapabilities,
         VideoBackendTranscodeSubtitles,
-        VideoBackendTrackSupport {
+        VideoBackendTrackSupport,
+        VideoBackendNativeOverlay {
+  // Native presentation is optional; the other platform views retain their
+  // existing background and surface lifecycle.
   RillightVideoBackend({
     PlayerSettingsStore? settingsStore,
     CorePlayerFactory? createPlayer,
@@ -44,6 +47,23 @@ class RillightVideoBackend extends VideoBackend
   final _events = StreamController<VideoBackendEvent>.broadcast();
   final _nativeEvents = StreamController<Map<String, dynamic>>.broadcast();
   CorePlayer? _player;
+  final _nativeOverlay = ValueNotifier(false);
+  CoreNativeOverlay? _nativePresentation;
+  @override
+  ValueListenable<bool> get nativeOverlay => _nativeOverlay;
+  void _onNativePresentation() {
+    _nativeOverlay.value = _nativePresentation?.nativeOverlay.value ?? false;
+  }
+
+  void _bindNativePresentation(CorePlayer? player) {
+    _nativePresentation?.nativeOverlay.removeListener(_onNativePresentation);
+    _nativePresentation = player is CoreNativeOverlay
+        ? player as CoreNativeOverlay
+        : null;
+    _nativePresentation?.nativeOverlay.addListener(_onNativePresentation);
+    _onNativePresentation();
+  }
+
   PlaybackTransportSession? _transport;
   StreamSubscription<CorePlayerEvent>? _coreEvents;
   Timer? _diagnosticsTimer;
@@ -105,6 +125,15 @@ class RillightVideoBackend extends VideoBackend
   String _openPhase = 'idle';
 
   Future<Map<String, Object?>> diagnostics() async {
+    Map<String, dynamic> presentation = const {};
+    final native = _nativePresentation;
+    if (native != null && Platform.isWindows) {
+      try {
+        presentation = await native.presentationStatus().timeout(
+          const Duration(seconds: 2),
+        );
+      } catch (_) {}
+    }
     Map<String, Object?> transport = _lastTransportDiagnostics;
     final active = _transport;
     var diagnosticStatus = active == null ? 'detached' : 'live';
@@ -122,6 +151,7 @@ class RillightVideoBackend extends VideoBackend
       }
     }
     return {
+      ...presentation,
       ...transport,
       ...?active?.localDiagnostics,
       'openPhase': _openPhase,
@@ -350,6 +380,7 @@ class RillightVideoBackend extends VideoBackend
       if (_disposed || generation != _generation) return;
       _openPhase = 'player';
       final player = _player ??= await _createPlayer();
+      _bindNativePresentation(player);
       if (_disposed || generation != _generation) {
         if (!Platform.isAndroid) await player.dispose();
         return;
@@ -422,6 +453,9 @@ class RillightVideoBackend extends VideoBackend
           keepAndroidPlayer: true,
           releaseRetainedSnapshot: false,
         );
+      }
+      if (error is CoreVideoCompatibilityException) {
+        throw const VideoCompatibilityException('unsupportedDolbyVision');
       }
       rethrow;
     }
@@ -907,6 +941,7 @@ class RillightVideoBackend extends VideoBackend
         await player.stop();
       } else {
         _player = null;
+        _bindNativePresentation(null);
         await player.dispose();
       }
     }
@@ -960,6 +995,7 @@ class RillightVideoBackend extends VideoBackend
     await _stopSession(keepAndroidPlayer: false, releaseRetainedSnapshot: true);
     await _events.close();
     await _nativeEvents.close();
+    _nativeOverlay.dispose();
   }
 
   @override

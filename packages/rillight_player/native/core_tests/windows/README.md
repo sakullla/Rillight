@@ -1,12 +1,24 @@
 # Windows core output checks
 
 The native CTest suite checks RGBA geometry, D3D11 shared-resource capability,
-and WASAPI buffer consumption. The production Flutter surface uses a pixel
-buffer: Flutter 3.47.4 with Impeller did not import the independently created
-D3D11 shared texture in an actual window. Hardware video decoding remains a
+and WASAPI buffer consumption. The production Flutter surface prefers immutable
+BGRA D3D11 render targets on Flutter's adapter, with CPU pixel-buffer fallback
+when that presenter cannot initialize. RGBA shared textures failed binding in
+the current ANGLE framebuffer configuration; the BGRA presentation path has
+produced changing, correctly colored pictures in an actual Impeller window.
+Hardware video decoding remains a
 separate FFmpeg capability and is reported per video track. The suite also
 checks audio startup offset and the handoff to a monotonic clock after a short
 audio track ends.
+
+`rillight_windows_gpu_present` checks GPU color-channel order, rotation,
+letterboxing, cross-device shared imports, and immutability of held frames.
+It also reads FP16 highlights and linear subtitle blending back from a native
+HDR render target and rejects HDR input in an SDR texture. Color-pipeline tests
+compare SDR GPU output to CPU readback and check absolute HDR luminance,
+signed gamut and held-frame lifetime in FP16. These numerical checks establish
+neither physical HDR brightness nor 60 Hz scanout; actual-window evidence is
+recorded separately in `../../HDR_PRESENTATION.md`.
 
 `flutter_core_smoke.dart` and `flutter_smoke_source.cpp` exercise the complete
 core → Flutter texture path with generated `tracks.mkv` media. Run from the
@@ -75,3 +87,41 @@ flutter build windows --debug -t packages/rillight_player/native/core_tests/wind
 flutter build windows --debug -t packages/rillight_player/native/core_tests/windows/flutter_core_smoke.dart --dart-define=RILLIGHT_SMOKE_MEDIA=build/player-validation/media/gapped-audio-video.mkv --dart-define=RILLIGHT_SMOKE_MIN_POSITION_US=2800000 --dart-define=RILLIGHT_SMOKE_MAX_STALL_MS=300
 # Copy the helper DLL and launch as above. maxStallMs must stay <= 300 ms.
 ```
+# HDR and Dolby Vision GPU conversion
+
+The owned core has an opt-in `RILLIGHT_CORE_GPU_TESTS=ON` target in the parent
+native CMake project. Build `rillight_windows_color_pipeline_test` and run
+`ctest -R rillight_windows_color_pipeline --output-on-failure` with the verified
+SDK's `bin` directory on `PATH`. This requires an actual D3D11 hardware device.
+It compiles the production HLSL shader at runtime and checks HDR10 limited-range
+black, neutral PQ conversion, polynomial/MMR RPU equivalence, planar/P010
+normalization, 12/16-bit planar/P012/P016 inputs, analytic PQ/sRGB versus LUT
+precision, GPU/portable CPU agreement and invalid metadata rejection. These checks establish GPU color
+conversion; displayed Flutter frames and physical audio require separate checks.
+
+`stream_starvation_test.py` uses a local range server to suspend an active
+response after playback starts. It requires a seekable sample with audio and
+video of at least 25 seconds (a bitrate large enough to exhaust queued data).
+It checks that the clock freezes during starvation, video resumes, pause
+freezes the clock, and 2x speed and seeking still produce native video frames:
+
+```powershell
+python packages/rillight_player/native/core_tests/windows/stream_starvation_test.py --core build/local-current-windows-sdk/bin/librillight_core.dll --media build/hdr60-validation/media/4k-hevc.mkv
+```
+
+These controls do not establish rendered frame rate. Windows surface status
+reports `frames` (published), `acquiredFrames` (distinct pictures requested by
+Flutter), and `textureCallbacks` (all raster callbacks, including repeats).
+Compare counter deltas over the same steady interval, excluding startup,
+seeks, resize and occlusion. Actual display cadence and physical sound still
+require independent evidence. The default Flutter GPU texture maps HDR/Dolby
+Vision into SDR. The active-HDR native route instead retains FP16 scRGB;
+its committed video frames do not depend on Flutter texture callbacks. See
+`../../HDR_PRESENTATION.md` for local evidence and capture boundaries.
+Profile 7 FEL layer composition is not implemented.
+
+`rillight_portable_color_pipeline_test` is available on all native targets and
+does not require D3D11. The production shared fallback retains 16-bit YUV while
+resizing and consumes the same per-frame RPU constants as Windows, then maps
+PQ/HLG and Dolby Vision to SDR using persistent row workers. Passing this test
+does not establish real-time playback on macOS, Linux, or an Android device.

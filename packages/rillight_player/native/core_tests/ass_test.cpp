@@ -42,6 +42,7 @@ struct Bytes {
 
 struct Media {
   Bytes video;
+  Bytes hdr_video;
   Bytes srt_video;
   Bytes vtt_video;
   Bytes external;
@@ -102,25 +103,25 @@ int write_video_packets(AVFormatContext *format, AVCodecContext *encoder,
   return result == AVERROR(EAGAIN) || result == AVERROR_EOF ? 0 : result;
 }
 
-Bytes make_ass_video(AVCodecID subtitle_codec = AV_CODEC_ID_ASS) {
+Bytes make_ass_video(AVCodecID subtitle_codec = AV_CODEC_ID_ASS, bool hdr = false) {
   AVFormatContext *format = nullptr;
   assert(avformat_alloc_output_context2(&format, nullptr, "matroska", nullptr) == 0);
   assert(avio_open_dyn_buf(&format->pb) >= 0);
-  const AVCodec *codec = avcodec_find_encoder(AV_CODEC_ID_MPEG4);
+  const AVCodec *codec = avcodec_find_encoder(hdr ? AV_CODEC_ID_FFV1 : AV_CODEC_ID_MPEG4);
   assert(codec);
   AVCodecContext *encoder = avcodec_alloc_context3(codec);
   assert(encoder);
   encoder->width = 320;
   encoder->height = 180;
-  encoder->pix_fmt = AV_PIX_FMT_YUV420P;
+  encoder->pix_fmt = hdr ? AV_PIX_FMT_YUV420P10LE : AV_PIX_FMT_YUV420P;
   encoder->time_base = AVRational{1, 10};
   encoder->framerate = AVRational{10, 1};
   encoder->bit_rate = 300000;
   encoder->sample_aspect_ratio = AVRational{2, 1};
   encoder->color_range = AVCOL_RANGE_MPEG;
-  encoder->colorspace = AVCOL_SPC_BT709;
-  encoder->color_primaries = AVCOL_PRI_BT709;
-  encoder->color_trc = AVCOL_TRC_BT709;
+  encoder->colorspace = hdr ? AVCOL_SPC_BT2020_NCL : AVCOL_SPC_BT709;
+  encoder->color_primaries = hdr ? AVCOL_PRI_BT2020 : AVCOL_PRI_BT709;
+  encoder->color_trc = hdr ? AVCOL_TRC_SMPTE2084 : AVCOL_TRC_BT709;
   assert(avcodec_open2(encoder, codec, nullptr) == 0);
   AVStream *video = avformat_new_stream(format, nullptr);
   assert(video);
@@ -170,6 +171,12 @@ Bytes make_ass_video(AVCodecID subtitle_codec = AV_CODEC_ID_ASS) {
   assert(av_frame_get_buffer(frame, 32) == 0);
   for (int index = 0; index < 30; ++index) {
     assert(av_frame_make_writable(frame) == 0);
+    if (hdr) {
+      for (int plane = 0; plane < 3; ++plane)
+        for (int row = 0; row < (plane == 0 ? frame->height : frame->height / 2); ++row)
+          std::fill_n(reinterpret_cast<uint16_t*>(frame->data[plane] + row * frame->linesize[plane]),
+                      plane == 0 ? frame->width : frame->width / 2, static_cast<uint16_t>(plane == 0 ? 64 : 512));
+    } else {
     for (int row = 0; row < frame->height; ++row)
       std::memset(frame->data[0] + row * frame->linesize[0], 16, frame->width);
     for (int row = 0; row < frame->height / 2; ++row) {
@@ -177,6 +184,7 @@ Bytes make_ass_video(AVCodecID subtitle_codec = AV_CODEC_ID_ASS) {
                   frame->width / 2);
       std::memset(frame->data[2] + row * frame->linesize[2], 128,
                   frame->width / 2);
+    }
     }
     frame->pts = index;
     assert(write_video_packets(format, encoder, video, frame) == 0);
@@ -198,6 +206,7 @@ Bytes make_ass_video(AVCodecID subtitle_codec = AV_CODEC_ID_ASS) {
 void *open(void *opaque, const char *url, int) {
   auto *media = static_cast<Media *>(opaque);
   if (std::strcmp(url, "synthetic.mkv") == 0) return new Bytes(media->video);
+  if (std::strcmp(url, "synthetic-hdr.mkv") == 0) return new Bytes(media->hdr_video);
   if (std::strcmp(url, "synthetic-srt.mkv") == 0)
     return new Bytes(media->srt_video);
   if (std::strcmp(url, "synthetic-vtt.mkv") == 0)
@@ -305,6 +314,9 @@ int main() {
   assert(rillight_core_abi_version() == RILLIGHT_CORE_ABI_VERSION);
   Media media{};
   media.video = make_ass_video();
+#if defined(_WIN32)
+  media.hdr_video = make_ass_video(AV_CODEC_ID_ASS, true);
+#endif
   media.srt_video = make_ass_video(AV_CODEC_ID_SUBRIP);
   media.vtt_video = make_ass_video(AV_CODEC_ID_WEBVTT);
   media.srt_video.stall_at_offset = media.srt_video.data.size() - 1;
@@ -325,6 +337,48 @@ int main() {
   RillightCoreIo io{&media, open, read, seek, close, cancel,
                     cancel_media_io};
   RillightCore *core = rillight_core_create(&io);
+#if defined(_WIN32)
+  assert(core && rillight_core_configure_gpu_video(core, 1) == 0);
+  assert(rillight_core_configure_hdr_video(core, 1) == 0);
+  assert(rillight_core_open(core, "synthetic-hdr.mkv", 1) == 0);
+  bool hdr_subtitles = false;
+  RillightCoreFrame* retained = nullptr;
+  std::vector<uint8_t> retained_overlay;
+  const auto hdr_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+  while (std::chrono::steady_clock::now() < hdr_deadline && !hdr_subtitles) {
+    auto* picture = rillight_core_take_frame(core, RILLIGHT_CORE_VIDEO_D3D11);
+    if (!picture) { std::this_thread::sleep_for(std::chrono::milliseconds(5)); continue; }
+    assert(picture->type == RILLIGHT_CORE_VIDEO_D3D11 && picture->data == nullptr);
+    RillightCoreSubtitleOverlay overlay{}; overlay.struct_size = sizeof(overlay);
+    assert(rillight_core_frame_subtitle_overlay(picture, &overlay) == 0);
+    if (overlay.data && overlay.width > 0 && overlay.height > 0) {
+      assert(overlay.x >= 0 && overlay.y >= 0 && overlay.x + overlay.width <= picture->width);
+      assert(overlay.y + overlay.height <= picture->height && overlay.height < picture->height);
+      bool ink = false;
+      for (int y = 0; y < overlay.height; ++y)
+        for (int x = 0; x < overlay.width; ++x) {
+          const auto* pixel = overlay.data + static_cast<size_t>(y) * overlay.stride + x * 4;
+          ink |= pixel[3] > 0 && pixel[0] > 0;
+          for (int c = 0; c < 3; ++c) assert(pixel[c] <= pixel[3]);
+        }
+      assert(ink);
+      if (!retained) {
+        retained = picture;
+        retained_overlay.assign(overlay.data, overlay.data + static_cast<size_t>(overlay.stride) * overlay.height);
+        continue;
+      }
+      RillightCoreSubtitleOverlay held{}; held.struct_size = sizeof(held);
+      assert(rillight_core_frame_subtitle_overlay(retained, &held) == 0);
+      assert(std::memcmp(held.data, retained_overlay.data(), retained_overlay.size()) == 0);
+      hdr_subtitles = true;
+    }
+    rillight_core_release_frame(picture);
+  }
+  assert(hdr_subtitles);
+  rillight_core_release_frame(retained);
+  rillight_core_destroy(core);
+  core = rillight_core_create(&io);
+#endif
   assert(core && rillight_core_open(core, "synthetic.mkv", 1) == 0);
   assert(wait_for(core, [](const auto &state) {
     return state.first_video_frame_ready && state.subtitle_stream_index >= 0;

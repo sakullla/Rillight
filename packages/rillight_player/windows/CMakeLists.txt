@@ -33,7 +33,7 @@ if(NOT CORE_DLL_FOUND)
 endif()
 
 add_library(${PLUGIN_NAME} SHARED
-  rillight_player_plugin.cpp video_surface.cpp audio_output.cpp pixel_present.cpp)
+  rillight_player_plugin.cpp video_surface.cpp audio_output.cpp pixel_present.cpp gpu_present.cpp hdr_host.cpp)
 apply_standard_settings(${PLUGIN_NAME})
 # Keep the per-pixel presentation kernel optimized during flutter run as well.
 # Plugin lifecycle/control code retains the ordinary Debug configuration.
@@ -48,7 +48,7 @@ target_compile_definitions(${PLUGIN_NAME} PRIVATE
 target_include_directories(${PLUGIN_NAME} INTERFACE
   "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(${PLUGIN_NAME} PRIVATE
-  flutter flutter_wrapper_plugin ole32 uuid)
+  flutter flutter_wrapper_plugin ole32 uuid d3d11 d3dcompiler dxgi dwmapi)
 set(rillight_player_bundled_libraries ${CORE_RUNTIME} PARENT_SCOPE)
 
 set(RILLIGHT_RUNTIME_NOTICES "$<TARGET_FILE_DIR:${BINARY_NAME}>/data/rillight_player")

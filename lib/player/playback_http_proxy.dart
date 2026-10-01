@@ -1876,7 +1876,7 @@ class PlaybackHttpProxy {
       _invalidate(key, representation);
       return false;
     }
-    if (response.headers.value('cache-control') != null ||
+    if (response.headers['cache-control'] != null ||
         validatedPolicy != newPolicy) {
       representation.policy = validatedPolicy;
     }

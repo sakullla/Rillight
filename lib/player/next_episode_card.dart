@@ -4,8 +4,6 @@ import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/player/player_controller.dart';
 import 'package:rillight/player/player_keys.dart';
 
-/// Shared next-episode offer for desktop, phone, and TV.
-/// The episode name identifies the target; play and cancel stay separate.
 class NextEpisodeCard extends StatelessWidget {
   const NextEpisodeCard({
     super.key,
@@ -13,81 +11,127 @@ class NextEpisodeCard extends StatelessWidget {
     this.playFocus,
     this.cancelFocus,
   });
-
   final PlayerController controller;
   final FocusNode? playFocus;
   final FocusNode? cancelFocus;
 
   @override
   Widget build(BuildContext context) {
+    final offer = controller.nextEpisode;
+    if (offer == null) return const SizedBox.shrink();
     final l10n = AppLocalizations.of(context);
     final theme = Theme.of(context);
-    final offer = controller.nextEpisode!;
-    final seconds = offer.remaining?.inSeconds;
     final scheme = theme.colorScheme;
-    return Material(
-      key: PlayerKeys.nextEpisode,
-      color: scheme.surface.withValues(alpha: 0.94),
-      elevation: 8,
-      borderRadius: BorderRadius.circular(12),
-      clipBehavior: Clip.antiAlias,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(8, 8, 4, 8),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            MediaImage(
-              item: offer.item,
-              width: 72,
-              height: 40,
-              preferThumb: true,
-              maxWidth: 240,
+    final remaining = offer.remaining;
+    final countdown = controller.nextEpisodeCountdown.inMilliseconds;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth.isFinite
+            ? constraints.maxWidth.clamp(0.0, 350.0).toDouble()
+            : 350.0;
+        return SizedBox(
+          width: width,
+          child: Material(
+            key: PlayerKeys.nextEpisode,
+            color: scheme.surfaceContainerHigh,
+            elevation: 8,
+            shadowColor: Colors.black54,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(18),
+              side: BorderSide(color: scheme.outlineVariant),
             ),
-            const SizedBox(width: 8),
-            SizedBox(
-              width: 120,
+            clipBehavior: Clip.antiAlias,
+            child: Padding(
+              padding: const EdgeInsets.all(16),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Text(
-                    offer.item.displayName,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w700,
+                    l10n.nextEpisodeHeading,
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      color: scheme.onSurfaceVariant,
                     ),
                   ),
-                  if (seconds != null) ...[
-                    const SizedBox(height: 2),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(10),
+                        child: MediaImage(
+                          item: offer.item,
+                          width: 96,
+                          height: 60,
+                          preferThumb: true,
+                          maxWidth: 320,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          offer.item.displayName,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (remaining != null) ...[
+                    const SizedBox(height: 12),
                     Text(
-                      l10n.nextEpisodeIn(seconds),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodySmall,
+                      l10n.nextEpisodeIn(
+                        (remaining.inMilliseconds / 1000).ceil(),
+                      ),
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    LinearProgressIndicator(
+                      value: countdown <= 0
+                          ? 0
+                          : (remaining.inMilliseconds / countdown).clamp(
+                              0.0,
+                              1.0,
+                            ),
+                      borderRadius: BorderRadius.circular(4),
+                      minHeight: 3,
                     ),
                   ],
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 16),
                   FilledButton.icon(
                     key: PlayerKeys.nextEpisodePlay,
                     focusNode: playFocus,
                     onPressed: controller.playNextEpisode,
-                    icon: const Icon(Icons.play_arrow_rounded, size: 18),
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size.fromHeight(48),
+                    ),
+                    icon: const Icon(Icons.skip_next_rounded, size: 22),
                     label: Text(l10n.playNextEpisode),
+                  ),
+                  const SizedBox(height: 8),
+                  OutlinedButton(
+                    key: PlayerKeys.nextEpisodeCancel,
+                    focusNode: cancelFocus,
+                    onPressed: controller.cancelNextEpisode,
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size.fromHeight(44),
+                    ),
+                    child: Text(
+                      remaining == null
+                          ? l10n.nextEpisodeKeepWatching
+                          : l10n.nextEpisodeStay,
+                    ),
                   ),
                 ],
               ),
             ),
-            IconButton(
-              key: PlayerKeys.nextEpisodeCancel,
-              focusNode: cancelFocus,
-              tooltip: l10n.cancelNextEpisode,
-              onPressed: controller.cancelNextEpisode,
-              icon: const Icon(Icons.close_rounded, size: 18),
-            ),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 }

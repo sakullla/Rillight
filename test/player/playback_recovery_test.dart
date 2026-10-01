@@ -11,6 +11,7 @@ import 'package:rillight/player/player_controller.dart';
 import 'package:rillight/player/player_window.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/playback_state.dart';
+import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/video_backend.dart';
 
 import '../emby/fake_emby_server.dart';
@@ -27,11 +28,14 @@ class _RecoveryBackend extends FakeVideoBackend {
   Completer<void>? openGate;
   String? rejectedSource;
   bool rejectNextVolume = false;
+  final restoreGates = <String, Completer<void>>{};
   int stopCount = 0;
   int openBegins = 0;
   int activeOpens = 0;
   int maxConcurrentOpens = 0;
   final List<String> nativeOrder = [];
+  final List<double> volumeCommands = [];
+  final List<double> rateCommands = [];
 
   @override
   Future<void> stop() async {
@@ -63,11 +67,33 @@ class _RecoveryBackend extends FakeVideoBackend {
 
   @override
   Future<void> setVolume(double value) async {
+    volumeCommands.add(value);
+    await restoreGates['volume']?.future;
     if (rejectNextVolume) {
       rejectNextVolume = false;
       throw StateError('Volume restore failed');
     }
     await super.setVolume(value);
+  }
+
+  @override
+  Future<void> setRate(double value) async {
+    rateCommands.add(value);
+    await restoreGates['rate']?.future;
+    await super.setRate(value);
+  }
+}
+
+class _DelayedSettingsStore extends MemoryPlayerSettingsStore {
+  Completer<void>? readGate;
+  int reads = 0;
+
+  @override
+  Future<PlayerSettings> read() async {
+    reads++;
+    final snapshot = await super.read();
+    await readGate?.future;
+    return snapshot;
   }
 }
 
@@ -75,6 +101,7 @@ void main() {
   late FakeEmbyServer server;
   late _RecoveryBackend backend;
   late PlayerController controller;
+  late _DelayedSettingsStore settings;
   Completer<void>? metadataGate;
   Completer<void>? catalogGate;
 
@@ -85,6 +112,7 @@ void main() {
       FakeMediaSource(id: 'alternate', name: 'Alternate'),
     ];
     backend = _RecoveryBackend();
+    settings = _DelayedSettingsStore();
     final dio = dioForFakeEmby(FakeEmbyAdapter([server]));
     dio.interceptors.add(
       InterceptorsWrapper(
@@ -118,9 +146,18 @@ void main() {
       recoveryTimeout: const Duration(milliseconds: 300),
       disposeTimeout: const Duration(milliseconds: 50),
       snapshotStore: MemoryPlaybackSessionSnapshotStore(),
+      settingsStore: settings,
     );
     await controller.start();
     addTearDown(() async {
+      if (settings.readGate case final gate? when !gate.isCompleted) {
+        gate.complete();
+      }
+      settings.readGate = null;
+      for (final gate in backend.restoreGates.values) {
+        if (!gate.isCompleted) gate.complete();
+      }
+      backend.restoreGates.clear();
       if (backend.stopGate case final gate? when !gate.isCompleted) {
         gate.complete();
       }
@@ -145,6 +182,71 @@ void main() {
       controller.dispose();
     });
   });
+
+  for (final selectedRate in [1.0, 1.5]) {
+    test(
+      'an earlier settings read does not replace loading user choices at $selectedRate',
+      () async {
+        await settings.write(
+          const PlayerSettings(volume: 20, playbackRate: .75),
+        );
+        settings.readGate = Completer<void>();
+        final reads = settings.reads;
+        final restart = controller.start();
+        for (
+          var attempt = 0;
+          settings.reads == reads && attempt < 50;
+          attempt++
+        ) {
+          await Future<void>.delayed(const Duration(milliseconds: 1));
+        }
+        expect(settings.reads, greaterThan(reads));
+        await controller
+            .setVolume(65)
+            .timeout(const Duration(milliseconds: 100));
+        await controller
+            .setRate(selectedRate)
+            .timeout(const Duration(milliseconds: 100));
+        settings.readGate!.complete();
+        settings.readGate = null;
+        await restart;
+        expect(controller.volume, 65);
+        expect(controller.playbackRate, selectedRate);
+        expect(backend.volume, mpvVolumeForPercent(65));
+        expect(backend.rate, selectedRate);
+      },
+    );
+  }
+
+  test(
+    'loading volume and rate changes wait for the open to complete',
+    () async {
+      backend.openGate = Completer<void>();
+      final recovery = controller.switchMediaSource('alternate');
+      for (
+        var attempt = 0;
+        backend.activeOpens == 0 && attempt < 50;
+        attempt++
+      ) {
+        await Future<void>.delayed(const Duration(milliseconds: 1));
+      }
+      expect(backend.activeOpens, 1);
+      final volumes = backend.volumeCommands.length;
+      final rates = backend.rateCommands.length;
+      await controller.setVolume(65).timeout(const Duration(milliseconds: 100));
+      await controller.setRate(1.5).timeout(const Duration(milliseconds: 100));
+      expect(controller.volume, 65);
+      expect(controller.playbackRate, 1.5);
+      expect(backend.volumeCommands.length, volumes);
+      expect(backend.rateCommands.length, rates);
+      backend.openGate!.complete();
+      backend.openGate = null;
+      await recovery;
+      expect(backend.volume, mpvVolumeForPercent(65));
+      expect(backend.rate, 1.5);
+      expect(controller.error, isNull);
+    },
+  );
 
   test(
     'retry announces recovery before a blocked stop and coalesces taps',
@@ -341,6 +443,25 @@ void main() {
       expect(controller.trackFailure, contains('previous source restored'));
     },
   );
+
+  for (final parameter in ['volume', 'rate']) {
+    test(
+      'recovery timeout identifies the blocked $parameter command',
+      () async {
+        backend.restoreGates[parameter] = Completer<void>();
+        await controller.retryPlayback();
+        expect(controller.state.phase, PlaybackPhase.failed);
+        expect(
+          controller.disconnectDetail,
+          contains(
+            parameter == 'volume' ? 'restore volume' : 'restore playback rate',
+          ),
+        );
+        backend.restoreGates[parameter]!.complete();
+        backend.restoreGates.clear();
+      },
+    );
+  }
 
   test('close during recovery prevents a late source commit', () async {
     backend.openGate = Completer<void>();

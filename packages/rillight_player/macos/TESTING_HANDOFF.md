@@ -161,3 +161,15 @@ Xcode 打包脚本使用系统 Python 3.9。`verify_core_dependencies.py` / `pre
 **本机（Apple Silicon）**：合成夹具脚本已跑通 H.264/HEVC/VP9 的 VideoToolbox 与 AV1 软件路径、seek、字幕和 HLS。窗口 PNG 与扬声器仍未取得。Finder 安装后的人工播放、Intel 未测。
 
 CI 构建、静态清单检查和探针输出应与实体设备播放证据分开记录。
+
+## 2026-10-01 共享杜比色彩路径变更（待目标机验证）
+
+原生核心新增 `PortableColorPipeline`，Profile 5 的逐帧 RPU 处理不再仅限
+Windows。CPU 路径在 YUV 16 bit 精度下完成缩放后进行 polynomial/MMR reshaping、
+PQ、RPU 矩阵、BT.2020 色域转换和 SDR 映射，使用查找表和持久工作线程。
+VideoToolbox 下载帧仍需保留逐帧 side data。
+
+此项没有在 macOS 实际构建或播放。需要在 Intel 和 Apple Silicon 上重跑
+`rillight_portable_color_pipeline`，验证真实 Profile 5/8 的变化彩色画面、
+seek/倍速、字幕和退出/睡眠恢复，并记录实际 VideoToolbox 或软件解码器。
+现有 Flutter BGRA 纹理仍输出 SDR；Metal/EDR 原生 HDR 显示尚未接通。
