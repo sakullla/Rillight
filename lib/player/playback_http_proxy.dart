@@ -2285,7 +2285,7 @@ class PlaybackHttpProxy {
       }
 
       try {
-        return await _sendCachedBody(output, body());
+        return await _sendBody(output, body());
       } catch (_) {
         if (!read.outputStarted && !read.cancelled) {
           _readAheadBypass.add(key);
@@ -2382,7 +2382,7 @@ class PlaybackHttpProxy {
           }
         }
 
-        return await _sendCachedBody(incoming.response, body());
+        return await _sendBody(incoming.response, body());
       } finally {
         _charge(-64 * 1024);
         await lease.close();
@@ -2520,16 +2520,16 @@ class PlaybackHttpProxy {
         }
       }
 
-      return await _sendCachedBody(incoming.response, body());
+      return await _sendBody(incoming.response, body());
     } finally {
       _charge(-prefetchedLength);
     }
   }
 
-  Future<bool> _sendCachedBody(
-    HttpResponse output,
-    Stream<List<int>> body,
-  ) async {
+  // Own the producer iterator until downstream cancellation has completed.
+  // HttpResponse.addStream can otherwise leave an async* producer's late body
+  // failure unobserved when a demuxer closes its probe or seeks to another range.
+  Future<bool> _sendBody(HttpResponse output, Stream<List<int>> body) async {
     final chunks = StreamIterator(body);
     try {
       if (!await chunks.moveNext()) return false;
@@ -3368,7 +3368,7 @@ class PlaybackHttpProxy {
             // One bound stream propagates downstream cancellation upstream.
             // Repeated add/flush calls can silently succeed after dart:io has
             // swallowed a broken-pipe error, draining an abandoned movie.
-            await output.addStream(body());
+            await _sendBody(output, body());
             if (bodyLength > 0 && received != bodyLength) {
               throw const HttpException('Truncated media representation');
             }

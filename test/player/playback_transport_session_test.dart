@@ -8,6 +8,57 @@ import 'package:rillight/player/playback_transport_session.dart';
 
 void main() {
   test(
+    'truncated unvalidated media fails its read without killing the worker',
+    () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      server.listen((request) async {
+        if (request.uri.path == '/healthy') {
+          request.response.write('healthy');
+          await request.response.close();
+          return;
+        }
+        // Without a validator a broken body must fail, rather than resume with
+        // bytes from an unknown representation. That failure belongs to this
+        // response; subsequent seek/subtitle/control commands must still work.
+        request.response.contentLength = 4 * 1024 * 1024;
+        final socket = await request.response.detachSocket(writeHeaders: true);
+        socket.add(List<int>.filled(128 * 1024, 7));
+        await socket.flush();
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+        socket.destroy();
+      });
+      final session = await PlaybackTransportSession.start(diskLimitBytes: 0);
+      final client = HttpClient();
+      try {
+        final route = await session.register(
+          Uri.parse('http://127.0.0.1:${server.port}/broken'),
+        );
+        Object? failure;
+        try {
+          final response = await (await client.getUrl(route)).close();
+          await response.drain<void>().timeout(const Duration(seconds: 3));
+        } on HttpException catch (error) {
+          failure = error;
+        }
+        expect(failure, isNotNull);
+        await session.setPlaybackActive(false);
+        await session.seek();
+        expect(session.localDiagnostics['transportWorkerExited'], isFalse);
+        expect(session.localDiagnostics['transportWorkerFailureKind'], isNull);
+        final healthy = await session.register(
+          Uri.parse('http://127.0.0.1:${server.port}/healthy'),
+        );
+        final response = await (await client.getUrl(healthy)).close();
+        expect(await response.transform(utf8.decoder).join(), 'healthy');
+      } finally {
+        client.close(force: true);
+        await session.close();
+        await server.close(force: true);
+      }
+    },
+  );
+
+  test(
     'cancelled 200 probe recovery keeps the isolate alive for a tail seek',
     () async {
       const total = 4 * 1024 * 1024;

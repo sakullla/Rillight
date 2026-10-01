@@ -495,7 +495,7 @@ def app_flow(device, tv):
         d.key(23)
         d.wait(lambda s: 'TvDetailPage' in s['pages'], 'remote detail')
     else:
-        d.tap(label='Rillight 流光验证 01')
+        d.tap(key='phone-hero-open')
         d.row(key='mobile-detail-play')
     if tv:
         d.key(23)
@@ -547,8 +547,11 @@ def app_flow(device, tv):
     lock_observation = None
     if not tv:
         state = d.state()
-        if not any(row['key'] == 'mobile-player-lock' for row in state['rows']):
+        # Hidden controls stay mounted during their opacity transition; their
+        # keys alone do not prove they can receive an Android tap.
+        if not state['player']['controls']:
             d.adb('shell', 'input', 'tap', round(state['size'][0]/2), round(state['size'][1]/2))
+        d.wait(lambda s: s['player'] and s['player']['controls'], 'visible player controls')
         _, lock = d.row(key='mobile-player-lock')
         lock_rect = lock['rect']
         d.tap(key='mobile-player-lock')

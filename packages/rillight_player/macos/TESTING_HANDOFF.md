@@ -2,7 +2,7 @@
 
 ## 2026-10-01 播放器与界面候选交接
 
-本轮 Windows 工作区的实现、验证结果、构建命令和目标机适配顺序见 [macOS 播放器交接](../../../docs/macos-player-handoff-2026-10-01.md)。候选为包含该文档的提交，基准 `ea12d3a`。Swift Package 的核心头文件已同步 ABI 8；当前 macOS 仍发布 8 位 BGRA Flutter 纹理，真正 EDR/HDR 输出尚待实现。共用核心包含 1×音频过滤优化与 Android MediaCodec 恢复修改；本轮没有执行 macOS 原生编译、GUI 帧、物理音频或 VideoToolbox 实际路径验收，也未完成最新 Android APK 的真机验证。以下历史记录保持原有证据边界。
+本轮 Windows 工作区的实现、验证结果、构建命令和目标机适配顺序见 [macOS 播放器交接](../../../docs/macos-player-handoff-2026-10-01.md)。候选为包含该文档的提交，基准 `ea12d3a`。Swift Package 的核心头文件已同步 ABI 8；当前 macOS 仍发布 8 位 BGRA Flutter 纹理，真正 EDR/HDR 输出尚待实现。共用核心包含 1×音频过滤优化与 Android MediaCodec 恢复修改；本轮没有执行 macOS 原生编译、GUI 帧、物理音频或 VideoToolbox 实际路径验收。Android 已补做真机重试并修复传输 isolate 退出：基本原生检查通过，但杜比倍速/seek 后的变化画面检查失败；真正 HDR、实际 60fps 和物理音频仍未验收，详细结果见交接文档新增章节。以下历史记录保持原有证据边界。
 
 ## 2026-09-28 音视频流水线分离待目标机验证
 

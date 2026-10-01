@@ -4,7 +4,47 @@
 
 基准提交：`ea12d3a`。候选为包含本文档的提交，可用 `git rev-parse HEAD` 记录其完整版本号。本轮在 Windows / Flutter 3.47.4 上开发，原生依赖固定 FFmpeg n9.0.2、核心 ABI 8。本文中的验证记录是开发工作树结果；目标机应绑定自己的提交、构建输入和应用 SHA256。
 
-**macOS 本轮尚未编译、安装或验收。当前 macOS 输出是 8 位 BGRA Flutter 纹理，没有实现真正的 EDR/HDR 高亮输出。Android 最新版本也没有完成 ADB 真机验证。** 保留历史记录于 [TESTING_HANDOFF.md](../packages/rillight_player/macos/TESTING_HANDOFF.md)，不要把历史 n9.0.1 制品当成本轮候选。
+**macOS 本轮尚未编译、安装或验收。当前 macOS 输出是 8 位 BGRA Flutter 纹理，没有实现真正的 EDR/HDR 高亮输出。Android 已补做真机重试，基本原生播放通过，但杜比倍速及跳转后的变化画面检查失败，详见下节。** 保留历史记录于 [TESTING_HANDOFF.md](../packages/rillight_player/macos/TESTING_HANDOFF.md)，不要把历史 n9.0.1 制品当成本轮候选。
+
+## Android 真机重试与传输修复（2026-10-01）
+
+本节验证对象是 `5e2653f109aada4ae00017ee3ae36f1c2b253b7b` 加本次传输修复的工作树，随后提交包含修复与本文档。以下上一轮的 948 个测试及无设备记录保留为历史，不代表重试结果。设备是 PKM110 / Android 16（API 36），仅安装可丢弃的 `com.rillight.rillight.validation`，没有清理或覆盖正式应用。使用 arm64 debug、Flutter 3.47.4、FFmpeg 9.0.2、Impeller Vulkan，以及合成凭据/本地媒体；没有伪造登录 UA。
+
+### 确认的故障与修复
+
+原生检查在切换音轨及嵌入字幕后，暂停报 `Playback is opening or closed`。独立重跑同样失败；诊断记录核心 I/O 错误 `-5`、`transportWorkerExited: true`、`HttpException`，对应代理正文的 `Media body cannot safely resume`。解码器探测或 seek 关闭下游读取时，直接 `HttpResponse.addStream(body())` 可能漏接 async* 正文生成器的后续错误，导致传输 isolate 退出。
+
+`lib/player/playback_http_proxy.dart` 现在让前台正文与缓存正文共用 `_sendBody`，由 `StreamIterator` 持有生产者，并在 finally 中等待取消结束。保留真实截断错误及 representation validator 检查，不通过扩大超时或不安全续传掩盖故障。新增 transport 用例验证无 validator 的截断读失败后，worker 仍能处理暂停、seek 和下一次正常请求；该小用例在旧代码上也通过，不能声称其稳定复现 Android 取消时序。实际前后对照来自手机原生失败及修复后独立运行通过。
+
+验证脚本还修正了两处交互：新版首页通过 `phone-hero-open` 进入详情；控制栏保持 mounted 时，先确认实际显示，再点击锁定按钮，避免点击已隐藏控件。
+
+### 已执行结果与剩余问题
+
+| 检查 | 结果 | 边界 |
+| --- | --- | --- |
+| 全量 Dart 测试 | 949 个通过，0 失败，159s | 包含新增 transport 用例；不是设备播放验收 |
+| HTTP 代理 / transport 专项 | 67 个通过 | 单元回归 |
+| Android 验证工具测试 | 27 个通过 | 工具回归 |
+| `flutter analyze` / 两个改动 Dart 文件格式检查 | 通过 | 无分析问题，格式无变化 |
+| 修复后真机原生检查 | 通过 | 音轨/字幕、暂停/seek、Surface 重建、HLS/跨域、401、失败隔离、重试及 dispose；捕获实际变化彩色画面 |
+| 正式手机界面流程 | 通过 | 合成登录、详情播放、屏内锁定/解锁、暂停/恢复、横屏、后台/前台、返回详情/首页、搜索断网重试，以及 Playing/Stopped 报告；不含物理音频验收 |
+| APK 与 SDK | 通过 | arm64 ELF/依赖闭包核验及设备安装 SHA256 匹配；不是三 ABI Release 验收 |
+| 4K HEVC Main 10 / PQ / 60fps 样本 | 变化画面检查通过 | 1×、1.5×、暂停 seek 后恢复的两帧截图均变化；实际 decoder 为 software，未测显示帧率 |
+| 4K 杜比样本（dvh1 / 25fps） | **未通过** | 初始 1×变化画面通过；1.5×与 seek 恢复时截图差值均为 0，虽然 position 前进且无 core error，不能据此称播放通过 |
+| 真正 Android HDR、实际 60fps、硬解性能、物理声音 | 未验证 / HDR 输出尚未接通 | 当前 Android RGBA8888 路径进行 SDR 映射；没有建立 HDR 亮度、帧节奏或物理音频证据 |
+
+真机原生画面检查平均 RGB 差值约 3.47，彩色像素比例约 99.98%；HTTP 检查记录授权请求 23、跨域请求 5、凭据泄漏 0、Range 请求 14。这里的通过只针对记录的合成样本与检查步骤。杜比倍速/跳转的静止画面仍需检查 decoder、转换耗时、输出队列和 Surface 呈现，不得用控制命令成功代替画面证据。
+
+用户在本次提交前明确反馈：HDR 60fps 仍严重卡顿，杜比画面偏绿。两项均按未达标处理；上述截图变化不证明性能或颜色正确。后续需继续适配原生 Android 解码、色彩处理及显示管线。
+
+本机 ignored 证据目录（不会随 Git 传到 macOS）：
+
+- 原失败：`build/android-validation/runs/5e2653f-native-phone-current/`、`5e2653f-native-phone-after-install-guide/`、`5e2653f-native-phone-diagnostic/`、`5e2653f-native-phone-transport-diagnostic/`。
+- 修复后原生通过：`build/android-validation/runs/5e2653f-transport-repair-native/result.json`，APK SHA256 `c3230c20cde6cbc03085871e3296c1c019e72bbb691da4a3af01c557130d76bc`。
+- HDR / 杜比：`build/android-validation/runs/5e2653f-transport-repair-hdr-20261001-162551/result.json`；保留失败截图和 native 日志。
+- 旧脚本失败：`5e2653f-transport-repair-app/`（误点标题）、`5e2653f-transport-repair-app-current-actions/`（误点隐藏的锁定按钮），不能删除失败记录或改写为通过。
+- 更新脚本后手机界面通过：`build/android-validation/runs/5e2653f-transport-repair-app-visible-controls/result.json`，APK SHA256 `f1cc700e5947dc2299b5ef862a02544d2c347bdce306b210a97fe073eb2cbd31`。真机无法取得模拟器 gRPC 音频，保留 `audio.json` 失败；UI/控制通过与整体未验收分开记录。
+- 测试日志：`build/android-transport-repair-full-tests.log`、`android-transport-repair-tests.log`、`android-transport-repair-tool-tests.log`、`android-transport-repair-analyze.log`。
 
 ## 已交付改动与入口
 
