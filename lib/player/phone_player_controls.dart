@@ -449,7 +449,7 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
               duration: c.duration,
               child: SliderTheme(
                 data: SliderTheme.of(context).copyWith(
-                  showValueIndicator: ShowValueIndicator.always,
+                  showValueIndicator: ShowValueIndicator.onDrag,
                   valueIndicatorColor: Colors.white,
                   valueIndicatorTextStyle: const TextStyle(
                     color: Colors.black,
