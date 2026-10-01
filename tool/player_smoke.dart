@@ -7,6 +7,7 @@ import 'dart:io';
 import 'package:flutter/widgets.dart';
 import 'package:rillight/app/app.dart';
 import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/player/danmaku/dandanplay_models.dart';
 import 'package:rillight/player/rillight_video_backend.dart';
 import 'package:rillight/player/player_page.dart';
 import 'package:rillight/player/player_settings.dart';
@@ -708,6 +709,96 @@ Future<void> main(List<String> args) async {
           await Future<void>.delayed(const Duration(seconds: 3));
         }
       }
+      if (Platform.isMacOS) {
+        Future<Map<String, Object?>> surface() async {
+          final status = await backend.surfaceStatus();
+          return {
+            'conversionUs': status['conversionUs'],
+            'maxConversionUs': status['maxConversionUs'],
+            'presentIntervalUs': status['presentIntervalUs'],
+            'lateFrames': status['lateFrames'],
+            'frames': status['frames'],
+            'textureCopies': status['textureCopies'],
+            'outputPixelFormat': status['outputPixelFormat'],
+            'edrHeadroom': status['edrHeadroom'],
+            'playbackRate': controller.playbackRate,
+            'positionMs': controller.position.inMilliseconds,
+            'playing': controller.isPlaying,
+          };
+        }
+
+        await controller.playEpisode(
+          EmbyItem.fromJson({
+            'Id': '1080p60-long',
+            'Type': 'Movie',
+            'Name': '1080p60-long',
+          }),
+        );
+        await loaded('1080p60-long-loaded');
+        final overlay = _page()?.danmaku;
+        if (overlay == null) {
+          throw StateError('Danmaku controller is unavailable');
+        }
+        overlay.adoptComments([
+          for (var index = 0; index < 40; index++)
+            DanmakuComment(
+              cid: index + 1,
+              time: index / 2,
+              mode: index.isEven ? 1 : 5,
+              color: 0xFFFFFF,
+              text: 'Rillight 60fps danmaku $index',
+            ),
+          const DanmakuComment(
+            cid: 100,
+            time: 0,
+            mode: 4,
+            color: 0xFFFFFF,
+            text: 'Rillight fixed danmaku',
+          ),
+        ]);
+        final intervals = <int>[];
+        for (var sample = 0; sample < 8; sample++) {
+          await Future<void>.delayed(const Duration(milliseconds: 300));
+          final status = await surface();
+          final interval = status['presentIntervalUs'];
+          if (interval is num && interval > 0) intervals.add(interval.toInt());
+        }
+        await record('1080p60-present', {
+          'intervalsUs': intervals,
+          ...await surface(),
+        });
+        await record('1080p60-danmaku-loaded', await surface());
+        await Future<void>.delayed(const Duration(seconds: 5));
+        await controller.setRate(1.25);
+        await record('1080p60-rate125-loaded', await surface());
+        await Future<void>.delayed(const Duration(seconds: 5));
+        await windowManager.setSize(const Size(1100, 620));
+        await record('1080p60-resized-loaded', await surface());
+        await Future<void>.delayed(const Duration(seconds: 5));
+        Object? fullscreenError;
+        var fullscreen = false;
+        try {
+          await windowManager.setFullScreen(true);
+          fullscreen = await windowManager.isFullScreen();
+        } catch (error) {
+          fullscreenError = error.toString();
+        }
+        await record('1080p60-fullscreen-loaded', {
+          'fullscreen': fullscreen,
+          'fullscreenError': fullscreenError,
+          ...await surface(),
+        });
+        await Future<void>.delayed(const Duration(seconds: 5));
+        await controller.setRate(2);
+        await Future<void>.delayed(const Duration(seconds: 2));
+        await record('1080p60-rate2-loaded', await surface());
+        await Future<void>.delayed(const Duration(seconds: 4));
+        await controller.setRate(1);
+        try {
+          await windowManager.setFullScreen(false);
+        } catch (_) {}
+        await windowManager.setSize(const Size(1280, 720));
+      }
       await controller.playEpisode(
         EmbyItem.fromJson({
           'Id': 'baseline',
@@ -876,7 +967,7 @@ Future<void> main(List<String> args) async {
       final result = File('${root.path}/player-result.json');
       await _until(
         () => result.existsSync(),
-        timeout: const Duration(minutes: 3),
+        timeout: const Duration(minutes: 6),
       );
       final outcome = jsonDecode(await result.readAsString()) as Map;
       if (outcome['passed'] != true) {

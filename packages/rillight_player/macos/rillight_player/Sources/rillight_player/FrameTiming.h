@@ -9,7 +9,8 @@ namespace rillight_macos {
 inline bool VideoDue(const RillightCoreFrame& frame,
                      const RillightCoreSnapshot& snapshot) {
   return frame.pts_us < 0 || snapshot.state == RILLIGHT_CORE_READY ||
-         frame.pts_us <= snapshot.position_us + 33000;
+         snapshot.state == RILLIGHT_CORE_PAUSED ||
+         frame.pts_us <= snapshot.position_us + 10000;
 }
 
 inline bool VideoTooLate(const RillightCoreFrame& frame,

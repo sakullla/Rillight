@@ -110,6 +110,7 @@ class PlayerPage extends StatefulWidget {
 
 class PlayerPageState extends State<PlayerPage> {
   PlayerController? controller;
+  DanmakuController? get danmaku => _danmaku;
   ValueListenable<bool>? _nativePresentation;
   void _onNativePresentation() {
     if (mounted) setState(() {});

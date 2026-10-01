@@ -389,6 +389,16 @@ class DanmakuController extends ChangeNotifier {
     layout.reset();
   }
 
+  /// 直接显示一组评论，不访问弹幕服务器，也不写播放设置。
+  void adoptComments(List<DanmakuComment> comments) {
+    if (_disposed) return;
+    danmakuOn = comments.isNotEmpty;
+    _setComments(comments);
+    status = comments.isEmpty ? DanmakuStatus.off : DanmakuStatus.active;
+    statusDetail = null;
+    notifyListeners();
+  }
+
   /// 原始评论落地:重建时间轴并喂给布局引擎。
   void _setComments(List<DanmakuComment> loaded) {
     _comments = loaded;

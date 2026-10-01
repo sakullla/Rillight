@@ -6,7 +6,9 @@
 | --- | --- |
 | Windows, active HDR display | D3D11 conversion to FP16 linear scRGB; native DXGI HWND swapchain; DWM composition with transparent Flutter controls. |
 | Windows, SDR display or unavailable HDR host | BGRA8888/sRGB Flutter texture with explicit SDR tone mapping for HDR/Dolby Vision. |
-| macOS, Linux, Android phone/TV | RGBA8888 SDR. Portable HDR/Dolby Vision conversion exists; native HDR/EDR presentation is not implemented. |
+| macOS, screen EDR headroom above 1 | RGBA16Float extended-linear CAMetalLayer behind transparent Flutter. 1.0 is 203-nit SDR white. PQ/HLG/supported Dolby Vision skip 8-bit quantization. Subtitles stay an sRGB plane blended in linear light. |
+| macOS, no EDR headroom or Metal layer unavailable | 8-bit BGRA/sRGB Flutter texture. HDR/Dolby Vision uses the portable SDR tone map. `sdrMapped` stays true. |
+| Linux, Android phone/TV | RGBA8888 SDR or the Android GLES path. Neither is the macOS EDR layer. |
 
 Windows selects the native route at player-surface creation. The current output
 must report active PQ/BT.2020 and at least 10 bits per component; swapchain scRGB

@@ -38,8 +38,11 @@ class PlaybackScopeTest(unittest.TestCase):
                         {'passed': controls_pass}))
                 else:
                     (output / 'window-evidence.json').write_text(json.dumps(
-                        {name: {} for name in ('1080p60-loaded', '4k-hevc-loaded',
-                                              'av1-loaded', 'vp9-loaded')}))
+                        {name: {} for name in (
+                            '1080p60-loaded', '4k-hevc-loaded', 'av1-loaded',
+                            'vp9-loaded', '1080p60-danmaku-loaded',
+                            '1080p60-rate125-loaded', '1080p60-resized-loaded',
+                            '1080p60-fullscreen-loaded', '1080p60-rate2-loaded')}))
                 return process
 
             env = {

@@ -14,7 +14,17 @@ from datetime import datetime
 
 from PIL import Image
 
-WANTED = ('1080p60-loaded', '4k-hevc-loaded', 'av1-loaded', 'vp9-loaded')
+WANTED = (
+    '1080p60-loaded',
+    '4k-hevc-loaded',
+    'av1-loaded',
+    'vp9-loaded',
+    '1080p60-danmaku-loaded',
+    '1080p60-rate125-loaded',
+    '1080p60-resized-loaded',
+    '1080p60-fullscreen-loaded',
+    '1080p60-rate2-loaded',
+)
 
 
 def records(root):
@@ -40,31 +50,27 @@ def player_pid(events):
     return None
 
 
-def list_rillight_windows():
-    script = (
-        'tell application "System Events"\n'
-        'set report to ""\n'
-        'repeat with p in (every process whose name is "rillight")\n'
-        'try\n'
-        'set uid to unix id of p\n'
-        'repeat with w in windows of p\n'
-        'set pos to position of w\n'
-        'set sz to size of w\n'
-        'set nm to ""\n'
-        'try\n'
-        'set nm to name of w as text\n'
-        'end try\n'
-        'set report to report & (uid as text) & "|" & nm & "|" & '
-        '(item 1 of pos as text) & "," & (item 2 of pos as text) & "," & '
-        '(item 1 of sz as text) & "," & (item 2 of sz as text) & linefeed\n'
-        'end repeat\n'
-        'end try\n'
-        'end repeat\n'
-        'return report\n'
-        'end tell'
-    )
-    output = subprocess.check_output(
-        ['osascript', '-e', script], text=True, stderr=subprocess.STDOUT)
+def window_list_binary():
+    root = Path(__file__).resolve().parents[1]
+    binary = root / 'build' / 'player-validation' / 'window_list'
+    binary.parent.mkdir(parents=True, exist_ok=True)
+    source = Path(__file__).resolve().parent / 'window_list.m'
+    if (not binary.exists() or
+            binary.stat().st_mtime < source.stat().st_mtime):
+        subprocess.check_call([
+            'clang', '-fobjc-arc', '-framework', 'CoreGraphics',
+            '-framework', 'CoreFoundation', '-o', str(binary), str(source),
+        ])
+    return binary
+
+
+def list_rillight_windows(pid=None):
+    # System Events reports zero windows for this Flutter process. CoreGraphics
+    # sees the NSWindow, including ones not marked on-screen yet.
+    command = [str(window_list_binary())]
+    if pid is not None:
+        command.append(str(int(pid)))
+    output = subprocess.check_output(command, text=True, stderr=subprocess.STDOUT)
     windows = []
     for line in output.splitlines():
         parts = line.split('|', 2)
@@ -92,7 +98,9 @@ def raise_pid(pid):
 
 
 def window_bounds(pid):
-    windows = list_rillight_windows()
+    windows = list_rillight_windows(pid)
+    if not windows:
+        windows = list_rillight_windows()
     print('rillight windows:', windows, flush=True)
     matching = [item for item in windows if item['pid'] == int(pid)
                 and item['bounds'][2] >= 400 and item['bounds'][3] >= 200]
@@ -114,9 +122,14 @@ def window_bounds(pid):
     raise RuntimeError(f'No player window for pid {pid}: {windows}')
 
 
+_fronted = False
+
+
 def activate_app(app):
-    if app is None:
+    global _fronted
+    if app is None or _fronted:
         return
+    _fronted = True
     subprocess.run(['open', '-a', str(app)], check=False,
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     time.sleep(0.3)

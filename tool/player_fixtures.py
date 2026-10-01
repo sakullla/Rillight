@@ -64,6 +64,11 @@ def generate(directory, ffmpeg, long_cache=False):
                         '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000',
                         '-t', '30' if name == 'timeout.mp4' else '12', '-c:v', codec, '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
                         '-c:a', 'aac', str(directory / name)], check=True)
+    long_rate = directory / '1080p60-long.mp4'
+    if not long_rate.exists():
+        subprocess.run([ffmpeg, '-y', '-stream_loop', '4', '-i',
+                        str(directory / '1080p60.mp4'), '-c', 'copy', '-t', '60',
+                        str(long_rate)], check=True)
     (directory / 'sample.ass').write_text('''[Script Info]
 ScriptType: v4.00+
 PlayResX: 1280
@@ -115,12 +120,13 @@ def serve(media, output):
     conditions = {'offline': False, 'unstable': False, 'faulted': False}
     fault_lock = threading.Lock()
     paths = {'baseline': 'baseline.mp4', 'delayed-report': 'timeout.mp4', 'delayed-subtitle': 'timeout.mp4', 'tracks': 'tracks-long.mkv', 'hls': 'stream.m3u8',
-             '1080p60': '1080p60.mp4', '4k-hevc': '4k-hevc.mkv', 'av1': 'av1.mkv',
+             '1080p60': '1080p60.mp4', '1080p60-long': '1080p60-long.mp4',
+             '4k-hevc': '4k-hevc.mkv', 'av1': 'av1.mkv',
              'vp9': 'vp9.webm', 'cache-long': 'cache-long.mp4',
              'broken': 'missing.mkv'}
     user = {'Id': 'validation-user', 'Name': 'validation', 'Configuration': {'EnableNextEpisodeAutoPlay': False}}
     def item(identifier):
-        return {'Id': identifier, 'Name': identifier, 'Type': 'Movie', 'RunTimeTicks': 900000000 if identifier == 'cache-long' else 300000000 if identifier.startswith('delayed-') or identifier == 'tracks' else 120000000,
+        return {'Id': identifier, 'Name': identifier, 'Type': 'Movie', 'RunTimeTicks': 900000000 if identifier == 'cache-long' else 600000000 if identifier == '1080p60-long' else 300000000 if identifier.startswith('delayed-') or identifier == 'tracks' else 120000000,
                 'UserData': {'PlaybackPositionTicks': 20000000 if identifier == 'baseline' else 0}, 'MediaType': 'Video'}
 
     class Handler(BaseHTTPRequestHandler):

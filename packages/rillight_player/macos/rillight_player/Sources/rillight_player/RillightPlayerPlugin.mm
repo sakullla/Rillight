@@ -7,6 +7,8 @@
 #include "CoreAudioOutput.h"
 #include "FrameOutput.h"
 #include "FrameTiming.h"
+#include "MetalEdrOutput.h"
+#include "PixelBufferOutput.h"
 
 #include <algorithm>
 #include <atomic>
@@ -14,6 +16,7 @@
 #include <cmath>
 #include <cstring>
 #include <memory>
+#include <vector>
 
 using Clock = std::chrono::steady_clock;
 
@@ -28,14 +31,25 @@ using Clock = std::chrono::steady_clock;
   std::atomic<bool> detached;
   std::atomic<int> width;
   std::atomic<int> height;
+  std::atomic<bool> notificationPending;
   int64_t frames;
+  int64_t copiedFrames;
+  int64_t lateFrames;
+  int64_t conversionUs;
+  int64_t maxConversionUs;
+  int64_t presentIntervalUs;
   NSString* error;
   uint32_t actualHardware;
+  NSView* flutterView;
 }
 - (void)start:(void (^)(NSString* error))ready;
 - (BOOL)detach;
 - (void)retire:(void (^)(void))done;
 - (void)resizeWidth:(int)w height:(int)h;
+- (void)activateOverlay;
+- (BOOL)extendedOutput;
+- (BOOL)lastFrameLinear;
+- (double)edrHeadroom;
 @end
 
 @implementation RillightSurface {
@@ -57,6 +71,9 @@ using Clock = std::chrono::steady_clock;
   uint64_t _timeline;
   int _renderedWidth;
   int _renderedHeight;
+  bool _needsPublication;
+  bool _newFramePending;
+  rillight_macos::PixelBufferOutput _videoOutput;
   int64_t _audioEndPts;
   double _audioSpeed;
   bool _audioClockStarted;
@@ -65,6 +82,12 @@ using Clock = std::chrono::steady_clock;
   Clock::time_point _audioGapSince;
   Clock::time_point _audioStartupSince;
   Clock::time_point _firstAudioWriteSince;
+  rillight_macos::EdrSurface _edr;
+  std::vector<uint16_t> _linear;
+  bool _lastHalf;
+  bool _usingEdr;
+  bool _havePresent;
+  Clock::time_point _lastPresent;
 }
 
 - (instancetype)init {
@@ -76,11 +99,16 @@ using Clock = std::chrono::steady_clock;
     latest = nullptr;
     stopped = false;
     detached = false;
+    notificationPending = false;
     width = 1280;
     height = 720;
     frames = 0;
     error = @"";
     actualHardware = 0;
+    presentIntervalUs = 0;
+    _lastHalf = false;
+    _usingEdr = false;
+    _havePresent = false;
     _audioEndPts = -1;
     _audioSpeed = 1.0;
   }
@@ -108,6 +136,12 @@ using Clock = std::chrono::steady_clock;
         ready(@"Core VideoToolbox preference could not be configured");
       });
       return;
+    }
+    double headroom = 1;
+    if (rillight_macos::CreateEdrSurface(&self->_edr, self->flutterView,
+                                         &headroom) &&
+        rillight_core_configure_macos_edr(self->core, 1) != 0) {
+      rillight_macos::DestroyEdrSurface(&self->_edr);
     }
     _timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, self->_queue);
     dispatch_source_set_timer(_timer, dispatch_time(DISPATCH_TIME_NOW, 0),
@@ -145,38 +179,89 @@ using Clock = std::chrono::steady_clock;
   }
 }
 
-- (void)publish:(const rillight_macos::PixelFrame&)pixels newFrame:(BOOL)newFrame
+- (void)notifyTexture {
+  if (notificationPending.exchange(true)) return;
+  dispatch_async(dispatch_get_main_queue(), ^{
+    self->notificationPending.store(false);
+    if (!self->stopped.load())
+      [self->registry textureFrameAvailable:self->textureId];
+  });
+}
+
+- (void)notePresent:(BOOL)linear elapsed:(int64_t)elapsed newFrame:(BOOL)newFrame {
+  const auto now = Clock::now();
+  [lock lock];
+  if (newFrame) ++frames;
+  conversionUs = elapsed;
+  maxConversionUs = std::max(maxConversionUs, elapsed);
+  _lastHalf = linear;
+  if (linear) _usingEdr = true;
+  if (_havePresent) {
+    presentIntervalUs = std::chrono::duration_cast<std::chrono::microseconds>(
+        now - _lastPresent).count();
+  }
+  _lastPresent = now;
+  _havePresent = true;
+  [lock unlock];
+}
+
+- (BOOL)publishLinear:(const RillightCoreFrame&)frame width:(int)outputWidth
+               height:(int)outputHeight newFrame:(BOOL)newFrame
+              session:(uint64_t)session timeline:(uint64_t)timeline {
+  const auto started = Clock::now();
+  const size_t stride = static_cast<size_t>(outputWidth) * 8;
+  _linear.resize(static_cast<size_t>(outputWidth) * outputHeight * 4);
+  RillightCoreSubtitleOverlay overlay{};
+  overlay.struct_size = sizeof(overlay);
+  const RillightCoreSubtitleOverlay* subtitles = nullptr;
+  if (rillight_core_frame_subtitle_overlay(&frame, &overlay) == 0)
+    subtitles = &overlay;
+  if (!rillight_macos::WriteLinearHalf(
+          frame, outputWidth, outputHeight, _linear.data(), stride,
+          _linear.size() * sizeof(uint16_t), subtitles)) {
+    [self setFailure:@"Extended-range frame fit failed"];
+    return NO;
+  }
+  RillightCoreSnapshot current{};
+  current.struct_size = sizeof(current);
+  if (stopped.load() || rillight_core_snapshot(core, &current) != 0 ||
+      current.session_id != session || current.timeline_version != timeline) {
+    return NO;
+  }
+  if (!rillight_macos::PresentEdrSurface(&_edr, _linear.data(), outputWidth,
+                                         outputHeight, stride)) {
+    [self setFailure:@"Extended-range drawable was not presented"];
+    return NO;
+  }
+  const int64_t elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
+      Clock::now() - started).count();
+  [self notePresent:frame.type == RILLIGHT_CORE_VIDEO_RGBA16F elapsed:elapsed
+           newFrame:newFrame];
+  return YES;
+}
+
+- (BOOL)publish:(const RillightCoreFrame&)frame width:(int)outputWidth
+        height:(int)outputHeight
+        newFrame:(BOOL)newFrame
         session:(uint64_t)session timeline:(uint64_t)timeline {
-  if (stopped.load() || !pixels.width || !pixels.height) return;
-  NSDictionary* attributes = @{
-    (id)kCVPixelBufferIOSurfacePropertiesKey: @{},
-    (id)kCVPixelBufferMetalCompatibilityKey: @YES,
-  };
+  if (stopped.load()) return NO;
+  if (_edr.ready &&
+      (_usingEdr || frame.type == RILLIGHT_CORE_VIDEO_RGBA16F)) {
+    return [self publishLinear:frame width:outputWidth height:outputHeight
+                      newFrame:newFrame session:session timeline:timeline];
+  }
+  const auto started = Clock::now();
   CVPixelBufferRef buffer = nullptr;
-  const CVReturn created = CVPixelBufferCreate(
-      kCFAllocatorDefault, pixels.width, pixels.height,
-      kCVPixelFormatType_32BGRA, (__bridge CFDictionaryRef)attributes, &buffer);
+  const CVReturn created = _videoOutput.Render(
+      frame, outputWidth, outputHeight, &buffer);
   if (created != kCVReturnSuccess || !buffer) {
-    [self setFailure:@"CVPixelBuffer/IOSurface allocation failed"];
-    return;
+    [self setFailure:[NSString stringWithFormat:
+        @"CVPixelBuffer output failed (%d)", created]];
+    return NO;
   }
-  if (!CVPixelBufferGetIOSurface(buffer)) {
-    [self setFailure:@"CVPixelBuffer has no IOSurface"];
-    CVPixelBufferRelease(buffer);
-    return;
-  }
-  if (CVPixelBufferLockBaseAddress(buffer, 0) != kCVReturnSuccess) {
-    [self setFailure:@"CVPixelBuffer lock failed"];
-    CVPixelBufferRelease(buffer);
-    return;
-  }
-  auto* base = static_cast<uint8_t*>(CVPixelBufferGetBaseAddress(buffer));
-  const size_t stride = CVPixelBufferGetBytesPerRow(buffer);
-  for (int y = 0; y < pixels.height; ++y)
-    std::memcpy(base + static_cast<size_t>(y) * stride,
-                pixels.bgra.data() + static_cast<size_t>(y) * pixels.width * 4,
-                static_cast<size_t>(pixels.width) * 4);
-  CVPixelBufferUnlockBaseAddress(buffer, 0);
+  const int64_t elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
+      Clock::now() - started).count();
+  BOOL published = NO;
   RillightCoreSnapshot current{};
   current.struct_size = sizeof(current);
   if (!stopped.load() && rillight_core_snapshot(core, &current) == 0 &&
@@ -186,27 +271,34 @@ using Clock = std::chrono::steady_clock;
       CVPixelBufferRef old = latest;
       latest = CVPixelBufferRetain(buffer);
       if (newFrame) ++frames;
+      conversionUs = elapsed;
+      maxConversionUs = std::max(maxConversionUs, elapsed);
+      _lastHalf = false;
+      const auto presented = Clock::now();
+      if (_havePresent) {
+        presentIntervalUs = std::chrono::duration_cast<std::chrono::microseconds>(
+            presented - _lastPresent).count();
+      }
+      _lastPresent = presented;
+      _havePresent = true;
+      published = YES;
       if (old) CVPixelBufferRelease(old);
     }
     [lock unlock];
-    dispatch_async(dispatch_get_main_queue(), ^{
-      if (!self->stopped.load())
-        [self->registry textureFrameAvailable:self->textureId];
-    });
+    if (published) [self notifyTexture];
   }
   CVPixelBufferRelease(buffer);
+  return published;
 }
 
 - (void)clearImage {
   [lock lock];
   if (latest) { CVPixelBufferRelease(latest); latest = nullptr; }
   frames = 0;
+  copiedFrames = lateFrames = conversionUs = maxConversionUs = 0;
   actualHardware = 0;
   [lock unlock];
-  dispatch_async(dispatch_get_main_queue(), ^{
-    if (!self->stopped.load())
-      [self->registry textureFrameAvailable:self->textureId];
-  });
+  [self notifyTexture];
 }
 
 - (void)reportAudio:(const RillightCoreSnapshot&)snapshot delay:(int64_t)delay {
@@ -386,6 +478,7 @@ using Clock = std::chrono::steady_clock;
     _session = snapshot.session_id;
     _timeline = snapshot.timeline_version;
     _renderedWidth = _renderedHeight = 0;
+    _needsPublication = _newFramePending = false;
     [self clearImage];
   }
   if (snapshot.video_stream_index >= 0) {
@@ -414,8 +507,11 @@ using Clock = std::chrono::steady_clock;
   if (_pendingVideo) {
     const bool current = _pendingVideo->session_id == snapshot.session_id &&
                          _pendingVideo->timeline_version == snapshot.timeline_version;
-    if (!current || !rillight_macos::ValidSource(*_pendingVideo)) {
-      if (current) [self setFailure:@"Core returned invalid RGBA frame"];
+    const bool acceptable = _edr.ready
+        ? rillight_macos::ValidLinearSource(*_pendingVideo)
+        : rillight_macos::ValidSource(*_pendingVideo);
+    if (!current || !acceptable) {
+      if (current) [self setFailure:@"Core returned an invalid video frame"];
       rillight_core_release_frame(_pendingVideo);
       _pendingVideo = nullptr;
     } else if (!holdVideo &&
@@ -426,26 +522,28 @@ using Clock = std::chrono::steady_clock;
         if (_lastVideo) rillight_core_release_frame(_lastVideo);
         _lastVideo = _pendingVideo;
         _pendingVideo = nullptr;
-        const int w = width.load(), h = height.load();
-        [self publish:rillight_macos::Present(*_lastVideo, w, h) newFrame:YES
-              session:snapshot.session_id timeline:snapshot.timeline_version];
-        _renderedWidth = w; _renderedHeight = h;
+        _needsPublication = _newFramePending = true;
       } else {
+        [lock lock]; ++lateFrames; [lock unlock];
         rillight_core_release_frame(_pendingVideo);
         _pendingVideo = nullptr;
       }
     }
   }
   if (_lastVideo &&
-      (_renderedWidth != width.load() || _renderedHeight != height.load())) {
-    const int w = width.load(), h = height.load();
-    [self publish:rillight_macos::Present(*_lastVideo, w, h) newFrame:NO
-          session:snapshot.session_id timeline:snapshot.timeline_version];
-    _renderedWidth = w; _renderedHeight = h;
+      (_needsPublication || _renderedWidth != width.load() ||
+       _renderedHeight != height.load())) {
+    const int outputWidth = width.load(), outputHeight = height.load();
+    if ([self publish:*_lastVideo width:outputWidth height:outputHeight
+              newFrame:_newFramePending
+              session:snapshot.session_id timeline:snapshot.timeline_version]) {
+      _renderedWidth = outputWidth; _renderedHeight = outputHeight;
+      _needsPublication = _newFramePending = false;
+    }
   }
 
   if (snapshot.source_eof && snapshot.queued_video_frames == 0 &&
-      !_pendingVideo && drainedAudio)
+      !_pendingVideo && !_needsPublication && drainedAudio)
     rillight_core_report_output_drained(core, snapshot.session_id,
                                        snapshot.timeline_version);
 }
@@ -454,6 +552,7 @@ using Clock = std::chrono::steady_clock;
   [lock lock];
   CVPixelBufferRef result = !stopped.load() && latest ?
       CVPixelBufferRetain(latest) : nullptr;
+  if (result) ++copiedFrames;
   [lock unlock];
   return result;
 }
@@ -484,7 +583,30 @@ using Clock = std::chrono::steady_clock;
     self->_audio.reset();
   });
   [registry unregisterTexture:textureId];
+  rillight_macos::DestroyEdrSurface(&_edr);
   return YES;
+}
+
+- (void)activateOverlay {
+  rillight_macos::ActivateEdrSurface(&_edr, flutterView);
+}
+
+- (BOOL)extendedOutput {
+  [lock lock];
+  const bool usingEdr = _usingEdr;
+  [lock unlock];
+  return usingEdr;
+}
+- (double)edrHeadroom {
+  NSScreen* screen = flutterView.window.screen ?: NSScreen.mainScreen;
+  if (screen) return screen.maximumExtendedDynamicRangeColorComponentValue;
+  return _edr.headroom;
+}
+- (BOOL)lastFrameLinear {
+  [lock lock];
+  const bool linear = _lastHalf;
+  [lock unlock];
+  return linear;
 }
 
 - (void)retire:(void (^)(void))done {
@@ -515,12 +637,14 @@ using Clock = std::chrono::steady_clock;
 @end
 
 @implementation RillightPlayerPlugin {
+  id<FlutterPluginRegistrar> _registrar;
   id<FlutterTextureRegistry> _registry;
   NSMutableDictionary<NSNumber*, RillightSurface*>* _surfaces;
 }
 
 + (void)registerWithRegistrar:(NSObject<FlutterPluginRegistrar>*)registrar {
   RillightPlayerPlugin* plugin = [[RillightPlayerPlugin alloc] init];
+  plugin->_registrar = registrar;
   plugin->_registry = registrar.textures;
   plugin->_surfaces = [NSMutableDictionary dictionary];
   FlutterMethodChannel* channel = [FlutterMethodChannel
@@ -547,6 +671,7 @@ using Clock = std::chrono::steady_clock;
     surface = [[RillightSurface alloc] init];
     surface->core = reinterpret_cast<RillightCore*>(handle.longLongValue);
     surface->registry = _registry;
+    surface->flutterView = _registrar.view;
     surface->textureId = [_registry registerTexture:surface];
     _surfaces[handle] = surface;
     [surface start:^(NSString* failure) {
@@ -578,6 +703,9 @@ using Clock = std::chrono::steady_clock;
   } else if (!surface) {
     result([FlutterError errorWithCode:@"missing"
                                   message:@"Surface unavailable" details:nil]);
+  } else if ([call.method isEqualToString:@"activateOverlay"]) {
+    [surface activateOverlay];
+    result(nil);
   } else if ([call.method isEqualToString:@"resize"]) {
     [surface resizeWidth:[arguments[@"width"] intValue]
                  height:[arguments[@"height"] intValue]];
@@ -586,12 +714,31 @@ using Clock = std::chrono::steady_clock;
     RillightCoreSnapshot snapshot{};
     snapshot.struct_size = sizeof(snapshot);
     const bool hasSnapshot = rillight_core_snapshot(surface->core, &snapshot) == 0;
+    const double sourceFrameRate = rillight_core_video_frame_rate(surface->core);
+    const bool extended = [surface extendedOutput];
+    const bool linear = [surface lastFrameLinear];
+    const double headroom = [surface edrHeadroom];
     [surface->lock lock];
     NSString* decoder = !hasSnapshot || snapshot.video_stream_index < 0 ?
         @"none" : !snapshot.first_video_frame_ready ? @"pending" :
         surface->actualHardware == RILLIGHT_CORE_HW_VIDEOTOOLBOX ?
         @"videotoolbox" : @"software";
     NSDictionary* status = @{@"frames": @(surface->frames),
+                             @"textureCopies": @(surface->copiedFrames),
+                             @"lateFrames": @(surface->lateFrames),
+                             @"conversionUs": @(surface->conversionUs),
+                             @"maxConversionUs": @(surface->maxConversionUs),
+                             @"outputPixelFormat": extended
+                                 ? (linear ? @"rgba16f-extended-linear"
+                                           : @"rgba8-on-edr-layer")
+                                 : @"bgra8-srgb",
+                             @"hdrOutput": @(extended && linear),
+                             @"sdrMapped": @(!extended),
+                             @"nativeOverlay": @(extended),
+                             @"edrHeadroom": @(headroom),
+                             @"presentIntervalUs": @(surface->presentIntervalUs),
+                             @"sourceFrameRate": @(sourceFrameRate),
+                             @"queuedVideoFrames": @(hasSnapshot ? snapshot.queued_video_frames : 0),
                              @"error": surface->error,
                              @"actualHardware": @(surface->actualHardware),
                              @"preferredHardware": @(hasSnapshot ?

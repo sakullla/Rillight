@@ -68,6 +68,9 @@ class _CoreDriver implements CorePlayer {
   @override
   Widget buildView({Key? key}) => SizedBox(key: key);
 
+  @override
+  Future<Map<String, dynamic>> surfaceStatus() async => const {};
+
   void emit(String kind, Object value) {
     controller.add(CorePlayerEvent(request!.session, kind, value));
   }

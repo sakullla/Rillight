@@ -1,8 +1,37 @@
 #include "../core/portable_color_pipeline.h"
 #include "color_pipeline_fixtures.h"
 
+float HalfToFloat(uint16_t half) {
+  const uint32_t sign = static_cast<uint32_t>(half & 0x8000u) << 16;
+  const uint32_t exponent = (half >> 10) & 0x1fu;
+  const uint32_t mantissa = half & 0x3ffu;
+  uint32_t bits = 0;
+  if (exponent == 0) bits = sign;
+  else if (exponent == 31) bits = sign | 0x7f800000u | (mantissa << 13);
+  else bits = sign | ((exponent + 112) << 23) | (mantissa << 13);
+  float value = 0;
+  std::memcpy(&value, &bits, sizeof(value));
+  return value;
+}
+
 int main() {
   PortableColorPipeline pipeline;
+  {
+    AVFrame* bright = Picture(AV_PIX_FMT_YUV420P10LE, 940);
+    std::vector<uint8_t> mapped(32 * 24 * 4);
+    assert(pipeline.Render(bright, 32, 24, false, mapped.data(), 32 * 4));
+    std::vector<uint16_t> linear(32 * 24 * 4);
+    assert(pipeline.RenderLinearHalf(bright, 32, 24, false, linear.data(), 32 * 8));
+    const float peak = HalfToFloat(linear[0]);
+    assert(peak > 1.0f);
+    assert(mapped[0] == 255 || peak > mapped[0] / 255.0f);
+    AVFrame* dark = Picture(AV_PIX_FMT_YUV420P10LE, 64);
+    assert(pipeline.RenderLinearHalf(dark, 32, 24, false, linear.data(), 32 * 8));
+    assert(HalfToFloat(linear[0]) < peak);
+    assert(!pipeline.RenderLinearHalf(dark, 32, 24, false, linear.data(), 32 * 4));
+    av_frame_free(&bright);
+    av_frame_free(&dark);
+  }
   std::vector<uint8_t> pixels(32 * 24 * 4);
   for (const auto format : {AV_PIX_FMT_YUV420P10LE, AV_PIX_FMT_P010LE,
                             AV_PIX_FMT_YUV420P12LE, AV_PIX_FMT_P012LE,

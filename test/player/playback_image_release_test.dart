@@ -123,4 +123,7 @@ class _IdleCore implements CorePlayer {
 
   @override
   Widget buildView({Key? key}) => const SizedBox.shrink();
+
+  @override
+  Future<Map<String, dynamic>> surfaceStatus() async => const {};
 }

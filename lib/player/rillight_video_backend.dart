@@ -124,6 +124,9 @@ class RillightVideoBackend extends VideoBackend
   String? get lastFailure => _lastFailure;
   String _openPhase = 'idle';
 
+  Future<Map<String, dynamic>> surfaceStatus() async =>
+      await _player?.surfaceStatus() ?? const {};
+
   Future<Map<String, Object?>> diagnostics() async {
     Map<String, dynamic> presentation = const {};
     final native = _nativePresentation;

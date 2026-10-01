@@ -6,6 +6,10 @@
 
 **macOS 本轮尚未编译、安装或验收。当前 macOS 输出是 8 位 BGRA Flutter 纹理，没有实现真正的 EDR/HDR 高亮输出。Android 已补做真机重试，基本原生播放通过，但杜比倍速及跳转后的变化画面检查失败，详见下节。** 保留历史记录于 [TESTING_HANDOFF.md](../packages/rillight_player/macos/TESTING_HANDOFF.md)，不要把历史 n9.0.1 制品当成本轮候选。
 
+### 2026-10-02 macOS 本机后续
+
+上面的结论保留原 Windows 交接轮次的证据边界。随后在本机 MacBook Air M3 / macOS 27.0 上接入 SDR 8 位 BGRA IOSurface 池、避免 CPU 放大，并在有潜在 EDR headroom 时走 RGBA16Float / Display P3 扩展线性层。窗口彩条、1×/1.25×/2×、弹幕和 `-20001` 杜比视界拒绝已写入包内记录。面板高光、物理听音、Atmos/HDMI 直通、跨屏和睡眠唤醒仍未验收。详见 [本机适配记录](../packages/rillight_player/macos/TESTING_HANDOFF.md)。
+
 ## Android 真机重试与传输修复（2026-10-01）
 
 本节验证对象是 `5e2653f109aada4ae00017ee3ae36f1c2b253b7b` 加本次传输修复的工作树，随后提交包含修复与本文档。以下上一轮的 948 个测试及无设备记录保留为历史，不代表重试结果。设备是 PKM110 / Android 16（API 36），仅安装可丢弃的 `com.rillight.rillight.validation`，没有清理或覆盖正式应用。使用 arm64 debug、Flutter 3.47.4、FFmpeg 9.0.2、Impeller Vulkan，以及合成凭据/本地媒体；没有伪造登录 UA。

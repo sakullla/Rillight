@@ -106,10 +106,10 @@ def smoke(*, skip_build=False, skip_restore=False, skip_window_capture=False):
         if PYTHON_APP.is_dir():
             capture_cmd = ['open', '-W', '-n', '-a', str(PYTHON_APP), '--args',
                            str(capture_script), '--output', str(output),
-                           '--timeout', '240', '--app', str(APP)]
+                           '--timeout', '360', '--app', str(APP)]
         else:
             capture_cmd = [sys.executable, str(capture_script),
-                           '--output', str(output), '--timeout', '240',
+                           '--output', str(output), '--timeout', '360',
                            '--app', str(APP)]
         if not skip_window_capture:
             scope['window_capture'] = 'failed'
@@ -123,12 +123,12 @@ def smoke(*, skip_build=False, skip_restore=False, skip_window_capture=False):
             stdout=(output / 'app.stdout.log').open('w'),
             stderr=(output / 'app.stderr.log').open('w'))
         print('Playback validation evidence:', output, flush=True)
-        deadline = time.monotonic() + 300
+        deadline = time.monotonic() + 420
         while app.poll() is None:
             if time.monotonic() > deadline:
                 raise RuntimeError('Playback validation timed out')
             time.sleep(0.25)
-        capture_status = capture.wait(timeout=30) if capture is not None else None
+        capture_status = capture.wait(timeout=90) if capture is not None else None
         if app.returncode != 0:
             raise RuntimeError(f'Player smoke exited {app.returncode}')
         result = json.loads((output / 'result.json').read_text(encoding='utf-8'))
@@ -147,8 +147,11 @@ def smoke(*, skip_build=False, skip_restore=False, skip_window_capture=False):
                   'for Python to capture actual frames.', flush=True)
         else:
             evidence = json.loads(evidence_path.read_text(encoding='utf-8'))
-            if set(evidence) != {'1080p60-loaded', '4k-hevc-loaded',
-                                 'av1-loaded', 'vp9-loaded'}:
+            if set(evidence) != {
+                    '1080p60-loaded', '4k-hevc-loaded', 'av1-loaded',
+                    'vp9-loaded', '1080p60-danmaku-loaded',
+                    '1080p60-rate125-loaded', '1080p60-resized-loaded',
+                    '1080p60-fullscreen-loaded', '1080p60-rate2-loaded'}:
                 raise RuntimeError(
                     'Incomplete window evidence: ' + str(sorted(evidence)))
             scope['window_capture'] = 'passed'

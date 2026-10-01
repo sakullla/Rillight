@@ -132,6 +132,9 @@ abstract class CorePlayer {
   Future<void> dispose();
   Widget buildView({Key? key});
 
+  /// Plugin frame timing. Empty when this player has no native surface.
+  Future<Map<String, dynamic>> surfaceStatus() async => const {};
+
   static Future<CorePlayer> create({String? libraryPath}) async {
     if (Platform.isAndroid) return AndroidCorePlayer();
     return DesktopCorePlayer.create(libraryPath: libraryPath);
@@ -211,6 +214,9 @@ class AndroidCorePlayer implements CorePlayer {
     if (_disposed) return;
     await command('stop');
   }
+
+  @override
+  Future<Map<String, dynamic>> surfaceStatus() async => const {};
 
   @override
   Widget buildView({Key? key}) => PlatformViewLink(
@@ -313,7 +319,7 @@ class DesktopCorePlayer implements CorePlayer, CoreNativeOverlay {
       });
       if (texture == null) throw StateError('Core texture was not created');
       final player = DesktopCorePlayer._(bindings, handle, texture);
-      if (Platform.isWindows) {
+      if (Platform.isWindows || Platform.isMacOS) {
         final status = await player.presentationStatus();
         player._nativeOverlay.value = status['nativeOverlay'] == true;
       }
@@ -399,6 +405,9 @@ class DesktopCorePlayer implements CorePlayer, CoreNativeOverlay {
           );
           final frames = status?['frames'];
           final renderedTimeline = status?['timeline'];
+          if (Platform.isMacOS) {
+            _nativeOverlay.value = status?['nativeOverlay'] == true;
+          }
           if (frames is! num ||
               frames.toInt() <= 0 ||
               (renderedTimeline is num &&
@@ -786,6 +795,14 @@ class DesktopCorePlayer implements CorePlayer, CoreNativeOverlay {
   );
 
   @override
+  Future<Map<String, dynamic>> surfaceStatus() async {
+    final status = await _channel.invokeMapMethod<String, dynamic>('status', {
+      'handle': _handle.address,
+    });
+    return status ?? const {};
+  }
+
+  @override
   Future<void> dispose() async {
     if (_disposed) return;
     _disposed = true;
@@ -899,8 +916,9 @@ class _DesktopCoreViewState extends State<_DesktopCoreView>
       return Texture(
         key: _textureKey,
         textureId: widget.player._textureId,
-        // The core already scales to the physical viewport. Bilinear sampling
-        // avoids generating mipmaps for every uploaded video frame.
+        // Windows scales in the core. macOS keeps the view aspect and uploads
+        // at most the source resolution, so this sampler does the Retina scale.
+        // Bilinear avoids generating mipmaps for every uploaded video frame.
         filterQuality: FilterQuality.low,
       );
     },

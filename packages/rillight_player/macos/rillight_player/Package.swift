@@ -23,9 +23,13 @@ let package = Package(
                 .headerSearchPath("include/rillight_player")
             ],
             linkerSettings: [
+                .linkedFramework("Accelerate"),
+                .linkedFramework("CoreGraphics"),
                 .linkedFramework("AudioToolbox"),
                 .linkedFramework("CoreVideo"),
                 .linkedFramework("IOSurface"),
+                .linkedFramework("Metal"),
+                .linkedFramework("QuartzCore"),
                 .linkedLibrary("rillight_core")
             ]
         )

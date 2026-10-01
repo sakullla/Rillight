@@ -47,7 +47,11 @@ typedef enum RillightCoreFrameType {
   RILLIGHT_CORE_AUDIO_S16 = 2,
   RILLIGHT_CORE_VIDEO_D3D11 = 3,
   RILLIGHT_CORE_VIDEO_MEDIACODEC = 4,
-  RILLIGHT_CORE_VIDEO_ANDROID_P010 = 5
+  RILLIGHT_CORE_VIDEO_ANDROID_P010 = 5,
+  /* Tightly packed little-endian RGBA16F. 1.0 is SDR white; values above 1.0
+   * are highlights. take_frame(VIDEO_RGBA) also returns this type when the
+   * macOS EDR sink is enabled. Callers must branch on frame->type. */
+  RILLIGHT_CORE_VIDEO_RGBA16F = 6
 } RillightCoreFrameType;
 
 typedef enum RillightCoreTrackType {
@@ -238,6 +242,12 @@ RILLIGHT_CORE_API void *rillight_core_frame_d3d11_texture(
  * remains sRGB RGBA8888. A sink must inspect the native texture's format and
  * must not pass FP16 through Flutter's 8-bit external-texture contract. */
 RILLIGHT_CORE_API int rillight_core_configure_hdr_video(RillightCore *core,
+                                                       int enabled);
+/* Opt-in macOS extended-range output, configured while idle, ended, or failed.
+ * PQ, HLG and supported Dolby Vision frames are then emitted as RGBA16F instead
+ * of 8-bit sRGB. SDR frames stay VIDEO_RGBA. Disabling is allowed in those same
+ * states. This is not the Windows scRGB contract and does not certify Dolby. */
+RILLIGHT_CORE_API int rillight_core_configure_macos_edr(RillightCore *core,
                                                        int enabled);
 RILLIGHT_CORE_API int rillight_core_frame_subtitle_overlay(
     const RillightCoreFrame *frame, RillightCoreSubtitleOverlay *overlay);

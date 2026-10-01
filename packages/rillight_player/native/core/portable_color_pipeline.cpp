@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstring>
 #include <condition_variable>
 #include <functional>
 #include <limits>
@@ -36,6 +37,42 @@ struct TransferTables {
     }
   }
 };
+
+uint16_t FloatToHalf(float value) {
+  uint32_t bits = 0;
+  std::memcpy(&bits, &value, sizeof(bits));
+  const uint32_t sign = (bits >> 16) & 0x8000u;
+  int32_t exponent =
+      static_cast<int32_t>((bits >> 23) & 0xff) - 127 + 15;
+  uint32_t mantissa = bits & 0x7fffffu;
+  if (((bits >> 23) & 0xff) == 0xff) {
+    return static_cast<uint16_t>(sign | 0x7c00u |
+                                 (mantissa ? 0x200u : 0));
+  }
+  if (exponent <= 0) {
+    if (exponent < -10) return static_cast<uint16_t>(sign);
+    mantissa |= 0x800000u;
+    const uint32_t shift = static_cast<uint32_t>(1 - exponent);
+    uint32_t half = mantissa >> (shift + 13);
+    const uint32_t rest = mantissa & ((1u << (shift + 13)) - 1u);
+    if (rest > (1u << (shift + 12)) ||
+        (rest == (1u << (shift + 12)) && (half & 1u))) ++half;
+    return static_cast<uint16_t>(sign | half);
+  }
+  if (exponent >= 31) return static_cast<uint16_t>(sign | 0x7c00u);
+  uint32_t half = mantissa >> 13;
+  if ((mantissa & 0x1fffu) > 0x1000u ||
+      ((mantissa & 0x1fffu) == 0x1000u && (half & 1u))) {
+    ++half;
+    if (half == 0x400u) {
+      half = 0;
+      ++exponent;
+      if (exponent >= 31) return static_cast<uint16_t>(sign | 0x7c00u);
+    }
+  }
+  return static_cast<uint16_t>(sign | (static_cast<uint32_t>(exponent) << 10) |
+                               half);
+}
 
 float Lookup(const Table& table, float x) {
   x = std::clamp(x, 0.0f, 1.0f) * 4095;
@@ -137,7 +174,8 @@ struct PortableColorPipeline::Impl {
   std::unique_ptr<RowWorkers> workers;
   ~Impl() { sws_free_context(&scaler); av_frame_free(&sampled); }
 
-  bool Render(const AVFrame* frame, int width, int height, bool dovi, uint8_t* rgba, int stride) {
+  bool Render(const AVFrame* frame, int width, int height, bool dovi,
+              uint8_t* rgba, int stride, uint16_t* linear_half) {
     const auto format = static_cast<AVPixelFormat>(frame->format);
     const auto* description = av_pix_fmt_desc_get(format);
     if (!description || description->flags & (AV_PIX_FMT_FLAG_HWACCEL | AV_PIX_FMT_FLAG_RGB) ||
@@ -201,7 +239,10 @@ struct PortableColorPipeline::Impl {
         const auto* luma = reinterpret_cast<const uint16_t*>(sampled->data[0] + y * sampled->linesize[0]);
         const auto* u = reinterpret_cast<const uint16_t*>(sampled->data[1] + y * sampled->linesize[1]);
         const auto* v = reinterpret_cast<const uint16_t*>(sampled->data[2] + y * sampled->linesize[2]);
-        auto* row = rgba + static_cast<ptrdiff_t>(y) * stride;
+        auto* row = rgba ? rgba + static_cast<ptrdiff_t>(y) * stride : nullptr;
+        auto* half_row = linear_half ? reinterpret_cast<uint16_t*>(
+            reinterpret_cast<uint8_t*>(linear_half) +
+            static_cast<ptrdiff_t>(y) * stride) : nullptr;
         for (int x = 0; x < width; ++x) {
           Pixel signal{luma[x] / source_maximum, u[x] / source_maximum, v[x] / source_maximum};
           Pixel rgb;
@@ -230,6 +271,15 @@ struct PortableColorPipeline::Impl {
                    -.124550f * wide[0] + 1.132900f * wide[1] - .008349f * wide[2],
                    -.018151f * wide[0] - .100579f * wide[1] + 1.118730f * wide[2]};
           }
+          if (half_row) {
+            // 203 nits is the SDR reference already used by the 8-bit mapper.
+            // Values above 1.0 stay available for an EDR display.
+            auto* pixel = half_row + 4 * x;
+            for (int c = 0; c < 3; ++c)
+              pixel[c] = FloatToHalf(rgb[c] / 203.0f);
+            pixel[3] = FloatToHalf(1.0f);
+            continue;
+          }
           const float luminance = std::max(.2126f * rgb[0] + .7152f * rgb[1] + .0722f * rgb[2], 0.0f);
           const float peak = std::max(parameters.visible.w, 203.0f);
           const float mapped = luminance * (1 + 203 / peak) / (203 + luminance);
@@ -257,6 +307,13 @@ bool PortableColorPipeline::Render(const AVFrame* frame, int width, int height, 
                                     uint8_t* rgba, int stride) {
   if (!frame || !rgba || width <= 0 || width > std::numeric_limits<int>::max() / 4 ||
       height <= 0 || stride < width * 4) return false;
-  try { return impl_->Render(frame, width, height, dovi, rgba, stride); }
-  catch (const std::exception&) { return false; }
+  try { return impl_->Render(frame, width, height, dovi, rgba, stride, nullptr); }
+  catch (...) { return false; }
+}
+bool PortableColorPipeline::RenderLinearHalf(const AVFrame* frame, int width, int height,
+                                              bool dovi, uint16_t* rgba, int stride) {
+  if (!frame || !rgba || width <= 0 || width > std::numeric_limits<int>::max() / 8 ||
+      height <= 0 || stride < width * 8) return false;
+  try { return impl_->Render(frame, width, height, dovi, nullptr, stride, rgba); }
+  catch (...) { return false; }
 }

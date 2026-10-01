@@ -185,3 +185,152 @@ VideoToolbox 下载帧仍需保留逐帧 side data。
 `rillight_portable_color_pipeline`，验证真实 Profile 5/8 的变化彩色画面、
 seek/倍速、字幕和退出/睡眠恢复，并记录实际 VideoToolbox 或软件解码器。
 现有 Flutter BGRA 纹理仍输出 SDR；Metal/EDR 原生 HDR 显示尚未接通。
+
+## 2026-10-01 原生 macOS 基础输出适配（工作树）
+
+本次对象为 `0150f7912b9957e4ae2500845ef19360e2162414` 加未提交的 macOS 输出改动，
+不是历史 n9.0.1 `.app`。主机 macOS 27.0（26A428），Flutter 3.47.4 / Dart 3.13.3。
+操作期间执行权限变为受限沙箱；后续原生系统服务、用户目录写入及本地 socket
+检查须按失败或未验证记录，不能沿用之前的应用验收结论。
+
+### 实现与诊断
+
+- 暂停 open/seek 的预览不再等待一个不会前进的播放时钟。回归先在旧逻辑上
+  触发断言失败，修复后通过；播放中的提前呈现窗口由 33ms 收紧为 10ms。
+- `WriteBgra` 直接写入有 stride 的目标，保留 SAR、旋转、黑边及 alpha；
+  `PixelBufferOutput` 在无需几何适配时使用 Accelerate 的 RGBA→BGRA 转换。
+  移除每帧中间 BGRA vector 和随后整帧 memcpy，仍保留独立、不可变 IOSurface。
+- 不复用已发布的 pixel buffer：本次 SDK 内 Flutter 引擎在纹理桥接后释放
+  CVPixelBuffer/CVMetalTexture 包装，不能仅凭其引用计数推断 GPU 已结束采样。
+  未加入没有 GPU 完成证据的纹理池。
+- 待处理的主线程纹理通知合并为至多一个。发布失败保留重试状态，未发布的末帧
+  不报告 output drained；会话/时间线改变仍释放旧帧并清空输出状态。
+- `status` 新增 `textureCopies`、`lateFrames`、`conversionUs`、`maxConversionUs`、
+  `sourceFrameRate`、`queuedVideoFrames`、`outputPixelFormat: bgra8-srgb` 和
+  `hdrOutput: false`。计数与耗时随时间线清空。`frames` 是提交数，
+  `textureCopies` 是 Flutter 取纹理次数（可重复），**都不是实际屏幕显示帧数**。
+  耗时只包括 pixel buffer 分配和转换，不包含核心解码、屏幕呈现或 GPU 完成时间。
+
+### 实际执行结果
+
+| 检查 | 本次结果与边界 |
+| --- | --- |
+| 固定源 universal SDK 构建与校验 | 通过；FFmpeg n9.0.2，源提交 `946fcce07b6dcd0331c8cc609192aeff5e1924f8`，含 libass/dav1d |
+| owned core Release 构建 | 通过；arm64+x86_64，部署下限 12.0；不等于 Intel 实机运行 |
+| 直接加载本次核心 | ABI 8；`ffmpeg=n9.0.2;avformat=4129126;avcodec=4129126;avutil=3998054`；这是 SDK/core 构建树加载，不是新 `.app` 的实际加载 |
+| 插件编译 | arm64/x86_64 Objective-C++ 对象编译通过；`-Wall -Wextra -Werror`；没有完成应用链接、安装和启动 |
+| macOS 原生输出 CTest | 2 通过（几何/调度、Accelerate 内存像素转换），1 失败（真实 IOSurface）；无 skip |
+| 原生核心 CTest | 4 通过（帧成本、音频会话、portable color、startup），1 失败（慢外部 ASS）；无 skip |
+| Python 打包/证据契约 | `verify_bundle_test.py` 16、`capture_playback_test.py` 3、`player_smoke_test.py` 4 通过；包含模拟数据，不是新 `.app` 的包审计或播放 |
+| `flutter analyze --no-pub` | 失败：本机缺少锁文件所需的 `file_selector` 缓存，产生 4 个相关诊断；未修改相册代码或依赖约束 |
+| Flutter surface retirement 回归 | 加载阶段失败：监听 `127.0.0.1:0` 被拒绝（errno 1），测试正文未执行 |
+| 新 `lib/main.dart` Release `.app` | 未完成：共享 SDK 缓存不可写；改用工作树内 SDK/config 后，Xcode/SwiftPM 的用户缓存和系统服务权限仍失败 |
+| 本地启动脚本 `macos/player_smoke.py` | 已按默认完整路径执行，退出码 1；SDK 校验通过，但创建 `~/Library/Containers/com.sakullla.rillight/Data/rillight-validation/20261001-215901` 被拒绝（errno 1）。在构建和应用启动之前退出，没有使用旧包冒充候选 |
+| GUI、变化画面、实际 decoder、物理声音、同步、GPU 稳定性 | 未验证；未以核心事件、内存像素或旧 `.app` 代替 |
+
+核心 dylib SHA256：`bea4cf300b04bc9aa26c64fcd5f9778e3e2ba9c4d665e999d1f83522a2fc58f5`。
+路径为 `build/macos-core/librillight_core.dylib`。未产生本次可发布 `.app` 哈希。
+SDK marker 位于 `build/macos-core-sdk/rillight-core-dependencies.json`。
+
+IOSurface 失败为 `PixelBufferOutput::Render: -6662`。使用原来的
+`CVPixelBufferCreate` 参数分别创建 2×2 和 1280×1280 作为对照，也返回 `-6662`，
+并出现 `kIOSurfaceMethodSetCoreVideoBridgedKeys failed: 10000003`。这只能说明当前
+执行环境无法完成原生纹理验证，不能据此宣布新路径通过，或改用不含 IOSurface 的制品。
+慢外部 ASS 仍在 `ass_test.cpp:569` 的 9s pending 等待失败；历史记录已有相同类别
+失败，本次没有放宽超时、删除断言或修复该独立问题。
+
+日志与编译对象保留在 ignored `build/macos-adaptation-20261001/`：
+`sdk-build.log`、`core-tests.log`、`frame-tests.log`、`native-core-probe.log`、
+`iosurface-probe.log`、`flutter-release-local-sdk.log`、
+`flutter-release-local-sdk-pods.log`、`flutter-analyze.log`、
+`surface-retirement-tests.log`、`local-launch-smoke.log`、
+`local-launch-script-tests.log` 和 `plugin-{arm64,x86_64}.o`。这些不会随 Git 传输。
+
+### 后续原生验收
+
+在具备原生系统服务、Xcode 缓存与屏幕捕获权限的同一主机，先完成依赖恢复与构建：
+
+```sh
+export RILLIGHT_MACOS_CORE_PREFIX="$PWD/build/macos-core-sdk"
+export RILLIGHT_MACOS_CORE_DYLIB="$PWD/build/macos-core/librillight_core.dylib"
+export RILLIGHT_MACOS_CORE_SHA256="$(shasum -a 256 "$RILLIGHT_MACOS_CORE_DYLIB" | awk '{print $1}')"
+flutter pub get
+cmake -S packages/rillight_player/native/core_tests/macos -B build/macos-frame-tests \
+  -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0
+cmake --build build/macos-frame-tests
+ctest --test-dir build/macos-frame-tests --output-on-failure
+flutter build macos --release --target lib/main.dart
+python3 macos/verify_bundle.py build/macos/Build/Products/Release/rillight.app
+python3 macos/player_smoke.py
+```
+
+随后补逐编码变化帧、暂停 seek 预览、倍速/切轨/字幕、resize/全屏/跨屏、
+重复开关和睡眠唤醒，以及实际 decoder、物理音频与音画同步。
+真正 HDR/EDR 原生层、高精度核心输出契约、真实 DV Profile 5/8 样本、
+SDR/HDR/DV 的 60fps 与弹幕呈现、Atmos 对象或 HDMI 压缩直通均未实现或未验证；
+本次仍是 SDR 纹理输出，不宣称整份适配清单已闭合或取得性能收益。
+
+## 2026-10-01 本机补测（工作树，HEAD 0150f79）
+
+主机是 MacBook Air / Apple M3 / 10 核 GPU。`system_profiler SPDisplaysDataType` 只列出内置 Liquid Retina，2560×1664，没有刷新率或 HDR 开关。`NSScreen` 当前 EDR headroom 为 1.0，潜在倍数为 2.0。Impeller 启动日志为 MetalSDF。核心 `build/macos-core/librillight_core.dylib` SHA256 为 `3d4fb0971cba2b89afa278fa5ee7595d5becfae8eaf576c1587cfdf4356ebc11`，通用二进制。`actual_hardware=2` 表示 VideoToolbox。下列合成媒体没有杜比视界 RPU。
+
+### 基本播放
+
+`macos/player_smoke.py` 在最新插件上通过。证据目录 `build/player-validation/macos-runs/20261001-235415`：控制通过，窗口捕获通过。H.264 1080p60、HEVC 4K、AV1、VP9 各有连续变化的彩色窗口帧，首帧彩色约 1.3–1.5 秒。物理声音和硬件验收保持 `not_run`。
+
+同一 1080p60 H.264/AAC 文件上，暂停 250ms 期间位置只增加 1µs；恢复后跳到 1.5s 并继续出帧；2× 后 `playback_speed=2`。视频队列峰值 3 帧。无声 H.264 只有视频帧。AAC 纯音频为 48 kHz 立体声 S16，没有视频帧。
+
+没有做全屏、resize、跨屏、反复开关窗口、后台恢复或睡眠唤醒。
+
+### HDR
+
+PQ HEVC（`smpte2084`，10 位）在打开 macOS EDR 时 30 帧都是 RGBA16F，抽样峰值 81.8；关闭时 30 帧都是 8 位 RGBA，峰值 1.0。HLG（`arib-std-b67`）同样：打开时 RGBA16F 峰值 8.18，关闭时 8 位峰值 1.0。两者 `actual_hardware=2`。
+
+独立窗口把 PQ 帧送进 `RGBA16Float` / `kCGColorSpaceExtendedLinearDisplayP3` / `wantsExtendedDynamicRangeContent` 的 CAMetalLayer。画布读回 1280×720，峰值仍是 81.812，超过 1.0 的颜色通道有 1294784 个。送画前后屏幕当前 headroom 都是 1.0。窗口里能看到彩条，但这不是面板高光已被抬升的证据，截图也不能代替。没有 Profile 5/8 杜比视界样本，不宣布支持；不支持组合的核心错误码仍是 -20001，这次没有用真实样本触发。
+
+### 60fps 与弹幕
+
+1080p60 取帧间隔中位数 15048µs，低于 16.67ms 的一帧预算。这是核心交出帧的间隔，不是屏幕扫描间隔。1920×1080 IOSurface 分配加 RGBA→BGRA 的中位数是 601µs，最大 3359µs，没有因此加纹理池。窗口捕获的采样间隔约 1 秒，不能证明 16.67ms 的显示节奏。没有在 1.25×、2×、全屏、HDR10 或杜比视界上复测 60fps。
+
+`flutter test test/player/danmaku/danmaku_renderer_cases.dart` 11 项通过，包括控制栏渐变不压暗白色弹幕。这是 widget 像素断言，不是 60fps 片源上的实机弹幕。
+
+### 杜比音频
+
+E-AC-3 和 TrueHD 都解出 48 kHz 立体声 S16 PCM。默认输出设备是「MacBook Air扬声器」，2 声道。CoreAudio 接受了 11520 字节 PCM，没有报错；开始时设备时间戳尚无效。没有做扬声器或耳机听感，也没有 Atmos 对象渲染或 HDMI 压缩直通。
+
+### 2026-10-02 显示路径耗时
+
+Flutter Impeller 只收 8 位 BGRA 或双平面 8 位 YUV，YUV 矩阵写死 BT.601，所以 VideoToolbox 的 NV12 不能直接交给纹理。播放窗口是整窗物理像素。旧的逐像素拟合把 1920×1080 彩条放进 2940×1846 窗口，中位数 61996µs，最大 63108µs。方像素画面现在保持窗口宽高比，但不再在 CPU 上放大；同一次测量得到的缓冲是 1920×1206，中位数 359µs，最大 1070µs。1920×1080 原尺寸 IOSurface 池的首次分配 3451µs，之后中位数 171µs（此前每帧新建时中位数 601µs、最大 3359µs）。帧测试 3 项通过。这不是屏幕扫描间隔。
+
+`macos/player_smoke.py` 证据 `build/player-validation/macos-runs/20261002-002008` 失败。1080p60 合成片只有 12 秒，脚本却在这段里改窗口大小、进出全屏并在约 25 秒后设置 2×。文件结束后核心拒绝变速，错误是 `Core rejected rate (-1)`。窗口在 1470×923 和 960×540 之间跳过，随后进入全屏。这次没有形成通过的窗口证据。全屏、resize、1.25× 和 2× 的 60fps 显示仍未验收。
+
+去掉 1080p 中途改窗口之后，`macos/player_smoke.py` 通过。证据目录 `build/player-validation/macos-runs/20261002-010128`：控制通过，窗口捕获通过。H.264 1080p60、HEVC 4K、AV1、VP9 各有连续变化的彩色窗口帧，首帧彩色约 1.2–1.4 秒，采样窗口 2940×1846。物理声音和硬件验收仍是 `not_run`。采样间隔约 1 秒，不能证明 16.67ms 的屏幕刷新。生产包已用 `lib/main.dart` 重新构建。
+
+### 2026-10-02 倍速与解码耗时
+
+同一条 12 秒 1080p60 H.264，VideoToolbox。核心按播放时钟交帧，队列保持 3 帧，没有把屏幕扫描间隔测出来。
+
+| 倍速 | 实测速度 | 交帧间隔中位数 | 最大间隔 | 名义间隔 |
+| --- | --- | --- | --- | --- |
+| 1× | 1.00 | 14085µs | 20589µs | 16667µs |
+| 1.25× | 1.25 | 13589µs | 18142µs | 13333µs |
+| 2× | 2.00 | 7241µs | 13657µs | 8333µs |
+
+1× 中间隔短于 16.67ms，是因为取帧允许提前约 10ms。1.25× 和 2× 都把速度应用到了时钟，队列没有被抽空。最大间隔里包含变速后的恢复。没有全屏或改窗口。
+
+直接对 VideoToolbox 帧计时，不含播放时钟。1080p H.264：读回中位数 79µs、最大 239µs，swscale 到 RGBA 中位数 381µs、最大 649µs。4K HEVC：读回 326µs / 1170µs，swscale 1469µs / 1807µs。8 位解码和颜色转换都远小于一帧预算。
+
+另做了一条 2 秒、1920×1080、60fps、HEVC Main 10，复用标签 `smpte2084` / BT.2020。这是 testsrc2，不是标定过的 HDR 母版。打开 EDR 时 90 帧都是 RGBA16F，峰值 81.812，`transfer=16`，`hw=2`，队列 3，交帧中位数 15099µs。关闭 EDR 时 90 帧都是 8 位 RGBA，峰值 1.0，中位数 18310µs，队列仍是 3。面板 headroom 没有在这次测量。把同一条 HEVC 标成 `dvh1` 且没有 RPU 时，核心进入失败状态，`ffmpeg_error=-20001`，没有吐出视频帧。
+
+### 2026-10-02 窗口、倍速、弹幕
+
+证据 `build/player-validation/macos-runs/20261002-015728`：控制和窗口捕获通过。60 秒 1080p60 上一次完成这些步骤，没有来回改窗口：
+
+- 1× 时插件提交间隔 8 次为 15489–16720µs，中位约 16400µs。2.5 秒内 152 帧，`lateFrames=0`。最近一帧转换 3360µs。
+- 白色滚动和固定弹幕叠在彩条上，窗口图能读到 “Rillight 60fps danmaku”。
+- 1.25× 后继续播放。稳定段约 5 秒出 377 帧，`lateFrames=0`，一次提交间隔 14801µs，转换最大 5556µs。
+- 窗口改到 1100×620 点，捕获为 2200×1240，彩条仍在动。
+- `windowManager.isFullScreen()` 返回 true，没有异常。捕获到的窗口仍是 2200×1240，没有变成整块屏幕。不能把这次叫做已验证的全屏画面尺寸。
+- 2× 后 2 秒内 245 帧，`playing=true`，`lateFrames=0`，转换最大 3733µs。
+
+`windowManager.hide()` 会卡住播放 isolate，后台恢复没有做成。本机只有一块内置屏，没有做跨屏。没有让机器睡眠。物理扬声器、Atmos 对象渲染和 HDMI 压缩直通没有做。生产包已用 `lib/main.dart` 重新构建。
