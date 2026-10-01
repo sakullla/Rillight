@@ -408,9 +408,9 @@ void main() {
         fitted = height;
       }
     }
-    // 压缩止步于 4:5 画面本身;矮视口里其余内容随悬浮导航向下滚动让位。
-    expect(fitted, lessThan(natural - 1));
-    expect(fitted, closeTo(360 * 5 / 4, 1));
+    // 矮视口只压缩顶栏延伸，保留完整横图与文字区。
+    expect(fitted, lessThanOrEqualTo(natural));
+    expect(fitted, greaterThanOrEqualTo(PhoneHero.contentHeightFor(360)));
     expect(tester.takeException(), isNull);
   }, tags: ['integration']);
 

@@ -8,11 +8,9 @@ import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/app_error_view.dart';
 import 'package:rillight/app/widgets/liquid_glass.dart';
-import 'package:rillight/app/widgets/media_source_menu_tile.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/auth/auth_scope.dart';
-import 'package:rillight/emby/device_profile.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_failure.dart';
 import 'package:rillight/library/item_format.dart';
@@ -33,7 +31,9 @@ import 'package:rillight/player/player_controller.dart';
 import 'package:rillight/player/buffered_ranges_track.dart';
 import 'package:rillight/player/player_keys.dart';
 import 'package:rillight/player/player_settings.dart';
-import 'package:rillight/player/playback_skip_settings.dart';
+import 'package:rillight/player/playback_settings_menu.dart';
+import 'package:rillight/player/playback_control_scrims.dart';
+import 'package:rillight/player/seek_preview.dart';
 import 'package:rillight/player/player_window.dart';
 import 'package:rillight/player/player_window_host.dart';
 import 'package:rillight/player/video_backend.dart';
@@ -556,6 +556,24 @@ class PlayerPageState extends State<PlayerPage> {
                         ),
                       ),
                     ),
+                    if (current.loading)
+                      const Positioned.fill(
+                        child: IgnorePointer(
+                          child: ColoredBox(color: Colors.black),
+                        ),
+                      ),
+                    Positioned.fill(
+                      child: PlaybackControlScrims(
+                        key: const Key('player-control-scrims'),
+                        visible: current.controlsVisible,
+                        topExtent: kPlayerChromeBarExtent,
+                        showBottom:
+                            !current.loading &&
+                            current.resolved != null &&
+                            !current.playbackEnded &&
+                            current.error == null,
+                      ),
+                    ),
                     // 弹幕只绘制,叠在点击层下面,避免 CustomPaint 吃掉单击。
                     if (_danmakuOverlayVisible(current))
                       Positioned.fill(
@@ -622,6 +640,7 @@ class PlayerPageState extends State<PlayerPage> {
                         onOpenEpisodes: _openEpisodeList,
                         onDanmakuSearch: _openDanmakuPanel,
                         onDragStart: (value) {
+                          current.setControlsPinned(true);
                           current.onUserActivity();
                           setState(() {
                             _dragSeeking = true;
@@ -633,6 +652,7 @@ class PlayerPageState extends State<PlayerPage> {
                           setState(() => _dragValue = value);
                         },
                         onDragEnd: (value) {
+                          current.setControlsPinned(false);
                           setState(() => _dragSeeking = false);
                           final duration = current.duration;
                           if (duration <= Duration.zero) {
@@ -830,7 +850,6 @@ class _PlayerChromeBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final l10n = AppLocalizations.of(context);
-    final scrim = theme.colorScheme.scrim;
     final title = controller.item?.displayName ?? '';
     final statusWidth = (MediaQuery.sizeOf(context).width * 0.4).clamp(
       148.0,
@@ -852,21 +871,7 @@ class _PlayerChromeBar extends StatelessWidget {
               child: WindowDragArea(
                 key: const Key('player-window-drag'),
                 child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.bottomCenter,
-                      end: Alignment.topCenter,
-                      colors: [
-                        Colors.transparent,
-                        scrim.withValues(
-                          alpha: AppScrim.of(context, AppScrim.playerBarSoft),
-                        ),
-                        scrim.withValues(
-                          alpha: AppScrim.of(context, AppScrim.playerPanel),
-                        ),
-                      ],
-                    ),
-                  ),
+                  decoration: const BoxDecoration(),
                   child: Padding(
                     padding: EdgeInsets.fromLTRB(
                       AppSpacing.md,
@@ -1132,7 +1137,10 @@ class _NextEpisodeBanner extends StatelessWidget {
       right: AppSpacing.xl,
       bottom: controller.controlsVisible ? 112 : AppSpacing.xl,
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 360),
+        constraints: BoxConstraints(
+          maxWidth: (MediaQuery.sizeOf(context).width - AppSpacing.xl * 2)
+              .clamp(0.0, 480.0),
+        ),
         child: NextEpisodeCard(controller: controller),
       ),
     );
@@ -2094,7 +2102,6 @@ class _ControlsBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scrim = Theme.of(context).colorScheme.scrim;
     return Positioned(
       left: 0,
       right: 0,
@@ -2103,18 +2110,7 @@ class _ControlsBar extends StatelessWidget {
         visible: visible,
         child: DecoratedBox(
           key: PlayerKeys.controls,
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [
-                Colors.transparent,
-                scrim.withValues(
-                  alpha: AppScrim.of(context, AppScrim.playerBar),
-                ),
-              ],
-            ),
-          ),
+          decoration: const BoxDecoration(),
           child: Padding(
             padding: const EdgeInsets.fromLTRB(
               AppSpacing.lg,
@@ -2187,22 +2183,26 @@ class _SeekTimeline extends StatelessWidget {
         Expanded(
           child: SliderTheme(
             data: _overlaySliderTheme(theme, thumbRadius: 6),
-            child: BufferedRangesTrack(
-              snapshot: controller.bufferSnapshot,
-              duration: controller.duration,
-              child: Slider(
-                key: PlayerKeys.seekBar,
-                value: value,
-                onChanged: !seekEnabled
-                    ? null
-                    : (next) {
-                        if (!dragging) {
-                          onDragStart(next);
-                        } else {
-                          onDragUpdate(next);
-                        }
-                      },
-                onChangeEnd: !seekEnabled ? null : onDragEnd,
+            child: SeekPreview(
+              controller: controller,
+              dragValue: dragging ? dragValue : null,
+              child: BufferedRangesTrack(
+                snapshot: controller.bufferSnapshot,
+                duration: controller.duration,
+                child: Slider(
+                  key: PlayerKeys.seekBar,
+                  value: value,
+                  onChanged: !seekEnabled
+                      ? null
+                      : (next) {
+                          if (!dragging) {
+                            onDragStart(next);
+                          } else {
+                            onDragUpdate(next);
+                          }
+                        },
+                  onChangeEnd: !seekEnabled ? null : onDragEnd,
+                ),
               ),
             ),
           ),
@@ -2282,7 +2282,7 @@ class _ControlsRow extends StatelessWidget {
             iconSize: 22,
             icon: Icons.video_library_rounded,
           ),
-        _PlaybackOverflowMenu(controller: controller),
+        PlaybackSettingsMenu(controller: controller),
         _PlayerIconButton(
           key: PlayerKeys.fullscreen,
           tooltip: controller.isFullScreen
@@ -2296,280 +2296,6 @@ class _ControlsRow extends StatelessWidget {
       ],
     );
   }
-}
-
-/// 低频播放设置收入溢出菜单,控制条只留主操作与高频入口
-/// (播放/音量/弹幕/字幕/剧集/全屏)。点开后再进子菜单选具体项。
-class _PlaybackOverflowMenu extends StatelessWidget {
-  const _PlaybackOverflowMenu({required this.controller});
-
-  final PlayerController controller;
-
-  @override
-  Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context);
-    final scheme = Theme.of(context).colorScheme;
-    return PopupMenuButton<_PlaybackOverflowAction>(
-      key: PlayerKeys.more,
-      tooltip: l10n.playerPlaybackSettings,
-      padding: EdgeInsets.zero,
-      splashRadius: 20,
-      constraints: _controlMenuConstraints,
-      icon: Icon(Icons.settings_outlined, color: scheme.onSurface),
-      onSelected: (action) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (context.mounted) {
-            unawaited(_openAction(context, action));
-          }
-        });
-      },
-      itemBuilder: (context) {
-        final l10n = AppLocalizations.of(context);
-        return [
-          PopupMenuItem(
-            key: PlayerKeys.speed,
-            value: _PlaybackOverflowAction.speed,
-            child: _PlaybackSettingRow(
-              label: l10n.playbackRate,
-              value: _rateLabel(controller.playbackRate),
-              valueKey: PlayerKeys.speedLabel,
-            ),
-          ),
-          PopupMenuItem(
-            value: _PlaybackOverflowAction.skip,
-            child: _PlaybackSettingRow(
-              label: l10n.playerSkipSettings,
-              value: '',
-              valueKey: const Key('player-skip-settings-label'),
-            ),
-          ),
-          if (controller.audioTracks.length > 1)
-            PopupMenuItem(
-              key: PlayerKeys.audio,
-              value: _PlaybackOverflowAction.audio,
-              child: _PlaybackSettingRow(
-                label: l10n.audioTrack,
-                value: _currentAudioLabel(controller, l10n),
-              ),
-            ),
-          if (controller.isTranscode)
-            PopupMenuItem(
-              key: PlayerKeys.quality,
-              value: _PlaybackOverflowAction.quality,
-              child: _PlaybackSettingRow(
-                label: l10n.quality,
-                value: _qualityLabel(l10n, controller.maxStreamingBitrate),
-              ),
-            ),
-          if (controller.canSwitchMediaSource)
-            PopupMenuItem(
-              key: PlayerKeys.mediaSource,
-              value: _PlaybackOverflowAction.mediaSource,
-              child: _PlaybackSettingRow(
-                label: l10n.mediaSource,
-                value: _compactMediaSourceLabel(
-                  controller.resolved?.mediaSource.presentation.compact ??
-                      l10n.mediaSource,
-                ),
-                valueKey: PlayerKeys.mediaSourceLabel,
-              ),
-            ),
-        ];
-      },
-    );
-  }
-
-  Future<void> _openAction(
-    BuildContext context,
-    _PlaybackOverflowAction action,
-  ) async {
-    if (!context.mounted) {
-      return;
-    }
-    final position = _buttonMenuPosition(context);
-    switch (action) {
-      case _PlaybackOverflowAction.skip:
-        await showDialog<void>(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: Text(AppLocalizations.of(context).playerSkipSettings),
-            content: SizedBox(
-              width: 440,
-              child: PlaybackSkipSettings(controller: controller),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: Text(
-                  MaterialLocalizations.of(context).closeButtonTooltip,
-                ),
-              ),
-            ],
-          ),
-        );
-      case _PlaybackOverflowAction.speed:
-        final rate = await showMenu<double>(
-          context: context,
-          position: position,
-          constraints: _controlMenuConstraints,
-          items: [
-            for (final value in kPlaybackRateLadder)
-              CheckedPopupMenuItem(
-                value: value,
-                checked: value == controller.playbackRate,
-                child: Text(_rateLabel(value)),
-              ),
-          ],
-        );
-        if (rate != null && context.mounted) {
-          unawaited(controller.setRate(rate));
-        }
-      case _PlaybackOverflowAction.audio:
-        final index = await showMenu<int>(
-          context: context,
-          position: position,
-          constraints: _controlMenuConstraints,
-          items: [
-            for (final track in controller.audioTracks)
-              CheckedPopupMenuItem(
-                value: track.index,
-                checked: track.index == controller.audioStreamIndex,
-                child: Text(track.label),
-              ),
-          ],
-        );
-        if (index != null && context.mounted) {
-          unawaited(controller.setAudio(index));
-        }
-      case _PlaybackOverflowAction.quality:
-        final bitrate = await showMenu<int>(
-          context: context,
-          position: position,
-          constraints: _controlMenuConstraints,
-          items: [
-            CheckedPopupMenuItem(
-              value: kTranscodeBitrates.first,
-              checked:
-                  controller.maxStreamingBitrate == kTranscodeBitrates.first ||
-                  !kTranscodeBitrates.contains(controller.maxStreamingBitrate),
-              child: Text(AppLocalizations.of(context).qualityAuto),
-            ),
-            for (final value in controller.availableBitrates.skip(1))
-              CheckedPopupMenuItem(
-                value: value,
-                checked: controller.maxStreamingBitrate == value,
-                child: Text(
-                  AppLocalizations.of(context).qualityMbps(value ~/ 1000000),
-                ),
-              ),
-          ],
-        );
-        if (bitrate != null && context.mounted) {
-          unawaited(controller.setMaxBitrate(bitrate));
-        }
-      case _PlaybackOverflowAction.mediaSource:
-        if (controller.loading) {
-          return;
-        }
-        final sourceId = await showMenu<String>(
-          context: context,
-          position: position,
-          constraints: _controlMenuConstraints,
-          items: [
-            for (final source in controller.mediaSources)
-              CheckedPopupMenuItem(
-                value: source.id,
-                checked: source.id == controller.resolved?.mediaSource.id,
-                child: MediaSourceMenuTile(view: source.presentation),
-              ),
-          ],
-        );
-        if (sourceId != null && context.mounted) {
-          unawaited(controller.switchMediaSource(sourceId));
-        }
-    }
-  }
-}
-
-enum _PlaybackOverflowAction { speed, quality, audio, mediaSource, skip }
-
-/// 溢出菜单第一层:左侧类别,右侧当前值。
-class _PlaybackSettingRow extends StatelessWidget {
-  const _PlaybackSettingRow({
-    required this.label,
-    required this.value,
-    this.valueKey,
-  });
-
-  final String label;
-  final String value;
-  final Key? valueKey;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Row(
-      children: [
-        Expanded(child: Text(label)),
-        const SizedBox(width: AppSpacing.md),
-        Text(
-          value,
-          key: valueKey,
-          style: theme.textTheme.bodyMedium?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-/// 阶梯倍速的显示文案,如 0.5x / 0.75x / 1x / 2x。
-String _rateLabel(double rate) {
-  final trimmed = rate == rate.roundToDouble()
-      ? rate.round().toString()
-      : rate.toString();
-  return '${trimmed}x';
-}
-
-String _qualityLabel(AppLocalizations l10n, int bitrate) {
-  if (bitrate == kTranscodeBitrates.first ||
-      !kTranscodeBitrates.contains(bitrate)) {
-    return l10n.qualityAuto;
-  }
-  return l10n.qualityMbps(bitrate ~/ 1000000);
-}
-
-String _currentAudioLabel(PlayerController controller, AppLocalizations l10n) {
-  for (final track in controller.audioTracks) {
-    if (track.index == controller.audioStreamIndex) {
-      return track.label;
-    }
-  }
-  return l10n.audioTrack;
-}
-
-String _compactMediaSourceLabel(String label, {int maxChars = 12}) {
-  final trimmed = label.trim();
-  if (trimmed.length <= maxChars) {
-    return trimmed;
-  }
-  return '${trimmed.substring(0, maxChars - 1)}…';
-}
-
-RelativeRect _buttonMenuPosition(BuildContext context) {
-  final box = context.findRenderObject() as RenderBox?;
-  final overlay = Overlay.of(context).context.findRenderObject() as RenderBox?;
-  if (box == null || overlay == null) {
-    return RelativeRect.fill;
-  }
-  return RelativeRect.fromRect(
-    Rect.fromPoints(
-      box.localToGlobal(Offset.zero, ancestor: overlay),
-      box.localToGlobal(box.size.bottomRight(Offset.zero), ancestor: overlay),
-    ),
-    Offset.zero & overlay.size,
-  );
 }
 
 /// 控制条弹幕入口:打开设置面板(开关、搜索、显示参数都在面板里)。

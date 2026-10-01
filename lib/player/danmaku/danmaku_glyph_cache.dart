@@ -120,17 +120,17 @@ class DanmakuGlyphStyle {
   int get hashCode => Object.hash(fontPx, opacity, outline, colorful);
 }
 
-/// 已 layout 的填充 Paragraph、可选描边 Paragraph 与测量宽度。
+/// One laid-out paragraph owns the fill and its outline shadows.
 class DanmakuGlyph {
   DanmakuGlyph({
     required this.fill,
-    required this.stroke,
+    required this.hasOutline,
     required this.width,
     required this.fillColor,
   });
 
   final ui.Paragraph fill;
-  final ui.Paragraph? stroke;
+  final bool hasOutline;
   final double width;
 
   /// 填充色,供测试断言 colorful=false 时为白。
@@ -149,7 +149,6 @@ class DanmakuGlyphCache {
   final LinkedHashMap<DanmakuGlyphKey, DanmakuGlyph> _entries =
       LinkedHashMap<DanmakuGlyphKey, DanmakuGlyph>();
   final Map<String, double> _widthByText = <String, double>{};
-
   DanmakuGlyphStyle _style = DanmakuGlyphStyle.unset;
   List<DanmakuGlyphKey> _pending = const [];
   int _pendingIndex = 0;
@@ -357,21 +356,26 @@ class DanmakuGlyphCache {
       text: key.displayText,
       fontPx: fontPx,
       color: fillColor,
+      shadows: _style.outline
+          ? [
+              for (final offset in [
+                Offset(-danmakuGlyphStrokeWidth(fontPx), 0),
+                Offset(danmakuGlyphStrokeWidth(fontPx), 0),
+                Offset(0, -danmakuGlyphStrokeWidth(fontPx)),
+                Offset(0, danmakuGlyphStrokeWidth(fontPx)),
+              ])
+                ui.Shadow(
+                  color: kDanmakuGlyphStrokeColor.withValues(
+                    alpha: _style.opacity * 0.9,
+                  ),
+                  offset: offset,
+                ),
+            ]
+          : const [],
     );
-    final stroke = _style.outline
-        ? _paragraph(
-            text: key.displayText,
-            fontPx: fontPx,
-            foreground: Paint()
-              ..style = PaintingStyle.stroke
-              ..strokeWidth = danmakuGlyphStrokeWidth(fontPx)
-              ..strokeJoin = StrokeJoin.round
-              ..color = kDanmakuGlyphStrokeColor,
-          )
-        : null;
     return DanmakuGlyph(
       fill: fill,
-      stroke: stroke,
+      hasOutline: _style.outline,
       width: fill.maxIntrinsicWidth,
       fillColor: fillColor,
     );
@@ -381,7 +385,7 @@ class DanmakuGlyphCache {
     required String text,
     required double fontPx,
     Color? color,
-    Paint? foreground,
+    List<ui.Shadow> shadows = const [],
   }) {
     final families = danmakuFontFallbacks();
     final builder = ui.ParagraphBuilder(
@@ -396,7 +400,7 @@ class DanmakuGlyphCache {
     builder.pushStyle(
       ui.TextStyle(
         color: color,
-        foreground: foreground,
+        shadows: shadows,
         fontSize: fontPx,
         fontFamily: families.first,
         fontFamilyFallback: families.sublist(1),

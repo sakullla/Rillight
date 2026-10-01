@@ -220,6 +220,7 @@ class DanmakuViewState extends State<DanmakuView>
           return;
         }
         apply(clearForSource: sourceChanged);
+        _advanceFrame();
       });
       return;
     }
@@ -245,10 +246,14 @@ class DanmakuViewState extends State<DanmakuView>
       if (item.mode == DanmakuMode.scroll) {
         continue;
       }
-      hash ^= item.id;
+      // IDs may be missing/reused by compatible services. Include the actual
+      // entry and geometry so replacing an equally sized set invalidates it.
+      hash = Object.hash(hash, item.entry, item.left, item.top, item.fontPx);
       count++;
     }
-    final identity = Object.hash(hash, count);
+    final identity = count == 0
+        ? Object.hash(0, 0)
+        : Object.hash(hash, count, _appliedStyle, _lastSize);
     if (identity != _fixedIdentity) {
       _fixedIdentity = identity;
       _fixedTick.value++;
@@ -287,19 +292,14 @@ void _paintLayer({
     return;
   }
   final cache = view.widget.controller.glyphCache;
-  final outline = cache.outline;
   var draws = 0;
   for (final item in view.widget.controller.layout.activeEntries) {
     final isScroll = item.mode == DanmakuMode.scroll;
     if (scroll != isScroll) {
       continue;
     }
-    final glyph = cache.get(cache.keyOf(item.entry));
     final offset = Offset(item.left, item.top);
-    if (outline && glyph.stroke != null) {
-      canvas.drawParagraph(glyph.stroke!, offset);
-      draws++;
-    }
+    final glyph = cache.get(cache.keyOf(item.entry));
     canvas.drawParagraph(glyph.fill, offset);
     draws++;
   }

@@ -63,6 +63,33 @@ const _device = EmbyDeviceInfo(
 );
 
 void main() {
+  Future<void> enterSection(WidgetTester tester, String section) async {
+    final entry = find.byKey(ValueKey('mobile-player-section-$section'));
+    await tester.ensureVisible(entry);
+    await tester.pump();
+    await tester.tap(entry);
+    await tester.pump(const Duration(milliseconds: 400));
+  }
+
+  Future<void> closeOptions(WidgetTester tester) async {
+    final back = find.widgetWithText(TextButton, '返回');
+    await tester.ensureVisible(back);
+    await tester.pump();
+    await tester.tap(back);
+    await tester.pump();
+    expect(
+      find.byKey(const Key('mobile-player-section-speed')),
+      findsOneWidget,
+    );
+    expect(find.byKey(const Key('mobile-player-options')), findsOneWidget);
+    await tester.ensureVisible(back);
+    await tester.pump();
+    await tester.tap(back);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.byKey(const Key('mobile-player-options')), findsNothing);
+  }
+
   Future<AuthController> login(FakeEmbyServer server) async {
     final auth = AuthController(
       client: EmbyClient(
@@ -437,16 +464,18 @@ void main() {
       await tester.tap(find.byKey(const Key('mobile-player-more')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 400));
-      // "更多"面板承载弹幕、音轨字幕、速度、片源、静音与音量(R10/R11)。
+      // 一级分类保留所有入口，弹幕能力在二级分类中。
+      for (final section in ['tracks', 'speed', 'picture', 'danmaku']) {
+        expect(
+          find.byKey(ValueKey('mobile-player-section-$section')),
+          findsOneWidget,
+        );
+      }
+      expect(find.text('来源'), findsNothing);
+      await enterSection(tester, 'danmaku');
       expect(find.byKey(DanmakuKeys.toggle), findsOneWidget);
       expect(find.byKey(DanmakuKeys.search), findsOneWidget);
       expect(find.byKey(DanmakuKeys.panel), findsOneWidget);
-      expect(find.text('音轨与字幕'), findsWidgets);
-      expect(find.text('字幕'), findsOneWidget);
-      expect(find.text('播放速度'), findsOneWidget);
-      expect(find.text('来源'), findsNothing);
-      expect(find.byKey(const Key('mobile-player-mute')), findsOneWidget);
-      expect(find.byKey(const Key('mobile-player-volume')), findsOneWidget);
 
       // 弹幕子面板:透明度/字号可调,开关即时生效(此时面板未滚动)。
       await tester.tap(find.byKey(DanmakuKeys.panel));
@@ -469,18 +498,14 @@ void main() {
       await tester.tap(find.byKey(const Key('mobile-player-more')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 400));
+      await enterSection(tester, 'picture');
       final mute = find.byKey(const Key('mobile-player-mute'));
       await tester.ensureVisible(mute);
       await tester.pump();
       await tester.tap(mute);
       await tester.pump();
       expect(backend.volume, 0);
-      final closeSheet = find.widgetWithText(TextButton, '返回');
-      await tester.ensureVisible(closeSheet);
-      await tester.pump();
-      await tester.tap(closeSheet);
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 400));
+      await closeOptions(tester);
       await closePlayer(tester);
 
       // 弹幕服务不可达时提示可关闭,视频继续播放。
@@ -557,6 +582,7 @@ void main() {
       await tester.tap(find.byKey(const Key('mobile-player-more')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 400));
+      await enterSection(tester, 'picture');
       final slider = tester.widget<Slider>(
         find.byKey(const Key('mobile-player-volume')),
       );
@@ -564,12 +590,7 @@ void main() {
       await tester.pump();
       expect(current.volume, 40);
       expect(backend.volume, 40);
-      final closeSheet = find.widgetWithText(TextButton, '返回');
-      await tester.ensureVisible(closeSheet);
-      await tester.pump();
-      await tester.tap(closeSheet);
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 400));
+      await closeOptions(tester);
 
       await tester.tap(find.byKey(const Key('mobile-player-toggle')));
       await tester.pump();
@@ -846,7 +867,16 @@ void main() {
       expect(find.byKey(DanmakuKeys.toggle), findsNothing);
       expect(find.byKey(DanmakuKeys.search), findsNothing);
       expect(find.byKey(DanmakuKeys.panel), findsNothing);
-      expect(find.text('播放速度'), findsOneWidget);
+      expect(
+        find.byKey(const Key('mobile-player-section-speed')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('mobile-player-section-tracks')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const Key('mobile-player-volume')), findsNothing);
+      await enterSection(tester, 'picture');
       expect(find.text('来源'), findsNothing);
       expect(find.byKey(const Key('mobile-player-mute')), findsOneWidget);
       expect(find.byKey(const Key('mobile-player-volume')), findsOneWidget);
@@ -857,12 +887,7 @@ void main() {
       await tester.tap(mute);
       await tester.pump();
       expect(backend.volume, 0);
-      final closeSheet = find.widgetWithText(TextButton, '返回');
-      await tester.ensureVisible(closeSheet);
-      await tester.pump();
-      await tester.tap(closeSheet);
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 400));
+      await closeOptions(tester);
       expect(find.byType(BottomSheet), findsNothing);
       await closePlayer(tester);
       expect(tester.takeException(), isNull);
@@ -1049,6 +1074,7 @@ void main() {
       await tester.tap(find.byKey(const Key('mobile-player-more')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 400));
+      await enterSection(tester, 'picture');
       expect(
         tester
             .widget<ChoiceChip>(
@@ -1069,12 +1095,7 @@ void main() {
             .selected,
         isTrue,
       );
-      final closeSheet = find.widgetWithText(TextButton, '返回');
-      await tester.ensureVisible(closeSheet);
-      await tester.pump();
-      await tester.tap(closeSheet);
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 400));
+      await closeOptions(tester);
 
       await tester.pump(const Duration(seconds: 5));
       expect(
@@ -1482,6 +1503,7 @@ void main() {
       await tester.tap(find.byKey(const Key('mobile-player-more')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 400));
+      await enterSection(tester, 'tracks');
       final commentary = find.text('Commentary');
       await tester.ensureVisible(commentary);
       await tester.pump();
@@ -1498,12 +1520,7 @@ void main() {
       expect(backend.openCount, 1);
       expect(find.text('重试'), findsNothing);
 
-      final closeSheet = find.widgetWithText(TextButton, '返回');
-      await tester.ensureVisible(closeSheet);
-      await tester.pump();
-      await tester.tap(closeSheet);
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 400));
+      await closeOptions(tester);
       final before = backend.position;
       await tester.tap(find.byKey(const Key('mobile-player-forward')));
       await tester.pump();

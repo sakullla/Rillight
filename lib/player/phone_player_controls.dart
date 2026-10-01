@@ -685,6 +685,7 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                       ),
                   }.entries)
                     ListTile(
+                      key: ValueKey('mobile-player-section-${entry.key}'),
                       leading: Icon(entry.value.$1),
                       title: Text(entry.value.$2),
                       trailing: const Icon(Icons.chevron_right_rounded),

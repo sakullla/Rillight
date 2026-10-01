@@ -28,6 +28,8 @@ class _RecoveryBackend extends FakeVideoBackend {
   Completer<void>? openGate;
   String? rejectedSource;
   bool rejectNextVolume = false;
+  bool selectDefaultAudioOnOpen = false;
+  int audioSelections = 0;
   final restoreGates = <String, Completer<void>>{};
   int stopCount = 0;
   int openBegins = 0;
@@ -59,6 +61,12 @@ class _RecoveryBackend extends FakeVideoBackend {
         throw StateError('Source rejected');
       }
       await super.open(request);
+      if (selectDefaultAudioOnOpen) {
+        audioIndex = request.mediaStreams
+            .where((stream) => stream.type == 'Audio')
+            .firstOrNull
+            ?.index;
+      }
     } finally {
       activeOpens--;
       nativeOrder.add('open-end-$openNumber');
@@ -81,6 +89,12 @@ class _RecoveryBackend extends FakeVideoBackend {
     rateCommands.add(value);
     await restoreGates['rate']?.future;
     await super.setRate(value);
+  }
+
+  @override
+  Future<void> setAudioIndex(int index) async {
+    audioSelections++;
+    await super.setAudioIndex(index);
   }
 }
 
@@ -182,6 +196,20 @@ void main() {
       controller.dispose();
     });
   });
+
+  test(
+    'recovery keeps a confirmed audio track without selecting it again',
+    () async {
+      backend.selectDefaultAudioOnOpen = true;
+      final selections = backend.audioSelections;
+      await controller.retryPlayback();
+      expect(controller.error, isNull);
+      expect(controller.loading, isFalse);
+      expect(controller.audioStreamIndex, backend.selectedAudioIndex);
+      expect(backend.selectedAudioIndex, isNotNull);
+      expect(backend.audioSelections, selections);
+    },
+  );
 
   for (final selectedRate in [1.0, 1.5]) {
     test(

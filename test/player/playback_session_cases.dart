@@ -1037,7 +1037,12 @@ class _ControlledBackend extends FakeVideoBackend {
     warmedPrefix = request.warmedPrefix;
     _openCancelled = false;
     await openGate?.future;
-    if (!_openCancelled) await super.open(request);
+    if (!_openCancelled) {
+      await super.open(request);
+      // Simulate a backend that lost its audio selection on reopen. A backend
+      // already holding the requested track correctly skips redundant work.
+      if (failInitialization == 'audio') audioIndex = null;
+    }
   }
 
   @override

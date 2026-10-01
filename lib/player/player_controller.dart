@@ -310,7 +310,9 @@ class PlayerController extends ChangeNotifier {
   bool skipPromptVisible = false;
   bool skipIntroEnabled = true;
   bool skipOutroEnabled = true;
-  bool controlsPinned = false;
+  static const _defaultControlsPin = 'player-controls-default';
+  final Set<Object> _controlsPinOwners = {};
+  bool get controlsPinned => _controlsPinOwners.isNotEmpty;
   bool _nextUpOffered = false;
 
   /// 这一集没有下一集时才显示跳过片尾。有下一集时下一集按钮代替它。
@@ -1309,8 +1311,15 @@ class PlayerController extends ChangeNotifier {
   }
 
   /// 剧集列表面板打开时钉住控制层,避免顶栏盖住关闭钮后又自动隐藏。
-  void setControlsPinned(bool pinned) {
-    controlsPinned = pinned;
+  void setControlsPinned(bool pinned, {Object? owner}) {
+    if (_disposed) return;
+    final token = owner ?? _defaultControlsPin;
+    if (pinned) {
+      _controlsPinOwners.add(token);
+    } else {
+      _controlsPinOwners.remove(token);
+    }
+    pinned = controlsPinned;
     if (pinned) {
       controlsVisible = true;
       _hideTimer?.cancel();
@@ -2185,7 +2194,7 @@ class PlayerController extends ChangeNotifier {
           if (isPlaying) {
             disconnected = false;
             disconnectDetail = null;
-            onUserActivity();
+            if (changed) onUserActivity();
           } else {
             controlsVisible = true;
             _hideTimer?.cancel();
@@ -2498,11 +2507,13 @@ class PlayerController extends ChangeNotifier {
         onStage?.call('restore audio track');
         final audioApplied = await _restoreParameter(operation, () async {
           if (selectedAudio != null && !next.isTranscode) {
-            await _selectDeviceTrack(
-              audio: true,
-              index: selectedAudio,
-              select: () => backend.setAudioIndex(selectedAudio),
-            );
+            if (backend.selectedAudioIndex != selectedAudio) {
+              await _selectDeviceTrack(
+                audio: true,
+                index: selectedAudio,
+                select: () => backend.setAudioIndex(selectedAudio),
+              );
+            }
           }
         });
         if (_accepts(operation)) {
@@ -3481,7 +3492,7 @@ class PlayerController extends ChangeNotifier {
     _updateActiveSkip();
     _emit();
     try {
-      await (await _settings()).write(
+      await (await _settings()).writePatch(
         PlayerSettings(
           skipIntroEnabled: kind == PlayerSkipKind.intro ? enabled : null,
           skipOutroEnabled: kind == PlayerSkipKind.outro ? enabled : null,

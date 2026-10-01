@@ -54,6 +54,7 @@ class PhoneMinePage extends StatefulWidget {
   static const serverDeleteCancelKey = Key('phone-mine-server-delete-cancel');
 
   static const changePasswordKey = Key('phone-mine-change-password');
+  static const settingsKey = Key('phone-mine-settings');
 
   static Key rateKey(double rate) => Key('phone-mine-rate-$rate');
 
@@ -454,6 +455,7 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
             title: l10n.settings,
             children: [
               ListTile(
+                key: PhoneMinePage.settingsKey,
                 leading: const Icon(Icons.tune_rounded),
                 title: Text(l10n.settings),
                 subtitle: Text(l10n.settingsCategoriesHint),

@@ -2269,25 +2269,25 @@ abstract class AppLocalizations {
   /// No description provided for @settingsSkipIntro.
   ///
   /// In zh, this message translates to:
-  /// **'片头跳过提示'**
+  /// **'片头提示'**
   String get settingsSkipIntro;
 
   /// No description provided for @settingsSkipIntroHint.
   ///
   /// In zh, this message translates to:
-  /// **'在标记的片头显示跳过按钮，关闭后完整播放'**
+  /// **'显示跳过片头按钮，需手动点击；关闭后完整播放片头'**
   String get settingsSkipIntroHint;
 
   /// No description provided for @settingsSkipOutro.
   ///
   /// In zh, this message translates to:
-  /// **'片尾跳过提示'**
+  /// **'片尾提示'**
   String get settingsSkipOutro;
 
   /// No description provided for @settingsSkipOutroHint.
   ///
   /// In zh, this message translates to:
-  /// **'在片尾显示跳过或下一集提示，关闭后播放结束再提示下一集'**
+  /// **'显示跳过或下一集提示；关闭后等播放结束再提示下一集'**
   String get settingsSkipOutroHint;
 
   /// No description provided for @playerSkipSettings.
@@ -2295,6 +2295,30 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'片头与片尾'**
   String get playerSkipSettings;
+
+  /// No description provided for @playerSettingOn.
+  ///
+  /// In zh, this message translates to:
+  /// **'开启'**
+  String get playerSettingOn;
+
+  /// No description provided for @playerSettingOff.
+  ///
+  /// In zh, this message translates to:
+  /// **'关闭'**
+  String get playerSettingOff;
+
+  /// No description provided for @playerSkipSettingsSummary.
+  ///
+  /// In zh, this message translates to:
+  /// **'片头{intro} · 片尾{outro}'**
+  String playerSkipSettingsSummary(String intro, String outro);
+
+  /// No description provided for @playerSkipSettingsSaved.
+  ///
+  /// In zh, this message translates to:
+  /// **'自动保存，应用于所有视频'**
+  String get playerSkipSettingsSaved;
 
   /// No description provided for @nextEpisodeHeading.
   ///

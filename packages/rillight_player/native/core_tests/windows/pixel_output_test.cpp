@@ -2,8 +2,19 @@
 #include <cstdint>
 
 #include "../../../windows/pixel_present.h"
+#include "../../../windows/video_schedule.h"
 
 int main() {
+  RillightCoreSnapshot clock{};
+  clock.position_us = 1234567;
+  clock.state = RILLIGHT_CORE_PLAYING;
+  assert(!rillight_windows::VideoFrameDue(clock.position_us + 40000, clock));
+  assert(rillight_windows::VideoFrameDue(clock.position_us + 10000, clock));
+  assert(rillight_windows::VideoFrameDue(-1, clock));
+  clock.state = RILLIGHT_CORE_PAUSED;
+  assert(rillight_windows::VideoFrameDue(clock.position_us + 40000, clock));
+  clock.state = RILLIGHT_CORE_READY;
+  assert(rillight_windows::VideoFrameDue(clock.position_us + 40000, clock));
   uint8_t pixels[] = {255, 0, 0, 255, 0, 0, 255, 255};
   RillightCoreFrame source{};
   source.struct_size = sizeof(source);

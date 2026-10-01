@@ -168,6 +168,8 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    await tester.tap(find.byKey(const ValueKey('settings-section-外观')));
+    await tester.pumpAndSettle();
     expect(
       tester
           .widget<DropdownButton<AppearanceStyle>>(

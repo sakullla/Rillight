@@ -109,12 +109,17 @@ HdrHost::~HdrHost() {
 }
 
 void HdrHost::Activate() {
+  // The loading UI is initially opaque. Make its initialized black backing
+  // window participate in DWM before enabling Flutter transparency; the
+  // opposite order can briefly reveal the light browse window underneath.
+  active_ = true;
+  UpdateWindow();
+  Check(DwmFlush());
   MARGINS margins{-1,-1,-1,-1}; Check(DwmExtendFrameIntoClientArea(parent_, &margins));
   DWM_BLURBEHIND blur{}; blur.dwFlags = DWM_BB_ENABLE | DWM_BB_BLURREGION;
   blur.fEnable = TRUE; blur.hRgnBlur = CreateRectRgn(0,0,-1,-1);
   const auto result = DwmEnableBlurBehindWindow(parent_, &blur);
   DeleteObject(blur.hRgnBlur); Check(result);
-  active_ = true; UpdateWindow();
 }
 
 void HdrHost::UpdateWindow() {

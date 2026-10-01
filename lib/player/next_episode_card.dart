@@ -27,107 +27,107 @@ class NextEpisodeCard extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final width = constraints.maxWidth.isFinite
-            ? constraints.maxWidth.clamp(0.0, 350.0).toDouble()
-            : 350.0;
+            ? constraints.maxWidth.clamp(0.0, 480.0).toDouble()
+            : 480.0;
+        final compact = width < 400;
         return SizedBox(
           width: width,
           child: Material(
             key: PlayerKeys.nextEpisode,
             color: scheme.surfaceContainerHigh,
-            elevation: 8,
-            shadowColor: Colors.black54,
+            elevation: 4,
+            shadowColor: Colors.black38,
             shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(18),
+              borderRadius: BorderRadius.circular(12),
               side: BorderSide(color: scheme.outlineVariant),
             ),
             clipBehavior: Clip.antiAlias,
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text(
-                    l10n.nextEpisodeHeading,
-                    style: theme.textTheme.labelMedium?.copyWith(
-                      color: scheme.onSurfaceVariant,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(10),
+                  child: Row(
                     children: [
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(10),
-                        child: MediaImage(
-                          item: offer.item,
-                          width: 96,
-                          height: 60,
-                          preferThumb: true,
-                          maxWidth: 320,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          offer.item.displayName,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.titleSmall?.copyWith(
-                            fontWeight: FontWeight.w700,
+                      if (!compact) ...[
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(6),
+                          child: MediaImage(
+                            item: offer.item,
+                            width: 56,
+                            height: 36,
+                            preferThumb: true,
+                            maxWidth: 320,
                           ),
                         ),
+                        const SizedBox(width: 10),
+                      ],
+                      Expanded(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              remaining == null
+                                  ? l10n.nextEpisodeHeading
+                                  : l10n.nextEpisodeIn(
+                                      (remaining.inMilliseconds / 1000).ceil(),
+                                    ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: scheme.onSurfaceVariant,
+                              ),
+                            ),
+                            const SizedBox(height: 3),
+                            Text(
+                              offer.item.displayName,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.titleSmall?.copyWith(
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      FilledButton.icon(
+                        key: PlayerKeys.nextEpisodePlay,
+                        focusNode: playFocus,
+                        onPressed: controller.playNextEpisode,
+                        style: FilledButton.styleFrom(
+                          minimumSize: const Size(0, 40),
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          visualDensity: VisualDensity.standard,
+                        ),
+                        icon: const Icon(Icons.skip_next_rounded, size: 20),
+                        label: Text(l10n.nextEpisode),
+                      ),
+                      const SizedBox(width: 4),
+                      IconButton(
+                        key: PlayerKeys.nextEpisodeCancel,
+                        focusNode: cancelFocus,
+                        tooltip: remaining == null
+                            ? l10n.nextEpisodeKeepWatching
+                            : l10n.nextEpisodeStay,
+                        onPressed: controller.cancelNextEpisode,
+                        icon: const Icon(Icons.close_rounded, size: 18),
                       ),
                     ],
                   ),
-                  if (remaining != null) ...[
-                    const SizedBox(height: 12),
-                    Text(
-                      l10n.nextEpisodeIn(
-                        (remaining.inMilliseconds / 1000).ceil(),
-                      ),
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: scheme.onSurfaceVariant,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    LinearProgressIndicator(
-                      value: countdown <= 0
-                          ? 0
-                          : (remaining.inMilliseconds / countdown).clamp(
-                              0.0,
-                              1.0,
-                            ),
-                      borderRadius: BorderRadius.circular(4),
-                      minHeight: 3,
-                    ),
-                  ],
-                  const SizedBox(height: 16),
-                  FilledButton.icon(
-                    key: PlayerKeys.nextEpisodePlay,
-                    focusNode: playFocus,
-                    onPressed: controller.playNextEpisode,
-                    style: FilledButton.styleFrom(
-                      minimumSize: const Size.fromHeight(48),
-                    ),
-                    icon: const Icon(Icons.skip_next_rounded, size: 22),
-                    label: Text(l10n.playNextEpisode),
+                ),
+                if (remaining != null)
+                  LinearProgressIndicator(
+                    value: countdown <= 0
+                        ? 0
+                        : (remaining.inMilliseconds / countdown).clamp(
+                            0.0,
+                            1.0,
+                          ),
+                    minHeight: 2,
                   ),
-                  const SizedBox(height: 8),
-                  OutlinedButton(
-                    key: PlayerKeys.nextEpisodeCancel,
-                    focusNode: cancelFocus,
-                    onPressed: controller.cancelNextEpisode,
-                    style: OutlinedButton.styleFrom(
-                      minimumSize: const Size.fromHeight(44),
-                    ),
-                    child: Text(
-                      remaining == null
-                          ? l10n.nextEpisodeKeepWatching
-                          : l10n.nextEpisodeStay,
-                    ),
-                  ),
-                ],
-              ),
+              ],
             ),
           ),
         );

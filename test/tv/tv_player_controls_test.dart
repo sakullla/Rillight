@@ -163,7 +163,7 @@ void main() {
     await tester.pumpAndSettle();
     await key(tester, LogicalKeyboardKey.arrowDown);
     expect(focused(tester, 'tv-player-toggle'), isTrue);
-    for (final entry in ['tracks', 'quality', 'source', 'speed']) {
+    for (final entry in ['tracks', 'quality', 'source', 'skip', 'speed']) {
       await key(tester, LogicalKeyboardKey.arrowRight);
       expect(focused(tester, 'tv-player-$entry'), isTrue);
       final origin = FocusManager.instance.primaryFocus;
@@ -194,6 +194,15 @@ void main() {
       );
       expect(paintedBorder.left, greaterThanOrEqualTo(viewport.left));
       expect(paintedBorder.right, lessThanOrEqualTo(viewport.right));
+      if (entry == 'skip') {
+        expect(c.skipIntroEnabled, isTrue);
+        await key(tester, LogicalKeyboardKey.select);
+        expect(c.skipIntroEnabled, isFalse);
+        await key(tester, LogicalKeyboardKey.arrowDown);
+        await key(tester, LogicalKeyboardKey.select);
+        expect(c.skipOutroEnabled, isFalse);
+        expect(c.controlsPinned, isTrue);
+      }
       await tester.binding.handlePopRoute();
       await tester.pumpAndSettle();
       expect(FocusManager.instance.primaryFocus, same(origin));

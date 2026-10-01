@@ -580,6 +580,19 @@ void main() {
     expect(controller.nextEpisode?.item.id, 'episode-friends-s1e2');
   });
 
+  test(
+    'duplicate playing notifications do not reopen hidden controls',
+    () async {
+      final controller = await startStandaloneController();
+      addTearDown(controller.dispose);
+      controller.hideControlsOnPointerExit();
+      expect(controller.controlsVisible, isFalse);
+      backend.emitEvent(VideoEventKind.playing, true);
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.controlsVisible, isFalse);
+    },
+  );
+
   test('skip intro stays visible for the whole intro after resume', () async {
     const second = 10000000;
     final episode = server.items.firstWhere(

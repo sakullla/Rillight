@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "pixel_present.h"
+#include "video_schedule.h"
 
 VideoSurface::VideoSurface(RillightCore* core, std::shared_ptr<CoreApi> api,
                            flutter::TextureRegistrar* textures, IDXGIAdapter* adapter, HWND window)
@@ -325,9 +326,7 @@ void VideoSurface::Run(std::function<void(std::string)> ready) {
             pending->timeline_version != timeline) {
           api_->release_frame(pending);
           pending = nullptr;
-        } else if (pending->pts_us < 0 ||
-                   pending->pts_us <= state.position_us + 10000 ||
-                   state.state == RILLIGHT_CORE_READY) {
+        } else if (rillight_windows::VideoFrameDue(pending->pts_us, state)) {
           // The core already selects the newest due frame and discards older
           // queued pictures. Rejecting its last available frame here can leave
           // the texture frozen indefinitely when HDR conversion runs late.

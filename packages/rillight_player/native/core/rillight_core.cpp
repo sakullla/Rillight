@@ -1793,11 +1793,16 @@ int prepare_audio_filter(AudioFilter *filter, const AVFrame *frame,
       &filter->source, avfilter_get_by_name("abuffer"), "input", args,
       nullptr, filter->graph);
   if (result < 0) return result;
-  const std::string tempo_arg = std::to_string(std::min(speed, 2.0));
-  result = avfilter_graph_create_filter(
-      &tempo, avfilter_get_by_name("atempo"), "tempo", tempo_arg.c_str(),
-      nullptr, filter->graph);
-  if (result < 0) return result;
+  if (speed != 1.0) {
+    // Unity playback needs format conversion/downmix only. Running WSOLA at
+    // unity adds a priming window and packet buffering to every open/seek,
+    // including E-AC-3/TrueHD, without changing the requested playback speed.
+    const std::string tempo_arg = std::to_string(std::min(speed, 2.0));
+    result = avfilter_graph_create_filter(
+        &tempo, avfilter_get_by_name("atempo"), "tempo", tempo_arg.c_str(),
+        nullptr, filter->graph);
+    if (result < 0) return result;
+  }
   if (speed > 2.0) {
     const std::string second_arg = std::to_string(speed / 2.0);
     result = avfilter_graph_create_filter(
@@ -1814,13 +1819,16 @@ int prepare_audio_filter(AudioFilter *filter, const AVFrame *frame,
       &filter->sink, avfilter_get_by_name("abuffersink"), "output", nullptr,
       nullptr, filter->graph);
   if (result < 0) return result;
-  result = avfilter_link(filter->source, 0, tempo, 0);
-  if (result < 0) return result;
+  if (tempo) {
+    result = avfilter_link(filter->source, 0, tempo, 0);
+    if (result < 0) return result;
+  }
   if (tempo_second) {
     result = avfilter_link(tempo, 0, tempo_second, 0);
     if (result < 0) return result;
   }
-  result = avfilter_link(tempo_second ? tempo_second : tempo, 0, format, 0);
+  result = avfilter_link(tempo_second ? tempo_second :
+                        tempo ? tempo : filter->source, 0, format, 0);
   if (result < 0) return result;
   result = avfilter_link(format, 0, filter->sink, 0);
   if (result < 0) return result;
@@ -2636,7 +2644,28 @@ void run(RillightCoreImpl *core, uint64_t session) {
         }
       }
       if (result < 0) break;
-      if (video.context) avcodec_flush_buffers(video.context);
+      if (video.context && video.hardware == RILLIGHT_CORE_HW_MEDIACODEC) {
+        // Some Android Codec2 implementations stop producing pictures after
+        // flush during an audio/subtitle/rate seek. All decode/conversion lanes
+        // are quiescent here, so retire the codec and create a fresh instance
+        // with the same hardware policy instead of leaving recovery stalled.
+        const int stream = video.stream;
+        avcodec_free_context(&video.context);
+        video = make_decoder(format, stream, core->hardware_preference,
+                             core->allow_software_fallback);
+        if (!video.context) {
+          result = video.error < 0 ? video.error : AVERROR_DECODER_NOT_FOUND;
+          break;
+        }
+        conversion_ready = false;
+        std::lock_guard lock(core->mutex);
+        for (auto& track : core->tracks) {
+          if (track.stream_index == stream)
+            track.actual_hardware = RILLIGHT_CORE_HW_NONE;
+        }
+      } else if (video.context) {
+        avcodec_flush_buffers(video.context);
+      }
       if (audio.context) avcodec_flush_buffers(audio.context);
       if (subtitle.context) avcodec_flush_buffers(subtitle.context);
       close_audio_filter(&audio_filter);

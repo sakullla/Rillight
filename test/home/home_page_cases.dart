@@ -6,9 +6,7 @@ import 'package:rillight/app/app.dart';
 import 'package:rillight/app/app_shell.dart';
 import 'package:rillight/app/widgets/app_empty_view.dart';
 import 'package:rillight/app/widgets/app_error_view.dart';
-import 'package:rillight/app/widgets/backdrop_scrim.dart';
 import 'package:rillight/app/widgets/liquid_glass.dart';
-import 'package:rillight/app/widgets/scrim_icon_button.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/credential_store.dart';
@@ -110,7 +108,7 @@ void main() {
       expect(
         find.descendant(
           of: find.byType(HomeHero),
-          matching: find.byType(BackdropScrim),
+          matching: find.byKey(const Key('home-hero-card')),
         ),
         findsOneWidget,
       );
@@ -133,22 +131,23 @@ void main() {
           of: find.byType(HomeHero),
           matching: find.byType(FilledButton),
         ),
-        findsNothing,
+        findsOneWidget,
       );
       expect(
         tester.widget(find.byKey(CatalogKeys.heroPrev)),
-        isA<ScrimIconButton>(),
+        isA<IconButton>(),
       );
       expect(
         tester.widget(find.byKey(CatalogKeys.heroNext)),
-        isA<ScrimIconButton>(),
+        isA<IconButton>(),
       );
-      expect(find.byKey(CatalogKeys.heroDot(4)), findsOneWidget);
+      expect(find.byKey(CatalogKeys.heroDot(3)), findsOneWidget);
+      expect(find.byKey(CatalogKeys.heroDot(4)), findsNothing);
       expect(
         find.byKey(CatalogKeys.heroDot(HomeHero.maxFeatured)),
         findsNothing,
       );
-      const featuredOrder = ['Inception', '老友记', '飞屋环游记', '封面失败片', '未分类型电影'];
+      const featuredOrder = ['Inception', '老友记', '飞屋环游记', '封面失败片'];
       for (final title in featuredOrder) {
         if (title != featuredOrder.first) {
           await tester.tap(find.byKey(CatalogKeys.heroNext));
@@ -156,7 +155,7 @@ void main() {
         }
         expect(
           find.descendant(
-            of: find.byType(HomeHero),
+            of: find.byKey(const Key('home-hero-card')),
             matching: find.text(title),
           ),
           findsOneWidget,

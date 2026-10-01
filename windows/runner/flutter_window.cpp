@@ -131,10 +131,16 @@ bool FlutterWindow::OnCreate() {
   g_original_flutter_view_proc = reinterpret_cast<WNDPROC>(SetWindowLongPtr(
       flutter_view, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(FlutterViewWndProc)));
 
-  // Do not Show on first frame. Dart applies TitleBarStyle.hidden and the
-  // intended size while the HWND is still hidden; showing 1280x720 with a
-  // caption here, then hiding the bar and resizing, is the shrink-then-grow
-  // flash. configureMainWindow / player _configureWindow call Show.
+  // Dart prepares the title bar and size before requesting Show. That request
+  // can precede Flutter's first rasterized frame: keep the window hidden until
+  // both conditions hold, without showing the initial native geometry.
+  flutter_controller_->engine()->SetNextFrameCallback([this]() {
+    first_frame_ready_ = true;
+    if (show_requested_) {
+      show_requested_ = false;
+      Show();
+    }
+  });
   flutter_controller_->ForceRedraw();
 
   return true;
@@ -163,6 +169,13 @@ LRESULT
 FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                               WPARAM const wparam,
                               LPARAM const lparam) noexcept {
+  if (message == WM_WINDOWPOSCHANGING && !first_frame_ready_) {
+    auto* position = reinterpret_cast<WINDOWPOS*>(lparam);
+    if (position->flags & SWP_SHOWWINDOW) {
+      position->flags &= ~SWP_SHOWWINDOW;
+      show_requested_ = true;
+    }
+  }
   if (native_caption_buttons_) {
     if (message == WM_NCHITTEST) {
       LRESULT dwm_hit = 0;

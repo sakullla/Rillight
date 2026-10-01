@@ -23,6 +23,7 @@ import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/library/item_format.dart';
 import 'package:rillight/home/phone_hero.dart';
+import 'package:rillight/home/hero_artwork.dart';
 import 'package:rillight/home/phone_home_sections.dart';
 import 'package:rillight/media_image/media_image.dart';
 
@@ -318,7 +319,10 @@ class _PhoneHomeState extends State<PhoneHome> {
           return page;
         }
         return ContentTheme(
-          item: hero,
+          item: heroArtworkSources(
+            hero,
+            series: catalog.latestSeries.items,
+          ).themeItem,
           preferBackdrop: true,
           fillSurface: true,
           child: page,
@@ -383,7 +387,7 @@ double _wideBadgeHeight(BuildContext context) {
   return line + 2 * 2;
 }
 
-/// 横幅默认高度仍是顶栏延伸加 4:5 画面。继续观看放不下时只缩短这段延伸。
+/// 保留完整横向画面与文字区，矮视口只压缩顶栏延伸。
 class _BannerSlot {
   const _BannerSlot({required this.natural, required this.fitted});
 
@@ -399,7 +403,10 @@ _BannerSlot _bannerSlot({
   required _HomeSection? resume,
 }) {
   final extension = MediaQuery.paddingOf(context).top + 56;
-  final picture = width * 5 / 4;
+  final picture = PhoneHero.contentHeightFor(
+    width,
+    textScale: MediaQuery.textScalerOf(context).scale(14) / 14,
+  );
   final natural = extension + picture;
   var bannerThenResume = false;
   for (final id in visible) {

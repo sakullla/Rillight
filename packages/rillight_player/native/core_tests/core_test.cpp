@@ -371,6 +371,31 @@ int main() {
   Media media{make_wav(), make_bmp()};
   RillightCoreIo io{&media, open, read, seek, close, nullptr,
                     cancel_media_io};
+  // Unity playback must preserve every input sample without tempo priming or
+  // a tail that needs another packet to become audible.
+  auto *unity_core = rillight_core_create(&io);
+  assert(unity_core && rillight_core_open(unity_core, "synthetic.wav", 1) == 0);
+  int unity_samples = 0;
+  const auto unity_deadline = std::chrono::steady_clock::now() +
+                              std::chrono::seconds(5);
+  bool unity_drained = false;
+  while (std::chrono::steady_clock::now() < unity_deadline) {
+    if (auto *pcm = rillight_core_take_frame(unity_core, RILLIGHT_CORE_AUDIO_S16)) {
+      assert(pcm->sample_rate == 48000 && pcm->channels == 2);
+      unity_samples += pcm->sample_count;
+      rillight_core_release_frame(pcm);
+    } else {
+      const auto state = snapshot(unity_core);
+      assert(state.state != RILLIGHT_CORE_FAILED);
+      if (state.source_eof && state.queued_audio_frames == 0) {
+        unity_drained = true;
+        break;
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+  }
+  assert(unity_drained && unity_samples == 4800);
+  rillight_core_destroy(unity_core);
   auto *core = rillight_core_create(&io);
   assert(core);
   assert(rillight_core_open(core, "synthetic.wav", 1) == 0);

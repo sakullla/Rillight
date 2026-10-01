@@ -1,34 +1,29 @@
 import 'package:flutter/material.dart';
 import 'package:rillight/app/content_theme.dart';
+import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_motion.dart';
 import 'package:rillight/app/theme.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_controller.dart';
-import 'package:rillight/home/featured_items.dart';
 import 'package:rillight/home/catalog_keys.dart';
-import 'package:rillight/media_image/media_image.dart';
+import 'package:rillight/home/featured_items.dart';
+import 'package:rillight/home/hero_artwork.dart';
+import 'package:rillight/home/hero_playback_actions.dart';
+import 'package:rillight/library/item_format.dart';
 
-/// 手机首页横幅。候选规则与桌面首页横幅相同，但不把那个组件装进手机：
-/// 它依赖桌面顶栏重叠。左右滑动切换；点画面进入条目。无自动轮换。
+/// Phone artwork keeps its landscape composition, with text on a solid surface.
 class PhoneHero extends StatefulWidget {
   const PhoneHero({super.key, required this.catalog, this.onItem});
-
   final CatalogController catalog;
-
-  /// 当前画面，供首页把页面底色收成这张图的主题色。
   final ValueChanged<EmbyItem>? onItem;
-
   static const bannerKey = Key('phone-hero');
   static const openKey = Key('phone-hero-open');
-
   static const maxFeatured = 5;
-
   static Key itemKey(String id) => ValueKey('phone-hero-$id');
-
-  /// 继续观看优先、其次最新电影和剧集，最多 [maxFeatured] 条。
-  static List<EmbyItem> featuredItemsOf(CatalogController catalog) {
-    return featuredHomeItems(catalog, limit: maxFeatured);
-  }
+  static List<EmbyItem> featuredItemsOf(CatalogController catalog) =>
+      featuredHomeItems(catalog, limit: maxFeatured);
+  static double contentHeightFor(double width, {double textScale = 1}) =>
+      (width - 32) * 9 / 16 + 176 * textScale + 16;
 
   @override
   State<PhoneHero> createState() => _PhoneHeroState();
@@ -38,7 +33,6 @@ class _PhoneHeroState extends State<PhoneHero> {
   int _index = 0;
   String? _reportedId;
   final PageController _page = PageController();
-
   List<EmbyItem> get _featured => PhoneHero.featuredItemsOf(widget.catalog);
 
   @override
@@ -48,100 +42,107 @@ class _PhoneHeroState extends State<PhoneHero> {
   }
 
   void _open(EmbyItem item) {
+    final artwork = heroArtworkSources(
+      item,
+      series: widget.catalog.latestSeries.items,
+    );
     PhoneMotion.openItem(
       context,
-      item,
+      artwork.handoffItem(item),
       preferBackdrop: true,
       maxWidth: PhoneMotion.heroRequestWidth,
+    );
+  }
+
+  void _goTo(int value) {
+    _page.animateToPage(
+      value,
+      duration: AppMotion.durationOf(context),
+      curve: AppMotion.standard,
     );
   }
 
   @override
   Widget build(BuildContext context) {
     final items = _featured;
-    if (items.isEmpty) {
-      return const SizedBox.shrink();
-    }
+    if (items.isEmpty) return const SizedBox.shrink();
     final index = _index % items.length;
-    final rotating = items.length > 1;
     return LayoutBuilder(
       builder: (context, constraints) {
         final width = constraints.maxWidth;
-        // 画面从状态栏背后铺下来。多出来的高度是顶栏,4:5 纵向构图完整留在顶栏下面。
         final top = MediaQuery.paddingOf(context).top + 56;
-        final height = top + width * 5 / 4;
+        final scale = MediaQuery.textScalerOf(context).scale(14) / 14;
+        final height =
+            top + PhoneHero.contentHeightFor(width, textScale: scale);
         _report(items[index]);
         return SizedBox(
           key: PhoneHero.bannerKey,
           width: width,
           height: height,
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              PageView.builder(
-                controller: _page,
-                physics: rotating
-                    ? const PageScrollPhysics()
-                    : const NeverScrollableScrollPhysics(),
-                itemCount: items.length,
-                onPageChanged: (value) {
-                  setState(() => _index = value);
-                  _report(items[value]);
-                },
-                itemBuilder: (context, page) {
-                  final pageItem = items[page];
-                  final pageTitle =
-                      pageItem.isEpisode &&
-                          (pageItem.seriesName?.isNotEmpty ?? false)
-                      ? pageItem.seriesName!
-                      : pageItem.name;
-                  return GestureDetector(
-                    key: page == index ? PhoneHero.openKey : null,
-                    behavior: HitTestBehavior.opaque,
-                    onTap: () => _open(pageItem),
-                    child: KeyedSubtree(
-                      key: PhoneHero.itemKey(pageItem.id),
-                      child: ContentTheme(
-                        item: pageItem,
-                        preferBackdrop: true,
-                        fillSurface: false,
-                        child: Stack(
-                          fit: StackFit.expand,
-                          children: [
-                            PhoneMotion.sharedImage(
-                              itemId: pageItem.id,
-                              preferBackdrop: true,
-                              child: MediaImage(
-                                item: pageItem,
-                                preferBackdrop: true,
-                                alignment: Alignment.center,
-                                maxWidth: PhoneMotion.heroRequestWidth,
+          child: Padding(
+            padding: EdgeInsets.only(top: top),
+            child: PageView.builder(
+              controller: _page,
+              physics: items.length > 1
+                  ? const PageScrollPhysics()
+                  : const NeverScrollableScrollPhysics(),
+              itemCount: items.length,
+              onPageChanged: (value) {
+                setState(() => _index = value);
+                _report(items[value]);
+              },
+              itemBuilder: (context, page) {
+                final item = items[page];
+                final artwork = heroArtworkSources(
+                  item,
+                  series: widget.catalog.latestSeries.items,
+                );
+                return ContentTheme(
+                  key: PhoneHero.itemKey(item.id),
+                  item: artwork.themeItem,
+                  fillSurface: false,
+                  child: Material(
+                    type: MaterialType.transparency,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          AspectRatio(
+                            aspectRatio: 16 / 9,
+                            child: GestureDetector(
+                              key: page == index ? PhoneHero.openKey : null,
+                              onTap: () => _open(item),
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(18),
+                                child: PhoneMotion.sharedImage(
+                                  itemId: item.id,
+                                  preferBackdrop: true,
+                                  child: HeroArtwork(
+                                    sources: artwork,
+                                    requestWidth: PhoneMotion.heroRequestWidth,
+                                    compact: true,
+                                  ),
+                                ),
                               ),
                             ),
-                            _HeroWash(),
-                            Positioned(
-                              left: AppSpacing.md,
-                              right: AppSpacing.md,
-                              bottom: AppSpacing.md,
-                              child: _HeroCaption(
-                                item: pageItem,
-                                title: pageTitle,
-                                trailing: rotating && page == index
-                                    ? _HeroDots(
-                                        count: items.length,
-                                        index: index,
-                                      )
-                                    : null,
-                              ),
+                          ),
+                          Expanded(
+                            child: _HeroCaption(
+                              item: item,
+                              onOpen: () => _open(item),
+                              index: index,
+                              count: items.length,
+                              onSelect: _goTo,
                             ),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
                     ),
-                  );
-                },
-              ),
-            ],
+                  ),
+                );
+              },
+            ),
           ),
         );
       },
@@ -149,135 +150,114 @@ class _PhoneHeroState extends State<PhoneHero> {
   }
 
   void _report(EmbyItem item) {
-    final onItem = widget.onItem;
-    if (onItem == null || _reportedId == item.id) {
-      return;
-    }
+    final callback = widget.onItem;
+    if (callback == null || _reportedId == item.id) return;
     _reportedId = item.id;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && _reportedId == item.id) {
-        onItem(item);
-      }
+      if (mounted && _reportedId == item.id) callback(item);
     });
   }
 }
 
-class _HeroWash extends StatelessWidget {
-  const _HeroWash();
-
-  @override
-  Widget build(BuildContext context) {
-    // 顶部压暗带保状态栏可读;底部从 AppMobileHero.bottomStart 起溶入
-    // 当前主题的表面色,与页面侧 ContentTheme 铺的底色同色,无可见接缝。
-    final surface = Theme.of(context).colorScheme.surface;
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            Colors.black.withValues(alpha: AppScrim.top),
-            Colors.transparent,
-            Colors.transparent,
-            surface,
-          ],
-          stops: const [
-            AppMobileHero.topStart,
-            AppMobileHero.topEnd,
-            AppMobileHero.bottomStart,
-            AppMobileHero.bottomEnd,
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// 轮播点：贴在元信息行右侧，活动段拉长，颜色取当前画面主题色。
-class _HeroDots extends StatelessWidget {
-  const _HeroDots({required this.count, required this.index});
-
-  final int count;
-  final int index;
-
-  @override
-  Widget build(BuildContext context) {
-    final active = Theme.of(context).colorScheme.primary;
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        for (var i = 0; i < count; i++)
-          Container(
-            key: CatalogKeys.heroDot(i),
-            width: i == index ? 16 : 6,
-            height: 4,
-            margin: const EdgeInsets.symmetric(horizontal: 3),
-            decoration: BoxDecoration(
-              color: i == index ? active : Colors.white.withValues(alpha: 0.45),
-              borderRadius: BorderRadius.circular(99),
-            ),
-          ),
-      ],
-    );
-  }
-}
-
-/// 横幅文案：标题加一行元信息（年份 · 评分 · 类型），[trailing] 放轮播点。
 class _HeroCaption extends StatelessWidget {
-  const _HeroCaption({required this.item, required this.title, this.trailing});
-
+  const _HeroCaption({
+    required this.item,
+    required this.onOpen,
+    required this.index,
+    required this.count,
+    required this.onSelect,
+  });
   final EmbyItem item;
-  final String title;
-  final Widget? trailing;
+  final VoidCallback onOpen;
+  final int index;
+  final int count;
+  final ValueChanged<int> onSelect;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final year = item.productionYear != null && item.productionYear! > 0
-        ? item.productionYear
-        : item.premiereDate?.year;
-    final rating = item.communityRating;
-    final genre = item.genres.isEmpty ? null : item.genres.first;
+    final scheme = theme.colorScheme;
+    final l10n = AppLocalizations.of(context);
+    final title = item.isEpisode && item.seriesName?.isNotEmpty == true
+        ? item.seriesName!
+        : item.name;
     final meta = [
-      if (year != null) '$year',
-      if (rating != null) rating.toStringAsFixed(1),
-      ?genre,
-    ].join('  ·  ');
-    const ink = Colors.white;
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          title,
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-          style: theme.textTheme.headlineMedium?.copyWith(
-            color: ink,
-            fontWeight: FontWeight.w700,
-            height: 1.15,
+      if (item.isEpisode) ?seasonEpisodeCode(item),
+      if (item.canResume)
+        l10n.playbackProgress((item.playbackProgress * 100).round()),
+      if (!item.isEpisode && item.productionYear != null)
+        '${item.productionYear}',
+      if (item.communityRating != null)
+        item.communityRating!.toStringAsFixed(1),
+    ];
+    return Padding(
+      padding: const EdgeInsets.only(top: 14, bottom: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.titleLarge?.copyWith(
+              fontWeight: FontWeight.w700,
+            ),
           ),
-        ),
-        if (meta.isNotEmpty || trailing != null) ...[
-          const SizedBox(height: 6),
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  meta,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.labelLarge?.copyWith(
-                    color: ink.withValues(alpha: 0.88),
-                    height: 1.2,
-                  ),
-                ),
+          if (meta.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text(
+              meta.join(' · '),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: scheme.onSurfaceVariant,
               ),
-              ?trailing,
+            ),
+          ],
+          const Spacer(),
+          Wrap(
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 12,
+            children: [
+              HeroPlaybackActions(item: item, onDetails: onOpen),
+              if (count > 1)
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    for (var i = 0; i < count; i++)
+                      Semantics(
+                        selected: i == index,
+                        label: '${i + 1} / $count',
+                        child: InkResponse(
+                          key: CatalogKeys.heroDot(i),
+                          onTap: () => onSelect(i),
+                          radius: 20,
+                          child: SizedBox(
+                            width: 44,
+                            height: 44,
+                            child: Center(
+                              child: AnimatedContainer(
+                                duration: AppMotion.durationOf(context),
+                                width: i == index ? 16 : 5,
+                                height: 5,
+                                decoration: BoxDecoration(
+                                  color: i == index
+                                      ? scheme.primary
+                                      : scheme.onSurface.withValues(alpha: 0.3),
+                                  borderRadius: BorderRadius.circular(99),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
             ],
           ),
         ],
-      ],
+      ),
     );
   }
 }

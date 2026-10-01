@@ -16,6 +16,7 @@ import 'package:rillight/app/phone_mine_page.dart';
 import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/router.dart';
 import 'package:rillight/app/theme.dart';
+import 'package:rillight/app/settings/settings_page.dart';
 import 'package:rillight/auth/android_connect_page.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
@@ -314,7 +315,14 @@ void main() {
       expect(find.byKey(PhoneHero.itemKey('series-h')), findsNothing);
       expect(find.byKey(CatalogKeys.heroDot(4)), findsOneWidget);
       expect(find.byKey(CatalogKeys.heroDot(5)), findsNothing);
-      expect(find.text('继续播放'), findsNothing);
+      expect(find.text('继续播放'), findsWidgets);
+      final hero = find.byKey(PhoneHero.itemKey('episode-a'));
+      final resume = find.descendant(of: hero, matching: find.text('继续播放'));
+      final detail = find.descendant(of: hero, matching: find.text('详情'));
+      expect(
+        tester.getCenter(resume).dy,
+        closeTo(tester.getCenter(detail).dy, 1),
+      );
       expect(find.text('已看 40%'), findsWidgets);
       expect(find.byTooltip('暂停轮播'), findsNothing);
       // 横幅只留标题和元信息行，不再叠剧情简介。
@@ -1983,7 +1991,7 @@ void main() {
         expect(find.text('家庭影院'), findsOneWidget);
         expect(find.text('line-b.test:8096'), findsOneWidget);
         expect(find.text('账户与服务器'), findsOneWidget);
-        expect(find.text('播放设置'), findsOneWidget);
+        expect(find.byKey(PhoneMinePage.settingsKey), findsOneWidget);
         expect(find.text('我的'), findsWidgets);
         expect(
           tester.getTopLeft(find.byKey(PhoneMinePage.userKey)).dy,
@@ -1995,7 +2003,7 @@ void main() {
         );
         expect(
           tester.getTopLeft(find.text('退出登录')).dy,
-          lessThan(tester.getTopLeft(find.text('播放速度')).dy),
+          lessThan(tester.getTopLeft(find.byKey(PhoneMinePage.settingsKey)).dy),
         );
 
         final target = auth.savedServers.single.lines.firstWhere(
@@ -2087,10 +2095,11 @@ void main() {
 
       expect(find.text('解码后端'), findsNothing);
       expect(find.text('硬件解码'), findsNothing);
-      // 磁盘缓冲上限已收进"我的-缓存"分组,只读当前值、不暴露桌面解码项。
-      await _scrollTo(tester, find.text('磁盘缓冲上限'));
-      expect(find.text('磁盘缓冲上限'), findsOneWidget);
-      await _mineTap(tester, find.byKey(PhoneMinePage.rateKey(1.5)));
+      await _openMineSettings(tester, '播放');
+      expect(find.byKey(SettingsPage.diskCacheLimitKey), findsOneWidget);
+      final rate = find.byKey(const Key('settings-playback-rate'));
+      await _mineTap(tester, rate);
+      await _mineTap(tester, find.text('1.5x').last);
 
       final saved = await store.read();
       expect(saved.playbackRate, 1.5);
@@ -2145,17 +2154,18 @@ void main() {
         );
         await _pump(tester, auth: auth, store: store);
 
+        await _openMineSettings(tester, '弹幕配置');
         expect(find.text('留空使用官方源'), findsOneWidget);
         expect(
           tester
-              .widget<TextField>(find.byKey(PhoneMinePage.danmakuTokenKey))
+              .widget<TextField>(find.byKey(SettingsPage.danmakuTokenFieldKey))
               .obscureText,
           isTrue,
         );
-        await _mineTap(tester, find.byKey(PhoneMinePage.tokenVisibilityKey));
+        await _mineTap(tester, find.byKey(SettingsPage.tokenVisibilityKey));
         expect(
           tester
-              .widget<TextField>(find.byKey(PhoneMinePage.danmakuTokenKey))
+              .widget<TextField>(find.byKey(SettingsPage.danmakuTokenFieldKey))
               .obscureText,
           isFalse,
         );
@@ -2163,7 +2173,7 @@ void main() {
 
         await _enter(
           tester,
-          PhoneMinePage.danmakuServerKey,
+          SettingsPage.danmakuServerFieldKey,
           'https://dan.example',
         );
         final custom = _CaptureDanmakuClient();
@@ -2181,7 +2191,7 @@ void main() {
         expect(custom.source?.isCustom, isTrue);
         expect(custom.source?.baseUri.host, 'dan.example');
 
-        await _enter(tester, PhoneMinePage.danmakuServerKey, '');
+        await _enter(tester, SettingsPage.danmakuServerFieldKey, '');
         final saved = await store.read();
         expect(saved.danmakuServer, '');
         expect(saved.danmakuAppId, 'app-keep');
@@ -2978,6 +2988,15 @@ Future<void> _pump(
     ),
   );
   await _mineSettle(tester);
+}
+
+Future<void> _openMineSettings(WidgetTester tester, String section) async {
+  final entry = find.byKey(PhoneMinePage.settingsKey);
+  await _scrollTo(tester, entry);
+  await _mineTap(tester, entry);
+  final category = find.byKey(ValueKey('settings-section-$section'));
+  await _mineTap(tester, category);
+  expect(find.byType(SettingsPage), findsOneWidget);
 }
 
 Future<void> _mineSettle(WidgetTester tester) async {

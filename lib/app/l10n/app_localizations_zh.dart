@@ -1147,19 +1147,33 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsDanmakuDisplaySummary => '字号、不透明度、显示区域与屏蔽词';
 
   @override
-  String get settingsSkipIntro => '片头跳过提示';
+  String get settingsSkipIntro => '片头提示';
 
   @override
-  String get settingsSkipIntroHint => '在标记的片头显示跳过按钮，关闭后完整播放';
+  String get settingsSkipIntroHint => '显示跳过片头按钮，需手动点击；关闭后完整播放片头';
 
   @override
-  String get settingsSkipOutro => '片尾跳过提示';
+  String get settingsSkipOutro => '片尾提示';
 
   @override
-  String get settingsSkipOutroHint => '在片尾显示跳过或下一集提示，关闭后播放结束再提示下一集';
+  String get settingsSkipOutroHint => '显示跳过或下一集提示；关闭后等播放结束再提示下一集';
 
   @override
   String get playerSkipSettings => '片头与片尾';
+
+  @override
+  String get playerSettingOn => '开启';
+
+  @override
+  String get playerSettingOff => '关闭';
+
+  @override
+  String playerSkipSettingsSummary(String intro, String outro) {
+    return '片头$intro · 片尾$outro';
+  }
+
+  @override
+  String get playerSkipSettingsSaved => '自动保存，应用于所有视频';
 
   @override
   String get nextEpisodeHeading => '接下来播放';

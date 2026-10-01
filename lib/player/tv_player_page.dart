@@ -1,4 +1,3 @@
-import 'package:rillight/player/playback_skip_settings.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -361,8 +360,27 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                           : l.qualityMbps(bitrate ~/ 1000000),
                                     ),
                                   ),
-                              if (panel == _TvPanel.skip)
-                                PlaybackSkipSettings(controller: c),
+                              if (panel == _TvPanel.skip) ...[
+                                TvAction(
+                                  key: const Key('tv-skip-intro-enabled'),
+                                  autofocus: true,
+                                  selected: c.skipIntroEnabled,
+                                  onPressed: () => c.setSkipEnabled(
+                                    PlayerSkipKind.intro,
+                                    !c.skipIntroEnabled,
+                                  ),
+                                  child: Text(l.settingsSkipIntro),
+                                ),
+                                TvAction(
+                                  key: const Key('tv-skip-outro-enabled'),
+                                  selected: c.skipOutroEnabled,
+                                  onPressed: () => c.setSkipEnabled(
+                                    PlayerSkipKind.outro,
+                                    !c.skipOutroEnabled,
+                                  ),
+                                  child: Text(l.settingsSkipOutro),
+                                ),
+                              ],
                               if (panel == _TvPanel.speed)
                                 for (final rate in kPlaybackRateLadder)
                                   TvAction(

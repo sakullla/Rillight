@@ -94,6 +94,46 @@ void expectNoSameLaneXOverlap(List<DanmakuActive> active) {
 
 void main() {
   test(
+    'automatic density accounts for long comments occupying the picture',
+    () {
+      DanmakuLayout crowded(String text) => layoutWith(
+        comments: [for (var i = 0; i < 30; i++) comment(i, 1, text: text)],
+      )..update(const Duration(seconds: 1), size);
+      final long = crowded('这是一条比较长的弹幕用于检查画面占用面积');
+      final short = crowded('好');
+      expect(long.activeCount, lessThan(short.activeCount));
+      expect(long.activeCount, greaterThan(0));
+      final count = long.activeCount;
+      for (var ms = 1020; ms < 2000; ms += 20) {
+        long.update(Duration(milliseconds: ms), size);
+        expect(long.activeCount, count);
+      }
+    },
+  );
+
+  test('fixed and scrolling modes reserve shared physical rows', () {
+    final layout = layoutWith(
+      comments: [
+        comment(1, 0, mode: 5),
+        comment(2, .1),
+        comment(3, .2, mode: 4),
+      ],
+      settings: const DanmakuDisplaySettings(density: DanmakuDensity.unlimited),
+    );
+    layout.update(const Duration(seconds: 1), size);
+    expect(layout.activeCount, 3);
+    final items = layout.activeEntries;
+    for (var i = 0; i < items.length; i++) {
+      for (var j = i + 1; j < items.length; j++) {
+        expect(
+          (items[i].top - items[j].top).abs(),
+          greaterThanOrEqualTo(layout.fontPx * 1.2),
+        );
+      }
+    }
+  });
+
+  test(
     'comments enter on their timeline slot and exit after lifespan',
     () async {
       final layout = layoutWith(comments: [comment(1, 1)]);
@@ -184,7 +224,6 @@ void main() {
       comments: [
         for (var i = 0; i < 30; i++)
           comment(100 + i, 1 + i * 0.01, text: 'aaaa'),
-        comment(1, 1.5, mode: 4),
       ],
       settings: const DanmakuDisplaySettings(areaFraction: 0.25),
     );
@@ -196,7 +235,11 @@ void main() {
       expect(frame.top, greaterThanOrEqualTo(0));
     }
     // 底部固定弹幕贴显示区域下沿(第 0 车道)。
-    final bottom = frames.singleWhere((frame) => frame.id == 1);
+    final bottomLayout = layoutWith(
+      comments: [comment(1, 1.5, mode: 4)],
+      settings: const DanmakuDisplaySettings(areaFraction: .25),
+    );
+    final bottom = bottomLayout.update(const Duration(seconds: 2), size).single;
     expect(bottom.top, closeTo(100 - lineHeight, 0.1));
   });
 

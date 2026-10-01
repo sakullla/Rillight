@@ -134,7 +134,7 @@ void _paintTrack(
   }
 
   final total = duration.inMicroseconds;
-  if (snapshot.isKnown && total > 0) {
+  if (snapshot.isKnown && snapshot.ranges.isNotEmpty && total > 0) {
     for (final range in snapshot.ranges) {
       segment(
         (range.start.inMicroseconds / total).clamp(0.0, 1.0),

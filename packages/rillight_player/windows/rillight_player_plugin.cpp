@@ -157,7 +157,14 @@ class RillightPlayerPlugin : public flutter::Plugin {
         }
         const auto hdr = surface->hdr_display();
         const auto stats = surface->hdr_stats();
+        RillightCoreSnapshot snapshot{};
+        snapshot.struct_size = sizeof(snapshot);
+        const bool snapshot_valid = api_->snapshot(reinterpret_cast<RillightCore*>(handle), &snapshot) == 0;
         result->Success(Value(Map{
+            {Value("coreState"), Value(snapshot_valid ? static_cast<int32_t>(snapshot.state) : -1)},
+            {Value("coreFirstVideoReady"), Value(snapshot_valid && snapshot.first_video_frame_ready != 0)},
+            {Value("coreQueuedVideoFrames"), Value(snapshot_valid ? snapshot.queued_video_frames : -1)},
+            {Value("coreNativeTimeline"), Value(static_cast<int64_t>(snapshot.timeline_version))},
             {Value("presentStatsValid"), Value(stats.valid)},
             {Value("presentCount"), Value(static_cast<int64_t>(stats.present_count))},
             {Value("presentRefreshCount"), Value(static_cast<int64_t>(stats.present_refresh))},

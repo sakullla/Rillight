@@ -134,7 +134,7 @@ class _LoadedImage {
 // The independent player attaches a client session without restoring the
 // account controller. Use the actual authenticated endpoint and user in both
 // processes; a missing session must never resolve to a shared anonymous key.
-String? _imageAccountScope(AuthController? auth) {
+String? mediaImageAccountScope(AuthController? auth) {
   final client = auth?.client;
   if (client == null ||
       !client.hasSession ||
@@ -204,7 +204,8 @@ class _MediaImageState extends State<MediaImage> {
   }
 
   /// Protected artwork is scoped to both the server and authenticated user.
-  String? get _accountScope => _imageAccountScope(AuthScope.maybeOf(context));
+  String? get _accountScope =>
+      mediaImageAccountScope(AuthScope.maybeOf(context));
 
   @override
   void didChangeDependencies() {
@@ -575,7 +576,7 @@ class _MediaImageState extends State<MediaImage> {
     bool valid() =>
         current() &&
         _lastAccountScope == serverId &&
-        _imageAccountScope(auth) == serverId;
+        mediaImageAccountScope(auth) == serverId;
     final maxWidth = _requestMaxWidth;
     for (final candidate in _candidates) {
       if (!valid()) return null;
@@ -599,7 +600,7 @@ class _MediaImageState extends State<MediaImage> {
               maxWidth: maxWidth,
               cancelToken: token,
             );
-            if (_imageAccountScope(auth) != serverId || data.isEmpty) {
+            if (mediaImageAccountScope(auth) != serverId || data.isEmpty) {
               return null;
             }
             return Uint8List.fromList(data);
@@ -796,7 +797,7 @@ Future<Uint8List?> loadChapterImage(
     return Future<Uint8List?>.value();
   }
   final auth = AuthScope.of(context);
-  final scope = _imageAccountScope(auth);
+  final scope = mediaImageAccountScope(auth);
   if (scope == null) return null;
   final bytes = await MediaImageCache.instance.load(
     serverId: scope,
@@ -805,9 +806,9 @@ Future<Uint8List?> loadChapterImage(
     variant: '$index',
     tag: tag,
     maxWidth: maxWidth,
-    isCurrent: () => _imageAccountScope(auth) == scope,
+    isCurrent: () => mediaImageAccountScope(auth) == scope,
     fetch: () async {
-      if (_imageAccountScope(auth) != scope) {
+      if (mediaImageAccountScope(auth) != scope) {
         return null;
       }
       try {
@@ -817,7 +818,7 @@ Future<Uint8List?> loadChapterImage(
           tag: tag,
           maxWidth: maxWidth,
         );
-        if (_imageAccountScope(auth) != scope || data.isEmpty) {
+        if (mediaImageAccountScope(auth) != scope || data.isEmpty) {
           return null;
         }
         return Uint8List.fromList(data);
@@ -827,7 +828,7 @@ Future<Uint8List?> loadChapterImage(
       }
     },
   );
-  return _imageAccountScope(auth) == scope ? bytes : null;
+  return mediaImageAccountScope(auth) == scope ? bytes : null;
 }
 
 class _PosterLoadTurn {

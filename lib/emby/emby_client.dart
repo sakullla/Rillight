@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 import 'package:dio/io.dart';
@@ -814,6 +815,59 @@ class EmbyClient {
         cancelToken: cancelToken,
       );
     }
+  }
+
+  Future<bool> hasVideoPreviewThumbnails(
+    String itemId, {
+    CancelToken? cancelToken,
+  }) async {
+    final data = await _requestJson(
+      'GET',
+      '/Items/$itemId/ThumbnailSet',
+      queryParameters: {'Width': '160'},
+      cancelToken: cancelToken,
+    );
+    return data['Thumbnails'] is List &&
+        (data['Thumbnails'] as List).isNotEmpty;
+  }
+
+  /// BIF previews are optional and bounded; never buffer a large response before
+  /// checking its size. Requests use the saved session headers and UA.
+  Future<Uint8List> getVideoPreviewBif(
+    String itemId, {
+    CancelToken? cancelToken,
+  }) async {
+    if (!hasSession) throw const EmbyException(EmbyFailureKind.sessionExpired);
+    final uri = joinEmbyApiPath(
+      _baseUrl!,
+      '/Videos/$itemId/index.bif',
+    ).replace(queryParameters: {'Width': '160'});
+    return _withAuthRetry(() async {
+      final transferCancel = cancelToken ?? CancelToken();
+      final response = await _dio.requestUri<ResponseBody>(
+        uri,
+        cancelToken: transferCancel,
+        options: Options(
+          responseType: ResponseType.stream,
+          headers: {
+            ..._headers(token: _accessToken, userId: _userId),
+            'Accept': '*/*',
+          },
+        ),
+      );
+      final body = response.data;
+      if (body == null) throw const FormatException('Missing preview data');
+      const limit = 32 * 1024 * 1024;
+      final bytes = BytesBuilder(copy: false);
+      await for (final chunk in body.stream) {
+        if (bytes.length + chunk.length > limit) {
+          transferCancel.cancel('Preview data exceeds memory limit');
+          throw const FormatException('Preview data exceeds memory limit');
+        }
+        bytes.add(chunk);
+      }
+      return bytes.takeBytes();
+    });
   }
 
   Future<List<int>> getItemImage(

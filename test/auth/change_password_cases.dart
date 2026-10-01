@@ -71,7 +71,7 @@ void main() {
       );
 
       expect(changed, isTrue);
-      expect(server.requests, contains('POST /Users/user-alice/Password'));
+      expect(server.requests, contains('POST /emby/Users/user-alice/Password'));
       final body = server.changePasswordRequests.single;
       expect(body['Id'], 'user-alice');
       // 旧密码留空:请求不带 CurrentPw,由服务器裁决。

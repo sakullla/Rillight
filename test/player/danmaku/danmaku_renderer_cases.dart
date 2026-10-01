@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'dart:ui' as ui;
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/player/danmaku/danmaku_controller.dart';
 import 'package:rillight/player/danmaku/danmaku_glyph_cache.dart';
@@ -6,6 +8,7 @@ import 'package:rillight/player/danmaku/danmaku_layout.dart';
 import 'package:rillight/player/danmaku/danmaku_renderer.dart';
 import 'package:rillight/player/danmaku/dandanplay_models.dart';
 import 'package:rillight/player/player_settings.dart';
+import 'package:rillight/player/playback_control_scrims.dart';
 
 const viewport = Size(800, 400);
 
@@ -73,6 +76,67 @@ Future<void> pumpFrames(WidgetTester tester, int count) async {
 }
 
 void main() {
+  testWidgets('control scrims behind comments do not darken their fill', (
+    tester,
+  ) async {
+    final controller = controllerWith([
+      comment(1, 0, mode: 5, color: 0xffffff, text: '稳定的白色弹幕'),
+    ]);
+    addTearDown(controller.dispose);
+    controller.updatePosition(
+      const Duration(seconds: 2),
+      playing: false,
+      rate: 1,
+    );
+    final boundaryKey = GlobalKey();
+    Widget scene(bool visible) => MaterialApp(
+      home: Center(
+        child: RepaintBoundary(
+          key: boundaryKey,
+          child: SizedBox(
+            width: 800,
+            height: 400,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                const ColoredBox(color: Colors.black),
+                PlaybackControlScrims(
+                  visible: visible,
+                  topExtent: 100,
+                  showBottom: true,
+                ),
+                DanmakuView(controller: controller),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    Future<int> whitePixels() async {
+      final boundary =
+          boundaryKey.currentContext!.findRenderObject()!
+              as RenderRepaintBoundary;
+      final image = await boundary.toImage();
+      final data = (await image.toByteData(
+        format: ui.ImageByteFormat.rawRgba,
+      ))!.buffer.asUint8List();
+      var white = 0;
+      for (var i = 0; i < image.width * 45 * 4; i += 4) {
+        if (data[i] > 190 && data[i + 1] > 190 && data[i + 2] > 190) white++;
+      }
+      image.dispose();
+      return white;
+    }
+
+    await tester.pumpWidget(scene(false));
+    await warmup(tester, controller);
+    final before = (await tester.runAsync(whitePixels))!;
+    expect(before, greaterThan(100));
+    await tester.pumpWidget(scene(true));
+    await tester.pumpAndSettle();
+    expect(await tester.runAsync(whitePixels), before);
+  });
+
   testWidgets('renders comments driven by the ticker while playing', (
     tester,
   ) async {
@@ -194,6 +258,26 @@ void main() {
     expect(state.debugFixedLayerPaintCount, afterInit + 1);
   });
 
+  testWidgets('fixed comments repaint when IDs are reused or styles change', (
+    tester,
+  ) async {
+    final controller = controllerWith([comment(0, 0, mode: 5, text: 'old')]);
+    addTearDown(controller.dispose);
+    controller.updatePosition(Duration.zero, playing: false, rate: 1);
+    await pumpDanmaku(tester, controller);
+    final state = await warmup(tester, controller);
+    final before = state.debugFixedLayerPaintCount;
+    controller.layout.comments = [comment(0, 0, mode: 5, text: 'new')];
+    controller.layout.reset();
+    controller.notifyListeners();
+    await tester.pump();
+    expect(state.debugFixedLayerPaintCount, greaterThan(before));
+    final afterReplacement = state.debugFixedLayerPaintCount;
+    await controller.setDisplay(const DanmakuDisplaySettings(opacity: .4));
+    await tester.pump();
+    expect(state.debugFixedLayerPaintCount, greaterThan(afterReplacement));
+  });
+
   testWidgets('episode and style changes rebuild the glyph cache', (
     tester,
   ) async {
@@ -261,7 +345,14 @@ void main() {
       );
       final alpha = (controller.display.opacity * 0xFF).round().clamp(0, 255);
       expect(white.fillColor.toARGB32(), (alpha << 24) | kDanmakuGlyphWhiteRgb);
-      expect(white.stroke, isNotNull);
+      expect(white.hasOutline, isTrue);
+      final stateWithOutline = tester.state<DanmakuViewState>(
+        find.byType(DanmakuView),
+      );
+      expect(
+        stateWithOutline.debugLastDrawParagraphCount,
+        controller.layout.activeCount,
+      );
 
       await controller.setDisplay(
         const DanmakuDisplaySettings(colorful: false, outline: false),
@@ -273,7 +364,7 @@ void main() {
       final plain = controller.glyphCache.get(
         const DanmakuGlyphKey('弹幕1', kDanmakuGlyphWhiteRgb),
       );
-      expect(plain.stroke, isNull);
+      expect(plain.hasOutline, isFalse);
       expect(controller.layout.activeCount, greaterThan(0));
       expect(state.debugLastDrawParagraphCount, controller.layout.activeCount);
     },

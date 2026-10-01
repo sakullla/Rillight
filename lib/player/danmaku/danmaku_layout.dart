@@ -40,6 +40,10 @@ const Duration kDanmakuMaxFrameStep = Duration(milliseconds: 50);
 /// 同车道弹幕之间的最小像素间隙,避免描边重叠。
 const double kDanmakuCollisionGap = 8;
 
+/// Reserve space for long comments as well as counting them. A row containing
+/// a long sentence should not have the same density cost as a short reaction.
+const double kDanmakuAutoCoverage = 0.18;
+
 /// 活动弹幕条目(spawn 后的运行时状态),由 [DanmakuLayout.update] 原地更新。
 class DanmakuActive {
   DanmakuActive({
@@ -384,6 +388,11 @@ class DanmakuLayout {
       return;
     }
     final width = _measure(entry.displayText, _fontPx.toDouble());
+    if (settings.density == DanmakuDensity.auto &&
+        _active.isNotEmpty &&
+        _reservedCoverage(width) > kDanmakuAutoCoverage) {
+      return;
+    }
     final mode = entry.renderMode;
     final lifespan = _lifespanFor(mode);
     final lanes = _laneLast.putIfAbsent(mode, () => <DanmakuActive?>[]);
@@ -472,6 +481,24 @@ class DanmakuLayout {
     return (_height * settings.areaFraction / lineHeight).floor();
   }
 
+  double _reservedCoverage(double nextWidth) {
+    final area = _width * _height * settings.areaFraction;
+    if (area <= 0) return 1;
+    final lineHeight = _fontPx * kDanmakuLineHeightFactor;
+    final totalWidth = _active.fold<double>(
+      nextWidth.clamp(0.0, _width),
+      (total, item) => total + item.width.clamp(0.0, _width),
+    );
+    return totalWidth * lineHeight / area;
+  }
+
+  double _laneTop(DanmakuMode mode, int lane) {
+    final lineHeight = _fontPx * kDanmakuLineHeightFactor;
+    return mode == DanmakuMode.bottom
+        ? _height * settings.areaFraction - (lane + 1) * lineHeight
+        : lane * lineHeight;
+  }
+
   /// 车道空闲判定(当前几何,不重排已上场弹幕):
   /// - 固定弹幕:前一条仍在该车道则占用。
   /// - 滚动弹幕:前一条须整段进入画面,且新条在旧条离开前追不上。
@@ -483,6 +510,20 @@ class DanmakuLayout {
     Duration lifespan,
     Duration spawn,
   ) {
+    if (settings.preventOverlap) {
+      final top = _laneTop(mode, lane);
+      final textHeight = _fontPx * 1.2;
+      // Fixed and scrolling comments share the same physical area. Separate
+      // per-mode lane lists alone allow a scrolling fill/outline to cross a
+      // fixed comment and make its colour appear to flash.
+      for (final item in _active) {
+        if (item.mode == mode || spawn - item.spawn >= item.lifespan) continue;
+        final otherTop = _laneTop(item.mode, item.lane);
+        if (top < otherTop + textHeight && otherTop < top + textHeight) {
+          return false;
+        }
+      }
+    }
     final last = lanes[lane];
     if (last == null) {
       return true;

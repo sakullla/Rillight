@@ -37,6 +37,8 @@ class FlutterWindow : public Win32Window {
   HWND flutter_view_hwnd_ = nullptr;
 
   bool native_caption_buttons_ = true;
+  bool first_frame_ready_ = false;
+  bool show_requested_ = false;
 };
 
 #endif  // RUNNER_FLUTTER_WINDOW_H_

@@ -116,7 +116,10 @@ void main() {
       of: find.byKey(const Key('mobile-player-options')),
       matching: find.byType(Scrollable),
     );
-    final target = find.text(text);
+    final target = find.descendant(
+      of: find.byKey(const Key('mobile-player-options')),
+      matching: find.text(text),
+    );
     for (var i = 0; i < 12; i++) {
       if (target.evaluate().isNotEmpty) {
         final box = tester.renderObject<RenderBox>(target);
@@ -300,6 +303,7 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 400));
       expect(find.byKey(const Key('mobile-player-options')), findsOneWidget);
+      await tapSheetText(tester, '音轨与字幕');
       await tapSheetText(tester, '英文字幕');
       expect(current.subtitleStreamIndex, 4);
       expect(current.trackFailure, isNull);
@@ -959,7 +963,7 @@ void main() {
       await tester.tap(find.byKey(const Key('mobile-shell-mine-entry')));
       await tester.pumpAndSettle();
       expect(find.text('alice'), findsOneWidget);
-      expect(find.text('播放速度'), findsOneWidget);
+      expect(find.byKey(PhoneMinePage.settingsKey), findsOneWidget);
       expect(find.byType(PhoneMinePage), findsOneWidget);
       await tester.binding.handlePopRoute();
       await tester.pumpAndSettle();
