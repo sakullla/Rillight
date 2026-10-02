@@ -103,12 +103,14 @@ class MediaImage extends StatefulWidget {
   /// 清空内存与磁盘两级缓存,仅测试使用。
   @visibleForTesting
   static void debugClearCache() {
+    _MediaImageState._validated.clear();
     MediaImageCache.instance.clear();
   }
 
   /// 仅清空进程内内存层(保留磁盘层),模拟应用重启,仅测试使用。
   @visibleForTesting
   static void debugClearMemory() {
+    _MediaImageState._validated.clear();
     MediaImageCache.instance.clearMemory();
   }
 
@@ -177,7 +179,45 @@ bool _isTransientImageFailure(Object error) {
 }
 
 class _MediaImageState extends State<MediaImage> {
-  static final _invalidImages = <String>{};
+  // A cache key alone is not proof that its current bytes are a valid image.
+  // Weak references avoid retaining a second copy of the image-byte cache.
+  static final _validated = <String, (WeakReference<Uint8List>, bool)>{};
+
+  static bool? _knownValidation(String key, Uint8List bytes) {
+    final entry = _validated[key];
+    return entry != null && identical(entry.$1.target, bytes) ? entry.$2 : null;
+  }
+
+  static Future<bool> _validate(String key, Uint8List bytes) async {
+    final known = _knownValidation(key, bytes);
+    if (known != null) {
+      if (!known) MediaImageCache.instance._rejectEncodedImage(key, bytes);
+      return known;
+    }
+    var valid = false;
+    try {
+      final codec = await ui.instantiateImageCodec(
+        bytes,
+        targetWidth: 1,
+        targetHeight: 1,
+      );
+      try {
+        final frame = await codec.getNextFrame();
+        frame.image.dispose();
+        valid = true;
+      } finally {
+        codec.dispose();
+      }
+    } catch (_) {
+      // A successful HTTP response or disk hit can still contain HTML, a
+      // truncated image, or other undecodable data. Continue to the next ref.
+    }
+    _validated[key] = (WeakReference(bytes), valid);
+    if (_validated.length > 256) _validated.remove(_validated.keys.first);
+    if (!valid) MediaImageCache.instance._rejectEncodedImage(key, bytes);
+    return valid;
+  }
+
   Future<_LoadedImage?>? _future;
   String? _lastAccountScope;
   int? _lastRequestWidth;
@@ -302,7 +342,6 @@ class _MediaImageState extends State<MediaImage> {
       tag: candidate.tag,
       maxWidth: maxWidth,
     );
-    if (_invalidImages.contains(cacheKey)) return null;
     final bytes = MediaImageCache.instance.peek(
       serverId: scope,
       itemId: candidate.itemId,
@@ -310,7 +349,9 @@ class _MediaImageState extends State<MediaImage> {
       tag: candidate.tag,
       maxWidth: maxWidth,
     );
-    if (bytes != null && bytes.isNotEmpty) {
+    if (bytes != null &&
+        bytes.isNotEmpty &&
+        _knownValidation(cacheKey, bytes) == true) {
       return _LoadedImage(
         bytes: bytes,
         type: candidate.type,
@@ -550,17 +591,15 @@ class _MediaImageState extends State<MediaImage> {
     if (bytes == null || bytes.isEmpty) {
       return null;
     }
-    return _LoadedImage(
-      bytes: bytes,
+    final cacheKey = MediaImageCache.key(
+      serverId: serverId,
+      itemId: candidate.itemId,
       type: candidate.type,
-      cacheKey: MediaImageCache.key(
-        serverId: serverId,
-        itemId: candidate.itemId,
-        type: candidate.type,
-        tag: candidate.tag,
-        maxWidth: maxWidth,
-      ),
+      tag: candidate.tag,
+      maxWidth: maxWidth,
     );
+    if (!await _validate(cacheKey, bytes)) return null;
+    return _LoadedImage(bytes: bytes, type: candidate.type, cacheKey: cacheKey);
   }
 
   bool _canRetryLoad() {
@@ -627,29 +666,14 @@ class _MediaImageState extends State<MediaImage> {
         onAbort: () => token?.cancel('image-timeout'),
       );
       if (bytes != null && bytes.isNotEmpty) {
-        try {
-          final buffer = await ui.ImmutableBuffer.fromUint8List(bytes);
-          try {
-            final descriptor = await ui.ImageDescriptor.encoded(buffer);
-            descriptor.dispose();
-          } finally {
-            buffer.dispose();
-          }
-        } catch (_) {
-          _invalidImages.add(
-            MediaImageCache.key(
-              serverId: serverId,
-              itemId: candidate.itemId,
-              type: candidate.type,
-              tag: candidate.tag,
-              maxWidth: maxWidth,
-            ),
-          );
-          if (_invalidImages.length > 128) {
-            _invalidImages.remove(_invalidImages.first);
-          }
-          continue;
-        }
+        final cacheKey = MediaImageCache.key(
+          serverId: serverId,
+          itemId: candidate.itemId,
+          type: candidate.type,
+          tag: candidate.tag,
+          maxWidth: maxWidth,
+        );
+        if (!await _validate(cacheKey, bytes)) continue;
         if (!valid()) return null;
         return _LoadedImage(
           bytes: bytes,
@@ -1374,6 +1398,24 @@ class MediaImageCache {
     }
   }
 
+  void _rejectEncodedImage(String cacheKey, Uint8List bytes) {
+    if (identical(_bytes[cacheKey], bytes)) {
+      _bytes.remove(cacheKey);
+      _bytesTotal -= bytes.length;
+    }
+    _pendingDiskWrites.remove(cacheKey);
+    _recordMiss(cacheKey);
+    final store = _diskStore;
+    if (store != null) {
+      unawaited(
+        store
+            .remove(cacheKey)
+            .timeout(_diskIoTimeout)
+            .catchError((Object _) {}),
+      );
+    }
+  }
+
   void _recordMiss(String cacheKey) {
     _misses[cacheKey] = clock().add(negativeTtl);
     // 顺手清理过期负缓存,长会话下 Map 不无限膨胀。
@@ -1448,11 +1490,13 @@ class MediaImageCache {
 
   Future<void> _writeDiskNow(String cacheKey, Uint8List bytes) async {
     final store = _diskStore;
-    if (store == null) {
-      return;
-    }
+    if (store == null || _misses.containsKey(cacheKey)) return;
     try {
       await store.write(cacheKey, bytes).timeout(_diskIoTimeout);
+      // Decode rejection may have arrived while this write was in flight.
+      if (_misses.containsKey(cacheKey)) {
+        await store.remove(cacheKey).timeout(_diskIoTimeout);
+      }
     } catch (_) {
       // 磁盘写入失败降级为仅内存缓存,不影响显示。
     }

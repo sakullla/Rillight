@@ -17,6 +17,8 @@ import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/home/catalog_keys.dart';
+import 'package:rillight/home/catalog_scope.dart';
+import 'package:rillight/player/mobile_player_page.dart';
 import 'package:rillight/home/phone_hero.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_keys.dart';
@@ -231,6 +233,58 @@ void main() {
           await capture.save('detail-from-home-ready');
         }
         await capture.pages(app, auth, server);
+        if (config.$1 == 'phone' && capture.wants('home')) {
+          app.router.go('/');
+          await capture.advance(400);
+          await tester.tap(find.byType(NavigationDestination).first);
+          await capture.advance(400);
+          final catalog = CatalogScope.of(
+            tester.element(find.byType(PhoneHero)),
+          );
+          final originals = [
+            for (final item in server.items)
+              (
+                item,
+                item.played,
+                item.nextUp,
+                item.playbackPositionTicks,
+                item.playedPercentage,
+              ),
+          ];
+          for (final item in server.items) {
+            if (item.type == 'Movie') item.played = true;
+            if (item.type == 'Movie' || item.type == 'Episode') {
+              item.nextUp = false;
+              item.playbackPositionTicks = 0;
+              item.playedPercentage = 0;
+            }
+          }
+          await tester.runAsync(catalog.reloadHomeRows);
+          await capture.advance(700);
+          await tester.ensureVisible(find.byKey(PhoneHero.bannerKey));
+          await capture.advance(300);
+          await capture.save('home-series-featured');
+          await capture.tap(const ValueKey('hero-resume-series-friends'));
+          await capture.advance(1000);
+          expect(
+            tester
+                .widget<MobilePlayerPage>(find.byType(MobilePlayerPage))
+                .itemId,
+            'episode-friends-s1e2',
+          );
+          await capture.save('player-from-series-hero');
+          app.router.pop();
+          await capture.advance(500);
+          for (final original in originals) {
+            original.$1.played = original.$2;
+            original.$1.nextUp = original.$3;
+            original.$1.playbackPositionTicks = original.$4;
+            original.$1.playedPercentage = original.$5;
+          }
+          await tester.runAsync(catalog.reloadHomeRows);
+          backend = CaptureBackend();
+        }
+
         if (capture.wants('player') || capture.wants('danmaku')) {
           app.router.go('/item/movie-up');
           await capture.advance(800);

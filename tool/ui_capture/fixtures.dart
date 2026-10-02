@@ -192,6 +192,12 @@ class CaptureAdapter extends FakeEmbyAdapter {
       final parts = options.uri.path.split('/');
       final index = parts.indexOf('Images');
       final id = parts[index - 1];
+      if (id == 'palette-fallback' && parts.last == 'Backdrop') {
+        return ResponseBody.fromString(
+          '<html>synthetic200badimage</html>',
+          200,
+        );
+      }
       if (id != 'movie-broken') {
         final wide = parts.last != 'Primary' || id.startsWith('episode-');
         final key = '$id-$wide';
@@ -273,7 +279,7 @@ Future<Uint8List> drawArtwork(String id, {required bool wide}) async {
   final seed = id.codeUnits.fold(0, (a, b) => a + b);
   final tone = switch (id) {
     'palette-red' => const Color(0xFFC63F51),
-    'palette-blue' => const Color(0xFF3566C4),
+    'palette-blue' || 'palette-fallback' => const Color(0xFF3566C4),
     'palette-green' => const Color(0xFF278B62),
     'palette-mono' => const Color(0xFF888888),
     'palette-bright' => const Color(0xFFFAFAFA),

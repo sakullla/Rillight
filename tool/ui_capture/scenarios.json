@@ -1185,5 +1185,33 @@
     "platforms": [
       "phone"
     ]
+  },
+  {
+    "id": "home-series-featured",
+    "feature": "home",
+    "platforms": [
+      "phone"
+    ]
+  },
+  {
+    "id": "player-from-series-hero",
+    "feature": "home",
+    "platforms": [
+      "phone"
+    ]
+  },
+  {
+    "id": "detail-palette-fallback",
+    "feature": "detail",
+    "platforms": [
+      "phone"
+    ]
+  },
+  {
+    "id": "detail-palette-fallback-reentry",
+    "feature": "detail",
+    "platforms": [
+      "phone"
+    ]
   }
 ]

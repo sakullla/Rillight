@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:cryptography/dart.dart';
 import 'package:dio/dio.dart';
@@ -12,6 +13,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/theme.dart';
+import 'package:rillight/app/content_theme.dart';
 import 'package:rillight/app/widgets/poster_placeholder.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/auth/auth_controller.dart';
@@ -116,6 +118,133 @@ void main() {
     name: '海报电影',
     type: 'Movie',
     primaryImageTag: 'tag-img',
+  );
+
+  testWidgets(
+    'invalid200 artwork falls back on first visit, reentry and persisted cache hits',
+    (tester) async {
+      final good = (await tester.runAsync(() async {
+        final recorder = ui.PictureRecorder();
+        Canvas(recorder).drawRect(
+          const Rect.fromLTWH(0, 0, 32, 32),
+          Paint()..color = Colors.green,
+        );
+        final picture = recorder.endRecording();
+        final image = await picture.toImage(32, 32);
+        final data = await image.toByteData(format: ui.ImageByteFormat.png);
+        image.dispose();
+        picture.dispose();
+        return data!.buffer.asUint8List();
+      }))!;
+      final client = _CorruptBackdropClient(good);
+      final auth = AuthController.memory(client: client);
+      addTearDown(auth.dispose);
+      final disk = _FakeDiskStore();
+      MediaImageCache.instance.debugSetDiskStore(disk);
+      const item = EmbyItem(
+        id: 'img-movie',
+        name: '带回退的海报',
+        type: 'Movie',
+        backdropImageTag: 'bad200',
+        primaryImageTag: 'valid-primary',
+      );
+      final scope = mediaImageAccountScope(auth)!;
+      final badKey = MediaImageCache.key(
+        serverId: scope,
+        itemId: item.id,
+        type: 'Backdrop',
+        tag: 'bad200',
+        maxWidth: 120,
+      );
+      final goodKey = MediaImageCache.key(
+        serverId: scope,
+        itemId: item.id,
+        type: 'Primary',
+        tag: 'valid-primary',
+        maxWidth: 120,
+      );
+      late ColorScheme displayed;
+      Widget subject() => wrap(
+        auth,
+        ContentTheme(
+          item: item,
+          child: Builder(
+            builder: (context) {
+              displayed = Theme.of(context).colorScheme;
+              return MediaImage(
+                item: item,
+                preferBackdrop: true,
+                contributesToTheme: true,
+                maxWidth: 120,
+                width: 120,
+                height: 180,
+              );
+            },
+          ),
+        ),
+      );
+      final expected = (await tester.runAsync(
+        () => contentSchemeFromBytes(good, AppTheme.dark().colorScheme),
+      ))!;
+      Future<void> verify() async {
+        await tester.pumpWidget(subject());
+        for (var i = 0; i < 16; i++) {
+          await tester.pump(const Duration(milliseconds: 50));
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 10)),
+          );
+        }
+        expect(find.byType(Image), findsOneWidget);
+        expect(find.byType(PosterPlaceholder), findsNothing);
+        expect(displayed.surface, expected.surface);
+        expect(displayed.surface, isNot(AppTheme.dark().colorScheme.surface));
+        expect(tester.takeException(), isNull);
+        expect(disk.files.containsKey(badKey), isFalse);
+      }
+
+      await verify();
+      expect(client.requests, ['Backdrop', 'Primary']);
+      expect(disk.files.containsKey(goodKey), isTrue);
+      await tester.pumpWidget(const SizedBox.shrink());
+      client.requests.clear();
+      await verify();
+      expect(client.requests, isEmpty);
+
+      // A store can also return the same rejected byte object after the
+      // negative-cache window/memory state is gone. Rejection still evicts it.
+      await tester.pumpWidget(const SizedBox.shrink());
+      MediaImageCache.instance.clearMemory();
+      ContentTheme.debugClear();
+      disk.files[badKey] = client.bad;
+      await verify();
+      expect(client.requests, isEmpty);
+
+      // Simulate a process restart with a poisoned disk file from an earlier
+      // version: neither the byte-validation memo nor palette memo may help.
+      await tester.pumpWidget(const SizedBox.shrink());
+      MediaImage.debugClearMemory();
+      ContentTheme.debugClear();
+      disk.files[badKey] = client.bad;
+      await verify();
+      expect(client.requests, isEmpty);
+
+      // Bytes inserted by another cache consumer are not trusted by _peekLoaded.
+      await tester.pumpWidget(const SizedBox.shrink());
+      MediaImage.debugClearMemory();
+      ContentTheme.debugClear();
+      await tester.runAsync(
+        () => MediaImageCache.instance.load(
+          serverId: scope,
+          itemId: item.id,
+          type: 'Backdrop',
+          tag: 'bad200',
+          maxWidth: 120,
+          fetch: () async => client.bad,
+        ),
+      );
+      await verify();
+      expect(client.requests, isEmpty);
+    },
   );
 
   testWidgets('same-server account switch reloads protected artwork', (
@@ -1272,6 +1401,14 @@ void main() {
       await pumpPosterStrip(tester, auth, count: 2);
       MediaImageCache.instance.markScrollActivity();
       await tester.pump();
+      // Disk bytes must finish genuine decode validation, not merely produce
+      // an Image widget. Drive engine I/O without advancing the scroll clock.
+      for (var i = 0; i < 4; i++) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 10)),
+        );
+        await tester.pump();
+      }
       expect(MediaImageCache.instance.isScrollBusy, isTrue);
       expect(imageRequests(), isEmpty);
       expect(
@@ -1296,6 +1433,14 @@ void main() {
       MediaImageCache.instance.markScrollActivity();
       await tester.pump();
       await tester.pump();
+      // Disk bytes must finish genuine decode validation, not merely produce
+      // an Image widget. Drive engine I/O without advancing the scroll clock.
+      for (var i = 0; i < 4; i++) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 10)),
+        );
+        await tester.pump();
+      }
       expect(MediaImageCache.instance.isScrollBusy, isTrue);
       expect(
         find.descendant(
@@ -1586,5 +1731,30 @@ class _ControlledImageClient extends EmbyClient {
     } finally {
       active--;
     }
+  }
+}
+
+class _CorruptBackdropClient extends EmbyClient {
+  _CorruptBackdropClient(this.good) : super(device: _device) {
+    attachSession(
+      baseUrl: Uri.parse('https://artwork.example/emby'),
+      accessToken: 'synthetic',
+      userId: 'test',
+    );
+  }
+  final Uint8List good;
+  final bad = Uint8List.fromList(utf8.encode('<html>not an image</html>'));
+  final requests = <String>[];
+  @override
+  Future<List<int>> getItemImage(
+    String itemId, {
+    String type = 'Primary',
+    int? index,
+    String? tag,
+    int maxWidth = 280,
+    CancelToken? cancelToken,
+  }) async {
+    requests.add(type);
+    return type == 'Backdrop' ? bad : good;
   }
 }

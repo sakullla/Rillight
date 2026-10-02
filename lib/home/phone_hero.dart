@@ -4,6 +4,9 @@ import 'package:rillight/app/content_theme.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_motion.dart';
 import 'package:rillight/app/theme.dart';
+import 'package:rillight/auth/auth_scope.dart';
+import 'package:rillight/home/catalog_scope.dart';
+import 'package:rillight/library/detail_controller.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_controller.dart';
 import 'package:rillight/home/catalog_keys.dart';
@@ -262,9 +265,34 @@ class _HeroCaption extends StatelessWidget {
             item: item,
             onDetails: onOpen,
             onResume: () async {
+              var target = item;
+              if (item.isSeries) {
+                final controller = DetailController(
+                  auth: AuthScope.of(context),
+                  cache: CatalogScope.of(context).cache,
+                  itemId: item.id,
+                );
+                try {
+                  controller.applyItem(item);
+                  await controller.loadSeasons();
+                  await controller.retainOffPageResume();
+                  final resolved = controller.playTarget;
+                  if (!context.mounted) return;
+                  if (resolved == null || !resolved.isPlayable) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text(l10n.noPlayableStream)),
+                    );
+                    return;
+                  }
+                  target = resolved;
+                } finally {
+                  controller.dispose();
+                }
+              }
+              if (!context.mounted) return;
               await context.push<void>(
-                '/play/${item.id}',
-                extra: PlayerOpenRequest(itemId: item.id, autoResume: true),
+                '/play/${target.id}',
+                extra: PlayerOpenRequest(itemId: target.id, autoResume: true),
               );
             },
           ),

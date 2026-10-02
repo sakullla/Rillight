@@ -168,7 +168,15 @@ extension PageCaptures on CaptureSession {
       await save('detail-gallery-next');
       await dismiss();
       if (platform == 'phone') {
-        for (final tone in ['red', 'blue', 'green', 'mono', 'bright', 'dark']) {
+        for (final tone in [
+          'red',
+          'blue',
+          'green',
+          'mono',
+          'bright',
+          'dark',
+          'fallback',
+        ]) {
           final id = 'palette-$tone';
           server.items.add(
             FakeEmbyItem(
@@ -180,7 +188,25 @@ extension PageCaptures on CaptureSession {
               overview: '动态背景来自当前显示的图片。文字和操作保持清晰。',
             ),
           );
-          await route(app, '/item/$id', 'detail-palette-$tone');
+          app.router.go('/item/$id');
+          await advance(900);
+          if (tone == 'fallback') await advance(500);
+          await save('detail-palette-$tone');
+          if (tone == 'fallback') {
+            final first = Theme.of(
+              tester.element(find.byKey(const Key('phone-detail-banner'))),
+            ).colorScheme;
+            app.router.go('/item/movie-up');
+            await advance(500);
+            app.router.go('/item/$id');
+            await advance(900);
+            await advance(500);
+            await save('detail-palette-fallback-reentry');
+            final revisited = Theme.of(
+              tester.element(find.byKey(const Key('phone-detail-banner'))),
+            ).colorScheme;
+            expect(revisited.surface, first.surface);
+          }
         }
       }
     }
