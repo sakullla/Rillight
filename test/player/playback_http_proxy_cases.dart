@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/player/playback_http_proxy.dart';
 import 'package:rillight/player/playback_resolver.dart';
 import 'package:rillight/player/cache/session_byte_cache.dart';
+import 'package:rillight/player/cache/http_cache_policy.dart';
 
 import 'cache/mp4_fixture.dart';
 
@@ -22,6 +23,73 @@ Uint8List _paddedProgressiveMp4() {
 }
 
 void main() {
+  test(
+    'next-episode warm handoff keeps cache coverage and download speed after seek',
+    () async {
+      const kib = 1024;
+      const total = 512 * kib;
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final cache = await SessionByteCache.open();
+      final proxy = await PlaybackHttpProxy.create(
+        cache: cache,
+        sessionBuffering: true,
+      );
+      final client = HttpClient();
+      server.listen((request) async {
+        final range = MediaByteRange.resolve(
+          request.headers.value('range'),
+          total,
+        )!;
+        request.response.statusCode = 206;
+        request.response.headers.set(
+          'content-range',
+          'bytes ${range.start}-${range.end}/$total',
+        );
+        request.response.headers.set('etag', '"episode-two"');
+        request.response.contentLength = range.length;
+        request.response.add(
+          Uint8List(range.length)..fillRange(0, range.length, 9),
+        );
+        await request.response.close();
+      });
+      final origin = Uri.parse(
+        'http://127.0.0.1:${server.port}/episode-two.mp4',
+      );
+      final route = proxy.register(origin);
+      proxy.installWarmPrefix(
+        origin,
+        Uint8List(32 * kib)..fillRange(0, 32 * kib, 9),
+      );
+      Future<void> read(String range) async {
+        final request = await client.getUrl(route);
+        request.headers.set('range', range);
+        final response = await request.close();
+        expect(response.statusCode, 206);
+        await response.drain<void>();
+      }
+
+      try {
+        await read('bytes=0-${64 * kib - 1}');
+        await proxy.refreshTimeline(const Duration(minutes: 1));
+        expect(proxy.upstreamBytes, 32 * kib);
+        expect(proxy.upstreamBytesPerSecond, greaterThan(0));
+        expect(proxy.diagnostics['cachedByteRanges'], [
+          {'start': 32 * kib, 'end': 64 * kib},
+        ]);
+        await read('bytes=${128 * kib}-${256 * kib - 1}');
+        await proxy.refreshTimeline(const Duration(minutes: 1));
+        expect(proxy.upstreamBytesPerSecond, greaterThan(0));
+        expect(proxy.diagnostics['cachedByteRanges'], [
+          {'start': 32 * kib, 'end': 64 * kib},
+          {'start': 128 * kib, 'end': 256 * kib},
+        ]);
+      } finally {
+        client.close(force: true);
+        await proxy.close();
+        await server.close(force: true);
+      }
+    },
+  );
   test(
     'renewed source URL keeps verified bytes and refills through the new URL',
     () async {

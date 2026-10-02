@@ -141,13 +141,10 @@ int loopback_open_at(LoopbackHandle *handle, int64_t position) {
                           &interrupt, &options);
   av_dict_free(&options);
   if (result < 0) return result;
-  if (position > 0) {
-    const int64_t seeked = avio_seek(replacement, position, SEEK_SET);
-    if (seeked != position) {
-      avio_closep(&replacement);
-      return seeked < 0 ? static_cast<int>(seeked) : AVERROR(EIO);
-    }
-  }
+  // HTTP's offset option already positions the protocol at this byte. The
+  // newly allocated AVIO buffer still starts at logical zero; a small avio_seek
+  // would consume the offset again rather than repositioning the protocol.
+  replacement->pos = position;
   if (handle->media && handle->owner->media_generation.load() != generation) {
     avio_closep(&replacement);
     return AVERROR_EXIT;

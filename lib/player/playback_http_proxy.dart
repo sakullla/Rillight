@@ -1052,6 +1052,7 @@ class PlaybackHttpProxy {
         ? 'bytes=${warm.length}-${warm.length}'
         : 'bytes=${warm.length}-$requestedEnd';
     HttpClientResponse upstream;
+    Uri effective;
     try {
       final fetched = await _fetch(
         incoming,
@@ -1061,6 +1062,7 @@ class PlaybackHttpProxy {
         overrides: {'range': upstreamRange},
       );
       upstream = fetched.$1;
+      effective = fetched.$2;
     } catch (_) {
       return false;
     }
@@ -1082,6 +1084,17 @@ class PlaybackHttpProxy {
       await upstream.drain<void>();
       return false;
     }
+    await _classify(PlaybackCacheStream.stable);
+    // The prefetched bytes do not carry a current response validator.
+    // Only the newly validated suffix enters this episode's cache. Its requested
+    // range differs from the stitched response sent to the native decoder.
+    final representation = _beginRepresentation(
+      incoming,
+      key,
+      upstream,
+      effective,
+      requestedRange: upstreamRange,
+    );
     final output = incoming.response;
     output.statusCode = HttpStatus.partialContent;
     output.headers.set('accept-ranges', 'bytes');
@@ -1095,30 +1108,89 @@ class PlaybackHttpProxy {
     );
     output.contentLength = responseEnd - start + 1;
     final warmEnd = min(warm.length, responseEnd + 1);
-    var sent = 0;
-    if (start < warmEnd) {
-      final piece = Uint8List.sublistView(warm, start, warmEnd);
-      output.add(piece);
-      await output.flush();
-      sent += piece.length;
+    final blockSize = min(1024 * 1024, parsed.end - parsed.start + 1);
+    final reserved =
+        representation != null && _reserveCacheWorkspace(blockSize);
+    Uint8List? assembly = reserved ? Uint8List(blockSize) : null;
+    var assembled = 0;
+    var blockStart = parsed.start;
+    var received = 0;
+    var complete = false;
+    if (reserved) _charge(blockSize);
+    void retain(Uint8List bytes) {
+      var cursor = 0;
+      while (cursor < bytes.length) {
+        final length = min(blockSize - assembled, bytes.length - cursor);
+        assembly!.setRange(assembled, assembled + length, bytes, cursor);
+        cursor += length;
+        assembled += length;
+        if (assembled == blockSize) {
+          _store(key, representation!, blockStart, assembly!);
+          blockStart += assembled;
+          assembled = 0;
+          assembly = Uint8List(blockSize);
+        }
+      }
     }
-    read.outputStarted = true;
-    if (inside) {
-      await upstream.drain<void>();
-      return true;
-    }
-    final limit = responseEnd - start + 1;
-    await for (final chunk in upstream) {
+
+    Stream<List<int>> body() async* {
       read.check();
-      final room = limit - sent;
-      if (room <= 0) break;
-      final slice = chunk.length <= room ? chunk : chunk.sublist(0, room);
-      output.add(slice);
-      await output.flush();
-      sent += slice.length;
-      if (sent >= limit) break;
+      if (start < warmEnd) {
+        read.outputStarted = true;
+        yield Uint8List.sublistView(warm, start, warmEnd);
+      }
+      await for (final chunk in upstream) {
+        read.check();
+        _received(chunk.length, media: !inside);
+        received += chunk.length;
+        if (received > parsed.end - parsed.start + 1) {
+          throw const HttpException('Invalid warm suffix length');
+        }
+        if (inside) continue;
+        for (var offset = 0; offset < chunk.length; offset += 64 * 1024) {
+          final piece = Uint8List.fromList(
+            chunk.sublist(offset, min(offset + 64 * 1024, chunk.length)),
+          );
+          _charge(piece.length * 2);
+          try {
+            if (assembly != null &&
+                _representations[key]?.generation ==
+                    representation!.generation) {
+              retain(piece);
+            }
+            read.outputStarted = true;
+            yield piece;
+          } finally {
+            _charge(-piece.length * 2);
+          }
+        }
+      }
+      if (received != parsed.end - parsed.start + 1) {
+        throw const HttpException('Truncated warm suffix');
+      }
+      complete = true;
+      if (representation != null) representation.complete = true;
     }
-    return true;
+
+    try {
+      return await _sendBody(output, body());
+    } finally {
+      if (reserved) {
+        if (!inside &&
+            assembled > 0 &&
+            (complete || read.cancelled) &&
+            _representations[key]?.generation == representation.generation) {
+          _store(
+            key,
+            representation,
+            blockStart,
+            Uint8List.sublistView(assembly!, 0, assembled),
+          );
+        }
+        _charge(-blockSize);
+        _releaseCacheWorkspace(blockSize);
+      }
+    }
   }
 
   Uri register(
@@ -3594,8 +3666,9 @@ class PlaybackHttpProxy {
     HttpRequest incoming,
     String key,
     HttpClientResponse response,
-    Uri effective,
-  ) {
+    Uri effective, {
+    String? requestedRange,
+  }) {
     if (!_cacheableRequest(incoming, key)) return null;
     final policy = MediaCachePolicy(
       response.headers,
@@ -3628,7 +3701,7 @@ class PlaybackHttpProxy {
     }
     final total = contentRange?.total ?? response.contentLength;
     final requested = MediaByteRange.resolve(
-      incoming.headers.value('range'),
+      requestedRange ?? incoming.headers.value('range'),
       total,
     );
     if (contentRange != null &&

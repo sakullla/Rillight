@@ -108,6 +108,38 @@ class _PendingOpenCoreDriver extends _CoreDriver {
   }
 }
 
+class _WarmHandoffCoreDriver extends _CoreDriver {
+  Future<void> _read(String range) async {
+    final client = HttpClient();
+    try {
+      final request = await client.getUrl(this.request!.url);
+      request.headers.set('range', range);
+      final response = await request.close();
+      expect(response.statusCode, HttpStatus.partialContent);
+      await response.drain<void>();
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  @override
+  Future<Map<String, dynamic>> open(CorePlayerOpen value) async {
+    final result = await super.open(value);
+    emit('duration', 60000);
+    await _read('bytes=0-65535');
+    return result;
+  }
+
+  @override
+  Future<Map<String, dynamic>> command(
+    String method, [
+    Map<String, Object?> args = const {},
+  ]) async {
+    if (method == 'seek') await _read('bytes=131072-262143');
+    return super.command(method, args);
+  }
+}
+
 class _FailingCoreDriver extends _CoreDriver {
   _FailingCoreDriver(this.failure);
 
@@ -174,6 +206,99 @@ class _RejectedAudioCoreDriver extends _CoreDriver {
 }
 
 void main() {
+  test(
+    'next episode with a warmed prefix publishes current cache and speed after seek',
+    () async {
+      const total = 512 * 1024;
+      final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      upstream.listen((request) async {
+        final match = RegExp(
+          r'^bytes=(\d+)-(\d+)$',
+        ).firstMatch(request.headers.value('range')!)!;
+        final start = int.parse(match[1]!);
+        final end = int.parse(match[2]!);
+        request.response.statusCode = 206;
+        request.response.headers.set(
+          'content-range',
+          'bytes $start-$end/$total',
+        );
+        request.response.headers.set('etag', '"${request.uri.path}"');
+        request.response.contentLength = end - start + 1;
+        request.response.add(List.filled(end - start + 1, 9));
+        await request.response.close();
+      });
+      final backend = RillightVideoBackend(
+        settingsStore: MemoryPlayerSettingsStore(),
+        createPlayer: () async => _WarmHandoffCoreDriver(),
+      );
+      final speeds = <(int, double)>[];
+      final snapshots = <BufferSnapshot>[];
+      final subscription = backend.events.listen((event) {
+        if (event.kind == VideoEventKind.cacheSpeed) {
+          speeds.add((event.sessionId, event.value as double));
+        }
+        if (event.kind == VideoEventKind.bufferSnapshot) {
+          snapshots.add(event.value as BufferSnapshot);
+        }
+      });
+      Future<void> waitFor(bool Function() condition) async {
+        final deadline = DateTime.now().add(const Duration(seconds: 5));
+        while (!condition() && DateTime.now().isBefore(deadline)) {
+          await Future<void>.delayed(const Duration(milliseconds: 10));
+        }
+        expect(condition(), isTrue);
+      }
+
+      try {
+        await backend.open(
+          VideoOpenRequest(
+            sessionId: 1,
+            url: Uri.parse('http://127.0.0.1:${upstream.port}/episode-one'),
+          ),
+        );
+        await waitFor(
+          () =>
+              snapshots.any((s) => s.sessionId == 1 && s.byteCoverage != null),
+        );
+        await backend.open(
+          VideoOpenRequest(
+            sessionId: 2,
+            url: Uri.parse('http://127.0.0.1:${upstream.port}/episode-two'),
+            warmedPrefix: Uint8List(32768)..fillRange(0, 32768, 9),
+          ),
+        );
+        await waitFor(
+          () => snapshots.any(
+            (s) =>
+                s.sessionId == 2 &&
+                s.byteCoverage?.ranges.any(
+                      (r) => r.start == 32768 && r.end == 65536,
+                    ) ==
+                    true,
+          ),
+        );
+        await backend.seek(const Duration(seconds: 3));
+        await waitFor(
+          () => snapshots.any(
+            (s) =>
+                s.sessionId == 2 &&
+                s.byteCoverage?.ranges.any(
+                      (r) => r.start == 131072 && r.end == 262144,
+                    ) ==
+                    true,
+          ),
+        );
+        expect(speeds.any((sample) => sample.$1 == 2 && sample.$2 > 0), isTrue);
+        final current = snapshots.last;
+        expect(current.sessionId, 2);
+        expect(current.byteCoverage!.ranges.first.start, 32768);
+      } finally {
+        await subscription.cancel();
+        await backend.dispose();
+        await upstream.close(force: true);
+      }
+    },
+  );
   test(
     'rejected optional audio keeps the current track and playable session',
     () async {

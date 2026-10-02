@@ -21,6 +21,22 @@ else()
   target_compile_options(rillight_core_test PRIVATE -UNDEBUG)
 endif()
 add_test(NAME rillight_core_audio_session COMMAND rillight_core_test)
+if(UNIX AND NOT CMAKE_CROSSCOMPILING)
+  find_package(Python3 QUIET COMPONENTS Interpreter)
+  if(Python3_Interpreter_FOUND)
+    add_test(NAME rillight_core_loopback_seek
+      COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/loopback_seek_test.py"
+              "$<TARGET_FILE:rillight_core>")
+    set_tests_properties(rillight_core_loopback_seek PROPERTIES TIMEOUT 15)
+    if(APPLE)
+      set_tests_properties(rillight_core_loopback_seek PROPERTIES
+        ENVIRONMENT "DYLD_LIBRARY_PATH=${core_lib_dir}")
+    else()
+      set_tests_properties(rillight_core_loopback_seek PROPERTIES
+        ENVIRONMENT "LD_LIBRARY_PATH=${core_lib_dir}")
+    endif()
+  endif()
+endif()
 option(RILLIGHT_CORE_GPU_TESTS "Run color conversion on a real D3D11 or Metal device" OFF)
 if(APPLE AND RILLIGHT_CORE_GPU_TESTS)
   add_executable(rillight_macos_color_pipeline_test
