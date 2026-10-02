@@ -5,6 +5,8 @@ import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/library/browse_controller.dart';
+import 'package:rillight/library/shelf_sort.dart';
+import 'package:rillight/library/library_filter_panel.dart';
 import 'package:rillight/media_image/media_image.dart';
 
 class TvLibraryPage extends StatefulWidget {
@@ -31,7 +33,16 @@ class _TvLibraryPageState extends State<TvLibraryPage> {
         auth: AuthScope.of(context),
         cache: CatalogScope.of(context).cache,
         parentId: widget.viewId,
-        includeItemTypes: widget.initialType ?? 'Movie,Series',
+        includeItemTypes:
+            widget.initialType ??
+            switch (CatalogScope.of(context).libraries
+                .where((item) => item.id == widget.viewId)
+                .firstOrNull
+                ?.collectionTypeNormalized) {
+              'movies' => 'Movie',
+              'tvshows' => 'Series',
+              _ => 'Movie,Series',
+            },
       );
       final genre = widget.initialGenre;
       if (genre != null && genre.isNotEmpty) {
@@ -49,71 +60,46 @@ class _TvLibraryPageState extends State<TvLibraryPage> {
   }
 
   Future<void> _filter() async {
-    final c = _controller!, l = AppLocalizations.of(context);
-    var type = c.type, watch = c.watch, sort = c.sortBy;
+    final c = _controller!;
     await showDialog<void>(
       context: context,
       useRootNavigator: false,
-      builder: (context) => StatefulBuilder(
-        builder: (context, update) => AlertDialog(
-          title: Text(l.libraryFilter),
-          content: SizedBox(
-            width: 620,
-            child: SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(l.libraryFilterType),
-                  for (final choice in [
-                    (null, l.libraryFilterAll),
-                    ('Movie', l.mobileMovies),
-                    ('Series', l.mobileSeries),
-                  ])
-                    TvAction(
-                      autofocus: choice.$1 == null,
-                      selected: type == choice.$1,
-                      onPressed: () => update(() => type = choice.$1),
-                      child: Text(choice.$2),
-                    ),
-                  Text(l.libraryFilterWatch),
-                  for (final choice in [
-                    (null, l.libraryFilterAll),
-                    ('IsPlayed', l.mobileWatched),
-                    ('IsUnplayed', l.mobileUnwatched),
-                  ])
-                    TvAction(
-                      selected: watch == choice.$1,
-                      onPressed: () => update(() => watch = choice.$1),
-                      child: Text(choice.$2),
-                    ),
-                  Text(l.mobileSort),
-                  for (final choice in [
-                    ('SortName', l.mobileNameSort),
-                    ('DateCreated', l.mobileDateSort),
-                  ])
-                    TvAction(
-                      selected: sort == choice.$1,
-                      onPressed: () => update(() => sort = choice.$1),
-                      child: Text(choice.$2),
-                    ),
-                  TvAction(
-                    onPressed: () {
-                      c.filter(type: type, watch: watch, sortBy: sort);
-                      Navigator.pop(context);
-                    },
-                    child: Text(l.libraryFilter),
-                  ),
-                  TvAction(
-                    onPressed: () {
-                      c.filter(sortBy: 'SortName');
-                      Navigator.pop(context);
-                    },
-                    child: Text(l.libraryFilterClear),
-                  ),
-                ],
-              ),
+      builder: (context) => Dialog(
+        clipBehavior: Clip.antiAlias,
+        child: LibraryFilterPanel(
+          television: true,
+          typeFilterable: c.includeItemTypes == 'Movie,Series',
+          keyPrefix: 'tv-library',
+          initial: ShelfFilters(
+            type: CatalogTypeFilter.values.firstWhere(
+              (v) => v.itemType == c.type,
+              orElse: () => CatalogTypeFilter.all,
             ),
+            watch: CatalogWatchFilter.values.firstWhere(
+              (v) => v.param == c.watch,
+              orElse: () => CatalogWatchFilter.all,
+            ),
+            years: c.years,
+            genres: c.genres,
+          ),
+          sort: CatalogSort.values.firstWhere(
+            (s) => s.sortBy == c.sortBy,
+            orElse: () => CatalogSort.initial,
+          ),
+          years: c.items
+              .map((item) => item.productionYear)
+              .whereType<int>()
+              .toSet()
+              .toList(),
+          genres: c.items.expand((item) => item.genres).toSet().toList(),
+          loadGenres: () =>
+              AuthScope.of(context).client.getLibraryGenres(widget.viewId),
+          onApply: (filters, sort) => c.filter(
+            type: filters.type.itemType,
+            watch: filters.watch.param,
+            years: filters.years,
+            genres: filters.genres,
+            sortBy: (sort ?? CatalogSort.initial).sortBy,
           ),
         ),
       ),

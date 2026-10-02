@@ -472,19 +472,20 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                   ],
                 ),
               ),
-            BufferedRangesTrack(
-              snapshot: c.bufferSnapshot,
-              duration: c.duration,
-              child: SliderTheme(
-                data: SliderTheme.of(context).copyWith(
-                  showValueIndicator: ShowValueIndicator.onDrag,
-                  valueIndicatorColor: Colors.white,
-                  valueIndicatorTextStyle: const TextStyle(
-                    color: Colors.black,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                  ),
+            SliderTheme(
+              data: SliderTheme.of(context).copyWith(
+                showValueIndicator: ShowValueIndicator.onDrag,
+                valueIndicatorColor: Colors.white,
+                valueIndicatorTextStyle: const TextStyle(
+                  color: Colors.black,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
                 ),
+              ),
+              child: BufferedRangesTrack(
+                snapshot: c.bufferSnapshot,
+                duration: c.duration,
+                trackHeight: 6,
                 child: Slider(
                   key: const Key('mobile-player-seek'),
                   value: (_seek ?? c.position.inMilliseconds.toDouble()).clamp(
@@ -1125,26 +1126,34 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
         ),
       );
     }
+    final themes = InheritedTheme.capture(
+      from: context,
+      to: Navigator.of(context, rootNavigator: true).context,
+    );
     return showGeneralDialog<void>(
       context: context,
       barrierDismissible: true,
       barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
       barrierColor: Colors.black54,
       transitionDuration: AppMotion.durationOf(context),
-      pageBuilder: (context, animation, secondaryAnimation) => SafeArea(
-        child: Align(
-          alignment: Alignment.centerRight,
-          child: SizedBox(
-            width: math.min(360, MediaQuery.sizeOf(context).width * .65),
-            height: double.infinity,
-            child: Material(
-              key: const Key('mobile-player-options'),
-              color: Theme.of(context).colorScheme.surface,
-              borderRadius: const BorderRadius.horizontal(
-                left: Radius.circular(20),
+      pageBuilder: (context, animation, secondaryAnimation) => themes.wrap(
+        Builder(
+          builder: (context) => SafeArea(
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: SizedBox(
+                width: math.min(360, MediaQuery.sizeOf(context).width * .65),
+                height: double.infinity,
+                child: Material(
+                  key: const Key('mobile-player-options'),
+                  color: Theme.of(context).colorScheme.surface,
+                  borderRadius: const BorderRadius.horizontal(
+                    left: Radius.circular(20),
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: builder(context),
+                ),
               ),
-              clipBehavior: Clip.antiAlias,
-              child: builder(context),
             ),
           ),
         ),

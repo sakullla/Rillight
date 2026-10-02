@@ -230,70 +230,61 @@ void main() {
     },
   );
 
-  testWidgets('phone mine shows the current server library size', (
-    tester,
-  ) async {
-    tester.view.physicalSize = const Size(360, 900);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-    final server =
-        FakeEmbyServer(
-            baseUrl: Uri.parse('http://counts-phone.test:8096'),
-            items: const [],
-          )
-          ..itemCountsOverride = {
-            'Movie': 12,
-            'Series': 3,
-            'Episode': 45,
-            'Photo': 0,
-          };
-    final auth = authController([server]);
-    await tester.runAsync(() async {
-      await connect(auth, server);
-      for (var i = 0; i < 100 && auth.libraryCounts == null; i++) {
-        await Future<void>.delayed(const Duration(milliseconds: 5));
-      }
-    });
-    expect(auth.libraryCounts, isNotNull);
+  testWidgets(
+    'phone account prioritizes management without library statistics',
+    (tester) async {
+      tester.view.physicalSize = const Size(360, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final server =
+          FakeEmbyServer(
+              baseUrl: Uri.parse('http://counts-phone.test:8096'),
+              items: const [],
+            )
+            ..itemCountsOverride = {
+              'Movie': 12,
+              'Series': 3,
+              'Episode': 45,
+              'Photo': 0,
+            };
+      final auth = authController([server]);
+      await tester.runAsync(() async {
+        await connect(auth, server);
+        for (var i = 0; i < 100 && auth.libraryCounts == null; i++) {
+          await Future<void>.delayed(const Duration(milliseconds: 5));
+        }
+      });
+      expect(auth.libraryCounts, isNotNull);
 
-    await tester.pumpWidget(
-      AuthScope(
-        controller: auth,
-        child: PlayerScope(
-          bindings: PlayerBindings(settingsStore: MemoryPlayerSettingsStore()),
-          child: MaterialApp(
-            theme: AppTheme.dark(),
-            locale: const Locale('zh'),
-            supportedLocales: AppLocalizations.supportedLocales,
-            localizationsDelegates: AppLocalizations.localizationsDelegates,
-            home: const Scaffold(body: PhoneMinePage()),
+      await tester.pumpWidget(
+        AuthScope(
+          controller: auth,
+          child: PlayerScope(
+            bindings: PlayerBindings(
+              settingsStore: MemoryPlayerSettingsStore(),
+            ),
+            child: MaterialApp(
+              theme: AppTheme.dark(),
+              locale: const Locale('zh'),
+              supportedLocales: AppLocalizations.supportedLocales,
+              localizationsDelegates: AppLocalizations.localizationsDelegates,
+              home: const Scaffold(body: PhoneMinePage()),
+            ),
           ),
         ),
-      ),
-    );
-    await tester.pump();
-    final scrollable = find
-        .descendant(
-          of: find.byKey(const PageStorageKey('mobile-mine-scroll')),
-          matching: find.byType(Scrollable),
-        )
-        .first;
-    await tester.scrollUntilVisible(
-      find.text('电影 12'),
-      250,
-      scrollable: scrollable,
-    );
-    await tester.pump();
-    expect(find.text('库规模'), findsOneWidget);
-    expect(find.text('电影 12'), findsOneWidget);
-    expect(find.text('剧集 3'), findsOneWidget);
-    expect(find.text('单集 45'), findsOneWidget);
-    expect(find.text('照片 0'), findsOneWidget);
-    expect(tester.takeException(), isNull);
-  }, tags: ['integration']);
+      );
+      await tester.pump();
+      expect(find.byKey(PhoneMinePage.lineKey), findsOneWidget);
+      expect(find.byKey(PhoneMinePage.settingsKey), findsOneWidget);
+      expect(find.byType(LibraryCountsPanel), findsNothing);
+      expect(find.text('库规模'), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+    tags: ['integration'],
+  );
 
-  testWidgets('tv settings pane shows the current server library size', (
+  testWidgets('tv settings prioritize server actions without statistics', (
     tester,
   ) async {
     isolateImageCache();
@@ -351,10 +342,11 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
     await tester.pumpAndSettle();
 
-    expect(find.text('电影 5'), findsOneWidget);
-    expect(find.text('剧集 2'), findsOneWidget);
-    expect(find.text('单集 30'), findsOneWidget);
-    expect(find.text('照片 1'), findsOneWidget);
+    expect(
+      find.byKey(ValueKey('tv-line-add-${auth.session!.server.id}')),
+      findsOneWidget,
+    );
+    expect(find.byType(LibraryCountsPanel), findsNothing);
     expect(tester.takeException(), isNull);
   }, tags: ['integration']);
 }

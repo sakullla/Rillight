@@ -1,0 +1,1084 @@
+[
+  {
+    "id": "account",
+    "feature": "servers",
+    "platforms": [
+      "phone"
+    ]
+  },
+  {
+    "id": "account-change-password",
+    "feature": "servers",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "account-password-mismatch",
+    "feature": "servers",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "account-settings-entry",
+    "feature": "settings",
+    "platforms": [
+      "phone"
+    ]
+  },
+  {
+    "id": "danmaku-advanced",
+    "feature": "danmaku",
+    "platforms": [
+      "desktop",
+      "phone"
+    ]
+  },
+  {
+    "id": "danmaku-disabled",
+    "feature": "danmaku",
+    "platforms": [
+      "desktop",
+      "phone"
+    ]
+  },
+  {
+    "id": "danmaku-episode-picker",
+    "feature": "danmaku",
+    "platforms": [
+      "desktop",
+      "phone"
+    ]
+  },
+  {
+    "id": "danmaku-keyword-filter",
+    "feature": "danmaku",
+    "platforms": [
+      "desktop",
+      "phone"
+    ]
+  },
+  {
+    "id": "danmaku-landscape-advanced",
+    "feature": "danmaku",
+    "platforms": [
+      "phone"
+    ]
+  },
+  {
+    "id": "danmaku-landscape-disabled",
+    "feature": "danmaku",
+    "platforms": [
+      "phone"
+    ]
+  },
+  {
+    "id": "danmaku-landscape-episode-picker",
+    "feature": "danmaku",
+    "platforms": [
+      "phone"
+    ]
+  },
+  {
+    "id": "danmaku-landscape-keyword-filter",
+    "feature": "danmaku",
+    "platforms": [
+      "phone"
+    ]
+  },
+  {
+    "id": "danmaku-landscape-matched",
+    "feature": "danmaku",
+    "platforms": [
+      "phone"
+    ]
+  },
+  {
+    "id": "danmaku-landscape-search",
+    "feature": "danmaku",
+    "platforms": [
+      "phone"
+    ]
+  },
+  {
+    "id": "danmaku-landscape-search-empty",
+    "feature": "danmaku",
+    "platforms": [
+      "phone"
+    ]
+  },
+  {
+    "id": "danmaku-landscape-search-error",
+    "feature": "danmaku",
+    "platforms": [
+      "phone"
+    ]
+  },
+  {
+    "id": "danmaku-landscape-search-loading",
+    "feature": "danmaku",
+    "platforms": [
+      "phone"
+    ]
+  },
+  {
+    "id": "danmaku-landscape-search-results",
+    "feature": "danmaku",
+    "platforms": [
+      "phone"
+    ]
+  },
+  {
+    "id": "danmaku-landscape-style",
+    "feature": "danmaku",
+    "platforms": [
+      "phone"
+    ]
+  },
+  {
+    "id": "danmaku-matched",
+    "feature": "danmaku",
+    "platforms": [
+      "desktop",
+      "phone"
+    ]
+  },
+  {
+    "id": "danmaku-search",
+    "feature": "danmaku",
+    "platforms": [
+      "desktop",
+      "phone"
+    ]
+  },
+  {
+    "id": "danmaku-search-empty",
+    "feature": "danmaku",
+    "platforms": [
+      "desktop",
+      "phone"
+    ]
+  },
+  {
+    "id": "danmaku-search-error",
+    "feature": "danmaku",
+    "platforms": [
+      "desktop",
+      "phone"
+    ]
+  },
+  {
+    "id": "danmaku-search-loading",
+    "feature": "danmaku",
+    "platforms": [
+      "desktop",
+      "phone"
+    ]
+  },
+  {
+    "id": "danmaku-search-results",
+    "feature": "danmaku",
+    "platforms": [
+      "desktop",
+      "phone"
+    ]
+  },
+  {
+    "id": "danmaku-style",
+    "feature": "danmaku",
+    "platforms": [
+      "desktop",
+      "phone"
+    ]
+  },
+  {
+    "id": "detail-audio",
+    "feature": "detail",
+    "platforms": [
+      "desktop"
+    ]
+  },
+  {
+    "id": "detail-from-home-loading",
+    "feature": "detail",
+    "platforms": [
+      "phone"
+    ]
+  },
+  {
+    "id": "detail-from-home-ready",
+    "feature": "detail",
+    "platforms": [
+      "phone"
+    ]
+  },
+  {
+    "id": "detail-gallery",
+    "feature": "detail",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "detail-gallery-next",
+    "feature": "detail",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "detail-subtitles",
+    "feature": "detail",
+    "platforms": [
+      "desktop"
+    ]
+  },
+  {
+    "id": "episode-context-menu",
+    "feature": "detail",
+    "platforms": [
+      "desktop"
+    ]
+  },
+  {
+    "id": "episode-detail",
+    "feature": "detail",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "home-customize",
+    "feature": "home",
+    "platforms": [
+      "phone"
+    ]
+  },
+  {
+    "id": "home-loading-120ms",
+    "feature": "home",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "home-loading-480ms",
+    "feature": "home",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "home-ready",
+    "feature": "home",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "home-remote-focus",
+    "feature": "home",
+    "platforms": [
+      "tv"
+    ]
+  },
+  {
+    "id": "home-return",
+    "feature": "home",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "home-shelves",
+    "feature": "home",
+    "platforms": [
+      "phone"
+    ]
+  },
+  {
+    "id": "library-filters",
+    "feature": "library",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "library-filters-genre",
+    "feature": "library",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "library-filters-selected",
+    "feature": "library",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "library-filters-sorting",
+    "feature": "library",
+    "platforms": [
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "library-filters-watch",
+    "feature": "library",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "library-filters-year",
+    "feature": "library",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "library-list",
+    "feature": "library",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "library-movies",
+    "feature": "library",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "library-navigation-customize",
+    "feature": "library",
+    "platforms": [
+      "desktop"
+    ]
+  },
+  {
+    "id": "library-navigation-menu",
+    "feature": "library",
+    "platforms": [
+      "desktop"
+    ]
+  },
+  {
+    "id": "library-series",
+    "feature": "library",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "library-sort",
+    "feature": "library",
+    "platforms": [
+      "desktop"
+    ]
+  },
+  {
+    "id": "login-address-editor",
+    "feature": "login",
+    "platforms": [
+      "tv"
+    ]
+  },
+  {
+    "id": "login-advanced",
+    "feature": "login",
+    "platforms": [
+      "desktop",
+      "phone"
+    ]
+  },
+  {
+    "id": "login-appearance",
+    "feature": "login",
+    "platforms": [
+      "desktop",
+      "phone"
+    ]
+  },
+  {
+    "id": "login-saved-servers",
+    "feature": "login",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "login-validation",
+    "feature": "login",
+    "platforms": [
+      "desktop",
+      "phone"
+    ]
+  },
+  {
+    "id": "movie-detail",
+    "feature": "detail",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "player-buffering",
+    "feature": "player",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "player-cache-active",
+    "feature": "player",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "player-cache-idle",
+    "feature": "player",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "player-controls",
+    "feature": "player",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "player-ended",
+    "feature": "player",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "player-episode",
+    "feature": "player",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "player-episode-list",
+    "feature": "player",
+    "platforms": [
+      "desktop"
+    ]
+  },
+  {
+    "id": "player-error",
+    "feature": "player",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "player-landscape-controls",
+    "feature": "player",
+    "platforms": [
+      "phone"
+    ]
+  },
+  {
+    "id": "player-landscape-settings",
+    "feature": "player",
+    "platforms": [
+      "phone"
+    ]
+  },
+  {
+    "id": "player-landscape-settings-danmaku",
+    "feature": "player",
+    "platforms": [
+      "phone"
+    ]
+  },
+  {
+    "id": "player-landscape-settings-picture",
+    "feature": "player",
+    "platforms": [
+      "phone"
+    ]
+  },
+  {
+    "id": "player-landscape-settings-quality",
+    "feature": "player",
+    "platforms": [
+      "phone"
+    ]
+  },
+  {
+    "id": "player-landscape-settings-skip",
+    "feature": "player",
+    "platforms": [
+      "phone"
+    ]
+  },
+  {
+    "id": "player-landscape-settings-source",
+    "feature": "player",
+    "platforms": [
+      "phone"
+    ]
+  },
+  {
+    "id": "player-landscape-settings-speed",
+    "feature": "player",
+    "platforms": [
+      "phone"
+    ]
+  },
+  {
+    "id": "player-landscape-settings-tracks",
+    "feature": "player",
+    "platforms": [
+      "phone"
+    ]
+  },
+  {
+    "id": "player-loading",
+    "feature": "player",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "player-locked",
+    "feature": "player",
+    "platforms": [
+      "phone"
+    ]
+  },
+  {
+    "id": "player-next-episode",
+    "feature": "player",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "player-paused",
+    "feature": "player",
+    "platforms": [
+      "desktop",
+      "phone"
+    ]
+  },
+  {
+    "id": "player-remote-focus",
+    "feature": "player",
+    "platforms": [
+      "tv"
+    ]
+  },
+  {
+    "id": "player-resumed",
+    "feature": "player",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "player-season-picker",
+    "feature": "player",
+    "platforms": [
+      "desktop"
+    ]
+  },
+  {
+    "id": "player-seek-preview",
+    "feature": "player",
+    "platforms": [
+      "desktop"
+    ]
+  },
+  {
+    "id": "player-settings",
+    "feature": "player",
+    "platforms": [
+      "phone"
+    ]
+  },
+  {
+    "id": "player-settings-audio",
+    "feature": "player",
+    "platforms": [
+      "desktop"
+    ]
+  },
+  {
+    "id": "player-settings-danmaku",
+    "feature": "player",
+    "platforms": [
+      "phone"
+    ]
+  },
+  {
+    "id": "player-settings-picture",
+    "feature": "player",
+    "platforms": [
+      "phone"
+    ]
+  },
+  {
+    "id": "player-settings-quality",
+    "feature": "player",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "player-settings-quality-focus",
+    "feature": "player",
+    "platforms": [
+      "tv"
+    ]
+  },
+  {
+    "id": "player-settings-skip",
+    "feature": "player",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "player-settings-skip-focus",
+    "feature": "player",
+    "platforms": [
+      "tv"
+    ]
+  },
+  {
+    "id": "player-settings-source",
+    "feature": "player",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "player-settings-source-focus",
+    "feature": "player",
+    "platforms": [
+      "tv"
+    ]
+  },
+  {
+    "id": "player-settings-speed",
+    "feature": "player",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "player-settings-speed-focus",
+    "feature": "player",
+    "platforms": [
+      "tv"
+    ]
+  },
+  {
+    "id": "player-settings-tracks",
+    "feature": "player",
+    "platforms": [
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "player-settings-tracks-focus",
+    "feature": "player",
+    "platforms": [
+      "tv"
+    ]
+  },
+  {
+    "id": "player-subtitles",
+    "feature": "player",
+    "platforms": [
+      "desktop"
+    ]
+  },
+  {
+    "id": "poster-hover",
+    "feature": "home",
+    "platforms": [
+      "desktop"
+    ]
+  },
+  {
+    "id": "poster-hover-transition",
+    "feature": "home",
+    "platforms": [
+      "desktop"
+    ]
+  },
+  {
+    "id": "poster-normal",
+    "feature": "home",
+    "platforms": [
+      "desktop"
+    ]
+  },
+  {
+    "id": "search-empty",
+    "feature": "search",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "search-entry",
+    "feature": "search",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "search-filter",
+    "feature": "search",
+    "platforms": [
+      "desktop",
+      "phone"
+    ]
+  },
+  {
+    "id": "search-idle",
+    "feature": "search",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "search-input-dialog",
+    "feature": "search",
+    "platforms": [
+      "tv"
+    ]
+  },
+  {
+    "id": "search-results",
+    "feature": "search",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "season-detail",
+    "feature": "detail",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "season-episode-picker",
+    "feature": "detail",
+    "platforms": [
+      "desktop",
+      "phone"
+    ]
+  },
+  {
+    "id": "season-episodes",
+    "feature": "detail",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "series-detail",
+    "feature": "detail",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "series-season-picker",
+    "feature": "detail",
+    "platforms": [
+      "desktop"
+    ]
+  },
+  {
+    "id": "server-add",
+    "feature": "servers",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "server-add-advanced",
+    "feature": "servers",
+    "platforms": [
+      "desktop",
+      "phone"
+    ]
+  },
+  {
+    "id": "server-add-line",
+    "feature": "servers",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "server-delete-confirm",
+    "feature": "servers",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "server-edit-line",
+    "feature": "servers",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "server-entry",
+    "feature": "servers",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "server-manager",
+    "feature": "servers",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "server-rename",
+    "feature": "servers",
+    "platforms": [
+      "phone"
+    ]
+  },
+  {
+    "id": "server-search-empty",
+    "feature": "servers",
+    "platforms": [
+      "phone"
+    ]
+  },
+  {
+    "id": "settings",
+    "feature": "settings",
+    "platforms": [
+      "desktop",
+      "phone"
+    ]
+  },
+  {
+    "id": "settings-appearance",
+    "feature": "settings",
+    "platforms": [
+      "desktop",
+      "phone"
+    ]
+  },
+  {
+    "id": "settings-appearance-expanded",
+    "feature": "settings",
+    "platforms": [
+      "desktop",
+      "phone"
+    ]
+  },
+  {
+    "id": "settings-cache",
+    "feature": "settings",
+    "platforms": [
+      "desktop",
+      "phone"
+    ]
+  },
+  {
+    "id": "settings-danmaku",
+    "feature": "settings",
+    "platforms": [
+      "desktop",
+      "phone"
+    ]
+  },
+  {
+    "id": "settings-danmaku-advanced",
+    "feature": "settings",
+    "platforms": [
+      "desktop",
+      "phone"
+    ]
+  },
+  {
+    "id": "settings-decoder",
+    "feature": "settings",
+    "platforms": [
+      "desktop",
+      "phone"
+    ]
+  },
+  {
+    "id": "settings-decoding",
+    "feature": "settings",
+    "platforms": [
+      "desktop",
+      "phone"
+    ]
+  },
+  {
+    "id": "settings-playback-expanded",
+    "feature": "settings",
+    "platforms": [
+      "desktop",
+      "phone"
+    ]
+  },
+  {
+    "id": "settings-speed",
+    "feature": "settings",
+    "platforms": [
+      "desktop",
+      "phone"
+    ]
+  },
+  {
+    "id": "shelf-continue-watching",
+    "feature": "library",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "shelf-latest-movies",
+    "feature": "library",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "shelf-latest-series",
+    "feature": "library",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "shelf-next-up",
+    "feature": "library",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  }
+]

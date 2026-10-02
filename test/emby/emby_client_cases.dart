@@ -468,7 +468,7 @@ void main() {
     );
     final request = server.requests.last;
     expect(request, contains('Filters=IsPlayed'));
-    expect(request, contains('Genres=SciFi%2CAction'));
+    expect(request, contains('Genres=SciFi%7CAction'));
     expect(request, contains('Years=2025%2C2024'));
 
     // 不传筛选时不携带对应参数。

@@ -5,7 +5,7 @@ import 'dart:io';
 import 'package:flutter/widgets.dart';
 import 'package:path_provider/path_provider.dart';
 
-/// 手机底部导航是贴底还是悬浮。缺省为悬浮。
+/// 手机底部导航是贴底还是悬浮。缺省为贴底。
 abstract class PhoneNavStyleStore {
   Future<bool> read();
 
@@ -13,7 +13,7 @@ abstract class PhoneNavStyleStore {
 }
 
 class MemoryPhoneNavStyleStore implements PhoneNavStyleStore {
-  MemoryPhoneNavStyleStore([this.value = true]);
+  MemoryPhoneNavStyleStore([this.value = false]);
 
   bool value;
 
@@ -35,14 +35,14 @@ class FilePhoneNavStyleStore implements PhoneNavStyleStore {
   Future<bool> read() async {
     try {
       if (!await file.exists()) {
-        return true;
+        return false;
       }
       final decoded = jsonDecode(await file.readAsString());
       if (decoded is Map && decoded['floating'] is bool) {
         return decoded['floating'] as bool;
       }
     } catch (_) {}
-    return true;
+    return false;
   }
 
   @override
@@ -72,7 +72,7 @@ class PhoneNavStyleController extends ChangeNotifier {
   PhoneNavStyleController({PhoneNavStyleStore? store}) : _store = store;
 
   PhoneNavStyleStore? _store;
-  bool floating = true;
+  bool floating = false;
   bool _disposed = false;
   bool _ready = false;
 

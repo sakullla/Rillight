@@ -9,7 +9,6 @@ import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/auth/change_password_dialog.dart';
-import 'package:rillight/auth/library_counts_panel.dart';
 import 'package:rillight/auth/line_address_dialog.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/home/catalog_scope.dart';
@@ -302,12 +301,6 @@ class _TvSession extends StatelessWidget {
         children: [
           Text(
             '${auth.session?.server.name ?? ''} · ${auth.session?.username ?? ''}',
-          ),
-          const SizedBox(height: 8),
-          LibraryCountsPanel(
-            counts: auth.libraryCounts,
-            loading: auth.libraryCountsLoading,
-            failure: auth.libraryCountsFailure,
           ),
           const SizedBox(height: 16),
           Text(l.mobileLine),

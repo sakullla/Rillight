@@ -10,7 +10,7 @@ import 'package:rillight/home/catalog_failure.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/media_image/media_image.dart';
 
-/// 手机片库列表。大约两列带库名的卡片；没有库图时用库名占满该卡。
+/// 手机片库列表。两列卡片保留库名；没有封面时显示媒体类型图标。
 class PhoneLibrariesTab extends StatelessWidget {
   const PhoneLibrariesTab({super.key});
 
@@ -154,6 +154,7 @@ class _LibraryBlock extends StatelessWidget {
                       )
                     : _LibraryNamePlaceholder(
                         key: Key('phone-library-placeholder-${library.id}'),
+                        collectionType: library.collectionType,
                       ),
               ),
             ),
@@ -173,12 +174,32 @@ class _LibraryBlock extends StatelessWidget {
 }
 
 class _LibraryNamePlaceholder extends StatelessWidget {
-  const _LibraryNamePlaceholder({super.key});
+  const _LibraryNamePlaceholder({super.key, this.collectionType});
+  final String? collectionType;
 
   @override
   Widget build(BuildContext context) {
-    return ColoredBox(
-      color: Theme.of(context).colorScheme.surfaceContainerHigh,
+    final scheme = Theme.of(context).colorScheme;
+    final icon = switch (collectionType) {
+      'movies' => Icons.movie_outlined,
+      'tvshows' => Icons.tv_rounded,
+      'music' => Icons.music_note_rounded,
+      'photos' => Icons.photo_library_outlined,
+      _ => Icons.video_library_outlined,
+    };
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [scheme.surfaceContainerHighest, scheme.surfaceContainerLow],
+        ),
+      ),
+      child: Center(
+        child: ExcludeSemantics(
+          child: Icon(icon, size: 36, color: scheme.onSurfaceVariant),
+        ),
+      ),
     );
   }
 }

@@ -105,7 +105,7 @@ CatalogRequest catalogItemsRequest({
     'SortBy': ?sortBy,
     'SortOrder': ?sortOrder,
     if (filters != null && filters.isNotEmpty) 'Filters': filters.join(','),
-    if (genres != null && genres.isNotEmpty) 'Genres': genres.join(','),
+    if (genres != null && genres.isNotEmpty) 'Genres': genres.join('|'),
     if (years != null && years.isNotEmpty) 'Years': years.join(','),
     'EnableImageTypes': EmbyClient.imageTypes,
   });

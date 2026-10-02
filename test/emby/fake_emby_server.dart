@@ -219,6 +219,8 @@ class FakeEmbyItem {
     DateTime? dateCreated,
     DateTime? premiereDate,
     this.communityRating,
+    this.genres = const [],
+    this.favorite = false,
     this.criticRating,
     this.officialRating,
     DateTime? dateLastContentAdded,
@@ -271,6 +273,8 @@ class FakeEmbyItem {
   DateTime? premiereDate;
   DateTime? lastPlayedDate;
   double? communityRating;
+  List<String> genres;
+  bool favorite;
   double? criticRating;
   String? officialRating;
   String container;
@@ -325,6 +329,7 @@ class FakeEmbyItem {
       'DateLastContentAdded': dateLastContentAdded.toIso8601String(),
       if (premiereDate != null) 'PremiereDate': premiereDate!.toIso8601String(),
       if (communityRating != null) 'CommunityRating': communityRating,
+      if (genres.isNotEmpty) 'Genres': genres,
       if (criticRating != null) 'CriticRating': criticRating,
       if (officialRating != null) 'OfficialRating': officialRating,
       if (mediaStreams.isNotEmpty)
@@ -342,6 +347,7 @@ class FakeEmbyItem {
       if (people.isNotEmpty)
         'People': [for (final person in people) person.toJson()],
       'UserData': {
+        'IsFavorite': favorite,
         'Played': played,
         'PlaybackPositionTicks': playbackPositionTicks,
         if (playedPercentage != null) 'PlayedPercentage': playedPercentage,
@@ -680,6 +686,30 @@ class FakeEmbyServer {
       return _handleItemCounts();
     }
 
+    if (segments.length == 1 && segments.first == 'Genres' && method == 'GET') {
+      final parent = options.uri.queryParameters['ParentId'];
+      final names =
+          items
+              .where(
+                (item) =>
+                    parent == null || _belongsTo(item, parent, recursive: true),
+              )
+              .expand((item) => item.genres)
+              .toSet()
+              .toList()
+            ..sort();
+      final start =
+          int.tryParse(options.uri.queryParameters['StartIndex'] ?? '') ?? 0;
+      final limit =
+          int.tryParse(options.uri.queryParameters['Limit'] ?? '') ?? 200;
+      return _json(200, {
+        'Items': [
+          for (final name in names.skip(start).take(limit))
+            {'Id': 'genre-$name', 'Name': name, 'Type': 'Genre'},
+        ],
+        'TotalRecordCount': names.length,
+      });
+    }
     final playback = await _handlePlayback(
       options,
       method,
@@ -1371,6 +1401,21 @@ class FakeEmbyServer {
         .toSet();
     var matched = items.where((item) {
       final filters = (options.uri.queryParameters['Filters'] ?? '').split(',');
+      if (filters.contains('IsPlayed') && !item.played) return false;
+      if (filters.contains('IsUnplayed') && item.played) return false;
+      if (filters.contains('IsFavorite') && !item.favorite) return false;
+      final genres = (options.uri.queryParameters['Genres'] ?? '')
+          .split('|')
+          .where((value) => value.isNotEmpty)
+          .toSet();
+      if (genres.isNotEmpty && !item.genres.any(genres.contains)) return false;
+      final years = (options.uri.queryParameters['Years'] ?? '')
+          .split(',')
+          .where((value) => value.isNotEmpty)
+          .toSet();
+      if (years.isNotEmpty && !years.contains('${item.productionYear}')) {
+        return false;
+      }
       if (filters.contains('IsResumable') &&
           (item.played || item.playbackPositionTicks <= 0)) {
         return false;

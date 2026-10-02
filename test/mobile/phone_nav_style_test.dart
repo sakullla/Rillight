@@ -6,20 +6,23 @@ import 'package:rillight/app/phone_nav_style.dart';
 import 'package:rillight/app/theme.dart';
 
 void main() {
-  test('missing preference keeps the navigation floating', () async {
-    final store = MemoryPhoneNavStyleStore();
-    final controller = PhoneNavStyleController(store: store);
-    addTearDown(controller.dispose);
-    await controller.load();
-    expect(controller.floating, isTrue);
+  test(
+    'missing preference docks navigation and keeps an explicit floating choice',
+    () async {
+      final store = MemoryPhoneNavStyleStore();
+      final controller = PhoneNavStyleController(store: store);
+      addTearDown(controller.dispose);
+      await controller.load();
+      expect(controller.floating, isFalse);
 
-    await controller.setFloating(false);
-    expect(store.value, isFalse);
-    final again = PhoneNavStyleController(store: store);
-    addTearDown(again.dispose);
-    await again.load();
-    expect(again.floating, isFalse);
-  });
+      await controller.setFloating(true);
+      expect(store.value, isTrue);
+      final again = PhoneNavStyleController(store: store);
+      addTearDown(again.dispose);
+      await again.load();
+      expect(again.floating, isTrue);
+    },
+  );
 
   testWidgets(
     'floating navigation stays inset and docked navigation is flush',

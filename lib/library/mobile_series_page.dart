@@ -135,50 +135,74 @@ class PhoneItemBanner extends StatelessWidget {
           ),
         ),
         if (showCaption)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(
-              AppSpacing.md,
-              AppSpacing.sm,
-              AppSpacing.md,
-              AppSpacing.md,
+          PhoneDetailCaption(
+            title: _BannerTitle(
+              title: title,
+              hint: onTitleTap == null ? null : titleHint,
+              onTap: onTitleTap,
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _BannerTitle(
-                  title: title,
-                  hint: onTitleTap == null ? null : titleHint,
-                  onTap: onTitleTap,
-                ),
-                if (meta.isNotEmpty) ...[
-                  const SizedBox(height: AppSpacing.xs),
-                  Wrap(
-                    key: metaKey,
-                    spacing: AppSpacing.xs,
-                    runSpacing: AppSpacing.xxs,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    children: [
-                      for (var i = 0; i < meta.length; i++) ...[
-                        if (i > 0)
-                          Text(
-                            '·',
-                            style: theme.textTheme.labelMedium?.copyWith(
-                              color: theme.colorScheme.onSurfaceVariant,
-                            ),
-                          ),
-                        _MetaChip(entry: meta[i]),
-                      ],
-                    ],
-                  ),
-                ],
-                if (actions != null) ...[
-                  const SizedBox(height: AppSpacing.md),
-                  actions!,
-                ],
-              ],
-            ),
+            meta: meta,
+            actions: actions,
           ),
       ],
+    );
+  }
+}
+
+/// Shared geometry for a loaded detail header and its loading placeholder.
+class PhoneDetailCaption extends StatelessWidget {
+  const PhoneDetailCaption({
+    super.key,
+    required this.title,
+    this.meta = const [],
+    this.actions,
+    this.pendingMetadata,
+  });
+  final Widget title;
+  final List<PhoneMetaEntry> meta;
+  final Widget? actions, pendingMetadata;
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.md,
+        AppSpacing.sm,
+        AppSpacing.md,
+        AppSpacing.md,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          title,
+          if (meta.isNotEmpty || pendingMetadata != null) ...[
+            const SizedBox(height: AppSpacing.xs),
+            pendingMetadata ??
+                Wrap(
+                  key: PhoneItemBanner.metaKey,
+                  spacing: AppSpacing.xs,
+                  runSpacing: AppSpacing.xxs,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    for (var i = 0; i < meta.length; i++) ...[
+                      if (i > 0)
+                        Text(
+                          '·',
+                          style: theme.textTheme.labelMedium?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      _MetaChip(entry: meta[i]),
+                    ],
+                  ],
+                ),
+          ],
+          if (actions != null) ...[
+            const SizedBox(height: AppSpacing.md),
+            actions!,
+          ],
+        ],
+      ),
     );
   }
 }

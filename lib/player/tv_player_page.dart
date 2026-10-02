@@ -326,8 +326,16 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                     TvAction(
                                       key: ValueKey('audio-${track.index}'),
                                       autofocus:
-                                          track ==
-                                          c.selectableAudioTracks.first,
+                                          track.index == c.audioStreamIndex ||
+                                          (!c.selectableAudioTracks.any(
+                                                (t) =>
+                                                    t.index ==
+                                                    c.audioStreamIndex,
+                                              ) &&
+                                              track ==
+                                                  c
+                                                      .selectableAudioTracks
+                                                      .first),
                                       selected:
                                           c.audioStreamIndex == track.index,
                                       onPressed: c.loading
@@ -343,7 +351,14 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                   const SizedBox(height: 16),
                                   Text(l.subtitleTrack),
                                   TvAction(
-                                    autofocus: !c.canSwitchAudioTrack,
+                                    autofocus:
+                                        !c.canSwitchAudioTrack &&
+                                        (c.subtitleStreamIndex == null ||
+                                            !c.selectableSubtitleTracks.any(
+                                              (t) =>
+                                                  t.index ==
+                                                  c.subtitleStreamIndex,
+                                            )),
                                     selected: c.subtitleStreamIndex == null,
                                     onPressed: c.loading
                                         ? null
@@ -357,6 +372,9 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                       in c.selectableSubtitleTracks)
                                     TvAction(
                                       key: ValueKey('subtitle-${track.index}'),
+                                      autofocus:
+                                          !c.canSwitchAudioTrack &&
+                                          c.subtitleStreamIndex == track.index,
                                       selected:
                                           c.subtitleStreamIndex == track.index,
                                       onPressed: c.loading
@@ -375,7 +393,13 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                 for (final source in c.mediaSources)
                                   TvAction(
                                     key: ValueKey('source-${source.id}'),
-                                    autofocus: source == c.mediaSources.first,
+                                    autofocus:
+                                        source.id == c.activeMediaSourceId ||
+                                        (!c.mediaSources.any(
+                                              (s) =>
+                                                  s.id == c.activeMediaSourceId,
+                                            ) &&
+                                            source == c.mediaSources.first),
                                     selected:
                                         c.activeMediaSourceId == source.id,
                                     onPressed: c.loading
@@ -392,7 +416,12 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                   TvAction(
                                     key: ValueKey('tv-quality-$bitrate'),
                                     autofocus:
-                                        bitrate == c.availableBitrates.first,
+                                        bitrate == c.maxStreamingBitrate ||
+                                        (!c.availableBitrates.contains(
+                                              c.maxStreamingBitrate,
+                                            ) &&
+                                            bitrate ==
+                                                c.availableBitrates.first),
                                     selected: c.maxStreamingBitrate == bitrate,
                                     onPressed: c.loading
                                         ? null

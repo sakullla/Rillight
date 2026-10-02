@@ -31,6 +31,25 @@ Linux actual-window validation uses `linux/packaging/playback_smoke.sh`: H.264/H
 
 Android uses the same owned core in-process. Phone/TV pages share controllers but have separate interaction trees. Keep the native view mounted while loading; recheck playback exit followed by gesture navigation and screen lock/wake when changing surface behavior. Device validation uses the disposable `.validation` package and synthetic credentials. Generated tracked files must be marked in `.gitattributes`; generated validation media/protobuf clients stay under ignored `build/`. Keep `android/.cxx/` ignored.
 
+## Prototype UI Capture
+
+Use `node tool/capture-ui.mjs` to render the actual Flutter desktop, phone and TV interaction trees with synthetic Emby, playback and danmaku data. No native app, SDK, emulator or personal server is needed. Default capture includes both light and dark themes; player surfaces intentionally retain their dark presentation in either application theme.
+
+```sh
+node tool/capture-ui.mjs --list
+node tool/capture-ui.mjs
+node tool/capture-ui.mjs --feature servers --theme light
+node tool/capture-ui.mjs --feature danmaku --platform phone --size 360
+node tool/capture-ui.mjs --only 'poster-hover*,player-settings-*' --platform desktop
+node tool/capture-ui.mjs --only server-delete-confirm --theme light
+```
+
+Features are `home`, `library`, `detail`, `search`, `servers`, `settings`, `login`, `player` and `danmaku`; comma-separated values are supported. `--only` accepts exact state IDs or quoted `*`/`?` patterns. Combine filters with `--list` before a focused run. `--size` selects the profile width: desktop 1024/1440, phone 360/412 (including landscape playback), TV 1920. Filters combine with AND; values within one filter combine with OR. No matching state is an error, not a successful empty run.
+
+Requires Node 18+, the project Flutter version and a Chinese font. Set `RILLIGHT_CAPTURE_FONT` to an absolute TTF/OTF/TTC path if automatic font discovery fails. Each run writes PNGs, `index.html`, `capture.log` and `manifest.json` to a unique directory under ignored `build/ui-capture/`; `--out` changes the output root. The report records the font hash, Flutter/host version, dimensions, application/rendered themes and missing states. Use the same environment and font for visual comparisons.
+
+Capture page contents and interaction states, including loading frames, hover/focus, filters, dialogs, server and account forms, episode selection, playback menus and danmaku search/style/error states. Update the explicit registry `tool/ui_capture/scenarios.json` when adding a state; a missing registered state or a missed tap/layout exception must fail the run. Keep generated screenshots and media under `build/`. See `tool/ui_capture/README.md` for coverage and sources. These images establish prototype UI appearance only, not native window, decoder, physical audio or device acceptance.
+
 ## Coding Style & Naming Conventions
 
 Follow `flutter_lints` from `analysis_options.yaml` and Dart formatter output, using two-space indentation. Use `snake_case.dart` filenames, `UpperCamelCase` types, and `lowerCamelCase` members; prefix private identifiers with `_`. Keep UI, controllers, and API/storage responsibilities in their existing modules. Edit ARB localization sources rather than generated localization Dart files.

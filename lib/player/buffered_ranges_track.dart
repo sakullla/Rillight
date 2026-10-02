@@ -10,16 +10,18 @@ class BufferedRangesTrack extends StatelessWidget {
     required this.snapshot,
     required this.duration,
     required this.child,
+    this.trackHeight = 4,
   });
 
   final BufferSnapshot snapshot;
   final Duration duration;
   final Widget child;
+  final double trackHeight;
 
   @override
   Widget build(BuildContext context) => SliderTheme(
     data: SliderTheme.of(context).copyWith(
-      trackHeight: 4,
+      trackHeight: trackHeight,
       thumbColor: Colors.white,
       trackShape: _BufferedSliderTrack(snapshot: snapshot, duration: duration),
     ),

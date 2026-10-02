@@ -46,6 +46,9 @@ class PhoneBottomNav extends StatelessWidget {
           context: context,
           removeBottom: floating,
           child: NavigationBar(
+            height: 72,
+            labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+            indicatorShape: const StadiumBorder(),
             animationDuration: AppMotion.durationOf(
               context,
               AppMobileNav.pillDuration,

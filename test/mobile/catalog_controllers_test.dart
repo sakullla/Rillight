@@ -213,6 +213,8 @@ void main() {
     expect(search.items.every((item) => item.id.startsWith('live-')), isTrue);
   });
   test('search filter clears old-condition results while loading', () async {
+    server.items.firstWhere((item) => item.id == 'movie-inception').played =
+        true;
     final search = SearchController(auth: auth, cache: cache);
     addTearDown(search.dispose);
     await search.submit('Inception');
@@ -336,6 +338,7 @@ void main() {
           name: 'Film $i',
           type: 'Movie',
           parentId: 'view-movies',
+          played: true,
         ),
     ];
     final browse = BrowseController(

@@ -419,9 +419,10 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
       return [
         if (item.productionYear != null)
           PhoneMetaEntry('${item.productionYear}'),
-        if (seasons.isNotEmpty) PhoneMetaEntry(l.seasonCount(seasons.length)),
-        if (item.childCount != null)
-          PhoneMetaEntry(l.episodeCount(item.childCount!)),
+        if (seasons.isNotEmpty)
+          PhoneMetaEntry(l.seasonCount(seasons.length))
+        else if (item.childCount != null)
+          PhoneMetaEntry(l.seasonCount(item.childCount!)),
         if (item.communityRating != null)
           PhoneMetaEntry(
             item.communityRating!.toStringAsFixed(1),
@@ -1140,63 +1141,107 @@ class _PhoneDetailPending extends StatelessWidget {
               height: 1.2,
             ),
           );
+    final item = source?.item;
+    final meta = <PhoneMetaEntry>[
+      if (item?.isEpisode == true && seasonEpisodeCode(item!) != null)
+        PhoneMetaEntry(seasonEpisodeCode(item)!),
+      if (item?.productionYear != null)
+        PhoneMetaEntry('${item!.productionYear}'),
+      if (item?.isSeries == true && item?.childCount != null)
+        PhoneMetaEntry(l.seasonCount(item!.childCount!)),
+      if (item != null && !item.isSeries && runtimeLabel(l, item) != null)
+        PhoneMetaEntry(runtimeLabel(l, item)!),
+      if (item?.communityRating != null)
+        PhoneMetaEntry(
+          item!.communityRating!.toStringAsFixed(1),
+          highlight: true,
+        ),
+      for (final genre in item?.genres ?? const <String>[])
+        PhoneMetaEntry(genre),
+    ];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(
-            AppSpacing.md,
-            AppSpacing.md,
-            AppSpacing.md,
-            0,
+        PhoneDetailCaption(
+          title: title,
+          meta: meta,
+          pendingMetadata: meta.isEmpty
+              ? SkeletonBlock(width: 144, height: 18, animated: animate)
+              : null,
+          actions: KeyedSubtree(
+            key: actionKey,
+            child: _DetailPlayActions(
+              label: l.play,
+              enabled: false,
+              showRestart: false,
+              onPlay: null,
+              onRestart: null,
+            ),
           ),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+            key: bodyKey,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  Expanded(child: title),
-                  const SizedBox(width: AppSpacing.sm),
-                  Tooltip(
-                    message: l.play,
-                    child: FilledButton(
-                      key: actionKey,
-                      style: FilledButton.styleFrom(
-                        minimumSize: const Size(48, 48),
-                        padding: EdgeInsets.zero,
-                        shape: const CircleBorder(),
+              SkeletonBlock(width: contentWidth, height: 14, animated: animate),
+              const SizedBox(height: AppSpacing.xs),
+              SkeletonBlock(
+                width: contentWidth * .72,
+                height: 14,
+                animated: animate,
+              ),
+              const SizedBox(height: AppSpacing.lg),
+              if (item?.isSeries == true) ...[
+                Row(
+                  children: [
+                    for (var i = 0; i < 3; i++)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: SkeletonBlock(
+                          width: 72,
+                          height: 40,
+                          animated: animate,
+                        ),
                       ),
-                      onPressed: null,
-                      child: const Icon(Icons.play_arrow, size: 28),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                for (var i = 0; i < 2; i++)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Row(
+                      children: [
+                        SkeletonBlock(
+                          width: contentWidth * .4,
+                          height: contentWidth * .4 * 9 / 16,
+                          animated: animate,
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              SkeletonBlock(height: 14, animated: animate),
+                              const SizedBox(height: 8),
+                              SkeletonBlock(
+                                width: 80,
+                                height: 12,
+                                animated: animate,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                ],
-              ),
-              const SizedBox(height: AppSpacing.md),
-              Column(
-                key: bodyKey,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  SkeletonBlock(
-                    width: contentWidth,
-                    height: 14,
-                    animated: animate,
-                  ),
-                  const SizedBox(height: AppSpacing.xs),
-                  SkeletonBlock(
-                    width: contentWidth * 0.72,
-                    height: 14,
-                    animated: animate,
-                  ),
-                  const SizedBox(height: AppSpacing.md),
-                  SkeletonBlock(
-                    width: contentWidth,
-                    height: 96,
-                    animated: animate,
-                  ),
-                ],
-              ),
+              ] else
+                SkeletonBlock(
+                  width: contentWidth,
+                  height: 80,
+                  animated: animate,
+                ),
             ],
           ),
         ),

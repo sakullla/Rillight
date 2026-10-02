@@ -88,6 +88,38 @@ abstract final class AppTheme {
   /// 浅色主题:同一分层结构,只换浅色调。
   static ThemeData light() => _theme(lightTones);
 
+  /// Phone reading sizes and touch targets, with the same warm surface palette.
+  static ThemeData phoneLight() => _phone(light());
+  static ThemeData phoneDark() => _phone(dark());
+
+  static ThemeData _phone(ThemeData base) => base.copyWith(
+    textTheme: base.textTheme.copyWith(
+      bodyLarge: base.textTheme.bodyLarge?.copyWith(fontSize: 17, height: 1.5),
+      bodyMedium: base.textTheme.bodyMedium?.copyWith(
+        fontSize: 16,
+        height: 1.4,
+      ),
+      bodySmall: base.textTheme.bodySmall?.copyWith(fontSize: 13, height: 1.4),
+      titleLarge: base.textTheme.titleLarge?.copyWith(
+        fontSize: 24,
+        fontWeight: FontWeight.w700,
+      ),
+      titleMedium: base.textTheme.titleMedium?.copyWith(
+        fontSize: 18,
+        fontWeight: FontWeight.w600,
+      ),
+      titleSmall: base.textTheme.titleSmall?.copyWith(
+        fontSize: 16,
+        fontWeight: FontWeight.w600,
+      ),
+    ),
+    listTileTheme: base.listTileTheme.copyWith(minTileHeight: 56),
+    inputDecorationTheme: base.inputDecorationTheme.copyWith(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+    ),
+    navigationBarTheme: base.navigationBarTheme.copyWith(height: 72),
+  );
+
   static ThemeData _theme(Tones t) {
     final scheme = ColorScheme(
       brightness: t.brightness,
@@ -307,7 +339,7 @@ abstract final class AppTheme {
           horizontal: AppSpacing.md,
           vertical: AppSpacing.sm,
         ),
-        hintStyle: bodyMedium.copyWith(color: t.onSurfaceVariant),
+        hintStyle: textTheme.bodyMedium?.copyWith(color: t.onSurfaceVariant),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(AppRadii.md),
           borderSide: BorderSide.none,
@@ -347,8 +379,10 @@ abstract final class AppTheme {
           borderRadius: BorderRadius.circular(AppRadii.xl),
           side: BorderSide(color: t.outlineVariant),
         ),
-        titleTextStyle: titleLarge.copyWith(color: t.onSurface),
-        contentTextStyle: bodyMedium.copyWith(color: t.onSurfaceVariant),
+        titleTextStyle: textTheme.titleLarge,
+        contentTextStyle: textTheme.bodyMedium?.copyWith(
+          color: t.onSurfaceVariant,
+        ),
       ),
       snackBarTheme: SnackBarThemeData(
         backgroundColor: t.surfaceHighest,
@@ -367,7 +401,7 @@ abstract final class AppTheme {
         ),
         // 桌面默认 minHeight 24 + 竖向 4 点内边距会裁切雅黑体;顶栏靠右
         // 时「取消置顶」最后一个字看起来缺笔。
-        textStyle: labelMedium.copyWith(
+        textStyle: textTheme.labelMedium?.copyWith(
           color: t.onSurface,
           fontWeight: FontWeight.w400,
           height: 1.35,
@@ -401,8 +435,10 @@ abstract final class AppTheme {
         indicatorColor: t.surfaceHigh,
         selectedIconTheme: IconThemeData(color: t.onSurface),
         unselectedIconTheme: IconThemeData(color: t.onSurfaceVariant),
-        selectedLabelTextStyle: labelMedium.copyWith(color: t.onSurface),
-        unselectedLabelTextStyle: labelMedium.copyWith(
+        selectedLabelTextStyle: textTheme.labelMedium?.copyWith(
+          color: t.onSurface,
+        ),
+        unselectedLabelTextStyle: textTheme.labelMedium?.copyWith(
           color: t.onSurfaceVariant,
         ),
       ),
@@ -417,7 +453,7 @@ abstract final class AppTheme {
         indicatorColor: t.surfaceHigh,
         indicatorShape: const StadiumBorder(),
         labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
-        labelTextStyle: WidgetStatePropertyAll(labelMedium),
+        labelTextStyle: WidgetStatePropertyAll(textTheme.labelMedium),
         iconTheme: WidgetStatePropertyAll(
           IconThemeData(color: t.onSurfaceVariant),
         ),

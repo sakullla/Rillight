@@ -24,6 +24,7 @@ import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/home/media_shelf.dart';
 import 'package:rillight/library/poster_card.dart';
 import 'package:rillight/library/shelf_sort.dart';
+import 'package:rillight/library/library_filter_panel.dart';
 import 'package:rillight/media_image/media_image.dart';
 
 const Map<ShortcutActivator, Intent> catalogGridArrowShortcuts = {
@@ -1102,8 +1103,6 @@ class _FilterBar extends StatelessWidget {
     required this.onChanged,
   });
 
-  static const _all = 'all';
-
   final ShelfFilters filters;
   final bool typeFilterable;
   final List<int> yearOptions;
@@ -1133,13 +1132,13 @@ class _FilterBar extends StatelessWidget {
       if (filters.years.isNotEmpty)
         _activeChip(
           context,
-          label: '${filters.years.first}',
+          label: filters.years.join('、'),
           onDeleted: () => onChanged(filters.copyWith(years: const [])),
         ),
       if (filters.genres.isNotEmpty)
         _activeChip(
           context,
-          label: filters.genres.first,
+          label: filters.genres.join("、"),
           onDeleted: () => onChanged(filters.copyWith(genres: const [])),
         ),
     ];
@@ -1191,212 +1190,29 @@ class _FilterBar extends StatelessWidget {
     );
   }
 
-  Future<void> _openPanel(BuildContext context) async {
-    final l10n = AppLocalizations.of(context);
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    // 草稿:面板内选择仅暂存,点击「确定」才生效;取消/点遮罩丢弃。
-    var draft = filters;
-    await showDialog<void>(
-      context: context,
-      barrierColor: scheme.scrim.withValues(
-        alpha: AppScrim.of(context, AppScrim.barrier),
+  Future<void> _openPanel(BuildContext context) => showDialog<void>(
+    context: context,
+    builder: (dialogContext) => Dialog(
+      clipBehavior: Clip.antiAlias,
+      child: LibraryFilterPanel(
+        key: gridFilterPanelKey,
+        initial: filters,
+        years: yearOptions,
+        genres: genreOptions,
+        loadGenres: () {
+          final uri = GoRouter.maybeOf(
+            context,
+          )?.routeInformationProvider.value.uri;
+          final parentId = uri?.pathSegments.firstOrNull == 'library'
+              ? uri!.pathSegments.last
+              : uri?.queryParameters['parentId'];
+          return AuthScope.of(context).client.getLibraryGenres(parentId);
+        },
+        typeFilterable: typeFilterable,
+        onApply: (next, _) => onChanged(next),
       ),
-      builder: (dialogContext) {
-        Widget dimensionChips({
-          required String dimension,
-          required String label,
-          required List<(String, String)> options,
-          required String selected,
-          required ValueChanged<String> onSelected,
-        }) {
-          return Column(
-            key: gridFilterKey(dimension),
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(label, style: theme.textTheme.labelLarge),
-              const SizedBox(height: AppSpacing.xs),
-              Wrap(
-                spacing: AppSpacing.xs,
-                runSpacing: AppSpacing.xs,
-                children: [
-                  for (final (value, optionLabel) in options)
-                    ChoiceChip(
-                      key: gridFilterOption(dimension, value),
-                      label: Text(optionLabel),
-                      selected: value == selected,
-                      onSelected: (_) => onSelected(value),
-                    ),
-                ],
-              ),
-            ],
-          );
-        }
-
-        return StatefulBuilder(
-          builder: (dialogContext, setPanelState) {
-            return Dialog(
-              backgroundColor: Colors.transparent,
-              elevation: 0,
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 480),
-                child: Material(
-                  key: gridFilterPanelKey,
-                  color: scheme.surfaceContainerHigh,
-                  elevation: 12,
-                  shadowColor: Colors.black.withValues(alpha: 0.45),
-                  surfaceTintColor: Colors.transparent,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(AppRadii.xl),
-                    side: BorderSide(
-                      color: Colors.white.withValues(alpha: AppGlass.edgeLight),
-                    ),
-                  ),
-                  clipBehavior: Clip.antiAlias,
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(
-                      AppSpacing.lg,
-                      AppSpacing.md,
-                      AppSpacing.lg,
-                      AppSpacing.sm,
-                    ),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Text(
-                          l10n.libraryFilter,
-                          style: theme.textTheme.titleMedium,
-                        ),
-                        const SizedBox(height: AppSpacing.sm),
-                        if (typeFilterable) ...[
-                          dimensionChips(
-                            dimension: 'type',
-                            label: l10n.libraryFilterType,
-                            options: [
-                              for (final option in CatalogTypeFilter.values)
-                                (
-                                  option.itemType ?? _all,
-                                  option == CatalogTypeFilter.all
-                                      ? l10n.libraryFilterAll
-                                      : option.label,
-                                ),
-                            ],
-                            selected: draft.type.itemType ?? _all,
-                            onSelected: (value) => setPanelState(() {
-                              draft = draft.copyWith(
-                                type: value == 'Movie'
-                                    ? CatalogTypeFilter.movie
-                                    : value == 'Series'
-                                    ? CatalogTypeFilter.series
-                                    : CatalogTypeFilter.all,
-                              );
-                            }),
-                          ),
-                          const SizedBox(height: AppSpacing.sm),
-                        ],
-                        dimensionChips(
-                          dimension: 'watch',
-                          label: l10n.libraryFilterWatch,
-                          options: [
-                            for (final option in CatalogWatchFilter.values)
-                              (
-                                option.param ?? _all,
-                                option == CatalogWatchFilter.all
-                                    ? l10n.libraryFilterAll
-                                    : option.label,
-                              ),
-                          ],
-                          selected: draft.watch.param ?? _all,
-                          onSelected: (value) => setPanelState(() {
-                            draft = draft.copyWith(
-                              watch: value == 'IsUnplayed'
-                                  ? CatalogWatchFilter.unplayed
-                                  : value == 'IsPlayed'
-                                  ? CatalogWatchFilter.played
-                                  : CatalogWatchFilter.all,
-                            );
-                          }),
-                        ),
-                        const SizedBox(height: AppSpacing.sm),
-                        dimensionChips(
-                          dimension: 'year',
-                          label: l10n.libraryFilterYear,
-                          options: [
-                            (_all, l10n.libraryFilterAll),
-                            for (final year in yearOptions) ('$year', '$year'),
-                          ],
-                          selected: draft.years.isEmpty
-                              ? _all
-                              : '${draft.years.first}',
-                          onSelected: (value) => setPanelState(() {
-                            draft = draft.copyWith(
-                              years: value == _all
-                                  ? const []
-                                  : [int.parse(value)],
-                            );
-                          }),
-                        ),
-                        const SizedBox(height: AppSpacing.sm),
-                        dimensionChips(
-                          dimension: 'genre',
-                          label: l10n.libraryFilterGenre,
-                          options: [
-                            (_all, l10n.libraryFilterAll),
-                            for (final genre in genreOptions) (genre, genre),
-                          ],
-                          selected: draft.genres.isEmpty
-                              ? _all
-                              : draft.genres.first,
-                          onSelected: (value) => setPanelState(() {
-                            draft = draft.copyWith(
-                              genres: value == _all ? const [] : [value],
-                            );
-                          }),
-                        ),
-                        const SizedBox(height: AppSpacing.md),
-                        Align(
-                          alignment: Alignment.centerRight,
-                          child: Wrap(
-                            spacing: AppSpacing.xs,
-                            children: [
-                              if (draft.isNotEmpty)
-                                TextButton(
-                                  onPressed: () => setPanelState(
-                                    () => draft = const ShelfFilters(),
-                                  ),
-                                  child: Text(l10n.libraryFilterClear),
-                                ),
-                              TextButton(
-                                onPressed: () => Navigator.pop(dialogContext),
-                                child: Text(l10n.libraryFilterCancel),
-                              ),
-                              TextButton(
-                                onPressed: () {
-                                  onChanged(draft);
-                                  Navigator.pop(dialogContext);
-                                },
-                                child: Text(
-                                  MaterialLocalizations.of(
-                                    dialogContext,
-                                  ).okButtonLabel,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
+    ),
+  );
 
   String l10nLabel(BuildContext context) =>
       AppLocalizations.of(context).libraryFilterAll;

@@ -10,6 +10,7 @@ import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/library/tv_detail_page.dart';
 import 'package:rillight/library/tv_library_page.dart';
+import 'package:rillight/library/library_filter_panel.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/player/tv_player_page.dart';
 import 'package:rillight/player/player_bindings.dart';
@@ -277,7 +278,7 @@ void main() {
       await key(tester, LogicalKeyboardKey.select);
       expect(find.byType(TvLibraryPage), findsOneWidget);
       await key(tester, LogicalKeyboardKey.select);
-      expect(find.byType(AlertDialog), findsOneWidget);
+      expect(find.byType(LibraryFilterPanel), findsOneWidget);
       expect(focusedAction(), findsOneWidget);
       final dialogFocus = FocusManager.instance.primaryFocus;
       unawaited(catalog.reload(showCachedFirst: false));
@@ -285,7 +286,7 @@ void main() {
       expect(FocusManager.instance.primaryFocus, same(dialogFocus));
       await tester.binding.handlePopRoute();
       await tester.pumpAndSettle();
-      expect(find.byType(AlertDialog), findsNothing);
+      expect(find.byType(LibraryFilterPanel), findsNothing);
       for (var i = 0; i < 40 && focusedLabel(tester) != '加载更多'; i++) {
         await key(tester, LogicalKeyboardKey.arrowDown);
       }

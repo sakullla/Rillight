@@ -77,7 +77,9 @@ enum CatalogSort {
 enum CatalogWatchFilter {
   all(null, '全部'),
   unplayed('IsUnplayed', '未看'),
-  played('IsPlayed', '已看');
+  played('IsPlayed', '已看'),
+  resumable('IsResumable', '继续观看'),
+  favorite('IsFavorite', '收藏');
 
   const CatalogWatchFilter(this.param, this.label);
 
@@ -101,8 +103,7 @@ enum CatalogTypeFilter {
 
 /// 片库页组合筛选状态:类型/年份/流派/已看可任意组合,可整体清除。
 ///
-/// 年份与流派在请求侧是多值(Years/Genres 逗号分隔);当前 UI 每维度单选,
-/// 多值能力保留给 [EmbyClient.queryItems] 的 API 调用方。
+/// 年份与流派支持多选；Years 用逗号、Genres 用竖线编码。
 class ShelfFilters {
   const ShelfFilters({
     this.type = CatalogTypeFilter.all,

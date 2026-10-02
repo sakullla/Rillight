@@ -27,6 +27,8 @@ class BrowseController extends ChangeNotifier {
   bool loading = false, loadingMore = false, hasMore = false;
   String? type, watch, genre;
   int? year;
+  List<int> years = const [];
+  List<String> genres = const [];
   String sortBy = CatalogSort.initial.sortBy;
   EmbyException? error;
   int _revision = 0, _offset = 0;
@@ -58,8 +60,16 @@ class BrowseController extends ChangeNotifier {
       sortBy: sortBy,
       sortOrder: _sortOrder,
       filters: watch == null ? null : [watch!],
-      genres: genre == null ? null : [genre!],
-      years: year == null ? null : [year!],
+      genres: genres.isNotEmpty
+          ? genres
+          : genre == null
+          ? null
+          : [genre!],
+      years: years.isNotEmpty
+          ? years
+          : year == null
+          ? null
+          : [year!],
     );
   }
 
@@ -135,12 +145,19 @@ class BrowseController extends ChangeNotifier {
     required String sortBy,
     int? year,
     String? genre,
+    List<int>? years,
+    List<String>? genres,
   }) {
     this.type = type;
     this.watch = watch;
-    this.year = year;
-    final trimmed = genre?.trim();
-    this.genre = (trimmed == null || trimmed.isEmpty) ? null : trimmed;
+    this.years = years ?? (year == null ? const [] : [year]);
+    this.year = this.years.firstOrNull;
+    this.genres = (genres ?? (genre == null ? const [] : [genre]))
+        .map((g) => g.trim())
+        .where((g) => g.isNotEmpty)
+        .toSet()
+        .toList();
+    this.genre = this.genres.firstOrNull;
     this.sortBy = sortBy;
     return load();
   }

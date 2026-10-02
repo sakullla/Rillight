@@ -25,7 +25,7 @@ class PhoneHero extends StatefulWidget {
   static List<EmbyItem> featuredItemsOf(CatalogController catalog) =>
       featuredHomeItems(catalog, limit: maxFeatured);
   static double contentHeightFor(double width, {double textScale = 1}) =>
-      (width - 32) * 9 / 16 + 144 * textScale + 44;
+      (width - 32) * 9 / 16 + 160 * textScale + 44;
 
   @override
   State<PhoneHero> createState() => _PhoneHeroState();
@@ -106,10 +106,14 @@ class _PhoneHeroState extends State<PhoneHero> {
                         key: PhoneHero.itemKey(item.id),
                         item: artwork.themeItem,
                         fillSurface: false,
-                        child: Material(
-                          type: MaterialType.transparency,
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 16),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          child: Material(
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.surfaceContainerLow,
+                            borderRadius: BorderRadius.circular(24),
+                            clipBehavior: Clip.antiAlias,
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
@@ -121,7 +125,9 @@ class _PhoneHeroState extends State<PhoneHero> {
                                         : null,
                                     onTap: () => _open(item),
                                     child: ClipRRect(
-                                      borderRadius: BorderRadius.circular(18),
+                                      borderRadius: const BorderRadius.vertical(
+                                        top: Radius.circular(24),
+                                      ),
                                       child: RepaintBoundary(
                                         child: PhoneMotion.sharedImage(
                                           itemId: item.id,
@@ -138,9 +144,14 @@ class _PhoneHeroState extends State<PhoneHero> {
                                   ),
                                 ),
                                 Expanded(
-                                  child: _HeroCaption(
-                                    item: item,
-                                    onOpen: () => _open(item),
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 16,
+                                    ),
+                                    child: _HeroCaption(
+                                      item: item,
+                                      onOpen: () => _open(item),
+                                    ),
                                   ),
                                 ),
                               ],

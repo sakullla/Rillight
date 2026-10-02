@@ -32,12 +32,10 @@ class _GenreItem extends FakeEmbyItem {
     required super.name,
     required super.type,
     required super.parentId,
-    required this.genres,
+    required super.genres,
     super.productionYear,
     super.dateCreated,
   });
-
-  final List<String> genres;
 
   @override
   Map<String, dynamic> toJson() {
@@ -240,11 +238,11 @@ void main() {
   }
 
   Future<void> tapFilter(WidgetTester tester, String dimension) async {
-    if (find.byKey(gridFilterKey(dimension)).evaluate().isEmpty) {
+    if (find.byKey(gridFilterPanelKey).evaluate().isEmpty) {
       await tapBelowTopBar(tester, find.byKey(gridFilterMenuKey));
       await settle(tester);
     }
-    await tester.ensureVisible(find.byKey(gridFilterKey(dimension)));
+    await tester.tap(find.byKey(Key('catalog-grid-filter-section-$dimension')));
     await settle(tester);
   }
 
@@ -257,7 +255,7 @@ void main() {
     await tester.ensureVisible(find.byKey(gridFilterOption(dimension, value)));
     await tester.tap(find.byKey(gridFilterOption(dimension, value)));
     await settle(tester);
-    await tester.tap(find.widgetWithText(TextButton, '确定'));
+    await tester.tap(find.byKey(const Key('catalog-grid-filter-apply')));
     await settle(tester);
   }
 
@@ -319,7 +317,7 @@ void main() {
     expect(find.byKey(gridFilterPanelKey), findsOneWidget);
 
     // 取消:丢弃草稿并关闭,网格仍不变。
-    await tester.tap(find.widgetWithText(TextButton, '取消'));
+    await tester.tap(find.byKey(const Key('catalog-grid-filter-cancel')));
     await settle(tester);
     expect(find.byKey(gridFilterPanelKey), findsNothing);
     expect(posterNames(tester), before);
@@ -329,7 +327,7 @@ void main() {
     await settle(tester);
     await tester.tap(find.byKey(gridFilterOption('watch', 'IsPlayed')));
     await settle(tester);
-    await tester.tap(find.widgetWithText(TextButton, '确定'));
+    await tester.tap(find.byKey(const Key('catalog-grid-filter-apply')));
     await settle(tester);
     expect(find.byKey(gridFilterPanelKey), findsNothing);
     expect(posterNames(tester), isNot(before));

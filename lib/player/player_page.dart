@@ -438,7 +438,7 @@ class PlayerPageState extends State<PlayerPage> {
       child: Focus(
         focusNode: _playerShortcuts,
         autofocus: true,
-        descendantsAreFocusable: _danmakuSearchOpen || _danmakuPanelOpen,
+        descendantsAreFocusable: true,
         onFocusChange: (focused) {
           if (focused) controller?.onUserActivity();
         },
@@ -451,6 +451,11 @@ class PlayerPageState extends State<PlayerPage> {
               _closeDanmakuSearch();
               return KeyEventResult.handled;
             }
+            return KeyEventResult.ignored;
+          }
+          // An open settings panel owns its keyboard interactions. Arrow and
+          // space keys must not seek or toggle playback behind that panel.
+          if (current.controlsPinned && !_danmakuPanelOpen && !_episodesOpen) {
             return KeyEventResult.ignored;
           }
           if (event.logicalKey == LogicalKeyboardKey.space) {
@@ -856,7 +861,10 @@ class _FadeThrough extends StatelessWidget {
       opacity: visible ? 1.0 : 0.0,
       duration: AppMotion.durationOf(context),
       curve: AppMotion.standard,
-      child: IgnorePointer(ignoring: !visible, child: child),
+      child: ExcludeFocus(
+        excluding: !visible,
+        child: IgnorePointer(ignoring: !visible, child: child),
+      ),
     );
   }
 }
@@ -2654,6 +2662,9 @@ class _DanmakuSearchPanelState extends State<_DanmakuSearchPanel> {
           ),
         ),
       );
+    }
+    if (widget.danmaku.searchFailure != null) {
+      return DanmakuSearchError(onRetry: () => unawaited(_runSearch()));
     }
     if (_animes.isEmpty) {
       return Center(

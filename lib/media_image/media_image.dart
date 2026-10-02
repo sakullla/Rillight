@@ -679,7 +679,7 @@ class _MediaImageState extends State<MediaImage> {
       isAntiAlias: false,
       frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
         if (frame == null && !wasSynchronouslyLoaded) {
-          return PosterPlaceholder(width: width, height: height);
+          return _loadingBox(context, width, height);
         }
         return child;
       },

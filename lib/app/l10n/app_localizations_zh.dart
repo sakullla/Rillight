@@ -1267,4 +1267,61 @@ class AppLocalizationsZh extends AppLocalizations {
   String phoneServerDeleted(String name) {
     return '已删除「$name」';
   }
+
+  @override
+  String cardSeasonCount(int count) {
+    return '$count季';
+  }
+
+  @override
+  String get filterApply => '应用筛选';
+
+  @override
+  String get filterReset => '重置';
+
+  @override
+  String filterSelectedCount(int count) {
+    return '已选 $count 项';
+  }
+
+  @override
+  String get filterSearchOptions => '查找选项';
+
+  @override
+  String get filterNoOptions => '暂无可选项';
+
+  @override
+  String get filterFavorite => '收藏';
+
+  @override
+  String get filterResumable => '继续观看';
+
+  @override
+  String get filterChooseHint => '同一分类可选多项，不同分类组合筛选';
+
+  @override
+  String get filterBrowseTitle => '筛选与排序';
+
+  @override
+  String get filterEdit => '调整';
+
+  @override
+  String get filterSortAscending => '升序';
+
+  @override
+  String get filterSortDescending => '降序';
+
+  @override
+  String get phoneDiscover => '发现好故事';
+
+  @override
+  String get phoneLibraryBrowse => '浏览片库';
+
+  @override
+  String get phoneSearchHint => '搜索电影、剧集和演员';
+
+  @override
+  String phoneSelectedSeason(int count) {
+    return '本季 $count 集';
+  }
 }

@@ -880,7 +880,7 @@ void main() {
       expect(
         find.descendant(
           of: find.byKey(phoneHomeBadgesKey('series-long')),
-          matching: find.text('24 集'),
+          matching: find.text('24季'),
         ),
         findsOneWidget,
       );
@@ -1722,7 +1722,7 @@ void main() {
             ),
         ];
         final width = arts.first.size.width;
-        expect(width, closeTo((360 - 32 - 2 * 16) / 3, 1));
+        expect(width, closeTo((360 - 32 - 16) / 2, 1));
         expect(
           arts.every((box) => (box.size.width - width).abs() < 0.5),
           isTrue,
@@ -1734,7 +1734,7 @@ void main() {
         final columns = arts
             .map((box) => box.localToGlobal(Offset.zero).dx.round())
             .toSet();
-        expect(columns.length, 3);
+        expect(columns.length, 2);
         expect(find.byType(MobilePressable), findsWidgets);
         // 网格卡不再有投影(ADR-2),图区圆角统一 AppRadii.md。
         final inception = find.byKey(
@@ -1775,6 +1775,7 @@ void main() {
         expect(find.byKey(phoneCardBadgesKey('movie-up')), findsNothing);
 
         await _openFilters(tester);
+        await _libraryTap(tester, const Key('phone-library-section-sort'));
         expect(find.text('更新日期'), findsWidgets);
         expect(find.text('加入日期'), findsOneWidget);
         expect(find.text('标题'), findsOneWidget);
@@ -1783,14 +1784,14 @@ void main() {
         expect(find.text('随机'), findsOneWidget);
         expect(find.text('首映日期'), findsNothing);
         expect(
-          find.byKey(const Key('phone-library-year-section')),
+          find.byKey(const Key('phone-library-section-year')),
           findsOneWidget,
         );
         expect(
-          find.byKey(const Key('phone-library-genre-section')),
-          findsNothing,
+          find.byKey(const Key('phone-library-section-genre')),
+          findsOneWidget,
         );
-        expect(find.text('流派'), findsNothing);
+        expect(find.text('流派'), findsOneWidget);
 
         await _libraryTap(tester, const Key('phone-library-watch-IsUnplayed'));
         await _libraryTap(tester, const Key('phone-library-sort-DateCreated'));
@@ -1850,7 +1851,7 @@ void main() {
         final cleared = _lastItemsQuery(harness.server);
         expect(cleared, contains('SortBy=DateLastContentAdded'));
         expect(cleared, contains('SortOrder=Descending'));
-        expect(cleared, contains('IncludeItemTypes=Movie,Series'));
+        expect(cleared, contains('IncludeItemTypes=Movie'));
         expect(cleared, isNot(contains('Years=')));
         expect(cleared, isNot(contains('Filters=')));
         expect(tester.takeException(), isNull);
@@ -1899,7 +1900,7 @@ void main() {
       await _openMovies(tester);
       await _openFilters(tester);
       expect(
-        find.byKey(const Key('phone-library-genre-section')),
+        find.byKey(const Key('phone-library-section-genre')),
         findsOneWidget,
       );
       expect(find.text('流派'), findsOneWidget);
@@ -1914,7 +1915,7 @@ void main() {
       final harness = await _start(tester);
       await _openMovies(tester);
       await _openFilters(tester);
-      await _libraryTap(tester, const Key('phone-library-type-Series'));
+      await _libraryTap(tester, const Key('phone-library-watch-IsFavorite'));
       await _libraryTap(tester, const Key('phone-library-apply'));
       expect(find.byType(MobileEmptyState), findsOneWidget);
       expect(find.text('暂无内容'), findsOneWidget);
@@ -1922,17 +1923,14 @@ void main() {
       expect(find.byType(MobileFailureState), findsNothing);
       expect(find.text('重试'), findsNothing);
       expect(find.text('Inception'), findsNothing);
-      expect(
-        _lastItemsQuery(harness.server),
-        contains('IncludeItemTypes=Series'),
-      );
+      expect(_lastItemsQuery(harness.server), contains('Filters=IsFavorite'));
 
       await tester.tap(find.byKey(MobileEmptyState.actionKey));
       await tester.pumpAndSettle();
       expect(find.text('Inception'), findsOneWidget);
       expect(find.byType(MobileEmptyState), findsNothing);
       final cleared = _lastItemsQuery(harness.server);
-      expect(cleared, contains('IncludeItemTypes=Movie,Series'));
+      expect(cleared, contains('IncludeItemTypes=Movie'));
       expect(cleared, contains('SortBy=DateLastContentAdded'));
       expect(tester.takeException(), isNull);
     }, tags: ['integration']);
@@ -2742,8 +2740,7 @@ Future<void> _homeUntil(WidgetTester tester, Finder finder) async {
 Future<void> _filterUnwatched(WidgetTester tester) async {
   await tester.tap(find.byKey(const Key('phone-library-filter')));
   await tester.pumpAndSettle();
-  await tester.tap(find.byKey(const Key('phone-library-watch-IsUnplayed')));
-  await tester.pumpAndSettle();
+  await _libraryTap(tester, const Key('phone-library-watch-IsUnplayed'));
   await tester.tap(find.byKey(const Key('phone-library-apply')));
   await tester.pumpAndSettle();
 }
@@ -2835,6 +2832,14 @@ Future<void> _openFilters(WidgetTester tester) async {
 }
 
 Future<void> _libraryTap(WidgetTester tester, Key key) async {
+  final value = (key as ValueKey<String>).value;
+  for (final section in ['type', 'watch', 'year', 'genre', 'sort']) {
+    if (value.startsWith('phone-library-$section-') &&
+        find.byKey(key).evaluate().isEmpty) {
+      await tester.tap(find.byKey(Key('phone-library-section-$section')));
+      await tester.pumpAndSettle();
+    }
+  }
   final finder = find.byKey(key);
   await tester.ensureVisible(finder);
   await tester.pumpAndSettle();

@@ -40,6 +40,38 @@ class DanmakuPanel extends StatefulWidget {
   State<DanmakuPanel> createState() => _DanmakuPanelState();
 }
 
+/// Search failure is distinct from an empty result and remains recoverable in
+/// the same panel, including short landscape phone viewports.
+class DanmakuSearchError extends StatelessWidget {
+  const DanmakuSearchError({super.key, required this.onRetry});
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(12),
+        child: Semantics(
+          liveRegion: true,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(l.errorLoadFailed, textAlign: TextAlign.center),
+              const SizedBox(height: 8),
+              TextButton.icon(
+                onPressed: onRetry,
+                icon: const Icon(Icons.refresh_rounded),
+                label: Text(l.retry),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _DanmakuPanelState extends State<DanmakuPanel> {
   bool _advancedExpanded = false;
 
@@ -85,7 +117,26 @@ class _DanmakuPanelState extends State<DanmakuPanel> {
     );
 
     final Widget body;
-    if (expandAdvanced) {
+    if (widget.embedded) {
+      // Phone landscape sheets can be shorter than the basic controls alone.
+      // Keep all controls in one scroll viewport so advanced options stay
+      // reachable with a keyboard or a short display.
+      body = SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(16, 12, 8, 14),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            chrome,
+            if (expandAdvanced)
+              DanmakuDisplayForm(
+                value: danmaku.display,
+                onChanged: (next) => unawaited(danmaku.setDisplay(next)),
+                layout: DanmakuFormLayout.playerAdvanced,
+              ),
+          ],
+        ),
+      );
+    } else if (expandAdvanced) {
       body = SizedBox(
         height: maxHeight,
         width: width,
@@ -108,11 +159,6 @@ class _DanmakuPanelState extends State<DanmakuPanel> {
             ),
           ],
         ),
-      );
-    } else if (widget.embedded) {
-      body = SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(16, 12, 8, 14),
-        child: chrome,
       );
     } else {
       body = Padding(

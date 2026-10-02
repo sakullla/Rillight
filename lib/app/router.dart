@@ -22,6 +22,7 @@ import 'package:rillight/app/phone_mine_page.dart';
 import 'package:rillight/library/mobile_detail_page.dart';
 import 'package:rillight/library/mobile_library_page.dart';
 import 'package:rillight/player/mobile_player_page.dart';
+import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_window_host.dart';
 
 import 'package:rillight/app/tv_shell.dart';
@@ -136,6 +137,7 @@ GoRouter createAppRouter({
                 context: context,
                 state: state,
                 child: MobileDetailPage(
+                  key: ValueKey(state.uri.toString()),
                   itemId: state.pathParameters['itemId']!,
                   initialSeasonId: state.uri.queryParameters['season'],
                   initialEpisodeId: state.uri.queryParameters['episode'],
@@ -197,6 +199,7 @@ GoRouter createAppRouter({
             GoRoute(
               path: '/item/:itemId',
               builder: (context, state) => TvDetailPage(
+                key: ValueKey(state.uri.toString()),
                 itemId: state.pathParameters['itemId']!,
                 initialSeasonId: state.uri.queryParameters['season'],
               ),
@@ -258,7 +261,9 @@ GoRouter createAppRouter({
             ),
             GoRoute(
               path: AppRoutes.settings,
-              builder: (context, state) => const SettingsPage(),
+              builder: (context, state) => SettingsPage(
+                settingsStore: PlayerScope.of(context).settingsStore,
+              ),
             ),
           ],
         ),

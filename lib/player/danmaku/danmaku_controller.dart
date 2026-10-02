@@ -460,7 +460,10 @@ class DanmakuController extends ChangeNotifier {
     status = DanmakuStatus.active;
   }
 
-  /// 手动搜索(匹配错误时切换剧集入口)。失败返回空列表。
+  /// Failure of the latest manual search, independent of active playback.
+  DanmakuApiException? searchFailure;
+
+  /// 手动搜索(匹配错误时切换剧集入口)。失败返回空列表并记录原因。
   ///
   /// 优先 `/search/episodes`(带分集);官方 `/search/anime` 往往只有作品名,
   /// 展开后是空的,所以缺分集时再拉 `/bangumi/{id}`。
@@ -473,6 +476,7 @@ class DanmakuController extends ChangeNotifier {
       return const [];
     }
     _cancelActiveToken(_searchCancelToken);
+    searchFailure = null;
     final token = CancelToken();
     _searchCancelToken = token;
     final generation = ++_searchGeneration;
@@ -532,6 +536,7 @@ class DanmakuController extends ChangeNotifier {
         )) {
           return const [];
         }
+        searchFailure = fallbackFailure;
         return const [];
       }
     }

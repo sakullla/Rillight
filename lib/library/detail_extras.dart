@@ -394,6 +394,7 @@ class DetailAlbumStrip extends StatelessWidget {
   ) {
     showDialog<void>(
       context: context,
+      useRootNavigator: false,
       builder: (context) =>
           _AlbumViewer(itemId: itemId, tags: tags, initialIndex: index),
     );

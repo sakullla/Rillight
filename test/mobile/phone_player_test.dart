@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'dart:ui' as ui;
 import 'dart:ui' show DisplayFeature, DisplayFeatureState, DisplayFeatureType;
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_motion.dart';
@@ -123,6 +125,7 @@ void main() {
     PhoneDisplayControl? display,
     Size size = const Size(800, 360),
     Duration? mediaDuration,
+    bool lightApp = false,
   }) async {
     final server = FakeEmbyServer();
     prepare?.call(server);
@@ -153,20 +156,23 @@ void main() {
             locale: const Locale('zh', 'CN'),
             supportedLocales: AppLocalizations.supportedLocales,
             localizationsDelegates: AppLocalizations.localizationsDelegates,
-            theme: AppTheme.dark(),
+            theme: lightApp ? AppTheme.light() : AppTheme.dark(),
             home: Builder(
               builder: (context) => Scaffold(
                 body: TextButton(
                   onPressed: () {
                     Navigator.of(context).push(
                       MaterialPageRoute<void>(
-                        builder: (_) => MobilePlayerPage(
-                          itemId: itemId,
-                          orientation: orientation,
-                          systemBars: systemBars,
-                          wakeLock: wakeLock,
-                          danmakuHasher: hasher,
-                          displayControl: display,
+                        builder: (_) => Theme(
+                          data: AppTheme.dark(),
+                          child: MobilePlayerPage(
+                            itemId: itemId,
+                            orientation: orientation,
+                            systemBars: systemBars,
+                            wakeLock: wakeLock,
+                            danmakuHasher: hasher,
+                            displayControl: display,
+                          ),
                         ),
                       ),
                     );
@@ -209,6 +215,83 @@ void main() {
     }
     expect(find.byType(MobilePlayerPage), findsNothing);
   }
+
+  testWidgets(
+    'phone timeline paints verified cache coverage and updates network speed',
+    (tester) async {
+      final backend = FakeVideoBackend();
+      final controller = await showPlayer(
+        tester,
+        itemId: 'movie-up',
+        backend: backend,
+      );
+      backend.emitEvent(VideoEventKind.duration, const Duration(seconds: 100));
+      backend.emitEvent(VideoEventKind.cacheSpeed, 2621440);
+      backend.emitEvent(
+        VideoEventKind.bufferSnapshot,
+        BufferSnapshot(
+          sessionId: controller.bufferSnapshot.sessionId,
+          resourceId: 'fixture',
+          representationVersion: 'v1',
+          trackVersion: 0,
+          sequence: 1,
+          ranges: const [BufferedRange(Duration.zero, Duration(seconds: 60))],
+        ),
+      );
+      await tester.pump();
+      expect(find.text('2.5 MB/s'), findsOneWidget);
+      final element = tester.element(
+        find.byKey(const Key('mobile-player-seek')),
+      );
+      final box = element.findRenderObject()! as RenderBox;
+      final boundary = element
+          .findAncestorRenderObjectOfType<RenderRepaintBoundary>()!;
+      final sliderTheme = SliderTheme.of(element);
+      final rect = sliderTheme.trackShape!.getPreferredRect(
+        parentBox: box,
+        sliderTheme: sliderTheme,
+        isEnabled: true,
+      );
+      final point = box.localToGlobal(
+        Offset(rect.left + rect.width * .4, rect.center.dy),
+        ancestor: boundary,
+      );
+      final bytes = await tester.runAsync(() async {
+        final image = await boundary.toImage();
+        final data = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+        final index = (point.dy.floor() * image.width + point.dx.floor()) * 4;
+        final pixel = data!.buffer.asUint8List().sublist(index, index + 4);
+        image.dispose();
+        return pixel;
+      });
+      expect(bytes, [0x69, 0x77, 0x83, 0xff]);
+      backend.emitEvent(VideoEventKind.cacheSpeed, 0);
+      await tester.pump();
+      expect(find.text('0 KB/s'), findsOneWidget);
+      expect(controller.bufferSnapshot.ranges, isNotEmpty);
+      await closePlayer(tester);
+    },
+    tags: ['integration'],
+  );
+
+  testWidgets(
+    'landscape options inherit the dark player inside a light application',
+    (tester) async {
+      await showPlayer(tester, itemId: 'movie-up', lightApp: true);
+      await tester.tap(find.byKey(const Key('mobile-player-more')));
+      await tester.pumpAndSettle();
+      final panel = find.byKey(const Key('mobile-player-options'));
+      expect(Theme.of(tester.element(panel)).brightness, Brightness.dark);
+      expect(
+        tester.widget<Material>(panel).color,
+        AppTheme.dark().colorScheme.surface,
+      );
+      await tester.tap(find.byKey(const Key('mobile-player-panel-close')));
+      await tester.pumpAndSettle();
+      await closePlayer(tester);
+    },
+    tags: ['integration'],
+  );
 
   testWidgets('old player cannot unlock after a new player takes orientation', (
     tester,

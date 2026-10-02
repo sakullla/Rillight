@@ -4,6 +4,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
 import 'package:rillight/auth/auth_controller.dart';
@@ -218,6 +219,50 @@ void main() {
   PlayerController controllerOf(WidgetTester tester) {
     return tester.state<PlayerPageState>(find.byType(PlayerPage)).controller!;
   }
+
+  testWidgets('settings own keyboard input and Escape returns to the player', (
+    tester,
+  ) async {
+    final auth = await pumpLoggedIn(tester);
+    await openPlayable(tester, 'movie-up');
+    if (find.byKey(PlayerKeys.resumeFromStart).evaluate().isNotEmpty) {
+      await tester.tap(find.byKey(PlayerKeys.resumeFromStart));
+      await settle(tester);
+    }
+    await tester.tap(find.byKey(PlayerKeys.more));
+    await settle(tester);
+    final position = backend.position;
+    final playing = backend.isPlaying;
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await tester.pump();
+    expect(backend.position, position);
+    expect(backend.isPlaying, playing);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await settle(tester);
+    expect(find.byKey(const Key('player-settings-panel')), findsNothing);
+    expect(find.byType(PlayerPage), findsOneWidget);
+    expect(
+      tester
+          .widget<IconButton>(find.byKey(PlayerKeys.more))
+          .focusNode!
+          .hasFocus,
+      isTrue,
+    );
+    controllerOf(tester).hideControlsOnPointerExit();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(
+      tester
+          .widget<IconButton>(find.byKey(PlayerKeys.more))
+          .focusNode!
+          .canRequestFocus,
+      isFalse,
+    );
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(seconds: 4));
+    app.router.dispose();
+    auth.dispose();
+  }, tags: ['integration']);
 
   test('embedded text subtitles select the container track', () async {
     _withEpisodeStreams(server, subtitleIndexById: {'movie-up': 2});

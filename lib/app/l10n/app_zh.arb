@@ -1558,5 +1558,43 @@
         "type": "String"
       }
     }
+  },
+  "cardSeasonCount": "{count}季",
+  "@cardSeasonCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "filterApply": "应用筛选",
+  "filterReset": "重置",
+  "filterSelectedCount": "已选 {count} 项",
+  "@filterSelectedCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "filterSearchOptions": "查找选项",
+  "filterNoOptions": "暂无可选项",
+  "filterFavorite": "收藏",
+  "filterResumable": "继续观看",
+  "filterChooseHint": "同一分类可选多项，不同分类组合筛选",
+  "filterBrowseTitle": "筛选与排序",
+  "filterEdit": "调整",
+  "filterSortAscending": "升序",
+  "filterSortDescending": "降序",
+  "phoneDiscover": "发现好故事",
+  "phoneLibraryBrowse": "浏览片库",
+  "phoneSearchHint": "搜索电影、剧集和演员",
+  "phoneSelectedSeason": "本季 {count} 集",
+  "@phoneSelectedSeason": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
   }
 }

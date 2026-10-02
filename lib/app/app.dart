@@ -65,8 +65,12 @@ class RillightApp extends StatelessWidget {
                       supportedLocales: AppLocalizations.supportedLocales,
                       localizationsDelegates:
                           AppLocalizations.localizationsDelegates,
-                      theme: AppTheme.light(),
-                      darkTheme: AppTheme.dark(),
+                      theme: environment.isTv
+                          ? AppTheme.light()
+                          : AppTheme.phoneLight(),
+                      darkTheme: environment.isTv
+                          ? AppTheme.dark()
+                          : AppTheme.phoneDark(),
                       themeMode: mode,
                       scrollBehavior: environment.isTv
                           ? null

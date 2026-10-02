@@ -2499,6 +2499,108 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'已删除「{name}」'**
   String phoneServerDeleted(String name);
+
+  /// No description provided for @cardSeasonCount.
+  ///
+  /// In zh, this message translates to:
+  /// **'{count}季'**
+  String cardSeasonCount(int count);
+
+  /// No description provided for @filterApply.
+  ///
+  /// In zh, this message translates to:
+  /// **'应用筛选'**
+  String get filterApply;
+
+  /// No description provided for @filterReset.
+  ///
+  /// In zh, this message translates to:
+  /// **'重置'**
+  String get filterReset;
+
+  /// No description provided for @filterSelectedCount.
+  ///
+  /// In zh, this message translates to:
+  /// **'已选 {count} 项'**
+  String filterSelectedCount(int count);
+
+  /// No description provided for @filterSearchOptions.
+  ///
+  /// In zh, this message translates to:
+  /// **'查找选项'**
+  String get filterSearchOptions;
+
+  /// No description provided for @filterNoOptions.
+  ///
+  /// In zh, this message translates to:
+  /// **'暂无可选项'**
+  String get filterNoOptions;
+
+  /// No description provided for @filterFavorite.
+  ///
+  /// In zh, this message translates to:
+  /// **'收藏'**
+  String get filterFavorite;
+
+  /// No description provided for @filterResumable.
+  ///
+  /// In zh, this message translates to:
+  /// **'继续观看'**
+  String get filterResumable;
+
+  /// No description provided for @filterChooseHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'同一分类可选多项，不同分类组合筛选'**
+  String get filterChooseHint;
+
+  /// No description provided for @filterBrowseTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'筛选与排序'**
+  String get filterBrowseTitle;
+
+  /// No description provided for @filterEdit.
+  ///
+  /// In zh, this message translates to:
+  /// **'调整'**
+  String get filterEdit;
+
+  /// No description provided for @filterSortAscending.
+  ///
+  /// In zh, this message translates to:
+  /// **'升序'**
+  String get filterSortAscending;
+
+  /// No description provided for @filterSortDescending.
+  ///
+  /// In zh, this message translates to:
+  /// **'降序'**
+  String get filterSortDescending;
+
+  /// No description provided for @phoneDiscover.
+  ///
+  /// In zh, this message translates to:
+  /// **'发现好故事'**
+  String get phoneDiscover;
+
+  /// No description provided for @phoneLibraryBrowse.
+  ///
+  /// In zh, this message translates to:
+  /// **'浏览片库'**
+  String get phoneLibraryBrowse;
+
+  /// No description provided for @phoneSearchHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'搜索电影、剧集和演员'**
+  String get phoneSearchHint;
+
+  /// No description provided for @phoneSelectedSeason.
+  ///
+  /// In zh, this message translates to:
+  /// **'本季 {count} 集'**
+  String phoneSelectedSeason(int count);
 }
 
 class _AppLocalizationsDelegate

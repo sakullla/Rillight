@@ -743,20 +743,25 @@ class _PhoneDanmakuSearchState extends State<_PhoneDanmakuSearch> {
   List<DanmakuAnime> _results = const [];
   bool _loading = false;
   bool _searched = false;
+  int _searchGeneration = 0;
 
   @override
   void dispose() {
+    _searchGeneration++;
     _field.dispose();
     super.dispose();
   }
 
   Future<void> _run() async {
+    final term = _field.text.trim();
+    if (term.isEmpty) return;
+    final generation = ++_searchGeneration;
     setState(() {
       _loading = true;
       _searched = true;
     });
-    final results = await widget.danmaku.search(_field.text);
-    if (!mounted) return;
+    final results = await widget.danmaku.search(term);
+    if (!mounted || generation != _searchGeneration) return;
     setState(() {
       _loading = false;
       _results = results;
@@ -788,7 +793,7 @@ class _PhoneDanmakuSearchState extends State<_PhoneDanmakuSearch> {
               child: IconButton(
                 key: DanmakuKeys.searchSubmit,
                 tooltip: l10n.danmakuSearch,
-                onPressed: () => unawaited(_run()),
+                onPressed: _loading ? null : () => unawaited(_run()),
                 icon: const Icon(Icons.arrow_forward),
               ),
             ),
@@ -801,6 +806,8 @@ class _PhoneDanmakuSearchState extends State<_PhoneDanmakuSearch> {
                     )
                   : !_searched
                   ? Center(child: Text(l10n.danmakuSearchHint))
+                  : widget.danmaku.searchFailure != null
+                  ? DanmakuSearchError(onRetry: () => unawaited(_run()))
                   : _results.isEmpty
                   ? Center(child: Text(l10n.danmakuNoMatch))
                   : ListView(

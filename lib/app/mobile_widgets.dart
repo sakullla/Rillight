@@ -85,7 +85,7 @@ class _MobilePressableState extends State<MobilePressable> {
 /// 海报卡角标组的定位键:一张卡最多一组角标,测试据此把角标限定在卡内。
 Key phoneCardBadgesKey(String itemId) => Key('phone-card-badges-$itemId');
 
-/// 角标文案(ADR-3):分集给季集编号、剧集给集数、已看给已看标记、可续播给
+/// 角标文案:分集给季集编号、剧集给季数、已看给已看标记、可续播给
 /// 已看百分比(沿用 playbackProgress/resumeProgress 的既有语义)。
 ///
 /// [includePlayback] 关闭时不给已看/进度角标:片库「最新入库」预览行只在
@@ -102,7 +102,7 @@ List<String> phoneCardBadgeLabels(
       labels.add(code);
     }
   } else if (item.isSeries && (item.childCount ?? 0) > 0) {
-    labels.add(l10n.episodeCount(item.childCount!));
+    labels.add(l10n.cardSeasonCount(item.childCount!));
   }
   if (includePlayback) {
     if (item.userData.played) {
@@ -248,6 +248,16 @@ class PhonePosterCard extends StatelessWidget {
                         right: AppSpacing.xs,
                         child: PhoneCardBadges(itemId: item.id, labels: badges),
                       ),
+                    if (item.communityRating != null &&
+                        item.communityRating! > 0)
+                      Positioned(
+                        right: 8,
+                        bottom: 8,
+                        child: _PhoneCardBadge(
+                          label:
+                              '★ ${item.communityRating!.toStringAsFixed(1)}',
+                        ),
+                      ),
                   ],
                 ),
               ),
@@ -256,7 +266,7 @@ class PhonePosterCard extends StatelessWidget {
           const SizedBox(height: 6),
           Text(
             item.name,
-            maxLines: 1,
+            maxLines: 2,
             overflow: TextOverflow.ellipsis,
             style: theme.textTheme.bodyMedium?.copyWith(
               fontWeight: FontWeight.w600,
@@ -369,12 +379,13 @@ double phonePosterCardLabelExtent(BuildContext context) {
   }
 
   return 6 +
-      lineHeight(
-        theme.textTheme.bodyMedium?.copyWith(
-          fontWeight: FontWeight.w600,
-          height: 1.2,
-        ),
-      ) +
+      2 *
+          lineHeight(
+            theme.textTheme.bodyMedium?.copyWith(
+              fontWeight: FontWeight.w600,
+              height: 1.2,
+            ),
+          ) +
       lineHeight(theme.textTheme.labelSmall?.copyWith(height: 1.2));
 }
 

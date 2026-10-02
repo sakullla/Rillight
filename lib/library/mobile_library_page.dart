@@ -15,16 +15,8 @@ import 'package:rillight/home/catalog_failure.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/library/browse_controller.dart';
 import 'package:rillight/library/shelf_sort.dart';
+import 'package:rillight/library/library_filter_panel.dart';
 import 'package:rillight/media_image/media_image.dart';
-
-const _phoneSorts = <CatalogSort>[
-  CatalogSort.dateUpdated,
-  CatalogSort.dateCreated,
-  CatalogSort.name,
-  CatalogSort.productionYear,
-  CatalogSort.communityRating,
-  CatalogSort.random,
-];
 
 String _sortLabel(AppLocalizations l10n, String sortBy) {
   for (final sort in CatalogSort.values) {
@@ -107,7 +99,13 @@ class _MobileLibraryPageState extends State<MobileLibraryPage> {
       auth: _auth!,
       cache: _cache!,
       parentId: widget.viewId,
-      includeItemTypes: photos ? 'Photo,PhotoAlbum' : 'Movie,Series',
+      includeItemTypes: photos
+          ? 'Photo,PhotoAlbum'
+          : switch (view?.collectionTypeNormalized) {
+              'movies' => 'Movie',
+              'tvshows' => 'Series',
+              _ => 'Movie,Series',
+            },
     )..addListener(_rememberDimensions);
   }
 
@@ -183,31 +181,35 @@ class _MobileLibraryPageState extends State<MobileLibraryPage> {
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
-      builder: (context) => _FilterSheet(
-        type: controller.type,
-        watch: controller.watch,
-        year: controller.year,
-        genre: controller.genre,
-        sortBy: controller.sortBy,
+      builder: (context) => LibraryFilterPanel(
+        keyPrefix: 'phone-library',
+        typeFilterable: controller.includeItemTypes == 'Movie,Series',
+        initial: ShelfFilters(
+          type: CatalogTypeFilter.values.firstWhere(
+            (value) => value.itemType == controller.type,
+            orElse: () => CatalogTypeFilter.all,
+          ),
+          watch: CatalogWatchFilter.values.firstWhere(
+            (value) => value.param == controller.watch,
+            orElse: () => CatalogWatchFilter.all,
+          ),
+          years: controller.years,
+          genres: controller.genres,
+        ),
+        sort: CatalogSort.values.firstWhere(
+          (value) => value.sortBy == controller.sortBy,
+          orElse: () => CatalogSort.initial,
+        ),
         years: years,
         genres: genres,
-        onApply:
-            ({
-              required String? type,
-              required String? watch,
-              required int? year,
-              required String? genre,
-              required String sortBy,
-            }) {
-              controller.filter(
-                type: type,
-                watch: watch,
-                year: year,
-                genre: genre,
-                sortBy: sortBy,
-              );
-            },
-        onClear: _clearFilters,
+        loadGenres: () => _auth!.client.getLibraryGenres(widget.viewId),
+        onApply: (filters, sort) => controller.filter(
+          type: filters.type.itemType,
+          watch: filters.watch.param,
+          years: filters.years,
+          genres: filters.genres,
+          sortBy: (sort ?? CatalogSort.initial).sortBy,
+        ),
       ),
     );
   }
@@ -233,11 +235,14 @@ class _MobileLibraryPageState extends State<MobileLibraryPage> {
       appBar: AppBar(
         title: Text(_libraryTitle(l10n), key: const Key('phone-library-title')),
         actions: [
-          IconButton(
-            key: const Key('phone-library-filter'),
-            tooltip: l10n.libraryFilter,
-            onPressed: _openFilters,
-            icon: const Icon(Icons.filter_list),
+          Padding(
+            padding: const EdgeInsets.only(right: 12),
+            child: FilledButton.tonalIcon(
+              key: const Key('phone-library-filter'),
+              onPressed: _openFilters,
+              icon: const Icon(Icons.tune_rounded, size: 20),
+              label: Text(l10n.libraryFilter),
+            ),
           ),
         ],
       ),
@@ -379,27 +384,29 @@ class _ActiveFilters extends StatelessWidget {
               label: Text(l10n.mobileSeries),
               visualDensity: VisualDensity.compact,
             ),
-          if (controller.watch == 'IsPlayed' ||
-              controller.watch == 'IsUnplayed')
+          if (controller.watch != null)
             Chip(
               key: const Key('phone-library-active-watch'),
               label: Text(
-                controller.watch == 'IsPlayed'
-                    ? l10n.mobileWatched
-                    : l10n.mobileUnwatched,
+                CatalogWatchFilter.values
+                    .firstWhere(
+                      (value) => value.param == controller.watch,
+                      orElse: () => CatalogWatchFilter.all,
+                    )
+                    .label,
               ),
               visualDensity: VisualDensity.compact,
             ),
           if (controller.year != null)
             Chip(
               key: const Key('phone-library-active-year'),
-              label: Text('${controller.year}'),
+              label: Text(controller.years.join('、')),
               visualDensity: VisualDensity.compact,
             ),
           if (controller.genre != null)
             Chip(
               key: const Key('phone-library-active-genre'),
-              label: Text(controller.genre!),
+              label: Text(controller.genres.join("、")),
               visualDensity: VisualDensity.compact,
             ),
           if (_hasCriteria(controller) && controller.items.isNotEmpty)
@@ -411,244 +418,6 @@ class _ActiveFilters extends StatelessWidget {
             ),
         ],
       ),
-    );
-  }
-}
-
-class _FilterSheet extends StatefulWidget {
-  const _FilterSheet({
-    required this.type,
-    required this.watch,
-    required this.year,
-    required this.genre,
-    required this.sortBy,
-    required this.years,
-    required this.genres,
-    required this.onApply,
-    required this.onClear,
-  });
-
-  final String? type;
-  final String? watch;
-  final int? year;
-  final String? genre;
-  final String sortBy;
-  final List<int> years;
-  final List<String> genres;
-  final void Function({
-    required String? type,
-    required String? watch,
-    required int? year,
-    required String? genre,
-    required String sortBy,
-  })
-  onApply;
-  final VoidCallback onClear;
-
-  @override
-  State<_FilterSheet> createState() => _FilterSheetState();
-}
-
-class _FilterSheetState extends State<_FilterSheet> {
-  late String? _type = widget.type;
-  late String? _watch = widget.watch;
-  late int? _year = widget.year;
-  late String? _genre = widget.genre;
-  late String _sortBy = widget.sortBy;
-
-  @override
-  Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context);
-    final bottom = MediaQuery.viewInsetsOf(context).bottom;
-    return ConstrainedBox(
-      constraints: BoxConstraints(
-        maxHeight: MediaQuery.sizeOf(context).height * 0.9,
-      ),
-      child: SingleChildScrollView(
-        padding: EdgeInsets.fromLTRB(
-          AppSpacing.lg,
-          AppSpacing.lg,
-          AppSpacing.lg,
-          AppSpacing.lg + bottom,
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(
-              l10n.libraryFilter,
-              style: Theme.of(context).textTheme.titleLarge,
-            ),
-            const SizedBox(height: AppSpacing.md),
-            _dimension(
-              label: l10n.libraryFilterType,
-              children: [
-                _choice(
-                  key: const Key('phone-library-type-all'),
-                  label: l10n.libraryFilterAll,
-                  selected: _type == null,
-                  onSelected: () => setState(() => _type = null),
-                ),
-                _choice(
-                  key: const Key('phone-library-type-Movie'),
-                  label: l10n.mobileMovies,
-                  selected: _type == 'Movie',
-                  onSelected: () => setState(() => _type = 'Movie'),
-                ),
-                _choice(
-                  key: const Key('phone-library-type-Series'),
-                  label: l10n.mobileSeries,
-                  selected: _type == 'Series',
-                  onSelected: () => setState(() => _type = 'Series'),
-                ),
-              ],
-            ),
-            _dimension(
-              label: l10n.libraryFilterWatch,
-              children: [
-                _choice(
-                  key: const Key('phone-library-watch-all'),
-                  label: l10n.libraryFilterAll,
-                  selected: _watch == null,
-                  onSelected: () => setState(() => _watch = null),
-                ),
-                _choice(
-                  key: const Key('phone-library-watch-IsPlayed'),
-                  label: l10n.mobileWatched,
-                  selected: _watch == 'IsPlayed',
-                  onSelected: () => setState(() => _watch = 'IsPlayed'),
-                ),
-                _choice(
-                  key: const Key('phone-library-watch-IsUnplayed'),
-                  label: l10n.mobileUnwatched,
-                  selected: _watch == 'IsUnplayed',
-                  onSelected: () => setState(() => _watch = 'IsUnplayed'),
-                ),
-              ],
-            ),
-            if (widget.years.isNotEmpty)
-              _dimension(
-                key: const Key('phone-library-year-section'),
-                label: l10n.libraryFilterYear,
-                children: [
-                  _choice(
-                    key: const Key('phone-library-year-all'),
-                    label: l10n.libraryFilterAll,
-                    selected: _year == null,
-                    onSelected: () => setState(() => _year = null),
-                  ),
-                  for (final year in widget.years)
-                    _choice(
-                      key: Key('phone-library-year-$year'),
-                      label: '$year',
-                      selected: _year == year,
-                      onSelected: () => setState(() => _year = year),
-                    ),
-                ],
-              ),
-            if (widget.genres.isNotEmpty)
-              _dimension(
-                key: const Key('phone-library-genre-section'),
-                label: l10n.libraryFilterGenre,
-                children: [
-                  _choice(
-                    key: const Key('phone-library-genre-all'),
-                    label: l10n.libraryFilterAll,
-                    selected: _genre == null,
-                    onSelected: () => setState(() => _genre = null),
-                  ),
-                  for (final genre in widget.genres)
-                    _choice(
-                      key: Key('phone-library-genre-$genre'),
-                      label: genre,
-                      selected: _genre == genre,
-                      onSelected: () => setState(() => _genre = genre),
-                    ),
-                ],
-              ),
-            _dimension(
-              label: l10n.mobileSort,
-              children: [
-                for (final sort in _phoneSorts)
-                  _choice(
-                    key: Key('phone-library-sort-${sort.sortBy}'),
-                    label: _sortLabel(l10n, sort.sortBy),
-                    selected: _sortBy == sort.sortBy,
-                    onSelected: () => setState(() => _sortBy = sort.sortBy),
-                  ),
-              ],
-            ),
-            const SizedBox(height: AppSpacing.lg),
-            FilledButton(
-              key: const Key('phone-library-apply'),
-              style: FilledButton.styleFrom(minimumSize: const Size(48, 48)),
-              onPressed: () {
-                widget.onApply(
-                  type: _type,
-                  watch: _watch,
-                  year: _year,
-                  genre: _genre,
-                  sortBy: _sortBy,
-                );
-                Navigator.pop(context);
-              },
-              child: Text(l10n.libraryFilter),
-            ),
-            TextButton(
-              key: const Key('phone-library-clear'),
-              style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
-              onPressed: () {
-                widget.onClear();
-                Navigator.pop(context);
-              },
-              child: Text(l10n.libraryFilterClear),
-            ),
-            TextButton(
-              key: const Key('phone-library-cancel'),
-              style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
-              onPressed: () => Navigator.pop(context),
-              child: Text(l10n.libraryFilterCancel),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _dimension({
-    Key? key,
-    required String label,
-    required List<Widget> children,
-  }) {
-    return Padding(
-      key: key,
-      padding: const EdgeInsets.only(bottom: AppSpacing.md),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(label, style: Theme.of(context).textTheme.titleSmall),
-          const SizedBox(height: AppSpacing.xs),
-          Wrap(
-            spacing: AppSpacing.xs,
-            runSpacing: AppSpacing.xs,
-            children: children,
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _choice({
-    required Key key,
-    required String label,
-    required bool selected,
-    required VoidCallback onSelected,
-  }) {
-    return ChoiceChip(
-      key: key,
-      label: Text(label),
-      selected: selected,
-      onSelected: (_) => onSelected(),
     );
   }
 }
@@ -669,7 +438,39 @@ class _LibrarySkeleton extends StatelessWidget {
           runSpacing: spacing,
           children: [
             for (var i = 0; i < columns * 2; i++)
-              SkeletonBlock(width: width, height: width * 1.5, animated: false),
+              SizedBox(
+                width: width,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SkeletonBlock(
+                      width: width,
+                      height: width * 1.5,
+                      animated: false,
+                    ),
+                    const SizedBox(height: 6),
+                    SizedBox(
+                      height: phonePosterCardLabelExtent(context) - 6,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          SkeletonBlock(
+                            width: width * .82,
+                            height: 14,
+                            animated: false,
+                          ),
+                          const SizedBox(height: 6),
+                          SkeletonBlock(
+                            width: width * .42,
+                            height: 12,
+                            animated: false,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
           ],
         );
       },
@@ -677,9 +478,10 @@ class _LibrarySkeleton extends StatelessWidget {
   }
 }
 
-/// 手机片库海报在 480dp 以内固定 3 列。412dp 上 4 列会把标题挤成断行。
+/// Narrow phones use two readable columns; larger phones fit three.
 int phoneLibraryColumnCount(double width) {
-  if (width <= 480) {
+  if (width <= 360) return 2;
+  if (width <= 600) {
     return 3;
   }
   return mobileGridColumnCount(width);

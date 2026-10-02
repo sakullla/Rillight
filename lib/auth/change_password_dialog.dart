@@ -66,51 +66,56 @@ class _ChangePasswordDialogState extends State<ChangePasswordDialog> {
             !auth.isBusy && _newPassword.text.isNotEmpty && !mismatch;
         return AlertDialog(
           title: Text(l10n.changePassword),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                TextField(
-                  key: ChangePasswordDialog.currentPasswordField,
-                  controller: _current,
-                  obscureText: true,
-                  decoration: InputDecoration(
-                    labelText: l10n.changePasswordCurrent,
-                    helperText: l10n.changePasswordCurrentHint,
-                  ),
-                ),
-                TextField(
-                  key: ChangePasswordDialog.newPasswordField,
-                  controller: _newPassword,
-                  obscureText: true,
-                  onChanged: (_) => setState(() {}),
-                  decoration: InputDecoration(
-                    labelText: l10n.changePasswordNew,
-                  ),
-                ),
-                TextField(
-                  key: ChangePasswordDialog.confirmField,
-                  controller: _confirm,
-                  obscureText: true,
-                  onChanged: (_) => setState(() {}),
-                  decoration: InputDecoration(
-                    labelText: l10n.changePasswordConfirm,
-                    errorText: mismatch ? l10n.changePasswordMismatch : null,
-                  ),
-                ),
-                if (failure != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 12),
-                    child: Text(
-                      embyFailureMessage(l10n, failure),
-                      key: ChangePasswordDialog.failureKey,
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.error,
-                      ),
+          content: SizedBox(
+            width: 360,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  TextField(
+                    key: ChangePasswordDialog.currentPasswordField,
+                    controller: _current,
+                    obscureText: true,
+                    decoration: InputDecoration(
+                      labelText: l10n.changePasswordCurrent,
+                      helperText: l10n.changePasswordCurrentHint,
                     ),
                   ),
-              ],
+                  const SizedBox(height: 20),
+                  TextField(
+                    key: ChangePasswordDialog.newPasswordField,
+                    controller: _newPassword,
+                    obscureText: true,
+                    onChanged: (_) => setState(() {}),
+                    decoration: InputDecoration(
+                      labelText: l10n.changePasswordNew,
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  TextField(
+                    key: ChangePasswordDialog.confirmField,
+                    controller: _confirm,
+                    obscureText: true,
+                    onChanged: (_) => setState(() {}),
+                    decoration: InputDecoration(
+                      labelText: l10n.changePasswordConfirm,
+                      errorText: mismatch ? l10n.changePasswordMismatch : null,
+                    ),
+                  ),
+                  if (failure != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 12),
+                      child: Text(
+                        embyFailureMessage(l10n, failure),
+                        key: ChangePasswordDialog.failureKey,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.error,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
             ),
           ),
           actions: [

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/media_source_menu_tile.dart';
@@ -22,6 +23,8 @@ class PlaybackSettingsMenu extends StatefulWidget {
 
 class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
   final MenuController _menu = MenuController();
+  final FocusNode _buttonFocus = FocusNode();
+  final FocusScopeNode _panelFocus = FocusScopeNode();
   _SettingsSection _section = _SettingsSection.speed;
   bool _pending = false;
 
@@ -37,6 +40,8 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
 
   @override
   void dispose() {
+    _buttonFocus.dispose();
+    _panelFocus.dispose();
     final controller = widget.controller;
     // 换片源时加载态会拆掉整棵控制树。MenuAnchor 的关闭动画不一定回调。
     // 等树拆完再释放本菜单的钉住，其它面板的钉住保留。
@@ -74,7 +79,13 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
     final l10n = AppLocalizations.of(context);
     return MenuAnchor(
       controller: _menu,
-      onOpen: () => widget.controller.setControlsPinned(true, owner: _menu),
+      childFocusNode: _buttonFocus,
+      onOpen: () {
+        widget.controller.setControlsPinned(true, owner: _menu);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && _menu.isOpen) _panelFocus.requestFocus();
+        });
+      },
       onClose: () => widget.controller.setControlsPinned(false, owner: _menu),
       consumeOutsideTap: true,
       style: MenuStyle(
@@ -92,6 +103,7 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
       ),
       builder: (context, menu, _) => IconButton(
         key: PlayerKeys.more,
+        focusNode: _buttonFocus,
         tooltip: l10n.playerPlaybackSettings,
         color: scheme.onSurface,
         icon: const Icon(Icons.settings_outlined),
@@ -102,11 +114,23 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
           key: const Key('player-settings-panel'),
           width: width,
           height: height,
-          child: Material(
-            type: MaterialType.transparency,
-            child: ListenableBuilder(
-              listenable: widget.controller,
-              builder: (context, _) => _panel(context),
+          child: FocusScope(
+            node: _panelFocus,
+            onKeyEvent: (_, event) {
+              if (event is KeyDownEvent &&
+                  event.logicalKey == LogicalKeyboardKey.escape) {
+                _menu.close();
+                _buttonFocus.requestFocus();
+                return KeyEventResult.handled;
+              }
+              return KeyEventResult.ignored;
+            },
+            child: Material(
+              type: MaterialType.transparency,
+              child: ListenableBuilder(
+                listenable: widget.controller,
+                builder: (context, _) => _panel(context),
+              ),
             ),
           ),
         ),
@@ -232,13 +256,21 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
                 ),
               ),
               if (value.isNotEmpty)
-                Text(
-                  value,
-                  key: section == _SettingsSection.speed
-                      ? PlayerKeys.speedLabel
-                      : null,
-                  style: theme.textTheme.labelLarge?.copyWith(
-                    fontWeight: FontWeight.w700,
+                Flexible(
+                  child: Tooltip(
+                    message: value,
+                    child: Text(
+                      value,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.end,
+                      key: section == _SettingsSection.speed
+                          ? PlayerKeys.speedLabel
+                          : null,
+                      style: theme.textTheme.labelLarge?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
                   ),
                 ),
             ],

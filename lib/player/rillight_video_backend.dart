@@ -72,6 +72,8 @@ class RillightVideoBackend extends VideoBackend
   StreamSubscription<CorePlayerEvent>? _coreEvents;
   Timer? _diagnosticsTimer;
   bool _diagnosticsBusy = false;
+  bool _timelineRefreshing = false;
+  int _timelineRefreshGeneration = -1;
   bool _disposed = false;
   int _generation = 0;
   int _sessionId = 0;
@@ -674,21 +676,32 @@ class RillightVideoBackend extends VideoBackend
     _diagnosticsBusy = true;
     final trackVersion = _trackVersion;
     try {
-      if (duration > Duration.zero) {
-        try {
-          await transport
+      if (duration > Duration.zero &&
+          (!_timelineRefreshing || _timelineRefreshGeneration != generation)) {
+        _timelineRefreshing = true;
+        _timelineRefreshGeneration = generation;
+        // Indexing can scan disk for seconds. The transport keeps diagnostics
+        // serviceable during that work; do not stall speed sampling behind it.
+        unawaited(
+          transport
               .refreshTimeline(duration)
-              .timeout(const Duration(seconds: 5));
-        } catch (_) {
-          // Timeline indexing is optional. Read the latest transport snapshot
-          // even when its disk scan is still running or times out.
-        }
+              .then<void>((_) {}, onError: (Object _, StackTrace _) {})
+              .whenComplete(() {
+                if (_timelineRefreshGeneration == generation) {
+                  _timelineRefreshing = false;
+                }
+              }),
+        );
       }
       final data = await transport.diagnostics.timeout(
         const Duration(seconds: 2),
       );
       _lastTransportDiagnostics = data;
       _reportAuthentication(data, generation);
+      final rate = data['upstreamBytesPerSecond'];
+      if (rate is num) {
+        _emit(VideoEventKind.cacheSpeed, rate.toDouble(), generation);
+      }
       if (_opened &&
           _lastOpenRequest?.dynamicSource == false &&
           data['readAheadFailed'] == true &&
@@ -769,10 +782,6 @@ class RillightVideoBackend extends VideoBackend
         duration: duration,
       );
       _emit(VideoEventKind.bufferSnapshot, bufferSnapshot, generation);
-      final rate = data['upstreamBytesPerSecond'];
-      if (rate is num) {
-        _emit(VideoEventKind.cacheSpeed, rate.toDouble(), generation);
-      }
     } catch (_) {
       // A failed optional diagnostics poll is not evidence that validated
       // cache blocks were removed. The next successful poll replaces them.

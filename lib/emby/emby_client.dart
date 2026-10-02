@@ -368,7 +368,7 @@ class EmbyClient {
   }
 
   /// 官方筛选参数:[filters] 对应 `Filters`(IsPlayed/IsUnplayed 等已看状态),
-  /// [genres] 对应 `Genres`,[years] 对应 `Years`,均支持逗号分隔多值。
+  /// [genres] 对应 `Genres`(竖线分隔),[years] 对应 `Years`(逗号分隔)。
   Future<EmbyItemPage> queryItems({
     String? parentId,
     String? searchTerm,
@@ -397,7 +397,7 @@ class EmbyClient {
         'SortBy': ?sortBy,
         'SortOrder': ?sortOrder,
         if (filters != null && filters.isNotEmpty) 'Filters': filters.join(','),
-        if (genres != null && genres.isNotEmpty) 'Genres': genres.join(','),
+        if (genres != null && genres.isNotEmpty) 'Genres': genres.join('|'),
         if (years != null && years.isNotEmpty) 'Years': years.join(','),
         'EnableImageTypes': imageTypes,
       },
@@ -418,6 +418,41 @@ class EmbyClient {
       sortBy: 'SortName',
       sortOrder: 'Ascending',
     );
+  }
+
+  /// Emby exposes library-wide genres separately from a paginated item result.
+  /// Never derive the complete filter list from the first 60 posters alone.
+  Future<List<String>> getLibraryGenres(String? parentId) async {
+    final names = <String>{};
+    var offset = 0;
+    while (true) {
+      final page = await _getItemPage(
+        '/Genres',
+        queryParameters: {
+          'UserId': _requireUserId(),
+          if (parentId != null && parentId.isNotEmpty) 'ParentId': parentId,
+          'Recursive': 'true',
+          'StartIndex': '$offset',
+          'Limit': '200',
+          'EnableImages': 'false',
+          'EnableUserData': 'false',
+          'SortBy': 'SortName',
+          'SortOrder': 'Ascending',
+        },
+      );
+      final before = names.length;
+      names.addAll(
+        page.items
+            .map((item) => item.name.trim())
+            .where((name) => name.isNotEmpty),
+      );
+      offset += page.items.length;
+      if (!page.hasMore(fetched: offset, pageSize: 200) ||
+          names.length == before) {
+        break;
+      }
+    }
+    return names.toList()..sort();
   }
 
   Future<List<EmbyItem>> getSimilar(

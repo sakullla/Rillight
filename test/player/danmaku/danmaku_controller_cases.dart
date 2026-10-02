@@ -245,6 +245,25 @@ void main() {
   });
 
   test(
+    'manual search distinguishes failure from empty results and clears it on retry',
+    () async {
+      final controller = makeController();
+      addTearDown(controller.dispose);
+      await controller.startSession(context());
+      final status = controller.status;
+      client.searchError = const DanmakuApiException(
+        DanmakuApiFailureKind.unreachable,
+      );
+      expect(await controller.search('Show'), isEmpty);
+      expect(controller.searchFailure?.kind, DanmakuApiFailureKind.unreachable);
+      expect(controller.status, status);
+      client.searchError = null;
+      expect(await controller.search('No match'), isEmpty);
+      expect(controller.searchFailure, isNull);
+    },
+  );
+
+  test(
     'isConfigured requires official credentials or a custom server',
     () async {
       // 无凭据:不触达 API,状态为 unreachable。

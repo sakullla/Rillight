@@ -28,7 +28,17 @@ class PosterPlaceholder extends StatelessWidget {
             color: colorScheme.surfaceContainerHigh,
             borderRadius: BorderRadius.circular(8),
           ),
-          child: const Center(child: SizedBox.shrink()),
+          child: LayoutBuilder(
+            builder: (context, constraints) => Center(
+              child: ExcludeSemantics(
+                child: Icon(
+                  Icons.image_not_supported_outlined,
+                  size: (constraints.biggest.shortestSide * .2).clamp(16, 40),
+                  color: colorScheme.onSurfaceVariant.withValues(alpha: .65),
+                ),
+              ),
+            ),
+          ),
         ),
       ),
     );

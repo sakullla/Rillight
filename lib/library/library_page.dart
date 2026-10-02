@@ -23,7 +23,11 @@ class LibraryPage extends StatelessWidget {
       key: ValueKey(viewId),
       source: 'items',
       parentId: viewId,
-      includeItemTypes: 'Movie,Series',
+      includeItemTypes: switch (current?.collectionTypeNormalized) {
+        'movies' => 'Movie',
+        'tvshows' => 'Series',
+        _ => 'Movie,Series',
+      },
       recursive: true,
       title: current?.name ?? '',
       showTitle: true,

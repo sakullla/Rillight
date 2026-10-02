@@ -372,12 +372,16 @@ double _rowHeightOf(BuildContext context, {required bool wide}) {
   final textScale = MediaQuery.textScalerOf(context).scale(14) / 14;
   final width = _cardWidthOf(context, wide: wide);
   if (!wide) {
-    final titleLine = 14 * 1.2 * textScale;
-    final yearLine = 12 * 1.2 * textScale;
-    return width * 1.5 + 6 + titleLine + yearLine + 2;
+    return width * 1.5 + phonePosterCardLabelExtent(context) + 2;
   }
-  final titleLine = 14 * 1.2 * textScale;
-  final meta = 12 * 1.2 * textScale;
+  final titleLine =
+      (Theme.of(context).textTheme.bodyMedium?.fontSize ?? 14) *
+      1.2 *
+      textScale;
+  final meta =
+      (Theme.of(context).textTheme.labelSmall?.fontSize ?? 12) *
+      1.2 *
+      textScale;
   final badge = _wideBadgeHeight(context);
   return width * 9 / 16 + 6 + badge + titleLine + meta + 4;
 }
