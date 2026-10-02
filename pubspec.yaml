@@ -1,7 +1,7 @@
 name: rillight
 description: "灯川 Rillight Emby client for desktop and Android"
 publish_to: 'none'
-version: 0.1.33+34
+version: 0.1.34+35
 
 environment:
   sdk: ^3.11.5
