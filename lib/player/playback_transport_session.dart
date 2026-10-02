@@ -155,6 +155,10 @@ class PlaybackTransportSession {
     await _request('retry');
   }
 
+  Future<void> refreshSourceUrl(Uri route, Uri url) async {
+    await _request('refreshSource', [route.toString(), url.toString()]);
+  }
+
   Future<void> refreshTimeline(Duration duration) async {
     await _request(
       'timeline',
@@ -300,6 +304,13 @@ Future<void> _serveTransport(List<Object?> arguments) async {
             break;
           case 'retry':
             await proxy.retryReadAhead();
+            break;
+          case 'refreshSource':
+            final value = message[2] as List;
+            proxy.refreshSourceUrl(
+              Uri.parse(value[0] as String),
+              Uri.parse(value[1] as String),
+            );
             break;
           case 'tracks':
             final value = message[2] as List;

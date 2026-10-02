@@ -116,20 +116,13 @@ void main() {
     );
   });
 
-  test(
-    'without a stored preference an unconfirmed system falls back to dark',
-    () async {
-      final controller = AppearanceController(
-        store: MemoryPlayerSettingsStore(),
-      );
-      await Future<void>.delayed(Duration.zero);
+  test('without a stored preference the appearance defaults to dark', () async {
+    final controller = AppearanceController(store: MemoryPlayerSettingsStore());
+    await Future<void>.delayed(Duration.zero);
 
-      // 跟随系统且未确认浅色偏好:呈深色,不是 ThemeMode.system。
-      expect(controller.style, AppearanceStyle.system);
-      expect(controller.systemChoice, SystemBrightnessChoice.unknown);
-      expect(controller.themeMode, ThemeMode.dark);
-    },
-  );
+    expect(controller.style, AppearanceStyle.dark);
+    expect(controller.themeMode, ThemeMode.dark);
+  });
 
   test('a stored preference loads and setStyle persists without clearing '
       'other settings', () async {
@@ -176,7 +169,7 @@ void main() {
             find.byKey(SettingsPage.appearanceKey),
           )
           .value,
-      AppearanceStyle.system,
+      AppearanceStyle.dark,
     );
 
     await tester.tap(find.byKey(SettingsPage.appearanceKey));
@@ -199,7 +192,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(ConnectFormKeys.connectAppearanceKey), findsOneWidget);
-    // 首次启动(无偏好、系统未确认浅色)呈深色。
+    // 未保存过外观时默认深色。
+    expect(controller.style, AppearanceStyle.dark);
     expect(
       tester.widget<MaterialApp>(find.byType(MaterialApp)).themeMode,
       ThemeMode.dark,
@@ -207,11 +201,11 @@ void main() {
 
     await tester.tap(find.byKey(ConnectFormKeys.connectAppearanceKey));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('深色').last);
+    await tester.tap(find.text('浅色').last);
     await tester.pumpAndSettle();
 
-    expect(controller.style, AppearanceStyle.dark);
-    expect((await store.read()).appearanceStyle, 'dark');
+    expect(controller.style, AppearanceStyle.light);
+    expect((await store.read()).appearanceStyle, 'light');
   }, tags: ['integration']);
 
   testWidgets(

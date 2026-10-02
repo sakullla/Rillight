@@ -13,6 +13,16 @@ struct EdrSurface {
   bool ready = false;
 };
 
+struct EdrPresentationStats {
+  int64_t frames = 0;
+  int64_t first_presented_us = 0;
+  int64_t last_presented_us = 0;
+  int64_t max_interval_us = 0;
+};
+
+EdrPresentationStats ReadEdrPresentationStats(const EdrSurface* surface);
+void ResetEdrPresentationStats(EdrSurface* surface);
+
 // headroom is 1 when the screen cannot show extended values. Creating the
 // layer fails closed: ready stays false and the caller keeps the 8-bit texture.
 bool CreateEdrSurface(EdrSurface* surface, NSView* flutter_view, double* headroom);

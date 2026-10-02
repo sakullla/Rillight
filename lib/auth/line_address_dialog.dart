@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/emby/emby_errors.dart';
+import 'package:rillight/emby/emby_url.dart';
 
 /// 线路地址编辑对话框:添加与修改共用,只录入地址,没有 User-Agent 输入项。
 class LineAddressDialog extends StatefulWidget {
@@ -29,6 +31,7 @@ Future<String?> showLineAddressDialog(
 
 class _LineAddressDialogState extends State<LineAddressDialog> {
   late final TextEditingController _address;
+  bool _invalid = false;
 
   @override
   void initState() {
@@ -47,7 +50,12 @@ class _LineAddressDialogState extends State<LineAddressDialog> {
     if (value.isEmpty) {
       return;
     }
-    Navigator.of(context).pop(value);
+    try {
+      final normalized = normalizeEmbyBaseUrl(value);
+      Navigator.of(context).pop(normalized.toString());
+    } on EmbyException {
+      setState(() => _invalid = true);
+    }
   }
 
   @override
@@ -63,9 +71,13 @@ class _LineAddressDialogState extends State<LineAddressDialog> {
         autocorrect: false,
         textInputAction: TextInputAction.done,
         onSubmitted: (_) => _submit(context),
+        onChanged: (_) {
+          if (_invalid) setState(() => _invalid = false);
+        },
         decoration: InputDecoration(
           labelText: l10n.extraLineAddress,
           hintText: l10n.serverAddressHint,
+          errorText: _invalid ? l10n.errorInvalidAddress : null,
         ),
       ),
       actions: [

@@ -135,7 +135,7 @@ class PlayerSettings {
   final Map<String, DanmakuSeriesMemory> danmakuSeriesMemories;
 
   /// 外观偏好(浅色/深色/跟随系统的枚举名);null 表示未选择过,
-  /// 由应用外壳按「跟随系统」解析。仅存字符串,播放进程不消费。
+  /// 由应用外壳按深色解析。仅存字符串,播放进程不消费。
   final String? appearanceStyle;
 
   final bool? skipIntroEnabled;

@@ -1,5 +1,8 @@
 #include "portable_color_pipeline.h"
 #include "dovi_color_metadata.h"
+#if defined(RILLIGHT_HAVE_MACOS_COLOR)
+#include "macos_color_pipeline.h"
+#endif
 
 #include <algorithm>
 #include <array>
@@ -39,6 +42,14 @@ struct TransferTables {
 };
 
 uint16_t FloatToHalf(float value) {
+#if defined(__APPLE__) && defined(__aarch64__)
+  // Apple Silicon has a native, round-to-nearest FP32 -> FP16 conversion.
+  // Software exponent/rounding branches ran three times per HDR pixel.
+  const _Float16 half = static_cast<_Float16>(value);
+  uint16_t bits = 0;
+  std::memcpy(&bits, &half, sizeof(bits));
+  return bits;
+#else
   uint32_t bits = 0;
   std::memcpy(&bits, &value, sizeof(bits));
   const uint32_t sign = (bits >> 16) & 0x8000u;
@@ -72,6 +83,7 @@ uint16_t FloatToHalf(float value) {
   }
   return static_cast<uint16_t>(sign | (static_cast<uint32_t>(exponent) << 10) |
                                half);
+#endif
 }
 
 float Lookup(const Table& table, float x) {
@@ -172,6 +184,9 @@ struct PortableColorPipeline::Impl {
   SwsContext* scaler = nullptr;
   AVFrame* sampled = nullptr;
   std::unique_ptr<RowWorkers> workers;
+#if defined(RILLIGHT_HAVE_MACOS_COLOR)
+  MacosColorPipeline metal;
+#endif
   ~Impl() { sws_free_context(&scaler); av_frame_free(&sampled); }
 
   bool Render(const AVFrame* frame, int width, int height, bool dovi,
@@ -233,6 +248,11 @@ struct PortableColorPipeline::Impl {
     const int depth = description->comp[0].depth;
     const float source_maximum = static_cast<float>(((1u << depth) - 1) << (16 - depth));
     const bool full = frame->color_range == AVCOL_RANGE_JPEG;
+#if defined(RILLIGHT_HAVE_MACOS_COLOR)
+    if (linear_half && metal.RenderLinearHalf(sampled, parameters, depth, full,
+            dovi, frame->color_trc, tables.pq.data(), tables.hlg.data(),
+            linear_half, stride)) return true;
+#endif
     if (!workers) workers = std::make_unique<RowWorkers>();
     workers->Execute([&](int partition) {
       for (int y = height * partition / 4; y < height * (partition + 1) / 4; ++y) {

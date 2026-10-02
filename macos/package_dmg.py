@@ -8,7 +8,7 @@ import subprocess
 import tempfile
 
 VOLUME = 'Rillight'
-APP_NAME = 'rillight.app'
+APP_NAME = 'Rillight.app'
 APPLICATIONS = 'Applications'
 WINDOW_SIZE = (660, 400)
 ICON_SIZE = 128
@@ -22,7 +22,7 @@ BACKGROUND_NAME = 'background.png'
 def require_app(app):
     app = Path(app).resolve()
     if app.name != APP_NAME or app.suffix != '.app' or not (app / 'Contents/MacOS').is_dir():
-        raise ValueError('Expected an existing rillight.app bundle')
+        raise ValueError('Expected an existing Rillight.app bundle')
     return app
 
 
@@ -41,7 +41,7 @@ def inspect_layout(root):
     app = root / APP_NAME
     shortcut = root / APPLICATIONS
     if not app.is_dir() or not (app / 'Contents/MacOS').is_dir():
-        raise ValueError('Disk image is missing rillight.app')
+        raise ValueError('Disk image is missing Rillight.app')
     if not shortcut.is_symlink() or os.readlink(shortcut) != '/Applications':
         raise ValueError('Disk image must include a visible Applications shortcut')
     visible = [path.name for path in root.iterdir() if not path.name.startswith('.')]

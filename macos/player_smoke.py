@@ -16,8 +16,8 @@ import sys
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
-APP = ROOT / 'build/macos/Build/Products/Release/rillight.app'
-EXECUTABLE = APP / 'Contents/MacOS/rillight'
+APP = ROOT / 'build/macos/Build/Products/Release/Rillight.app'
+EXECUTABLE = APP / 'Contents/MacOS/Rillight'
 BUNDLE_ID = 'com.sakullla.rillight'
 PYTHON_APP = Path(
     '/Library/Frameworks/Python.framework/Versions/3.14/Resources/Python.app')

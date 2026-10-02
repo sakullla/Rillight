@@ -4,6 +4,9 @@
 #import <QuartzCore/CAMetalLayer.h>
 
 #include <cstring>
+#include <array>
+#include <atomic>
+#include <memory>
 #include <vector>
 
 namespace rillight_macos {
@@ -29,10 +32,23 @@ fragment float4 edr_fragment(VertexOut input [[stage_in]],
 )";
 
 struct Presenter {
+  struct PresentationCounters {
+    std::atomic<int64_t> frames{0}, first{0}, last{0}, max_interval{0};
+  };
+  struct ImageSlot {
+    id<MTLTexture> image = nil;
+    std::shared_ptr<std::atomic<bool>> busy =
+        std::make_shared<std::atomic<bool>>(false);
+    int width = 0;
+    int height = 0;
+  };
   CAMetalLayer* layer = nil;
   id<MTLDevice> device = nil;
   id<MTLCommandQueue> queue = nil;
   id<MTLRenderPipelineState> pipeline = nil;
+  std::array<ImageSlot, 3> images;
+  std::shared_ptr<PresentationCounters> counters =
+      std::make_shared<PresentationCounters>();
 
   bool Open(CAMetalLayer* target) {
     layer = target;
@@ -55,6 +71,7 @@ struct Presenter {
   }
 
   bool Draw(const uint16_t* pixels, int width, int height, size_t stride) {
+    @autoreleasepool {
     if (!layer || !pipeline || width <= 0 || height <= 0 || !pixels) return false;
     std::vector<uint16_t> packed;
     const uint16_t* rows = pixels;
@@ -70,14 +87,32 @@ struct Presenter {
       rows = packed.data();
       row_bytes = static_cast<size_t>(width) * 8;
     }
-    MTLTextureDescriptor* description = [MTLTextureDescriptor
-        texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA16Float
-                                      width:static_cast<NSUInteger>(width)
-                                     height:static_cast<NSUInteger>(height)
-                                  mipmapped:NO];
-    description.usage = MTLTextureUsageShaderRead;
-    description.storageMode = MTLStorageModeShared;
-    id<MTLTexture> image = [device newTextureWithDescriptor:description];
+    // The GPU may still be sampling the previous upload. Reuse one of three
+    // textures only after its completion handler releases it. An exceptional
+    // busy pool uses a one-off texture; nextDrawable bounds the GPU queue.
+    ImageSlot* slot = nullptr;
+    for (auto& candidate : images) {
+      if (!candidate.busy->load(std::memory_order_acquire)) {
+        slot = &candidate;
+        break;
+      }
+    }
+    id<MTLTexture> image = slot ? slot->image : nil;
+    if (!image || !slot || slot->width != width || slot->height != height) {
+      MTLTextureDescriptor* description = [MTLTextureDescriptor
+          texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA16Float
+                                        width:static_cast<NSUInteger>(width)
+                                       height:static_cast<NSUInteger>(height)
+                                    mipmapped:NO];
+      description.usage = MTLTextureUsageShaderRead;
+      description.storageMode = MTLStorageModeShared;
+      image = [device newTextureWithDescriptor:description];
+      if (slot) {
+        slot->image = image;
+        slot->width = width;
+        slot->height = height;
+      }
+    }
     if (!image) return false;
     [image replaceRegion:MTLRegionMake2D(0, 0, static_cast<NSUInteger>(width),
                                          static_cast<NSUInteger>(height))
@@ -107,9 +142,36 @@ struct Presenter {
     [encoder setFragmentTexture:image atIndex:0];
     [encoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
     [encoder endEncoding];
+    auto presented = std::atomic_load(&counters);
+    [drawable addPresentedHandler:^(id<MTLDrawable> shown) {
+      const int64_t time = static_cast<int64_t>(shown.presentedTime * 1000000);
+      if (time <= 0) return;
+      int64_t previous = presented->last.load();
+      do {
+        if (time <= previous) return;
+      } while (!presented->last.compare_exchange_weak(previous, time));
+      int64_t zero = 0;
+      presented->first.compare_exchange_strong(zero, time);
+      if (previous > 0) {
+        const int64_t interval = time - previous;
+        int64_t maximum = presented->max_interval.load();
+        while (interval > maximum &&
+               !presented->max_interval.compare_exchange_weak(maximum, interval)) {}
+      }
+      ++presented->frames;
+    }];
     [commands presentDrawable:drawable];
+    if (slot) {
+      // Capture the flag, not Presenter: completion can outlive window close.
+      auto busy = slot->busy;
+      busy->store(true, std::memory_order_release);
+      [commands addCompletedHandler:^(id<MTLCommandBuffer>) {
+        busy->store(false, std::memory_order_release);
+      }];
+    }
     [commands commit];
     return true;
+    }
   }
 };
 
@@ -235,6 +297,21 @@ bool PresentEdrSurface(EdrSurface* surface, const uint16_t* pixels, int width,
   if (!surface || !surface->ready || !surface->presenter) return false;
   return static_cast<Presenter*>(surface->presenter)->Draw(
       pixels, width, height, stride);
+}
+
+EdrPresentationStats ReadEdrPresentationStats(const EdrSurface* surface) {
+  if (!surface || !surface->ready || !surface->presenter) return {};
+  auto* presenter = static_cast<Presenter*>(surface->presenter);
+  auto counters = std::atomic_load(&presenter->counters);
+  return {counters->frames.load(), counters->first.load(), counters->last.load(),
+          counters->max_interval.load()};
+}
+
+void ResetEdrPresentationStats(EdrSurface* surface) {
+  if (!surface || !surface->ready || !surface->presenter) return;
+  auto* presenter = static_cast<Presenter*>(surface->presenter);
+  std::atomic_store(&presenter->counters,
+                    std::make_shared<Presenter::PresentationCounters>());
 }
 
 }  // namespace rillight_macos

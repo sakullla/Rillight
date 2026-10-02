@@ -623,7 +623,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsDiskCacheLimit => '磁盘缓冲上限';
 
   @override
-  String get settingsDiskCacheLimitHint => '限制本地缓冲占用';
+  String get settingsDiskCacheLimitHint => '限制本地缓冲占用；达到上限后，随播放进度自动释放旧片段并缓存后续内容';
 
   @override
   String get settingsHardwareDecoding => '硬件解码';
@@ -1220,4 +1220,51 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get danmakuPreviewText => '一起看剧，弹幕也清晰舒适';
+
+  @override
+  String get phoneServerManagement => '服务器管理';
+
+  @override
+  String get phoneServerManagementHint => '切换服务器，管理连接地址和保存的账号';
+
+  @override
+  String get phoneCurrentServer => '正在使用';
+
+  @override
+  String get phoneManageServer => '管理服务器';
+
+  @override
+  String get phoneRenameServer => '修改显示名称';
+
+  @override
+  String get phoneServerName => '显示名称';
+
+  @override
+  String get phoneServerNameHint => '留空使用服务器名称';
+
+  @override
+  String get phoneEmptyServers => '还没有保存的服务器';
+
+  @override
+  String get phoneNoMatchingServers => '没有找到匹配的服务器';
+
+  @override
+  String get phoneOperationFailed => '操作失败，请重试';
+
+  @override
+  String get phoneDeleteCurrentServerHint => '删除正在使用的服务器后，会退出当前登录';
+
+  @override
+  String get phoneManageSavedServers => '管理已保存的服务器';
+
+  @override
+  String get undoAction => '撤销';
+
+  @override
+  String get phoneGestureSeek => '滑动定位，松开后跳转';
+
+  @override
+  String phoneServerDeleted(String name) {
+    return '已删除「$name」';
+  }
 }

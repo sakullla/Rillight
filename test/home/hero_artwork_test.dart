@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/emby/emby_models.dart';
@@ -9,6 +10,7 @@ import 'package:rillight/home/featured_items.dart';
 import 'package:rillight/home/hero_artwork.dart';
 import 'package:rillight/home/home_hero.dart';
 import 'package:rillight/home/phone_hero.dart';
+import 'package:rillight/player/player_window_host.dart';
 
 void main() {
   const episode = EmbyItem(
@@ -112,6 +114,70 @@ void main() {
   tearDown(() {
     catalog.dispose();
     auth.dispose();
+  });
+  testWidgets('desktop hero artwork and copy open details but resume plays', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    catalog.resume = CatalogRowState(
+      items: [
+        EmbyItem.fromJson({
+          'Id': 'episode',
+          'Name': 'Resume episode',
+          'Type': 'Episode',
+          'SeriesId': 'series',
+          'UserData': {
+            'PlaybackPositionTicks': 120000000,
+            'PlayedPercentage': 20,
+          },
+        }),
+      ],
+    );
+    final host = OverlayPlayerWindowHost();
+    addTearDown(host.dispose);
+    final router = GoRouter(
+      routes: [
+        GoRoute(
+          path: '/',
+          builder: (_, _) => Scaffold(body: HomeHero(catalog: catalog)),
+        ),
+        GoRoute(
+          path: '/item/:id',
+          builder: (_, state) =>
+              Scaffold(body: Text('Details ${state.pathParameters['id']}')),
+        ),
+      ],
+    );
+    addTearDown(router.dispose);
+    await tester.pumpWidget(
+      PlayerWindowScope(
+        host: host,
+        child: MaterialApp.router(
+          routerConfig: router,
+          locale: const Locale('zh'),
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('hero-resume-episode')));
+    await tester.pumpAndSettle();
+    expect(host.current?.itemId, 'episode');
+    expect(router.canPop(), isFalse);
+    final target = find.byKey(const Key('home-hero-details-target'));
+    await tester.tapAt(tester.getTopRight(target) + const Offset(-40, 80));
+    await tester.pumpAndSettle();
+    expect(find.text('Details episode'), findsOneWidget);
+    router.pop();
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Resume episode').first);
+    await tester.pumpAndSettle();
+    expect(find.text('Details episode'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
   test('resume episodes and series appear only once per title', () {
     expect(featuredHomeItems(catalog).map((item) => item.id), [

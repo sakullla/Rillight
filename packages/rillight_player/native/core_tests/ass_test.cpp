@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cerrno>
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
@@ -105,7 +106,9 @@ int write_video_packets(AVFormatContext *format, AVCodecContext *encoder,
 
 Bytes make_ass_video(AVCodecID subtitle_codec = AV_CODEC_ID_ASS, bool hdr = false) {
   AVFormatContext *format = nullptr;
-  assert(avformat_alloc_output_context2(&format, nullptr, "matroska", nullptr) == 0);
+  const bool mov_text = subtitle_codec == AV_CODEC_ID_MOV_TEXT;
+  assert(avformat_alloc_output_context2(&format, nullptr,
+                                        mov_text ? "mp4" : "matroska", nullptr) == 0);
   assert(avio_open_dyn_buf(&format->pb) >= 0);
   const AVCodec *codec = avcodec_find_encoder(hdr ? AV_CODEC_ID_FFV1 : AV_CODEC_ID_MPEG4);
   assert(codec);
@@ -122,6 +125,7 @@ Bytes make_ass_video(AVCodecID subtitle_codec = AV_CODEC_ID_ASS, bool hdr = fals
   encoder->colorspace = hdr ? AVCOL_SPC_BT2020_NCL : AVCOL_SPC_BT709;
   encoder->color_primaries = hdr ? AVCOL_PRI_BT2020 : AVCOL_PRI_BT709;
   encoder->color_trc = hdr ? AVCOL_TRC_SMPTE2084 : AVCOL_TRC_BT709;
+  if (mov_text) encoder->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
   assert(avcodec_open2(encoder, codec, nullptr) == 0);
   AVStream *video = avformat_new_stream(format, nullptr);
   assert(video);
@@ -140,6 +144,22 @@ Bytes make_ass_video(AVCodecID subtitle_codec = AV_CODEC_ID_ASS, bool hdr = fals
   subtitle->time_base = AVRational{1, 1000};
   subtitle->codecpar->codec_type = AVMEDIA_TYPE_SUBTITLE;
   subtitle->codecpar->codec_id = subtitle_codec;
+  if (mov_text) {
+    const auto* text_codec = avcodec_find_encoder(AV_CODEC_ID_MOV_TEXT);
+    assert(text_codec);
+    auto* text_encoder = avcodec_alloc_context3(text_codec);
+    text_encoder->width = 320;
+    text_encoder->height = 180;
+    text_encoder->time_base = subtitle->time_base;
+    const size_t header_size = std::strlen(kAssHeader);
+    text_encoder->subtitle_header = static_cast<uint8_t*>(
+        av_mallocz(header_size + AV_INPUT_BUFFER_PADDING_SIZE));
+    std::memcpy(text_encoder->subtitle_header, kAssHeader, header_size);
+    text_encoder->subtitle_header_size = static_cast<int>(header_size);
+    assert(avcodec_open2(text_encoder, text_codec, nullptr) == 0);
+    assert(avcodec_parameters_from_context(subtitle->codecpar, text_encoder) == 0);
+    avcodec_free_context(&text_encoder);
+  }
   if (subtitle_codec == AV_CODEC_ID_ASS) {
     const size_t header_size = std::strlen(kAssHeader);
     subtitle->codecpar->extradata = static_cast<uint8_t *>(
@@ -154,12 +174,17 @@ Bytes make_ass_video(AVCodecID subtitle_codec = AV_CODEC_ID_ASS, bool hdr = fals
       "0,0,Default,,0,0,0,,VISIBLE SUBTITLE" : "VISIBLE TEXT";
   AVPacket *subtitle_packet = av_packet_alloc();
   assert(subtitle_packet);
-  assert(av_new_packet(subtitle_packet, static_cast<int>(std::strlen(event))) == 0);
-  std::memcpy(subtitle_packet->data, event, std::strlen(event));
+  const int text_size = static_cast<int>(std::strlen(event));
+  assert(av_new_packet(subtitle_packet, text_size + (mov_text ? 2 : 0)) == 0);
+  if (mov_text) {
+    subtitle_packet->data[0] = static_cast<uint8_t>(text_size >> 8);
+    subtitle_packet->data[1] = static_cast<uint8_t>(text_size);
+  }
+  std::memcpy(subtitle_packet->data + (mov_text ? 2 : 0), event, text_size);
   subtitle_packet->stream_index = subtitle->index;
   subtitle_packet->pts = 0;
   subtitle_packet->dts = 0;
-  subtitle_packet->duration = 4000;
+  subtitle_packet->duration = av_rescale_q(4000, {1, 1000}, subtitle->time_base);
   assert(av_interleaved_write_frame(format, subtitle_packet) == 0);
   av_packet_free(&subtitle_packet);
 
@@ -205,7 +230,8 @@ Bytes make_ass_video(AVCodecID subtitle_codec = AV_CODEC_ID_ASS, bool hdr = fals
 
 void *open(void *opaque, const char *url, int) {
   auto *media = static_cast<Media *>(opaque);
-  if (std::strcmp(url, "synthetic.mkv") == 0) return new Bytes(media->video);
+  if (std::strcmp(url, "synthetic.mkv") == 0 ||
+      std::strcmp(url, "synthetic.mp4") == 0) return new Bytes(media->video);
   if (std::strcmp(url, "synthetic-hdr.mkv") == 0) return new Bytes(media->hdr_video);
   if (std::strcmp(url, "synthetic-srt.mkv") == 0)
     return new Bytes(media->srt_video);
@@ -241,14 +267,14 @@ int read(void *, void *handle, uint8_t *data, int size) {
   }
   if (bytes->fail_read) return -5;
   if (bytes->stall_at_offset &&
-      bytes->offset >= bytes->stall_at_offset) return -11;
+      bytes->offset >= bytes->stall_at_offset) return AVERROR(EAGAIN);
   if (bytes->slow_progress_reads > 0) {
     std::this_thread::sleep_for(std::chrono::milliseconds(550));
     --bytes->slow_progress_reads;
     size = std::min(size, 32);
   } else if (bytes->eagain_after_progress) {
     bytes->eagain_after_progress = false;
-    return -11;
+    return AVERROR(EAGAIN);
   }
   if (bytes->stall_at_offset)
     size = std::min(size, 1024);
@@ -310,8 +336,44 @@ bool wait_for(RillightCore *core, Predicate predicate,
 }
 }  // namespace
 
-int main() {
+int main(int argc, char** argv) {
   assert(rillight_core_abi_version() == RILLIGHT_CORE_ABI_VERSION);
+  if (argc > 1 && std::strcmp(argv[1], "--mov-text-only") == 0) {
+    Media media{};
+    media.video = make_ass_video(AV_CODEC_ID_MOV_TEXT);
+    RillightCoreIo io{&media, open, read, seek, close, cancel, cancel_media_io};
+    auto* core = rillight_core_create(&io);
+    assert(core && rillight_core_open(core, "synthetic.mp4", 1) == 0);
+    assert(wait_for(core, [](const auto& state) {
+      return state.first_video_frame_ready && state.subtitle_stream_index >= 0;
+    }));
+    bool visible = false;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (!visible && std::chrono::steady_clock::now() < deadline) {
+      if (auto* frame = rillight_core_take_frame(core, RILLIGHT_CORE_VIDEO_RGBA)) {
+        int white = 0;
+        for (int i = 0; i + 3 < frame->data_size; i += 4)
+          if (frame->data[i] > 180 && frame->data[i + 1] > 180 &&
+              frame->data[i + 2] > 180) ++white;
+        visible = white > 20;
+        rillight_core_release_frame(frame);
+      }
+      if (!visible) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    assert(visible);
+    const auto selected = snapshot(core).subtitle_stream_index;
+    assert(rillight_core_select_subtitle(core, -1, 2) == 0);
+    assert(wait_for(core, [](const auto& state) {
+      return state.subtitle_stream_index == -1 && state.first_video_frame_ready;
+    }));
+    assert(rillight_core_select_subtitle(core, selected, 3) == 0);
+    assert(wait_for(core, [selected](const auto& state) {
+      return state.subtitle_stream_index == selected && state.first_video_frame_ready;
+    }));
+    rillight_core_destroy(core);
+    std::puts("MOV_TEXT MP4 subtitle pixels and off/on selection passed");
+    return 0;
+  }
   Media media{};
   media.video = make_ass_video();
 #if defined(_WIN32)

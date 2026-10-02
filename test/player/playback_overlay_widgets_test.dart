@@ -10,6 +10,8 @@ import 'package:rillight/player/bif_preview.dart';
 import 'package:rillight/player/next_episode_card.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/playback_settings_menu.dart';
+import 'package:rillight/player/playback_models.dart';
+import 'package:rillight/player/playback_resolver.dart';
 import 'package:rillight/player/player_controller.dart';
 import 'package:rillight/player/player_keys.dart';
 import 'package:rillight/player/player_settings.dart';
@@ -55,6 +57,43 @@ void main() {
         home: Scaffold(body: Center(child: child)),
       );
 
+  for (final count in [0, 1, 2]) {
+    testWidgets('settings hide unavailable or single choices ($count)', (
+      tester,
+    ) async {
+      final source = PlaybackMediaSource(
+        id: 'one',
+        supportsTranscoding: count > 0,
+        bitrate: count == 1 ? 500 : null,
+        mediaStreams: [
+          for (var i = 0; i < count; i++)
+            MediaStreamInfo(index: i, type: 'Audio', displayTitle: 'Audio $i'),
+        ],
+      );
+      controller.resolved = ResolvedPlayback(
+        playMethod: PlayMethod.directPlay,
+        streamUrl: Uri.parse('https://example.test/movie'),
+        playSessionId: 'session',
+        mediaSource: source,
+        itemId: 'current',
+      );
+      controller.mediaSources = [
+        for (var i = 0; i < count; i++) PlaybackMediaSource(id: '$i'),
+      ];
+      await tester.pumpWidget(
+        app(PlaybackSettingsMenu(controller: controller)),
+      );
+      await tester.tap(find.byKey(PlayerKeys.more));
+      await tester.pumpAndSettle();
+      final expected = count > 1 ? findsOneWidget : findsNothing;
+      expect(find.byKey(PlayerKeys.audio), expected);
+      expect(find.byKey(PlayerKeys.quality), expected);
+      expect(find.byKey(PlayerKeys.mediaSource), expected);
+      expect(find.byKey(PlayerKeys.speed), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
   testWidgets(
     'settings categories stay available and persist both skip choices',
     (tester) async {
@@ -63,6 +102,33 @@ void main() {
       );
       await tester.tap(find.byKey(PlayerKeys.more));
       await tester.pumpAndSettle();
+      final selectedRate = tester.getSize(
+        find.byKey(const ValueKey('player-rate-1.0')),
+      );
+      expect(selectedRate.height, inInclusiveRange(36, 44));
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('player-rate-1.0')),
+          matching: find.byIcon(Icons.check_rounded),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('player-rate-1.5')),
+          matching: find.byIcon(Icons.check_rounded),
+        ),
+        findsNothing,
+      );
+      final panelRect = tester.getRect(
+        find.byKey(const Key('player-settings-panel')),
+      );
+      final lastRate = tester.getRect(
+        find.byKey(const ValueKey('player-rate-3.0')),
+      );
+      expect(lastRate.bottom, lessThanOrEqualTo(panelRect.bottom + .5));
+      expect(lastRate.top, greaterThanOrEqualTo(panelRect.top));
+      expect(lastRate.height, selectedRate.height);
       expect(find.byType(ExpansionTile), findsNothing);
       expect(find.byKey(const Key('player-skip-intro-enabled')), findsNothing);
       final panelSize = tester.getSize(

@@ -76,6 +76,72 @@ void main() {
     },
   );
 
+  test(
+    'busy byte verification retains recent coverage then expires and recovers',
+    () async {
+      final bytes = Uint8List(1024);
+      final root = await Directory.systemTemp.createTemp(
+        'rillight-timeline-retry-',
+      );
+      final cache = await SessionByteCache.open(
+        root: root,
+        memoryLimitBytes: 0,
+      );
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      server.listen((request) async {
+        request.response.contentLength = bytes.length;
+        request.response.headers.set('etag', '"immutable"');
+        request.response.add(bytes);
+        await request.response.close();
+      });
+      final proxy = await PlaybackHttpProxy.create(
+        cache: cache,
+        sessionBuffering: true,
+      );
+      final client = HttpClient();
+      try {
+        final route = proxy.register(
+          Uri.parse('http://127.0.0.1:${server.port}/movie.mp4'),
+        );
+        await (await (await client.getUrl(route)).close()).drain<void>();
+        final deadline = DateTime.now().add(const Duration(seconds: 2));
+        while ((cache.diagnostics['diskBytes'] as int? ?? 0) < bytes.length &&
+            DateTime.now().isBefore(deadline)) {
+          await Future<void>.delayed(const Duration(milliseconds: 5));
+        }
+        await proxy.refreshTimeline(const Duration(seconds: 4));
+        final expected = [
+          {'start': 0, 'end': 1024},
+        ];
+        expect(proxy.diagnostics['cachedByteRanges'], expected);
+        await cache.resize(
+          memoryBytes: 0,
+          pendingBytes: 0,
+          diskBytes: 2048 * 1024 * 1024,
+        );
+        await proxy.refreshTimeline(
+          const Duration(seconds: 4, milliseconds: 1),
+        );
+        expect(proxy.diagnostics['cachedByteRanges'], expected);
+        await Future<void>.delayed(const Duration(milliseconds: 5100));
+        await proxy.refreshTimeline(const Duration(seconds: 4));
+        expect(proxy.diagnostics['cachedByteRanges'], isEmpty);
+        await cache.resize(
+          memoryBytes: 0,
+          pendingBytes: 8 * 1024 * 1024,
+          diskBytes: 2048 * 1024 * 1024,
+        );
+        await proxy.refreshTimeline(const Duration(seconds: 4));
+        expect(proxy.diagnostics['cachedByteRanges'], expected);
+      } finally {
+        client.close(force: true);
+        await proxy.close();
+        await server.close(force: true);
+        await root.delete(recursive: true);
+      }
+    },
+  );
+
   test('unknown timeline exposes only current verified byte islands', () async {
     final bytes = Uint8List.fromList(List<int>.generate(1024, (i) => i % 251));
     var etag = '"first"';
@@ -98,7 +164,7 @@ void main() {
       request.response.add(bytes.sublist(range.start, range.end + 1));
       await request.response.close();
     });
-    final cache = await SessionByteCache.open();
+    final cache = await SessionByteCache.open(memoryLimitBytes: 1024);
     final proxy = await PlaybackHttpProxy.create(
       cache: cache,
       sessionBuffering: true,
@@ -131,6 +197,35 @@ void main() {
       final identity = first['timelineIdentity'] as String;
       final separator = identity.lastIndexOf(':');
       expect(separator, greaterThan(0));
+      final resource = identity.substring(0, separator);
+      final generation = int.parse(identity.substring(separator + 1));
+      await cache.put(
+        resource: 'unrelated',
+        generation: 1,
+        offset: 0,
+        bytes: Uint8List(600),
+      );
+      await cache.read(
+        resource: resource,
+        generation: generation,
+        offset: 0,
+        maxLength: 100,
+      );
+      await cache.read(
+        resource: resource,
+        generation: generation,
+        offset: 500,
+        maxLength: 100,
+      );
+      await cache.put(
+        resource: 'other',
+        generation: 1,
+        offset: 0,
+        bytes: Uint8List(600),
+      );
+      // Evicting unrelated, unadvertised RAM must not blink verified islands.
+      expect(proxy.diagnostics['cachedByteRanges'], first['cachedByteRanges']);
+
       proxy.selectContainerTracks(videoTrackId: 1, audioTrackId: 2);
       final refreshing = proxy.refreshTimeline(const Duration(seconds: 4));
       final write = cache.put(

@@ -74,6 +74,11 @@ abstract interface class VideoBackendTrackSupport {
   bool? subtitleTrackSupported(int index);
 }
 
+/// Renew a progressive media URL without replacing its decoder or cache.
+abstract interface class VideoBackendSourceRenewal {
+  Future<void> refreshSourceUrl(Uri url);
+}
+
 /// Native video can be composed behind the transparent Flutter controls.
 abstract interface class VideoBackendNativeOverlay {
   ValueListenable<bool> get nativeOverlay;
@@ -90,6 +95,7 @@ enum VideoEventKind {
   error,
   cacheSpeed,
   authenticationRequired,
+  sourceRefreshRequired,
 }
 
 /// The backend preserves the originating open's identity, including late events.

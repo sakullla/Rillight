@@ -800,6 +800,38 @@ class SessionByteCache {
     // Inaccessible immutable disk blocks remain charged and are LRU candidates.
   }
 
+  /// Reclaim consumed progressive-media blocks before unread forward data is
+  /// evicted. Keep initialization bytes and any active protected read intact.
+  Future<void> discardBefore({
+    required String resource,
+    required int generation,
+    required int offset,
+    int keepPrefixBytes = 32 * 1024 * 1024,
+  }) async {
+    if (_closed || _acquiringLeases != 0 || offset <= keepPrefixBytes) return;
+    final protected = {
+      for (final lease in _rangeLeases)
+        for (final block in lease._blocks) block.key,
+    };
+    final tokens = <String>[];
+    for (final item in _entries.entries.toList()) {
+      final key = item.key;
+      if (key.resource != resource ||
+          key.generation != generation ||
+          key.offset < keepPrefixBytes ||
+          key.offset + item.value.length > offset ||
+          item.value.publication != null ||
+          protected.contains(key)) {
+        continue;
+      }
+      final token = item.value.diskToken;
+      if (token != null) tokens.add(token);
+      _forget(key);
+      _removeMemory(key);
+    }
+    if (tokens.isNotEmpty) await _disk?.drop(tokens);
+  }
+
   Future<void> close() => _closing ??= _close();
 
   Future<void> _close() async {

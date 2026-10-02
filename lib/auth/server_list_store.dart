@@ -41,10 +41,14 @@ class SavedServer {
     required this.lines,
     this.activeLineId,
     this.userAgent,
+    this.nickname,
   });
 
   final String id;
   final String name;
+  final String? nickname;
+  String get displayName =>
+      nickname?.trim().isNotEmpty == true ? nickname!.trim() : name;
   final String username;
   final List<ServerLine> lines;
   final String? activeLineId;
@@ -79,6 +83,7 @@ class SavedServer {
   Map<String, dynamic> toJson() => {
     'id': id,
     'name': name,
+    if (nickname?.trim().isNotEmpty == true) 'nickname': nickname!.trim(),
     'username': username,
     'activeLineId': activeLineId,
     if (normalizedUserAgent != null) 'userAgent': normalizedUserAgent,
@@ -112,6 +117,7 @@ class SavedServer {
     return SavedServer(
       id: json['id']?.toString() ?? '',
       name: json['name']?.toString() ?? '',
+      nickname: json['nickname']?.toString(),
       username: json['username']?.toString() ?? '',
       lines: lines,
       activeLineId: resolvedActiveLineId,
@@ -162,10 +168,12 @@ class SavedServer {
     List<ServerLine>? lines,
     String? activeLineId,
     String? userAgent,
+    String? nickname,
   }) {
     return SavedServer(
       id: id ?? this.id,
       name: name ?? this.name,
+      nickname: nickname ?? this.nickname,
       username: username ?? this.username,
       lines: lines ?? this.lines,
       activeLineId: activeLineId ?? this.activeLineId,

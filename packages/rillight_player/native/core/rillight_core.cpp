@@ -132,6 +132,9 @@ int loopback_open_at(LoopbackHandle *handle, int64_t position) {
   av_dict_set(&options, "rw_timeout", "45000000", 0);
   // Every reconnect must retain the same sealed route and redirect policy.
   av_dict_set(&options, "max_redirects", "0", 0);
+  // Reopening after cancellation must request the target directly. Opening at
+  // byte zero first creates an obsolete header request beside the media read.
+  if (position > 0) av_dict_set_int(&options, "offset", position, 0);
   const AVIOInterruptCB interrupt{loopback_interrupted, handle};
   AVIOContext *replacement = nullptr;
   int result = avio_open2(&replacement, handle->url.c_str(), AVIO_FLAG_READ,
@@ -185,12 +188,15 @@ int loopback_read(void *, void *pointer, uint8_t *data, int size) {
     const int reopened = loopback_open_at(handle, handle->position);
     if (reopened < 0) return reopened;
   }
-  int result = avio_read(handle->io, data, size);
+  // This is an AVIO read callback, not a request to fill the caller's buffer.
+  // Container probing can grow that buffer to 16 MiB for seek-back. Filling
+  // it eagerly re-downloads megabytes on every interleaved track seek.
+  int result = avio_read_partial(handle->io, data, size);
   if (result > 0) handle->position += result;
   if (result == AVERROR(EIO) && !handle->owner->closing.load() &&
       handle->owner->media_generation.load() == generation &&
       loopback_open_at(handle, handle->position) == 0) {
-    result = avio_read(handle->io, data, size);
+    result = avio_read_partial(handle->io, data, size);
     if (result > 0) handle->position += result;
   }
   return result;
@@ -1239,8 +1245,18 @@ int source_read(void *opaque, uint8_t *buffer, int size) {
 
 int64_t source_seek(void *opaque, int64_t offset, int whence) {
   auto *source = static_cast<Source *>(opaque);
-  if (!source->aes)
-    return source->io.seek(source->io.opaque, source->handle, offset, whence);
+  if (!source->aes) {
+    const auto timeline = source->timeline_signal->load();
+    const int64_t result = source->io.seek(source->io.opaque, source->handle, offset, whence);
+    if (!(whence & AVSEEK_SIZE) && result < 0 && result != AVERROR(ENOSYS) &&
+        result != AVERROR(EAGAIN) && result != AVERROR_EXIT &&
+        source->timeline_signal->load() == timeline &&
+        source->active_read_timeline->load() == timeline) {
+      int expected = 0;
+      source->fatal_error->compare_exchange_strong(expected, static_cast<int>(result));
+    }
+    return result;
+  }
   if (whence == AVSEEK_SIZE)
     return source->io.seek(source->io.opaque, source->handle, offset, whence);
   if (whence == SEEK_CUR && offset == 0) return source->position;
@@ -1666,7 +1682,8 @@ bool bitmap_subtitle_codec(AVCodecID codec) {
 
 #if RILLIGHT_HAVE_LIBASS
 bool text_subtitle_codec(AVCodecID codec) {
-  return codec == AV_CODEC_ID_SUBRIP || codec == AV_CODEC_ID_WEBVTT;
+  return codec == AV_CODEC_ID_SUBRIP || codec == AV_CODEC_ID_WEBVTT ||
+         codec == AV_CODEC_ID_MOV_TEXT;
 }
 #endif
 
@@ -2651,6 +2668,44 @@ class VideoConvertLane {
   bool enabled_ = true, busy_ = false, stopped_ = false;
 };
 
+bool complete_mp4_header(AVFormatContext* format) {
+  if (!format || !format->iformat || !format->iformat->name ||
+      std::string_view(format->iformat->name).find("mov,mp4") != 0 ||
+      (format->ctx_flags & AVFMTCTX_NOHEADER)) return false;
+  bool video = false;
+  int64_t duration = 0;
+  for (unsigned int i = 0; i < format->nb_streams; ++i) {
+    const auto* stream = format->streams[i];
+    const auto* parameters = stream->codecpar;
+    if (parameters->codec_type == AVMEDIA_TYPE_VIDEO &&
+        !(stream->disposition & AV_DISPOSITION_ATTACHED_PIC)) {
+      if (parameters->codec_id != AV_CODEC_ID_H264 &&
+          parameters->codec_id != AV_CODEC_ID_HEVC &&
+          parameters->codec_id != AV_CODEC_ID_AV1 &&
+          parameters->codec_id != AV_CODEC_ID_MPEG4) return false;
+      if (parameters->width <= 0 || parameters->height <= 0 ||
+          parameters->extradata_size <= 0 ||
+          stream->nb_frames <= 0 || stream->duration <= 0 ||
+          stream->time_base.num <= 0 || stream->time_base.den <= 0 ||
+          (stream->avg_frame_rate.num <= 0 && stream->r_frame_rate.num <= 0))
+        return false;
+      video = true;
+    } else if (parameters->codec_type == AVMEDIA_TYPE_AUDIO) {
+      // Unknown MP4 sample entries cannot become playable by probing their
+      // payload. They must not block fully described supported tracks.
+      if (parameters->codec_id != AV_CODEC_ID_NONE &&
+          (parameters->sample_rate <= 0 || parameters->ch_layout.nb_channels <= 0))
+        return false;
+    }
+    if (stream->duration > 0 && stream->time_base.num > 0 && stream->time_base.den > 0)
+      duration = std::max(duration, av_rescale_q(stream->duration,
+                           stream->time_base, AVRational{1, AV_TIME_BASE}));
+  }
+  if (!video || duration <= 0) return false;
+  if (format->duration == AV_NOPTS_VALUE) format->duration = duration;
+  return true;
+}
+
 void run(RillightCoreImpl *core, uint64_t session) {
   AVFormatContext *format = avformat_alloc_context();
   Source *main_source = nullptr;
@@ -2688,6 +2743,7 @@ void run(RillightCoreImpl *core, uint64_t session) {
   format->interrupt_callback = AVIOInterruptCB{interrupt_read, core};
   format->io_open = nested_open;
   format->io_close2 = nested_close;
+
   main_source = open_source(core, core->url.c_str(), AVIO_FLAG_READ);
   if (!main_source) {
     result = core->owned_loopback ? core->owned_loopback->media_open_error.load() : 0;
@@ -2696,15 +2752,25 @@ void run(RillightCoreImpl *core, uint64_t session) {
   }
   format->pb = main_source->avio;
   format->flags |= AVFMT_FLAG_CUSTOM_IO;
+
   result = avformat_open_input(&format, core->url.c_str(), nullptr, nullptr);
   if (result < 0) goto finish;
-  result = avformat_find_stream_info(format, nullptr);
-  if (result < 0) goto finish;
+  // MP4 sample tables and codec configuration already describe complete VOD
+  // streams. Probing every optional track can otherwise force distant network
+  // reads before playback, even though the selected decoders can open now.
+  // Fragmented/live/incomplete headers retain FFmpeg's full discovery path.
+  if (!complete_mp4_header(format)) {
+
+    result = avformat_find_stream_info(format, nullptr);
+    if (result < 0) goto finish;
+  }
+
   {
     const int vi = av_find_best_stream(format, AVMEDIA_TYPE_VIDEO, -1, -1,
                                        nullptr, 0);
+    const AVCodec *audio_codec = nullptr;
     const int ai = av_find_best_stream(format, AVMEDIA_TYPE_AUDIO, -1, -1,
-                                       nullptr, 0);
+                                       &audio_codec, 0);
     result = restore_dovi_configuration(format, vi, &pending_packets);
     if (result < 0) goto finish;
     if (vi >= 0) {
@@ -2877,6 +2943,7 @@ void run(RillightCoreImpl *core, uint64_t session) {
 
       return result;
     })) { result = AVERROR(ENOMEM); goto finish; }
+
   while (!core->stop) {
     uint64_t timeline;
     int64_t seek;
@@ -3012,7 +3079,8 @@ void run(RillightCoreImpl *core, uint64_t session) {
       } else {
         avcodec_free_context(&replacement.context);
         std::lock_guard lock(core->mutex);
-        core->error = AVERROR_DECODER_NOT_FOUND;
+        core->error = replacement.error < 0 ? replacement.error :
+                                                AVERROR_DECODER_NOT_FOUND;
       }
     }
     if (change_subtitle) {
@@ -3096,6 +3164,15 @@ void run(RillightCoreImpl *core, uint64_t session) {
       close_audio_filter(&audio_filter);
       std::lock_guard lock(core->mutex);
       core->speed = selected_speed;
+    }
+    // Do not seek/read the payload of every unselected MP4 audio track.
+    // Keep their headers and indices so a later selection can re-enable them.
+    for (unsigned i = 0; i < format->nb_streams; ++i) {
+      format->streams[i]->discard =
+          static_cast<int>(i) == video.stream ||
+          static_cast<int>(i) == audio.stream ||
+          static_cast<int>(i) == subtitle.stream
+              ? AVDISCARD_DEFAULT : AVDISCARD_ALL;
     }
     conversion_lane.Resume();
     video_lane.Resume();
@@ -3190,6 +3267,7 @@ void run(RillightCoreImpl *core, uint64_t session) {
     if (result < 0) break;
   }
 finish:
+
   core->decode_abort = true;
   core->wake.notify_all();
   video_lane.Stop();
@@ -3668,9 +3746,17 @@ int rillight_core_select_audio(RillightCore *pointer, int stream_index,
   if (core->state == RILLIGHT_CORE_IDLE ||
       core->state == RILLIGHT_CORE_OPENING ||
       core->state == RILLIGHT_CORE_ENDED ||
-      core->state == RILLIGHT_CORE_FAILED ||
-      !accept_operation(core, operation_id)) return -1;
+      core->state == RILLIGHT_CORE_FAILED) return -1;
+  if (std::none_of(core->tracks.begin(), core->tracks.end(),
+                   [stream_index](const RillightCoreTrack &track) {
+                     return track.type == RILLIGHT_CORE_TRACK_AUDIO &&
+                            track.stream_index == stream_index &&
+                            avcodec_find_decoder(
+                                static_cast<AVCodecID>(track.codec_id));
+                   })) return AVERROR_DECODER_NOT_FOUND;
+  if (!accept_operation(core, operation_id)) return -1;
   if (core->audio_index == stream_index && !core->audio_change) return 0;
+  core->error = 0;
   core->base_position = playback_position(core);
   core->requested_audio = stream_index;
   core->audio_change = true;

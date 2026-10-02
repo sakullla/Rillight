@@ -828,7 +828,7 @@
   "@settingsDiskCacheLimit": {
     "description": "Setting row label for the on-disk playback cache size limit."
   },
-  "settingsDiskCacheLimitHint": "限制本地缓冲占用",
+  "settingsDiskCacheLimitHint": "限制本地缓冲占用；达到上限后，随播放进度自动释放旧片段并缓存后续内容",
   "@settingsDiskCacheLimitHint": {
     "description": "Short explanation under the disk cache limit row."
   },
@@ -1470,7 +1470,14 @@
   "playerSettingOff": "关闭",
   "playerSkipSettingsSummary": "片头{intro} · 片尾{outro}",
   "@playerSkipSettingsSummary": {
-    "placeholders": { "intro": { "type": "String" }, "outro": { "type": "String" } }
+    "placeholders": {
+      "intro": {
+        "type": "String"
+      },
+      "outro": {
+        "type": "String"
+      }
+    }
   },
   "playerSkipSettingsSaved": "自动保存，应用于所有视频",
   "nextEpisodeHeading": "接下来播放",
@@ -1487,5 +1494,69 @@
   "settingsDanmakuConfiguration": "弹幕配置",
   "settingsDanmakuConfigurationSummary": "显示样式、屏蔽词与服务连接",
   "danmakuPreview": "样式预览",
-  "danmakuPreviewText": "一起看剧，弹幕也清晰舒适"
+  "danmakuPreviewText": "一起看剧，弹幕也清晰舒适",
+  "phoneServerManagement": "服务器管理",
+  "@phoneServerManagement": {
+    "description": "Touch server management or desktop gesture feedback."
+  },
+  "phoneServerManagementHint": "切换服务器，管理连接地址和保存的账号",
+  "@phoneServerManagementHint": {
+    "description": "Touch server management or desktop gesture feedback."
+  },
+  "phoneCurrentServer": "正在使用",
+  "@phoneCurrentServer": {
+    "description": "Touch server management or desktop gesture feedback."
+  },
+  "phoneManageServer": "管理服务器",
+  "@phoneManageServer": {
+    "description": "Touch server management or desktop gesture feedback."
+  },
+  "phoneRenameServer": "修改显示名称",
+  "@phoneRenameServer": {
+    "description": "Touch server management or desktop gesture feedback."
+  },
+  "phoneServerName": "显示名称",
+  "@phoneServerName": {
+    "description": "Touch server management or desktop gesture feedback."
+  },
+  "phoneServerNameHint": "留空使用服务器名称",
+  "@phoneServerNameHint": {
+    "description": "Touch server management or desktop gesture feedback."
+  },
+  "phoneEmptyServers": "还没有保存的服务器",
+  "@phoneEmptyServers": {
+    "description": "Touch server management or desktop gesture feedback."
+  },
+  "phoneNoMatchingServers": "没有找到匹配的服务器",
+  "@phoneNoMatchingServers": {
+    "description": "Touch server management or desktop gesture feedback."
+  },
+  "phoneOperationFailed": "操作失败，请重试",
+  "@phoneOperationFailed": {
+    "description": "Touch server management or desktop gesture feedback."
+  },
+  "phoneDeleteCurrentServerHint": "删除正在使用的服务器后，会退出当前登录",
+  "@phoneDeleteCurrentServerHint": {
+    "description": "Touch server management or desktop gesture feedback."
+  },
+  "phoneManageSavedServers": "管理已保存的服务器",
+  "@phoneManageSavedServers": {
+    "description": "Touch server management or desktop gesture feedback."
+  },
+  "undoAction": "撤销",
+  "@undoAction": {
+    "description": "Touch server management or desktop gesture feedback."
+  },
+  "phoneGestureSeek": "滑动定位，松开后跳转",
+  "@phoneGestureSeek": {
+    "description": "Touch server management or desktop gesture feedback."
+  },
+  "phoneServerDeleted": "已删除「{name}」",
+  "@phoneServerDeleted": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  }
 }

@@ -3,6 +3,7 @@
 #include <array>
 #include <cassert>
 #include <cstdio>
+#include <vector>
 
 int main() {
   @autoreleasepool {
@@ -63,6 +64,26 @@ int main() {
     CVPixelBufferUnlockBaseAddress(rotated, kCVPixelBufferLock_ReadOnly);
     assert(CVPixelBufferGetWidth(rotated) == 3);
     CVPixelBufferRelease(rotated);
+    std::vector<uint8_t> hd(8 * 4 * 4, 0);
+    RillightCoreFrame large{};
+    large.type = RILLIGHT_CORE_VIDEO_RGBA;
+    large.width = 8;
+    large.height = 4;
+    large.stride = 32;
+    large.data = hd.data();
+    large.data_size = hd.size();
+    large.sar_num = large.sar_den = 1;
+    rillight_macos::PixelBufferOutput fitted;
+    CVPixelBufferRef windowed = nullptr;
+    assert(fitted.Render(large, 4, 2, &windowed) == kCVReturnSuccess);
+    assert(CVPixelBufferGetWidth(windowed) == 4);
+    assert(CVPixelBufferGetHeight(windowed) == 2);
+    CVPixelBufferRelease(windowed);
+    CVPixelBufferRef retina = nullptr;
+    assert(fitted.Render(large, 16, 8, &retina) == kCVReturnSuccess);
+    assert(CVPixelBufferGetWidth(retina) == 8);
+    assert(CVPixelBufferGetHeight(retina) == 4);
+    CVPixelBufferRelease(retina);
     frame.data_size = 1;
     CVPixelBufferRef blocked = nullptr;
     assert(output.Render(frame, 2, 2, &blocked) == kCVReturnInvalidArgument);

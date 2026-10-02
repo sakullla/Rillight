@@ -350,7 +350,7 @@ jobs:
           cleanup() { hdiutil detach "$mount_point" -force > /dev/null 2>&1 || true; }
           trap cleanup EXIT
 
-          signature="$(codesign -dvv "$mount_point/rillight.app" 2>&1 || true)"
+          signature="$(codesign -dvv "$mount_point/Rillight.app" 2>&1 || true)"
           echo "$signature"
           if ! grep -Fq "Authority=Rillight Self Sign" <<< "$signature"; then
             echo "::error::Rillight-macos-${GITHUB_REF_NAME} does not carry the fixed self signature"

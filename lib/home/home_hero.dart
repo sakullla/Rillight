@@ -110,22 +110,26 @@ class _HomeHeroState extends State<HomeHero> {
                     ),
                   ),
                   clipBehavior: Clip.antiAlias,
-                  child: SizedBox(
-                    height: compact ? height + 180 : height,
-                    child: compact
-                        ? Column(
-                            children: [
-                              SizedBox(height: 180, child: image),
-                              Expanded(child: copy),
-                            ],
-                          )
-                        : Row(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              Expanded(flex: 5, child: copy),
-                              Expanded(flex: 6, child: image),
-                            ],
-                          ),
+                  child: InkWell(
+                    key: const Key('home-hero-details-target'),
+                    onTap: () => context.push(AppRoutes.item(item.id)),
+                    child: SizedBox(
+                      height: compact ? height + 180 : height,
+                      child: compact
+                          ? Column(
+                              children: [
+                                SizedBox(height: 180, child: image),
+                                Expanded(child: copy),
+                              ],
+                            )
+                          : Row(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                Expanded(flex: 5, child: copy),
+                                Expanded(flex: 6, child: image),
+                              ],
+                            ),
+                    ),
                   ),
                 );
               },

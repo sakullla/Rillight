@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/app/desktop_gestures.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/scrim_icon_button.dart';
@@ -64,6 +65,29 @@ class AppShell extends StatefulWidget {
 }
 
 class _AppShellState extends State<AppShell> {
+  final _forwardLocations = <String>[];
+  String? _gestureLocation;
+  bool _gestureNavigation = false;
+
+  void _back() {
+    if (_searchOpen) {
+      _closeSearch();
+      return;
+    }
+    final router = GoRouter.of(context);
+    final uri = GoRouterState.of(context).uri.toString();
+    if (!router.canPop() && uri == AppRoutes.home) return;
+    _forwardLocations.add(uri);
+    _gestureNavigation = true;
+    router.canPop() ? router.pop() : router.go(AppRoutes.home);
+  }
+
+  void _forward() {
+    if (_searchOpen || _forwardLocations.isEmpty) return;
+    _gestureNavigation = true;
+    GoRouter.of(context).push(_forwardLocations.removeLast());
+  }
+
   bool _searchOpen = false;
   final FocusNode _searchQueryFocus = FocusNode();
   final FocusNode _searchButtonFocus = FocusNode();
@@ -127,60 +151,70 @@ class _AppShellState extends State<AppShell> {
       return Scaffold(body: widget.child);
     }
 
-    return SearchOverlayController(
-      isOpen: _searchOpen,
-      open: _openSearch,
-      close: _closeSearch,
-      child: CallbackShortcuts(
-        bindings: {
-          const SingleActivator(LogicalKeyboardKey.keyF, control: true):
-              _openSearch,
-          const SingleActivator(LogicalKeyboardKey.keyF, meta: true):
-              _openSearch,
-        },
-        child: Focus(
-          autofocus: true,
-          skipTraversal: true,
-          child: Scaffold(
-            body: Stack(
-              fit: StackFit.expand,
-              children: [
-                NotificationListener<HomeScrollNotification>(
-                  onNotification: (notification) {
-                    if (_scrollPath != location ||
-                        _contentScrolled != notification.scrolled) {
-                      setState(() {
-                        _scrollPath = location;
-                        _contentScrolled = notification.scrolled;
-                      });
-                    }
-                    return true;
-                  },
-                  child: widget.child,
-                ),
-                Positioned(
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  child: _TopBar(
-                    location: location,
-                    opaque:
-                        !_immersiveTopBar(location) || _barScrolled(location),
-                    searchFocus: _searchButtonFocus,
+    final gestureLocation = GoRouterState.of(context).uri.toString();
+    if (_gestureLocation != gestureLocation) {
+      if (!_gestureNavigation) _forwardLocations.clear();
+      _gestureLocation = gestureLocation;
+      _gestureNavigation = false;
+    }
+    return DesktopNavigationGestures(
+      onBack: _back,
+      onForward: _forwardLocations.isEmpty ? null : _forward,
+      child: SearchOverlayController(
+        isOpen: _searchOpen,
+        open: _openSearch,
+        close: _closeSearch,
+        child: CallbackShortcuts(
+          bindings: {
+            const SingleActivator(LogicalKeyboardKey.keyF, control: true):
+                _openSearch,
+            const SingleActivator(LogicalKeyboardKey.keyF, meta: true):
+                _openSearch,
+          },
+          child: Focus(
+            autofocus: true,
+            skipTraversal: true,
+            child: Scaffold(
+              body: Stack(
+                fit: StackFit.expand,
+                children: [
+                  NotificationListener<HomeScrollNotification>(
+                    onNotification: (notification) {
+                      if (_scrollPath != location ||
+                          _contentScrolled != notification.scrolled) {
+                        setState(() {
+                          _scrollPath = location;
+                          _contentScrolled = notification.scrolled;
+                        });
+                      }
+                      return true;
+                    },
+                    child: widget.child,
                   ),
-                ),
-                // 遮罩在顶栏之上、覆盖层之下:压暗整个背景并拦截穿透
-                // 覆盖层非交互区域的点击,点击等同关闭;关闭后立即恢复。
-                SearchOverlayBarrier(
-                  visible: _searchOpen,
-                  onDismiss: _closeSearch,
-                ),
-                if (_searchOpen)
-                  SearchOverlay(
-                    queryFocusNode: _searchQueryFocus,
-                    onClose: _closeSearch,
+                  Positioned(
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    child: _TopBar(
+                      location: location,
+                      opaque:
+                          !_immersiveTopBar(location) || _barScrolled(location),
+                      searchFocus: _searchButtonFocus,
+                    ),
                   ),
-              ],
+                  // 遮罩在顶栏之上、覆盖层之下:压暗整个背景并拦截穿透
+                  // 覆盖层非交互区域的点击,点击等同关闭;关闭后立即恢复。
+                  SearchOverlayBarrier(
+                    visible: _searchOpen,
+                    onDismiss: _closeSearch,
+                  ),
+                  if (_searchOpen)
+                    SearchOverlay(
+                      queryFocusNode: _searchQueryFocus,
+                      onClose: _closeSearch,
+                    ),
+                ],
+              ),
             ),
           ),
         ),

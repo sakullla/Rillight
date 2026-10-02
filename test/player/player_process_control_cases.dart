@@ -44,9 +44,32 @@ void main() {
     await control.ready(processId: 999);
     await Future<void>.delayed(const Duration(milliseconds: 5));
     expect(completed, isFalse);
+    expect(control.activations, isEmpty);
     await control.ready();
     expect(await spawning, 42);
+    expect(control.activations, [42]);
   });
+
+  test(
+    'cancellation during activation still retires the ready child',
+    () async {
+      final control = _ControlledProcess()..activationGate = Completer<void>();
+      addTearDown(control.clean);
+      final spawning = control.spawn(executable: 'test', arguments: '{}');
+      final failure = expectLater(
+        spawning,
+        throwsA(isA<PlayerProcessStartupException>()),
+      );
+      await _until(() => control.endpoint != null);
+      await control.ready();
+      await _until(() => control.activations.isNotEmpty);
+      control.cancelPendingSpawns();
+      control.activationGate!.complete();
+      await failure;
+      expect(control.alive, isFalse);
+      expect(control.killed, 1);
+    },
+  );
 
   test(
     'Windows keeps the original process object when its PID is reused',
@@ -317,6 +340,15 @@ class _ControlledProcess extends DesktopPlayerProcessControl {
   PlayerProcessProtocol? endpoint;
   bool alive = false;
   int killed = 0;
+  final activations = <int>[];
+  Completer<void>? activationGate;
+
+  @override
+  Future<void> activate(int pid) async {
+    activations.add(pid);
+    await activationGate?.future;
+  }
+
   @override
   Future<int> launch(String executable, String payloadPath) async {
     endpoint = PlayerProcessProtocol.fromJson(

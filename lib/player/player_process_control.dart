@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/services.dart';
 import 'package:rillight/player/player_host_command.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/player_process_protocol.dart';
@@ -54,6 +55,7 @@ abstract class DesktopPlayerProcessControl implements PlayerProcessControl {
 
   Future<int> launch(String executable, String payloadPath);
   Future<void> terminate(int pid);
+  Future<void> activate(int pid) async {}
 
   @override
   Future<int> spawn({
@@ -86,7 +88,13 @@ abstract class DesktopPlayerProcessControl implements PlayerProcessControl {
           throw StateError('Player window initialization failed');
         }
         final ready = await endpoint.read('ready');
-        if (ready?['pid'] == child && generation == _generation) return child;
+        if (ready?['pid'] == child && generation == _generation) {
+          await activate(child);
+          if (generation != _generation) {
+            throw StateError('Player launch cancelled');
+          }
+          return child;
+        }
         await endpoint.heartbeat();
         await Future<void>.delayed(pollInterval);
       }
@@ -224,6 +232,16 @@ class WindowsPlayerProcessControl extends DesktopPlayerProcessControl {
 class PosixPlayerProcessControl extends DesktopPlayerProcessControl {
   PosixPlayerProcessControl({super.pollInterval, super.startupTimeout});
   final Map<int, Process> _children = {};
+
+  @override
+  Future<void> activate(int pid) async {
+    if (!Platform.isMacOS) return;
+    // On macOS 14+, the active host must yield activation to its helper.
+    // Calling windowManager.focus() in the helper alone cannot do that.
+    await const MethodChannel(
+      'rillight/window_activation',
+    ).invokeMethod<bool>('activatePlayer', {'pid': pid});
+  }
 
   @override
   Future<int> launch(String executable, String payloadPath) async {

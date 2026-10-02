@@ -1,6 +1,6 @@
 """Bundle the verified owned-core macOS dylib closure before app signing.
 
-Usage: python3 bundle_macos.py path/to/rillight.app
+Usage: python3 bundle_macos.py path/to/Rillight.app
 """
 
 from __future__ import annotations

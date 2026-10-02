@@ -15,6 +15,7 @@ import 'package:rillight/player/buffer_snapshot.dart';
 import 'package:rillight/player/playback_coordinator.dart';
 import 'package:rillight/player/playback_session.dart';
 import 'package:rillight/player/playback_state.dart';
+import 'package:rillight/player/network_throughput.dart';
 import 'package:rillight/player/playback_models.dart';
 import 'package:rillight/player/playback_resolver.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
@@ -213,6 +214,7 @@ class PlayerController extends ChangeNotifier {
   final _trackRevisions = <String, int>{};
   int? _snapshotOwner;
   String? trackFailure;
+  int? _sourceRenewalOperation;
   String? _operationBaseUrl;
   String? _operationUserId;
   String? _operationToken;
@@ -350,6 +352,27 @@ class PlayerController extends ChangeNotifier {
   List<MediaStreamInfo> get subtitleTracks =>
       resolved?.mediaSource.subtitleStreams ?? const [];
 
+  List<MediaStreamInfo> get selectableAudioTracks {
+    final support = backend;
+    if (isTranscode || support is! VideoBackendTrackSupport) return audioTracks;
+    return audioTracks
+        .where(
+          (track) =>
+              (support as VideoBackendTrackSupport).audioTrackSupported(
+                track.index,
+              ) !=
+              false,
+        )
+        .toList(growable: false);
+  }
+
+  // Subtitle off is always available, including when a server omits track
+  // metadata or a single subtitle cannot currently be decoded.
+  List<MediaStreamInfo> get selectableSubtitleTracks => subtitleTracks;
+
+  bool get canSwitchAudioTrack => selectableAudioTracks.length > 1;
+  bool get canSwitchQuality => availableBitrates.length > 1;
+
   /// 播放剧集时才提供剧集列表入口;电影不显示。
   bool get canBrowseEpisodes {
     final current = item;
@@ -408,6 +431,14 @@ class PlayerController extends ChangeNotifier {
     }
     if (!_accepts(operation)) return;
     state.phase = PlaybackPhase.loading;
+    state.buffering = false;
+    isPlaying = false;
+    position = buffer = Duration.zero;
+    bufferSnapshot = BufferSnapshot.empty(
+      sessionId: operation.id,
+      unknownReason: 'preparing',
+    );
+    cacheSpeedBytesPerSec = 0;
     error = null;
     loadFailure = null;
     disconnected = false;
@@ -821,14 +852,8 @@ class PlayerController extends ChangeNotifier {
           error == null &&
           !loading &&
           !disconnected) {
-        if (sourceId != null &&
-            ((audio != null && audio != audioStreamIndex) ||
-                (subtitle != null && subtitle != subtitleStreamIndex))) {
-          trackFailure =
-              'Previous track is unavailable on this source; '
-              'a compatible track was selected';
-          _emit();
-        }
+        // Track indices belong to a media source. Successfully selecting a
+        // compatible track after switching versions is not a loading failure.
         return;
       }
       if (sourceId != null &&
@@ -2177,10 +2202,20 @@ class PlayerController extends ChangeNotifier {
           _updateNetworkSlow();
         case VideoEventKind.cacheSpeed:
           final value = event.value;
-          cacheSpeedBytesPerSec = value is num && value.isFinite && value > 0
+          final next = value is num && value.isFinite && value > 0
               ? value.toDouble()
-              : 0;
+              : 0.0;
+          final sameReadout =
+              formatNetworkThroughput(next) ==
+              formatNetworkThroughput(cacheSpeedBytesPerSec);
+          cacheSpeedBytesPerSec = next;
+          final slowBefore = networkSlow;
           _updateNetworkSlow();
+          // The readout is coarse (KB/s or MB/s). Rebuilding the player for an
+          // unchanged label steals frames from the texture upload.
+          if (sameReadout && slowBefore == networkSlow && !_playbackUiDue()) {
+            return;
+          }
         case VideoEventKind.buffering:
           if (disconnected || state.phase == PlaybackPhase.failed) return;
           state.buffering = event.value as bool;
@@ -2218,6 +2253,7 @@ class PlayerController extends ChangeNotifier {
           disconnected = true;
           isPlaying = false;
           loading = false;
+          state.buffering = false;
           disconnectDetail = message.trim().isEmpty ? null : message.trim();
           controlsVisible = true;
           state.phase = PlaybackPhase.failed;
@@ -2234,6 +2270,8 @@ class PlayerController extends ChangeNotifier {
           _hideTimer?.cancel();
           _progressTimer?.cancel();
           unawaited(backend.stop().catchError((Object _) {}));
+        case VideoEventKind.sourceRefreshRequired:
+          unawaited(_renewSourceUrl(operation));
       }
       _lastPlaybackUi = DateTime.now();
       _emit();
@@ -2242,6 +2280,58 @@ class PlayerController extends ChangeNotifier {
 
   bool _playbackUiDue() {
     return DateTime.now().difference(_lastPlaybackUi) >= kPlaybackUiMinInterval;
+  }
+
+  Future<void> _renewSourceUrl(PlaybackOperation operation) async {
+    final current = resolved;
+    final renewal = backend;
+    if (current == null ||
+        current.isTranscode ||
+        renewal is! VideoBackendSourceRenewal ||
+        _sourceRenewalOperation == operation.id ||
+        !_accepts(operation)) {
+      return;
+    }
+    _sourceRenewalOperation = operation.id;
+    try {
+      final info = await client
+          .getPlaybackInfo(
+            itemId: itemId,
+            mediaSourceId: current.mediaSource.id,
+            maxStreamingBitrate: maxStreamingBitrate,
+            audioStreamIndex: audioStreamIndex,
+            subtitleStreamIndex: subtitleStreamIndex,
+            deviceProfile: backend is VideoBackendCapabilities
+                ? await (backend as VideoBackendCapabilities).deviceProfile(
+                    maxStreamingBitrate,
+                  )
+                : null,
+          )
+          .timeout(const Duration(seconds: 15));
+      if (!_accepts(operation) || !identical(resolved, current)) return;
+      final next = resolvePlayback(
+        info: info,
+        baseUrl: client.baseUrl!,
+        accessToken: client.accessToken!,
+        itemId: itemId,
+        mediaSourceId: current.mediaSource.id,
+      );
+      if (next == null ||
+          next.isTranscode ||
+          next.mediaSource.id != current.mediaSource.id) {
+        return;
+      }
+      await (renewal as VideoBackendSourceRenewal).refreshSourceUrl(
+        next.streamUrl,
+      );
+    } catch (_) {
+      // Renewal is optional while cached playback continues. Normal failure
+      // reporting remains available if foreground bytes cannot be recovered.
+    } finally {
+      if (_sourceRenewalOperation == operation.id) {
+        _sourceRenewalOperation = null;
+      }
+    }
   }
 
   void _updateNetworkSlow() {
@@ -3653,6 +3743,7 @@ bool isFatalPlaybackError(String message, {required bool playing}) {
   const network = [
     'media http 403',
     'ffmpeg core error',
+    'core playback failed',
     'connection',
     'network',
     'http error',

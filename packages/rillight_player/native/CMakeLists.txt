@@ -93,6 +93,15 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   target_link_options(rillight_core PRIVATE "LINKER:-rpath-link,${core_lib_dir}")
 endif()
 if(APPLE)
+  enable_language(OBJCXX)
+  set(CMAKE_OBJCXX_STANDARD 17)
+  set(CMAKE_OBJCXX_STANDARD_REQUIRED ON)
+  target_sources(rillight_core PRIVATE core/macos_color_pipeline.mm)
+  target_compile_definitions(rillight_core PRIVATE RILLIGHT_HAVE_MACOS_COLOR=1)
+  set_source_files_properties(core/macos_color_pipeline.mm PROPERTIES
+    COMPILE_OPTIONS "-fobjc-arc")
+  target_link_libraries(rillight_core PRIVATE
+    "-framework Metal" "-framework Foundation")
   set_target_properties(rillight_core PROPERTIES
     INSTALL_NAME_DIR "@rpath"
     MACOSX_RPATH ON)

@@ -25,6 +25,8 @@ import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/phone_orientation.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_controller.dart';
+import 'package:rillight/player/playback_models.dart';
+import 'package:rillight/player/playback_resolver.dart';
 import 'package:rillight/player/player_keys.dart';
 import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/video_backend.dart';
@@ -849,6 +851,44 @@ void main() {
     expect(tester.takeException(), isNull);
   }, tags: ['integration']);
 
+  testWidgets('single-choice phone controls and more entries stay hidden', (
+    tester,
+  ) async {
+    final c = await showPlayer(tester, itemId: 'movie-inception');
+    const source = PlaybackMediaSource(
+      id: 'only',
+      mediaStreams: [MediaStreamInfo(index: 1, type: 'Audio', codec: 'aac')],
+    );
+    c.resolved = ResolvedPlayback(
+      playMethod: PlayMethod.directPlay,
+      streamUrl: Uri.parse('https://example.test/media'),
+      playSessionId: 'session',
+      mediaSource: source,
+      itemId: c.itemId,
+    );
+    c.mediaSources = const [source];
+    c.onUserActivity();
+    await tester.pump();
+    for (final key in ['mobile-player-quality', 'mobile-player-danmaku']) {
+      expect(find.byKey(Key(key)), findsNothing);
+    }
+    await tester.tap(find.byKey(const Key('mobile-player-more')));
+    await tester.pumpAndSettle();
+    for (final key in [
+      'mobile-player-section-quality',
+      'mobile-player-source-entry',
+      'mobile-player-section-danmaku',
+    ]) {
+      expect(find.byKey(Key(key)), findsNothing);
+    }
+    await enterSection(tester, 'tracks');
+    expect(find.text('关闭字幕'), findsOneWidget);
+    expect(find.text('音轨'), findsNothing);
+    await tester.tap(find.byKey(const Key('mobile-player-panel-close')));
+    await tester.pumpAndSettle();
+    await closePlayer(tester);
+  }, tags: ['integration']);
+
   testWidgets(
     'more panel hosts danmaku, tracks, speed, source, mute and volume',
     (tester) async {
@@ -1503,11 +1543,14 @@ void main() {
       await tester.tap(find.byKey(const Key('mobile-player-more')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 400));
-      await enterSection(tester, 'tracks');
-      final commentary = find.text('Commentary');
-      await tester.ensureVisible(commentary);
-      await tester.pump();
-      await tester.tap(commentary);
+      expect(
+        find.byKey(const Key('mobile-player-section-tracks')),
+        findsOneWidget,
+      );
+      await tester.tap(find.byKey(const Key('mobile-player-panel-close')));
+      await tester.pumpAndSettle();
+      // A late selection from a stale control still reports a localized error.
+      await current.setAudio(8);
       await tester.pump();
       expect(find.text('此轨道在当前设备上不可用'), findsWidgets);
       expect(find.textContaining('Bad state:'), findsNothing);
@@ -1520,7 +1563,6 @@ void main() {
       expect(backend.openCount, 1);
       expect(find.text('重试'), findsNothing);
 
-      await closeOptions(tester);
       final before = backend.position;
       await tester.tap(find.byKey(const Key('mobile-player-forward')));
       await tester.pump();

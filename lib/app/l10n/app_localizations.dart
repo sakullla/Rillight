@@ -1261,7 +1261,7 @@ abstract class AppLocalizations {
   /// Short explanation under the disk cache limit row.
   ///
   /// In zh, this message translates to:
-  /// **'限制本地缓冲占用'**
+  /// **'限制本地缓冲占用；达到上限后，随播放进度自动释放旧片段并缓存后续内容'**
   String get settingsDiskCacheLimitHint;
 
   /// Setting row label for hardware decoding mode.
@@ -2409,6 +2409,96 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'一起看剧，弹幕也清晰舒适'**
   String get danmakuPreviewText;
+
+  /// Touch server management or desktop gesture feedback.
+  ///
+  /// In zh, this message translates to:
+  /// **'服务器管理'**
+  String get phoneServerManagement;
+
+  /// Touch server management or desktop gesture feedback.
+  ///
+  /// In zh, this message translates to:
+  /// **'切换服务器，管理连接地址和保存的账号'**
+  String get phoneServerManagementHint;
+
+  /// Touch server management or desktop gesture feedback.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在使用'**
+  String get phoneCurrentServer;
+
+  /// Touch server management or desktop gesture feedback.
+  ///
+  /// In zh, this message translates to:
+  /// **'管理服务器'**
+  String get phoneManageServer;
+
+  /// Touch server management or desktop gesture feedback.
+  ///
+  /// In zh, this message translates to:
+  /// **'修改显示名称'**
+  String get phoneRenameServer;
+
+  /// Touch server management or desktop gesture feedback.
+  ///
+  /// In zh, this message translates to:
+  /// **'显示名称'**
+  String get phoneServerName;
+
+  /// Touch server management or desktop gesture feedback.
+  ///
+  /// In zh, this message translates to:
+  /// **'留空使用服务器名称'**
+  String get phoneServerNameHint;
+
+  /// Touch server management or desktop gesture feedback.
+  ///
+  /// In zh, this message translates to:
+  /// **'还没有保存的服务器'**
+  String get phoneEmptyServers;
+
+  /// Touch server management or desktop gesture feedback.
+  ///
+  /// In zh, this message translates to:
+  /// **'没有找到匹配的服务器'**
+  String get phoneNoMatchingServers;
+
+  /// Touch server management or desktop gesture feedback.
+  ///
+  /// In zh, this message translates to:
+  /// **'操作失败，请重试'**
+  String get phoneOperationFailed;
+
+  /// Touch server management or desktop gesture feedback.
+  ///
+  /// In zh, this message translates to:
+  /// **'删除正在使用的服务器后，会退出当前登录'**
+  String get phoneDeleteCurrentServerHint;
+
+  /// Touch server management or desktop gesture feedback.
+  ///
+  /// In zh, this message translates to:
+  /// **'管理已保存的服务器'**
+  String get phoneManageSavedServers;
+
+  /// Touch server management or desktop gesture feedback.
+  ///
+  /// In zh, this message translates to:
+  /// **'撤销'**
+  String get undoAction;
+
+  /// Touch server management or desktop gesture feedback.
+  ///
+  /// In zh, this message translates to:
+  /// **'滑动定位，松开后跳转'**
+  String get phoneGestureSeek;
+
+  /// No description provided for @phoneServerDeleted.
+  ///
+  /// In zh, this message translates to:
+  /// **'已删除「{name}」'**
+  String phoneServerDeleted(String name);
 }
 
 class _AppLocalizationsDelegate

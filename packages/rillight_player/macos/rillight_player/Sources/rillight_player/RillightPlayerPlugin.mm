@@ -50,6 +50,7 @@ using Clock = std::chrono::steady_clock;
 - (BOOL)extendedOutput;
 - (BOOL)lastFrameLinear;
 - (double)edrHeadroom;
+- (rillight_macos::EdrPresentationStats)presentationStats;
 @end
 
 @implementation RillightSurface {
@@ -88,6 +89,12 @@ using Clock = std::chrono::steady_clock;
   bool _usingEdr;
   bool _havePresent;
   Clock::time_point _lastPresent;
+  int _hardwareStream;
+  int _hardwareTicks;
+}
+
+- (rillight_macos::EdrPresentationStats)presentationStats {
+  return rillight_macos::ReadEdrPresentationStats(&_edr);
 }
 
 - (instancetype)init {
@@ -109,6 +116,8 @@ using Clock = std::chrono::steady_clock;
     _lastHalf = false;
     _usingEdr = false;
     _havePresent = false;
+    _hardwareStream = -2;
+    _hardwareTicks = 0;
     _audioEndPts = -1;
     _audioSpeed = 1.0;
   }
@@ -292,6 +301,7 @@ using Clock = std::chrono::steady_clock;
 }
 
 - (void)clearImage {
+  rillight_macos::ResetEdrPresentationStats(&_edr);
   [lock lock];
   if (latest) { CVPixelBufferRelease(latest); latest = nullptr; }
   frames = 0;
@@ -481,7 +491,13 @@ using Clock = std::chrono::steady_clock;
     _needsPublication = _newFramePending = false;
     [self clearImage];
   }
-  if (snapshot.video_stream_index >= 0) {
+  // Hardware mode is for the status readout. Walking every track on the
+  // 5 ms video tick competes with frame conversion.
+  if (snapshot.video_stream_index >= 0 &&
+      (snapshot.video_stream_index != _hardwareStream ||
+       ++_hardwareTicks >= 40)) {
+    _hardwareTicks = 0;
+    _hardwareStream = snapshot.video_stream_index;
     const int tracks = rillight_core_track_count(core);
     for (int i = 0; i < tracks; ++i) {
       RillightCoreTrack track{};
@@ -560,6 +576,10 @@ using Clock = std::chrono::steady_clock;
 - (void)resizeWidth:(int)w height:(int)h {
   width = std::clamp(w, 1, 4096);
   height = std::clamp(h, 1, 2304);
+  // Convert HDR at the physical viewport size, rather than converting every
+  // source pixel and then discarding it during the native fit. The core keeps
+  // SAR, rotation, subtitle coordinates and the current playback timeline.
+  rillight_core_set_video_output_size(core, width.load(), height.load());
 }
 
 - (BOOL)detach {
@@ -718,12 +738,17 @@ using Clock = std::chrono::steady_clock;
     const bool extended = [surface extendedOutput];
     const bool linear = [surface lastFrameLinear];
     const double headroom = [surface edrHeadroom];
+    const auto presented = [surface presentationStats];
     [surface->lock lock];
     NSString* decoder = !hasSnapshot || snapshot.video_stream_index < 0 ?
         @"none" : !snapshot.first_video_frame_ready ? @"pending" :
         surface->actualHardware == RILLIGHT_CORE_HW_VIDEOTOOLBOX ?
         @"videotoolbox" : @"software";
     NSDictionary* status = @{@"frames": @(surface->frames),
+                             @"presentedFrames": @(presented.frames),
+                             @"firstPresentedUs": @(presented.first_presented_us),
+                             @"lastPresentedUs": @(presented.last_presented_us),
+                             @"maxPresentIntervalUs": @(presented.max_interval_us),
                              @"textureCopies": @(surface->copiedFrames),
                              @"lateFrames": @(surface->lateFrames),
                              @"conversionUs": @(surface->conversionUs),
@@ -739,6 +764,14 @@ using Clock = std::chrono::steady_clock;
                              @"presentIntervalUs": @(surface->presentIntervalUs),
                              @"sourceFrameRate": @(sourceFrameRate),
                              @"queuedVideoFrames": @(hasSnapshot ? snapshot.queued_video_frames : 0),
+                             @"queuedAudioFrames": @(hasSnapshot ? snapshot.queued_audio_frames : 0),
+                             @"coreState": @(hasSnapshot ? snapshot.state : 0),
+                             @"coreError": @(hasSnapshot ? snapshot.ffmpeg_error : 0),
+                             @"videoStreamIndex": @(hasSnapshot ? snapshot.video_stream_index : -1),
+                             @"audioStreamIndex": @(hasSnapshot ? snapshot.audio_stream_index : -1),
+                             @"firstVideoReady": @(hasSnapshot && snapshot.first_video_frame_ready != 0),
+                             @"firstAudioReady": @(hasSnapshot && snapshot.first_audio_frame_ready != 0),
+                             @"sourceEof": @(hasSnapshot && snapshot.source_eof != 0),
                              @"error": surface->error,
                              @"actualHardware": @(surface->actualHardware),
                              @"preferredHardware": @(hasSnapshot ?

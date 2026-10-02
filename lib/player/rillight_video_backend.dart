@@ -27,6 +27,7 @@ class RillightVideoBackend extends VideoBackend
         VideoBackendCapabilities,
         VideoBackendTranscodeSubtitles,
         VideoBackendTrackSupport,
+        VideoBackendSourceRenewal,
         VideoBackendNativeOverlay {
   // Native presentation is optional; the other platform views retain their
   // existing background and surface lifecycle.
@@ -65,6 +66,9 @@ class RillightVideoBackend extends VideoBackend
   }
 
   PlaybackTransportSession? _transport;
+  Uri? _mediaRoute;
+  DateTime? _sourceRenewalRequestedAt;
+  int _sourceRenewalCount = 0;
   StreamSubscription<CorePlayerEvent>? _coreEvents;
   Timer? _diagnosticsTimer;
   bool _diagnosticsBusy = false;
@@ -130,7 +134,7 @@ class RillightVideoBackend extends VideoBackend
   Future<Map<String, Object?>> diagnostics() async {
     Map<String, dynamic> presentation = const {};
     final native = _nativePresentation;
-    if (native != null && Platform.isWindows) {
+    if (native != null && (Platform.isWindows || Platform.isMacOS)) {
       try {
         presentation = await native.presentationStatus().timeout(
           const Duration(seconds: 2),
@@ -168,6 +172,7 @@ class RillightVideoBackend extends VideoBackend
       'coreLastEvent': _lastCoreEvent,
       'coreErrorCode': _lastCoreErrorCode,
       'coreOpenFailureKind': _coreOpenFailureKind,
+      'sourceRenewalCount': _sourceRenewalCount,
       'coreActualHardware': _actualHardware,
       'coreActualHardwareName': switch (_actualHardware) {
         0 => 'software',
@@ -328,6 +333,7 @@ class RillightVideoBackend extends VideoBackend
     _actualHardware = null;
     _lastTransportDiagnostics = const {};
     _authenticationReported = false;
+    _sourceRenewalRequestedAt = null;
     bufferSnapshot = BufferSnapshot.empty(
       sessionId: request.sessionId,
       resourceId: request.url.toString(),
@@ -370,8 +376,13 @@ class RillightVideoBackend extends VideoBackend
         return;
       }
       _transport = transport;
+      // Container probes jump between the header, indexes and track samples.
+      // Optional full-window prefetch competes with those small foreground
+      // reads and is only useful once the decoder has opened the stream.
+      await transport.setPlaybackActive(false);
       _openPhase = 'register';
       final sealed = await transport.register(request.url);
+      _mediaRoute = sealed;
       final warmed = request.warmedPrefix;
       if (warmed != null && warmed.isNotEmpty) {
         try {
@@ -428,7 +439,7 @@ class RillightVideoBackend extends VideoBackend
       if (_disposed || generation != _generation) return;
       _readTrackSupport(result);
       await _syncContainerTracks(result, transport);
-      if (request.startPaused) await transport.setPlaybackActive(false);
+      await transport.setPlaybackActive(_wantsPlayback);
       if (_disposed || generation != _generation) return;
       selectedAudioIndex = result['audioIndex'] as int?;
       selectedSubtitleIndex = result['subtitleIndex'] as int?;
@@ -492,6 +503,16 @@ class RillightVideoBackend extends VideoBackend
         _emit(VideoEventKind.completed, event.value == true, generation);
       case 'error':
         isPlaying = false;
+        final failedTransport = _transport;
+        if (failedTransport != null) {
+          unawaited(() async {
+            try {
+              await failedTransport.setPlaybackActive(false);
+            } catch (_) {
+              // Recovery may already have retired this session.
+            }
+          }());
+        }
         _lastFailure = event.value.toString();
         _recordCoreFailure(event.value);
         if (_opened) {
@@ -526,7 +547,7 @@ class RillightVideoBackend extends VideoBackend
         ? failure.message ?? ''
         : failure.toString();
     final match = RegExp(
-      r'FFmpeg core error (-?[0-9]{1,10})',
+      r'(?:FFmpeg core error |Core playback failed \()(-?[0-9]{1,10})',
     ).firstMatch(message);
     if (match != null) {
       _lastCoreErrorCode = int.tryParse(match.group(1)!);
@@ -572,6 +593,12 @@ class RillightVideoBackend extends VideoBackend
       } catch (_) {}
       if (epoch != _recoveryEpoch || _disposed) return;
       _reportAuthentication(data, generation);
+      if (data['lastMediaUpstreamStatus'] == 403) {
+        // Retry must fetch fresh PlaybackInfo in the controller; reopening
+        // the same rejected signed URL here cannot restore access.
+        _emit(VideoEventKind.error, 'Media HTTP 403', generation);
+        return;
+      }
       final status = data['lastUpstreamStatus'];
       final retryableStatus =
           status == 408 ||
@@ -662,6 +689,21 @@ class RillightVideoBackend extends VideoBackend
       );
       _lastTransportDiagnostics = data;
       _reportAuthentication(data, generation);
+      if (_opened &&
+          _lastOpenRequest?.dynamicSource == false &&
+          data['readAheadFailed'] == true &&
+          (data['prefetchAuthenticationStatus'] == 403 ||
+              const {
+                'producer:HttpException',
+                'producer:SocketException',
+                'producer:TimeoutException',
+              }.contains(data['readAheadBypassReason'])) &&
+          (_sourceRenewalRequestedAt == null ||
+              DateTime.now().difference(_sourceRenewalRequestedAt!) >
+                  const Duration(seconds: 30))) {
+        _sourceRenewalRequestedAt = DateTime.now();
+        _emit(VideoEventKind.sourceRefreshRequired, 403, generation);
+      }
       if (generation != _generation ||
           _disposed ||
           _cacheTrackPending > 0 ||
@@ -749,9 +791,16 @@ class RillightVideoBackend extends VideoBackend
     final actualHardware = result['actualHardware'];
     if (actualHardware is num) _actualHardware = actualHardware.toInt();
     if (!result.containsKey('rejectedAudio')) return;
+    final previouslyRejectedAudio = _trackSupportKnown
+        ? _rejectedAudio
+        : const <int>{};
     _trackSupportKnown = true;
-    _playableAudio = _indices(result['playableAudio']);
-    _rejectedAudio = _indices(result['rejectedAudio']);
+    _rejectedAudio = {
+      ...previouslyRejectedAudio,
+      ..._indices(result['rejectedAudio']),
+    };
+    _playableAudio = _indices(result['playableAudio'])
+      ..removeAll(_rejectedAudio);
     _playableSubtitle = _indices(result['playableSubtitle']);
     _rejectedSubtitle = _indices(result['rejectedSubtitle']);
   }
@@ -833,6 +882,34 @@ class RillightVideoBackend extends VideoBackend
   }
 
   @override
+  Future<void> refreshSourceUrl(Uri url) async {
+    final transport = _transport;
+    final route = _mediaRoute;
+    final request = _lastOpenRequest;
+    if (transport == null ||
+        route == null ||
+        request == null ||
+        request.dynamicSource) {
+      return;
+    }
+    await transport.refreshSourceUrl(route, url);
+    if (!identical(transport, _transport)) return;
+    _sourceRenewalCount++;
+    _lastOpenRequest = VideoOpenRequest(
+      sessionId: request.sessionId,
+      url: url,
+      start: request.start,
+      headers: request.headers,
+      credentialOrigin: request.credentialOrigin,
+      credentialHeaders: request.credentialHeaders,
+      playMethod: request.playMethod,
+      isInfiniteStream: request.isInfiniteStream,
+      mediaStreams: request.mediaStreams,
+      startPaused: request.startPaused,
+    );
+  }
+
+  @override
   Future<void> pause() async {
     _wantsPlayback = false;
     if (_recovering) return;
@@ -848,7 +925,11 @@ class RillightVideoBackend extends VideoBackend
       position = value;
       return;
     }
-    await _transport?.seek();
+    // Desktop FFmpeg commits its new timeline and interrupts the old socket
+    // atomically. Cancelling the proxy first can turn that old read into a
+    // fatal EIO before the seek is accepted. Its closed downstream socket
+    // already retires the corresponding proxy request.
+    if (_player is! CoreNativeSeekCancellation) await _transport?.seek();
     await _command('seek', {'position': value.inMilliseconds});
   }
 
@@ -882,6 +963,12 @@ class RillightVideoBackend extends VideoBackend
     _invalidateTrack();
     try {
       await _command('audio', {'index': index});
+    } on CoreTrackSelectionException {
+      if (generation == _generation) {
+        _playableAudio = {..._playableAudio}..remove(index);
+        _rejectedAudio = {..._rejectedAudio, index};
+      }
+      throw const DeviceTrackRejected();
     } finally {
       if (generation == _generation) {
         _cacheTrackPending--;

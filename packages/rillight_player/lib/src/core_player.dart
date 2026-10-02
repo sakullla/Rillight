@@ -34,6 +34,19 @@ class CoreVideoCompatibilityException implements Exception {
   String toString() => 'Unsupported Dolby Vision color pipeline';
 }
 
+class CoreTrackSelectionException implements Exception {
+  const CoreTrackSelectionException(this.track, this.errorCode);
+  final String track;
+  final int errorCode;
+
+  @override
+  String toString() => 'Core rejected $track track ($errorCode)';
+}
+
+/// A native seek changes the timeline before cancelling its owned media IO.
+/// The transport must not close that IO independently before the native call.
+abstract interface class CoreNativeSeekCancellation {}
+
 class CorePlayerTrack {
   const CorePlayerTrack({
     required this.index,
@@ -261,7 +274,8 @@ abstract interface class CoreNativeOverlay {
   Future<Map<String, dynamic>> presentationStatus();
 }
 
-class DesktopCorePlayer implements CorePlayer, CoreNativeOverlay {
+class DesktopCorePlayer
+    implements CorePlayer, CoreNativeOverlay, CoreNativeSeekCancellation {
   DesktopCorePlayer._(this._bindings, this._handle, this._textureId);
 
   static const _channel = MethodChannel('rillight_player');
@@ -345,6 +359,7 @@ class DesktopCorePlayer implements CorePlayer, CoreNativeOverlay {
     if (_disposed) throw StateError('Core is disposed');
     _session = request.session;
     _serverStreams = request.streams;
+    _rejectedAudioStreams.clear();
     _poll?.cancel();
     _previousPosition = _previousDuration = _previousState = _previousTimeline =
         -1;
@@ -491,11 +506,13 @@ class DesktopCorePlayer implements CorePlayer, CoreNativeOverlay {
   }
 
   List<CorePlayerTrack> _serverStreams = const [];
+  final _rejectedAudioStreams = <int>{};
   Map<String, dynamic> _trackResult(
     _CoreSnapshot snapshot,
     List<CorePlayerTrack> server,
   ) {
     final native = <int, (int, String?)>{};
+    final unsupportedAudio = {..._rejectedAudioStreams};
     var actualHardware = 0;
     int? videoTrackId;
     int? audioTrackId;
@@ -530,6 +547,10 @@ class DesktopCorePlayer implements CorePlayer, CoreNativeOverlay {
           track.ref.type,
           _cstring(track.ref.language),
         );
+        if (track.ref.type == 2 &&
+            !_bindings.decoderAvailable(_cstring(track.ref.codecName) ?? '')) {
+          unsupportedAudio.add(track.ref.streamIndex);
+        }
       }
     } finally {
       calloc.free(track);
@@ -582,11 +603,15 @@ class DesktopCorePlayer implements CorePlayer, CoreNativeOverlay {
           ?.key,
       'playableAudio': [
         for (final item in server.where((item) => item.type == 'Audio'))
-          if (mapped.containsKey(item.index)) item.index,
+          if (mapped.containsKey(item.index) &&
+              !unsupportedAudio.contains(mapped[item.index]))
+            item.index,
       ],
       'rejectedAudio': [
         for (final item in server.where((item) => item.type == 'Audio'))
-          if (!mapped.containsKey(item.index)) item.index,
+          if (!mapped.containsKey(item.index) ||
+              unsupportedAudio.contains(mapped[item.index]))
+            item.index,
       ],
       'playableSubtitle': [
         for (final item in server.where((item) => item.type == 'Subtitle'))
@@ -669,6 +694,10 @@ class DesktopCorePlayer implements CorePlayer, CoreNativeOverlay {
       default:
         throw UnsupportedError('Unknown core command $method');
     }
+    if (result != 0 && method == 'audio' && _readSnapshot().state != 8) {
+      _rejectedAudioStreams.add(selectedStream!);
+      throw CoreTrackSelectionException(method, result);
+    }
     _check(result, method);
     _CoreSnapshot snapshot;
     if (method == 'seek') {
@@ -684,9 +713,16 @@ class DesktopCorePlayer implements CorePlayer, CoreNativeOverlay {
                 value.firstAudioFrameReady != 0),
       );
     } else if (method == 'audio') {
-      snapshot = await _waitSnapshot(
-        (value) => value.audioStreamIndex == selectedStream && value.state != 6,
-      );
+      try {
+        snapshot = await _waitSnapshot(
+          (value) =>
+              value.audioStreamIndex == selectedStream && value.state != 6,
+          trackSelection: method,
+        );
+      } on CoreTrackSelectionException {
+        _rejectedAudioStreams.add(selectedStream!);
+        rethrow;
+      }
     } else if (method == 'subtitle' || method == 'subtitleOff') {
       snapshot = await _waitSnapshot(
         (value) =>
@@ -720,8 +756,9 @@ class DesktopCorePlayer implements CorePlayer, CoreNativeOverlay {
   }
 
   Future<_CoreSnapshot> _waitSnapshot(
-    bool Function(_CoreSnapshot) accept,
-  ) async {
+    bool Function(_CoreSnapshot) accept, {
+    String? trackSelection,
+  }) async {
     final deadline = DateTime.now().add(const Duration(seconds: 8));
     while (DateTime.now().isBefore(deadline)) {
       if (_disposed) throw StateError('Core was disposed during command');
@@ -730,6 +767,12 @@ class DesktopCorePlayer implements CorePlayer, CoreNativeOverlay {
         throw StateError('Core command failed (${value.ffmpegError})');
       }
       if (accept(value)) return value;
+      if (trackSelection != null && value.state != 6 && value.ffmpegError < 0) {
+        // A rejected optional audio change preserves the previous decoder.
+        // Report that rejection immediately, rather than timing out and
+        // turning otherwise healthy playback into a failed open.
+        throw CoreTrackSelectionException(trackSelection, value.ffmpegError);
+      }
       await Future<void>.delayed(const Duration(milliseconds: 40));
     }
     final last = _readSnapshot();
@@ -913,13 +956,15 @@ class _DesktopCoreViewState extends State<_DesktopCoreView>
         });
         return const SizedBox.expand();
       }
-      return Texture(
-        key: _textureKey,
-        textureId: widget.player._textureId,
-        // Windows scales in the core. macOS keeps the view aspect and uploads
-        // at most the source resolution, so this sampler does the Retina scale.
-        // Bilinear avoids generating mipmaps for every uploaded video frame.
-        filterQuality: FilterQuality.low,
+      return RepaintBoundary(
+        child: Texture(
+          key: _textureKey,
+          textureId: widget.player._textureId,
+          // Windows scales in the core. macOS keeps the view aspect and uploads
+          // at most the source resolution, so this sampler does the Retina scale.
+          // Bilinear avoids generating mipmaps for every uploaded video frame.
+          filterQuality: FilterQuality.low,
+        ),
       );
     },
   );

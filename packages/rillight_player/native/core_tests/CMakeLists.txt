@@ -21,7 +21,24 @@ else()
   target_compile_options(rillight_core_test PRIVATE -UNDEBUG)
 endif()
 add_test(NAME rillight_core_audio_session COMMAND rillight_core_test)
-option(RILLIGHT_CORE_GPU_TESTS "Run color conversion on a real Windows D3D11 device" OFF)
+option(RILLIGHT_CORE_GPU_TESTS "Run color conversion on a real D3D11 or Metal device" OFF)
+if(APPLE AND RILLIGHT_CORE_GPU_TESTS)
+  add_executable(rillight_macos_color_pipeline_test
+    macos/color_pipeline_test.cpp ../core/macos_color_pipeline.mm
+    ../core/portable_color_pipeline.cpp)
+  target_include_directories(rillight_macos_color_pipeline_test PRIVATE
+    "${RILLIGHT_CORE_PREFIX}/include" "${CMAKE_CURRENT_SOURCE_DIR}/../core")
+  target_link_libraries(rillight_macos_color_pipeline_test PRIVATE
+    ${avutil_library} ${swscale_library} Threads::Threads
+    "-framework Metal" "-framework Foundation")
+  target_compile_options(rillight_macos_color_pipeline_test PRIVATE
+    -Wall -Wextra -Werror -UNDEBUG)
+  set_target_properties(rillight_macos_color_pipeline_test PROPERTIES
+    BUILD_RPATH "${core_lib_dir}")
+  add_test(NAME rillight_macos_color_pipeline COMMAND rillight_macos_color_pipeline_test)
+  set_tests_properties(rillight_macos_color_pipeline PROPERTIES TIMEOUT 30
+    ENVIRONMENT "DYLD_LIBRARY_PATH=${core_lib_dir}")
+endif()
 add_executable(rillight_portable_color_pipeline_test
   portable_color_pipeline_test.cpp ../core/portable_color_pipeline.cpp)
 target_include_directories(rillight_portable_color_pipeline_test PRIVATE "${RILLIGHT_CORE_PREFIX}/include")
@@ -114,6 +131,15 @@ if(ass_library)
       -Wall -Wextra -Werror -UNDEBUG)
   endif()
   add_test(NAME rillight_core_ass_composition COMMAND rillight_core_ass_test)
+  add_test(NAME rillight_core_mov_text COMMAND rillight_core_ass_test --mov-text-only)
+  set_tests_properties(rillight_core_mov_text PROPERTIES TIMEOUT 15)
+  if(APPLE)
+    set_tests_properties(rillight_core_mov_text PROPERTIES
+      ENVIRONMENT "DYLD_LIBRARY_PATH=${core_lib_dir}")
+  elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set_tests_properties(rillight_core_mov_text PROPERTIES
+      ENVIRONMENT "LD_LIBRARY_PATH=${core_lib_dir}")
+  endif()
   set_tests_properties(rillight_core_ass_composition PROPERTIES TIMEOUT 20)
   if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set_tests_properties(rillight_core_ass_composition PROPERTIES

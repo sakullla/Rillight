@@ -3,16 +3,16 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/media_source_menu_tile.dart';
-import 'package:rillight/emby/device_profile.dart';
 import 'package:rillight/player/playback_skip_settings.dart';
 import 'package:rillight/player/player_controller.dart';
 import 'package:rillight/player/player_keys.dart';
+import 'package:rillight/player/player_setting_choices.dart';
 
 enum _SettingsSection { speed, skip, audio, quality, source }
 
-/// A stable settings panel: categories remain available while values change.
-/// Narrow windows use a horizontal category bar with the same controls.
+/// 分类始终留在面板里，改值时不收起。窄窗口改成顶部分类条，控件相同。
 class PlaybackSettingsMenu extends StatefulWidget {
   const PlaybackSettingsMenu({super.key, required this.controller});
   final PlayerController controller;
@@ -38,9 +38,8 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
   @override
   void dispose() {
     final controller = widget.controller;
-    // Changing source temporarily removes the entire controls subtree while
-    // loading. MenuAnchor teardown need not deliver its animated onClose.
-    // Release this menu's lease after tree teardown, preserving other panels.
+    // 换片源时加载态会拆掉整棵控制树。MenuAnchor 的关闭动画不一定回调。
+    // 等树拆完再释放本菜单的钉住，其它面板的钉住保留。
     scheduleMicrotask(() => controller.setControlsPinned(false, owner: _menu));
     super.dispose();
   }
@@ -70,8 +69,8 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final screen = MediaQuery.sizeOf(context);
-    final width = math.min(520.0, math.max(200.0, screen.width - 24));
-    final height = math.min(400.0, math.max(160.0, screen.height - 112));
+    final width = math.min(420.0, math.max(280.0, screen.width - 48));
+    final height = math.min(336.0, math.max(240.0, screen.height - 220));
     final l10n = AppLocalizations.of(context);
     return MenuAnchor(
       controller: _menu,
@@ -80,14 +79,14 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
       consumeOutsideTap: true,
       style: MenuStyle(
         padding: const WidgetStatePropertyAll(EdgeInsets.zero),
-        backgroundColor: WidgetStatePropertyAll(scheme.surfaceContainerHigh),
+        backgroundColor: WidgetStatePropertyAll(scheme.surfaceContainer),
         surfaceTintColor: const WidgetStatePropertyAll(Colors.transparent),
+        elevation: const WidgetStatePropertyAll(16),
+        shadowColor: WidgetStatePropertyAll(scheme.scrim.withValues(alpha: .5)),
         shape: WidgetStatePropertyAll(
           RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(18),
-            side: BorderSide(
-              color: scheme.outlineVariant.withValues(alpha: .4),
-            ),
+            borderRadius: BorderRadius.circular(AppRadii.xl),
+            side: BorderSide(color: scheme.outlineVariant),
           ),
         ),
       ),
@@ -107,7 +106,7 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
             type: MaterialType.transparency,
             child: ListenableBuilder(
               listenable: widget.controller,
-              builder: (context, _) => _panel(context, compact: width < 460),
+              builder: (context, _) => _panel(context),
             ),
           ),
         ),
@@ -115,7 +114,35 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
     );
   }
 
-  Widget _panel(BuildContext context, {required bool compact}) {
+  String _sectionValue(AppLocalizations l10n, _SettingsSection section) {
+    final c = widget.controller;
+    switch (section) {
+      case _SettingsSection.speed:
+        return playerRateLabel(c.playbackRate);
+      case _SettingsSection.skip:
+        final enabled = <String>[
+          if (c.skipIntroEnabled) l10n.settingsSkipIntro,
+          if (c.skipOutroEnabled) l10n.settingsSkipOutro,
+        ];
+        return enabled.isEmpty ? l10n.playerSettingOff : enabled.join(' · ');
+      case _SettingsSection.audio:
+        for (final track in c.selectableAudioTracks) {
+          if (track.index == c.audioStreamIndex) return track.label;
+        }
+        return '';
+      case _SettingsSection.quality:
+        return playerQualityLabel(l10n, c.maxStreamingBitrate);
+      case _SettingsSection.source:
+        for (final source in c.mediaSources) {
+          if (source.id == c.resolved?.mediaSource.id) {
+            return source.presentation.headline;
+          }
+        }
+        return '';
+    }
+  }
+
+  Widget _panel(BuildContext context) {
     final c = widget.controller;
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
@@ -131,13 +158,13 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
         Icons.skip_next_rounded,
         const Key('player-skip-settings-section'),
       ),
-      if (c.audioTracks.isNotEmpty)
+      if (c.canSwitchAudioTrack)
         _SettingsSection.audio: (
           l10n.audioTrack,
           Icons.audiotrack_rounded,
           PlayerKeys.audio,
         ),
-      if (c.isTranscode)
+      if (c.canSwitchQuality)
         _SettingsSection.quality: (
           l10n.quality,
           Icons.high_quality_outlined,
@@ -156,49 +183,75 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
     Widget category(_SettingsSection key, (String, IconData, Key) info) {
       final selected = section == key;
       return Padding(
-        padding: const EdgeInsets.all(4),
+        padding: const EdgeInsets.symmetric(horizontal: 4),
         child: Semantics(
           selected: selected,
           child: TextButton.icon(
             key: info.$3,
             onPressed: () => setState(() => _section = key),
-            icon: Icon(info.$2, size: 18),
-            label: Text(info.$1, maxLines: 1, overflow: TextOverflow.ellipsis),
+            icon: Icon(info.$2, size: 16),
+            label: Text(info.$1),
             style: TextButton.styleFrom(
-              alignment: Alignment.centerLeft,
-              minimumSize: const Size(0, 44),
+              minimumSize: const Size(0, 36),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              visualDensity: VisualDensity.compact,
               foregroundColor: selected
-                  ? scheme.onSecondaryContainer
+                  ? scheme.onSurface
                   : scheme.onSurfaceVariant,
               backgroundColor: selected
-                  ? scheme.secondaryContainer
+                  ? scheme.surfaceBright
                   : Colors.transparent,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
-              ),
+              shape: const StadiumBorder(),
+              side: selected
+                  ? BorderSide(color: scheme.onSurface.withValues(alpha: .7))
+                  : BorderSide.none,
               padding: const EdgeInsets.symmetric(horizontal: 12),
-              textStyle: theme.textTheme.labelLarge,
+              textStyle: theme.textTheme.labelLarge?.copyWith(
+                fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+              ),
             ),
           ),
         ),
       );
     }
 
-    final content = SingleChildScrollView(
-      key: ValueKey('player-settings-content-${section.name}'),
-      primary: false,
-      padding: const EdgeInsets.all(20),
+    final value = _sectionValue(l10n, section);
+    final content = Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            sections[section]!.$1,
-            style: theme.textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.w600,
-            ),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  sections[section]!.$1,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              if (value.isNotEmpty)
+                Text(
+                  value,
+                  key: section == _SettingsSection.speed
+                      ? PlayerKeys.speedLabel
+                      : null,
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+            ],
           ),
-          const SizedBox(height: 16),
-          ..._controls(context, section),
+          const SizedBox(height: 12),
+          if (section == _SettingsSection.speed)
+            PlayerRateGrid(
+              selected: c.playbackRate,
+              enabled: !_pending && !c.loading,
+              onSelected: (rate) => unawaited(_apply(() => c.setRate(rate))),
+            )
+          else
+            ..._controls(context, section),
         ],
       ),
     );
@@ -207,13 +260,15 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(20, 6, 8, 4),
+            padding: const EdgeInsets.fromLTRB(20, 8, 8, 4),
             child: Row(
               children: [
                 Expanded(
                   child: Text(
                     l10n.playerPlaybackSettings,
-                    style: theme.textTheme.titleSmall,
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
                 IconButton(
@@ -231,50 +286,28 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
                 ? const LinearProgressIndicator()
                 : Divider(
                     height: 2,
-                    color: scheme.outlineVariant.withValues(alpha: .35),
+                    color: scheme.outlineVariant.withValues(alpha: .7),
                   ),
           ),
-          if (compact) ...[
-            SingleChildScrollView(
-              primary: false,
+          SizedBox(
+            height: 48,
+            child: ListView(
               scrollDirection: Axis.horizontal,
+              primary: false,
               padding: const EdgeInsets.symmetric(horizontal: 8),
-              child: Row(
-                children: [
-                  for (final entry in sections.entries)
-                    category(entry.key, entry.value),
-                ],
-              ),
+              children: [
+                for (final entry in sections.entries)
+                  category(entry.key, entry.value),
+              ],
             ),
-            Expanded(child: content),
-          ] else
-            Expanded(
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  SizedBox(
-                    width: 142,
-                    child: SingleChildScrollView(
-                      primary: false,
-                      padding: const EdgeInsets.fromLTRB(8, 12, 4, 12),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          for (final entry in sections.entries)
-                            category(entry.key, entry.value),
-                        ],
-                      ),
-                    ),
-                  ),
-                  VerticalDivider(
-                    width: 1,
-                    thickness: 1,
-                    color: scheme.outlineVariant.withValues(alpha: .35),
-                  ),
-                  Expanded(child: content),
-                ],
-              ),
+          ),
+          Expanded(
+            child: SingleChildScrollView(
+              key: ValueKey('player-settings-content-${section.name}'),
+              primary: false,
+              child: content,
             ),
+          ),
         ],
       ),
     );
@@ -287,37 +320,10 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
     final enabled = !_pending && !c.loading;
     switch (section) {
       case _SettingsSection.speed:
-        return [
-          Text(
-            _rateLabel(c.playbackRate),
-            key: PlayerKeys.speedLabel,
-            style: theme.textTheme.headlineSmall?.copyWith(
-              color: theme.colorScheme.primary,
-            ),
-          ),
-          const SizedBox(height: 16),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              for (final rate in kPlaybackRateLadder)
-                ChoiceChip(
-                  label: SizedBox(
-                    width: 42,
-                    child: Text(_rateLabel(rate), textAlign: TextAlign.center),
-                  ),
-                  selected: rate == c.playbackRate,
-                  showCheckmark: false,
-                  onSelected: enabled
-                      ? (_) => unawaited(_apply(() => c.setRate(rate)))
-                      : null,
-                ),
-            ],
-          ),
-        ];
+        return const [];
       case _SettingsSection.skip:
         return [
-          PlaybackSkipSettings(controller: c),
+          PlaybackSkipSettings(controller: c, compact: true),
           const SizedBox(height: 12),
           Text(
             l10n.playerSkipSettingsSaved,
@@ -328,7 +334,7 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
         ];
       case _SettingsSection.audio:
         return [
-          for (final track in c.audioTracks)
+          for (final track in c.selectableAudioTracks)
             _choice(
               Text(track.label, maxLines: 2, overflow: TextOverflow.ellipsis),
               track.index == c.audioStreamIndex,
@@ -341,7 +347,7 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
         return [
           for (final bitrate in c.availableBitrates)
             _choice(
-              Text(_qualityLabel(l10n, bitrate)),
+              Text(playerQualityLabel(l10n, bitrate)),
               bitrate == c.maxStreamingBitrate,
               enabled
                   ? () => unawaited(_apply(() => c.setMaxBitrate(bitrate)))
@@ -366,24 +372,23 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
   Widget _choice(Widget label, bool selected, VoidCallback? onPressed) {
     final scheme = Theme.of(context).colorScheme;
     return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.only(bottom: 4),
       child: ListTile(
         selected: selected,
-        selectedTileColor: scheme.secondaryContainer,
-        selectedColor: scheme.onSecondaryContainer,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        selectedTileColor: scheme.surfaceBright,
+        selectedColor: scheme.onSurface,
+        iconColor: scheme.onSurfaceVariant,
+        textColor: scheme.onSurface,
+        shape: const StadiumBorder(),
+        minTileHeight: 44,
+        visualDensity: VisualDensity.compact,
         contentPadding: const EdgeInsets.symmetric(horizontal: 12),
         title: label,
-        trailing: selected ? const Icon(Icons.check_rounded, size: 18) : null,
+        trailing: selected
+            ? Icon(Icons.check_rounded, size: 18, color: scheme.onSurface)
+            : const SizedBox(width: 18),
         onTap: onPressed,
       ),
     );
   }
 }
-
-String _rateLabel(double rate) =>
-    '${rate == rate.roundToDouble() ? rate.round() : rate}x';
-String _qualityLabel(AppLocalizations l10n, int bitrate) =>
-    bitrate == kTranscodeBitrates.first || !kTranscodeBitrates.contains(bitrate)
-    ? l10n.qualityAuto
-    : l10n.qualityMbps(bitrate ~/ 1000000);

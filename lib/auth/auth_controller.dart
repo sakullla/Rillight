@@ -481,7 +481,7 @@ class AuthController extends ChangeNotifier {
     SavedServer next, {
     required bool remountSession,
   }) async {
-    await _upsertServer(next);
+    await _upsertServer(next, remember: false);
     if (_prefill?.id == next.id) {
       _prefill = next;
     }
@@ -520,7 +520,7 @@ class AuthController extends ChangeNotifier {
     final activeChanged = server.activeLineId == lineId;
     final nextActive = activeChanged ? nextLines.first.id : server.activeLineId;
     final next = server.copyWith(lines: nextLines, activeLineId: nextActive);
-    await _upsertServer(next);
+    await _upsertServer(next, remember: false);
     if (_prefill?.id == serverId) {
       _prefill = next;
     }
@@ -588,6 +588,26 @@ class AuthController extends ChangeNotifier {
 
   Future<String?> savedPassword(String serverId) async {
     return (await credentials.read(serverId))?.password;
+  }
+
+  Future<void> renameServer(String serverId, String nickname) async {
+    final server = _serverById(serverId);
+    if (server == null) return;
+    await _persistLineEdit(
+      server.copyWith(nickname: nickname.trim()),
+      remountSession: false,
+    );
+  }
+
+  /// Undo a local removal without switching accounts or reviving a session.
+  Future<void> restoreSavedServer(
+    SavedServer server,
+    StoredCredentials? stored,
+  ) async {
+    if (_serverById(server.id) != null) return;
+    if (stored != null) await credentials.write(server.id, stored);
+    await _upsertServer(server, remember: false);
+    notifyListeners();
   }
 
   EmbyException? _passwordChangeFailure;
@@ -707,6 +727,7 @@ class AuthController extends ChangeNotifier {
     return SavedServer(
       id: serverId,
       name: name,
+      nickname: existing?.nickname,
       username: username,
       lines: lines,
       activeLineId: line.id,
@@ -740,16 +761,17 @@ class AuthController extends ChangeNotifier {
     return null;
   }
 
-  Future<void> _upsertServer(SavedServer server) async {
+  Future<void> _upsertServer(SavedServer server, {bool remember = true}) async {
+    final lastId = remember
+        ? server.id
+        : _session?.server.id ?? (await servers.load()).lastServerId;
     final next = <SavedServer>[
       for (final item in _savedServers)
         if (item.id != server.id) item,
       server,
     ];
     _savedServers = next;
-    await servers.save(
-      ServerListSnapshot(servers: next, lastServerId: server.id),
-    );
+    await servers.save(ServerListSnapshot(servers: next, lastServerId: lastId));
   }
 
   Future<bool> _refreshSession() async {

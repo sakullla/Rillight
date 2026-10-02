@@ -12,8 +12,7 @@ import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/auth/change_password_dialog.dart';
 import 'package:rillight/auth/failure_message.dart';
 import 'package:rillight/auth/library_counts_panel.dart';
-import 'package:rillight/auth/line_address_dialog.dart';
-import 'package:rillight/auth/server_list_store.dart';
+import 'package:rillight/auth/phone_server_manager.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/player/player_bindings.dart';
 
@@ -85,207 +84,17 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
     await catalog.reload();
   }
 
-  Future<void> _lines() async {
-    final auth = AuthScope.of(context);
-    final l10n = AppLocalizations.of(context);
-    await showModalBottomSheet<void>(
-      context: context,
-      useSafeArea: true,
-      isScrollControlled: true,
-      builder: (sheetContext) => ListenableBuilder(
-        listenable: auth,
-        builder: (sheetContext, _) {
-          final sheetL10n = AppLocalizations.of(sheetContext);
-          return FractionallySizedBox(
-            heightFactor: .65,
-            child: ListView(
-              padding: const EdgeInsets.all(AppSpacing.lg),
-              children: [
-                Text(
-                  l10n.mobileLine,
-                  style: Theme.of(sheetContext).textTheme.titleLarge,
-                ),
-                for (final server in auth.savedServers) ...[
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                      vertical: AppSpacing.sm,
-                    ),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            '${server.name} · ${server.username}',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        IconButton(
-                          key: PhoneMinePage.serverDeleteKey(server.id),
-                          tooltip: sheetL10n.deleteServer,
-                          icon: const Icon(Icons.delete_outline, size: 20),
-                          onPressed: () => unawaited(
-                            _confirmDeleteServer(sheetContext, auth, server),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  for (final line in server.lines)
-                    _lineOption(auth, sheetL10n, server, line),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: TextButton.icon(
-                      key: PhoneMinePage.lineAddKey(server.id),
-                      onPressed: () => unawaited(_addLine(auth, server)),
-                      icon: const Icon(Icons.add, size: 18),
-                      label: Text(sheetL10n.addLine),
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          );
-        },
-      ),
-    );
-  }
-
-  /// 先确认再删除;取消不改动任何内容。删除当前服务器时回到登录页。
-  Future<void> _confirmDeleteServer(
-    BuildContext sheetContext,
-    AuthController auth,
-    SavedServer server,
-  ) async {
-    final l10n = AppLocalizations.of(sheetContext);
-    final confirmed = await showDialog<bool>(
-      context: sheetContext,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: Text(l10n.deleteServer),
-          content: Text(l10n.deleteServerConfirmMessage(server.name)),
-          actions: [
-            TextButton(
-              key: PhoneMinePage.serverDeleteCancelKey,
-              onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: Text(l10n.cancelAction),
-            ),
-            FilledButton(
-              key: PhoneMinePage.serverDeleteConfirmKey,
-              onPressed: () => Navigator.of(dialogContext).pop(true),
-              child: Text(l10n.deleteServerConfirm),
-            ),
-          ],
-        );
-      },
-    );
-    if (confirmed != true) {
-      return;
-    }
-    final wasCurrent = auth.session?.server.id == server.id;
-    await auth.deleteServer(server.id);
-    if (!mounted) {
-      return;
-    }
-    // 删除当前服务器后路由已回登录页,收起底部面板避免盖住登录表单。
-    if (wasCurrent) {
-      Navigator.of(context).pop();
-    }
-  }
-
-  Widget _lineOption(
-    AuthController auth,
-    AppLocalizations l10n,
-    SavedServer server,
-    ServerLine line,
-  ) {
-    final serverId = server.id;
-    final selected =
-        auth.session?.server.id == serverId &&
-        auth.session?.server.activeLine?.id == line.id;
-    return ListTile(
-      key: PhoneMinePage.lineOptionKey(line.id),
-      minTileHeight: AppSpacing.huge,
-      contentPadding: EdgeInsets.zero,
-      title: Text(line.hostLabel),
-      selected: selected,
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          IconButton(
-            key: PhoneMinePage.lineEditKey(server.id, line.id),
-            tooltip: l10n.editLine,
-            icon: const Icon(Icons.edit_outlined, size: 20),
-            onPressed: () => unawaited(_editLine(auth, server, line)),
-          ),
-          IconButton(
-            key: PhoneMinePage.lineDeleteKey(server.id, line.id),
-            tooltip: l10n.deleteLine,
-            icon: const Icon(Icons.link_off, size: 20),
-            onPressed: server.lines.length > 1
-                ? () => unawaited(_deleteLine(auth, server, line))
-                : null,
-          ),
-          if (selected) const Icon(Icons.check),
-        ],
-      ),
-      onTap: () {
-        Navigator.pop(context);
-        unawaited(_switchLine(serverId, line.id));
-      },
-    );
-  }
-
-  /// 添加线路:只录地址,不改变当前线路,面板内列表即时刷新。
-  Future<void> _addLine(AuthController auth, SavedServer server) async {
-    final address = await showLineAddressDialog(context);
-    if (address == null || !mounted) {
-      return;
-    }
-    await auth.addLine(server.id, address);
-  }
-
-  /// 修改线路地址:仅地址变化,无 UA 输入项;改的是当前线路时,
-  /// 之后浏览与播放走新地址并刷新目录。
-  Future<void> _editLine(
-    AuthController auth,
-    SavedServer server,
-    ServerLine line,
-  ) async {
-    final address = await showLineAddressDialog(
-      context,
-      initialAddress: line.address,
-    );
-    if (address == null || !mounted) {
-      return;
-    }
-    final wasActive =
-        auth.session?.server.id == server.id &&
-        auth.session?.server.activeLineId == line.id;
-    final changed = await auth.updateLineAddress(server.id, line.id, address);
-    if (!changed || !mounted) {
-      return;
-    }
-    if (wasActive) {
-      await _reloadCatalog();
-    }
-  }
-
-  /// 删除线路:只剩一条时不执行(按钮已不可用,控制器同样兜底);
-  /// 删除当前线路后客户端挂到剩余线路并刷新目录。
-  Future<void> _deleteLine(
-    AuthController auth,
-    SavedServer server,
-    ServerLine line,
-  ) async {
-    final wasActive =
-        auth.session?.server.id == server.id &&
-        auth.session?.server.activeLineId == line.id;
-    await auth.deleteLine(server.id, line.id);
-    if (!mounted || !wasActive) {
-      return;
-    }
-    await _reloadCatalog();
-  }
+  Future<void> _lines() => showPhoneServerManager(
+    context,
+    auth: AuthScope.of(context),
+    onSelect: _switchLine,
+    onCurrentLineChanged: () async {
+      if (mounted) await _reloadCatalog();
+    },
+    onAddServer: () {
+      if (mounted) context.push('${AppRoutes.connect}?add=1');
+    },
+  );
 
   Widget _group(
     BuildContext context, {
@@ -353,7 +162,7 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
                     ),
                     const SizedBox(height: AppSpacing.xxs),
                     Text(
-                      session?.server.name ?? '',
+                      session?.server.displayName ?? '',
                       key: PhoneMinePage.serverKey,
                       style: Theme.of(context).textTheme.titleMedium,
                     ),
@@ -402,7 +211,9 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
                 minTileHeight: AppSpacing.huge,
                 contentPadding: EdgeInsets.zero,
                 leading: const Icon(Icons.dns_outlined),
-                title: Text(l10n.mobileLine),
+                title: Text(l10n.phoneServerManagement),
+                subtitle: Text(l10n.phoneServerManagementHint),
+                trailing: const Icon(Icons.chevron_right),
                 onTap: _lines,
               ),
               ListTile(

@@ -40,7 +40,7 @@ def sha(data):
 class PlayerHelperTest(unittest.TestCase):
     def test_stages_current_executable_and_signs_only_inherited_rights(self):
         with tempfile.TemporaryDirectory() as temp:
-            app = Path(temp) / 'rillight.app'
+            app = Path(temp) / 'Rillight.app'
             executable = app / 'Contents/MacOS/rillight'
             executable.parent.mkdir(parents=True)
             executable.write_bytes(b'current-runner')
@@ -63,7 +63,7 @@ class PlayerHelperTest(unittest.TestCase):
 
     def test_missing_helper_or_standalone_sandbox_rights_are_rejected(self):
         with tempfile.TemporaryDirectory() as temp:
-            app = Path(temp) / 'rillight.app'
+            app = Path(temp) / 'Rillight.app'
             with self.assertRaisesRegex(RuntimeError, 'Missing'):
                 verify_helper(app)
             helper_path(app).parent.mkdir(parents=True)
@@ -187,7 +187,7 @@ class MachOTest(unittest.TestCase):
 
     def test_rejects_unbundled_and_legacy_dependencies(self):
         with tempfile.TemporaryDirectory() as temp:
-            contents = Path(temp) / 'rillight.app/Contents'
+            contents = Path(temp) / 'Rillight.app/Contents'
             binary = contents / 'Frameworks/librillight_core.dylib'
             binary.parent.mkdir(parents=True)
             binary.write_bytes(b'core')
@@ -236,7 +236,7 @@ class BundleVerificationTest(unittest.TestCase):
             self.assertFalse((app / 'Contents/Frameworks/libmpv.2.dylib').exists())
 
     def make_app(self, root):
-        app = root / 'rillight.app'
+        app = root / 'Rillight.app'
         contents = app / 'Contents'
         frameworks = contents / 'Frameworks'
         resources = contents / 'Resources'
@@ -347,7 +347,7 @@ class BundleVerificationTest(unittest.TestCase):
         with patch('sign_bundle.subprocess.check_output',
                    return_value=plistlib.dumps(actual)):
             with self.assertRaisesRegex(ValueError, 'Signed entitlements differ'):
-                verify_signed_entitlements('rillight.app', expected)
+                verify_signed_entitlements('Rillight.app', expected)
 
 
 if __name__ == '__main__':

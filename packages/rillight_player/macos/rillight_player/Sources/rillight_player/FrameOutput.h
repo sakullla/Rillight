@@ -209,13 +209,77 @@ inline bool WriteLinearHalf(const RillightCoreFrame& frame, int requested_width,
   const int left = (width - content_width) / 2;
   const int top = (height - content_height) / 2;
   const uint16_t opaque = FloatToHalf(1.0f);
-  for (int row = 0; row < height; ++row) {
-    auto* target = reinterpret_cast<uint16_t*>(
-        reinterpret_cast<uint8_t*>(data) + static_cast<size_t>(row) * stride);
-    for (int column = 0; column < width; ++column) {
+  const auto clear_span = [opaque](uint16_t* target, int count) {
+    for (int column = 0; column < count; ++column) {
       target[4 * column] = target[4 * column + 1] = target[4 * column + 2] = 0;
       target[4 * column + 3] = opaque;
     }
+  };
+  for (int row = 0; row < height; ++row) {
+    auto* target = reinterpret_cast<uint16_t*>(
+        reinterpret_cast<uint8_t*>(data) + static_cast<size_t>(row) * stride);
+    if (row < top || row >= top + content_height) {
+      clear_span(target, width);
+    } else {
+      clear_span(target, left);
+      clear_span(target + 4 * (left + content_width),
+                 width - left - content_width);
+    }
+  }
+  if (frame.type == RILLIGHT_CORE_VIDEO_RGBA16F) {
+    // HDR is already extended-linear FP16. Copy its channels unchanged;
+    // only subtitle pixels need a float blend. Compute the nearest-neighbor
+    // coordinates once per axis instead of dividing for every output pixel.
+    thread_local std::vector<int> columns;
+    columns.resize(content_width);
+    const int column_extent = quarter_turn ? frame.height : frame.width;
+    for (int x = 0; x < content_width; ++x) {
+      double coordinate = (x + 0.5) / content_width;
+      if (rotation == 1 || rotation == 2) coordinate = 1.0 - coordinate;
+      columns[x] = std::clamp(static_cast<int>(coordinate * column_extent),
+                               0, column_extent - 1);
+    }
+    const bool has_overlay = overlay && overlay->data && overlay->width > 0 &&
+        overlay->height > 0 && overlay->stride >= overlay->width * 4;
+    for (int y = 0; y < content_height; ++y) {
+      double coordinate = (y + 0.5) / content_height;
+      if (rotation == 2 || rotation == 3) coordinate = 1.0 - coordinate;
+      const int row_extent = quarter_turn ? frame.width : frame.height;
+      const int mapped_row = std::clamp(
+          static_cast<int>(coordinate * row_extent), 0, row_extent - 1);
+      auto* target = reinterpret_cast<uint16_t*>(
+          reinterpret_cast<uint8_t*>(data) +
+          static_cast<size_t>(top + y) * stride) + left * 4;
+      if (rotation == 0 && content_width == frame.width && !has_overlay) {
+        std::memcpy(target, frame.data + static_cast<size_t>(mapped_row) *
+                    frame.stride, static_cast<size_t>(content_width) * 8);
+        for (int x = 0; x < content_width; ++x) target[x * 4 + 3] = opaque;
+        continue;
+      }
+      for (int x = 0; x < content_width; ++x) {
+        const int sx = quarter_turn ? mapped_row : columns[x];
+        const int sy = quarter_turn ? columns[x] : mapped_row;
+        const auto* source = reinterpret_cast<const uint16_t*>(
+            frame.data + static_cast<size_t>(sy) * frame.stride +
+            static_cast<size_t>(sx) * 8);
+        auto* pixel = target + x * 4;
+        std::memcpy(pixel, source, 3 * sizeof(uint16_t));
+        pixel[3] = opaque;
+        if (!has_overlay || sx < overlay->x || sy < overlay->y ||
+            sx >= overlay->x + overlay->width ||
+            sy >= overlay->y + overlay->height) continue;
+        const uint8_t* subtitle = overlay->data +
+            static_cast<size_t>(sy - overlay->y) * overlay->stride +
+            static_cast<size_t>(sx - overlay->x) * 4;
+        const float alpha = subtitle[3] / 255.0f;
+        if (alpha == 0) continue;
+        for (int channel = 0; channel < 3; ++channel) {
+          pixel[channel] = FloatToHalf(SrgbToLinear(subtitle[channel]) * alpha +
+              HalfToFloat(source[channel]) * (1.0f - alpha));
+        }
+      }
+    }
+    return true;
   }
   for (int y = 0; y < content_height; ++y) {
     for (int x = 0; x < content_width; ++x) {
@@ -232,21 +296,11 @@ inline bool WriteLinearHalf(const RillightCoreFrame& frame, int requested_width,
                                 0, frame.width - 1);
       const int sy = std::clamp(static_cast<int>(source_v * frame.height),
                                 0, frame.height - 1);
-      float red = 0, green = 0, blue = 0;
-      if (frame.type == RILLIGHT_CORE_VIDEO_RGBA16F) {
-        const auto* src = reinterpret_cast<const uint16_t*>(
-            frame.data + static_cast<size_t>(sy) * frame.stride +
-            static_cast<size_t>(sx) * 8);
-        red = HalfToFloat(src[0]);
-        green = HalfToFloat(src[1]);
-        blue = HalfToFloat(src[2]);
-      } else {
-        const uint8_t* src = frame.data + static_cast<size_t>(sy) * frame.stride +
-                             static_cast<size_t>(sx) * 4;
-        red = SrgbToLinear(src[0]);
-        green = SrgbToLinear(src[1]);
-        blue = SrgbToLinear(src[2]);
-      }
+      const uint8_t* src = frame.data + static_cast<size_t>(sy) * frame.stride +
+                           static_cast<size_t>(sx) * 4;
+      float red = SrgbToLinear(src[0]);
+      float green = SrgbToLinear(src[1]);
+      float blue = SrgbToLinear(src[2]);
       if (overlay && overlay->data && sx >= overlay->x && sy >= overlay->y &&
           sx < overlay->x + overlay->width && sy < overlay->y + overlay->height &&
           overlay->stride >= overlay->width * 4) {

@@ -7,6 +7,7 @@ import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/auth/connect_draft.dart';
 import 'package:rillight/auth/failure_message.dart';
 import 'package:rillight/auth/server_list_store.dart';
+import 'package:rillight/auth/phone_server_manager.dart';
 import 'package:rillight/emby/emby_errors.dart';
 import 'package:rillight/emby/emby_url.dart';
 
@@ -116,6 +117,28 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
     _password.clear();
     _userAgent.text = server.normalizedUserAgent ?? '';
   }
+
+  Future<void> _manageServers() => showPhoneServerManager(
+    context,
+    auth: AuthScope.of(context),
+    onSelect: (id, lineId) async {
+      final server = AuthScope.of(
+        context,
+      ).savedServers.firstWhere((s) => s.id == id);
+      setState(() => _select(server.copyWith(activeLineId: lineId)));
+    },
+    onAddServer: () {
+      if (!mounted) return;
+      setState(() {
+        _draft?.selectedServerId = null;
+        _draft?.selectedLineId = null;
+        _address.clear();
+        _path.clear();
+        _username.clear();
+        _password.clear();
+      });
+    },
+  );
 
   void _select(SavedServer server) {
     _applyServer(server);
@@ -265,18 +288,39 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
                   children: [
                     Text(l10n.mobileConnectionHint),
                     const SizedBox(height: 24),
-                    if (auth.savedServers.isNotEmpty)
-                      ExpansionTile(
-                        title: Text(l10n.savedServers),
+                    if (auth.savedServers.isNotEmpty) ...[
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              l10n.savedServers,
+                              style: Theme.of(context).textTheme.titleSmall,
+                            ),
+                          ),
+                          TextButton.icon(
+                            key: const Key('phone-connect-manage-servers'),
+                            onPressed: auth.isBusy ? null : _manageServers,
+                            icon: const Icon(Icons.settings_outlined, size: 18),
+                            label: Text(l10n.phoneManageServer),
+                          ),
+                        ],
+                      ),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
                         children: [
                           for (final server in auth.savedServers)
-                            ListTile(
-                              title: Text(server.name),
-                              subtitle: Text(server.username),
-                              onTap: auth.isBusy ? null : () => _select(server),
+                            ChoiceChip(
+                              label: Text(server.displayName),
+                              selected: _draft?.selectedServerId == server.id,
+                              onSelected: auth.isBusy
+                                  ? null
+                                  : (_) => setState(() => _select(server)),
                             ),
                         ],
                       ),
+                      const SizedBox(height: 20),
+                    ],
                     TextField(
                       key: const Key('android-connect-address'),
                       controller: _address,

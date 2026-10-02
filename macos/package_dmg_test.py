@@ -30,7 +30,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / '.github/workflows/macos-package.yml'
 
 
-def make_app(directory, name='rillight.app'):
+def make_app(directory, name='Rillight.app'):
     app = Path(directory) / name
     (app / 'Contents/MacOS').mkdir(parents=True)
     (app / 'Contents/MacOS/rillight').write_bytes(b'fixture')
@@ -56,7 +56,7 @@ class DragInstallLayoutTest(unittest.TestCase):
             self.assertEqual(os.readlink(layout['applications']), '/Applications')
             self.assertEqual(
                 {path.name for path in staging.iterdir() if not path.name.startswith('.')},
-                {'rillight.app', 'Applications'})
+                {'Rillight.app', 'Applications'})
 
     def test_app_only_layout_is_not_a_release_image(self):
         with tempfile.TemporaryDirectory(prefix='rillight-dmg-app-only-') as directory:
@@ -98,7 +98,7 @@ class LayoutAssetsTest(unittest.TestCase):
                 BACKGROUND_ASSET.read_bytes())
             from ds_store import DSStore
             with DSStore.open(str(staging / '.DS_Store')) as store:
-                self.assertEqual(store['rillight.app']['Iloc'], APP_ICON_POSITION)
+                self.assertEqual(store['Rillight.app']['Iloc'], APP_ICON_POSITION)
                 self.assertEqual(store['Applications']['Iloc'], APPLICATIONS_ICON_POSITION)
                 self.assertNotEqual(APP_ICON_POSITION, APPLICATIONS_ICON_POSITION)
                 self.assertEqual(store['.']['icvp']['iconSize'], float(ICON_SIZE))
@@ -151,7 +151,7 @@ class PackageCommandTest(unittest.TestCase):
     def test_non_release_app_name_is_rejected(self):
         with tempfile.TemporaryDirectory(prefix='rillight-dmg-name-') as directory:
             app = make_app(directory, 'Other.app')
-            with self.assertRaisesRegex(ValueError, 'rillight.app'):
+            with self.assertRaisesRegex(ValueError, 'Rillight.app'):
                 package(app, Path(directory) / 'out.dmg')
 
 
@@ -170,7 +170,7 @@ class ReleaseWorkflowTest(unittest.TestCase):
         self.assertNotIn('notarytool', workflow)
         self.assertNotIn('Developer ID', workflow)
         self.assertNotIn('staple', workflow)
-        self.assertNotIn('ditto "$app" "$staging/rillight.app"', workflow)
+        self.assertNotIn('ditto "$app" "$staging/Rillight.app"', workflow)
         self.assertIn('dmg_assets', helper)
         self.assertIn('background_alias_bytes', helper)
         self.assertNotIn('notarytool', helper)

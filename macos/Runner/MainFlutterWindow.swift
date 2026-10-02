@@ -3,6 +3,8 @@ import FlutterMacOS
 import window_manager
 
 class MainFlutterWindow: NSWindow {
+  private var activationChannel: FlutterMethodChannel?
+
   override func awakeFromNib() {
     let flutterViewController = FlutterViewController()
     let windowFrame = self.frame
@@ -11,6 +13,39 @@ class MainFlutterWindow: NSWindow {
     self.setFrame(windowFrame, display: true)
 
     RegisterGeneratedPlugins(registry: flutterViewController)
+
+    let channel = FlutterMethodChannel(
+      name: "rillight/window_activation",
+      binaryMessenger: flutterViewController.engine.binaryMessenger)
+    channel.setMethodCallHandler { call, result in
+      guard call.method == "activatePlayer" else {
+        result(FlutterMethodNotImplemented)
+        return
+      }
+      guard let arguments = call.arguments as? [String: Any],
+            let pid = arguments["pid"] as? Int,
+            pid > 0, pid <= Int(Int32.max),
+            let player = NSRunningApplication(processIdentifier: pid_t(pid)),
+            !player.isTerminated else {
+        result(false)
+        return
+      }
+      // The user clicked Play in the host. Hand focus to that ready helper;
+      // respect a later switch to another app while the helper was opening.
+      if player.isActive {
+        result(true)
+      } else if !NSApp.isActive {
+        result(false)
+      } else if #available(macOS 14.0, *) {
+        NSApp.yieldActivation(to: player)
+        result(player.activate(from: NSRunningApplication.current,
+                               options: [.activateAllWindows]))
+      } else {
+        result(player.activate(options: [.activateIgnoringOtherApps,
+                                         .activateAllWindows]))
+      }
+    }
+    activationChannel = channel
 
     super.awakeFromNib()
   }

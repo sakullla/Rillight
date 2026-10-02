@@ -417,6 +417,10 @@ int main() {
   assert(track.type == RILLIGHT_CORE_TRACK_AUDIO &&
          track.stream_index == before.audio_stream_index &&
          track.sample_rate == 48000 && track.channels == 1);
+  assert(rillight_core_select_audio(core, 99, 2) != 0);
+  assert(snapshot(core).timeline_version == before.timeline_version &&
+         snapshot(core).audio_stream_index == before.audio_stream_index &&
+         snapshot(core).ffmpeg_error == before.ffmpeg_error);
   assert(rillight_core_select_subtitle(core, 99, 2) != 0);
   assert(snapshot(core).timeline_version == before.timeline_version &&
          snapshot(core).subtitle_stream_index == -1);
@@ -499,6 +503,31 @@ int main() {
     rillight_core_release_frame(retained_video);
   });
   release_video.join();
+  // A macOS resize now bounds conversion at the physical viewport. It must
+  // neither upscale the source nor turn a window resize into a media seek.
+  for (int size : {8, 64}) {
+    core = rillight_core_create(&io);
+    assert(core && rillight_core_set_video_output_size(core, size, size) == 0);
+    assert(rillight_core_open(core, "synthetic.bmp", 1) == 0);
+    assert(wait_for(core, [](const auto &state) {
+      return state.first_video_frame_ready != 0;
+    }));
+    const auto before_resize = snapshot(core);
+    frame = rillight_core_take_frame(core, RILLIGHT_CORE_VIDEO_RGBA);
+    const int expected_size = std::min(size, 32);
+    assert(frame && frame->width == expected_size &&
+           frame->height == expected_size);
+    assert(frame->sar_num == frame->sar_den);
+    rillight_core_release_frame(frame);
+    assert(rillight_core_set_video_output_size(core, 16, 12) == 0);
+    const auto resized = snapshot(core);
+    assert(resized.session_id == before_resize.session_id &&
+           resized.timeline_version == before_resize.timeline_version &&
+           resized.state == before_resize.state);
+    assert(rillight_core_set_video_output_size(core, -1, 12) != 0);
+    assert(rillight_core_set_video_output_size(core, 0, 12) != 0);
+    rillight_core_destroy(core);
+  }
   core = rillight_core_create(&io);
   assert(core && rillight_core_open(core, "synthetic.wav", 1) == 0);
   assert(wait_for(core, [](const auto &state) {

@@ -1,12 +1,14 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/player/network_throughput.dart';
+import 'package:rillight/player/player_setting_choices.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
-import 'package:rillight/emby/device_profile.dart';
 import 'package:rillight/player/rillight_video_backend.dart';
 import 'package:rillight/player/buffered_ranges_track.dart';
 import 'package:rillight/player/android_playback_lifecycle.dart';
@@ -251,33 +253,54 @@ class TvPlayerPageState extends State<TvPlayerPage> {
       _TvPanel.speed => l.mobileSpeed,
       _TvPanel.skip => l.playerSkipSettings,
     };
+    final scheme = Theme.of(context).colorScheme;
+    final screen = MediaQuery.sizeOf(context);
+    final panelWidth = math.min(480.0, math.max(360.0, screen.width * .42));
     await showDialog<void>(
       context: context,
       useRootNavigator: false,
-      barrierColor: Colors.black38,
+      barrierColor: scheme.scrim.withValues(alpha: AppScrim.playerBarrier),
       builder: (context) => Dialog(
         key: const Key('tv-player-panel'),
         alignment: Alignment.centerRight,
         insetPadding: EdgeInsets.zero,
-        backgroundColor: const Color(0xff111923),
+        backgroundColor: scheme.surfaceContainer,
         surfaceTintColor: Colors.transparent,
-        shape: const RoundedRectangleBorder(),
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.horizontal(
+            left: Radius.circular(AppRadii.xl),
+          ),
+        ),
         child: SizedBox(
-          width: MediaQuery.sizeOf(context).width * .46,
+          width: panelWidth,
           height: double.infinity,
           child: SafeArea(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(28, 24, 28, 24),
               child: DefaultTextStyle.merge(
-                style: const TextStyle(fontSize: 20, color: Colors.white),
+                style: TextStyle(fontSize: 20, color: scheme.onSurface),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     Text(
                       title,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 28,
-                        fontWeight: FontWeight.w600,
+                        fontWeight: FontWeight.w700,
+                        color: scheme.onSurface,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    ListenableBuilder(
+                      listenable: c,
+                      builder: (context, _) => Text(
+                        _panelValue(c, panel, l),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 18,
+                          color: scheme.onSurfaceVariant,
+                        ),
                       ),
                     ),
                     const SizedBox(height: 18),
@@ -289,48 +312,64 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                           // inside the scroll viewport, including wide TVs.
                           padding: EdgeInsets.symmetric(
                             horizontal:
-                                MediaQuery.sizeOf(context).width *
-                                    .46 *
-                                    (TvAction.focusedScale - 1) /
-                                    2 +
-                                4,
+                                panelWidth * (TvAction.focusedScale - 1) / 2 +
+                                8,
                             vertical: 6,
                           ),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
                               if (panel == _TvPanel.tracks) ...[
-                                Text(l.audioTrack),
-                                for (final track in c.audioTracks)
+                                if (c.canSwitchAudioTrack) Text(l.audioTrack),
+                                if (c.canSwitchAudioTrack)
+                                  for (final track in c.selectableAudioTracks)
+                                    TvAction(
+                                      key: ValueKey('audio-${track.index}'),
+                                      autofocus:
+                                          track ==
+                                          c.selectableAudioTracks.first,
+                                      selected:
+                                          c.audioStreamIndex == track.index,
+                                      onPressed: c.loading
+                                          ? null
+                                          : () => c.setAudio(track.index),
+                                      child: _choiceLabel(
+                                        track.label,
+                                        selected:
+                                            c.audioStreamIndex == track.index,
+                                      ),
+                                    ),
+                                ...[
+                                  const SizedBox(height: 16),
+                                  Text(l.subtitleTrack),
                                   TvAction(
-                                    key: ValueKey('audio-${track.index}'),
-                                    autofocus: track == c.audioTracks.first,
-                                    selected: c.audioStreamIndex == track.index,
+                                    autofocus: !c.canSwitchAudioTrack,
+                                    selected: c.subtitleStreamIndex == null,
                                     onPressed: c.loading
                                         ? null
-                                        : () => c.setAudio(track.index),
-                                    child: Text(track.label),
+                                        : () => c.setSubtitle(null),
+                                    child: _choiceLabel(
+                                      l.subtitleOff,
+                                      selected: c.subtitleStreamIndex == null,
+                                    ),
                                   ),
-                                const SizedBox(height: 16),
-                                Text(l.subtitleTrack),
-                                TvAction(
-                                  autofocus: c.audioTracks.isEmpty,
-                                  selected: c.subtitleStreamIndex == null,
-                                  onPressed: c.loading
-                                      ? null
-                                      : () => c.setSubtitle(null),
-                                  child: Text(l.subtitleOff),
-                                ),
-                                for (final track in c.subtitleTracks)
-                                  TvAction(
-                                    key: ValueKey('subtitle-${track.index}'),
-                                    selected:
-                                        c.subtitleStreamIndex == track.index,
-                                    onPressed: c.loading
-                                        ? null
-                                        : () => c.setSubtitle(track.index),
-                                    child: Text(track.label),
-                                  ),
+                                  for (final track
+                                      in c.selectableSubtitleTracks)
+                                    TvAction(
+                                      key: ValueKey('subtitle-${track.index}'),
+                                      selected:
+                                          c.subtitleStreamIndex == track.index,
+                                      onPressed: c.loading
+                                          ? null
+                                          : () => c.setSubtitle(track.index),
+                                      child: _choiceLabel(
+                                        track.label,
+                                        selected:
+                                            c.subtitleStreamIndex ==
+                                            track.index,
+                                      ),
+                                    ),
+                                ],
                               ],
                               if (panel == _TvPanel.source)
                                 for (final source in c.mediaSources)
@@ -342,7 +381,11 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                     onPressed: c.loading
                                         ? null
                                         : () => c.switchMediaSource(source.id),
-                                    child: Text(source.name ?? source.id),
+                                    child: _choiceLabel(
+                                      source.name ?? source.id,
+                                      selected:
+                                          c.activeMediaSourceId == source.id,
+                                    ),
                                   ),
                               if (panel == _TvPanel.quality)
                                 for (final bitrate in c.availableBitrates)
@@ -354,10 +397,10 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                     onPressed: c.loading
                                         ? null
                                         : () => c.setMaxBitrate(bitrate),
-                                    child: Text(
-                                      bitrate == kTranscodeBitrates.first
-                                          ? l.qualityAuto
-                                          : l.qualityMbps(bitrate ~/ 1000000),
+                                    child: _choiceLabel(
+                                      playerQualityLabel(l, bitrate),
+                                      selected:
+                                          c.maxStreamingBitrate == bitrate,
                                     ),
                                   ),
                               if (panel == _TvPanel.skip) ...[
@@ -369,7 +412,10 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                     PlayerSkipKind.intro,
                                     !c.skipIntroEnabled,
                                   ),
-                                  child: Text(l.settingsSkipIntro),
+                                  child: _choiceLabel(
+                                    l.settingsSkipIntro,
+                                    selected: c.skipIntroEnabled,
+                                  ),
                                 ),
                                 TvAction(
                                   key: const Key('tv-skip-outro-enabled'),
@@ -378,7 +424,10 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                     PlayerSkipKind.outro,
                                     !c.skipOutroEnabled,
                                   ),
-                                  child: Text(l.settingsSkipOutro),
+                                  child: _choiceLabel(
+                                    l.settingsSkipOutro,
+                                    selected: c.skipOutroEnabled,
+                                  ),
                                 ),
                               ],
                               if (panel == _TvPanel.speed)
@@ -390,7 +439,10 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                     onPressed: c.loading
                                         ? null
                                         : () => c.setRate(rate),
-                                    child: Text('${rate}x'),
+                                    child: _choiceLabel(
+                                      '${rate}x',
+                                      selected: c.playbackRate == rate,
+                                    ),
                                   ),
                               if (c.trackFailure != null) Text(c.trackFailure!),
                             ],
@@ -436,6 +488,54 @@ class TvPlayerPageState extends State<TvPlayerPage> {
       c.dispose();
     }
     super.dispose();
+  }
+
+  String _panelValue(PlayerController c, _TvPanel panel, AppLocalizations l) {
+    switch (panel) {
+      case _TvPanel.tracks:
+        for (final track in c.audioTracks) {
+          if (track.index == c.audioStreamIndex) return track.label;
+        }
+        return c.subtitleStreamIndex == null ? l.subtitleOff : l.subtitleTrack;
+      case _TvPanel.quality:
+        return playerQualityLabel(l, c.maxStreamingBitrate);
+      case _TvPanel.source:
+        for (final source in c.mediaSources) {
+          if (source.id == c.activeMediaSourceId) {
+            return source.name ?? source.id;
+          }
+        }
+        return l.mediaSource;
+      case _TvPanel.speed:
+        return '${c.playbackRate}x';
+      case _TvPanel.skip:
+        final enabled = <String>[
+          if (c.skipIntroEnabled) l.settingsSkipIntro,
+          if (c.skipOutroEnabled) l.settingsSkipOutro,
+        ];
+        return enabled.isEmpty ? l.playerSettingOff : enabled.join(' · ');
+    }
+  }
+
+  Widget _choiceLabel(String text, {required bool selected}) {
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            text,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+            ),
+          ),
+        ),
+        if (selected) ...[
+          const SizedBox(width: 12),
+          const Icon(Icons.check_rounded, size: 26),
+        ],
+      ],
+    );
   }
 
   String _time(Duration value) {
@@ -596,17 +696,29 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                         enabled: visible,
                         child: DecoratedBox(
                           key: const Key('tv-player-gradient'),
-                          decoration: const BoxDecoration(
+                          decoration: BoxDecoration(
                             gradient: LinearGradient(
                               begin: Alignment.topCenter,
                               end: Alignment.bottomCenter,
                               colors: [
-                                Color(0xd9101822),
-                                Color(0x00101822),
-                                Color(0x90101822),
-                                Color(0xfa101822),
+                                Colors.black.withValues(
+                                  alpha: AppScrim.of(context, AppScrim.top),
+                                ),
+                                Colors.black.withValues(alpha: 0),
+                                Colors.black.withValues(
+                                  alpha: AppScrim.of(
+                                    context,
+                                    AppScrim.playerBarSoft,
+                                  ),
+                                ),
+                                Colors.black.withValues(
+                                  alpha: AppScrim.of(
+                                    context,
+                                    AppScrim.playerBar,
+                                  ),
+                                ),
                               ],
-                              stops: [0, .35, .58, 1],
+                              stops: const [0, .38, .62, 1],
                             ),
                           ),
                           child: SafeArea(
@@ -634,7 +746,8 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                                 CrossAxisAlignment.start,
                                             children: [
                                               Text(
-                                                c.item?.name ?? l.playerLoading,
+                                                c.item?.displayName ??
+                                                    l.playerLoading,
                                                 maxLines: 1,
                                                 overflow: TextOverflow.ellipsis,
                                                 style: const TextStyle(
@@ -756,27 +869,31 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                         _action(
                                           'tv-player-tracks',
                                           Icons.subtitles_outlined,
-                                          l.mobileTracks,
+                                          c.canSwitchAudioTrack
+                                              ? l.mobileTracks
+                                              : l.subtitleTrack,
                                           ready
                                               ? () => _panel(_TvPanel.tracks)
                                               : null,
                                         ),
-                                        _action(
-                                          'tv-player-quality',
-                                          Icons.high_quality_outlined,
-                                          l.quality,
-                                          ready
-                                              ? () => _panel(_TvPanel.quality)
-                                              : null,
-                                        ),
-                                        _action(
-                                          'tv-player-source',
-                                          Icons.video_library_outlined,
-                                          l.mediaSource,
-                                          ready
-                                              ? () => _panel(_TvPanel.source)
-                                              : null,
-                                        ),
+                                        if (c.canSwitchQuality)
+                                          _action(
+                                            'tv-player-quality',
+                                            Icons.high_quality_outlined,
+                                            l.quality,
+                                            ready
+                                                ? () => _panel(_TvPanel.quality)
+                                                : null,
+                                          ),
+                                        if (c.canSwitchMediaSource)
+                                          _action(
+                                            'tv-player-source',
+                                            Icons.video_library_outlined,
+                                            l.mediaSource,
+                                            ready
+                                                ? () => _panel(_TvPanel.source)
+                                                : null,
+                                          ),
                                         _action(
                                           'tv-player-skip',
                                           Icons.fast_forward_rounded,
@@ -882,12 +999,16 @@ class _TvPlaybackActionState extends State<_TvPlaybackAction> {
             constraints: const BoxConstraints(minHeight: 56),
             padding: const EdgeInsets.all(4),
             decoration: BoxDecoration(
-              color: _focused ? const Color(0xff315d8c) : Colors.transparent,
+              color: _focused
+                  ? Theme.of(context).colorScheme.tertiaryContainer
+                  : Colors.transparent,
               border: Border.all(
-                color: _focused ? Colors.white : Colors.transparent,
+                color: _focused
+                    ? Theme.of(context).colorScheme.onSurface
+                    : Colors.transparent,
                 width: 3,
               ),
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(AppRadii.md),
             ),
             child: Opacity(opacity: enabled ? 1 : .4, child: widget.child),
           ),

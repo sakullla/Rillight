@@ -14,6 +14,8 @@ import 'package:rillight/player/buffered_ranges_track.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/network_throughput.dart';
 import 'package:rillight/player/player_controller.dart';
+import 'package:rillight/player/playback_models.dart';
+import 'package:rillight/player/playback_resolver.dart';
 import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/tv_player_page.dart';
@@ -124,6 +126,35 @@ void main() {
       .any((s) => s.properties.focused == true);
 
   testWidgets(
+    'single-choice TV tracks quality and source actions stay hidden',
+    (tester) async {
+      final c = await start(tester, FakeVideoBackend());
+      const source = PlaybackMediaSource(
+        id: 'only',
+        mediaStreams: [MediaStreamInfo(index: 1, type: 'Audio', codec: 'aac')],
+      );
+      c.resolved = ResolvedPlayback(
+        playMethod: PlayMethod.directPlay,
+        streamUrl: Uri.parse('https://example.test/media'),
+        playSessionId: 'session',
+        mediaSource: source,
+        itemId: c.itemId,
+      );
+      c.mediaSources = const [source];
+      c.onUserActivity();
+      await tester.pump();
+      for (final key in ['tv-player-quality', 'tv-player-source']) {
+        expect(find.byKey(Key(key)), findsNothing);
+      }
+      expect(find.byKey(const Key('tv-player-tracks')), findsOneWidget);
+      expect(find.byKey(const Key('tv-player-speed')), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await finish(tester);
+    },
+    tags: ['integration'],
+  );
+
+  testWidgets(
     'surface remote seek and scan preserve playing and paused intent',
     (tester) async {
       final video = FakeVideoBackend();
@@ -160,6 +191,11 @@ void main() {
     tester,
   ) async {
     final c = await start(tester, FakeVideoBackend(), reducedMotion: true);
+    c.mediaSources = [
+      ...c.mediaSources,
+      const PlaybackMediaSource(id: 'alternate'),
+    ];
+    c.onUserActivity();
     await tester.pumpAndSettle();
     await key(tester, LogicalKeyboardKey.arrowDown);
     expect(focused(tester, 'tv-player-toggle'), isTrue);

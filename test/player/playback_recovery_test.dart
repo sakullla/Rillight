@@ -23,7 +23,11 @@ const _device = EmbyDeviceInfo(
   version: '0.1.0',
 );
 
-class _RecoveryBackend extends FakeVideoBackend {
+class _RecoveryBackend extends FakeVideoBackend
+    implements VideoBackendSourceRenewal {
+  final renewedUrls = <Uri>[];
+  @override
+  Future<void> refreshSourceUrl(Uri url) async => renewedUrls.add(url);
   Completer<void>? stopGate;
   Completer<void>? openGate;
   String? rejectedSource;
@@ -273,6 +277,53 @@ void main() {
       expect(backend.volume, mpvVolumeForPercent(65));
       expect(backend.rate, 1.5);
       expect(controller.error, isNull);
+    },
+  );
+
+  test(
+    'expired source renewal keeps the decoder position and playback intent',
+    () async {
+      final opens = backend.openCount;
+      final position = controller.position;
+      backend.emitEvent(VideoEventKind.sourceRefreshRequired, 403);
+      final deadline = DateTime.now().add(const Duration(seconds: 2));
+      while (backend.renewedUrls.isEmpty && DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+      }
+      expect(backend.renewedUrls, hasLength(1));
+      expect(backend.openCount, opens);
+      expect(controller.position, position);
+      expect(controller.isPlaying, isTrue);
+      expect(controller.disconnected, isFalse);
+    },
+  );
+
+  test(
+    'successful source fallback to its own audio is not a track failure',
+    () async {
+      final oldAudio = controller.audioStreamIndex;
+      server.items
+          .firstWhere((item) => item.id == 'movie-up')
+          .extraSources = const [
+        FakeMediaSource(
+          id: 'alternate',
+          name: 'Alternate',
+          mediaStreams: [
+            FakeMediaStream(
+              index: 9,
+              type: 'Audio',
+              codec: 'aac',
+              isDefault: true,
+            ),
+          ],
+        ),
+      ];
+      await controller.switchMediaSource('alternate');
+      expect(oldAudio, isNot(9));
+      expect(controller.audioStreamIndex, 9);
+      expect(controller.trackFailure, isNull);
+      expect(controller.error, isNull);
+      expect(controller.canSwitchAudioTrack, isFalse);
     },
   );
 

@@ -13,8 +13,8 @@ class PlaybackScopeTest(unittest.TestCase):
     def exercise(self, *, skip_capture, controls_pass=True, capture_status=0):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            app = root / 'rillight.app'
-            executable = app / 'Contents/MacOS/rillight'
+            app = root / 'Rillight.app'
+            executable = app / 'Contents/MacOS/Rillight'
             executable.parent.mkdir(parents=True)
             executable.touch()
             processes = []

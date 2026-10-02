@@ -12,6 +12,7 @@ import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/player/playback_models.dart';
+import 'package:rillight/player/danmaku/danmaku_keys.dart';
 import 'package:rillight/player/playback_state.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/network_throughput.dart';
@@ -375,6 +376,7 @@ void main() {
     await waitFor(tester, find.byKey(PlayerKeys.playPause));
 
     expect(find.byKey(PlayerKeys.networkSpeed), findsOneWidget);
+    expect(find.byKey(DanmakuKeys.menu), findsNothing);
     expect(find.text('0 KB/s'), findsOneWidget);
     expect(find.textContaining('缓存'), findsNothing);
     expect(find.byKey(PlayerKeys.volumePercent), findsOneWidget);

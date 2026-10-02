@@ -88,6 +88,7 @@ class PlaybackHttpProxy {
   bool _refreshingTimeline = false;
   final FutureOr<void> Function(PlaybackCacheStream)? onStreamChanged;
   final _routes = SealedMediaRoutes();
+  final _refreshedUrls = <String, Uri>{};
   final _privateSubtitles = <String, String>{};
   final _roles = <String, PlaybackResourceRole>{};
   final _hlsNext = <String, _HlsNext>{};
@@ -103,6 +104,9 @@ class PlaybackHttpProxy {
   final _loads = <String, _SharedLoad>{};
   final _writes = <Future<bool>>{};
   int _active = 0;
+  Completer<void> _requestReleased = Completer<void>();
+  int _admissionWaits = 0;
+  int _admissionRejected = 0;
   int _activeSegmentPrefetchRequests = 0;
   int _seekGeneration = 0;
   int _hlsIndexBytes = 0;
@@ -130,11 +134,15 @@ class PlaybackHttpProxy {
   int _cancelled = 0;
   String? _lastValidationFailure;
   int? _lastUpstreamStatus;
+  String? _readAheadBypassReason;
+  String? _lastUpstreamResourceRole;
+  int? _lastMediaUpstreamStatus;
   final _upstreamPhases = <String, int>{};
   String? _lastUpstreamPhase;
   String? _lastUpstreamFailureKind;
   int? _lastUpstreamPhaseElapsedMs;
   int? _authenticationStatus;
+  int? _prefetchAuthenticationStatus;
   int _inFlight = 0;
   int _inFlightPeak = 0;
   final _samples = <(DateTime, int)>[];
@@ -143,6 +151,36 @@ class PlaybackHttpProxy {
   bool _playbackActive = true;
 
   int get upstreamBytes => _upstreamBytes;
+  void refreshSourceUrl(Uri route, Uri url) {
+    if (_closed ||
+        dynamicSource ||
+        !sessionBuffering ||
+        (url.scheme != 'https' && url.scheme != 'http') ||
+        route.host != '127.0.0.1' ||
+        route.port != _server.port ||
+        !route.path.startsWith('/$_secret/')) {
+      throw StateError('Invalid media renewal');
+    }
+    final token = route.path.substring('/$_secret/'.length).split('/').first;
+    final resource = _routes.open(token);
+    if (resource == null || resource.role != PlaybackResourceRole.media.index) {
+      throw StateError('Invalid media renewal route');
+    }
+    _refreshedUrls[resource.identity] = url;
+    _prefetchAuthenticationStatus = null;
+    if (_lastMediaUpstreamStatus == 403) _lastMediaUpstreamStatus = null;
+    if (_warmIdentity == resource.identity) {
+      _warmPrefix = null;
+      _warmIdentity = null;
+    }
+    if (_authenticationStatus == 403) _authenticationStatus = null;
+    _readAheadBypass.remove(resource.identity);
+    _readAheadBypassReason = null;
+    if (_readAhead?.resource == resource.identity) {
+      _readAhead?.retryAfterSourceRenewal();
+    }
+  }
+
   void resumeAfterDiskRecovery() => _readAhead?.resumeAfterDiskRecovery();
   Future<void> retryReadAhead() async {
     if (_closed) return;
@@ -249,7 +287,26 @@ class PlaybackHttpProxy {
     return representation != null &&
         resource != null &&
         _byteIdentity == '$resource:${representation.generation}' &&
-        _byteCoverageRevision == cache!.coverageRevision;
+        (_byteCoverageRevision == cache!.coverageRevision ||
+            _cachedBytes.every(
+              (range) =>
+                  cache!.firstMissingOffset(
+                    resource: resource,
+                    generation: representation.generation,
+                    offset: range.start,
+                    length: range.end - range.start,
+                  ) ==
+                  null,
+            ));
+  }
+
+  void _retainByteCoverageWhileBusy() {
+    final verified = _lastByteIntegrityCheck;
+    if (!_byteCoverageCurrent ||
+        verified == null ||
+        DateTime.now().difference(verified) > const Duration(seconds: 5)) {
+      _clearByteCoverage();
+    }
   }
 
   String? get _timelineUnknownReason {
@@ -296,12 +353,15 @@ class PlaybackHttpProxy {
       'cancelledReads': _cancelled,
       'lastValidationFailure': _lastValidationFailure,
       'lastUpstreamStatus': _lastUpstreamStatus,
+      'lastUpstreamResourceRole': _lastUpstreamResourceRole,
+      'lastMediaUpstreamStatus': _lastMediaUpstreamStatus,
       'upstreamConnectingRequests': _upstreamPhases['connect'] ?? 0,
       'upstreamAwaitingHeadersRequests': _upstreamPhases['headers'] ?? 0,
       'lastUpstreamPhase': _lastUpstreamPhase,
       'lastUpstreamFailureKind': _lastUpstreamFailureKind,
       'lastUpstreamPhaseElapsedMs': _lastUpstreamPhaseElapsedMs,
       'authenticationStatus': _authenticationStatus,
+      'prefetchAuthenticationStatus': _prefetchAuthenticationStatus,
       'proxyInFlightBytes': _inFlight,
       'proxyInFlightPeakBytes': _inFlightPeak,
       'registeredResources': _roles.length,
@@ -309,6 +369,8 @@ class PlaybackHttpProxy {
       'streamPolicy': _stream.name,
       'sessionBuffering': sessionBuffering,
       'activeRequests': _active,
+      'admissionWaits': _admissionWaits,
+      'admissionRejected': _admissionRejected,
       'activeSegmentPrefetchRequests': _activeSegmentPrefetchRequests,
       'upstreamBytesPerSecond': upstreamBytesPerSecond,
       'cacheWorkspaceBytes': _cacheWorkspace,
@@ -347,6 +409,7 @@ class PlaybackHttpProxy {
       'timelineVideoTrackIdentified': _selectedVideoTrackId != null,
       'timelineAudioTrackIdentified': _selectedAudioTrackId != null,
       'readAheadBypassedResources': _readAheadBypass.length,
+      'readAheadBypassReason': _readAheadBypassReason,
       'hlsNextSegments': _hlsNext.length,
       'hlsIndexBytes': _hlsIndexBytes,
       'hlsPlaylists': _hlsPlaylists.length,
@@ -401,7 +464,7 @@ class PlaybackHttpProxy {
       return;
     }
     if (_mappingUnknownReason == 'integrityUnavailable') {
-      if (_byteIdentity != null) _clearByteCoverage();
+      _retainByteCoverageWhileBusy();
       return;
     }
     if (_mappingUnknownReason == 'cacheChangedDuringIndex') {
@@ -459,21 +522,21 @@ class PlaybackHttpProxy {
         verifyChecksum: true,
       );
       if (_closed ||
-          !identical(_representations[resource], representation) ||
+          _representations[resource]?.generation != representation.generation ||
           resource != (_timelineResource ?? _readAhead?.resource) ||
           cache!.diagnostics['degradation'] != null) {
         if (_byteIdentity == identity) _clearByteCoverage();
         return;
       }
       if (ranges == null) {
-        _clearByteCoverage();
+        _retainByteCoverageWhileBusy();
         return;
       }
       // availableRanges filters entries against the live cache after its
       // asynchronous disk check. Concurrent new writes are scanned next.
       _publishByteCoverage(resource, representation, ranges);
     } catch (_) {
-      _clearByteCoverage();
+      _retainByteCoverageWhileBusy();
     } finally {
       _refreshingBytes = false;
     }
@@ -1258,6 +1321,7 @@ class PlaybackHttpProxy {
     required Map<String, String?> overrides,
     bool reportAuthentication = true,
   }) async {
+    url = _refreshedUrls[read.resourceKey] ?? url;
     for (var redirects = 0; redirects <= 10; redirects++) {
       read.check();
       url = _withoutForeignCredentials(url);
@@ -1318,7 +1382,13 @@ class PlaybackHttpProxy {
       );
       read.check();
       _lastUpstreamStatus = response.statusCode;
+      final role = _roles[read.resourceKey];
+      _lastUpstreamResourceRole = role?.name;
+      if (role != PlaybackResourceRole.subtitle && reportAuthentication) {
+        _lastMediaUpstreamStatus = response.statusCode;
+      }
       if (reportAuthentication &&
+          role != PlaybackResourceRole.subtitle &&
           (response.statusCode == HttpStatus.unauthorized ||
               response.statusCode == HttpStatus.forbidden)) {
         _authenticationStatus = response.statusCode;
@@ -1895,7 +1965,7 @@ class PlaybackHttpProxy {
   ) async {
     final identity = '$key:${representation.generation}:$start:$end';
     final load = _loads.putIfAbsent(identity, () {
-      final producer = _ProxyRead();
+      final producer = _ProxyRead()..resourceKey = key;
       final shared = _SharedLoad(producer);
       shared.future = (() async {
         final started = DateTime.now();
@@ -2029,6 +2099,7 @@ class PlaybackHttpProxy {
   bool _canReadAhead(HttpRequest incoming, String key, _Representation? rep) {
     final storage = cache;
     if (readAheadBytes <= 0 ||
+        !_playbackActive ||
         storage == null ||
         rep == null ||
         _stream != PlaybackCacheStream.stable ||
@@ -2106,7 +2177,7 @@ class PlaybackHttpProxy {
             _releaseCacheWorkspace(SessionReadAhead.blockBytes);
           },
           fetch: (start, end) async {
-            final producer = _ProxyRead();
+            final producer = _ProxyRead()..resourceKey = key;
             Stream<List<int>> source() async* {
               var cursor = start;
               final started = DateTime.now();
@@ -2130,6 +2201,29 @@ class PlaybackHttpProxy {
                     );
                     if (response.statusCode == HttpStatus.unauthorized ||
                         response.statusCode == HttpStatus.forbidden) {
+                      _prefetchAuthenticationStatus = response.statusCode;
+                      // A future range can be temporarily rate-limited even
+                      // while current media is valid. Retry optional prefetch
+                      // with bounded backoff; actual foreground demand still
+                      // receives the authentication failure immediately.
+                      if (response.statusCode == HttpStatus.forbidden &&
+                          ahead?.diagnostics['readAheadReaderWaiting'] !=
+                              true &&
+                          attempt < 5) {
+                        for (final request in producer.requests.toList()) {
+                          request.abort();
+                        }
+                        await _backoff(
+                          attempt,
+                          started,
+                          producer,
+                          retryAfter: _retryAfter(
+                            response.headers.value('retry-after'),
+                          ),
+                        );
+                        _recoveryAttempts++;
+                        continue;
+                      }
                       // An optional future range may be rejected while the
                       // player is still consuming valid cached bytes. Preserve
                       // those bytes and surface authentication only on demand.
@@ -2185,6 +2279,7 @@ class PlaybackHttpProxy {
                       );
                     }
                     rep.policy = policy;
+                    _prefetchAuthenticationStatus = null;
                     await for (final bytes in response.timeout(
                       const Duration(seconds: 15),
                     )) {
@@ -2240,8 +2335,11 @@ class PlaybackHttpProxy {
                 if (cursor <= end) {
                   throw const HttpException('Read-ahead recovery exhausted');
                 }
-              } catch (_) {
-                if (!producer.cancelled) _readAheadBypass.add(key);
+              } catch (error) {
+                if (!producer.cancelled) {
+                  _readAheadBypassReason = 'producer:${error.runtimeType}';
+                  _readAheadBypass.add(key);
+                }
                 rethrow;
               } finally {
                 producer.cancel();
@@ -2286,8 +2384,14 @@ class PlaybackHttpProxy {
 
       try {
         return await _sendBody(output, body());
-      } catch (_) {
+      } on ReadAheadSuperseded {
+        // A demuxer has moved to another track/range. Retire its old request,
+        // without disabling prefetch for every subsequent read of this movie.
+        read.cancel();
+        rethrow;
+      } catch (error) {
         if (!read.outputStarted && !read.cancelled) {
+          _readAheadBypassReason = 'consumer:${error.runtimeType}';
           _readAheadBypass.add(key);
           return false;
         }
@@ -2315,8 +2419,11 @@ class PlaybackHttpProxy {
       return false;
     }
     final rangeValue = incoming.headers.value('range');
-    final range = MediaByteRange.resolve(rangeValue, representation.total);
-    if (range == null) {
+    final resolvedRange = MediaByteRange.resolve(
+      rangeValue,
+      representation.total,
+    );
+    if (resolvedRange == null) {
       if (!MediaByteRange.beyondEnd(rangeValue, representation.total)) {
         return false;
       }
@@ -2328,6 +2435,7 @@ class PlaybackHttpProxy {
       incoming.response.contentLength = 0;
       return true;
     }
+    MediaByteRange range = resolvedRange;
     if (representation.policy.strongEtag == null &&
         (range.start < representation.responseStart ||
             range.end > representation.responseEnd)) {
@@ -2386,6 +2494,24 @@ class PlaybackHttpProxy {
       } finally {
         _charge(-64 * 1024);
         await lease.close();
+      }
+    }
+    // A large decoder range may start in a fully validated cached extent.
+    // Return that extent as a bounded 206 instead of fetching a distant gap
+    // before delivering its first byte. FFmpeg continues at Content-Range's
+    // end when it actually needs more. Separate responses retain validators.
+    if (sessionBuffering &&
+        !dynamicSource &&
+        rangeValue != null &&
+        range.length >= 256 * 1024) {
+      final firstMissing = cache!.firstMissingOffset(
+        resource: key,
+        generation: representation.generation,
+        offset: range.start,
+        length: range.length,
+      );
+      if (firstMissing != null && firstMissing - range.start >= 64 * 1024) {
+        range = MediaByteRange(range.start, firstMissing - 1);
       }
     }
     var position = range.start;
@@ -2611,7 +2737,28 @@ class PlaybackHttpProxy {
         }
       }
       final requestLimit = prefetch ? _maxRequests - 2 : _maxRequests;
+      if (!prefetch && _active >= requestLimit && _reads.length <= 32) {
+        // Cached MP4 track seeks can arrive faster than TCP close callbacks
+        // retire the previous responses. Yield boundedly for a released slot
+        // instead of turning that normal burst into a fatal local HTTP 503.
+        _admissionWaits++;
+        final deadline = DateTime.now().add(const Duration(seconds: 2));
+        while (_active >= requestLimit) {
+          final remaining = deadline.difference(DateTime.now());
+          if (remaining <= Duration.zero) break;
+          try {
+            await Future.any([
+              _requestReleased.future,
+              read.cancelledFuture,
+            ]).timeout(remaining);
+          } on TimeoutException {
+            break;
+          }
+          read.check();
+        }
+      }
       if (_active >= requestLimit) {
+        _admissionRejected++;
         incoming.response.statusCode = HttpStatus.serviceUnavailable;
         await incoming.response.close();
         return;
@@ -2631,6 +2778,9 @@ class PlaybackHttpProxy {
       read.cancel();
       if (acquired) {
         _active--;
+        final released = _requestReleased;
+        _requestReleased = Completer<void>();
+        released.complete();
         if (incoming.headers.value('x-rillight-prefetch') == '1') {
           _activeSegmentPrefetchRequests--;
         }
@@ -2732,7 +2882,7 @@ class PlaybackHttpProxy {
         return;
       }
       final key = route.identity;
-      final url = route.url;
+      final url = _refreshedUrls[key] ?? route.url;
       read.resourceKey = key;
       if (!_roles.containsKey(key)) {
         while (_roles.length >= 256) {
@@ -3089,6 +3239,7 @@ class PlaybackHttpProxy {
             )) {
               return;
             }
+            _readAheadBypassReason ??= 'admission';
             _readAheadBypass.add(key);
             await _serveResponse(incoming, read);
             return;

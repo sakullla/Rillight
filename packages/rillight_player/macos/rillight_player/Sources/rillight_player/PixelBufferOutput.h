@@ -127,21 +127,43 @@ class PixelBufferOutput {
     if (!ValidSource(frame)) return kCVReturnInvalidArgument;
     width = std::clamp(width, 1, 4096);
     height = std::clamp(height, 1, 2304);
-    // The Flutter texture is stretched to the view. Keep the view's aspect
-    // ratio, but do not resample square-pixel frames: a larger Retina view
-    // used to upscale on the CPU. The GPU samples this smaller buffer.
-    if (QuarterTurns(frame) == 0 && height > 0) {
+    // The Flutter texture is stretched to the view, so the buffer keeps the
+    // view's aspect ratio. Square-pixel frames are never enlarged past the
+    // source: a Retina window bigger than the frame stays at source size and
+    // the GPU samples up. A smaller window is downscaled here. Uploading a
+    // full 4K buffer into a windowed player was the playback stall.
+    if (QuarterTurns(frame) == 0 && width > 0 && height > 0 &&
+        frame.width > 0 && frame.height > 0) {
       const double sar = frame.sar_num > 0 && frame.sar_den > 0
           ? std::clamp(static_cast<double>(frame.sar_num) / frame.sar_den,
                       0.1, 10.0)
           : 1.0;
       if (std::abs(sar - 1.0) < 0.001) {
-        const int across = std::max(
-            1, static_cast<int>(std::lround(frame.height * static_cast<double>(width) / height)));
-        const int down = std::max(
-            1, static_cast<int>(std::lround(frame.width * static_cast<double>(height) / width)));
-        width = std::clamp(std::max(frame.width, across), 1, 4096);
-        height = std::clamp(std::max(frame.height, down), 1, 4096);
+        const double view_aspect = static_cast<double>(width) / height;
+        const double frame_aspect =
+            static_cast<double>(frame.width) / frame.height;
+        int fitted_width;
+        int fitted_height;
+        if (frame_aspect >= view_aspect) {
+          fitted_width = std::min(width, frame.width);
+          fitted_height = std::max(
+              1, static_cast<int>(std::lround(fitted_width / view_aspect)));
+        } else {
+          fitted_height = std::min(height, frame.height);
+          fitted_width = std::max(
+              1, static_cast<int>(std::lround(fitted_height * view_aspect)));
+        }
+        const double content_scale = std::min(
+            fitted_width / static_cast<double>(frame.width),
+            fitted_height / static_cast<double>(frame.height));
+        if (content_scale > 1.0) {
+          fitted_width = std::max(
+              1, static_cast<int>(std::lround(fitted_width / content_scale)));
+          fitted_height = std::max(
+              1, static_cast<int>(std::lround(fitted_height / content_scale)));
+        }
+        width = std::clamp(fitted_width, 1, 4096);
+        height = std::clamp(fitted_height, 1, 4096);
       }
     }
     CVPixelBufferRef buffer = nullptr;

@@ -13,8 +13,13 @@ class ReadAheadTransfer {
   final void Function() cancel;
 }
 
+/// A session seek/stop cancelled this reader; the resource remains usable.
+class ReadAheadSuperseded extends HttpException {
+  const ReadAheadSuperseded() : super('Media read superseded');
+}
+
 /// A session-owned sliding read-ahead window, independent of socket backpressure.
-/// Only one producer runs. The newest large media read owns its position; small
+/// One producer serves concurrent readers of the same representation; small
 /// demuxer probes are handled by the HTTP transport outside this scheduler.
 class SessionReadAhead {
   SessionReadAhead({
@@ -43,6 +48,12 @@ class SessionReadAhead {
   final bool Function()? reserveWorkspace;
   final void Function()? releaseWorkspace;
   int _reader = 0;
+  int _cancelGeneration = 0;
+  int _producerEpoch = 0;
+  int _transferStart = 0;
+  int _transferEnd = -1;
+  final _recentPositions = <int, (int, DateTime)>{};
+  int _discardedBefore = 0;
   int _position = 0;
   int _published = 0;
   bool _active = false;
@@ -56,6 +67,10 @@ class SessionReadAhead {
   int _publicationActive = 0;
   int _publicationPeak = 0;
   int _publicationBackpressure = 0;
+  Uint8List? _liveBuffer;
+  int _liveStart = 0;
+  int _liveLength = 0;
+  int _liveReader = -1;
   Future<void>? _worker;
   ReadAheadTransfer? _transfer;
   Completer<void> _changed = Completer<void>();
@@ -83,9 +98,17 @@ class SessionReadAhead {
     changed.complete();
   }
 
-  void stop() {
+  void stop({bool cancelReaders = true}) {
+    if (cancelReaders) {
+      _cancelGeneration++;
+      _recentPositions.clear();
+      _discardedBefore = 0;
+    }
     _active = false;
     _reader++;
+    _producerEpoch++;
+    _liveBuffer = null;
+    _liveLength = 0;
     _transfer?.cancel();
     _readerWaiting = false;
     _notify();
@@ -126,6 +149,15 @@ class SessionReadAhead {
     }
   }
 
+  void retryAfterSourceRenewal() {
+    if (_closed) return;
+    _failed = false;
+    _failure = null;
+    _active = true;
+    _notify();
+    _schedule();
+  }
+
   void setPrefetchAllowed(bool allowed) {
     if (_prefetchAllowed == allowed) return;
     _prefetchAllowed = allowed;
@@ -163,7 +195,42 @@ class SessionReadAhead {
     return missing;
   }
 
-  Future<void> _waitForPublicationCapacity(int cost) async {
+  void _noteReaderPosition(int position) {
+    final now = DateTime.now();
+    _recentPositions.removeWhere(
+      (_, value) => now.difference(value.$2) > const Duration(seconds: 15),
+    );
+    // Keep distinct nearby audio/video cursors; a far audio chunk must not
+    // advance the eviction boundary beyond video that is still being read.
+    final bucket = position ~/ (32 * 1024 * 1024);
+    final previous = _recentPositions[bucket];
+    _recentPositions[bucket] = (
+      previous == null ? position : min(previous.$1, position),
+      now,
+    );
+    while (_recentPositions.length > 32) {
+      _recentPositions.remove(_recentPositions.keys.first);
+    }
+  }
+
+  Future<void> _reclaimConsumed() async {
+    if (_recentPositions.isEmpty) return;
+    final used = cache.diagnostics['diskBytes'] as int? ?? 0;
+    if (used < cache.diskSessionLimitBytes * .75) return;
+    final floor = _recentPositions.values.map((value) => value.$1).reduce(min);
+    final reserve = min(64 * 1024 * 1024, cache.diskSessionLimitBytes ~/ 8);
+    final before = max(0, floor - reserve);
+    if (before < _discardedBefore + blockBytes) return;
+    await cache.discardBefore(
+      resource: resource,
+      generation: generation,
+      offset: before,
+      keepPrefixBytes: min(32 * 1024 * 1024, cache.diskSessionLimitBytes ~/ 16),
+    );
+    _discardedBefore = before;
+  }
+
+  Future<void> _waitForPublicationCapacity(int cost, int reader) async {
     // Leave one disk-read reservation available while ahead writes are queued.
     // Otherwise publications can fill the pending budget and
     // starve the foreground reader and cache-integrity observations.
@@ -172,18 +239,19 @@ class SessionReadAhead {
       cache.pendingLimitBytes - 2 * _publicationBlockBytes,
     );
     while (!_closed &&
+        _active &&
+        reader == _producerEpoch &&
         cost <= cache.pendingLimitBytes &&
         (cache.diagnostics['degradation'] == 'disk-timeout' ||
             cache.diagnostics['degradation'] == null &&
                 (cache.diagnostics['pendingBytes'] as int) + cost > limit)) {
       _publicationBackpressure++;
-      final changed = cache.pendingChanged;
-      await changed;
+      await Future.any([cache.pendingChanged, _changed.future]);
     }
   }
 
   Future<void> _fill() async {
-    final reader = _reader;
+    final reader = _producerEpoch;
     final reserved = reserveWorkspace?.call() ?? true;
     try {
       if (!reserved) {
@@ -191,8 +259,9 @@ class SessionReadAhead {
       }
       while (_active &&
           !_closed &&
-          reader == _reader &&
+          reader == _producerEpoch &&
           (_prefetchAllowed || _readerWaiting)) {
+        await _reclaimConsumed();
         if (cache.diagnostics['degradation'] == 'disk-timeout') {
           _waitingForDisk = true;
         }
@@ -202,24 +271,32 @@ class SessionReadAhead {
         final missing = _missing();
         if (missing == null) return;
         final start = missing;
-        final requestLength = _windowEnd - start;
+        // The disk quota is a sliding window, not one enormous HTTP request.
+        // Large ranges amplify demuxer probes/seeks and can be rejected by CDNs.
+        final requestLength = min(maxRequestBytes, _windowEnd - start);
         _requestBytes = requestLength;
         final end = start + requestLength - 1;
+        _transferStart = start;
+        _transferEnd = end;
         final transfer = await fetch(start, end);
         _transfer = transfer;
         if (!_active ||
             _closed ||
-            reader != _reader ||
+            reader != _producerEpoch ||
             (!_prefetchAllowed && !_readerWaiting)) {
           transfer.cancel();
           return;
         }
         var offset = start;
-        // Publish the first MiB promptly for startup/seek, then use larger disk
-        // blocks without waiting for the entire forward range to download.
+        // Persist a first MiB, then larger disk blocks. The foreground can
+        // consume the validated live prefix before a whole block is persisted.
         var buffer = Uint8List(
           min(min(_publicationBlockBytes, 1024 * 1024), end - offset + 1),
         );
+        _liveBuffer = buffer;
+        _liveReader = reader;
+        _liveStart = offset;
+        _liveLength = 0;
         var length = 0;
         final publications = <Future<bool>>[];
         final pendingPublications = <Future<bool>>{};
@@ -237,8 +314,8 @@ class SessionReadAhead {
             await pendingPublications.first;
           }
           final cost = bytes.length * 2;
-          await _waitForPublicationCapacity(cost);
-          if (!_active || _closed || reader != _reader) return;
+          await _waitForPublicationCapacity(cost, reader);
+          if (!_active || _closed || reader != _producerEpoch) return;
           late final Future<bool> publication;
           publication = cache
               .put(
@@ -263,7 +340,7 @@ class SessionReadAhead {
 
         try {
           await for (final bytes in transfer.bytes) {
-            if (!_active || _closed || reader != _reader) return;
+            if (!_active || _closed || reader != _producerEpoch) return;
             // React at network-chunk granularity even when assembling a large
             // disk block. A pause must not download the remaining 4 MiB first.
             if (!_prefetchAllowed && !_readerWaiting) return;
@@ -276,12 +353,14 @@ class SessionReadAhead {
               buffer.setRange(length, length + count, bytes, cursor);
               length += count;
               cursor += count;
+              _liveLength = length;
+              _notify();
               if (length == buffer.length) {
                 await publish(buffer, offset);
                 if (cache.diagnostics['degradation'] == 'disk-timeout') {
                   _waitingForDisk = true;
                 }
-                if (!_active || _closed || reader != _reader) return;
+                if (!_active || _closed || reader != _producerEpoch) return;
                 offset += length;
                 _published += length;
                 length = 0;
@@ -293,6 +372,9 @@ class SessionReadAhead {
                 buffer = Uint8List(
                   min(_publicationBlockBytes, max(0, end - offset + 1)),
                 );
+                _liveBuffer = buffer;
+                _liveStart = offset;
+                _liveLength = 0;
               }
             }
           }
@@ -301,50 +383,108 @@ class SessionReadAhead {
           }
         } finally {
           transfer.cancel();
+          // Switching between separately stored audio/video chunks is a normal
+          // demuxer seek. Keep its validated partial block; otherwise every
+          // switch discards the bytes that the next packet needs again.
+          if (!_closed &&
+              length > 0 &&
+              (reader != _producerEpoch || !_active || !_prefetchAllowed)) {
+            final retained = await cache.put(
+              resource: resource,
+              generation: generation,
+              offset: offset,
+              bytes: Uint8List.sublistView(buffer, 0, length),
+            );
+            if (retained) _published += length;
+          }
           if (identical(_transfer, transfer)) _transfer = null;
           final results = await Future.wait(publications);
           if (results.any((accepted) => !accepted) &&
               _active &&
               !_closed &&
-              reader == _reader) {
+              reader == _producerEpoch) {
             throw const HttpException('Read-ahead cache rejected a block');
           }
         }
       }
     } catch (error) {
-      if (_active && !_closed && reader == _reader) {
+      if (_active && !_closed && reader == _producerEpoch) {
         _failed = true;
         _failure = error;
       }
       _notify();
     } finally {
+      if (_liveReader == reader) {
+        _liveBuffer = null;
+        _liveLength = 0;
+      }
       if (reserved) releaseWorkspace?.call();
     }
   }
 
   Stream<List<int>> read(int start, int end) async* {
     if (_closed || _failed) throw const HttpException('Read-ahead unavailable');
-    stop();
-    final reader = _reader;
+    // MP4 can place audio and video chunks tens of MiB apart. Replacing the
+    // HTTP consumer must not cancel the continuous download each time the
+    // demuxer alternates tracks. Far seeks still interrupt obsolete work.
+    final cachedStart =
+        cache.firstMissingOffset(
+          resource: resource,
+          generation: generation,
+          offset: start,
+          length: min(64 * 1024, end - start + 1),
+        ) ==
+        null;
+    final nearby =
+        _worker != null &&
+        (cachedStart ||
+            start >= _transferStart &&
+                start <= _transferEnd + 128 * 1024 * 1024);
+    if (!nearby) stop(cancelReaders: false);
+    final reader = ++_reader;
+    final cancellation = _cancelGeneration;
+    _noteReaderPosition(start);
     _active = true;
     _position = start;
     try {
       var offset = start;
       var progressDeadline = DateTime.now().add(const Duration(seconds: 25));
       while (offset <= end) {
-        if (_closed || !_active || reader != _reader) {
-          throw const HttpException('Media read cancelled');
+        if (_closed || !_active || cancellation != _cancelGeneration) {
+          throw const ReadAheadSuperseded();
         }
         final changed = _changed.future;
         final pendingChanged = cache.pendingChanged;
-        final hit = await cache.read(
+        var hit = await cache.read(
           resource: resource,
           generation: generation,
           offset: offset,
           maxLength: min(64 * 1024, end - offset + 1),
         );
-        if (_closed || !_active || reader != _reader) {
-          throw const HttpException('Media read cancelled');
+        // Already validated network bytes belong to this reader/generation.
+        // Copy only the requested slice so a 64 KiB read never retains a
+        // whole producer block, and don't publish incomplete disk coverage.
+        final live = _liveBuffer;
+        if (hit == null &&
+            live != null &&
+            _liveReader == _producerEpoch &&
+            offset >= _liveStart &&
+            offset < _liveStart + _liveLength) {
+          final start = offset - _liveStart;
+          final length = min(
+            min(64 * 1024, end - offset + 1),
+            _liveLength - start,
+          );
+          hit = CacheRead(
+            offset,
+            Uint8List.fromList(
+              Uint8List.sublistView(live, start, start + length),
+            ),
+            CacheReadSource.memory,
+          );
+        }
+        if (_closed || !_active || cancellation != _cancelGeneration) {
+          throw const ReadAheadSuperseded();
         }
         if (hit == null) {
           if (_failed) {
@@ -373,12 +513,18 @@ class SessionReadAhead {
         }
         yield hit.bytes;
         offset += hit.bytes.length;
+        _noteReaderPosition(offset);
         _position = offset;
         progressDeadline = DateTime.now().add(const Duration(seconds: 25));
         _schedule();
       }
     } finally {
-      if (reader == _reader) stop();
+      if (reader == _reader) {
+        _readerWaiting = false;
+        // Keep the session's bounded forward window warm between demux reads.
+        // Playback pause, explicit seek and session close stop it separately.
+        if (!_prefetchAllowed) stop();
+      }
     }
   }
 }

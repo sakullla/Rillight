@@ -151,7 +151,62 @@ class _TrackIdCoreDriver extends _CoreDriver {
   };
 }
 
+class _RejectedAudioCoreDriver extends _CoreDriver {
+  int attempts = 0;
+
+  @override
+  Future<Map<String, dynamic>> open(CorePlayerOpen value) async => {
+    ...await super.open(value),
+    'playableAudio': [2, 3],
+  };
+
+  @override
+  Future<Map<String, dynamic>> command(
+    String method, [
+    Map<String, Object?> args = const {},
+  ]) async {
+    if (method == 'audio') {
+      attempts++;
+      throw const CoreTrackSelectionException('audio', -1128613112);
+    }
+    return super.command(method, args);
+  }
+}
+
 void main() {
+  test(
+    'rejected optional audio keeps the current track and playable session',
+    () async {
+      final core = _RejectedAudioCoreDriver();
+      final backend = RillightVideoBackend(
+        settingsStore: MemoryPlayerSettingsStore(),
+        createPlayer: () async => core,
+      );
+      addTearDown(backend.dispose);
+      await backend.open(
+        VideoOpenRequest(
+          sessionId: 81,
+          url: Uri.parse('http://127.0.0.1:8765/media.mp4'),
+        ),
+      );
+      await expectLater(
+        backend.setAudioIndex(3),
+        throwsA(isA<DeviceTrackRejected>()),
+      );
+      expect(backend.selectedAudioIndex, 2);
+      expect(backend.audioTrackSupported(3), false);
+      expect(core.disposed, false);
+      await expectLater(
+        backend.setAudioIndex(3),
+        throwsA(isA<DeviceTrackRejected>()),
+      );
+      expect(core.attempts, 1);
+      await backend.play();
+      expect(backend.isPlaying, true);
+      expect(backend.audioTrackSupported(3), false);
+      expect(backend.lastFailure, isNull);
+    },
+  );
   for (final status in [HttpStatus.ok, HttpStatus.unauthorized]) {
     test(
       'transport reports HTTP $status before the core finishes opening',

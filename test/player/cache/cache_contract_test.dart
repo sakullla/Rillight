@@ -834,6 +834,307 @@ void main() {
 
   group('session_read_ahead_test.dart', () {
     test(
+      'consumed reclamation preserves initialization upcoming bytes and active leases',
+      () async {
+        const block = 64 * 1024;
+        final root = await Directory.systemTemp.createTemp(
+          'rillight-consumed-',
+        );
+        final cache = await SessionByteCache.open(
+          root: root,
+          memoryLimitBytes: 0,
+          diskLimitBytes: 8 * block,
+        );
+        CacheRangeLease? lease;
+        try {
+          for (var i = 0; i < 5; i++) {
+            await cache.put(
+              resource: 'movie',
+              generation: 1,
+              offset: i * block,
+              bytes: Uint8List(block)..fillRange(0, block, i),
+            );
+          }
+          lease = await cache.protectRange(
+            resource: 'movie',
+            generation: 1,
+            offset: block,
+            length: block,
+          );
+          expect(lease, isNotNull);
+          await cache.discardBefore(
+            resource: 'movie',
+            generation: 1,
+            offset: 3 * block,
+            keepPrefixBytes: block,
+          );
+          for (final i in [0, 1, 3, 4]) {
+            expect(
+              await cache.read(
+                resource: 'movie',
+                generation: 1,
+                offset: i * block,
+              ),
+              isNotNull,
+            );
+          }
+          expect(
+            await cache.read(
+              resource: 'movie',
+              generation: 1,
+              offset: 2 * block,
+            ),
+            isNull,
+          );
+          await lease!.close();
+          await cache.discardBefore(
+            resource: 'movie',
+            generation: 1,
+            offset: 3 * block,
+            keepPrefixBytes: block,
+          );
+          expect(
+            await cache.read(resource: 'movie', generation: 1, offset: block),
+            isNull,
+          );
+        } finally {
+          await lease?.close();
+          await cache.close();
+          await root.delete(recursive: true);
+        }
+      },
+    );
+    test(
+      'overlapping demux readers share prefetch without cancelling each other',
+      () async {
+        const block = 64 * 1024;
+        final cache = await SessionByteCache.open(
+          memoryLimitBytes: 2 * 1024 * 1024,
+        );
+        final release = Completer<void>();
+        var requests = 0;
+        final ahead = SessionReadAhead(
+          cache: cache,
+          resource: 'tracks',
+          generation: 1,
+          total: 1024 * 1024,
+          aheadBytes: 1024 * 1024,
+          fetch: (start, end) async {
+            requests++;
+            return ReadAheadTransfer(
+              (() async* {
+                for (var offset = start; offset <= end; offset += block) {
+                  yield Uint8List(block)..fillRange(0, block, offset ~/ block);
+                  if (offset == 0) await release.future;
+                }
+              })(),
+              () {
+                if (!release.isCompleted) release.complete();
+              },
+            );
+          },
+        );
+        final video = StreamIterator(ahead.read(0, 1024 * 1024 - 1));
+        final audio = StreamIterator(ahead.read(2 * block, 1024 * 1024 - 1));
+        try {
+          expect(
+            await video.moveNext().timeout(const Duration(seconds: 2)),
+            isTrue,
+          );
+          final pendingAudio = audio.moveNext();
+          await Future<void>.delayed(const Duration(milliseconds: 10));
+          release.complete();
+          expect(
+            await pendingAudio.timeout(const Duration(seconds: 2)),
+            isTrue,
+          );
+          expect(audio.current.every((byte) => byte == 2), isTrue);
+          expect(
+            await video.moveNext().timeout(const Duration(seconds: 2)),
+            isTrue,
+          );
+          expect(video.current.every((byte) => byte == 1), isTrue);
+          expect(requests, 1);
+          expect(ahead.failed, isFalse);
+        } finally {
+          ahead.stop();
+          await video.cancel();
+          await audio.cancel();
+          await ahead.close();
+          await cache.close();
+        }
+      },
+    );
+    test(
+      'a cancelled track read retains its validated partial block',
+      () async {
+        const size = 64 * 1024;
+        final cache = await SessionByteCache.open(memoryLimitBytes: 4 * size);
+        final release = Completer<void>();
+        final ahead = SessionReadAhead(
+          cache: cache,
+          resource: 'interleaved',
+          generation: 1,
+          total: 1024 * 1024,
+          aheadBytes: 1024 * 1024,
+          fetch: (start, end) async => ReadAheadTransfer(
+            (() async* {
+              yield Uint8List(size)..fillRange(0, size, 7);
+              await release.future;
+            })(),
+            () {
+              if (!release.isCompleted) release.complete();
+            },
+          ),
+        );
+        final reader = StreamIterator(ahead.read(0, 1024 * 1024 - 1));
+        try {
+          expect(
+            await reader.moveNext().timeout(const Duration(seconds: 2)),
+            isTrue,
+          );
+          ahead.stop();
+          await reader.cancel();
+          await until(
+            () => ahead.diagnostics['readAheadWorkerActive'] == false,
+          );
+          final retained = await cache.read(
+            resource: 'interleaved',
+            generation: 1,
+            offset: 0,
+            maxLength: size,
+          );
+          expect(retained?.bytes, hasLength(size));
+          expect(retained!.bytes.every((byte) => byte == 7), isTrue);
+          expect(ahead.failed, isFalse);
+        } finally {
+          await ahead.close();
+          await cache.close();
+        }
+      },
+    );
+    test('a full disk window keeps rolling beyond its quota', () async {
+      const mib = 1024 * 1024;
+      const total = 48 * mib;
+      final root = await Directory.systemTemp.createTemp(
+        'rillight-rolling-window-',
+      );
+      final cache = await SessionByteCache.open(
+        root: root,
+        memoryLimitBytes: 4 * mib,
+        diskLimitBytes: 16 * mib,
+      );
+      final starts = <int>[];
+      final ahead = SessionReadAhead(
+        cache: cache,
+        resource: 'rolling',
+        generation: 1,
+        total: total,
+        aheadBytes: 16 * mib,
+        fetch: (start, end) async {
+          starts.add(start);
+          return ReadAheadTransfer(
+            (() async* {
+              for (var offset = start; offset <= end; offset += 64 * 1024) {
+                final bytes = Uint8List((end - offset + 1).clamp(0, 64 * 1024));
+                bytes.fillRange(0, bytes.length, (offset ~/ (64 * 1024)) % 251);
+                yield bytes;
+              }
+            })(),
+            () {},
+          );
+        },
+      );
+      try {
+        var received = 0;
+        await for (final chunk
+            in ahead.read(0, total - 1).timeout(const Duration(seconds: 10))) {
+          expect(chunk.first, (received ~/ (64 * 1024)) % 251);
+          received += chunk.length;
+        }
+        expect(received, total);
+        expect(starts.any((start) => start >= 32 * mib), isTrue);
+        expect(
+          cache.diagnostics['diskBytes'] as int,
+          lessThanOrEqualTo(16 * mib),
+        );
+      } finally {
+        await ahead.close();
+        await cache.close();
+        await root.delete(recursive: true);
+      }
+    });
+
+    test(
+      'large cache windows use bounded requests and expose the first 64 KiB',
+      () async {
+        const mib = 1024 * 1024;
+        const total = 80 * mib;
+        final root = await Directory.systemTemp.createTemp(
+          'rillight-bounded-range-',
+        );
+        final cache = await SessionByteCache.open(
+          root: root,
+          memoryLimitBytes: 8 * mib,
+          diskLimitBytes: 128 * mib,
+          pendingLimitBytes: 64 * mib,
+        );
+        final requests = <(int, int)>[];
+        final release = Completer<void>();
+        final ahead = SessionReadAhead(
+          cache: cache,
+          resource: 'bounded',
+          generation: 1,
+          total: total,
+          aheadBytes: 2048 * mib,
+          fetch: (start, end) async {
+            requests.add((start, end));
+            if (end - start + 1 > 32 * mib) {
+              throw const HttpException('Range rejected by server');
+            }
+            return ReadAheadTransfer(
+              (() async* {
+                for (var offset = start; offset <= end; offset += 64 * 1024) {
+                  yield Uint8List((end - offset + 1).clamp(0, 64 * 1024));
+                  if (offset == 0) await release.future;
+                }
+              })(),
+              () {
+                if (!release.isCompleted) release.complete();
+              },
+            );
+          },
+        );
+        final reader = StreamIterator(ahead.read(0, total - 1));
+        try {
+          expect(
+            await reader.moveNext().timeout(const Duration(seconds: 3)),
+            isTrue,
+          );
+          expect(reader.current, hasLength(64 * 1024));
+          release.complete();
+          await until(
+            () =>
+                ahead.diagnostics['readAheadWorkerActive'] == false &&
+                ahead.diagnostics['readAheadPublishedBytes'] == total,
+          );
+          expect(requests, [
+            (0, 32 * mib - 1),
+            (32 * mib, 64 * mib - 1),
+            (64 * mib, total - 1),
+          ]);
+          expect(ahead.failed, isFalse);
+        } finally {
+          if (!release.isCompleted) release.complete();
+          await reader.cancel();
+          await ahead.close();
+          await cache.close();
+          await root.delete(recursive: true);
+        }
+      },
+    );
+
+    test(
       'large blocks reduce file count without delaying first delivery',
       () async {
         const mib = 1024 * 1024;

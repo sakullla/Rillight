@@ -6,7 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/player/player_settings.dart';
 
-/// 外观三态:跟随系统(默认)、浅色、深色。
+/// 外观三态:跟随系统、浅色、深色。未选择过时默认深色。
 enum AppearanceStyle { system, light, dark }
 
 /// 「跟随系统」的落点亮度确认结果。
@@ -75,10 +75,10 @@ extension AppearanceStyleThemeMode on AppearanceStyle {
   }
 }
 
-/// 外观偏好:未选择过时跟随系统,选择后立即生效并持久化。
+/// 外观偏好:未选择过时使用深色,选择后立即生效并持久化。
 ///
 /// 持久化复用 [PlayerSettingsStore] 通道(与播放器设置同一 JSON 文件,
-/// 合并写互不清除);读取失败/无偏好时保持 [AppearanceStyle.system]。
+/// 合并写互不清除);读取失败/无偏好时保持 [AppearanceStyle.dark]。
 class AppearanceController extends ChangeNotifier {
   AppearanceController({PlayerSettingsStore? store}) : _store = store {
     final injected = _store;
@@ -97,7 +97,7 @@ class AppearanceController extends ChangeNotifier {
   Future<PlayerSettingsStore>? _ready;
   Future<void>? _initialLoad;
 
-  AppearanceStyle _style = AppearanceStyle.system;
+  AppearanceStyle _style = AppearanceStyle.dark;
 
   /// 「跟随系统」的落点亮度。未确认前是 [SystemBrightnessChoice.unknown],
   /// 即 R12 要求的「平台无偏好时呈深色」;ready/系统亮度变化时刷新。

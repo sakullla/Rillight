@@ -91,7 +91,7 @@ jobs:
       - name: Exercise production loopback proxy and missing-server negative control
         id: proxy
         run: |
-          python3 macos/proxy_smoke.py build/macos/Build/Products/Release/rillight.app \
+          python3 macos/proxy_smoke.py build/macos/Build/Products/Release/Rillight.app \
             build/macos-proxy-sandbox-evidence
       - name: Exercise production playback controls on the hosted runner
         id: playback
@@ -103,7 +103,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          app="build/macos/Build/Products/Release/rillight.app"
+          app="build/macos/Build/Products/Release/Rillight.app"
           python3 macos/verify_bundle.py "$app"
           # Probe packaged core/FFmpeg versions; this is not a GUI/playback test.
           DYLD_LIBRARY_PATH="$PWD/$app/Contents/Frameworks" \
@@ -136,7 +136,7 @@ jobs:
           SIGNING_MODE: ${{ inputs.signing }}
         run: |
           set -euo pipefail
-          app="build/macos/Build/Products/Release/rillight.app"
+          app="build/macos/Build/Products/Release/Rillight.app"
           if [ "$SIGNING_MODE" != "identity" ] && [ "$SIGNING_MODE" != "adhoc" ]; then
             echo "::error::Unsupported macOS signing mode: $SIGNING_MODE"
             exit 1
