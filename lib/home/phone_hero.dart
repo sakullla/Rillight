@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:rillight/app/content_theme.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_motion.dart';
@@ -10,6 +11,7 @@ import 'package:rillight/home/featured_items.dart';
 import 'package:rillight/home/hero_artwork.dart';
 import 'package:rillight/home/hero_playback_actions.dart';
 import 'package:rillight/library/item_format.dart';
+import 'package:rillight/player/player_window_host.dart';
 
 /// Phone artwork keeps its landscape composition, with text on a solid surface.
 class PhoneHero extends StatefulWidget {
@@ -220,7 +222,16 @@ class _HeroCaption extends StatelessWidget {
             ),
           ],
           const Spacer(),
-          HeroPlaybackActions(item: item, onDetails: onOpen),
+          HeroPlaybackActions(
+            item: item,
+            onDetails: onOpen,
+            onResume: () async {
+              await context.push<void>(
+                '/play/${item.id}',
+                extra: PlayerOpenRequest(itemId: item.id, autoResume: true),
+              );
+            },
+          ),
         ],
       ),
     );

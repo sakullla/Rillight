@@ -9,9 +9,13 @@ class HeroPlaybackActions extends StatefulWidget {
     super.key,
     required this.item,
     required this.onDetails,
+    this.onResume,
   });
   final EmbyItem item;
   final VoidCallback onDetails;
+
+  /// Phone navigation owns a route; desktop callers use the window host.
+  final Future<void> Function()? onResume;
 
   @override
   State<HeroPlaybackActions> createState() => _HeroPlaybackActionsState();
@@ -22,13 +26,18 @@ class _HeroPlaybackActionsState extends State<HeroPlaybackActions> {
 
   Future<void> _resume() async {
     if (_opening) return;
-    final host = PlayerWindowScope.maybeOf(context);
     setState(() => _opening = true);
     try {
-      if (host == null) throw StateError('Player host unavailable');
-      await host.open(
-        PlayerOpenRequest(itemId: widget.item.id, autoResume: true),
-      );
+      final resume = widget.onResume;
+      if (resume != null) {
+        await resume();
+      } else {
+        final host = PlayerWindowScope.maybeOf(context);
+        if (host == null) throw StateError('Player host unavailable');
+        await host.open(
+          PlayerOpenRequest(itemId: widget.item.id, autoResume: true),
+        );
+      }
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.maybeOf(context)?.showSnackBar(

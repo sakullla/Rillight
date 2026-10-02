@@ -512,6 +512,25 @@ class Device:
         self.adb('shell', 'am', 'start', '-W', '-n', ACTIVITY)
 
 
+def phone_hero_resume_flow(device):
+    device.tap(key='hero-resume-movie-01')
+    started = device.wait(lambda s: s['player'] and not s['player']['loading'] and
+                          s['player']['playing'], 'phone hero starts owned playback', 40)
+    position = started['player']['positionMs']
+    if position < 2000:
+        raise RuntimeError('Phone hero lost the synthetic resume position')
+    advanced = device.wait(lambda s: s['player'] and s['player']['playing'] and
+                           s['player']['positionMs'] > position + 500,
+                           'phone hero playback advances')
+    device.screenshot('hero-resume-playing')
+    device.key(4)
+    device.wait(lambda s: s['player'] is None and s['size'][1] > s['size'][0] and
+                any(row['key'] == 'hero-resume-movie-01' for row in s['rows']),
+                'phone hero returns home')
+    return {'started_at_ms': position, 'advanced_to_ms': advanced['player']['positionMs'],
+            'returned_home': True}
+
+
 def app_flow(device, tv, *, capture_virtual_audio=True):
     d = device
     d.wait(lambda s: s['tv'] == tv and not s['authenticated'], 'platform connection page')
@@ -525,7 +544,9 @@ def app_flow(device, tv, *, capture_virtual_audio=True):
             d.text(value)
             d.close_editor()  # first Back hides IME; second closes dialog
             d.key(20)
-        d.key(20, 23)
+        # Password advances to User-Agent; skip the appearance selector before
+        # confirming Connect, matching the production TV connection form.
+        d.key(20, 20, 23)
     else:
         for name, value in [('address', 'http://127.0.0.1:8784'), ('username', 'mobile'), ('password', 'test-only')]:
             d.tap(key='android-connect-' + name)
@@ -541,6 +562,7 @@ def app_flow(device, tv, *, capture_virtual_audio=True):
     d.wait(lambda s: s['authenticated'] is True, 'real HTTP authentication')
     d.row(label='Rillight 流光验证 01')
     d.screenshot('home')
+    hero_resume = None if tv else phone_hero_resume_flow(d)
     source_focus = None
     if tv:
         # The featured carousel's first focusable child is an unlabeled Prev
@@ -601,6 +623,7 @@ def app_flow(device, tv, *, capture_virtual_audio=True):
     save(d.output / 'app-observations.json', {
         'virtual_audio': audio, 'displayed_pixels': pixels,
         'featured_focus': source_focus,
+        'hero_resume': hero_resume,
         'playing_after_audio_capture': bool(post_audio['player'] and post_audio['player']['playing']),
     })
     if not post_audio['player'] or not post_audio['player']['playing']:

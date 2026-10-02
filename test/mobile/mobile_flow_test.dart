@@ -149,6 +149,44 @@ void main() {
     expect(find.byType(TvPlayerPage, skipOffstage: false), findsNothing);
   }
 
+  testWidgets('phone hero resumes through the app router and returns home', (
+    tester,
+  ) async {
+    final server = FakeEmbyServer();
+    final (_, backend) = await start(
+      tester,
+      server,
+      backend: FakeVideoBackend(duration: const Duration(hours: 3)),
+    );
+    await login(tester, server);
+    final catalog = CatalogScope.of(tester.element(find.byType(PhoneHome)));
+    final item = PhoneHero.featuredItemsOf(catalog).first;
+    expect(item.canResume, isTrue);
+    final resume = find.byKey(ValueKey('hero-resume-${item.id}'));
+    await tester.tap(resume);
+    await tester.pumpAndSettle();
+    expect(find.byType(MobilePlayerPage), findsOneWidget);
+    expect(find.text('无法播放'), findsNothing);
+    expect(backend.openCount, 1);
+    expect(backend.isPlaying, isTrue);
+    final controller = tester
+        .state<MobilePlayerPageState>(find.byType(MobilePlayerPage))
+        .controller!;
+    expect(controller.itemId, item.id);
+    expect(
+      backend.openedStart,
+      Duration(microseconds: item.userData.playbackPositionTicks ~/ 10),
+    );
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pumpAndSettle();
+    expect(find.byType(MobileShell), findsOneWidget);
+    expect(find.byType(MobilePlayerPage), findsNothing);
+    expect(tester.widget<FilledButton>(resume).onPressed, isNotNull);
+    expect(tester.takeException(), isNull);
+  }, tags: ['integration']);
+
   testWidgets(
     'touch journey: login, search, series, playback, subtitle, landscape and progress',
     (tester) async {
