@@ -10,6 +10,7 @@ import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_scope.dart';
+import 'package:rillight/home/hero_artwork.dart';
 import 'package:rillight/library/detail_controller.dart';
 import 'package:rillight/library/episode_detail_sections.dart';
 import 'package:rillight/library/detail_extras.dart';
@@ -97,8 +98,12 @@ class _TvDetailPageState extends State<TvDetailPage> {
       listenable: c,
       builder: (context, _) {
         final item = c.item, target = c.playTarget;
+        final season = c.seasons.where((s) => s.id == c.seasonId).firstOrNull;
+        final artwork = item?.isSeries == true && season != null
+            ? seasonArtworkItem(season, item!)
+            : item;
         return ContentTheme(
-          item: item,
+          item: artwork,
           preferBackdrop: item?.isEpisode != true,
           preferParentBackdrop: item?.isEpisode == true,
           child: TvFrame(
@@ -109,7 +114,7 @@ class _TvDetailPageState extends State<TvDetailPage> {
                 if (item == null && c.loading) const _TvDetailSkeleton(),
                 if (c.error != null) TvFailure(error: c.error!, retry: c.load),
                 if (item != null) ...[
-                  _TvBackdropHeader(item: item),
+                  _TvBackdropHeader(item: item, artwork: artwork),
                   const SizedBox(height: 12),
                   if (c.seasonError != null)
                     TvFailure(error: c.seasonError!, retry: c.loadSeasons),
@@ -237,9 +242,10 @@ class _TvDetailPageState extends State<TvDetailPage> {
 
 /// 沉浸式头部:全宽 backdrop 铺底,底部渐变上落标题、元信息与简介。
 class _TvBackdropHeader extends StatelessWidget {
-  const _TvBackdropHeader({required this.item});
+  const _TvBackdropHeader({required this.item, this.artwork});
 
   final EmbyItem item;
+  final EmbyItem? artwork;
 
   @override
   Widget build(BuildContext context) {
@@ -265,7 +271,8 @@ class _TvBackdropHeader extends StatelessWidget {
         children: [
           ColoredBox(color: theme.colorScheme.surfaceContainerHigh),
           MediaImage(
-            item: item,
+            item: artwork ?? item,
+            contributesToTheme: true,
             preferBackdrop: !item.isEpisode,
             preferParentBackdrop: item.isEpisode,
             maxWidth: 1280,

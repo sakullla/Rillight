@@ -120,10 +120,31 @@ class _MobileSearchPageState extends State<MobileSearchPage> {
                   decoration: InputDecoration(
                     hintText: l.searchHint,
                     prefixIcon: const Icon(Icons.search),
-                    suffixIcon: IconButton(
-                      tooltip: l.search,
-                      onPressed: _submit,
-                      icon: const Icon(Icons.arrow_forward),
+                    suffixIcon: ValueListenableBuilder<TextEditingValue>(
+                      valueListenable: _text,
+                      builder: (context, value, _) => Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (value.text.isNotEmpty)
+                            IconButton(
+                              key: const Key('mobile-search-clear'),
+                              tooltip: MaterialLocalizations.of(
+                                context,
+                              ).deleteButtonTooltip,
+                              onPressed: () {
+                                _text.clear();
+                                _onChanged('');
+                                _focus.requestFocus();
+                              },
+                              icon: const Icon(Icons.close_rounded),
+                            ),
+                          IconButton(
+                            tooltip: l.search,
+                            onPressed: _submit,
+                            icon: const Icon(Icons.arrow_forward),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -249,7 +270,10 @@ class _SearchSkeleton extends StatelessWidget {
         // 结果网格在 ListView 的水平 padding 之内取宽,这里先扣同样边距再算列。
         final gridWidth = constraints.maxWidth - AppSpacing.md * 2;
         const spacing = AppSpacing.md;
-        final columns = mobileGridColumnCount(gridWidth);
+        final columns = mobileGridColumnCount(
+          gridWidth,
+          textScale: MediaQuery.textScalerOf(context).scale(16) / 16,
+        );
         final cellWidth = (gridWidth - spacing * (columns - 1)) / columns;
         final labelExtent = phonePosterCardLabelExtent(context);
         return SkeletonPosterGrid(

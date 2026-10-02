@@ -276,7 +276,8 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
         ],
       ),
       body: SafeArea(
-        child: Center(
+        child: Align(
+          alignment: Alignment.topCenter,
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 560),
             child: ListenableBuilder(
@@ -286,7 +287,23 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Text(l10n.mobileConnectionHint),
+                    Icon(
+                      Icons.movie_filter_outlined,
+                      size: 36,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      l10n.appName,
+                      style: Theme.of(context).textTheme.headlineLarge,
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      l10n.mobileConnectionHint,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
                     const SizedBox(height: 24),
                     if (auth.savedServers.isNotEmpty) ...[
                       Row(

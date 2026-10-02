@@ -15,7 +15,8 @@ class DetailController extends ChangeNotifier {
     required this.itemId,
     this.seasonId,
     this.initialEpisodeId,
-  }) : repository = DetailRepository(auth.client, cache) {
+  }) : _hasExplicitSeason = seasonId != null,
+       repository = DetailRepository(auth.client, cache) {
     _identity = _currentIdentity;
     auth.addListener(_onAuth);
   }
@@ -23,6 +24,7 @@ class DetailController extends ChangeNotifier {
   final DetailRepository repository;
   final String itemId;
   final String? initialEpisodeId;
+  final bool _hasExplicitSeason;
   EmbyItem? item;
 
   void applyItem(EmbyItem next) {
@@ -319,6 +321,7 @@ class DetailController extends ChangeNotifier {
     String? resumeSeason, firstUnwatchedSeason;
     try {
       for (final season in seasons) {
+        if (_hasExplicitSeason && season.id != seasonId) continue;
         var start = 0;
         while (true) {
           final visiblePage =

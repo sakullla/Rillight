@@ -1080,5 +1080,110 @@
       "phone",
       "tv"
     ]
+  },
+  {
+    "id": "home-text-130",
+    "feature": "home",
+    "platforms": [
+      "phone"
+    ]
+  },
+  {
+    "id": "home-text-200",
+    "feature": "home",
+    "platforms": [
+      "phone"
+    ]
+  },
+  {
+    "id": "login-text-200",
+    "feature": "login",
+    "platforms": [
+      "phone"
+    ]
+  },
+  {
+    "id": "login-keyboard",
+    "feature": "login",
+    "platforms": [
+      "phone"
+    ]
+  },
+  {
+    "id": "library-filters-text-200",
+    "feature": "library",
+    "platforms": [
+      "phone"
+    ]
+  },
+  {
+    "id": "movie-detail-text-200",
+    "feature": "detail",
+    "platforms": [
+      "phone"
+    ]
+  },
+  {
+    "id": "settings-text-200",
+    "feature": "settings",
+    "platforms": [
+      "phone"
+    ]
+  },
+  {
+    "id": "series-second-season-artwork",
+    "feature": "detail",
+    "platforms": [
+      "phone"
+    ]
+  },
+  {
+    "id": "series-first-season-artwork",
+    "feature": "detail",
+    "platforms": [
+      "phone"
+    ]
+  },
+  {
+    "id": "detail-palette-red",
+    "feature": "detail",
+    "platforms": [
+      "phone"
+    ]
+  },
+  {
+    "id": "detail-palette-blue",
+    "feature": "detail",
+    "platforms": [
+      "phone"
+    ]
+  },
+  {
+    "id": "detail-palette-green",
+    "feature": "detail",
+    "platforms": [
+      "phone"
+    ]
+  },
+  {
+    "id": "detail-palette-mono",
+    "feature": "detail",
+    "platforms": [
+      "phone"
+    ]
+  },
+  {
+    "id": "detail-palette-bright",
+    "feature": "detail",
+    "platforms": [
+      "phone"
+    ]
+  },
+  {
+    "id": "detail-palette-dark",
+    "feature": "detail",
+    "platforms": [
+      "phone"
+    ]
   }
 ]

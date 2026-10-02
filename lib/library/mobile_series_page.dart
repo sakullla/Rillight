@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_chrome.dart';
 import 'package:rillight/app/mobile_motion.dart';
+import 'package:rillight/app/mobile_widgets.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/auth/failure_message.dart';
@@ -91,6 +92,7 @@ class PhoneItemBanner extends StatelessWidget {
                   preferBackdrop: preferBackdrop,
                   child: MediaImage(
                     item: item,
+                    contributesToTheme: true,
                     preferBackdrop: preferBackdrop,
                     maxWidth: maxWidth,
                   ),
@@ -115,7 +117,7 @@ class PhoneItemBanner extends StatelessWidget {
                 left: 0,
                 right: 0,
                 bottom: 0,
-                height: imageHeight * 0.24,
+                height: imageHeight * 0.48,
                 child: DecoratedBox(
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
@@ -164,44 +166,51 @@ class PhoneDetailCaption extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        AppSpacing.md,
-        AppSpacing.sm,
-        AppSpacing.md,
-        AppSpacing.md,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          title,
-          if (meta.isNotEmpty || pendingMetadata != null) ...[
-            const SizedBox(height: AppSpacing.xs),
-            pendingMetadata ??
-                Wrap(
-                  key: PhoneItemBanner.metaKey,
-                  spacing: AppSpacing.xs,
-                  runSpacing: AppSpacing.xxs,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    for (var i = 0; i < meta.length; i++) ...[
-                      if (i > 0)
-                        Text(
-                          '·',
-                          style: theme.textTheme.labelMedium?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
+    return Transform.translate(
+      offset: const Offset(0, -20),
+      child: Container(
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surface,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        padding: const EdgeInsets.fromLTRB(
+          AppSpacing.lg,
+          AppSpacing.lg,
+          AppSpacing.lg,
+          AppSpacing.xxs,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            title,
+            if (meta.isNotEmpty || pendingMetadata != null) ...[
+              const SizedBox(height: AppSpacing.xs),
+              pendingMetadata ??
+                  Wrap(
+                    key: PhoneItemBanner.metaKey,
+                    spacing: AppSpacing.xs,
+                    runSpacing: AppSpacing.xxs,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      for (var i = 0; i < meta.length; i++) ...[
+                        if (i > 0)
+                          Text(
+                            '·',
+                            style: theme.textTheme.labelMedium?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
                           ),
-                        ),
-                      _MetaChip(entry: meta[i]),
+                        _MetaChip(entry: meta[i]),
+                      ],
                     ],
-                  ],
-                ),
+                  ),
+            ],
+            if (actions != null) ...[
+              const SizedBox(height: AppSpacing.md),
+              actions!,
+            ],
           ],
-          if (actions != null) ...[
-            const SizedBox(height: AppSpacing.md),
-            actions!,
-          ],
-        ],
+        ),
       ),
     );
   }
@@ -217,7 +226,7 @@ class _BannerTitle extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final titleStyle = theme.textTheme.headlineSmall?.copyWith(
+    final titleStyle = theme.textTheme.headlineLarge?.copyWith(
       color: theme.colorScheme.onSurface,
       fontWeight: FontWeight.w700,
       height: 1.2,
@@ -396,7 +405,9 @@ class MobileSeriesPage extends StatelessWidget {
         EpisodeOverviewSection(overview: item.overview, compact: true),
       if (showSeasons || onPickEpisode != null)
         SizedBox(
-          height: 48,
+          height:
+              48 *
+              (MediaQuery.textScalerOf(context).scale(14) / 14).clamp(1, 2),
           child: ListView.separated(
             key: const Key('phone-season-list'),
             scrollDirection: Axis.horizontal,
@@ -491,6 +502,7 @@ class MobileSeriesPage extends StatelessWidget {
             child: Text(l.mobileLoadMore),
           ),
         ),
+      DetailAlbumStrip(item: item),
       EpisodePeopleSection(people: item.people),
       EpisodeMetadataSection(item: item),
       DetailExternalLinks(links: item.externalUrls, title: item.name),
@@ -857,7 +869,7 @@ class _SimilarRow extends StatelessWidget {
           ),
         ),
         SizedBox(
-          height: 196,
+          height: 128 * 1.5 + phonePosterCardLabelExtent(context),
           child: ListView.separated(
             key: CatalogKeys.similarRow,
             scrollDirection: Axis.horizontal,
@@ -868,28 +880,12 @@ class _SimilarRow extends StatelessWidget {
             itemBuilder: (context, index) {
               final item = items[index];
               return SizedBox(
-                width: 104,
-                child: InkWell(
-                  key: CatalogKeys.item(item.id),
+                width: 128,
+                child: PhonePosterCard(
+                  item: item,
+                  pressKey: CatalogKeys.item(item.id),
+                  imageMaxWidth: 320,
                   onTap: () => onOpenItem(item.id),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: ClipRRect(
-                          // 独立卡片圆角统一 AppRadii.md(ADR-5)。
-                          borderRadius: BorderRadius.circular(AppRadii.md),
-                          child: MediaImage(item: item, maxWidth: 320),
-                        ),
-                      ),
-                      const SizedBox(height: AppSpacing.xxs),
-                      Text(
-                        item.name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                  ),
                 ),
               );
             },

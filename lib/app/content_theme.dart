@@ -1,11 +1,10 @@
-import 'dart:async';
-import 'dart:io' show Platform;
+import 'dart:ui' as ui;
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:rillight/app/theme.dart';
 import 'package:rillight/auth/auth_scope.dart';
-import 'package:rillight/emby/emby_client.dart';
+import 'artwork_color_scope.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/media_image/media_image.dart';
 
@@ -37,6 +36,7 @@ class ContentTheme extends StatefulWidget {
   static void debugClear() => _schemes.clear();
 
   static final _schemes = <String, ColorScheme>{};
+  static final _pending = <String, Future<ColorScheme>>{};
 
   @override
   State<ContentTheme> createState() => _ContentThemeState();
@@ -44,158 +44,117 @@ class ContentTheme extends StatefulWidget {
 
 class _ContentThemeState extends State<ContentTheme> {
   ColorScheme? _scheme;
-  String? _token;
+  String? _identity, _owner;
   int _generation = 0;
 
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    _schedule();
-  }
-
-  @override
-  void didUpdateWidget(ContentTheme oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.item?.id != widget.item?.id ||
-        oldWidget.item?.primaryImageTag != widget.item?.primaryImageTag ||
-        oldWidget.item?.backdropImageTag != widget.item?.backdropImageTag ||
-        oldWidget.item?.parentBackdropImageTag !=
-            widget.item?.parentBackdropImageTag ||
-        oldWidget.preferBackdrop != widget.preferBackdrop ||
-        oldWidget.preferParentBackdrop != widget.preferParentBackdrop) {
-      _schedule();
-    }
-  }
-
-  void _schedule() {
-    // 测试里图片解码会留下取色超时计时器，页面卸载后测试无法收干净。
-    if (Platform.environment['FLUTTER_TEST'] == 'true') {
-      return;
-    }
-    final item = widget.item;
-    final auth = AuthScope.maybeOf(context);
-    if (item == null || auth == null) {
-      _token = null;
-      if (_scheme != null) {
-        setState(() => _scheme = null);
-      }
-      return;
-    }
-    final candidates = item.imageCandidates(
-      preferBackdrop: widget.preferBackdrop,
-      preferParentBackdrop: widget.preferParentBackdrop,
-    );
-    if (candidates.isEmpty) {
-      return;
-    }
-    final ref = candidates.first;
-    final serverId = auth.session?.server.id ?? '';
-    final token = MediaImageCache.key(
-      serverId: serverId,
-      itemId: ref.itemId,
-      type: ref.type,
-      tag: ref.tag,
-      maxWidth: ContentTheme.sampleMaxWidth,
-    );
-    if (token == _token) {
-      return;
-    }
-    _token = token;
-    final cached = ContentTheme._schemes[token];
-    if (cached != null) {
-      setState(() => _scheme = cached);
-      return;
-    }
+  void _report(String itemId, String identity, Uint8List bytes) {
+    if (itemId != widget.item?.id) return;
+    final base = Theme.of(context).brightness == Brightness.dark
+        ? AppTheme.dark().colorScheme
+        : AppTheme.light().colorScheme;
+    final token = '$identity/${base.brightness.name}';
+    if (_identity == token) return;
+    _identity = token;
     final generation = ++_generation;
-    final client = auth.client;
-    unawaited(_load(generation, token, serverId, ref, client));
-  }
-
-  Future<void> _load(
-    int generation,
-    String token,
-    String serverId,
-    ItemImageRef ref,
-    EmbyClient client,
-  ) async {
-    try {
-      final bytes = await MediaImageCache.instance.load(
-        serverId: serverId,
-        itemId: ref.itemId,
-        type: ref.type,
-        tag: ref.tag,
-        maxWidth: ContentTheme.sampleMaxWidth,
-        fetch: () async {
-          final data = await client.getItemImage(
-            ref.itemId,
-            type: ref.type,
-            tag: ref.tag,
-            maxWidth: ContentTheme.sampleMaxWidth,
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted || generation != _generation) return;
+      final scheme =
+          ContentTheme._schemes[token] ??
+          await ContentTheme._pending.putIfAbsent(
+            token,
+            () => contentSchemeFromBytes(bytes, base).whenComplete(() {
+              ContentTheme._pending.remove(token);
+            }),
           );
-          return Uint8List.fromList(data);
-        },
-      );
-      if (!mounted || generation != _generation || bytes == null) {
-        return;
-      }
-      final fallback = Theme.of(context).colorScheme;
-      final scheme = await contentSchemeFromBytes(bytes, fallback);
-      if (!mounted || generation != _generation) {
-        return;
-      }
+      if (!mounted || generation != _generation) return;
       _remember(token, scheme);
       setState(() => _scheme = scheme);
-    } catch (_) {
-      // 取色失败就留在应用主题上，页面照常显示。
-    }
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final scheme = _scheme;
-    final data = scheme == null
-        ? theme
-        : theme.copyWith(
-            colorScheme: scheme,
-            scaffoldBackgroundColor: scheme.surface,
-            filledButtonTheme: FilledButtonThemeData(
-              style: theme.filledButtonTheme.style?.copyWith(
-                backgroundColor: WidgetStateProperty.resolveWith((states) {
-                  if (states.contains(WidgetState.disabled)) {
-                    return scheme.onSurface.withValues(alpha: 0.12);
-                  }
-                  return scheme.primary;
-                }),
-                foregroundColor: WidgetStateProperty.resolveWith((states) {
-                  if (states.contains(WidgetState.disabled)) {
-                    return scheme.onSurface.withValues(alpha: 0.38);
-                  }
-                  return scheme.onPrimary;
-                }),
-                iconColor: WidgetStateProperty.resolveWith((states) {
-                  if (states.contains(WidgetState.disabled)) {
-                    return scheme.onSurface.withValues(alpha: 0.38);
-                  }
-                  return scheme.onPrimary;
-                }),
-              ),
-            ),
-          );
+    final auth = AuthScope.maybeOf(context);
+    final item = widget.item;
+    final refs =
+        item?.imageCandidates(
+          preferBackdrop: widget.preferBackdrop,
+          preferParentBackdrop: widget.preferParentBackdrop,
+        ) ??
+        const <ItemImageRef>[];
+    final owner =
+        '${mediaImageAccountScope(auth)}/${item?.id}/${theme.brightness}/${refs.map((r) => '${r.itemId}:${r.type}:${r.tag}').join('|')}';
+    final sourceChanged = _owner != owner;
+    if (sourceChanged) {
+      _owner = owner;
+      _identity = null;
+      _scheme = null;
+      ++_generation;
+    }
+    final scheme =
+        _scheme ??
+        (theme.brightness == Brightness.dark
+            ? AppTheme.dark().colorScheme
+            : AppTheme.light().colorScheme);
+    final data = theme.copyWith(
+      colorScheme: scheme,
+      scaffoldBackgroundColor: scheme.surface,
+      textTheme: theme.textTheme.apply(
+        bodyColor: scheme.onSurface,
+        displayColor: scheme.onSurface,
+      ),
+      filledButtonTheme: FilledButtonThemeData(
+        style: theme.filledButtonTheme.style?.copyWith(
+          backgroundColor: WidgetStateProperty.resolveWith(
+            (states) => states.contains(WidgetState.disabled)
+                ? scheme.surfaceContainerHighest
+                : scheme.primary,
+          ),
+          foregroundColor: WidgetStateProperty.resolveWith(
+            (states) => states.contains(WidgetState.disabled)
+                ? scheme.onSurfaceVariant
+                : scheme.onPrimary,
+          ),
+        ),
+      ),
+      textButtonTheme: TextButtonThemeData(
+        style: theme.textButtonTheme.style?.copyWith(
+          foregroundColor: WidgetStatePropertyAll(scheme.primary),
+        ),
+      ),
+      iconButtonTheme: IconButtonThemeData(
+        style: theme.iconButtonTheme.style?.copyWith(
+          foregroundColor: WidgetStatePropertyAll(scheme.onSurface),
+        ),
+      ),
+      chipTheme: theme.chipTheme.copyWith(
+        selectedColor: scheme.primaryContainer,
+      ),
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: theme.outlinedButtonTheme.style?.copyWith(
+          foregroundColor: WidgetStatePropertyAll(scheme.onSurface),
+          side: WidgetStatePropertyAll(BorderSide(color: scheme.outline)),
+        ),
+      ),
+    );
     return AnimatedTheme(
       data: data,
-      duration: AppMotion.slow,
-      child: Builder(
-        builder: (context) {
-          final child = widget.child;
-          if (!widget.fillSurface) {
-            return child;
-          }
-          return ColoredBox(
-            color: Theme.of(context).colorScheme.surface,
-            child: child,
-          );
+      duration: sourceChanged
+          ? Duration.zero
+          : AppMotion.durationOf(context, AppMotion.slow),
+      child: ArtworkColorScope(
+        report: (itemId, identity, bytes) {
+          if (_owner == owner) _report(itemId, identity, bytes);
         },
+        child: Builder(
+          builder: (context) => widget.fillSurface
+              ? ColoredBox(
+                  color: Theme.of(context).colorScheme.surface,
+                  child: widget.child,
+                )
+              : widget.child,
+        ),
       ),
     );
   }
@@ -216,18 +175,59 @@ Future<ColorScheme> contentSchemeFromBytes(
   Uint8List bytes,
   ColorScheme fallback,
 ) async {
-  final extracted = await ColorScheme.fromImageProvider(
-    provider: MemoryImage(bytes),
-    brightness: fallback.brightness,
-    dynamicSchemeVariant: DynamicSchemeVariant.content,
-  );
-  return extracted.copyWith(
-    error: fallback.error,
-    onError: fallback.onError,
-    errorContainer: fallback.errorContainer,
-    onErrorContainer: fallback.onErrorContainer,
-    onSurface: fallback.onSurface,
-    onSurfaceVariant: fallback.onSurfaceVariant,
+  try {
+    final codec = await ui.instantiateImageCodec(
+      bytes,
+      targetWidth: 32,
+      targetHeight: 32,
+      allowUpscaling: false,
+    );
+    final frame = await codec.getNextFrame();
+    final data = await frame.image.toByteData(
+      format: ui.ImageByteFormat.rawRgba,
+    );
+    frame.image.dispose();
+    codec.dispose();
+    var colorful = 0;
+    if (data != null) {
+      final rgba = data.buffer.asUint8List();
+      for (var i = 0; i + 3 < rgba.length; i += 4) {
+        final rgb = [rgba[i], rgba[i + 1], rgba[i + 2]]..sort();
+        if (rgba[i + 3] > 128 &&
+            rgb.last - rgb.first > 24 &&
+            rgb.last > 32 &&
+            rgb.first < 235) {
+          colorful++;
+        }
+      }
+    }
+    if (colorful < 32) return fallback;
+    final extracted = await ColorScheme.fromImageProvider(
+      provider: ResizeImage(MemoryImage(bytes), width: 64),
+      brightness: fallback.brightness,
+      dynamicSchemeVariant: DynamicSchemeVariant.content,
+    );
+    return composeContentScheme(fallback, extracted);
+  } catch (_) {
+    return fallback;
+  }
+}
+
+/// Tonal pairs from the selected artwork own the local content surface. Global
+/// navigation and semantic errors retain their application theme.
+@visibleForTesting
+ColorScheme composeContentScheme(ColorScheme base, ColorScheme artwork) {
+  Color tone(Color surface) =>
+      Color.lerp(surface, artwork.primaryContainer, .38)!;
+  return artwork.copyWith(
+    surface: tone(artwork.surface),
+    surfaceContainerLow: tone(artwork.surfaceContainerLow),
+    surfaceContainer: tone(artwork.surfaceContainer),
+    surfaceContainerHigh: tone(artwork.surfaceContainerHigh),
+    error: base.error,
+    onError: base.onError,
+    errorContainer: base.errorContainer,
+    onErrorContainer: base.onErrorContainer,
     surfaceTint: Colors.transparent,
   );
 }

@@ -41,11 +41,24 @@ void main() {
     expect(_contrast(scheme.onPrimary, scheme.primary), greaterThan(4.5));
     expect(_contrast(scheme.onError, scheme.error), greaterThan(4.5));
 
-    // 深色主题表面保持原值:海报与画面周围的分层不变。
+    // 深色分层与操作在新的冷调表面上同样保持对比。
     final dark = AppTheme.dark();
     expect(dark.colorScheme.brightness, Brightness.dark);
-    expect(dark.colorScheme.surfaceContainer, const Color(0xFF1A1A1F));
-    expect(dark.scaffoldBackgroundColor, const Color(0xFF0A0A0C));
+    expect(
+      _contrast(
+        dark.colorScheme.onSurfaceVariant,
+        dark.colorScheme.surfaceContainer,
+      ),
+      greaterThan(4.5),
+    );
+    expect(
+      _contrast(dark.colorScheme.onPrimary, dark.colorScheme.primary),
+      greaterThan(4.5),
+    );
+    expect(
+      dark.colorScheme.surfaceContainer.computeLuminance(),
+      greaterThan(dark.scaffoldBackgroundColor.computeLuminance()),
+    );
     // 遮罩底色两种亮度下都是黑色:海报/画面上的渐变不受外观影响。
     expect(AppTheme.light().colorScheme.scrim, Colors.black);
     expect(dark.colorScheme.scrim, Colors.black);

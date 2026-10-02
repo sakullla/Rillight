@@ -55,7 +55,7 @@ class _HeroPlaybackActionsState extends State<HeroPlaybackActions> {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        if (widget.item.canResume) ...[
+        if (widget.item.canResume || widget.onResume != null) ...[
           Flexible(
             child: FilledButton.icon(
               key: ValueKey('hero-resume-${widget.item.id}'),
@@ -68,7 +68,7 @@ class _HeroPlaybackActionsState extends State<HeroPlaybackActions> {
                     )
                   : const Icon(Icons.play_arrow_rounded, size: 20),
               label: Text(
-                l10n.resumePlay,
+                widget.item.canResume ? l10n.resumePlay : l10n.play,
                 maxLines: 2,
                 textAlign: TextAlign.center,
               ),

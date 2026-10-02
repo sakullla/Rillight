@@ -430,7 +430,10 @@ class _LibrarySkeleton extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         const spacing = AppSpacing.md;
-        final columns = phoneLibraryColumnCount(constraints.maxWidth);
+        final columns = phoneLibraryColumnCount(
+          constraints.maxWidth,
+          textScale: MediaQuery.textScalerOf(context).scale(16) / 16,
+        );
         final width =
             (constraints.maxWidth - spacing * (columns - 1)) / columns;
         return Wrap(
@@ -479,13 +482,8 @@ class _LibrarySkeleton extends StatelessWidget {
 }
 
 /// Narrow phones use two readable columns; larger phones fit three.
-int phoneLibraryColumnCount(double width) {
-  if (width <= 360) return 2;
-  if (width <= 600) {
-    return 3;
-  }
-  return mobileGridColumnCount(width);
-}
+int phoneLibraryColumnCount(double width, {double textScale = 1}) =>
+    mobileGridColumnCount(width, textScale: textScale);
 
 class _PhonePosterSliver extends StatelessWidget {
   const _PhonePosterSliver({required this.items, required this.gridWidth});
@@ -496,7 +494,10 @@ class _PhonePosterSliver extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     const spacing = AppSpacing.md;
-    final columns = phoneLibraryColumnCount(gridWidth);
+    final columns = phoneLibraryColumnCount(
+      gridWidth,
+      textScale: MediaQuery.textScalerOf(context).scale(16) / 16,
+    );
     final cellWidth = (gridWidth - spacing * (columns - 1)) / columns;
     final label = phonePosterCardLabelExtent(context);
     final imageWidth = catalogPosterMaxWidth(

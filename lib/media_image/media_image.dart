@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:rillight/app/theme/tokens.dart';
+import 'package:rillight/app/artwork_color_scope.dart';
 import 'package:rillight/app/widgets/poster_placeholder.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/auth/auth_controller.dart';
@@ -84,6 +85,7 @@ class MediaImage extends StatefulWidget {
     this.preferParentBackdrop = false,
     this.maxWidth,
     this.alignment = Alignment.center,
+    this.contributesToTheme = false,
   });
 
   final EmbyItem item;
@@ -96,6 +98,7 @@ class MediaImage extends StatefulWidget {
   final bool preferParentBackdrop;
   final int? maxWidth;
   final Alignment alignment;
+  final bool contributesToTheme;
 
   /// 清空内存与磁盘两级缓存,仅测试使用。
   @visibleForTesting
@@ -174,6 +177,7 @@ bool _isTransientImageFailure(Object error) {
 }
 
 class _MediaImageState extends State<MediaImage> {
+  static final _invalidImages = <String>{};
   Future<_LoadedImage?>? _future;
   String? _lastAccountScope;
   int? _lastRequestWidth;
@@ -185,11 +189,21 @@ class _MediaImageState extends State<MediaImage> {
   Completer<void>? _retryWaiter;
 
   List<ItemImageRef> get _candidates {
-    return widget.item.imageCandidates(
+    final candidates = widget.item.imageCandidates(
       preferBackdrop: widget.preferBackdrop,
       preferThumb: widget.preferThumb,
       preferParentBackdrop: widget.preferParentBackdrop,
     );
+    if (widget.item.isSeason && widget.preferBackdrop) {
+      final own = candidates.where((ref) => ref.itemId == widget.item.id);
+      return [
+        ...own.where((ref) => ref.type == 'Backdrop'),
+        ...own.where((ref) => ref.type == 'Primary'),
+        ...own.where((ref) => ref.type != 'Backdrop' && ref.type != 'Primary'),
+        ...candidates.where((ref) => ref.itemId != widget.item.id),
+      ];
+    }
+    return candidates;
   }
 
   bool get _hasImageSource => _candidates.isNotEmpty;
@@ -288,6 +302,7 @@ class _MediaImageState extends State<MediaImage> {
       tag: candidate.tag,
       maxWidth: maxWidth,
     );
+    if (_invalidImages.contains(cacheKey)) return null;
     final bytes = MediaImageCache.instance.peek(
       serverId: scope,
       itemId: candidate.itemId,
@@ -612,6 +627,30 @@ class _MediaImageState extends State<MediaImage> {
         onAbort: () => token?.cancel('image-timeout'),
       );
       if (bytes != null && bytes.isNotEmpty) {
+        try {
+          final buffer = await ui.ImmutableBuffer.fromUint8List(bytes);
+          try {
+            final descriptor = await ui.ImageDescriptor.encoded(buffer);
+            descriptor.dispose();
+          } finally {
+            buffer.dispose();
+          }
+        } catch (_) {
+          _invalidImages.add(
+            MediaImageCache.key(
+              serverId: serverId,
+              itemId: candidate.itemId,
+              type: candidate.type,
+              tag: candidate.tag,
+              maxWidth: maxWidth,
+            ),
+          );
+          if (_invalidImages.length > 128) {
+            _invalidImages.remove(_invalidImages.first);
+          }
+          continue;
+        }
+        if (!valid()) return null;
         return _LoadedImage(
           bytes: bytes,
           type: candidate.type,
@@ -672,7 +711,7 @@ class _MediaImageState extends State<MediaImage> {
       ),
       width: width,
       height: height,
-      fit: BoxFit.cover,
+      fit: BoxFit.contain,
       alignment: widget.alignment,
       filterQuality: FilterQuality.low,
       gaplessPlayback: true,
@@ -680,6 +719,11 @@ class _MediaImageState extends State<MediaImage> {
       frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
         if (frame == null && !wasSynchronouslyLoaded) {
           return _loadingBox(context, width, height);
+        }
+        if (widget.contributesToTheme) {
+          ArtworkColorScope.maybeOf(
+            context,
+          )?.report(widget.item.id, loaded.cacheKey, loaded.bytes);
         }
         return child;
       },

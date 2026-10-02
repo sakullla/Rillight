@@ -23,6 +23,7 @@ import 'package:rillight/emby/emby_errors.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_failure.dart';
 import 'package:rillight/home/catalog_keys.dart';
+import 'package:rillight/home/hero_artwork.dart';
 import 'package:rillight/library/detail_extras.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/home/media_shelf.dart';
@@ -1101,8 +1102,12 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     final playTarget = _playTarget(item);
     final screenWidth = MediaQuery.sizeOf(context).width;
     final wideCardWidth = MediaShelf.wideCardWidthFor(screenWidth);
+    final season = _seasons.where((s) => s.id == _seasonId).firstOrNull;
+    final artwork = item.isSeries && season != null
+        ? seasonArtworkItem(season, item)
+        : item;
     return ContentTheme(
-      item: item,
+      item: artwork,
       preferBackdrop: !item.isEpisode,
       preferParentBackdrop: item.isEpisode,
       child: NotificationListener<ScrollNotification>(
@@ -1126,6 +1131,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                   _DetailHeader(
                     key: ItemDetailPage.headerKey,
                     item: item,
+                    artworkItem: artwork,
                     runtime: runtime,
                     topOverlap: topOverlap,
                     seasonCount: _seasons.length,
@@ -2112,6 +2118,7 @@ class _DetailHeader extends StatelessWidget {
   const _DetailHeader({
     super.key,
     required this.item,
+    this.artworkItem,
     required this.runtime,
     required this.busyPlayed,
     required this.onPlay,
@@ -2137,6 +2144,7 @@ class _DetailHeader extends StatelessWidget {
   });
 
   final EmbyItem item;
+  final EmbyItem? artworkItem;
   final String? runtime;
   final bool busyPlayed;
   final VoidCallback? onPlay;
@@ -2218,7 +2226,8 @@ class _DetailHeader extends StatelessWidget {
                           ),
                           backdrop: MediaImage(
                             key: ValueKey('detail-hero-${item.id}'),
-                            item: item,
+                            contributesToTheme: true,
+                            item: artworkItem ?? item,
                             preferBackdrop: !item.isEpisode,
                             preferParentBackdrop: item.isEpisode,
                             maxWidth: mediaBackdropRequestWidth(
@@ -2251,7 +2260,10 @@ class _DetailHeader extends StatelessWidget {
                         ? MainAxisSize.min
                         : MainAxisSize.max,
                     children: [
-                      _DetailPoster(item: item, layoutWidth: width),
+                      _DetailPoster(
+                        item: artworkItem ?? item,
+                        layoutWidth: width,
+                      ),
                       const SizedBox(width: AppSpacing.xl),
                       Flexible(
                         fit: width < AppBreakpoints.compact

@@ -23,9 +23,9 @@ import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/library/item_format.dart';
 import 'package:rillight/home/phone_hero.dart';
-import 'package:rillight/home/hero_artwork.dart';
 import 'package:rillight/home/phone_home_sections.dart';
 import 'package:rillight/media_image/media_image.dart';
+import 'package:rillight/player/player_window_host.dart';
 
 /// 首页行请求的 Limit。满这一页说明货架查询后面还有条目。
 const int phoneHomeRowLimit = 24;
@@ -49,7 +49,6 @@ class PhoneHome extends StatefulWidget {
 class _PhoneHomeState extends State<PhoneHome> {
   PhoneHomeSectionController? _sections;
   var _loadedServerId = '';
-  EmbyItem? _heroItem;
 
   PhoneHomeSectionController get _controller =>
       _sections ?? PhoneHomeSectionController.app();
@@ -203,15 +202,7 @@ class _PhoneHomeState extends State<PhoneHome> {
               children.add(
                 _fitBanner(
                   slot: bannerSlot,
-                  child: PhoneHero(
-                    catalog: catalog,
-                    onItem: (item) {
-                      if (_heroItem?.id == item.id) {
-                        return;
-                      }
-                      setState(() => _heroItem = item);
-                    },
-                  ),
+                  child: PhoneHero(catalog: catalog),
                 ),
               );
               continue;
@@ -280,7 +271,7 @@ class _PhoneHomeState extends State<PhoneHome> {
         final navClearance = phoneScrollClearance(context);
         // 横幅不出现时（被隐藏或暂无候选），首块内容要躲开状态栏和透明顶栏。
         final topInset = sectionChildren != null && !hasBanner
-            ? MediaQuery.paddingOf(context).top + 56 + AppSpacing.md
+            ? MediaQuery.viewPaddingOf(context).top + 56 + AppSpacing.md
             : 0.0;
         final page = RefreshIndicator(
           onRefresh: () => catalog.reload(showCachedFirst: false),
@@ -314,19 +305,7 @@ class _PhoneHomeState extends State<PhoneHome> {
             },
           ),
         );
-        final hero = _heroItem;
-        if (hero == null) {
-          return page;
-        }
-        return ContentTheme(
-          item: heroArtworkSources(
-            hero,
-            series: catalog.latestSeries.items,
-          ).themeItem,
-          preferBackdrop: true,
-          fillSurface: true,
-          child: page,
-        );
+        return page;
       },
     );
   }
@@ -368,28 +347,11 @@ String _resumeMeta(EmbyItem item, String title) {
 }
 
 /// 行高 = 图区 + 图下标题。横卡的进度在画面底边，移除按钮叠在画面角上。
-double _rowHeightOf(BuildContext context, {required bool wide}) {
-  final textScale = MediaQuery.textScalerOf(context).scale(14) / 14;
-  final width = _cardWidthOf(context, wide: wide);
-  if (!wide) {
-    return width * 1.5 + phonePosterCardLabelExtent(context) + 2;
-  }
-  final titleLine =
-      (Theme.of(context).textTheme.bodyMedium?.fontSize ?? 14) *
-      1.2 *
-      textScale;
-  final meta =
-      (Theme.of(context).textTheme.labelSmall?.fontSize ?? 12) *
-      1.2 *
-      textScale;
-  final badge = _wideBadgeHeight(context);
-  return width * 9 / 16 + 6 + badge + titleLine + meta + 4;
-}
+double _rowHeightOf(BuildContext context, {required bool wide}) =>
+    phoneHomeRailHeight(context, wide: wide);
 
-double _wideBadgeHeight(BuildContext context) {
-  final line = MediaQuery.textScalerOf(context).scale(12) * 1.2;
-  return line + 2 * 2;
-}
+double _wideBadgeHeight(BuildContext context) =>
+    phoneHomeWideBadgeHeight(context);
 
 /// 保留完整横向画面与文字区，矮视口只压缩顶栏延伸。
 class _BannerSlot {
@@ -406,7 +368,7 @@ _BannerSlot _bannerSlot({
   required List<String> visible,
   required _HomeSection? resume,
 }) {
-  final extension = MediaQuery.paddingOf(context).top + 56;
+  final extension = MediaQuery.viewPaddingOf(context).top + 56;
   final picture = PhoneHero.contentHeightFor(
     width,
     textScale: MediaQuery.textScalerOf(context).scale(14) / 14,
@@ -622,7 +584,14 @@ class _WideCard extends StatelessWidget {
   final VoidCallback? onRemove;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => ContentTheme(
+    item: item,
+    preferBackdrop: true,
+    fillSurface: false,
+    child: Builder(builder: _buildCard),
+  );
+
+  Widget _buildCard(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final theme = Theme.of(context);
     final progress = item.playbackProgress;
@@ -634,68 +603,96 @@ class _WideCard extends StatelessWidget {
       padding: const EdgeInsets.only(right: AppSpacing.xs),
       child: SizedBox(
         width: width,
-        child: MobilePressable(
-          key: CatalogKeys.item(item.id),
-          onTap: () => PhoneMotion.openItem(context, item),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(AppRadii.md),
-                child: AspectRatio(
-                  aspectRatio: 16 / 9,
-                  child: Stack(
-                    fit: StackFit.expand,
-                    clipBehavior: Clip.hardEdge,
-                    children: [
-                      _sharedPosterImage(item, shared),
-                      if (item.canResume)
-                        Positioned(
-                          left: 0,
-                          right: 0,
-                          bottom: 0,
-                          child: SizedBox(
-                            key: CatalogKeys.resumeProgress,
-                            height: 4,
-                            child: ColoredBox(
-                              color: Colors.black.withValues(alpha: 0.45),
-                              child: FractionallySizedBox(
-                                alignment: Alignment.centerLeft,
-                                widthFactor: progress.clamp(0.0, 1.0),
-                                child: ColoredBox(
-                                  color: theme.colorScheme.primary,
+        child: Material(
+          color: theme.colorScheme.surface,
+          borderRadius: BorderRadius.circular(16),
+          clipBehavior: Clip.antiAlias,
+          child: MobilePressable(
+            key: CatalogKeys.item(item.id),
+            onTap: () => PhoneMotion.openItem(context, item),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(AppRadii.md),
+                  child: AspectRatio(
+                    aspectRatio: 16 / 9,
+                    child: Stack(
+                      fit: StackFit.expand,
+                      clipBehavior: Clip.hardEdge,
+                      children: [
+                        _sharedPosterImage(item, shared),
+                        if (item.canResume)
+                          Positioned(
+                            left: 8,
+                            bottom: 8,
+                            child: IconButton.filled(
+                              key: Key('phone-resume-play-${item.id}'),
+                              tooltip: l10n.resumePlay,
+                              style: IconButton.styleFrom(
+                                minimumSize: const Size(48, 48),
+                                backgroundColor: theme.colorScheme.primary,
+                                foregroundColor: theme.colorScheme.onPrimary,
+                              ),
+                              onPressed: () => context.push<void>(
+                                '/play/${item.id}',
+                                extra: PlayerOpenRequest(
+                                  itemId: item.id,
+                                  autoResume: true,
+                                ),
+                              ),
+                              icon: const Icon(Icons.play_arrow_rounded),
+                            ),
+                          ),
+
+                        if (item.canResume)
+                          Positioned(
+                            left: 0,
+                            right: 0,
+                            bottom: 0,
+                            child: SizedBox(
+                              key: CatalogKeys.resumeProgress,
+                              height: 4,
+                              child: ColoredBox(
+                                color: Colors.black.withValues(alpha: 0.45),
+                                child: FractionallySizedBox(
+                                  alignment: Alignment.centerLeft,
+                                  widthFactor: progress.clamp(0.0, 1.0),
+                                  child: ColoredBox(
+                                    color: theme.colorScheme.primary,
+                                  ),
                                 ),
                               ),
                             ),
                           ),
-                        ),
-                      if (onRemove != null)
-                        Positioned(
-                          top: 0,
-                          right: 0,
-                          child: Tooltip(
-                            message: l10n.removeFromResume,
-                            child: GestureDetector(
-                              key: CatalogKeys.removeFromResume(item.id),
-                              behavior: HitTestBehavior.opaque,
-                              onTap: onRemove,
-                              child: const SizedBox(
-                                width: 48,
-                                height: 48,
-                                child: Center(
-                                  child: DecoratedBox(
-                                    decoration: BoxDecoration(
-                                      color: Color(0x8C000000),
-                                      shape: BoxShape.circle,
-                                    ),
-                                    child: SizedBox(
-                                      width: 28,
-                                      height: 28,
-                                      child: Icon(
-                                        Icons.close,
-                                        size: 16,
-                                        color: Colors.white,
+                        if (onRemove != null)
+                          Positioned(
+                            top: 0,
+                            right: 0,
+                            child: Tooltip(
+                              message: l10n.removeFromResume,
+                              child: GestureDetector(
+                                key: CatalogKeys.removeFromResume(item.id),
+                                behavior: HitTestBehavior.opaque,
+                                onTap: onRemove,
+                                child: const SizedBox(
+                                  width: 48,
+                                  height: 48,
+                                  child: Center(
+                                    child: DecoratedBox(
+                                      decoration: BoxDecoration(
+                                        color: Color(0x8C000000),
+                                        shape: BoxShape.circle,
+                                      ),
+                                      child: SizedBox(
+                                        width: 28,
+                                        height: 28,
+                                        child: Icon(
+                                          Icons.close,
+                                          size: 16,
+                                          color: Colors.white,
+                                        ),
                                       ),
                                     ),
                                   ),
@@ -703,40 +700,50 @@ class _WideCard extends StatelessWidget {
                               ),
                             ),
                           ),
+                      ],
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (badges.isNotEmpty)
+                        SizedBox(
+                          height: badgeHeight,
+                          child: ClipRect(
+                            child: PhoneCardBadges(
+                              itemId: item.id,
+                              labels: badges,
+                            ),
+                          ),
+                        ),
+                      Text(
+                        title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                          height: 1.2,
+                        ),
+                      ),
+                      // 进度百分比由角标承载,页脚只保留季集/集名或年份。
+                      if (meta.isNotEmpty)
+                        Text(
+                          meta,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                            height: 1.2,
+                          ),
                         ),
                     ],
                   ),
                 ),
-              ),
-              const SizedBox(height: 6),
-              if (badges.isNotEmpty)
-                SizedBox(
-                  height: badgeHeight,
-                  child: ClipRect(
-                    child: PhoneCardBadges(itemId: item.id, labels: badges),
-                  ),
-                ),
-              Text(
-                title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  fontWeight: FontWeight.w600,
-                  height: 1.2,
-                ),
-              ),
-              // 进度百分比由角标承载,页脚只保留季集/集名或年份。
-              if (meta.isNotEmpty)
-                Text(
-                  meta,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                    height: 1.2,
-                  ),
-                ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -1045,6 +1052,9 @@ String _latestTypes(EmbyItem library) {
 Widget _sharedPosterImage(EmbyItem item, bool shared) {
   final image = MediaImage(
     item: item,
+    contributesToTheme: true,
+    preferBackdrop: !item.isEpisode,
+    preferThumb: item.isEpisode,
     maxWidth: PhoneMotion.posterRequestWidth,
   );
   if (!shared) {

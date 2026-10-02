@@ -77,12 +77,14 @@ class FakeSeason {
     required this.name,
     this.indexNumber,
     this.primaryImageTag,
+    this.backdropImageTag,
   });
 
   final String id;
   final String name;
   final int? indexNumber;
   final String? primaryImageTag;
+  final String? backdropImageTag;
 }
 
 /// 注入用的分集描述,经 [FakeEmbyServer.setEpisodes] 转成 Episode 条目。
@@ -569,6 +571,10 @@ class FakeEmbyServer {
           seriesName: series?.name,
           indexNumber: season.indexNumber,
           primaryImageTag: season.primaryImageTag,
+          backdropImageTag: season.backdropImageTag,
+          parentBackdropItemId: series?.id,
+          parentBackdropImageTag: series?.backdropImageTag,
+          seriesPrimaryImageTag: series?.primaryImageTag,
         ),
     ];
     items.addAll(created);

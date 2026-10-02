@@ -4,7 +4,7 @@ import 'theme/tokens.dart';
 
 export 'theme/tokens.dart';
 
-/// 应用唯一视觉权威:分层表面 + 暖色文字,克制高光仅用于播放/焦点/进度。
+/// 应用唯一视觉权威:冷蓝灰表面 + 清晰文字,克制高光仅用于播放/焦点/进度。
 ///
 /// 所有页面与组件应从 [AppTheme.dark] / [AppTheme.light] 与 token 类
 /// ([AppSpacing] / [AppRadii] / [AppMotion] / [AppBreakpoints]) 取视觉值,
@@ -13,82 +13,82 @@ abstract final class AppTheme {
   /// 一套主题的全部取色。浅色/深色共用同一套组件样式,只换色调。
   @visibleForTesting
   static const Tones darkTones = Tones._(
-    base: Color(0xFF0A0A0C),
-    surfaceLowest: Color(0xFF0F0F12),
-    surfaceLow: Color(0xFF141418),
-    surface: Color(0xFF1A1A1F),
-    surfaceHigh: Color(0xFF202027),
-    surfaceHighest: Color(0xFF292931),
-    surfaceBright: Color(0xFF33333C),
-    onSurface: Color(0xFFF5F2EC),
-    onSurfaceVariant: Color(0xFFB3AFA6),
-    outline: Color(0xFF3D3D45),
-    outlineVariant: Color(0xFF26262C),
-    accent: Color(0xFFD8CFC4),
-    onAccent: Color(0xFF161410),
-    accentContainer: Color(0xFF2E2B27),
-    onAccentContainer: Color(0xFFE8E2D8),
-    secondary: Color(0xFFA8A29A),
-    onSecondary: Color(0xFF161410),
-    secondaryContainer: Color(0xFF2C2A27),
-    onSecondaryContainer: Color(0xFFD8D2C8),
-    tertiary: Color(0xFF8FA3BF),
-    onTertiary: Color(0xFF121A26),
-    tertiaryContainer: Color(0xFF2C3A4E),
-    onTertiaryContainer: Color(0xFFD4E0F2),
+    base: Color(0xFF151A28),
+    surfaceLowest: Color(0xFF171D2C),
+    surfaceLow: Color(0xFF1D2536),
+    surface: Color(0xFF242D40),
+    surfaceHigh: Color(0xFF2B354A),
+    surfaceHighest: Color(0xFF354158),
+    surfaceBright: Color(0xFF414D65),
+    onSurface: Color(0xFFF3F5FF),
+    onSurfaceVariant: Color(0xFFB9C3D9),
+    outline: Color(0xFF78849F),
+    outlineVariant: Color(0xFF39445B),
+    accent: Color(0xFFB8B8FF),
+    onAccent: Color(0xFF242052),
+    accentContainer: Color(0xFF37355F),
+    onAccentContainer: Color(0xFFE4DFFF),
+    secondary: Color(0xFFEDB7CD),
+    onSecondary: Color(0xFF462437),
+    secondaryContainer: Color(0xFF4E3447),
+    onSecondaryContainer: Color(0xFFFFDBEA),
+    tertiary: Color(0xFF9EDBD5),
+    onTertiary: Color(0xFF143C3B),
+    tertiaryContainer: Color(0xFF284C4C),
+    onTertiaryContainer: Color(0xFFC1F2EC),
     error: Color(0xFFE8786F),
     onError: Color(0xFF2A0A08),
     errorContainer: Color(0xFF5C2320),
     onErrorContainer: Color(0xFFFFD2CD),
-    inverseSurface: Color(0xFFF5F2EC),
-    onInverseSurface: Color(0xFF141418),
-    inversePrimary: Color(0xFF6F675C),
+    inverseSurface: Color(0xFFF3F5FF),
+    onInverseSurface: Color(0xFF242D40),
+    inversePrimary: Color(0xFF5757A8),
     scrim: Colors.black,
   );
 
-  /// 浅色调:暖白分层表面 + 深暖文字;正文/控件对比度不低于 4.5:1。
+  /// 浅色调:清透分层表面 + 深蓝灰文字;正文/控件对比度不低于 4.5:1。
   @visibleForTesting
   static const Tones lightTones = Tones._(
-    base: Color(0xFFF6F4F0),
-    surfaceLowest: Color(0xFFFBFAF7),
-    surfaceLow: Color(0xFFF2EFEA),
-    surface: Color(0xFFECE8E1),
-    surfaceHigh: Color(0xFFE4DFD6),
-    surfaceHighest: Color(0xFFDCD6CB),
-    surfaceBright: Color(0xFFD2CCC0),
-    onSurface: Color(0xFF1F1C17),
-    onSurfaceVariant: Color(0xFF555046),
-    outline: Color(0xFF8A8478),
-    outlineVariant: Color(0xFFD5CFC4),
-    accent: Color(0xFF6F6557),
-    onAccent: Color(0xFFF6F4F0),
-    accentContainer: Color(0xFFDDD6CB),
-    onAccentContainer: Color(0xFF262119),
-    secondary: Color(0xFF6B665D),
-    onSecondary: Color(0xFFF6F4F0),
-    secondaryContainer: Color(0xFFE0DBD1),
-    onSecondaryContainer: Color(0xFF262119),
-    tertiary: Color(0xFF4E6076),
-    onTertiary: Color(0xFFF6F4F0),
-    tertiaryContainer: Color(0xFFD4DEEC),
-    onTertiaryContainer: Color(0xFF1B2838),
+    base: Color(0xFFF6F7FC),
+    surfaceLowest: Color(0xFFFFFFFF),
+    surfaceLow: Color(0xFFFFFFFF),
+    surface: Color(0xFFEEF0F8),
+    surfaceHigh: Color(0xFFE7EAF5),
+    surfaceHighest: Color(0xFFDDE2F0),
+    surfaceBright: Color(0xFFD6DDED),
+    onSurface: Color(0xFF22283C),
+    onSurfaceVariant: Color(0xFF566079),
+    outline: Color(0xFF788299),
+    outlineVariant: Color(0xFFD6DCEC),
+    accent: Color(0xFF5757A8),
+    onAccent: Color(0xFFFFFFFF),
+    accentContainer: Color(0xFFE3E1FF),
+    onAccentContainer: Color(0xFF343264),
+    secondary: Color(0xFF8E4E6D),
+    onSecondary: Color(0xFFFFFFFF),
+    secondaryContainer: Color(0xFFF9DEEA),
+    onSecondaryContainer: Color(0xFF63334B),
+    tertiary: Color(0xFF306D69),
+    onTertiary: Color(0xFFFFFFFF),
+    tertiaryContainer: Color(0xFFD2EFEA),
+    onTertiaryContainer: Color(0xFF214D49),
     error: Color(0xFFB03A32),
     onError: Color(0xFFFFFFFF),
     errorContainer: Color(0xFFF5D4D0),
     onErrorContainer: Color(0xFF4A120E),
-    inverseSurface: Color(0xFF322F29),
-    onInverseSurface: Color(0xFFF5F2EC),
-    inversePrimary: Color(0xFFD8CFC4),
+    inverseSurface: Color(0xFF2B354A),
+    onInverseSurface: Color(0xFFF3F5FF),
+    inversePrimary: Color(0xFFB8B8FF),
     scrim: Colors.black,
   );
 
-  /// 近黑深色主题(默认)。
+  /// 冷蓝灰深色主题(默认)。
   static ThemeData dark() => _theme(darkTones);
 
   /// 浅色主题:同一分层结构,只换浅色调。
   static ThemeData light() => _theme(lightTones);
 
-  /// Phone reading sizes and touch targets, with the same warm surface palette.
+  /// Phone reading sizes and touch targets, with the same cool surface palette.
   static ThemeData phoneLight() => _phone(light());
   static ThemeData phoneDark() => _phone(dark());
 
@@ -101,11 +101,11 @@ abstract final class AppTheme {
       ),
       bodySmall: base.textTheme.bodySmall?.copyWith(fontSize: 13, height: 1.4),
       titleLarge: base.textTheme.titleLarge?.copyWith(
-        fontSize: 24,
+        fontSize: 28,
         fontWeight: FontWeight.w700,
       ),
       titleMedium: base.textTheme.titleMedium?.copyWith(
-        fontSize: 18,
+        fontSize: 20,
         fontWeight: FontWeight.w600,
       ),
       titleSmall: base.textTheme.titleSmall?.copyWith(
@@ -282,8 +282,8 @@ abstract final class AppTheme {
       ),
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
-          backgroundColor: t.onSurface,
-          foregroundColor: t.base,
+          backgroundColor: t.accent,
+          foregroundColor: t.onAccent,
           disabledBackgroundColor: t.surfaceHigh,
           disabledForegroundColor: t.onSurfaceVariant,
           padding: const EdgeInsets.symmetric(
@@ -296,8 +296,8 @@ abstract final class AppTheme {
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
-          backgroundColor: t.onSurface,
-          foregroundColor: t.base,
+          backgroundColor: t.accent,
+          foregroundColor: t.onAccent,
           disabledBackgroundColor: t.surfaceHigh,
           disabledForegroundColor: t.onSurfaceVariant,
           elevation: 0,
@@ -432,8 +432,8 @@ abstract final class AppTheme {
       ),
       navigationRailTheme: NavigationRailThemeData(
         backgroundColor: t.base,
-        indicatorColor: t.surfaceHigh,
-        selectedIconTheme: IconThemeData(color: t.onSurface),
+        indicatorColor: t.accentContainer,
+        selectedIconTheme: IconThemeData(color: t.onAccentContainer),
         unselectedIconTheme: IconThemeData(color: t.onSurfaceVariant),
         selectedLabelTextStyle: textTheme.labelMedium?.copyWith(
           color: t.onSurface,
@@ -450,12 +450,16 @@ abstract final class AppTheme {
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         height: 64,
-        indicatorColor: t.surfaceHigh,
+        indicatorColor: t.accentContainer,
         indicatorShape: const StadiumBorder(),
         labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
         labelTextStyle: WidgetStatePropertyAll(textTheme.labelMedium),
-        iconTheme: WidgetStatePropertyAll(
-          IconThemeData(color: t.onSurfaceVariant),
+        iconTheme: WidgetStateProperty.resolveWith(
+          (states) => IconThemeData(
+            color: states.contains(WidgetState.selected)
+                ? t.onAccentContainer
+                : t.onSurfaceVariant,
+          ),
         ),
       ),
       progressIndicatorTheme: ProgressIndicatorThemeData(
@@ -507,7 +511,7 @@ class Tones {
     required this.scrim,
   });
 
-  /// 页面底色(最深层)。深色近黑,浅色暖白。
+  /// 页面底色(最深层)。深色蓝灰,浅色近白。
   final Color base;
   final Color surfaceLowest;
   final Color surfaceLow;
@@ -520,7 +524,7 @@ class Tones {
   final Color outline;
   final Color outlineVariant;
 
-  /// 克制高光,只用于播放/焦点/进度,不涂导航与主按钮。
+  /// 品牌蓝紫用于主要操作、选中和播放进度。
   final Color accent;
   final Color onAccent;
   final Color accentContainer;

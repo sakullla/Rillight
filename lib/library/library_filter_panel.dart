@@ -97,10 +97,16 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
     final size = MediaQuery.sizeOf(context);
     final wide = widget.television || size.width >= 700;
     final sections = _sections(l);
+    final textScale = MediaQuery.textScalerOf(context).scale(14) / 14;
+    final compactSection = _section == 'type' || _section == 'watch';
+    final naturalHeight = wide
+        ? (widget.television ? 760.0 : 680.0)
+        : (compactSection ? 440.0 : 620.0) * textScale;
     final height = math.min(
-      widget.television ? 760.0 : 680.0,
-      size.height * .88,
+      naturalHeight,
+      (size.height - MediaQuery.viewInsetsOf(context).bottom) * .88,
     );
+
     return SizedBox(
       width: widget.television ? 980 : 760,
       height: height,
@@ -122,7 +128,7 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
                       children: [
                         Text(
                           l.filterBrowseTitle,
-                          style: theme.textTheme.titleLarge,
+                          style: theme.textTheme.headlineSmall,
                         ),
                         const SizedBox(height: 4),
                         Text(
@@ -146,7 +152,7 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
             ),
             if (_count > 0)
               SizedBox(
-                height: 44,
+                height: 44 * textScale,
                 child: ListView(
                   scrollDirection: Axis.horizontal,
                   padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -205,7 +211,7 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
                   : Column(
                       children: [
                         SizedBox(
-                          height: 60,
+                          height: math.max(60, 44 * textScale + 12),
                           child: ListView(
                             scrollDirection: Axis.horizontal,
                             padding: const EdgeInsets.symmetric(
@@ -320,11 +326,9 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
       alignment: wide ? Alignment.centerLeft : Alignment.center,
       padding: EdgeInsets.symmetric(horizontal: wide ? 16 : 10),
       minimumSize: const Size(48, 48),
-      backgroundColor: selected
-          ? scheme.secondaryContainer
-          : Colors.transparent,
+      backgroundColor: selected ? scheme.primaryContainer : Colors.transparent,
       foregroundColor: selected
-          ? scheme.onSecondaryContainer
+          ? scheme.onPrimaryContainer
           : scheme.onSurfaceVariant,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
     );
@@ -502,6 +506,8 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
                         key: _key('$_section-${option.$1}'),
                         label: Text(option.$2),
                         selected: option.$3,
+                        selectedColor: theme.colorScheme.primaryContainer,
+                        checkmarkColor: theme.colorScheme.onPrimaryContainer,
                         showCheckmark: true,
                         onSelected: (_) => setState(option.$4),
                         materialTapTargetSize: MaterialTapTargetSize.padded,

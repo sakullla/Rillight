@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:rillight/auth/auth_scope.dart';
+import 'package:rillight/app/artwork_color_scope.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/media_image/media_image.dart';
 
@@ -120,9 +121,14 @@ class HeroArtwork extends StatefulWidget {
 }
 
 class _ArtworkData {
-  const _ArtworkData(this.bytes, {required this.poster});
+  const _ArtworkData(
+    this.bytes, {
+    required this.poster,
+    required this.identity,
+  });
   final Uint8List bytes;
   final bool poster;
+  final String identity;
 }
 
 class _HeroArtworkState extends State<HeroArtwork> {
@@ -204,7 +210,11 @@ class _HeroArtworkState extends State<HeroArtwork> {
                     minimumWidth: minimum,
                   );
             if (suitable && current()) {
-              return _ArtworkData(bytes, poster: poster);
+              return _ArtworkData(
+                bytes,
+                poster: poster,
+                identity: '$scope/${ref.itemId}/${ref.type}/${ref.tag}',
+              );
             }
           } finally {
             descriptor.dispose();
@@ -247,6 +257,16 @@ class _HeroArtworkState extends State<HeroArtwork> {
             fit: image.poster ? BoxFit.contain : BoxFit.cover,
             cacheWidth: image.poster ? 480 : widget.requestWidth,
             filterQuality: FilterQuality.medium,
+            frameBuilder: (context, child, frame, synchronous) {
+              if (frame != null || synchronous) {
+                ArtworkColorScope.maybeOf(context)?.report(
+                  widget.sources.themeItem?.id ?? '',
+                  image.identity,
+                  image.bytes,
+                );
+              }
+              return child;
+            },
             errorBuilder: (_, _, _) => const SizedBox.expand(),
           );
           if (!image.poster) return SizedBox.expand(child: art);
@@ -274,3 +294,17 @@ class _HeroArtworkState extends State<HeroArtwork> {
     );
   }
 }
+
+EmbyItem seasonArtworkItem(EmbyItem season, EmbyItem series) => EmbyItem(
+  id: season.id,
+  name: season.name,
+  type: 'Season',
+  primaryImageTag: season.primaryImageTag,
+  backdropImageTag: season.backdropImageTag,
+  thumbImageTag: season.thumbImageTag,
+  parentBackdropItemId: season.parentBackdropItemId ?? series.id,
+  parentBackdropImageTag:
+      season.parentBackdropImageTag ?? series.backdropImageTag,
+  seriesId: series.id,
+  seriesPrimaryImageTag: season.seriesPrimaryImageTag ?? series.primaryImageTag,
+);

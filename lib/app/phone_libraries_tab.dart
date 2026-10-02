@@ -79,12 +79,17 @@ class PhoneLibrariesTab extends StatelessWidget {
                 sliver: SliverLayoutBuilder(
                   builder: (context, constraints) {
                     const spacing = AppSpacing.md;
-                    const columns = 2;
+                    final columns =
+                        MediaQuery.textScalerOf(context).scale(14) / 14 > 1.5
+                        ? 1
+                        : 2;
                     final cellWidth =
-                        (constraints.crossAxisExtent - spacing) / columns;
+                        (constraints.crossAxisExtent -
+                            spacing * (columns - 1)) /
+                        columns;
                     final textScale =
                         MediaQuery.textScalerOf(context).scale(14) / 14;
-                    final titleBlock = AppSpacing.xs + 22 * textScale;
+                    final titleBlock = 20 + 44 * textScale;
                     return SliverGrid(
                       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                         crossAxisCount: columns,
@@ -132,18 +137,20 @@ class _LibraryBlock extends StatelessWidget {
     final scheme = theme.colorScheme;
     final hasImage = _hasImage;
     return Material(
-      color: Colors.transparent,
+      color: scheme.surfaceContainerLow,
+      borderRadius: BorderRadius.circular(20),
+      clipBehavior: Clip.antiAlias,
       child: InkWell(
         key: Key('phone-library-block-${library.id}'),
         onTap: onTap,
-        borderRadius: BorderRadius.circular(AppRadii.md),
+        borderRadius: BorderRadius.circular(20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Expanded(
               child: Material(
                 color: scheme.surfaceContainerHigh,
-                borderRadius: BorderRadius.circular(AppRadii.md),
+                borderRadius: BorderRadius.circular(20),
                 clipBehavior: Clip.antiAlias,
                 child: hasImage
                     ? MediaImage(
@@ -160,11 +167,14 @@ class _LibraryBlock extends StatelessWidget {
             ),
             const SizedBox(height: AppSpacing.xs),
             // 标题左对齐,与全仓卡片规范一致(ADR-5)。
-            Text(
-              library.name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.bodyMedium,
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+              child: Text(
+                library.name,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.titleSmall,
+              ),
             ),
           ],
         ),
@@ -192,12 +202,12 @@ class _LibraryNamePlaceholder extends StatelessWidget {
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [scheme.surfaceContainerHighest, scheme.surfaceContainerLow],
+          colors: [scheme.primaryContainer, scheme.surfaceContainerLow],
         ),
       ),
       child: Center(
         child: ExcludeSemantics(
-          child: Icon(icon, size: 36, color: scheme.onSurfaceVariant),
+          child: Icon(icon, size: 44, color: scheme.onPrimaryContainer),
         ),
       ),
     );

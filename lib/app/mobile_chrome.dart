@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/app/mobile_widgets.dart';
 import 'package:rillight/app/theme.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/home/phone_hero.dart';
@@ -106,7 +107,7 @@ class _HomeLoading extends StatelessWidget {
         LayoutBuilder(
           builder: (context, constraints) {
             final width = constraints.maxWidth;
-            final top = MediaQuery.paddingOf(context).top;
+            final top = MediaQuery.viewPaddingOf(context).top;
             final scale = MediaQuery.textScalerOf(context).scale(14) / 14;
             return SizedBox(
               height:
@@ -115,50 +116,46 @@ class _HomeLoading extends StatelessWidget {
                   PhoneHero.contentHeightFor(width, textScale: scale),
               child: Padding(
                 padding: EdgeInsets.fromLTRB(16, top + 56, 16, 44),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                child: Stack(
                   children: [
-                    SkeletonBlock(
-                      width: width - 32,
-                      height: (width - 32) * 9 / 16,
-                      borderRadius: BorderRadius.circular(24),
-                      animated: animate,
+                    Positioned.fill(
+                      child: SkeletonBlock(
+                        width: width - 32,
+                        height:
+                            PhoneHero.contentHeightFor(
+                              width,
+                              textScale: scale,
+                            ) -
+                            44,
+                        borderRadius: BorderRadius.circular(24),
+                        animated: animate,
+                      ),
                     ),
-                    Expanded(
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            SkeletonBlock(
-                              width: (width - 64) * .68,
-                              height: 28 * scale,
-                              animated: animate,
-                            ),
-                            const SizedBox(height: 6),
-                            SkeletonBlock(
-                              width: 120,
-                              height: 14 * scale,
-                              animated: animate,
-                            ),
-                            const Spacer(),
-                            Row(
-                              children: [
-                                SkeletonBlock(
-                                  width: 120,
-                                  height: 48,
-                                  animated: animate,
-                                ),
-                                const SizedBox(width: 12),
-                                SkeletonBlock(
-                                  width: 64,
-                                  height: 48,
-                                  animated: animate,
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
+                    Positioned(
+                      left: 20,
+                      right: 20,
+                      bottom: 16,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          SkeletonBlock(
+                            width: (width - 72) * .68,
+                            height: 28 * scale,
+                            animated: animate,
+                          ),
+                          const SizedBox(height: 8),
+                          SkeletonBlock(
+                            width: 120,
+                            height: 14 * scale,
+                            animated: animate,
+                          ),
+                          const SizedBox(height: 16),
+                          SkeletonBlock(
+                            width: 180,
+                            height: 48,
+                            animated: animate,
+                          ),
+                        ],
                       ),
                     ),
                   ],
@@ -224,10 +221,10 @@ class _LibrariesLoading extends StatelessWidget {
   }
 }
 
-/// 海报卡宽：一屏三张完整 2:3，再露出下一张。页边距 16，间距 8。
+/// 海报卡宽：一屏两张完整 2:3，再露出下一张。页边距 16，间距 8。
 double phoneHomePosterCardWidth(double screenWidth) {
   final available = screenWidth - AppSpacing.md * 2;
-  return (available - AppSpacing.xs * 3) / 3.3;
+  return (available - AppSpacing.xs * 2) / 2.2;
 }
 
 /// 横卡宽：一屏一张完整 16:9，再露出下一张。页边距 16，间距 8。
@@ -235,6 +232,28 @@ double phoneHomeWideCardWidth(double screenWidth) {
   final available = screenWidth - AppSpacing.md * 2;
   return (available - AppSpacing.xs) / 1.3;
 }
+
+/// Shared geometry keeps loading and resolved rails on the same baseline.
+double phoneHomeRailHeight(BuildContext context, {required bool wide}) {
+  final screen = MediaQuery.sizeOf(context).width;
+  final width = wide
+      ? phoneHomeWideCardWidth(screen)
+      : phoneHomePosterCardWidth(screen);
+  if (!wide) return width * 1.5 + phonePosterCardLabelExtent(context) + 2;
+  final theme = Theme.of(context).textTheme;
+  final scaler = MediaQuery.textScalerOf(context);
+  final title = scaler.scale(theme.bodyMedium?.fontSize ?? 14) * 1.2;
+  final meta = scaler.scale(theme.labelSmall?.fontSize ?? 12) * 1.2;
+  return width * 9 / 16 +
+      16 +
+      phoneHomeWideBadgeHeight(context) +
+      title * 2 +
+      meta +
+      4;
+}
+
+double phoneHomeWideBadgeHeight(BuildContext context) =>
+    MediaQuery.textScalerOf(context).scale(12) * 1.2 + 4;
 
 class _RailLoading extends StatelessWidget {
   const _RailLoading({required this.animate, required this.wide});
@@ -250,7 +269,7 @@ class _RailLoading extends StatelessWidget {
         : phoneHomePosterCardWidth(screen);
     final imageHeight = wide ? cardWidth * 9 / 16 : cardWidth * 1.5;
     return SizedBox(
-      height: imageHeight + AppSpacing.xs + 14,
+      height: phoneHomeRailHeight(context, wide: wide),
       child: ListView.builder(
         scrollDirection: Axis.horizontal,
         physics: const NeverScrollableScrollPhysics(),

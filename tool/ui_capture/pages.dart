@@ -95,6 +95,13 @@ extension PageCaptures on CaptureSession {
     }
     if (wants('detail')) {
       await route(app, '/item/series-friends', 'series-detail');
+      if (platform == 'phone') {
+        await tap(CatalogKeys.season('season-friends-2'));
+        await save('series-second-season-artwork');
+        await tap(CatalogKeys.season('season-friends-1'));
+        await save('series-first-season-artwork');
+      }
+
       if (platform == 'desktop') {
         await modal(CatalogKeys.seasonPicker, 'series-season-picker');
       }
@@ -127,6 +134,13 @@ extension PageCaptures on CaptureSession {
       }
       await route(app, '/item/episode-friends-s1e2', 'episode-detail');
       await route(app, '/item/movie-up', 'movie-detail');
+      if (platform == 'phone') {
+        tester.platformDispatcher.textScaleFactorTestValue = 2;
+        await advance(350);
+        await save('movie-detail-text-200');
+        tester.platformDispatcher.clearTextScaleFactorTestValue();
+        await advance(350);
+      }
       if (platform == 'desktop') {
         await modal(CatalogKeys.detailAudio, 'detail-audio');
         await modal(CatalogKeys.detailSubtitle, 'detail-subtitles');
@@ -153,6 +167,22 @@ extension PageCaptures on CaptureSession {
       expect(find.text('2 / 2'), findsOneWidget);
       await save('detail-gallery-next');
       await dismiss();
+      if (platform == 'phone') {
+        for (final tone in ['red', 'blue', 'green', 'mono', 'bright', 'dark']) {
+          final id = 'palette-$tone';
+          server.items.add(
+            FakeEmbyItem(
+              id: id,
+              name: '海报配色 · $tone',
+              type: 'Movie',
+              primaryImageTag: id,
+              backdropImageTag: id,
+              overview: '动态背景来自当前显示的图片。文字和操作保持清晰。',
+            ),
+          );
+          await route(app, '/item/$id', 'detail-palette-$tone');
+        }
+      }
     }
     if (wants('search')) await searchPages(app);
     if (wants('servers')) await serverPages(app, auth);
@@ -162,6 +192,13 @@ extension PageCaptures on CaptureSession {
   Future<void> filterStates(Key openKey, String prefix) async {
     await tap(openKey);
     await save('library-filters');
+    if (platform == 'phone') {
+      tester.platformDispatcher.textScaleFactorTestValue = 2;
+      await advance(350);
+      await save('library-filters-text-200');
+      tester.platformDispatcher.clearTextScaleFactorTestValue();
+      await advance(350);
+    }
     for (final section in ['watch', 'genre', 'year']) {
       await tap(Key('$prefix-section-$section'));
       await save('library-filters-$section');
@@ -292,6 +329,11 @@ extension PageCaptures on CaptureSession {
       await route(app, '/mine', 'account-settings-entry');
       await tap(PhoneMinePage.settingsKey);
       await save('settings');
+      tester.platformDispatcher.textScaleFactorTestValue = 2;
+      await advance(350);
+      await save('settings-text-200');
+      tester.platformDispatcher.clearTextScaleFactorTestValue();
+      await advance(350);
     }
     await tap(const ValueKey('settings-section-外观'));
     await save('settings-appearance-expanded');
@@ -333,6 +375,20 @@ extension PageCaptures on CaptureSession {
       'phone' => 'android-connect-submit',
       _ => 'tv-connect-submit',
     });
+    if (platform == 'phone') {
+      tester.platformDispatcher.textScaleFactorTestValue = 2;
+      await advance(350);
+      await save('login-text-200');
+      tester.platformDispatcher.clearTextScaleFactorTestValue();
+      tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+      await tester.tap(find.byKey(address));
+      await advance(350);
+      await save('login-keyboard');
+      tester.view.resetViewInsets();
+      tester.testTextInput.hide();
+      FocusManager.instance.primaryFocus?.unfocus();
+      await advance(350);
+    }
     if (platform == 'tv') {
       await tap(address);
       await save('login-address-editor');

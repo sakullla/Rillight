@@ -47,6 +47,58 @@ void main() {
 
   tearDown(PhoneHomeSectionController.debugResetApp);
 
+  for (final scale in [1.0, 1.3, 2.0]) {
+    for (final width in [360.0, 412.0]) {
+      testWidgets('readable poster grid $width at $scale text scale', (
+        tester,
+      ) async {
+        await _pumpSurface(tester, width: width, height: 915);
+        tester.platformDispatcher.textScaleFactorTestValue = scale;
+        addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+        var opened = false;
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: AppTheme.phoneLight(),
+            locale: const Locale('zh'),
+            supportedLocales: AppLocalizations.supportedLocales,
+            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            home: Scaffold(
+              body: SingleChildScrollView(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: MobileGrid(
+                    items: [
+                      for (var i = 0; i < 6; i++)
+                        _movie('large-$i', '这是没有图片的很长电影标题 $i'),
+                    ],
+                    itemBuilder: (context, item) => PhonePosterCard(
+                      item: item,
+                      pressKey: Key(item.id),
+                      onTap: () => opened = true,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pump();
+        final first = tester.getRect(find.byKey(const Key('large-0')));
+        expect(first.width, greaterThanOrEqualTo(scale == 1 ? 110 : 140));
+        expect(first.left, greaterThanOrEqualTo(16));
+        expect(first.right, lessThanOrEqualTo(width - 16));
+        await tester.tap(find.byKey(const Key('large-0')));
+        expect(opened, isTrue);
+        await tester.scrollUntilVisible(
+          find.byKey(const Key('large-5')),
+          200,
+          scrollable: find.byType(Scrollable).first,
+        );
+        expect(tester.takeException(), isNull);
+      });
+    }
+  }
+
   testWidgets('home mounts a later rail only after it nears the viewport', (
     tester,
   ) async {
@@ -527,19 +579,20 @@ void _expectPeek(WidgetTester tester, double width) {
   expect(picture.aspectRatio, closeTo(16 / 9, 0.02));
 
   final posters = [
-    for (var i = 0; i < 4; i++)
+    for (var i = 0; i < 3; i++)
       tester.getRect(find.byKey(CatalogKeys.item('movie-$i'))),
   ];
   expect(posters[0].left, closeTo(16, 1));
   expect(posters[0].width, closeTo(phoneHomePosterCardWidth(width), 1));
-  for (var i = 0; i < 3; i++) {
+  expect(posters[0].width, greaterThanOrEqualTo(128));
+  for (var i = 0; i < 2; i++) {
     expect(posters[i].right, lessThanOrEqualTo(width));
     if (i > 0) {
       expect(posters[i].left - posters[i - 1].right, closeTo(AppSpacing.xs, 1));
     }
   }
-  expect(posters[3].left, lessThan(width));
-  expect(posters[3].right, greaterThan(width));
+  expect(posters[2].left, lessThan(width));
+  expect(posters[2].right, greaterThan(width));
   final poster = tester.getSize(
     find.descendant(
       of: find.byKey(CatalogKeys.item('movie-0')),

@@ -147,6 +147,27 @@ void main() {
       await tester.pumpAndSettle();
     }
 
+    testWidgets('large text and keyboard keep login validation reachable', (
+      tester,
+    ) async {
+      tester.platformDispatcher.textScaleFactorTestValue = 2;
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+      await pumpConnect(tester);
+      tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+      addTearDown(tester.view.resetViewInsets);
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(_address), 'not a server');
+      await tap(tester, find.byKey(_submit));
+      expect(textOf(tester, _address), 'not a server');
+      await tester.ensureVisible(find.byKey(_submit));
+      await tester.pumpAndSettle();
+      expect(
+        tester.getRect(find.byKey(_submit)).bottom,
+        lessThanOrEqualTo(500),
+      );
+      expect(tester.takeException(), isNull);
+    }, tags: ['integration']);
+
     testWidgets(
       'path, extra line and User-Agent stay under 更多 until expanded',
       (tester) async {
@@ -471,7 +492,7 @@ void main() {
     });
 
     testWidgets(
-      'poster flies to the top as the same image and is the only hero',
+      'handoff flies unchanged then loaded artwork supersedes its stale tag',
       (tester) async {
         await _pumpMotionHome(tester);
         await _homeUntil(
@@ -516,9 +537,13 @@ void main() {
         expect(tester.getTopLeft(find.byKey(PhoneItemBanner.bannerKey)).dy, 0);
         final landed = _bannerImage(tester);
         expect(landed.item.id, posterImage.item.id);
-        expect(landed.preferBackdrop, isFalse);
-        expect(landed.maxWidth, posterImage.maxWidth);
-        expect(landed.item.primaryImageTag, posterImage.item.primaryImageTag);
+        expect(landed.preferBackdrop, isTrue);
+        expect(landed.maxWidth, PhoneMotion.pageRequestWidth);
+        expect(landed.item.primaryImageTag, 'tag-inception');
+        expect(
+          landed.item.primaryImageTag,
+          isNot(posterImage.item.primaryImageTag),
+        );
         final play = find.byKey(const Key('mobile-detail-play'));
         expect(tester.widget<FilledButton>(play).onPressed, isNotNull);
         expect(find.text('Inception'), findsWidgets);
@@ -548,7 +573,7 @@ void main() {
       await _homeSettle(tester);
       expect(tester.getTopLeft(find.byKey(PhoneItemBanner.bannerKey)).dy, 0);
       expect(_bannerImage(tester).preferBackdrop, isTrue);
-      expect(_bannerImage(tester).maxWidth, PhoneMotion.heroRequestWidth);
+      expect(_bannerImage(tester).maxWidth, PhoneMotion.pageRequestWidth);
       expect(find.textContaining('dream-sharing'), findsOneWidget);
       expect(find.textContaining('2010'), findsOneWidget);
       expect(
@@ -714,6 +739,14 @@ void main() {
         );
         expect(find.byKey(CatalogKeys.resumeProgress), findsWidgets);
         expect(_inside(tester.getRect(find.text('已看 10%').last), card), isTrue);
+
+        final resumePlay = find.byKey(const Key('phone-resume-play-movie-b'));
+        expect(tester.getSize(resumePlay), const Size(48, 48));
+        await tester.tap(resumePlay);
+        await tester.pumpAndSettle();
+        expect(find.text('播放 movie-b'), findsOneWidget);
+        router.pop();
+        await tester.pumpAndSettle();
 
         // 真实服务器上移除后刷新,继续观看行保持消失并落库。
         final (liveRouter, server) = await _openPhone(tester);

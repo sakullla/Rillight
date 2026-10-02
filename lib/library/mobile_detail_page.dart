@@ -9,6 +9,7 @@ import 'package:rillight/library/detail_extras.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_chrome.dart';
 import 'package:rillight/app/mobile_motion.dart';
+import 'package:rillight/app/mobile_widgets.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
@@ -17,6 +18,7 @@ import 'package:rillight/auth/failure_message.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/emby/emby_errors.dart';
 import 'package:rillight/home/catalog_keys.dart';
+import 'package:rillight/home/hero_artwork.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/library/detail_controller.dart';
 import 'package:rillight/library/episode_detail_sections.dart';
@@ -469,11 +471,20 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
         final handoff = _imageHandoff(context);
         final pending = item == null && controller.loading;
         final failed = item == null && controller.error != null;
-        final imageSource = failed ? null : handoff?.item ?? item;
+        final selectedSeason = controller.seasons
+            .where((season) => season.id == controller.seasonId)
+            .firstOrNull;
+        final imageSource = failed
+            ? null
+            : item == null
+            ? handoff?.item
+            : item.isSeries && selectedSeason != null
+            ? seasonArtworkItem(selectedSeason, item)
+            : item;
         final immersive = imageSource != null && !_barSolid;
         return ContentTheme(
           item: imageSource,
-          preferBackdrop: handoff?.preferBackdrop ?? true,
+          preferBackdrop: pending ? (handoff?.preferBackdrop ?? true) : true,
           child: Scaffold(
             extendBodyBehindAppBar: imageSource != null,
             appBar: AppBar(
@@ -578,10 +589,13 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
                                         ? () => _openItem(_nextEpisode!.id)
                                         : null,
                                   ),
-                            preferBackdrop: handoff?.preferBackdrop ?? true,
-                            maxWidth:
-                                handoff?.maxWidth ??
-                                PhoneMotion.pageRequestWidth,
+                            preferBackdrop: pending
+                                ? (handoff?.preferBackdrop ?? true)
+                                : true,
+                            maxWidth: pending
+                                ? (handoff?.maxWidth ??
+                                      PhoneMotion.pageRequestWidth)
+                                : PhoneMotion.pageRequestWidth,
                             showCaption: !pending,
                           ),
                         ),
@@ -591,7 +605,6 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
                           message: embyFailureMessage(l, controller.error!),
                           onRetry: _refresh,
                         ),
-                      if (item != null) DetailAlbumStrip(item: item),
                       if (item?.isSeries == true &&
                           controller.seasonError != null)
                         MobileFailureState(
@@ -790,6 +803,7 @@ class _PhoneItemDetail extends StatelessWidget {
       children: [
         if (plainOverview(item.overview) != null)
           EpisodeOverviewSection(overview: item.overview, compact: true),
+        DetailAlbumStrip(item: item),
         if (item.chapters.isNotEmpty)
           _ChapterStrip(
             itemId: item.id,
@@ -836,7 +850,11 @@ class _ChapterStrip extends StatelessWidget {
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context);
     final theme = Theme.of(context);
-    final labelHeight = (theme.textTheme.labelLarge?.fontSize ?? 14) * 1.4;
+    final labelHeight =
+        MediaQuery.textScalerOf(
+          context,
+        ).scale(theme.textTheme.labelLarge?.fontSize ?? 14) *
+        1.4;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1061,7 +1079,7 @@ class _DetailSimilar extends StatelessWidget {
           ),
         ),
         SizedBox(
-          height: 196,
+          height: 128 * 1.5 + phonePosterCardLabelExtent(context),
           child: ListView.separated(
             key: CatalogKeys.similarRow,
             scrollDirection: Axis.horizontal,
@@ -1072,28 +1090,12 @@ class _DetailSimilar extends StatelessWidget {
             itemBuilder: (context, index) {
               final item = items[index];
               return SizedBox(
-                width: 104,
-                child: InkWell(
-                  key: CatalogKeys.item(item.id),
+                width: 128,
+                child: PhonePosterCard(
+                  item: item,
+                  pressKey: CatalogKeys.item(item.id),
+                  imageMaxWidth: 320,
                   onTap: () => onOpenItem(item.id),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: ClipRRect(
-                          // 独立卡片圆角统一 AppRadii.md(ADR-5)。
-                          borderRadius: BorderRadius.circular(AppRadii.md),
-                          child: MediaImage(item: item, maxWidth: 320),
-                        ),
-                      ),
-                      const SizedBox(height: AppSpacing.xxs),
-                      Text(
-                        item.name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                  ),
                 ),
               );
             },
@@ -1136,7 +1138,7 @@ class _PhoneDetailPending extends StatelessWidget {
             key: titleKey,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.headlineSmall?.copyWith(
+            style: theme.textTheme.headlineLarge?.copyWith(
               fontWeight: FontWeight.w700,
               height: 1.2,
             ),

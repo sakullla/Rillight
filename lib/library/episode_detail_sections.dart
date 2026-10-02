@@ -816,8 +816,9 @@ class EpisodeMetadataSection extends StatelessWidget {
           for (final row in rows)
             Padding(
               padding: const EdgeInsets.only(bottom: AppSpacing.xxs),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
+              child: Wrap(
+                spacing: AppSpacing.sm,
+                runSpacing: AppSpacing.xxs,
                 children: [
                   Text(
                     row.$1,
@@ -825,7 +826,6 @@ class EpisodeMetadataSection extends StatelessWidget {
                       color: theme.colorScheme.onSurfaceVariant,
                     ),
                   ),
-                  const SizedBox(width: AppSpacing.sm),
                   Text(row.$2, style: theme.textTheme.bodyMedium),
                 ],
               ),

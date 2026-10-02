@@ -104,13 +104,14 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          title,
-          style: Theme.of(
-            context,
-          ).textTheme.titleSmall?.copyWith(color: scheme.onSurfaceVariant),
-        ),
-        const SizedBox(height: AppSpacing.xs),
+        if (title.isNotEmpty)
+          Text(
+            title,
+            style: Theme.of(
+              context,
+            ).textTheme.titleSmall?.copyWith(color: scheme.onSurfaceVariant),
+          ),
+        if (title.isNotEmpty) const SizedBox(height: AppSpacing.xs),
         Card(
           margin: EdgeInsets.zero,
           clipBehavior: Clip.antiAlias,
@@ -138,47 +139,54 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
         key: const PageStorageKey('mobile-mine-scroll'),
         padding: const EdgeInsets.all(AppSpacing.md),
         children: [
-          Row(
-            children: [
-              CircleAvatar(
-                radius: 28,
-                backgroundColor: scheme.surfaceContainerHighest,
-                child: Icon(
-                  Icons.person,
-                  size: 32,
-                  color: scheme.onSurfaceVariant,
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: scheme.surfaceContainerLow,
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: scheme.outlineVariant),
+            ),
+            child: Row(
+              children: [
+                CircleAvatar(
+                  radius: 28,
+                  backgroundColor: scheme.secondaryContainer,
+                  child: Icon(
+                    Icons.person,
+                    size: 32,
+                    color: scheme.onSecondaryContainer,
+                  ),
                 ),
-              ),
-              const SizedBox(width: AppSpacing.md),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      session?.username ?? '',
-                      key: PhoneMinePage.userKey,
-                      style: Theme.of(context).textTheme.headlineSmall,
-                    ),
-                    const SizedBox(height: AppSpacing.xxs),
-                    Text(
-                      session?.server.displayName ?? '',
-                      key: PhoneMinePage.serverKey,
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
-                    if (lineLabel.isNotEmpty) ...[
+                const SizedBox(width: AppSpacing.md),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        session?.username ?? '',
+                        key: PhoneMinePage.userKey,
+                        style: Theme.of(context).textTheme.headlineSmall,
+                      ),
                       const SizedBox(height: AppSpacing.xxs),
                       Text(
-                        lineLabel,
-                        key: PhoneMinePage.currentLineKey,
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: scheme.onSurfaceVariant,
-                        ),
+                        session?.server.displayName ?? '',
+                        key: PhoneMinePage.serverKey,
+                        style: Theme.of(context).textTheme.titleMedium,
                       ),
+                      if (lineLabel.isNotEmpty) ...[
+                        const SizedBox(height: AppSpacing.xxs),
+                        Text(
+                          lineLabel,
+                          key: PhoneMinePage.currentLineKey,
+                          style: Theme.of(context).textTheme.bodyMedium
+                              ?.copyWith(color: scheme.onSurfaceVariant),
+                        ),
+                      ],
                     ],
-                  ],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
           if (failure != null) ...[
             const SizedBox(height: AppSpacing.sm),
@@ -247,7 +255,7 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
           const SizedBox(height: AppSpacing.xl),
           _group(
             context,
-            title: l10n.settings,
+            title: '',
             children: [
               ListTile(
                 key: PhoneMinePage.settingsKey,
@@ -260,6 +268,7 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
                     builder: (context) => Scaffold(
                       appBar: AppBar(title: Text(l10n.settings)),
                       body: SettingsPage(
+                        showTitle: false,
                         settingsStore: PlayerScope.of(context).settingsStore,
                       ),
                     ),

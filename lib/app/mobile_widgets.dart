@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/app/content_theme.dart';
 import 'package:rillight/app/mobile_motion.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/emby/emby_models.dart';
@@ -206,7 +207,14 @@ class PhonePosterCard extends StatelessWidget {
   final VoidCallback? onTap;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => ContentTheme(
+    item: item,
+    preferBackdrop: false,
+    fillSurface: false,
+    child: Builder(builder: _buildCard),
+  );
+
+  Widget _buildCard(BuildContext context) {
     final theme = Theme.of(context);
     final l10n = AppLocalizations.of(context);
     final badges = phoneCardBadgeLabels(
@@ -214,76 +222,95 @@ class PhonePosterCard extends StatelessWidget {
       item,
       includePlayback: includePlaybackBadges,
     );
-    final image = MediaImage(item: item, maxWidth: imageMaxWidth);
-    final card = MobilePressable(
-      key: pressKey,
-      onTap:
-          onTap ??
-          () => PhoneMotion.openItem(context, item, maxWidth: imageMaxWidth),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(AppRadii.md),
-            child: AspectRatio(
-              aspectRatio: 2 / 3,
-              // 图缺失时 MediaImage 落主题化占位,底衬与页面分层。
-              child: ColoredBox(
-                color: theme.colorScheme.surfaceContainerLow,
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    hero
-                        ? PhoneMotion.sharedImage(
+    final image = MediaImage(
+      item: item,
+      maxWidth: imageMaxWidth,
+      contributesToTheme: true,
+    );
+    final card = Material(
+      color: theme.colorScheme.surface,
+      borderRadius: BorderRadius.circular(16),
+      clipBehavior: Clip.antiAlias,
+      child: MobilePressable(
+        key: pressKey,
+        onTap:
+            onTap ??
+            () => PhoneMotion.openItem(context, item, maxWidth: imageMaxWidth),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(AppRadii.md),
+              child: AspectRatio(
+                aspectRatio: 2 / 3,
+                // 图缺失时 MediaImage 落主题化占位,底衬与页面分层。
+                child: ColoredBox(
+                  color: theme.colorScheme.surfaceContainerLow,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      hero
+                          ? PhoneMotion.sharedImage(
+                              itemId: item.id,
+                              preferBackdrop: false,
+                              child: image,
+                            )
+                          : image,
+                      if (badges.isNotEmpty)
+                        Positioned(
+                          top: AppSpacing.xs,
+                          left: AppSpacing.xs,
+                          right: AppSpacing.xs,
+                          child: PhoneCardBadges(
                             itemId: item.id,
-                            preferBackdrop: false,
-                            child: image,
-                          )
-                        : image,
-                    if (badges.isNotEmpty)
-                      Positioned(
-                        top: AppSpacing.xs,
-                        left: AppSpacing.xs,
-                        right: AppSpacing.xs,
-                        child: PhoneCardBadges(itemId: item.id, labels: badges),
-                      ),
-                    if (item.communityRating != null &&
-                        item.communityRating! > 0)
-                      Positioned(
-                        right: 8,
-                        bottom: 8,
-                        child: _PhoneCardBadge(
-                          label:
-                              '★ ${item.communityRating!.toStringAsFixed(1)}',
+                            labels: badges,
+                          ),
                         ),
-                      ),
-                  ],
+                      if (item.communityRating != null &&
+                          item.communityRating! > 0)
+                        Positioned(
+                          right: 8,
+                          bottom: 8,
+                          child: _PhoneCardBadge(
+                            label:
+                                '★ ${item.communityRating!.toStringAsFixed(1)}',
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
               ),
             ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            item.name,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              fontWeight: FontWeight.w600,
-              height: 1.2,
-            ),
-          ),
-          if (item.productionYear != null && item.productionYear! > 0)
-            Text(
-              '${item.productionYear}',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-                height: 1.2,
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 6, 10, 10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    item.name,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      height: 1.2,
+                    ),
+                  ),
+                  if (item.productionYear != null && item.productionYear! > 0)
+                    Text(
+                      '${item.productionYear}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                        height: 1.2,
+                      ),
+                    ),
+                ],
               ),
             ),
-        ],
+          ],
+        ),
       ),
     );
     final width = this.width;
@@ -378,7 +405,7 @@ double phonePosterCardLabelExtent(BuildContext context) {
     return height;
   }
 
-  return 6 +
+  return 16 +
       2 *
           lineHeight(
             theme.textTheme.bodyMedium?.copyWith(
@@ -389,9 +416,13 @@ double phonePosterCardLabelExtent(BuildContext context) {
       lineHeight(theme.textTheme.labelSmall?.copyWith(height: 1.2));
 }
 
-/// 手机网格列数标定(T5):按内容宽度约 95dp 一格,360dp→3 列、
-/// 412dp→4 列,随宽度自适应并 clamp 在 2–6 列。
-int mobileGridColumnCount(double width) => (width / 95).floor().clamp(2, 6);
+/// Readable poster widths: 360dp uses two columns, 412dp uses three.
+/// System text scaling reduces columns instead of shrinking labels.
+int mobileGridColumnCount(double width, {double textScale = 1}) =>
+    ((width + AppSpacing.md) / (126 * textScale.clamp(1, 2))).floor().clamp(
+      1,
+      6,
+    );
 
 /// 手机端海报网格(T5):Wrap 换 GridView,列数走 [mobileGridColumnCount],
 /// 间距走 [AppSpacing];图片懒加载沿用 media_image。
@@ -416,7 +447,10 @@ class MobileGrid extends StatelessWidget {
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
       const spacing = AppSpacing.md;
-      final columns = mobileGridColumnCount(constraints.maxWidth);
+      final columns = mobileGridColumnCount(
+        constraints.maxWidth,
+        textScale: MediaQuery.textScalerOf(context).scale(16) / 16,
+      );
       final cellWidth =
           (constraints.maxWidth - spacing * (columns - 1)) / columns;
       final labelExtent = phonePosterCardLabelExtent(context);

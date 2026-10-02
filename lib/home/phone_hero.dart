@@ -13,7 +13,7 @@ import 'package:rillight/home/hero_playback_actions.dart';
 import 'package:rillight/library/item_format.dart';
 import 'package:rillight/player/player_window_host.dart';
 
-/// Phone artwork keeps its landscape composition, with text on a solid surface.
+/// A continuous artwork composition with a readable, surface-toned caption.
 class PhoneHero extends StatefulWidget {
   const PhoneHero({super.key, required this.catalog, this.onItem});
   final CatalogController catalog;
@@ -25,7 +25,7 @@ class PhoneHero extends StatefulWidget {
   static List<EmbyItem> featuredItemsOf(CatalogController catalog) =>
       featuredHomeItems(catalog, limit: maxFeatured);
   static double contentHeightFor(double width, {double textScale = 1}) =>
-      (width - 32) * 9 / 16 + 160 * textScale + 44;
+      (width - 32) * 9 / 16 + 120 * textScale + 44;
 
   @override
   State<PhoneHero> createState() => _PhoneHeroState();
@@ -72,7 +72,7 @@ class _PhoneHeroState extends State<PhoneHero> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final width = constraints.maxWidth;
-        final top = MediaQuery.paddingOf(context).top + 56;
+        final top = MediaQuery.viewPaddingOf(context).top + 56;
         final scale = MediaQuery.textScalerOf(context).scale(14) / 14;
         final height =
             top + PhoneHero.contentHeightFor(width, textScale: scale);
@@ -106,55 +106,80 @@ class _PhoneHeroState extends State<PhoneHero> {
                         key: PhoneHero.itemKey(item.id),
                         item: artwork.themeItem,
                         fillSurface: false,
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
-                          child: Material(
-                            color: Theme.of(
-                              context,
-                            ).colorScheme.surfaceContainerLow,
-                            borderRadius: BorderRadius.circular(24),
-                            clipBehavior: Clip.antiAlias,
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                AspectRatio(
-                                  aspectRatio: 16 / 9,
-                                  child: GestureDetector(
-                                    key: page == index
-                                        ? PhoneHero.openKey
-                                        : null,
-                                    onTap: () => _open(item),
-                                    child: ClipRRect(
-                                      borderRadius: const BorderRadius.vertical(
-                                        top: Radius.circular(24),
-                                      ),
-                                      child: RepaintBoundary(
-                                        child: PhoneMotion.sharedImage(
-                                          itemId: item.id,
-                                          preferBackdrop: true,
-                                          child: HeroArtwork(
-                                            sources: artwork,
-                                            requestWidth:
-                                                PhoneMotion.heroRequestWidth,
-                                            compact: true,
+                        child: Builder(
+                          builder: (context) => Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
+                            child: Material(
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.surfaceContainerLow,
+                              borderRadius: BorderRadius.circular(24),
+                              clipBehavior: Clip.antiAlias,
+                              child: Stack(
+                                fit: StackFit.expand,
+                                children: [
+                                  Positioned(
+                                    left: 0,
+                                    right: 0,
+                                    top: 0,
+                                    height: (width - 32) * 9 / 16,
+                                    child: AspectRatio(
+                                      aspectRatio: 16 / 9,
+                                      child: GestureDetector(
+                                        key: page == index
+                                            ? PhoneHero.openKey
+                                            : null,
+                                        onTap: () => _open(item),
+                                        child: RepaintBoundary(
+                                          child: PhoneMotion.sharedImage(
+                                            itemId: item.id,
+                                            preferBackdrop: true,
+                                            child: HeroArtwork(
+                                              sources: artwork,
+                                              requestWidth:
+                                                  PhoneMotion.heroRequestWidth,
+                                              compact: true,
+                                            ),
                                           ),
                                         ),
                                       ),
                                     ),
                                   ),
-                                ),
-                                Expanded(
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 16,
+                                  Positioned.fill(
+                                    child: IgnorePointer(
+                                      child: DecoratedBox(
+                                        decoration: BoxDecoration(
+                                          gradient: LinearGradient(
+                                            begin: Alignment.topCenter,
+                                            end: Alignment.bottomCenter,
+                                            stops: const [0, .30, .67, 1],
+                                            colors: [
+                                              Colors.transparent,
+                                              Colors.transparent,
+                                              Theme.of(context)
+                                                  .colorScheme
+                                                  .surfaceContainerLow
+                                                  .withValues(alpha: .94),
+                                              Theme.of(
+                                                context,
+                                              ).colorScheme.surfaceContainerLow,
+                                            ],
+                                          ),
+                                        ),
+                                      ),
                                     ),
+                                  ),
+                                  Positioned(
+                                    left: 20,
+                                    right: 20,
+                                    bottom: 16,
                                     child: _HeroCaption(
                                       item: item,
                                       onOpen: () => _open(item),
                                     ),
                                   ),
-                                ),
-                              ],
+                                ],
+                              ),
                             ),
                           ),
                         ),
@@ -232,7 +257,7 @@ class _HeroCaption extends StatelessWidget {
               ),
             ),
           ],
-          const Spacer(),
+          const SizedBox(height: 16),
           HeroPlaybackActions(
             item: item,
             onDetails: onOpen,
@@ -284,7 +309,7 @@ class _PageIndicator extends StatelessWidget {
                       height: 5,
                       decoration: BoxDecoration(
                         color: i == index
-                            ? scheme.primary
+                            ? scheme.secondary
                             : scheme.onSurface.withValues(alpha: .25),
                         borderRadius: BorderRadius.circular(99),
                       ),

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/app/content_theme.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/app_hover_card.dart';
 import 'package:rillight/emby/emby_models.dart';
@@ -34,7 +35,14 @@ class PosterCard extends StatelessWidget {
   static Key playButtonKey(String itemId) => Key('poster-play-$itemId');
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => ContentTheme(
+    item: item,
+    preferBackdrop: wide,
+    fillSurface: false,
+    child: Builder(builder: _buildCard),
+  );
+
+  Widget _buildCard(BuildContext context) {
     final height = wide ? width * 9 / 16 : width * 1.5;
     final l10n = AppLocalizations.of(context);
     final progress = item.playbackProgress;
@@ -67,6 +75,7 @@ class PosterCard extends StatelessWidget {
                         child: MediaImage(
                           key: ValueKey(item.id),
                           item: item,
+                          contributesToTheme: true,
                           width: width,
                           height: height,
                           preferBackdrop: wide,

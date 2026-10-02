@@ -162,6 +162,18 @@ void main() {
         gate.complete();
         await capture.advance(1200);
         await capture.save('home-ready');
+        if (config.$1 == 'phone' && capture.wants('home')) {
+          for (final scale in [1.3, 2.0]) {
+            tester.platformDispatcher.textScaleFactorTestValue = scale;
+            await capture.advance(350);
+            await capture.save(
+              scale == 1.3 ? 'home-text-130' : 'home-text-200',
+            );
+          }
+          tester.platformDispatcher.clearTextScaleFactorTestValue();
+          await capture.advance(350);
+        }
+
         if (capture.wants('home')) {
           if (config.$1 == 'desktop') {
             final card = find.byKey(CatalogKeys.item('movie-up')).first;
@@ -444,10 +456,15 @@ class CaptureSession {
       await tester.pump(const Duration(milliseconds: 20));
     }
     // Decode in-memory images and finish genuine asynchronous I/O.
-    await tester.runAsync(
-      () => Future<void>.delayed(const Duration(milliseconds: 30)),
-    );
-    await tester.pump();
+    // Decoding, sampled-pixel extraction and the content scheme are separate
+    // engine futures. Alternate real I/O and fake frames so captures include
+    // the same resolved palette as production, rather than its loading theme.
+    for (var i = 0; i < 8; i++) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 10)),
+      );
+      await tester.pump(const Duration(milliseconds: 50));
+    }
     expect(tester.takeException(), isNull);
   }
 

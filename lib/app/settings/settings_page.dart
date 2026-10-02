@@ -24,9 +24,11 @@ class SettingsPage extends StatefulWidget {
     this.settingsStore,
     this.platform,
     this.appearance,
+    this.showTitle = true,
   });
 
   /// 测试注入;运行时留空用当前平台。
+  final bool showTitle;
   final PlayerSettingsStore? settingsStore;
   final TargetPlatform? platform;
 
@@ -272,6 +274,7 @@ class _SettingsPageState extends State<SettingsPage> {
     final decoding = _settings.hardwareDecoding ?? HardwareDecodingMode.auto;
     final backend = _settings.hardwareDecoder ?? HardwareDecoderBackend.auto;
     final showPageTitle =
+        widget.showTitle &&
         context.findAncestorWidgetOfExactType<AppShell>() == null;
 
     return ListView(
@@ -311,7 +314,9 @@ class _SettingsPageState extends State<SettingsPage> {
                 _SettingsSection(
                   icon: Icons.brightness_6_outlined,
                   title: l10n.settingsAppearance,
-                  subtitle: l10n.settingsAppearanceHint,
+                  subtitle: (appearance?.style ?? AppearanceStyle.system).label(
+                    l10n,
+                  ),
                   children: [
                     if (nav != null)
                       ListenableBuilder(
@@ -353,7 +358,8 @@ class _SettingsPageState extends State<SettingsPage> {
                 _SettingsSection(
                   icon: Icons.play_circle_outline_rounded,
                   title: l10n.settingsPlayback,
-                  subtitle: l10n.settingsAppliesToNewPlayback,
+                  subtitle:
+                      '${_settings.effectivePlaybackRate}× · ${l10n.settingsCacheSize(effectiveLimit / 1024)}',
                   trailing: TextButton.icon(
                     key: SettingsPage.restoreDefaultsKey,
                     onPressed: _loaded ? _restoreDefaults : null,

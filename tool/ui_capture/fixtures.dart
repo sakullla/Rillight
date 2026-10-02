@@ -139,6 +139,7 @@ FakeEmbyServer captureServer() {
       name: '第 1 季',
       indexNumber: 1,
       primaryImageTag: 's1',
+      backdropImageTag: 'season-one-backdrop',
     ),
     FakeSeason(
       id: 'season-friends-2',
@@ -192,7 +193,7 @@ class CaptureAdapter extends FakeEmbyAdapter {
       final index = parts.indexOf('Images');
       final id = parts[index - 1];
       if (id != 'movie-broken') {
-        final wide = parts.last != 'Primary';
+        final wide = parts.last != 'Primary' || id.startsWith('episode-');
         final key = '$id-$wide';
         final bytes = artwork[key] ??= await drawArtwork(id, wide: wide);
         return ResponseBody.fromBytes(
@@ -270,7 +271,25 @@ Future<Uint8List> drawArtwork(String id, {required bool wide}) async {
   final canvas = Canvas(recorder);
   final size = wide ? const Size(960, 540) : const Size(400, 600);
   final seed = id.codeUnits.fold(0, (a, b) => a + b);
-  LandscapePainter(seed: seed).paint(canvas, size);
+  final tone = switch (id) {
+    'palette-red' => const Color(0xFFC63F51),
+    'palette-blue' => const Color(0xFF3566C4),
+    'palette-green' => const Color(0xFF278B62),
+    'palette-mono' => const Color(0xFF888888),
+    'palette-bright' => const Color(0xFFFAFAFA),
+    'palette-dark' => const Color(0xFF080808),
+    _ => null,
+  };
+  if (tone != null) {
+    canvas.drawRect(Offset.zero & size, Paint()..color = tone);
+    canvas.drawCircle(
+      Offset(size.width * .7, size.height * .25),
+      size.shortestSide * .12,
+      Paint()..color = Colors.white.withValues(alpha: .2),
+    );
+  } else {
+    LandscapePainter(seed: seed).paint(canvas, size);
+  }
   final picture = recorder.endRecording();
   final image = await picture.toImage(size.width.toInt(), size.height.toInt());
   final data = await image.toByteData(format: ui.ImageByteFormat.png);
