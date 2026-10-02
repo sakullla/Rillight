@@ -341,7 +341,11 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 400));
       expect(find.byKey(const Key('mobile-player-options')), findsOneWidget);
-      await tapSheetText(tester, '音轨与字幕');
+      final tracks = find.byKey(const Key('mobile-player-section-tracks'));
+      await tester.ensureVisible(tracks);
+      await tester.pumpAndSettle();
+      await tester.tap(tracks);
+      await tester.pumpAndSettle();
       await tapSheetText(tester, '英文字幕');
       expect(current.subtitleStreamIndex, 4);
       expect(current.trackFailure, isNull);
