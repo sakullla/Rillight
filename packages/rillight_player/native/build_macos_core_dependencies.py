@@ -1,5 +1,4 @@
-"""Build a universal macOS FFmpeg/libass/dav1d SDK from build_subtitle_unicode import meson_source
-from pinned sources.
+"""Build a universal macOS FFmpeg/libass/dav1d SDK from pinned sources.
 
 The output prefix is x86_64+arm64, uses @rpath install names, and must pass
 verify_core_dependencies.py --target macos-universal --require-subtitles.
@@ -19,6 +18,7 @@ import sys
 
 from build_core_dependencies import (
     SPEC, fetch_source, locked_ffmpeg_patches, run as capture, sha256)
+from build_subtitle_unicode import meson_source
 from prepare_macos import (
     ABI_MAJOR_DYLIB, bundled_names, is_macho, sanitize_install_names)
 from verify_core_dependencies import verify

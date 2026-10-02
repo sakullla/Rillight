@@ -1,5 +1,7 @@
 """Unit checks for the macOS universal SDK builder helpers."""
 
+from contextlib import redirect_stdout
+import io
 import json
 from pathlib import Path
 import tempfile
@@ -47,6 +49,60 @@ class MacosBuilderHelpersTest(unittest.TestCase):
             self.assertIn("needs_exe_wrapper = true", text)
             self.assertIn("cpu_family = 'x86_64'", text)
             self.assertIn("-mmacosx-version-min=12.0", text)
+
+    def test_default_main_builds_unicode_subtitles_for_both_architectures(self):
+        # Exercise main with no --with-libass flag and the real Meson adapter.
+        # Network/compiler/packaging boundaries are finite fakes, so a missing
+        # module import cannot be concealed by mocking meson_source itself.
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            prefix, work = root / "sdk", root / "work"
+            outputs = {}
+            for name in ("libass.9.dylib", "libdav1d.7.dylib"):
+                path = prefix / "lib" / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b"synthetic runtime for orchestration test")
+                outputs[name] = path
+            argv = ["build_macos_core_dependencies.py", "--prefix", str(prefix),
+                    "--work", str(work), "--jobs", "1"]
+            with (
+                patch.object(macos.platform, "system", return_value="Darwin"),
+                patch.object(macos, "native_arch", return_value="arm64"),
+                patch.object(macos.sys, "argv", argv),
+                patch.object(macos, "which", side_effect=lambda name, _: root / name),
+                patch.object(macos, "locked_ffmpeg_patches", return_value={}),
+                patch.object(macos, "restore_ffmpeg_tree"),
+                patch.object(macos, "fetch_source"),
+                patch.object(macos, "pinned_source", side_effect=lambda path, *_: path),
+                patch.object(macos, "meson_build") as builds,
+                patch.object(macos, "live"),
+                patch.object(macos, "lipo_runtime", return_value=outputs),
+                patch.object(macos, "sanitize_prefix"),
+                patch.object(macos, "verify", return_value=[]) as verify,
+                redirect_stdout(io.StringIO()),
+            ):
+                self.assertEqual(macos.main(), 0)
+
+            project = work / "libunibreak-project"
+            generated = (project / "meson.build").read_text(encoding="utf-8")
+            self.assertIn("static_library('unibreak'", generated)
+            self.assertIn(str(work / "libunibreak/src/linebreak.c"), generated)
+            for arch in macos.ARCHES:
+                calls = [call.args for call in builds.call_args_list
+                         if call.args[2] == work / f"libunibreak-{arch}"]
+                self.assertEqual(len(calls), 1)
+                self.assertEqual(calls[0][1], project)
+                self.assertEqual(calls[0][3], work / f"stage-{arch}")
+                ass_calls = [call.args for call in builds.call_args_list
+                             if call.args[2] == work / f"libass-{arch}"]
+                self.assertEqual(len(ass_calls), 1)
+                self.assertIn("-Dlibunibreak=enabled", ass_calls[0][5])
+            marker = json.loads((prefix / "rillight-core-dependencies.json")
+                                .read_text(encoding="utf-8"))
+            self.assertEqual(marker["libass"]["unicode_line_breaks"],
+                             macos.SPEC["libass"]["unicode_line_breaks"])
+            verify.assert_called_once_with(prefix, "macos-universal",
+                                           require_subtitles=True)
 
     def test_builder_rejects_non_darwin_hosts(self):
         argv = ["build_macos_core_dependencies.py",
