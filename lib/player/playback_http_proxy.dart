@@ -1178,7 +1178,7 @@ class PlaybackHttpProxy {
       if (reserved) {
         if (!inside &&
             assembled > 0 &&
-            (complete || read.cancelled) &&
+            (complete || representation.policy.strongEtag != null) &&
             _representations[key]?.generation == representation.generation) {
           _store(
             key,
@@ -1189,6 +1189,11 @@ class PlaybackHttpProxy {
         }
         _charge(-blockSize);
         _releaseCacheWorkspace(blockSize);
+      }
+      if (!complete &&
+          representation != null &&
+          representation.policy.strongEtag == null) {
+        _invalidate(key, representation);
       }
     }
   }
@@ -3394,10 +3399,29 @@ class PlaybackHttpProxy {
                             1) {
                   throw const HttpException('Invalid media body length');
                 }
-                if (assembly != null &&
-                    representation != null &&
-                    identical(_representations[key], representation)) {
-                  retain(part);
+                if (representation != null &&
+                    _representations[key]?.generation ==
+                        representation.generation) {
+                  if (sessionBuffering &&
+                      position == 0 &&
+                      representation.policy.strongEtag != null &&
+                      _roles[key] == PlaybackResourceRole.media) {
+                    // Publish initialization before the demuxer can close its
+                    // probe. TCP cancellation may be observed only after this
+                    // producer's cleanup, too late to retain a partial block.
+                    if (cache!.firstMissingOffset(
+                          resource: key,
+                          generation: representation.generation,
+                          offset: 0,
+                          length: part.length,
+                        ) !=
+                        null) {
+                      _store(key, representation, 0, part);
+                    }
+                    blockStart = part.length;
+                  } else if (assembly != null) {
+                    retain(part);
+                  }
                 }
                 read.outputStarted = true;
                 yield part;
@@ -3598,7 +3622,8 @@ class PlaybackHttpProxy {
             complete = true;
             if (representation != null) {
               if (assembled > 0 &&
-                  identical(_representations[key], representation)) {
+                  _representations[key]?.generation ==
+                      representation.generation) {
                 _store(
                   key,
                   representation,
@@ -3610,7 +3635,6 @@ class PlaybackHttpProxy {
             }
           } finally {
             if (!complete &&
-                read.cancelled &&
                 assembled > 0 &&
                 representation != null &&
                 representation.policy.strongEtag != null &&

@@ -417,6 +417,14 @@ void main() {
             if (!arrived.isCompleted) arrived.complete();
           }, onError: (Object _) {});
           await arrived.future;
+          if (tagged) {
+            // The decoder may immediately abandon this probe for its tail
+            // index. Initialization bytes must already be observable then.
+            await proxy.refreshTimeline(const Duration(seconds: 4));
+            expect(proxy.diagnostics['cachedTimeRanges'], [
+              {'startMs': 0, 'endMs': 4000},
+            ]);
+          }
           proxy.cancelPendingReads();
           final deadline = DateTime.now().add(const Duration(seconds: 3));
           while (proxy.diagnostics['activeRequests'] != 0 &&
