@@ -193,6 +193,8 @@ def verify(prefix: Path, target: str, require_subtitles: bool = False) -> list[s
         errors.append(f"{target}: missing pinned libass for ASS/SSA")
     if isinstance(libass, dict):
         specification = SPEC["libass"]
+        if require_subtitles and libass.get("unicode_line_breaks") != specification.get("unicode_line_breaks"):
+            errors.append(f"{target}: missing pinned Unicode line breaking support")
         if libass.get("version") != specification["version"] or \
                 libass.get("commit") != specification["commit"]:
             errors.append(f"{target}: libass version/source mismatch")

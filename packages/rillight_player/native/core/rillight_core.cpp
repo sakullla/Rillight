@@ -295,6 +295,7 @@ struct VideoOutputFrame : RillightCoreFrame {
   std::shared_ptr<VideoBufferPool> buffers;
   std::shared_ptr<void> gpu_texture;
   std::shared_ptr<AVFrame> codec_frame;
+  bool subtitle_redraw = false;
   std::vector<uint8_t> subtitle_pixels;
   RillightCoreSubtitleOverlay subtitle_overlay{};
 };
@@ -350,6 +351,9 @@ struct AssRenderer {
   ASS_Track *track = nullptr;
   int stream = -1;
   bool external = false;
+  bool plain_text = false;
+  RillightCoreSubtitlePresentation last_presentation{};
+  int last_width = 0, last_height = 0;
 };
 
 void close_ass(AssRenderer *ass) {
@@ -436,6 +440,11 @@ bool open_text_ass(AssRenderer *ass, const AVCodecContext *decoder,
                             decoder->subtitle_header_size);
   configure_ass_fonts(replacement.renderer);
   replacement.stream = stream_index;
+  replacement.plain_text = true;
+  if (ass_track_set_feature(replacement.track, ASS_FEATURE_WRAP_UNICODE, 1) != 0) {
+    close_ass(&replacement);
+    return false;
+  }
   close_ass(ass);
   *ass = replacement;
   return true;
@@ -521,6 +530,11 @@ bool open_external_text(AssRenderer *ass, const std::vector<char> &header,
   }
   configure_ass_fonts(replacement.renderer);
   replacement.stream = stream_index;
+  replacement.plain_text = true;
+  if (ass_track_set_feature(replacement.track, ASS_FEATURE_WRAP_UNICODE, 1) != 0) {
+    close_ass(&replacement);
+    return false;
+  }
   replacement.external = true;
   close_ass(ass);
   *ass = replacement;
@@ -537,6 +551,40 @@ void process_ass(AssRenderer *ass, const AVPacket *packet,
   ass_process_chunk(ass->track,
                     reinterpret_cast<char *>(packet->data), packet->size,
                     start, duration);
+}
+
+// Both output paths enter here, in the subtitle mutex, before rasterization.
+void apply_subtitle_presentation(AssRenderer *ass, int width, int height,
+                                const RillightCoreSubtitlePresentation &p) {
+  if (!ass->track) return;
+  if (ass->last_width == width && ass->last_height == height &&
+      std::memcmp(&ass->last_presentation, &p, sizeof(p)) == 0) return;
+  ass->last_presentation = p;
+  ass->last_width = width; ass->last_height = height;
+  ass_set_storage_size(ass->renderer, width, height);
+  ass_set_frame_size(ass->renderer, width, height);
+  ass_set_font_scale(ass->renderer, 1.0);
+  ass_set_pixel_aspect(ass->renderer, 0);
+  ass_set_selective_style_override_enabled(ass->renderer, ASS_OVERRIDE_DEFAULT);
+  if (!p.enabled || (!ass->plain_text && p.original_ass)) return;
+  ass_set_pixel_aspect(ass->renderer,
+      (p.display_width / p.display_height) / (static_cast<double>(width) / height));
+  // libass's selective user style uses a 288-high virtual canvas, independent
+  // of the script PlayRes. Pixel aspect is kept at 1: no stretched glyphs.
+  const double size = std::min(p.font_size * p.user_scale,
+                               p.display_height * 0.18);
+  ASS_Style style{};
+  // libass 0.17.5 copies FontName even when only size fields are selected.
+  style.FontName = const_cast<char *>("sans-serif");
+  style.FontSize = size * 288.0 / p.display_height;
+  style.ScaleX = style.ScaleY = 1.0;
+  style.MarginL = style.MarginR = static_cast<int>(
+      p.safe_horizontal * ass->track->PlayResX / p.display_width);
+  style.MarginV = static_cast<int>(p.safe_vertical * ass->track->PlayResY / p.display_height);
+  int bits = ASS_OVERRIDE_BIT_FONT_SIZE_FIELDS;
+  if (ass->plain_text) bits |= ASS_OVERRIDE_BIT_MARGINS;
+  ass_set_selective_style_override(ass->renderer, &style);
+  ass_set_selective_style_override_enabled(ass->renderer, bits);
 }
 
 void blend_ass(RillightCoreFrame *frame, AssRenderer *ass) {
@@ -579,6 +627,8 @@ void blend_ass(RillightCoreFrame *frame, AssRenderer *ass) {
 struct AssRenderer {};
 void close_ass(AssRenderer *) {}
 void blend_ass(RillightCoreFrame *, AssRenderer *) {}
+void apply_subtitle_presentation(AssRenderer *, int, int,
+    const RillightCoreSubtitlePresentation &) {}
 #endif
 
 void blend_subtitles(RillightCoreFrame *frame,
@@ -762,6 +812,13 @@ struct RillightCoreImpl {
   std::unique_ptr<LoopbackIo> owned_loopback;
   std::mutex mutex;
   std::mutex lifecycle_mutex;
+  std::mutex subtitle_mutex;
+  AssRenderer ass;
+  std::vector<SubtitleCue> subtitle_cues;
+  RillightCoreSubtitlePresentation subtitle_presentation{};
+  RillightCoreFrame *displayed_clean = nullptr;
+  bool subtitle_redraw = false;
+  RillightCoreFrame *subtitle_preview = nullptr;
   std::condition_variable wake;
   std::thread worker;
   std::thread subtitle_loader;
@@ -1125,6 +1182,11 @@ void clear_queue(std::deque<RillightCoreFrame *> &queue, size_t &bytes) {
 }
 
 void reset_frames(RillightCoreImpl *core) {
+  rillight_core_release_frame(core->displayed_clean);
+  core->displayed_clean = nullptr;
+  core->subtitle_redraw = false;
+  rillight_core_release_frame(core->subtitle_preview);
+  core->subtitle_preview = nullptr;
   clear_queue(core->video, core->video_bytes);
   clear_queue(core->audio, core->audio_bytes);
   core->first_video = false;
@@ -2323,28 +2385,9 @@ int convert_video_frame(RillightCoreImpl *core, AVFormatContext *format,
         track.actual_hardware = hardware;
     }
   }
-  {
-    std::unique_lock<std::mutex> subtitle_lock;
-    if (subtitle_mutex) subtitle_lock = std::unique_lock(*subtitle_mutex);
-    if (output->type == RILLIGHT_CORE_VIDEO_RGBA16F) {
-      // Keep data_size equal to the half-float allocation. The overlay lives
-      // in its own buffer and must not change the pixel recycle size.
-      const int pixel_bytes = output->data_size;
-      render_gpu_subtitles(static_cast<VideoOutputFrame*>(output), *cues, ass);
-      output->data_size = pixel_bytes;
-    } else if (output->data) {
-      blend_subtitles(output, *cues);
-      blend_ass(output, ass);
-    } else if (hdr_video || output->type == RILLIGHT_CORE_VIDEO_MEDIACODEC ||
-               output->type == RILLIGHT_CORE_VIDEO_ANDROID_P010) {
-      render_gpu_subtitles(static_cast<VideoOutputFrame*>(output), *cues, ass);
-    }
-    if (pts >= 0)
-      cues->erase(std::remove_if(cues->begin(), cues->end(),
-                                 [pts](const SubtitleCue &cue) {
-                                   return cue.end_us < pts;
-                                 }), cues->end());
-  }
+  // Compose at presentation time: queued frames adopt the current policy,
+  // and the retained clean frame can be rerendered while playback is paused.
+  (void)cues; (void)ass; (void)subtitle_mutex;
   return enqueue(core, output, stream_index, timeline);
 }
 
@@ -2711,9 +2754,10 @@ void run(RillightCoreImpl *core, uint64_t session) {
   PendingPackets pending_packets;
   VideoConvertLane conversion_lane(core);
   AudioFilter audio_filter;
-  std::vector<SubtitleCue> subtitle_cues;
-  AssRenderer ass;
-  std::mutex subtitle_mutex;
+  auto &subtitle_cues = core->subtitle_cues;
+  auto &ass = core->ass;
+  auto &subtitle_mutex = core->subtitle_mutex;
+  { std::lock_guard lock(subtitle_mutex); subtitle_cues.clear(); }
   bool conversion_ready = false;
   VideoSink video_sink = [&](AVFrame *frame, int stream, uint32_t hardware,
                             uint64_t timeline) {
@@ -3055,6 +3099,7 @@ void run(RillightCoreImpl *core, uint64_t session) {
       if (audio.context) avcodec_flush_buffers(audio.context);
       if (subtitle.context) avcodec_flush_buffers(subtitle.context);
       close_audio_filter(&audio_filter);
+      std::lock_guard subtitle_lock(subtitle_mutex);
       subtitle_cues.clear();
 #if RILLIGHT_HAVE_LIBASS
       if (ass.track && !ass.external) ass_flush_events(ass.track);
@@ -3144,11 +3189,14 @@ void run(RillightCoreImpl *core, uint64_t session) {
       if (selected_subtitle == -1 || replacement.context || ass_selected) {
         avcodec_free_context(&subtitle.context);
         subtitle = replacement;
+        {
+        std::lock_guard subtitle_lock(subtitle_mutex);
         subtitle_cues.clear();
         close_ass(&ass);
 #if RILLIGHT_HAVE_LIBASS
         if (ass_selected) ass = replacement_ass;
 #endif
+        }
         std::lock_guard lock(core->mutex);
         core->subtitle_index = subtitle.stream;
         core->error = 0;
@@ -3272,7 +3320,10 @@ finish:
   audio_lane.Stop();
   subtitle_lane.Stop();
   if (core->decode_error < 0) result = core->decode_error.load();
-  close_ass(&ass);
+  { std::lock_guard lock(core->mutex);
+    std::lock_guard subtitle_lock(subtitle_mutex);
+    close_ass(&ass);
+  }
   close_audio_filter(&audio_filter);
   avcodec_free_context(&video.context);
   avcodec_free_context(&audio.context);
@@ -3493,6 +3544,7 @@ int rillight_core_set_android_window(RillightCore* pointer, void* window,
 int rillight_core_render_mediacodec_frame(const RillightCoreFrame* frame) {
 #if defined(__ANDROID__)
   if (!frame || frame->type != RILLIGHT_CORE_VIDEO_MEDIACODEC) return -1;
+  if (static_cast<const VideoOutputFrame*>(frame)->subtitle_redraw) return 0;
   const auto& decoded = static_cast<const VideoOutputFrame*>(frame)->codec_frame;
   if (!decoded || !decoded->data[3]) return -1;
   return av_mediacodec_release_buffer(
@@ -3570,6 +3622,8 @@ void rillight_core_destroy(RillightCore *pointer) {
     stop_worker(core);
     clear_queue(core->video, core->video_bytes);
     clear_queue(core->audio, core->audio_bytes);
+    rillight_core_release_frame(core->displayed_clean);
+    rillight_core_release_frame(core->subtitle_preview);
   }
   delete core;
 }
@@ -3655,6 +3709,7 @@ int rillight_core_open_at(RillightCore *pointer, const char *url,
     core->decode_error = 0;
     core->media_io_active = false;
     ++core->session;
+    core->subtitle_presentation = {};
     ++core->timeline;
     core->timeline_signal = core->timeline;
     core->url = url;
@@ -4013,6 +4068,87 @@ int rillight_core_container_track_ids(RillightCore *pointer,
   return 0;
 }
 
+static RillightCoreFrame *compose_displayed_frame(RillightCoreImpl *core, bool redraw);
+
+int rillight_core_set_subtitle_presentation(RillightCore *pointer,
+    const RillightCoreSubtitlePresentation *p, uint64_t session) {
+  if (!pointer || !p || p->struct_size != sizeof(*p) || p->version != 1 ||
+      (p->enabled != 0 && p->enabled != 1) ||
+      (p->original_ass != 0 && p->original_ass != 1)) return -1;
+  if (p->enabled && (!std::isfinite(p->display_width) ||
+      !std::isfinite(p->display_height) || !std::isfinite(p->font_size) ||
+      !std::isfinite(p->user_scale) || !std::isfinite(p->safe_horizontal) ||
+      !std::isfinite(p->safe_vertical) || p->display_width < 1 ||
+      p->display_height < 1 || p->display_width > 32768 ||
+      p->display_height > 32768 || p->font_size < 1 || p->font_size > 512 ||
+      p->user_scale < 0.25 || p->user_scale > 4 ||
+      p->safe_horizontal < 0 || p->safe_vertical < 0 ||
+      p->safe_horizontal * 2 >= p->display_width ||
+      p->safe_vertical * 2 >= p->display_height)) return -1;
+  auto *core = impl(pointer);
+  std::lock_guard lock(core->mutex);
+  if (!session || session != core->session || core->state == RILLIGHT_CORE_CLOSING)
+    return -1;
+  const auto previous = core->subtitle_presentation;
+  core->subtitle_presentation = *p;
+  if (core->displayed_clean) {
+    auto *preview = compose_displayed_frame(core, true);
+    if (!preview) {
+      core->subtitle_presentation = previous;
+      return -1;
+    }
+    rillight_core_release_frame(core->subtitle_preview);
+    core->subtitle_preview = preview;
+    core->subtitle_redraw = true;
+  }
+  return 0;
+}
+
+// The retained frame is never handed to a sink or blended. A redraw therefore
+// cannot accumulate glyphs, mutate an outstanding texture, or advance time.
+static VideoOutputFrame *subtitle_frame_copy(const RillightCoreFrame *source) {
+  auto *copy = new (std::nothrow) VideoOutputFrame(
+      *static_cast<const VideoOutputFrame *>(source));
+  if (!copy) return nullptr;
+  if (source->data) {
+    copy->data = copy->buffers->Acquire(source->data_size);
+    if (!copy->data) { delete copy; return nullptr; }
+    memcpy(copy->data, source->data, source->data_size);
+  }
+  copy->subtitle_pixels.clear();
+  copy->subtitle_overlay = {};
+  return copy;
+}
+
+static RillightCoreFrame *compose_displayed_frame(RillightCoreImpl *core,
+                                                  bool redraw) {
+  VideoOutputFrame *frame = nullptr;
+  try {
+    frame = subtitle_frame_copy(core->displayed_clean);
+    if (!frame) return nullptr;
+    frame->subtitle_redraw = redraw;
+    std::lock_guard subtitle_lock(core->subtitle_mutex);
+    core->subtitle_cues.erase(std::remove_if(core->subtitle_cues.begin(),
+        core->subtitle_cues.end(), [frame](const SubtitleCue &cue) {
+          return cue.end_us < frame->pts_us;
+        }), core->subtitle_cues.end());
+    apply_subtitle_presentation(&core->ass, frame->width, frame->height,
+                                core->subtitle_presentation);
+    if (frame->type == RILLIGHT_CORE_VIDEO_RGBA) {
+      blend_subtitles(frame, core->subtitle_cues);
+      blend_ass(frame, &core->ass);
+    } else {
+      const int bytes = frame->data_size;
+      render_gpu_subtitles(frame, core->subtitle_cues, &core->ass);
+      if (frame->data) frame->data_size = bytes;
+    }
+    return frame;
+  } catch (const std::bad_alloc &) {
+    rillight_core_release_frame(frame);
+    return nullptr;
+  }
+}
+
 RillightCoreFrame *rillight_core_take_frame(RillightCore *pointer, int type) {
   if (!pointer) return nullptr;
   auto *core = impl(pointer);
@@ -4025,6 +4161,15 @@ RillightCoreFrame *rillight_core_take_frame(RillightCore *pointer, int type) {
       core->state == RILLIGHT_CORE_RECOVERING && core->video_index >= 0 &&
       !core->first_video)
     return nullptr;
+  if (type != RILLIGHT_CORE_AUDIO_S16 && core->subtitle_redraw && core->displayed_clean) {
+    auto *redraw = core->subtitle_preview;
+    if (type == RILLIGHT_CORE_VIDEO_RGBA && redraw &&
+        redraw->type != RILLIGHT_CORE_VIDEO_RGBA &&
+        redraw->type != RILLIGHT_CORE_VIDEO_RGBA16F) return nullptr;
+    core->subtitle_preview = nullptr;
+    core->subtitle_redraw = false;
+    return redraw;
+  }
   auto &queue = type != RILLIGHT_CORE_AUDIO_S16 ? core->video : core->audio;
   auto &bytes = type != RILLIGHT_CORE_AUDIO_S16 ? core->video_bytes : core->audio_bytes;
   if (queue.empty()) {
@@ -4071,8 +4216,20 @@ RillightCoreFrame *rillight_core_take_frame(RillightCore *pointer, int type) {
       samples[index] = static_cast<int16_t>(std::clamp(value, -32768.0, 32767.0));
     }
   }
-  if (type != RILLIGHT_CORE_AUDIO_S16)
+  if (type != RILLIGHT_CORE_AUDIO_S16) {
     core->paused_video_frame_emitted = true;
+    rillight_core_release_frame(core->displayed_clean);
+    core->displayed_clean = nullptr;
+    if (core->subtitle_index >= 0) {
+      core->displayed_clean = frame;
+      frame = compose_displayed_frame(core, false);
+      if (!frame) {
+        // Rendering failure cannot interrupt video or expose partial pixels.
+        frame = core->displayed_clean;
+        core->displayed_clean = nullptr;
+      }
+    }
+  }
   core->wake.notify_all();
   return frame;
 }

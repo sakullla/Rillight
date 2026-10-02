@@ -5,6 +5,47 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/player/player_settings.dart';
 
 void main() {
+  test('phone subtitle defaults, malformed size and merged reset', () async {
+    expect(
+      const PlayerSettings().effectivePhoneSubtitles.size,
+      PhoneSubtitleSize.standard,
+    );
+    expect(
+      PlayerSettings.fromJson({
+        'phoneSubtitles': {'size': 'broken'},
+      }).effectivePhoneSubtitles.size,
+      PhoneSubtitleSize.standard,
+    );
+    final directory = await Directory.systemTemp.createTemp('phone-subtitles-');
+    addTearDown(() => directory.delete(recursive: true));
+    final store = FilePlayerSettingsStore(
+      File('${directory.path}/settings.json'),
+    );
+    await store.write(const PlayerSettings(volume: 33, danmakuEnabled: false));
+    await store.writePatch(
+      const PlayerSettings(
+        phoneSubtitles: PhoneSubtitleSettings(
+          size: PhoneSubtitleSize.extraLarge,
+          originalAss: true,
+        ),
+      ),
+    );
+    await store.write(const PlayerSettings(playbackRate: 1.5));
+    expect(
+      (await store.read()).effectivePhoneSubtitles.size,
+      PhoneSubtitleSize.extraLarge,
+    );
+    await store.writePatch(
+      const PlayerSettings(phoneSubtitles: PhoneSubtitleSettings()),
+    );
+    final restored = await store.read();
+    expect(restored.effectivePhoneSubtitles.size, PhoneSubtitleSize.standard);
+    expect(restored.effectivePhoneSubtitles.originalAss, isFalse);
+    expect(restored.volume, 33);
+    expect(restored.danmakuEnabled, isFalse);
+    expect(restored.playbackRate, 1.5);
+  });
+
   test('concurrent stores merge and readers only see complete JSON', () async {
     final directory = await Directory.systemTemp.createTemp(
       'rillight-settings-atomic-',

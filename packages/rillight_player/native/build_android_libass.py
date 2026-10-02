@@ -16,10 +16,16 @@ import sys
 from build_android_core_dependencies import ABIS
 from build_core_dependencies import SPEC, fetch_source, run, sha256
 from verify_core_dependencies import verify
+from build_subtitle_unicode import meson_source
 
 
 def pinned_source(path: Path, specification: dict[str, str], tag: str) -> Path:
-    if path.is_dir() and (path / ".git").is_dir():
+    has_head = path.is_dir() and (path / ".git").is_dir() and subprocess.run(
+        ["git", "rev-parse", "--verify", "HEAD"], cwd=path,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+    # A interrupted fetch leaves an initialized repository without HEAD. Let
+    # fetch_source retry its pinned commit/tag/remote checks without deleting it.
+    if has_head:
         changed = [line.strip() for line in run(["git", "-c", "core.filemode=false", "status", "--porcelain"], path).splitlines()]
         # HarfBuzz's Meson generator writes version/umbrella headers into its
         # checkout. Restore only those known generated paths before pin checks.
@@ -103,9 +109,9 @@ def main() -> int:
     parser.add_argument("--meson", type=Path, default=shutil.which("meson") or "C:/msys64/mingw64/bin/meson.exe")
     parser.add_argument("--pkg-config", type=Path, default=shutil.which("pkg-config") or "C:/msys64/mingw64/bin/pkg-config.exe")
     args = parser.parse_args()
-    host = {"Windows": "windows-x86_64", "Linux": "linux-x86_64"}.get(platform.system())
+    host = {"Windows": "windows-x86_64", "Linux": "linux-x86_64", "Darwin": "darwin-x86_64"}.get(platform.system())
     if host is None or args.jobs < 1:
-        parser.error("requires Windows/Linux host and positive --jobs")
+        parser.error("requires Windows/Linux/macOS host and positive --jobs")
     ndk_bin = args.ndk.resolve() / "toolchains" / "llvm" / "prebuilt" / host / "bin"
     if not ndk_bin.is_dir() or not args.meson.is_file() or not args.pkg_config.is_file():
         parser.error("NDK, Meson or pkg-config is missing")
@@ -128,6 +134,9 @@ def main() -> int:
     for name, specification in SPEC["libass"]["android_sources"].items():
         source = work / name
         sources[name] = pinned_source(source, specification, specification["tag"])
+    unicode_spec = SPEC["libass"]["unicode_line_breaks"]
+    unicode_source = pinned_source(work / "libunibreak", unicode_spec, unicode_spec["tag"])
+    sources["libunibreak"] = meson_source(unicode_source, work / "libunibreak-project", unicode_spec["version"])
     ass_spec = SPEC["libass"]
     ass_source = work / "libass"
     pinned_source(ass_source, ass_spec, ass_spec["version"])
@@ -140,10 +149,11 @@ def main() -> int:
         cross_file(cross, ndk_bin=ndk_bin, abi=abi, prefix=prefix,
                    pkg_config=args.pkg_config.resolve())
         builds = [
+            ("libunibreak", []),
             ("freetype", ["-Ddefault_library=static", "-Dharfbuzz=disabled", "-Dzlib=disabled", "-Dpng=disabled", "-Dbzip2=disabled", "-Dbrotli=disabled"]),
             ("fribidi", ["-Ddefault_library=static", "-Ddocs=false", "-Dtests=false"]),
             ("harfbuzz", ["-Ddefault_library=static", "-Dtests=disabled", "-Dcairo=disabled", "-Dglib=disabled", "-Dgobject=disabled", "-Dfreetype=disabled", "-Dicu=disabled", "-Dintrospection=disabled"]),
-            ("libass", ["-Ddefault_library=shared", "-Dfontconfig=disabled", "-Drequire-system-font-provider=false", "-Dlibunibreak=disabled", "-Dtest=disabled", "-Dcompare=disabled", "-Dasm=disabled"]),
+            ("libass", ["-Ddefault_library=shared", "-Dfontconfig=disabled", "-Drequire-system-font-provider=false", "-Dlibunibreak=enabled", "-Dtest=disabled", "-Dcompare=disabled", "-Dasm=disabled"]),
         ]
         for name, options in builds:
             print(f"Building {name} for {abi}", flush=True)
@@ -168,6 +178,7 @@ def main() -> int:
                 "fontconfig": "disabled (Android explicit font path)",
             },
             "android_sources": SPEC["libass"]["android_sources"],
+            "unicode_line_breaks": unicode_spec,
         }
         marker_file.write_text(json.dumps(marker, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         failures = verify(prefix, f"android-{abi}", require_subtitles=True)

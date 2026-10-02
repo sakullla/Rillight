@@ -84,6 +84,39 @@ abstract interface class VideoBackendNativeOverlay {
   ValueListenable<bool> get nativeOverlay;
 }
 
+/// Display coordinates share one unit; fontSize is already text-scaled.
+/// A viewport must describe the video display rectangle, including fit/fill.
+class SubtitlePresentation {
+  const SubtitlePresentation({
+    required this.displayWidth,
+    required this.displayHeight,
+    required this.fontSize,
+    this.userScale = 1,
+    this.originalAss = false,
+    this.safeHorizontal = 12,
+    this.safeVertical = 8,
+  });
+  final double displayWidth, displayHeight, fontSize, userScale;
+  final double safeHorizontal, safeVertical;
+  final bool originalAss;
+  Map<String, Object?> toMap() => {
+    'displayWidth': displayWidth,
+    'displayHeight': displayHeight,
+    'fontSize': fontSize,
+    'userScale': userScale,
+    'originalAss': originalAss,
+    'safeHorizontal': safeHorizontal,
+    'safeVertical': safeVertical,
+  };
+}
+
+abstract interface class VideoBackendSubtitlePresentation {
+  Future<void> setSubtitlePresentation(
+    SubtitlePresentation presentation, {
+    required int sessionId,
+  });
+}
+
 enum VideoEventKind {
   position,
   duration,
@@ -151,7 +184,18 @@ abstract class VideoBackend {
   }
 }
 
-class FakeVideoBackend implements VideoBackend {
+class FakeVideoBackend
+    implements VideoBackend, VideoBackendSubtitlePresentation {
+  SubtitlePresentation? subtitlePresentation;
+  @override
+  Future<void> setSubtitlePresentation(
+    SubtitlePresentation value, {
+    required int sessionId,
+  }) async {
+    if (sessionId != this.sessionId) throw StateError("Stale subtitle session");
+    subtitlePresentation = value;
+  }
+
   FakeVideoBackend({this.duration = const Duration(minutes: 22)});
 
   @override

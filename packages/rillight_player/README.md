@@ -126,3 +126,21 @@ evidence contracts are in
 [`tool/player_release_evidence.md`](../../tool/player_release_evidence.md).
 Build success, dependency audits, installed launch, visible changing frames,
 physical audio, synchronization and GPU stability are distinct observations.
+
+### Subtitle presentation (core ABI 9)
+
+The version 1 `rillight_core_set_subtitle_presentation` command accepts the
+current native session ID and a display rectangle, visible font target, scale,
+safe margins and original-ASS switch. Ordinary text uses pinned libass with
+statically linked, pinned libunibreak 6.1 for Unicode line wrapping. All SDK
+builders enable this feature and subtitle-enabled SDK verification rejects
+missing source provenance. Rebuild older subtitle SDKs before building ABI 9.
+
+CPU composition and HDR/GPU subtitle planes share the same rendering policy.
+The core retains one clean displayed frame when subtitles are active, so sizing
+can rerasterize paused output without seeking, moving the clock or accumulating
+glyphs. Authored positioned ASS events keep their layout under libass's
+selective-override heuristic; original-ASS mode restores authored text sizes.
+Bitmap subtitles are unaffected. Unconfigured desktop/TV rendering retains the
+original scale. Native pixel tests exercise layout and timing; they do not prove
+Android displayed frames, physical audio, or hardware decoder acceptance.

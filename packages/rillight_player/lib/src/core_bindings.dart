@@ -83,13 +83,38 @@ final class NativeCoreTrack extends Struct {
   external int isExternal;
 }
 
+final class NativeSubtitlePresentation extends Struct {
+  @Uint32()
+  external int structSize;
+  @Uint32()
+  external int version;
+  @Int32()
+  external int enabled;
+  @Int32()
+  external int originalAss;
+  @Double()
+  external double displayWidth;
+  @Double()
+  external double displayHeight;
+  @Double()
+  external double fontSize;
+  @Double()
+  external double userScale;
+  @Double()
+  external double safeHorizontal;
+  @Double()
+  external double safeVertical;
+}
+
 class CoreBindings {
   CoreBindings({String? libraryPath})
     : libraryPath = libraryPath ?? defaultLibraryPath,
       _library = DynamicLibrary.open(libraryPath ?? defaultLibraryPath) {
-    if (abiVersion() != 8) {
+    if (abiVersion() != 9) {
       throw StateError('Unsupported Rillight core ABI ${abiVersion()}');
     }
+    // ABI 9 is incomplete without its required presentation entry point.
+    setSubtitlePresentation;
   }
 
   static String get defaultLibraryPath {
@@ -153,6 +178,15 @@ class CoreBindings {
         Int32 Function(Pointer<Void>, Int32, Uint64),
         int Function(Pointer<Void>, int, int)
       >('rillight_core_select_audio');
+  late final setSubtitlePresentation = _library
+      .lookupFunction<
+        Int32 Function(
+          Pointer<Void>,
+          Pointer<NativeSubtitlePresentation>,
+          Uint64,
+        ),
+        int Function(Pointer<Void>, Pointer<NativeSubtitlePresentation>, int)
+      >('rillight_core_set_subtitle_presentation');
   late final selectSubtitle = _library
       .lookupFunction<
         Int32 Function(Pointer<Void>, Int32, Uint64),

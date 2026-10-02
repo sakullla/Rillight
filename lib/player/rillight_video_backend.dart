@@ -25,6 +25,7 @@ typedef CorePlayerFactory = Future<CorePlayer> Function();
 class RillightVideoBackend extends VideoBackend
     implements
         VideoBackendCapabilities,
+        VideoBackendSubtitlePresentation,
         VideoBackendTranscodeSubtitles,
         VideoBackendTrackSupport,
         VideoBackendSourceRenewal,
@@ -954,6 +955,15 @@ class RillightVideoBackend extends VideoBackend
     _rate = value;
     if (_recovering) return;
     await _command('rate', {'value': value});
+  }
+
+  @override
+  Future<void> setSubtitlePresentation(
+    SubtitlePresentation value, {
+    required int sessionId,
+  }) async {
+    if (sessionId != _sessionId) throw StateError('Stale subtitle session');
+    await _command('subtitlePresentation', value.toMap());
   }
 
   Future<void> setVideoScale(String mode) async {

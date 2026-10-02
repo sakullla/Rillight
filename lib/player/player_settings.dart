@@ -14,6 +14,38 @@ enum HardwareDecodingMode { auto, on, off }
 /// 硬件解码后端:auto 走平台默认,其余为 mpv hwdec 值。
 enum HardwareDecoderBackend { auto, d3d11va, nvdec, videotoolbox }
 
+enum PhoneSubtitleSize {
+  small(0.85),
+  standard(1),
+  large(1.25),
+  extraLarge(1.5);
+
+  const PhoneSubtitleSize(this.scale);
+  final double scale;
+}
+
+/// Independent of subtitle track selection and danmaku. Explicit defaults
+/// restore the default through the settings store's merge-write contract.
+class PhoneSubtitleSettings {
+  const PhoneSubtitleSettings({
+    this.size = PhoneSubtitleSize.standard,
+    this.originalAss = false,
+  });
+  final PhoneSubtitleSize size;
+  final bool originalAss;
+  Map<String, dynamic> toJson() => {
+    'size': size.name,
+    'originalAss': originalAss,
+  };
+  factory PhoneSubtitleSettings.fromJson(Map<String, dynamic> json) =>
+      PhoneSubtitleSettings(
+        size:
+            _readEnum(PhoneSubtitleSize.values, json['size']) ??
+            PhoneSubtitleSize.standard,
+        originalAss: json['originalAss'] == true,
+      );
+}
+
 /// 按剧(seriesId)记忆的播放偏好:音轨/字幕(含关闭)/码率/片源名。
 ///
 /// [subtitleOff] 为 true 才表示用户关闭了字幕;缺省字段只表示未指定,
@@ -82,6 +114,7 @@ class PlayerSeriesPreference {
 class PlayerSettings {
   const PlayerSettings({
     this.volume,
+    this.phoneSubtitles,
     this.diskCacheLimitMiB,
     this.hardwareDecoding,
     this.hardwareDecoder,
@@ -100,6 +133,10 @@ class PlayerSettings {
 
   /// 音量百分比;100 为原片 0 dB,超过 100 为额外增益。
   /// null 表示「未配置」,读取回落默认 100。
+  final PhoneSubtitleSettings? phoneSubtitles;
+  PhoneSubtitleSettings get effectivePhoneSubtitles =>
+      phoneSubtitles ?? const PhoneSubtitleSettings();
+
   static const int volumeMax = 150;
   final int? volume;
 
@@ -160,6 +197,7 @@ class PlayerSettings {
   }
 
   Map<String, dynamic> toJson() => {
+    if (phoneSubtitles != null) 'phoneSubtitles': phoneSubtitles!.toJson(),
     if (volume != null) 'volume': clampedVolume,
     if (diskCacheLimitMiB != null) 'diskCacheLimitMiB': diskCacheLimitMiB,
     if (hardwareDecoding != null) 'hardwareDecoding': hardwareDecoding!.name,
@@ -195,6 +233,11 @@ class PlayerSettings {
         ? raw.round()
         : int.tryParse(raw?.toString() ?? '');
     return PlayerSettings(
+      phoneSubtitles: json['phoneSubtitles'] is Map
+          ? PhoneSubtitleSettings.fromJson(
+              Map<String, dynamic>.from(json['phoneSubtitles'] as Map),
+            )
+          : null,
       volume: value?.clamp(0, volumeMax),
       diskCacheLimitMiB: _readInt(json['diskCacheLimitMiB']),
       hardwareDecoding: _readEnum(

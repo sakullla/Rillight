@@ -128,6 +128,7 @@ class MacosBuilderHelpersTest(unittest.TestCase):
             self.assertIn("autodetection", joined)
             self.assertIn("font provider", joined)
             self.assertIn("subtitle source pins", joined)
+            self.assertIn("pinned Unicode line breaking", joined)
 
 
 if __name__ == "__main__":

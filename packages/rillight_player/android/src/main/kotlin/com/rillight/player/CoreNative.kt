@@ -32,6 +32,10 @@ internal object CoreNative {
     external fun seek(handle: Long, positionUs: Long, operation: Long): Int
     external fun speed(handle: Long, speed: Double, operation: Long): Int
     external fun selectAudio(handle: Long, stream: Int, operation: Long): Int
+    external fun subtitlePresentation(handle: Long, session: Long,
+        displayWidth: Double, displayHeight: Double, fontSize: Double,
+        userScale: Double, originalAss: Boolean,
+        safeHorizontal: Double, safeVertical: Double): Int
     external fun selectSubtitle(handle: Long, stream: Int, operation: Long): Int
     external fun addSubtitle(handle: Long, url: String, operation: Long): Int
     external fun snapshot(handle: Long): LongArray?

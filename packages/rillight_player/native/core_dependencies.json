@@ -27,6 +27,11 @@
     "commit": "4a05d8127f525943ebf45fdc6497c9e665947f0d",
     "license": "ISC",
     "required_build_dependencies": ["freetype2", "fribidi", "harfbuzz", "fontconfig"],
+    "unicode_line_breaks": {
+      "version": "6.1", "repository": "https://github.com/adah1972/libunibreak.git",
+      "tag": "libunibreak_6_1", "commit": "304585d8e2d63187507368d612c3d5fff1486368",
+      "license": "Zlib"
+    },
     "android_sources": {
       "freetype": {"version": "2.13.3", "repository": "https://github.com/freetype/freetype.git", "tag": "VER-2-13-3", "commit": "42608f77f20749dd6ddc9e0536788eaad70ea4b5"},
       "fribidi": {"version": "1.0.16", "repository": "https://github.com/fribidi/fribidi.git", "tag": "v1.0.16", "commit": "68162babff4f39c4e2dc164a5e825af93bda9983"},

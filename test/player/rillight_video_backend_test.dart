@@ -17,6 +17,7 @@ class _CoreDriver implements CorePlayer {
   CorePlayerOpen? request;
   bool disposed = false;
   String? lastCommand;
+  Map<String, Object?> lastArgs = const {};
   int actualHardware = 0;
 
   @override
@@ -46,6 +47,7 @@ class _CoreDriver implements CorePlayer {
     Map<String, Object?> args = const {},
   ]) async {
     lastCommand = method;
+    lastArgs = args;
     return {
       'actualHardware': actualHardware,
       'audioIndex': 2,
@@ -206,6 +208,38 @@ class _RejectedAudioCoreDriver extends _CoreDriver {
 }
 
 void main() {
+  test(
+    'subtitle presentation forwards geometry and rejects stale session',
+    () async {
+      final driver = _CoreDriver();
+      final backend = RillightVideoBackend(
+        settingsStore: MemoryPlayerSettingsStore(),
+        createPlayer: () async => driver,
+      );
+      addTearDown(backend.dispose);
+      await backend.open(
+        VideoOpenRequest(
+          sessionId: 17,
+          url: Uri.parse('http://127.0.0.1:1/synthetic.mp4'),
+        ),
+      );
+      const p = SubtitlePresentation(
+        displayWidth: 360,
+        displayHeight: 202.5,
+        fontSize: 20,
+        userScale: 1.5,
+        originalAss: true,
+      );
+      await backend.setSubtitlePresentation(p, sessionId: 17);
+      expect(driver.lastCommand, 'subtitlePresentation');
+      expect(driver.lastArgs, p.toMap());
+      await expectLater(
+        backend.setSubtitlePresentation(p, sessionId: 16),
+        throwsStateError,
+      );
+    },
+  );
+
   test(
     'next episode with a warmed prefix publishes current cache and speed after seek',
     () async {

@@ -995,6 +995,125 @@ class PlayerController extends ChangeNotifier {
     await _reportProgress(eventName: 'Seek');
   }
 
+  PhoneSubtitleSettings phoneSubtitleSettings = const PhoneSubtitleSettings();
+  String? subtitlePresentationError;
+  SubtitlePresentation? _subtitleViewport;
+  Future<void>? _subtitlePresentationTail;
+  int _subtitleSettingsRevision = 0;
+
+  /// No independent text track means there is no effective font-size control.
+  bool get canAdjustSubtitleSize {
+    final index = subtitleStreamIndex;
+    if (index == null) return false;
+    final stream = resolved?.mediaSource.streamByIndex(index);
+    if (stream == null || !stream.isTextSubtitle) return false;
+    return !(resolved?.isTranscode == true &&
+        _transcodeSubtitleDelivery(stream) == TranscodeSubtitleDelivery.burnIn);
+  }
+
+  /// Called only by phone layout, using the actual video display rectangle.
+  /// PiP callers pass its actual rectangle; its short height caps font size.
+  Future<void> updateSubtitleViewport({
+    required double width,
+    required double height,
+    double textScale = 1,
+    bool landscape = false,
+    double safeHorizontal = 12,
+    double safeVertical = 8,
+  }) async {
+    if (!width.isFinite ||
+        !height.isFinite ||
+        width <= 0 ||
+        height <= 0 ||
+        !textScale.isFinite ||
+        textScale <= 0) {
+      return;
+    }
+    final viewport = SubtitlePresentation(
+      displayWidth: width,
+      displayHeight: height,
+      fontSize: (landscape ? 24 : 20) * textScale,
+      safeHorizontal: safeHorizontal.clamp(0, width * 0.2),
+      safeVertical: safeVertical.clamp(0, height * 0.2),
+    );
+    final previous = _subtitleViewport;
+    if (previous != null &&
+        previous.displayWidth == viewport.displayWidth &&
+        previous.displayHeight == viewport.displayHeight &&
+        previous.fontSize == viewport.fontSize &&
+        previous.safeHorizontal == viewport.safeHorizontal &&
+        previous.safeVertical == viewport.safeVertical) {
+      return;
+    }
+    _subtitleViewport = viewport;
+    await _queueSubtitlePresentation(phoneSubtitleSettings, save: false);
+  }
+
+  Future<void> setPhoneSubtitleSettings(PhoneSubtitleSettings settings) =>
+      _queueSubtitlePresentation(settings, save: true);
+
+  Future<void> resetPhoneSubtitleSettings() =>
+      setPhoneSubtitleSettings(const PhoneSubtitleSettings());
+
+  Future<void> _queueSubtitlePresentation(
+    PhoneSubtitleSettings settings, {
+    required bool save,
+  }) {
+    final operation = _operations.current;
+    final viewport = _subtitleViewport;
+    if (!save && viewport == null) return Future<void>.value();
+    final revision = save
+        ? ++_subtitleSettingsRevision
+        : _subtitleSettingsRevision;
+    final work = (_subtitlePresentationTail ?? Future<void>.value()).then((
+      _,
+    ) async {
+      if (operation != null && !_accepts(operation)) return;
+      final effective = save ? settings : phoneSubtitleSettings;
+      var applied = false;
+      try {
+        if (_canSendPlaybackParameters &&
+            viewport != null &&
+            backend is VideoBackendSubtitlePresentation &&
+            operation != null) {
+          await (backend as VideoBackendSubtitlePresentation)
+              .setSubtitlePresentation(
+                SubtitlePresentation(
+                  displayWidth: viewport.displayWidth,
+                  displayHeight: viewport.displayHeight,
+                  fontSize: viewport.fontSize,
+                  userScale: effective.size.scale,
+                  originalAss: effective.originalAss,
+                  safeHorizontal: viewport.safeHorizontal,
+                  safeVertical: viewport.safeVertical,
+                ),
+                sessionId: operation.id,
+              );
+        }
+        if (operation != null && !_accepts(operation)) return;
+        if (save) {
+          phoneSubtitleSettings = settings;
+          applied = true;
+          await (await _settings()).writePatch(
+            PlayerSettings(phoneSubtitles: settings),
+          );
+        }
+        if (revision == _subtitleSettingsRevision) {
+          subtitlePresentationError = null;
+        }
+      } catch (_) {
+        if (operation == null || _accepts(operation)) {
+          subtitlePresentationError = applied
+              ? '字幕显示设置已应用，但未能保存，请重试'
+              : '字幕显示设置未生效，请重试';
+        }
+      }
+      _emit();
+    });
+    _subtitlePresentationTail = work.then<void>((_) {}, onError: (Object _) {});
+    return work;
+  }
+
   static const volumeWheelStep = 5;
 
   bool get _canSendPlaybackParameters =>
@@ -2594,6 +2713,7 @@ class PlayerController extends ChangeNotifier {
         if (isRecovering && (!volumeApplied || !rateApplied)) {
           throw StateError('Required playback settings were not restored');
         }
+        await _queueSubtitlePresentation(phoneSubtitleSettings, save: false);
         onStage?.call('restore audio track');
         final audioApplied = await _restoreParameter(operation, () async {
           if (selectedAudio != null && !next.isTranscode) {
@@ -3547,12 +3667,16 @@ class PlayerController extends ChangeNotifier {
   Future<void> _restoreSettings(PlaybackOperation operation) async {
     final volumeRevision = _volumeRevision;
     final rateRevision = _rateRevision;
+    final subtitleRevision = _subtitleSettingsRevision;
     try {
       final settings = await (await _settings()).read();
       if (!_accepts(operation)) return;
       if (volumeRevision == _volumeRevision) volume = settings.clampedVolume;
       if (rateRevision == _rateRevision) {
         playbackRate = settings.effectivePlaybackRate;
+      }
+      if (subtitleRevision == _subtitleSettingsRevision) {
+        phoneSubtitleSettings = settings.effectivePhoneSubtitles;
       }
       skipIntroEnabled = settings.isSkipIntroEnabled;
       skipOutroEnabled = settings.isSkipOutroEnabled;
@@ -3606,7 +3730,7 @@ class PlayerController extends ChangeNotifier {
         playbackRate: playbackRate,
         seriesPreferences: Map.of(_seriesPreferences),
       );
-      await (await _settings()).write(value);
+      await (await _settings()).writePatch(value);
     } catch (_) {}
   }
 

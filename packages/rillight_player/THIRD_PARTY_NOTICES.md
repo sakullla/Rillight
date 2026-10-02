@@ -17,6 +17,11 @@ pin alone does not certify that a bundled binary came from that source.
   reviewed for each package. License texts:
   [`FFmpeg-LGPL-2.1.txt`](native/licenses/FFmpeg-LGPL-2.1.txt) and
   [`FFmpeg-GPL-2.0.txt`](native/licenses/FFmpeg-GPL-2.0.txt).
+- **libunibreak 6.1**: [pinned source](https://github.com/adah1972/libunibreak/tree/304585d8e2d63187507368d612c3d5fff1486368),
+  [Zlib license](native/licenses/libunibreak-Zlib.txt). Statically linked into
+  libass to wrap ordinary Unicode text, including Chinese. The dependency
+  marker records its source pin under `libass.unicode_line_breaks`; its code is
+  covered by the verified libass binary hash. Authored ASS wrapping is retained.
 - **libass 0.17.5**: [source](https://github.com/libass/libass/tree/4a05d8127f525943ebf45fdc6497c9e665947f0d),
   ISC. The pinned source's
   [`COPYING`](native/licenses/libass-ISC.txt) is included with subtitle-enabled

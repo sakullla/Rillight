@@ -190,9 +190,9 @@ def main() -> int:
     source = args.source.resolve() if args.source else work / "ffmpeg"
     if not bash.is_file() or not (ndk / "toolchains/llvm/prebuilt").is_dir():
         parser.error("provide an installed Bash and Android NDK root")
-    host = {"Windows": "windows-x86_64", "Linux": "linux-x86_64"}.get(platform.system())
+    host = {"Windows": "windows-x86_64", "Linux": "linux-x86_64", "Darwin": "darwin-x86_64"}.get(platform.system())
     if host is None:
-        parser.error("Android SDK builder currently supports Windows or Linux hosts")
+        parser.error("Android SDK builder currently supports Windows, Linux or macOS hosts")
     ndk_bin = ndk / "toolchains/llvm/prebuilt" / host / "bin"
     if not ndk_bin.is_dir():
         parser.error(f"NDK host toolchain is missing: {ndk_bin}")

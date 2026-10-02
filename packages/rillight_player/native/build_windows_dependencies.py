@@ -3,6 +3,7 @@
 import argparse
 import json
 import os
+from build_subtitle_unicode import meson_source
 from pathlib import Path
 import re
 import shlex
@@ -88,17 +89,23 @@ def main() -> None:
         for patch in locked_ffmpeg_patches().values():
             subprocess.run(['git', '-C', str(work / 'ffmpeg'), 'apply', str(patch)], check=True)
 
+        unicode_spec = SPEC['libass']['unicode_line_breaks']
+        unicode_source = work / 'libunibreak'
+        fetch_source(unicode_source, unicode_spec['repository'], unicode_spec['commit'], unicode_spec['tag'])
+        unicode_project = meson_source(unicode_source, work / 'libunibreak-project', unicode_spec['version'])
         for name, options in (
+            ('libunibreak', []),
             ('dav1d', ['-Denable_tools=false', '-Denable_tests=false']),
-            ('libass', ['-Dfontconfig=enabled', '-Drequire-system-font-provider=true']),
+            ('libass', ['-Dfontconfig=enabled', '-Drequire-system-font-provider=true', '-Dlibunibreak=enabled']),
         ):
             build = work / (name + '-build')
-            setup = ['meson', 'setup', unix(build), unix(work / name),
+            setup = ['meson', 'setup', unix(build), unix(unicode_project if name == 'libunibreak' else work / name),
                      f'--prefix={prefix_unix}', '--libdir=lib', '--buildtype=release',
                      '-Ddefault_library=shared', *options]
             if (build / 'build.ninja').exists():
                 setup.append('--reconfigure')
-            shell(shlex.join(setup) + '\n' +
+            shell(f'export PKG_CONFIG_PATH={shlex.quote(prefix_unix + "/lib/pkgconfig")}\n' +
+                  shlex.join(setup) + '\n' +
                   f'meson compile -C {shlex.quote(unix(build))} -j{args.jobs}\n' +
                   f'meson install -C {shlex.quote(unix(build))}\n')
 
@@ -126,6 +133,7 @@ def main() -> None:
             marker[name] = {'version': SPEC[name]['version'], 'commit': SPEC[name]['commit'],
                             'library': library.relative_to(prefix).as_posix(),
                             'sha256': digest(library)}
+        marker['libass']['unicode_line_breaks'] = unicode_spec
         marker['libass']['build_dependencies'] = {
             name: shell(shlex.join(['pkg-config', '--modversion', name]), capture=True)
             for name in SPEC['libass']['required_build_dependencies']

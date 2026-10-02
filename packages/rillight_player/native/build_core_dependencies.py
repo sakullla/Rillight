@@ -13,6 +13,8 @@ import platform
 import subprocess
 import sys
 
+from build_subtitle_unicode import meson_source
+
 
 ROOT = Path(__file__).resolve().parent
 SPEC = json.loads((ROOT / "core_dependencies.json").read_text(encoding="utf-8"))
@@ -157,6 +159,18 @@ def main() -> int:
             run(["pkg-config", "--exists", dependency])
         run(["pkg-config", "--atleast-version=2.10.92", "fontconfig"])
         ass_spec = SPEC["libass"]
+        unicode_spec = ass_spec["unicode_line_breaks"]
+        unicode_source = work / "libunibreak"
+        fetch_source(unicode_source, unicode_spec["repository"], unicode_spec["commit"], unicode_spec["tag"])
+        unicode_project = meson_source(unicode_source, work / "libunibreak-project", unicode_spec["version"])
+        unicode_build = work / "libunibreak-build"
+        setup = ["meson", "setup", str(unicode_build), str(unicode_project),
+                 f"--prefix={prefix}", "--libdir=lib", "--buildtype=release"]
+        if (unicode_build / "build.ninja").exists(): setup.insert(2, "--reconfigure")
+        run(setup)
+        run(["meson", "compile", "-C", str(unicode_build), "-j", str(args.jobs)])
+        run(["meson", "install", "-C", str(unicode_build)])
+        os.environ["PKG_CONFIG_PATH"] = str(prefix / "lib/pkgconfig") + os.pathsep + os.environ.get("PKG_CONFIG_PATH", "")
         ass_source = work / "libass"
         ass_build = work / "libass-build"
         fetch_source(ass_source, ass_spec["repository"],
@@ -164,7 +178,7 @@ def main() -> int:
         meson_args = ["meson", "setup", str(ass_build), str(ass_source),
                       f"--prefix={prefix}", "--libdir=lib",
                       "--buildtype=release", "-Ddefault_library=shared",
-                      "-Dfontconfig=enabled",
+                      "-Dfontconfig=enabled", "-Dlibunibreak=enabled",
                       "-Drequire-system-font-provider=true"]
         if (ass_build / "build.ninja").exists():
             meson_args.insert(2, "--reconfigure")
@@ -177,6 +191,7 @@ def main() -> int:
             raise RuntimeError("pinned libass shared library was not installed")
         ass_library = max(ass_candidates, key=lambda path: len(path.name))
         libass_marker = {
+            "unicode_line_breaks": unicode_spec,
             "version": ass_spec["version"],
             "commit": ass_spec["commit"],
             "library": str(ass_library.relative_to(prefix)),

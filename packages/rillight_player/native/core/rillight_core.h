@@ -13,7 +13,7 @@
 extern "C" {
 #endif
 
-#define RILLIGHT_CORE_ABI_VERSION 8
+#define RILLIGHT_CORE_ABI_VERSION 9
 
 /* Non-FFmpeg failure: the Dolby Vision base layer cannot be displayed with
  * the currently implemented color pipeline. Reported in ffmpeg_error. */
@@ -181,6 +181,25 @@ typedef struct RillightCoreSnapshot {
   int allow_software_fallback;
   int external_subtitle_pending;
 } RillightCoreSnapshot;
+
+/* Version 1 display geometry uses a single unit (physical or logical pixels).
+ * Zero enabled restores authored sizing. Session identity rejects late callers.
+ * Text is rerasterized; bitmap subtitles and video pixels are never scaled. */
+typedef struct RillightCoreSubtitlePresentation {
+  uint32_t struct_size;
+  uint32_t version;
+  int32_t enabled;
+  int32_t original_ass;
+  double display_width;
+  double display_height;
+  double font_size;
+  double user_scale;
+  double safe_horizontal;
+  double safe_vertical;
+} RillightCoreSubtitlePresentation;
+RILLIGHT_CORE_API int rillight_core_set_subtitle_presentation(
+    RillightCore *core, const RillightCoreSubtitlePresentation *presentation,
+    uint64_t session_id);
 
 RILLIGHT_CORE_API uint32_t rillight_core_abi_version(void);
 RILLIGHT_CORE_API const char *rillight_core_ffmpeg_versions(void);

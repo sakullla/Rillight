@@ -119,6 +119,7 @@ class _CoreSnapshot {
     this.playbackSpeed,
     this.externalSubtitlePending,
     this.timelineVersion,
+    this.sessionId,
   );
   final int state;
   final int ffmpegError;
@@ -132,6 +133,7 @@ class _CoreSnapshot {
   final double playbackSpeed;
   final int externalSubtitlePending;
   final int timelineVersion;
+  final int sessionId;
 }
 
 abstract class CorePlayer {
@@ -499,6 +501,7 @@ class DesktopCorePlayer
         value.playbackSpeed,
         value.externalSubtitlePending,
         value.timelineVersion,
+        value.sessionId,
       );
     } finally {
       calloc.free(pointer);
@@ -676,6 +679,28 @@ class DesktopCorePlayer
           selectedStream!,
           ++_operation,
         );
+      case 'subtitlePresentation':
+        final presentation = calloc<NativeSubtitlePresentation>();
+        try {
+          presentation.ref
+            ..structSize = sizeOf<NativeSubtitlePresentation>()
+            ..version = 1
+            ..enabled = 1
+            ..originalAss = args['originalAss'] == true ? 1 : 0
+            ..displayWidth = (args['displayWidth'] as num).toDouble()
+            ..displayHeight = (args['displayHeight'] as num).toDouble()
+            ..fontSize = (args['fontSize'] as num).toDouble()
+            ..userScale = (args['userScale'] as num).toDouble()
+            ..safeHorizontal = (args['safeHorizontal'] as num).toDouble()
+            ..safeVertical = (args['safeVertical'] as num).toDouble();
+          result = _bindings.setSubtitlePresentation(
+            _handle,
+            presentation,
+            _readSnapshot().sessionId,
+          );
+        } finally {
+          calloc.free(presentation);
+        }
       case 'subtitleOff':
         result = _bindings.selectSubtitle(_handle, -1, ++_operation);
       case 'subtitleUri':

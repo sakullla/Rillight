@@ -1,4 +1,5 @@
-"""Build a universal macOS FFmpeg/libass/dav1d SDK from pinned sources.
+"""Build a universal macOS FFmpeg/libass/dav1d SDK from build_subtitle_unicode import meson_source
+from pinned sources.
 
 The output prefix is x86_64+arm64, uses @rpath install names, and must pass
 verify_core_dependencies.py --target macos-universal --require-subtitles.
@@ -311,6 +312,9 @@ def main() -> int:
     ass_source = None
     subtitle_sources: dict[str, Path] = {}
     if with_libass:
+        unicode_spec = ass_spec["unicode_line_breaks"]
+        unicode_source = pinned_source(work / "libunibreak", unicode_spec, unicode_spec["tag"])
+        unicode_project = meson_source(unicode_source, work / "libunibreak-project", unicode_spec["version"])
         ass_source = pinned_source(work / "libass", ass_spec, ass_spec["version"])
         for name, specification in SUBTITLE_SOURCES.items():
             subtitle_sources[name] = pinned_source(
@@ -337,6 +341,7 @@ def main() -> int:
                     args.jobs, env, cross)
         if with_libass:
             builds = [
+                ("libunibreak", unicode_project, []),
                 ("freetype", subtitle_sources["freetype"],
                  ["-Ddefault_library=static", "-Dharfbuzz=disabled",
                   "-Dzlib=disabled", "-Dpng=disabled", "-Dbzip2=disabled",
@@ -351,7 +356,7 @@ def main() -> int:
                 ("libass", ass_source,
                  ["-Ddefault_library=shared", "-Dfontconfig=disabled",
                   "-Dcoretext=enabled", "-Drequire-system-font-provider=true",
-                  "-Dlibunibreak=disabled", "-Dtest=disabled",
+                  "-Dlibunibreak=enabled", "-Dtest=disabled",
                   "-Dcompare=disabled"]),
             ]
             for name, source, options in builds:
@@ -402,6 +407,7 @@ def main() -> int:
                 "fontconfig": FONTCONFIG_PROVENANCE,
             },
             "sources": SUBTITLE_SOURCES,
+            "unicode_line_breaks": unicode_spec,
         }
     (prefix / "rillight-core-dependencies.json").write_text(
         json.dumps(marker, indent=2, sort_keys=True) + "\n", encoding="utf-8")

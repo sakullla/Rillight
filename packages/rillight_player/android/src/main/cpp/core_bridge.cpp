@@ -387,6 +387,16 @@ Java_com_rillight_player_CoreNative_snapshot(JNIEnv *env, jobject, jlong handle)
 }
 
 JNIEXPORT jint JNICALL
+Java_com_rillight_player_CoreNative_subtitlePresentation(JNIEnv *, jobject,
+    jlong handle, jlong session, jdouble width, jdouble height, jdouble font_size,
+    jdouble scale, jboolean original, jdouble horizontal, jdouble vertical) {
+  if (!handle) return -1;
+  RillightCoreSubtitlePresentation p{sizeof(p), 1, 1, original ? 1 : 0,
+      width, height, font_size, scale, horizontal, vertical};
+  return rillight_core_set_subtitle_presentation(bridge(handle)->core, &p, session);
+}
+
+JNIEXPORT jint JNICALL
 Java_com_rillight_player_CoreNative_trackCount(JNIEnv *, jobject, jlong handle) {
   return handle ? rillight_core_track_count(bridge(handle)->core) : -1;
 }

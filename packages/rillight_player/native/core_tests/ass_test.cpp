@@ -104,7 +104,9 @@ int write_video_packets(AVFormatContext *format, AVCodecContext *encoder,
   return result == AVERROR(EAGAIN) || result == AVERROR_EOF ? 0 : result;
 }
 
-Bytes make_ass_video(AVCodecID subtitle_codec = AV_CODEC_ID_ASS, bool hdr = false) {
+Bytes make_ass_video(AVCodecID subtitle_codec = AV_CODEC_ID_ASS, bool hdr = false,
+                     int width = 320, int height = 180,
+                     const char *override_text = nullptr) {
   AVFormatContext *format = nullptr;
   const bool mov_text = subtitle_codec == AV_CODEC_ID_MOV_TEXT;
   assert(avformat_alloc_output_context2(&format, nullptr,
@@ -114,8 +116,8 @@ Bytes make_ass_video(AVCodecID subtitle_codec = AV_CODEC_ID_ASS, bool hdr = fals
   assert(codec);
   AVCodecContext *encoder = avcodec_alloc_context3(codec);
   assert(encoder);
-  encoder->width = 320;
-  encoder->height = 180;
+  encoder->width = width;
+  encoder->height = height;
   encoder->pix_fmt = hdr ? AV_PIX_FMT_YUV420P10LE : AV_PIX_FMT_YUV420P;
   encoder->time_base = AVRational{1, 10};
   encoder->framerate = AVRational{10, 1};
@@ -172,6 +174,7 @@ Bytes make_ass_video(AVCodecID subtitle_codec = AV_CODEC_ID_ASS, bool hdr = fals
 
   const char *event = subtitle_codec == AV_CODEC_ID_ASS ?
       "0,0,Default,,0,0,0,,VISIBLE SUBTITLE" : "VISIBLE TEXT";
+  if (override_text) event = override_text;
   AVPacket *subtitle_packet = av_packet_alloc();
   assert(subtitle_packet);
   const int text_size = static_cast<int>(std::strlen(event));
@@ -194,7 +197,7 @@ Bytes make_ass_video(AVCodecID subtitle_codec = AV_CODEC_ID_ASS, bool hdr = fals
   frame->width = encoder->width;
   frame->height = encoder->height;
   assert(av_frame_get_buffer(frame, 32) == 0);
-  for (int index = 0; index < 30; ++index) {
+  for (int index = 0; index < (width > 320 ? 3 : 30); ++index) {
     assert(av_frame_make_writable(frame) == 0);
     if (hdr) {
       for (int plane = 0; plane < 3; ++plane)
@@ -334,10 +337,154 @@ bool wait_for(RillightCore *core, Predicate predicate,
   }
   return false;
 }
+struct InkBounds {
+  int left = 100000, top = 100000, right = -1, bottom = -1;
+  int height() const { return bottom - top + 1; }
+  int width() const { return right - left + 1; }
+};
+InkBounds ink_bounds(const RillightCoreFrame *frame) {
+  InkBounds bounds;
+  RillightCoreSubtitleOverlay overlay{};
+  overlay.struct_size = sizeof(overlay);
+  const bool plane = frame->type != RILLIGHT_CORE_VIDEO_RGBA;
+  if (plane) assert(rillight_core_frame_subtitle_overlay(frame, &overlay) == 0);
+  const auto *data = plane ? overlay.data : frame->data;
+  const int width = plane ? overlay.width : frame->width;
+  const int height = plane ? overlay.height : frame->height;
+  const int stride = plane ? overlay.stride : frame->stride;
+  assert(data);
+  for (int y = 0; y < height; ++y) for (int x = 0; x < width; ++x) {
+    const auto *pixel = data + y * stride + x * 4;
+    if (pixel[0] > 100 || pixel[1] > 100 || pixel[2] > 100) {
+      bounds.left = std::min(bounds.left, x + (plane ? overlay.x : 0));
+      bounds.right = std::max(bounds.right, x + (plane ? overlay.x : 0));
+      bounds.top = std::min(bounds.top, y + (plane ? overlay.y : 0));
+      bounds.bottom = std::max(bounds.bottom, y + (plane ? overlay.y : 0));
+    }
+  }
+  return bounds;
+}
+
+InkBounds render_fixture(const char *text, AVCodecID codec, bool plane,
+                         bool original = false, double scale = 1) {
+  Media media{};
+  media.video = make_ass_video(codec, plane, 320, 180, text);
+  RillightCoreIo io{&media, open, read, seek, close, cancel, cancel_media_io};
+  auto *core = rillight_core_create(&io);
+#if defined(__APPLE__)
+  if (plane) assert(rillight_core_configure_macos_edr(core, 1) == 0);
+#else
+  assert(!plane);
+#endif
+  assert(rillight_core_open(core, "synthetic.mkv", 1) == 0);
+  assert(rillight_core_set_playing(core, 0, 2) == 0);
+  assert(wait_for(core, [](auto state) { return state.first_video_frame_ready; }));
+  const auto state = snapshot(core);
+  RillightCoreSubtitlePresentation p{sizeof(p), 1, 1, original ? 1 : 0,
+      360, 202.5, 20, scale, 12, 8};
+  assert(rillight_core_set_subtitle_presentation(core, &p, state.session_id) == 0);
+  auto *frame = rillight_core_take_frame(core, RILLIGHT_CORE_VIDEO_RGBA);
+  assert(frame && (plane ? frame->type == RILLIGHT_CORE_VIDEO_RGBA16F :
+                          frame->type == RILLIGHT_CORE_VIDEO_RGBA));
+  auto bounds = ink_bounds(frame);
+  assert(bounds.left >= 0 && bounds.right < frame->width);
+  assert(bounds.top >= 0 && bounds.bottom < frame->height);
+  rillight_core_release_frame(frame);
+  rillight_core_destroy(core);
+  return bounds;
+}
+
+void layout_presentation_test() {
+  const char *chinese = "这是一段较长的中文字幕，用来确认字号增大后自动换行而不会超出视频区域";
+  const auto line = render_fixture("字幕测试", AV_CODEC_ID_SUBRIP, false);
+  const auto wrapped = render_fixture(chinese, AV_CODEC_ID_SUBRIP, false);
+  assert(wrapped.height() > line.height() * 2);
+  const auto bilingual = render_fixture("中文字幕\nEnglish subtitle", AV_CODEC_ID_WEBVTT, false);
+  assert(bilingual.height() > line.height());
+  const char *positioned = "0,0,Default,,0,0,0,,{\\pos(160,90)\\c&H0000FF&}POSITION";
+  const auto authored = render_fixture(positioned, AV_CODEC_ID_ASS, false, true);
+  const auto adjusted = render_fixture(positioned, AV_CODEC_ID_ASS, false, false, 1.5);
+  assert(authored.left == adjusted.left && authored.top == adjusted.top &&
+         authored.width() == adjusted.width() && authored.height() == adjusted.height());
+#if defined(__APPLE__)
+  const auto cpu = render_fixture("Same raster policy", AV_CODEC_ID_SUBRIP, false);
+  const auto gpu = render_fixture("Same raster policy", AV_CODEC_ID_SUBRIP, true);
+  assert(cpu.left == gpu.left && cpu.top == gpu.top &&
+         cpu.width() == gpu.width() && cpu.height() == gpu.height());
+#endif
+  std::puts("Chinese wrapping, bilingual text, authored ASS position/color and CPU/HDR plane policy passed");
+}
+
+void presentation_test() {
+  for (const auto codec : {AV_CODEC_ID_SUBRIP, AV_CODEC_ID_WEBVTT, AV_CODEC_ID_ASS}) {
+    double previous_resolution = 0;
+    for (const int height : {1080, 2160}) {
+      Media media{};
+      media.video = make_ass_video(codec, false, height * 16 / 9, height);
+      RillightCoreIo io{&media, open, read, seek, close, cancel, cancel_media_io};
+      auto *core = rillight_core_create(&io);
+      assert(rillight_core_open(core, "synthetic.mkv", 1) == 0);
+      assert(rillight_core_set_playing(core, 0, 2) == 0);
+      assert(wait_for(core, [](auto s) { return s.first_video_frame_ready; }));
+      auto *frame = rillight_core_take_frame(core, RILLIGHT_CORE_VIDEO_RGBA);
+      assert(frame);
+      const auto original = ink_bounds(frame);
+      const int64_t pts = frame->pts_us;
+      rillight_core_release_frame(frame);
+      const auto before = snapshot(core);
+      RillightCoreSubtitlePresentation p{sizeof(p), 1, 1, 0,
+          360, 202.5, 20, 0.85, 12, 8};
+      int previous_height = 0;
+      for (double scale : {0.85, 1.0, 1.25, 1.5}) {
+        p.user_scale = scale;
+        assert(rillight_core_set_subtitle_presentation(core, &p, before.session_id) == 0);
+        frame = rillight_core_take_frame(core, RILLIGHT_CORE_VIDEO_RGBA);
+        assert(frame && frame->pts_us == pts);
+        const auto bounds = ink_bounds(frame);
+        assert(bounds.height() > previous_height);
+        assert(bounds.left >= 0 && bounds.right < frame->width);
+        previous_height = bounds.height();
+        if (scale == 1.0) {
+          const double displayed = bounds.height() * 202.5 / frame->height;
+          if (previous_resolution) assert(std::abs(displayed - previous_resolution) < 0.6);
+          previous_resolution = displayed;
+        }
+        rillight_core_release_frame(frame);
+        const auto after = snapshot(core);
+        assert(after.position_us == before.position_us);
+        assert(after.timeline_version == before.timeline_version && after.state == RILLIGHT_CORE_PAUSED);
+      }
+      p.font_size = NAN;
+      assert(rillight_core_set_subtitle_presentation(core, &p, before.session_id) != 0);
+      p.font_size = 20;
+      assert(rillight_core_set_subtitle_presentation(core, &p, before.session_id + 1) != 0);
+      p.enabled = 0;
+      assert(rillight_core_set_subtitle_presentation(core, &p, before.session_id) == 0);
+      frame = rillight_core_take_frame(core, RILLIGHT_CORE_VIDEO_RGBA);
+      assert(frame);
+      const auto restored = ink_bounds(frame);
+      assert(restored.width() == original.width() && restored.height() == original.height());
+      rillight_core_release_frame(frame);
+      if (codec == AV_CODEC_ID_ASS) {
+        p.enabled = p.original_ass = 1;
+        assert(rillight_core_set_subtitle_presentation(core, &p, before.session_id) == 0);
+        frame = rillight_core_take_frame(core, RILLIGHT_CORE_VIDEO_RGBA);
+        const auto authored = ink_bounds(frame);
+        assert(authored.width() == original.width() && authored.height() == original.height());
+        rillight_core_release_frame(frame);
+      }
+      rillight_core_destroy(core);
+    }
+  }
+  std::puts("Real text pixels: monotonic sizing, 1080p/4K equivalence, paused redraw, original ASS and invalid/stale rejection passed");
+}
 }  // namespace
 
 int main(int argc, char** argv) {
   assert(rillight_core_abi_version() == RILLIGHT_CORE_ABI_VERSION);
+  if (argc > 1 && std::strcmp(argv[1], "--presentation") == 0) {
+    presentation_test(); layout_presentation_test(); return 0;
+  }
   if (argc > 1 && std::strcmp(argv[1], "--mov-text-only") == 0) {
     Media media{};
     media.video = make_ass_video(AV_CODEC_ID_MOV_TEXT);
@@ -747,6 +894,23 @@ int main(int argc, char** argv) {
       rillight_core_release_frame(video_frame);
     }
     assert(early_blank && timed_text_visible);
+    assert(rillight_core_set_playing(core, 0, 7) == 0);
+    const auto paused = snapshot(core);
+    RillightCoreSubtitlePresentation presentation{sizeof(presentation), 1, 1, 0,
+        360, 202.5, 20, 0.85, 12, 8};
+    assert(rillight_core_set_subtitle_presentation(core, &presentation, paused.session_id) == 0);
+    auto *small = rillight_core_take_frame(core, RILLIGHT_CORE_VIDEO_RGBA);
+    assert(small);
+    const auto small_ink = ink_bounds(small);
+    const auto subtitle_pts = small->pts_us;
+    rillight_core_release_frame(small);
+    presentation.user_scale = 1.5;
+    assert(rillight_core_set_subtitle_presentation(core, &presentation, paused.session_id) == 0);
+    auto *large = rillight_core_take_frame(core, RILLIGHT_CORE_VIDEO_RGBA);
+    assert(large && large->pts_us == subtitle_pts);
+    assert(ink_bounds(large).height() > small_ink.height());
+    assert(snapshot(core).position_us == paused.position_us);
+    rillight_core_release_frame(large);
     rillight_core_destroy(core);
   }
   // Exercise both success and rejected parse cleanup repeatedly in one

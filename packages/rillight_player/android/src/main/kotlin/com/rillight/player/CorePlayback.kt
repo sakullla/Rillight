@@ -295,6 +295,18 @@ internal class CorePlayback(
                     if (code == 0) { beginTrack(result, stream, method == "subtitle", handle); return }
                     code
                 }
+                "subtitlePresentation" -> {
+                    val nativeSession = CoreNative.snapshot(handle)?.get(1)
+                        ?: throw IllegalStateException("Core session unavailable")
+                    CoreNative.subtitlePresentation(handle, nativeSession,
+                        (args["displayWidth"] as Number).toDouble(),
+                        (args["displayHeight"] as Number).toDouble(),
+                        (args["fontSize"] as Number).toDouble(),
+                        (args["userScale"] as Number).toDouble(),
+                        args["originalAss"] == true,
+                        (args["safeHorizontal"] as Number).toDouble(),
+                        (args["safeVertical"] as Number).toDouble())
+                }
                 "subtitleOff" -> {
                     val code = synchronized(outputLock) {
                         val selected = CoreNative.selectSubtitle(handle, -1, operation.incrementAndGet())

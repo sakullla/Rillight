@@ -209,6 +209,75 @@ void main() {
   );
 
   test(
+    'phone subtitle changes apply paused, preserve time and survive episodes',
+    () async {
+      await controller.start();
+      await controller.togglePlay();
+      await controller.updateSubtitleViewport(width: 360, height: 202.5);
+      final position = controller.position;
+      final opens = backend.openCount;
+      await controller.setPhoneSubtitleSettings(
+        const PhoneSubtitleSettings(
+          size: PhoneSubtitleSize.large,
+          originalAss: true,
+        ),
+      );
+      expect(backend.subtitlePresentation!.fontSize, 20);
+      expect(backend.subtitlePresentation!.userScale, 1.25);
+      expect(backend.subtitlePresentation!.originalAss, isTrue);
+      expect(backend.isPlaying, isFalse);
+      expect(controller.position, position);
+      expect(backend.openCount, opens);
+      await controller.setVolume(20);
+      await controller.playEpisode(episode('episode-friends-s1e1'));
+      expect(backend.subtitlePresentation!.userScale, 1.25);
+      expect(
+        (await settings.read()).effectivePhoneSubtitles.size,
+        PhoneSubtitleSize.large,
+      );
+      await controller.resetPhoneSubtitleSettings();
+      expect(backend.subtitlePresentation!.userScale, 1);
+      expect(
+        (await settings.read()).effectivePhoneSubtitles.originalAss,
+        isFalse,
+      );
+    },
+  );
+
+  test(
+    'subtitle failure keeps actual preference and stale geometry cannot reach new session',
+    () async {
+      await controller.start();
+      await controller.updateSubtitleViewport(width: 360, height: 202.5);
+      backend.failPresentation = true;
+      await controller.setPhoneSubtitleSettings(
+        const PhoneSubtitleSettings(size: PhoneSubtitleSize.large),
+      );
+      expect(controller.phoneSubtitleSettings.size, PhoneSubtitleSize.standard);
+      expect(controller.subtitlePresentationError, isNotNull);
+      expect(
+        (await settings.read()).effectivePhoneSubtitles.size,
+        PhoneSubtitleSize.standard,
+      );
+      backend.failPresentation = false;
+      final oldSession = backend.sessionId;
+      await controller.playEpisode(episode('episode-friends-s1e1'));
+      await expectLater(
+        backend.setSubtitlePresentation(
+          const SubtitlePresentation(
+            displayWidth: 360,
+            displayHeight: 202.5,
+            fontSize: 40,
+          ),
+          sessionId: oldSession,
+        ),
+        throwsStateError,
+      );
+      expect(backend.subtitlePresentation!.fontSize, 20);
+    },
+  );
+
+  test(
     'immediate item switch preserves debounced volume and rate changes',
     () async {
       await settings.write(
@@ -1025,6 +1094,16 @@ class _ControlledBackend extends FakeVideoBackend {
   final audioRequests = <int>[];
   final failedAudioIndices = <int>{};
   String? failInitialization;
+  bool failPresentation = false;
+  @override
+  Future<void> setSubtitlePresentation(
+    SubtitlePresentation value, {
+    required int sessionId,
+  }) async {
+    if (failPresentation) throw StateError('Presentation rejected');
+    await super.setSubtitlePresentation(value, sessionId: sessionId);
+  }
+
   Completer<void>? rateGate;
   bool rateStarted = false;
   Completer<void>? subtitleGate;
