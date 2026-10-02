@@ -217,6 +217,66 @@ void main() {
   }
 
   testWidgets(
+    'phone PiP removes controls and keeps the same mounted video session',
+    (tester) async {
+      final backend = _PhonePresentationBackend();
+      final c = await showPlayer(
+        tester,
+        itemId: 'movie-inception',
+        backend: backend,
+        wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
+      );
+      final opens = backend.openCount;
+      await tester.tap(find.byKey(const Key('mobile-player-pip')));
+      await tester.pump();
+      expect(find.byKey(const Key('mobile-player-toggle')), findsNothing);
+      expect(find.byType(PhonePlayerGestures), findsNothing);
+      expect(backend.openCount, opens);
+      expect(c.isPlaying, isTrue);
+      backend.phonePresentation.value = {
+        'supported': true,
+        'foreground': true,
+        'active': false,
+      };
+      await tester.pump();
+      expect(find.byKey(const Key('mobile-player-toggle')), findsOneWidget);
+      expect(backend.openCount, opens);
+      await closePlayer(tester);
+    },
+    tags: ['integration'],
+  );
+
+  for (final size in [const Size(360, 800), const Size(800, 360)]) {
+    testWidgets(
+      'phone large text keeps shortcuts and fixed panel exit reachable $size',
+      (tester) async {
+        tester.platformDispatcher.textScaleFactorTestValue = 2;
+        addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+        await showPlayer(
+          tester,
+          itemId: 'movie-inception',
+          size: size,
+          wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
+        );
+        for (final name in ['speed', 'tracks', 'more']) {
+          final button = find.byKey(Key('mobile-player-$name'));
+          expect(button.hitTestable(), findsOneWidget);
+          expect(tester.getRect(button).right, lessThanOrEqualTo(size.width));
+        }
+        await tester.tap(find.byKey(const Key('mobile-player-tracks')));
+        await tester.pumpAndSettle();
+        final exit = find.byKey(const Key('mobile-player-panel-close'));
+        expect(exit.hitTestable(), findsOneWidget);
+        expect(tester.takeException(), isNull);
+        await tester.tap(exit);
+        await tester.pumpAndSettle();
+        await closePlayer(tester);
+      },
+      tags: ['integration'],
+    );
+  }
+
+  testWidgets(
     'phone timeline paints verified cache coverage and updates network speed',
     (tester) async {
       final backend = FakeVideoBackend();
@@ -1085,7 +1145,9 @@ void main() {
       await tester.pump();
       expect(current.canSwitchMediaSource, isTrue);
       expect(find.text('来源'), findsNothing);
-      await tester.tap(find.byKey(const Key('mobile-player-quality')));
+      await tester.tap(find.byKey(const Key('mobile-player-more')));
+      await tester.pumpAndSettle();
+      await enterSection(tester, 'quality');
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 400));
       expect(find.text('来源'), findsNothing);
@@ -1683,14 +1745,11 @@ void main() {
       expect(tester.getSize(timeline).width, greaterThan(size.width - 50));
       final cache = find.byKey(const Key('mobile-player-cache-status'));
       final clock = find.byKey(const Key('mobile-player-clock'));
-      expect(
-        tester.getCenter(cache).dy,
-        closeTo(tester.getCenter(clock).dy, 2),
-      );
-      expect(
-        tester.getTopLeft(cache).dx,
-        greaterThan(tester.getTopRight(clock).dx),
-      );
+      final clockRect = tester.getRect(clock),
+          cacheRect = tester.getRect(cache);
+      expect(clockRect.overlaps(cacheRect), isFalse);
+      expect(cacheRect.bottom, lessThanOrEqualTo(size.height));
+      expect(cacheRect.left, greaterThanOrEqualTo(0));
       backend.emitEvent(VideoEventKind.cacheSpeed, 1048576);
       backend.emitEvent(
         VideoEventKind.bufferSnapshot,
@@ -1810,10 +1869,12 @@ void main() {
         findsOneWidget,
       );
 
-      expect(find.byKey(const Key('mobile-player-quality')), findsOneWidget);
+      expect(find.byKey(const Key('mobile-player-quality')), findsNothing);
       expect(find.byKey(const Key('mobile-player-tracks')), findsOneWidget);
       expect(find.byKey(const Key('mobile-player-danmaku')), findsNothing);
-      await tester.tap(find.byKey(const Key('mobile-player-quality')));
+      await tester.tap(find.byKey(const Key('mobile-player-more')));
+      await tester.pumpAndSettle();
+      await enterSection(tester, 'quality');
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 400));
       expect(find.text('来源'), findsNothing);
@@ -2117,5 +2178,29 @@ class _FailingDanmakuClient extends DandanplayClient {
     CancelToken? cancelToken,
   }) async {
     throw _failure;
+  }
+}
+
+class _PhonePresentationBackend extends FakeVideoBackend
+    implements VideoBackendPhonePresentation {
+  @override
+  final ValueNotifier<Map<String, dynamic>> phonePresentation = ValueNotifier({
+    'supported': true,
+    'foreground': true,
+  });
+  @override
+  Future<void> configurePhonePresentation(bool enabled) async {}
+  @override
+  Future<Map<String, dynamic>> refreshPhonePresentation() async =>
+      phonePresentation.value;
+  @override
+  Future<bool> enterPictureInPicture() async {
+    phonePresentation.value = {
+      'supported': true,
+      'active': true,
+      'retainPlayback': true,
+      'foreground': false,
+    };
+    return true;
   }
 }

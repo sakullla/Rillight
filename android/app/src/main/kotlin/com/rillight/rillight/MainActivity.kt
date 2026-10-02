@@ -10,6 +10,19 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
+    override fun onUserLeaveHint() {
+        com.rillight.player.RillightCorePlayerPlugin.userLeave(this)
+        super.onUserLeaveHint()
+    }
+    override fun onPictureInPictureModeChanged(active: Boolean, configuration: Configuration) {
+        com.rillight.player.RillightCorePlayerPlugin.pipMode(this, active)
+        super.onPictureInPictureModeChanged(active, configuration)
+    }
+    override fun onPictureInPictureUiStateChanged(state: android.app.PictureInPictureUiState) {
+        super.onPictureInPictureUiStateChanged(state)
+        if (android.os.Build.VERSION.SDK_INT >= 35 && state.isTransitioningToPip)
+            com.rillight.player.RillightCorePlayerPlugin.pipTransition(this)
+    }
     // The owned core's platform view and Flutter overlays share an Activity.
     // Keep Flutter in a TextureView across route teardown and screen lock so
     // surface transitions do not switch the Activity's rendering target.

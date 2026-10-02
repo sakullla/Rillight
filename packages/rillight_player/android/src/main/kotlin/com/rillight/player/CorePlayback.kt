@@ -85,6 +85,7 @@ internal class CorePlayback(
     private var preferredHardware = 8
     private var lastDecoderCheckMs = 0L
     @Volatile private var volume = 1f
+    @Volatile private var lastPresentedUs = -1L
     @Volatile var session = ""
         private set
     var view: CoreSurfaceView? = null
@@ -119,6 +120,20 @@ internal class CorePlayback(
         synchronized(surfaceLock) { this.surface = surface; surfaceRevision.incrementAndGet() }
         wakeOutput()
     }
+
+    override fun videoGeometry(value: Map<String, Any>) { emit("videoGeometry", value) }
+    fun videoSourceRect() = view?.sourceRect()
+    fun presentationDiagnostics(): Map<String, Any> {
+        val snap = running?.let { CoreNative.snapshot(it.handle) }
+        return mapOf("surfaceValid" to (surface?.isValid == true),
+            "surfaceRevision" to surfaceRevision.get(), "desiredPaused" to desiredPaused,
+            "renderedFirst" to renderedFirst, "presentedPositionMs" to (lastPresentedUs / 1000), "state" to (snap?.get(0) ?: -1),
+            "firstVideo" to (snap?.get(10) ?: 0), "firstAudio" to (snap?.get(11) ?: 0),
+            "queuedVideo" to (snap?.get(13) ?: 0), "queuedAudio" to (snap?.get(14) ?: 0),
+            "timeline" to (snap?.get(3) ?: 0))
+    }
+    fun pipReady() = renderedFirst && running != null
+    fun pipPlaying() = !desiredPaused && running != null
 
     override fun setViewport(width: Int, height: Int) {
         if (width <= 0 || height <= 0) return
@@ -163,6 +178,7 @@ internal class CorePlayback(
         desiredPaused = args["paused"] == true
         audioReady = false
         renderedFirst = false
+        lastPresentedUs = -1
         emittedCompletion = false
         buffering = false
         lastPlaying = false
@@ -556,7 +572,8 @@ internal class CorePlayback(
                 }
                 val frame = videoSurface?.takeIf { it.isValid }
                     ?.let { CoreNative.renderVideo(active.handle, it, hdrDisplaySupported) }
-                if (frame != null && frame[6] == snap[1] && frame[7] == snap[3]) {
+                if (frame != null && frame[6] == snap[1] && frame[7] == snap[3] && generation.get() == active.generation) {
+                    lastPresentedUs = frame[0]
                     val overlay = CoreNative.takeVideoOverlay(active.handle)
                     handler.post {
                         if (generation.get() == active.generation) {

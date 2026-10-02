@@ -23,6 +23,7 @@ import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_controller.dart';
 import 'package:rillight/player/next_episode_card.dart';
 import 'package:rillight/player/player_window.dart';
+import 'package:rillight/player/video_backend.dart';
 import 'package:rillight/player/phone/phone_player_interaction.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
@@ -179,6 +180,87 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
   final PhonePlayerInteraction _interaction = PhonePlayerInteraction();
   Object? _visualSignature;
   bool _fillFrame = false;
+  VideoBackendPhonePresentation? _presentation;
+  bool _pip = false;
+  bool _pipSupported = false;
+  bool _viewportScheduled = false;
+  void _onPresentation() {
+    if (!mounted || _closing) return;
+    final state = _presentation?.phonePresentation.value ?? const {};
+    final supported = state['supported'] == true;
+    if (_pipSupported != supported) setState(() => _pipSupported = supported);
+    final pip =
+        state['active'] == true ||
+        state['entering'] == true ||
+        state['returning'] == true;
+    if (_pip != pip) {
+      _pip = pip;
+      if (pip) {
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        final route = ModalRoute.of(context);
+        Navigator.of(
+          context,
+        ).popUntil((candidate) => identical(candidate, route));
+        controller?.setControlsPinned(false);
+      } else if (state['foreground'] == true) {
+        unawaited(_bars?.reassert());
+        unawaited(_orientation?.reassert());
+      }
+      setState(() {});
+    }
+    _scheduleSubtitleViewport();
+  }
+
+  void _scheduleSubtitleViewport() {
+    if (_viewportScheduled || !mounted) return;
+    _viewportScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _viewportScheduled = false;
+      if (!mounted || _closing) return;
+      final media = MediaQuery.of(context);
+      final raw = _presentation?.phonePresentation.value['geometry'];
+      if (raw is! Map) return; // Never invent decoded dimensions/SAR.
+      final density =
+          (raw['density'] as num?)?.toDouble() ?? media.devicePixelRatio;
+      final width = (raw['width'] as num?)?.toDouble();
+      final height = (raw['height'] as num?)?.toDouble();
+      if (width == null || height == null || density <= 0) return;
+      final landscape = media.size.width > media.size.height;
+      final base = landscape ? 24.0 : 20.0;
+      unawaited(
+        controller?.updateSubtitleViewport(
+          width: width / density,
+          height: height / density,
+          landscape: landscape,
+          textScale: media.textScaler.scale(base) / base,
+          safeHorizontal:
+              12 + ((raw['safeHorizontal'] as num?)?.toDouble() ?? 0) / density,
+          safeVertical:
+              8 + ((raw['safeVertical'] as num?)?.toDouble() ?? 0) / density,
+        ),
+      );
+    });
+  }
+
+  Future<void> _configurePhone(bool enabled) async {
+    try {
+      await _presentation?.configurePhonePresentation(enabled);
+    } catch (_) {
+      // Native teardown and controller close must still run if the bridge left.
+    }
+  }
+
+  Future<void> _enterPip() async {
+    var accepted = false;
+    try {
+      accepted = await _presentation?.enterPictureInPicture() ?? false;
+    } catch (_) {}
+    if (!accepted && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(AppLocalizations.of(context).phonePipFailed)),
+      );
+    }
+  }
 
   @override
   void initState() {
@@ -193,7 +275,7 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed && !_closing) {
+    if (state == AppLifecycleState.resumed && !_closing && !_pip) {
       unawaited(_bars?.reassert());
       unawaited(_orientation?.reassert());
     }
@@ -240,7 +322,15 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
     );
     _danmaku = danmaku;
     danmaku.addListener(_onDanmaku);
-    _lifecycle = AndroidPlaybackLifecycle(created);
+    if (created.backend is VideoBackendPhonePresentation) {
+      _presentation = created.backend as VideoBackendPhonePresentation;
+      _presentation!.phonePresentation.addListener(_onPresentation);
+      unawaited(_configurePhone(true).then((_) => _onPresentation()));
+    }
+    _lifecycle = AndroidPlaybackLifecycle(
+      created,
+      phonePresentation: _presentation,
+    );
     unawaited(_bars!.hide());
     unawaited(_orientation!.enterPlayback());
     unawaited(created.start());
@@ -362,6 +452,8 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
   Future<void> _close() async {
     if (_closing) return;
     _closing = true;
+    await _configurePhone(false);
+    if (!mounted) return;
     final route = ModalRoute.of(context);
     final navigator = Navigator.of(context);
     _lifecycle?.dispose();
@@ -526,6 +618,8 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
     controller?.removeListener(_onPlayback);
     _danmaku?.removeListener(_onDanmaku);
     _lifecycle?.dispose();
+    _presentation?.phonePresentation.removeListener(_onPresentation);
+    unawaited(_configurePhone(false));
     final orientation = _orientation;
     final bars = _bars;
     final wake = _wake;
@@ -585,6 +679,7 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
   Widget build(BuildContext context) {
     final c = controller!;
     final danmaku = _danmaku;
+    _scheduleSubtitleViewport();
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (popped, _) {
@@ -603,71 +698,79 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
             fit: StackFit.expand,
             children: [
               c.backend.buildView(),
-              if (danmaku != null && _showDanmakuLayer(c))
-                Positioned.fill(
-                  child: IgnorePointer(child: DanmakuView(controller: danmaku)),
-                ),
-              PhonePlayerGestures(
-                controller: c,
-                display: _display!,
-                interaction: _interaction,
-              ),
-              ListenableBuilder(
-                listenable: Listenable.merge([c, _interaction]),
-                builder: (context, _) {
-                  return PhoneMotion.reveal(
-                    context: context,
-                    visible: _interaction.controlsVisibleFor(c),
-                    child: PhonePlayerControls(
-                      controller: c,
-                      danmaku: danmaku,
-                      onClose: _close,
-                      onOpenDanmakuPanel: _openDanmakuPanel,
-                      onOpenDanmakuSearch: _openDanmakuSearch,
-                      center: _centerStatus(c),
-                      interaction: _interaction,
-                      fillFrame: _fillFrame,
-                      onFillFrame: (fill) {
-                        if (_fillFrame == fill) return;
-                        setState(() => _fillFrame = fill);
-                        final backend = c.backend;
-                        if (backend is RillightVideoBackend) {
-                          unawaited(
-                            backend.setVideoScale(fill ? 'fill' : 'fit'),
-                          );
-                        }
-                      },
-                    ),
-                  );
-                },
-              ),
-              if (!_interaction.locked &&
-                  c.nextEpisode != null &&
-                  c.error == null &&
-                  !c.sessionExpired)
-                Positioned(
-                  left: 12,
-                  top: 64,
-                  child: NextEpisodeCard(controller: c),
-                ),
-              if (!_interaction.locked &&
-                  danmaku != null &&
-                  danmaku.isConfigured &&
-                  c.error == null &&
-                  !c.loading &&
-                  _danmakuNeedsAttention(danmaku))
-                Positioned(
-                  top: c.nextEpisode != null ? 148 : 8,
-                  left: 12,
-                  right: 12,
-                  child: SafeArea(
-                    child: _PhoneDanmakuFailure(
-                      danmaku: danmaku,
-                      onRetry: _retryDanmaku,
-                      onDisable: () => unawaited(danmaku.toggleDanmaku()),
+              if (!_pip) ...[
+                if (danmaku != null && _showDanmakuLayer(c))
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: DanmakuView(controller: danmaku),
                     ),
                   ),
+                PhonePlayerGestures(
+                  controller: c,
+                  display: _display!,
+                  interaction: _interaction,
                 ),
+                ListenableBuilder(
+                  listenable: Listenable.merge([c, _interaction]),
+                  builder: (context, _) {
+                    return PhoneMotion.reveal(
+                      context: context,
+                      visible: _interaction.controlsVisibleFor(c),
+                      child: PhonePlayerControls(
+                        controller: c,
+                        danmaku: danmaku,
+                        onClose: _close,
+                        pipSupported: _pipSupported,
+                        onPictureInPicture: _presentation == null
+                            ? null
+                            : _enterPip,
+                        onOpenDanmakuPanel: _openDanmakuPanel,
+                        onOpenDanmakuSearch: _openDanmakuSearch,
+                        center: _centerStatus(c),
+                        interaction: _interaction,
+                        fillFrame: _fillFrame,
+                        onFillFrame: (fill) {
+                          if (_fillFrame == fill) return;
+                          setState(() => _fillFrame = fill);
+                          final backend = c.backend;
+                          if (backend is RillightVideoBackend) {
+                            unawaited(
+                              backend.setVideoScale(fill ? 'fill' : 'fit'),
+                            );
+                          }
+                        },
+                      ),
+                    );
+                  },
+                ),
+                if (!_interaction.locked &&
+                    c.nextEpisode != null &&
+                    c.error == null &&
+                    !c.sessionExpired)
+                  Positioned(
+                    left: 12,
+                    top: 64,
+                    child: NextEpisodeCard(controller: c),
+                  ),
+                if (!_interaction.locked &&
+                    danmaku != null &&
+                    danmaku.isConfigured &&
+                    c.error == null &&
+                    !c.loading &&
+                    _danmakuNeedsAttention(danmaku))
+                  Positioned(
+                    top: c.nextEpisode != null ? 148 : 8,
+                    left: 12,
+                    right: 12,
+                    child: SafeArea(
+                      child: _PhoneDanmakuFailure(
+                        danmaku: danmaku,
+                        onRetry: _retryDanmaku,
+                        onDisable: () => unawaited(danmaku.toggleDanmaku()),
+                      ),
+                    ),
+                  ),
+              ],
             ],
           ),
         ),

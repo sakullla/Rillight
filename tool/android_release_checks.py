@@ -36,7 +36,7 @@ CORE_NOTICE_FILES = (
     'licenses/FFmpeg-LGPL-2.1.txt', 'licenses/FFmpeg-GPL-2.0.txt',
     'licenses/libass-ISC.txt', 'licenses/FreeType-LICENSE.txt',
     'licenses/FreeType-FTL.txt', 'licenses/FriBidi-LGPL-2.1.txt',
-    'licenses/HarfBuzz-Old-MIT.txt',
+    'licenses/HarfBuzz-Old-MIT.txt', 'licenses/libunibreak-Zlib.txt',
 )
 ELF_MACHINES = {
     'arm64-v8a': 'AArch64',
@@ -325,6 +325,7 @@ def capture_audio(serial, output, rate, seconds=6):
     import emulator_controller_pb2_grpc as rpc
     discovery = None
     candidates = [Path(tempfile.gettempdir()) / 'avd/running',
+                  Path.home() / 'Library/Caches/TemporaryItems/avd/running',
                   Path(os.environ.get('XDG_RUNTIME_DIR', '/run/user/' + str(getattr(os, 'getuid', lambda: 0)()))) / 'avd/running']
     for directory in candidates:
         for ini in directory.glob('*.ini'):
@@ -407,6 +408,28 @@ class Device:
             time.sleep(.4)
         self.wait(lambda s: not any(r['key'] == 'tv-input-editor' for r in s['rows']), 'remote input dialog closed')
 
+    def dismiss_immersive_hint(self):
+        self.adb('shell', 'uiautomator', 'dump', '/sdcard/rillight-player-screen.xml')
+        tree = ET.fromstring(self.adb('shell', 'cat', '/sdcard/rillight-player-screen.xml'))
+        legacy_cling = any(node.attrib.get('resource-id') in (
+            'android:id/immersive_cling_title', 'android:id/immersive_cling_description')
+            for node in tree.iter('node'))
+        for node in tree.iter('node'):
+            trusted_button = (node.attrib.get('package') == 'com.android.systemui' or
+                (legacy_cling and node.attrib.get('package') == 'android' and
+                 node.attrib.get('resource-id') == 'android:id/ok'))
+            if not trusted_button or not (
+                    node.attrib.get('text', '').strip().lower() in ('got it', '知道了') or
+                    node.attrib.get('resource-id') == 'com.android.systemui:id/ok'):
+                continue
+            bounds = [int(value) for value in re.findall(r'\d+', node.attrib.get('bounds', ''))]
+            if len(bounds) == 4:
+                x1, y1, x2, y2 = bounds
+                self.adb('shell', 'input', 'tap', (x1+x2)//2, (y1+y2)//2)
+                save(self.output / 'immersive-hint.json', {'dismissed': True, 'bounds': bounds})
+                return True
+        return False
+
     def hide_ime(self):
         # A hardware-keyboard AVD may accept text without showing an IME.
         # Sending Back unconditionally would then exit the connection page.
@@ -460,7 +483,8 @@ class Device:
         for _ in range(20):
             time.sleep(.2)
             current_state, current_row = self.row(key, label)
-            stable = current_row['rect'] == row['rect'] and current_state['size'] == state['size']
+            stable = (current_row['rect'] == row['rect'] and current_state['size'] == state['size']
+                      and current_row.get('hitTestable', True))
             state, row = current_state, current_row
             if stable:
                 break
@@ -512,10 +536,106 @@ class Device:
         self.adb('shell', 'am', 'start', '-W', '-n', ACTIVITY)
 
 
+def has_system_pip_task(tasks, sdk):
+    """Require our task, with OS-version-specific pinned representation."""
+    package = re.escape(PACKAGE) + r'(?=[/\s}])'
+    if sdk >= 28:
+        return any(re.search(package, line) and
+                   re.search(r'(?:mode|windowingMode)=pinned|windowingMode=2\b', line)
+                   for line in tasks.splitlines() if 'Task{' in line)
+    if sdk in (26, 27):
+        # Android O uses the fixed PINNED_STACK_ID=4, before windowing modes.
+        stacks = re.split(r'(?m)^\s*Stack #(\d+):', tasks)
+        return any(stacks[i] == '4' and re.search(
+            r'TaskRecord\{[^\n]*' + package + r'[^\n]*\bStackId=4\b', stacks[i+1])
+            for i in range(1, len(stacks)-1, 2))
+    return False
+
+
+def phone_pip_flow(device):
+    """Observe actual system PiP; Flutter visibility alone is insufficient."""
+    d = device
+    before = d.state()
+    initial = before['player']
+    facts = initial.get('presentation', {})
+    if not facts.get('supported'):
+        return {'status': 'unsupported', 'passed': True}
+    session = initial['diagnostics']['coreSession']
+    d.key(3)
+    entered = d.wait(lambda s: s['player'] and
+                     s['player'].get('presentation', {}).get('active') and
+                     s['player']['playing'] and not s['player']['released'],
+                     'native auto PiP playing')
+    tasks = d.adb('shell', 'dumpsys', 'activity', 'activities').decode(errors='replace')
+    (d.output / 'pip-system-tasks.txt').write_text(tasks)
+    sdk = int(d.adb('shell', 'getprop', 'ro.build.version.sdk').decode().strip())
+    if not has_system_pip_task(tasks, sdk):
+        raise RuntimeError('Native PiP callback has no actual pinned system task')
+    if entered['player']['diagnostics']['coreSession'] != session:
+        raise RuntimeError('PiP reopened the native session')
+    if any(r['key'] in ('mobile-player-toggle', 'mobile-player-more') for r in entered['rows']):
+        raise RuntimeError('Ordinary controls remain in PiP')
+    d.wait(lambda s: s['player'] and
+           0 < (s['player']['presentation'].get('displayRect', [0, 0, 0, 0])[2] -
+                s['player']['presentation'].get('displayRect', [0, 0, 0, 0])[0]) < min(before['size']),
+           'PiP native display resized')
+    a = d.screenshot('pip-auto-a')
+    time.sleep(1)
+    b = d.screenshot('pip-auto-b')
+    rect = d.state()['player']['presentation'].get('displayRect')
+    if not isinstance(rect, list) or len(rect) != 4 or rect[2] <= rect[0] or rect[3] <= rect[1]:
+        raise RuntimeError('PiP lacks actual display bounds')
+    from PIL import Image
+    crops = []
+    for source, name in ((a, 'pip-video-a.png'), (b, 'pip-video-b.png')):
+        output = d.output / name
+        with Image.open(source) as image:
+            if rect[0] < 0 or rect[1] < 0 or rect[2] > image.width or rect[3] > image.height:
+                raise RuntimeError('PiP display bounds exceed screencap; align wm override and physical display before pixel validation')
+            image.crop(tuple(rect)).save(output)
+        crops.append(output)
+    pixels = pixel_check(*crops)
+    # Launching the existing singleTop Activity asks the system to expand it.
+    d.adb('shell', 'am', 'start', '-n', ACTIVITY)
+    expanded = d.wait(lambda s: s['player'] and s['player']['playing'] and
+                     not s['player'].get('presentation', {}).get('active') and
+                     s['player'].get('presentation', {}).get('foreground') and
+                     not s['player'].get('presentation', {}).get('returning'),
+                     'PiP expands same playing session')
+    d.dismiss_immersive_hint()
+    expanded = d.state()
+    if expanded['player']['diagnostics']['coreSession'] != session:
+        raise RuntimeError('PiP expansion replaced the session')
+    if not expanded['player']['controls']:
+        d.adb('shell', 'input', 'tap', round(expanded['size'][0]/2), round(expanded['size'][1]/2))
+    d.wait(lambda s: s['player'] and s['player']['controls'], 'expanded controls visible')
+    d.tap(key='mobile-player-toggle')
+    d.wait(lambda s: s['player'] and not s['player']['playing'], 'pause before manual PiP')
+    d.tap(key='mobile-player-pip')
+    paused = d.wait(lambda s: s['player'] and s['player'].get('presentation', {}).get('active') and
+                    not s['player']['playing'], 'manual PiP retains pause')
+    d.screenshot('pip-manual-paused')
+    time.sleep(.8)
+    if abs(d.state()['player']['positionMs'] - paused['player']['positionMs']) > 300:
+        raise RuntimeError('Paused PiP clock advanced')
+    d.adb('shell', 'am', 'start', '-n', ACTIVITY)
+    d.wait(lambda s: s['player'] and not s['player']['playing'] and
+           not s['player'].get('presentation', {}).get('active') and
+           s['player'].get('presentation', {}).get('foreground') and
+           not s['player'].get('presentation', {}).get('returning'), 'paused PiP expands paused')
+    d.dismiss_immersive_hint()
+    report = {'passed': True, 'status': 'observed', 'system_pinned': True,
+              'same_session': True, 'manual_paused': True, 'sdk': sdk, 'displayed_pixels': pixels,
+              'audio': 'unverified physical output', 'display_rect': rect}
+    save(d.output / 'pip-observations.json', report)
+    return report
+
+
 def phone_hero_resume_flow(device):
     device.tap(key='hero-resume-movie-01')
     started = device.wait(lambda s: s['player'] and not s['player']['loading'] and
                           s['player']['playing'], 'phone hero starts owned playback', 40)
+    device.dismiss_immersive_hint()
     position = started['player']['positionMs']
     if position < 2000:
         raise RuntimeError('Phone hero lost the synthetic resume position')
@@ -584,19 +704,7 @@ def app_flow(device, tv, *, capture_virtual_audio=True):
     # tutorial above the actual video. Dismiss its explicit button before the
     # displayed-pixel observation; never count the tutorial as a video frame.
     if not tv:
-        d.adb('shell', 'uiautomator', 'dump', '/sdcard/rillight-player-screen.xml')
-        tree = ET.fromstring(d.adb('shell', 'cat', '/sdcard/rillight-player-screen.xml'))
-        for node in tree.iter('node'):
-            if node.attrib.get('package') != 'com.android.systemui' or \
-                    node.attrib.get('text') not in ('Got it', '知道了'):
-                continue
-            bounds = [int(value) for value in re.findall(r'\d+', node.attrib.get('bounds', ''))]
-            if len(bounds) != 4:
-                continue
-            x1, y1, x2, y2 = bounds
-            d.adb('shell', 'input', 'tap', (x1+x2)//2, (y1+y2)//2)
-            save(d.output / 'immersive-hint.json', {'dismissed': True, 'bounds': bounds})
-            break
+        d.dismiss_immersive_hint()
     # Capture displayed frames before opening the emulator's audio stream.
     # That stream can trigger a separate Android audio-focus transition.
     time.sleep(1)
@@ -609,7 +717,7 @@ def app_flow(device, tv, *, capture_virtual_audio=True):
             audio = capture_audio(d.serial, d.output / 'audio', 48000 if tv else 44100)
         else:
             audio = {'passed': False, 'status': 'unverified',
-                     'reason': 'Physical device: emulator virtual-audio capture is not applicable'}
+                     'reason': 'Virtual-audio capture was not requested for this diagnostic run'}
             save(d.output / 'audio.json', audio)
     except Exception as error:
         # Keep independent UI/control observations, but never pass the device
@@ -690,6 +798,17 @@ def app_flow(device, tv, *, capture_virtual_audio=True):
     else:
         d.tap(key='mobile-player-toggle')
     d.wait(lambda s: s['player'] and s['player']['playing'], 'resume')
+    if not tv:
+        pip_result = phone_pip_flow(d)
+        save(d.output / 'pip-observations.json', pip_result)
+        # Ordinary background is exercised in a paused state, never by disabling
+        # native protection or treating legitimate PiP as a release failure.
+        state = d.state()
+        if state['player']['playing']:
+            if not state['player']['controls']:
+                d.adb('shell', 'input', 'tap', round(state['size'][0]/2), round(state['size'][1]/2))
+            d.tap(key='mobile-player-toggle')
+            d.wait(lambda s: s['player'] and not s['player']['playing'], 'pause for ordinary background')
     d.key(3)
     time.sleep(2)
     d.adb('shell', 'am', 'start', '-n', ACTIVITY)

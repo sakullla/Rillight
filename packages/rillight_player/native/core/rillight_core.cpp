@@ -3320,10 +3320,9 @@ finish:
   audio_lane.Stop();
   subtitle_lane.Stop();
   if (core->decode_error < 0) result = core->decode_error.load();
-  { std::lock_guard lock(core->mutex);
-    std::lock_guard subtitle_lock(subtitle_mutex);
-    close_ass(&ass);
-  }
+  // The last displayed clean frame outlives decoding (including EOF). Keep its
+  // subtitle events/fonts until the session is replaced or destroyed so a
+  // paused viewport/PiP redraw cannot erase still-active glyphs.
   close_audio_filter(&audio_filter);
   avcodec_free_context(&video.context);
   avcodec_free_context(&audio.context);
@@ -3624,6 +3623,7 @@ void rillight_core_destroy(RillightCore *pointer) {
     clear_queue(core->audio, core->audio_bytes);
     rillight_core_release_frame(core->displayed_clean);
     rillight_core_release_frame(core->subtitle_preview);
+    close_ass(&core->ass);
   }
   delete core;
 }
@@ -3704,6 +3704,7 @@ int rillight_core_open_at(RillightCore *pointer, const char *url,
   {
     std::lock_guard lock(core->mutex);
     reset_frames(core);
+    { std::lock_guard subtitle_lock(core->subtitle_mutex); close_ass(&core->ass); }
     core->stop = false;
     core->decode_abort = false;
     core->decode_error = 0;

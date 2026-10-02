@@ -37,6 +37,13 @@ internal fun effectiveDisplayBrightness(
 /** Android output for the owned FFmpeg core. It contains no Media3 player. */
 class RillightCorePlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandler,
     EventChannel.StreamHandler, ActivityAware, PluginRegistry.ActivityResultListener {
+    companion object {
+        private var current: RillightCorePlayerPlugin? = null
+        fun userLeave(activity: Activity) { current?.takeIf { it.activity === activity }?.pip?.userLeave() }
+        fun pipMode(activity: Activity, active: Boolean) { current?.takeIf { it.activity === activity }?.pip?.mode(active) }
+        fun pipTransition(activity: Activity) { current?.takeIf { it.activity === activity }?.pip?.transition() }
+    }
+    private var pip: PhonePipCoordinator? = null
     private lateinit var context: Context
     private lateinit var channel: MethodChannel
     private lateinit var events: EventChannel
@@ -105,14 +112,21 @@ class RillightCorePlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandler,
     private fun attachActivity(current: Activity) {
         detachActivity()
         activity = current
+        Companion.current = this
+        pip = PhonePipCoordinator(current, handler) { id, token, state ->
+            sink?.success(mapOf("owner" to id, "sessionId" to token, "kind" to "presentation", "value" to state))
+        }
         val callbacks = object : Application.ActivityLifecycleCallbacks {
             override fun onActivityPaused(candidate: Activity) {
-                if (candidate === current) owners.values.forEach { it.pauseForActivity() }
+                if (candidate === current) {
+                    pip?.paused()
+                    owners.values.filter { pip?.protects(it) != true }.forEach { it.pauseForActivity() }
+                }
             }
             override fun onActivityCreated(candidate: Activity, state: Bundle?) = Unit
             override fun onActivityStarted(candidate: Activity) = Unit
-            override fun onActivityResumed(candidate: Activity) = Unit
-            override fun onActivityStopped(candidate: Activity) = Unit
+            override fun onActivityResumed(candidate: Activity) { if (candidate === current) pip?.resumed() }
+            override fun onActivityStopped(candidate: Activity) { if (candidate === current) pip?.stopped() }
             override fun onActivitySaveInstanceState(candidate: Activity, state: Bundle) = Unit
             override fun onActivityDestroyed(candidate: Activity) = Unit
         }
@@ -121,6 +135,8 @@ class RillightCorePlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandler,
     }
 
     private fun detachActivity() {
+        pip?.dispose(); pip = null
+        if (Companion.current === this) Companion.current = null
         activityBinding?.removeActivityResultListener(this)
         activityBinding = null
         val previous = activity
@@ -132,6 +148,7 @@ class RillightCorePlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandler,
     }
 
     private fun owner(id: String): CorePlayback = CorePlayback(context, id, handler) { token, kind, value ->
+        pip?.event(id, token, kind, value)
         sink?.success(mapOf("owner" to id, "sessionId" to token, "kind" to kind, "value" to value))
     }
 
@@ -198,13 +215,19 @@ class RillightCorePlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandler,
             result.success(mapOf("sessionId" to token))
             return
         }
-        if (call.method == "open") { owner.open(token, args, result); return }
+        if (call.method == "open") { pip?.bind(id, token); owner.open(token, args, result); return }
         if (owner.session.isNotEmpty() && owner.session != token) {
             result.error("stale", "Expired playback session", mapOf("sessionId" to token)); return
         }
         when (call.method) {
-            "stop" -> owner.stop(result)
-            "dispose" -> { owner.dispose(result); owners.remove(id) }
+            "configurePhonePresentation" -> {
+                pip?.configure(id, owner, args["enabled"] == true)
+                result.success(pip?.snapshot() ?: mapOf("supported" to false))
+            }
+            "phonePresentation" -> result.success(pip?.snapshot() ?: mapOf("supported" to false))
+            "enterPictureInPicture" -> result.success(mapOf("accepted" to (pip?.enter(true) == true)))
+            "stop" -> { pip?.retire(id); owner.stop(result) }
+            "dispose" -> { pip?.retire(id); owner.dispose(result); owners.remove(id) }
             else -> owner.command(call.method, args, result)
         }
     }

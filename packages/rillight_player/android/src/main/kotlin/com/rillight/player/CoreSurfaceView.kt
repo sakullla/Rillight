@@ -27,6 +27,7 @@ internal class CoreSurfaceView(context: Context, private val owner: SurfaceOwner
     private var sarDen = 1
     private var rotation = 0
     private var fill = false
+    private var displayedRect = android.graphics.Rect()
 
     init {
         setBackgroundColor(Color.BLACK)
@@ -52,6 +53,10 @@ internal class CoreSurfaceView(context: Context, private val owner: SurfaceOwner
         updateGeometry()
     }
 
+    fun sourceRect(): android.graphics.Rect {
+        val location = IntArray(2); getLocationOnScreen(location)
+        return android.graphics.Rect(displayedRect).apply { offset(location[0], location[1]) }
+    }
     fun overlay(plane: CoreVideoOverlay) { subtitles.update(plane) }
     fun clearOverlay() { subtitles.clear() }
 
@@ -62,6 +67,10 @@ internal class CoreSurfaceView(context: Context, private val owner: SurfaceOwner
         val effectiveHeight = if (rotation % 180 == 0) heightPx.toFloat() else pixelWidth
         val factor = if (fill) maxOf(width / effectiveWidth, height / effectiveHeight)
                      else minOf(width / effectiveWidth, height / effectiveHeight)
+        val visibleWidth = minOf(width.toFloat(), effectiveWidth * factor)
+        val visibleHeight = minOf(height.toFloat(), effectiveHeight * factor)
+        displayedRect.set(((width - visibleWidth) / 2).roundToInt(), ((height - visibleHeight) / 2).roundToInt(),
+            ((width + visibleWidth) / 2).roundToInt(), ((height + visibleHeight) / 2).roundToInt())
         val desiredWidth = (pixelWidth * factor).roundToInt().coerceAtLeast(1)
         val desiredHeight = (heightPx * factor).roundToInt().coerceAtLeast(1)
         val params = video.layoutParams as LayoutParams
@@ -74,6 +83,14 @@ internal class CoreSurfaceView(context: Context, private val owner: SurfaceOwner
             (width + desiredWidth) / 2f, (height + desiredHeight) / 2f)
         subtitles.rotation = rotation.toFloat()
         subtitles.invalidate()
+        val margins = subtitleCropMargins(desiredWidth, desiredHeight, width, height, rotation)
+        owner.videoGeometry(mapOf("width" to desiredWidth, "height" to desiredHeight,
+            "visibleWidth" to minOf(width.toFloat(), effectiveWidth * factor),
+            "visibleHeight" to minOf(height.toFloat(), effectiveHeight * factor),
+            "safeHorizontal" to margins.first,
+            "safeVertical" to margins.second,
+            "rotation" to rotation, "sarNum" to sarNum, "sarDen" to sarDen,
+            "density" to resources.displayMetrics.density))
     }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
@@ -124,6 +141,7 @@ internal class CoreSurfaceView(context: Context, private val owner: SurfaceOwner
 }
 
 internal interface SurfaceOwner {
+    fun videoGeometry(value: Map<String, Any>)
     fun setSurface(surface: Surface?)
     fun setViewport(width: Int, height: Int)
 }

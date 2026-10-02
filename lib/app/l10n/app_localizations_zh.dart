@@ -1324,4 +1324,37 @@ class AppLocalizationsZh extends AppLocalizations {
   String phoneSelectedSeason(int count) {
     return '本季 $count 集';
   }
+
+  @override
+  String get phoneSubtitleSize => '手机字幕大小';
+
+  @override
+  String get phoneSubtitleSmall => '小';
+
+  @override
+  String get phoneSubtitleStandard => '标准';
+
+  @override
+  String get phoneSubtitleLarge => '大';
+
+  @override
+  String get phoneSubtitleExtraLarge => '特大';
+
+  @override
+  String get phoneSubtitleOriginal => '使用原始 ASS 样式';
+
+  @override
+  String get phoneSubtitleOriginalHint => '保留字幕作者的字号与特效排版';
+
+  @override
+  String get phoneSubtitleUnavailable => '当前没有独立可调的文字字幕；图片字幕和画面内文字不支持字号调整';
+
+  @override
+  String get phonePictureInPicture => '画中画';
+
+  @override
+  String get phonePipUnavailable => '当前设备或系统设置不支持画中画';
+
+  @override
+  String get phonePipFailed => '无法进入画中画，请检查系统权限';
 }

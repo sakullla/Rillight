@@ -586,6 +586,7 @@ class PlayerController extends ChangeNotifier {
   String? _suspendedUser;
   String? _suspendedToken;
   int _suspendedTicks = 0;
+  bool _suspendedAtEnd = false;
   Future<void>? _suspending;
   Future<void>? _suspendRetirement;
   Future<void>? _restoring;
@@ -610,6 +611,7 @@ class PlayerController extends ChangeNotifier {
     _suspendedUser = client.userId;
     _suspendedToken = client.accessToken;
     _suspendedTicks = ticksFromDuration(position);
+    _suspendedAtEnd = playbackEnded || state.phase == PlaybackPhase.ended;
     isPlaying = false;
     final stopped = _stopSession();
     _beginOperation();
@@ -704,6 +706,21 @@ class PlayerController extends ChangeNotifier {
     _suspendRetirement = null;
     _suspendReleasePending = false;
     _backgroundReleased = false;
+    if (_suspendedAtEnd) {
+      // EOF has no next video frame. Reopening at duration would leave native
+      // startup waiting forever. Restore the ended UI; only explicit replay
+      // creates a new decoder at zero, and returning never starts audio.
+      loading = false;
+      isPlaying = false;
+      playbackEnded = true;
+      controlsVisible = true;
+      state.phase = PlaybackPhase.ended;
+      if (duration > Duration.zero && position > duration) {
+        _setPosition(duration);
+      }
+      _emit();
+      return;
+    }
     final operation = _beginOperation();
     if (operation == null) return;
     await _open(
@@ -1003,6 +1020,7 @@ class PlayerController extends ChangeNotifier {
 
   /// No independent text track means there is no effective font-size control.
   bool get canAdjustSubtitleSize {
+    if (_suspendedAtEnd) return false;
     final index = subtitleStreamIndex;
     if (index == null) return false;
     final stream = resolved?.mediaSource.streamByIndex(index);
@@ -1033,8 +1051,8 @@ class PlayerController extends ChangeNotifier {
       displayWidth: width,
       displayHeight: height,
       fontSize: (landscape ? 24 : 20) * textScale,
-      safeHorizontal: safeHorizontal.clamp(0, width * 0.2),
-      safeVertical: safeVertical.clamp(0, height * 0.2),
+      safeHorizontal: safeHorizontal.clamp(0, width * 0.49),
+      safeVertical: safeVertical.clamp(0, height * 0.49),
     );
     final previous = _subtitleViewport;
     if (previous != null &&
@@ -1118,6 +1136,7 @@ class PlayerController extends ChangeNotifier {
 
   bool get _canSendPlaybackParameters =>
       !loading &&
+      !_suspendedAtEnd &&
       switch (state.phase) {
         PlaybackPhase.playing ||
         PlaybackPhase.paused ||
@@ -2517,6 +2536,7 @@ class PlayerController extends ChangeNotifier {
     _slowSince = null;
     nextEpisode = null;
     playbackEnded = false;
+    _suspendedAtEnd = false;
     _nextUpOffered = false;
     _nextUpLoading = false;
     _outroSkipAllowed = false;

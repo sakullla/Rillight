@@ -203,3 +203,26 @@ and injects a delayed invalid response. Pause, seek, volume and superseding
 selection must remain responsive, and the failed download must never add a
 native subtitle. The separate owned-core test exercises a blocked external
 subtitle load; these are distinct paths.
+
+### Phone subtitles and system PiP
+
+The app observer now exposes `player.presentation` (version, supported, entering,
+active, foreground, retainPlayback, shouldSuspend, generation, actual native
+geometry and screen display rectangle) plus `subtitleSettings`,
+`subtitleAdjustable` and `subtitleSettingsError`. These are session-filtered
+facts, not a second playback owner. Synthetic SRT/WebVTT media includes Chinese
+and English lines; inspect actual Android screenshots for Chinese glyphs,
+wrapping, fit/fill, text scale and paused size changes. A selected track alone
+is insufficient evidence.
+
+`phone_pip_flow` exercises Home auto-entry, verifies a real pinned system task,
+checks the same core session and hidden Flutter controls, compares cropped native
+video frames, expands the existing singleTop Activity, and tests manual entry
+while paused. Ordinary background checks then leave a paused player. Unsupported
+API 24/25 and TV never enter PiP. Root-device runs must separately check system
+RemoteActions, denied permission, screen lock/wake, close, fast transitions and
+account invalidation; unexecuted versions remain unverified. Emulator gRPC PCM
+can prove virtual audio only, never physical speakers or hardware acceptance.
+
+Prototype `player-pip-controls-hidden` injects native state into the real Flutter
+tree; it does not show a system PiP window or prove native playback continuity.

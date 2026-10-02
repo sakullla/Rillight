@@ -415,6 +415,39 @@ void layout_presentation_test() {
   std::puts("Chinese wrapping, bilingual text, authored ASS position/color and CPU/HDR plane policy passed");
 }
 
+void ended_subtitle_redraw_test() {
+  Media media{};
+  media.video = make_ass_video(AV_CODEC_ID_SUBRIP);
+  RillightCoreIo io{&media, open, read, seek, close, cancel, cancel_media_io};
+  auto *core = rillight_core_create(&io);
+  assert(rillight_core_open(core, "synthetic.mkv", 1) == 0);
+  int64_t last_pts = -1;
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  while (std::chrono::steady_clock::now() < deadline) {
+    if (auto *frame = rillight_core_take_frame(core, RILLIGHT_CORE_VIDEO_RGBA)) {
+      last_pts = frame->pts_us;
+      // Subtitle cue lasts four seconds; the three-second movie must retain
+      // glyphs through every queued tail frame, even after demux reaches EOF.
+      assert(ink_bounds(frame).width() > 0);
+      rillight_core_release_frame(frame);
+    }
+    const auto state = snapshot(core);
+    if (state.source_eof && !state.queued_video_frames)
+      assert(rillight_core_report_output_drained(core, state.session_id, state.timeline_version) == 0);
+    if (state.state == RILLIGHT_CORE_ENDED) break;
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  const auto ended = snapshot(core);
+  assert(ended.state == RILLIGHT_CORE_ENDED && last_pts >= 2800000);
+  RillightCoreSubtitlePresentation p{sizeof(p), 1, 1, 0, 180, 101.25, 20, 1, 6, 4};
+  assert(rillight_core_set_subtitle_presentation(core, &p, ended.session_id) == 0);
+  auto *preview = rillight_core_take_frame(core, RILLIGHT_CORE_VIDEO_RGBA);
+  assert(preview && preview->pts_us == last_pts);
+  assert(ink_bounds(preview).width() > 0);
+  rillight_core_release_frame(preview);
+  rillight_core_destroy(core);
+}
+
 void presentation_test() {
   for (const auto codec : {AV_CODEC_ID_SUBRIP, AV_CODEC_ID_WEBVTT, AV_CODEC_ID_ASS}) {
     double previous_resolution = 0;
@@ -483,7 +516,7 @@ void presentation_test() {
 int main(int argc, char** argv) {
   assert(rillight_core_abi_version() == RILLIGHT_CORE_ABI_VERSION);
   if (argc > 1 && std::strcmp(argv[1], "--presentation") == 0) {
-    presentation_test(); layout_presentation_test(); return 0;
+    presentation_test(); layout_presentation_test(); ended_subtitle_redraw_test(); return 0;
   }
   if (argc > 1 && std::strcmp(argv[1], "--mov-text-only") == 0) {
     Media media{};

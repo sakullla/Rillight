@@ -254,7 +254,29 @@ class CaptureAdapter extends FakeEmbyAdapter {
   }
 }
 
-class CaptureBackend extends FakeVideoBackend {
+class CaptureBackend extends FakeVideoBackend
+    implements VideoBackendPhonePresentation {
+  @override
+  final ValueNotifier<Map<String, dynamic>> phonePresentation = ValueNotifier({
+    'supported': true,
+    'foreground': true,
+  });
+  @override
+  Future<void> configurePhonePresentation(bool enabled) async {}
+  @override
+  Future<Map<String, dynamic>> refreshPhonePresentation() async =>
+      phonePresentation.value;
+  @override
+  Future<bool> enterPictureInPicture() async {
+    phonePresentation.value = {
+      'supported': true,
+      'active': true,
+      'retainPlayback': true,
+      'foreground': false,
+    };
+    return true;
+  }
+
   CaptureBackend() : super(duration: const Duration(minutes: 96));
   Completer<void>? openGate;
 

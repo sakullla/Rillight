@@ -51,3 +51,8 @@ node tool/capture-ui.mjs --only '*loading*' --list
 运行前先 `flutter pub get`。捕获不自动更新视觉基线，也不以截图存在代替人工视觉评审；完整矩阵完成后再检查截图中的文字、选中反馈、焦点、遮挡与内容密度。
 
 macOS 若运行磁盘缓存测试时出现 `disk-unavailable`，先检查系统临时目录是否经过 `/var` 等符号链接。缓存协调器有意拒绝链接根目录；可使用 `env TMPDIR=/private/tmp flutter test --no-pub` 指定真实临时目录，无需放宽生产代码中的目录保护。原型捕获使用内存缓存，不依赖这项设置。
+
+手机播放器包含真实字幕偏好编辑器的“大”和“原始 ASS”状态，以及画中画入口与控制层隐藏状态。
+画中画隐藏状态通过注入原生事实的测试 backend 驱动同一 Flutter 树，仅验证覆盖层显隐；
+它不是系统小窗、原生字幕像素或连续视频／音频证据。系统 PiP 使用隔离 Android 验证包，
+由 `tool/android_release_checks.py` 的 `phone_pip_flow` 另验 pinned task、连续会话和变化画面。

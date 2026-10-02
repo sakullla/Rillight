@@ -25,8 +25,8 @@ args = parser.parse_args()
 media = args.media.resolve()
 if args.generate:
     media.mkdir(parents=True, exist_ok=True)
-    (media / 'sample.srt').write_text('1\n00:00:00,000 --> 00:01:00,000\nANDROID EMBEDDED SRT\n', encoding='utf-8')
-    (media / 'sample.vtt').write_text('WEBVTT\n\n00:00.000 --> 01:00.000\nANDROID EXTERNAL WEBVTT\n', encoding='utf-8')
+    (media / 'sample.srt').write_text('1\n00:00:00,000 --> 00:01:00,000\n中文字幕清晰可读，长句应当自然换行\nANDROID EMBEDDED SRT\n', encoding='utf-8')
+    (media / 'sample.vtt').write_text('WEBVTT\n\n00:00.000 --> 01:00.000\n外部字幕字号调整保持时间同步\nANDROID EXTERNAL WEBVTT\n', encoding='utf-8')
     subprocess.run([args.ffmpeg, '-y', '-f', 'lavfi', '-i', 'testsrc2=size=1280x720:rate=30',
         '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000',
         '-f', 'lavfi', '-i', 'sine=frequency=880:sample_rate=48000', '-i', str(media / 'sample.srt'),

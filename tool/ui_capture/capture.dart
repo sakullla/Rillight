@@ -368,6 +368,27 @@ void main() {
             await capture.danmakuPages(danmakuClient);
             await mouse.removePointer();
           } else if (config.$1 == 'phone') {
+            for (final scale in [1.3, 2.0]) {
+              tester.platformDispatcher.textScaleFactorTestValue = scale;
+              await capture.advance(200);
+              await capture.revealPhoneControls();
+              await capture.save(
+                'player-controls-text-${(scale * 100).round()}',
+              );
+            }
+            tester.platformDispatcher.clearTextScaleFactorTestValue();
+            await capture.advance(200);
+            await capture.revealPhoneControls();
+            await capture.save('player-pip-entry');
+            await capture.tap(const Key('mobile-player-pip'));
+            expect(find.byKey(const Key('mobile-player-toggle')), findsNothing);
+            await capture.save('player-pip-controls-hidden');
+            backend.phonePresentation.value = {
+              'supported': true,
+              'foreground': true,
+              'active': false,
+            };
+            await capture.advance(200);
             await capture.tap(const Key('mobile-player-lock'));
             await capture.save('player-locked');
             await capture.tap(const Key('mobile-player-unlock'));
@@ -522,7 +543,34 @@ class CaptureSession {
     expect(tester.takeException(), isNull);
   }
 
+  Future<void> revealPhoneControls() async {
+    final player = find.byType(MobilePlayerPage);
+    if (player.evaluate().length != 1) return;
+    if (tester
+            .state<MobilePlayerPageState>(player)
+            .controller
+            ?.controlsVisible ==
+        false) {
+      await tester.tapAt(Offset(20, tester.view.physicalSize.height * .45));
+      await advance(100);
+    }
+  }
+
   Future<void> tap(Key key) async {
+    final player = find.byType(MobilePlayerPage);
+    if (platform == 'phone' &&
+        key is ValueKey<String> &&
+        key.value.startsWith('mobile-player-') &&
+        player.evaluate().length == 1) {
+      final state = tester.state<MobilePlayerPageState>(player);
+      if (state.controller?.controlsVisible == false &&
+          find.byKey(const Key('mobile-player-options')).evaluate().isEmpty) {
+        // Palette settling also advances time. Reveal expired controls using
+        // the actual gesture tree before interacting with their buttons.
+        await tester.tapAt(Offset(20, tester.view.physicalSize.height * .45));
+        await advance(100);
+      }
+    }
     var target = find.byKey(key);
     expect(target, findsOneWidget, reason: 'Missing capture interaction: $key');
     // ExpansionTile's whole render box includes its expanded children. Click
@@ -552,6 +600,21 @@ class CaptureSession {
       final key = ValueKey('mobile-player-section-$section');
       await tap(key);
       await save('$prefix-settings-$section');
+      if (section == 'tracks') {
+        final controller = tester
+            .state<MobilePlayerPageState>(find.byType(MobilePlayerPage))
+            .controller!;
+        final track = controller.selectableSubtitleTracks.firstWhere(
+          (track) => track.isTextSubtitle,
+        );
+        unawaited(controller.setSubtitle(track.index));
+        await advance(600);
+        await tap(const Key('phone-subtitle-large'));
+        await save('$prefix-subtitle-large');
+        await tap(const Key('phone-subtitle-original'));
+        await save('$prefix-subtitle-original');
+        await tap(const Key('phone-subtitle-reset'));
+      }
       await tap(const Key('mobile-player-panel-back'));
     }
     await tap(const Key('mobile-player-source-entry'));

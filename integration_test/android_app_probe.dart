@@ -67,6 +67,9 @@ Future<Map<String, Object?>> snapshot() async {
             'released': controller.backgroundReleased,
             'audio': controller.audioStreamIndex,
             'subtitle': controller.subtitleStreamIndex,
+            'subtitleSettings': controller.phoneSubtitleSettings.toJson(),
+            'subtitleAdjustable': controller.canAdjustSubtitleSize,
+            'subtitleSettingsError': controller.subtitlePresentationError,
             'activeMediaSourceId': controller.activeMediaSourceId,
             'pendingMediaSourceId': controller.pendingMediaSourceId,
             'mediaSourceCount': controller.mediaSources.length,
@@ -100,10 +103,19 @@ Future<Map<String, Object?>> snapshot() async {
           if (rect.overlaps(
             Offset.zero & (view.physicalSize / view.devicePixelRatio),
           )) {
+            final hit = HitTestResult();
+            WidgetsBinding.instance.hitTestInView(
+              hit,
+              rect.center,
+              view.viewId,
+            );
             rows.add({
               'key': key,
               'label': label,
               'focused': focused,
+              'hitTestable': hit.path.any(
+                (entry) => identical(entry.target, render),
+              ),
               'rect': [rect.left, rect.top, rect.right, rect.bottom],
             });
           }
@@ -129,6 +141,8 @@ Future<Map<String, Object?>> snapshot() async {
     // transport/core facts are exposed; no media URL, credentials, or raw errors.
     try {
       final diagnostics = await observedBackend!.diagnostics();
+      player!['presentation'] = await observedBackend!
+          .refreshPhonePresentation();
       player!['diagnostics'] = {
         for (final key in const [
           'openPhase',

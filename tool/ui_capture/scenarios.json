@@ -1213,5 +1213,61 @@
     "platforms": [
       "phone"
     ]
+  },
+  {
+    "id": "player-subtitle-large",
+    "feature": "player",
+    "platforms": [
+      "phone"
+    ]
+  },
+  {
+    "id": "player-subtitle-original",
+    "feature": "player",
+    "platforms": [
+      "phone"
+    ]
+  },
+  {
+    "id": "player-landscape-subtitle-large",
+    "feature": "player",
+    "platforms": [
+      "phone"
+    ]
+  },
+  {
+    "id": "player-landscape-subtitle-original",
+    "feature": "player",
+    "platforms": [
+      "phone"
+    ]
+  },
+  {
+    "id": "player-pip-entry",
+    "feature": "player",
+    "platforms": [
+      "phone"
+    ]
+  },
+  {
+    "id": "player-pip-controls-hidden",
+    "feature": "player",
+    "platforms": [
+      "phone"
+    ]
+  },
+  {
+    "id": "player-controls-text-130",
+    "feature": "player",
+    "platforms": [
+      "phone"
+    ]
+  },
+  {
+    "id": "player-controls-text-200",
+    "feature": "player",
+    "platforms": [
+      "phone"
+    ]
   }
 ]

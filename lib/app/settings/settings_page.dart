@@ -13,6 +13,7 @@ import 'package:rillight/player/danmaku/danmaku_display_settings.dart';
 import 'package:rillight/player/danmaku/danmaku_keys.dart';
 import 'package:rillight/player/player_runtime_options.dart';
 import 'package:rillight/player/player_settings.dart';
+import 'package:rillight/player/phone_subtitle_settings.dart';
 
 /// 设置页:展开/收起外观、播放与弹幕配置,按需调整二级选项。
 ///
@@ -213,6 +214,7 @@ class _SettingsPageState extends State<SettingsPage> {
         hardwareDecoding: HardwareDecodingMode.auto,
         hardwareDecoder: HardwareDecoderBackend.auto,
         playbackRate: 1,
+        phoneSubtitles: const PhoneSubtitleSettings(),
         skipIntroEnabled: true,
         skipOutroEnabled: true,
       ),
@@ -373,6 +375,13 @@ class _SettingsPageState extends State<SettingsPage> {
                     label: Text(l10n.settingsRestoreDefaults),
                   ),
                   children: [
+                    PhoneSubtitleSettingsControls(
+                      value: _settings.effectivePhoneSubtitles,
+                      onChanged: (value) => unawaited(
+                        _save(PlayerSettings(phoneSubtitles: value)),
+                      ),
+                    ),
+                    const Divider(),
                     _SettingsChoiceRow(
                       label: l10n.playbackRate,
                       hint: l10n.settingsAppliesToNewPlayback,

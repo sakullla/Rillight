@@ -26,6 +26,7 @@ class RillightVideoBackend extends VideoBackend
     implements
         VideoBackendCapabilities,
         VideoBackendSubtitlePresentation,
+        VideoBackendPhonePresentation,
         VideoBackendTranscodeSubtitles,
         VideoBackendTrackSupport,
         VideoBackendSourceRenewal,
@@ -42,6 +43,54 @@ class RillightVideoBackend extends VideoBackend
        _player = Platform.isAndroid && createPlayer == null
            ? AndroidCorePlayer()
            : null;
+
+  @override
+  final ValueNotifier<Map<String, dynamic>> phonePresentation = ValueNotifier(
+    const {},
+  );
+  bool _phonePresentationEnabled = false;
+  @override
+  Future<void> configurePhonePresentation(bool enabled) async {
+    _phonePresentationEnabled = enabled;
+    final player = _player;
+    if (player is! AndroidCorePlayer) return;
+    final generation = _generation;
+    final expectedSession = _coreSession;
+    final state = await player.command('configurePhonePresentation', {
+      'enabled': enabled,
+    });
+    if (!_disposed &&
+        generation == _generation &&
+        expectedSession == _coreSession &&
+        state['session'] == expectedSession) {
+      phonePresentation.value = state;
+    }
+  }
+
+  @override
+  Future<Map<String, dynamic>> refreshPhonePresentation() async {
+    final player = _player;
+    if (player is! AndroidCorePlayer) return const {};
+    final generation = _generation;
+    final expectedSession = _coreSession;
+    final state = await player.command('phonePresentation');
+    if (_disposed ||
+        generation != _generation ||
+        expectedSession != _coreSession ||
+        state['session'] != expectedSession) {
+      return const {};
+    }
+    phonePresentation.value = state;
+    return state;
+  }
+
+  @override
+  Future<bool> enterPictureInPicture() async {
+    final player = _player;
+    if (player is! AndroidCorePlayer) return false;
+    final result = await player.command('enterPictureInPicture');
+    return result['accepted'] == true;
+  }
 
   PlayerSettingsStore? _settingsStore;
   final CorePlayerFactory _createPlayer;
@@ -441,6 +490,7 @@ class RillightVideoBackend extends VideoBackend
       );
       if (_disposed || generation != _generation) return;
       _readTrackSupport(result);
+      if (_phonePresentationEnabled) await configurePhonePresentation(true);
       await _syncContainerTracks(result, transport);
       await transport.setPlaybackActive(_wantsPlayback);
       if (_disposed || generation != _generation) return;
@@ -487,6 +537,8 @@ class RillightVideoBackend extends VideoBackend
     _lastCoreEvent = event.kind;
     _nativeEvents.add({'kind': event.kind, 'value': event.value});
     switch (event.kind) {
+      case 'presentation':
+        phonePresentation.value = Map<String, dynamic>.from(event.value as Map);
       case 'position':
         position = Duration(
           milliseconds: (event.value as num).toInt().clamp(0, 1 << 52),
@@ -1105,6 +1157,7 @@ class RillightVideoBackend extends VideoBackend
     await _events.close();
     await _nativeEvents.close();
     _nativeOverlay.dispose();
+    phonePresentation.dispose();
   }
 
   @override

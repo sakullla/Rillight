@@ -121,6 +121,35 @@ void main() {
     expect(settings.volume, 40);
   }, tags: ['integration']);
 
+  testWidgets(
+    'phone subtitle preference saves independently and resets through shared editor',
+    (tester) async {
+      final store = MemoryPlayerSettingsStore(
+        const PlayerSettings(volume: 54, playbackRate: 1.5),
+      );
+      await pumpPage(tester, store: store);
+      await expandSection(tester, '播放');
+      await tester.tap(find.byKey(const Key('phone-subtitle-extraLarge')));
+      await tester.pumpAndSettle();
+      expect(
+        (await store.read()).effectivePhoneSubtitles.size,
+        PhoneSubtitleSize.extraLarge,
+      );
+      await tester.tap(find.byKey(const Key('phone-subtitle-original')));
+      await tester.pumpAndSettle();
+      expect((await store.read()).effectivePhoneSubtitles.originalAss, isTrue);
+      await tester.tap(find.byKey(const Key('phone-subtitle-reset')));
+      await tester.pumpAndSettle();
+      expect(
+        (await store.read()).effectivePhoneSubtitles.size,
+        PhoneSubtitleSize.standard,
+      );
+      expect((await store.read()).volume, 54);
+      expect((await store.read()).playbackRate, 1.5);
+    },
+    tags: ['integration'],
+  );
+
   testWidgets('sections collapse and skip switches persist independently', (
     tester,
   ) async {
@@ -130,7 +159,11 @@ void main() {
     await expandSection(tester, '播放');
     final switches = find.descendant(
       of: find.byKey(const ValueKey('settings-section-播放')),
-      matching: find.byType(SwitchListTile),
+      matching: find.byWidgetPredicate(
+        (w) =>
+            w is SwitchListTile &&
+            w.key != const Key('phone-subtitle-original'),
+      ),
     );
     expect(switches, findsNWidgets(2));
     await tester.tap(switches.first);
@@ -155,7 +188,15 @@ void main() {
     await pumpPage(tester, store: store);
     await store.write(const PlayerSettings(volume: 75));
     await expandSection(tester, '播放');
-    await tester.tap(find.byType(SwitchListTile).first);
+    await tester.tap(
+      find
+          .byWidgetPredicate(
+            (w) =>
+                w is SwitchListTile &&
+                w.key != const Key('phone-subtitle-original'),
+          )
+          .first,
+    );
     await tester.pumpAndSettle();
     expect((await store.read()).volume, 75);
     expect((await store.read()).isSkipIntroEnabled, isFalse);

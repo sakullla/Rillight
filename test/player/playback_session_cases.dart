@@ -176,6 +176,27 @@ void main() {
   );
 
   test(
+    'ended background restore keeps ended UI until explicit zero replay',
+    () async {
+      await controller.start();
+      backend.completePlayback(at: const Duration(hours: 3));
+      await _until(() => controller.playbackEnded);
+      final opens = backend.openCount;
+      await controller.suspendPlayback();
+      await controller.restorePlayback();
+      expect(backend.openCount, opens);
+      expect(controller.loading, isFalse);
+      expect(controller.playbackEnded, isTrue);
+      expect(controller.isPlaying, isFalse);
+      expect(controller.backgroundReleased, isFalse);
+      await controller.togglePlay();
+      expect(backend.openCount, opens + 1);
+      expect(backend.openedStart, Duration.zero);
+      expect(controller.playbackEnded, isFalse);
+    },
+  );
+
+  test(
     'native authentication failure stops media and exposes reconnect state',
     () async {
       await controller.start();

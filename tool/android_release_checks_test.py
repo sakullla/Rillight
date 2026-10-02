@@ -19,6 +19,50 @@ import android_release_checks as checks
 
 
 class EvidenceTests(unittest.TestCase):
+    def test_legacy_immersive_button_requires_explicit_cling_context(self):
+        with tempfile.TemporaryDirectory() as temp:
+            device = object.__new__(Device)
+            device.output = Path(temp)
+            button = '<node package="android" resource-id="android:id/ok" text="GOT IT" bounds="[10,20][50,60]"/>'
+            title = '<node package="android" resource-id="android:id/immersive_cling_title"/>'
+            device.adb = Mock(side_effect=[b'', ('<hierarchy>'+title+button+'</hierarchy>').encode(), b''])
+            self.assertTrue(device.dismiss_immersive_hint())
+            self.assertEqual(device.adb.call_args, call('shell', 'input', 'tap', 30, 40))
+            device.adb = Mock(side_effect=[b'', ('<hierarchy>'+button+'</hierarchy>').encode()])
+            self.assertFalse(device.dismiss_immersive_hint())
+            self.assertEqual(device.adb.call_count, 2)
+
+    def test_pinned_task_detection_is_version_and_package_bound(self):
+        modern = 'Task{abc I=' + checks.PACKAGE + '/Main U=0 mode=pinned sz=1}'
+        legacy = '  Stack #4:\n    TaskRecord{abc I=' + checks.PACKAGE + '/Main U=0 StackId=4 sz=1}\n  Stack #1:\n'
+        self.assertTrue(checks.has_system_pip_task(modern, 36))
+        self.assertTrue(checks.has_system_pip_task(legacy, 26))
+        self.assertTrue(checks.has_system_pip_task(legacy, 27))
+        self.assertFalse(checks.has_system_pip_task(legacy, 36))
+        self.assertFalse(checks.has_system_pip_task(legacy.replace('Stack #4:', 'Stack #1:'), 26))
+        self.assertFalse(checks.has_system_pip_task(modern.replace(checks.PACKAGE, 'other.app'), 36))
+        self.assertFalse(checks.has_system_pip_task(legacy, 25))
+
+    def test_pip_unsupported_never_sends_home_or_fakes_a_window(self):
+        device = Mock()
+        device.state.return_value = {'player': {'presentation': {'supported': False}}}
+        self.assertEqual(checks.phone_pip_flow(device)['status'], 'unsupported')
+        device.key.assert_not_called()
+        device.screenshot.assert_not_called()
+
+    def test_pip_callback_without_system_pinned_task_fails(self):
+        with tempfile.TemporaryDirectory() as temp:
+            device = Mock(output=Path(temp))
+            player = {'presentation': {'supported': True, 'active': True},
+                      'diagnostics': {'coreSession': 'current'}, 'playing': True,
+                      'released': False}
+            device.state.return_value = {'player': player}
+            device.wait.return_value = {'player': player, 'rows': []}
+            device.adb.side_effect = lambda *args: b'36' if 'getprop' in args else b'Activity mode=fullscreen'
+            with self.assertRaisesRegex(RuntimeError, 'actual pinned system task'):
+                checks.phone_pip_flow(device)
+            device.screenshot.assert_not_called()
+
     def test_jni_audit_accepts_definitions_and_rejects_release_shrinking(self):
         # dexdump's method-definition shape; the broken 0.1.33 APK renamed
         # CoreInput and open(), and erased both frame constructors.

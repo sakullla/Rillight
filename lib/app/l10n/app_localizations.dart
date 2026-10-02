@@ -2601,6 +2601,72 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'本季 {count} 集'**
   String phoneSelectedSeason(int count);
+
+  /// No description provided for @phoneSubtitleSize.
+  ///
+  /// In zh, this message translates to:
+  /// **'手机字幕大小'**
+  String get phoneSubtitleSize;
+
+  /// No description provided for @phoneSubtitleSmall.
+  ///
+  /// In zh, this message translates to:
+  /// **'小'**
+  String get phoneSubtitleSmall;
+
+  /// No description provided for @phoneSubtitleStandard.
+  ///
+  /// In zh, this message translates to:
+  /// **'标准'**
+  String get phoneSubtitleStandard;
+
+  /// No description provided for @phoneSubtitleLarge.
+  ///
+  /// In zh, this message translates to:
+  /// **'大'**
+  String get phoneSubtitleLarge;
+
+  /// No description provided for @phoneSubtitleExtraLarge.
+  ///
+  /// In zh, this message translates to:
+  /// **'特大'**
+  String get phoneSubtitleExtraLarge;
+
+  /// No description provided for @phoneSubtitleOriginal.
+  ///
+  /// In zh, this message translates to:
+  /// **'使用原始 ASS 样式'**
+  String get phoneSubtitleOriginal;
+
+  /// No description provided for @phoneSubtitleOriginalHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'保留字幕作者的字号与特效排版'**
+  String get phoneSubtitleOriginalHint;
+
+  /// No description provided for @phoneSubtitleUnavailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'当前没有独立可调的文字字幕；图片字幕和画面内文字不支持字号调整'**
+  String get phoneSubtitleUnavailable;
+
+  /// No description provided for @phonePictureInPicture.
+  ///
+  /// In zh, this message translates to:
+  /// **'画中画'**
+  String get phonePictureInPicture;
+
+  /// No description provided for @phonePipUnavailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'当前设备或系统设置不支持画中画'**
+  String get phonePipUnavailable;
+
+  /// No description provided for @phonePipFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'无法进入画中画，请检查系统权限'**
+  String get phonePipFailed;
 }
 
 class _AppLocalizationsDelegate

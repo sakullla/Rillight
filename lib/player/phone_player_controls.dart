@@ -14,6 +14,7 @@ import 'package:rillight/player/buffered_ranges_track.dart';
 import 'package:rillight/player/network_throughput.dart';
 import 'package:rillight/player/player_controller.dart';
 import 'package:rillight/player/player_settings.dart';
+import 'package:rillight/player/phone_subtitle_settings.dart';
 import 'package:rillight/player/playback_skip_settings.dart';
 import 'package:rillight/player/player_setting_choices.dart';
 import 'package:rillight/player/phone/phone_player_interaction.dart';
@@ -43,6 +44,8 @@ class PhonePlayerControls extends StatefulWidget {
     this.center = const SizedBox.shrink(),
     this.fillFrame = false,
     this.onFillFrame,
+    this.onPictureInPicture,
+    this.pipSupported = true,
   });
 
   final PlayerController controller;
@@ -58,6 +61,8 @@ class PhonePlayerControls extends StatefulWidget {
   /// True when the picture is cropped to remove aspect-ratio black bars.
   final bool fillFrame;
   final ValueChanged<bool>? onFillFrame;
+  final Future<void> Function()? onPictureInPicture;
+  final bool pipSupported;
 
   @override
   State<PhonePlayerControls> createState() => PhonePlayerControlsState();
@@ -298,6 +303,21 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                   ),
                   const SizedBox(width: 4),
                   Expanded(child: _title(l)),
+                  if (widget.onPictureInPicture != null)
+                    IconButton(
+                      key: const Key('mobile-player-pip'),
+                      tooltip: widget.pipSupported
+                          ? l.phonePictureInPicture
+                          : l.phonePipUnavailable,
+                      style: _phoneChromeButton,
+                      onPressed:
+                          _canControl &&
+                              widget.pipSupported &&
+                              !_controller.playbackEnded
+                          ? widget.onPictureInPicture
+                          : null,
+                      icon: const Icon(Icons.picture_in_picture_alt),
+                    ),
                   IconButton(
                     key: const Key('mobile-player-lock'),
                     tooltip: l.mobileLock,
@@ -518,58 +538,30 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
             ),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 8),
-              child: Row(
-                children: [
-                  clock,
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Align(
-                      alignment: Alignment.centerRight,
-                      child: FittedBox(fit: BoxFit.scaleDown, child: cache),
-                    ),
-                  ),
-                ],
+              child: Wrap(
+                crossAxisAlignment: WrapCrossAlignment.center,
+                alignment: WrapAlignment.spaceBetween,
+                spacing: 12,
+                runSpacing: 4,
+                children: [clock, cache],
               ),
             ),
             const SizedBox(height: 8),
-            Row(
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
               children: [
-                Expanded(
-                  child: SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: Row(
-                      children: [
-                        _shortcut(
-                          'mobile-player-speed',
-                          Icons.speed,
-                          '${c.playbackRate}x',
-                          () => _openMore(section: 'speed'),
-                        ),
-                        if (c.canSwitchQuality)
-                          _shortcut(
-                            'mobile-player-quality',
-                            Icons.high_quality_outlined,
-                            playerQualityLabel(l, c.maxStreamingBitrate),
-                            () => _openMore(section: 'quality'),
-                          ),
-                        _shortcut(
-                          'mobile-player-tracks',
-                          Icons.subtitles_outlined,
-                          c.canSwitchAudioTrack
-                              ? l.mobileTracks
-                              : l.subtitleTrack,
-                          () => _openMore(section: 'tracks'),
-                        ),
-                        if (widget.danmaku?.isConfigured == true)
-                          _shortcut(
-                            'mobile-player-danmaku',
-                            Icons.forum_outlined,
-                            l.danmaku,
-                            () => _openMore(section: 'danmaku'),
-                          ),
-                      ],
-                    ),
-                  ),
+                _shortcut(
+                  'mobile-player-speed',
+                  Icons.speed,
+                  '${c.playbackRate}x',
+                  () => _openMore(section: 'speed'),
+                ),
+                _shortcut(
+                  'mobile-player-tracks',
+                  Icons.subtitles_outlined,
+                  c.canSwitchAudioTrack ? l.mobileTracks : l.subtitleTrack,
+                  () => _openMore(section: 'tracks'),
                 ),
                 _shortcut(
                   'mobile-player-more',
@@ -577,6 +569,13 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                   l.mobileMore,
                   () => _openMore(),
                 ),
+                if (widget.danmaku?.isConfigured == true)
+                  _shortcut(
+                    'mobile-player-danmaku',
+                    Icons.forum_outlined,
+                    l.danmaku,
+                    () => _openMore(section: 'danmaku'),
+                  ),
               ],
             ),
           ],
@@ -593,7 +592,7 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
   ) {
     return Padding(
       key: ValueKey('shortcut-shell-$key'),
-      padding: const EdgeInsets.only(right: 8),
+      padding: EdgeInsets.zero,
       child: TextButton.icon(
         key: Key(key),
         style: TextButton.styleFrom(
@@ -609,12 +608,7 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
         ),
         onPressed: _controller.loading ? null : () => unawaited(action()),
         icon: Icon(icon, size: 20),
-        label: Text(
-          label,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(fontSize: 13),
-        ),
+        label: Text(label, style: const TextStyle(fontSize: 14)),
       ),
     );
   }
@@ -759,7 +753,7 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
             );
           }
 
-          return SingleChildScrollView(
+          return Padding(
             padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -814,275 +808,323 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                   ],
                 ),
                 const SizedBox(height: 12),
-                if (section == null) ...[
-                  for (final entry in <String, (IconData, String)>{
-                    'speed': (Icons.speed, l.playbackRate),
-                    'tracks': (
-                      Icons.subtitles_outlined,
-                      c.canSwitchAudioTrack ? l.mobileTracks : l.subtitleTrack,
-                    ),
-                    if (c.canSwitchQuality)
-                      'quality': (Icons.high_quality_outlined, l.quality),
-                    'picture': (Icons.aspect_ratio, l.playerPictureSettings),
-                    'skip': (Icons.fast_forward_rounded, l.playerSkipSettings),
-                    if (danmaku != null)
-                      'danmaku': (Icons.chat_bubble_outline, l.danmaku),
-                  }.entries)
-                    optionTile(
-                      key: ValueKey('mobile-player-section-${entry.key}'),
-                      selected: false,
-                      leading: Icon(entry.value.$1),
-                      title: Text(entry.value.$2),
-                      subtitle: Text(
-                        sectionValue(entry.key),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      trailing: const Icon(Icons.chevron_right_rounded),
-                      onTap: () {
-                        panelSetState(() => panelSection = entry.key);
-                        widget.interaction.setPanel(entry.key);
-                      },
-                    ),
-                  if (c.canSwitchMediaSource)
-                    optionTile(
-                      key: const Key('mobile-player-source-entry'),
-                      selected: false,
-                      leading: const Icon(Icons.video_library_outlined),
-                      title: Text(l.mobileSource),
-                      subtitle: Text(
-                        sectionValue('source'),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      trailing: const Icon(Icons.chevron_right_rounded),
-                      onTap: () {
-                        panelSetState(() => panelSection = 'source');
-                        widget.interaction.setPanel('source');
-                      },
-                    ),
-                ],
-                if (section == 'skip') PlaybackSkipSettings(controller: c),
-                if (section == 'source' && c.canSwitchMediaSource) ...[
-                  SizedBox(
-                    height: 40,
-                    child: Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        sourceStatus,
-                        key: const Key('mobile-source-status'),
-                      ),
-                    ),
-                  ),
-                  for (final source in c.mediaSources)
-                    optionTile(
-                      key: ValueKey('mobile-source-${source.id}'),
-                      selected: source.id == c.activeMediaSourceId,
-                      leading: Icon(
-                        c.pendingMediaSourceId == source.id && c.isRecovering
-                            ? Icons.hourglass_top
-                            : source.id == c.activeMediaSourceId
-                            ? Icons.check_circle
-                            : Icons.radio_button_unchecked,
-                        key: ValueKey('mobile-source-icon-${source.id}'),
-                      ),
-                      title: Text(source.name ?? source.id),
-                      onTap: c.loading
-                          ? null
-                          : () {
-                              attemptedSourceId = source.id;
-                              unawaited(c.switchMediaSource(source.id));
+                Flexible(
+                  child: SingleChildScrollView(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (section == null) ...[
+                          for (final entry in <String, (IconData, String)>{
+                            'speed': (Icons.speed, l.playbackRate),
+                            'tracks': (
+                              Icons.subtitles_outlined,
+                              c.canSwitchAudioTrack
+                                  ? l.mobileTracks
+                                  : l.subtitleTrack,
+                            ),
+                            if (c.canSwitchQuality)
+                              'quality': (
+                                Icons.high_quality_outlined,
+                                l.quality,
+                              ),
+                            'picture': (
+                              Icons.aspect_ratio,
+                              l.playerPictureSettings,
+                            ),
+                            'skip': (
+                              Icons.fast_forward_rounded,
+                              l.playerSkipSettings,
+                            ),
+                            if (danmaku != null)
+                              'danmaku': (Icons.chat_bubble_outline, l.danmaku),
+                          }.entries)
+                            optionTile(
+                              key: ValueKey(
+                                'mobile-player-section-${entry.key}',
+                              ),
+                              selected: false,
+                              leading: Icon(entry.value.$1),
+                              title: Text(entry.value.$2),
+                              subtitle: Text(
+                                sectionValue(entry.key),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              trailing: const Icon(Icons.chevron_right_rounded),
+                              onTap: () {
+                                panelSetState(() => panelSection = entry.key);
+                                widget.interaction.setPanel(entry.key);
+                              },
+                            ),
+                          if (c.canSwitchMediaSource)
+                            optionTile(
+                              key: const Key('mobile-player-source-entry'),
+                              selected: false,
+                              leading: const Icon(Icons.video_library_outlined),
+                              title: Text(l.mobileSource),
+                              subtitle: Text(
+                                sectionValue('source'),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              trailing: const Icon(Icons.chevron_right_rounded),
+                              onTap: () {
+                                panelSetState(() => panelSection = 'source');
+                                widget.interaction.setPanel('source');
+                              },
+                            ),
+                        ],
+                        if (section == 'skip')
+                          PlaybackSkipSettings(controller: c),
+                        if (section == 'source' && c.canSwitchMediaSource) ...[
+                          SizedBox(
+                            height: 40,
+                            child: Align(
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                sourceStatus,
+                                key: const Key('mobile-source-status'),
+                              ),
+                            ),
+                          ),
+                          for (final source in c.mediaSources)
+                            optionTile(
+                              key: ValueKey('mobile-source-${source.id}'),
+                              selected: source.id == c.activeMediaSourceId,
+                              leading: Icon(
+                                c.pendingMediaSourceId == source.id &&
+                                        c.isRecovering
+                                    ? Icons.hourglass_top
+                                    : source.id == c.activeMediaSourceId
+                                    ? Icons.check_circle
+                                    : Icons.radio_button_unchecked,
+                                key: ValueKey(
+                                  'mobile-source-icon-${source.id}',
+                                ),
+                              ),
+                              title: Text(source.name ?? source.id),
+                              onTap: c.loading
+                                  ? null
+                                  : () {
+                                      attemptedSourceId = source.id;
+                                      unawaited(c.switchMediaSource(source.id));
+                                    },
+                            ),
+                        ],
+                        if (section == 'picture') ...[
+                          _VideoScaleChoices(
+                            fill: widget.fillFrame,
+                            onChanged: (fill) => widget.onFillFrame?.call(fill),
+                          ),
+                          const SizedBox(height: 16),
+                          Text(l.mobileAppVolume),
+                          Row(
+                            children: [
+                              IconButton(
+                                key: const Key('mobile-player-mute'),
+                                tooltip: c.volume <= 0 ? l.unmute : l.mute,
+                                onPressed:
+                                    c.loading ||
+                                        c.error != null ||
+                                        c.disconnected ||
+                                        c.sessionExpired
+                                    ? null
+                                    : () => c.toggleMute(),
+                                icon: Icon(
+                                  c.volume <= 0
+                                      ? Icons.volume_off
+                                      : Icons.volume_up,
+                                ),
+                              ),
+                              Expanded(
+                                child: Slider(
+                                  key: const Key('mobile-player-volume'),
+                                  value: c.volume
+                                      .clamp(0, PlayerSettings.volumeMax)
+                                      .toDouble(),
+                                  max: PlayerSettings.volumeMax.toDouble(),
+                                  onChanged:
+                                      c.loading ||
+                                          c.error != null ||
+                                          c.disconnected ||
+                                          c.sessionExpired
+                                      ? null
+                                      : (value) => c.setVolume(value.round()),
+                                ),
+                              ),
+                              Text(l.volumePercent(c.volume)),
+                            ],
+                          ),
+                        ],
+                        if (danmaku != null && section == 'danmaku') ...[
+                          TextButton.icon(
+                            key: DanmakuKeys.search,
+                            style: TextButton.styleFrom(
+                              alignment: Alignment.centerLeft,
+                              minimumSize: const Size.fromHeight(48),
+                              backgroundColor: scheme.surfaceContainerHighest,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(
+                                  AppRadii.md,
+                                ),
+                              ),
+                            ),
+                            onPressed: () {
+                              Navigator.pop(sheetContext);
+                              widget.onOpenDanmakuSearch();
                             },
-                    ),
-                ],
-                if (section == 'picture') ...[
-                  _VideoScaleChoices(
-                    fill: widget.fillFrame,
-                    onChanged: (fill) => widget.onFillFrame?.call(fill),
-                  ),
-                  const SizedBox(height: 16),
-                  Text(l.mobileAppVolume),
-                  Row(
-                    children: [
-                      IconButton(
-                        key: const Key('mobile-player-mute'),
-                        tooltip: c.volume <= 0 ? l.unmute : l.mute,
-                        onPressed:
-                            c.loading ||
-                                c.error != null ||
-                                c.disconnected ||
-                                c.sessionExpired
-                            ? null
-                            : () => c.toggleMute(),
-                        icon: Icon(
-                          c.volume <= 0 ? Icons.volume_off : Icons.volume_up,
-                        ),
-                      ),
-                      Expanded(
-                        child: Slider(
-                          key: const Key('mobile-player-volume'),
-                          value: c.volume
-                              .clamp(0, PlayerSettings.volumeMax)
-                              .toDouble(),
-                          max: PlayerSettings.volumeMax.toDouble(),
-                          onChanged:
-                              c.loading ||
-                                  c.error != null ||
-                                  c.disconnected ||
-                                  c.sessionExpired
-                              ? null
-                              : (value) => c.setVolume(value.round()),
-                        ),
-                      ),
-                      Text(l.volumePercent(c.volume)),
-                    ],
-                  ),
-                ],
-                if (danmaku != null && section == 'danmaku') ...[
-                  TextButton.icon(
-                    key: DanmakuKeys.search,
-                    style: TextButton.styleFrom(
-                      alignment: Alignment.centerLeft,
-                      minimumSize: const Size.fromHeight(48),
-                      backgroundColor: scheme.surfaceContainerHighest,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(AppRadii.md),
-                      ),
-                    ),
-                    onPressed: () {
-                      Navigator.pop(sheetContext);
-                      widget.onOpenDanmakuSearch();
-                    },
-                    icon: const Icon(Icons.search),
-                    label: Text(l.danmakuSearch),
-                  ),
-                  const SizedBox(height: 8),
-                  TextButton.icon(
-                    key: DanmakuKeys.panel,
-                    style: TextButton.styleFrom(
-                      alignment: Alignment.centerLeft,
-                      minimumSize: const Size.fromHeight(48),
-                      backgroundColor: scheme.surfaceContainerHighest,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(AppRadii.md),
-                      ),
-                    ),
-                    onPressed: () {
-                      Navigator.pop(sheetContext);
-                      widget.onOpenDanmakuPanel();
-                    },
-                    icon: const Icon(Icons.tune),
-                    label: Text(l.mobileDanmakuPanel),
-                  ),
-                ],
-                if (section == 'tracks') ...[
-                  if (c.canSwitchAudioTrack)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: Text(
-                        l.audioTrack,
-                        style: theme.textTheme.titleSmall,
-                      ),
-                    ),
-                  if (c.canSwitchAudioTrack)
-                    for (final track in c.selectableAudioTracks)
-                      optionTile(
-                        selected: c.audioStreamIndex == track.index,
-                        leading: Icon(
-                          c.audioStreamIndex == track.index
-                              ? Icons.check_circle
-                              : Icons.radio_button_unchecked,
-                        ),
-                        title: Text(track.label),
-                        onTap: () => c.setAudio(track.index),
-                      ),
-                  ...[
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8, bottom: 8),
-                      child: Text(
-                        l.subtitleTrack,
-                        style: theme.textTheme.titleSmall,
-                      ),
-                    ),
-                    optionTile(
-                      selected: c.subtitleStreamIndex == null,
-                      leading: Icon(
-                        c.subtitleStreamIndex == null
-                            ? Icons.check_circle
-                            : Icons.radio_button_unchecked,
-                      ),
-                      title: Text(l.subtitleOff),
-                      onTap: () => c.setSubtitle(null),
-                    ),
-                    for (final track in c.selectableSubtitleTracks)
-                      optionTile(
-                        selected: c.subtitleStreamIndex == track.index,
-                        leading: Icon(
-                          c.subtitleStreamIndex == track.index
-                              ? Icons.check_circle
-                              : Icons.radio_button_unchecked,
-                        ),
-                        title: Text(track.label),
-                        onTap: () => c.setSubtitle(track.index),
-                      ),
-                  ],
-                  if (c.trackFailure != null) Text(l.mobileTrackUnavailable),
-                ],
-                if (section == 'quality')
-                  ChipTheme(
-                    data: playerChoiceChipTheme(theme),
-                    child: Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        for (final bitrate in c.availableBitrates)
-                          ChoiceChip(
-                            key: ValueKey('mobile-quality-$bitrate'),
-                            label: Text(playerQualityLabel(l, bitrate)),
-                            selected: c.maxStreamingBitrate == bitrate,
-                            showCheckmark: false,
-                            onSelected: c.loading
-                                ? null
-                                : (_) => unawaited(c.setMaxBitrate(bitrate)),
+                            icon: const Icon(Icons.search),
+                            label: Text(l.danmakuSearch),
                           ),
+                          const SizedBox(height: 8),
+                          TextButton.icon(
+                            key: DanmakuKeys.panel,
+                            style: TextButton.styleFrom(
+                              alignment: Alignment.centerLeft,
+                              minimumSize: const Size.fromHeight(48),
+                              backgroundColor: scheme.surfaceContainerHighest,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(
+                                  AppRadii.md,
+                                ),
+                              ),
+                            ),
+                            onPressed: () {
+                              Navigator.pop(sheetContext);
+                              widget.onOpenDanmakuPanel();
+                            },
+                            icon: const Icon(Icons.tune),
+                            label: Text(l.mobileDanmakuPanel),
+                          ),
+                        ],
+                        if (section == 'tracks') ...[
+                          if (c.canAdjustSubtitleSize)
+                            PhoneSubtitleSettingsControls(
+                              value: c.phoneSubtitleSettings,
+                              onChanged: (value) =>
+                                  unawaited(c.setPhoneSubtitleSettings(value)),
+                              error: c.subtitlePresentationError,
+                            )
+                          else
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 16),
+                              child: Text(l.phoneSubtitleUnavailable),
+                            ),
+                          if (c.canSwitchAudioTrack)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 8),
+                              child: Text(
+                                l.audioTrack,
+                                style: theme.textTheme.titleSmall,
+                              ),
+                            ),
+                          if (c.canSwitchAudioTrack)
+                            for (final track in c.selectableAudioTracks)
+                              optionTile(
+                                selected: c.audioStreamIndex == track.index,
+                                leading: Icon(
+                                  c.audioStreamIndex == track.index
+                                      ? Icons.check_circle
+                                      : Icons.radio_button_unchecked,
+                                ),
+                                title: Text(track.label),
+                                onTap: () => c.setAudio(track.index),
+                              ),
+                          ...[
+                            Padding(
+                              padding: const EdgeInsets.only(top: 8, bottom: 8),
+                              child: Text(
+                                l.subtitleTrack,
+                                style: theme.textTheme.titleSmall,
+                              ),
+                            ),
+                            optionTile(
+                              selected: c.subtitleStreamIndex == null,
+                              leading: Icon(
+                                c.subtitleStreamIndex == null
+                                    ? Icons.check_circle
+                                    : Icons.radio_button_unchecked,
+                              ),
+                              title: Text(l.subtitleOff),
+                              onTap: () => c.setSubtitle(null),
+                            ),
+                            for (final track in c.selectableSubtitleTracks)
+                              optionTile(
+                                selected: c.subtitleStreamIndex == track.index,
+                                leading: Icon(
+                                  c.subtitleStreamIndex == track.index
+                                      ? Icons.check_circle
+                                      : Icons.radio_button_unchecked,
+                                ),
+                                title: Text(track.label),
+                                onTap: () => c.setSubtitle(track.index),
+                              ),
+                          ],
+                          if (c.trackFailure != null)
+                            Text(l.mobileTrackUnavailable),
+                        ],
+                        if (section == 'quality')
+                          ChipTheme(
+                            data: playerChoiceChipTheme(theme),
+                            child: Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                for (final bitrate in c.availableBitrates)
+                                  ChoiceChip(
+                                    key: ValueKey('mobile-quality-$bitrate'),
+                                    label: Text(playerQualityLabel(l, bitrate)),
+                                    selected: c.maxStreamingBitrate == bitrate,
+                                    showCheckmark: false,
+                                    onSelected: c.loading
+                                        ? null
+                                        : (_) => unawaited(
+                                            c.setMaxBitrate(bitrate),
+                                          ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        if (section == 'speed')
+                          ChipTheme(
+                            data: playerChoiceChipTheme(theme),
+                            child: Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                for (final rate in kPlaybackRateLadder)
+                                  ChoiceChip(
+                                    label: Text('${rate}x'),
+                                    selected: c.playbackRate == rate,
+                                    showCheckmark: false,
+                                    onSelected: c.loading
+                                        ? null
+                                        : (_) => c.setRate(rate),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        const SizedBox(height: 8),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: TextButton.icon(
+                            onPressed: section != null
+                                ? () {
+                                    panelSetState(() => panelSection = null);
+                                    widget.interaction.setPanel('more');
+                                  }
+                                : () => Navigator.pop(sheetContext),
+                            icon: Icon(
+                              section != null
+                                  ? Icons.arrow_back_rounded
+                                  : Icons.close_rounded,
+                            ),
+                            label: Text(l.mobileBack),
+                          ),
+                        ),
                       ],
                     ),
-                  ),
-                if (section == 'speed')
-                  ChipTheme(
-                    data: playerChoiceChipTheme(theme),
-                    child: Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        for (final rate in kPlaybackRateLadder)
-                          ChoiceChip(
-                            label: Text('${rate}x'),
-                            selected: c.playbackRate == rate,
-                            showCheckmark: false,
-                            onSelected: c.loading
-                                ? null
-                                : (_) => c.setRate(rate),
-                          ),
-                      ],
-                    ),
-                  ),
-                const SizedBox(height: 8),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: TextButton.icon(
-                    onPressed: section != null
-                        ? () {
-                            panelSetState(() => panelSection = null);
-                            widget.interaction.setPanel('more');
-                          }
-                        : () => Navigator.pop(sheetContext),
-                    icon: Icon(
-                      section != null
-                          ? Icons.arrow_back_rounded
-                          : Icons.close_rounded,
-                    ),
-                    label: Text(l.mobileBack),
                   ),
                 ),
               ],

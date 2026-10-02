@@ -117,6 +117,14 @@ abstract interface class VideoBackendSubtitlePresentation {
   });
 }
 
+/// Native Activity/PiP facts. Only the phone route enables this contract.
+abstract interface class VideoBackendPhonePresentation {
+  ValueListenable<Map<String, dynamic>> get phonePresentation;
+  Future<Map<String, dynamic>> refreshPhonePresentation();
+  Future<void> configurePhonePresentation(bool enabled);
+  Future<bool> enterPictureInPicture();
+}
+
 enum VideoEventKind {
   position,
   duration,

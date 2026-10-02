@@ -68,7 +68,7 @@ class LinuxReleaseTests(unittest.TestCase):
     def write_report(self):
         notices = self.bundle / 'data/rillight_player'
         (notices / 'loaded-versions.json').write_text(json.dumps({
-            'coreAbi': 8, 'versions': 'ffmpeg=9.0.2;avformat=1',
+            'coreAbi': 9, 'versions': 'ffmpeg=9.0.2;avformat=1',
             'bundledLibraries': {
                 str(path.relative_to(self.bundle)): hashlib.sha256(path.read_bytes()).hexdigest()
                 for path in (self.bundle / 'lib').glob('*.so*') if path.is_file() and not path.is_symlink()
@@ -90,13 +90,13 @@ class LinuxReleaseTests(unittest.TestCase):
                 return self.value
 
         class Core:
-            rillight_core_abi_version = Function(8)
+            rillight_core_abi_version = Function(9)
             rillight_core_ffmpeg_versions = Function(b'ffmpeg=n9.0.2;avformat=1')
 
         with patch.object(checks.ctypes, 'CDLL', return_value=Core()):
-            self.assertEqual(checks.loaded_core_versions(self.bundle)['coreAbi'], 8)
+            self.assertEqual(checks.loaded_core_versions(self.bundle)['coreAbi'], 9)
             Core.rillight_core_ffmpeg_versions.value = b'ffmpeg=9.0.2;avformat=1'
-            self.assertEqual(checks.loaded_core_versions(self.bundle)['coreAbi'], 8)
+            self.assertEqual(checks.loaded_core_versions(self.bundle)['coreAbi'], 9)
             Core.rillight_core_ffmpeg_versions.value = b'ffmpeg=n9.0.1;avformat=1'
             with self.assertRaisesRegex(ValueError, 'version mismatch'):
                 checks.loaded_core_versions(self.bundle)
