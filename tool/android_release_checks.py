@@ -43,6 +43,59 @@ ELF_MACHINES = {
     'armeabi-v7a': 'ARM',
     'x86_64': 'Advanced Micro Devices X86-64',
 }
+# Native-to-Java lookups in core_bridge.cpp are invisible to R8. Check actual
+# DEX definitions, not string-table entries or pre-shrinking Kotlin classes.
+JNI_CALLBACKS = {
+    'CoreIoFactory': {('open', '(Ljava/lang/String;)Lcom/rillight/player/CoreInput;')},
+    'CoreInput': {('read', '([BI)I'), ('seek', '(JI)J'),
+                  ('close', '()V'), ('interrupt', '()V')},
+    'CoreAudioFrame': {('<init>', '(JJJ[B)V')},
+    'CoreVideoOverlay': {('<init>', '(IIIIII[B)V')},
+    'CoreNative': {('create', '(Lcom/rillight/player/CoreIoFactory;)J')},
+}
+
+
+def jni_definitions(dump):
+    definitions = {}
+    for block in re.split(r'^Class #', dump, flags=re.MULTILINE):
+        descriptor = re.search(r"Class descriptor\s*:\s*'Lcom/rillight/player/(\w+);'", block)
+        if descriptor is None:
+            continue
+        # Ignore fields and local-variable/debug information. A DEX method
+        # declaration has adjacent name, descriptor and access-flags lines.
+        methods = set(re.findall(
+            r"name\s*:\s*'([^']+)'\s+type\s*:\s*'(\([^']+)'\s+access\s*:", block))
+        definitions[descriptor[1]] = methods
+    return definitions
+
+
+def check_jni_definitions(definitions):
+    for name, required in JNI_CALLBACKS.items():
+        if name not in definitions:
+            raise RuntimeError('APK JNI class missing or renamed: ' + name)
+        missing = required - definitions[name]
+        if missing:
+            raise RuntimeError(f'APK JNI methods missing or renamed in {name}: {sorted(missing)}')
+
+
+def apk_jni_check(apk):
+    candidates = sorted((sdk_path() / 'build-tools').glob('*/dexdump*'))
+    dexdump = next((p for p in reversed(candidates)
+                    if p.name in ('dexdump', 'dexdump.exe')), None)
+    if dexdump is None:
+        raise RuntimeError('SDK build-tools/dexdump missing; APK JNI contract unverified')
+    definitions = {}
+    with zipfile.ZipFile(apk) as archive, tempfile.TemporaryDirectory(prefix='rillight-apk-dex-') as folder:
+        for entry in archive.namelist():
+            if re.fullmatch(r'classes\d*\.dex', entry):
+                target = Path(folder) / entry
+                target.write_bytes(archive.read(entry))
+                # DEX debug strings use modified UTF-8 (including C0 80 for
+                # NUL). JNI names/descriptors here are all ASCII.
+                definitions.update(jni_definitions(
+                    run([dexdump, target]).decode('utf-8', errors='replace')))
+    check_jni_definitions(definitions)
+    return {'verified_classes': sorted(JNI_CALLBACKS)}
 
 
 def run(args, **kwargs):
@@ -203,6 +256,7 @@ def apk_check(apk, validation=False, expected_abi=None):
             hasher.update(chunk)
         digest = hasher.hexdigest()
     return {'sha256': digest, 'package': package, 'badging': text,
+            'jni': apk_jni_check(apk),
             'native': apk_native_check(apk, expected_abi=expected_abi)}
 
 

@@ -19,6 +19,60 @@ import android_release_checks as checks
 
 
 class EvidenceTests(unittest.TestCase):
+    def test_jni_audit_accepts_definitions_and_rejects_release_shrinking(self):
+        # dexdump's method-definition shape; the broken 0.1.33 APK renamed
+        # CoreInput and open(), and erased both frame constructors.
+        dump = ''
+        for index, (name, methods) in enumerate(checks.JNI_CALLBACKS.items()):
+            dump += f"Class #{index} -\n  Class descriptor  : 'Lcom/rillight/player/{name};'\n"
+            for method, signature in methods:
+                dump += (f"      name          : '{method}'\n"
+                         f"      type          : '{signature}'\n"
+                         "      access        : 0x0001 (PUBLIC)\n")
+        parsed = checks.jni_definitions(dump)
+        checks.check_jni_definitions(parsed)
+        for name, methods in checks.JNI_CALLBACKS.items():
+            for method in methods:
+                with self.subTest(name=name, method=method):
+                    broken = {key: set(value) for key, value in parsed.items()}
+                    broken[name].remove(method)
+                    with self.assertRaisesRegex(RuntimeError, 'APK JNI methods missing'):
+                        checks.check_jni_definitions(broken)
+        renamed = dump.replace("Class descriptor  : 'Lcom/rillight/player/CoreInput;'",
+                               "Class descriptor  : 'Ln0;'")
+        with self.assertRaisesRegex(RuntimeError, 'APK JNI class missing.*CoreInput'):
+            checks.check_jni_definitions(checks.jni_definitions(renamed))
+
+    def test_jni_audit_does_not_accept_references_as_definitions(self):
+        parsed = checks.jni_definitions("Class #0 -\n  Class descriptor  : 'Lother/Class;'\n"
+                                      "  source_file_idx : Lcom/rillight/player/CoreInput;\n")
+        self.assertEqual(parsed, {})
+        with self.assertRaisesRegex(RuntimeError, 'APK JNI class missing'):
+            checks.check_jni_definitions(parsed)
+
+    def test_jni_apk_audit_reads_all_dex_files_and_modified_utf8(self):
+        dumps = []
+        for index, (name, methods) in enumerate(checks.JNI_CALLBACKS.items()):
+            dump = f"Class #{index} -\n  Class descriptor  : 'Lcom/rillight/player/{name};'\n"
+            for method, signature in methods:
+                dump += f" name : '{method}'\n type : '{signature}'\n access : 0x0001\n"
+            dumps.append(dump.encode() + b' source_file_idx : \xc0\x80\n')
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            tool = root / 'build-tools/36/dexdump'
+            tool.parent.mkdir(parents=True)
+            tool.touch()
+            apk = root / 'multidex.apk'
+            with zipfile.ZipFile(apk, 'w') as archive:
+                for index in range(len(dumps)):
+                    archive.writestr(f'classes{index + 1 if index else ""}.dex', b'dex')
+                archive.writestr('assets/irrelevant.dex', b'not executable')
+            with patch.object(checks, 'sdk_path', return_value=root), \
+                    patch.object(checks, 'run', side_effect=dumps) as run:
+                self.assertEqual(checks.apk_jni_check(apk),
+                                 {'verified_classes': sorted(checks.JNI_CALLBACKS)})
+                self.assertEqual(run.call_count, len(dumps))
+
     def test_owned_color_uses_only_public_ndk_graphics_dependencies(self):
         self.assertTrue({'libEGL.so', 'libGLESv3.so'} <= checks.ANDROID_SYSTEM_LIBRARIES)
         self.assertNotIn('libvulkan_vendor.so', checks.ANDROID_SYSTEM_LIBRARIES)

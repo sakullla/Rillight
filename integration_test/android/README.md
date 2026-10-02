@@ -18,6 +18,16 @@ python tool/android_release_checks.py --all-targets
 python tool/android_release_checks.py --serial emulator-5554
 ```
 
+APK checks inspect DEX definitions for the JNI classes, callbacks and frame
+constructors used by `core_bridge.cpp`, in addition to native dependencies.
+The plugin's `consumer-rules.pro` must preserve these in R8 builds. A debug
+playback pass does not establish release compatibility: after changing the
+JNI boundary or shrinker rules, also build the native smoke entrypoint with
+`--release --android-project-arg=rillightValidation=true`, audit that APK via
+`tool.android_release_checks.apk_check(path, validation=True)`, and run it
+against the synthetic fixture on a device.
+Use local test signing for this disposable package; it is not a release asset.
+
 Windows also has `tool/android_smoke.ps1 -AllTargets -Ffmpeg PATH`. The wrapper
 uses the current Python interpreter; activate the environment first. All-targets
 requires running AVDs with a 360dp phone, a 412dp phone and a Leanback TV.
