@@ -132,8 +132,12 @@ internal class CorePlayback(
             "queuedVideo" to (snap?.get(13) ?: 0), "queuedAudio" to (snap?.get(14) ?: 0),
             "timeline" to (snap?.get(3) ?: 0))
     }
-    fun pipReady() = renderedFirst && running != null
-    fun pipPlaying() = !desiredPaused && running != null
+    fun pipReady() = renderedFirst && running?.let {
+        CoreNative.snapshot(it.handle)?.get(0) in setOf(2L, 3L, 4L, 5L)
+    } == true
+    fun pipPlaying() = !desiredPaused && running?.let {
+        CoreNative.snapshot(it.handle)?.get(0) == 3L
+    } == true
 
     override fun setViewport(width: Int, height: Int) {
         if (width <= 0 || height <= 0) return
@@ -146,6 +150,12 @@ internal class CorePlayback(
     fun setScale(mode: String?) {
         scaleMode = if (mode == "fill") "fill" else "fit"
         view?.scale(scaleMode)
+    }
+
+    fun rejectOpenForActivity(token: String, result: MethodChannel.Result) {
+        stop()
+        session = token
+        result.error("activity", "Phone playback route is not active", mapOf("sessionId" to token))
     }
 
     fun open(token: String, args: Map<*, *>, result: MethodChannel.Result) {

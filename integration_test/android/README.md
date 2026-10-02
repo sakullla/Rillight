@@ -226,3 +226,12 @@ can prove virtual audio only, never physical speakers or hardware acceptance.
 
 Prototype `player-pip-controls-hidden` injects native state into the real Flutter
 tree; it does not show a system PiP window or prove native playback continuity.
+
+For PiP auto-next/media-reopen regression, use the existing next-episode autoplay
+path and record the old Stopped then the new Playing item identity. The native
+media session should change, while the same Activity remains pinned, ordinary
+controls stay hidden, and the new item keeps advancing. A media `stop` retires
+readiness and old controls; route disable/dispose and Activity stop/lock revoke
+presentation protection. Test old RemoteActions against the new session, plus
+close/lock during replacement. This is separate from the no-media-change PiP
+flow, where the core session must remain identical.

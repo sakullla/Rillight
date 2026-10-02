@@ -215,7 +215,14 @@ class RillightCorePlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandler,
             result.success(mapOf("sessionId" to token))
             return
         }
-        if (call.method == "open") { pip?.bind(id, token); owner.open(token, args, result); return }
+        if (call.method == "open") {
+            pip?.bind(id, token)
+            if (pip?.allowsOpen(id) == false) {
+                owner.rejectOpenForActivity(token, result)
+                return
+            }
+            owner.open(token, args, result); return
+        }
         if (owner.session.isNotEmpty() && owner.session != token) {
             result.error("stale", "Expired playback session", mapOf("sessionId" to token)); return
         }
@@ -226,7 +233,7 @@ class RillightCorePlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandler,
             }
             "phonePresentation" -> result.success(pip?.snapshot() ?: mapOf("supported" to false))
             "enterPictureInPicture" -> result.success(mapOf("accepted" to (pip?.enter(true) == true)))
-            "stop" -> { pip?.retire(id); owner.stop(result) }
+            "stop" -> { pip?.mediaStopped(id); owner.stop(result) }
             "dispose" -> { pip?.retire(id); owner.dispose(result); owners.remove(id) }
             else -> owner.command(call.method, args, result)
         }

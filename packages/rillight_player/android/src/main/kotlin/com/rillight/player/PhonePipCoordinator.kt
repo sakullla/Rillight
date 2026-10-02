@@ -41,7 +41,7 @@ internal class PhonePipCoordinator(private val activity: Activity, private val h
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             if (intent.action != action || !policy.active ||
-                !policy.accepts(intent.getStringExtra("session") ?: "")) return
+                intent.getStringExtra("owner") != ownerId || !policy.accepts(intent.getStringExtra("session") ?: "")) return
             val method = if (intent.getBooleanExtra("play", false)) "play" else "pause"
             owner?.command(method, emptyMap<String, Any>(), object : MethodChannel.Result {
                 override fun success(result: Any?) { refresh() }
@@ -82,24 +82,44 @@ internal class PhonePipCoordinator(private val activity: Activity, private val h
             android.os.Process.myUid(), activity.packageName) == AppOpsManager.MODE_ALLOWED
     }
     fun configure(id: String, playback: CorePlayback, enabled: Boolean) {
-        if (ownerId != id) { owner?.pauseForActivity(); policy.bind("") }
+        if (ownerId != id) {
+            owner?.pauseForActivity(); policy.retire(); policy.bind("")
+            entrySession = ""; geometry = emptyMap()
+        }
         ownerId = id; owner = playback; policy.bind(playback.session); policy.enabled = enabled
         policy.ready = playback.pipReady(); policy.playing = playback.pipPlaying()
         if (!enabled) { owner?.pauseForActivity(); policy.retire(); refresh(); return }
         refresh()
     }
-    fun bind(id: String, token: String) { if (id == ownerId) { policy.bind(token); refresh() } }
+    fun bind(id: String, token: String) {
+        if (id != ownerId) return
+        if (supported() && activity.isInPictureInPictureMode) policy.confirmActiveWindow()
+        policy.bind(token)
+        if (policy.active || policy.returning) entrySession = token
+        refresh()
+    }
+    fun allowsOpen(id: String) = id != ownerId || policy.canOpenMedia()
+    fun mediaStopped(id: String) {
+        if (id != ownerId) return
+        if (supported() && activity.isInPictureInPictureMode) policy.confirmActiveWindow()
+        owner?.pauseForActivity()
+        policy.mediaStopped()
+        refresh()
+    }
     fun event(id: String, token: String, kind: String, value: Any) {
-        if (id != ownerId || token != policy.session) return
+        if (id != ownerId) return
+        // The mounted view can resize between decoders. Its geometry is a
+        // presentation fact, not a late first-frame/playing event from media.
+        if (kind == "videoGeometry" && policy.acceptsWindowGeometry(token)) {
+            @Suppress("UNCHECKED_CAST")
+            val current = value as Map<String, Any>
+            geometry = current; refresh(); return
+        }
+        if (!policy.acceptsEvent(token)) return
         when (kind) {
             "firstFrame" -> policy.ready = value == true
             "playing" -> policy.playing = value == true
-            "completed", "error" -> { policy.ready = false; policy.playing = false; if (policy.entering) { suspend(); return } }
-            "videoGeometry" -> {
-                @Suppress("UNCHECKED_CAST")
-                val current = value as Map<String, Any>
-                geometry = current
-            }
+            "completed", "error" -> policy.mediaFailedOrEnded()
             else -> return
         }
         refresh()
@@ -117,8 +137,9 @@ internal class PhonePipCoordinator(private val activity: Activity, private val h
         val height = (geometry["visibleHeight"] as? Number)?.toDouble() ?: 9.0
         val ratio = (width / height.coerceAtLeast(1.0)).coerceIn(1.0 / 2.39, 2.39)
         val intent = Intent(action).setPackage(activity.packageName)
-            .setData(android.net.Uri.parse("rillight-pip://${policy.session}/${!policy.playing}"))
-            .putExtra("session", policy.session).putExtra("play", !policy.playing)
+            .setData(android.net.Uri.Builder().scheme("rillight-pip").authority(ownerId)
+                .appendPath(policy.session).appendPath((!policy.playing).toString()).build())
+            .putExtra("owner", ownerId).putExtra("session", policy.session).putExtra("play", !policy.playing)
         val pending = PendingIntent.getBroadcast(activity, 0, intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val control = RemoteAction(Icon.createWithResource(activity,

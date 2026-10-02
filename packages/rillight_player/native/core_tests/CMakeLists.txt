@@ -1,3 +1,11 @@
+add_executable(rillight_android_surface_copy_test android_surface_copy_test.cpp)
+if(MSVC)
+  target_compile_options(rillight_android_surface_copy_test PRIVATE /W4 /WX /UNDEBUG)
+else()
+  target_compile_options(rillight_android_surface_copy_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+endif()
+add_test(NAME rillight_android_surface_copy COMMAND rillight_android_surface_copy_test)
+
 add_executable(rillight_video_frame_cost_test video_frame_cost_test.cpp)
 target_include_directories(rillight_video_frame_cost_test PRIVATE "${RILLIGHT_CORE_PREFIX}/include")
 target_link_libraries(rillight_video_frame_cost_test PRIVATE ${avutil_library})

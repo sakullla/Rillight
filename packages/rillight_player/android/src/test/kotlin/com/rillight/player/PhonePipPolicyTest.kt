@@ -5,6 +5,56 @@ import org.junit.Test
 
 class PhonePipPolicyTest {
     private fun ready() = PhonePipPolicy().apply { bind("one"); enabled = true; ready = true; playing = true }
+    @Test fun activePipMediaStopBindAndReadyKeepsWindowButRevokesOldControls() {
+        val p = ready(); p.foreground = false; p.mode(true)
+        p.mediaStopped() // Actual plugin stop path used by controller next/open.
+        assertTrue(p.active); assertTrue(p.retainsPlayback())
+        assertFalse(p.accepts("one")); assertFalse(p.acceptsEvent("one"))
+        assertTrue(p.acceptsWindowGeometry("one"))
+        p.bind("two")
+        assertTrue(p.active); assertTrue(p.retainsPlayback()); assertTrue(p.canOpenMedia())
+        assertFalse(p.ready); assertFalse(p.playing)
+        assertFalse(p.accepts("one")); assertFalse(p.acceptsEvent("one"))
+        assertTrue(p.acceptsEvent("two"))
+        assertFalse(p.acceptsWindowGeometry("one")); assertTrue(p.acceptsWindowGeometry("two"))
+        p.ready = true; p.playing = true
+        assertTrue(p.accepts("two")); assertTrue(p.retainsPlayback())
+        assertFalse(p.foreground)
+    }
+
+    @Test fun mediaReopenDuringExpansionPreservesReturningFact() {
+        val p = ready(); p.foreground = false; p.mode(true); p.mode(false)
+        p.confirmActiveWindow() // A stale positive query cannot undo mode=false.
+        assertFalse(p.active)
+        p.mediaStopped(); p.bind("two")
+        assertTrue(p.returning); assertTrue(p.retainsPlayback())
+        p.resume()
+        assertFalse(p.returning); assertFalse(p.retainsPlayback())
+    }
+    @Test fun routeExitAndScreenOffCannotBeRevivedByMediaBind() {
+        val closed = ready(); closed.mode(true); closed.retire(); closed.bind("two")
+        assertFalse(closed.enabled); assertFalse(closed.retainsPlayback()); assertFalse(closed.canOpenMedia())
+        val locked = ready(); locked.mode(true); locked.suspend(); locked.bind("two")
+        locked.confirmActiveWindow() // A stale platform mode cannot override stop/lock.
+        assertTrue(locked.blocked); assertFalse(locked.retainsPlayback()); assertFalse(locked.canOpenMedia())
+        assertFalse(locked.accepts("two"))
+    }
+    @Test fun pendingUnconfirmedEntryDoesNotGrantNewMediaBackgroundPlayback() {
+        val p = ready(); p.request(true, false); p.foreground = false
+        p.mediaStopped(); p.bind("two")
+        assertFalse(p.entering); assertFalse(p.retainsPlayback()); assertFalse(p.canOpenMedia())
+        assertFalse(p.acceptsEvent("one"))
+    }
+    @Test fun confirmedWindowSurvivesMediaStopBeforeDelayedModeCallback() {
+        val p = ready(); p.request(true, false); p.foreground = false
+        p.confirmActiveWindow(); p.mediaStopped(); p.bind("two")
+        assertTrue(p.active); assertTrue(p.retainsPlayback())
+        p.mediaFailedOrEnded()
+        assertFalse(p.accepts("two")); assertFalse(p.playing)
+        p.suspend()
+        assertFalse(p.retainsPlayback())
+    }
+
     @Test fun endedSessionRejectsPreviouslyEnabledRemoteAction() {
         val p = ready(); p.mode(true)
         assertTrue(p.accepts("one"))

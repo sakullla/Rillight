@@ -15,6 +15,7 @@
 #include "rillight_core.h"
 #include "decoder_probe.h"
 #include "media_io_roles.h"
+#include "rgba_surface_copy.h"
 
 namespace {
 struct AttachedEnv {
@@ -505,18 +506,22 @@ Java_com_rillight_player_CoreNative_renderVideo(JNIEnv *env, jobject,
                 window, frame->width, frame->height, WINDOW_FORMAT_RGBA_8888);
   ANativeWindow_Buffer buffer{};
   const int locked = geometry == 0 ? ANativeWindow_lock(window, &buffer, nullptr) : -1;
-  if (locked != 0 || !buffer.bits || buffer.stride < frame->width ||
-      buffer.height < frame->height) {
+  if (locked != 0 || !buffer.bits || buffer.width <= 0 || buffer.height <= 0 ||
+      buffer.stride < buffer.width) {
     if (locked == 0) ANativeWindow_unlockAndPost(window);
     rillight_core_release_frame(frame);
     ANativeWindow_release(window);
     return nullptr;
   }
   auto *pixels = static_cast<uint8_t *>(buffer.bits);
-  const size_t row = static_cast<size_t>(frame->width) * 4;
-  for (int y = 0; y < frame->height; ++y)
-    std::memcpy(pixels + static_cast<size_t>(y) * buffer.stride * 4,
-                frame->data + static_cast<size_t>(y) * frame->stride, row);
+  if (!CopyRgbaSurface(
+          {frame->data, frame->width, frame->height, static_cast<size_t>(frame->stride)},
+          {pixels, buffer.width, buffer.height, static_cast<size_t>(buffer.stride) * 4})) {
+    ANativeWindow_unlockAndPost(window);
+    rillight_core_release_frame(frame);
+    ANativeWindow_release(window);
+    return nullptr;
+  }
   bool current = false;
   int posted = -1;
   {
