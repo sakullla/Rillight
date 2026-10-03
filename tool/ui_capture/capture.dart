@@ -894,12 +894,7 @@ class CaptureSession {
   }
 }
 
-class _LanHttpOverrides extends HttpOverrides {
-  @override
-  HttpClient createHttpClient(SecurityContext? context) {
-    return super.createHttpClient(context);
-  }
-}
+class _LanHttpOverrides extends HttpOverrides {}
 
 Future<String> _lanRequest(Uri uri, {String? body}) {
   return HttpOverrides.runWithHttpOverrides(
