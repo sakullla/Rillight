@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
+import 'package:rillight/app/tv_appearance_picker.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
@@ -302,6 +303,8 @@ class _TvSession extends StatelessWidget {
           Text(
             '${auth.session?.server.name ?? ''} · ${auth.session?.username ?? ''}',
           ),
+          const SizedBox(height: 16),
+          const TvAppearancePicker(),
           const SizedBox(height: 16),
           Text(l.mobileLine),
           if (auth.lineSwitchFailure != null) ...[

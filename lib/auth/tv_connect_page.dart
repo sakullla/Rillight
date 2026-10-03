@@ -7,12 +7,21 @@ import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/auth/connect_draft.dart';
 import 'package:rillight/auth/failure_message.dart';
 import 'package:rillight/auth/server_list_store.dart';
+import 'package:rillight/auth/tv_lan_pair.dart';
 import 'package:rillight/app/tv_widgets.dart';
 
 /// Remote connection flow; credentials remain owned by the auth draft.
 class TvConnectPage extends StatefulWidget {
-  const TvConnectPage({super.key, this.addingAnother = false});
+  const TvConnectPage({
+    super.key,
+    this.addingAnother = false,
+    this.createLanAssist,
+  });
+
   final bool addingAnother;
+
+  /// 测试注入本机回环地址。正式界面在用户打开辅助后自行创建。
+  final TvLanAssist Function()? createLanAssist;
 
   @override
   State<TvConnectPage> createState() => _TvConnectPageState();
@@ -24,6 +33,8 @@ class _TvConnectPageState extends State<TvConnectPage> {
   final _password = TextEditingController();
   final _userAgent = TextEditingController();
   ConnectDraft? _draft;
+  TvLanAssist? _lan;
+  bool _openingLan = false;
 
   @override
   void didChangeDependencies() {
@@ -83,8 +94,52 @@ class _TvConnectPageState extends State<TvConnectPage> {
     if (mounted && auth.isLoggedIn && widget.addingAnother) context.go('/');
   }
 
+  void _onLan() {
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  Future<void> _openLan() async {
+    if (_openingLan) {
+      return;
+    }
+    final current = _lan;
+    if (current != null && !current.isTerminal) {
+      return;
+    }
+    _openingLan = true;
+    current?.removeListener(_onLan);
+    current?.dispose();
+    final lan = widget.createLanAssist?.call() ?? TvLanAssist();
+    lan.addListener(_onLan);
+    _lan = lan;
+    if (mounted) {
+      setState(() {});
+    }
+    await lan.open();
+    _openingLan = false;
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  Future<void> _confirmLan() async {
+    final lan = _lan;
+    if (lan == null) {
+      return;
+    }
+    final auth = AuthScope.of(context);
+    await lan.confirm(auth);
+    if (mounted && auth.isLoggedIn && widget.addingAnother) {
+      context.go('/');
+    }
+  }
+
   @override
   void dispose() {
+    _lan?.removeListener(_onLan);
+    _lan?.dispose();
     for (final field in [_address, _username, _password, _userAgent]) {
       field.dispose();
     }
@@ -172,11 +227,66 @@ class _TvConnectPageState extends State<TvConnectPage> {
                       child: Text('${server.name} · ${server.username}'),
                     ),
                 ],
+                const SizedBox(height: 16),
+                ..._lanSection(l10n, auth.isBusy),
               ],
             ),
           ),
         ),
       ),
     );
+  }
+
+  /// 遥控器登录在前,手机辅助在后。证书警告过不去时只说明未完成。
+  List<Widget> _lanSection(AppLocalizations l10n, bool busy) {
+    final lan = _lan;
+    final phase = lan?.phase ?? TvLanPhase.idle;
+    final offer = lan?.offer;
+    final pending = lan?.pending;
+    if (_openingLan || (phase == TvLanPhase.waiting && offer == null)) {
+      return [Text(l10n.tvLanWaiting)];
+    }
+    if (phase == TvLanPhase.waiting && offer != null) {
+      return [
+        Text(l10n.tvLanWaiting),
+        Text(l10n.tvLanAddress),
+        SelectableText(offer.manualUrl, key: const Key('tv-lan-address')),
+        TvLanQrImage(key: const Key('tv-lan-qr'), modules: offer.qrModules),
+        Text(l10n.tvLanFingerprint),
+        SelectableText(offer.fingerprint, key: const Key('tv-lan-fingerprint')),
+        TvAction(
+          key: const Key('tv-lan-incomplete'),
+          onPressed: lan!.markIncomplete,
+          child: Text(l10n.tvLanFailed),
+        ),
+      ];
+    }
+    if (phase == TvLanPhase.pending && pending != null) {
+      return [
+        Text(pending.server, key: const Key('tv-lan-server')),
+        Text(pending.account, key: const Key('tv-lan-account')),
+        TvAction(
+          key: const Key('tv-lan-confirm'),
+          onPressed: busy ? null : _confirmLan,
+          child: Text(l10n.tvLanConfirm),
+        ),
+        TvAction(
+          key: const Key('tv-lan-reject'),
+          onPressed: busy ? null : lan!.reject,
+          child: Text(l10n.tvLanReject),
+        ),
+      ];
+    }
+    return [
+      if (phase == TvLanPhase.expired)
+        Text(l10n.tvLanExpired, key: const Key('tv-lan-expired')),
+      if (phase == TvLanPhase.failed)
+        Text(l10n.tvLanFailed, key: const Key('tv-lan-failed')),
+      TvAction(
+        key: const Key('tv-lan-assist'),
+        onPressed: busy || _openingLan ? null : _openLan,
+        child: Text(l10n.tvLanAssist),
+      ),
+    ];
   }
 }
