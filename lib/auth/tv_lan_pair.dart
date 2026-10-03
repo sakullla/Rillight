@@ -11,7 +11,8 @@ import 'package:rillight/auth/auth_controller.dart';
 ///
 /// 只在用户打开时于本进程启动临时 HTTPS,不发现设备、不访问公网。
 /// 二维码和地址只含源、端口、配对号和证书指纹。手机提交后须遥控器确认
-/// 才会调用 [AuthController.connect];拒绝、过期、取消和未配对请求不建立会话。
+/// 才会调用 [AuthController.connect];拒绝、过期、取消、返回和未配对请求不建立会话。
+/// 返回时正在等待的手机收到失败页；连接中已经确定的成败仍写给手机。
 class TvLanAssist extends ChangeNotifier {
   TvLanAssist({
     this.lifetime = const Duration(minutes: 3),
@@ -156,11 +157,10 @@ class TvLanAssist extends ChangeNotifier {
         preserveSessionOnFailure: true,
       );
     } finally {
-      if (!_disposed) {
-        _phase = accepted ? TvLanPhase.confirmed : TvLanPhase.failed;
-        _notify();
-        await _deliverFinalThenClose();
-      }
+      // 页面已经返回时也要把这次确定的结果页写给手机，再关闭。
+      _phase = accepted ? TvLanPhase.confirmed : TvLanPhase.failed;
+      _notify();
+      await _deliverFinalThenClose();
     }
     return accepted;
   }
@@ -214,11 +214,20 @@ class TvLanAssist extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _timer?.cancel();
-    if (_phase == TvLanPhase.waiting || _phase == TvLanPhase.pending) {
-      _wipe();
-      _phase = TvLanPhase.cancelled;
+    // 连接中不关闭：confirm 会把已经确定的页面交给手机，再关套接字。
+    if (_phase != TvLanPhase.connecting) {
+      if (_phase == TvLanPhase.pending) {
+        _wipe();
+        _phase = TvLanPhase.cancelled;
+        unawaited(_deliverFinalThenClose());
+      } else {
+        if (_phase == TvLanPhase.waiting) {
+          _wipe();
+          _phase = TvLanPhase.cancelled;
+        }
+        unawaited(_shutdown());
+      }
     }
-    unawaited(_shutdown());
     super.dispose();
   }
 

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
@@ -590,6 +591,194 @@ void main() {
     );
     expect(late == null || late.status != 200, isTrue);
   });
+
+  test(
+    'backing out while the phone is waiting delivers failure and keeps the session',
+    () async {
+      final server = FakeEmbyServer();
+      final auth = authFor(server);
+      addTearDown(auth.dispose);
+      await auth.connect(
+        address: server.baseUrl.toString(),
+        username: 'alice',
+        password: 'correct-horse',
+      );
+      final token = auth.session!.accessToken;
+
+      assist = start(phoneGrace: const Duration(seconds: 3));
+      await assist!.open();
+      final offer = assist!.offer!;
+      await _exchange(
+        offer,
+        method: 'POST',
+        path: '/submit',
+        body: _form('http://other.test:8096', 'mallory', _password),
+      );
+      expect(assist!.phase, TvLanPhase.pending);
+      final waiting = _exchange(offer, path: '/status');
+      await _waitForPhone(assist!);
+      assist!.dispose();
+      final page = await waiting;
+      _expectPhone(page!.body, '失败', secret: _password, token: token);
+      expect(page.body.contains('成功'), isFalse);
+      expect(page.body.contains('待确认'), isFalse);
+      expect(assist!.phase, TvLanPhase.cancelled);
+      expect(assist!.pending, isNull);
+      expect(await assist!.confirm(auth), isFalse);
+      expect(auth.isLoggedIn, isTrue);
+      expect(auth.session!.accessToken, token);
+      expect(auth.session!.username, 'alice');
+      expect(auth.client.accessToken, token);
+      expect(auth.client.baseUrl, server.baseUrl);
+      final again = await _exchange(offer, path: '/status');
+      expect(again == null || again.status != 200, isTrue);
+    },
+  );
+
+  test(
+    'dispose during connect still delivers the decided success page',
+    () async {
+      final home = FakeEmbyServer();
+      final other = FakeEmbyServer(
+        serverId: 'server-id-2',
+        serverName: '第二台',
+        baseUrl: Uri.parse('http://other.test:8096'),
+        users: const [
+          FakeEmbyUser(
+            username: 'bob',
+            password: 'correct-horse',
+            userId: 'user-bob',
+          ),
+        ],
+      );
+      final dio = dioForFakeEmby(FakeEmbyAdapter([home, other]));
+      final auth = AuthController.memory(
+        client: EmbyClient(device: _device, dio: dio),
+      );
+      addTearDown(auth.dispose);
+      await auth.connect(
+        address: home.baseUrl.toString(),
+        username: 'alice',
+        password: 'correct-horse',
+      );
+      final token = auth.session!.accessToken;
+      assist = start(phoneGrace: const Duration(seconds: 3));
+      await assist!.open();
+      final offer = assist!.offer!;
+      final posted = await _exchange(
+        offer,
+        method: 'POST',
+        path: '/submit',
+        body: _form(other.baseUrl.toString(), 'bob', 'correct-horse'),
+      );
+      _expectPhone(posted!.body, '待确认', secret: 'correct-horse', token: token);
+
+      final gate = Completer<void>();
+      addTearDown(() {
+        if (!gate.isCompleted) {
+          gate.complete();
+        }
+      });
+      dio.interceptors.add(
+        InterceptorsWrapper(
+          onRequest: (options, handler) async {
+            await gate.future;
+            handler.next(options);
+          },
+        ),
+      );
+      final connectingFuture = _exchange(offer, path: '/status');
+      await _waitForPhone(assist!);
+      final confirmFuture = assist!.confirm(auth);
+      final connecting = await connectingFuture;
+      _expectPhone(
+        connecting!.body,
+        '连接中',
+        secret: 'correct-horse',
+        token: token,
+      );
+      final resultFuture = _exchange(offer, path: '/status');
+      await _waitForPhone(assist!);
+      expect(assist!.phase, TvLanPhase.connecting);
+      assist!.dispose();
+      expect(assist!.phase, TvLanPhase.connecting);
+      gate.complete();
+      final page = await resultFuture;
+      final accepted = await confirmFuture;
+      _expectPhone(page!.body, '成功', secret: 'correct-horse', token: token);
+      expect(page.body.contains('失败'), isFalse);
+      expect(page.body.contains('连接中'), isFalse);
+      expect(accepted, isTrue);
+      expect(assist!.phase, TvLanPhase.confirmed);
+      expect(auth.session!.username, 'bob');
+      expect(auth.session!.accessToken, isNot(token));
+      expect(page.body.contains(auth.session!.accessToken), isFalse);
+      expect(auth.client.accessToken, auth.session!.accessToken);
+      expect(auth.client.baseUrl, other.baseUrl);
+    },
+  );
+
+  test(
+    'dispose during a failed connect still delivers failure and keeps the session',
+    () async {
+      final server = FakeEmbyServer();
+      final dio = dioForFakeEmby(FakeEmbyAdapter([server]));
+      final auth = AuthController.memory(
+        client: EmbyClient(device: _device, dio: dio),
+      );
+      addTearDown(auth.dispose);
+      await auth.connect(
+        address: server.baseUrl.toString(),
+        username: 'alice',
+        password: 'correct-horse',
+      );
+      final token = auth.session!.accessToken;
+      assist = start(phoneGrace: const Duration(seconds: 3));
+      await assist!.open();
+      final offer = assist!.offer!;
+      await _exchange(
+        offer,
+        method: 'POST',
+        path: '/submit',
+        body: _form('http://missing.test:8096', 'mallory', _password),
+      );
+      final gate = Completer<void>();
+      addTearDown(() {
+        if (!gate.isCompleted) {
+          gate.complete();
+        }
+      });
+      dio.interceptors.add(
+        InterceptorsWrapper(
+          onRequest: (options, handler) async {
+            await gate.future;
+            handler.next(options);
+          },
+        ),
+      );
+      final connectingFuture = _exchange(offer, path: '/status');
+      await _waitForPhone(assist!);
+      final confirmFuture = assist!.confirm(auth);
+      final connecting = await connectingFuture;
+      _expectPhone(connecting!.body, '连接中', secret: _password, token: token);
+      final resultFuture = _exchange(offer, path: '/status');
+      await _waitForPhone(assist!);
+      expect(assist!.phase, TvLanPhase.connecting);
+      assist!.dispose();
+      gate.complete();
+      final page = await resultFuture;
+      final accepted = await confirmFuture;
+      _expectPhone(page!.body, '失败', secret: _password, token: token);
+      expect(page.body.contains('成功'), isFalse);
+      expect(accepted, isFalse);
+      expect(assist!.phase, TvLanPhase.failed);
+      expect(auth.isLoggedIn, isTrue);
+      expect(auth.session!.accessToken, token);
+      expect(auth.session!.username, 'alice');
+      expect(auth.client.accessToken, token);
+      expect(auth.client.baseUrl, server.baseUrl);
+    },
+  );
 }
 
 Future<void> _waitForLan(
