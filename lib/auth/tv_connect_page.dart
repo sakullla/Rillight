@@ -262,7 +262,7 @@ class _TvConnectPageState extends State<TvConnectPage> {
         SelectableText(offer.fingerprint, key: const Key('tv-lan-fingerprint')),
         TvAction(
           key: const Key('tv-lan-incomplete'),
-          onPressed: lan!.markIncomplete,
+          onPressed: lan.markIncomplete,
           child: Text(l10n.tvLanFailed),
         ),
       ];

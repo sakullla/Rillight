@@ -6,7 +6,6 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
-import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/auth/tv_connect_page.dart';
@@ -850,12 +849,7 @@ class _Page {
 }
 
 /// The widget binding replaces [HttpClient] with a client that never connects.
-class _DirectHttpOverrides extends HttpOverrides {
-  @override
-  HttpClient createHttpClient(SecurityContext? context) {
-    return super.createHttpClient(context);
-  }
-}
+class _DirectHttpOverrides extends HttpOverrides {}
 
 Future<_Page?> _exchange(
   TvLanOffer offer, {
