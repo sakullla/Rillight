@@ -13,6 +13,7 @@ import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/hero_artwork.dart';
 import 'package:rillight/library/detail_controller.dart';
+import 'package:rillight/library/tv_library_page.dart';
 import 'package:rillight/library/episode_detail_sections.dart';
 import 'package:rillight/library/episode_list.dart';
 import 'package:rillight/library/detail_extras.dart';
@@ -30,7 +31,20 @@ class TvDetailPage extends StatefulWidget {
 
 class _TvDetailPageState extends State<TvDetailPage> {
   DetailController? _controller;
+  final _focus = TvReturnFocus();
   bool _playBusy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    FocusManager.instance.addListener(_onFocus);
+  }
+
+  void _onFocus() {
+    if (!mounted) return;
+    _focus.syncOwned(this);
+  }
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -40,10 +54,16 @@ class _TvDetailPageState extends State<TvDetailPage> {
       itemId: widget.itemId,
       seasonId: widget.initialSeasonId,
     )..load();
+    _focus.noteRoute(
+      ModalRoute.of(context)?.isCurrent ?? true,
+      () => _focus.allowRestore(this),
+    );
   }
 
   @override
   void dispose() {
+    FocusManager.instance.removeListener(_onFocus);
+    _focus.dispose();
     _controller?.dispose();
     super.dispose();
   }
@@ -99,6 +119,10 @@ class _TvDetailPageState extends State<TvDetailPage> {
     return ListenableBuilder(
       listenable: c,
       builder: (context, _) {
+        _focus.retain([
+          for (final season in c.seasons) 'season:${season.id}',
+          for (final episode in c.episodes) 'episode:${episode.id}',
+        ]);
         final item = c.item, target = c.playTarget;
         final season = c.seasons.where((s) => s.id == c.seasonId).firstOrNull;
         final artwork = item?.isSeries == true && season != null
@@ -189,6 +213,7 @@ class _TvDetailPageState extends State<TvDetailPage> {
                         for (final season in c.seasons)
                           TvAction(
                             key: ValueKey(season.id),
+                            focusNode: _focus.nodeFor('season:${season.id}'),
                             selected: season.id == c.seasonId,
                             onPressed: () => c.selectSeason(season.id),
                             child: Text(season.name),
@@ -215,6 +240,7 @@ class _TvDetailPageState extends State<TvDetailPage> {
                           _TvEpisodeTile(
                             episode: episode,
                             current: episode.id == target?.id,
+                            focusNode: _focus.nodeFor('episode:${episode.id}'),
                           ),
                         if (c.hasMore)
                           TvAction(
@@ -354,10 +380,15 @@ class _TvBackdropHeader extends StatelessWidget {
 
 /// 分集行:缩略图(进度/已看角标)+ 集数名 + 时长/已看,当前集以选中态与播放图标标识。
 class _TvEpisodeTile extends StatelessWidget {
-  const _TvEpisodeTile({required this.episode, required this.current});
+  const _TvEpisodeTile({
+    required this.episode,
+    required this.current,
+    required this.focusNode,
+  });
 
   final EmbyItem episode;
   final bool current;
+  final FocusNode focusNode;
 
   @override
   Widget build(BuildContext context) {
@@ -377,6 +408,7 @@ class _TvEpisodeTile extends StatelessWidget {
     ];
     return TvAction(
       key: ValueKey(episode.id),
+      focusNode: focusNode,
       selected: current,
       onPressed: () => context.push(AppRoutes.item(episode.id)),
       child: Row(

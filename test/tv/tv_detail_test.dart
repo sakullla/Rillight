@@ -255,6 +255,8 @@ void main() {
         await key(tester, LogicalKeyboardKey.arrowDown);
       }
       expect(focusedLabel(tester), contains('The Pilot'));
+      final episodeFocus = FocusManager.instance.primaryFocus;
+      final episodeLabel = focusedLabel(tester);
       await key(tester, LogicalKeyboardKey.select);
 
       // 单集详情:头部为集名(标题栏与头部各一处),且单集提供标记已看操作。
@@ -271,6 +273,8 @@ void main() {
       await tester.binding.handlePopRoute();
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('tv-detail-episodes')), findsOneWidget);
+      expect(FocusManager.instance.primaryFocus, same(episodeFocus));
+      expect(focusedLabel(tester), episodeLabel);
       expect(focusedAction(), findsOneWidget);
       expect(tester.takeException(), isNull);
     },

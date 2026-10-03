@@ -232,11 +232,14 @@ void main() {
         await key(tester, LogicalKeyboardKey.arrowDown);
       }
       expect(focusedLabel(tester), 'Inception');
+      final resultFocus = FocusManager.instance.primaryFocus;
       await key(tester, LogicalKeyboardKey.select);
       expect(find.byType(TvDetailPage), findsOneWidget);
       await tester.binding.handlePopRoute();
       await tester.pumpAndSettle();
       expect(find.textContaining('Inception'), findsWidgets);
+      expect(FocusManager.instance.primaryFocus, same(resultFocus));
+      expect(focusedLabel(tester), 'Inception');
       await tester.binding.handlePopRoute();
       await tester.pumpAndSettle();
       expect(focusedLabel(tester), '首页');
@@ -316,6 +319,33 @@ void main() {
     },
     tags: ['integration'],
   );
+
+  testWidgets('remote library poster focus returns to the opened item', (
+    tester,
+  ) async {
+    final server = FakeEmbyServer();
+    await start(tester, server);
+    await login(tester, server);
+    await key(tester, LogicalKeyboardKey.arrowDown);
+    await key(tester, LogicalKeyboardKey.select);
+    await key(tester, LogicalKeyboardKey.arrowRight);
+    await key(tester, LogicalKeyboardKey.select);
+    expect(find.byType(TvLibraryPage), findsOneWidget);
+    await key(tester, LogicalKeyboardKey.arrowDown);
+    await key(tester, LogicalKeyboardKey.arrowRight);
+    final card = FocusManager.instance.primaryFocus;
+    final label = focusedLabel(tester);
+    expect(label, isNotEmpty);
+    expect(label, isNot('筛选'));
+    await key(tester, LogicalKeyboardKey.select);
+    expect(find.byType(TvDetailPage), findsOneWidget);
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.byType(TvLibraryPage), findsOneWidget);
+    expect(FocusManager.instance.primaryFocus, same(card));
+    expect(focusedLabel(tester), label);
+    expect(tester.takeException(), isNull);
+  }, tags: ['integration']);
 }
 
 class _FailingRecoveryStore extends MemoryPlaybackSessionSnapshotStore {
