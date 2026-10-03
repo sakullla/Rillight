@@ -25,6 +25,7 @@ import 'package:rillight/home/phone_home.dart';
 import 'package:rillight/home/phone_home_sections.dart';
 import 'package:rillight/home/phone_shelf_page.dart';
 import 'package:rillight/library/mobile_detail_page.dart';
+import 'package:rillight/media_image/media_image.dart';
 
 import '../../integration_test/mobile_performance.dart' as probe;
 import '../emby/fake_emby_server.dart';
@@ -127,7 +128,21 @@ void main() {
           .first,
     );
     expect(later, findsOneWidget);
+    await tester.pump(MediaImageCache.defaultScrollIdle);
   });
+
+  testWidgets('home scrolling defers image work until the idle window', (
+    tester,
+  ) async {
+    await _pumpRails(tester, width: 360, height: 560);
+    expect(MediaImageCache.instance.isScrollBusy, isFalse);
+    _homeScroll(tester).jumpTo(100);
+    await tester.pump();
+    expect(MediaImageCache.instance.isScrollBusy, isTrue);
+    await tester.pump(MediaImageCache.defaultScrollIdle);
+    expect(MediaImageCache.instance.isScrollBusy, isFalse);
+    await tester.pumpWidget(const SizedBox());
+  }, tags: ['integration']);
 
   testWidgets('image sampling accepts only cards inside the shelf grid', (
     tester,

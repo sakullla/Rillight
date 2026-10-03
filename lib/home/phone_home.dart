@@ -295,7 +295,7 @@ class _PhoneHomeState extends State<PhoneHome> {
             },
           ),
         );
-        return page;
+        return MediaImageScrollListener(child: page);
       },
     );
   }

@@ -979,7 +979,7 @@ void main() {
       );
 
       await Scrollable.ensureVisible(tester.element(retry), alignment: 0.2);
-      await tester.pump();
+      await tester.pump(MediaImageCache.defaultScrollIdle);
       await tester.tap(retry);
       await tester.pump();
       expect(find.byKey(CatalogKeys.item('movie-b')), findsOneWidget);
@@ -2320,6 +2320,7 @@ void main() {
           await tester.pump(const Duration(milliseconds: 100));
         }
         expect(latest, findsOneWidget);
+        await tester.pump(MediaImageCache.defaultScrollIdle);
         expect(
           find.descendant(of: latest, matching: find.byType(PhonePosterCard)),
           findsWidgets,

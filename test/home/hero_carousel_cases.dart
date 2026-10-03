@@ -137,6 +137,78 @@ void main() {
       expect(tester.takeException(), isNull);
       await unmount(tester);
     });
+
+    testWidgets('scrolling and an offscreen banner pause rotation', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(1200, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final scroll = ScrollController();
+      addTearDown(scroll.dispose);
+      await tester.pumpWidget(
+        wrap(
+          SingleChildScrollView(
+            controller: scroll,
+            child: Column(
+              children: [
+                HomeHero(catalog: catalog),
+                const SizedBox(height: 2000),
+              ],
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      final gesture = await tester.startGesture(const Offset(600, 300));
+      await gesture.moveBy(const Offset(0, -80));
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 14));
+      expect(find.text('Movie A'), findsOneWidget);
+      await gesture.up();
+      await tester.pumpAndSettle();
+
+      // An eager child stays mounted outside the viewport. Its timer must stop.
+      scroll.jumpTo(700);
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 14));
+      expect(find.text('Movie A'), findsOneWidget);
+      scroll.jumpTo(0);
+      await tester.pump();
+      await tester.pump(HeroAutoRotate.rotateInterval);
+      await tester.pump(const Duration(milliseconds: 500));
+      expect(find.text('Movie B'), findsOneWidget);
+      await unmount(tester);
+    });
+
+    testWidgets('disabling tickers cancels an already armed rotation', (
+      tester,
+    ) async {
+      final enabled = ValueNotifier(true);
+      addTearDown(enabled.dispose);
+      await tester.pumpWidget(
+        wrap(
+          ValueListenableBuilder(
+            valueListenable: enabled,
+            builder: (_, value, child) =>
+                TickerMode(enabled: value, child: child!),
+            child: HomeHero(catalog: catalog),
+          ),
+        ),
+      );
+      await tester.pump();
+      enabled.value = false;
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 14));
+      expect(find.text('Movie A'), findsOneWidget);
+      enabled.value = true;
+      await tester.pump();
+      await tester.pump(HeroAutoRotate.rotateInterval);
+      await tester.pump(const Duration(milliseconds: 500));
+      expect(find.text('Movie B'), findsOneWidget);
+      await unmount(tester);
+    });
   });
 
   group('phone auto rotate', () {

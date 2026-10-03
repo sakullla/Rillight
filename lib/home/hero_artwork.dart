@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -144,6 +145,9 @@ class HeroArtworkData {
 }
 
 class _HeroArtworkState extends State<HeroArtwork> {
+  // Byte objects are shared by MediaImageCache. Weak keys reuse header checks
+  // across carousel remounts without keeping another image cache alive.
+  static final _dimensions = Expando<(int, int)>();
   Future<HeroArtworkData?>? _future;
   String? _token;
   String? _reportedIdentity;
@@ -177,7 +181,7 @@ class _HeroArtworkState extends State<HeroArtwork> {
     final auth = AuthScope.of(context);
     final client = auth.client;
     final width = widget.requestWidth;
-    final minimum = widget.compact ? 640 : 960;
+    final minimum = math.min(widget.compact ? 640 : 960, width);
     final refs = [...widget.sources.backdrops, ...widget.sources.posters];
     bool current() =>
         mounted &&
@@ -187,13 +191,15 @@ class _HeroArtworkState extends State<HeroArtwork> {
       if (!current()) return null;
       try {
         final poster = ref.type == 'Primary';
+        // The sharp poster decodes at 480px; its blurred fill only needs 160px.
+        final sourceWidth = poster ? math.min(width, 480) : width;
         CancelToken? cancel;
         final bytes = await MediaImageCache.instance.load(
           serverId: scope,
           itemId: ref.itemId,
           type: ref.type,
           tag: ref.tag,
-          maxWidth: width,
+          maxWidth: sourceWidth,
           isCurrent: current,
           onAbort: () => cancel?.cancel('hero-image-expired'),
           fetch: () async {
@@ -203,7 +209,7 @@ class _HeroArtworkState extends State<HeroArtwork> {
                 ref.itemId,
                 type: ref.type,
                 tag: ref.tag,
-                maxWidth: width,
+                maxWidth: sourceWidth,
                 cancelToken: cancel,
               ),
             );
@@ -211,29 +217,34 @@ class _HeroArtworkState extends State<HeroArtwork> {
         );
         if (!current()) return null;
         if (bytes == null || bytes.isEmpty) continue;
-        final buffer = await ui.ImmutableBuffer.fromUint8List(bytes);
-        try {
-          final descriptor = await ui.ImageDescriptor.encoded(buffer);
+        var dimensions = _dimensions[bytes];
+        if (dimensions == null) {
+          final buffer = await ui.ImmutableBuffer.fromUint8List(bytes);
           try {
-            final suitable = poster
-                ? descriptor.width >= 240 && descriptor.height >= 320
-                : HeroArtwork.suitableBackdrop(
-                    descriptor.width,
-                    descriptor.height,
-                    minimumWidth: minimum,
-                  );
-            if (suitable && current()) {
-              return HeroArtworkData(
-                bytes,
-                poster: poster,
-                identity: '$scope/${ref.itemId}/${ref.type}/${ref.tag}',
-              );
+            final descriptor = await ui.ImageDescriptor.encoded(buffer);
+            try {
+              dimensions = (descriptor.width, descriptor.height);
+              _dimensions[bytes] = dimensions;
+            } finally {
+              descriptor.dispose();
             }
           } finally {
-            descriptor.dispose();
+            buffer.dispose();
           }
-        } finally {
-          buffer.dispose();
+        }
+        final suitable = poster
+            ? dimensions.$1 >= 240 && dimensions.$2 >= 320
+            : HeroArtwork.suitableBackdrop(
+                dimensions.$1,
+                dimensions.$2,
+                minimumWidth: minimum,
+              );
+        if (suitable && current()) {
+          return HeroArtworkData(
+            bytes,
+            poster: poster,
+            identity: '$scope/${ref.itemId}/${ref.type}/${ref.tag}',
+          );
         }
       } catch (_) {
         // Try another official artwork source without a broken-image banner.
@@ -330,11 +341,13 @@ class _HeroArtworkState extends State<HeroArtwork> {
     required double opacity,
     required double sigma,
   }) {
-    return Opacity(
-      opacity: opacity,
-      child: ImageFiltered(
-        imageFilter: ui.ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
-        child: Image.memory(bytes, fit: BoxFit.cover, cacheWidth: 160),
+    return RepaintBoundary(
+      child: Opacity(
+        opacity: opacity,
+        child: ImageFiltered(
+          imageFilter: ui.ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
+          child: Image.memory(bytes, fit: BoxFit.cover, cacheWidth: 160),
+        ),
       ),
     );
   }

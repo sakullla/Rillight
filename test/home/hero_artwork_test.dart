@@ -1,8 +1,15 @@
+import 'dart:typed_data';
+import 'dart:ui' as ui;
+
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/auth/auth_controller.dart';
+import 'package:rillight/auth/auth_scope.dart';
+import 'package:rillight/emby/emby_client.dart';
+import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_controller.dart';
 import 'package:rillight/home/catalog_keys.dart';
@@ -12,8 +19,92 @@ import 'package:rillight/home/hero_carousel.dart';
 import 'package:rillight/home/home_hero.dart';
 import 'package:rillight/home/phone_hero.dart';
 import 'package:rillight/player/player_window_host.dart';
+import 'package:rillight/media_image/media_image.dart';
+
+import '../helpers/image_cache_fixture.dart';
 
 void main() {
+  for (final posterOnly in [false, true]) {
+    testWidgets('hero poster uses a bounded request, posterOnly=$posterOnly', (
+      tester,
+    ) async {
+      isolateImageCache();
+      addTearDown(MediaImage.debugClearCache);
+      addTearDown(MediaImage.debugResetCacheConfiguration);
+      final poster = (await tester.runAsync(() => _imageBytes(320, 480)))!;
+      final client = _HeroImageClient(poster);
+      final imageAuth = AuthController.memory(client: client);
+      addTearDown(imageAuth.dispose);
+      HeroArtworkData? resolved;
+      final sources = HeroArtworkSources(
+        [
+          if (!posterOnly)
+            const ItemImageRef(itemId: 'title', type: 'Backdrop', tag: 'bad'),
+        ],
+        [const ItemImageRef(itemId: 'title', type: 'Primary', tag: 'poster')],
+      );
+      Widget subject() => MaterialApp(
+        home: AuthScope(
+          controller: imageAuth,
+          child: SizedBox(
+            width: 1000,
+            height: 400,
+            child: HeroArtwork(
+              sources: sources,
+              requestWidth: 1920,
+              onResolved: (data) => resolved = data,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpWidget(subject());
+      await _pumpUntil(tester, () => resolved != null);
+      expect(resolved!.poster, isTrue);
+      expect(client.requests, [
+        if (!posterOnly) ('Backdrop', 1920),
+        ('Primary', 480),
+      ]);
+      await tester.pumpWidget(const SizedBox());
+      resolved = null;
+      await tester.pumpWidget(subject());
+      await _pumpUntil(tester, () => resolved != null);
+      expect(resolved!.poster, isTrue);
+      expect(client.requests.length, posterOnly ? 1 : 2);
+      await tester.pumpWidget(const SizedBox());
+    });
+  }
+
+  testWidgets('a backdrop requested below 960px remains usable', (
+    tester,
+  ) async {
+    isolateImageCache();
+    addTearDown(MediaImage.debugClearCache);
+    addTearDown(MediaImage.debugResetCacheConfiguration);
+    final bytes = (await tester.runAsync(() => _imageBytes(800, 450)))!;
+    final client = _HeroImageClient(bytes, backdrop: bytes);
+    final imageAuth = AuthController.memory(client: client);
+    addTearDown(imageAuth.dispose);
+    HeroArtworkData? resolved;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: AuthScope(
+          controller: imageAuth,
+          child: HeroArtwork(
+            sources: const HeroArtworkSources(
+              [ItemImageRef(itemId: 'title', type: 'Backdrop', tag: 'small')],
+              [ItemImageRef(itemId: 'title', type: 'Primary', tag: 'poster')],
+            ),
+            requestWidth: 800,
+            onResolved: (data) => resolved = data,
+          ),
+        ),
+      ),
+    );
+    await _pumpUntil(tester, () => resolved != null);
+    expect(resolved!.poster, isFalse);
+    expect(client.requests, [('Backdrop', 800)]);
+    await tester.pumpWidget(const SizedBox());
+  });
   test(
     'season posters fall back to the series endpoint without a missing-image request',
     () {
@@ -361,5 +452,62 @@ void main() {
         expect(tester.takeException(), isNull);
       });
     }
+  }
+}
+
+Future<Uint8List> _imageBytes(int width, int height) async {
+  final recorder = ui.PictureRecorder();
+  Canvas(recorder).drawColor(Colors.green, BlendMode.src);
+  final picture = recorder.endRecording();
+  final image = await picture.toImage(width, height);
+  final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+  image.dispose();
+  picture.dispose();
+  return bytes!.buffer.asUint8List();
+}
+
+Future<void> _pumpUntil(WidgetTester tester, bool Function() ready) async {
+  for (var attempt = 0; attempt < 50 && !ready(); attempt++) {
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 10)),
+    );
+    await tester.pump();
+  }
+  expect(ready(), isTrue);
+}
+
+class _HeroImageClient extends EmbyClient {
+  _HeroImageClient(this.poster, {Uint8List? backdrop})
+    : backdrop = backdrop ?? Uint8List.fromList([1, 2, 3]),
+      super(
+        device: const EmbyDeviceInfo(
+          clientName: 'test',
+          deviceName: 'test',
+          deviceId: 'hero-images',
+          version: '1',
+        ),
+      ) {
+    attachSession(
+      baseUrl: Uri.parse('https://hero.example/emby'),
+      accessToken: 'synthetic',
+      userId: 'test',
+    );
+  }
+
+  final Uint8List poster;
+  final Uint8List backdrop;
+  final requests = <(String, int)>[];
+
+  @override
+  Future<List<int>> getItemImage(
+    String itemId, {
+    String type = 'Primary',
+    int? index,
+    String? tag,
+    int maxWidth = 280,
+    CancelToken? cancelToken,
+  }) async {
+    requests.add((type, maxWidth));
+    return type == 'Backdrop' ? backdrop : poster;
   }
 }

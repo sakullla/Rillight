@@ -2,8 +2,10 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/theme/tokens.dart';
+import 'package:rillight/app/widgets/scroll_viewport.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/hero_artwork.dart';
@@ -376,6 +378,77 @@ mixin HeroAutoRotate<T extends StatefulWidget> on State<T> {
 
   Timer? _rotateTimer;
   bool _rotatePaused = false;
+  int _rotateItemCount = 0;
+  List<ScrollPosition> _rotateScrolls = const [];
+  bool _rotateCheckQueued = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _detachRotateScrolls();
+    _rotateScrolls = ancestorScrollPositions(context);
+    for (final position in _rotateScrolls) {
+      position.addListener(_onRotateScroll);
+      position.isScrollingNotifier.addListener(_onRotateScroll);
+    }
+    _queueRotateCheck();
+  }
+
+  void _detachRotateScrolls() {
+    for (final position in _rotateScrolls) {
+      position.removeListener(_onRotateScroll);
+      position.isScrollingNotifier.removeListener(_onRotateScroll);
+    }
+    _rotateScrolls = const [];
+  }
+
+  void _onRotateScroll() {
+    cancelAutoRotate();
+    _queueRotateCheck();
+  }
+
+  void _queueRotateCheck() {
+    if (_rotateCheckQueued) return;
+    _rotateCheckQueued = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _rotateCheckQueued = false;
+      if (!mounted) return;
+      if (_canAutoRotate(_rotateItemCount)) {
+        armAutoRotate(_rotateItemCount);
+      } else {
+        cancelAutoRotate();
+      }
+    });
+  }
+
+  bool _rotateInViewport() {
+    final object = context.findRenderObject();
+    if (object is! RenderBox || !object.attached || !object.hasSize) {
+      return true;
+    }
+    RenderObject? ancestor = object.parent;
+    while (ancestor != null) {
+      if (ancestor is RenderAbstractViewport && ancestor is RenderBox) {
+        final box = ancestor as RenderBox;
+        if (box.attached && box.hasSize) {
+          final rect = MatrixUtils.transformRect(
+            object.getTransformTo(box),
+            Offset.zero & object.size,
+          );
+          if (!rect.overlaps(Offset.zero & box.size)) return false;
+        }
+      }
+      ancestor = ancestor.parent;
+    }
+    return true;
+  }
+
+  @override
+  void dispose() {
+    _detachRotateScrolls();
+    cancelAutoRotate();
+    super.dispose();
+  }
 
   /// 宿主实现:推进到下一条。
   void advanceCarousel();
@@ -385,15 +458,20 @@ mixin HeroAutoRotate<T extends StatefulWidget> on State<T> {
       itemCount >= 2 &&
       !_rotatePaused &&
       mounted &&
+      !_rotateScrolls.any((position) => position.isScrollingNotifier.value) &&
+      _rotateInViewport() &&
       TickerMode.valuesOf(context).enabled &&
       !MediaQuery.disableAnimationsOf(context);
 
   /// 幂等:计时器存活时不重置,触发后由宿主 build 再次调用重新武装。
   void armAutoRotate(int itemCount) {
+    _rotateItemCount = itemCount;
     if (_rotateTimer != null || !_canAutoRotate(itemCount)) return;
     _rotateTimer = Timer(rotateInterval, () {
       _rotateTimer = null;
-      if (mounted) advanceCarousel();
+      if (_canAutoRotate(_rotateItemCount)) {
+        advanceCarousel();
+      }
     });
   }
 
