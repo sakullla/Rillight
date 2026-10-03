@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:rillight/app/content_theme.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_motion.dart';
 import 'package:rillight/app/theme.dart';
@@ -9,14 +8,15 @@ import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/library/detail_controller.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_controller.dart';
-import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/featured_items.dart';
 import 'package:rillight/home/hero_artwork.dart';
+import 'package:rillight/home/hero_carousel.dart';
 import 'package:rillight/home/hero_playback_actions.dart';
-import 'package:rillight/library/item_format.dart';
+import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/player/player_window_host.dart';
 
-/// A continuous artwork composition with a readable, surface-toned caption.
+/// 全出血轮播:图片铺满整卡,渐变遮罩上排标题与按钮,
+/// 触摸暂停的 7 秒自动轮播;仅海报的条目走海报聚焦版式。
 class PhoneHero extends StatefulWidget {
   const PhoneHero({super.key, required this.catalog, this.onItem});
   final CatalogController catalog;
@@ -34,14 +34,16 @@ class PhoneHero extends StatefulWidget {
   State<PhoneHero> createState() => _PhoneHeroState();
 }
 
-class _PhoneHeroState extends State<PhoneHero> {
+class _PhoneHeroState extends State<PhoneHero> with HeroAutoRotate {
   int _index = 0;
   String? _reportedId;
   final PageController _page = PageController();
+  final Map<String, HeroLayout> _layoutOverride = {};
   List<EmbyItem> get _featured => PhoneHero.featuredItemsOf(widget.catalog);
 
   @override
   void dispose() {
+    cancelAutoRotate();
     _page.dispose();
     super.dispose();
   }
@@ -68,9 +70,31 @@ class _PhoneHeroState extends State<PhoneHero> {
   }
 
   @override
+  void advanceCarousel() {
+    final count = _featured.length;
+    if (count >= 2 && mounted) {
+      _goTo((_index + 1) % count);
+    }
+  }
+
+  void _onArtworkResolved(
+    EmbyItem item,
+    HeroArtworkSources sources,
+    HeroArtworkData data,
+  ) {
+    final guessed = _layoutOverride[item.id] ?? heroLayoutFor(sources);
+    final actual = data.poster
+        ? HeroLayout.posterSpotlight
+        : HeroLayout.fullBleed;
+    if (guessed == actual) return;
+    setState(() => _layoutOverride[item.id] = actual);
+  }
+
+  @override
   Widget build(BuildContext context) {
     final items = _featured;
     if (items.isEmpty) return const SizedBox.shrink();
+    armAutoRotate(items.length);
     final index = _index % items.length;
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -89,118 +113,153 @@ class _PhoneHeroState extends State<PhoneHero> {
             child: Column(
               children: [
                 Expanded(
-                  child: PageView.builder(
-                    controller: _page,
-                    physics: items.length > 1
-                        ? const PageScrollPhysics()
-                        : const NeverScrollableScrollPhysics(),
-                    itemCount: items.length,
-                    onPageChanged: (value) {
-                      setState(() => _index = value);
-                      _report(items[value]);
-                    },
-                    itemBuilder: (context, page) {
-                      final item = items[page];
-                      final artwork = heroArtworkSources(
-                        item,
-                        series: widget.catalog.latestSeries.items,
-                      );
-                      return ContentTheme(
-                        key: PhoneHero.itemKey(item.id),
-                        item: artwork.themeItem,
-                        fillSurface: false,
-                        child: Builder(
-                          builder: (context) => Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 16),
-                            child: Material(
-                              color: Theme.of(
-                                context,
-                              ).colorScheme.surfaceContainerLow,
-                              borderRadius: BorderRadius.circular(24),
-                              clipBehavior: Clip.antiAlias,
-                              child: Stack(
-                                fit: StackFit.expand,
-                                children: [
-                                  Positioned(
-                                    left: 0,
-                                    right: 0,
-                                    top: 0,
-                                    height: (width - 32) * 9 / 16,
-                                    child: AspectRatio(
-                                      aspectRatio: 16 / 9,
-                                      child: GestureDetector(
-                                        key: page == index
-                                            ? PhoneHero.openKey
-                                            : null,
-                                        onTap: () => _open(item),
-                                        child: RepaintBoundary(
-                                          child: PhoneMotion.sharedImage(
-                                            itemId: item.id,
-                                            preferBackdrop: true,
-                                            child: HeroArtwork(
-                                              sources: artwork,
-                                              requestWidth:
-                                                  PhoneMotion.heroRequestWidth,
-                                              compact: true,
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                  Positioned.fill(
-                                    child: IgnorePointer(
-                                      child: DecoratedBox(
-                                        decoration: BoxDecoration(
-                                          gradient: LinearGradient(
-                                            begin: Alignment.topCenter,
-                                            end: Alignment.bottomCenter,
-                                            stops: const [0, .30, .67, 1],
-                                            colors: [
-                                              Colors.transparent,
-                                              Colors.transparent,
-                                              Theme.of(context)
-                                                  .colorScheme
-                                                  .surfaceContainerLow
-                                                  .withValues(alpha: .94),
-                                              Theme.of(
-                                                context,
-                                              ).colorScheme.surfaceContainerLow,
-                                            ],
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                  Positioned(
-                                    left: 20,
-                                    right: 20,
-                                    bottom: 16,
-                                    child: _HeroCaption(
-                                      item: item,
-                                      onOpen: () => _open(item),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                      );
-                    },
+                  child: Listener(
+                    onPointerDown: (_) => pauseAutoRotate(),
+                    onPointerUp: (_) => resumeAutoRotate(items.length),
+                    onPointerCancel: (_) => resumeAutoRotate(items.length),
+                    child: PageView.builder(
+                      controller: _page,
+                      physics: items.length > 1
+                          ? const PageScrollPhysics()
+                          : const NeverScrollableScrollPhysics(),
+                      itemCount: items.length,
+                      onPageChanged: (value) {
+                        setState(() => _index = value);
+                        _report(items[value]);
+                        resetAutoRotate(items.length);
+                      },
+                      itemBuilder: (context, page) {
+                        final item = items[page];
+                        return KeyedSubtree(
+                          key: PhoneHero.itemKey(item.id),
+                          child: _pageCard(context, item, page == index, width),
+                        );
+                      },
+                    ),
                   ),
                 ),
                 if (items.length > 1)
-                  _PageIndicator(
+                  HeroDots(
                     index: index,
                     count: items.length,
-                    onSelect: _goTo,
+                    onSelect: (i) {
+                      _goTo(i);
+                      resetAutoRotate(items.length);
+                    },
+                    onScrim: false,
                   ),
               ],
             ),
           ),
         );
       },
+    );
+  }
+
+  Widget _pageCard(
+    BuildContext context,
+    EmbyItem item,
+    bool current,
+    double width,
+  ) {
+    final artwork = heroArtworkSources(
+      item,
+      series: widget.catalog.latestSeries.items,
+    );
+    final layout = _layoutOverride[item.id] ?? heroLayoutFor(artwork);
+    final requestWidth = mediaHeroBackdropRequestWidth(
+      layoutWidth: width - 32,
+      devicePixelRatio: MediaQuery.devicePixelRatioOf(context),
+    );
+    final actions = HeroPlaybackActions(
+      item: item,
+      onDetails: () => _open(item),
+      onResume: () => _resume(item),
+    );
+    final text = HeroTextBlock(
+      item: item,
+      compact: true,
+      includeActions: layout == HeroLayout.fullBleed,
+      actions: actions,
+    );
+    final artworkWidget = RepaintBoundary(
+      child: PhoneMotion.sharedImage(
+        itemId: item.id,
+        preferBackdrop: true,
+        child: HeroArtwork(
+          sources: artwork,
+          requestWidth: requestWidth,
+          compact: true,
+          onResolved: (data) => _onArtworkResolved(item, artwork, data),
+        ),
+      ),
+    );
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Material(
+        color: Theme.of(context).colorScheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(24),
+        clipBehavior: Clip.antiAlias,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            if (layout == HeroLayout.fullBleed) ...[
+              GestureDetector(
+                key: current ? PhoneHero.openKey : null,
+                onTap: () => _open(item),
+                child: artworkWidget,
+              ),
+              const HeroScrim(),
+              Positioned(left: 20, right: 20, bottom: 16, child: text),
+            ] else
+              GestureDetector(
+                key: current ? PhoneHero.openKey : null,
+                onTap: () => _open(item),
+                child: HeroPosterSpotlight(
+                  sources: artwork,
+                  requestWidth: requestWidth,
+                  compact: true,
+                  text: text,
+                  actions: actions,
+                  onResolved: (data) => _onArtworkResolved(item, artwork, data),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _resume(EmbyItem item) async {
+    final l10n = AppLocalizations.of(context);
+    var target = item;
+    if (item.isSeries) {
+      final controller = DetailController(
+        auth: AuthScope.of(context),
+        cache: CatalogScope.of(context).cache,
+        itemId: item.id,
+      );
+      try {
+        controller.applyItem(item);
+        await controller.loadSeasons();
+        await controller.retainOffPageResume();
+        final resolved = controller.playTarget;
+        if (!mounted) return;
+        if (resolved == null || !resolved.isPlayable) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text(l10n.noPlayableStream)));
+          return;
+        }
+        target = resolved;
+      } finally {
+        controller.dispose();
+      }
+    }
+    if (!mounted) return;
+    await context.push<void>(
+      '/play/${target.id}',
+      extra: PlayerOpenRequest(itemId: target.id, autoResume: true),
     );
   }
 
@@ -211,143 +270,5 @@ class _PhoneHeroState extends State<PhoneHero> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && _reportedId == item.id) callback(item);
     });
-  }
-}
-
-class _HeroCaption extends StatelessWidget {
-  const _HeroCaption({required this.item, required this.onOpen});
-  final EmbyItem item;
-  final VoidCallback onOpen;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    final l10n = AppLocalizations.of(context);
-    final title = item.isEpisode && item.seriesName?.isNotEmpty == true
-        ? item.seriesName!
-        : item.name;
-    final meta = [
-      if (item.isEpisode) ?seasonEpisodeCode(item),
-      if (item.canResume)
-        l10n.playbackProgress((item.playbackProgress * 100).round()),
-      if (!item.isEpisode && item.productionYear != null)
-        '${item.productionYear}',
-      if (item.communityRating != null)
-        item.communityRating!.toStringAsFixed(1),
-    ];
-    return Padding(
-      padding: const EdgeInsets.only(top: 14, bottom: 4),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            title,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.titleLarge?.copyWith(
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          if (meta.isNotEmpty) ...[
-            const SizedBox(height: 6),
-            Text(
-              meta.join(' · '),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: scheme.onSurfaceVariant,
-              ),
-            ),
-          ],
-          const SizedBox(height: 16),
-          HeroPlaybackActions(
-            item: item,
-            onDetails: onOpen,
-            onResume: () async {
-              var target = item;
-              if (item.isSeries) {
-                final controller = DetailController(
-                  auth: AuthScope.of(context),
-                  cache: CatalogScope.of(context).cache,
-                  itemId: item.id,
-                );
-                try {
-                  controller.applyItem(item);
-                  await controller.loadSeasons();
-                  await controller.retainOffPageResume();
-                  final resolved = controller.playTarget;
-                  if (!context.mounted) return;
-                  if (resolved == null || !resolved.isPlayable) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text(l10n.noPlayableStream)),
-                    );
-                    return;
-                  }
-                  target = resolved;
-                } finally {
-                  controller.dispose();
-                }
-              }
-              if (!context.mounted) return;
-              await context.push<void>(
-                '/play/${target.id}',
-                extra: PlayerOpenRequest(itemId: target.id, autoResume: true),
-              );
-            },
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _PageIndicator extends StatelessWidget {
-  const _PageIndicator({
-    required this.index,
-    required this.count,
-    required this.onSelect,
-  });
-  final int index;
-  final int count;
-  final ValueChanged<int> onSelect;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Material(
-      type: MaterialType.transparency,
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          for (var i = 0; i < count; i++)
-            Semantics(
-              selected: i == index,
-              label: '${i + 1} / $count',
-              child: InkResponse(
-                key: CatalogKeys.heroDot(i),
-                onTap: () => onSelect(i),
-                child: SizedBox(
-                  width: 44,
-                  height: 44,
-                  child: Center(
-                    child: AnimatedContainer(
-                      duration: AppMotion.durationOf(context, AppMotion.fast),
-                      width: i == index ? 18 : 5,
-                      height: 5,
-                      decoration: BoxDecoration(
-                        color: i == index
-                            ? scheme.secondary
-                            : scheme.onSurface.withValues(alpha: .25),
-                        borderRadius: BorderRadius.circular(99),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
   }
 }

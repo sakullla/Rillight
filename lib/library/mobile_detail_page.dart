@@ -493,6 +493,14 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
               elevation: 0,
               scrolledUnderElevation: 0,
               foregroundColor: immersive ? Colors.white : null,
+              // 横幅滚出后顶栏接管标题,不再只剩一条空色块。
+              title: _barSolid && (item ?? handoff?.item) != null
+                  ? Text(
+                      (item ?? handoff?.item)!.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    )
+                  : null,
               actions: [
                 if (item != null && !item.isSeries)
                   IconButton(

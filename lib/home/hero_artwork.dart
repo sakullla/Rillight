@@ -100,11 +100,21 @@ class HeroArtwork extends StatefulWidget {
     required this.sources,
     required this.requestWidth,
     this.compact = false,
+    this.spotlightBackground = false,
+    this.onResolved,
   });
 
   final HeroArtworkSources sources;
   final int requestWidth;
   final bool compact;
+
+  /// Poster-spotlight mode: a poster result renders only the blurred, darkened
+  /// full-bleed background; the parent draws the crisp poster card itself.
+  final bool spotlightBackground;
+
+  /// Fires once per resolved image (post-frame, deduped by identity) so parents
+  /// can switch between full-bleed and poster-spotlight layouts.
+  final ValueChanged<HeroArtworkData>? onResolved;
 
   static bool suitableBackdrop(
     int width,
@@ -120,8 +130,10 @@ class HeroArtwork extends StatefulWidget {
   State<HeroArtwork> createState() => _HeroArtworkState();
 }
 
-class _ArtworkData {
-  const _ArtworkData(
+/// A validated hero image. [poster] marks poster-shaped art, which parents may
+/// present as a poster-spotlight instead of a full-bleed backdrop.
+class HeroArtworkData {
+  const HeroArtworkData(
     this.bytes, {
     required this.poster,
     required this.identity,
@@ -132,8 +144,9 @@ class _ArtworkData {
 }
 
 class _HeroArtworkState extends State<HeroArtwork> {
-  Future<_ArtworkData?>? _future;
+  Future<HeroArtworkData?>? _future;
   String? _token;
+  String? _reportedIdentity;
   int _generation = 0;
 
   @override
@@ -160,7 +173,7 @@ class _HeroArtworkState extends State<HeroArtwork> {
     _future = scope == null || auth == null ? null : _load(scope, generation);
   }
 
-  Future<_ArtworkData?> _load(String scope, int generation) async {
+  Future<HeroArtworkData?> _load(String scope, int generation) async {
     final auth = AuthScope.of(context);
     final client = auth.client;
     final width = widget.requestWidth;
@@ -210,7 +223,7 @@ class _HeroArtworkState extends State<HeroArtwork> {
                     minimumWidth: minimum,
                   );
             if (suitable && current()) {
-              return _ArtworkData(
+              return HeroArtworkData(
                 bytes,
                 poster: poster,
                 identity: '$scope/${ref.itemId}/${ref.type}/${ref.tag}',
@@ -235,6 +248,17 @@ class _HeroArtworkState extends State<HeroArtwork> {
     super.dispose();
   }
 
+  void _notifyResolved(HeroArtworkData image) {
+    final callback = widget.onResolved;
+    if (callback == null || _reportedIdentity == image.identity) return;
+    _reportedIdentity = image.identity;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _reportedIdentity == image.identity) {
+        callback(image);
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -246,12 +270,16 @@ class _HeroArtworkState extends State<HeroArtwork> {
           colors: [scheme.surfaceContainerHigh, scheme.surface],
         ),
       ),
-      child: FutureBuilder<_ArtworkData?>(
+      child: FutureBuilder<HeroArtworkData?>(
         key: ValueKey(_token),
         future: _future,
         builder: (context, snapshot) {
           final image = snapshot.data;
           if (image == null) return const SizedBox.expand();
+          _notifyResolved(image);
+          if (widget.spotlightBackground && image.poster) {
+            return _spotlightBackdrop(image.bytes);
+          }
           final art = Image.memory(
             image.bytes,
             fit: image.poster ? BoxFit.contain : BoxFit.cover,
@@ -274,22 +302,39 @@ class _HeroArtworkState extends State<HeroArtwork> {
             child: Stack(
               fit: StackFit.expand,
               children: [
-                Opacity(
-                  opacity: .25,
-                  child: ImageFiltered(
-                    imageFilter: ui.ImageFilter.blur(sigmaX: 24, sigmaY: 24),
-                    child: Image.memory(
-                      image.bytes,
-                      fit: BoxFit.cover,
-                      cacheWidth: 160,
-                    ),
-                  ),
-                ),
+                _blurredFill(image.bytes, opacity: .25, sigma: 24),
                 Padding(padding: const EdgeInsets.all(20), child: art),
               ],
             ),
           );
         },
+      ),
+    );
+  }
+
+  /// Full-bleed blurred + darkened layer behind a parent-drawn poster card.
+  Widget _spotlightBackdrop(Uint8List bytes) {
+    return ClipRect(
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          _blurredFill(bytes, opacity: .5, sigma: 32),
+          const ColoredBox(color: Colors.black54),
+        ],
+      ),
+    );
+  }
+
+  Widget _blurredFill(
+    Uint8List bytes, {
+    required double opacity,
+    required double sigma,
+  }) {
+    return Opacity(
+      opacity: opacity,
+      child: ImageFiltered(
+        imageFilter: ui.ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
+        child: Image.memory(bytes, fit: BoxFit.cover, cacheWidth: 160),
       ),
     );
   }

@@ -650,6 +650,8 @@ Future<void> _pumpRails(
             name: '第 $i 集',
             type: 'Episode',
             seriesName: '示例剧',
+            seriesId: 'series-demo',
+            seriesPrimaryImageTag: 'series-poster',
             parentIndexNumber: 1,
             indexNumber: i,
             userData: const EmbyUserData(

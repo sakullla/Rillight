@@ -334,6 +334,35 @@ void main() {
     servers: MemoryServerListStore(),
   );
 
+  testWidgets('season banner prefers the series backdrop over its poster', (
+    tester,
+  ) async {
+    final client = _ControlledImageClient();
+    final auth = detachedAuth(client);
+    addTearDown(auth.dispose);
+    const season = EmbyItem(
+      id: 'img-season',
+      name: '第 3 季',
+      type: 'Season',
+      primaryImageTag: 'season-poster',
+      parentBackdropItemId: 'img-series',
+      parentBackdropImageTag: 'series-backdrop',
+      seriesId: 'img-series',
+      seriesPrimaryImageTag: 'series-poster',
+    );
+    await tester.pumpWidget(
+      wrap(
+        auth,
+        MediaImage(item: season, preferBackdrop: true, width: 240, height: 135),
+      ),
+    );
+    await pumpUntilImage(tester);
+    expect(find.byType(Image), findsOneWidget);
+    // 竖版季海报不能压过剧集横版背景:只请求剧集 Backdrop。
+    expect(client.requested, ['img-series']);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('card crop fills mismatched artwork without refetching it', (
     tester,
   ) async {

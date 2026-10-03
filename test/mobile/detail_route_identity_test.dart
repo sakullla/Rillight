@@ -15,7 +15,7 @@ import '../helpers/image_cache_fixture.dart';
 
 void main() {
   testWidgets(
-    'selected season artwork precedes shared series artwork and failures fall back',
+    'season banner prefers wide artwork and failures never touch the poster',
     (tester) async {
       isolateImageCache();
       tester.view.physicalSize = const Size(412, 915);
@@ -90,15 +90,16 @@ void main() {
       await tester.tap(find.byKey(CatalogKeys.season('season-friends-2')));
       await _artworkFrames(tester);
       expect(header().item.id, 'season-friends-2');
+      // 只有竖版季海报时,宽幅横幅优先共享的剧集横版背景。
       expect(
         server.requests.any(
-          (r) => r.contains('/season-friends-2/Images/Primary'),
+          (r) => r.contains('/series-friends/Images/Backdrop'),
         ),
         isTrue,
       );
       expect(
         server.requests.any(
-          (r) => r.contains('/series-friends/Images/Backdrop'),
+          (r) => r.contains('/season-friends-2/Images/Primary'),
         ),
         isFalse,
       );
@@ -106,14 +107,13 @@ void main() {
       await tester.tap(find.byKey(CatalogKeys.season('season-friends-3')));
       await _artworkFrames(tester);
       expect(header().item.id, 'season-friends-3');
+      // 无图季复用上一季已缓存的剧集背景,不为季本身发起任何图片请求。
       expect(
-        server.requests.any(
-          (r) => r.contains('/series-friends/Images/Backdrop'),
-        ),
-        isTrue,
+        server.requests.any((r) => r.contains('/season-friends-3/Images/')),
+        isFalse,
       );
-      // A previously displayed season's new tag can fail independently; its
-      // fallback must be the shared source, without retaining the old poster.
+      // 季海报失效不再影响横幅:共享背景直接命中,失效的季海报根本不被请求,
+      // 也不会残留上一季旧图。
       server.items
               .firstWhere((item) => item.id == 'season-friends-2')
               .primaryImageTag =
@@ -126,11 +126,10 @@ void main() {
       await _artworkFrames(tester);
       expect(header().item.id, 'season-friends-2');
       expect(header().item.primaryImageTag, 'two-failed');
+      // 横幅直接复用缓存的剧集背景,失效的季海报根本不被请求。
       expect(
-        server.requests.any(
-          (r) => r.contains('/season-friends-2/Images/Primary'),
-        ),
-        isTrue,
+        server.requests.any((r) => r.contains('/season-friends-2/Images/')),
+        isFalse,
       );
       expect(tester.takeException(), isNull);
     },

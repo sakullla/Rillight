@@ -13,6 +13,7 @@ import 'package:rillight/home/catalog_controller.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/home/featured_items.dart';
+import 'package:rillight/home/hero_carousel.dart';
 import 'package:rillight/home/home_display_dialog.dart';
 import 'package:rillight/home/library_latest_row.dart';
 import 'package:rillight/home/library_tiles.dart';
@@ -289,17 +290,8 @@ class _TvFeaturedState extends State<_TvFeatured> {
         item.backdropImageTag != null ||
         item.parentBackdropImageTag != null ||
         item.primaryImageTag != null;
-    final title = item.isEpisode && (item.seriesName?.isNotEmpty ?? false)
-        ? item.seriesName!
-        : item.name;
-    final meta = <String>[
-      if (!item.isEpisode &&
-          item.productionYear != null &&
-          item.productionYear! > 0)
-        '${item.productionYear}',
-      if (item.canResume)
-        l.playbackProgress((item.playbackProgress * 100).round()),
-    ];
+    final title = heroTitle(item);
+    final meta = heroMetaLabels(l, item);
     return SizedBox(
       key: TvHomeKeys.featured,
       height: height,
@@ -319,7 +311,7 @@ class _TvFeaturedState extends State<_TvFeatured> {
                       item: item,
                       height: height,
                       preferBackdrop: true,
-                      maxWidth: mediaBackdropRequestWidth(
+                      maxWidth: mediaHeroBackdropRequestWidth(
                         layoutWidth: viewSize.width,
                         devicePixelRatio: MediaQuery.devicePixelRatioOf(
                           context,
@@ -328,17 +320,7 @@ class _TvFeaturedState extends State<_TvFeatured> {
                     ),
                   ),
                 ),
-              const Positioned.fill(
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [Colors.transparent, Color(0xcc0b0f14)],
-                    ),
-                  ),
-                ),
-              ),
+              const Positioned.fill(child: HeroScrim()),
               Positioned(
                 left: 24,
                 right: 24,
@@ -357,15 +339,26 @@ class _TvFeaturedState extends State<_TvFeatured> {
                         fontWeight: FontWeight.w800,
                       ),
                     ),
-                    if (meta.isNotEmpty) ...[
+                    if (meta.isNotEmpty || item.communityRating != null) ...[
                       const SizedBox(height: 4),
-                      Text(
-                        meta.join(' · '),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.labelLarge?.copyWith(
-                          color: Colors.white.withValues(alpha: 0.8),
-                        ),
+                      Row(
+                        children: [
+                          if (meta.isNotEmpty)
+                            Flexible(
+                              child: Text(
+                                meta.join(' · '),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.labelLarge?.copyWith(
+                                  color: Colors.white.withValues(alpha: 0.8),
+                                ),
+                              ),
+                            ),
+                          if (item.communityRating != null) ...[
+                            const SizedBox(width: 10),
+                            HeroRatingBadge(rating: item.communityRating),
+                          ],
+                        ],
                       ),
                     ],
                     const SizedBox(height: 12),

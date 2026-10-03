@@ -112,6 +112,12 @@ class _ContentThemeState extends State<ContentTheme> {
     final data = theme.copyWith(
       colorScheme: scheme,
       scaffoldBackgroundColor: scheme.surface,
+      // 顶栏跟随内容主题:详情页滚动收起的 AppBar 与页面同色,
+      // 不再露出应用中性底色(与海报动态色拼接的异色条)。
+      appBarTheme: theme.appBarTheme.copyWith(
+        backgroundColor: scheme.surface,
+        surfaceTintColor: Colors.transparent,
+      ),
       textTheme: theme.textTheme.apply(
         bodyColor: scheme.onSurface,
         displayColor: scheme.onSurface,

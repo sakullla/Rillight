@@ -46,6 +46,10 @@ const int kMediaBackdropMinRequestWidth = 640;
 /// 背景图请求宽度上限:按窗口像素取值,但不超过此解码预算。
 const int kMediaBackdropMaxRequestWidth = 1280;
 
+/// 首页轮播全出血主图的请求宽度上限:1440 桌面 / 1920 TV 下 1280 偏软,
+/// 轮播单独放宽一档。
+const int kMediaBackdropHeroMaxRequestWidth = 1920;
+
 /// 把 Flutter 解码缓存收到低配可承受的上限。启动时调用一次。
 void configurePaintingImageCache({bool playerProcess = false}) {
   final cache = PaintingBinding.instance.imageCache;
@@ -73,6 +77,22 @@ int mediaBackdropRequestWidth({
   }
   if (px > kMediaBackdropMaxRequestWidth) {
     return kMediaBackdropMaxRequestWidth;
+  }
+  return px;
+}
+
+/// 首页轮播主图请求宽度:同 [mediaBackdropRequestWidth],但上限放宽到
+/// [kMediaBackdropHeroMaxRequestWidth]。
+int mediaHeroBackdropRequestWidth({
+  required double layoutWidth,
+  required double devicePixelRatio,
+}) {
+  final px = (layoutWidth * devicePixelRatio).round();
+  if (px < kMediaBackdropMinRequestWidth) {
+    return kMediaBackdropMinRequestWidth;
+  }
+  if (px > kMediaBackdropHeroMaxRequestWidth) {
+    return kMediaBackdropHeroMaxRequestWidth;
   }
   return px;
 }
@@ -294,21 +314,13 @@ class _MediaImageState extends State<MediaImage> {
   Completer<void>? _retryWaiter;
 
   List<ItemImageRef> get _candidates {
-    final candidates = widget.item.imageCandidates(
+    // 季条目沿用 imageCandidates 的自然顺序:季背景 → 剧集背景 → 季海报,
+    // 竖版季海报不再压过剧集横版背景(竖图在宽幅横幅里裁剪后无法看)。
+    return widget.item.imageCandidates(
       preferBackdrop: widget.preferBackdrop,
       preferThumb: widget.preferThumb,
       preferParentBackdrop: widget.preferParentBackdrop,
     );
-    if (widget.item.isSeason && widget.preferBackdrop) {
-      final own = candidates.where((ref) => ref.itemId == widget.item.id);
-      return [
-        ...own.where((ref) => ref.type == 'Backdrop'),
-        ...own.where((ref) => ref.type == 'Primary'),
-        ...own.where((ref) => ref.type != 'Backdrop' && ref.type != 'Primary'),
-        ...candidates.where((ref) => ref.itemId != widget.item.id),
-      ];
-    }
-    return candidates;
   }
 
   bool get _hasImageSource => _candidates.isNotEmpty;

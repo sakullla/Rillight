@@ -231,6 +231,10 @@ class CaptureAdapter extends FakeEmbyAdapter {
           if (value['Id'] == 'movie-up') {
             value['BackdropImageTags'] = ['capture-still-1', 'capture-still-2'];
           }
+          // 首页轮播同时呈现全出血与海报聚焦两种版式。
+          if (value['Id'] == 'series-friends') {
+            value['BackdropImageTags'] = ['capture-still-2'];
+          }
           for (final child in value.values) {
             addAlbum(child);
           }

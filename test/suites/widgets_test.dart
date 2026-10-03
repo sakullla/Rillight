@@ -19,6 +19,10 @@ void main() {
     caseEntrypoints['catalog/catalog_controller_cases.dart']!,
   );
   group(
+    'home/hero_carousel_test.dart',
+    caseEntrypoints['home/hero_carousel_cases.dart']!,
+  );
+  group(
     'player/danmaku/danmaku_renderer_test.dart',
     caseEntrypoints['player/danmaku/danmaku_renderer_cases.dart']!,
   );

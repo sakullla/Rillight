@@ -24,6 +24,7 @@ const caseModules = <String>[
   'emby/emby_socket_cases.dart',
   'emby/emby_url_cases.dart',
   'emby/media_source_format_cases.dart',
+  'home/hero_carousel_cases.dart',
   'home/home_page_cases.dart',
   'home/library_nav_prefs_cases.dart',
   'library/item_format_cases.dart',

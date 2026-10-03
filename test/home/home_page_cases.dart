@@ -147,6 +147,20 @@ void main() {
         find.byKey(CatalogKeys.heroDot(HomeHero.maxFeatured)),
         findsNothing,
       );
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('home-hero-card')),
+          matching: find.byType(TextButton),
+        ),
+        findsNothing,
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('home-hero-card')),
+          matching: find.text('8.8'),
+        ),
+        findsOneWidget,
+      );
       const featuredOrder = ['Inception', '老友记', '飞屋环游记', '封面失败片'];
       for (final title in featuredOrder) {
         if (title != featuredOrder.first) {
@@ -193,7 +207,16 @@ void main() {
       await settle(tester);
 
       expect(resumeRequests(), greaterThan(before));
+      // 刷新后轮到 movie-up 的轮播页显示新片名;先滚回顶部让轮播可见。
+      // 上文片名循环已把轮播停在第 4 页,再切 3 次回到 movie-up(第 3 页)。
+      await scrollBelowTopBar(tester, find.byKey(const Key('home-hero-card')));
+      for (var i = 0; i < 3; i++) {
+        await tester.tap(find.byKey(CatalogKeys.heroNext));
+        await tester.pump();
+      }
       expect(find.text('手动刷新后的电影'), findsWidgets);
+      // 让滚动空闲等短计时器自然耗尽,避免测试结束时仍有 pending Timer。
+      await tester.pump(const Duration(seconds: 1));
     },
     tags: ['integration'],
   );

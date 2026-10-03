@@ -8,6 +8,7 @@ import 'package:rillight/home/catalog_controller.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/featured_items.dart';
 import 'package:rillight/home/hero_artwork.dart';
+import 'package:rillight/home/hero_carousel.dart';
 import 'package:rillight/home/home_hero.dart';
 import 'package:rillight/home/phone_hero.dart';
 import 'package:rillight/player/player_window_host.dart';
@@ -218,6 +219,42 @@ void main() {
     ]);
   });
 
+  test('poster-only titles stay featured; artless titles are excluded', () {
+    catalog.resume = const CatalogRowState();
+    catalog.latestSeries = const CatalogRowState();
+    catalog.latestMovies = const CatalogRowState(
+      items: [
+        EmbyItem(
+          id: 'poster-only',
+          name: 'Poster only',
+          type: 'Movie',
+          primaryImageTag: 'poster',
+        ),
+        EmbyItem(id: 'artless', name: 'Artless', type: 'Movie'),
+      ],
+    );
+    expect(featuredHomeItems(catalog).map((item) => item.id), ['poster-only']);
+  });
+
+  testWidgets('rating badge hides without a score and shows one decimal', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: Column(
+            children: [
+              HeroRatingBadge(rating: null),
+              HeroRatingBadge(rating: 8.84),
+            ],
+          ),
+        ),
+      ),
+    );
+    expect(find.byIcon(Icons.star_rounded), findsOneWidget);
+    expect(find.text('8.8'), findsOneWidget);
+  });
+
   testWidgets(
     'five phone targets remain usable with large text and a long title',
     (tester) async {
@@ -311,10 +348,8 @@ void main() {
             lessThan(width * 5 / 4 + 56),
           );
           expect(
-            tester
-                .widget<AspectRatio>(find.byType(AspectRatio).first)
-                .aspectRatio,
-            16 / 9,
+            find.descendant(of: caption, matching: find.byType(HeroArtwork)),
+            findsWidgets,
           );
         }
         await tester.tap(find.byKey(CatalogKeys.heroDot(1)));

@@ -370,7 +370,7 @@ void main() {
         return null;
       }
 
-      // 无自动轮换:停留再久也停在当前条。
+      // 测试环境默认关闭自动轮换:停留再久也停在当前条。
       expect(alignedHero(), 'episode-a');
       await tester.pump(const Duration(seconds: 7));
       expect(alignedHero(), 'episode-a');
@@ -382,7 +382,7 @@ void main() {
       await tester.pump(const Duration(seconds: 1));
       expect(alignedHero(), 'movie-b');
 
-      // 滑动后也不会恢复自动轮换。
+      // 滑动后同样不恢复自动轮换(测试门未开启)。
       await tester.pump(const Duration(seconds: 7));
       expect(alignedHero(), 'movie-b');
       expect(tester.takeException(), isNull);
@@ -2470,7 +2470,10 @@ EmbyItem _item(
     name: name,
     type: type,
     seriesName: seriesName,
+    seriesId: seriesName == null ? null : 'series-of-$id',
+    seriesPrimaryImageTag: seriesName == null ? null : 'tag-series-$id',
     overview: overview,
+    primaryImageTag: 'tag-$id',
     userData: percent == null
         ? const EmbyUserData()
         : EmbyUserData(playbackPositionTicks: 1, playedPercentage: percent),
