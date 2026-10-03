@@ -1362,4 +1362,34 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get phonePipFailed => '无法进入画中画，请检查系统权限';
+
+  @override
+  String get tvSectionMoveUp => '上移';
+
+  @override
+  String get tvSectionMoveDown => '下移';
+
+  @override
+  String get tvLanAssist => '手机辅助连接';
+
+  @override
+  String get tvLanWaiting => '等待手机提交';
+
+  @override
+  String get tvLanConfirm => '确认连接';
+
+  @override
+  String get tvLanReject => '拒绝';
+
+  @override
+  String get tvLanExpired => '辅助连接已过期';
+
+  @override
+  String get tvLanFailed => '辅助连接未完成';
+
+  @override
+  String get tvLanFingerprint => '证书指纹';
+
+  @override
+  String get tvLanAddress => '局域网地址';
 }

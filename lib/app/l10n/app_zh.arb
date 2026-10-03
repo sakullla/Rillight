@@ -1616,5 +1616,15 @@
   "phoneSubtitleUnavailable": "当前没有独立可调的文字字幕；图片字幕和画面内文字不支持字号调整",
   "phonePictureInPicture": "画中画",
   "phonePipUnavailable": "当前设备或系统设置不支持画中画",
-  "phonePipFailed": "无法进入画中画，请检查系统权限"
+  "phonePipFailed": "无法进入画中画，请检查系统权限",
+  "tvSectionMoveUp": "上移",
+  "tvSectionMoveDown": "下移",
+  "tvLanAssist": "手机辅助连接",
+  "tvLanWaiting": "等待手机提交",
+  "tvLanConfirm": "确认连接",
+  "tvLanReject": "拒绝",
+  "tvLanExpired": "辅助连接已过期",
+  "tvLanFailed": "辅助连接未完成",
+  "tvLanFingerprint": "证书指纹",
+  "tvLanAddress": "局域网地址"
 }

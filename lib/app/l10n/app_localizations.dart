@@ -2673,6 +2673,66 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'无法进入画中画，请检查系统权限'**
   String get phonePipFailed;
+
+  /// No description provided for @tvSectionMoveUp.
+  ///
+  /// In zh, this message translates to:
+  /// **'上移'**
+  String get tvSectionMoveUp;
+
+  /// No description provided for @tvSectionMoveDown.
+  ///
+  /// In zh, this message translates to:
+  /// **'下移'**
+  String get tvSectionMoveDown;
+
+  /// No description provided for @tvLanAssist.
+  ///
+  /// In zh, this message translates to:
+  /// **'手机辅助连接'**
+  String get tvLanAssist;
+
+  /// No description provided for @tvLanWaiting.
+  ///
+  /// In zh, this message translates to:
+  /// **'等待手机提交'**
+  String get tvLanWaiting;
+
+  /// No description provided for @tvLanConfirm.
+  ///
+  /// In zh, this message translates to:
+  /// **'确认连接'**
+  String get tvLanConfirm;
+
+  /// No description provided for @tvLanReject.
+  ///
+  /// In zh, this message translates to:
+  /// **'拒绝'**
+  String get tvLanReject;
+
+  /// No description provided for @tvLanExpired.
+  ///
+  /// In zh, this message translates to:
+  /// **'辅助连接已过期'**
+  String get tvLanExpired;
+
+  /// No description provided for @tvLanFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'辅助连接未完成'**
+  String get tvLanFailed;
+
+  /// No description provided for @tvLanFingerprint.
+  ///
+  /// In zh, this message translates to:
+  /// **'证书指纹'**
+  String get tvLanFingerprint;
+
+  /// No description provided for @tvLanAddress.
+  ///
+  /// In zh, this message translates to:
+  /// **'局域网地址'**
+  String get tvLanAddress;
 }
 
 class _AppLocalizationsDelegate
