@@ -32,11 +32,20 @@ class HomeHero extends StatefulWidget {
 
 class _HomeHeroState extends State<HomeHero> with HeroAutoRotate {
   int _index = 0;
+  bool _hovered = false;
+  bool _focusWithin = false;
   final Map<String, HeroLayout> _layoutOverride = {};
 
   void _select(int value, int count) {
     setState(() => _index = (value % count + count) % count);
     resetAutoRotate(count);
+  }
+
+  /// 鼠标拖拽或触控板/触屏横扫翻页;速度过低视为误触。
+  void _onSwipe(DragEndDetails details, int count) {
+    final velocity = details.primaryVelocity ?? 0;
+    if (count < 2 || velocity.abs() < 280) return;
+    _select(_index + (velocity < 0 ? 1 : -1), count);
   }
 
   @override
@@ -108,8 +117,14 @@ class _HomeHeroState extends State<HomeHero> with HeroAutoRotate {
         16,
       ),
       child: MouseRegion(
-        onEnter: (_) => pauseAutoRotate(),
-        onExit: (_) => resumeAutoRotate(items.length),
+        onEnter: (_) {
+          pauseAutoRotate();
+          setState(() => _hovered = true);
+        },
+        onExit: (_) {
+          resumeAutoRotate(items.length);
+          setState(() => _hovered = false);
+        },
         child: LayoutBuilder(
           builder: (context, constraints) {
             final scheme = Theme.of(context).colorScheme;
@@ -154,7 +169,7 @@ class _HomeHeroState extends State<HomeHero> with HeroAutoRotate {
                         onResolved: (data) =>
                             _onArtworkResolved(item, artwork, data),
                       ),
-                      HeroScrim(top: widget.topOverlap > 0),
+                      HeroScrim(top: widget.topOverlap > 0, leading: !compact),
                       Positioned(
                         left: compact ? 20 : 32,
                         right: compact ? 20 : 32,
@@ -192,56 +207,35 @@ class _HomeHeroState extends State<HomeHero> with HeroAutoRotate {
               child: InkWell(
                 key: const Key('home-hero-details-target'),
                 onTap: () => context.push(AppRoutes.item(item.id)),
-                child: SizedBox(
-                  height: compact ? height + 180 : height,
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      AnimatedSwitcher(
-                        duration: AppMotion.durationOf(context, AppMotion.slow),
-                        child: RepaintBoundary(
-                          key: ValueKey('home-hero-slide-${item.id}'),
-                          child: visual,
-                        ),
+                child: GestureDetector(
+                  onHorizontalDragEnd: items.length > 1
+                      ? (details) => _onSwipe(details, items.length)
+                      : null,
+                  child: Focus(
+                    canRequestFocus: false,
+                    skipTraversal: true,
+                    onFocusChange: (value) =>
+                        setState(() => _focusWithin = value),
+                    child: SizedBox(
+                      height: compact ? height + 180 : height,
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          AnimatedSwitcher(
+                            duration: AppMotion.durationOf(
+                              context,
+                              heroSlideDuration,
+                            ),
+                            transitionBuilder: heroSlideTransition,
+                            child: RepaintBoundary(
+                              key: ValueKey('home-hero-slide-${item.id}'),
+                              child: visual,
+                            ),
+                          ),
+                          if (items.length > 1) ..._controls(index, items),
+                        ],
                       ),
-                      if (items.length > 1) ...[
-                        Positioned(
-                          left: 4,
-                          top: 0,
-                          bottom: 0,
-                          child: Center(
-                            child: _chevron(
-                              key: CatalogKeys.heroPrev,
-                              tooltip: AppLocalizations.of(context).scrollLeft,
-                              icon: Icons.chevron_left,
-                              onPressed: () => _select(index - 1, items.length),
-                            ),
-                          ),
-                        ),
-                        Positioned(
-                          right: 4,
-                          top: 0,
-                          bottom: 0,
-                          child: Center(
-                            child: _chevron(
-                              key: CatalogKeys.heroNext,
-                              tooltip: AppLocalizations.of(context).scrollRight,
-                              icon: Icons.chevron_right,
-                              onPressed: () => _select(index + 1, items.length),
-                            ),
-                          ),
-                        ),
-                        Positioned(
-                          right: 20,
-                          bottom: 20,
-                          child: HeroDots(
-                            index: index,
-                            count: items.length,
-                            onSelect: (i) => _select(i, items.length),
-                          ),
-                        ),
-                      ],
-                    ],
+                    ),
                   ),
                 ),
               ),
@@ -250,6 +244,72 @@ class _HomeHeroState extends State<HomeHero> with HeroAutoRotate {
         ),
       ),
     );
+  }
+
+  /// 左右箭头只在悬停或键盘焦点在卡内时浮现,平时让画面保持干净;
+  /// 透明时仍可点击,触屏桌面不会失去入口。圆点常驻,放在半透明胶囊上。
+  List<Widget> _controls(int index, List<EmbyItem> items) {
+    final l10n = AppLocalizations.of(context);
+    final reveal = _hovered || _focusWithin;
+    final fade = AppMotion.durationOf(context, AppMotion.normal);
+    Widget side({required bool left, required Widget child}) => Positioned(
+      left: left ? 12 : null,
+      right: left ? null : 12,
+      top: 0,
+      bottom: 0,
+      child: Center(
+        child: AnimatedOpacity(
+          opacity: reveal ? 1 : 0,
+          duration: fade,
+          curve: AppMotion.standard,
+          child: AnimatedSlide(
+            offset: reveal ? Offset.zero : Offset(left ? -.25 : .25, 0),
+            duration: fade,
+            curve: AppMotion.standard,
+            child: child,
+          ),
+        ),
+      ),
+    );
+    return [
+      side(
+        left: true,
+        child: _chevron(
+          key: CatalogKeys.heroPrev,
+          tooltip: l10n.scrollLeft,
+          icon: Icons.chevron_left_rounded,
+          onPressed: () => _select(index - 1, items.length),
+        ),
+      ),
+      side(
+        left: false,
+        child: _chevron(
+          key: CatalogKeys.heroNext,
+          tooltip: l10n.scrollRight,
+          icon: Icons.chevron_right_rounded,
+          onPressed: () => _select(index + 1, items.length),
+        ),
+      ),
+      Positioned(
+        right: 20,
+        bottom: 16,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: .28),
+            borderRadius: BorderRadius.circular(99),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: HeroDots(
+              index: index,
+              count: items.length,
+              cycle: rotateCycle,
+              onSelect: (i) => _select(i, items.length),
+            ),
+          ),
+        ),
+      ),
+    ];
   }
 
   Widget _chevron({
@@ -262,9 +322,13 @@ class _HomeHeroState extends State<HomeHero> with HeroAutoRotate {
       key: key,
       tooltip: tooltip,
       onPressed: onPressed,
+      iconSize: 28,
       style: IconButton.styleFrom(
-        backgroundColor: Colors.black38,
+        minimumSize: const Size(48, 48),
+        backgroundColor: Colors.black.withValues(alpha: .42),
         foregroundColor: Colors.white,
+        hoverColor: Colors.white.withValues(alpha: .14),
+        side: BorderSide(color: Colors.white.withValues(alpha: .16)),
       ),
       icon: Icon(icon),
     );

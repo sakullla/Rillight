@@ -14,6 +14,7 @@ import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/hero_artwork.dart';
 import 'package:rillight/library/detail_controller.dart';
 import 'package:rillight/library/episode_detail_sections.dart';
+import 'package:rillight/library/episode_list.dart';
 import 'package:rillight/library/detail_extras.dart';
 import 'package:rillight/library/item_format.dart';
 import 'package:rillight/media_image/media_image.dart';
@@ -365,10 +366,14 @@ class _TvEpisodeTile extends StatelessWidget {
     final progress = episode.playbackProgress;
     final played = episode.userData.played;
     final runtime = runtimeLabel(l, episode);
+    final overview = plainOverview(episode.overview);
     final meta = <String>[
-      ?runtime,
-      if (played) l.mobileWatched,
       if (current) l.nowPlayingEpisode,
+      if (episode.canResume)
+        ?remainingLabel(l, episode)
+      else if (played)
+        l.mobileWatched,
+      if (episode.premiereDate != null) formatDateYmd(episode.premiereDate!),
     ];
     return TvAction(
       key: ValueKey(episode.id),
@@ -377,7 +382,7 @@ class _TvEpisodeTile extends StatelessWidget {
       child: Row(
         children: [
           SizedBox(
-            width: 168,
+            width: 208,
             child: AspectRatio(
               aspectRatio: 16 / 9,
               child: ClipRRect(
@@ -386,6 +391,8 @@ class _TvEpisodeTile extends StatelessWidget {
                   fit: StackFit.expand,
                   children: [
                     MediaImage(item: episode, preferThumb: true, maxWidth: 480),
+                    if (played && !current)
+                      ColoredBox(color: Colors.black.withValues(alpha: .36)),
                     if (progress > 0 && !played)
                       Positioned(
                         left: 0,
@@ -393,18 +400,21 @@ class _TvEpisodeTile extends StatelessWidget {
                         bottom: 0,
                         child: LinearProgressIndicator(
                           value: progress,
-                          minHeight: 3,
+                          minHeight: 4,
+                          backgroundColor: Colors.black.withValues(alpha: .45),
                         ),
                       ),
-                    if (played)
+                    if (runtime != null)
                       Positioned(
                         right: 6,
+                        bottom: progress > 0 && !played ? 10 : 6,
+                        child: EpisodeThumbBadge(label: runtime),
+                      ),
+                    if (played)
+                      const Positioned(
+                        right: 6,
                         top: 6,
-                        child: Icon(
-                          Icons.check_circle,
-                          size: 20,
-                          color: Colors.white.withValues(alpha: 0.92),
-                        ),
+                        child: EpisodeWatchedBadge(size: 18),
                       ),
                     if (current)
                       Center(
@@ -420,7 +430,7 @@ class _TvEpisodeTile extends StatelessWidget {
               ),
             ),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 16),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -429,17 +439,35 @@ class _TvEpisodeTile extends StatelessWidget {
                   episodeLabel(episode),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.titleSmall,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
-                if (meta.isNotEmpty)
+                if (meta.isNotEmpty) ...[
+                  const SizedBox(height: 2),
                   Text(
                     meta.join(' · '),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.labelMedium?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
+                      color: current || episode.canResume
+                          ? theme.colorScheme.primary
+                          : theme.colorScheme.onSurfaceVariant,
                     ),
                   ),
+                ],
+                if (overview != null) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    overview,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                      height: 1.4,
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -492,7 +520,7 @@ class _TvEpisodeSkeleton extends StatelessWidget {
           const SizedBox(height: 8),
           Row(
             children: [
-              SkeletonBlock(width: 168, height: 94, animated: animate),
+              SkeletonBlock(width: 208, height: 117, animated: animate),
               const SizedBox(width: 12),
               SkeletonBlock(width: 240, height: 20, animated: animate),
             ],

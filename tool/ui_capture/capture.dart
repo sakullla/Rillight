@@ -219,6 +219,7 @@ void main() {
         if (config.$1 == 'phone' && capture.wants('detail')) {
           app.router.go('/');
           await capture.advance(500);
+          await revealPhoneHero(tester, capture);
           final loading = Completer<void>();
           adapter.catalogGate = loading;
           await capture.activate(find.byKey(PhoneHero.openKey));
@@ -248,6 +249,7 @@ void main() {
           await capture.advance(400);
           await tester.tap(find.byType(NavigationDestination).first);
           await capture.advance(400);
+          await revealPhoneHero(tester, capture);
           final catalog = CatalogScope.of(
             tester.element(find.byType(PhoneHero)),
           );
@@ -509,6 +511,16 @@ void main() {
       }, tags: ['integration']);
     }
   }
+}
+
+/// 首页分区截图把列表上拉过;懒构建列表里滚出视口的轮播不存在,先滚回顶部。
+Future<void> revealPhoneHero(
+  WidgetTester tester,
+  CaptureSession capture,
+) async {
+  if (find.byKey(PhoneHero.bannerKey).evaluate().isNotEmpty) return;
+  await tester.drag(find.byType(Scrollable).first, const Offset(0, 2000));
+  await capture.advance(400);
 }
 
 class CaptureSession {

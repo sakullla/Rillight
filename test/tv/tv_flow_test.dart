@@ -12,6 +12,7 @@ import 'package:rillight/library/tv_detail_page.dart';
 import 'package:rillight/library/tv_library_page.dart';
 import 'package:rillight/library/library_filter_panel.dart';
 import 'package:rillight/home/catalog_scope.dart';
+import 'package:rillight/home/tv_home_page.dart';
 import 'package:rillight/player/tv_player_page.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_settings.dart';
@@ -151,6 +152,22 @@ void main() {
       expect(focusedLabel(tester), '首页');
       await key(tester, LogicalKeyboardKey.arrowRight);
       await key(tester, LogicalKeyboardKey.arrowDown);
+      // 横幅主操作行是「播放」在前、「详情」在后;向右一步到详情。
+      expect(
+        find.descendant(
+          of: find.byKey(TvHomeKeys.featuredPlay),
+          matching: focusedAction(),
+        ),
+        findsOneWidget,
+      );
+      await key(tester, LogicalKeyboardKey.arrowRight);
+      expect(
+        find.descendant(
+          of: find.byKey(TvHomeKeys.featuredOpen),
+          matching: focusedAction(),
+        ),
+        findsOneWidget,
+      );
       final card = FocusManager.instance.primaryFocus;
       final label = focusedLabel(tester);
       expect(label, isNotEmpty);

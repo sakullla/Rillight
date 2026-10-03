@@ -21,6 +21,19 @@ String? runtimeLabel(AppLocalizations l10n, EmbyItem item) {
   return l10n.runtimeHoursMinutes(minutes ~/ 60, minutes % 60);
 }
 
+/// 未看完的剩余时长;不可续播或片长未知时为 null。
+String? remainingLabel(AppLocalizations l10n, EmbyItem item) {
+  final runtime = item.runTimeTicks;
+  if (!item.canResume || runtime == null || runtime <= 0) {
+    return null;
+  }
+  final left = runtime - item.resumePositionTicks;
+  if (left <= 0) {
+    return null;
+  }
+  return l10n.remainingMinutes((left / 10000000 / 60).ceil());
+}
+
 String chapterClock(int startPositionTicks) {
   final seconds = startPositionTicks <= 0 ? 0 : startPositionTicks ~/ 10000000;
   final hours = seconds ~/ 3600;

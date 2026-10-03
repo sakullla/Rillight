@@ -436,6 +436,11 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
+  String remainingMinutes(int minutes) {
+    return '剩余 $minutes 分钟';
+  }
+
+  @override
   String get play => '播放';
 
   @override

@@ -363,7 +363,8 @@ void main() {
           if (finder.evaluate().isEmpty) {
             continue;
           }
-          if ((tester.getRect(finder).left - banner.left).abs() < 2) {
+          // 当前卡居中,两侧露出邻卡。
+          if ((tester.getCenter(finder).dx - banner.center.dx).abs() < 2) {
             return id;
           }
         }

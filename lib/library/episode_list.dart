@@ -9,6 +9,7 @@ import 'package:rillight/emby/emby_errors.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_failure.dart';
 import 'package:rillight/home/catalog_keys.dart';
+import 'package:rillight/library/episode_detail_sections.dart';
 import 'package:rillight/library/item_format.dart';
 import 'package:rillight/media_image/media_image.dart';
 
@@ -212,6 +213,7 @@ class EpisodeRow extends StatefulWidget {
 
 class _EpisodeRowState extends State<EpisodeRow> {
   bool _hovered = false;
+  bool _focused = false;
 
   Future<void> _openMenu(BuildContext context, Offset globalPosition) async {
     final l10n = AppLocalizations.of(context);
@@ -263,9 +265,15 @@ class _EpisodeRowState extends State<EpisodeRow> {
     final progress = item.playbackProgress;
     final playLabel = item.canResume ? l10n.resumePlay : l10n.play;
     final played = item.userData.played;
+    final runtime = runtimeLabel(l10n, item);
+    final premiere = item.premiereDate;
     final meta = <String>[
-      ?runtimeLabel(l10n, item),
-      if (item.canResume) l10n.playbackProgress((progress * 100).round()),
+      if (item.canResume)
+        remainingLabel(l10n, item) ??
+            l10n.playbackProgress((progress * 100).round())
+      else if (played)
+        l10n.mobileWatched,
+      if (premiere != null) formatDateYmd(premiere),
     ];
     final overview = plainOverview(item.overview);
     final viewport = MediaQuery.sizeOf(context);
@@ -296,6 +304,7 @@ class _EpisodeRowState extends State<EpisodeRow> {
             child: InkWell(
               key: CatalogKeys.episode(item.id),
               onTap: widget.onTap,
+              onFocusChange: (value) => setState(() => _focused = value),
               onSecondaryTapDown: (details) {
                 unawaited(_openMenu(context, details.globalPosition));
               },
@@ -316,33 +325,15 @@ class _EpisodeRowState extends State<EpisodeRow> {
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(AppRadii.sm),
-                        child: SizedBox(
-                          width: thumbWidth,
-                          height: thumbHeight,
-                          child: Stack(
-                            fit: StackFit.expand,
-                            children: [
-                              RepaintBoundary(
-                                child: MediaImage(
-                                  key: ValueKey(item.id),
-                                  item: item,
-                                  width: thumbWidth,
-                                  height: thumbHeight,
-                                  preferThumb: true,
-                                  fit: BoxFit.cover,
-                                  maxWidth: 480,
-                                ),
-                              ),
-                              if (item.canResume)
-                                Align(
-                                  alignment: Alignment.bottomCenter,
-                                  child: _EpisodeProgressBar(value: progress),
-                                ),
-                            ],
-                          ),
-                        ),
+                      _EpisodeThumb(
+                        item: item,
+                        width: thumbWidth,
+                        height: thumbHeight,
+                        runtime: runtime,
+                        hovered: _hovered || _focused,
+                        selected: selected,
+                        playLabel: playLabel,
+                        onPlay: widget.onPlay,
                       ),
                       const SizedBox(width: AppSpacing.md),
                       Expanded(
@@ -358,6 +349,11 @@ class _EpisodeRowState extends State<EpisodeRow> {
                                 fontWeight: selected
                                     ? FontWeight.w700
                                     : FontWeight.w600,
+                                color: selected
+                                    ? scheme.primary
+                                    : played
+                                    ? scheme.onSurface.withValues(alpha: .72)
+                                    : null,
                               ),
                             ),
                             if (meta.isNotEmpty) ...[
@@ -367,7 +363,12 @@ class _EpisodeRowState extends State<EpisodeRow> {
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: theme.textTheme.bodySmall?.copyWith(
-                                  color: scheme.onSurfaceVariant,
+                                  color: item.canResume
+                                      ? scheme.primary
+                                      : scheme.onSurfaceVariant,
+                                  fontWeight: item.canResume
+                                      ? FontWeight.w600
+                                      : null,
                                 ),
                               ),
                             ],
@@ -379,7 +380,7 @@ class _EpisodeRowState extends State<EpisodeRow> {
                                 overflow: TextOverflow.ellipsis,
                                 style: theme.textTheme.bodySmall?.copyWith(
                                   color: scheme.onSurface.withValues(
-                                    alpha: 0.78,
+                                    alpha: played ? 0.58 : 0.78,
                                   ),
                                   height: 1.35,
                                 ),
@@ -425,6 +426,187 @@ class _EpisodeRowState extends State<EpisodeRow> {
 }
 
 enum _EpisodeRowMenuAction { play, togglePlayed }
+
+/// 分集缩略图:右下时长胶囊、已看角标并压暗;悬停浮出播放按钮,
+/// 点缩略图直接开播(点行其余区域仍进集详情)。
+class _EpisodeThumb extends StatelessWidget {
+  const _EpisodeThumb({
+    required this.item,
+    required this.width,
+    required this.height,
+    required this.runtime,
+    required this.hovered,
+    required this.selected,
+    required this.playLabel,
+    required this.onPlay,
+  });
+
+  final EmbyItem item;
+  final double width;
+  final double height;
+  final String? runtime;
+  final bool hovered;
+  final bool selected;
+  final String playLabel;
+  final VoidCallback onPlay;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final played = item.userData.played;
+    final resumable = item.canResume;
+    final fade = AppMotion.durationOf(context, AppMotion.normal);
+    final runtime = this.runtime;
+    return Container(
+      width: width,
+      height: height,
+      foregroundDecoration: selected
+          ? BoxDecoration(
+              borderRadius: BorderRadius.circular(AppRadii.sm),
+              border: Border.all(color: scheme.primary, width: 2),
+            )
+          : null,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(AppRadii.sm),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            RepaintBoundary(
+              child: MediaImage(
+                key: ValueKey(item.id),
+                item: item,
+                width: width,
+                height: height,
+                preferThumb: true,
+                fit: BoxFit.cover,
+                maxWidth: 480,
+              ),
+            ),
+            IgnorePointer(
+              child: AnimatedContainer(
+                duration: fade,
+                color: Colors.black.withValues(
+                  alpha: hovered
+                      ? .32
+                      : played && !selected
+                      ? .36
+                      : 0,
+                ),
+              ),
+            ),
+            if (runtime != null)
+              Positioned(
+                right: 6,
+                bottom: resumable ? 9 : 6,
+                child: EpisodeThumbBadge(label: runtime),
+              ),
+            if (played)
+              const Positioned(top: 6, right: 6, child: EpisodeWatchedBadge()),
+            Material(
+              type: MaterialType.transparency,
+              child: InkWell(
+                key: ValueKey('episode-thumb-play-${item.id}'),
+                canRequestFocus: false,
+                onTap: onPlay,
+                child: Center(
+                  child: AnimatedOpacity(
+                    opacity: hovered ? 1 : 0,
+                    duration: fade,
+                    child: AnimatedScale(
+                      scale: hovered ? 1 : .85,
+                      duration: fade,
+                      curve: AppMotion.standard,
+                      child: Tooltip(
+                        message: playLabel,
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: .5),
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: .85),
+                              width: 1.5,
+                            ),
+                          ),
+                          child: Padding(
+                            padding: EdgeInsets.all(height * .08),
+                            child: Icon(
+                              Icons.play_arrow_rounded,
+                              color: Colors.white,
+                              size: height * .26,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            if (resumable)
+              Align(
+                alignment: Alignment.bottomCenter,
+                child: _EpisodeProgressBar(value: item.playbackProgress),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 缩略图上的深底白字小胶囊(时长等),亮画面上也能读清。
+class EpisodeThumbBadge extends StatelessWidget {
+  const EpisodeThumbBadge({super.key, required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: .66),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+        child: Text(
+          label,
+          maxLines: 1,
+          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+            color: Colors.white,
+            fontWeight: FontWeight.w600,
+            fontFeatures: const [FontFeature.tabularFigures()],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 已看角标:深色圆底上的勾,不依赖画面明暗。
+class EpisodeWatchedBadge extends StatelessWidget {
+  const EpisodeWatchedBadge({super.key, this.size = 16});
+
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: .6),
+        shape: BoxShape.circle,
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(2),
+        child: Icon(
+          Icons.check_rounded,
+          size: size,
+          color: Colors.white.withValues(alpha: .95),
+        ),
+      ),
+    );
+  }
+}
 
 /// 分集列表加载骨架:与 [EpisodeRow] 同结构的全宽占位行。
 class EpisodeListSkeleton extends StatelessWidget {

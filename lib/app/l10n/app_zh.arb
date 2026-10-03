@@ -589,6 +589,15 @@
       }
     }
   },
+  "remainingMinutes": "剩余 {minutes} 分钟",
+  "@remainingMinutes": {
+    "description": "Time left in a partially watched episode, rounded up to whole minutes.",
+    "placeholders": {
+      "minutes": {
+        "type": "int"
+      }
+    }
+  },
   "play": "播放",
   "@play": {
     "description": "Start playback from the beginning."

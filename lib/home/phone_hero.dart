@@ -27,8 +27,16 @@ class PhoneHero extends StatefulWidget {
   static Key itemKey(String id) => ValueKey('phone-hero-$id');
   static List<EmbyItem> featuredItemsOf(CatalogController catalog) =>
       featuredHomeItems(catalog, limit: maxFeatured);
+
+  /// 当前卡距屏幕边缘的距离;相邻卡之间留 [cardGap],
+  /// 两侧各露出 [cardInset] - [cardGap] 宽的邻卡,提示可以横滑。
+  static const double cardInset = 24;
+  static const double cardGap = 8;
+  static double cardWidthFor(double width) => width - cardInset * 2;
+  static double viewportFractionFor(double width) =>
+      width <= 0 ? 1 : ((cardWidthFor(width) + cardGap) / width).clamp(.5, 1.0);
   static double contentHeightFor(double width, {double textScale = 1}) =>
-      (width - 32) * 9 / 16 + 120 * textScale + 44;
+      cardWidthFor(width) * 9 / 16 + 120 * textScale + 44;
 
   @override
   State<PhoneHero> createState() => _PhoneHeroState();
@@ -37,7 +45,7 @@ class PhoneHero extends StatefulWidget {
 class _PhoneHeroState extends State<PhoneHero> with HeroAutoRotate {
   int _index = 0;
   String? _reportedId;
-  final PageController _page = PageController();
+  PageController _page = PageController();
   final Map<String, HeroLayout> _layoutOverride = {};
   List<EmbyItem> get _featured => PhoneHero.featuredItemsOf(widget.catalog);
 
@@ -46,6 +54,36 @@ class _PhoneHeroState extends State<PhoneHero> with HeroAutoRotate {
     cancelAutoRotate();
     _page.dispose();
     super.dispose();
+  }
+
+  /// viewportFraction 只能在构造时给定;横竖屏切换改了宽度就换一个
+  /// 停在同一页的控制器,旧控制器等 PageView 解绑后再释放。
+  PageController _controllerFor(double fraction) {
+    if ((_page.viewportFraction - fraction).abs() < .001) return _page;
+    final old = _page;
+    _page = PageController(initialPage: _index, viewportFraction: fraction);
+    WidgetsBinding.instance.addPostFrameCallback((_) => old.dispose());
+    return _page;
+  }
+
+  /// 邻卡按离中心的距离缩小并压暗,当前卡保持原大。
+  Widget _depth(int page, Widget child) {
+    if (MediaQuery.disableAnimationsOf(context)) return child;
+    return AnimatedBuilder(
+      animation: _page,
+      child: child,
+      builder: (context, child) {
+        var current = _index.toDouble();
+        if (_page.hasClients && _page.position.haveDimensions) {
+          current = _page.page ?? current;
+        }
+        final distance = (current - page).abs().clamp(0.0, 1.0);
+        return Transform.scale(
+          scale: 1 - .06 * distance,
+          child: Opacity(opacity: 1 - .35 * distance, child: child),
+        );
+      },
+    );
   }
 
   void _open(EmbyItem item) {
@@ -103,6 +141,7 @@ class _PhoneHeroState extends State<PhoneHero> with HeroAutoRotate {
         final scale = MediaQuery.textScalerOf(context).scale(14) / 14;
         final height =
             top + PhoneHero.contentHeightFor(width, textScale: scale);
+        final controller = _controllerFor(PhoneHero.viewportFractionFor(width));
         _report(items[index]);
         return SizedBox(
           key: PhoneHero.bannerKey,
@@ -118,7 +157,8 @@ class _PhoneHeroState extends State<PhoneHero> with HeroAutoRotate {
                     onPointerUp: (_) => resumeAutoRotate(items.length),
                     onPointerCancel: (_) => resumeAutoRotate(items.length),
                     child: PageView.builder(
-                      controller: _page,
+                      controller: controller,
+                      clipBehavior: Clip.none,
                       physics: items.length > 1
                           ? const PageScrollPhysics()
                           : const NeverScrollableScrollPhysics(),
@@ -132,7 +172,10 @@ class _PhoneHeroState extends State<PhoneHero> with HeroAutoRotate {
                         final item = items[page];
                         return KeyedSubtree(
                           key: PhoneHero.itemKey(item.id),
-                          child: _pageCard(context, item, page == index, width),
+                          child: _depth(
+                            page,
+                            _pageCard(context, item, page == index, width),
+                          ),
                         );
                       },
                     ),
@@ -147,6 +190,7 @@ class _PhoneHeroState extends State<PhoneHero> with HeroAutoRotate {
                       resetAutoRotate(items.length);
                     },
                     onScrim: false,
+                    cycle: rotateCycle,
                   ),
               ],
             ),
@@ -168,7 +212,7 @@ class _PhoneHeroState extends State<PhoneHero> with HeroAutoRotate {
     );
     final layout = _layoutOverride[item.id] ?? heroLayoutFor(artwork);
     final requestWidth = mediaHeroBackdropRequestWidth(
-      layoutWidth: width - 32,
+      layoutWidth: PhoneHero.cardWidthFor(width),
       devicePixelRatio: MediaQuery.devicePixelRatioOf(context),
     );
     final actions = HeroPlaybackActions(
@@ -195,11 +239,13 @@ class _PhoneHeroState extends State<PhoneHero> with HeroAutoRotate {
       ),
     );
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.symmetric(horizontal: PhoneHero.cardGap / 2),
       child: Material(
         color: Theme.of(context).colorScheme.surfaceContainerLow,
         borderRadius: BorderRadius.circular(24),
         clipBehavior: Clip.antiAlias,
+        elevation: current ? 3 : 0,
+        shadowColor: Colors.black54,
         child: Stack(
           fit: StackFit.expand,
           children: [

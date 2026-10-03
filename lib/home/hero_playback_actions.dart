@@ -57,6 +57,7 @@ class _HeroPlaybackActionsState extends State<HeroPlaybackActions> {
       children: [
         if (widget.item.canResume || widget.onResume != null) ...[
           Flexible(
+            flex: 3,
             child: FilledButton.icon(
               key: ValueKey('hero-resume-${widget.item.id}'),
               onPressed: _opening ? null : _resume,
@@ -78,9 +79,16 @@ class _HeroPlaybackActionsState extends State<HeroPlaybackActions> {
           const SizedBox(width: 12),
         ],
         Flexible(
+          flex: 2,
           child: OutlinedButton(
             onPressed: widget.onDetails,
-            style: OutlinedButton.styleFrom(minimumSize: const Size(0, 48)),
+            // 按钮总在深色遮罩上,不随应用明/暗主题取前景色。
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size(0, 48),
+              foregroundColor: Colors.white,
+              backgroundColor: Colors.black.withValues(alpha: .18),
+              side: BorderSide(color: Colors.white.withValues(alpha: .7)),
+            ),
             child: Text(l10n.details),
           ),
         ),

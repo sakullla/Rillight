@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/scroll_viewport.dart';
@@ -64,9 +66,12 @@ class HeroRatingBadge extends StatelessWidget {
 /// 图片上的黑色渐变遮罩:底部供文字阅读,顶部淡带保证顶栏可读。
 /// 不随应用明/暗主题变化,遮罩上统一白字。
 class HeroScrim extends StatelessWidget {
-  const HeroScrim({super.key, this.top = false});
+  const HeroScrim({super.key, this.top = false, this.leading = false});
 
   final bool top;
+
+  /// 宽版式的文字块在左下:再叠一条自左向右的横向渐变,亮图上也可读。
+  final bool leading;
 
   @override
   Widget build(BuildContext context) {
@@ -74,6 +79,21 @@ class HeroScrim extends StatelessWidget {
       child: Stack(
         fit: StackFit.expand,
         children: [
+          if (leading)
+            const DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.centerLeft,
+                  end: Alignment.centerRight,
+                  stops: [0, .38, .72],
+                  colors: [
+                    Color(0xA6000000),
+                    Color(0x4D000000),
+                    Colors.transparent,
+                  ],
+                ),
+              ),
+            ),
           const DecoratedBox(
             decoration: BoxDecoration(
               gradient: LinearGradient(
@@ -192,8 +212,12 @@ class HeroTextBlock extends StatelessWidget {
   }
 }
 
-/// 圆点指示器:桌面与手机共用;命中区 44×44,选中为长条。
+/// 圆点指示器:桌面、手机与 TV 共用;可点时命中区 44×44,选中为长条。
 /// [onScrim] 为 true 时用遮罩白(图片上),否则用应用主题色(图片外)。
+///
+/// 传入 [cycle] 时,选中长条从左向右填充,时长 [interval],显示距自动
+/// 翻页还剩多久;值为 null(暂停、悬停、未武装)时长条保持实心。
+/// [onSelect] 为 null 时只作展示(TV 用遥控器切换),不参与焦点遍历。
 class HeroDots extends StatelessWidget {
   const HeroDots({
     super.key,
@@ -201,55 +225,158 @@ class HeroDots extends StatelessWidget {
     required this.count,
     required this.onSelect,
     this.onScrim = true,
+    this.cycle,
+    this.interval = HeroAutoRotate.rotateInterval,
   });
 
   final int index;
   final int count;
-  final ValueChanged<int> onSelect;
+  final ValueChanged<int>? onSelect;
   final bool onScrim;
+  final ValueListenable<int?>? cycle;
+  final Duration interval;
+
+  static const double _activeWidth = 22;
+  static const double _restWidth = 6;
+  static const double _thickness = 6;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final selected = onScrim ? Colors.white : scheme.secondary;
     final resting = onScrim
-        ? Colors.white.withValues(alpha: .35)
-        : scheme.onSurface.withValues(alpha: .25);
-    return Material(
-      type: MaterialType.transparency,
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          for (var i = 0; i < count; i++)
-            Semantics(
-              selected: i == index,
-              label: '${i + 1} / $count',
-              child: InkResponse(
-                key: CatalogKeys.heroDot(i),
-                onTap: () => onSelect(i),
-                child: SizedBox(
-                  width: 44,
-                  height: 44,
-                  child: Center(
-                    child: AnimatedContainer(
-                      duration: AppMotion.durationOf(context, AppMotion.fast),
-                      width: i == index ? 18 : 5,
-                      height: 5,
-                      decoration: BoxDecoration(
-                        color: i == index ? selected : resting,
-                        borderRadius: BorderRadius.circular(99),
-                      ),
-                    ),
-                  ),
+        ? Colors.white.withValues(alpha: .38)
+        : scheme.onSurface.withValues(alpha: .22);
+    final select = onSelect;
+    final extent = select == null ? 16.0 : 44.0;
+    final dots = Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (var i = 0; i < count; i++)
+          Semantics(
+            selected: i == index,
+            label: '${i + 1} / $count',
+            child: _hitTarget(
+              key: CatalogKeys.heroDot(i),
+              onTap: select == null ? null : () => select(i),
+              child: SizedBox(
+                width: i == index && select == null
+                    ? _activeWidth + 10
+                    : extent,
+                height: extent,
+                child: Center(
+                  child: i == index
+                      ? _ActivePill(
+                          cycle: cycle,
+                          interval: interval,
+                          fill: selected,
+                          track: resting,
+                        )
+                      : AnimatedContainer(
+                          duration: AppMotion.durationOf(
+                            context,
+                            AppMotion.normal,
+                          ),
+                          curve: AppMotion.standard,
+                          width: _restWidth,
+                          height: _thickness,
+                          decoration: BoxDecoration(
+                            color: resting,
+                            borderRadius: BorderRadius.circular(99),
+                          ),
+                        ),
                 ),
               ),
             ),
-        ],
+          ),
+      ],
+    );
+    return Material(
+      type: MaterialType.transparency,
+      child: select == null ? ExcludeFocus(child: dots) : dots,
+    );
+  }
+
+  Widget _hitTarget({
+    required Key key,
+    required VoidCallback? onTap,
+    required Widget child,
+  }) {
+    if (onTap == null) return KeyedSubtree(key: key, child: child);
+    return InkResponse(key: key, onTap: onTap, child: child);
+  }
+}
+
+class _ActivePill extends StatelessWidget {
+  const _ActivePill({
+    required this.cycle,
+    required this.interval,
+    required this.fill,
+    required this.track,
+  });
+
+  final ValueListenable<int?>? cycle;
+  final Duration interval;
+  final Color fill;
+  final Color track;
+
+  @override
+  Widget build(BuildContext context) {
+    Widget pill(Widget? progress) => ClipRRect(
+      borderRadius: BorderRadius.circular(99),
+      child: SizedBox(
+        width: HeroDots._activeWidth,
+        height: HeroDots._thickness,
+        child: progress == null
+            ? ColoredBox(color: fill)
+            : ColoredBox(color: track, child: progress),
       ),
+    );
+    final cycle = this.cycle;
+    if (cycle == null || MediaQuery.disableAnimationsOf(context)) {
+      return pill(null);
+    }
+    return ValueListenableBuilder<int?>(
+      valueListenable: cycle,
+      builder: (context, token, _) {
+        if (token == null) return pill(null);
+        return RepaintBoundary(
+          child: pill(
+            TweenAnimationBuilder<double>(
+              key: ValueKey(token),
+              tween: Tween(begin: 0, end: 1),
+              duration: interval,
+              builder: (context, value, _) => Align(
+                alignment: Alignment.centerLeft,
+                child: FractionallySizedBox(
+                  widthFactor: value,
+                  heightFactor: 1,
+                  child: ColoredBox(color: fill),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }
+
+/// 轮播换页:淡入叠加轻微缩放(进场由 1.04 收到 1),比纯淡入更有层次。
+Widget heroSlideTransition(Widget child, Animation<double> animation) {
+  final curved = CurvedAnimation(parent: animation, curve: AppMotion.standard);
+  return FadeTransition(
+    opacity: curved,
+    child: ScaleTransition(
+      scale: Tween<double>(begin: 1.04, end: 1).animate(curved),
+      child: child,
+    ),
+  );
+}
+
+/// 轮播换页时长:比常规过渡稍长,让大图交叉淡化不显生硬。
+const heroSlideDuration = Duration(milliseconds: 420);
 
 /// 海报聚焦版式:海报放大模糊压暗铺底 + 清晰海报卡 + 文字槽。
 /// Apple TV 风格,让只有海报的条目看起来是刻意设计而非降级。
@@ -382,6 +509,31 @@ mixin HeroAutoRotate<T extends StatefulWidget> on State<T> {
   List<ScrollPosition> _rotateScrolls = const [];
   bool _rotateCheckQueued = false;
 
+  /// 当前计时周期编号;null 表示没有在倒计时。供 [HeroDots.cycle] 画进度。
+  ValueListenable<int?> get rotateCycle => _rotateCycle;
+  final ValueNotifier<int?> _rotateCycle = ValueNotifier(null);
+  int _rotateCycleSeed = 0;
+  int? _rotateCyclePending;
+  bool _rotateCycleQueued = false;
+  bool _rotateDisposed = false;
+
+  // armAutoRotate 常在宿主 build 内调用,此时改通知值会让已挂载的
+  // 监听者在构建期 markNeedsBuild;推迟到帧末统一发布最新值。
+  void _publishCycle(int? value) {
+    _rotateCyclePending = value;
+    if (SchedulerBinding.instance.schedulerPhase !=
+        SchedulerPhase.persistentCallbacks) {
+      if (!_rotateDisposed) _rotateCycle.value = value;
+      return;
+    }
+    if (_rotateCycleQueued) return;
+    _rotateCycleQueued = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _rotateCycleQueued = false;
+      if (!_rotateDisposed) _rotateCycle.value = _rotateCyclePending;
+    });
+  }
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -447,6 +599,8 @@ mixin HeroAutoRotate<T extends StatefulWidget> on State<T> {
   void dispose() {
     _detachRotateScrolls();
     cancelAutoRotate();
+    _rotateDisposed = true;
+    _rotateCycle.dispose();
     super.dispose();
   }
 
@@ -469,16 +623,19 @@ mixin HeroAutoRotate<T extends StatefulWidget> on State<T> {
     if (_rotateTimer != null || !_canAutoRotate(itemCount)) return;
     _rotateTimer = Timer(rotateInterval, () {
       _rotateTimer = null;
+      _publishCycle(null);
       if (_canAutoRotate(_rotateItemCount)) {
         advanceCarousel();
       }
     });
+    _publishCycle(++_rotateCycleSeed);
   }
 
   void pauseAutoRotate() {
     _rotatePaused = true;
     _rotateTimer?.cancel();
     _rotateTimer = null;
+    _publishCycle(null);
   }
 
   void resumeAutoRotate(int itemCount) {
@@ -490,11 +647,14 @@ mixin HeroAutoRotate<T extends StatefulWidget> on State<T> {
   void resetAutoRotate(int itemCount) {
     _rotateTimer?.cancel();
     _rotateTimer = null;
+    _publishCycle(null);
     armAutoRotate(itemCount);
   }
 
   void cancelAutoRotate() {
+    final armed = _rotateTimer != null;
     _rotateTimer?.cancel();
     _rotateTimer = null;
+    if (armed) _publishCycle(null);
   }
 }

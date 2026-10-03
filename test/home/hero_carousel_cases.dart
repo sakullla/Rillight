@@ -119,6 +119,37 @@ void main() {
       await unmount(tester);
     });
 
+    testWidgets('active dot counts down while armed and stays solid on hover', (
+      tester,
+    ) async {
+      await pumpDesktop(tester);
+      await tester.pump();
+      Finder countdown() => find.byType(TweenAnimationBuilder<double>);
+      expect(countdown(), findsOneWidget);
+
+      final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      addTearDown(gesture.removePointer);
+      await gesture.addPointer(
+        location: tester.getCenter(find.byKey(const Key('home-hero-card'))),
+      );
+      await tester.pump();
+      await tester.pump();
+      expect(countdown(), findsNothing);
+      // 悬停时左右箭头浮现。
+      final next = find.ancestor(
+        of: find.byKey(CatalogKeys.heroNext),
+        matching: find.byType(AnimatedOpacity),
+      );
+      expect(tester.widget<AnimatedOpacity>(next.first).opacity, 1);
+
+      await gesture.moveTo(const Offset(20, 780));
+      await tester.pump();
+      await tester.pump();
+      expect(countdown(), findsOneWidget);
+      expect(tester.widget<AnimatedOpacity>(next.first).opacity, 0);
+      await unmount(tester);
+    });
+
     testWidgets('a single candidate never arms the timer', (tester) async {
       catalog.latestMovies = const CatalogRowState(
         items: [
@@ -167,7 +198,8 @@ void main() {
       await tester.pump(const Duration(seconds: 14));
       expect(find.text('Movie A'), findsOneWidget);
       await gesture.up();
-      await tester.pumpAndSettle();
+      // 计时武装后圆点倒计时持续动画,pumpAndSettle 不会收敛。
+      await tester.pump(const Duration(seconds: 1));
 
       // An eager child stays mounted outside the viewport. Its timer must stop.
       scroll.jumpTo(700);

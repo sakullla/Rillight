@@ -59,6 +59,71 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets(
+    'thumbnail plays directly while the row opens details; watched and remaining time show',
+    (tester) async {
+      var played = 0;
+      var opened = 0;
+      Widget row(EmbyItem item) => MaterialApp(
+        locale: const Locale('zh'),
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        home: Scaffold(
+          body: SizedBox(
+            width: 1200,
+            child: EpisodeRow(
+              item: item,
+              selected: false,
+              busyPlayed: false,
+              onTap: () => opened++,
+              onPlay: () => played++,
+              onTogglePlayed: () {},
+            ),
+          ),
+        ),
+      );
+      await tester.pumpWidget(
+        row(
+          const EmbyItem(
+            id: 'e2',
+            name: '半途',
+            type: 'Episode',
+            indexNumber: 2,
+            runTimeTicks: 24 * 60 * 10000000,
+            userData: EmbyUserData(playbackPositionTicks: 10 * 60 * 10000000),
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(find.text('24分钟'), findsOneWidget);
+      expect(find.text('剩余 14 分钟'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('episode-thumb-play-e2')));
+      await tester.pump();
+      expect(played, 1);
+      expect(opened, 0);
+      await tester.tap(find.text('2. 半途'));
+      await tester.pump();
+      expect(opened, 1);
+
+      await tester.pumpWidget(
+        row(
+          const EmbyItem(
+            id: 'e3',
+            name: '看完',
+            type: 'Episode',
+            indexNumber: 3,
+            userData: EmbyUserData(played: true),
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(find.byType(EpisodeWatchedBadge), findsOneWidget);
+      expect(find.textContaining('剩余'), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   test(
     'series reading scale stays flat through 1080p and trails the panel scale',
     () {

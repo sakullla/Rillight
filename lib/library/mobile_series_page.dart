@@ -11,6 +11,7 @@ import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/library/detail_extras.dart';
 import 'package:rillight/library/episode_detail_sections.dart';
+import 'package:rillight/library/episode_list.dart';
 import 'package:rillight/library/item_format.dart';
 import 'package:rillight/media_image/media_image.dart';
 
@@ -671,21 +672,34 @@ class _EpisodeRow extends StatelessWidget {
     final runtime = runtimeLabel(l, episode);
     final code = seasonEpisodeCode(episode);
     final progress = episode.playbackProgress;
+    final played = episode.userData.played;
+    final scheme = theme.colorScheme;
+    final premiere = episode.premiereDate;
+    final status = <String>[
+      if (episode.canResume) ?remainingLabel(l, episode),
+      if (premiere != null) formatDateYmd(premiere),
+    ];
     return Padding(
       padding: const EdgeInsets.fromLTRB(
         AppSpacing.md,
-        AppSpacing.xs,
+        AppSpacing.xxs,
         AppSpacing.md,
-        AppSpacing.xs,
+        AppSpacing.xxs,
       ),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
+      child: Material(
+        color: current
+            ? scheme.primaryContainer.withValues(alpha: .32)
+            : Colors.transparent,
+        shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppRadii.md),
-          border: Border.all(
-            color: current ? theme.colorScheme.primary : Colors.transparent,
-            width: 2,
+          side: BorderSide(
+            color: current
+                ? scheme.primary.withValues(alpha: .7)
+                : Colors.transparent,
+            width: 1.5,
           ),
         ),
+        clipBehavior: Clip.antiAlias,
         child: InkWell(
           key: CatalogKeys.episode(episode.id),
           onTap: onTap,
@@ -709,7 +723,11 @@ class _EpisodeRow extends StatelessWidget {
                             preferThumb: true,
                             maxWidth: 480,
                           ),
-                          if (progress > 0 && !episode.userData.played)
+                          if (played && !current)
+                            ColoredBox(
+                              color: Colors.black.withValues(alpha: .36),
+                            ),
+                          if (progress > 0 && !played)
                             Positioned(
                               left: 0,
                               right: 0,
@@ -717,20 +735,16 @@ class _EpisodeRow extends StatelessWidget {
                               child: LinearProgressIndicator(
                                 value: progress,
                                 minHeight: 3,
+                                backgroundColor: Colors.black.withValues(
+                                  alpha: .45,
+                                ),
                               ),
                             ),
                           if (runtime != null)
                             Positioned(
                               right: 6,
-                              bottom: progress > 0 && !episode.userData.played
-                                  ? 8
-                                  : 6,
-                              child: Text(
-                                runtime,
-                                style: theme.textTheme.labelSmall?.copyWith(
-                                  color: Colors.white,
-                                ),
-                              ),
+                              bottom: progress > 0 && !played ? 8 : 6,
+                              child: EpisodeThumbBadge(label: runtime),
                             ),
                           if (code != null)
                             Positioned(
@@ -795,24 +809,60 @@ class _EpisodeRow extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(episode.name, style: theme.textTheme.titleSmall),
+                      Text(
+                        episode.name,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          fontWeight: current ? FontWeight.w700 : null,
+                          color: current
+                              ? scheme.primary
+                              : played
+                              ? scheme.onSurface.withValues(alpha: .72)
+                              : null,
+                        ),
+                      ),
+                      if (status.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: Text(
+                            status.join(' · '),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: episode.canResume
+                                  ? scheme.primary
+                                  : scheme.onSurfaceVariant,
+                              fontWeight: episode.canResume
+                                  ? FontWeight.w600
+                                  : null,
+                            ),
+                          ),
+                        ),
                       // 该集简介:EmbyItem.overview 缺失(无字段/纯空白/HTML 残迹)
                       // 时整行隐藏,卡片优雅降级为标题+时长。
                       if (overview != null)
-                        Text(
-                          overview,
-                          key: const Key('phone-episode-overview'),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
-                            height: 1.4,
+                        Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: Text(
+                            overview,
+                            key: const Key('phone-episode-overview'),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: scheme.onSurfaceVariant.withValues(
+                                alpha: played ? .75 : 1,
+                              ),
+                              height: 1.4,
+                            ),
                           ),
                         ),
-                      if (episode.userData.played)
+                      if (played)
                         Text(
                           l.mobileWatched,
-                          style: theme.textTheme.labelMedium,
+                          style: theme.textTheme.labelMedium?.copyWith(
+                            color: scheme.onSurfaceVariant,
+                          ),
                         ),
                     ],
                   ),

@@ -18,7 +18,9 @@ import 'package:rillight/home/home_display_dialog.dart';
 import 'package:rillight/home/library_latest_row.dart';
 import 'package:rillight/home/library_tiles.dart';
 import 'package:rillight/home/phone_home_sections.dart';
+import 'package:rillight/library/item_format.dart';
 import 'package:rillight/media_image/media_image.dart';
+import 'package:rillight/player/player_window_host.dart';
 
 /// TV 首页 featured 区与行级焦点记忆的测试键(仅 TV 首页使用,不入桌面键表)。
 abstract final class TvHomeKeys {
@@ -26,6 +28,7 @@ abstract final class TvHomeKeys {
   static const featuredPrev = Key('tv-featured-prev');
   static const featuredNext = Key('tv-featured-next');
   static const featuredOpen = Key('tv-featured-open');
+  static const featuredPlay = Key('tv-featured-play');
   static const featuredTitle = Key('tv-featured-title');
 }
 
@@ -292,6 +295,8 @@ class _TvFeaturedState extends State<_TvFeatured> {
         item.primaryImageTag != null;
     final title = heroTitle(item);
     final meta = heroMetaLabels(l, item);
+    final overview = plainOverview(item.overview);
+    final playable = item.canResume || item.isMovie || item.isEpisode;
     return SizedBox(
       key: TvHomeKeys.featured,
       height: height,
@@ -304,7 +309,8 @@ class _TvFeaturedState extends State<_TvFeatured> {
             children: [
               if (hasImage)
                 AnimatedSwitcher(
-                  duration: AppMotion.durationOf(context, AppMotion.slow),
+                  duration: AppMotion.durationOf(context, heroSlideDuration),
+                  transitionBuilder: heroSlideTransition,
                   child: RepaintBoundary(
                     key: ValueKey(item.id),
                     child: MediaImage(
@@ -320,10 +326,10 @@ class _TvFeaturedState extends State<_TvFeatured> {
                     ),
                   ),
                 ),
-              const Positioned.fill(child: HeroScrim()),
+              const Positioned.fill(child: HeroScrim(leading: true)),
               Positioned(
-                left: 24,
-                right: 24,
+                left: 56,
+                right: 56,
                 bottom: 20,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -337,6 +343,9 @@ class _TvFeaturedState extends State<_TvFeatured> {
                       style: theme.textTheme.headlineMedium?.copyWith(
                         color: Colors.white,
                         fontWeight: FontWeight.w800,
+                        shadows: const [
+                          Shadow(blurRadius: 12, color: Colors.black54),
+                        ],
                       ),
                     ),
                     if (meta.isNotEmpty || item.communityRating != null) ...[
@@ -361,12 +370,58 @@ class _TvFeaturedState extends State<_TvFeatured> {
                         ],
                       ),
                     ],
+                    // 矮视口只留标题与操作,保证按钮不被挤出横幅。
+                    if (overview != null && height >= 300) ...[
+                      const SizedBox(height: 8),
+                      ConstrainedBox(
+                        constraints: BoxConstraints(
+                          maxWidth: viewSize.width * .5,
+                        ),
+                        child: Text(
+                          overview,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: Colors.white.withValues(alpha: 0.82),
+                            height: 1.45,
+                          ),
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 12),
-                    TvAction(
-                      key: TvHomeKeys.featuredOpen,
-                      emphasized: true,
-                      onPressed: () => context.push(AppRoutes.item(item.id)),
-                      child: Text(l.details),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (playable) ...[
+                          TvAction(
+                            key: TvHomeKeys.featuredPlay,
+                            emphasized: true,
+                            onPressed: () => context.push(
+                              '/play/${item.id}',
+                              extra: PlayerOpenRequest(
+                                itemId: item.id,
+                                autoResume: true,
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.play_arrow_rounded),
+                                const SizedBox(width: 6),
+                                Text(item.canResume ? l.resumePlay : l.play),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                        ],
+                        TvAction(
+                          key: TvHomeKeys.featuredOpen,
+                          emphasized: !playable,
+                          onPressed: () =>
+                              context.push(AppRoutes.item(item.id)),
+                          child: Text(l.details),
+                        ),
+                      ],
                     ),
                   ],
                 ),
@@ -397,13 +452,25 @@ class _TvFeaturedState extends State<_TvFeatured> {
                   ),
                 ),
                 Positioned(
-                  right: 20,
-                  bottom: 20,
-                  child: Text(
-                    '${index + 1} / ${items.length}',
-                    style: theme.textTheme.labelMedium?.copyWith(
-                      color: Colors.white.withValues(alpha: 0.8),
-                    ),
+                  right: 24,
+                  bottom: 24,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      HeroDots(
+                        index: index,
+                        count: items.length,
+                        onSelect: null,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        '${index + 1} / ${items.length}',
+                        style: theme.textTheme.labelMedium?.copyWith(
+                          color: Colors.white.withValues(alpha: 0.8),
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],

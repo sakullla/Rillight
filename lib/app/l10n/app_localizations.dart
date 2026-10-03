@@ -904,6 +904,12 @@ abstract class AppLocalizations {
   /// **'已看 {percent}%'**
   String playbackProgress(int percent);
 
+  /// Time left in a partially watched episode, rounded up to whole minutes.
+  ///
+  /// In zh, this message translates to:
+  /// **'剩余 {minutes} 分钟'**
+  String remainingMinutes(int minutes);
+
   /// Start playback from the beginning.
   ///
   /// In zh, this message translates to:
