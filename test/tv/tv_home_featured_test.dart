@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -7,7 +10,12 @@ import 'package:rillight/app/tv_shell.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
+import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/home/catalog_keys.dart';
+import 'package:rillight/home/phone_home_sections.dart';
 import 'package:rillight/home/tv_home_page.dart';
+import 'package:rillight/home/tv_section_prefs.dart';
+import 'package:rillight/home/tv_shelf_page.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
@@ -16,9 +24,18 @@ import '../emby/fake_emby_server.dart';
 import '../helpers/image_cache_fixture.dart';
 
 void main() {
-  setUp(isolateImageCache);
-  Future<RillightApp> start(WidgetTester tester, FakeEmbyServer server) async {
-    tester.view.physicalSize = const Size(960, 540);
+  setUp(() {
+    isolateImageCache();
+    TvSectionController.debugResetApp();
+    debugResetTvSectionStore();
+    PhoneHomeSectionController.debugResetApp();
+  });
+  Future<(RillightApp, Future<void> Function())> start(
+    WidgetTester tester,
+    FakeEmbyServer server, {
+    Size size = const Size(960, 540),
+  }) async {
+    tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
@@ -44,12 +61,19 @@ void main() {
     );
     await tester.pumpWidget(app);
     await tester.pumpAndSettle();
-    addTearDown(() async {
+    var disposed = false;
+    Future<void> shutdown() async {
+      if (disposed) {
+        return;
+      }
+      disposed = true;
       await tester.pumpWidget(const SizedBox.shrink());
       app.router.dispose();
       auth.dispose();
-    });
-    return app;
+    }
+
+    addTearDown(shutdown);
+    return (app, shutdown);
   }
 
   Future<void> key(WidgetTester tester, LogicalKeyboardKey key) async {
@@ -302,4 +326,307 @@ void main() {
     },
     tags: ['integration'],
   );
+
+  testWidgets(
+    'tv section file is per server and does not change the phone file',
+    (tester) async {
+      await tester.runAsync(() async {
+        final root = Directory.systemTemp.createTempSync(
+          'rillight_tv_sections_',
+        );
+        addTearDown(() {
+          if (root.existsSync()) {
+            root.deleteSync(recursive: true);
+          }
+        });
+        final phoneFile = File('${root.path}/phone_home_sections.json');
+        const phoneJson =
+            '{"server-a":{"order":["banner","resume"],"hidden":["nextUp"]}}';
+        await phoneFile.writeAsString(phoneJson);
+        final tvFile = File('${root.path}/tv_home_sections.json');
+        const libraries = [
+          EmbyItem(id: 'view-movies', name: '电影', type: 'CollectionFolder'),
+          EmbyItem(id: 'view-tv', name: '剧集', type: 'CollectionFolder'),
+        ];
+        final first = TvSectionController(store: FileTvSectionStore(tvFile));
+        addTearDown(first.dispose);
+        await first.load('server-b');
+        await first.setVisible(PhoneHomeSectionId.resume, false);
+        await first.move(PhoneHomeSectionId.libraries, -3, libraries);
+        final editing = TvSectionController(store: FileTvSectionStore(tvFile));
+        addTearDown(editing.dispose);
+        await editing.load('server-a');
+        expect(editing.isHidden(PhoneHomeSectionId.banner), isFalse);
+        expect(editing.orderedIds(libraries), [
+          PhoneHomeSectionId.banner,
+          PhoneHomeSectionId.resume,
+          PhoneHomeSectionId.nextUp,
+          PhoneHomeSectionId.libraries,
+          PhoneHomeSectionId.libraryLatest('view-movies'),
+          PhoneHomeSectionId.libraryLatest('view-tv'),
+        ]);
+        await editing.move(PhoneHomeSectionId.resume, 1, libraries);
+        await editing.setVisible(PhoneHomeSectionId.banner, false);
+        expect(editing.visibleIds(libraries).first, PhoneHomeSectionId.nextUp);
+        expect(
+          editing.visibleIds(libraries),
+          isNot(contains(PhoneHomeSectionId.banner)),
+        );
+        expect(phoneFile.readAsStringSync(), phoneJson);
+
+        final restarted = TvSectionController(
+          store: FileTvSectionStore(tvFile),
+        );
+        addTearDown(restarted.dispose);
+        await restarted.load('server-a');
+        expect(restarted.isHidden(PhoneHomeSectionId.banner), isTrue);
+        expect(restarted.visibleIds(libraries).take(2), [
+          PhoneHomeSectionId.nextUp,
+          PhoneHomeSectionId.resume,
+        ]);
+        await restarted.load('server-b');
+        expect(restarted.isHidden(PhoneHomeSectionId.resume), isTrue);
+        expect(restarted.isHidden(PhoneHomeSectionId.banner), isFalse);
+        expect(
+          restarted.orderedIds(libraries).first,
+          PhoneHomeSectionId.libraries,
+        );
+        await restarted.load('server-a');
+        expect(restarted.isHidden(PhoneHomeSectionId.banner), isTrue);
+        expect(restarted.isHidden(PhoneHomeSectionId.resume), isFalse);
+
+        final phone = PhoneHomeSectionController(
+          store: FilePhoneHomeSectionStore(phoneFile),
+        );
+        addTearDown(phone.dispose);
+        await phone.load('server-a');
+        expect(phone.prefs.order, ['banner', 'resume']);
+        expect(phone.isHidden(PhoneHomeSectionId.nextUp), isTrue);
+        expect(phone.isHidden(PhoneHomeSectionId.banner), isFalse);
+        expect(phoneFile.readAsStringSync(), phoneJson);
+        final saved = jsonDecode(tvFile.readAsStringSync());
+        expect(saved, isA<Map<String, dynamic>>());
+        expect((saved as Map).keys, containsAll(['server-a', 'server-b']));
+        expect(tvFile.path, endsWith('tv_home_sections.json'));
+        expect(tvFile.path, isNot(endsWith('phone_home_sections.json')));
+      });
+    },
+  );
+
+  testWidgets(
+    'remote moves sections up and down without changing the phone home',
+    (tester) async {
+      final server = FakeEmbyServer();
+      _showContinueAndNext(server);
+      final phone = PhoneHomeSectionController.app();
+      await tester.runAsync(() => phone.load('server-id-1'));
+      final (_, stop) = await start(
+        tester,
+        server,
+        size: const Size(960, 1600),
+      );
+      await login(tester, server);
+      expect(
+        tester.getTopLeft(find.byKey(const ValueKey('tv-row-继续观看'))).dy,
+        lessThan(
+          tester.getTopLeft(find.byKey(const ValueKey('tv-row-即将播放'))).dy,
+        ),
+      );
+
+      await _openSectionEditor(tester);
+      expect(find.byType(ReorderableDragStartListener), findsNothing);
+      await _focusEditorAction(
+        tester,
+        TvSectionEditor.moveDownKey(PhoneHomeSectionId.resume),
+      );
+      await key(tester, LogicalKeyboardKey.select);
+      expect(
+        tester
+            .getTopLeft(
+              find.byKey(TvSectionEditor.tileKey(PhoneHomeSectionId.nextUp)),
+            )
+            .dy,
+        lessThan(
+          tester
+              .getTopLeft(
+                find.byKey(TvSectionEditor.tileKey(PhoneHomeSectionId.resume)),
+              )
+              .dy,
+        ),
+      );
+      final bannerSwitch = find.byKey(
+        TvSectionEditor.visibleKey(PhoneHomeSectionId.banner),
+      );
+      await tester.ensureVisible(bannerSwitch);
+      await tester.pumpAndSettle();
+      await tester.tap(bannerSwitch);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(TvSectionEditor.closeKey));
+      await tester.pumpAndSettle();
+      final homeScroll = find
+          .descendant(
+            of: find.byKey(const PageStorageKey('tv-home')),
+            matching: find.byType(Scrollable),
+          )
+          .first;
+      tester.state<ScrollableState>(homeScroll).position.jumpTo(0);
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(TvHomeKeys.featured), findsNothing);
+      expect(
+        tester.getTopLeft(find.byKey(const ValueKey('tv-row-即将播放'))).dy,
+        lessThan(
+          tester.getTopLeft(find.byKey(const ValueKey('tv-row-继续观看'))).dy,
+        ),
+      );
+      expect(phone.prefs.order, PhoneHomeSectionId.fixed);
+      expect(phone.prefs.hidden, isEmpty);
+      expect(
+        TvSectionController.app().isHidden(PhoneHomeSectionId.banner),
+        isTrue,
+      );
+      expect(phone.isHidden(PhoneHomeSectionId.banner), isFalse);
+
+      await stop();
+      TvSectionController.debugResetApp();
+      final restarted = FakeEmbyServer();
+      _showContinueAndNext(restarted);
+      await start(tester, restarted, size: const Size(960, 1600));
+      await login(tester, restarted);
+      expect(find.byKey(TvHomeKeys.featured), findsNothing);
+      expect(
+        tester.getTopLeft(find.byKey(const ValueKey('tv-row-即将播放'))).dy,
+        lessThan(
+          tester.getTopLeft(find.byKey(const ValueKey('tv-row-继续观看'))).dy,
+        ),
+      );
+      expect(phone.prefs.order, PhoneHomeSectionId.fixed);
+      expect(phone.prefs.hidden, isEmpty);
+      expect(tester.takeException(), isNull);
+    },
+    tags: ['integration'],
+  );
+
+  testWidgets(
+    'a failed library row keeps the other rows operable and retryable',
+    (tester) async {
+      final server = FakeEmbyServer()..itemsStatus = 503;
+      final (app, _) = await start(tester, server);
+      await login(tester, server);
+      expect(find.byKey(const ValueKey('tv-row-继续观看')), findsOneWidget);
+      final moviesRetry = find.descendant(
+        of: find.byKey(const Key('tv-library-view-movies')),
+        matching: find.text('重试'),
+      );
+      final seriesRetry = find.descendant(
+        of: find.byKey(const Key('tv-library-view-tv')),
+        matching: find.text('重试'),
+      );
+      await tester.tap(
+        find.byKey(CatalogKeys.shelfMore(CatalogKeys.shelfResume)),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(TvShelfPage), findsOneWidget);
+      app.router.pop();
+      await tester.pumpAndSettle();
+      expect(find.byType(TvShelfPage), findsNothing);
+
+      final homeScroll = find
+          .descendant(
+            of: find.byKey(const PageStorageKey('tv-home')),
+            matching: find.byType(Scrollable),
+          )
+          .first;
+      await tester.scrollUntilVisible(moviesRetry, 400, scrollable: homeScroll);
+      await tester.pumpAndSettle();
+      expect(moviesRetry, findsOneWidget);
+      await tester.scrollUntilVisible(
+        find.byKey(const Key('tv-library-view-tv')),
+        400,
+        scrollable: homeScroll,
+      );
+      await tester.pumpAndSettle();
+      expect(seriesRetry, findsOneWidget);
+      await tester.scrollUntilVisible(
+        moviesRetry,
+        -400,
+        scrollable: homeScroll,
+      );
+      server.itemsStatus = null;
+      await tester.tap(moviesRetry);
+      await tester.pumpAndSettle();
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('tv-library-view-movies')),
+          matching: find.byKey(const ValueKey('tv-row-电影')),
+        ),
+        findsOneWidget,
+      );
+      expect(moviesRetry, findsNothing);
+      await tester.scrollUntilVisible(seriesRetry, 400, scrollable: homeScroll);
+      expect(seriesRetry, findsOneWidget);
+      tester.state<ScrollableState>(homeScroll).position.jumpTo(0);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('tv-row-继续观看')), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+    tags: ['integration'],
+  );
 }
+
+void _showContinueAndNext(FakeEmbyServer server) {
+  final current = server.items.firstWhere(
+    (item) => item.id == 'episode-friends-s1e1',
+  );
+  current.played = false;
+  current.playedPercentage = 40;
+  current.playbackPositionTicks = 1000;
+}
+
+Future<void> _press(WidgetTester tester, LogicalKeyboardKey logicalKey) async {
+  await tester.sendKeyEvent(logicalKey);
+  await tester.pumpAndSettle();
+}
+
+Future<void> _openSectionEditor(WidgetTester tester) async {
+  await _press(tester, LogicalKeyboardKey.arrowRight);
+  for (var i = 0; i < 48 && _focusedLabel(tester) != '编辑首页'; i++) {
+    await _press(tester, LogicalKeyboardKey.arrowDown);
+  }
+  expect(_focusedLabel(tester), '编辑首页');
+  await _press(tester, LogicalKeyboardKey.select);
+  expect(find.byKey(TvSectionEditor.editorKey), findsOneWidget);
+  await tester.pump();
+  expect(
+    find.descendant(
+      of: find.byKey(TvSectionEditor.editorKey),
+      matching: _focusedAction(),
+    ),
+    findsOneWidget,
+  );
+}
+
+Future<void> _focusEditorAction(WidgetTester tester, Key keyId) async {
+  final matched = find.descendant(
+    of: find.byKey(keyId),
+    matching: _focusedAction(),
+  );
+  for (var i = 0; i < 24 && matched.evaluate().isEmpty; i++) {
+    await _press(tester, LogicalKeyboardKey.arrowDown);
+  }
+  expect(matched, findsOneWidget);
+}
+
+Finder _focusedAction() => find.byWidgetPredicate(
+  (widget) =>
+      widget is Semantics &&
+      widget.properties.focused == true &&
+      widget.properties.button == true,
+);
+
+String _focusedLabel(WidgetTester tester) => tester
+    .widgetList<Text>(
+      find.descendant(of: _focusedAction(), matching: find.byType(Text)),
+    )
+    .map((text) => text.data)
+    .join(' ');

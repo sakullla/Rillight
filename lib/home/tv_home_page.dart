@@ -14,10 +14,10 @@ import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/home/featured_items.dart';
 import 'package:rillight/home/hero_carousel.dart';
-import 'package:rillight/home/home_display_dialog.dart';
 import 'package:rillight/home/library_latest_row.dart';
 import 'package:rillight/home/library_tiles.dart';
 import 'package:rillight/home/phone_home_sections.dart';
+import 'package:rillight/home/tv_section_prefs.dart';
 import 'package:rillight/library/item_format.dart';
 import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/player/player_window_host.dart';
@@ -33,7 +33,7 @@ abstract final class TvHomeKeys {
 }
 
 /// TV 首页：轮播图、继续观看、下一集、片库入口和每个片库的最近添加。
-/// 顺序和显示与手机同一套。行级焦点记忆。
+/// 顺序和显隐按服务器记在电视自己的存储里，手机和桌面不受影响。行级焦点记忆。
 ///
 /// featured 候选复用 [featuredHomeItems](继续观看优先,上限 5),只手动左右
 /// 切换不自动轮换;无候选时整区隐藏。切换控件在 AnimatedSwitcher 之外,快速
@@ -48,7 +48,7 @@ class TvHomePage extends StatefulWidget {
 class _TvHomePageState extends State<TvHomePage> {
   var _loadedServerId = '';
 
-  PhoneHomeSectionController get _sections => PhoneHomeSectionController.app();
+  TvSectionController get _sections => TvSectionController.app();
 
   @override
   void didChangeDependencies() {
@@ -202,7 +202,7 @@ class _TvHomePageState extends State<TvHomePage> {
             if (sectionChildren.isEmpty) Text(l.mobileEmpty),
             TvAction(
               key: const Key('tv-home-display'),
-              onPressed: () => showHomeDisplayDialog(context),
+              onPressed: () => showTvSectionEditor(context),
               child: Text(l.phoneHomeEdit),
             ),
             TvAction(
