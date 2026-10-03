@@ -1626,5 +1626,13 @@
   "tvLanExpired": "辅助连接已过期",
   "tvLanFailed": "辅助连接未完成",
   "tvLanFingerprint": "证书指纹",
-  "tvLanAddress": "局域网地址"
+  "tvLanAddress": "局域网地址",
+  "tvLanValidUntil": "本次配对有效至 {time}",
+  "@tvLanValidUntil": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  }
 }

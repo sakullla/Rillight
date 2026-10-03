@@ -15,6 +15,7 @@ import 'package:rillight/auth/auth_controller.dart';
 class TvLanAssist extends ChangeNotifier {
   TvLanAssist({
     this.lifetime = const Duration(minutes: 3),
+    this.phoneGrace = const Duration(seconds: 2),
     InternetAddress? bindAddress,
     this.advertiseHost,
     Random? random,
@@ -22,6 +23,9 @@ class TvLanAssist extends ChangeNotifier {
        _random = random ?? Random.secure();
 
   final Duration lifetime;
+
+  /// 结果确定后留给手机取最终页面的时间。到点仍关闭入口。
+  final Duration phoneGrace;
   final String? advertiseHost;
   final InternetAddress? _bindAddress;
   final Random _random;
@@ -32,12 +36,23 @@ class TvLanAssist extends ChangeNotifier {
   String? _password;
   HttpServer? _server;
   Timer? _timer;
+  DateTime? _expiresAt;
   Future<void>? _closing;
   bool _reserved = false;
   bool _disposed = false;
+  bool _announcedConnecting = false;
+  bool _finalSent = false;
+  final List<HttpRequest> _watchers = [];
+  Completer<void>? _finalDelivered;
 
   TvLanPhase get phase => _phase;
   TvLanOffer? get offer => _offer;
+
+  /// 本次配对的截止时间。等待界面用它显示有效期。
+  DateTime? get expiresAt => _expiresAt;
+
+  /// 还没写完响应、正在等阶段变化的手机请求。
+  int get phoneWaiters => _watchers.length;
 
   /// 待确认的服务器与账号。不含密码。
   TvLanSubmission? get pending {
@@ -100,6 +115,7 @@ class TvLanAssist extends ChangeNotifier {
         certificateDer: material.certificateDer,
         qrModules: TvLanQr.encode(qrText),
       );
+      _expiresAt = DateTime.now().add(lifetime);
       _phase = TvLanPhase.waiting;
       _timer = Timer(lifetime, _expire);
       _notify();
@@ -114,31 +130,39 @@ class TvLanAssist extends ChangeNotifier {
   }
 
   /// 遥控器确认后才登录。非待确认状态不会调用 [AuthController.connect]。
-  Future<void> confirm(AuthController auth) async {
+  ///
+  /// 成功才换成新会话。失败时保留确认前的会话和令牌，并先把结果页写给手机。
+  Future<bool> confirm(AuthController auth) async {
     if (_disposed || _phase != TvLanPhase.pending) {
-      return;
+      return false;
     }
     final held = _pending;
     final password = _password;
     if (held == null || password == null) {
-      return;
+      return false;
     }
     _password = null;
     _pending = null;
-    _phase = TvLanPhase.confirmed;
+    _phase = TvLanPhase.connecting;
     _timer?.cancel();
     _notify();
-    // 先登录。套接字关闭走根 zone,不能挡住确认。
-    final closing = _shutdown();
+    await _flushWatchers();
+    var accepted = false;
     try {
-      await auth.connect(
+      accepted = await auth.connect(
         address: held.server,
         username: held.account,
         password: password,
+        preserveSessionOnFailure: true,
       );
     } finally {
-      await closing;
+      if (!_disposed) {
+        _phase = accepted ? TvLanPhase.confirmed : TvLanPhase.failed;
+        _notify();
+        await _deliverFinalThenClose();
+      }
     }
+    return accepted;
   }
 
   /// 拒绝当前提交,不登录,并关闭入口。
@@ -146,35 +170,42 @@ class TvLanAssist extends ChangeNotifier {
     if (_disposed || _phase != TvLanPhase.pending) {
       return;
     }
-    _wipe();
-    _phase = TvLanPhase.rejected;
-    _timer?.cancel();
-    _notify();
-    await _shutdown();
+    await _finish(TvLanPhase.rejected);
   }
 
   /// 用户退出辅助。不修改已有会话。
   Future<void> cancel() async {
-    if (_disposed || isTerminal || _phase == TvLanPhase.idle) {
+    if (_disposed ||
+        isTerminal ||
+        _phase == TvLanPhase.idle ||
+        _phase == TvLanPhase.connecting) {
       return;
     }
-    _wipe();
-    _phase = TvLanPhase.cancelled;
-    _timer?.cancel();
-    _notify();
-    await _shutdown();
+    await _finish(TvLanPhase.cancelled);
   }
 
   /// 浏览器警告无法继续时结束辅助,不猜测原因。
   Future<void> markIncomplete() async {
-    if (_disposed || isTerminal || _phase == TvLanPhase.idle) {
+    if (_disposed ||
+        isTerminal ||
+        _phase == TvLanPhase.idle ||
+        _phase == TvLanPhase.connecting) {
       return;
     }
+    await _finish(TvLanPhase.failed);
+  }
+
+  Future<void> _finish(TvLanPhase phase) async {
+    final submitted = _phase == TvLanPhase.pending;
     _wipe();
-    _phase = TvLanPhase.failed;
+    _phase = phase;
     _timer?.cancel();
     _notify();
-    await _shutdown();
+    if (submitted) {
+      await _deliverFinalThenClose();
+    } else {
+      await _shutdown();
+    }
   }
 
   Future<void> close() => _shutdown();
@@ -259,10 +290,15 @@ class TvLanAssist extends ChangeNotifier {
     if (_phase != TvLanPhase.waiting && _phase != TvLanPhase.pending) {
       return;
     }
+    final submitted = _phase == TvLanPhase.pending;
     _wipe();
     _phase = TvLanPhase.expired;
     _notify();
-    unawaited(_shutdown());
+    if (submitted) {
+      unawaited(_deliverFinalThenClose());
+    } else {
+      unawaited(_shutdown());
+    }
   }
 
   void _wipe() {
@@ -277,6 +313,63 @@ class TvLanAssist extends ChangeNotifier {
     }
   }
 
+  Future<void> _deliverFinalThenClose() async {
+    await _flushWatchers();
+    if (!_finalSent && phoneGrace > Duration.zero) {
+      final done = Completer<void>();
+      _finalDelivered = done;
+      try {
+        await done.future.timeout(phoneGrace);
+      } on TimeoutException {
+        // 手机没有来取最终页面时仍关闭入口。
+      }
+      _finalDelivered = null;
+    }
+    await _shutdown();
+  }
+
+  void _noteFinalDelivered() {
+    _finalSent = true;
+    final done = _finalDelivered;
+    if (done != null && !done.isCompleted) {
+      done.complete();
+    }
+  }
+
+  Future<void> _flushWatchers() async {
+    final pending = List<HttpRequest>.of(_watchers);
+    _watchers.clear();
+    if (_phase == TvLanPhase.connecting && pending.isNotEmpty) {
+      _announcedConnecting = true;
+    }
+    for (final request in pending) {
+      try {
+        await _reply(request, HttpStatus.ok, _phoneStatePage());
+        if (isTerminal) {
+          _noteFinalDelivered();
+        }
+      } catch (_) {}
+    }
+  }
+
+  Future<void> _servePhone(HttpRequest request) async {
+    if (isTerminal) {
+      await _reply(request, HttpStatus.ok, _phoneStatePage());
+      _noteFinalDelivered();
+      return;
+    }
+    if (_phase == TvLanPhase.connecting && !_announcedConnecting) {
+      _announcedConnecting = true;
+      await _reply(request, HttpStatus.ok, _phoneStatePage());
+      return;
+    }
+    if (_phase == TvLanPhase.pending || _phase == TvLanPhase.connecting) {
+      _watchers.add(request);
+      return;
+    }
+    await _reply(request, HttpStatus.notFound, _phoneMessage('无法使用此连接。'));
+  }
+
   Future<void> _shutdown() {
     _timer?.cancel();
     final closing = _closing;
@@ -285,6 +378,7 @@ class TvLanAssist extends ChangeNotifier {
     }
     final server = _server;
     _server = null;
+    _watchers.clear();
     if (server == null) {
       return _closing = Future<void>.value();
     }
@@ -323,17 +417,26 @@ class TvLanAssist extends ChangeNotifier {
       await _reply(request, HttpStatus.notFound, _phoneMessage('无法使用此连接。'));
       return;
     }
+    final path = request.uri.path.isEmpty ? '/' : request.uri.path;
+    if (request.method == 'GET' && (path == '/' || path == '/status')) {
+      if (_phase == TvLanPhase.waiting && path == '/') {
+        await _reply(
+          request,
+          HttpStatus.ok,
+          _phoneForm(
+            fingerprint: offer.fingerprint,
+            pairingId: offer.pairingId,
+          ),
+        );
+        return;
+      }
+      if (_phase != TvLanPhase.waiting && _phase != TvLanPhase.idle) {
+        await _servePhone(request);
+        return;
+      }
+    }
     if (isTerminal) {
       await _reply(request, HttpStatus.gone, _phoneMessage('无法使用此连接。'));
-      return;
-    }
-    final path = request.uri.path.isEmpty ? '/' : request.uri.path;
-    if (request.method == 'GET' && path == '/') {
-      await _reply(
-        request,
-        HttpStatus.ok,
-        _phoneForm(fingerprint: offer.fingerprint, pairingId: offer.pairingId),
-      );
       return;
     }
     if (request.method == 'POST' && path == '/submit') {
@@ -383,7 +486,7 @@ class TvLanAssist extends ChangeNotifier {
     _password = password;
     _phase = TvLanPhase.pending;
     _notify();
-    await _reply(request, HttpStatus.ok, _phoneMessage('已提交，请在电视上确认。'));
+    await _reply(request, HttpStatus.ok, _phoneStatePage());
   }
 
   Future<String> _readBody(HttpRequest request) async {
@@ -396,6 +499,16 @@ class TvLanAssist extends ChangeNotifier {
     }
     return utf8.decode(builder.takeBytes());
   }
+
+  String _statusTarget() {
+    final offer = _offer;
+    if (offer == null) {
+      return '/status';
+    }
+    return '/status?id=${offer.pairingId}&fp=${offer.fingerprint}';
+  }
+
+  String _phoneStatePage() => _phoneStateFor(_phase, _statusTarget());
 
   Future<void> _reply(HttpRequest request, int status, String body) async {
     request.response.statusCode = status;
@@ -414,6 +527,7 @@ enum TvLanPhase {
   idle,
   waiting,
   pending,
+  connecting,
   confirmed,
   rejected,
   expired,
@@ -596,6 +710,49 @@ code{word-break:break-all}
 
 String _phoneMessage(String text) {
   return '<!DOCTYPE html><html lang="zh-CN"><meta charset="utf-8"><title>灯川连接</title><p>${_html(text)}</p></html>';
+}
+
+String _phoneStateFor(TvLanPhase phase, String refresh) {
+  switch (phase) {
+    case TvLanPhase.pending:
+      return _phoneState('待确认', '请在电视上确认这次连接。', refresh: refresh);
+    case TvLanPhase.connecting:
+      return _phoneState('连接中', '正在连接服务器。', refresh: refresh);
+    case TvLanPhase.confirmed:
+      return _phoneState('成功', '电视已连接。');
+    case TvLanPhase.rejected:
+    case TvLanPhase.expired:
+    case TvLanPhase.cancelled:
+    case TvLanPhase.failed:
+      return _phoneState('失败', '连接未完成。');
+    case TvLanPhase.idle:
+    case TvLanPhase.waiting:
+      return _phoneMessage('无法使用此连接。');
+  }
+}
+
+String _phoneState(String heading, String detail, {String? refresh}) {
+  final next = refresh == null
+      ? ''
+      : '<meta http-equiv="refresh" content="0;url=${_html(refresh)}">';
+  return '''
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+$next
+<title>灯川连接</title>
+<style>
+body{font-family:sans-serif;margin:24px;background:#111;color:#eee}
+</style>
+</head>
+<body>
+<h1>${_html(heading)}</h1>
+<p>${_html(detail)}</p>
+</body>
+</html>
+''';
 }
 
 String _html(String value) {

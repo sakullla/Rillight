@@ -1392,4 +1392,9 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get tvLanAddress => '局域网地址';
+
+  @override
+  String tvLanValidUntil(String time) {
+    return '本次配对有效至 $time';
+  }
 }

@@ -181,16 +181,19 @@ class AuthController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> connect({
+  Future<bool> connect({
     required String address,
     required String username,
     required String password,
     String? userAgent,
     String? lineId,
+    bool preserveSessionOnFailure = false,
   }) async {
     if (_busy) {
-      return;
+      return false;
     }
+    // 只有电视辅助确认会要求失败后留在原会话。手机和桌面的失败结果保持原样。
+    final previous = preserveSessionOnFailure ? _session : null;
     _busy = true;
     _failure = null;
     notifyListeners();
@@ -224,24 +227,40 @@ class AuthController extends ChangeNotifier {
       _activate(server, stored);
       _prefill = null;
       connectDraft = null;
+      return true;
     } on EmbyException catch (error) {
       _failure = error;
-      _session = null;
-      client.clearSession();
-      _resetLibraryCounts();
+      _dropOrRestore(previous);
+      return false;
     } catch (error) {
       _failure = EmbyException(
         EmbyFailureKind.unknown,
         detail: error.toString(),
         cause: error,
       );
-      _session = null;
-      client.clearSession();
-      _resetLibraryCounts();
+      _dropOrRestore(previous);
+      return false;
     } finally {
       _busy = false;
       notifyListeners();
     }
+  }
+
+  /// 登录失败时清掉尝试。若调用方留下了原会话，则重新挂上原来的令牌。
+  void _dropOrRestore(AuthSession? previous) {
+    if (previous == null) {
+      _session = null;
+      client.clearSession();
+      _resetLibraryCounts();
+      return;
+    }
+    _session = previous;
+    client.attachSession(
+      baseUrl: Uri.parse(previous.server.baseUrl),
+      accessToken: previous.accessToken,
+      userId: previous.userId,
+      userAgent: previous.server.normalizedUserAgent,
+    );
   }
 
   Future<void> logout() async {

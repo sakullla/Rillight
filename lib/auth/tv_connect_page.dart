@@ -130,8 +130,8 @@ class _TvConnectPageState extends State<TvConnectPage> {
       return;
     }
     final auth = AuthScope.of(context);
-    await lan.confirm(auth);
-    if (mounted && auth.isLoggedIn && widget.addingAnother) {
+    final accepted = await lan.confirm(auth);
+    if (mounted && accepted && widget.addingAnother) {
       context.go('/');
     }
   }
@@ -247,8 +247,14 @@ class _TvConnectPageState extends State<TvConnectPage> {
       return [Text(l10n.tvLanWaiting)];
     }
     if (phase == TvLanPhase.waiting && offer != null) {
+      final expires = lan!.expiresAt;
       return [
         Text(l10n.tvLanWaiting),
+        if (expires != null)
+          Text(
+            l10n.tvLanValidUntil(_lanClock(expires)),
+            key: const Key('tv-lan-expires'),
+          ),
         Text(l10n.tvLanAddress),
         SelectableText(offer.manualUrl, key: const Key('tv-lan-address')),
         TvLanQrImage(key: const Key('tv-lan-qr'), modules: offer.qrModules),
@@ -289,4 +295,10 @@ class _TvConnectPageState extends State<TvConnectPage> {
       ),
     ];
   }
+}
+
+String _lanClock(DateTime time) {
+  final local = time.toLocal();
+  String two(int value) => value.toString().padLeft(2, '0');
+  return '${two(local.hour)}:${two(local.minute)}:${two(local.second)}';
 }

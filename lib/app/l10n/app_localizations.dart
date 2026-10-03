@@ -2733,6 +2733,12 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'局域网地址'**
   String get tvLanAddress;
+
+  /// No description provided for @tvLanValidUntil.
+  ///
+  /// In zh, this message translates to:
+  /// **'本次配对有效至 {time}'**
+  String tvLanValidUntil(String time);
 }
 
 class _AppLocalizationsDelegate

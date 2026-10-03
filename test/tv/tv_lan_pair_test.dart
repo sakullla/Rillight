@@ -34,10 +34,11 @@ void main() {
     await current?.close();
   });
 
-  TvLanAssist start({Duration? lifetime}) {
+  TvLanAssist start({Duration? lifetime, Duration? phoneGrace}) {
     return TvLanAssist(
       advertiseHost: '127.0.0.1',
       lifetime: lifetime ?? const Duration(minutes: 3),
+      phoneGrace: phoneGrace ?? Duration.zero,
     );
   }
 
@@ -104,7 +105,9 @@ void main() {
         body: _form(server.baseUrl.toString(), 'alice', 'correct-horse'),
       );
       expect(posted!.status, 200);
+      expect(posted.body, contains('待确认'));
       expect(posted.body.contains('correct-horse'), isFalse);
+      expect(posted.body.contains('<script'), isFalse);
       expect(assist!.phase, TvLanPhase.pending);
       expect(assist!.pending!.server, server.baseUrl.toString());
       expect(assist!.pending!.account, 'alice');
@@ -227,6 +230,7 @@ void main() {
       final expired = start(lifetime: const Duration(milliseconds: 200));
       assist = expired;
       await expired.open();
+      expect(expired.expiresAt, isNotNull);
       final expiredOffer = expired.offer!;
       await Future<void>.delayed(const Duration(milliseconds: 400));
       expect(expired.phase, TvLanPhase.expired);
@@ -260,7 +264,10 @@ void main() {
           auth: auth,
           child: TvConnectPage(
             createLanAssist: () {
-              opened = TvLanAssist(advertiseHost: '127.0.0.1');
+              opened = TvLanAssist(
+                advertiseHost: '127.0.0.1',
+                phoneGrace: Duration.zero,
+              );
               return opened!;
             },
           ),
@@ -282,6 +289,18 @@ void main() {
       assist = opened;
       expect(assist!.phase, TvLanPhase.waiting);
       expect(find.text(_password), findsNothing);
+      final deadline = assist!.expiresAt;
+      expect(deadline, isNotNull);
+      final shown = tester
+          .widget<Text>(find.byKey(const Key('tv-lan-expires')))
+          .data!;
+      final local = deadline!.toLocal();
+      String two(int value) => value.toString().padLeft(2, '0');
+      expect(
+        shown,
+        '本次配对有效至 ${two(local.hour)}:${two(local.minute)}:${two(local.second)}',
+      );
+      expect(shown.contains(_password), isFalse);
 
       final posted = await tester.runAsync(
         () => _exchange(
@@ -327,7 +346,10 @@ void main() {
         auth: auth,
         child: TvConnectPage(
           createLanAssist: () {
-            opened = TvLanAssist(advertiseHost: '127.0.0.1');
+            opened = TvLanAssist(
+              advertiseHost: '127.0.0.1',
+              phoneGrace: Duration.zero,
+            );
             return opened!;
           },
         ),
@@ -350,6 +372,224 @@ void main() {
     expect(find.byKey(const Key('tv-connect-submit')), findsOneWidget);
     expect(find.text('辅助连接未完成'), findsWidgets);
   });
+
+  test(
+    'a failed confirm keeps the previous session and the phone sees failure',
+    () async {
+      final server = FakeEmbyServer();
+      final auth = authFor(server);
+      addTearDown(auth.dispose);
+      await auth.connect(
+        address: server.baseUrl.toString(),
+        username: 'alice',
+        password: 'correct-horse',
+      );
+      final token = auth.session!.accessToken;
+      expect(auth.client.accessToken, token);
+
+      assist = start(phoneGrace: const Duration(seconds: 3));
+      await assist!.open();
+      final offer = assist!.offer!;
+      final posted = await _exchange(
+        offer,
+        method: 'POST',
+        path: '/submit',
+        body: _form('http://other.test:8096', 'mallory', _password),
+      );
+      expect(posted!.status, 200);
+      _expectPhone(posted.body, '待确认', secret: _password, token: token);
+      expect(_statusQuery(posted.body), {'id', 'fp'});
+
+      final connectingFuture = _exchange(offer, path: '/status');
+      await _waitForPhone(assist!);
+      final confirmFuture = assist!.confirm(auth);
+      final connecting = await connectingFuture;
+      _expectPhone(connecting!.body, '连接中', secret: _password, token: token);
+
+      final failedFuture = _exchange(offer, path: '/status');
+      final failed = await failedFuture;
+      final accepted = await confirmFuture;
+      _expectPhone(failed!.body, '失败', secret: _password, token: token);
+      expect(failed.body.contains('成功'), isFalse);
+      expect(accepted, isFalse);
+      expect(assist!.phase, TvLanPhase.failed);
+      expect(auth.isLoggedIn, isTrue);
+      expect(auth.session!.accessToken, token);
+      expect(auth.session!.username, 'alice');
+      expect(auth.client.accessToken, token);
+      expect(auth.client.baseUrl, server.baseUrl);
+      final closed = await _exchange(offer, path: '/status');
+      expect(closed == null || closed.status != 200, isTrue);
+    },
+  );
+
+  test('a failed confirm with no session stays signed out', () async {
+    final server = FakeEmbyServer();
+    final auth = authFor(server);
+    addTearDown(auth.dispose);
+    assist = start(phoneGrace: const Duration(seconds: 3));
+    await assist!.open();
+    final offer = assist!.offer!;
+    final posted = await _exchange(
+      offer,
+      method: 'POST',
+      path: '/submit',
+      body: _form(server.baseUrl.toString(), 'alice', _password),
+    );
+    _expectPhone(
+      posted!.body,
+      '待确认',
+      secret: _password,
+      token: 'session-token-must-not-appear',
+    );
+
+    final connectingFuture = _exchange(offer, path: '/status');
+    await _waitForPhone(assist!);
+    final confirmFuture = assist!.confirm(auth);
+    final connecting = await connectingFuture;
+    _expectPhone(
+      connecting!.body,
+      '连接中',
+      secret: _password,
+      token: 'session-token-must-not-appear',
+    );
+    final failed = await _exchange(offer, path: '/status');
+    final accepted = await confirmFuture;
+    _expectPhone(
+      failed!.body,
+      '失败',
+      secret: _password,
+      token: 'session-token-must-not-appear',
+    );
+    expect(accepted, isFalse);
+    expect(auth.isLoggedIn, isFalse);
+    expect(auth.session, isNull);
+    expect(auth.client.accessToken, isNull);
+    expect(auth.client.baseUrl, isNull);
+  });
+
+  test('a successful confirm still switches to the new session', () async {
+    final home = FakeEmbyServer();
+    final other = FakeEmbyServer(
+      serverId: 'server-id-2',
+      serverName: '第二台',
+      baseUrl: Uri.parse('http://other.test:8096'),
+      users: const [
+        FakeEmbyUser(
+          username: 'bob',
+          password: 'correct-horse',
+          userId: 'user-bob',
+        ),
+      ],
+    );
+    final auth = AuthController.memory(
+      client: EmbyClient(
+        device: _device,
+        dio: dioForFakeEmby(FakeEmbyAdapter([home, other])),
+      ),
+    );
+    addTearDown(auth.dispose);
+    await auth.connect(
+      address: home.baseUrl.toString(),
+      username: 'alice',
+      password: 'correct-horse',
+    );
+    final token = auth.session!.accessToken;
+
+    assist = start(phoneGrace: const Duration(seconds: 3));
+    await assist!.open();
+    final offer = assist!.offer!;
+    final posted = await _exchange(
+      offer,
+      method: 'POST',
+      path: '/submit',
+      body: _form(other.baseUrl.toString(), 'bob', 'correct-horse'),
+    );
+    _expectPhone(posted!.body, '待确认', secret: 'correct-horse', token: token);
+
+    final connectingFuture = _exchange(offer, path: '/status');
+    await _waitForPhone(assist!);
+    final confirmFuture = assist!.confirm(auth);
+    final connecting = await connectingFuture;
+    _expectPhone(
+      connecting!.body,
+      '连接中',
+      secret: 'correct-horse',
+      token: token,
+    );
+    final success = await _exchange(offer, path: '/status');
+    final accepted = await confirmFuture;
+    _expectPhone(success!.body, '成功', secret: 'correct-horse', token: token);
+    expect(success.body.contains('连接中'), isFalse);
+    expect(success.body.contains('待确认'), isFalse);
+    expect(accepted, isTrue);
+    expect(auth.session!.username, 'bob');
+    expect(auth.session!.accessToken, isNot(token));
+    expect(success.body.contains(auth.session!.accessToken), isFalse);
+    expect(auth.client.accessToken, auth.session!.accessToken);
+    expect(auth.client.baseUrl, other.baseUrl);
+  });
+
+  test('reject and expiry tell the phone before the entry closes', () async {
+    final server = FakeEmbyServer();
+    final auth = authFor(server);
+    addTearDown(auth.dispose);
+    await auth.connect(
+      address: server.baseUrl.toString(),
+      username: 'alice',
+      password: 'correct-horse',
+    );
+    final token = auth.session!.accessToken;
+    assist = start(phoneGrace: const Duration(seconds: 3));
+    await assist!.open();
+    final offer = assist!.offer!;
+    await _exchange(
+      offer,
+      method: 'POST',
+      path: '/submit',
+      body: _form('http://other.test:8096', 'mallory', _password),
+    );
+    final rejected = _exchange(offer, path: '/status');
+    await _waitForPhone(assist!);
+    await assist!.reject();
+    final page = await rejected;
+    _expectPhone(page!.body, '失败', secret: _password, token: token);
+    expect(auth.session!.accessToken, token);
+    expect(assist!.phase, TvLanPhase.rejected);
+    final again = await _exchange(offer, path: '/status');
+    expect(again == null || again.status != 200, isTrue);
+
+    final expired = start(
+      lifetime: const Duration(seconds: 5),
+      phoneGrace: const Duration(seconds: 3),
+    );
+    assist = expired;
+    await expired.open();
+    final expiredOffer = expired.offer!;
+    expect(expired.expiresAt, isNotNull);
+    expect(expired.expiresAt!.isAfter(DateTime.now()), isTrue);
+    await _exchange(
+      expiredOffer,
+      method: 'POST',
+      path: '/submit',
+      body: _form('http://other.test:8096', 'mallory', _password),
+    );
+    final failure = _exchange(expiredOffer, path: '/status');
+    await _waitForPhone(expired);
+    final remaining = expired.expiresAt!.difference(DateTime.now());
+    await Future<void>.delayed(remaining + const Duration(milliseconds: 400));
+    expect(expired.phase, TvLanPhase.expired);
+    final expiredPage = await failure;
+    _expectPhone(expiredPage!.body, '失败', secret: _password, token: token);
+    expect(auth.session!.accessToken, token);
+    final late = await _exchange(
+      expiredOffer,
+      method: 'POST',
+      path: '/submit',
+      body: _form(server.baseUrl.toString(), 'alice', _password),
+    );
+    expect(late == null || late.status != 200, isTrue);
+  });
 }
 
 Future<void> _waitForLan(
@@ -367,6 +607,37 @@ Future<void> _waitForLan(
       () => Future<void>.delayed(const Duration(milliseconds: 250)),
     );
   }
+}
+
+Future<void> _waitForPhone(TvLanAssist lan) async {
+  final deadline = DateTime.now().add(const Duration(seconds: 3));
+  while (lan.phoneWaiters == 0) {
+    if (DateTime.now().isAfter(deadline)) {
+      fail('phone status request was not held');
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+  }
+}
+
+void _expectPhone(
+  String body,
+  String heading, {
+  required String secret,
+  required String token,
+}) {
+  expect(body, contains('<h1>$heading</h1>'));
+  expect(body.contains(secret), isFalse);
+  expect(body.contains(token), isFalse);
+  expect(body.contains('<script'), isFalse);
+  expect(body.contains('cdn'), isFalse);
+}
+
+Set<String> _statusQuery(String body) {
+  final match = RegExp('url=([^"]+)').firstMatch(body);
+  expect(match, isNotNull);
+  final raw = match!.group(1)!.replaceAll('&amp;', '&');
+  final uri = Uri.parse('https://127.0.0.1$raw');
+  return uri.queryParameters.keys.toSet();
 }
 
 String _form(String address, String username, String password) {
