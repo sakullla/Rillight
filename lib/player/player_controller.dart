@@ -317,6 +317,10 @@ class PlayerController extends ChangeNotifier {
   bool get controlsPinned => _controlsPinOwners.isNotEmpty;
   bool _nextUpOffered = false;
 
+  /// 用户取消过下一集后，这个控制器不再开始自动倒计时。
+  /// 新的 [PlayerController] 才重新允许自动连播。
+  bool _nextAutoplayCancelled = false;
+
   /// 这一集没有下一集时才显示跳过片尾。有下一集时下一集按钮代替它。
   bool _outroSkipAllowed = false;
   bool _nextUpLoading = false;
@@ -1537,6 +1541,11 @@ class PlayerController extends ChangeNotifier {
   }
 
   void cancelNextEpisode() {
+    _nextAutoplayCancelled = true;
+    _clearNextEpisodeOffer();
+  }
+
+  void _clearNextEpisodeOffer() {
     _nextTimer?.cancel();
     _nextTimer = null;
     nextEpisode = null;
@@ -3592,7 +3601,8 @@ class PlayerController extends ChangeNotifier {
       return;
     }
     playbackEnded = false;
-    final autoplay = user?.enableNextEpisodeAutoPlay ?? true;
+    final autoplay =
+        !_nextAutoplayCancelled && (user?.enableNextEpisodeAutoPlay ?? true);
     if (!autoplay) {
       nextEpisode = NextEpisodeOffer(item: next);
       _noteNextOffer();
@@ -3722,7 +3732,9 @@ class PlayerController extends ChangeNotifier {
       skipIntroEnabled = enabled;
     } else {
       skipOutroEnabled = enabled;
-      if (!enabled && nextEpisode?.autoplay == false) cancelNextEpisode();
+      if (!enabled && nextEpisode?.autoplay == false) {
+        _clearNextEpisodeOffer();
+      }
       // Re-enabling can offer the next episode again at the closing marker.
       if (enabled) _nextUpOffered = false;
     }

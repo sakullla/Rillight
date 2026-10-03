@@ -31,6 +31,7 @@ void main() {
     FakeVideoBackend video, {
     bool reducedMotion = false,
     Size size = const Size(960, 540),
+    String itemId = 'movie-inception',
   }) async {
     final server = FakeEmbyServer();
     final auth = AuthController.memory(
@@ -85,10 +86,8 @@ void main() {
               builder: (context) => TextButton(
                 onPressed: () => Navigator.of(context).push(
                   MaterialPageRoute<void>(
-                    builder: (_) => const TvPlayerPage(
-                      itemId: 'movie-inception',
-                      autoResume: false,
-                    ),
+                    builder: (_) =>
+                        TvPlayerPage(itemId: itemId, autoResume: false),
                   ),
                 ),
                 child: const Text('open'),
@@ -380,6 +379,69 @@ void main() {
       expect(c.error, isNull);
       expect(c.disconnected, isFalse);
       expect(tester.element(find.byKey(const Key('native-view'))), same(view));
+      expect(tester.takeException(), isNull);
+      await finish(tester);
+    },
+    tags: ['integration'],
+  );
+
+  testWidgets(
+    'cancelling next episode blocks another auto countdown at natural end',
+    (tester) async {
+      final backend = FakeVideoBackend();
+      final current = await start(
+        tester,
+        backend,
+        itemId: 'episode-friends-s1e1',
+      );
+      for (var i = 0; i < 40 && current.loading; i++) {
+        await tester.pump(const Duration(milliseconds: 50));
+      }
+      expect(current.loading, isFalse);
+      expect(current.itemId, 'episode-friends-s1e1');
+      backend.emitEvent(
+        VideoEventKind.position,
+        backend.duration - const Duration(minutes: 1),
+      );
+      for (var i = 0; i < 40 && current.nextEpisode == null; i++) {
+        await tester.pump(const Duration(milliseconds: 50));
+      }
+      expect(current.nextEpisode?.item.id, 'episode-friends-s1e2');
+      expect(current.nextEpisode?.remaining, isNull);
+      await tester.ensureVisible(find.byKey(PlayerKeys.nextEpisodeCancel));
+      await tester.tap(find.byKey(PlayerKeys.nextEpisodeCancel));
+      await tester.pump();
+      expect(current.nextEpisode, isNull);
+      expect(current.itemId, 'episode-friends-s1e1');
+
+      final opens = backend.openCount;
+      backend.completePlayback();
+      for (var i = 0; i < 40 && current.nextEpisode == null; i++) {
+        await tester.pump(const Duration(milliseconds: 50));
+      }
+      expect(current.itemId, 'episode-friends-s1e1');
+      expect(current.nextEpisode?.item.id, 'episode-friends-s1e2');
+      expect(current.nextEpisode?.remaining, isNull);
+      expect(find.textContaining('秒后播放下一集'), findsNothing);
+      await tester.pump(
+        current.nextEpisodeCountdown + const Duration(seconds: 2),
+      );
+      expect(current.itemId, 'episode-friends-s1e1');
+      expect(current.nextEpisode?.remaining, isNull);
+      expect(backend.openCount, opens);
+      expect(find.textContaining('秒后播放下一集'), findsNothing);
+
+      await tester.ensureVisible(find.byKey(PlayerKeys.nextEpisodePlay));
+      await tester.tap(find.byKey(PlayerKeys.nextEpisodePlay));
+      for (
+        var i = 0;
+        i < 40 && (current.itemId != 'episode-friends-s1e2' || current.loading);
+        i++
+      ) {
+        await tester.pump(const Duration(milliseconds: 50));
+      }
+      expect(current.itemId, 'episode-friends-s1e2');
+      expect(backend.openCount, greaterThan(opens));
       expect(tester.takeException(), isNull);
       await finish(tester);
     },
