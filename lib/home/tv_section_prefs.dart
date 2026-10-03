@@ -188,18 +188,42 @@ class TvSectionController extends ChangeNotifier {
     await _save(TvSectionPrefs(order: _prefs.order, hidden: hidden));
   }
 
-  /// 在完整顺序里与相邻栏目对调，隐藏的栏目也占一个位置。
+  /// 只在当前已知栏目里移动。不在本次片库中的已保存 id 留在原来的相对位置。
   Future<void> move(String id, int delta, List<EmbyItem> libraries) async {
-    final order = orderedIds(libraries);
-    final index = order.indexOf(id);
+    final known = orderedIds(libraries);
+    final index = known.indexOf(id);
     final next = index + delta;
-    if (index < 0 || next < 0 || next >= order.length) {
+    if (index < 0 || next < 0 || next >= known.length) {
       return;
     }
-    final swapped = List<String>.of(order);
+    final swapped = List<String>.of(known);
     final moved = swapped.removeAt(index);
     swapped.insert(next, moved);
-    await _save(TvSectionPrefs(order: swapped, hidden: _prefs.hidden));
+    await _save(
+      TvSectionPrefs(order: _mergeMovedOrder(swapped), hidden: _prefs.hidden),
+    );
+  }
+
+  /// 用调整后的已知顺序替换已保存顺序里的已知栏目，其余 id 原地保留。
+  List<String> _mergeMovedOrder(List<String> swappedKnown) {
+    final known = swappedKnown.toSet();
+    final merged = <String>[];
+    var cursor = 0;
+    for (final id in _prefs.order) {
+      if (!known.contains(id)) {
+        merged.add(id);
+        continue;
+      }
+      if (cursor >= swappedKnown.length) {
+        continue;
+      }
+      merged.add(swappedKnown[cursor]);
+      cursor++;
+    }
+    if (cursor < swappedKnown.length) {
+      merged.addAll(swappedKnown.sublist(cursor));
+    }
+    return merged;
   }
 
   Future<void> _save(TvSectionPrefs prefs) async {

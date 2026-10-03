@@ -414,6 +414,109 @@ void main() {
   );
 
   testWidgets(
+    'moving sections keeps saved library ids when libraries are missing',
+    (tester) async {
+      await tester.runAsync(() async {
+        final root = Directory.systemTemp.createTempSync(
+          'rillight_tv_sections_missing_',
+        );
+        addTearDown(() {
+          if (root.existsSync()) {
+            root.deleteSync(recursive: true);
+          }
+        });
+        final phoneFile = File('${root.path}/phone_home_sections.json');
+        const phoneJson =
+            '{"server-a":{"order":["banner","resume"],"hidden":["nextUp"]}}';
+        await phoneFile.writeAsString(phoneJson);
+        final tvFile = File('${root.path}/tv_home_sections.json');
+        final movies = PhoneHomeSectionId.libraryLatest('view-movies');
+        final shows = PhoneHomeSectionId.libraryLatest('view-tv');
+        final savedOrder = [
+          PhoneHomeSectionId.banner,
+          movies,
+          PhoneHomeSectionId.resume,
+          shows,
+          PhoneHomeSectionId.nextUp,
+          PhoneHomeSectionId.libraries,
+        ];
+        await tvFile.writeAsString(
+          const JsonEncoder.withIndent('  ').convert({
+            'server-a': {'order': savedOrder, 'hidden': <String>[]},
+            'server-b': {
+              'order': [
+                PhoneHomeSectionId.libraries,
+                PhoneHomeSectionId.banner,
+              ],
+              'hidden': [PhoneHomeSectionId.nextUp],
+            },
+          }),
+        );
+        final editing = TvSectionController(store: FileTvSectionStore(tvFile));
+        addTearDown(editing.dispose);
+        await editing.load('server-a');
+        await editing.move(PhoneHomeSectionId.resume, 1, const <EmbyItem>[]);
+        await editing.setVisible(PhoneHomeSectionId.banner, false);
+
+        final stored = jsonDecode(tvFile.readAsStringSync());
+        expect(stored, isA<Map<String, dynamic>>());
+        final servers = stored as Map<String, dynamic>;
+        expect(servers['server-a'], {
+          'order': [
+            PhoneHomeSectionId.banner,
+            movies,
+            PhoneHomeSectionId.nextUp,
+            shows,
+            PhoneHomeSectionId.resume,
+            PhoneHomeSectionId.libraries,
+          ],
+          'hidden': [PhoneHomeSectionId.banner],
+        });
+        expect(servers['server-b'], {
+          'order': [PhoneHomeSectionId.libraries, PhoneHomeSectionId.banner],
+          'hidden': [PhoneHomeSectionId.nextUp],
+        });
+        expect(phoneFile.readAsStringSync(), phoneJson);
+
+        final restarted = TvSectionController(
+          store: FileTvSectionStore(tvFile),
+        );
+        addTearDown(restarted.dispose);
+        await restarted.load('server-a');
+        const libraries = [
+          EmbyItem(id: 'view-movies', name: '电影', type: 'CollectionFolder'),
+          EmbyItem(id: 'view-tv', name: '剧集', type: 'CollectionFolder'),
+        ];
+        expect(restarted.orderedIds(libraries), [
+          PhoneHomeSectionId.banner,
+          movies,
+          PhoneHomeSectionId.nextUp,
+          shows,
+          PhoneHomeSectionId.resume,
+          PhoneHomeSectionId.libraries,
+        ]);
+        expect(restarted.isHidden(PhoneHomeSectionId.banner), isTrue);
+        await restarted.load('server-b');
+        expect(restarted.prefs.order, [
+          PhoneHomeSectionId.libraries,
+          PhoneHomeSectionId.banner,
+        ]);
+        expect(restarted.isHidden(PhoneHomeSectionId.nextUp), isTrue);
+        expect(restarted.prefs.order, isNot(contains(movies)));
+
+        final phone = PhoneHomeSectionController(
+          store: FilePhoneHomeSectionStore(phoneFile),
+        );
+        addTearDown(phone.dispose);
+        await phone.load('server-a');
+        expect(phone.prefs.order, ['banner', 'resume']);
+        expect(phone.isHidden(PhoneHomeSectionId.nextUp), isTrue);
+        expect(phoneFile.readAsStringSync(), phoneJson);
+      });
+    },
+  );
+
+  testWidgets(
     'remote moves sections up and down without changing the phone home',
     (tester) async {
       final server = FakeEmbyServer();
