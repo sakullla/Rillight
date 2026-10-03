@@ -1277,5 +1277,33 @@
     "platforms": [
       "phone"
     ]
+  },
+  {
+    "id": "tv-home-section-move",
+    "feature": "home",
+    "platforms": [
+      "tv"
+    ]
+  },
+  {
+    "id": "tv-appearance-signed-in",
+    "feature": "settings",
+    "platforms": [
+      "tv"
+    ]
+  },
+  {
+    "id": "tv-lan-confirm",
+    "feature": "login",
+    "platforms": [
+      "tv"
+    ]
+  },
+  {
+    "id": "tv-lan-phone",
+    "feature": "login",
+    "platforms": [
+      "tv"
+    ]
   }
 ]

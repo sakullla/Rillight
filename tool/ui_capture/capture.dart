@@ -11,13 +11,17 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
 import 'package:rillight/app/appearance_style.dart';
 import 'package:rillight/app/presentation_environment.dart';
+import 'package:rillight/app/tv_appearance_picker.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/server_list_store.dart';
+import 'package:rillight/auth/tv_connect_page.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/catalog_scope.dart';
+import 'package:rillight/home/phone_home_sections.dart';
+import 'package:rillight/home/tv_section_prefs.dart';
 import 'package:rillight/player/mobile_player_page.dart';
 import 'package:rillight/home/phone_hero.dart';
 import 'package:rillight/player/player_bindings.dart';
@@ -207,6 +211,7 @@ void main() {
             await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
             await capture.advance(300);
             await capture.save('home-remote-focus');
+            await capture.captureTvSectionMove();
           } else {
             await tester.drag(
               find.byType(Scrollable).first,
@@ -502,7 +507,11 @@ void main() {
           }
         }
         tester.view.physicalSize = config.$3;
-        if (capture.wants('login')) await capture.loginPages(app, auth);
+        if (config.$1 == 'tv') await capture.captureTvAppearance(app);
+        if (capture.wants('login')) {
+          await capture.loginPages(app, auth);
+          if (config.$1 == 'tv') await capture.captureTvLan(auth);
+        }
         await tester.pumpWidget(const SizedBox.shrink());
         await capture.advance(500);
         app.router.dispose();
@@ -673,7 +682,8 @@ class CaptureSession {
         'renderedTheme':
             state.startsWith('player') ||
                 state.startsWith('danmaku') ||
-                state.startsWith('detail-gallery')
+                state.startsWith('detail-gallery') ||
+                state == 'tv-lan-phone'
             ? 'dark'
             : theme,
         'file': file,
@@ -684,5 +694,357 @@ class CaptureSession {
     });
     // ignore: avoid_print
     print('CAPTURE $file');
+  }
+
+  bool shouldCapture(String state) =>
+      selectedStates.isEmpty || selectedStates.contains(state);
+
+  /// 电视首页栏目编辑。上移、下移后恢复原顺序，避免写进后续状态。
+  Future<void> captureTvSectionMove() async {
+    if (!shouldCapture('tv-home-section-move')) return;
+    await tap(const ValueKey('tv-nav-0'));
+    final homeScroll = find.descendant(
+      of: find.byKey(const PageStorageKey('tv-home')),
+      matching: find.byWidgetPredicate(
+        (widget) =>
+            widget is Scrollable && widget.axisDirection == AxisDirection.down,
+      ),
+    );
+    expect(homeScroll, findsOneWidget);
+    final edit = find.byKey(const Key('tv-home-display'));
+    final position = tester.state<ScrollableState>(homeScroll).position;
+    for (var i = 0; i < 8 && edit.evaluate().isEmpty; i++) {
+      position.jumpTo(position.maxScrollExtent);
+      await tester.pump();
+    }
+    expect(edit, findsOneWidget);
+    await tester.tap(edit);
+    await advance(400);
+    expect(find.byKey(TvSectionEditor.editorKey), findsOneWidget);
+    final banner = TvSectionEditor.tileKey(PhoneHomeSectionId.banner);
+    final resume = TvSectionEditor.tileKey(PhoneHomeSectionId.resume);
+    var moved = false;
+    try {
+      await tap(TvSectionEditor.moveDownKey(PhoneHomeSectionId.banner));
+      moved = true;
+      expect(
+        tester.getTopLeft(find.byKey(resume)).dy,
+        lessThan(tester.getTopLeft(find.byKey(banner)).dy),
+      );
+      await save('tv-home-section-move');
+    } finally {
+      try {
+        if (moved &&
+            find
+                .byKey(TvSectionEditor.moveUpKey(PhoneHomeSectionId.banner))
+                .evaluate()
+                .isNotEmpty) {
+          await tap(TvSectionEditor.moveUpKey(PhoneHomeSectionId.banner));
+          expect(
+            tester.getTopLeft(find.byKey(banner)).dy,
+            lessThan(tester.getTopLeft(find.byKey(resume)).dy),
+          );
+        }
+      } finally {
+        if (find.byKey(TvSectionEditor.editorKey).evaluate().isNotEmpty) {
+          await tap(TvSectionEditor.closeKey);
+        }
+      }
+    }
+    expect(find.byKey(TvSectionEditor.editorKey), findsNothing);
+  }
+
+  /// 登录后的设置栏外观三态，与连接页共用同一控件。
+  Future<void> captureTvAppearance(RillightApp app) async {
+    if (!wants('settings') || !shouldCapture('tv-appearance-signed-in')) {
+      return;
+    }
+    app.router.go('/');
+    await advance(600);
+    await tap(const ValueKey('tv-nav-3'));
+    expect(find.byType(TvAppearancePicker), findsOneWidget);
+    for (final name in ['system', 'light', 'dark']) {
+      expect(find.byKey(Key('tv-appearance-$name')), findsOneWidget);
+    }
+    await save('tv-appearance-signed-in');
+  }
+
+  /// 手机辅助页来自电视本机 HTML；确认页只显示服务器和账号。
+  Future<void> captureTvLan(AuthController auth) async {
+    final phone = shouldCapture('tv-lan-phone');
+    final confirm = shouldCapture('tv-lan-confirm');
+    if (!phone && !confirm) return;
+    expect(auth.isLoggedIn, isFalse);
+    expect(auth.session, isNull);
+    expect(find.byType(TvConnectPage), findsOneWidget);
+    const secret = 'capture-lan-secret';
+    const server = 'http://192.0.2.10:8096';
+    const account = 'lan-capture';
+    await tap(const Key('tv-lan-assist'));
+    await _waitForKey(const Key('tv-lan-address'));
+    final manual = Uri.parse(
+      tester
+          .widget<SelectableText>(find.byKey(const Key('tv-lan-address')))
+          .data!,
+    );
+    final fingerprint = tester
+        .widget<SelectableText>(find.byKey(const Key('tv-lan-fingerprint')))
+        .data!;
+    expect(manual.queryParameters.keys.toSet(), {'id', 'fp'});
+    expect(manual.queryParameters['fp'], fingerprint);
+    expect(manual.toString().contains(secret), isFalse);
+    final html = await tester.runAsync(() => _lanRequest(manual));
+    expect(html, isNotNull);
+    expect(html!.contains(secret), isFalse);
+    final page = _lanPhonePage(html, fingerprint);
+    try {
+      if (phone) {
+        final context = tester.element(find.byType(TvConnectPage));
+        unawaited(
+          showGeneralDialog<void>(
+            context: context,
+            barrierDismissible: false,
+            barrierColor: const Color(0xFF111111),
+            transitionDuration: Duration.zero,
+            pageBuilder: (_, _, _) => _LanPhonePreview(page),
+          ),
+        );
+        try {
+          await advance(100);
+          expect(find.byKey(_LanPhonePreview.previewKey), findsOneWidget);
+          expect(find.text(secret), findsNothing);
+          await save('tv-lan-phone');
+        } finally {
+          final preview = find.byKey(_LanPhonePreview.previewKey);
+          if (preview.evaluate().isNotEmpty) {
+            Navigator.of(tester.element(preview)).pop();
+            await advance(100);
+          }
+        }
+      }
+      if (confirm) {
+        final posted = await tester.runAsync(
+          () => _lanRequest(
+            manual.replace(path: '/submit'),
+            body:
+                'address=${Uri.encodeQueryComponent(server)}'
+                '&username=${Uri.encodeQueryComponent(account)}'
+                '&password=${Uri.encodeQueryComponent(secret)}',
+          ),
+        );
+        expect(posted, isNotNull);
+        expect(posted!.contains(secret), isFalse);
+        await _waitForKey(const Key('tv-lan-server'));
+        expect(
+          tester.widget<Text>(find.byKey(const Key('tv-lan-server'))).data,
+          server,
+        );
+        expect(
+          tester.widget<Text>(find.byKey(const Key('tv-lan-account'))).data,
+          account,
+        );
+        final passwordLabel = find.descendant(
+          of: find.byKey(const Key('tv-connect-password')),
+          matching: find.byType(Text),
+        );
+        expect(passwordLabel, findsOneWidget);
+        final passwordText = tester.widget<Text>(passwordLabel).data ?? '';
+        expect(passwordText.contains('•'), isFalse);
+        expect(passwordText.contains(secret), isFalse);
+        expect(find.textContaining(secret), findsNothing);
+        await Scrollable.ensureVisible(
+          tester.element(find.byKey(const Key('tv-lan-server'))),
+          alignment: .2,
+        );
+        await advance(150);
+        await save('tv-lan-confirm');
+      }
+    } finally {
+      await _closeLan(manual);
+    }
+  }
+
+  Future<void> _waitForKey(Key key) async {
+    for (var i = 0; i < 40; i++) {
+      await tester.pump();
+      if (find.byKey(key).evaluate().isNotEmpty) return;
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 250)),
+      );
+    }
+    expect(find.byKey(key), findsOneWidget);
+  }
+
+  Future<void> _closeLan(Uri manual) async {
+    if (find.byKey(const Key('tv-lan-reject')).evaluate().isNotEmpty) {
+      await tap(const Key('tv-lan-reject'));
+      try {
+        await tester.runAsync(
+          () => _lanRequest(manual.replace(path: '/status')),
+        );
+      } on Object {
+        // 入口已经关闭时不再挡住后续清理。
+      }
+      await advance(2200);
+      return;
+    }
+    if (find.byKey(const Key('tv-lan-incomplete')).evaluate().isNotEmpty) {
+      await tap(const Key('tv-lan-incomplete'));
+    }
+  }
+}
+
+class _LanHttpOverrides extends HttpOverrides {
+  @override
+  HttpClient createHttpClient(SecurityContext? context) {
+    return super.createHttpClient(context);
+  }
+}
+
+Future<String> _lanRequest(Uri uri, {String? body}) {
+  return HttpOverrides.runWithHttpOverrides(
+    () => _lanRequestDirect(uri, body: body),
+    _LanHttpOverrides(),
+  );
+}
+
+Future<String> _lanRequestDirect(Uri uri, {String? body}) async {
+  final client = HttpClient();
+  try {
+    client.badCertificateCallback = (_, _, _) => true;
+    final request = await client
+        .openUrl(body == null ? 'GET' : 'POST', uri)
+        .timeout(const Duration(seconds: 5));
+    if (body != null) {
+      request.headers.contentType = ContentType(
+        'application',
+        'x-www-form-urlencoded',
+        charset: 'utf-8',
+      );
+      request.write(body);
+    }
+    final response = await request.close().timeout(const Duration(seconds: 5));
+    final text = await utf8.decoder.bind(response).join();
+    if (response.statusCode != 200) {
+      throw StateError('LAN assist HTTP ${response.statusCode}');
+    }
+    return text;
+  } finally {
+    client.close(force: true);
+  }
+}
+
+class _LanPhonePage {
+  const _LanPhonePage({
+    required this.title,
+    required this.intro,
+    required this.fingerprint,
+    required this.labels,
+    required this.submit,
+  });
+
+  final String title;
+  final String intro;
+  final String fingerprint;
+  final List<String> labels;
+  final String submit;
+}
+
+_LanPhonePage _lanPhonePage(String html, String fingerprint) {
+  expect(html.contains('<script'), isFalse);
+  String tag(String name) {
+    final match = RegExp(
+      '<$name\\b[^>]*>(.*?)</$name>',
+      dotAll: true,
+    ).firstMatch(html);
+    expect(match, isNotNull, reason: 'phone page missing <$name>');
+    return _lanText(match!.group(1)!);
+  }
+
+  final labels = <String>[];
+  for (final match in RegExp(
+    r'<label>([^<]*)<input\b([^>]*)>',
+    dotAll: true,
+  ).allMatches(html)) {
+    expect(match.group(2)!.contains('value='), isFalse);
+    labels.add(_lanText(match.group(1)!));
+  }
+  final page = _LanPhonePage(
+    title: tag('h1'),
+    intro: tag('p'),
+    fingerprint: tag('code'),
+    labels: labels,
+    submit: tag('button'),
+  );
+  expect(page.title, '灯川 Rillight');
+  expect(page.intro, '证书指纹');
+  expect(page.fingerprint, fingerprint);
+  expect(page.labels, ['服务器地址', '用户名', '密码']);
+  expect(page.submit, '提交到电视');
+  return page;
+}
+
+String _lanText(String raw) {
+  return raw
+      .replaceAll('&amp;', '&')
+      .replaceAll('&lt;', '<')
+      .replaceAll('&gt;', '>')
+      .replaceAll('&quot;', '"')
+      .trim();
+}
+
+/// 把电视回给手机的 HTML 可见内容画进捕获边界，不是产品页面。
+class _LanPhonePreview extends StatelessWidget {
+  const _LanPhonePreview(this.page);
+
+  static const previewKey = Key('tv-lan-phone-preview');
+
+  final _LanPhonePage page;
+
+  @override
+  Widget build(BuildContext context) {
+    final base = DefaultTextStyle.of(context).style;
+    const ink = Color(0xFFEEEEEE);
+    final text = base.copyWith(color: ink, fontSize: 16);
+    return Material(
+      key: previewKey,
+      color: const Color(0xFF111111),
+      child: ListView(
+        padding: const EdgeInsets.all(24),
+        children: [
+          Text(
+            page.title,
+            style: text.copyWith(fontSize: 32, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 16),
+          Text(page.intro, style: text),
+          const SizedBox(height: 8),
+          Text(page.fingerprint, style: text),
+          const SizedBox(height: 8),
+          for (final label in page.labels) ...[
+            Text(label, style: text),
+            const SizedBox(height: 8),
+            const ColoredBox(
+              color: Color(0xFFFFFFFF),
+              child: SizedBox(height: 48, width: double.infinity),
+            ),
+            const SizedBox(height: 16),
+          ],
+          ColoredBox(
+            color: const Color(0xFFE8E8E8),
+            child: SizedBox(
+              height: 48,
+              width: double.infinity,
+              child: Center(
+                child: Text(
+                  page.submit,
+                  style: text.copyWith(color: const Color(0xFF111111)),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
