@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/phone_mine_page.dart';
+import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/theme.dart';
+import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/auth/change_password_dialog.dart';
@@ -397,6 +400,143 @@ void main() {
     expect(find.byKey(ChangePasswordDialog.newPasswordField), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets(
+    'tv dialog focuses password inputs and activates cancel with the remote',
+    (tester) async {
+      final auth = await connected(tester);
+      await _pumpTvDialog(tester, auth);
+
+      expect(
+        find.descendant(
+          of: find.byType(ChangePasswordDialog),
+          matching: find.byType(TextField),
+        ),
+        findsNothing,
+      );
+      expect(
+        find.descendant(
+          of: find.byType(ChangePasswordDialog),
+          matching: find.byType(FilledButton),
+        ),
+        findsNothing,
+      );
+      expect(_focusedPasswordKey(), ChangePasswordDialog.currentPasswordField);
+      await _key(tester, LogicalKeyboardKey.arrowDown);
+      expect(_focusedPasswordKey(), ChangePasswordDialog.newPasswordField);
+      await _key(tester, LogicalKeyboardKey.arrowDown);
+      expect(_focusedPasswordKey(), ChangePasswordDialog.confirmField);
+      await _key(tester, LogicalKeyboardKey.arrowDown);
+      expect(_focusedPasswordKey(), ChangePasswordDialog.cancelKey);
+      expect(
+        tester
+            .widget<TvAction>(find.byKey(ChangePasswordDialog.cancelKey))
+            .onPressed,
+        isNotNull,
+      );
+
+      await _key(tester, LogicalKeyboardKey.select);
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(server.changePasswordRequests, isEmpty);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'tv dialog activates submit with the remote after the new passwords match',
+    (tester) async {
+      final auth = await connected(tester);
+      await _pumpTvDialog(tester, auth);
+
+      expect(_focusedPasswordKey(), ChangePasswordDialog.currentPasswordField);
+      await _key(tester, LogicalKeyboardKey.arrowDown);
+      expect(_focusedPasswordKey(), ChangePasswordDialog.newPasswordField);
+      await _editFocused(tester, 'new-horse');
+      expect(_focusedPasswordKey(), ChangePasswordDialog.newPasswordField);
+      await _key(tester, LogicalKeyboardKey.arrowDown);
+      expect(_focusedPasswordKey(), ChangePasswordDialog.confirmField);
+      await _editFocused(tester, 'new-horse');
+      await _key(tester, LogicalKeyboardKey.arrowDown);
+      expect(_focusedPasswordKey(), ChangePasswordDialog.cancelKey);
+      await _key(tester, LogicalKeyboardKey.arrowDown);
+      expect(_focusedPasswordKey(), ChangePasswordDialog.submitKey);
+      expect(
+        tester
+            .widget<TvAction>(find.byKey(ChangePasswordDialog.submitKey))
+            .onPressed,
+        isNotNull,
+      );
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.select);
+      await _pumpUntilGone(tester, find.byType(AlertDialog));
+
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(
+        server.changePasswordRequests.single.containsKey('CurrentPw'),
+        isFalse,
+      );
+      expect(
+        (await auth.credentials.read(server.serverId))?.password,
+        'new-horse',
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
+}
+
+Key? _focusedPasswordKey() {
+  final context = FocusManager.instance.primaryFocus?.context;
+  if (context == null) return null;
+  final input = context.findAncestorWidgetOfExactType<TvInput>();
+  if (input != null) return input.key;
+  return context.findAncestorWidgetOfExactType<TvAction>()?.key;
+}
+
+Future<void> _key(WidgetTester tester, LogicalKeyboardKey key) async {
+  await tester.sendKeyEvent(key);
+  await tester.pumpAndSettle();
+}
+
+Future<void> _editFocused(WidgetTester tester, String text) async {
+  await _key(tester, LogicalKeyboardKey.select);
+  expect(find.byKey(const Key('tv-input-editor')), findsOneWidget);
+  await tester.enterText(find.byKey(const Key('tv-input-editor')), text);
+  await tester.testTextInput.receiveAction(TextInputAction.done);
+  await tester.pumpAndSettle();
+}
+
+Future<void> _pumpTvDialog(WidgetTester tester, AuthController auth) async {
+  tester.view.physicalSize = const Size(1280, 720);
+  tester.view.devicePixelRatio = 1;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
+  await tester.pumpWidget(
+    PresentationScope(
+      environment: PresentationEnvironment.tv,
+      child: MaterialApp(
+        theme: AppTheme.dark(),
+        locale: const Locale('zh'),
+        supportedLocales: AppLocalizations.supportedLocales,
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => Center(
+              child: FilledButton(
+                key: const Key('open-change-password'),
+                onPressed: () => showDialog<void>(
+                  context: context,
+                  builder: (_) => ChangePasswordDialog(auth: auth),
+                ),
+                child: const Text('open'),
+              ),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+  await tester.tap(find.byKey(const Key('open-change-password')));
+  await tester.pumpAndSettle();
 }
 
 Future<void> _pumpDialog(WidgetTester tester, AuthController auth) async {

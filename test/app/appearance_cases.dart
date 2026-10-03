@@ -6,6 +6,7 @@ import 'package:rillight/app/app.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/settings/settings_page.dart';
 import 'package:rillight/app/theme.dart';
+import 'package:rillight/app/tv_appearance_picker.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/auth/auth_controller.dart';
@@ -273,6 +274,56 @@ void main() {
     },
     tags: ['integration'],
   );
+
+  testWidgets('the TV appearance picker writes the existing controller', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 720);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final store = MemoryPlayerSettingsStore();
+    final controller = AppearanceController(store: store);
+    await tester.pumpWidget(
+      MaterialApp(
+        locale: const Locale('zh', 'CN'),
+        supportedLocales: AppLocalizations.supportedLocales,
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        home: AppearanceScope(
+          controller: controller,
+          child: const Scaffold(body: TvAppearancePicker()),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final lightOption = find.byKey(const Key('tv-appearance-light'));
+    final darkOption = find.byKey(const Key('tv-appearance-dark'));
+    expect(find.byKey(const Key('tv-appearance-system')), findsOneWidget);
+    expect(lightOption, findsOneWidget);
+    expect(darkOption, findsOneWidget);
+    expect(controller.style, AppearanceStyle.dark);
+    expect(tester.widget<TvAction>(darkOption).selected, isTrue);
+
+    await tester.tap(lightOption);
+    await tester.pumpAndSettle();
+    expect(controller.style, AppearanceStyle.light);
+    expect(tester.widget<TvAction>(lightOption).selected, isTrue);
+    expect(tester.widget<TvAction>(darkOption).selected, isFalse);
+    expect((await store.read()).appearanceStyle, 'light');
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pumpAndSettle();
+    final focused = FocusManager.instance.primaryFocus?.context
+        ?.findAncestorWidgetOfExactType<TvAction>();
+    expect(focused?.key, const Key('tv-appearance-dark'));
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.select);
+    await tester.pumpAndSettle();
+    expect(controller.style, AppearanceStyle.dark);
+    expect(tester.widget<TvAction>(darkOption).selected, isTrue);
+    expect((await store.read()).appearanceStyle, 'dark');
+  });
 
   testWidgets('window caption buttons follow the theme brightness', (
     tester,

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/theme/tokens.dart';
+import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/failure_message.dart';
 
@@ -9,6 +11,8 @@ import 'package:rillight/auth/failure_message.dart';
 /// 旧密码可留空照常提交,由服务器决定是否要求;新密码需确认一致。
 /// 服务器拒绝时留在对话框内显示原因,输入保留;成功后关闭对话框。
 /// 服务器吊销会话时控制器会回到登录页,本机保存的新密码可直接重新进入。
+/// 电视呈现把输入和确认取消放进同一纵向焦点序列;手机与桌面仍用文本框和
+/// Material 按钮。
 class ChangePasswordDialog extends StatefulWidget {
   const ChangePasswordDialog({super.key, required this.auth});
 
@@ -31,11 +35,33 @@ class _ChangePasswordDialogState extends State<ChangePasswordDialog> {
   final _confirm = TextEditingController();
 
   @override
+  void initState() {
+    super.initState();
+    // 电视编辑框改的是同一控制器,父级要跟着刷新可否提交。
+    _newPassword.addListener(_onPasswordEdited);
+    _confirm.addListener(_onPasswordEdited);
+  }
+
+  void _onPasswordEdited() {
+    if (mounted) setState(() {});
+  }
+
+  @override
   void dispose() {
+    _newPassword.removeListener(_onPasswordEdited);
+    _confirm.removeListener(_onPasswordEdited);
     _current.dispose();
     _newPassword.dispose();
     _confirm.dispose();
     super.dispose();
+  }
+
+  bool _isTv(BuildContext context) {
+    return context
+            .dependOnInheritedWidgetOfExactType<PresentationScope>()
+            ?.environment
+            .isTv ??
+        false;
   }
 
   Future<void> _submit() async {
@@ -57,6 +83,7 @@ class _ChangePasswordDialogState extends State<ChangePasswordDialog> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final auth = widget.auth;
+    final tv = _isTv(context);
     return ListenableBuilder(
       listenable: auth,
       builder: (context, _) {
@@ -78,36 +105,42 @@ class _ChangePasswordDialogState extends State<ChangePasswordDialog> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  TextField(
-                    key: ChangePasswordDialog.currentPasswordField,
-                    controller: _current,
-                    obscureText: true,
-                    decoration: InputDecoration(
-                      labelText: l10n.changePasswordCurrent,
-                      helperText: l10n.changePasswordCurrentHint,
+                  if (tv)
+                    ..._tvFields(l10n, mismatch)
+                  else ...[
+                    TextField(
+                      key: ChangePasswordDialog.currentPasswordField,
+                      controller: _current,
+                      obscureText: true,
+                      decoration: InputDecoration(
+                        labelText: l10n.changePasswordCurrent,
+                        helperText: l10n.changePasswordCurrentHint,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 20),
-                  TextField(
-                    key: ChangePasswordDialog.newPasswordField,
-                    controller: _newPassword,
-                    obscureText: true,
-                    onChanged: (_) => setState(() {}),
-                    decoration: InputDecoration(
-                      labelText: l10n.changePasswordNew,
+                    const SizedBox(height: 20),
+                    TextField(
+                      key: ChangePasswordDialog.newPasswordField,
+                      controller: _newPassword,
+                      obscureText: true,
+                      onChanged: (_) => setState(() {}),
+                      decoration: InputDecoration(
+                        labelText: l10n.changePasswordNew,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 20),
-                  TextField(
-                    key: ChangePasswordDialog.confirmField,
-                    controller: _confirm,
-                    obscureText: true,
-                    onChanged: (_) => setState(() {}),
-                    decoration: InputDecoration(
-                      labelText: l10n.changePasswordConfirm,
-                      errorText: mismatch ? l10n.changePasswordMismatch : null,
+                    const SizedBox(height: 20),
+                    TextField(
+                      key: ChangePasswordDialog.confirmField,
+                      controller: _confirm,
+                      obscureText: true,
+                      onChanged: (_) => setState(() {}),
+                      decoration: InputDecoration(
+                        labelText: l10n.changePasswordConfirm,
+                        errorText: mismatch
+                            ? l10n.changePasswordMismatch
+                            : null,
+                      ),
                     ),
-                  ),
+                  ],
                   if (failure != null)
                     Padding(
                       padding: const EdgeInsets.only(top: 12),
@@ -119,30 +152,91 @@ class _ChangePasswordDialogState extends State<ChangePasswordDialog> {
                         ),
                       ),
                     ),
+                  if (tv) ...[
+                    const SizedBox(height: 12),
+                    TvAction(
+                      key: ChangePasswordDialog.cancelKey,
+                      onPressed: auth.isBusy
+                          ? null
+                          : () => Navigator.of(context).pop(),
+                      child: Text(l10n.cancelAction),
+                    ),
+                    TvAction(
+                      key: ChangePasswordDialog.submitKey,
+                      onPressed: canSubmit ? _submit : null,
+                      child: auth.isBusy
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : Text(l10n.changePasswordSubmit),
+                    ),
+                  ],
                 ],
               ),
             ),
           ),
-          actions: [
-            TextButton(
-              key: ChangePasswordDialog.cancelKey,
-              onPressed: auth.isBusy ? null : () => Navigator.of(context).pop(),
-              child: Text(l10n.cancelAction),
-            ),
-            FilledButton(
-              key: ChangePasswordDialog.submitKey,
-              onPressed: canSubmit ? _submit : null,
-              child: auth.isBusy
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : Text(l10n.changePasswordSubmit),
-            ),
-          ],
+          actions: tv
+              ? null
+              : [
+                  TextButton(
+                    key: ChangePasswordDialog.cancelKey,
+                    onPressed: auth.isBusy
+                        ? null
+                        : () => Navigator.of(context).pop(),
+                    child: Text(l10n.cancelAction),
+                  ),
+                  FilledButton(
+                    key: ChangePasswordDialog.submitKey,
+                    onPressed: canSubmit ? _submit : null,
+                    child: auth.isBusy
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : Text(l10n.changePasswordSubmit),
+                  ),
+                ],
         );
       },
     );
+  }
+
+  List<Widget> _tvFields(AppLocalizations l10n, bool mismatch) {
+    return [
+      TvInput(
+        key: ChangePasswordDialog.currentPasswordField,
+        label: l10n.changePasswordCurrent,
+        controller: _current,
+        secret: true,
+        autofocus: true,
+      ),
+      Padding(
+        padding: const EdgeInsets.only(left: 8, bottom: 8),
+        child: Text(l10n.changePasswordCurrentHint),
+      ),
+      TvInput(
+        key: ChangePasswordDialog.newPasswordField,
+        label: l10n.changePasswordNew,
+        controller: _newPassword,
+        secret: true,
+      ),
+      TvInput(
+        key: ChangePasswordDialog.confirmField,
+        label: l10n.changePasswordConfirm,
+        controller: _confirm,
+        secret: true,
+      ),
+      if (mismatch)
+        Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: Text(
+            l10n.changePasswordMismatch,
+            style: TextStyle(color: Theme.of(context).colorScheme.error),
+          ),
+        ),
+    ];
   }
 }
