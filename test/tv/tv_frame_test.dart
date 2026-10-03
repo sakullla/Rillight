@@ -108,7 +108,7 @@ void main() {
         expect(vertical, greaterThanOrEqualTo(48));
 
         final safe = tester.widget<SafeArea>(find.byType(SafeArea));
-        final padding = safe.child! as Padding;
+        final padding = safe.child as Padding;
         final insets = padding.padding as EdgeInsets;
         expect(insets.left, horizontal);
         expect(insets.right, horizontal);
