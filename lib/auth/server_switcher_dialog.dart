@@ -107,6 +107,7 @@ class _ServerSwitcherDialogState extends State<ServerSwitcherDialog> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final scheme = Theme.of(context).colorScheme;
+    final viewport = MediaQuery.sizeOf(context);
     final filtered = _filtered;
     return Dialog(
       backgroundColor: Colors.transparent,
@@ -128,7 +129,10 @@ class _ServerSwitcherDialogState extends State<ServerSwitcherDialog> {
         ),
         clipBehavior: Clip.antiAlias,
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 440, maxHeight: 560),
+          constraints: BoxConstraints(
+            maxWidth: AppViewport.fit(440, viewport.width - 64, viewport),
+            maxHeight: AppViewport.fit(560, viewport.height * 0.88, viewport),
+          ),
           child: Padding(
             padding: const EdgeInsets.fromLTRB(
               AppSpacing.md,

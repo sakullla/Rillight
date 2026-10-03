@@ -178,7 +178,17 @@ void main() {
 
         if (capture.wants('home')) {
           if (config.$1 == 'desktop') {
-            final card = find.byKey(CatalogKeys.item('movie-up')).first;
+            final card = find.byKey(CatalogKeys.item('movie-up'));
+            await tester.scrollUntilVisible(
+              card,
+              320,
+              scrollable: find
+                  .descendant(
+                    of: find.byKey(const PageStorageKey('home-scroll')),
+                    matching: find.byType(Scrollable),
+                  )
+                  .first,
+            );
             await tester.ensureVisible(card);
             await capture.advance(300);
             await capture.save('poster-normal');

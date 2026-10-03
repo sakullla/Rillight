@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/library/shelf_sort.dart';
 
@@ -99,191 +100,208 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
     final sections = _sections(l);
     final textScale = MediaQuery.textScalerOf(context).scale(14) / 14;
     final compactSection = _section == 'type' || _section == 'watch';
-    final naturalHeight = wide
-        ? (widget.television ? 760.0 : 680.0)
+    // 1080p 上观看状态、类型约 600×420，流派和年份约 600×520。
+    // 2K、4K 按窗口比例放大，仍留出四周，不铺满。
+    final panelScale = widget.television || wide
+        ? AppViewport.scaleOf(size)
+        : 1.0;
+    final naturalHeight = widget.television
+        ? 760.0 * panelScale
+        : wide
+        ? (compactSection ? 420.0 : 520.0) * panelScale
         : (compactSection ? 440.0 : 620.0) * textScale;
     final height = math.min(
       naturalHeight,
       (size.height - MediaQuery.viewInsetsOf(context).bottom) * .88,
     );
+    final width = widget.television
+        ? math.min(980.0 * panelScale, size.width - 48)
+        : wide
+        ? math.min(600.0 * panelScale, size.width - 48)
+        : size.width;
 
-    return SizedBox(
-      width: widget.television ? 980 : 760,
-      height: height,
-      child: Material(
-        color: scheme.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(24),
-        clipBehavior: Clip.antiAlias,
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(24, 20, 12, 12),
-              child: Row(
-                children: [
-                  Icon(Icons.tune_rounded, color: scheme.primary),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          l.filterBrowseTitle,
-                          style: theme.textTheme.headlineSmall,
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          l.filterSelectedCount(_count),
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: scheme.onSurfaceVariant,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (!widget.television)
-                    IconButton(
-                      key: _key('cancel'),
-                      tooltip: l.libraryFilterCancel,
-                      onPressed: () => Navigator.pop(context),
-                      icon: const Icon(Icons.close_rounded),
-                    ),
-                ],
-              ),
-            ),
-            if (_count > 0)
-              SizedBox(
-                height: 44 * textScale,
-                child: ListView(
-                  scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
+    return AnimatedSize(
+      duration: AppMotion.durationOf(context),
+      curve: AppMotion.standard,
+      alignment: Alignment.center,
+      child: SizedBox(
+        width: width,
+        height: height,
+        child: Material(
+          color: scheme.surfaceContainerLow,
+          borderRadius: BorderRadius.circular(24),
+          clipBehavior: Clip.antiAlias,
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 20, 12, 12),
+                child: Row(
                   children: [
-                    if (_draft.type != CatalogTypeFilter.all)
-                      _summary(
-                        _draft.type.label,
-                        () => _draft = _draft.copyWith(
-                          type: CatalogTypeFilter.all,
-                        ),
+                    Icon(Icons.tune_rounded, color: scheme.primary),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            l.filterBrowseTitle,
+                            style: theme.textTheme.headlineSmall,
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            l.filterSelectedCount(_count),
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: scheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
                       ),
-                    if (_draft.watch != CatalogWatchFilter.all)
-                      _summary(
-                        _watchLabel(l, _draft.watch),
-                        () => _draft = _draft.copyWith(
-                          watch: CatalogWatchFilter.all,
-                        ),
-                      ),
-                    for (final year in _draft.years)
-                      _summary(
-                        '$year',
-                        () => _draft = _draft.copyWith(
-                          years: [..._draft.years]..remove(year),
-                        ),
-                      ),
-                    for (final genre in _draft.genres)
-                      _summary(
-                        genre,
-                        () => _draft = _draft.copyWith(
-                          genres: [..._draft.genres]..remove(genre),
-                        ),
+                    ),
+                    if (!widget.television)
+                      IconButton(
+                        key: _key('cancel'),
+                        tooltip: l.libraryFilterCancel,
+                        onPressed: () => Navigator.pop(context),
+                        icon: const Icon(Icons.close_rounded),
                       ),
                   ],
                 ),
               ),
-            const Divider(height: 1),
-            Expanded(
-              child: wide
-                  ? Row(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        SizedBox(
-                          width: widget.television ? 230 : 180,
-                          child: ListView(
-                            padding: const EdgeInsets.all(12),
-                            children: [
-                              for (final section in sections)
-                                _category(section, wide: true),
-                            ],
+              if (_count > 0)
+                SizedBox(
+                  height: 44 * textScale,
+                  child: ListView(
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    children: [
+                      if (_draft.type != CatalogTypeFilter.all)
+                        _summary(
+                          _draft.type.label,
+                          () => _draft = _draft.copyWith(
+                            type: CatalogTypeFilter.all,
                           ),
                         ),
-                        const VerticalDivider(width: 1),
-                        Expanded(child: _options(context)),
-                      ],
-                    )
-                  : Column(
-                      children: [
-                        SizedBox(
-                          height: math.max(60, 44 * textScale + 12),
-                          child: ListView(
-                            scrollDirection: Axis.horizontal,
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 6,
+                      if (_draft.watch != CatalogWatchFilter.all)
+                        _summary(
+                          _watchLabel(l, _draft.watch),
+                          () => _draft = _draft.copyWith(
+                            watch: CatalogWatchFilter.all,
+                          ),
+                        ),
+                      for (final year in _draft.years)
+                        _summary(
+                          '$year',
+                          () => _draft = _draft.copyWith(
+                            years: [..._draft.years]..remove(year),
+                          ),
+                        ),
+                      for (final genre in _draft.genres)
+                        _summary(
+                          genre,
+                          () => _draft = _draft.copyWith(
+                            genres: [..._draft.genres]..remove(genre),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              const Divider(height: 1),
+              Expanded(
+                child: wide
+                    ? Row(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          SizedBox(
+                            width: widget.television ? 230 : 180,
+                            child: ListView(
+                              padding: const EdgeInsets.all(12),
+                              children: [
+                                for (final section in sections)
+                                  _category(section, wide: true),
+                              ],
                             ),
-                            children: [
-                              for (final section in sections)
-                                _category(section, wide: false),
-                            ],
+                          ),
+                          const VerticalDivider(width: 1),
+                          Expanded(child: _options(context)),
+                        ],
+                      )
+                    : Column(
+                        children: [
+                          SizedBox(
+                            height: math.max(60, 44 * textScale + 12),
+                            child: ListView(
+                              scrollDirection: Axis.horizontal,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 6,
+                              ),
+                              children: [
+                                for (final section in sections)
+                                  _category(section, wide: false),
+                              ],
+                            ),
+                          ),
+                          Expanded(child: _options(context)),
+                        ],
+                      ),
+              ),
+              const Divider(height: 1),
+              SafeArea(
+                top: false,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
+                  child: Row(
+                    children: [
+                      if (widget.television) ...[
+                        Expanded(
+                          child: TvAction(
+                            key: _key('clear'),
+                            onPressed: _reset,
+                            child: Text(l.filterReset),
                           ),
                         ),
-                        Expanded(child: _options(context)),
-                      ],
-                    ),
-            ),
-            const Divider(height: 1),
-            SafeArea(
-              top: false,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
-                child: Row(
-                  children: [
-                    if (widget.television) ...[
-                      Expanded(
-                        child: TvAction(
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: TvAction(
+                            key: _key('cancel'),
+                            onPressed: () => Navigator.pop(context),
+                            child: Text(l.libraryFilterCancel),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: TvAction(
+                            key: _key('apply'),
+                            emphasized: true,
+                            onPressed: _apply,
+                            child: Text(l.filterApply),
+                          ),
+                        ),
+                      ] else ...[
+                        TextButton(
                           key: _key('clear'),
                           onPressed: _reset,
                           child: Text(l.filterReset),
                         ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: TvAction(
-                          key: _key('cancel'),
-                          onPressed: () => Navigator.pop(context),
-                          child: Text(l.libraryFilterCancel),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: TvAction(
-                          key: _key('apply'),
-                          emphasized: true,
-                          onPressed: _apply,
-                          child: Text(l.filterApply),
-                        ),
-                      ),
-                    ] else ...[
-                      TextButton(
-                        key: _key('clear'),
-                        onPressed: _reset,
-                        child: Text(l.filterReset),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: FilledButton.icon(
-                          key: _key('apply'),
-                          onPressed: _apply,
-                          style: FilledButton.styleFrom(
-                            minimumSize: const Size(48, 48),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: FilledButton.icon(
+                            key: _key('apply'),
+                            onPressed: _apply,
+                            style: FilledButton.styleFrom(
+                              minimumSize: const Size(48, 48),
+                            ),
+                            icon: const Icon(Icons.check_rounded),
+                            label: Text(l.filterApply),
                           ),
-                          icon: const Icon(Icons.check_rounded),
-                          label: Text(l.filterApply),
                         ),
-                      ),
+                      ],
                     ],
-                  ],
+                  ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

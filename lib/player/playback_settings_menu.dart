@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:rillight/app/widgets/reveal_selected.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/media_source_menu_tile.dart';
@@ -74,8 +76,14 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final screen = MediaQuery.sizeOf(context);
-    final width = math.min(420.0, math.max(280.0, screen.width - 48));
-    final height = math.min(336.0, math.max(240.0, screen.height - 220));
+    final width = math.min(
+      AppViewport.dp(420, screen),
+      math.max(280.0, screen.width - 48),
+    );
+    final height = math.min(
+      AppViewport.dp(336, screen),
+      math.max(240.0, screen.height - 220),
+    );
     final l10n = AppLocalizations.of(context);
     return MenuAnchor(
       controller: _menu,
@@ -208,30 +216,33 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
       final selected = section == key;
       return Padding(
         padding: const EdgeInsets.symmetric(horizontal: 4),
-        child: Semantics(
+        child: RevealSelected(
           selected: selected,
-          child: TextButton.icon(
-            key: info.$3,
-            onPressed: () => setState(() => _section = key),
-            icon: Icon(info.$2, size: 16),
-            label: Text(info.$1),
-            style: TextButton.styleFrom(
-              minimumSize: const Size(0, 36),
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              visualDensity: VisualDensity.compact,
-              foregroundColor: selected
-                  ? scheme.onSurface
-                  : scheme.onSurfaceVariant,
-              backgroundColor: selected
-                  ? scheme.surfaceBright
-                  : Colors.transparent,
-              shape: const StadiumBorder(),
-              side: selected
-                  ? BorderSide(color: scheme.onSurface.withValues(alpha: .7))
-                  : BorderSide.none,
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              textStyle: theme.textTheme.labelLarge?.copyWith(
-                fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+          child: Semantics(
+            selected: selected,
+            child: TextButton.icon(
+              key: info.$3,
+              onPressed: () => setState(() => _section = key),
+              icon: Icon(info.$2, size: 16),
+              label: Text(info.$1),
+              style: TextButton.styleFrom(
+                minimumSize: const Size(0, 36),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                visualDensity: VisualDensity.compact,
+                foregroundColor: selected
+                    ? scheme.onSurface
+                    : scheme.onSurfaceVariant,
+                backgroundColor: selected
+                    ? scheme.surfaceBright
+                    : Colors.transparent,
+                shape: const StadiumBorder(),
+                side: selected
+                    ? BorderSide(color: scheme.onSurface.withValues(alpha: .7))
+                    : BorderSide.none,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                textStyle: theme.textTheme.labelLarge?.copyWith(
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                ),
               ),
             ),
           ),
@@ -323,14 +334,17 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
           ),
           SizedBox(
             height: 48,
-            child: ListView(
-              scrollDirection: Axis.horizontal,
-              primary: false,
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              children: [
-                for (final entry in sections.entries)
-                  category(entry.key, entry.value),
-              ],
+            child: ScrollConfiguration(
+              behavior: const _CategoryScrollBehavior(),
+              child: ListView(
+                scrollDirection: Axis.horizontal,
+                primary: false,
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                children: [
+                  for (final entry in sections.entries)
+                    category(entry.key, entry.value),
+                ],
+              ),
             ),
           ),
           Expanded(
@@ -405,22 +419,38 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
     final scheme = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.only(bottom: 4),
-      child: ListTile(
+      child: RevealSelected(
         selected: selected,
-        selectedTileColor: scheme.surfaceBright,
-        selectedColor: scheme.onSurface,
-        iconColor: scheme.onSurfaceVariant,
-        textColor: scheme.onSurface,
-        shape: const StadiumBorder(),
-        minTileHeight: 44,
-        visualDensity: VisualDensity.compact,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12),
-        title: label,
-        trailing: selected
-            ? Icon(Icons.check_rounded, size: 18, color: scheme.onSurface)
-            : const SizedBox(width: 18),
-        onTap: onPressed,
+        child: ListTile(
+          selected: selected,
+          selectedTileColor: scheme.surfaceBright,
+          selectedColor: scheme.onSurface,
+          iconColor: scheme.onSurfaceVariant,
+          textColor: scheme.onSurface,
+          shape: const StadiumBorder(),
+          minTileHeight: 44,
+          visualDensity: VisualDensity.compact,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+          title: label,
+          trailing: selected
+              ? Icon(Icons.check_rounded, size: 18, color: scheme.onSurface)
+              : const SizedBox(width: 18),
+          onTap: onPressed,
+        ),
       ),
     );
   }
+}
+
+class _CategoryScrollBehavior extends MaterialScrollBehavior {
+  const _CategoryScrollBehavior();
+
+  @override
+  Set<PointerDeviceKind> get dragDevices => const {
+    PointerDeviceKind.mouse,
+    PointerDeviceKind.touch,
+    PointerDeviceKind.stylus,
+    PointerDeviceKind.trackpad,
+    PointerDeviceKind.invertedStylus,
+  };
 }

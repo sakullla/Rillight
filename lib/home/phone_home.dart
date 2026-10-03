@@ -4,7 +4,6 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:go_router/go_router.dart';
-import 'package:rillight/app/content_theme.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_chrome.dart';
 import 'package:rillight/app/phone_bottom_nav.dart';
@@ -13,8 +12,6 @@ import 'package:rillight/app/mobile_widgets.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme.dart';
 import 'package:rillight/auth/auth_scope.dart';
-import 'package:rillight/emby/catalog_cache.dart';
-import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_errors.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_controller.dart';
@@ -22,6 +19,7 @@ import 'package:rillight/home/catalog_failure.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/library/item_format.dart';
+import 'package:rillight/home/library_latest_row.dart';
 import 'package:rillight/home/phone_hero.dart';
 import 'package:rillight/home/phone_home_sections.dart';
 import 'package:rillight/media_image/media_image.dart';
@@ -30,13 +28,8 @@ import 'package:rillight/player/player_window_host.dart';
 /// 首页行请求的 Limit。满这一页说明货架查询后面还有条目。
 const int phoneHomeRowLimit = 24;
 
-/// 每个片库在首页只预览一屏多一点，完整列表从「更多」进入。
-const int phoneHomeLibraryPreview = 12;
-
-/// 片库预览同时最多打两条请求，避免和首屏四行抢连接。
-final _homeLibraryLoads = _LoadGate(2);
-
-/// 手机首页：横幅、可配置区块，以及行后还有内容时的货架入口。
+/// 手机首页：轮播图、继续观看、下一集、片库入口和每个片库的最近添加。
+/// 拖动手柄排序，关掉的行归到「未显示」。片库页仍列出全部片库。
 class PhoneHome extends StatefulWidget {
   const PhoneHome({super.key, this.sections});
 
@@ -91,7 +84,10 @@ class _PhoneHomeState extends State<PhoneHome> {
             state: CatalogRowState(
               items: watching,
               loading: catalog.resume.loading && watching.isEmpty,
-              hidden: watching.isEmpty && !catalog.resume.loading,
+              hidden:
+                  watching.isEmpty &&
+                  !catalog.resume.loading &&
+                  catalog.resume.error == null,
               error: watching.isEmpty ? catalog.resume.error : null,
               notice: catalog.resume.notice,
             ),
@@ -106,7 +102,10 @@ class _PhoneHomeState extends State<PhoneHome> {
             state: CatalogRowState(
               items: nextUpItems,
               loading: catalog.nextUp.loading && nextUpItems.isEmpty,
-              hidden: nextUpItems.isEmpty && !catalog.nextUp.loading,
+              hidden:
+                  nextUpItems.isEmpty &&
+                  !catalog.nextUp.loading &&
+                  catalog.nextUp.error == null,
               error: nextUpItems.isEmpty ? catalog.nextUp.error : null,
               notice: catalog.nextUp.notice,
             ),
@@ -114,20 +113,6 @@ class _PhoneHomeState extends State<PhoneHome> {
             location: AppRoutes.shelfNextUp,
             rowKey: CatalogKeys.nextUpRow,
             wide: true,
-          ),
-          PhoneHomeSectionId.latestMovies: _HomeSection(
-            title: l10n.latestMoviesRow,
-            state: catalog.latestMovies,
-            shelfId: CatalogKeys.shelfLatestMovies,
-            location: AppRoutes.shelfLatestMovies,
-            rowKey: CatalogKeys.latestMoviesRow,
-          ),
-          PhoneHomeSectionId.latestSeries: _HomeSection(
-            title: l10n.latestSeriesRow,
-            state: catalog.latestSeries,
-            shelfId: CatalogKeys.shelfLatestSeries,
-            location: AppRoutes.shelfLatestSeries,
-            rowKey: CatalogKeys.latestSeriesRow,
           ),
         };
         final visible = _controller.visibleIds(catalog.libraries);
@@ -148,8 +133,8 @@ class _PhoneHomeState extends State<PhoneHome> {
                   id == PhoneHomeSectionId.libraries ||
                   PhoneHomeSectionId.libraryIdOf(id) != null,
             );
-        // 片库入口单独不算「已有海报」。四行仍在安静重试时要保持整页骨架，
-        // 重试耗尽后仍是整页失败，而不是被片库入口换成空页或行内占位。
+        // 片库入口单独不算「已有海报」。可见行仍在安静重试时要保持整页骨架，
+        // 重试耗尽后仍是整页失败，而不是被片库入口换成空页。
         final pageHasContent = hasItems || hasBanner || wantsLibraries;
         EmbyException? firstError;
         for (final state in states) {
@@ -158,8 +143,7 @@ class _PhoneHomeState extends State<PhoneHome> {
             break;
           }
         }
-        // 四行、横幅、片库入口和最近添加都没有可展示内容时才用整页占位、失败或空。
-        // 横幅候选来自被隐藏的行时，仍要画出横幅。
+        // 可见行、轮播图和片库都没有可展示内容时才用整页占位、失败或空。
         final Widget body;
         List<Widget>? sectionChildren;
         if (!hasItems && !hasBanner && firstError == null && loading) {
@@ -243,13 +227,14 @@ class _PhoneHomeState extends State<PhoneHome> {
               continue;
             }
             final libraryId = PhoneHomeSectionId.libraryIdOf(id);
-            if (libraryId != null && librariesById[libraryId] != null) {
+            final library = libraryId == null ? null : librariesById[libraryId];
+            if (library != null) {
               children.add(
                 Padding(
                   key: ValueKey('home-section-library-$libraryId'),
                   padding: sectionMargin,
                   child: _PhoneLibraryLatest(
-                    library: librariesById[libraryId]!,
+                    library: library,
                     sharePoster: (itemId) =>
                         sharedPosterOwners.putIfAbsent(
                           itemId,
@@ -269,8 +254,13 @@ class _PhoneHomeState extends State<PhoneHome> {
             (body is MobileLoadingPlaceholder &&
                 body.variant == MobileLoadingVariant.home);
         final navClearance = phoneScrollClearance(context);
-        // 横幅不出现时（被隐藏或暂无候选），首块内容要躲开状态栏和透明顶栏。
-        final topInset = sectionChildren != null && !hasBanner
+        // 只有轮播图排在第一并且真有画面时，才让它伸进状态栏。
+        // 用户把它调到后面时，第一行仍要躲开透明顶栏。
+        final bannerLeads =
+            visible.isNotEmpty &&
+            visible.first == PhoneHomeSectionId.banner &&
+            hasBanner;
+        final topInset = sectionChildren != null && !bannerLeads
             ? MediaQuery.viewPaddingOf(context).top + 56 + AppSpacing.md
             : 0.0;
         final page = RefreshIndicator(
@@ -584,14 +574,7 @@ class _WideCard extends StatelessWidget {
   final VoidCallback? onRemove;
 
   @override
-  Widget build(BuildContext context) => ContentTheme(
-    item: item,
-    preferBackdrop: true,
-    fillSurface: false,
-    child: Builder(builder: _buildCard),
-  );
-
-  Widget _buildCard(BuildContext context) {
+  Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final theme = Theme.of(context);
     final progress = item.playbackProgress;
@@ -771,7 +754,7 @@ class _PhoneLibraryEntry extends StatelessWidget {
     final l10n = AppLocalizations.of(context);
     final theme = Theme.of(context);
     final screen = MediaQuery.sizeOf(context).width;
-    // 与「继续观看」横卡同宽:一屏一张多,露出下一张。
+    // 与继续观看横卡同宽：一屏一张多，露出下一张。
     final cardWidth = phoneHomeWideCardWidth(screen);
     final cardHeight = cardWidth * 9 / 16;
     return Column(
@@ -856,203 +839,71 @@ class _PhoneLibraryEntry extends StatelessWidget {
   }
 }
 
-class _PhoneLibraryLatest extends StatefulWidget {
+class _PhoneLibraryLatest extends StatelessWidget {
   const _PhoneLibraryLatest({required this.library, required this.sharePoster});
 
   final EmbyItem library;
   final bool Function(String id) sharePoster;
 
   @override
-  State<_PhoneLibraryLatest> createState() => _PhoneLibraryLatestState();
-}
-
-class _PhoneLibraryLatestState extends State<_PhoneLibraryLatest> {
-  List<EmbyItem> _items = const [];
-  var _loading = true;
-  EmbyException? _error;
-  var _started = false;
-  Object? _identity;
-  int _generation = 0;
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    final auth = AuthScope.of(context);
-    final identity = (
-      auth.session?.server.id,
-      auth.client.baseUrl,
-      auth.client.userId,
-    );
-    if (_started && identity == _identity) {
-      return;
-    }
-    _started = true;
-    _identity = identity;
-    _items = const [];
-    _loading = true;
-    _error = null;
-    unawaited(_load());
-  }
-
-  @override
-  void didUpdateWidget(covariant _PhoneLibraryLatest oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.library.id != widget.library.id) {
-      _items = const [];
-      _loading = true;
-      _error = null;
-      unawaited(_load());
-    }
-  }
-
-  Future<void> _load() async {
-    final generation = ++_generation;
-    final identity = _identity;
-    bool owns() =>
-        mounted && generation == _generation && identity == _identity;
-    final catalog = CatalogScope.of(context);
-    final request = catalogItemsRequest(
-      userId: catalog.client.userId ?? '',
-      parentId: widget.library.id,
-      includeItemTypes: _latestTypes(widget.library),
-      recursive: true,
-      limit: phoneHomeLibraryPreview,
-      sortBy: 'DateCreated',
-      sortOrder: 'Descending',
-      fields: EmbyClient.homePosterFields,
-    );
-    final network = _homeLibraryLoads.run(
-      () => catalog.cache.fetch(catalog.client, request),
-    );
-    unawaited(network.then<void>((_) {}, onError: (Object _) {}));
-    unawaited(() async {
-      try {
-        final hit = await catalog.cache.lookupWhenReady(request);
-        if (!owns() ||
-            hit == null ||
-            (_items.isNotEmpty || (!_loading && _error == null))) {
-          return;
-        }
-        final cached = parseCatalogPage(hit.json).items;
-        if (cached.isEmpty) return;
-        setState(() {
-          _items = cached;
-          _loading = false;
-        });
-      } catch (_) {
-        // A damaged disk row cannot delay the live library response.
-      }
-    }());
-    try {
-      final items = await network;
-      if (!owns()) {
-        return;
-      }
-      setState(() {
-        _items = parseCatalogPage(items).items;
-        _loading = false;
-        _error = null;
-      });
-    } catch (error) {
-      if (!owns()) {
-        return;
-      }
-      setState(() {
-        _error = error is EmbyException
-            ? error
-            : EmbyException(EmbyFailureKind.unknown, cause: error);
-        _loading = false;
-      });
-    }
-  }
-
-  @override
   Widget build(BuildContext context) {
-    if (!_loading && _error == null && _items.isEmpty) {
-      return const SizedBox.shrink();
-    }
-    final l10n = AppLocalizations.of(context);
-    final title = l10n.phoneHomeLibraryLatest(widget.library.name);
-    return Column(
-      key: Key('phone-home-library-latest-${widget.library.id}'),
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _SectionTitle(
-          title: title,
-          moreKey: CatalogKeys.shelfMore('library-${widget.library.id}'),
-          onMore: () => context.push(AppRoutes.library(widget.library.id)),
-        ),
-        if (_loading && _items.isEmpty) const MobileLoadingPlaceholder.row(),
-        if (_error != null)
-          MobileFailureState(
-            message: catalogFailureMessage(l10n, _error!),
-            onRetry: () {
-              unawaited(_load());
-            },
-          ),
-        if (_items.isNotEmpty)
-          SizedBox(
-            height: _rowHeightOf(context, wide: false),
-            child: ListView.builder(
-              key: PageStorageKey('row-$title'),
-              scrollDirection: Axis.horizontal,
-              itemCount: _items.length,
-              itemBuilder: (context, index) {
-                final item = _items[index];
-                final shared = widget.sharePoster(item.id);
-                return PhonePosterCard(
-                  item: item,
-                  width: _cardWidthOf(context, wide: false),
-                  hero: shared,
-                  pressKey: shared ? CatalogKeys.item(item.id) : null,
-                  includePlaybackBadges: false,
-                );
-              },
+    return LibraryLatestData(
+      library: library,
+      builder: (context, snapshot) {
+        if (!snapshot.loading &&
+            snapshot.error == null &&
+            snapshot.items.isEmpty) {
+          return const SizedBox.shrink();
+        }
+        final l10n = AppLocalizations.of(context);
+        final title = l10n.phoneHomeLibraryLatest(library.name);
+        return Column(
+          key: Key('phone-home-library-latest-${library.id}'),
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _SectionTitle(
+              title: title,
+              moreKey: CatalogKeys.shelfMore('library-${library.id}'),
+              onMore: () => context.push(AppRoutes.library(library.id)),
             ),
-          ),
-      ],
+            if (snapshot.loading && snapshot.items.isEmpty)
+              const MobileLoadingPlaceholder.row(),
+            if (snapshot.error != null)
+              MobileFailureState(
+                message: catalogFailureMessage(l10n, snapshot.error!),
+                onRetry: snapshot.retry,
+              ),
+            if (snapshot.items.isNotEmpty)
+              SizedBox(
+                height: _rowHeightOf(context, wide: false),
+                child: ListView.builder(
+                  key: PageStorageKey('row-$title'),
+                  scrollDirection: Axis.horizontal,
+                  itemCount: snapshot.items.length,
+                  itemBuilder: (context, index) {
+                    final item = snapshot.items[index];
+                    final shared = sharePoster(item.id);
+                    return PhonePosterCard(
+                      item: item,
+                      width: _cardWidthOf(context, wide: false),
+                      hero: shared,
+                      pressKey: shared ? CatalogKeys.item(item.id) : null,
+                      includePlaybackBadges: false,
+                    );
+                  },
+                ),
+              ),
+          ],
+        );
+      },
     );
   }
-}
-
-/// 限制同时进行的首页片库请求。完成一条再放行下一条。
-class _LoadGate {
-  _LoadGate(this._limit);
-
-  final int _limit;
-  var _active = 0;
-  final _waiters = <Completer<void>>[];
-
-  Future<T> run<T>(Future<T> Function() job) async {
-    if (_active >= _limit) {
-      final ticket = Completer<void>();
-      _waiters.add(ticket);
-      await ticket.future;
-    }
-    _active++;
-    try {
-      return await job();
-    } finally {
-      _active--;
-      if (_waiters.isNotEmpty) {
-        _waiters.removeAt(0).complete();
-      }
-    }
-  }
-}
-
-String _latestTypes(EmbyItem library) {
-  return switch (library.collectionTypeNormalized) {
-    'movies' => 'Movie',
-    'tvshows' => 'Series',
-    _ => 'Movie,Series',
-  };
 }
 
 Widget _sharedPosterImage(EmbyItem item, bool shared) {
   final image = MediaImage(
     item: item,
-    contributesToTheme: true,
+    fit: BoxFit.cover,
     preferBackdrop: !item.isEpisode,
     preferThumb: item.isEpisode,
     maxWidth: PhoneMotion.posterRequestWidth,

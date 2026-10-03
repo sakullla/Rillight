@@ -104,12 +104,17 @@ void main() {
   ) async {
     await _pumpRails(tester, width: 360, height: 560);
     final catalog = CatalogScope.of(tester.element(find.byType(PhoneHome)));
-    catalog.latestSeries = CatalogRowState(
-      items: const [EmbyItem(id: 'series-lazy', name: '剧集', type: 'Series')],
-    );
+    catalog.libraries = const [
+      EmbyItem(
+        id: 'view-late',
+        name: '靠后片库',
+        type: 'CollectionFolder',
+        collectionType: 'movies',
+      ),
+    ];
     catalog.notifyListeners();
     await tester.pump();
-    final later = find.byKey(CatalogKeys.latestSeriesRow);
+    final later = find.byKey(const Key('phone-home-library-latest-view-late'));
     expect(later, findsNothing);
     await tester.scrollUntilVisible(
       later,
@@ -340,10 +345,6 @@ void main() {
       greaterThanOrEqualTo(2),
     );
     expect(
-      blocks.where((block) => _isRatio(block, 1.5)).length,
-      greaterThanOrEqualTo(3),
-    );
-    expect(
       blocks
           .where(
             (block) =>
@@ -352,47 +353,7 @@ void main() {
           .length,
       greaterThanOrEqualTo(2),
     );
-    expect(
-      blocks
-          .where(
-            (block) =>
-                ((block.width ?? 0) - phoneHomePosterCardWidth(360)).abs() <
-                0.5,
-          )
-          .length,
-      greaterThanOrEqualTo(3),
-    );
 
-    catalog
-      ..resume = const CatalogRowState(loading: true)
-      ..nextUp = const CatalogRowState(hidden: true)
-      ..latestMovies = CatalogRowState(items: [_movie('movie-a', '甲')])
-      ..latestSeries = const CatalogRowState(loading: true);
-    catalog.notifyListeners();
-    await tester.pump();
-    _expectRowShape(
-      tester,
-      find.byKey(CatalogKeys.resumeRow),
-      wide: true,
-      screen: 360,
-    );
-    // The final rail is now created only after it enters the vertical viewport.
-    await tester.scrollUntilVisible(
-      find.byKey(CatalogKeys.latestSeriesRow),
-      180,
-      scrollable: find
-          .descendant(
-            of: find.byType(PhoneHome),
-            matching: find.byType(Scrollable),
-          )
-          .first,
-    );
-    _expectRowShape(
-      tester,
-      find.byKey(CatalogKeys.latestSeriesRow),
-      wide: false,
-      screen: 360,
-    );
     expect(tester.takeException(), isNull);
   }, tags: ['integration']);
 
@@ -426,7 +387,7 @@ void main() {
           lessThan(picture.width * picture.height * 0.5),
         );
         expect(
-          tester.getTopLeft(find.text('最近更新的电影')).dy -
+          tester.getTopLeft(find.text('片库入口')).dy -
               tester.getRect(find.byKey(CatalogKeys.item('ep-1'))).bottom,
           greaterThanOrEqualTo(16),
         );
@@ -538,29 +499,6 @@ bool _isRatio(SkeletonBlock block, double ratio) {
   return (height / width - ratio).abs() < 0.02;
 }
 
-void _expectRowShape(
-  WidgetTester tester,
-  Finder row, {
-  required bool wide,
-  required double screen,
-}) {
-  final blocks = tester
-      .widgetList<SkeletonBlock>(
-        find.descendant(of: row, matching: find.byType(SkeletonBlock)),
-      )
-      .where((block) => (block.height ?? 0) > 20)
-      .toList();
-  final card = wide
-      ? phoneHomeWideCardWidth(screen)
-      : phoneHomePosterCardWidth(screen);
-  expect(blocks, isNotEmpty);
-  expect(blocks.first.width, closeTo(card, 0.5));
-  expect(
-    blocks.first.height! / blocks.first.width!,
-    closeTo(wide ? 9 / 16 : 1.5, 0.02),
-  );
-}
-
 void _expectPeek(WidgetTester tester, double width) {
   final first = tester.getRect(find.byKey(CatalogKeys.item('ep-1')));
   final second = tester.getRect(find.byKey(CatalogKeys.item('ep-2')));
@@ -577,29 +515,6 @@ void _expectPeek(WidgetTester tester, double width) {
     ),
   );
   expect(picture.aspectRatio, closeTo(16 / 9, 0.02));
-
-  final posters = [
-    for (var i = 0; i < 3; i++)
-      tester.getRect(find.byKey(CatalogKeys.item('movie-$i'))),
-  ];
-  expect(posters[0].left, closeTo(16, 1));
-  expect(posters[0].width, closeTo(phoneHomePosterCardWidth(width), 1));
-  expect(posters[0].width, greaterThanOrEqualTo(128));
-  for (var i = 0; i < 2; i++) {
-    expect(posters[i].right, lessThanOrEqualTo(width));
-    if (i > 0) {
-      expect(posters[i].left - posters[i - 1].right, closeTo(AppSpacing.xs, 1));
-    }
-  }
-  expect(posters[2].left, lessThan(width));
-  expect(posters[2].right, greaterThan(width));
-  final poster = tester.getSize(
-    find.descendant(
-      of: find.byKey(CatalogKeys.item('movie-0')),
-      matching: find.byType(AspectRatio),
-    ),
-  );
-  expect(poster.aspectRatio, closeTo(2 / 3, 0.02));
 }
 
 Future<void> _expectPosterGrid(WidgetTester tester, double width) async {
@@ -745,10 +660,16 @@ Future<void> _pumpRails(
       ],
     )
     ..nextUp = const CatalogRowState(hidden: true)
-    ..latestMovies = CatalogRowState(
-      items: [for (var i = 0; i < 4; i++) _movie('movie-$i', '电影 $i')],
-    )
+    ..latestMovies = const CatalogRowState(hidden: true)
     ..latestSeries = const CatalogRowState(hidden: true)
+    ..libraries = const [
+      EmbyItem(
+        id: 'view-movies',
+        name: '电影',
+        type: 'CollectionFolder',
+        collectionType: 'movies',
+      ),
+    ]
     ..librariesLoading = false;
   await tester.pumpWidget(_homeApp(catalog, nav: true));
   await tester.pump();
@@ -768,7 +689,10 @@ Widget _homeApp(CatalogController catalog, {bool nav = false}) {
       extendBody: nav,
       extendBodyBehindAppBar: nav,
       appBar: nav ? AppBar(toolbarHeight: 56, title: const Text('首页')) : null,
-      body: CatalogScope(controller: catalog, child: const PhoneHome()),
+      body: AuthScope(
+        controller: catalog.auth,
+        child: CatalogScope(controller: catalog, child: const PhoneHome()),
+      ),
       bottomNavigationBar: nav
           ? PhoneBottomNav(index: 0, floating: true, onSelected: (_) {})
           : null,

@@ -48,6 +48,7 @@ class DetailController extends ChangeNotifier {
   CancelToken? _resumeCancel;
   bool playedBusy = false;
   int _revision = 0, _seasonRevision = 0, _offset = 0;
+  int? _seasonsLoadRevision;
   bool _disposed = false;
   late Object _identity;
   Object get _currentIdentity =>
@@ -105,7 +106,7 @@ class DetailController extends ChangeNotifier {
       mediaSourceId ??= result.mediaSources.firstOrNull?.id;
       loading = false;
       notifyListeners();
-      if (result.isSeries && !seasonsLoading) {
+      if (result.isSeries && _seasonsLoadRevision != revision) {
         // Season and episode requests do not hold the already ready header.
         unawaited(loadSeasons());
       }
@@ -123,10 +124,18 @@ class DetailController extends ChangeNotifier {
     final identity = _identity;
     final current = item;
     if (current == null || !current.isSeries) return;
+    _seasonsLoadRevision = revision;
+    final selectionRevision = _seasonRevision;
     seasonsLoading = true;
     seasonError = null;
     notifyListeners();
     final network = repository.seasons(current.id);
+    final episodeId = initialEpisodeId?.trim();
+    final initialEpisode = episodeId == null || episodeId.isEmpty
+        ? Future<EmbyItem?>.value()
+        : repository
+              .item(episodeId)
+              .then<EmbyItem?>((item) => item, onError: (Object _) => null);
     if (seasons.isEmpty) {
       unawaited(() async {
         try {
@@ -168,18 +177,20 @@ class DetailController extends ChangeNotifier {
         notifyListeners();
         return;
       }
-      final episodeId = initialEpisodeId?.trim();
-      if (episodeId != null && episodeId.isNotEmpty) {
+      if (episodeId != null &&
+          episodeId.isNotEmpty &&
+          selectionRevision == _seasonRevision) {
         try {
-          final episode = await repository.item(episodeId);
+          final episode = await initialEpisode;
           if (_disposed || revision != _revision || identity != _identity) {
             return;
           }
-          final selected = episode.seasonId ?? episode.parentId;
+          if (selectionRevision != _seasonRevision) return;
+          final selected = episode?.seasonId ?? episode?.parentId;
           if (selected != null && selected.isNotEmpty) {
             await selectSeason(
               selected,
-              startAt: ((episode.indexNumber ?? 1) - 1).clamp(0, 1 << 30),
+              startAt: ((episode?.indexNumber ?? 1) - 1).clamp(0, 1 << 30),
             );
             return;
           }
@@ -190,7 +201,8 @@ class DetailController extends ChangeNotifier {
       final selected = seasons.any((s) => s.id == seasonId)
           ? seasonId
           : seasons.firstOrNull?.id;
-      if (selected != null && (!episodesLoading || seasonId != selected)) {
+      if (selected != null &&
+          (seasonId != selected || selectionRevision == _seasonRevision)) {
         await selectSeason(selected);
       }
       if (_disposed || revision != _revision || identity != _identity) return;

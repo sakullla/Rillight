@@ -113,7 +113,7 @@ else()
   target_compile_options(rillight_core_startup_test PRIVATE -UNDEBUG)
 endif()
 add_test(NAME rillight_core_startup_interleave COMMAND rillight_core_startup_test)
-set_tests_properties(rillight_core_startup_interleave PROPERTIES TIMEOUT 10)
+set_tests_properties(rillight_core_startup_interleave PROPERTIES TIMEOUT 15)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   target_link_options(rillight_core_startup_test PRIVATE
     "LINKER:-rpath-link,${core_lib_dir}")

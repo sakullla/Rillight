@@ -260,11 +260,17 @@ class FakeEmbyItem {
   String? primaryImageTag;
   String? thumbImageTag;
   String? backdropImageTag;
+
+  /// 多张背景图。非空时优先于 [backdropImageTag]，详情相册需要至少两张。
+  List<String> backdropImageTags = const [];
   String? seriesPrimaryImageTag;
   String? parentThumbItemId;
   String? parentThumbImageTag;
   String? parentBackdropItemId;
   String? parentBackdropImageTag;
+
+  /// 剧集背景图列表。非空时优先于单张 [parentBackdropImageTag]。
+  List<String> parentBackdropImageTags = const [];
   bool played;
   int playbackPositionTicks;
   double? playedPercentage;
@@ -317,7 +323,10 @@ class FakeEmbyItem {
           if (primaryImageTag != null) 'Primary': primaryImageTag,
           if (thumbImageTag != null) 'Thumb': thumbImageTag,
         },
-      if (backdropImageTag != null) 'BackdropImageTags': [backdropImageTag],
+      if (backdropImageTags.isNotEmpty)
+        'BackdropImageTags': backdropImageTags
+      else if (backdropImageTag != null)
+        'BackdropImageTags': [backdropImageTag],
       if (seriesPrimaryImageTag != null)
         'SeriesPrimaryImageTag': seriesPrimaryImageTag,
       if (parentThumbItemId != null) 'ParentThumbItemId': parentThumbItemId,
@@ -325,7 +334,9 @@ class FakeEmbyItem {
         'ParentThumbImageTag': parentThumbImageTag,
       if (parentBackdropItemId != null)
         'ParentBackdropItemId': parentBackdropItemId,
-      if (parentBackdropImageTag != null)
+      if (parentBackdropImageTags.isNotEmpty)
+        'ParentBackdropImageTags': parentBackdropImageTags
+      else if (parentBackdropImageTag != null)
         'ParentBackdropImageTags': [parentBackdropImageTag],
       'DateCreated': dateCreated.toIso8601String(),
       'DateLastContentAdded': dateLastContentAdded.toIso8601String(),
@@ -529,6 +540,13 @@ class FakeEmbyServer {
 
   /// 单条详情故意去掉进度,用来测详情页从 Resume 行回填 UserData。
   bool stripDetailPlaybackProgress = false;
+
+  /// 列表响应按 Fields 丢掉未请求的演职员、流派和剧照，模拟真实 Emby。
+  /// 单条详情仍返回完整条目。
+  bool omitUnrequestedListFields = false;
+
+  /// 挡住 `GET /Users/{uid}/Items/{id}`，让测试先看到切集时的列表预览。
+  Completer<void>? holdItemGet;
   final Set<String> issuedTokens = {};
   final Set<String> loggedOutTokens = {};
   int _tokenSeq = 0;
@@ -724,6 +742,14 @@ class FakeEmbyServer {
     );
     if (playback != null) {
       return playback;
+    }
+
+    if (holdItemGet != null &&
+        method == 'GET' &&
+        segments.length == 4 &&
+        segments[0] == 'Users' &&
+        segments[2] == 'Items') {
+      await holdItemGet!.future;
     }
 
     final catalog = _handleCatalog(options, method, segments);
@@ -1317,7 +1343,8 @@ class FakeEmbyServer {
       case 'Thumb':
         return item.thumbImageTag != null;
       case 'Backdrop':
-        return item.backdropImageTag != null;
+        return item.backdropImageTag != null ||
+            item.backdropImageTags.isNotEmpty;
       default:
         return false;
     }
@@ -1599,9 +1626,34 @@ class FakeEmbyServer {
   ResponseBody _queryPage(List<FakeEmbyItem> matched, RequestOptions options) {
     final paged = _paginate(matched, options);
     return _json(200, {
-      'Items': [for (final item in paged.items) item.toJson()],
+      'Items': [for (final item in paged.items) _listItemJson(item, options)],
       'TotalRecordCount': paged.total,
     });
+  }
+
+  Map<String, dynamic> _listItemJson(
+    FakeEmbyItem item,
+    RequestOptions options,
+  ) {
+    final json = item.toJson();
+    if (!omitUnrequestedListFields) {
+      return json;
+    }
+    final fields = (options.uri.queryParameters['Fields'] ?? '')
+        .split(',')
+        .map((part) => part.trim())
+        .toSet();
+    if (!fields.contains('People')) {
+      json.remove('People');
+    }
+    if (!fields.contains('Genres')) {
+      json.remove('Genres');
+    }
+    json.remove('BackdropImageTags');
+    json.remove('ParentBackdropItemId');
+    json.remove('ParentBackdropImageTag');
+    json.remove('ParentBackdropImageTags');
+    return json;
   }
 
   ResponseBody _queryResult(List<FakeEmbyItem> matched) {

@@ -834,6 +834,12 @@ int main(int argc, char** argv) {
       return state.subtitle_stream_index == text_track.stream_index &&
              state.first_video_frame_ready && state.state != RILLIGHT_CORE_FAILED;
     }));
+    // These sources stall after the video packets. Let demux reach EAGAIN
+    // without consuming frames: queued video must keep its clock advancing.
+    const int64_t resumed_position = snapshot(core).position_us;
+    assert(wait_for(core, [resumed_position](const auto &state) {
+      return state.position_us >= resumed_position + 100000;
+    }));
     bool text_rendered = false;
     const auto text_deadline = std::chrono::steady_clock::now() +
                                std::chrono::seconds(5);

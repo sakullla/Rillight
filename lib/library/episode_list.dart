@@ -15,8 +15,7 @@ import 'package:rillight/media_image/media_image.dart';
 /// 分集分区:纵向行列表(缩略图 + 标题 + 时长/进度 + 简介),头部为
 /// 「集」+ 季切换/选集 + 「更多」。行内容自适应伸展铺满可用宽度。
 ///
-/// 操作控件(播放/已看)平时隐藏、悬停或选中时淡入,保持桌面端
-/// 「平时干净、悬停浮现」的惯例;控件仍在组件树中,键盘与测试可达。
+/// 播放和已看一直留在行尾,方便扫视一季时直接开播或标已看。
 /// [error] 非空且没有剧集时,分区换成说明与重试。已有剧集时 [loadMoreError]
 /// 留在列表上方,条目保持可见;[hasMore] 时列表末尾提供「加载更多」。
 class EpisodeList extends StatelessWidget {
@@ -135,14 +134,16 @@ class EpisodeList extends StatelessWidget {
                     _EnsureVisibleWhenSelected(
                       selected: episode.id == currentId,
                       token: revealToken,
-                      child: EpisodeRow(
-                        key: ValueKey('episode-row-${episode.id}'),
-                        item: episode,
-                        selected: episode.id == currentId,
-                        busyPlayed: busyPlayedIds.contains(episode.id),
-                        onTap: () => onTap(episode),
-                        onPlay: () => onPlay(episode),
-                        onTogglePlayed: () => onTogglePlayed(episode),
+                      child: RepaintBoundary(
+                        child: EpisodeRow(
+                          key: ValueKey('episode-row-${episode.id}'),
+                          item: episode,
+                          selected: episode.id == currentId,
+                          busyPlayed: busyPlayedIds.contains(episode.id),
+                          onTap: () => onTap(episode),
+                          onPlay: () => onPlay(episode),
+                          onTogglePlayed: () => onTogglePlayed(episode),
+                        ),
                       ),
                     ),
                   if (hasMore)
@@ -174,10 +175,9 @@ class EpisodeList extends StatelessWidget {
   }
 }
 
-/// 分集行:16:9 缩略图(进度条叠底) + 「N. 标题」+ 时长/进度 + 本集简介;
-/// 右侧播放/已看控件平时隐藏,悬停或选中时淡入。点整行进入集详情,
-/// 右键菜单同样可播放/标已看。当前集以 surfaceContainerHigh 底色与
-/// primary 左边条标示。
+/// 分集行:16:9 缩略图(进度条叠底) + 「N. 标题」+ 时长/进度 + 两行简介。
+/// 播放/已看紧贴行尾,不另占一列空白。点整行进入集详情,右键菜单同样可
+/// 播放/标已看。当前集以 surfaceContainerHigh 底色与 primary 左边条标示。
 class EpisodeRow extends StatefulWidget {
   const EpisodeRow({
     super.key,
@@ -196,14 +196,14 @@ class EpisodeRow extends StatefulWidget {
   final VoidCallback onPlay;
   final VoidCallback onTogglePlayed;
 
-  static double thumbWidthFor(double screenWidth) {
-    if (screenWidth < AppBreakpoints.compact) {
-      return 200;
-    }
-    if (screenWidth < AppBreakpoints.large) {
-      return 224;
-    }
-    return 248;
+  static double thumbWidthFor(Size viewport) {
+    final width = viewport.width;
+    final base = width < AppBreakpoints.compact
+        ? 168.0
+        : width < AppBreakpoints.large
+        ? 184.0
+        : 200.0;
+    return base * AppViewport.readingScaleOf(viewport);
   }
 
   @override
@@ -268,139 +268,152 @@ class _EpisodeRowState extends State<EpisodeRow> {
       if (item.canResume) l10n.playbackProgress((progress * 100).round()),
     ];
     final overview = plainOverview(item.overview);
-    final thumbWidth = EpisodeRow.thumbWidthFor(
-      MediaQuery.sizeOf(context).width,
-    );
+    final viewport = MediaQuery.sizeOf(context);
+    final thumbWidth = EpisodeRow.thumbWidthFor(viewport);
     final thumbHeight = thumbWidth * 9 / 16;
-    return MouseRegion(
-      onEnter: (_) => setState(() => _hovered = true),
-      onExit: (_) => setState(() => _hovered = false),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(AppRadii.md),
-        child: Material(
-          color: selected ? scheme.surfaceContainerHigh : Colors.transparent,
-          child: InkWell(
-            key: CatalogKeys.episode(item.id),
-            onTap: widget.onTap,
-            onSecondaryTapDown: (details) {
-              unawaited(_openMenu(context, details.globalPosition));
-            },
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                border: Border(
-                  left: BorderSide(
-                    width: 3,
-                    color: selected ? scheme.primary : Colors.transparent,
+    final control = 36.0 * AppViewport.readingScaleOf(viewport);
+    final fill = selected
+        ? scheme.surfaceContainerHigh
+        : _hovered
+        ? scheme.surfaceContainerHighest.withValues(alpha: 0.55)
+        : scheme.surfaceContainerHighest.withValues(alpha: 0.28);
+    final actionStyle = IconButton.styleFrom(
+      minimumSize: Size(control, control),
+      padding: EdgeInsets.all(6 * control / 36),
+      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      visualDensity: VisualDensity.compact,
+      iconSize: 24 * control / 36,
+    );
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpacing.xs),
+      child: MouseRegion(
+        onEnter: (_) => setState(() => _hovered = true),
+        onExit: (_) => setState(() => _hovered = false),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(AppRadii.md),
+          child: Material(
+            color: fill,
+            child: InkWell(
+              key: CatalogKeys.episode(item.id),
+              onTap: widget.onTap,
+              onSecondaryTapDown: (details) {
+                unawaited(_openMenu(context, details.globalPosition));
+              },
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  border: Border(
+                    left: BorderSide(
+                      width: 3,
+                      color: selected ? scheme.primary : Colors.transparent,
+                    ),
                   ),
                 ),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(AppSpacing.sm),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(AppRadii.sm),
-                      child: SizedBox(
-                        width: thumbWidth,
-                        height: thumbHeight,
-                        child: Stack(
-                          fit: StackFit.expand,
-                          children: [
-                            RepaintBoundary(
-                              child: MediaImage(
-                                key: ValueKey(item.id),
-                                item: item,
-                                width: thumbWidth,
-                                height: thumbHeight,
-                                preferThumb: true,
-                                maxWidth: 480,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.sm,
+                    vertical: AppSpacing.xs,
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(AppRadii.sm),
+                        child: SizedBox(
+                          width: thumbWidth,
+                          height: thumbHeight,
+                          child: Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              RepaintBoundary(
+                                child: MediaImage(
+                                  key: ValueKey(item.id),
+                                  item: item,
+                                  width: thumbWidth,
+                                  height: thumbHeight,
+                                  preferThumb: true,
+                                  fit: BoxFit.cover,
+                                  maxWidth: 480,
+                                ),
                               ),
-                            ),
-                            if (item.canResume)
-                              Align(
-                                alignment: Alignment.bottomCenter,
-                                child: _EpisodeProgressBar(value: progress),
-                              ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: AppSpacing.md),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            title,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.titleSmall?.copyWith(
-                              fontWeight: selected ? FontWeight.w700 : null,
-                            ),
+                              if (item.canResume)
+                                Align(
+                                  alignment: Alignment.bottomCenter,
+                                  child: _EpisodeProgressBar(value: progress),
+                                ),
+                            ],
                           ),
-                          if (meta.isNotEmpty) ...[
-                            const SizedBox(height: AppSpacing.xxs),
-                            Text(
-                              meta.join(' · '),
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: scheme.onSurfaceVariant,
-                              ),
-                            ),
-                          ],
-                          if (overview != null && overview.isNotEmpty) ...[
-                            const SizedBox(height: AppSpacing.xs),
-                            Text(
-                              overview,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: scheme.onSurface.withValues(alpha: 0.78),
-                                height: 1.4,
-                              ),
-                            ),
-                          ],
-                        ],
+                        ),
                       ),
-                    ),
-                    // 悬停/选中时淡入;控件保留在树中,键盘与测试可达。
-                    AnimatedOpacity(
-                      opacity: _hovered || selected ? 1 : 0,
-                      duration: AppMotion.durationOf(context, AppMotion.fast),
-                      curve: AppMotion.standard,
-                      child: SizedBox(
-                        height: thumbHeight,
-                        child: Row(
+                      const SizedBox(width: AppSpacing.md),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
                           children: [
-                            IconButton(
-                              key: CatalogKeys.episodePlayed(item.id),
-                              tooltip: played
-                                  ? l10n.markUnplayed
-                                  : l10n.markPlayed,
-                              onPressed: widget.busyPlayed
-                                  ? null
-                                  : widget.onTogglePlayed,
-                              icon: Icon(
-                                played
-                                    ? Icons.check_circle_rounded
-                                    : Icons.check_circle_outline_rounded,
-                                color: played
-                                    ? scheme.primary
-                                    : scheme.onSurfaceVariant,
+                            Text(
+                              title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.titleSmall?.copyWith(
+                                fontWeight: selected
+                                    ? FontWeight.w700
+                                    : FontWeight.w600,
                               ),
                             ),
-                            IconButton.filled(
-                              key: CatalogKeys.episodePlay(item.id),
-                              tooltip: playLabel,
-                              onPressed: widget.onPlay,
-                              icon: const Icon(Icons.play_arrow_rounded),
-                            ),
+                            if (meta.isNotEmpty) ...[
+                              const SizedBox(height: AppSpacing.xxs),
+                              Text(
+                                meta.join(' · '),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: scheme.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
+                            if (overview != null && overview.isNotEmpty) ...[
+                              const SizedBox(height: AppSpacing.xxs),
+                              Text(
+                                overview,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: scheme.onSurface.withValues(
+                                    alpha: 0.78,
+                                  ),
+                                  height: 1.35,
+                                ),
+                              ),
+                            ],
                           ],
                         ),
                       ),
-                    ),
-                  ],
+                      const SizedBox(width: AppSpacing.xs),
+                      IconButton(
+                        key: CatalogKeys.episodePlayed(item.id),
+                        tooltip: played ? l10n.markUnplayed : l10n.markPlayed,
+                        style: actionStyle,
+                        onPressed: widget.busyPlayed
+                            ? null
+                            : widget.onTogglePlayed,
+                        icon: Icon(
+                          played
+                              ? Icons.check_circle_rounded
+                              : Icons.check_circle_outline_rounded,
+                          color: played
+                              ? scheme.primary
+                              : scheme.onSurfaceVariant,
+                        ),
+                      ),
+                      IconButton.filled(
+                        key: CatalogKeys.episodePlay(item.id),
+                        tooltip: playLabel,
+                        style: actionStyle,
+                        onPressed: widget.onPlay,
+                        icon: const Icon(Icons.play_arrow_rounded),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -422,9 +435,7 @@ class EpisodeListSkeleton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final thumbWidth = EpisodeRow.thumbWidthFor(
-      MediaQuery.sizeOf(context).width,
-    );
+    final thumbWidth = EpisodeRow.thumbWidthFor(MediaQuery.sizeOf(context));
     return Column(
       children: [
         for (var i = 0; i < rows; i++)
@@ -445,9 +456,12 @@ class _EpisodeRowSkeleton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.all(AppSpacing.sm),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.sm,
+        vertical: AppSpacing.xs,
+      ),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           SkeletonBlock(width: thumbWidth, height: thumbWidth * 9 / 16),
           const SizedBox(width: AppSpacing.md),

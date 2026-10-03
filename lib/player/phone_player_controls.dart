@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'dart:ui' show DisplayFeature, DisplayFeatureType;
 
 import 'package:flutter/material.dart';
+import 'package:rillight/app/widgets/reveal_selected.dart';
 import 'package:flutter/services.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_motion.dart';
@@ -557,12 +558,13 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                   '${c.playbackRate}x',
                   () => _openMore(section: 'speed'),
                 ),
-                _shortcut(
-                  'mobile-player-tracks',
-                  Icons.subtitles_outlined,
-                  c.canSwitchAudioTrack ? l.mobileTracks : l.subtitleTrack,
-                  () => _openMore(section: 'tracks'),
-                ),
+                if (c.canSwitchAudioTrack || c.canConfigureSubtitles)
+                  _shortcut(
+                    'mobile-player-tracks',
+                    Icons.subtitles_outlined,
+                    c.canSwitchAudioTrack ? l.mobileTracks : l.subtitleTrack,
+                    () => _openMore(section: 'tracks'),
+                  ),
                 _shortcut(
                   'mobile-player-more',
                   Icons.tune,
@@ -723,6 +725,7 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
           Widget optionTile({
             Key? key,
             required bool selected,
+            bool reveal = true,
             required Widget title,
             Widget? leading,
             Widget? trailing,
@@ -732,23 +735,26 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
             return Padding(
               key: key == null ? null : ValueKey('option-shell-$key'),
               padding: const EdgeInsets.only(bottom: 8),
-              child: ListTile(
-                key: key,
-                selected: selected,
-                selectedTileColor: scheme.surfaceBright,
-                selectedColor: scheme.onSurface,
-                iconColor: scheme.onSurfaceVariant,
-                textColor: scheme.onSurface,
-                tileColor: scheme.surfaceContainerHighest,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(AppRadii.md),
+              child: RevealSelected(
+                selected: selected && reveal,
+                child: ListTile(
+                  key: key,
+                  selected: selected,
+                  selectedTileColor: scheme.surfaceBright,
+                  selectedColor: scheme.onSurface,
+                  iconColor: scheme.onSurfaceVariant,
+                  textColor: scheme.onSurface,
+                  tileColor: scheme.surfaceContainerHighest,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(AppRadii.md),
+                  ),
+                  minTileHeight: 56,
+                  leading: leading,
+                  title: title,
+                  subtitle: subtitle,
+                  trailing: trailing,
+                  onTap: onTap,
                 ),
-                minTileHeight: 56,
-                leading: leading,
-                title: title,
-                subtitle: subtitle,
-                trailing: trailing,
-                onTap: onTap,
               ),
             );
           }
@@ -817,12 +823,14 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                         if (section == null) ...[
                           for (final entry in <String, (IconData, String)>{
                             'speed': (Icons.speed, l.playbackRate),
-                            'tracks': (
-                              Icons.subtitles_outlined,
-                              c.canSwitchAudioTrack
-                                  ? l.mobileTracks
-                                  : l.subtitleTrack,
-                            ),
+                            if (c.canSwitchAudioTrack ||
+                                c.canConfigureSubtitles)
+                              'tracks': (
+                                Icons.subtitles_outlined,
+                                c.canSwitchAudioTrack
+                                    ? l.mobileTracks
+                                    : l.subtitleTrack,
+                              ),
                             if (c.canSwitchQuality)
                               'quality': (
                                 Icons.high_quality_outlined,
@@ -1006,7 +1014,7 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                                   unawaited(c.setPhoneSubtitleSettings(value)),
                               error: c.subtitlePresentationError,
                             )
-                          else
+                          else if (c.canConfigureSubtitles)
                             Padding(
                               padding: const EdgeInsets.only(bottom: 16),
                               child: Text(l.phoneSubtitleUnavailable),
@@ -1022,6 +1030,7 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                           if (c.canSwitchAudioTrack)
                             for (final track in c.selectableAudioTracks)
                               optionTile(
+                                reveal: c.subtitleStreamIndex == null,
                                 selected: c.audioStreamIndex == track.index,
                                 leading: Icon(
                                   c.audioStreamIndex == track.index
@@ -1031,7 +1040,7 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                                 title: Text(track.label),
                                 onTap: () => c.setAudio(track.index),
                               ),
-                          ...[
+                          if (c.canConfigureSubtitles) ...[
                             Padding(
                               padding: const EdgeInsets.only(top: 8, bottom: 8),
                               child: Text(
@@ -1040,6 +1049,7 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                               ),
                             ),
                             optionTile(
+                              reveal: !c.canSwitchAudioTrack,
                               selected: c.subtitleStreamIndex == null,
                               leading: Icon(
                                 c.subtitleStreamIndex == null

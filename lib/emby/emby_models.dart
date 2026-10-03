@@ -549,12 +549,17 @@ class EmbyItem {
       add(id, 'Thumb', thumbImageTag);
     }
     final seriesPoster =
-        isEpisode &&
+        (isEpisode || isSeason) &&
         primaryImageTag != null &&
         seriesPrimaryImageTag != null &&
         primaryImageTag == seriesPrimaryImageTag;
     if (!seriesPoster) {
       add(id, 'Primary', primaryImageTag);
+    }
+    // A season often has no separate poster. Its inherited tag belongs to the
+    // series endpoint, and is also the fallback when a season poster is stale.
+    if (isSeason && !landscape && seriesId?.isNotEmpty == true) {
+      add(seriesId!, 'Primary', seriesPrimaryImageTag);
     }
     if (refs.isEmpty && !isEpisode) {
       add(id, 'Primary', primaryImageTag, requireTag: false);

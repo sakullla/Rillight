@@ -2,6 +2,9 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:go_router/go_router.dart';
+import 'package:rillight/app/routes.dart';
+import 'package:rillight/player/playback_ended_panel.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/player/network_throughput.dart';
@@ -38,6 +41,7 @@ class TvPlayerPageState extends State<TvPlayerPage> {
   Object? _identity;
   bool _closing = false;
   bool _focusedFailure = false;
+  bool _focusedEnd = false;
   double? _seek;
   bool _surfaceSeeking = false;
   int _scanRepeats = 0;
@@ -47,6 +51,7 @@ class TvPlayerPageState extends State<TvPlayerPage> {
   final _retryFocus = FocusNode();
   final _nextPlayFocus = FocusNode();
   final _nextCancelFocus = FocusNode();
+  final _endedReplayFocus = FocusNode();
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -80,6 +85,17 @@ class TvPlayerPageState extends State<TvPlayerPage> {
   void _playerChanged() {
     final c = controller!;
     if (_closing) return;
+    final ended =
+        c.playbackEnded && c.nextEpisode == null && !c.loading && !_failed;
+    if (ended) {
+      if (!_focusedEnd) _requestFocus(_endedReplayFocus);
+      _focusedEnd = true;
+      return;
+    }
+    if (_focusedEnd) {
+      _focusedEnd = false;
+      _requestFocus(c.nextEpisode == null ? _surfaceFocus : _nextPlayFocus);
+    }
     final cardFocused = _nextPlayFocus.hasFocus || _nextCancelFocus.hasFocus;
     if (!c.controlsVisible &&
         _surfaceFocus.hasFocus &&
@@ -113,9 +129,10 @@ class TvPlayerPageState extends State<TvPlayerPage> {
     }
   }
 
-  Future<void> _close() async {
+  Future<void> _close({String? viewSeriesId, String? seasonId}) async {
     if (_closing) return;
     _closing = true;
+    final router = viewSeriesId == null ? null : GoRouter.maybeOf(context);
     final route = ModalRoute.of(context);
     final navigator = Navigator.of(context);
     _lifecycle?.dispose();
@@ -135,6 +152,9 @@ class TvPlayerPageState extends State<TvPlayerPage> {
     // its overlays first, then pop the route whose session we actually closed.
     navigator.popUntil((candidate) => identical(candidate, route));
     navigator.pop();
+    if (router != null && viewSeriesId != null) {
+      router.push(AppRoutes.item(viewSeriesId, seasonId: seasonId));
+    }
   }
 
   bool get _failed =>
@@ -212,7 +232,10 @@ class TvPlayerPageState extends State<TvPlayerPage> {
       }
       return KeyEventResult.handled;
     }
-    if (_surfaceFocus.hasPrimaryFocus && !c.loading && !_failed) {
+    if (_surfaceFocus.hasPrimaryFocus &&
+        !c.loading &&
+        !_failed &&
+        !c.playbackEnded) {
       if (horizontal) {
         _surfaceSeeking = true;
         _previewSeek(key, repeat: event is KeyRepeatEvent);
@@ -347,7 +370,7 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                             c.audioStreamIndex == track.index,
                                       ),
                                     ),
-                                ...[
+                                if (c.canConfigureSubtitles) ...[
                                   const SizedBox(height: 16),
                                   Text(l.subtitleTrack),
                                   TvAction(
@@ -510,6 +533,7 @@ class TvPlayerPageState extends State<TvPlayerPage> {
     _seekFocus.dispose();
     _nextPlayFocus.dispose();
     _nextCancelFocus.dispose();
+    _endedReplayFocus.dispose();
     final c = controller;
     if (c != null) {
       c.removeListener(_playerChanged);
@@ -693,6 +717,26 @@ class TvPlayerPageState extends State<TvPlayerPage> {
               ListenableBuilder(
                 listenable: c,
                 builder: (context, _) {
+                  if (c.playbackEnded &&
+                      c.nextEpisode == null &&
+                      !c.loading &&
+                      !_failed) {
+                    return PlaybackEndedPanel(
+                      tv: true,
+                      replayFocus: _endedReplayFocus,
+                      title: c.item?.displayName ?? '',
+                      onReplay: () => unawaited(c.replay()),
+                      onClose: () => unawaited(_close()),
+                      onViewSeries: c.item?.seriesId?.isNotEmpty == true
+                          ? () => unawaited(
+                              _close(
+                                viewSeriesId: c.item!.seriesId,
+                                seasonId: c.item!.seasonId,
+                              ),
+                            )
+                          : null,
+                    );
+                  }
                   final visible =
                       c.controlsVisible ||
                       c.loading ||
@@ -895,16 +939,18 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                           ready ? c.togglePlay : null,
                                           focusNode: _playFocus,
                                         ),
-                                        _action(
-                                          'tv-player-tracks',
-                                          Icons.subtitles_outlined,
-                                          c.canSwitchAudioTrack
-                                              ? l.mobileTracks
-                                              : l.subtitleTrack,
-                                          ready
-                                              ? () => _panel(_TvPanel.tracks)
-                                              : null,
-                                        ),
+                                        if (c.canSwitchAudioTrack ||
+                                            c.canConfigureSubtitles)
+                                          _action(
+                                            'tv-player-tracks',
+                                            Icons.subtitles_outlined,
+                                            c.canSwitchAudioTrack
+                                                ? l.mobileTracks
+                                                : l.subtitleTrack,
+                                            ready
+                                                ? () => _panel(_TvPanel.tracks)
+                                                : null,
+                                          ),
                                         if (c.canSwitchQuality)
                                           _action(
                                             'tv-player-quality',

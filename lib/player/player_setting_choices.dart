@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:rillight/app/widgets/reveal_selected.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/emby/device_profile.dart';
 import 'package:rillight/player/player_controller.dart';
@@ -67,11 +68,14 @@ class PlayerRateGrid extends StatelessWidget {
           ),
           itemBuilder: (context, index) {
             final rate = kPlaybackRateLadder[index];
-            return PlayerRateCell(
-              key: ValueKey('player-rate-$rate'),
-              label: playerRateLabel(rate),
+            return RevealSelected(
               selected: rate == selected,
-              onPressed: enabled ? () => onSelected(rate) : null,
+              child: PlayerRateCell(
+                key: ValueKey('player-rate-$rate'),
+                label: playerRateLabel(rate),
+                selected: rate == selected,
+                onPressed: enabled ? () => onSelected(rate) : null,
+              ),
             );
           },
         );

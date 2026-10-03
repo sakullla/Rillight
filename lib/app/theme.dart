@@ -83,14 +83,19 @@ abstract final class AppTheme {
   );
 
   /// 冷蓝灰深色主题(默认)。
-  static ThemeData dark() => _theme(darkTones);
+  static final ThemeData _dark = _theme(darkTones);
+  static final ThemeData _light = _theme(lightTones);
+  static final ThemeData _phoneLight = _phone(_light);
+  static final ThemeData _phoneDark = _phone(_dark);
+
+  static ThemeData dark() => _dark;
 
   /// 浅色主题:同一分层结构,只换浅色调。
-  static ThemeData light() => _theme(lightTones);
+  static ThemeData light() => _light;
 
   /// Phone reading sizes and touch targets, with the same cool surface palette.
-  static ThemeData phoneLight() => _phone(light());
-  static ThemeData phoneDark() => _phone(dark());
+  static ThemeData phoneLight() => _phoneLight;
+  static ThemeData phoneDark() => _phoneDark;
 
   static ThemeData _phone(ThemeData base) => base.copyWith(
     textTheme: base.textTheme.copyWith(

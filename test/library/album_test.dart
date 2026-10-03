@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -11,6 +12,7 @@ import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/library/detail_extras.dart';
 
 final _png = base64Decode(
@@ -135,6 +137,103 @@ void main() {
       )?.itemId,
       'series',
     );
+  });
+
+  testWidgets('album strip leaves the wheel to the page and scrolls by drag', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(360, 240);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final auth = AuthController.memory(client: _AlbumClient());
+    addTearDown(auth.dispose);
+    await tester.pumpWidget(
+      AuthScope(
+        controller: auth,
+        child: MaterialApp(
+          locale: Locale('zh', 'CN'),
+          supportedLocales: AppLocalizations.supportedLocales,
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          home: Scaffold(
+            body: ListView(
+              children: [
+                DetailAlbumStrip(
+                  item: EmbyItem(
+                    id: 'album',
+                    name: 'Album',
+                    type: 'Movie',
+                    backdropImageTags: ['a', 'b', 'c', 'd'],
+                  ),
+                  thumbnailWidth: 200,
+                ),
+                SizedBox(height: 800),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    ScrollPosition position() {
+      return tester
+          .state<ScrollableState>(
+            find.descendant(
+              of: find.byType(DetailAlbumStrip),
+              matching: find.byType(Scrollable),
+            ),
+          )
+          .position;
+    }
+
+    expect(position().maxScrollExtent, greaterThan(0));
+    expect(position().pixels, 0);
+    expect(
+      find.byKey(CatalogKeys.shelfScrollRight(CatalogKeys.shelfAlbum)),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(CatalogKeys.shelfScrollLeft(CatalogKeys.shelfAlbum)),
+      findsNothing,
+    );
+
+    final page = tester
+        .state<ScrollableState>(
+          find.byWidgetPredicate(
+            (widget) => widget is Scrollable && widget.axis == Axis.vertical,
+          ),
+        )
+        .position;
+    await tester.sendEventToBinding(
+      PointerScrollEvent(
+        position: tester.getCenter(find.byType(DetailAlbumStrip)),
+        scrollDelta: const Offset(0, 80),
+      ),
+    );
+    await tester.pump();
+    expect(position().pixels, 0);
+    expect(page.pixels, greaterThan(0));
+
+    final beforeDrag = position().pixels;
+    await tester.drag(
+      find.descendant(
+        of: find.byType(DetailAlbumStrip),
+        matching: find.byType(ListView),
+      ),
+      const Offset(-40, 0),
+      kind: PointerDeviceKind.mouse,
+    );
+    await tester.pump();
+    expect(position().pixels, greaterThan(beforeDrag));
+
+    final afterDrag = position().pixels;
+    await tester.tap(
+      find.byKey(CatalogKeys.shelfScrollRight(CatalogKeys.shelfAlbum)),
+    );
+    await tester.pumpAndSettle();
+    expect(position().pixels, greaterThan(afterDrag));
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('enlargement supports zoom and keyboard paging', (tester) async {

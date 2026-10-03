@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/failure_message.dart';
 
@@ -67,7 +68,11 @@ class _ChangePasswordDialogState extends State<ChangePasswordDialog> {
         return AlertDialog(
           title: Text(l10n.changePassword),
           content: SizedBox(
-            width: 360,
+            width: AppViewport.fit(
+              360,
+              MediaQuery.sizeOf(context).width - 80,
+              MediaQuery.sizeOf(context),
+            ),
             child: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,

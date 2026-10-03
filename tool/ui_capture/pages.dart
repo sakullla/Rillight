@@ -6,6 +6,7 @@ import 'package:rillight/app/app.dart';
 import 'package:rillight/app/app_shell.dart';
 import 'package:rillight/app/phone_mine_page.dart';
 import 'package:rillight/app/settings/settings_page.dart';
+import 'package:rillight/app/theme.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/change_password_dialog.dart';
@@ -57,14 +58,23 @@ extension PageCaptures on CaptureSession {
       await route(app, '/', 'home-return');
       if (platform == 'desktop') {
         await tap(AppShell.overflowNavKey);
-        await save('library-navigation-menu');
-        await tap(AppShell.moreLibrariesKey);
+        await save('home-display');
+        await dismiss();
+        final homeScroll = find
+            .descendant(
+              of: find.byKey(const PageStorageKey('home-scroll')),
+              matching: find.byType(Scrollable),
+            )
+            .first;
+        tester.state<ScrollableState>(homeScroll).position.jumpTo(0);
+        await advance(100);
+        await tester.scrollUntilVisible(
+          find.byKey(CatalogKeys.librariesMenu),
+          320,
+          scrollable: homeScroll,
+        );
+        await advance(300);
         await save('library-list');
-        await dismiss();
-        await tap(AppShell.overflowNavKey);
-        await tap(AppShell.customizeNavKey);
-        await save('library-navigation-customize');
-        await dismiss();
       } else if (platform == 'phone') {
         await tap(const Key('phone-home-edit'));
         await save('home-customize');
@@ -167,6 +177,42 @@ extension PageCaptures on CaptureSession {
       expect(find.text('2 / 2'), findsOneWidget);
       await save('detail-gallery-next');
       await dismiss();
+      if (platform != 'tv') {
+        for (final tone in ['red', 'blue', 'green']) {
+          final id = 'palette-$tone';
+          server.items.removeWhere((item) => item.id == id);
+          server.items.add(
+            FakeEmbyItem(
+              id: id,
+              name: '流派配色 · $tone',
+              type: 'Movie',
+              primaryImageTag: id,
+              backdropImageTag: id,
+              genres: ['动画', '动作冒险', 'Sci-Fi & Fantasy'],
+              overview: '流派标签随海报配色变化，支持点击筛选和键盘聚焦。',
+            ),
+          );
+          app.router.go('/item/$id');
+          await advance(900);
+          final genres = platform == 'phone'
+              ? find.text('动作冒险')
+              : find.byType(DetailGenreRow);
+          expect(genres, findsOneWidget);
+          await Scrollable.ensureVisible(tester.element(genres), alignment: .5);
+          await advance(400);
+          final scheme = Theme.of(tester.element(genres)).colorScheme;
+          final base = scheme.brightness == Brightness.dark
+              ? AppTheme.dark().colorScheme
+              : AppTheme.light().colorScheme;
+          expect(
+            scheme.primary,
+            isNot(base.primary),
+            reason: 'The $tone genre capture must show resolved artwork colors',
+          );
+          await save('detail-genres-$tone');
+          server.items.removeWhere((item) => item.id == id);
+        }
+      }
       if (platform == 'phone') {
         for (final tone in [
           'red',

@@ -283,14 +283,17 @@ class _ConnectPageState extends State<ConnectPage> {
 
   /// 内容宽度随断点舒展:compact 全宽(减页边距),medium 收敛,
   /// large 再放宽,宽屏下整体由外层 [Center] 垂直居中。
-  static double _contentWidth(double maxWidth) {
+  static double _contentWidth(double maxWidth, double maxHeight) {
     if (maxWidth < AppBreakpoints.compact) {
       return maxWidth - AppSpacing.xl * 2;
     }
-    if (maxWidth <= AppBreakpoints.large) {
-      return 520;
-    }
-    return 580;
+    final design = maxWidth <= AppBreakpoints.large ? 520.0 : 580.0;
+    final height = maxHeight.isFinite ? maxHeight : maxWidth * 9 / 16;
+    return AppViewport.fit(
+      design,
+      maxWidth - AppSpacing.xl * 2,
+      Size(maxWidth, height),
+    );
   }
 
   @override
@@ -314,7 +317,10 @@ class _ConnectPageState extends State<ConnectPage> {
                 ),
                 child: Center(
                   child: SizedBox(
-                    width: _contentWidth(constraints.maxWidth),
+                    width: _contentWidth(
+                      constraints.maxWidth,
+                      constraints.maxHeight,
+                    ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [

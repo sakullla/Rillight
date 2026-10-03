@@ -104,6 +104,77 @@ Bytes make_media(int audio_packets = 40, int audio_start_samples = 0,
   return bytes;
 }
 
+// One opening keyframe, then more PCM than the pre-picture audio budget,
+// then the picture a seek actually wants. Seeking into that gap used to
+// re-arm the cold-open ENOBUFS guard and fail the session.
+Bytes make_seek_gap(int gap_packets) {
+  AVFormatContext *format = nullptr;
+  assert(avformat_alloc_output_context2(&format, nullptr, "matroska", nullptr) == 0);
+  format->avoid_negative_ts = AVFMT_AVOID_NEG_TS_DISABLED;
+  assert(avio_open_dyn_buf(&format->pb) == 0);
+  const auto *codec = avcodec_find_encoder(AV_CODEC_ID_MPEG4);
+  assert(codec);
+  auto *encoder = avcodec_alloc_context3(codec);
+  encoder->width = 64;
+  encoder->height = 64;
+  encoder->pix_fmt = AV_PIX_FMT_YUV420P;
+  encoder->time_base = AVRational{1, 10};
+  encoder->gop_size = 250;
+  assert(avcodec_open2(encoder, codec, nullptr) == 0);
+  auto *video = avformat_new_stream(format, nullptr);
+  video->time_base = encoder->time_base;
+  assert(avcodec_parameters_from_context(video->codecpar, encoder) == 0);
+  auto *audio = avformat_new_stream(format, nullptr);
+  audio->time_base = AVRational{1, 48000};
+  audio->codecpar->codec_type = AVMEDIA_TYPE_AUDIO;
+  audio->codecpar->codec_id = AV_CODEC_ID_PCM_S16LE;
+  audio->codecpar->sample_rate = 48000;
+  audio->codecpar->bits_per_coded_sample = 16;
+  av_channel_layout_default(&audio->codecpar->ch_layout, 2);
+  assert(avformat_write_header(format, nullptr) == 0);
+  auto *packet = av_packet_alloc();
+  auto *frame = av_frame_alloc();
+  frame->format = encoder->pix_fmt;
+  frame->width = encoder->width;
+  frame->height = encoder->height;
+  assert(av_frame_get_buffer(frame, 32) == 0);
+  for (int plane = 0; plane < 3; ++plane)
+    std::memset(frame->data[plane], plane == 0 ? 80 : 128,
+                frame->linesize[plane] * (plane == 0 ? 64 : 32));
+  auto write_video = [&](int pts) {
+    assert(av_frame_make_writable(frame) == 0);
+    frame->pts = pts;
+    assert(avcodec_send_frame(encoder, frame) == 0);
+    assert(avcodec_receive_packet(encoder, packet) == 0);
+    av_packet_rescale_ts(packet, encoder->time_base, video->time_base);
+    packet->stream_index = video->index;
+    assert(av_write_frame(format, packet) == 0);
+    av_packet_unref(packet);
+  };
+  write_video(0);
+  for (int index = 0; index < gap_packets; ++index) {
+    assert(av_new_packet(packet, 960 * 4) == 0);
+    std::memset(packet->data, 1, packet->size);
+    packet->stream_index = audio->index;
+    packet->pts = packet->dts = av_rescale_q(index * 960, {1, 48000}, audio->time_base);
+    packet->duration = av_rescale_q(960, {1, 48000}, audio->time_base);
+    assert(av_write_frame(format, packet) == 0);
+    av_packet_unref(packet);
+  }
+  write_video(12);
+  assert(av_write_trailer(format) == 0);
+  av_packet_free(&packet);
+  av_frame_free(&frame);
+  avcodec_free_context(&encoder);
+  uint8_t *data = nullptr;
+  const int size = avio_close_dyn_buf(format->pb, &data);
+  assert(size > 0);
+  Bytes bytes{{data, data + size}};
+  av_free(data);
+  avformat_free_context(format);
+  return bytes;
+}
+
 void *open(void *opaque, const char *, int) {
   return new Bytes(*static_cast<Bytes *>(opaque));
 }
@@ -255,6 +326,46 @@ int main() {
     rillight_core_release_frame(first_audio);
     rillight_core_destroy(core);
     if (!ready || !audio_preserved) return 1;
+  }
+  // 1300 stereo PCM packets are about 5 MB, past the 4 MB pre-picture budget.
+  // The wanted picture is muxed after that audio, at 1.2 s. A seek to 1.1 s
+  // must keep decoding instead of failing with ENOBUFS.
+  auto seek_gap = make_seek_gap(1300);
+  {
+    RillightCoreIo io{&seek_gap, open, read, seek, close, cancel, cancel};
+    auto *core = rillight_core_create(&io);
+    assert(core && rillight_core_open(core, "seek-gap.mkv", 1) == 0);
+    RillightCoreSnapshot state{};
+    state.struct_size = sizeof(state);
+    const auto opened = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    do {
+      assert(rillight_core_snapshot(core, &state) == 0);
+      if (state.first_video_frame_ready) break;
+      std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    } while (std::chrono::steady_clock::now() < opened);
+    const uint64_t timeline = state.timeline_version;
+    std::printf("seek gap open: state=%d error=%d firstVideo=%d\n",
+                state.state, state.ffmpeg_error, state.first_video_frame_ready);
+    assert(state.first_video_frame_ready);
+    assert(rillight_core_seek(core, 1100000, 2) == 0);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    do {
+      while (auto *frame = rillight_core_take_frame(core, RILLIGHT_CORE_AUDIO_S16))
+        rillight_core_release_frame(frame);
+      assert(rillight_core_snapshot(core, &state) == 0);
+      if (state.state == RILLIGHT_CORE_FAILED) break;
+      if (state.timeline_version != timeline && state.first_video_frame_ready &&
+          state.ffmpeg_error == 0) break;
+      std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    } while (std::chrono::steady_clock::now() < deadline);
+    std::printf("seek gap: state=%d error=%d firstVideo=%d timeline=%llu\n",
+                state.state, state.ffmpeg_error, state.first_video_frame_ready,
+                static_cast<unsigned long long>(state.timeline_version));
+    const bool recovered = state.state != RILLIGHT_CORE_FAILED &&
+        state.ffmpeg_error == 0 && state.timeline_version != timeline &&
+        state.first_video_frame_ready;
+    rillight_core_destroy(core);
+    if (!recovered) return 6;
   }
   // Oversized preroll must fail with a bounded error, never wait for a sink
   // that cannot consume until the first video packet has been reached.

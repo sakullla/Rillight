@@ -42,6 +42,7 @@ abstract final class CatalogKeys {
   static const shelfSimilar = 'similar';
   static const shelfEpisodes = 'episodes';
   static const shelfChapters = 'chapters';
+  static const shelfAlbum = 'album';
 
   static Key item(String id) => Key('catalog-item-$id');
   static Key removeFromResume(String id) => Key('catalog-remove-resume-$id');

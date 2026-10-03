@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
@@ -5,10 +7,16 @@ import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
+import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/home/catalog_controller.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/home/featured_items.dart';
+import 'package:rillight/home/home_display_dialog.dart';
+import 'package:rillight/home/library_latest_row.dart';
+import 'package:rillight/home/library_tiles.dart';
+import 'package:rillight/home/phone_home_sections.dart';
 import 'package:rillight/media_image/media_image.dart';
 
 /// TV 首页 featured 区与行级焦点记忆的测试键(仅 TV 首页使用,不入桌面键表)。
@@ -20,101 +28,225 @@ abstract final class TvHomeKeys {
   static const featuredTitle = Key('tv-featured-title');
 }
 
-/// TV 首页:顶部手动 featured 横幅 + 四行货架,行级焦点记忆。
+/// TV 首页：轮播图、继续观看、下一集、片库入口和每个片库的最近添加。
+/// 顺序和显示与手机同一套。行级焦点记忆。
 ///
 /// featured 候选复用 [featuredHomeItems](继续观看优先,上限 5),只手动左右
 /// 切换不自动轮换;无候选时整区隐藏。切换控件在 AnimatedSwitcher 之外,快速
 /// 连按时焦点节点不被移除,焦点不跳出行/区。
-class TvHomePage extends StatelessWidget {
+class TvHomePage extends StatefulWidget {
   const TvHomePage({super.key});
+
+  @override
+  State<TvHomePage> createState() => _TvHomePageState();
+}
+
+class _TvHomePageState extends State<TvHomePage> {
+  var _loadedServerId = '';
+
+  PhoneHomeSectionController get _sections => PhoneHomeSectionController.app();
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final serverId = AuthScope.maybeOf(context)?.session?.server.id ?? '';
+    if (_loadedServerId == serverId) {
+      return;
+    }
+    _loadedServerId = serverId;
+    unawaited(_sections.load(serverId));
+  }
 
   @override
   Widget build(BuildContext context) {
     final c = CatalogScope.of(context), l = AppLocalizations.of(context);
+    final sections = _sections;
     return ListenableBuilder(
-      listenable: c,
+      listenable: Listenable.merge([c, sections]),
       builder: (context, _) {
         final featured = featuredHomeItems(c);
+        final showBanner = !sections.isHidden(PhoneHomeSectionId.banner);
+        final visible = sections.visibleIds(c.libraries);
+        final watching = continueWatchingItems(c.resume.items, c.nextUp.items);
+        final watchingIds = {for (final item in watching) item.id};
+        final nextUpItems = [
+          for (final item in c.nextUp.items)
+            if (!watchingIds.contains(item.id)) item,
+        ];
+        final hideResume = sections.isHidden(PhoneHomeSectionId.resume);
+        final hideNextUp = sections.isHidden(PhoneHomeSectionId.nextUp);
+        final resumeState = CatalogRowState(
+          items: watching,
+          loading: !hideResume && c.resume.loading && watching.isEmpty,
+          hidden:
+              hideResume ||
+              (watching.isEmpty && !c.resume.loading && c.resume.error == null),
+          error: hideResume || watching.isNotEmpty ? null : c.resume.error,
+          notice: hideResume ? null : c.resume.notice,
+        );
+        final nextUpState = CatalogRowState(
+          items: nextUpItems,
+          loading: !hideNextUp && c.nextUp.loading && nextUpItems.isEmpty,
+          hidden:
+              hideNextUp ||
+              (nextUpItems.isEmpty &&
+                  !c.nextUp.loading &&
+                  c.nextUp.error == null),
+          error: hideNextUp || nextUpItems.isNotEmpty ? null : c.nextUp.error,
+          notice: hideNextUp ? null : c.nextUp.notice,
+        );
+        final showLibraryEntry =
+            visible.contains(PhoneHomeSectionId.libraries) &&
+            c.libraries.isNotEmpty;
+        final librariesById = {
+          for (final library in c.libraries) library.id: library,
+        };
+        List<Widget> shelf(
+          String title,
+          CatalogRowState state,
+          String route,
+          String shelfId,
+        ) {
+          if (state.hidden) {
+            return const [];
+          }
+          return [
+            TvAction(
+              key: CatalogKeys.shelfMore(shelfId),
+              onPressed: state.items.isEmpty ? null : () => context.push(route),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Flexible(
+                    child: Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleLarge,
+                    ),
+                  ),
+                  if (state.items.isNotEmpty)
+                    Icon(
+                      Icons.chevron_right,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                ],
+              ),
+            ),
+            if (state.loading && state.items.isEmpty) const _TvRowSkeleton(),
+            if (state.error != null || state.notice != null)
+              TvFailure(
+                error: (state.error ?? state.notice)!,
+                retry: c.reloadHomeRows,
+              ),
+            if (state.items.isNotEmpty)
+              _TvFocusMemoryRow(title: title, items: state.items),
+            const SizedBox(height: 20),
+          ];
+        }
+
+        final sectionChildren = <Widget>[
+          for (final id in visible) ...[
+            if (id == PhoneHomeSectionId.banner &&
+                showBanner &&
+                featured.isNotEmpty) ...[
+              _TvFeatured(items: featured),
+              const SizedBox(height: 20),
+            ] else if (id == PhoneHomeSectionId.resume)
+              ...shelf(
+                l.resumeRow,
+                resumeState,
+                AppRoutes.shelfResume,
+                CatalogKeys.shelfResume,
+              )
+            else if (id == PhoneHomeSectionId.nextUp)
+              ...shelf(
+                l.nextUpRow,
+                nextUpState,
+                AppRoutes.shelfNextUp,
+                CatalogKeys.shelfNextUp,
+              )
+            else if (id == PhoneHomeSectionId.libraries && showLibraryEntry)
+              LibraryTiles(
+                libraries: c.libraries,
+                cardBuilder: (context, library, width, height) {
+                  return TvAction(
+                    key: CatalogKeys.library(library.id),
+                    onPressed: () =>
+                        context.push(AppRoutes.library(library.id)),
+                    child: SizedBox(
+                      width: width,
+                      height: height,
+                      child: LibraryCardFace(
+                        library: library,
+                        width: width,
+                        height: height,
+                      ),
+                    ),
+                  );
+                },
+              )
+            else if (PhoneHomeSectionId.libraryIdOf(id) case final libraryId?
+                when librariesById[libraryId] != null)
+              _TvLibraryLatest(library: librariesById[libraryId]!),
+          ],
+        ];
         return ListView(
           key: const PageStorageKey('tv-home'),
           children: [
-            if (featured.isNotEmpty) ...[
-              _TvFeatured(items: featured),
-              const SizedBox(height: 20),
-            ],
-            for (final row in [
-              (
-                l.resumeRow,
-                c.resume,
-                AppRoutes.shelfResume,
-                CatalogKeys.shelfResume,
-              ),
-              (
-                l.nextUpRow,
-                c.nextUp,
-                AppRoutes.shelfNextUp,
-                CatalogKeys.shelfNextUp,
-              ),
-              (
-                l.latestMoviesRow,
-                c.latestMovies,
-                AppRoutes.shelfLatestMovies,
-                CatalogKeys.shelfLatestMovies,
-              ),
-              (
-                l.latestSeriesRow,
-                c.latestSeries,
-                AppRoutes.shelfLatestSeries,
-                CatalogKeys.shelfLatestSeries,
-              ),
-            ])
-              if (!row.$2.hidden) ...[
-                TvAction(
-                  key: CatalogKeys.shelfMore(row.$4),
-                  onPressed: row.$2.items.isEmpty
-                      ? null
-                      : () => context.push(row.$3),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Flexible(
-                        child: Text(
-                          row.$1,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.titleLarge,
-                        ),
-                      ),
-                      if (row.$2.items.isNotEmpty)
-                        Icon(
-                          Icons.chevron_right,
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
-                    ],
-                  ),
-                ),
-                if (row.$2.loading && row.$2.items.isEmpty)
-                  const _TvRowSkeleton(),
-                if (row.$2.error != null || row.$2.notice != null)
-                  TvFailure(
-                    error: (row.$2.error ?? row.$2.notice)!,
-                    retry: c.reloadHomeRows,
-                  ),
-                if (row.$2.items.isNotEmpty)
-                  _TvFocusMemoryRow(title: row.$1, items: row.$2.items),
-                const SizedBox(height: 20),
-              ],
-            if ([
-              c.resume,
-              c.nextUp,
-              c.latestMovies,
-              c.latestSeries,
-            ].every((r) => r.hidden))
-              Text(l.mobileEmpty),
+            ...sectionChildren,
+            if (sectionChildren.isEmpty) Text(l.mobileEmpty),
+            TvAction(
+              key: const Key('tv-home-display'),
+              onPressed: () => showHomeDisplayDialog(context),
+              child: Text(l.phoneHomeEdit),
+            ),
             TvAction(
               onPressed: () => c.reload(showCachedFirst: false),
               child: Text(l.mobileRefresh),
             ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _TvLibraryLatest extends StatelessWidget {
+  const _TvLibraryLatest({required this.library});
+
+  final EmbyItem library;
+
+  @override
+  Widget build(BuildContext context) {
+    return LibraryLatestData(
+      library: library,
+      builder: (context, snapshot) {
+        if (!snapshot.loading &&
+            snapshot.error == null &&
+            snapshot.items.isEmpty) {
+          return const SizedBox.shrink();
+        }
+        return Column(
+          key: Key('tv-library-${library.id}'),
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TvAction(
+              onPressed: () => context.push(AppRoutes.library(library.id)),
+              child: Text(
+                library.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+            ),
+            if (snapshot.loading && snapshot.items.isEmpty)
+              const _TvRowSkeleton(),
+            if (snapshot.error != null)
+              TvFailure(error: snapshot.error!, retry: snapshot.retry),
+            if (snapshot.items.isNotEmpty)
+              _TvFocusMemoryRow(title: library.name, items: snapshot.items),
+            const SizedBox(height: 20),
           ],
         );
       },

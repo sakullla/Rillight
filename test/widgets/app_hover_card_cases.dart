@@ -43,6 +43,55 @@ Future<TestGesture> _hoverCard(WidgetTester tester) async {
 }
 
 void main() {
+  testWidgets('outer page scrolling clears hover on a nested shelf card', (
+    tester,
+  ) async {
+    final page = ScrollController();
+    addTearDown(page.dispose);
+    final highlights = <bool>[];
+    await tester.pumpWidget(
+      _wrap(
+        SizedBox(
+          width: 400,
+          height: 300,
+          child: ListView(
+            controller: page,
+            children: [
+              SizedBox(
+                height: 180,
+                child: ListView(
+                  scrollDirection: Axis.horizontal,
+                  children: [
+                    AppHoverCard(
+                      onTap: () {},
+                      onHighlighted: highlights.add,
+                      child: const SizedBox(width: 120, height: 180),
+                    ),
+                    const SizedBox(width: 600),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 1000),
+            ],
+          ),
+        ),
+      ),
+    );
+    await _hoverCard(tester);
+    expect(highlights, [true]);
+    final scrolling = page.animateTo(
+      30,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.linear,
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 16));
+    expect(highlights, [true, false]);
+    expect(_scale(tester).scale, 1);
+    await tester.pumpAndSettle();
+    await scrolling;
+  });
+
   testWidgets('hover scales the card up and shows the focus ring', (
     tester,
   ) async {

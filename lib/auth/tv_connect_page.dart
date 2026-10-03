@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/appearance_style.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/auth/connect_draft.dart';
 import 'package:rillight/auth/failure_message.dart';
@@ -100,7 +101,9 @@ class _TvConnectPageState extends State<TvConnectPage> {
       back: widget.addingAnother,
       child: Center(
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 680),
+          constraints: BoxConstraints(
+            maxWidth: AppViewport.dp(680, MediaQuery.sizeOf(context)),
+          ),
           child: ListenableBuilder(
             listenable: appearance == null
                 ? auth

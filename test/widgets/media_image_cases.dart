@@ -334,6 +334,108 @@ void main() {
     servers: MemoryServerListStore(),
   );
 
+  testWidgets('card crop fills mismatched artwork without refetching it', (
+    tester,
+  ) async {
+    final client = _ControlledImageClient()..hold = true;
+    final auth = detachedAuth(client);
+    final boundaryKey = GlobalKey();
+    final bytes = (await tester.runAsync(() async {
+      final recorder = ui.PictureRecorder();
+      final canvas = Canvas(recorder);
+      canvas.drawColor(const Color(0xFFFF0000), BlendMode.src);
+      final picture = recorder.endRecording();
+      final image = await picture.toImage(48, 24);
+      final data = await image.toByteData(format: ui.ImageByteFormat.png);
+      image.dispose();
+      picture.dispose();
+      return data!.buffer.asUint8List();
+    }))!;
+    Widget subject(BoxFit fit) => wrap(
+      auth,
+      RepaintBoundary(
+        key: boundaryKey,
+        child: ColoredBox(
+          color: Colors.black,
+          child: MediaImage(item: withTag, width: 120, height: 180, fit: fit),
+        ),
+      ),
+    );
+    Future<List<int>> topPixel() async {
+      final boundary = tester.renderObject<RenderRepaintBoundary>(
+        find.byKey(boundaryKey),
+      );
+      return (await tester.runAsync(() async {
+        final image = await boundary.toImage();
+        final data = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+        image.dispose();
+        final offset = (10 * 120 + 60) * 4;
+        return data!.buffer.asUint8List().sublist(offset, offset + 4);
+      }))!;
+    }
+
+    await tester.pumpWidget(subject(BoxFit.contain));
+    await tester.pump();
+    client.pending['img-movie']!.complete(bytes);
+    await pumpUntilImage(tester);
+    expect(await topPixel(), [0, 0, 0, 255]);
+    await tester.pumpWidget(subject(BoxFit.cover));
+    await tester.pump();
+    expect(await topPixel(), [255, 0, 0, 255]);
+    expect(client.requested, ['img-movie']);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('nested shelf waits until its row enters the page viewport', (
+    tester,
+  ) async {
+    final client = _ControlledImageClient()..hold = true;
+    final auth = detachedAuth(client);
+    final page = ScrollController();
+    addTearDown(page.dispose);
+    MediaImageCache.instance.markScrollActivity();
+    await tester.pumpWidget(
+      wrap(
+        auth,
+        SizedBox(
+          width: 240,
+          height: 200,
+          child: MediaImageScrollListener(
+            child: ListView(
+              controller: page,
+              scrollCacheExtent: const ScrollCacheExtent.pixels(600),
+              children: [
+                const SizedBox(height: 300),
+                SizedBox(
+                  height: 180,
+                  child: ListView(
+                    scrollDirection: Axis.horizontal,
+                    children: [
+                      MediaImage(item: withTag, width: 120, height: 180),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 300),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(find.byType(MediaImage, skipOffstage: false), findsOneWidget);
+    expect(client.requested, isEmpty, reason: 'cached row is outside the page');
+    page.jumpTo(300);
+    await tester.pump();
+    await tester.pump();
+    expect(client.requested, ['img-movie']);
+    client.pending['img-movie']!.complete(kTinyPng);
+    await pumpUntilImage(tester);
+    expect(find.byType(Image), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(MediaImageCache.defaultScrollIdle);
+  });
+
   testWidgets(
     'attached player client loads and isolates endpoint, user and logout',
     (tester) async {

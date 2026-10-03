@@ -7,6 +7,7 @@ import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_chrome.dart';
 import 'package:rillight/app/mobile_motion.dart';
 import 'package:rillight/app/mobile_shell.dart';
+import 'package:rillight/app/mobile_widgets.dart';
 import 'package:rillight/app/phone_libraries_tab.dart';
 import 'package:rillight/app/phone_mine_page.dart';
 import 'package:rillight/app/routes.dart';
@@ -609,6 +610,11 @@ void main() {
       expect(find.text('已看 0%'), findsNothing);
       expect(find.byKey(const Key('mobile-search-failure')), findsNothing);
 
+      // A long result set only mounts cards near the viewport. Previously the
+      // nested shrink-wrapped grid built every result, including offscreen art.
+      expect(find.text('Page 49'), findsNothing);
+      final mountedCards = find.byType(PhoneGridPosterCard).evaluate().length;
+      expect(mountedCards, lessThan(20));
       final beforeMore = searchRequests();
       server.searchStatus = 503;
       scrollOf().jumpTo(scrollOf().maxScrollExtent);
@@ -621,7 +627,7 @@ void main() {
         findsOneWidget,
       );
       expect(find.byKey(const Key('mobile-search-page-retry')), findsOneWidget);
-      expect(find.text('Page 00'), findsWidgets);
+      expect(find.text('Page 49'), findsWidgets);
       expect(find.text('Page 50'), findsNothing);
       expect(find.byKey(const Key('mobile-search-failure')), findsNothing);
       expect(find.byKey(const Key('mobile-search-empty')), findsNothing);
@@ -629,12 +635,18 @@ void main() {
       expect(find.text('没有结果'), findsNothing);
       expect(searchRequests(), greaterThan(beforeMore));
 
+      scrollOf().jumpTo(0);
+      await tester.pumpAndSettle();
+      expect(find.text('Page 00'), findsOneWidget);
+
       server.searchStatus = null;
       scrollOf().jumpTo(scrollOf().maxScrollExtent);
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('mobile-search-page-retry')));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('mobile-search-page-failure')), findsNothing);
+      scrollOf().jumpTo(scrollOf().maxScrollExtent);
+      await tester.pumpAndSettle();
       expect(find.text('Page 54'), findsWidgets);
       expect(tester.takeException(), isNull);
     },

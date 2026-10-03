@@ -15,13 +15,17 @@ Future<String?> showMoreLibrariesDialog({
     builder: (context) {
       final theme = Theme.of(context);
       final l10n = AppLocalizations.of(context);
+      final viewport = MediaQuery.sizeOf(context);
       return Dialog(
         backgroundColor: theme.colorScheme.surface,
         elevation: 0,
         child: LiquidGlass(
           kind: LiquidGlassKind.panel,
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 360, maxHeight: 320),
+            constraints: BoxConstraints(
+              maxWidth: AppViewport.fit(360, viewport.width - 64, viewport),
+              maxHeight: AppViewport.fit(320, viewport.height * 0.8, viewport),
+            ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -170,6 +174,7 @@ class _LibraryNavDialogState extends State<_LibraryNavDialog> {
     final l10n = AppLocalizations.of(context);
     final pinnedLibraries = _pinnedLibraries;
     final unchecked = _uncheckedLibraries;
+    final viewport = MediaQuery.sizeOf(context);
     return AlertDialog(
       backgroundColor: Theme.of(context).colorScheme.surface,
       elevation: 0,
@@ -183,8 +188,8 @@ class _LibraryNavDialogState extends State<_LibraryNavDialog> {
           AppSpacing.md,
         ),
         child: SizedBox(
-          width: 480,
-          height: 480,
+          width: AppViewport.fit(480, viewport.width - 80, viewport),
+          height: AppViewport.fit(480, viewport.height * 0.8, viewport),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [

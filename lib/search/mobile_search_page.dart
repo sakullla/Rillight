@@ -14,6 +14,7 @@ import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_failure.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/library/catalog_filter_button.dart';
+import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/search/search_controller.dart';
 
 /// 手机搜索：输入即搜。剧集和电影都走 [AppRoutes.item]，由详情页按类型分画面。
@@ -215,43 +216,75 @@ class _SearchBody extends StatelessWidget {
     }
     return RefreshIndicator(
       onRefresh: () => c.submit(c.term),
-      child: ListView(
-        key: const PageStorageKey<String>('mobile-search-scroll'),
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: EdgeInsets.fromLTRB(
-          AppSpacing.md,
-          AppSpacing.md,
-          AppSpacing.md,
-          AppSpacing.md + phoneScrollClearance(context),
-        ),
-        children: [
-          if (c.refreshingFirstPage)
-            const LinearProgressIndicator(key: Key('mobile-search-refreshing')),
-          if (c.loadingMore) const LinearProgressIndicator(),
-          if (c.error != null)
-            _PageFailure(
-              key: const Key('mobile-search-refresh-failure'),
-              message: searchFailureMessage(label, c.error!),
-              onRetry: () => c.submit(c.term),
-              retryKey: const Key('mobile-search-refresh-retry'),
-            ),
-          _ResultGrid(items: c.items),
-          if (c.pageError != null)
-            _PageFailure(
-              key: const Key('mobile-search-page-failure'),
-              message: searchFailureMessage(label, c.pageError!),
-              onRetry: c.loadMore,
-            ),
-          if (c.pageError == null && c.hasMore && c.liveFirstPageReady)
-            FilledButton(
-              key: const Key('mobile-search-load-more'),
-              style: FilledButton.styleFrom(
-                minimumSize: const Size(AppSpacing.huge, AppSpacing.huge),
+      child: MediaImageScrollListener(
+        child: LayoutBuilder(
+          builder: (context, constraints) => CustomScrollView(
+            key: const PageStorageKey<String>('mobile-search-scroll'),
+            physics: const AlwaysScrollableScrollPhysics(),
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+            slivers: [
+              SliverPadding(
+                padding: EdgeInsets.fromLTRB(
+                  AppSpacing.md,
+                  AppSpacing.md,
+                  AppSpacing.md,
+                  AppSpacing.md + phoneScrollClearance(context),
+                ),
+                sliver: SliverMainAxisGroup(
+                  slivers: [
+                    if (c.refreshingFirstPage)
+                      const SliverToBoxAdapter(
+                        child: LinearProgressIndicator(
+                          key: Key('mobile-search-refreshing'),
+                        ),
+                      ),
+                    if (c.error != null)
+                      SliverToBoxAdapter(
+                        child: _PageFailure(
+                          key: const Key('mobile-search-refresh-failure'),
+                          message: searchFailureMessage(label, c.error!),
+                          onRetry: () => c.submit(c.term),
+                          retryKey: const Key('mobile-search-refresh-retry'),
+                        ),
+                      ),
+                    _ResultGrid(
+                      items: c.items,
+                      width: constraints.maxWidth - AppSpacing.md * 2,
+                    ),
+                    if (c.loadingMore)
+                      const SliverToBoxAdapter(
+                        child: LinearProgressIndicator(),
+                      ),
+                    if (c.pageError != null)
+                      SliverToBoxAdapter(
+                        child: _PageFailure(
+                          key: const Key('mobile-search-page-failure'),
+                          message: searchFailureMessage(label, c.pageError!),
+                          onRetry: c.loadMore,
+                        ),
+                      ),
+                    if (c.pageError == null &&
+                        c.hasMore &&
+                        c.liveFirstPageReady)
+                      SliverToBoxAdapter(
+                        child: FilledButton(
+                          key: const Key('mobile-search-load-more'),
+                          style: FilledButton.styleFrom(
+                            minimumSize: const Size(
+                              AppSpacing.huge,
+                              AppSpacing.huge,
+                            ),
+                          ),
+                          onPressed: c.loadingMore ? null : c.loadMore,
+                          child: Text(label.mobileLoadMore),
+                        ),
+                      ),
+                  ],
+                ),
               ),
-              onPressed: c.loadingMore ? null : c.loadMore,
-              child: Text(label.mobileLoadMore),
-            ),
-        ],
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -327,22 +360,38 @@ class _PageFailure extends StatelessWidget {
 }
 
 class _ResultGrid extends StatelessWidget {
-  const _ResultGrid({required this.items});
+  const _ResultGrid({required this.items, required this.width});
 
   final List<EmbyItem> items;
+  final double width;
 
   @override
   Widget build(BuildContext context) {
-    return MobileGrid(
-      items: items,
+    const spacing = AppSpacing.md;
+    final columns = mobileGridColumnCount(
+      width,
+      textScale: MediaQuery.textScalerOf(context).scale(16) / 16,
+    );
+    final cellWidth = (width - spacing * (columns - 1)) / columns;
+    return SliverGrid.builder(
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: columns,
+        mainAxisSpacing: spacing,
+        crossAxisSpacing: spacing,
+        mainAxisExtent: cellWidth * 1.5 + phonePosterCardLabelExtent(context),
+      ),
+      itemCount: items.length,
       // 结果卡与首页同规范(ADR-3);搜索 tab 与首页同导航栈共存,且同一
       // 条目可能同时出现在首页飞行海报里,这里不走 Hero、直 push 详情。
-      itemBuilder: (context, item) => PhoneGridPosterCard(
-        key: Key('mobile-search-item-${item.id}'),
-        item: item,
-        hero: false,
-        onTap: () => context.push(AppRoutes.item(item.id)),
-      ),
+      itemBuilder: (context, index) {
+        final item = items[index];
+        return PhoneGridPosterCard(
+          key: Key('mobile-search-item-${item.id}'),
+          item: item,
+          hero: false,
+          onTap: () => context.push(AppRoutes.item(item.id)),
+        );
+      },
     );
   }
 }

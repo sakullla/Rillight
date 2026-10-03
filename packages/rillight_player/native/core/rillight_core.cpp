@@ -836,6 +836,10 @@ struct RillightCoreImpl {
   bool play_intent = true;
   bool first_video = false;
   bool first_audio = false;
+  // Video lane progress for the current timeline. Seek recovery uses this to
+  // decide whether a full audio queue can wait for a picture.
+  int video_packets_pending = 0;
+  bool video_decode_busy = false;
   bool eof = false;
   bool input_exhausted = false;
   bool output_drained = false;
@@ -2481,9 +2485,32 @@ class DecodeLane {
     }
     if (cost > budget_) return AVERROR(ENOBUFS);
     std::unique_lock lock(core_->mutex);
+    const auto video_has_work = [&] {
+      return core_->video_packets_pending > 0 || core_->video_decode_busy;
+    };
     if (type_ == RILLIGHT_CORE_AUDIO_S16 && core_->video_index >= 0 &&
-        !core_->first_video && (bytes_ + cost > budget_ || queue_.size() >= 2048))
-      return AVERROR(ENOBUFS);
+        !core_->first_video && (bytes_ + cost > budget_ || queue_.size() >= 2048)) {
+      // PCM is withheld until the first picture. If video is already queued
+      // or decoding, let it finish even on cold open: the demux thread can fill
+      // this queue before the video lane gets CPU time. With no video work,
+      // cold open fails boundedly; seek recovery skips excess preroll instead
+      // of waiting for audio space that cannot become available yet.
+      if (!packet) return AVERROR(ENOBUFS);
+      if (video_has_work()) {
+        core_->wake.wait(lock, [&] {
+          return stopped_ || core_->stop || core_->decode_abort ||
+              core_->timeline != timeline || core_->first_video ||
+              !video_has_work() ||
+              (enabled_ && bytes_ + cost <= budget_ && queue_.size() < 2048);
+        });
+      }
+      if (stopped_ || core_->stop || core_->decode_abort ||
+          core_->timeline != timeline) return 0;
+      if (!core_->first_video && !video_has_work() &&
+          (bytes_ + cost > budget_ || queue_.size() >= 2048)) {
+        return core_->state == RILLIGHT_CORE_RECOVERING ? 0 : AVERROR(ENOBUFS);
+      }
+    }
     core_->wake.wait(lock, [&] {
       return stopped_ || core_->stop || core_->decode_abort ||
           core_->timeline != timeline ||
@@ -2493,6 +2520,8 @@ class DecodeLane {
         core_->timeline != timeline) return 0;
     auto *copy = packet ? av_packet_clone(packet) : nullptr;
     if (packet && !copy) return AVERROR(ENOMEM);
+    if (type_ == RILLIGHT_CORE_VIDEO_RGBA && packet)
+      core_->video_packets_pending++;
     queue_.push_back({copy, timeline, cost});
     bytes_ += cost;
     core_->wake.notify_all();
@@ -2532,6 +2561,7 @@ class DecodeLane {
     for (auto &packet : queue_) av_packet_free(&packet.value);
     queue_.clear();
     bytes_ = 0;
+    if (type_ == RILLIGHT_CORE_VIDEO_RGBA) core_->video_packets_pending = 0;
   }
   void Run() {
     for (;;) {
@@ -2551,12 +2581,16 @@ class DecodeLane {
         packet = queue_.front();
         queue_.pop_front();
         bytes_ -= packet.cost;
+        if (type_ == RILLIGHT_CORE_VIDEO_RGBA && packet.value &&
+            core_->video_packets_pending > 0)
+          core_->video_packets_pending--;
         core_->wake.notify_all();
         if (packet.timeline != core_->timeline) {
           av_packet_free(&packet.value);
           continue;
         }
         busy_ = true;
+        if (type_ == RILLIGHT_CORE_VIDEO_RGBA) core_->video_decode_busy = true;
       }
       int result;
       try { result = decode_(packet.value, packet.timeline); }
@@ -2566,6 +2600,7 @@ class DecodeLane {
       {
         std::lock_guard lock(core_->mutex);
         busy_ = false;
+        if (type_ == RILLIGHT_CORE_VIDEO_RGBA) core_->video_decode_busy = false;
         if (result < 0 && packet.timeline == core_->timeline && !core_->stop) {
           int expected = 0;
           core_->decode_error.compare_exchange_strong(expected, result);
@@ -3263,8 +3298,17 @@ void run(RillightCoreImpl *core, uint64_t session) {
       av_packet_free(&packet);
       {
         std::lock_guard lock(core->mutex);
-        if (core->state == RILLIGHT_CORE_PLAYING)
+        // A stalled demuxer must not freeze frames already queued for future
+        // presentation. Otherwise their deadlines can never be reached, and
+        // no new decoded frame may arrive to resume the playback clock.
+        const int64_t position = playback_position(core);
+        if (core->state == RILLIGHT_CORE_PLAYING && core->video.empty() &&
+            core->audio.empty() &&
+            (!core->audio_clock_active || position >= core->audio_clock_limit)) {
+          core->base_position = position;
+          core->base_time = Clock::now();
           core->state = RILLIGHT_CORE_BUFFERING;
+        }
       }
       std::this_thread::sleep_for(std::chrono::milliseconds(20));
       continue;

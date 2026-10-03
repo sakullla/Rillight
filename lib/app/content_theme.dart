@@ -49,15 +49,22 @@ class _ContentThemeState extends State<ContentTheme> {
 
   void _report(String itemId, String identity, Uint8List bytes) {
     if (itemId != widget.item?.id) return;
-    final base = Theme.of(context).brightness == Brightness.dark
+    final brightness = Theme.of(context).brightness;
+    final token = '$identity/${brightness.name}';
+    if (_identity == token) return;
+    final base = brightness == Brightness.dark
         ? AppTheme.dark().colorScheme
         : AppTheme.light().colorScheme;
-    final token = '$identity/${base.brightness.name}';
-    if (_identity == token) return;
     _identity = token;
     final generation = ++_generation;
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted || generation != _generation) return;
+      // Displaying the poster takes priority over optional palette extraction.
+      // Disposed content must not start another decode after the wait.
+      if (!ContentTheme._schemes.containsKey(token)) {
+        await MediaImageCache.instance.waitForScrollIdle();
+        if (!mounted || generation != _generation) return;
+      }
       final scheme =
           ContentTheme._schemes[token] ??
           await ContentTheme._pending.putIfAbsent(
@@ -83,8 +90,13 @@ class _ContentThemeState extends State<ContentTheme> {
           preferParentBackdrop: widget.preferParentBackdrop,
         ) ??
         const <ItemImageRef>[];
-    final owner =
-        '${mediaImageAccountScope(auth)}/${item?.id}/${theme.brightness}/${refs.map((r) => '${r.itemId}:${r.type}:${r.tag}').join('|')}';
+    final preferred = refs.firstOrNull;
+    // Episodes commonly share a series backdrop. Keep its palette through an
+    // episode change; only a different artwork source invalidates the theme.
+    final source = preferred == null
+        ? 'item:${item?.id}'
+        : '${preferred.itemId}:${preferred.type}:${preferred.tag}';
+    final owner = '${mediaImageAccountScope(auth)}/${theme.brightness}/$source';
     final sourceChanged = _owner != owner;
     if (sourceChanged) {
       _owner = owner;
@@ -129,7 +141,33 @@ class _ContentThemeState extends State<ContentTheme> {
         ),
       ),
       chipTheme: theme.chipTheme.copyWith(
+        // A flat ActionChip otherwise paints the inherited canvas color,
+        // which still belongs to the application rather than this artwork.
+        backgroundColor: scheme.surfaceContainerHigh,
+        disabledColor: scheme.surfaceContainer,
         selectedColor: scheme.primaryContainer,
+        labelStyle: theme.textTheme.labelLarge?.copyWith(
+          color: WidgetStateColor.resolveWith((states) {
+            if (states.contains(WidgetState.disabled)) {
+              return scheme.onSurface.withValues(alpha: .38);
+            }
+            return states.contains(WidgetState.selected)
+                ? scheme.onPrimaryContainer
+                : scheme.onSurface;
+          }),
+        ),
+        side: WidgetStateBorderSide.resolveWith((states) {
+          if (states.contains(WidgetState.focused)) {
+            return BorderSide(color: scheme.primary, width: 2);
+          }
+          return BorderSide(
+            color: states.contains(WidgetState.disabled)
+                ? scheme.onSurface.withValues(alpha: .12)
+                : scheme.outlineVariant,
+          );
+        }),
+        checkmarkColor: scheme.onPrimaryContainer,
+        surfaceTintColor: Colors.transparent,
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: theme.outlinedButtonTheme.style?.copyWith(

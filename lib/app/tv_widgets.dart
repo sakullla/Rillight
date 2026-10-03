@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
-import 'package:rillight/app/content_theme.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/auth/failure_message.dart';
@@ -375,32 +374,25 @@ class TvPoster extends StatelessWidget {
   final int imageMaxWidth;
   final FocusNode? focusNode;
   @override
-  Widget build(BuildContext context) => ContentTheme(
-    item: item,
-    preferBackdrop: false,
-    fillSurface: false,
-    child: Builder(
-      builder: (context) => TvAction(
-        autofocus: autofocus,
-        focusNode: focusNode,
-        onPressed: () => context.push(AppRoutes.item(item.id)),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Expanded(
-              child: RepaintBoundary(
-                child: MediaImage(
-                  item: item,
-                  maxWidth: imageMaxWidth,
-                  contributesToTheme: true,
-                ),
-              ),
+  Widget build(BuildContext context) => TvAction(
+    autofocus: autofocus,
+    focusNode: focusNode,
+    onPressed: () => context.push(AppRoutes.item(item.id)),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Expanded(
+          child: RepaintBoundary(
+            child: MediaImage(
+              item: item,
+              maxWidth: imageMaxWidth,
+              fit: BoxFit.cover,
             ),
-            const SizedBox(height: 8),
-            Text(item.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-          ],
+          ),
         ),
-      ),
+        const SizedBox(height: 8),
+        Text(item.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+      ],
     ),
   );
 }
@@ -517,7 +509,11 @@ class TvInput extends StatelessWidget {
           builder: (context) => AlertDialog(
             title: Text(label),
             content: SizedBox(
-              width: 600,
+              width: AppViewport.fit(
+                600,
+                MediaQuery.sizeOf(context).width - 96,
+                MediaQuery.sizeOf(context),
+              ),
               child: TextField(
                 key: const Key('tv-input-editor'),
                 controller: controller,

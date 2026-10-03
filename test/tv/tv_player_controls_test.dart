@@ -5,6 +5,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/theme.dart';
+import 'package:rillight/app/tv_widgets.dart';
+import 'package:rillight/player/player_keys.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/emby/emby_client.dart';
@@ -105,6 +107,42 @@ void main() {
         .controller!;
   }
 
+  testWidgets('TV completion focuses replay and remote can replay or close', (
+    tester,
+  ) async {
+    final backend = FakeVideoBackend(duration: const Duration(minutes: 148));
+    final current = await start(tester, backend);
+    backend.completePlayback();
+    await tester.pumpAndSettle();
+    expect(find.byKey(PlayerKeys.playbackEnded), findsOneWidget);
+    expect(
+      tester
+          .widget<TvAction>(find.byKey(PlayerKeys.replay))
+          .focusNode!
+          .hasFocus,
+      isTrue,
+    );
+    final opens = backend.openCount;
+    await tester.sendKeyEvent(LogicalKeyboardKey.select);
+    await tester.pumpAndSettle();
+    expect(current.playbackEnded, isFalse);
+    expect(backend.openCount, greaterThan(opens));
+    backend.completePlayback();
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.select);
+    for (
+      var i = 0;
+      i < 40 && find.byType(TvPlayerPage).evaluate().isNotEmpty;
+      i++
+    ) {
+      await tester.pump(const Duration(milliseconds: 200));
+    }
+    expect(find.byType(TvPlayerPage), findsNothing);
+    expect(find.text('open'), findsOneWidget);
+  }, tags: ['integration']);
+
   Future<void> key(WidgetTester tester, LogicalKeyboardKey key) async {
     await tester.sendKeyEvent(key);
     await tester.pumpAndSettle();
@@ -146,7 +184,7 @@ void main() {
       for (final key in ['tv-player-quality', 'tv-player-source']) {
         expect(find.byKey(Key(key)), findsNothing);
       }
-      expect(find.byKey(const Key('tv-player-tracks')), findsOneWidget);
+      expect(find.byKey(const Key('tv-player-tracks')), findsNothing);
       expect(find.byKey(const Key('tv-player-speed')), findsOneWidget);
       expect(tester.takeException(), isNull);
       await finish(tester);

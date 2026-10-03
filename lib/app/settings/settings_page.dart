@@ -291,8 +291,11 @@ class _SettingsPageState extends State<SettingsPage> {
           alignment: Alignment.topCenter,
           child: ConstrainedBox(
             key: SettingsPage.columnKey,
-            constraints: const BoxConstraints(
-              maxWidth: SettingsPage.columnMaxWidth,
+            constraints: BoxConstraints(
+              maxWidth: AppViewport.dp(
+                SettingsPage.columnMaxWidth,
+                MediaQuery.sizeOf(context),
+              ),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,

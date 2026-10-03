@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/widgets.dart';
 
 /// 4pt 栅格间距 token。统一全应用留白节奏。
@@ -57,6 +59,73 @@ abstract final class AppMotion {
 abstract final class AppBreakpoints {
   static const double compact = 960;
   static const double large = 1440;
+}
+
+/// 浮层按 1080p 窗口（1920×1080 逻辑像素）设计。
+///
+/// 窗口两边都大于这块设计尺寸时，按较短一边的比例放大，到 4K（2 倍）封顶。
+/// 更小的窗口保持设计尺寸，调用方再夹进可见区域。
+///
+/// [MediaQuery.size] 已经是逻辑像素，Windows 显示缩放算在里面。
+/// 4K 屏若系统缩放为 200%，逻辑尺寸与 1080p 相同，这里保持 1，不再放大第二次。
+abstract final class AppViewport {
+  static const double designWidth = 1920;
+  static const double designHeight = 1080;
+  static const double maxScale = 2;
+
+  static double scaleOf(Size viewport) {
+    final scale = math.min(
+      viewport.width / designWidth,
+      viewport.height / designHeight,
+    );
+    if (scale <= 1) return 1;
+    return math.min(scale, maxScale);
+  }
+
+  static double dp(double design, Size viewport) => design * scaleOf(viewport);
+
+  /// 剧集页正文的放大。浮层可以到 2 倍，正文只走这段的 65%，
+  /// 4K 约为 1.65 倍：字能看清，一季仍比 1080p 多露出几集。
+  ///
+  /// 1080p 及更小的窗口保持 1，沿用已经收紧的分集行。
+  static double readingScaleOf(Size viewport) {
+    final scale = scaleOf(viewport);
+    if (scale <= 1) return 1;
+    return 1 + (scale - 1) * 0.65;
+  }
+
+  /// 把剧集页包进放大后的文字缩放。图片和纯图标不跟着文字缩放，调用方另算。
+  static Widget readingScope({required bool enabled, required Widget child}) {
+    return _ReadingScope(enabled: enabled, child: child);
+  }
+
+  /// 设计尺寸放大后，不超过 [available]。
+  static double fit(double design, double available, Size viewport) {
+    final room = available < 0 ? 0.0 : available;
+    final scaled = dp(design, viewport);
+    return scaled < room ? scaled : room;
+  }
+}
+
+class _ReadingScope extends StatelessWidget {
+  const _ReadingScope({required this.enabled, required this.child});
+
+  final bool enabled;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!enabled) return child;
+    final factor = AppViewport.readingScaleOf(MediaQuery.sizeOf(context));
+    if (factor == 1) return child;
+    final current = MediaQuery.textScalerOf(context);
+    return MediaQuery(
+      data: MediaQuery.of(
+        context,
+      ).copyWith(textScaler: TextScaler.linear(current.scale(1) * factor)),
+      child: child,
+    );
+  }
 }
 
 /// 海报/剧照之上的实色遮罩 token:渐变与底衬的 alpha、stop 与高度。

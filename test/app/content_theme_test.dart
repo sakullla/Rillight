@@ -7,9 +7,172 @@ import 'package:rillight/app/content_theme.dart';
 import 'package:rillight/app/artwork_color_scope.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/app/theme.dart';
+import 'package:rillight/media_image/media_image.dart';
 
 void main() {
+  testWidgets('episodes sharing a backdrop keep their resolved palette', (
+    tester,
+  ) async {
+    ContentTheme.debugClear();
+    final bytes = (await tester.runAsync(() => _solidPng(Colors.red)))!;
+    late ArtworkColorScope report;
+    late ColorScheme scheme;
+    Widget page(String episode, String backdrop) => MaterialApp(
+      theme: AppTheme.dark(),
+      home: ContentTheme(
+        item: EmbyItem(
+          id: episode,
+          name: '',
+          type: 'Episode',
+          parentBackdropItemId: 'series',
+          parentBackdropImageTag: backdrop,
+        ),
+        preferParentBackdrop: true,
+        child: Builder(
+          builder: (context) {
+            report = ArtworkColorScope.maybeOf(context)!;
+            scheme = Theme.of(context).colorScheme;
+            return const SizedBox();
+          },
+        ),
+      ),
+    );
+    await tester.pumpWidget(page('episode-1', 'shared'));
+    report.report('episode-1', 'shared-backdrop', bytes);
+    await _settlePalette(tester);
+    final resolved = scheme;
+    expect(resolved.primary, isNot(AppTheme.dark().colorScheme.primary));
+    await tester.pumpWidget(page('episode-2', 'shared'));
+    expect(scheme, resolved);
+    await tester.pumpWidget(page('episode-2', 'replacement'));
+    expect(scheme, AppTheme.dark().colorScheme);
+  });
+
+  testWidgets('artwork palette waits for scrolling to become idle', (
+    tester,
+  ) async {
+    ContentTheme.debugClear();
+    addTearDown(MediaImage.debugResetCacheConfiguration);
+    final red = (await tester.runAsync(() => _solidPng(Colors.red)))!;
+    late ArtworkColorScope report;
+    late ColorScheme scheme;
+    var builds = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.dark(),
+        home: ContentTheme(
+          item: const EmbyItem(id: 'poster', name: '', type: 'Movie'),
+          child: Builder(
+            builder: (context) {
+              builds++;
+              report = ArtworkColorScope.maybeOf(context)!;
+              scheme = Theme.of(context).colorScheme;
+              return const SizedBox();
+            },
+          ),
+        ),
+      ),
+    );
+    final before = builds;
+    MediaImageCache.instance.markScrollActivity();
+    report.report('poster', 'scroll-palette', red);
+    await tester.pump(const Duration(milliseconds: 20));
+    expect(scheme, AppTheme.dark().colorScheme);
+    expect(builds, before);
+    await _settlePalette(tester);
+    expect(scheme.primary, isNot(AppTheme.dark().colorScheme.primary));
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   for (final brightness in Brightness.values) {
+    testWidgets('chips follow artwork and preserve focus in $brightness', (
+      tester,
+    ) async {
+      ContentTheme.debugClear();
+      final focus = FocusNode();
+      addTearDown(focus.dispose);
+      late ArtworkColorScope report;
+      late ColorScheme scheme;
+      var taps = 0;
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: brightness == Brightness.dark
+              ? AppTheme.dark()
+              : AppTheme.light(),
+          home: Scaffold(
+            body: ContentTheme(
+              item: const EmbyItem(id: 'genre', name: '', type: 'Movie'),
+              child: Builder(
+                builder: (context) {
+                  report = ArtworkColorScope.maybeOf(context)!;
+                  scheme = Theme.of(context).colorScheme;
+                  return Wrap(
+                    children: [
+                      ActionChip(
+                        focusNode: focus,
+                        label: const Text('动作冒险'),
+                        onPressed: () => taps++,
+                      ),
+                      ChoiceChip(
+                        label: const Text('已选择'),
+                        selected: true,
+                        onSelected: (_) {},
+                      ),
+                      const ActionChip(label: Text('不可用')),
+                    ],
+                  );
+                },
+              ),
+            ),
+          ),
+        ),
+      );
+      ShapeDecoration chipDecoration(String label) =>
+          tester
+                  .widget<Ink>(
+                    find
+                        .descendant(
+                          of: find.widgetWithText(RawChip, label),
+                          matching: find.byType(Ink),
+                        )
+                        .first,
+                  )
+                  .decoration!
+              as ShapeDecoration;
+      Color labelColor(String label) => tester
+          .widget<RichText>(
+            find.descendant(
+              of: find.text(label),
+              matching: find.byType(RichText),
+            ),
+          )
+          .text
+          .style!
+          .color!;
+      for (final color in [Colors.red, Colors.blue, Colors.green]) {
+        final bytes = (await tester.runAsync(() => _solidPng(color)))!;
+        report.report('genre', 'genre-$brightness-$color', bytes);
+        await _settlePalette(tester);
+        final background = chipDecoration('动作冒险').color!;
+        expect(background, scheme.surfaceContainerHigh);
+        expect(labelColor('动作冒险'), scheme.onSurface);
+        expect(_contrast(labelColor('动作冒险'), background), greaterThan(4.5));
+        expect(chipDecoration('已选择').color, scheme.primaryContainer);
+        expect(labelColor('已选择'), scheme.onPrimaryContainer);
+        expect(chipDecoration('不可用').color, scheme.surfaceContainer);
+        focus.requestFocus();
+        await tester.pumpAndSettle();
+        expect(
+          (chipDecoration('动作冒险').shape as OutlinedBorder).side,
+          BorderSide(color: scheme.primary, width: 2),
+        );
+        focus.unfocus();
+        await tester.pumpAndSettle();
+      }
+      await tester.tap(find.text('动作冒险'));
+      expect(taps, 1);
+    });
+
     for (final seed in [Colors.red, Colors.yellow, Colors.black]) {
       test('artwork $seed uses paired $brightness content tones', () {
         final base = brightness == Brightness.dark

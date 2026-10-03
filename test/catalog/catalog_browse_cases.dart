@@ -62,7 +62,7 @@ void main() {
       if (home.evaluate().isNotEmpty) {
         await tester.tap(home);
         await settle(tester);
-        return;
+        break;
       }
       final back = find.byKey(CatalogKeys.back);
       if (back.evaluate().isEmpty) {
@@ -71,11 +71,71 @@ void main() {
       await tester.tap(back);
       await settle(tester);
     }
+    final vertical = find.descendant(
+      of: find.byKey(const PageStorageKey<String>('home-scroll')),
+      matching: find.byWidgetPredicate(
+        (widget) =>
+            widget is Scrollable && widget.axisDirection == AxisDirection.down,
+      ),
+    );
+    if (vertical.evaluate().isEmpty) {
+      return;
+    }
+    tester.state<ScrollableState>(vertical).position.jumpTo(0);
+    await tester.pump();
+  }
+
+  /// 首页只构建视口附近的分栏，片库行也只构建露出的卡片。
+  Future<void> revealHome(WidgetTester tester, Finder finder) async {
+    Future<void> show() async {
+      await tester.ensureVisible(finder);
+      await settle(tester);
+    }
+
+    if (finder.evaluate().isNotEmpty) {
+      await show();
+      return;
+    }
+    final vertical = find.descendant(
+      of: find.byKey(const PageStorageKey<String>('home-scroll')),
+      matching: find.byWidgetPredicate(
+        (widget) =>
+            widget is Scrollable && widget.axisDirection == AxisDirection.down,
+      ),
+    );
+    final position = tester.state<ScrollableState>(vertical).position;
+    position.jumpTo(0);
+    await tester.pump();
+    final menu = find.byKey(CatalogKeys.librariesMenu);
+    if (menu.evaluate().isEmpty) {
+      await tester.scrollUntilVisible(menu, 320, scrollable: vertical);
+    }
+    final rail = find.descendant(
+      of: find.byKey(CatalogKeys.librariesMenu),
+      matching: find.byType(Scrollable),
+    );
+    if (finder.evaluate().isEmpty && rail.evaluate().isNotEmpty) {
+      try {
+        await tester.scrollUntilVisible(
+          finder,
+          240,
+          scrollable: rail.first,
+          maxScrolls: 12,
+        );
+      } catch (_) {
+        // 目标在片库行下面，不在这一条横滑里。
+      }
+    }
+    if (finder.evaluate().isEmpty) {
+      await tester.scrollUntilVisible(finder, 320, scrollable: vertical);
+    }
+    await show();
   }
 
   Future<void> openLibrary(WidgetTester tester, String viewId) async {
     await goHome(tester);
-    final tile = find.byKey(AppShell.libraryNavKey(viewId));
+    final tile = find.byKey(CatalogKeys.library(viewId));
+    await revealHome(tester, tile);
     await tester.ensureVisible(tile);
     await tester.tap(tile);
     await settle(tester);
@@ -90,17 +150,10 @@ void main() {
       expect(find.byType(NavigationRail), findsNothing);
       expect(find.byKey(AppShell.topBarKey), findsOneWidget);
       expect(find.byKey(AppShell.homeNavKey), findsOneWidget);
-      expect(find.byKey(AppShell.libraryNavKey('view-movies')), findsOneWidget);
+      expect(find.byKey(AppShell.overflowNavKey), findsOneWidget);
       expect(find.byKey(CatalogKeys.resumeRow), findsOneWidget);
       expect(find.byKey(CatalogKeys.nextUpRow), findsNothing);
-      expect(
-        tester.getTopLeft(find.byKey(CatalogKeys.resumeRow)).dy,
-        lessThan(tester.getTopLeft(find.byKey(CatalogKeys.latestMoviesRow)).dy),
-      );
-      expect(
-        tester.getTopLeft(find.byKey(CatalogKeys.resumeRow)).dy,
-        lessThan(tester.getTopLeft(find.byKey(CatalogKeys.latestSeriesRow)).dy),
-      );
+      final resumeTop = tester.getTopLeft(find.byKey(CatalogKeys.resumeRow)).dy;
       expect(find.text('Inception'), findsWidgets);
       expect(find.byKey(CatalogKeys.resumeProgress), findsWidgets);
       expect(
@@ -110,53 +163,80 @@ void main() {
         ),
         findsOneWidget,
       );
-      expect(find.text('最近更新的电影'), findsOneWidget);
-      expect(find.text('飞屋环游记'), findsWidgets);
-      expect(find.text('最近更新的剧集'), findsOneWidget);
-      expect(find.text('老友记'), findsWidgets);
+      expect(find.text('最近更新的电影'), findsNothing);
       expect(
         find.byKey(CatalogKeys.shelfMore(CatalogKeys.shelfResume)),
         findsOneWidget,
       );
+      await revealHome(tester, find.byKey(CatalogKeys.librariesMenu));
+      final homeList = find.byKey(const PageStorageKey<String>('home-scroll'));
+      final scrolled = tester
+          .state<ScrollableState>(
+            find
+                .descendant(of: homeList, matching: find.byType(Scrollable))
+                .first,
+          )
+          .position
+          .pixels;
       expect(
-        find.byKey(CatalogKeys.shelfMore(CatalogKeys.shelfNextUp)),
-        findsNothing,
+        resumeTop,
+        lessThan(
+          tester.getTopLeft(find.byKey(CatalogKeys.librariesMenu)).dy +
+              scrolled,
+        ),
       );
-      expect(
-        find.byKey(CatalogKeys.shelfMore(CatalogKeys.shelfLatestMovies)),
-        findsOneWidget,
-      );
-      expect(
-        find.byKey(CatalogKeys.shelfMore(CatalogKeys.shelfLatestSeries)),
-        findsOneWidget,
-      );
-      expect(find.text('更多'), findsNWidgets(3));
+      expect(find.byKey(CatalogKeys.library('view-movies')), findsOneWidget);
       expect(
         find.descendant(
           of: find.byKey(CatalogKeys.librariesMenu),
           matching: find.text('片库'),
         ),
-        findsNothing,
+        findsOneWidget,
       );
-      expect(find.byKey(CatalogKeys.library('view-movies')), findsNothing);
-      expect(find.byKey(CatalogKeys.library('view-tv')), findsNothing);
+      await revealHome(tester, find.byKey(CatalogKeys.library('view-tv')));
+      expect(find.byKey(CatalogKeys.library('view-tv')), findsOneWidget);
       expect(find.text('音乐'), findsNothing);
-      expect(find.byKey(AppShell.libraryNavKey('view-photos')), findsOneWidget);
+      await revealHome(tester, find.byKey(CatalogKeys.library('view-photos')));
+      expect(find.byKey(CatalogKeys.library('view-photos')), findsOneWidget);
       expect(find.text('混合媒体'), findsNothing);
       expect(
         find.descendant(
           of: find.byKey(CatalogKeys.librariesMenu),
           matching: find.text('未分类影视'),
         ),
+        findsOneWidget,
+      );
+      await revealHome(
+        tester,
+        find.byKey(CatalogKeys.shelfMore('library-view-movies')),
+      );
+      expect(find.text('飞屋环游记'), findsWidgets);
+      expect(find.text('最近更新的剧集'), findsNothing);
+      expect(find.text('老友记'), findsWidgets);
+      expect(
+        find.byKey(CatalogKeys.shelfMore(CatalogKeys.shelfNextUp)),
         findsNothing,
       );
       expect(
-        find.byKey(AppShell.libraryNavKey('view-untyped')),
+        find.byKey(CatalogKeys.shelfMore(CatalogKeys.shelfLatestMovies)),
+        findsNothing,
+      );
+      expect(
+        find.byKey(CatalogKeys.shelfMore(CatalogKeys.shelfLatestSeries)),
+        findsNothing,
+      );
+      expect(
+        find.byKey(CatalogKeys.shelfMore('library-view-movies')),
         findsOneWidget,
       );
+      expect(
+        find.byKey(CatalogKeys.shelfMore('library-view-tv')),
+        findsOneWidget,
+      );
+      expect(find.text('更多'), findsWidgets);
 
       await openLibrary(tester, 'view-movies');
-      expect(find.byKey(AppShell.libraryNavKey('view-movies')), findsNothing);
+      expect(find.byKey(CatalogKeys.library('view-movies')), findsNothing);
       expect(
         find.descendant(
           of: find.byType(CustomScrollView),
@@ -242,13 +322,13 @@ void main() {
         'Monica gets a new apartment.',
       );
       expect(find.byKey(CatalogKeys.seriesLink), findsOneWidget);
-      expect(find.byKey(CatalogKeys.viewSeries), findsOneWidget);
+      expect(find.byKey(CatalogKeys.viewSeries), findsNothing);
       expect(find.byKey(CatalogKeys.episodesRow), findsNothing);
       await ensureVisibleBelowTopBar(
         tester,
-        find.byKey(CatalogKeys.viewSeries),
+        find.byKey(CatalogKeys.seriesLink),
       );
-      await tapBelowTopBar(tester, find.byKey(CatalogKeys.viewSeries));
+      await tapBelowTopBar(tester, find.byKey(CatalogKeys.seriesLink));
       await settle(tester);
       expect(find.text('老友记 (1994)'), findsOneWidget);
 

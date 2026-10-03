@@ -1057,7 +1057,13 @@ class _PlaybackEndedOverlay extends StatelessWidget {
         ),
         child: Center(
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 420),
+            constraints: BoxConstraints(
+              maxWidth: AppViewport.fit(
+                420,
+                MediaQuery.sizeOf(context).width - 48,
+                MediaQuery.sizeOf(context),
+              ),
+            ),
             child: LiquidGlass(
               kind: LiquidGlassKind.panel,
               padding: const EdgeInsets.all(AppSpacing.xxl),
@@ -1168,7 +1174,7 @@ class _NextEpisodeBanner extends StatelessWidget {
       child: ConstrainedBox(
         constraints: BoxConstraints(
           maxWidth: (MediaQuery.sizeOf(context).width - AppSpacing.xl * 2)
-              .clamp(0.0, 480.0),
+              .clamp(0.0, AppViewport.dp(480, MediaQuery.sizeOf(context))),
         ),
         child: NextEpisodeCard(controller: controller),
       ),
@@ -1271,7 +1277,11 @@ class _EpisodeListPanel extends StatelessWidget {
             top: 0,
             bottom: 0,
             right: 0,
-            width: 400,
+            width: AppViewport.fit(
+              400,
+              MediaQuery.sizeOf(context).width,
+              MediaQuery.sizeOf(context),
+            ),
             child: Material(
               key: const Key('player-episodes-panel'),
               color: scheme.surfaceContainerHigh,
@@ -1433,7 +1443,15 @@ class _SeasonPicker extends StatelessWidget {
         unawaited(controller.selectSeason(seasonId));
       },
       initialValue: current.id,
-      constraints: const BoxConstraints(minWidth: 160, maxWidth: 280),
+      constraints: () {
+        final viewport = MediaQuery.sizeOf(context);
+        final maxWidth = AppViewport.fit(280, viewport.width * 0.5, viewport);
+        final minWidth = AppViewport.dp(160, viewport);
+        return BoxConstraints(
+          minWidth: minWidth < maxWidth ? minWidth : maxWidth,
+          maxWidth: maxWidth,
+        );
+      }(),
       padding: EdgeInsets.zero,
       splashRadius: 20,
       child: Padding(
@@ -1442,7 +1460,9 @@ class _SeasonPicker extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 120),
+              constraints: BoxConstraints(
+                maxWidth: AppViewport.dp(120, MediaQuery.sizeOf(context)),
+              ),
               child: Text(
                 current.name,
                 maxLines: 1,
@@ -2061,7 +2081,13 @@ class _Banner extends StatelessWidget {
       left: AppSpacing.page,
       bottom: 88,
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 420),
+        constraints: BoxConstraints(
+          maxWidth: AppViewport.fit(
+            420,
+            MediaQuery.sizeOf(context).width - 48,
+            MediaQuery.sizeOf(context),
+          ),
+        ),
         child: DecoratedBox(
           decoration: BoxDecoration(
             color: scheme.surface.withValues(alpha: 0.94),
@@ -2280,29 +2306,31 @@ class _ControlsRow extends StatelessWidget {
             danmaku: danmakuController,
             onPressed: onDanmakuSearch,
           ),
-        _ControlMenu<int>(
-          key: PlayerKeys.subtitle,
-          tooltip: l10n.subtitleTrack,
-          icon: controller.subtitleStreamIndex == null
-              ? Icons.closed_caption_off_rounded
-              : Icons.closed_caption_rounded,
-          onSelected: (value) {
-            controller.setSubtitle(value == _subtitleOffToken ? null : value);
-          },
-          items: [
-            CheckedPopupMenuItem(
-              value: _subtitleOffToken,
-              checked: controller.subtitleStreamIndex == null,
-              child: Text(l10n.subtitleOff),
-            ),
-            for (final track in controller.selectableSubtitleTracks)
+        if (controller.canConfigureSubtitles)
+          _ControlMenu<int>(
+            key: PlayerKeys.subtitle,
+            initialValue: controller.subtitleStreamIndex ?? _subtitleOffToken,
+            tooltip: l10n.subtitleTrack,
+            icon: controller.subtitleStreamIndex == null
+                ? Icons.closed_caption_off_rounded
+                : Icons.closed_caption_rounded,
+            onSelected: (value) {
+              controller.setSubtitle(value == _subtitleOffToken ? null : value);
+            },
+            items: [
               CheckedPopupMenuItem(
-                value: track.index,
-                checked: track.index == controller.subtitleStreamIndex,
-                child: Text(track.label),
+                value: _subtitleOffToken,
+                checked: controller.subtitleStreamIndex == null,
+                child: Text(l10n.subtitleOff),
               ),
-          ],
-        ),
+              for (final track in controller.selectableSubtitleTracks)
+                CheckedPopupMenuItem(
+                  value: track.index,
+                  checked: track.index == controller.subtitleStreamIndex,
+                  child: Text(track.label),
+                ),
+            ],
+          ),
         if (controller.canBrowseEpisodes)
           _PlayerIconButton(
             key: const Key('player-episodes'),
@@ -2421,7 +2449,13 @@ class _DanmakuSourceBanner extends StatelessWidget {
       top: kWindowChromeHeight + AppSpacing.xxl,
       child: Center(
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 560),
+          constraints: BoxConstraints(
+            maxWidth: AppViewport.fit(
+              560,
+              MediaQuery.sizeOf(context).width - 48,
+              MediaQuery.sizeOf(context),
+            ),
+          ),
           child: LiquidGlass(
             kind: LiquidGlassKind.control,
             padding: const EdgeInsets.symmetric(
@@ -2529,8 +2563,12 @@ class _DanmakuSearchPanelState extends State<_DanmakuSearchPanel> {
     final l10n = AppLocalizations.of(context);
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    final overlayWidth = MediaQuery.sizeOf(context).width;
-    final panelWidth = overlayWidth < 440 ? overlayWidth : 400.0;
+    final viewport = MediaQuery.sizeOf(context);
+    final overlayWidth = viewport.width;
+    final designWidth = AppViewport.dp(400, viewport);
+    final panelWidth = overlayWidth < designWidth + 40
+        ? overlayWidth
+        : designWidth;
     return Positioned(
       top: kPlayerChromeBarExtent,
       left: 0,
@@ -2912,11 +2950,16 @@ class _PlayerIconButton extends StatelessWidget {
 const _subtitleOffToken = -1;
 
 /// 倍速阶梯约 8 项需完整显示,避免菜单内滚动。
-const _controlMenuConstraints = BoxConstraints(
-  minWidth: 280,
-  maxWidth: 420,
-  maxHeight: 480,
-);
+/// 1080p 上保持原来的 280–420×480，更大的窗口按比例放大。
+BoxConstraints _controlMenuConstraintsFor(Size viewport) {
+  final maxWidth = AppViewport.fit(420, viewport.width - 48, viewport);
+  final minWidth = AppViewport.dp(280, viewport);
+  return BoxConstraints(
+    minWidth: minWidth < maxWidth ? minWidth : maxWidth,
+    maxWidth: maxWidth,
+    maxHeight: AppViewport.fit(480, viewport.height * 0.7, viewport),
+  );
+}
 
 /// 控制条右侧用图标打开菜单,长轨名只出现在弹出层。
 ///
@@ -2927,11 +2970,13 @@ class _ControlMenu<T> extends StatelessWidget {
     required this.tooltip,
     required this.items,
     required this.onSelected,
+    this.initialValue,
     this.icon,
     this.iconColor,
     this.child,
   }) : assert(icon != null || child != null);
 
+  final T? initialValue;
   final String tooltip;
   final IconData? icon;
   final Color? iconColor;
@@ -2945,10 +2990,11 @@ class _ControlMenu<T> extends StatelessWidget {
     if (child != null) {
       return PopupMenuButton<T>(
         tooltip: tooltip,
+        initialValue: initialValue,
         onSelected: (value) {
           onSelected(value);
         },
-        constraints: _controlMenuConstraints,
+        constraints: _controlMenuConstraintsFor(MediaQuery.sizeOf(context)),
         padding: EdgeInsets.zero,
         splashRadius: 20,
         itemBuilder: (context) => items,
@@ -2957,10 +3003,11 @@ class _ControlMenu<T> extends StatelessWidget {
     }
     return PopupMenuButton<T>(
       tooltip: tooltip,
+      initialValue: initialValue,
       onSelected: (value) {
         onSelected(value);
       },
-      constraints: _controlMenuConstraints,
+      constraints: _controlMenuConstraintsFor(MediaQuery.sizeOf(context)),
       padding: EdgeInsets.zero,
       splashRadius: 20,
       icon: Icon(icon, color: iconColor ?? scheme.onSurface),

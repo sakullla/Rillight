@@ -193,16 +193,27 @@ void main() {
     tester,
   ) async {
     final server = FakeEmbyServer();
+    // Two continue-watching posters, so the row has somewhere to move inside.
+    // Next-up episodes now share this row; keep them out so focus stays on
+    // these two posters.
+    for (final item in server.items) {
+      item.nextUp = false;
+    }
+    server.items
+            .firstWhere((item) => item.id == 'movie-up')
+            .playbackPositionTicks =
+        1000;
     await start(tester, server);
     await login(tester, server);
 
-    final row = find.byKey(const ValueKey('tv-row-最近更新的电影'));
+    final row = find.byKey(const ValueKey('tv-row-继续观看'));
     await key(tester, LogicalKeyboardKey.arrowRight);
-    // D-pad down until focus enters the latest-movies row's posters; the outer
-    // ListView builds the row lazily as focus scrolls it into view.
+    // D-pad down until focus enters the continue-watching posters.
+    // The first right-arrow enters beside the featured controls, so the
+    // landing poster is the right-hand one.
     for (
       var i = 0;
-      i < 10 &&
+      i < 24 &&
           find
               .descendant(of: row, matching: focusedAction())
               .evaluate()
@@ -211,16 +222,18 @@ void main() {
     ) {
       await key(tester, LogicalKeyboardKey.arrowDown);
     }
-    expect(find.descendant(of: row, matching: focusedAction()), findsOneWidget);
+    expect(focusedLabel(tester), '飞屋环游记');
 
-    // Move to the next poster; the row remembers it.
-    await key(tester, LogicalKeyboardKey.arrowRight);
+    // Step to the other poster in this row. The shelf title is full width, so
+    // a further right-arrow leaves the row instead of finding another poster.
+    await key(tester, LogicalKeyboardKey.arrowLeft);
+    expect(find.descendant(of: row, matching: focusedAction()), findsOneWidget);
+    expect(focusedLabel(tester), 'Inception');
     final remembered = FocusManager.instance.primaryFocus;
     final rememberedLabel = focusedLabel(tester);
-    expect(rememberedLabel, isNotEmpty);
 
-    // Leave the row, then come back: focus lands on the remembered item, not
-    // the directionally nearest one.
+    // Leave the row, then come back. Directional search prefers the poster
+    // nearest the title's center; the row must restore the one we left.
     await key(tester, LogicalKeyboardKey.arrowUp);
     expect(find.descendant(of: row, matching: focusedAction()), findsNothing);
     await key(tester, LogicalKeyboardKey.arrowDown);
@@ -233,7 +246,7 @@ void main() {
   testWidgets('featured section hides entirely without candidates', (
     tester,
   ) async {
-    final server = FakeEmbyServer(items: []);
+    final server = FakeEmbyServer(items: [], views: []);
     await start(tester, server);
     await login(tester, server);
     expect(find.byKey(TvHomeKeys.featured), findsNothing);

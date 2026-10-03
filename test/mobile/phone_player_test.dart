@@ -504,6 +504,45 @@ void main() {
     ]);
   }, tags: ['integration']);
 
+  for (final size in [const Size(360, 800), const Size(800, 360)]) {
+    testWidgets('phone completion offers replay and close at $size', (
+      tester,
+    ) async {
+      final backend = FakeVideoBackend(duration: const Duration(minutes: 96));
+      final current = await showPlayer(
+        tester,
+        itemId: 'movie-up',
+        backend: backend,
+        size: size,
+        wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
+      );
+      backend.completePlayback();
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.pump(const Duration(seconds: 5));
+      expect(find.byKey(PlayerKeys.playbackEnded), findsOneWidget);
+      expect(find.byKey(PlayerKeys.endedViewSeries), findsNothing);
+      expect(find.byKey(PlayerKeys.replay).hitTestable(), findsOneWidget);
+      expect(find.byKey(PlayerKeys.endedClose).hitTestable(), findsOneWidget);
+      final opens = backend.openCount;
+      await tester.tap(find.byKey(PlayerKeys.replay));
+      await tester.pumpAndSettle();
+      expect(current.playbackEnded, isFalse);
+      expect(backend.openCount, greaterThan(opens));
+      expect(find.byKey(PlayerKeys.playbackEnded), findsNothing);
+      backend.completePlayback();
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.tap(find.byKey(PlayerKeys.endedClose));
+      for (
+        var i = 0;
+        i < 40 && find.byType(MobilePlayerPage).evaluate().isNotEmpty;
+        i++
+      ) {
+        await tester.pump(const Duration(milliseconds: 200));
+      }
+      expect(find.byType(MobilePlayerPage), findsNothing);
+    }, tags: ['integration']);
+  }
+
   testWidgets(
     'next episode countdown can be cancelled, played, or absent for movies',
     (tester) async {
@@ -1024,9 +1063,8 @@ void main() {
     ]) {
       expect(find.byKey(Key(key)), findsNothing);
     }
-    await enterSection(tester, 'tracks');
-    expect(find.text('关闭字幕'), findsOneWidget);
-    expect(find.text('音轨'), findsNothing);
+    expect(find.byKey(const Key('mobile-player-section-tracks')), findsNothing);
+    expect(find.text('关闭字幕'), findsNothing);
     await tester.tap(find.byKey(const Key('mobile-player-panel-close')));
     await tester.pumpAndSettle();
     await closePlayer(tester);

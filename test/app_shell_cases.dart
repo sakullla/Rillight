@@ -37,6 +37,39 @@ const _device = EmbyDeviceInfo(
   version: '0.1.0',
 );
 
+/// 桌面首页只构建视口附近的分栏，片库入口要先滚进列表才会挂上。
+Future<void> revealHomeLibrary(WidgetTester tester, String viewId) async {
+  final tile = find.byKey(CatalogKeys.library(viewId));
+  if (tile.evaluate().isNotEmpty) {
+    await tester.ensureVisible(tile);
+    return;
+  }
+  final vertical = find.descendant(
+    of: find.byKey(const PageStorageKey<String>('home-scroll')),
+    matching: find.byWidgetPredicate(
+      (widget) =>
+          widget is Scrollable && widget.axisDirection == AxisDirection.down,
+    ),
+  );
+  final position = tester.state<ScrollableState>(vertical).position;
+  position.jumpTo(0);
+  await tester.pump();
+  final menu = find.byKey(CatalogKeys.librariesMenu);
+  if (menu.evaluate().isEmpty) {
+    await tester.scrollUntilVisible(menu, 320, scrollable: vertical);
+  }
+  if (tile.evaluate().isEmpty) {
+    final rail = find.descendant(of: menu, matching: find.byType(Scrollable));
+    await tester.scrollUntilVisible(
+      tile,
+      240,
+      scrollable: rail.first,
+      maxScrolls: 12,
+    );
+  }
+  await tester.ensureVisible(tile);
+}
+
 void main() {
   setUp(isolateImageCache);
   group('app shell integration', () {});
@@ -190,7 +223,8 @@ void main() {
         expect(find.byKey(SessionActions.serverMenuKey), findsOneWidget);
         expect(find.text('第二台电影'), findsWidgets);
 
-        await tester.tap(find.byKey(AppShell.libraryNavKey('view-movies')));
+        await revealHomeLibrary(tester, 'view-movies');
+        await tester.tap(find.byKey(CatalogKeys.library('view-movies')));
         await settle(tester);
 
         bool isHomeCatalog(String request) {
@@ -256,7 +290,8 @@ void main() {
         await settle(tester);
 
         // 离开首页:失败的切换不应把用户带回首页。
-        await tester.tap(find.byKey(AppShell.libraryNavKey('view-movies')));
+        await revealHomeLibrary(tester, 'view-movies');
+        await tester.tap(find.byKey(CatalogKeys.library('view-movies')));
         await settle(tester);
         expect(find.byType(LibraryPage), findsOneWidget);
 
@@ -319,15 +354,20 @@ void main() {
         expect(find.byType(HomePage), findsOneWidget);
         expect(tester.getTopLeft(find.byType(HomePage)).dy, 0);
         expect(tester.getTopLeft(find.byKey(AppShell.topBarKey)).dy, 0);
-        expect(
-          find.byKey(AppShell.libraryNavKey('view-movies')),
-          findsOneWidget,
-        );
+        await revealHomeLibrary(tester, 'view-movies');
+        expect(find.byKey(CatalogKeys.library('view-movies')), findsOneWidget);
+        await tester.tap(find.byKey(AppShell.overflowNavKey));
+        await settle(tester);
+        expect(find.text('轮播图'), findsOneWidget);
+        expect(find.text('下一集'), findsOneWidget);
+        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+        await settle(tester);
 
-        await tester.tap(find.byKey(AppShell.libraryNavKey('view-movies')));
+        await revealHomeLibrary(tester, 'view-movies');
+        await tester.tap(find.byKey(CatalogKeys.library('view-movies')));
         await settle(tester);
         expect(find.byType(LibraryPage), findsOneWidget);
-        expect(find.byKey(AppShell.libraryNavKey('view-movies')), findsNothing);
+        expect(find.byKey(CatalogKeys.library('view-movies')), findsNothing);
         expect(find.byKey(AppShell.homeNavKey), findsNothing);
         expect(
           GoRouter.of(tester.element(find.byType(LibraryPage))).state.uri.path,

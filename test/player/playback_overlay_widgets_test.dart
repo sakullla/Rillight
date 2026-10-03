@@ -57,6 +57,58 @@ void main() {
         home: Scaffold(body: Center(child: child)),
       );
 
+  testWidgets(
+    'long source menu reveals selection on opening, without undoing manual scroll',
+    (tester) async {
+      controller.mediaSources = [
+        for (var i = 0; i < 30; i++)
+          PlaybackMediaSource(id: '$i', name: 'Source $i'),
+      ];
+      controller.resolved = ResolvedPlayback(
+        playMethod: PlayMethod.directPlay,
+        streamUrl: Uri.parse('https://example.test/movie'),
+        playSessionId: 'session',
+        mediaSource: controller.mediaSources.last,
+        itemId: 'current',
+      );
+      await tester.pumpWidget(
+        app(PlaybackSettingsMenu(controller: controller)),
+      );
+      await tester.tap(find.byKey(PlayerKeys.more));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(PlayerKeys.mediaSource));
+      await tester.pumpAndSettle();
+      final selected = find.byWidgetPredicate(
+        (w) => w is ListTile && w.selected,
+      );
+      final content = find.byKey(
+        const ValueKey('player-settings-content-source'),
+      );
+      expect(
+        tester.getRect(content).contains(tester.getCenter(selected)),
+        isTrue,
+      );
+      final scroll = tester.state<ScrollableState>(
+        find.descendant(of: content, matching: find.byType(Scrollable)).first,
+      );
+      expect(scroll.position.pixels, greaterThan(0));
+      scroll.position.jumpTo(0);
+      await tester.pumpWidget(
+        app(PlaybackSettingsMenu(controller: controller)),
+      );
+      await tester.pumpAndSettle();
+      expect(scroll.position.pixels, 0);
+      await tester.tap(find.byKey(PlayerKeys.speed));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(PlayerKeys.mediaSource));
+      await tester.pumpAndSettle();
+      expect(
+        tester.getRect(content).contains(tester.getCenter(selected)),
+        isTrue,
+      );
+    },
+  );
+
   for (final count in [0, 1, 2]) {
     testWidgets('settings hide unavailable or single choices ($count)', (
       tester,
@@ -167,6 +219,63 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets('settings categories drag with the left mouse button', (
+    tester,
+  ) async {
+    final source = PlaybackMediaSource(
+      id: 'one',
+      supportsTranscoding: true,
+      mediaStreams: [
+        for (var i = 0; i < 2; i++)
+          MediaStreamInfo(index: i, type: 'Audio', displayTitle: 'Audio $i'),
+      ],
+    );
+    controller.resolved = ResolvedPlayback(
+      playMethod: PlayMethod.directPlay,
+      streamUrl: Uri.parse('https://example.test/movie'),
+      playSessionId: 'session',
+      mediaSource: source,
+      itemId: 'current',
+    );
+    controller.mediaSources = [
+      for (var i = 0; i < 2; i++) PlaybackMediaSource(id: '$i'),
+    ];
+    await tester.pumpWidget(app(PlaybackSettingsMenu(controller: controller)));
+    await tester.tap(find.byKey(PlayerKeys.more));
+    await tester.pumpAndSettle();
+    final categories = find.byWidgetPredicate(
+      (widget) =>
+          widget is ListView && widget.scrollDirection == Axis.horizontal,
+    );
+    ScrollPosition position() {
+      return tester
+          .state<ScrollableState>(
+            find.descendant(of: categories, matching: find.byType(Scrollable)),
+          )
+          .position;
+    }
+
+    expect(position().maxScrollExtent, greaterThan(0));
+    expect(position().pixels, 0);
+    final speedBefore = tester.getTopLeft(find.byKey(PlayerKeys.speed));
+    await tester.drag(
+      find.byKey(const Key('player-skip-settings-section')),
+      const Offset(-72, 0),
+      kind: PointerDeviceKind.mouse,
+    );
+    await tester.pump();
+    expect(position().pixels, greaterThan(40));
+    expect(
+      tester.getTopLeft(find.byKey(PlayerKeys.speed)).dx,
+      lessThan(speedBefore.dx - 40),
+    );
+    expect(find.byKey(const ValueKey('player-rate-1.0')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('player-skip-settings-section')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('player-skip-intro-enabled')), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets(
     'removing settings during source loading releases its control pin',

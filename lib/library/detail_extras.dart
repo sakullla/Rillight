@@ -1,16 +1,18 @@
 import 'dart:io';
 import 'package:file_selector/file_selector.dart';
-import 'package:flutter/services.dart';
-
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/tv_widgets.dart';
+import 'package:rillight/app/widgets/scrim_icon_button.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/library/provider_marks.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
@@ -44,13 +46,17 @@ void openGenreShelf(BuildContext context, EmbyItem item, String genre) {
 }
 
 class DetailGenreRow extends StatelessWidget {
-  const DetailGenreRow({super.key, required this.item});
+  const DetailGenreRow({super.key, required this.item, this.genres});
 
   final EmbyItem item;
 
+  /// 切集的列表条目经常不带流派。传入后沿用已经显示的名称，避免芯片先消失。
+  final List<String>? genres;
+
   @override
   Widget build(BuildContext context) {
-    if (item.genres.isEmpty) {
+    final genres = this.genres ?? item.genres;
+    if (genres.isEmpty) {
       return const SizedBox.shrink();
     }
     return Padding(
@@ -59,7 +65,7 @@ class DetailGenreRow extends StatelessWidget {
         spacing: AppSpacing.sm,
         runSpacing: AppSpacing.xs,
         children: [
-          for (final genre in item.genres)
+          for (final genre in genres)
             ActionChip(
               label: Text(genre),
               onPressed: () => openGenreShelf(context, item, genre),
@@ -328,14 +334,18 @@ class DetailAlbumStrip extends StatelessWidget {
     super.key,
     required this.item,
     this.thumbnailWidth = 170,
+    this.album,
   });
 
   final EmbyItem item;
   final double thumbnailWidth;
 
+  /// 切集时列表条目往往没有剧照。调用方可以沿用上一集已经显示的相册。
+  final ({String itemId, List<String> tags})? album;
+
   @override
   Widget build(BuildContext context) {
-    final album = detailAlbumOf(item);
+    final album = this.album ?? detailAlbumOf(item);
     if (album == null) {
       return const SizedBox.shrink();
     }
@@ -350,35 +360,13 @@ class DetailAlbumStrip extends StatelessWidget {
           const SizedBox(height: AppSpacing.sm),
           SizedBox(
             height: thumbnailWidth * 9 / 16,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: album.tags.length,
-              separatorBuilder: (context, index) =>
-                  const SizedBox(width: AppSpacing.sm),
-              itemBuilder: (context, index) {
-                return Material(
-                  clipBehavior: Clip.antiAlias,
-                  borderRadius: BorderRadius.circular(AppRadii.sm),
-                  child: InkWell(
-                    onTap: () =>
-                        _open(context, album.itemId, album.tags, index),
-                    borderRadius: BorderRadius.circular(AppRadii.sm),
-                    child: SizedBox(
-                      width: thumbnailWidth,
-                      child: _AlbumStill(
-                        itemId: album.itemId,
-                        tag: album.tags[index],
-                        index: index,
-                        maxWidth:
-                            (thumbnailWidth *
-                                    MediaQuery.devicePixelRatioOf(context))
-                                .ceil()
-                                .clamp(480, 1280),
-                      ),
-                    ),
-                  ),
-                );
-              },
+            child: _AlbumRail(
+              key: ValueKey(album.itemId),
+              itemId: album.itemId,
+              tags: album.tags,
+              thumbnailWidth: thumbnailWidth,
+              onOpen: (index) =>
+                  _open(context, album.itemId, album.tags, index),
             ),
           ),
         ],
@@ -399,6 +387,174 @@ class DetailAlbumStrip extends StatelessWidget {
           _AlbumViewer(itemId: itemId, tags: tags, initialIndex: index),
     );
   }
+}
+
+/// 相册横条。桌面默认不能用鼠标拖动横向列表，滚轮又只滚整页，
+/// 所以这里同时接受鼠标拖动，并用滚轮和两侧按钮左右移动。
+class _AlbumRail extends StatefulWidget {
+  const _AlbumRail({
+    super.key,
+    required this.itemId,
+    required this.tags,
+    required this.thumbnailWidth,
+    required this.onOpen,
+  });
+
+  final String itemId;
+  final List<String> tags;
+  final double thumbnailWidth;
+  final ValueChanged<int> onOpen;
+
+  @override
+  State<_AlbumRail> createState() => _AlbumRailState();
+}
+
+class _AlbumRailState extends State<_AlbumRail> {
+  final _controller = ScrollController();
+  var _canScrollLeft = false;
+  var _canScrollRight = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller.addListener(_updateButtons);
+  }
+
+  @override
+  void dispose() {
+    _controller.removeListener(_updateButtons);
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _updateButtons() {
+    if (!_controller.hasClients) {
+      if (_canScrollLeft || _canScrollRight) {
+        setState(() {
+          _canScrollLeft = false;
+          _canScrollRight = false;
+        });
+      }
+      return;
+    }
+    final position = _controller.position;
+    if (!position.hasContentDimensions) {
+      return;
+    }
+    final overflowing = position.maxScrollExtent > 0.5;
+    final canLeft = overflowing && position.pixels > 0.5;
+    final canRight =
+        overflowing && position.pixels < position.maxScrollExtent - 0.5;
+    if (canLeft != _canScrollLeft || canRight != _canScrollRight) {
+      setState(() {
+        _canScrollLeft = canLeft;
+        _canScrollRight = canRight;
+      });
+    }
+  }
+
+  void _page(int direction) {
+    if (!_controller.hasClients) {
+      return;
+    }
+    final position = _controller.position;
+    final target =
+        (position.pixels + position.viewportDimension * 0.9 * direction).clamp(
+          0.0,
+          position.maxScrollExtent,
+        );
+    final duration = AppMotion.durationOf(context);
+    if (duration == Duration.zero) {
+      _controller.jumpTo(target);
+      return;
+    }
+    _controller.animateTo(
+      target,
+      duration: duration,
+      curve: AppMotion.standard,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final ratio = MediaQuery.devicePixelRatioOf(context);
+    return Stack(
+      children: [
+        NotificationListener<ScrollMetricsNotification>(
+          onNotification: (_) {
+            _updateButtons();
+            return false;
+          },
+          child: ScrollConfiguration(
+            behavior: const _AlbumScrollBehavior(),
+            child: ListView.separated(
+              controller: _controller,
+              scrollDirection: Axis.horizontal,
+              itemCount: widget.tags.length,
+              separatorBuilder: (context, index) =>
+                  const SizedBox(width: AppSpacing.sm),
+              itemBuilder: (context, index) {
+                return Material(
+                  clipBehavior: Clip.antiAlias,
+                  borderRadius: BorderRadius.circular(AppRadii.sm),
+                  child: InkWell(
+                    onTap: () => widget.onOpen(index),
+                    borderRadius: BorderRadius.circular(AppRadii.sm),
+                    child: SizedBox(
+                      width: widget.thumbnailWidth,
+                      child: _AlbumStill(
+                        itemId: widget.itemId,
+                        tag: widget.tags[index],
+                        index: index,
+                        maxWidth: (widget.thumbnailWidth * ratio).ceil().clamp(
+                          480,
+                          1280,
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+        if (_canScrollLeft)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: ScrimIconButton(
+              key: CatalogKeys.shelfScrollLeft(CatalogKeys.shelfAlbum),
+              tooltip: l10n.scrollLeft,
+              icon: const Icon(Icons.chevron_left),
+              onPressed: () => _page(-1),
+            ),
+          ),
+        if (_canScrollRight)
+          Align(
+            alignment: Alignment.centerRight,
+            child: ScrimIconButton(
+              key: CatalogKeys.shelfScrollRight(CatalogKeys.shelfAlbum),
+              tooltip: l10n.scrollRight,
+              icon: const Icon(Icons.chevron_right),
+              onPressed: () => _page(1),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _AlbumScrollBehavior extends MaterialScrollBehavior {
+  const _AlbumScrollBehavior();
+
+  @override
+  Set<PointerDeviceKind> get dragDevices => const {
+    PointerDeviceKind.mouse,
+    PointerDeviceKind.touch,
+    PointerDeviceKind.stylus,
+    PointerDeviceKind.trackpad,
+    PointerDeviceKind.invertedStylus,
+  };
 }
 
 class _AlbumStill extends StatefulWidget {
@@ -429,6 +585,17 @@ class _AlbumStillState extends State<_AlbumStill> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     _bytes ??= _load();
+  }
+
+  @override
+  void didUpdateWidget(_AlbumStill oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.itemId != widget.itemId ||
+        oldWidget.tag != widget.tag ||
+        oldWidget.index != widget.index ||
+        oldWidget.maxWidth != widget.maxWidth) {
+      _bytes = _load();
+    }
   }
 
   Future<List<int>> _load() {
@@ -639,7 +806,11 @@ class _AlbumViewerState extends State<_AlbumViewer> {
             insetPadding: const EdgeInsets.all(16),
             clipBehavior: Clip.antiAlias,
             child: SizedBox(
-              width: 1200,
+              width: AppViewport.fit(
+                1200,
+                MediaQuery.sizeOf(context).width - 32,
+                MediaQuery.sizeOf(context),
+              ),
               height: MediaQuery.sizeOf(context).height * .85,
               child: Column(
                 children: [

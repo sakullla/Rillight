@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/appearance_style.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/auth/connect_draft.dart';
@@ -279,7 +280,9 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
         child: Align(
           alignment: Alignment.topCenter,
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 560),
+            constraints: BoxConstraints(
+              maxWidth: AppViewport.dp(560, MediaQuery.sizeOf(context)),
+            ),
             child: ListenableBuilder(
               listenable: auth,
               builder: (context, _) => SingleChildScrollView(

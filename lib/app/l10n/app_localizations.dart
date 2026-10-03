@@ -2164,10 +2164,10 @@ abstract class AppLocalizations {
   /// **'按住左侧手柄拖动排序。关闭的行会归到「未显示」。片库页仍会列出全部片库。'**
   String get phoneHomeEditHint;
 
-  /// Phone home section label for the featured banner.
+  /// Home section label for the featured carousel.
   ///
   /// In zh, this message translates to:
-  /// **'横幅'**
+  /// **'轮播图'**
   String get phoneHomeSectionBanner;
 
   /// Phone home section label for the next-up row.

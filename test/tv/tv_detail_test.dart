@@ -6,6 +6,7 @@ import 'package:rillight/app/app.dart';
 import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/tv_shell.dart';
+import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
@@ -104,6 +105,34 @@ void main() {
   int detailRequests(FakeEmbyServer server, String itemId) => server.requests
       .where((r) => r.startsWith('GET') && r.contains('/Items/$itemId'))
       .length;
+
+  testWidgets(
+    'remote opens the current season through the episode title link',
+    (tester) async {
+      final server = FakeEmbyServer();
+      final app = await start(tester, server);
+      await login(tester, server);
+      await openItem(tester, app, 'episode-friends-s1e1');
+      expect(find.byKey(CatalogKeys.viewSeries), findsNothing);
+      expect(find.byKey(CatalogKeys.seriesLink), findsOneWidget);
+      await key(tester, LogicalKeyboardKey.arrowUp);
+      expect(
+        find.descendant(
+          of: focusedAction(),
+          matching: find.textContaining('老友记'),
+        ),
+        findsOneWidget,
+      );
+      await key(tester, LogicalKeyboardKey.select);
+      expect(app.router.state.uri.path, AppRoutes.item('series-friends'));
+      expect(
+        app.router.state.uri.queryParameters['season'],
+        'season-friends-1',
+      );
+      expect(tester.takeException(), isNull);
+    },
+    tags: ['integration'],
+  );
 
   testWidgets(
     'series detail shows immersive header, episode states and refreshes after remote play',

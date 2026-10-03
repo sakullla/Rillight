@@ -96,15 +96,20 @@ class _DanmakuPanelState extends State<DanmakuPanel> {
     final unreachable =
         danmaku.status == DanmakuStatus.unreachable ||
         danmaku.status == DanmakuStatus.customUnreachable;
-    final mediaHeight = MediaQuery.sizeOf(context).height;
+    final viewport = MediaQuery.sizeOf(context);
+    final mediaHeight = viewport.height;
     final available = widget.embedded
         ? mediaHeight
         : mediaHeight - widget.topChromeExtent - 112 - AppSpacing.xl;
     final maxHeight = available > 0 ? available : mediaHeight;
     final expandAdvanced = configured && _advancedExpanded;
     final width = widget.embedded
-        ? MediaQuery.sizeOf(context).width
-        : DanmakuPanel.panelWidth;
+        ? viewport.width
+        : AppViewport.fit(
+            DanmakuPanel.panelWidth,
+            viewport.width - 48,
+            viewport,
+          );
 
     final chrome = _chrome(
       context,

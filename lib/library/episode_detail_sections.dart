@@ -55,6 +55,7 @@ class EpisodeOverviewSection extends StatefulWidget {
     super.key,
     required this.overview,
     this.compact = false,
+    this.collapsedLines = _collapsedLines,
   });
 
   /// 正文文本,供测试断言 maxLines。
@@ -67,6 +68,9 @@ class EpisodeOverviewSection extends StatefulWidget {
 
   final String? overview;
   final bool compact;
+
+  /// 折叠时最多显示的行数。剧集页用 2 行,把首屏留给分集。
+  final int collapsedLines;
 
   @override
   State<EpisodeOverviewSection> createState() => _EpisodeOverviewSectionState();
@@ -82,7 +86,7 @@ class _EpisodeOverviewSectionState extends State<EpisodeOverviewSection> {
   ) {
     final painter = TextPainter(
       text: TextSpan(text: widget.overview, style: style),
-      maxLines: EpisodeOverviewSection._collapsedLines,
+      maxLines: widget.collapsedLines,
       textDirection: Directionality.of(context),
     )..layout(maxWidth: maxWidth);
     return painter.didExceedMaxLines;
@@ -112,9 +116,7 @@ class _EpisodeOverviewSectionState extends State<EpisodeOverviewSection> {
             Text(
               overview,
               key: EpisodeOverviewSection.textKey,
-              maxLines: _expanded
-                  ? null
-                  : EpisodeOverviewSection._collapsedLines,
+              maxLines: _expanded ? null : widget.collapsedLines,
               overflow: _expanded
                   ? TextOverflow.visible
                   : TextOverflow.ellipsis,
@@ -433,6 +435,16 @@ class _PersonAvatarState extends State<_PersonAvatar> {
     if (_hasImage && AuthScope.maybeOf(context) != null) {
       _future ??= _load();
     }
+  }
+
+  @override
+  void didUpdateWidget(_PersonAvatar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.person.id == oldWidget.person.id &&
+        widget.person.primaryImageTag == oldWidget.person.primaryImageTag) {
+      return;
+    }
+    _future = _hasImage && AuthScope.maybeOf(context) != null ? _load() : null;
   }
 
   Future<Uint8List?> _load() {

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
-import 'package:rillight/app/content_theme.dart';
 import 'package:rillight/app/mobile_motion.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/emby/emby_models.dart';
@@ -207,14 +206,7 @@ class PhonePosterCard extends StatelessWidget {
   final VoidCallback? onTap;
 
   @override
-  Widget build(BuildContext context) => ContentTheme(
-    item: item,
-    preferBackdrop: false,
-    fillSurface: false,
-    child: Builder(builder: _buildCard),
-  );
-
-  Widget _buildCard(BuildContext context) {
+  Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final l10n = AppLocalizations.of(context);
     final badges = phoneCardBadgeLabels(
@@ -225,7 +217,7 @@ class PhonePosterCard extends StatelessWidget {
     final image = MediaImage(
       item: item,
       maxWidth: imageMaxWidth,
-      contributesToTheme: true,
+      fit: BoxFit.cover,
     );
     final card = Material(
       color: theme.colorScheme.surface,

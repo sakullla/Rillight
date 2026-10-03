@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:rillight/app/theme/tokens.dart';
+import 'package:rillight/app/widgets/scroll_viewport.dart';
 
 /// hover/焦点卡片包装:指针悬停与键盘焦点显示同一套焦点环,
 /// 悬停时按倍率放大并叠加阴影。动画时长与曲线取自 [AppMotion]。
@@ -58,32 +59,35 @@ class _AppHoverCardState extends State<AppHoverCard> {
   bool _hovering = false;
   bool _focused = false;
   bool _hoverResetScheduled = false;
-  ScrollPosition? _position;
+  List<ScrollPosition> _positions = const [];
+
+  bool get _scrolling =>
+      _positions.any((position) => position.isScrollingNotifier.value);
 
   bool get _highlighted => _hovering || _focused;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final next = Scrollable.maybeOf(context)?.position;
-    if (identical(_position, next)) {
-      return;
+    for (final position in _positions) {
+      position.isScrollingNotifier.removeListener(_onScrollChanged);
     }
-    _position?.isScrollingNotifier.removeListener(_onScrollChanged);
-    _position = next;
-    _position?.isScrollingNotifier.addListener(_onScrollChanged);
+    _positions = ancestorScrollPositions(context);
+    for (final position in _positions) {
+      position.isScrollingNotifier.addListener(_onScrollChanged);
+    }
   }
 
   @override
   void dispose() {
-    _position?.isScrollingNotifier.removeListener(_onScrollChanged);
+    for (final position in _positions) {
+      position.isScrollingNotifier.removeListener(_onScrollChanged);
+    }
     super.dispose();
   }
 
   void _onScrollChanged() {
-    if (_position?.isScrollingNotifier.value != true ||
-        !_hovering ||
-        _hoverResetScheduled) {
+    if (!_scrolling || !_hovering || _hoverResetScheduled) {
       return;
     }
     // ScrollPosition can notify while the viewport is laying out. Defer the
@@ -91,15 +95,13 @@ class _AppHoverCardState extends State<AppHoverCard> {
     _hoverResetScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _hoverResetScheduled = false;
-      if (!mounted || _position?.isScrollingNotifier.value != true) return;
+      if (!mounted) return;
       _setHovering(false);
     });
   }
 
   void _setHovering(bool value) {
-    if (value &&
-        (Scrollable.maybeOf(context)?.position.isScrollingNotifier.value ??
-            false)) {
+    if (value && _scrolling) {
       value = false;
     }
     if (_hovering == value) {
@@ -131,10 +133,7 @@ class _AppHoverCardState extends State<AppHoverCard> {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final radius = widget.borderRadius ?? BorderRadius.circular(AppRadii.md);
-    final scrolling =
-        Scrollable.maybeOf(context)?.position.isScrollingNotifier.value ??
-        false;
-    final highlighted = (_hovering && !scrolling) || _focused;
+    final highlighted = (_hovering && !_scrolling) || _focused;
 
     final card = AnimatedContainer(
       duration: AppMotion.fast,

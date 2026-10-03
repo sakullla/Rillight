@@ -10,6 +10,7 @@ import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_scope.dart';
+import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/hero_artwork.dart';
 import 'package:rillight/library/detail_controller.dart';
 import 'package:rillight/library/episode_detail_sections.dart';
@@ -255,8 +256,6 @@ class _TvBackdropHeader extends StatelessWidget {
     final height = math.min(320.0, size.height * 0.42);
     final overview = plainOverview(item.overview);
     final meta = <String>[
-      if (item.isEpisode && item.seriesName?.isNotEmpty == true)
-        item.seriesName!,
       if (seasonEpisodeCode(item) != null) seasonEpisodeCode(item)!,
       if (item.productionYear != null) '${item.productionYear}',
       if (runtimeLabel(l, item) != null) runtimeLabel(l, item)!,
@@ -273,6 +272,7 @@ class _TvBackdropHeader extends StatelessWidget {
           MediaImage(
             item: artwork ?? item,
             contributesToTheme: true,
+            smartCrop: true,
             preferBackdrop: !item.isEpisode,
             preferParentBackdrop: item.isEpisode,
             maxWidth: 1280,
@@ -295,6 +295,21 @@ class _TvBackdropHeader extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
+                if (item.isEpisode && item.seriesId?.isNotEmpty == true)
+                  TvAction(
+                    key: CatalogKeys.seriesLink,
+                    onPressed: () => context.push(
+                      AppRoutes.item(
+                        item.seriesId!,
+                        seasonId: item.seasonId ?? item.parentId,
+                      ),
+                    ),
+                    child: Text(
+                      '${item.seriesName ?? l.seasons}  ›',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
                 Text(
                   item.name,
                   maxLines: 2,

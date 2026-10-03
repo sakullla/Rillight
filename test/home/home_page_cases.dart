@@ -201,13 +201,14 @@ void main() {
   testWidgets(
     'a home row recovers from quiet-retry exhaustion and keeps cached cards',
     (tester) async {
-      server.latestMovieStatus = 500;
+      server.resumeStatus = 500;
+      server.nextUpStatus = 500;
       final auth = await connect(tester);
       await tester.pumpWidget(RillightApp(auth: auth));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 50));
 
-      final row = CatalogKeys.latestMoviesRow;
+      final row = CatalogKeys.resumeRow;
       Finder skeleton() => inRow(row, find.byType(SkeletonShelfRow));
       Finder retry() => inRow(row, find.text('重试'));
 
@@ -219,23 +220,24 @@ void main() {
       await tester.pump(const Duration(milliseconds: 50));
       expect(skeleton(), findsNothing);
       expect(retry(), findsOneWidget);
-      expect(find.text('飞屋环游记'), findsNothing);
+      expect(inRow(row, find.text('Inception')), findsNothing);
       final requestsAfterExhaustion = server.requests
-          .where((request) => request.contains('IncludeItemTypes=Movie'))
+          .where((request) => request.contains('Items/Resume'))
           .length;
 
       await tester.pump(const Duration(seconds: 30));
       await tester.pump(const Duration(milliseconds: 50));
       expect(
         server.requests
-            .where((request) => request.contains('IncludeItemTypes=Movie'))
+            .where((request) => request.contains('Items/Resume'))
             .length,
         requestsAfterExhaustion,
       );
       expect(retry(), findsOneWidget);
 
       // 点击「重试」后恢复。
-      server.latestMovieStatus = null;
+      server.resumeStatus = null;
+      server.nextUpStatus = null;
       await scrollBelowTopBar(tester, retry());
       await tester.tap(retry());
       await tester.pump();
@@ -244,32 +246,29 @@ void main() {
       expect(retry(), findsNothing);
       await scrollBelowTopBar(tester, find.byKey(row));
       await settle(tester);
-      expect(inRow(row, find.text('飞屋环游记')), findsOneWidget);
+      expect(inRow(row, find.text('Inception')), findsOneWidget);
       await tester.pump(const Duration(milliseconds: 50));
       await tester.pump(const Duration(milliseconds: 50));
 
       // 已有可见卡片时刷新失败:保留缓存卡片并再次提供本地重试。
       final catalog = CatalogScope.of(tester.element(find.byType(HomePage)));
-      server.latestMovieStatus = 500;
+      server.resumeStatus = 500;
       final reload = catalog.reloadHomeRows();
       await settle(tester);
       await reload;
       await tester.pump(const Duration(seconds: 28));
       await settle(tester);
-      expect(catalog.latestMovies.notice, isNotNull);
-      await scrollBelowTopBar(tester, find.byKey(CatalogKeys.latestMoviesRow));
+      expect(catalog.resume.notice, isNotNull);
+      await scrollBelowTopBar(tester, find.byKey(CatalogKeys.resumeRow));
       expect(
-        inRow(CatalogKeys.latestMoviesRow, find.text('飞屋环游记')),
+        inRow(CatalogKeys.resumeRow, find.text('Inception')),
         findsOneWidget,
       );
-      expect(
-        inRow(CatalogKeys.latestMoviesRow, find.text('重试')),
-        findsOneWidget,
-      );
-      server.latestMovieStatus = null;
-      await tester.tap(inRow(CatalogKeys.latestMoviesRow, find.text('重试')));
+      expect(inRow(CatalogKeys.resumeRow, find.text('重试')), findsOneWidget);
+      server.resumeStatus = null;
+      await tester.tap(inRow(CatalogKeys.resumeRow, find.text('重试')));
       await settle(tester);
-      expect(catalog.latestMovies.error, isNull);
+      expect(catalog.resume.error, isNull);
     },
     tags: ['integration'],
   );

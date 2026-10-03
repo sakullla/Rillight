@@ -8,7 +8,8 @@ import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/theme.dart';
 import 'package:rillight/emby/emby_models.dart';
 
-/// 手机首页区块 id。片库「最近添加」用 [libraryLatest]。
+/// 首页区块。片库入口和每个片库的最近添加都能单独开关、排序。
+/// 关掉只影响首页，片库页仍列出全部片库。
 abstract final class PhoneHomeSectionId {
   static const banner = 'banner';
   static const resume = 'resume';
@@ -17,14 +18,8 @@ abstract final class PhoneHomeSectionId {
   static const latestSeries = 'latestSeries';
   static const libraries = 'libraries';
 
-  static const fixed = <String>[
-    banner,
-    resume,
-    nextUp,
-    latestMovies,
-    latestSeries,
-    libraries,
-  ];
+  /// 缺省顺序。最近更新的电影、剧集不在首页。每个片库的分栏接在后面。
+  static const fixed = <String>[banner, resume, nextUp, libraries];
 
   static String libraryLatest(String libraryId) => 'library:$libraryId';
 

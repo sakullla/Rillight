@@ -266,6 +266,13 @@
     ]
   },
   {
+    "id": "home-display",
+    "feature": "home",
+    "platforms": [
+      "desktop"
+    ]
+  },
+  {
     "id": "home-loading-120ms",
     "feature": "home",
     "platforms": [
@@ -387,20 +394,6 @@
     ]
   },
   {
-    "id": "library-navigation-customize",
-    "feature": "library",
-    "platforms": [
-      "desktop"
-    ]
-  },
-  {
-    "id": "library-navigation-menu",
-    "feature": "library",
-    "platforms": [
-      "desktop"
-    ]
-  },
-  {
     "id": "library-series",
     "feature": "library",
     "platforms": [
@@ -455,6 +448,21 @@
       "desktop",
       "phone"
     ]
+  },
+  {
+    "id": "detail-genres-red",
+    "feature": "detail",
+    "platforms": ["desktop", "phone"]
+  },
+  {
+    "id": "detail-genres-blue",
+    "feature": "detail",
+    "platforms": ["desktop", "phone"]
+  },
+  {
+    "id": "detail-genres-green",
+    "feature": "detail",
+    "platforms": ["desktop", "phone"]
   },
   {
     "id": "movie-detail",

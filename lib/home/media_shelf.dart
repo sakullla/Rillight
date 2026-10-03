@@ -49,6 +49,7 @@ class MediaShelf extends StatefulWidget {
     this.onRemoveFromResume,
     this.headerAction,
     this.focusItemId,
+    this.scrollPageOnFocus = true,
   });
 
   final String shelfId;
@@ -71,6 +72,10 @@ class MediaShelf extends StatefulWidget {
   /// 打开第 10 集时不该停在第 1 集)。卡片节距按默认卡宽 + [cardGap] 估算,
   /// 自定义 [itemBuilder] 需使用同档卡宽。
   final String? focusItemId;
+
+  /// 焦点落在卡片上时，是否连同页面一起滚到卡片居中。
+  /// 本季分集已经在详情页里，点集只该滚这一行，不该把下面的演职员和相册带跑。
+  final bool scrollPageOnFocus;
 
   /// 内容超出时,静止右缘至少切进下一张卡片的宽度。
   static const double peek = AppSpacing.page;
@@ -457,8 +462,12 @@ class _MediaShelfState extends State<MediaShelf> {
                   cardWidth: cardWidth,
                   itemCount: widget.items.length,
                 );
+                final rowHeight = _rowHeight;
+                final hoverInset = widget.wide
+                    ? 0.0
+                    : rowHeight * (1 - 1 / MediaShelf.hoverScale) / 2;
                 return SizedBox(
-                  height: _rowHeight,
+                  height: rowHeight,
                   width: viewWidth,
                   child: Stack(
                     children: [
@@ -482,10 +491,11 @@ class _MediaShelfState extends State<MediaShelf> {
                                   scrollCacheExtent:
                                       const ScrollCacheExtent.viewport(0.5),
                                   // 首张卡片外缘仍落在 AppSpacing.page 竖线上。
-                                  padding: const EdgeInsets.symmetric(
+                                  padding: EdgeInsets.symmetric(
                                     horizontal:
                                         AppSpacing.page -
                                         MediaShelf.hoverGutter,
+                                    vertical: hoverInset,
                                   ),
                                   scrollDirection: Axis.horizontal,
                                   itemBuilder: (context, index) {
@@ -526,6 +536,8 @@ class _MediaShelfState extends State<MediaShelf> {
                                           child: Shortcuts(
                                             shortcuts: _kShelfArrowShortcuts,
                                             child: _EnsureVisibleOnFocus(
+                                              scrollPage:
+                                                  widget.scrollPageOnFocus,
                                               child: child,
                                             ),
                                           ),
@@ -594,9 +606,10 @@ class _MediaShelfState extends State<MediaShelf> {
 }
 
 class _EnsureVisibleOnFocus extends StatefulWidget {
-  const _EnsureVisibleOnFocus({required this.child});
+  const _EnsureVisibleOnFocus({required this.child, required this.scrollPage});
 
   final Widget child;
+  final bool scrollPage;
 
   @override
   State<_EnsureVisibleOnFocus> createState() => _EnsureVisibleOnFocusState();
@@ -617,10 +630,23 @@ class _EnsureVisibleOnFocusState extends State<_EnsureVisibleOnFocus> {
         if (!focused) return;
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (!mounted || !_focused || revision != _focusRevision) return;
+          final duration = AppMotion.durationOf(context, AppMotion.fast);
+          if (!widget.scrollPage) {
+            final scrollable = Scrollable.maybeOf(context);
+            final object = context.findRenderObject();
+            if (scrollable == null || object is! RenderObject) return;
+            scrollable.position.ensureVisible(
+              object,
+              alignment: 0.5,
+              duration: duration,
+              curve: AppMotion.standard,
+            );
+            return;
+          }
           Scrollable.ensureVisible(
             context,
             alignment: 0.5,
-            duration: AppMotion.durationOf(context, AppMotion.fast),
+            duration: duration,
             curve: AppMotion.standard,
           );
         });

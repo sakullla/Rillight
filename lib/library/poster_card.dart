@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
-import 'package:rillight/app/content_theme.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/app_hover_card.dart';
 import 'package:rillight/emby/emby_models.dart';
@@ -35,14 +34,7 @@ class PosterCard extends StatelessWidget {
   static Key playButtonKey(String itemId) => Key('poster-play-$itemId');
 
   @override
-  Widget build(BuildContext context) => ContentTheme(
-    item: item,
-    preferBackdrop: wide,
-    fillSurface: false,
-    child: Builder(builder: _buildCard),
-  );
-
-  Widget _buildCard(BuildContext context) {
+  Widget build(BuildContext context) {
     final height = wide ? width * 9 / 16 : width * 1.5;
     final l10n = AppLocalizations.of(context);
     final progress = item.playbackProgress;
@@ -75,11 +67,11 @@ class PosterCard extends StatelessWidget {
                         child: MediaImage(
                           key: ValueKey(item.id),
                           item: item,
-                          contributesToTheme: true,
                           width: width,
                           height: height,
                           preferBackdrop: wide,
                           maxWidth: wide ? 360 : 280,
+                          fit: BoxFit.cover,
                         ),
                       ),
                       _PosterRevealOverlay(
@@ -161,19 +153,30 @@ class EpisodeThumbCard extends StatelessWidget {
         onTap: onTap,
         hoverScale: 1,
         borderRadius: BorderRadius.circular(AppRadii.sm),
-        // selected 卡片自带主题色描边,抑制悬停/焦点环避免双层。
-        showRing: !selected,
+        // The image frame owns selection and hover feedback, with fixed insets.
+        showRing: false,
         builder: (context, highlighted) {
           return Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(AppRadii.sm),
-                clipBehavior: Clip.hardEdge,
-                child: SizedBox(
-                  width: width,
-                  height: height,
+              Container(
+                key: ValueKey('episode-thumb-frame-${item.id}'),
+                width: width,
+                height: height,
+                // Reserve the same 3dp frame for every episode. Painting a ring
+                // over only the selected image hides its edges and makes that
+                // picture visibly smaller than its neighbours.
+                padding: const EdgeInsets.all(3),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(AppRadii.sm),
+                  color: selected || highlighted
+                      ? Theme.of(context).colorScheme.primary
+                      : Theme.of(context).colorScheme.surfaceContainerHighest,
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(AppRadii.sm - 3),
+                  clipBehavior: Clip.hardEdge,
                   child: Stack(
                     fit: StackFit.expand,
                     children: [
@@ -185,6 +188,7 @@ class EpisodeThumbCard extends StatelessWidget {
                           height: height,
                           preferThumb: true,
                           maxWidth: 360,
+                          fit: BoxFit.cover,
                         ),
                       ),
                       _PosterRevealOverlay(
@@ -198,17 +202,23 @@ class EpisodeThumbCard extends StatelessWidget {
                           alignment: Alignment.bottomCenter,
                           child: _ResumeProgressBar(value: progress),
                         ),
-                      if (selected)
-                        Positioned.fill(
+                      if (item.userData.played)
+                        Positioned(
+                          top: 6,
+                          left: 6,
                           child: IgnorePointer(
                             child: DecoratedBox(
+                              key: Key('episode-thumb-played-${item.id}'),
                               decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(
-                                  AppRadii.sm,
-                                ),
-                                border: Border.all(
-                                  color: Theme.of(context).colorScheme.primary,
-                                  width: 3,
+                                color: Theme.of(context).colorScheme.primary,
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Padding(
+                                padding: EdgeInsets.all(2),
+                                child: Icon(
+                                  Icons.check_rounded,
+                                  size: 14,
+                                  color: Colors.white,
                                 ),
                               ),
                             ),
@@ -281,6 +291,7 @@ class SeasonPosterCard extends StatelessWidget {
                             width: width,
                             height: height,
                             maxWidth: 280,
+                            fit: BoxFit.cover,
                           ),
                           _PosterRevealOverlay(
                             item: item,

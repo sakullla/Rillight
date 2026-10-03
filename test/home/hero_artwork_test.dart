@@ -13,6 +13,38 @@ import 'package:rillight/home/phone_hero.dart';
 import 'package:rillight/player/player_window_host.dart';
 
 void main() {
+  test(
+    'season posters fall back to the series endpoint without a missing-image request',
+    () {
+      const series = EmbyItem(
+        id: 'series',
+        name: '',
+        type: 'Series',
+        primaryImageTag: 'series-poster',
+      );
+      for (final tag in <String?>[null, 'season-poster', 'series-poster']) {
+        final season = seasonArtworkItem(
+          EmbyItem(
+            id: 'season',
+            name: '',
+            type: 'Season',
+            primaryImageTag: tag,
+          ),
+          series,
+        );
+        final refs = season.imageCandidates();
+        expect(refs.last.itemId, 'series');
+        expect(refs.last.tag, 'series-poster');
+        expect(refs.last.type, 'Primary');
+        if (tag == 'season-poster') {
+          expect(refs.map((r) => r.itemId), ['season', 'series']);
+        } else {
+          expect(refs.length, 1);
+        }
+      }
+    },
+  );
+
   const episode = EmbyItem(
     id: 'episode',
     name: 'Generated frame',

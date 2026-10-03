@@ -12,6 +12,8 @@ import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/library/item_detail_page.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
+import 'package:rillight/player/playback_models.dart';
+import 'package:rillight/player/playback_resolver.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_keys.dart';
 import 'package:rillight/player/player_settings.dart';
@@ -28,6 +30,39 @@ const _device = EmbyDeviceInfo(
   deviceId: 'device-player-window',
   version: '0.1.0',
 );
+
+/// 桌面首页只构建视口附近的分栏，片库入口要先滚进列表才会挂上。
+Future<void> revealHomeLibrary(WidgetTester tester, String viewId) async {
+  final tile = find.byKey(CatalogKeys.library(viewId));
+  if (tile.evaluate().isNotEmpty) {
+    await tester.ensureVisible(tile);
+    return;
+  }
+  final vertical = find.descendant(
+    of: find.byKey(const PageStorageKey<String>('home-scroll')),
+    matching: find.byWidgetPredicate(
+      (widget) =>
+          widget is Scrollable && widget.axisDirection == AxisDirection.down,
+    ),
+  );
+  final position = tester.state<ScrollableState>(vertical).position;
+  position.jumpTo(0);
+  await tester.pump();
+  final menu = find.byKey(CatalogKeys.librariesMenu);
+  if (menu.evaluate().isEmpty) {
+    await tester.scrollUntilVisible(menu, 320, scrollable: vertical);
+  }
+  if (tile.evaluate().isEmpty) {
+    final rail = find.descendant(of: menu, matching: find.byType(Scrollable));
+    await tester.scrollUntilVisible(
+      tile,
+      240,
+      scrollable: rail.first,
+      maxScrolls: 12,
+    );
+  }
+  await tester.ensureVisible(tile);
+}
 
 class _TrackingAuth extends AuthController {
   _TrackingAuth({
@@ -151,8 +186,8 @@ void main() {
       await tester.tap(homeTitle);
       await settle(tester);
     }
-    final movies = find.byKey(AppShell.libraryNavKey('view-movies'));
-    await tester.ensureVisible(movies);
+    final movies = find.byKey(CatalogKeys.library('view-movies'));
+    await revealHomeLibrary(tester, 'view-movies');
     await tester.tap(movies);
     await settle(tester);
     final item = find.byKey(CatalogKeys.item(itemId)).first;
@@ -171,6 +206,36 @@ void main() {
       await openPlayable(tester, 'movie-up');
       await waitFor(tester, find.byType(PlayerPage));
       await waitFor(tester, find.byKey(PlayerKeys.playPause));
+
+      final controller = tester
+          .state<PlayerPageState>(find.byType(PlayerPage))
+          .controller!;
+      final original = controller.resolved!;
+      final originalSubtitle = controller.subtitleStreamIndex;
+      controller.subtitleStreamIndex = null;
+      for (final subtitles in [false, true]) {
+        controller.resolved = ResolvedPlayback(
+          playMethod: original.playMethod,
+          streamUrl: original.streamUrl,
+          playSessionId: original.playSessionId,
+          mediaSource: PlaybackMediaSource(
+            id: original.mediaSource.id,
+            mediaStreams: [
+              if (subtitles)
+                const MediaStreamInfo(index: 2, type: 'Subtitle', codec: 'srt'),
+            ],
+          ),
+          itemId: original.itemId,
+        );
+        controller.onUserActivity();
+        await tester.pump();
+        expect(
+          find.byKey(PlayerKeys.subtitle),
+          subtitles ? findsOneWidget : findsNothing,
+        );
+      }
+      controller.resolved = original;
+      controller.subtitleStreamIndex = originalSubtitle;
 
       final resumeBefore = server.requests
           .where((request) => request.contains('Items/Resume'))

@@ -370,6 +370,9 @@ class PlayerController extends ChangeNotifier {
   // metadata or a single subtitle cannot currently be decoded.
   List<MediaStreamInfo> get selectableSubtitleTracks => subtitleTracks;
 
+  bool get canConfigureSubtitles =>
+      selectableSubtitleTracks.isNotEmpty || subtitleStreamIndex != null;
+
   bool get canSwitchAudioTrack => selectableAudioTracks.length > 1;
   bool get canSwitchQuality => availableBitrates.length > 1;
 

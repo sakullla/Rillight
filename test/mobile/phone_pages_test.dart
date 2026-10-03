@@ -393,12 +393,12 @@ void main() {
       (tester) async {
         final (router, _) = await _openPhone(tester);
         expect(find.byKey(const Key('phone-home-edit')), findsOneWidget);
-        expect(find.text('横幅'), findsNothing);
+        expect(find.text('轮播图'), findsNothing);
 
         await tester.tap(find.byKey(const Key('phone-home-edit')));
         await _homeSettle(tester);
         expect(find.byKey(const Key('phone-home-edit-page')), findsOneWidget);
-        expect(find.text('横幅'), findsOneWidget);
+        expect(find.text('轮播图'), findsOneWidget);
         expect(
           find.text('按住左侧手柄拖动排序。关闭的行会归到「未显示」。片库页仍会列出全部片库。'),
           findsOneWidget,
@@ -409,7 +409,7 @@ void main() {
         await tester.tap(find.byKey(const Key('mobile-shell-mine-entry')));
         await _homeSettle(tester);
         expect(find.byType(PhoneMinePage), findsOneWidget);
-        expect(find.text('横幅'), findsNothing);
+        expect(find.text('轮播图'), findsNothing);
         expect(find.byKey(const Key('phone-home-edit-page')), findsNothing);
         expect(tester.takeException(), isNull);
       },
@@ -658,9 +658,7 @@ void main() {
         await _homeSettle(tester);
 
         // 货架:shared axis Y。
-        final more = find.byKey(
-          CatalogKeys.shelfMore(CatalogKeys.shelfLatestMovies),
-        );
+        final more = find.byKey(CatalogKeys.shelfMore(CatalogKeys.shelfResume));
         await _showOnHome(tester, more);
         await tester.tap(more);
         await tester.pump();
@@ -836,8 +834,6 @@ void main() {
               playedPercentage: 40,
             ),
           ),
-        ],
-        movies: [
           const EmbyItem(
             id: 'movie-progress',
             name: '进度电影',
@@ -855,8 +851,6 @@ void main() {
             productionYear: 2023,
             userData: EmbyUserData(played: true),
           ),
-        ],
-        series: [
           const EmbyItem(
             id: 'series-long',
             name: '长剧集',
@@ -865,6 +859,8 @@ void main() {
             childCount: 24,
           ),
         ],
+        movies: const [],
+        series: const [],
       );
       addTearDown(catalog.auth.dispose);
       addTearDown(catalog.dispose);
@@ -898,6 +894,16 @@ void main() {
         ),
         findsOneWidget,
       );
+      await tester.scrollUntilVisible(
+        find.byKey(phoneHomeBadgesKey('movie-played')),
+        200,
+        scrollable: find
+            .descendant(
+              of: find.byKey(CatalogKeys.resumeRow),
+              matching: find.byType(Scrollable),
+            )
+            .first,
+      );
       final playedBadges = find.byKey(phoneHomeBadgesKey('movie-played'));
       expect(
         find.descendant(of: playedBadges, matching: find.text('已看')),
@@ -908,8 +914,17 @@ void main() {
         findsNothing,
       );
 
-      // 剧集海报:集数角标。
-      await _showOnHome(tester, find.byKey(CatalogKeys.latestSeriesRow));
+      // 剧集海报:集数角标。继续观看横卡同用这套角标。
+      await tester.scrollUntilVisible(
+        find.byKey(phoneHomeBadgesKey('series-long')),
+        200,
+        scrollable: find
+            .descendant(
+              of: find.byKey(CatalogKeys.resumeRow),
+              matching: find.byType(Scrollable),
+            )
+            .first,
+      );
       expect(
         find.descendant(
           of: find.byKey(phoneHomeBadgesKey('series-long')),
@@ -929,7 +944,7 @@ void main() {
         movies: const [],
         series: const [],
       );
-      catalog.latestMovies = const CatalogRowState(
+      catalog.nextUp = const CatalogRowState(
         error: EmbyException(EmbyFailureKind.unknown, statusCode: 503),
       );
       addTearDown(catalog.auth.dispose);
@@ -941,7 +956,7 @@ void main() {
 
       // 失败行内给重试,继续观看行不受影响,失败行不出现货架入口。
       expect(find.byKey(CatalogKeys.item('movie-b')), findsOneWidget);
-      final failedRow = find.byKey(CatalogKeys.latestMoviesRow);
+      final failedRow = find.byKey(CatalogKeys.nextUpRow);
       expect(
         find.descendant(
           of: failedRow,
@@ -1014,27 +1029,22 @@ void main() {
         prepare: _addShelfMovies,
       );
       expect(find.text('冷门电影'), findsNothing);
-      // 电影行满员出现“更多”；继续观看和最近剧集有条目即出现。
+      // 最近更新行已离开首页，货架仍可从路由进入。
       expect(
         find.byKey(CatalogKeys.shelfMore(CatalogKeys.shelfLatestMovies)),
-        findsOneWidget,
+        findsNothing,
       );
       expect(
         find.byKey(CatalogKeys.shelfMore(CatalogKeys.shelfResume)),
         findsOneWidget,
       );
-      await _showOnHome(tester, find.byKey(CatalogKeys.latestSeriesRow));
       expect(
         find.byKey(CatalogKeys.shelfMore(CatalogKeys.shelfLatestSeries)),
-        findsOneWidget,
+        findsNothing,
       );
       expect(find.byType(ShelfGridPage), findsNothing);
 
-      final more = find.byKey(
-        CatalogKeys.shelfMore(CatalogKeys.shelfLatestMovies),
-      );
-      await _showOnHome(tester, more);
-      await tester.tap(more);
+      router.go(AppRoutes.shelfLatestMovies);
       await _homeSettle(tester);
 
       expect(find.byType(PhoneShelfPage), findsOneWidget);
@@ -1078,13 +1088,7 @@ void main() {
         isNotEmpty,
       );
 
-      router.pop();
-      await _homeSettle(tester);
-      final seriesMore = find.byKey(
-        CatalogKeys.shelfMore(CatalogKeys.shelfLatestSeries),
-      );
-      await _showOnHome(tester, seriesMore);
-      await tester.tap(seriesMore);
+      router.go(AppRoutes.shelfLatestSeries);
       await _homeSettle(tester);
       expect(find.byType(PhoneShelfPage), findsOneWidget);
       expect(
@@ -1405,6 +1409,7 @@ void main() {
         expect(find.byType(ChoiceChip), findsNothing);
         expect(find.text('Halfway through season two.'), findsOneWidget);
         expect(find.byKey(CatalogKeys.seriesLink), findsOneWidget);
+        expect(find.byKey(CatalogKeys.viewSeries), findsNothing);
         expect(find.byTooltip('下一集'), findsOneWidget);
         await tester.tap(find.byKey(CatalogKeys.nextEpisode));
         await tester.pumpAndSettle();
@@ -2329,19 +2334,26 @@ void main() {
     ) async {
       final (router, _) = await _openPhone(tester);
 
-      // 基线:首页按缺省顺序渲染,电影行在剧集行之前。
-      expect(_homeRowOrder(tester), [
-        CatalogKeys.latestMoviesRow,
-        CatalogKeys.latestSeriesRow,
-      ]);
+      // 基线:片库入口之后，各片库分栏按服务器顺序。
+      expect(
+        _librarySectionOrder(tester),
+        containsAllInOrder([
+          'home-section-library-view-movies',
+          'home-section-library-view-tv',
+        ]),
+      );
 
       await tester.tap(find.byKey(const Key('phone-home-edit')));
       await _homeSettle(tester);
       final moviesTile = find.byKey(
-        PhoneHomeSectionEditor.tileKey(PhoneHomeSectionId.latestMovies),
+        PhoneHomeSectionEditor.tileKey(
+          PhoneHomeSectionId.libraryLatest('view-movies'),
+        ),
       );
       final seriesTile = find.byKey(
-        PhoneHomeSectionEditor.tileKey(PhoneHomeSectionId.latestSeries),
+        PhoneHomeSectionEditor.tileKey(
+          PhoneHomeSectionId.libraryLatest('view-tv'),
+        ),
       );
       expect(moviesTile, findsOneWidget);
       expect(seriesTile, findsOneWidget);
@@ -2350,7 +2362,7 @@ void main() {
         lessThan(tester.getTopLeft(seriesTile).dy),
       );
 
-      // 拖住手柄把剧集行移到电影行之上。
+      // 拖住手柄把剧集分栏移到电影分栏之上。
       await tester.ensureVisible(seriesTile);
       await tester.pumpAndSettle();
       await _dragSectionUp(tester, seriesTile);
@@ -2361,33 +2373,59 @@ void main() {
         lessThan(tester.getTopLeft(moviesTile).dy),
       );
 
-      // 关闭电影行:它归入「未显示」分组,首页立即消失。
+      // 关闭电影分栏:最近添加消失，片库入口和片库页仍有这部片库。
       await tester.tap(
         find.byKey(
-          PhoneHomeSectionEditor.visibleKey(PhoneHomeSectionId.latestMovies),
+          PhoneHomeSectionEditor.visibleKey(
+            PhoneHomeSectionId.libraryLatest('view-movies'),
+          ),
         ),
       );
       await _homeSettle(tester);
       router.pop();
       await _homeSettle(tester);
-      expect(find.byKey(CatalogKeys.latestMoviesRow), findsNothing);
-      expect(_homeRowOrder(tester), [CatalogKeys.latestSeriesRow]);
+      expect(
+        find.byKey(const Key('phone-home-library-latest-view-movies')),
+        findsNothing,
+      );
+      await _showOnHome(
+        tester,
+        find.byKey(const Key('phone-home-library-view-movies')),
+      );
+      expect(
+        find.byKey(const Key('phone-home-library-view-movies')),
+        findsOneWidget,
+      );
+      expect(
+        _librarySectionOrder(tester),
+        isNot(contains('home-section-library-view-movies')),
+      );
+      await tester.tap(find.byType(NavigationDestination).at(1));
+      await _homeSettle(tester);
+      expect(find.text('电影'), findsWidgets);
+      await tester.tap(find.byType(NavigationDestination).at(0));
+      await _homeSettle(tester);
 
-      // 重新打开:行按编辑后的顺序恢复。
+      // 重新打开:分栏按编辑后的顺序恢复。
       await tester.tap(find.byKey(const Key('phone-home-edit')));
       await _homeSettle(tester);
       await tester.tap(
         find.byKey(
-          PhoneHomeSectionEditor.visibleKey(PhoneHomeSectionId.latestMovies),
+          PhoneHomeSectionEditor.visibleKey(
+            PhoneHomeSectionId.libraryLatest('view-movies'),
+          ),
         ),
       );
       await _homeSettle(tester);
       router.pop();
       await _homeSettle(tester);
-      expect(_homeRowOrder(tester), [
-        CatalogKeys.latestSeriesRow,
-        CatalogKeys.latestMoviesRow,
-      ]);
+      expect(
+        _librarySectionOrder(tester),
+        containsAllInOrder([
+          'home-section-library-view-tv',
+          'home-section-library-view-movies',
+        ]),
+      );
       expect(tester.takeException(), isNull);
     }, tags: ['integration']);
   });
@@ -2474,18 +2512,18 @@ Future<void> _showOnHome(WidgetTester tester, Finder finder) async {
   await tester.pump();
 }
 
-/// Inspect the lazy builder's section keys without triggering network work.
-List<Key> _homeRowOrder(WidgetTester tester) {
+/// 首页片库分栏的懒构建顺序，不把未挂载的行拉进视口。
+List<String> _librarySectionOrder(WidgetTester tester) {
   final list = find.byKey(const PageStorageKey('mobile-home-scroll'));
   final view = tester.widget<ListView>(list);
   final delegate = view.childrenDelegate as SliverChildBuilderDelegate;
   final context = tester.element(list);
   return [
     for (var index = 0; index < delegate.childCount!; index++)
-      if (delegate.builder(context, index) case final widget?
-          when widget.key == CatalogKeys.latestMoviesRow ||
-              widget.key == CatalogKeys.latestSeriesRow)
-        widget.key!,
+      if (delegate.builder(context, index)?.key case ValueKey<String>(
+        value: final value,
+      ) when value.startsWith('home-section-library-'))
+        value,
   ];
 }
 

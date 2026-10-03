@@ -5,6 +5,8 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
+import 'artwork_crop.dart';
+
 import 'package:cryptography/dart.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
@@ -15,6 +17,7 @@ import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/artwork_color_scope.dart';
 import 'package:rillight/app/widgets/poster_placeholder.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
+import 'package:rillight/app/widgets/scroll_viewport.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/emby/emby_errors.dart';
@@ -85,6 +88,8 @@ class MediaImage extends StatefulWidget {
     this.preferParentBackdrop = false,
     this.maxWidth,
     this.alignment = Alignment.center,
+    this.smartCrop = false,
+    this.fit = BoxFit.contain,
     this.contributesToTheme = false,
   });
 
@@ -98,6 +103,12 @@ class MediaImage extends StatefulWidget {
   final bool preferParentBackdrop;
   final int? maxWidth;
   final Alignment alignment;
+
+  /// Analyze only a large hero; ordinary cards use their fixed alignment.
+  final bool smartCrop;
+
+  /// Cards crop to a consistent frame; large artwork can retain its full image.
+  final BoxFit fit;
   final bool contributesToTheme;
 
   /// 清空内存与磁盘两级缓存,仅测试使用。
@@ -139,6 +150,8 @@ class _LoadedImage {
 // The independent player attaches a client session without restoring the
 // account controller. Use the actual authenticated endpoint and user in both
 // processes; a missing session must never resolve to a shared anonymous key.
+final _accountScopes = Expando<(Uri, String, String)>();
+
 String? mediaImageAccountScope(AuthController? auth) {
   final client = auth?.client;
   if (client == null ||
@@ -147,13 +160,18 @@ String? mediaImageAccountScope(AuthController? auth) {
     return null;
   }
   final base = client.baseUrl!;
+  final userId = client.userId!;
+  final cached = _accountScopes[auth!];
+  if (cached != null && cached.$1 == base && cached.$2 == userId) {
+    return cached.$3;
+  }
   final endpoint = Uri(
     scheme: base.scheme,
     host: base.host,
     port: base.port,
     path: base.path,
   );
-  return const DartSha256()
+  final scope = const DartSha256()
       .hashSync(
         utf8.encode(
           jsonEncode([
@@ -165,6 +183,8 @@ String? mediaImageAccountScope(AuthController? auth) {
       .bytes
       .map((byte) => byte.toRadixString(16).padLeft(2, '0'))
       .join();
+  _accountScopes[auth] = (base, userId, scope);
+  return scope;
 }
 
 bool _isTransientImageFailure(Object error) {
@@ -194,35 +214,80 @@ class _MediaImageState extends State<MediaImage> {
       if (!known) MediaImageCache.instance._rejectEncodedImage(key, bytes);
       return known;
     }
-    var valid = false;
-    try {
-      final codec = await ui.instantiateImageCodec(
-        bytes,
-        targetWidth: 1,
-        targetHeight: 1,
-      );
-      try {
-        final frame = await codec.getNextFrame();
-        frame.image.dispose();
-        valid = true;
-      } finally {
-        codec.dispose();
-      }
-    } catch (_) {
-      // A successful HTTP response or disk hit can still contain HTML, a
-      // truncated image, or other undecodable data. Continue to the next ref.
+    // 正常图片只看文件头。再解一次 1×1 会和显示解码叠在一起，
+    // 片库一屏回来时主线程会被成片的解码拖死。
+    if (_hasImageSignature(bytes)) {
+      _rememberValidation(key, bytes, true);
+      return true;
     }
-    _validated[key] = (WeakReference(bytes), valid);
-    if (_validated.length > 256) _validated.remove(_validated.keys.first);
+    var valid = false;
+    await _DecodeGate.acquire();
+    try {
+      try {
+        final codec = await ui.instantiateImageCodec(
+          bytes,
+          targetWidth: 1,
+          targetHeight: 1,
+        );
+        try {
+          final frame = await codec.getNextFrame();
+          frame.image.dispose();
+          valid = true;
+        } finally {
+          codec.dispose();
+        }
+      } catch (_) {
+        // A successful HTTP response or disk hit can still contain HTML, a
+        // truncated image, or other undecodable data. Continue to the next ref.
+      }
+    } finally {
+      _DecodeGate.release();
+    }
+    _rememberValidation(key, bytes, valid);
     if (!valid) MediaImageCache.instance._rejectEncodedImage(key, bytes);
     return valid;
+  }
+
+  static void _rememberValidation(String key, Uint8List bytes, bool valid) {
+    _validated[key] = (WeakReference(bytes), valid);
+    if (_validated.length > 256) _validated.remove(_validated.keys.first);
+  }
+
+  /// JPEG / PNG / GIF / WebP / BMP。HTML 和截断的非图片仍走解码校验。
+  static bool _hasImageSignature(Uint8List bytes) {
+    if (bytes.length < 12) {
+      return false;
+    }
+    if (bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF) {
+      return true;
+    }
+    if (bytes[0] == 0x89 &&
+        bytes[1] == 0x50 &&
+        bytes[2] == 0x4E &&
+        bytes[3] == 0x47) {
+      return true;
+    }
+    if (bytes[0] == 0x47 && bytes[1] == 0x49 && bytes[2] == 0x46) {
+      return true;
+    }
+    if (bytes[0] == 0x52 &&
+        bytes[1] == 0x49 &&
+        bytes[2] == 0x46 &&
+        bytes[3] == 0x46 &&
+        bytes[8] == 0x57 &&
+        bytes[9] == 0x45 &&
+        bytes[10] == 0x42 &&
+        bytes[11] == 0x50) {
+      return true;
+    }
+    return bytes[0] == 0x42 && bytes[1] == 0x4D;
   }
 
   Future<_LoadedImage?>? _future;
   String? _lastAccountScope;
   int? _lastRequestWidth;
   int _loadGeneration = 0;
-  ScrollPosition? _observedScroll;
+  List<ScrollPosition> _observedScrolls = const [];
   bool _frameWakeQueued = false;
   Completer<void>? _layoutWake;
   Timer? _retryTimer;
@@ -284,8 +349,10 @@ class _MediaImageState extends State<MediaImage> {
     _loadGeneration++;
     _cancelRetryWait();
     MediaImageCache.instance._cancelStaleFetches();
-    _observedScroll?.removeListener(_onObservedScroll);
-    _observedScroll = null;
+    for (final position in _observedScrolls) {
+      position.removeListener(_onObservedScroll);
+    }
+    _observedScrolls = const [];
     final wake = _layoutWake;
     _layoutWake = null;
     if (wake != null && !wake.isCompleted) {
@@ -379,24 +446,26 @@ class _MediaImageState extends State<MediaImage> {
 
   /// 滚动位置只在依赖变化时订阅。异步续体里再调 [Scrollable.maybeOf] 会登记继承依赖。
   void _trackScrollable() {
-    final position = Scrollable.maybeOf(context)?.position;
-    if (identical(position, _observedScroll)) {
-      return;
+    for (final position in _observedScrolls) {
+      position.removeListener(_onObservedScroll);
     }
-    _observedScroll?.removeListener(_onObservedScroll);
-    _observedScroll = position;
-    position?.addListener(_onObservedScroll);
+    _observedScrolls = ancestorScrollPositions(context);
+    for (final position in _observedScrolls) {
+      position.addListener(_onObservedScroll);
+    }
   }
 
   void _onObservedScroll() {
-    if (_frameWakeQueued || !mounted) {
+    MediaImageCache.instance._scheduleViewportUpdate();
+    if (_frameWakeQueued ||
+        !mounted ||
+        _layoutWake == null ||
+        _layoutWake!.isCompleted) {
       return;
     }
     _frameWakeQueued = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _frameWakeQueued = false;
-      MediaImageCache.instance._schedulePosterRelease();
-      MediaImageCache.instance._preemptForVisibleWaiters();
       final wake = _layoutWake;
       if (wake != null && !wake.isCompleted) {
         wake.complete();
@@ -425,22 +494,22 @@ class _MediaImageState extends State<MediaImage> {
     if (object is! RenderBox || !object.attached || !object.hasSize) {
       return null;
     }
-    final viewport = RenderAbstractViewport.maybeOf(object);
-    if (viewport == null) {
-      return true;
+    // A horizontal shelf may be laid out in the page's cache extent while the
+    // entire row is offscreen. Check every viewport, not only the shelf's.
+    RenderObject? ancestor = object.parent;
+    while (ancestor != null) {
+      if (ancestor is RenderAbstractViewport && ancestor is RenderBox) {
+        final box = ancestor as RenderBox;
+        if (!box.attached || !box.hasSize) return null;
+        final rect = MatrixUtils.transformRect(
+          object.getTransformTo(box),
+          Offset.zero & object.size,
+        );
+        if (!rect.overlaps(Offset.zero & box.size)) return false;
+      }
+      ancestor = ancestor.parent;
     }
-    if (viewport is! RenderBox) {
-      return null;
-    }
-    final box = viewport as RenderBox;
-    if (!box.attached || !box.hasSize) {
-      return null;
-    }
-    final rect = MatrixUtils.transformRect(
-      object.getTransformTo(box),
-      Offset.zero & object.size,
-    );
-    return rect.overlaps(Offset.zero & box.size);
+    return true;
   }
 
   Future<_LoadedImage?> _load() async {
@@ -725,6 +794,25 @@ class _MediaImageState extends State<MediaImage> {
     double? width,
     double? height,
   ) {
+    if (widget.smartCrop) {
+      return ArtworkCrop(
+        identity: loaded.cacheKey,
+        bytes: loaded.bytes,
+        waitForIdle: MediaImageCache.instance.waitForScrollIdle,
+        builder: (alignment) =>
+            _paintAligned(context, loaded, width, height, alignment),
+      );
+    }
+    return _paintAligned(context, loaded, width, height, widget.alignment);
+  }
+
+  Widget _paintAligned(
+    BuildContext context,
+    _LoadedImage loaded,
+    double? width,
+    double? height,
+    Alignment alignment,
+  ) {
     // 按请求宽度解码,避免服务端返回原图时在片库滚动里整屏解码。
     // ImageCache 用字符串 key,避免每帧对整段 JPEG 做 ==/hashCode。
     return Image(
@@ -735,8 +823,8 @@ class _MediaImageState extends State<MediaImage> {
       ),
       width: width,
       height: height,
-      fit: BoxFit.contain,
-      alignment: widget.alignment,
+      fit: widget.smartCrop ? BoxFit.cover : widget.fit,
+      alignment: alignment,
       filterQuality: FilterQuality.low,
       gaplessPlayback: true,
       isAntiAlias: false,
@@ -1046,6 +1134,22 @@ class MediaImageCache {
   }
 
   bool get isScrollBusy => _scrollIdleTimer != null;
+
+  bool _viewportUpdateQueued = false;
+
+  // All mounted posters observe scrolling, but queue reprioritization needs
+  // one geometry pass per frame rather than one pass per poster.
+  void _scheduleViewportUpdate() {
+    if (_viewportUpdateQueued || (_posterTurns.isEmpty && _waiters.isEmpty)) {
+      return;
+    }
+    _viewportUpdateQueued = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _viewportUpdateQueued = false;
+      _schedulePosterRelease();
+      _preemptForVisibleWaiters();
+    });
+  }
 
   Future<void> waitForScrollIdle() async {
     if (!isScrollBusy) {

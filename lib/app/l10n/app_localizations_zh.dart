@@ -1092,7 +1092,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get phoneHomeEditHint => '按住左侧手柄拖动排序。关闭的行会归到「未显示」。片库页仍会列出全部片库。';
 
   @override
-  String get phoneHomeSectionBanner => '横幅';
+  String get phoneHomeSectionBanner => '轮播图';
 
   @override
   String get phoneHomeSectionNextUp => '下一集';
