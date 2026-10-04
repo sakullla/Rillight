@@ -52,6 +52,7 @@ class SameSourceQueryController extends ChangeNotifier {
   bool _disposed = false;
   final Map<SourceReference, EpisodeComparison> _episodes = {};
   final Map<SourceReference, int> _attempts = {};
+  int _nextAttempt = 0;
   QueryItem? get origin => _originPermit?.isValid == true ? _origin : null;
   List<SourceQuerySnapshot> get sources => query.sources;
   bool get complete => query.complete;
@@ -94,12 +95,31 @@ class SameSourceQueryController extends ChangeNotifier {
     );
   }
 
+  WorkGroup? _confirmedGroup(SourceReference target) {
+    final seed = origin;
+    if (seed == null) return null;
+    final group = _comparisonIndex().groupFor(seed.reference);
+    return group?.contains(target) == true &&
+            query.items.any((i) => i.reference == target && i.item.isSeries)
+        ? group
+        : null;
+  }
+
+  void _revalidateEpisodes() {
+    // Permanently retire attempts when their confirmation disappears, even if
+    // the same references later merge again before an old HTTP reply arrives.
+    final invalid = _attempts.keys
+        .where((ref) => _confirmedGroup(ref) == null)
+        .toList();
+    for (final ref in invalid) {
+      _attempts.remove(ref);
+      _episodes.remove(ref);
+    }
+  }
+
   List<EpisodeComparison> get episodes {
-    final allowed = query.items.map((i) => i.reference).toSet();
-    if (origin == null) return const [];
-    return List.unmodifiable(
-      _episodes.values.where((e) => allowed.contains(e.target)),
-    );
+    _revalidateEpisodes();
+    return List.unmodifiable(_episodes.values);
   }
 
   Future<void> start({required QueryItem origin, required QueryScope scope}) {
@@ -146,9 +166,8 @@ class SameSourceQueryController extends ChangeNotifier {
         episode.reference.account != seed.reference.account) {
       throw StateError('Episode does not belong to permitted origin');
     }
-    final group = _comparisonIndex().groupFor(seed.reference);
+    final group = _confirmedGroup(target.reference);
     if (group == null ||
-        !group.contains(target.reference) ||
         target.item.type != 'Series' ||
         !query.items.any(
           (i) =>
@@ -158,14 +177,14 @@ class SameSourceQueryController extends ChangeNotifier {
       throw StateError('Confirmed allowed series required');
     }
     final revision = _revision;
-    final attempt = (_attempts[target.reference] ?? 0) + 1;
+    final attempt = ++_nextAttempt;
     _attempts[target.reference] = attempt;
     bool owns() =>
         !_disposed &&
         revision == _revision &&
         origin != null &&
         _attempts[target.reference] == attempt &&
-        query.items.any((i) => i.reference == target.reference);
+        _confirmedGroup(target.reference) != null;
     _episodes[target.reference] = EpisodeComparison(
       target.reference,
       SourceQueryStatus.loading,
@@ -231,7 +250,7 @@ class SameSourceQueryController extends ChangeNotifier {
       }
       if (!owns()) return;
       final lookup = locateEpisode(
-        series: group,
+        series: _confirmedGroup(target.reference)!,
         origin: episode,
         targetAccount: target.reference.account,
         available: available,
@@ -264,8 +283,7 @@ class SameSourceQueryController extends ChangeNotifier {
       _episodes.clear();
       _revision++;
     }
-    final allowed = query.items.map((i) => i.reference).toSet();
-    _episodes.removeWhere((ref, _) => !allowed.contains(ref));
+    _revalidateEpisodes();
     if (!_disposed) notifyListeners();
   }
 

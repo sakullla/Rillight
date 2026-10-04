@@ -500,6 +500,10 @@ class AggregationQueryController extends ChangeNotifier {
       if (!_owns(state, revision, attempt) || !permit.isValid) return;
       // Crop each source before WorkIndex sees it. A filter on one edition
       // cannot accidentally include a different edition via merged metadata.
+      // Validate the entire accepted page before publishing any rows or cursor.
+      // Identity decoding can reject ambiguous provider aliases; such failure
+      // belongs to this source attempt, never to global getters or siblings.
+      final accepted = <SourceReference, QueryItem>{};
       for (final item in page.items) {
         if (scope.types.isNotEmpty && !scope.types.contains(item.type)) {
           continue;
@@ -516,8 +520,12 @@ class AggregationQueryController extends ChangeNotifier {
           continue;
         }
         final ref = SourceReference(account: account, itemId: item.id);
-        state.items[ref] = QueryItem(ref, state.key.libraryId, item);
+        final result = QueryItem(ref, state.key.libraryId, item);
+        result
+            .work; // Fail closed; do not invent an identity for malformed DTOs.
+        accepted[ref] = result;
       }
+      state.items.addAll(accepted);
       state.cursor += page.items.length;
       state.total = page.totalRecordCount;
       state.hasMore = page.hasMore(

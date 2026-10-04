@@ -558,6 +558,211 @@ void main() {
     },
   );
 
+  for (final inFlight in [false, true]) {
+    test(
+      'paged conflict revokes ${inFlight ? 'in-flight' : 'cached'} episode confirmation',
+      () async {
+        await f.open();
+        final originRow = _movie('z-origin', type: 'Series')
+          ..['ProviderIds'] = {'Tmdb': '1', 'Tvdb': '2'};
+        final conflictRow = _movie('a-conflict', type: 'Series')
+          ..['ProviderIds'] = {'Tmdb': '1', 'Tvdb': '3'};
+        f.a.items = (_) async => _page([originRow], total: 1);
+        await f.query.start(
+          QueryScope(
+            region: AccessRegion.ordinary,
+            serverIds: {'a'},
+            types: {'Series'},
+          ),
+        );
+        final seed = f.query.items.single;
+        f.a.items = (r) async => _page([
+          r.uri.queryParameters['StartIndex'] == '0' ? originRow : conflictRow,
+        ], total: 2);
+        final entered = Completer<void>();
+        final release = Completer<void>();
+        f.b.items = (r) async {
+          if (r.uri.queryParameters['ParentId'] != 'target') {
+            return _page([_movie('target', type: 'Series')], total: 1);
+          }
+          if (!entered.isCompleted) entered.complete();
+          if (inFlight) await release.future;
+          return _page([
+            {
+              'Id': 'target-e1',
+              'Name': 'E1',
+              'Type': 'Episode',
+              'SeriesId': 'target',
+              'ParentIndexNumber': 1,
+              'IndexNumber': 1,
+            },
+          ], total: 1);
+        };
+        final detail = SameSourceQueryController(
+          registry: f.registry,
+          history: f.history,
+        );
+        addTearDown(detail.dispose);
+        await detail.start(
+          origin: seed,
+          scope: QueryScope(region: AccessRegion.ordinary, pageSize: 1),
+        );
+        final target = detail.comparisons.single.source;
+        expect(detail.comparisons.single.decision.confirmed, isTrue);
+        final episode = EpisodeSource(
+          reference: SourceReference(
+            account: seed.reference.account,
+            itemId: 'origin-e1',
+          ),
+          series: seed.reference,
+          season: 1,
+          episode: 1,
+          isSpecial: false,
+          numberingScheme: 'aired',
+        );
+        final lookup = detail.lookupEpisode(
+          target: target,
+          episode: episode,
+          verifiedNumberingScheme: 'aired',
+        );
+        await entered.future;
+        if (!inFlight) {
+          await lookup;
+          expect(
+            detail.episodes.single.lookup.status,
+            EpisodeLookupStatus.confirmed,
+          );
+        }
+        await detail.loadMore(const QuerySourceKey('a', 'library'));
+        expect(
+          detail.comparisons
+              .firstWhere((c) => c.source.reference == target.reference)
+              .decision
+              .confirmed,
+          isFalse,
+        );
+        expect(detail.episodes, isEmpty);
+        await expectLater(
+          detail.lookupEpisode(target: target, episode: episode),
+          throwsStateError,
+        );
+        if (inFlight) {
+          // A relation restored while the retired request is still pending
+          // cannot resurrect its result (or reuse its attempt token).
+          f.a.items = (_) async => _page([
+            Map<String, dynamic>.from(conflictRow)
+              ..['ProviderIds'] = {'Tmdb': '1', 'Tvdb': '2'},
+          ], total: 3);
+          await detail.retry(const QuerySourceKey('a', 'library'));
+          expect(
+            detail.comparisons
+                .firstWhere((c) => c.source.reference == target.reference)
+                .decision
+                .confirmed,
+            isTrue,
+          );
+          release.complete();
+        }
+        await lookup;
+        expect(detail.episodes, isEmpty);
+        // Once conflicts disappear, only a new lookup may restore confirmation.
+        f.a.items = (_) async => _page([originRow], total: 1);
+        await detail.start(
+          origin: seed,
+          scope: QueryScope(region: AccessRegion.ordinary, pageSize: 1),
+        );
+        expect(detail.episodes, isEmpty);
+        await detail.lookupEpisode(
+          target: target,
+          episode: episode,
+          verifiedNumberingScheme: 'aired',
+        );
+        expect(
+          detail.episodes.single.lookup.status,
+          EpisodeLookupStatus.confirmed,
+        );
+      },
+    );
+  }
+
+  test(
+    'malformed provider aliases fail only their source and corrected retry is atomic',
+    () async {
+      await f.open();
+      f.a.items = (_) async => _page([_movie('good')], total: 1);
+      f.b.items = (_) async => _page([
+        _movie('valid-before-malformed'),
+        _movie('bad')..['ProviderIds'] = {'Tmdb': '1', 'tmdb': '2'},
+      ], total: 2);
+      await f.query.start(QueryScope(region: AccessRegion.ordinary));
+      expect(f.query.summary, QuerySummary.partialFailure);
+      expect(
+        f.query.sources.firstWhere((s) => s.key.serverId == 'b').status,
+        SourceQueryStatus.failed,
+      );
+      expect(
+        f.query.sources.firstWhere((s) => s.key.serverId == 'b').cursor,
+        0,
+      );
+      expect(f.query.items.single.reference.itemId, 'good');
+      expect(f.query.works.single.sources.single.reference.itemId, 'good');
+      f.b.items = (_) async => _page([_movie('repaired')], total: 1);
+      await f.query.retry(const QuerySourceKey('b', 'library'));
+      expect(f.query.summary, QuerySummary.available);
+      expect(f.query.items, hasLength(2));
+      expect(f.query.works.single.sources, hasLength(2));
+      expect(f.b.itemRequests.last.queryParameters['StartIndex'], '0');
+    },
+  );
+
+  test(
+    'malformed discovery page retains cached editions and retries at unchanged cursor',
+    () async {
+      await f.open();
+      f.a.items = (_) async =>
+          _page([_movie('origin', type: 'Series')], total: 1);
+      await f.query.start(
+        QueryScope(
+          region: AccessRegion.ordinary,
+          serverIds: {'a'},
+          types: {'Series'},
+        ),
+      );
+      final detail = SameSourceQueryController(
+        registry: f.registry,
+        history: f.history,
+      );
+      addTearDown(detail.dispose);
+      f.b.items = (_) async =>
+          _page([_movie('cached', type: 'Series')], total: 2);
+      await detail.start(
+        origin: f.query.items.single,
+        scope: QueryScope(region: AccessRegion.ordinary, pageSize: 1),
+      );
+      f.b.items = (_) async => _page([
+        _movie('cached', type: 'Series', provider: '2'),
+        _movie('bad', type: 'Series')
+          ..['ProviderIds'] = {'Tmdb': '1', 'tmdb': '2'},
+      ], total: 3);
+      await detail.loadMore(const QuerySourceKey('b', 'library'));
+      expect(
+        detail.sources.firstWhere((s) => s.key.serverId == 'b').status,
+        SourceQueryStatus.failed,
+      );
+      expect(detail.sources.firstWhere((s) => s.key.serverId == 'b').cursor, 1);
+      expect(detail.comparisons.single.decision.confirmed, isTrue);
+      expect(detail.query.works.single.sources, hasLength(2));
+      expect(detail.episodes, isEmpty);
+      f.b.items = (_) async =>
+          _page([_movie('repaired', type: 'Series')], total: 2);
+      await detail.retry(const QuerySourceKey('b', 'library'));
+      expect(f.b.itemRequests.last.queryParameters['StartIndex'], '1');
+      expect(detail.comparisons, hasLength(2));
+      expect(detail.comparisons.every((c) => c.decision.confirmed), isTrue);
+      expect(detail.complete, isTrue);
+    },
+  );
+
   test(
     'independent detail lookup separates title candidates, preserves unknown version data and missing/uncertain episodes',
     () async {
