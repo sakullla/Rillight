@@ -222,19 +222,20 @@ class EmbyClient {
   static const itemFields =
       'Overview,ShortOverview,Taglines,ProductionYear,RunTimeTicks,ChildCount,'
       'SeriesInfo,DateCreated,PremiereDate,CommunityRating,SortName,'
-      'MediaSources,Chapters,ImageTags';
+      'MediaSources,Chapters,ImageTags,ProviderIds,UserData';
 
   /// 海报网格不需要 MediaSources/Chapters,大库带上这两项会把 /Items 拖死。
   /// ImageTags 必须显式要:部分 Emby/Jellyfin 不带这个 Field 时条目有标题没海报 tag,
   /// 网格就会整页灰块。
   static const gridFields =
       'Overview,ShortOverview,Taglines,ProductionYear,RunTimeTicks,ChildCount,'
-      'SeriesInfo,DateCreated,PremiereDate,CommunityRating,SortName,ImageTags';
+      'SeriesInfo,DateCreated,PremiereDate,CommunityRating,SortName,ImageTags,'
+      'ProviderIds,UserData';
 
   /// 首页海报行：不要简介和标语，这两项会把每条片库的 /Items 撑大。
   static const homePosterFields =
       'ProductionYear,ChildCount,SeriesInfo,DateCreated,PremiereDate,'
-      'CommunityRating,ImageTags';
+      'CommunityRating,ImageTags,ProviderIds,UserData';
   static const imageTypes = 'Primary,Backdrop,Thumb';
   static const detailImageTypes = 'Primary,Backdrop,Thumb,Chapter';
 

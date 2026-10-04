@@ -103,11 +103,15 @@ class EmbyUserData {
     this.played = false,
     this.playbackPositionTicks = 0,
     this.playedPercentage,
+    this.lastPlayedDate,
   });
 
   final bool played;
   final int playbackPositionTicks;
   final double? playedPercentage;
+
+  /// Unknown when absent or invalid; never inferred from response order.
+  final DateTime? lastPlayedDate;
 
   factory EmbyUserData.fromJson(dynamic json) {
     if (json is! Map) {
@@ -118,6 +122,7 @@ class EmbyUserData {
       played: map['Played'] == true,
       playbackPositionTicks: _asInt(map['PlaybackPositionTicks']) ?? 0,
       playedPercentage: _asDouble(map['PlayedPercentage']),
+      lastPlayedDate: _asDateTime(map['LastPlayedDate']),
     );
   }
 
@@ -125,12 +130,14 @@ class EmbyUserData {
     bool? played,
     int? playbackPositionTicks,
     double? playedPercentage,
+    DateTime? lastPlayedDate,
   }) {
     return EmbyUserData(
       played: played ?? this.played,
       playbackPositionTicks:
           playbackPositionTicks ?? this.playbackPositionTicks,
       playedPercentage: playedPercentage ?? this.playedPercentage,
+      lastPlayedDate: lastPlayedDate ?? this.lastPlayedDate,
     );
   }
 }
@@ -177,6 +184,14 @@ class ItemMediaStream {
     this.bitRate,
     this.videoRange,
     this.videoRangeType,
+    this.language,
+    this.isDefault,
+    this.isForced,
+    this.isExternal,
+    this.profile,
+    this.averageFrameRate,
+    this.sampleRate,
+    this.channelLayout,
   });
 
   final int index;
@@ -189,6 +204,14 @@ class ItemMediaStream {
   final int? bitRate;
   final String? videoRange;
   final String? videoRangeType;
+  final String? language;
+  final bool? isDefault;
+  final bool? isForced;
+  final bool? isExternal;
+  final String? profile;
+  final double? averageFrameRate;
+  final int? sampleRate;
+  final String? channelLayout;
 
   bool get isAudio => type == 'Audio';
   bool get isSubtitle => type == 'Subtitle';
@@ -202,6 +225,16 @@ class ItemMediaStream {
       index: _asInt(json['Index']) ?? 0,
       type: json['Type']?.toString() ?? '',
       codec: codec,
+      language: _stringTag(json['Language']),
+      isDefault: json['IsDefault'] is bool ? json['IsDefault'] as bool : null,
+      isForced: json['IsForced'] is bool ? json['IsForced'] as bool : null,
+      isExternal: json['IsExternal'] is bool
+          ? json['IsExternal'] as bool
+          : null,
+      profile: _stringTag(json['Profile']),
+      averageFrameRate: _asDouble(json['AverageFrameRate']),
+      sampleRate: _asInt(json['SampleRate']),
+      channelLayout: _stringTag(json['ChannelLayout']),
       channels: _asInt(json['Channels']),
       width: _asInt(json['Width']),
       height: _asInt(json['Height']),
@@ -227,6 +260,7 @@ class ItemMediaSource {
     this.width,
     this.height,
     this.streams = const [],
+    this.runTimeTicks,
   });
 
   final String id;
@@ -237,6 +271,7 @@ class ItemMediaSource {
   final int? width;
   final int? height;
   final List<ItemMediaStream> streams;
+  final int? runTimeTicks;
 
   String get label {
     final title = name?.trim();
@@ -291,6 +326,7 @@ class ItemMediaSource {
       container: json['Container']?.toString(),
       size: _asInt(json['Size']),
       bitrate: _asInt(json['Bitrate']),
+      runTimeTicks: _asInt(json['RunTimeTicks']),
       width: _asInt(json['Width']),
       height: _asInt(json['Height']),
       streams: [
@@ -359,6 +395,7 @@ class EmbyItem {
     this.seasonId,
     this.parentId,
     this.indexNumber,
+    this.indexNumberEnd,
     this.parentIndexNumber,
     this.primaryImageTag,
     this.thumbImageTag,
@@ -373,6 +410,7 @@ class EmbyItem {
     this.communityRating,
     this.genres = const [],
     this.externalUrls = const [],
+    this.providerIds = const {},
     this.mediaSources = const [],
     this.chapters = const [],
     this.people = const [],
@@ -399,6 +437,7 @@ class EmbyItem {
   final String? seasonId;
   final String? parentId;
   final int? indexNumber;
+  final int? indexNumberEnd;
   final int? parentIndexNumber;
   final String? primaryImageTag;
   final String? thumbImageTag;
@@ -417,6 +456,9 @@ class EmbyItem {
 
   /// Emby `ExternalUrls`：IMDb、官网等站外链接。
   final List<ItemExternalUrl> externalUrls;
+
+  /// Reliable identity facts only; ExternalUrls are not identity evidence.
+  final Map<String, String> providerIds;
   final List<ItemMediaSource> mediaSources;
   final List<ItemChapter> chapters;
 
@@ -640,6 +682,7 @@ class EmbyItem {
       seasonId: json['SeasonId']?.toString(),
       parentId: json['ParentId']?.toString(),
       indexNumber: _asInt(json['IndexNumber']),
+      indexNumberEnd: _asInt(json['IndexNumberEnd']),
       parentIndexNumber: _asInt(json['ParentIndexNumber']),
       primaryImageTag: primaryTag,
       thumbImageTag: thumbTag,
@@ -657,6 +700,12 @@ class EmbyItem {
           for (final genre in rawGenres)
             if (genre != null) genre.toString(),
       ],
+      providerIds: {
+        if (json['ProviderIds'] is Map)
+          for (final entry in (json['ProviderIds'] as Map).entries)
+            if (entry.value != null && entry.value.toString().trim().isNotEmpty)
+              entry.key.toString(): entry.value.toString().trim(),
+      },
       externalUrls: [
         if (rawLinks is List)
           for (final link in rawLinks)
@@ -702,6 +751,7 @@ class EmbyItem {
       seasonId: seasonId,
       parentId: parentId,
       indexNumber: indexNumber,
+      indexNumberEnd: indexNumberEnd,
       parentIndexNumber: parentIndexNumber,
       primaryImageTag: primaryImageTag,
       thumbImageTag: thumbImageTag,
@@ -716,6 +766,7 @@ class EmbyItem {
       communityRating: communityRating,
       genres: genres,
       externalUrls: externalUrls,
+      providerIds: providerIds,
       mediaSources: mediaSources,
       chapters: chapters,
       people: people,
