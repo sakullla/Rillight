@@ -131,8 +131,9 @@ class _ReadingScope extends StatelessWidget {
 /// 海报/剧照之上的实色遮罩 token:渐变与底衬的 alpha、stop 与高度。
 ///
 /// 由 `BackdropScrim`、`ScrimIconButton`、顶栏保护渐变、播放控制层渐变与
-/// 搜索遮罩共同引用,不在页面内散落十六进制黑。系统要求减少动态效果时,
-/// 非透明段的 alpha 经 [resolve] 抬到不低于 [reduced],透明端保持透明。
+/// 搜索遮罩共同引用,不在页面内散落十六进制黑。系统要求高对比度时,
+/// 非透明段的 alpha 经 [resolve] 抬高,透明端保持透明。
+/// 减少动画只影响动效,不改变这些静态遮罩的透明度。
 abstract final class AppScrim {
   /// 顶带起点:保护顶栏与返回钮,向下溶到透明。
   static const double top = 0.55;
@@ -176,20 +177,20 @@ abstract final class AppScrim {
   /// 搜索覆盖层压暗遮罩。
   static const double barrier = 0.55;
 
-  /// 减少动态效果时非透明段的最低 alpha。
-  static const double reduced = 0.85;
+  /// 高对比度模式下非透明段的最低 alpha。
+  static const double highContrastAlpha = 0.85;
 
-  /// 按 [reduce] 解析 [alpha]:减少动效时不低于 [reduced],透明(0)保持透明。
-  static double resolve(double alpha, {required bool reduce}) {
-    if (!reduce || alpha <= 0) {
+  /// 高对比度时提高不透明度,透明(0)保持透明。
+  static double resolve(double alpha, {required bool highContrast}) {
+    if (!highContrast || alpha <= 0) {
       return alpha;
     }
-    return alpha < reduced ? reduced : alpha;
+    return alpha < highContrastAlpha ? highContrastAlpha : alpha;
   }
 
   /// [resolve] 的 [BuildContext] 便捷形式。
   static double of(BuildContext context, double alpha) {
-    return resolve(alpha, reduce: MediaQuery.disableAnimationsOf(context));
+    return resolve(alpha, highContrast: MediaQuery.highContrastOf(context));
   }
 }
 

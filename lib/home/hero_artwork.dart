@@ -8,6 +8,7 @@ import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/app/artwork_color_scope.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/media_image/media_image.dart';
+import 'package:rillight/media_image/blurred_artwork.dart';
 
 /// Promotional artwork for a title, never an episode's generated frame.
 /// Shelf thumbnails keep their own selection rules.
@@ -342,13 +343,7 @@ class _HeroArtworkState extends State<HeroArtwork> {
     required double sigma,
   }) {
     return RepaintBoundary(
-      child: Opacity(
-        opacity: opacity,
-        child: ImageFiltered(
-          imageFilter: ui.ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
-          child: Image.memory(bytes, fit: BoxFit.cover, cacheWidth: 160),
-        ),
-      ),
+      child: BlurredArtwork(bytes: bytes, sigma: sigma, opacity: opacity),
     );
   }
 }

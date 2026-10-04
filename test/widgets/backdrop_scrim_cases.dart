@@ -14,10 +14,14 @@ Future<void> _pump(
   WidgetTester tester, {
   Widget? backdrop,
   bool disableAnimations = false,
+  bool highContrast = false,
 }) async {
   await tester.pumpWidget(
     MediaQuery(
-      data: MediaQueryData(disableAnimations: disableAnimations),
+      data: MediaQueryData(
+        disableAnimations: disableAnimations,
+        highContrast: highContrast,
+      ),
       child: MaterialApp(
         theme: AppTheme.dark(),
         home: Scaffold(
@@ -76,34 +80,49 @@ void main() {
     expect(bottom.colors[2].a, closeTo(1, 0.01));
   });
 
-  testWidgets(
-    'BackdropScrim raises opaque stops when animations are disabled',
-    (tester) async {
-      await _pump(tester, disableAnimations: true);
+  testWidgets('BackdropScrim raises opaque stops only for high contrast', (
+    tester,
+  ) async {
+    await _pump(tester, disableAnimations: true, highContrast: true);
 
-      for (final key in [
-        BackdropScrim.topBandKey,
-        BackdropScrim.textBandKey,
-        BackdropScrim.bottomBandKey,
-      ]) {
-        final gradient = _gradientOf(tester, key);
-        final opaque = gradient.colors.where((color) => color.a > 0);
-        expect(opaque, isNotEmpty, reason: '$key has no opaque stop');
-        for (final color in opaque) {
-          expect(
-            color.a,
-            greaterThanOrEqualTo(AppScrim.reduced - 0.01),
-            reason: '$key stop alpha ${color.a} below reduced threshold',
-          );
-        }
+    for (final key in [
+      BackdropScrim.topBandKey,
+      BackdropScrim.textBandKey,
+      BackdropScrim.bottomBandKey,
+    ]) {
+      final gradient = _gradientOf(tester, key);
+      final opaque = gradient.colors.where((color) => color.a > 0);
+      expect(opaque, isNotEmpty, reason: '$key has no opaque stop');
+      for (final color in opaque) {
         expect(
-          gradient.colors.any((color) => color.a == 0),
-          isTrue,
-          reason: '$key must still fade to transparent',
+          color.a,
+          greaterThanOrEqualTo(AppScrim.highContrastAlpha - 0.01),
+          reason: '$key stop alpha ${color.a} below high contrast threshold',
         );
       }
-    },
-  );
+      expect(
+        gradient.colors.any((color) => color.a == 0),
+        isTrue,
+        reason: '$key must still fade to transparent',
+      );
+    }
+  });
+
+  testWidgets('reducing motion preserves the backdrop gradients', (
+    tester,
+  ) async {
+    await _pump(tester);
+    final keys = [
+      BackdropScrim.topBandKey,
+      BackdropScrim.textBandKey,
+      BackdropScrim.bottomBandKey,
+    ];
+    final gradients = [for (final key in keys) _gradientOf(tester, key)];
+    await _pump(tester, disableAnimations: true);
+    for (var i = 0; i < keys.length; i++) {
+      expect(_gradientOf(tester, keys[i]), gradients[i]);
+    }
+  });
 
   testWidgets('BackdropScrim paints the page background without a backdrop', (
     tester,

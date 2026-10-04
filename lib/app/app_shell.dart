@@ -174,17 +174,20 @@ class _AppShellState extends State<AppShell> {
                       }
                       return true;
                     },
-                    child: widget.child,
+                    child: RepaintBoundary(child: widget.child),
                   ),
                   Positioned(
                     top: 0,
                     left: 0,
                     right: 0,
-                    child: _TopBar(
-                      location: location,
-                      opaque:
-                          !_immersiveTopBar(location) || _barScrolled(location),
-                      searchFocus: _searchButtonFocus,
+                    child: RepaintBoundary(
+                      child: _TopBar(
+                        location: location,
+                        opaque:
+                            !_immersiveTopBar(location) ||
+                            _barScrolled(location),
+                        searchFocus: _searchButtonFocus,
+                      ),
                     ),
                   ),
                   // 遮罩在顶栏之上、覆盖层之下:压暗整个背景并拦截穿透

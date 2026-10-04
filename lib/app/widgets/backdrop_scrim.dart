@@ -5,7 +5,7 @@ import 'package:rillight/app/theme/tokens.dart';
 ///
 /// 不含 [BackdropFilter],可以铺在整幅 backdrop 上。[backdrop] 为空或
 /// 图片加载失败时,遮罩仍绘制在主题页面底色之上,保证前景文字可读。
-/// 系统要求减少动态效果时,各段非透明 alpha 抬到 ≥ [AppScrim.reduced]。
+/// 系统要求高对比度时,非透明 alpha 抬到 ≥ [AppScrim.highContrastAlpha]。
 ///
 /// 整体 [IgnorePointer]:底图与遮罩都不拦截点击,前景控件叠在其上或其下均可。
 class BackdropScrim extends StatelessWidget {
@@ -37,16 +37,18 @@ class BackdropScrim extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final reduce = MediaQuery.disableAnimationsOf(context);
+    final highContrast = MediaQuery.highContrastOf(context);
     final light = theme.brightness == Brightness.light;
     final lightSurface = light && lightTextSurface;
     final scrim = theme.colorScheme.scrim;
     final pageBg = theme.scaffoldBackgroundColor;
 
-    Color scrimAt(double alpha) =>
-        scrim.withValues(alpha: AppScrim.resolve(alpha, reduce: reduce));
-    Color pageBgAt(double alpha) =>
-        pageBg.withValues(alpha: AppScrim.resolve(alpha, reduce: reduce));
+    Color scrimAt(double alpha) => scrim.withValues(
+      alpha: AppScrim.resolve(alpha, highContrast: highContrast),
+    );
+    Color pageBgAt(double alpha) => pageBg.withValues(
+      alpha: AppScrim.resolve(alpha, highContrast: highContrast),
+    );
 
     return IgnorePointer(
       child: Stack(

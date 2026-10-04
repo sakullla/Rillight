@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/appearance_style.dart';
+import 'package:rillight/app/desktop_performance_host.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_chrome.dart';
 import 'package:rillight/app/phone_nav_style.dart';
@@ -115,16 +116,18 @@ class RillightApp extends StatelessWidget {
               themeMode: mode,
               routerConfig: router,
               builder: (context, child) {
-                return PlayerScope(
-                  bindings: playerBindings,
-                  child: PlayerWindowScope(
-                    host: windowHost,
-                    child: _PlayerHostNoticeListener(
+                return DesktopPerformanceHost(
+                  child: PlayerScope(
+                    bindings: playerBindings,
+                    child: PlayerWindowScope(
                       host: windowHost,
-                      child: _PlayerWindowLayer(
+                      child: _PlayerHostNoticeListener(
                         host: windowHost,
-                        router: router,
-                        child: child ?? const SizedBox.shrink(),
+                        child: _PlayerWindowLayer(
+                          host: windowHost,
+                          router: router,
+                          child: child ?? const SizedBox.shrink(),
+                        ),
                       ),
                     ),
                   ),

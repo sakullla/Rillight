@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:rillight/app/theme.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/app_shell.dart';
+import 'package:rillight/app/desktop_scroll.dart';
 import 'package:rillight/app/mobile_motion.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/presentation_environment.dart';
@@ -233,36 +234,48 @@ GoRouter createAppRouter({
           routes: [
             GoRoute(
               path: AppRoutes.connect,
-              builder: (context, state) => const ConnectPage(),
+              pageBuilder: (context, state) =>
+                  _desktopPage(state, const ConnectPage()),
             ),
             GoRoute(
               path: AppRoutes.home,
-              builder: (context, state) => const HomePage(),
+              pageBuilder: (context, state) =>
+                  _desktopPage(state, const HomePage()),
             ),
             GoRoute(
               path: '/library/:viewId',
-              builder: (context, state) =>
-                  LibraryPage(viewId: state.pathParameters['viewId'] ?? ''),
+              pageBuilder: (context, state) => _desktopPage(
+                state,
+                LibraryPage(viewId: state.pathParameters['viewId'] ?? ''),
+              ),
             ),
             GoRoute(
               path: '/shelf/:source',
-              builder: (context, state) => ShelfGridPage.fromState(state),
+              pageBuilder: (context, state) =>
+                  _desktopPage(state, ShelfGridPage.fromState(state)),
             ),
             GoRoute(
               path: '/item/:itemId',
-              builder: (context, state) => ItemDetailPage(
-                itemId: state.pathParameters['itemId'] ?? '',
-                initialSeasonId: state.uri.queryParameters['season'],
+              pageBuilder: (context, state) => _desktopPage(
+                state,
+                ItemDetailPage(
+                  itemId: state.pathParameters['itemId'] ?? '',
+                  initialSeasonId: state.uri.queryParameters['season'],
+                ),
               ),
             ),
             GoRoute(
               path: AppRoutes.search,
-              builder: (context, state) => const SearchPage(),
+              pageBuilder: (context, state) =>
+                  _desktopPage(state, const SearchPage()),
             ),
             GoRoute(
               path: AppRoutes.settings,
-              builder: (context, state) => SettingsPage(
-                settingsStore: PlayerScope.of(context).settingsStore,
+              pageBuilder: (context, state) => _desktopPage(
+                state,
+                SettingsPage(
+                  settingsStore: PlayerScope.of(context).settingsStore,
+                ),
               ),
             ),
           ],
@@ -270,6 +283,17 @@ GoRouter createAppRouter({
     ],
   );
 }
+
+// Desktop navigation replaces the page directly. Mobile-style full-page
+// fade/zoom transitions composite two poster trees on every animation frame,
+// competing with scrolling and image uploads on shared-memory GPUs.
+NoTransitionPage<void> _desktopPage(GoRouterState state, Widget child) =>
+    NoTransitionPage<void>(
+      key: state.pageKey,
+      name: state.name ?? state.matchedLocation,
+      arguments: state.extra,
+      child: DesktopScrollScope(child: child),
+    );
 
 /// Navigator removals end a connection flow; refreshes and widget rebuilds do not.
 class _ConnectFlowObserver extends NavigatorObserver {

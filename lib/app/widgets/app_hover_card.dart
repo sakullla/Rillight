@@ -134,21 +134,23 @@ class _AppHoverCardState extends State<AppHoverCard> {
     final colorScheme = Theme.of(context).colorScheme;
     final radius = widget.borderRadius ?? BorderRadius.circular(AppRadii.md);
     final highlighted = (_hovering && !_scrolling) || _focused;
+    final reduceMotion = MediaQuery.disableAnimationsOf(context);
 
     final card = AnimatedContainer(
-      duration: AppMotion.fast,
+      duration: AppMotion.durationOf(context, AppMotion.fast),
       curve: AppMotion.standard,
       decoration: BoxDecoration(
         borderRadius: radius,
         boxShadow: [
-          BoxShadow(
-            color: colorScheme.shadow.withValues(
-              alpha: highlighted
-                  ? (colorScheme.brightness == Brightness.light ? 0.16 : 0.5)
-                  : 0,
+          if (!reduceMotion)
+            BoxShadow(
+              color: colorScheme.shadow.withValues(
+                alpha: highlighted
+                    ? (colorScheme.brightness == Brightness.light ? 0.16 : 0.5)
+                    : 0,
+              ),
+              blurRadius: highlighted ? widget.shadowBlurRadius : 0,
             ),
-            blurRadius: highlighted ? widget.shadowBlurRadius : 0,
-          ),
         ],
       ),
       // 焦点环走 foregroundDecoration:decoration 的 border 会被
@@ -179,7 +181,7 @@ class _AppHoverCardState extends State<AppHoverCard> {
         ),
       ),
     );
-    if (widget.hoverScale == 1 || MediaQuery.disableAnimationsOf(context)) {
+    if (widget.hoverScale == 1 || reduceMotion) {
       return card;
     }
     return AnimatedScale(

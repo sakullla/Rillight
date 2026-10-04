@@ -6,6 +6,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/app_shell.dart';
+import 'package:rillight/app/desktop_scroll.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme/tokens.dart';
@@ -249,7 +250,7 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
   bool get _episodes => widget.includeItemTypes == 'Episode';
   bool get _wideGrid =>
       _episodes || widget.source == 'resume' || widget.source == 'nextup';
-  final ScrollController _scrollController = ScrollController();
+  final ScrollController _scrollController = DesktopScrollController();
   int _loadGen = 0;
 
   /// 已拉取的原始条数(过滤前),作为下一页的 StartIndex。

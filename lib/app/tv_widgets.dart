@@ -796,7 +796,7 @@ class TvInput extends StatelessWidget {
 /// TV 沉浸 hero 遮罩:顶带保护导航/标题,左侧文字带托底白字,底带溶入页面。
 ///
 /// hero 文字恒为白色,遮罩恒为黑色系,与主题明暗无关;alpha 全部经
-/// [AppScrim.resolve],系统要求减少动态效果时抬到不低于 [AppScrim.reduced]。
+/// [AppScrim.resolve],系统要求高对比度时抬到不低于 [AppScrim.highContrastAlpha]。
 class TvHeroScrim extends StatelessWidget {
   const TvHeroScrim({
     super.key,

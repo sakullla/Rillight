@@ -1161,15 +1161,14 @@ void main() {
       await _homeSettle(tester);
       expect(find.byType(ShelfGridPage), findsOneWidget);
       expect(find.byType(PhoneShelfPage), findsNothing);
-      // 桌面路由不受手机 Material Motion 包装影响,仍是默认 Material 页面。
+      // Desktop routes remain independent of phone Material Motion and do not
+      // composite an animated page transition.
       final desktopShelfRoute = ModalRoute.of(
         tester.element(find.byType(ShelfGridPage)),
       )!;
-      expect(desktopShelfRoute.settings, isA<MaterialPage<void>>());
-      expect(
-        desktopShelfRoute.settings,
-        isNot(isA<CustomTransitionPage<void>>()),
-      );
+      expect(desktopShelfRoute.settings, isA<NoTransitionPage<void>>());
+      expect(desktopShelfRoute.transitionDuration, Duration.zero);
+      expect(desktopShelfRoute.reverseTransitionDuration, Duration.zero);
 
       final phoneRouter = createAppRouter(
         auth: auth,

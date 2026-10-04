@@ -18,11 +18,15 @@ Future<void> _pump(
   WidgetTester tester,
   Widget button, {
   bool disableAnimations = false,
+  bool highContrast = false,
   ThemeData? theme,
 }) async {
   await tester.pumpWidget(
     MediaQuery(
-      data: MediaQueryData(disableAnimations: disableAnimations),
+      data: MediaQueryData(
+        disableAnimations: disableAnimations,
+        highContrast: highContrast,
+      ),
       child: MaterialApp(
         theme: theme ?? AppTheme.dark(),
         home: Scaffold(
@@ -168,7 +172,26 @@ void main() {
     );
   });
 
-  testWidgets('ScrimIconButton raises backing alpha when animations disabled', (
+  testWidgets('ScrimIconButton raises backing alpha for high contrast', (
+    tester,
+  ) async {
+    await _pump(
+      tester,
+      ScrimIconButton(
+        key: _key,
+        icon: const Icon(Icons.refresh_rounded),
+        onPressed: () {},
+      ),
+      highContrast: true,
+    );
+    final background = _styleOf(tester).backgroundColor!.resolve({})!;
+    expect(
+      background.a,
+      greaterThanOrEqualTo(AppScrim.highContrastAlpha - 0.01),
+    );
+  });
+
+  testWidgets('reduced motion preserves icon backing transparency', (
     tester,
   ) async {
     await _pump(
@@ -180,7 +203,9 @@ void main() {
       ),
       disableAnimations: true,
     );
-    final background = _styleOf(tester).backgroundColor!.resolve({})!;
-    expect(background.a, greaterThanOrEqualTo(AppScrim.reduced - 0.01));
+    expect(
+      _styleOf(tester).backgroundColor!.resolve({})!.a,
+      closeTo(AppScrim.control, 0.01),
+    );
   });
 }

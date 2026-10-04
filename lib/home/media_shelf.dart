@@ -344,12 +344,7 @@ class _MediaShelfState extends State<MediaShelf> {
     GestureBinding.instance.pointerSignalResolver.register(event, (resolved) {
       final dy = (resolved as PointerScrollEvent).scrollDelta.dy;
       final position = vertical.position;
-      position.jumpTo(
-        (position.pixels + dy).clamp(
-          position.minScrollExtent,
-          position.maxScrollExtent,
-        ),
-      );
+      position.pointerScroll(dy);
     });
   }
 

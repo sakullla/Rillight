@@ -92,6 +92,15 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
     ::DispatchMessage(&msg);
   }
 
+  // window_manager.destroy posts WM_QUIT without destroying the HWND. Hide
+  // immediately after the Dart close guard has finished its player cleanup,
+  // then release the engine while COM is still initialized. Leaving this to
+  // stack destruction after CoUninitialize tears down GPU/COM resources in
+  // the wrong order and keeps the window visible throughout that teardown.
+  if (const HWND closing_window = window.GetHandle()) {
+    ::ShowWindow(closing_window, SW_HIDE);
+  }
+  window.Destroy();
   ::CoUninitialize();
   return EXIT_SUCCESS;
 }

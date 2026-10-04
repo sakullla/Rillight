@@ -27,10 +27,11 @@ class PosterOverviewBand extends StatelessWidget {
       return const SizedBox.shrink();
     }
     final theme = Theme.of(context);
-    final reduce = MediaQuery.disableAnimationsOf(context);
+    final highContrast = MediaQuery.highContrastOf(context);
     final scrim = theme.colorScheme.scrim;
-    Color at(double alpha) =>
-        scrim.withValues(alpha: AppScrim.resolve(alpha, reduce: reduce));
+    Color at(double alpha) => scrim.withValues(
+      alpha: AppScrim.resolve(alpha, highContrast: highContrast),
+    );
     final textStyle =
         style ??
         theme.textTheme.bodySmall?.copyWith(

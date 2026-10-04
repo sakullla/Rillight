@@ -303,7 +303,9 @@ class _HomeHeroState extends State<HomeHero> with HeroAutoRotate {
             child: HeroDots(
               index: index,
               count: items.length,
-              cycle: rotateCycle,
+              // A continuous countdown keeps the whole desktop window waking
+              // at the display refresh rate even when no one is interacting.
+              // Keep the selected dot static; the rotation timer still works.
               onSelect: (i) => _select(i, items.length),
             ),
           ),

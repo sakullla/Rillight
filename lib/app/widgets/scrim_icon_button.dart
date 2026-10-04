@@ -40,9 +40,9 @@ class ScrimIconButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final reduce = MediaQuery.disableAnimationsOf(context);
+    final highContrast = MediaQuery.highContrastOf(context);
     final backing = scheme.scrim.withValues(
-      alpha: AppScrim.resolve(AppScrim.control, reduce: reduce),
+      alpha: AppScrim.resolve(AppScrim.control, highContrast: highContrast),
     );
     final dimension = size.dimension;
     return IconButton(

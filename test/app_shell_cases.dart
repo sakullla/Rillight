@@ -162,6 +162,10 @@ void main() {
       await settle(tester);
 
       expect(find.byType(HomePage), findsOneWidget);
+      final route = ModalRoute.of(tester.element(find.byType(HomePage)))!;
+      expect(route.settings, isA<NoTransitionPage<void>>());
+      expect(route.transitionDuration, Duration.zero);
+      expect(route.reverseTransitionDuration, Duration.zero);
       expect(find.text('Inception'), findsWidgets);
 
       await appearance.setStyle(AppearanceStyle.dark);
