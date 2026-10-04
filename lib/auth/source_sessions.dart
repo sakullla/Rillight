@@ -200,6 +200,7 @@ class SourceSessionRegistry {
 
   int _revision = 0;
   final Map<String, int> _authAttempts = {};
+  final Map<String, Future<SourceSession>> _sessionAcquisitions = {};
   final Map<String, int> _checkAttempts = {};
 
   void _requireCurrent(SavedServer server, int scope, int generation) {
@@ -483,6 +484,68 @@ class SourceSessionRegistry {
     } finally {
       session?.client.clearSession();
       _transitioning.remove(id);
+    }
+  }
+
+  bool _participatingLibrary(
+    String id,
+    AccessRegion region,
+    String libraryId,
+  ) =>
+      libraryId.isNotEmpty &&
+      project(region).any(
+        (server) =>
+            server.id == id &&
+            server.participates &&
+            server.scopeKnown &&
+            server.libraryIds.contains(libraryId),
+      );
+
+  /// Read-only resolution through the same region/library authority as permit.
+  /// Unknown, hidden, nonparticipating and unauthenticated sources all return
+  /// null; this never probes a server or reveals a private membership.
+  SourceAccount? sessionAccount(
+    String id, {
+    required AccessRegion region,
+    required String libraryId,
+  }) {
+    if (!_participatingLibrary(id, region, libraryId)) return null;
+    final account = _sessions[id]?.account;
+    if (account == null || account.region != region) return null;
+    try {
+      permit(account, libraryId: libraryId).requireValid();
+      return account;
+    } on StateError {
+      return null;
+    }
+  }
+
+  /// Query consumers reuse valid sessions. Concurrent first acquisitions share
+  /// authentication rather than replacing one another's session revision.
+  /// Explicit authenticate remains available for deliberate credential refresh.
+  Future<SourceAccount> acquireAccount(
+    String id, {
+    required AccessRegion region,
+    required String libraryId,
+  }) async {
+    if (!_participatingLibrary(id, region, libraryId)) {
+      throw StateError('Source outside allowed scope');
+    }
+    final existing = sessionAccount(id, region: region, libraryId: libraryId);
+    if (existing != null) return existing;
+    final acquisition = _sessionAcquisitions[id] ??= authenticate(id);
+    try {
+      final session = await acquisition;
+      if (session.account.region != region ||
+          !_participatingLibrary(id, region, libraryId)) {
+        throw StateError('Source outside allowed scope');
+      }
+      permit(session.account, libraryId: libraryId).requireValid();
+      return session.account;
+    } finally {
+      if (identical(_sessionAcquisitions[id], acquisition)) {
+        _sessionAcquisitions.remove(id);
+      }
     }
   }
 
