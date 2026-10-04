@@ -32,6 +32,16 @@ extension PageCaptures on CaptureSession {
     await advance(400);
   }
 
+  /// 点开 [TvInput]，写入编辑框，再按完成回到原对话框。
+  Future<void> _editTvField(Key field, String text) async {
+    await activate(find.byKey(field));
+    final editor = find.byKey(const Key('tv-input-editor'));
+    expect(editor, findsOneWidget);
+    await tester.enterText(editor, text);
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await advance(350);
+  }
+
   Future<void> dismiss() async {
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await advance(350);
@@ -372,14 +382,20 @@ extension PageCaptures on CaptureSession {
       await tap(const Key('tv-change-password'));
     }
     await save('account-change-password');
-    await tester.enterText(
-      find.byKey(ChangePasswordDialog.newPasswordField),
-      'capture-only',
-    );
-    await tester.enterText(
-      find.byKey(ChangePasswordDialog.confirmField),
-      'mismatch',
-    );
+    if (platform == 'tv') {
+      // 电视密码行是 TvInput，文本框在点开后的编辑框里。
+      await _editTvField(ChangePasswordDialog.newPasswordField, 'capture-only');
+      await _editTvField(ChangePasswordDialog.confirmField, 'mismatch');
+    } else {
+      await tester.enterText(
+        find.byKey(ChangePasswordDialog.newPasswordField),
+        'capture-only',
+      );
+      await tester.enterText(
+        find.byKey(ChangePasswordDialog.confirmField),
+        'mismatch',
+      );
+    }
     await advance(150);
     await save('account-password-mismatch');
     await tap(ChangePasswordDialog.cancelKey);

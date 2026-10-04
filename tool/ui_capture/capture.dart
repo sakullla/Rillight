@@ -142,6 +142,7 @@ void main() {
           }
         });
         expect(auth.isLoggedIn, isTrue);
+        final snapshots = MemoryPlaybackSessionSnapshotStore();
         final app = RillightApp(
           auth: auth,
           environment: config.$2,
@@ -149,7 +150,7 @@ void main() {
           playerBindings: PlayerBindings(
             createBackend: () => backend,
             settingsStore: store,
-            snapshotStore: MemoryPlaybackSessionSnapshotStore(),
+            snapshotStore: snapshots,
             danmakuClient: danmakuClient,
             controlsHideAfter: const Duration(days: 1),
             progressInterval: const Duration(days: 1),
@@ -507,7 +508,9 @@ void main() {
           }
         }
         tester.view.physicalSize = config.$3;
-        if (config.$1 == 'tv') await capture.captureTvAppearance(app);
+        if (config.$1 == 'tv') {
+          await capture.captureTvAppearance(app, snapshots);
+        }
         if (capture.wants('login')) {
           await capture.loginPages(app, auth);
           if (config.$1 == 'tv') await capture.captureTvLan(auth);
@@ -755,12 +758,32 @@ class CaptureSession {
   }
 
   /// 登录后的设置栏外观三态，与连接页共用同一控件。
-  Future<void> captureTvAppearance(RillightApp app) async {
+  Future<void> captureTvAppearance(
+    RillightApp app,
+    MemoryPlaybackSessionSnapshotStore snapshots,
+  ) async {
     if (!wants('settings') || !shouldCapture('tv-appearance-signed-in')) {
       return;
     }
+    // 播放会留下会话快照。回到首页时电视壳用独立网络补报停止；
+    // 捕获环境没有这条连接，恢复失败会换成重试页，设置里的外观三态就不在了。
+    await tester.runAsync(snapshots.delete);
     app.router.go('/');
-    await advance(600);
+    for (
+      var i = 0;
+      i < 25 && find.byType(TvAppearancePicker).evaluate().isEmpty;
+      i++
+    ) {
+      await tester.pump(const Duration(milliseconds: 50));
+      if (find.text('重试').evaluate().isNotEmpty) {
+        await tester.runAsync(snapshots.delete);
+        await tester.tap(find.text('重试'));
+      }
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 100)),
+      );
+    }
+    await advance(300);
     await tap(const ValueKey('tv-nav-3'));
     expect(find.byType(TvAppearancePicker), findsOneWidget);
     for (final name in ['system', 'light', 'dark']) {
