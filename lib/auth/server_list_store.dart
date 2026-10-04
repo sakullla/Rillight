@@ -2,8 +2,12 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
+enum AccessRegion { ordinary, private }
+
 class ServerLine {
-  const ServerLine({required this.id, required this.address});
+  const ServerLine({required this.id, required this.address, this.nickname});
+
+  final String? nickname;
 
   final String id;
   final String address;
@@ -16,7 +20,11 @@ class ServerLine {
     return uri.hasPort ? '${uri.host}:${uri.port}' : uri.host;
   }
 
-  Map<String, dynamic> toJson() => {'id': id, 'address': address};
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'address': address,
+    if (nickname != null) 'nickname': nickname,
+  };
 
   factory ServerLine.fromJson(Map<String, dynamic> json) {
     final id = json['id']?.toString() ?? '';
@@ -25,11 +33,16 @@ class ServerLine {
     return ServerLine(
       id: id.isNotEmpty ? id : 'line-$address',
       address: address,
+      nickname: json['nickname']?.toString(),
     );
   }
 
-  ServerLine copyWith({String? id, String? address}) {
-    return ServerLine(id: id ?? this.id, address: address ?? this.address);
+  ServerLine copyWith({String? id, String? address, String? nickname}) {
+    return ServerLine(
+      id: id ?? this.id,
+      address: address ?? this.address,
+      nickname: nickname ?? this.nickname,
+    );
   }
 }
 
@@ -42,7 +55,24 @@ class SavedServer {
     this.activeLineId,
     this.userAgent,
     this.nickname,
+    this.region = AccessRegion.ordinary,
+    this.participates = true,
+    this.libraryIds = const [],
+    this.scopeKnown = false,
+    this.verifiedServerId,
+    this.checkedAt,
+    this.checkStatus = 'unknown',
   });
+
+  final AccessRegion region;
+  final bool participates;
+
+  /// An unknown legacy scope is empty until explicitly discovered/selected.
+  final List<String> libraryIds;
+  final bool scopeKnown;
+  final String? verifiedServerId;
+  final DateTime? checkedAt;
+  final String checkStatus;
 
   final String id;
   final String name;
@@ -85,6 +115,13 @@ class SavedServer {
     'name': name,
     if (nickname?.trim().isNotEmpty == true) 'nickname': nickname!.trim(),
     'username': username,
+    'region': region.name,
+    'participates': participates,
+    'libraryIds': libraryIds,
+    'scopeKnown': scopeKnown,
+    'verifiedServerId': verifiedServerId,
+    'checkedAt': checkedAt?.toIso8601String(),
+    'checkStatus': checkStatus,
     'activeLineId': activeLineId,
     if (normalizedUserAgent != null) 'userAgent': normalizedUserAgent,
     'lines': lines.map((line) => line.toJson()).toList(),
@@ -119,9 +156,20 @@ class SavedServer {
       name: json['name']?.toString() ?? '',
       nickname: json['nickname']?.toString(),
       username: json['username']?.toString() ?? '',
-      lines: lines,
+      lines: List<ServerLine>.unmodifiable(lines),
       activeLineId: resolvedActiveLineId,
       userAgent: _resolveUserAgent(json, resolvedActiveLineId),
+      region: json['region'] == 'private'
+          ? AccessRegion.private
+          : AccessRegion.ordinary,
+      participates: json['participates'] != false,
+      libraryIds: List<String>.unmodifiable(
+        (json['libraryIds'] as List? ?? []).whereType<String>(),
+      ),
+      scopeKnown: json['scopeKnown'] == true,
+      verifiedServerId: json['verifiedServerId']?.toString(),
+      checkedAt: DateTime.tryParse(json['checkedAt']?.toString() ?? ''),
+      checkStatus: json['checkStatus']?.toString() ?? 'unknown',
     );
   }
 
@@ -169,15 +217,29 @@ class SavedServer {
     String? activeLineId,
     String? userAgent,
     String? nickname,
+    AccessRegion? region,
+    bool? participates,
+    List<String>? libraryIds,
+    bool? scopeKnown,
+    String? verifiedServerId,
+    DateTime? checkedAt,
+    String? checkStatus,
   }) {
     return SavedServer(
       id: id ?? this.id,
       name: name ?? this.name,
       nickname: nickname ?? this.nickname,
       username: username ?? this.username,
-      lines: lines ?? this.lines,
+      lines: List<ServerLine>.unmodifiable(lines ?? this.lines),
       activeLineId: activeLineId ?? this.activeLineId,
       userAgent: userAgent ?? this.userAgent,
+      region: region ?? this.region,
+      participates: participates ?? this.participates,
+      libraryIds: List<String>.unmodifiable(libraryIds ?? this.libraryIds),
+      scopeKnown: scopeKnown ?? this.scopeKnown,
+      verifiedServerId: verifiedServerId ?? this.verifiedServerId,
+      checkedAt: checkedAt ?? this.checkedAt,
+      checkStatus: checkStatus ?? this.checkStatus,
     );
   }
 }
@@ -254,6 +316,7 @@ class FileServerListStore implements ServerListStore {
   Future<void> save(ServerListSnapshot snapshot) async {
     await file.parent.create(recursive: true);
     final payload = <String, dynamic>{
+      'version': 2,
       'lastServerId': snapshot.lastServerId,
       'servers': snapshot.servers.map((server) => server.toJson()).toList(),
     };

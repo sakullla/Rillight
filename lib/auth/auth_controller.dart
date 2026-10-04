@@ -4,6 +4,8 @@ import 'package:flutter/foundation.dart';
 import 'package:rillight/auth/connect_draft.dart';
 import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/server_list_store.dart';
+import 'package:rillight/auth/source_sessions.dart';
+import 'package:rillight/auth/region_access.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/emby/emby_errors.dart';
@@ -34,8 +36,20 @@ class AuthController extends ChangeNotifier {
   AuthController({
     required this.client,
     required this.credentials,
-    required this.servers,
+    required ServerListStore servers,
+    SourceSessionRegistry? sources,
+    this.persistPin,
   }) {
+    this.sources =
+        sources ??
+        SourceSessionRegistry(
+          access: RegionAccessController(),
+          store: servers,
+          credentials: credentials,
+          createClient: () => EmbyClient(device: client.device),
+        );
+    this.servers = this.sources.ordinaryStore;
+    this.sources.addMembershipCleanup(_clearSourceContribution);
     client.onSessionExpired = _onSessionExpired;
     client.onRefreshSession = _refreshSession;
   }
@@ -59,7 +73,26 @@ class AuthController extends ChangeNotifier {
 
   final EmbyClient client;
   final CredentialStore credentials;
-  final ServerListStore servers;
+  late final ServerListStore servers;
+  late final SourceSessionRegistry sources;
+  RegionAccessController get regionAccess => sources.access;
+  final Future<void> Function(PinVerifier)? persistPin;
+  Future<void> setPrivatePin(String pin, String confirmation) =>
+      regionAccess.setPin(pin, confirmation, persistPin ?? (_) async {});
+
+  Future<void> _clearSourceContribution(
+    SourceAccount? account,
+    String id,
+  ) async {
+    _savedServers = _savedServers.where((s) => s.id != id).toList();
+    if (_session?.server.id == id) {
+      _session = null;
+      client.clearSession();
+      _resetLibraryCounts();
+    }
+    if (_prefill?.id == id) _prefill = null;
+    if (!_disposed) notifyListeners();
+  }
 
   ConnectDraft? connectDraft;
 
@@ -201,6 +234,8 @@ class AuthController extends ChangeNotifier {
       client.setUserAgent(userAgent);
       final baseUrl = normalizeEmbyBaseUrl(address);
       final publicInfo = await client.getPublicInfo(baseUrl);
+      // Ordinary legacy login cannot replace credentials of a private member.
+      await sources.requireOrdinaryServer(publicInfo.id);
       final auth = await client.authenticateByName(
         baseUrl: baseUrl,
         username: username,
@@ -734,7 +769,7 @@ class AuthController extends ChangeNotifier {
     }
     late final ServerLine line;
     if (index >= 0) {
-      line = ServerLine(id: lines[index].id, address: address);
+      line = lines[index].copyWith(address: address);
       lines[index] = line;
     } else {
       line = ServerLine(
@@ -751,6 +786,13 @@ class AuthController extends ChangeNotifier {
       lines: lines,
       activeLineId: line.id,
       userAgent: normalizedUa,
+      region: existing?.region ?? AccessRegion.ordinary,
+      participates: existing?.participates ?? true,
+      libraryIds: existing?.libraryIds ?? const [],
+      scopeKnown: existing?.scopeKnown ?? false,
+      verifiedServerId: existing?.verifiedServerId ?? serverId,
+      checkedAt: existing?.checkedAt,
+      checkStatus: existing?.checkStatus ?? 'unknown',
     );
   }
 
@@ -862,6 +904,8 @@ class AuthController extends ChangeNotifier {
     _disposed = true;
     _resetLibraryCounts();
     connectDraft = null;
+    sources.removeMembershipCleanup(_clearSourceContribution);
+    sources.dispose();
     super.dispose();
   }
 }
