@@ -254,6 +254,62 @@ void main() {
     },
   );
 
+  test('conflicting versions resolve only their full source anchors', () {
+    final v1 = ref('a', version: 'v1');
+    final v2 = ref('a', version: 'v2');
+    final index = WorkIndex()
+      ..upsert([
+        work('a', reference: v1),
+        work('a', reference: v2, ids: {'Tmdb': '99'}),
+      ]);
+    expect(index.groups, hasLength(2));
+    final first = index.groupFor(v1)!;
+    final second = index.groupFor(v2)!;
+    expect(first.sources.single.reference, v1);
+    expect(second.sources.single.reference, v2);
+    expect(first.contains(v2), isFalse);
+    expect(second.contains(v1), isFalse);
+    expect(index.groupFor(ref('a')), isNull);
+    expect(index.groupForKey(v1.key), same(first));
+    expect(index.groupForKey(v2.key), same(second));
+
+    index.removeWhere((r) => r == v1);
+    expect(index.groupFor(v1), isNull);
+    expect(index.groupForKey(v1.key), isNull);
+    expect(index.groups.single.contains(v1), isFalse);
+    expect(index.groupFor(v2)!.sources.single.reference, v2);
+    expect(index.groupFor(ref('a')), same(index.groupFor(v2)));
+  });
+
+  test('an explicit item source cannot hide conflicting version groups', () {
+    final item = ref('a');
+    final version = ref('a', version: 'v2');
+    final index = WorkIndex()
+      ..upsert([
+        work('a', reference: item),
+        work('a', reference: version, ids: {'Tmdb': '99'}),
+      ]);
+    expect(index.groups, hasLength(2));
+    expect(index.groupFor(item), isNull);
+    expect(index.groupForKey(item.key)!.sources.single.reference, item);
+    expect(index.groupFor(version)!.sources.single.reference, version);
+  });
+
+  test('merged versions do not resurrect a removed or unknown version', () {
+    final v1 = ref('a', version: 'v1');
+    final v2 = ref('a', version: 'v2');
+    final index = WorkIndex()
+      ..upsert([work('a', reference: v1), work('a', reference: v2)]);
+    expect(index.groupFor(v1), same(index.groupFor(v2)));
+    expect(index.groupFor(ref('a')), same(index.groupFor(v2)));
+    index.removeWhere((r) => r == v1);
+    expect(index.groupFor(v1), isNull);
+    expect(index.groupFor(ref('a', version: 'missing')), isNull);
+    expect(index.groups.single.contains(v1), isFalse);
+    expect(index.groupFor(v2)!.contains(v2), isTrue);
+    expect(index.groupFor(ref('a'))!.contains(ref('a')), isTrue);
+  });
+
   group('episode lookup', () {
     late WorkGroup series;
     setUp(() {
@@ -307,6 +363,42 @@ void main() {
         expect(missing.source, isNull);
       },
     );
+    test('episode series versions require exact group membership', () {
+      final a = ref('a', version: 'series-v1');
+      final b = ref('b', version: 'series-v1');
+      final index = WorkIndex()
+        ..upsert([
+          work('a', type: 'Series', reference: a),
+          work('b', type: 'Series', reference: b),
+        ]);
+      series = index.groups.single;
+      // Emby supplies item-only SeriesId, so versions in one confirmed group
+      // must still accept their parent item reference.
+      expect(
+        lookup(episode('a'), [episode('b')]).status,
+        EpisodeLookupStatus.confirmed,
+      );
+      EpisodeSource withSeries(SourceReference parent) => EpisodeSource(
+        reference: ref('b', id: 'episode'),
+        series: parent,
+        season: 1,
+        episode: 2,
+        isSpecial: false,
+        numberingScheme: 'aired',
+      );
+      expect(
+        lookup(episode('a'), [withSeries(b)]).status,
+        EpisodeLookupStatus.confirmed,
+      );
+      expect(
+        lookup(episode('a'), [withSeries(ref('b', version: 'removed'))]).status,
+        EpisodeLookupStatus.uncertain,
+      );
+      expect(
+        lookup(episode('a'), [withSeries(ref('b', version: 'removed'))]).source,
+        isNull,
+      );
+    });
     test(
       'specials cannot match ordinary episodes and malformed special boundary is uncertain',
       () {

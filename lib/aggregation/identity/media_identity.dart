@@ -186,8 +186,15 @@ class WorkGroup {
   final String key;
   final List<WorkSource> sources;
   final List<ConfirmedLink> confirmations;
-  bool contains(SourceReference ref) =>
-      sources.any((s) => s.reference.item == ref.item);
+
+  /// Version references require exact membership. An item-only reference asks
+  /// whether this group has any version of the item; it does not establish that
+  /// this is the item's only group (use WorkIndex.groupFor for that lookup).
+  bool contains(SourceReference ref) => sources.any(
+    (s) => ref.mediaSourceId == null
+        ? s.reference.item == ref
+        : s.reference == ref,
+  );
 }
 
 /// Incremental source ownership, not watch-progress ownership. Upsert replaces
@@ -211,8 +218,16 @@ class WorkIndex {
     _rebuild();
   }
 
-  WorkGroup? groupFor(SourceReference ref) =>
-      _groups.where((g) => g.contains(ref)).firstOrNull;
+  /// Resolve a full version anchor exactly, never via its item projection.
+  /// Item-only anchors resolve only when all matching sources share one group;
+  /// conflicting versions make such an anchor ambiguous, even if an explicit
+  /// item-only source is present in one of those groups.
+  WorkGroup? groupFor(SourceReference ref) {
+    final matches = _groups.where((g) => g.contains(ref)).iterator;
+    if (!matches.moveNext()) return null;
+    final group = matches.current;
+    return matches.moveNext() ? null : group;
+  }
 
   /// All keys are source anchors, including retired group keys after a merge.
   /// A split resolves the old key only to its actual source's new group; this
