@@ -16,6 +16,7 @@ import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/auth/tv_connect_page.dart';
+import 'package:rillight/auth/tv_lan_pair.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/home/catalog_keys.dart';
@@ -513,7 +514,30 @@ void main() {
         }
         if (capture.wants('login')) {
           await capture.loginPages(app, auth);
-          if (config.$1 == 'tv') await capture.captureTvLan(auth);
+          if (config.$1 == 'tv') {
+            final probeAuth = AuthController(
+              client: EmbyClient(
+                device: const EmbyDeviceInfo(
+                  clientName: '灯川原型',
+                  deviceName: 'UI capture',
+                  deviceId: 'synthetic-ui-lan',
+                  version: '1',
+                ),
+                dio: dioForFakeEmby(adapter),
+              ),
+              credentials: MemoryCredentialStore(),
+              servers: MemoryServerListStore(),
+            );
+            try {
+              await capture.captureTvLan(
+                auth,
+                server.baseUrl.toString(),
+                probeAuth,
+              );
+            } finally {
+              probeAuth.dispose();
+            }
+          }
         }
         await tester.pumpWidget(const SizedBox.shrink());
         await capture.advance(500);
@@ -793,88 +817,128 @@ class CaptureSession {
   }
 
   /// 手机辅助页来自电视本机 HTML；确认页只显示服务器和账号。
-  Future<void> captureTvLan(AuthController auth) async {
-    final phone = shouldCapture('tv-lan-phone');
-    final confirm = shouldCapture('tv-lan-confirm');
-    if (!phone && !confirm) return;
+  ///
+  /// [probeAuth] 是成功的独立会话:登录成功会触发路由跳转并销毁连接页持有
+  /// 的辅助实例,成功页送达不能用页面内流程,也不能改动应用会话。
+  Future<void> captureTvLan(
+    AuthController auth,
+    String serverUrl,
+    AuthController probeAuth,
+  ) async {
+    const ids = [
+      'tv-lan-qr',
+      'tv-lan-phone',
+      'tv-lan-phone-pending',
+      'tv-lan-confirm',
+      'tv-lan-phone-failed',
+      'tv-lan-phone-success',
+    ];
+    if (!ids.any(shouldCapture)) return;
     expect(auth.isLoggedIn, isFalse);
     expect(auth.session, isNull);
     expect(find.byType(TvConnectPage), findsOneWidget);
     const secret = 'capture-lan-secret';
-    const server = 'http://192.0.2.10:8096';
+    const unreachable = 'http://192.0.2.10:8096';
     const account = 'lan-capture';
-    await tap(const Key('tv-lan-assist'));
-    await _waitForKey(const Key('tv-lan-address'));
-    final manual = Uri.parse(
-      tester
-          .widget<SelectableText>(find.byKey(const Key('tv-lan-address')))
-          .data!,
-    );
-    final fingerprint = tester
-        .widget<SelectableText>(find.byKey(const Key('tv-lan-fingerprint')))
-        .data!;
-    expect(manual.queryParameters.keys.toSet(), {'id', 'fp'});
-    expect(manual.queryParameters['fp'], fingerprint);
-    expect(manual.toString().contains(secret), isFalse);
-    final html = await tester.runAsync(() => _lanRequest(manual));
-    expect(html, isNotNull);
-    expect(html!.contains(secret), isFalse);
-    final page = _lanPhonePage(html, fingerprint);
-    try {
-      if (phone) {
-        final context = tester.element(find.byType(TvConnectPage));
-        unawaited(
-          showGeneralDialog<void>(
-            context: context,
-            barrierDismissible: false,
-            barrierColor: const Color(0xFF111111),
-            transitionDuration: Duration.zero,
-            pageBuilder: (_, _, _) => _LanPhonePreview(page),
-          ),
+
+    Future<String> submit(
+      Uri manual,
+      String server,
+      String password, {
+      String user = account,
+    }) async {
+      final body =
+          'address=${Uri.encodeQueryComponent(server)}'
+          '&username=${Uri.encodeQueryComponent(user)}'
+          '&password=${Uri.encodeQueryComponent(password)}';
+      final posted = await tester.runAsync(
+        () => _lanRequest(manual.replace(path: '/submit'), body: body),
+      );
+      expect(posted, isNotNull);
+      expect(posted!.contains(secret), isFalse);
+      expect(posted.contains('correct-horse'), isFalse);
+      return posted;
+    }
+
+    /// 轮询最终状态页:确认后入口只留 phoneGrace 供手机取页。
+    Future<String> finalPage(Uri manual, String heading) async {
+      for (var i = 0; i < 20; i++) {
+        final page = await tester.runAsync(
+          () => _lanRequest(manual.replace(path: '/status')),
         );
-        try {
-          await advance(100);
-          expect(find.byKey(_LanPhonePreview.previewKey), findsOneWidget);
-          expect(find.text(secret), findsNothing);
-          await save('tv-lan-phone');
-        } finally {
-          final preview = find.byKey(_LanPhonePreview.previewKey);
-          if (preview.evaluate().isNotEmpty) {
-            Navigator.of(tester.element(preview)).pop();
-            await advance(100);
-          }
+        if (page != null && page.contains(heading)) {
+          expect(page.contains(secret), isFalse);
+          expect(page.contains('correct-horse'), isFalse);
+          return page;
         }
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 200)),
+        );
       }
-      if (confirm) {
-        final posted = await tester.runAsync(
-          () => _lanRequest(
-            manual.replace(path: '/submit'),
-            body:
-                'address=${Uri.encodeQueryComponent(server)}'
-                '&username=${Uri.encodeQueryComponent(account)}'
-                '&password=${Uri.encodeQueryComponent(secret)}',
-          ),
+      fail('phone final page "$heading" was not delivered');
+    }
+
+    Uri? manual;
+    try {
+      await tap(const Key('tv-lan-assist'));
+      await _waitForKey(const Key('tv-lan-address'));
+      manual = Uri.parse(
+        tester
+            .widget<SelectableText>(find.byKey(const Key('tv-lan-address')))
+            .data!,
+      );
+      final fingerprint = tester
+          .widget<SelectableText>(find.byKey(const Key('tv-lan-fingerprint')))
+          .data!;
+      expect(manual.queryParameters.keys.toSet(), {'id', 'fp'});
+      expect(manual.queryParameters['fp'], fingerprint);
+      expect(manual.toString().contains(secret), isFalse);
+
+      if (shouldCapture('tv-lan-qr')) {
+        await Scrollable.ensureVisible(
+          tester.element(find.byKey(const Key('tv-lan-qr'))),
+          alignment: .3,
         );
-        expect(posted, isNotNull);
-        expect(posted!.contains(secret), isFalse);
-        await _waitForKey(const Key('tv-lan-server'));
-        expect(
-          tester.widget<Text>(find.byKey(const Key('tv-lan-server'))).data,
-          server,
+        await advance(150);
+        await save('tv-lan-qr');
+      }
+
+      final firstOffer = manual;
+      final html = await tester.runAsync(() => _lanRequest(firstOffer));
+      expect(html, isNotNull);
+      expect(html!.contains(secret), isFalse);
+      final page = _lanPhonePage(html, fingerprint);
+      if (shouldCapture('tv-lan-phone')) {
+        await _showPhone(_LanPhonePreview(page), 'tv-lan-phone');
+      }
+
+      final posted = await submit(manual, unreachable, secret);
+      if (shouldCapture('tv-lan-phone-pending')) {
+        await _showPhone(
+          _LanStatePreview(_lanStatePage(posted)),
+          'tv-lan-phone-pending',
         );
-        expect(
-          tester.widget<Text>(find.byKey(const Key('tv-lan-account'))).data,
-          account,
-        );
-        final passwordLabel = find.descendant(
-          of: find.byKey(const Key('tv-connect-password')),
-          matching: find.byType(Text),
-        );
-        expect(passwordLabel, findsOneWidget);
-        final passwordText = tester.widget<Text>(passwordLabel).data ?? '';
-        expect(passwordText.contains('•'), isFalse);
-        expect(passwordText.contains(secret), isFalse);
-        expect(find.textContaining(secret), findsNothing);
+      }
+
+      await _waitForKey(const Key('tv-lan-server'));
+      expect(
+        tester.widget<Text>(find.byKey(const Key('tv-lan-server'))).data,
+        unreachable,
+      );
+      expect(
+        tester.widget<Text>(find.byKey(const Key('tv-lan-account'))).data,
+        account,
+      );
+      final passwordLabel = find.descendant(
+        of: find.byKey(const Key('tv-connect-password')),
+        matching: find.byType(Text),
+      );
+      expect(passwordLabel, findsOneWidget);
+      final passwordText = tester.widget<Text>(passwordLabel).data ?? '';
+      expect(passwordText.contains('•'), isFalse);
+      expect(passwordText.contains(secret), isFalse);
+      expect(find.textContaining(secret), findsNothing);
+      if (shouldCapture('tv-lan-confirm')) {
         await Scrollable.ensureVisible(
           tester.element(find.byKey(const Key('tv-lan-server'))),
           alignment: .2,
@@ -882,8 +946,111 @@ class CaptureSession {
         await advance(150);
         await save('tv-lan-confirm');
       }
+
+      if (shouldCapture('tv-lan-phone-failed')) {
+        // 不可达地址确认后失败,手机在入口关闭前取到失败页。
+        await Scrollable.ensureVisible(
+          tester.element(find.byKey(const Key('tv-lan-confirm'))),
+          alignment: .5,
+        );
+        await advance(100);
+        await tap(const Key('tv-lan-confirm'));
+        final failed = await finalPage(manual, '失败');
+        await _showPhone(
+          _LanStatePreview(_lanStatePage(failed)),
+          'tv-lan-phone-failed',
+        );
+      } else {
+        await _closeLan(manual);
+      }
+
+      if (shouldCapture('tv-lan-phone-success')) {
+        // 独立驱动一次性配对:成功确认落在探针会话上,应用仍保持未登录,
+        // 不触发路由跳转,辅助实例也不受页面生命周期影响。
+        final lan = TvLanAssist();
+        try {
+          await tester.runAsync(() => lan.open());
+          final offer = lan.offer!;
+          final direct = Uri.parse(offer.manualUrl);
+          final body =
+              'address=${Uri.encodeQueryComponent(serverUrl)}'
+              '&username=${Uri.encodeQueryComponent('alice')}'
+              '&password=${Uri.encodeQueryComponent('correct-horse')}';
+          final posted = await tester.runAsync(
+            () => _lanRequest(direct.replace(path: '/submit'), body: body),
+          );
+          expect(posted, isNotNull);
+          expect(posted!.contains('correct-horse'), isFalse);
+          // confirm 会等到最终页送达并关闭入口才返回;手机取页必须与确认
+          // 在同一个真实异步区内并发:首个状态请求会被挂起,随确认先拿到
+          // 「连接中」,宽限期内再取到「成功」。
+          final success = await tester.runAsync(() async {
+            final confirmFuture = lan.confirm(probeAuth);
+            String? page;
+            for (var i = 0; i < 20 && page == null; i++) {
+              try {
+                final candidate = await _lanRequest(
+                  direct.replace(path: '/status'),
+                );
+                if (candidate.contains('成功')) {
+                  page = candidate;
+                }
+              } on Object {
+                // 入口关闭前的重试窗口。
+              }
+              if (page == null) {
+                await Future<void>.delayed(const Duration(milliseconds: 100));
+              }
+            }
+            await confirmFuture;
+            return page;
+          });
+          expect(
+            success,
+            isNotNull,
+            reason: 'phone success page not delivered',
+          );
+          expect(success!.contains('correct-horse'), isFalse);
+          await _showPhone(
+            _LanStatePreview(_lanStatePage(success)),
+            'tv-lan-phone-success',
+          );
+        } finally {
+          await tester.runAsync(() => lan.close());
+        }
+      }
     } finally {
-      await _closeLan(manual);
+      final opened = manual;
+      if (opened != null) {
+        await _closeLan(opened);
+      }
+    }
+  }
+
+  /// 把单页手机预览盖在捕获页面上,保存后关闭。
+  Future<void> _showPhone(Widget preview, String id) async {
+    final context = tester.element(find.byType(TvConnectPage));
+    unawaited(
+      showGeneralDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        barrierColor: const Color(0xFF101726),
+        transitionDuration: Duration.zero,
+        pageBuilder: (_, _, _) => preview,
+      ),
+    );
+    try {
+      await advance(100);
+      expect(find.byKey(_lanPreviewKey), findsOneWidget);
+      expect(find.text('capture-lan-secret'), findsNothing);
+      expect(find.text('correct-horse'), findsNothing);
+      await save(id);
+    } finally {
+      final shown = find.byKey(_lanPreviewKey);
+      if (shown.evaluate().isNotEmpty) {
+        Navigator.of(tester.element(shown)).pop();
+        await advance(100);
+      }
     }
   }
 
@@ -1011,57 +1178,336 @@ String _lanText(String raw) {
       .trim();
 }
 
-/// 把电视回给手机的 HTML 可见内容画进捕获边界，不是产品页面。
+/// 把电视回给手机的 HTML 可见内容画进捕获边界,不是产品页面。
+const _lanPreviewKey = Key('tv-lan-phone-preview');
+
 class _LanPhonePreview extends StatelessWidget {
   const _LanPhonePreview(this.page);
-
-  static const previewKey = Key('tv-lan-phone-preview');
 
   final _LanPhonePage page;
 
   @override
   Widget build(BuildContext context) {
-    final base = DefaultTextStyle.of(context).style;
-    const ink = Color(0xFFEEEEEE);
-    final text = base.copyWith(color: ink, fontSize: 16);
     return Material(
-      key: previewKey,
-      color: const Color(0xFF111111),
-      child: ListView(
-        padding: const EdgeInsets.all(24),
-        children: [
-          Text(
-            page.title,
-            style: text.copyWith(fontSize: 32, fontWeight: FontWeight.w700),
-          ),
-          const SizedBox(height: 16),
-          Text(page.intro, style: text),
-          const SizedBox(height: 8),
-          Text(page.fingerprint, style: text),
-          const SizedBox(height: 8),
-          for (final label in page.labels) ...[
-            Text(label, style: text),
-            const SizedBox(height: 8),
-            const ColoredBox(
-              color: Color(0xFFFFFFFF),
-              child: SizedBox(height: 48, width: double.infinity),
-            ),
-            const SizedBox(height: 16),
-          ],
-          ColoredBox(
-            color: const Color(0xFFE8E8E8),
-            child: SizedBox(
-              height: 48,
-              width: double.infinity,
-              child: Center(
-                child: Text(
-                  page.submit,
-                  style: text.copyWith(color: const Color(0xFF111111)),
-                ),
+      key: _lanPreviewKey,
+      color: const Color(0xFF101726),
+      child: Align(
+        alignment: Alignment.topCenter,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 400),
+          child: ListView(
+            shrinkWrap: true,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 32),
+            children: [
+              _LanCard(
+                children: [
+                  const _LanBrand(),
+                  const SizedBox(height: 6),
+                  const Text(
+                    '在手机上为电视登录 Emby 服务器,提交后回到电视确认。',
+                    style: TextStyle(
+                      color: Color(0xFF9AA4B8),
+                      fontSize: 14,
+                      height: 1.5,
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  Text(
+                    page.intro,
+                    style: const TextStyle(
+                      color: Color(0xFF9AA4B8),
+                      fontSize: 13,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Container(
+                    width: double.infinity,
+                    decoration: BoxDecoration(
+                      color: const Color(0x59000000),
+                      border: Border.all(color: const Color(0x14FFFFFF)),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 10,
+                    ),
+                    child: Text(
+                      page.fingerprint,
+                      style: const TextStyle(
+                        color: Color(0xFF8EA2C9),
+                        fontSize: 11,
+                        height: 1.6,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  for (final label in page.labels) ...[
+                    Text(
+                      label,
+                      style: const TextStyle(
+                        color: Color(0xFFC6CDDC),
+                        fontSize: 14,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Container(
+                      height: 50,
+                      decoration: BoxDecoration(
+                        color: const Color(0x52000000),
+                        border: Border.all(color: const Color(0x1FFFFFFF)),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+                  Container(
+                    height: 50,
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFF8BA4FF), Color(0xFFB18CFF)],
+                      ),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Center(
+                      child: Text(
+                        page.submit,
+                        style: const TextStyle(
+                          color: Color(0xFF0B1020),
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  const Text(
+                    '一次性配对,过期自动失效\n本页不含脚本与外部资源',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Color(0xFF7D8698),
+                      fontSize: 12,
+                      height: 1.6,
+                    ),
+                  ),
+                ],
               ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _LanBrand extends StatelessWidget {
+  const _LanBrand();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Row(
+      children: [
+        _LanLogo(),
+        SizedBox(width: 10),
+        Text(
+          '灯川 Rillight',
+          style: TextStyle(
+            color: Color(0xFFE8ECF4),
+            fontSize: 23,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _LanLogo extends StatelessWidget {
+  const _LanLogo();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 34,
+      height: 34,
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFF6D8DFF), Color(0xFF9A6DFF)],
+        ),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: const Center(
+        child: Text(
+          '灯',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 17,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _LanCard extends StatelessWidget {
+  const _LanCard({required this.children});
+
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: const Color(0x0DFFFFFF),
+        border: Border.all(color: const Color(0x17FFFFFF)),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: children,
+      ),
+    );
+  }
+}
+
+class _LanStatePage {
+  const _LanStatePage({
+    required this.heading,
+    required this.detail,
+    required this.tone,
+    required this.spinning,
+  });
+
+  final String heading;
+  final String detail;
+
+  /// ok / wait / err。
+  final String tone;
+  final bool spinning;
+}
+
+_LanStatePage _lanStatePage(String html) {
+  expect(html.contains('<script'), isFalse);
+  final headings = RegExp(
+    '<h1\\b[^>]*>(.*?)</h1>',
+    dotAll: true,
+  ).allMatches(html).toList();
+  // 第一个是品牌字标,状态标题在其后。
+  expect(headings.length, greaterThanOrEqualTo(2));
+  final heading = _lanText(headings.last.group(1)!);
+  final detailMatch = RegExp(
+    '<p class="detail">(.*?)</p>',
+    dotAll: true,
+  ).firstMatch(html);
+  expect(detailMatch, isNotNull, reason: 'state page missing detail');
+  final tone = switch (heading) {
+    '成功' => 'ok',
+    '待确认' || '连接中' => 'wait',
+    _ => 'err',
+  };
+  return _LanStatePage(
+    heading: heading,
+    detail: _lanText(detailMatch!.group(1)!),
+    tone: tone,
+    spinning: html.contains('class="spin"'),
+  );
+}
+
+/// 手机状态页(待确认/连接中/成功/失败)的捕获近似。
+class _LanStatePreview extends StatelessWidget {
+  const _LanStatePreview(this.page);
+
+  final _LanStatePage page;
+
+  @override
+  Widget build(BuildContext context) {
+    final (bg, fg) = switch (page.tone) {
+      'ok' => (const Color(0x2954D391), const Color(0xFF54D391)),
+      'wait' => (const Color(0x298BA4FF), const Color(0xFF8BA4FF)),
+      _ => (const Color(0x29FF6B6B), const Color(0xFFFF6B6B)),
+    };
+    final icon = switch (page.tone) {
+      'ok' => Icon(Icons.check_rounded, color: fg, size: 34),
+      'wait' => Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (var i = 0; i < 3; i++) ...[
+            Container(
+              width: 9,
+              height: 9,
+              decoration: BoxDecoration(color: fg, shape: BoxShape.circle),
+            ),
+            if (i < 2) const SizedBox(width: 8),
+          ],
+        ],
+      ),
+      _ => Icon(Icons.close_rounded, color: fg, size: 34),
+    };
+    return Material(
+      key: _lanPreviewKey,
+      color: const Color(0xFF101726),
+      child: Align(
+        alignment: Alignment.topCenter,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 400),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 32),
+            child: _LanCard(
+              children: [
+                const _LanBrand(),
+                const SizedBox(height: 28),
+                Center(
+                  child: page.spinning
+                      ? Container(
+                          width: 44,
+                          height: 44,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            border: Border.all(color: fg, width: 3),
+                          ),
+                        )
+                      : Container(
+                          width: 64,
+                          height: 64,
+                          decoration: BoxDecoration(
+                            color: bg,
+                            shape: BoxShape.circle,
+                          ),
+                          child: Center(child: icon),
+                        ),
+                ),
+                const SizedBox(height: 18),
+                Center(
+                  child: Text(
+                    page.heading,
+                    style: const TextStyle(
+                      color: Color(0xFFE8ECF4),
+                      fontSize: 23,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Center(
+                  child: Text(
+                    page.detail,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Color(0xFF9AA4B8),
+                      fontSize: 15,
+                      height: 1.6,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
-        ],
+        ),
       ),
     );
   }

@@ -609,12 +609,22 @@ class TvPlayerPageState extends State<TvPlayerPage> {
       focusNode: focusNode,
       onPressed: onPressed,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 28),
-            const SizedBox(width: 10),
+            // 圆形遮罩图标:亮画面上也可读,视觉重量统一。
+            DecoratedBox(
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: AppScrim.control),
+                shape: BoxShape.circle,
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(8),
+                child: Icon(icon, size: 28),
+              ),
+            ),
+            const SizedBox(width: 8),
             Text(
               label,
               style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w500),

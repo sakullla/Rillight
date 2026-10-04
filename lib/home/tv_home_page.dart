@@ -109,8 +109,9 @@ class _TvHomePageState extends State<TvHomePage> {
           String title,
           CatalogRowState state,
           String route,
-          String shelfId,
-        ) {
+          String shelfId, {
+          bool wide = false,
+        }) {
           if (state.hidden) {
             return const [];
           }
@@ -144,10 +145,23 @@ class _TvHomePageState extends State<TvHomePage> {
                 retry: c.reloadHomeRows,
               ),
             if (state.items.isNotEmpty)
-              _TvFocusMemoryRow(title: title, items: state.items),
+              _TvFocusMemoryRow(title: title, items: state.items, wide: wide),
             const SizedBox(height: 20),
           ];
         }
+
+        final gutter = tvSafeGutter(MediaQuery.sizeOf(context).width);
+        Widget padded(List<Widget> children) => Padding(
+          padding: EdgeInsets.symmetric(horizontal: gutter),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: children,
+          ),
+        );
+
+        /// 空 section 不占位,保证全部为空时回落到空态文案。
+        List<Widget> padSection(List<Widget> children) =>
+            children.isEmpty ? const [] : [padded(children)];
 
         final sectionChildren = <Widget>[
           for (final id in visible) ...[
@@ -157,58 +171,68 @@ class _TvHomePageState extends State<TvHomePage> {
               _TvFeatured(items: featured),
               const SizedBox(height: 20),
             ] else if (id == PhoneHomeSectionId.resume)
-              ...shelf(
-                l.resumeRow,
-                resumeState,
-                AppRoutes.shelfResume,
-                CatalogKeys.shelfResume,
+              ...padSection(
+                shelf(
+                  l.resumeRow,
+                  resumeState,
+                  AppRoutes.shelfResume,
+                  CatalogKeys.shelfResume,
+                  wide: true,
+                ),
               )
             else if (id == PhoneHomeSectionId.nextUp)
-              ...shelf(
-                l.nextUpRow,
-                nextUpState,
-                AppRoutes.shelfNextUp,
-                CatalogKeys.shelfNextUp,
+              ...padSection(
+                shelf(
+                  l.nextUpRow,
+                  nextUpState,
+                  AppRoutes.shelfNextUp,
+                  CatalogKeys.shelfNextUp,
+                ),
               )
             else if (id == PhoneHomeSectionId.libraries && showLibraryEntry)
-              LibraryTiles(
-                libraries: c.libraries,
-                cardBuilder: (context, library, width, height) {
-                  return TvAction(
-                    key: CatalogKeys.library(library.id),
-                    onPressed: () =>
-                        context.push(AppRoutes.library(library.id)),
-                    child: SizedBox(
-                      width: width,
-                      height: height,
-                      child: LibraryCardFace(
-                        library: library,
+              padded([
+                LibraryTiles(
+                  libraries: c.libraries,
+                  cardBuilder: (context, library, width, height) {
+                    return TvAction(
+                      key: CatalogKeys.library(library.id),
+                      onPressed: () =>
+                          context.push(AppRoutes.library(library.id)),
+                      child: SizedBox(
                         width: width,
                         height: height,
+                        child: LibraryCardFace(
+                          library: library,
+                          width: width,
+                          height: height,
+                        ),
                       ),
-                    ),
-                  );
-                },
-              )
+                    );
+                  },
+                ),
+              ])
             else if (PhoneHomeSectionId.libraryIdOf(id) case final libraryId?
                 when librariesById[libraryId] != null)
-              _TvLibraryLatest(library: librariesById[libraryId]!),
+              padded([_TvLibraryLatest(library: librariesById[libraryId]!)]),
           ],
         ];
         return ListView(
           key: const PageStorageKey('tv-home'),
+          padding: EdgeInsets.zero,
           children: [
             ...sectionChildren,
-            if (sectionChildren.isEmpty) Text(l.mobileEmpty),
-            TvAction(
-              key: const Key('tv-home-display'),
-              onPressed: () => showTvSectionEditor(context),
-              child: Text(l.phoneHomeEdit),
-            ),
-            TvAction(
-              onPressed: () => c.reload(showCachedFirst: false),
-              child: Text(l.mobileRefresh),
-            ),
+            if (sectionChildren.isEmpty) padded([Text(l.mobileEmpty)]),
+            padded([
+              TvAction(
+                key: const Key('tv-home-display'),
+                onPressed: () => showTvSectionEditor(context),
+                child: Text(l.phoneHomeEdit),
+              ),
+              TvAction(
+                onPressed: () => c.reload(showCachedFirst: false),
+                child: Text(l.mobileRefresh),
+              ),
+            ]),
           ],
         );
       },
@@ -258,7 +282,8 @@ class _TvLibraryLatest extends StatelessWidget {
   }
 }
 
-/// featured 横幅:背景图 + 标题 + 主操作,手动左右切换,无自动轮换。
+/// featured 沉浸 hero:全宽出血背图 + 遮罩 + 大标题 + 主操作,手动左右切换,
+/// 无自动轮换。hero 铺满视口宽并伸到顶部导航栏下,文字恒白压遮罩。
 class _TvFeatured extends StatefulWidget {
   const _TvFeatured({required this.items});
 
@@ -287,8 +312,9 @@ class _TvFeaturedState extends State<_TvFeatured> {
     final l = AppLocalizations.of(context);
     final theme = Theme.of(context);
     final viewSize = MediaQuery.sizeOf(context);
-    // 10 英尺横幅:高度约为视口高 45%,夹在可读区间内。
-    final height = (viewSize.height * 0.45).clamp(220.0, 460.0);
+    // 沉浸 hero:高度约为视口高 58%,夹在可读区间内;宽度铺满视口。
+    final height = (viewSize.height * 0.58).clamp(320.0, 620.0);
+    final gutter = tvSafeGutter(viewSize.width);
     final hasImage =
         item.backdropImageTag != null ||
         item.parentBackdropImageTag != null ||
@@ -299,183 +325,170 @@ class _TvFeaturedState extends State<_TvFeatured> {
     final playable = item.canResume || item.isMovie || item.isEpisode;
     return SizedBox(
       key: TvHomeKeys.featured,
+      width: viewSize.width,
       height: height,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(16),
-        child: ColoredBox(
-          color: const Color(0xff1d2632),
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              if (hasImage)
-                AnimatedSwitcher(
-                  duration: AppMotion.durationOf(context, heroSlideDuration),
-                  transitionBuilder: heroSlideTransition,
-                  child: RepaintBoundary(
-                    key: ValueKey(item.id),
-                    child: MediaImage(
-                      item: item,
-                      height: height,
-                      preferBackdrop: true,
-                      maxWidth: mediaHeroBackdropRequestWidth(
-                        layoutWidth: viewSize.width,
-                        devicePixelRatio: MediaQuery.devicePixelRatioOf(
-                          context,
-                        ),
-                      ),
+      child: ColoredBox(
+        color: theme.colorScheme.surfaceContainerHigh,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            if (hasImage)
+              AnimatedSwitcher(
+                duration: AppMotion.durationOf(context, heroSlideDuration),
+                transitionBuilder: heroSlideTransition,
+                child: RepaintBoundary(
+                  key: ValueKey(item.id),
+                  child: MediaImage(
+                    item: item,
+                    height: height,
+                    preferBackdrop: true,
+                    maxWidth: mediaHeroBackdropRequestWidth(
+                      layoutWidth: viewSize.width,
+                      devicePixelRatio: MediaQuery.devicePixelRatioOf(context),
                     ),
                   ),
                 ),
-              const Positioned.fill(child: HeroScrim(leading: true)),
-              Positioned(
-                left: 56,
-                right: 56,
-                bottom: 20,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      title,
-                      key: TvHomeKeys.featuredTitle,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.headlineMedium?.copyWith(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w800,
-                        shadows: const [
-                          Shadow(blurRadius: 12, color: Colors.black54),
+              ),
+            const Positioned.fill(child: TvHeroScrim()),
+            Positioned(
+              left: gutter,
+              right: gutter,
+              bottom: 24,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    title,
+                    key: TvHomeKeys.featuredTitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.displaySmall?.copyWith(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w800,
+                      shadows: const [
+                        Shadow(blurRadius: 12, color: Colors.black54),
+                      ],
+                    ),
+                  ),
+                  if (meta.isNotEmpty || item.communityRating != null) ...[
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        if (meta.isNotEmpty)
+                          Flexible(
+                            child: Text(
+                              meta.join(' · '),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.labelLarge?.copyWith(
+                                color: Colors.white.withValues(alpha: 0.8),
+                              ),
+                            ),
+                          ),
+                        if (item.communityRating != null) ...[
+                          const SizedBox(width: 10),
+                          HeroRatingBadge(rating: item.communityRating),
                         ],
+                      ],
+                    ),
+                  ],
+                  // 矮视口只留标题与操作,保证按钮不被挤出 hero。
+                  if (overview != null && height >= 360) ...[
+                    const SizedBox(height: 8),
+                    ConstrainedBox(
+                      constraints: BoxConstraints(
+                        maxWidth: viewSize.width * .5,
+                      ),
+                      child: Text(
+                        overview,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: Colors.white.withValues(alpha: 0.82),
+                          height: 1.45,
+                        ),
                       ),
                     ),
-                    if (meta.isNotEmpty || item.communityRating != null) ...[
-                      const SizedBox(height: 4),
-                      Row(
-                        children: [
-                          if (meta.isNotEmpty)
-                            Flexible(
-                              child: Text(
-                                meta.join(' · '),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: theme.textTheme.labelLarge?.copyWith(
-                                  color: Colors.white.withValues(alpha: 0.8),
-                                ),
-                              ),
-                            ),
-                          if (item.communityRating != null) ...[
-                            const SizedBox(width: 10),
-                            HeroRatingBadge(rating: item.communityRating),
-                          ],
-                        ],
-                      ),
-                    ],
-                    // 矮视口只留标题与操作,保证按钮不被挤出横幅。
-                    if (overview != null && height >= 300) ...[
-                      const SizedBox(height: 8),
-                      ConstrainedBox(
-                        constraints: BoxConstraints(
-                          maxWidth: viewSize.width * .5,
-                        ),
-                        child: Text(
-                          overview,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: Colors.white.withValues(alpha: 0.82),
-                            height: 1.45,
-                          ),
-                        ),
-                      ),
-                    ],
-                    const SizedBox(height: 12),
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        if (playable) ...[
-                          TvAction(
-                            key: TvHomeKeys.featuredPlay,
-                            emphasized: true,
-                            onPressed: () => context.push(
-                              '/play/${item.id}',
-                              extra: PlayerOpenRequest(
-                                itemId: item.id,
-                                autoResume: true,
-                              ),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Icon(Icons.play_arrow_rounded),
-                                const SizedBox(width: 6),
-                                Text(item.canResume ? l.resumePlay : l.play),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                        ],
+                  ],
+                  const SizedBox(height: 14),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (playable) ...[
                         TvAction(
-                          key: TvHomeKeys.featuredOpen,
-                          emphasized: !playable,
-                          onPressed: () =>
-                              context.push(AppRoutes.item(item.id)),
-                          child: Text(l.details),
+                          key: TvHomeKeys.featuredPlay,
+                          emphasized: true,
+                          pill: true,
+                          leading: const Icon(Icons.play_arrow_rounded),
+                          onPressed: () => context.push(
+                            '/play/${item.id}',
+                            extra: PlayerOpenRequest(
+                              itemId: item.id,
+                              autoResume: true,
+                            ),
+                          ),
+                          child: Text(item.canResume ? l.resumePlay : l.play),
                         ),
+                        const SizedBox(width: 8),
                       ],
+                      TvAction(
+                        key: TvHomeKeys.featuredOpen,
+                        emphasized: !playable,
+                        pill: true,
+                        onPressed: () => context.push(AppRoutes.item(item.id)),
+                        child: Text(l.details),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            if (items.length > 1) ...[
+              Positioned(
+                left: 8,
+                top: 0,
+                bottom: 0,
+                child: Center(
+                  child: TvAction(
+                    key: TvHomeKeys.featuredPrev,
+                    onPressed: () => _go(-1),
+                    child: const Icon(Icons.chevron_left),
+                  ),
+                ),
+              ),
+              Positioned(
+                right: 8,
+                top: 0,
+                bottom: 0,
+                child: Center(
+                  child: TvAction(
+                    key: TvHomeKeys.featuredNext,
+                    onPressed: () => _go(1),
+                    child: const Icon(Icons.chevron_right),
+                  ),
+                ),
+              ),
+              Positioned(
+                right: gutter,
+                bottom: 28,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    HeroDots(index: index, count: items.length, onSelect: null),
+                    const SizedBox(width: 8),
+                    Text(
+                      '${index + 1} / ${items.length}',
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        color: Colors.white.withValues(alpha: 0.8),
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
                     ),
                   ],
                 ),
               ),
-              if (items.length > 1) ...[
-                Positioned(
-                  left: 8,
-                  top: 0,
-                  bottom: 0,
-                  child: Center(
-                    child: TvAction(
-                      key: TvHomeKeys.featuredPrev,
-                      onPressed: () => _go(-1),
-                      child: const Icon(Icons.chevron_left),
-                    ),
-                  ),
-                ),
-                Positioned(
-                  right: 8,
-                  top: 0,
-                  bottom: 0,
-                  child: Center(
-                    child: TvAction(
-                      key: TvHomeKeys.featuredNext,
-                      onPressed: () => _go(1),
-                      child: const Icon(Icons.chevron_right),
-                    ),
-                  ),
-                ),
-                Positioned(
-                  right: 24,
-                  bottom: 24,
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      HeroDots(
-                        index: index,
-                        count: items.length,
-                        onSelect: null,
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        '${index + 1} / ${items.length}',
-                        style: theme.textTheme.labelMedium?.copyWith(
-                          color: Colors.white.withValues(alpha: 0.8),
-                          fontFeatures: const [FontFeature.tabularFigures()],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
             ],
-          ),
+          ],
         ),
       ),
     );
@@ -488,10 +501,17 @@ class _TvFeaturedState extends State<_TvFeatured> {
 /// 不改变外层 hasFocus,不会误触发。滚动位置仍由 [PageStorageKey] 记忆,
 /// 焦点目标移除由 TvFocusRegion 补焦,二者分工不变。
 class _TvFocusMemoryRow extends StatefulWidget {
-  const _TvFocusMemoryRow({required this.title, required this.items});
+  const _TvFocusMemoryRow({
+    required this.title,
+    required this.items,
+    this.wide = false,
+  });
 
   final String title;
   final List<EmbyItem> items;
+
+  /// 16:9 横版卡行(继续观看)。
+  final bool wide;
 
   @override
   State<_TvFocusMemoryRow> createState() => _TvFocusMemoryRowState();
@@ -562,13 +582,14 @@ class _TvFocusMemoryRowState extends State<_TvFocusMemoryRow> {
   @override
   Widget build(BuildContext context) {
     _prune();
+    final wide = widget.wide;
     return Focus(
       canRequestFocus: false,
       skipTraversal: true,
       onFocusChange: _onRowFocus,
       child: SizedBox(
         key: ValueKey('tv-row-${widget.title}'),
-        height: 272,
+        height: wide ? 220 : 272,
         child: ListView.builder(
           key: PageStorageKey('tv-row-${widget.title}'),
           scrollDirection: Axis.horizontal,
@@ -577,8 +598,12 @@ class _TvFocusMemoryRowState extends State<_TvFocusMemoryRow> {
             final item = widget.items[index];
             return SizedBox(
               key: ValueKey(item.id),
-              width: 170,
-              child: TvPoster(item: item, focusNode: _nodeFor(item)),
+              width: wide ? 288 : 170,
+              child: TvPoster(
+                item: item,
+                wide: wide,
+                focusNode: _nodeFor(item),
+              ),
             );
           },
         ),

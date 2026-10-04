@@ -1978,6 +1978,12 @@ abstract class AppLocalizations {
   /// **'服务器线路'**
   String get mobileLine;
 
+  /// TV settings pane group header for misc actions (add server, change password, logout).
+  ///
+  /// In zh, this message translates to:
+  /// **'其他'**
+  String get tvSettingsOther;
+
   /// No description provided for @mobileAddServer.
   ///
   /// In zh, this message translates to:
@@ -2691,6 +2697,24 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'手机辅助连接'**
   String get tvLanAssist;
+
+  /// TV LAN assist waiting section header next to the QR code.
+  ///
+  /// In zh, this message translates to:
+  /// **'用手机扫码登录'**
+  String get tvLanScanTitle;
+
+  /// TV LAN assist instructions below the scan title.
+  ///
+  /// In zh, this message translates to:
+  /// **'用手机相机扫码,在手机上填写服务器与账号,提交后回到电视确认即可完成登录'**
+  String get tvLanScanHint;
+
+  /// TV LAN assist header above the submitted server and account review.
+  ///
+  /// In zh, this message translates to:
+  /// **'手机已提交,确认后登录'**
+  String get tvLanPendingTitle;
 
   /// No description provided for @tvLanWaiting.
   ///

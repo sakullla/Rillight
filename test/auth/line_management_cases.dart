@@ -798,7 +798,7 @@ void main() {
         .focusNode!;
     navFocus(3).requestFocus();
     FocusManager.instance.applyFocusChangesIfNeeded();
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     await tester.pumpAndSettle();
 
     // 设置页是懒构建的 ListView:先滚动到目标再点击。
@@ -929,7 +929,7 @@ void main() {
           .focusNode!;
       navFocus.requestFocus();
       FocusManager.instance.applyFocusChangesIfNeeded();
-      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
       await tester.pumpAndSettle();
 
       final serverId = auth.savedServers.single.id;

@@ -10,6 +10,7 @@ import 'package:rillight/auth/failure_message.dart';
 import 'package:rillight/emby/emby_errors.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/media_shelf.dart';
+import 'package:rillight/library/episode_list.dart';
 import 'package:rillight/media_image/media_image.dart';
 
 /// Repairs a removed remote target only on the visible route. Offstage panes
@@ -111,10 +112,18 @@ class TvAction extends StatefulWidget {
     this.focusNode,
     this.selected = false,
     this.emphasized = false,
+    this.pill = false,
+    this.leading,
   });
   final Widget child;
   final FutureOr<void> Function()? onPressed;
   final bool autofocus, selected, emphasized;
+
+  /// 胶囊形态:圆角 28、横向留白更大,用于顶部导航、筛选与分季切换。
+  final bool pill;
+
+  /// 可选前导图标,与 [child] 横向排列。
+  final Widget? leading;
   final FocusNode? focusNode;
 
   /// 聚焦放大档位,要求落在 1.05–1.1。
@@ -208,6 +217,16 @@ class _TvActionState extends State<TvAction>
     final foreground = widget.emphasized
         ? (_focused ? scheme.onPrimary : scheme.onPrimaryContainer)
         : null;
+    final content = widget.leading == null
+        ? widget.child
+        : Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              widget.leading!,
+              const SizedBox(width: 8),
+              Flexible(child: widget.child),
+            ],
+          );
     return ExcludeFocus(
       excluding: widget.onPressed == null,
       child: FocusableActionDetector(
@@ -244,7 +263,9 @@ class _TvActionState extends State<TvAction>
               child: AnimatedContainer(
                 duration: AppMotion.durationOf(context, AppMotion.fast),
                 margin: const EdgeInsets.all(4),
-                padding: const EdgeInsets.all(12),
+                padding: widget.pill
+                    ? const EdgeInsets.symmetric(horizontal: 18, vertical: 10)
+                    : const EdgeInsets.all(12),
                 constraints: const BoxConstraints(minHeight: 48),
                 decoration: BoxDecoration(
                   color: fill,
@@ -253,17 +274,17 @@ class _TvActionState extends State<TvAction>
                     color: _focused ? scheme.onSurface : Colors.transparent,
                     width: TvAction.focusRingWidth,
                   ),
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(widget.pill ? 28 : 10),
                 ),
                 child: Opacity(
                   opacity: widget.onPressed == null ? .4 : 1,
                   child: foreground == null
-                      ? widget.child
+                      ? content
                       : IconTheme(
                           data: IconThemeData(color: foreground),
                           child: DefaultTextStyle.merge(
                             style: TextStyle(color: foreground),
-                            child: widget.child,
+                            child: content,
                           ),
                         ),
                 ),
@@ -276,22 +297,12 @@ class _TvActionState extends State<TvAction>
   }
 }
 
-class TvFrame extends StatelessWidget {
-  const TvFrame({
-    super.key,
-    required this.title,
-    required this.child,
-    this.back = true,
-  });
-  final String title;
+/// TV 舞台级主题覆写:弹窗底色与 1.15 倍阅读字号,TvFrame 与 TvShell 共用。
+class TvStageTheme extends StatelessWidget {
+  const TvStageTheme({super.key, required this.child});
   final Widget child;
-  final bool back;
   @override
   Widget build(BuildContext context) {
-    final viewSize = MediaQuery.sizeOf(context);
-    // 安全区:边距不低于视口宽/高的 5%(960x540 下恰为 48),大屏随之放大。
-    final horizontal = math.max(48.0, viewSize.width * 0.05);
-    final vertical = math.max(48.0, viewSize.height * 0.05);
     return Theme(
       data: Theme.of(context).copyWith(
         dialogTheme: DialogThemeData(
@@ -300,43 +311,150 @@ class TvFrame extends StatelessWidget {
         ),
         textTheme: Theme.of(context).textTheme.apply(fontSizeFactor: 1.15),
       ),
+      child: child,
+    );
+  }
+}
+
+/// 视口安全区留白:边距不低于视口宽/高的 5%(960x540 下恰为 48)。
+double tvSafeGutter(double extent) => math.max(48.0, extent * 0.05);
+
+class TvFrame extends StatelessWidget {
+  const TvFrame({
+    super.key,
+    required this.title,
+    required this.child,
+    this.back = true,
+    this.edgeToEdge = false,
+  });
+  final String title;
+  final Widget child;
+  final bool back;
+
+  /// 出血模式:true 时 [child] 铺满整个视口(调用方把沉浸头图放在滚动内容
+  /// 最前,自行处理正文留白),标题行带遮罩浮在最上方;false 时布局与既有
+  /// 安全区版本逐字节一致。
+  final bool edgeToEdge;
+
+  @override
+  Widget build(BuildContext context) {
+    final viewSize = MediaQuery.sizeOf(context);
+    // 安全区:边距不低于视口宽/高的 5%(960x540 下恰为 48),大屏随之放大。
+    final horizontal = tvSafeGutter(viewSize.width);
+    final vertical = tvSafeGutter(viewSize.height);
+    return TvStageTheme(
       child: TvFocusRegion(
         child: Scaffold(
-          body: SafeArea(
-            child: Padding(
-              padding: EdgeInsets.symmetric(
-                horizontal: horizontal,
-                vertical: vertical,
-              ),
-              child: FocusTraversalGroup(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Row(
-                      children: [
-                        if (back)
-                          TvAction(
-                            onPressed: () => Navigator.of(context).pop(),
-                            child: const Icon(Icons.arrow_back),
-                          ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Text(
-                            title,
-                            style: Theme.of(context).textTheme.headlineSmall,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ],
+          body: !edgeToEdge
+              ? SafeArea(
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(
+                      horizontal: horizontal,
+                      vertical: vertical,
                     ),
-                    const SizedBox(height: 12),
-                    Expanded(child: child),
+                    child: FocusTraversalGroup(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          _TvTitleRow(title: title, back: back),
+                          const SizedBox(height: 12),
+                          Expanded(child: child),
+                        ],
+                      ),
+                    ),
+                  ),
+                )
+              : Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    FocusTraversalGroup(child: child),
+                    Positioned(
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      child: _TvImmersiveTitleBand(
+                        title: title,
+                        back: back,
+                        horizontal: horizontal,
+                      ),
+                    ),
                   ],
                 ),
-              ),
-            ),
+        ),
+      ),
+    );
+  }
+}
+
+class _TvTitleRow extends StatelessWidget {
+  const _TvTitleRow({required this.title, required this.back});
+  final String title;
+  final bool back;
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        if (back)
+          TvAction(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Icon(Icons.arrow_back),
           ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Text(
+            title,
+            style: Theme.of(context).textTheme.headlineSmall,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// 出血页顶部遮罩带:保护返回钮与标题,向下溶到透明。
+class _TvImmersiveTitleBand extends StatelessWidget {
+  const _TvImmersiveTitleBand({
+    required this.title,
+    required this.back,
+    required this.horizontal,
+  });
+  final String title;
+  final bool back;
+  final double horizontal;
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final dark = scheme.brightness == Brightness.dark;
+    final band = dark ? Colors.black : scheme.surface;
+    final alpha = AppScrim.of(
+      context,
+      dark ? AppScrim.topBar : AppScrim.lightTopBar,
+    );
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            band.withValues(alpha: alpha),
+            band.withValues(alpha: alpha * 0.5),
+            band.withValues(alpha: 0),
+          ],
+          stops: AppScrim.topBarStops,
+        ),
+      ),
+      child: SafeArea(
+        bottom: false,
+        child: Padding(
+          padding: EdgeInsets.only(
+            left: horizontal,
+            right: horizontal,
+            top: 12,
+            bottom: 28,
+          ),
+          child: _TvTitleRow(title: title, back: back),
         ),
       ),
     );
@@ -361,6 +479,136 @@ class TvFailure extends StatelessWidget {
   );
 }
 
+/// 现代化 TV 海报卡:圆角封面 + 进度/已看/评分角标,聚焦时浮起投阴影。
+///
+/// 交互核仍是 [TvAction](焦点环、缩放、激活语义不变);[wide] 切换 16:9
+/// 缩略图版式(继续观看行),海报版式保持 2:3。
+class TvCard extends StatefulWidget {
+  const TvCard({
+    super.key,
+    required this.item,
+    this.autofocus = false,
+    this.imageMaxWidth = 280,
+    this.focusNode,
+    this.wide = false,
+  });
+  final EmbyItem item;
+  final bool autofocus;
+  final int imageMaxWidth;
+  final FocusNode? focusNode;
+
+  /// 16:9 横版卡:继续观看行的剧集/影片缩略图。
+  final bool wide;
+  @override
+  State<TvCard> createState() => _TvCardState();
+}
+
+class _TvCardState extends State<TvCard> {
+  final _ownedNode = FocusNode();
+  FocusNode get _node => widget.focusNode ?? _ownedNode;
+  bool get _focused => _node.hasFocus;
+
+  @override
+  void initState() {
+    super.initState();
+    _node.addListener(_changed);
+  }
+
+  void _changed() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    _node.removeListener(_changed);
+    _ownedNode.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final item = widget.item;
+    final theme = Theme.of(context);
+    final progress = item.playbackProgress;
+    final played = item.userData.played;
+    final meta = <String>[if (widget.wide && item.isEpisode) ?item.seriesName];
+    return TvAction(
+      autofocus: widget.autofocus,
+      focusNode: _node,
+      onPressed: () => context.push(AppRoutes.item(item.id)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(
+            child: AnimatedContainer(
+              duration: AppMotion.durationOf(context, AppMotion.fast),
+              curve: AppMotion.standard,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(AppRadii.md),
+                boxShadow: _focused
+                    ? const [
+                        BoxShadow(
+                          blurRadius: 16,
+                          offset: Offset(0, 6),
+                          color: Color(0x59000000),
+                        ),
+                      ]
+                    : const [],
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(AppRadii.md),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    RepaintBoundary(
+                      child: MediaImage(
+                        item: item,
+                        maxWidth: widget.imageMaxWidth,
+                        fit: BoxFit.cover,
+                        preferThumb: widget.wide,
+                      ),
+                    ),
+                    if (played)
+                      ColoredBox(color: Colors.black.withValues(alpha: .28)),
+                    if (progress > 0 && !played)
+                      Positioned(
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        child: LinearProgressIndicator(
+                          value: progress,
+                          minHeight: 4,
+                          backgroundColor: Colors.black.withValues(alpha: .45),
+                        ),
+                      ),
+                    if (played)
+                      const Positioned(
+                        right: 6,
+                        top: 6,
+                        child: EpisodeWatchedBadge(size: 18),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(item.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+          if (meta.isNotEmpty)
+            Text(
+              meta.join(' · '),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.labelMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
 class TvPoster extends StatelessWidget {
   const TvPoster({
     super.key,
@@ -368,32 +616,23 @@ class TvPoster extends StatelessWidget {
     this.autofocus = false,
     this.imageMaxWidth = 280,
     this.focusNode,
+    this.wide = false,
   });
   final EmbyItem item;
   final bool autofocus;
   final int imageMaxWidth;
   final FocusNode? focusNode;
+
+  /// 16:9 横版卡(继续观看行)。
+  final bool wide;
   @override
-  Widget build(BuildContext context) => TvAction(
+  Widget build(BuildContext context) => TvCard(
+    key: key,
+    item: item,
     autofocus: autofocus,
+    imageMaxWidth: imageMaxWidth,
     focusNode: focusNode,
-    onPressed: () => context.push(AppRoutes.item(item.id)),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Expanded(
-          child: RepaintBoundary(
-            child: MediaImage(
-              item: item,
-              maxWidth: imageMaxWidth,
-              fit: BoxFit.cover,
-            ),
-          ),
-        ),
-        const SizedBox(height: 8),
-        Text(item.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-      ],
-    ),
+    wide: wide,
   );
 }
 
@@ -401,7 +640,7 @@ class TvGrid extends StatelessWidget {
   const TvGrid({super.key, required this.items});
   final List<EmbyItem> items;
 
-  static int columnCount(double width) => (width / 180).floor().clamp(2, 6);
+  static int columnCount(double width) => (width / 200).floor().clamp(2, 8);
 
   static TvGridMetrics metricsFor(BuildContext context, double width) {
     final columns = columnCount(width);
@@ -491,17 +730,27 @@ class TvInput extends StatelessWidget {
     required this.controller,
     this.autofocus = false,
     this.secret = false,
+    this.pill = false,
+    this.leading,
     this.onSubmitted,
   });
   final String label;
   final TextEditingController controller;
   final bool autofocus, secret;
+
+  /// 胶囊形态(搜索条)。
+  final bool pill;
+
+  /// 可选前导图标。
+  final Widget? leading;
   final VoidCallback? onSubmitted;
   @override
   Widget build(BuildContext context) => ValueListenableBuilder(
     valueListenable: controller,
     builder: (context, value, _) => TvAction(
       autofocus: autofocus,
+      pill: pill,
+      leading: leading,
       onPressed: () async {
         await showDialog<void>(
           context: context,
@@ -542,4 +791,104 @@ class TvInput extends StatelessWidget {
       ),
     ),
   );
+}
+
+/// TV 沉浸 hero 遮罩:顶带保护导航/标题,左侧文字带托底白字,底带溶入页面。
+///
+/// hero 文字恒为白色,遮罩恒为黑色系,与主题明暗无关;alpha 全部经
+/// [AppScrim.resolve],系统要求减少动态效果时抬到不低于 [AppScrim.reduced]。
+class TvHeroScrim extends StatelessWidget {
+  const TvHeroScrim({
+    super.key,
+    this.top = true,
+    this.leading = true,
+    this.bottom = true,
+  });
+
+  /// 顶带:保护浮于 hero 之上的导航与标题。
+  final bool top;
+
+  /// 左侧文字带:hero 底部左对齐标题区的横向渐变。
+  final bool leading;
+
+  /// 底带:向页面底色溶入。
+  final bool bottom;
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        if (top)
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            height:
+                AppScrim.topBandHeight *
+                AppViewport.scaleOf(MediaQuery.sizeOf(context)),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Colors.black.withValues(
+                      alpha: AppScrim.of(context, AppScrim.top),
+                    ),
+                    Colors.black.withValues(alpha: 0),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        if (leading)
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.centerLeft,
+                  end: Alignment.centerRight,
+                  colors: [
+                    Colors.black.withValues(
+                      alpha: AppScrim.of(context, AppScrim.textStart),
+                    ),
+                    Colors.black.withValues(
+                      alpha: AppScrim.of(context, AppScrim.textMid),
+                    ),
+                    Colors.black.withValues(alpha: 0),
+                  ],
+                  stops: AppScrim.textStops,
+                ),
+              ),
+            ),
+          ),
+        if (bottom)
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            top: 0,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Colors.black.withValues(alpha: 0),
+                    Colors.black.withValues(
+                      alpha: AppScrim.of(context, AppScrim.bottomMid),
+                    ),
+                    Colors.black.withValues(
+                      alpha: AppScrim.of(context, AppScrim.bottomMid),
+                    ),
+                  ],
+                  stops: AppScrim.bottomStops,
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
 }

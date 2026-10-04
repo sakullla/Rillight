@@ -1295,6 +1295,10 @@
   "mobileRewind": "后退 10 秒",
   "mobileSpeed": "播放速度",
   "mobileLine": "服务器线路",
+  "tvSettingsOther": "其他",
+  "@tvSettingsOther": {
+    "description": "TV settings pane group header for misc actions (add server, change password, logout)."
+  },
   "mobileAddServer": "连接其他服务器",
   "mobileAccountServerGroup": "账户与服务器",
   "@mobileAccountServerGroup": {
@@ -1620,6 +1624,18 @@
   "tvSectionMoveUp": "上移",
   "tvSectionMoveDown": "下移",
   "tvLanAssist": "手机辅助连接",
+  "tvLanScanTitle": "用手机扫码登录",
+  "@tvLanScanTitle": {
+    "description": "TV LAN assist waiting section header next to the QR code."
+  },
+  "tvLanScanHint": "用手机相机扫码,在手机上填写服务器与账号,提交后回到电视确认即可完成登录",
+  "@tvLanScanHint": {
+    "description": "TV LAN assist instructions below the scan title."
+  },
+  "tvLanPendingTitle": "手机已提交,确认后登录",
+  "@tvLanPendingTitle": {
+    "description": "TV LAN assist header above the submitted server and account review."
+  },
   "tvLanWaiting": "等待手机提交",
   "tvLanConfirm": "确认连接",
   "tvLanReject": "拒绝",

@@ -13,6 +13,7 @@ import 'package:rillight/auth/tv_connect_page.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
+import 'package:rillight/home/tv_home_page.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_settings.dart';
@@ -84,16 +85,13 @@ void main() {
       }
 
       focusNav(1);
-      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
       // The first pane's post-frame focus callback is still pending here.
       focusNav(2);
-      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
       await tester.pumpAndSettle();
 
-      expect(
-        tester.widget<TvFrame>(find.byType(TvFrame)).title,
-        endsWith('搜索'),
-      );
+      expect(find.byType(TvSearchPage), findsOneWidget);
       expect(
         tester
             .widget<TvAction>(find.byKey(const ValueKey('tv-nav-2')))
@@ -108,10 +106,7 @@ void main() {
 
       await tester.binding.handlePopRoute();
       await tester.pumpAndSettle();
-      expect(
-        tester.widget<TvFrame>(find.byType(TvFrame)).title,
-        endsWith('首页'),
-      );
+      expect(find.byType(TvHomePage), findsOneWidget);
       expect(
         tester
             .widget<TvAction>(find.byKey(const ValueKey('tv-nav-0')))
@@ -123,6 +118,71 @@ void main() {
     },
     tags: ['integration'],
   );
+
+  testWidgets('up from pane content returns focus to the top nav', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(960, 540);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final server = FakeEmbyServer();
+    final auth = AuthController.memory(
+      client: EmbyClient(
+        device: const EmbyDeviceInfo(
+          clientName: 'test',
+          deviceName: 'tv',
+          deviceId: 'tv-nav-up-return',
+          version: '1',
+        ),
+        dio: dioForFakeEmby(FakeEmbyAdapter([server])),
+      ),
+    );
+    await tester.runAsync(
+      () => auth.connect(
+        address: server.baseUrl.toString(),
+        username: 'alice',
+        password: 'correct-horse',
+      ),
+    );
+    final app = RillightApp(
+      auth: auth,
+      environment: PresentationEnvironment.tv,
+      playerBindings: PlayerBindings(
+        createBackend: () => FakeVideoBackend(),
+        snapshotStore: MemoryPlaybackSessionSnapshotStore(),
+        settingsStore: MemoryPlayerSettingsStore(),
+      ),
+    );
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      app.router.dispose();
+      auth.dispose();
+    });
+    await tester.pumpWidget(app);
+    await tester.pumpAndSettle();
+
+    FocusNode navFocus(int index) => tester
+        .widget<FocusableActionDetector>(
+          find.descendant(
+            of: find.byKey(ValueKey('tv-nav-$index')),
+            matching: find.byType(FocusableActionDetector),
+          ),
+        )
+        .focusNode!;
+
+    // 下键进入首页面板,焦点落在 hero 区;连按上键最终回到顶部导航。
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+    expect(navFocus(0).hasFocus, isFalse);
+    for (var i = 0; i < 40 && !navFocus(0).hasFocus; i++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+      await tester.pumpAndSettle();
+    }
+    expect(navFocus(0).hasFocus, isTrue);
+    expect(tester.takeException(), isNull);
+  }, tags: ['integration']);
 
   testWidgets('a phone install opens phone pages', (tester) async {
     tester.view.physicalSize = const Size(360, 800);
@@ -229,7 +289,6 @@ void main() {
 
     await tester.tap(find.byKey(const ValueKey('tv-nav-3')));
     await tester.pumpAndSettle();
-    expect(tester.widget<TvFrame>(find.byType(TvFrame)).title, endsWith('设置'));
     expect(find.byType(TvAppearancePicker), findsOneWidget);
     expect(find.byKey(const Key('tv-appearance-system')), findsOneWidget);
     expect(find.byKey(const Key('tv-appearance-light')), findsOneWidget);

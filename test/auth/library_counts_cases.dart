@@ -339,7 +339,7 @@ void main() {
         .focusNode!;
     navFocus(3).requestFocus();
     FocusManager.instance.applyFocusChangesIfNeeded();
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     await tester.pumpAndSettle();
 
     expect(

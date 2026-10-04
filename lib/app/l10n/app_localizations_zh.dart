@@ -999,6 +999,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get mobileLine => '服务器线路';
 
   @override
+  String get tvSettingsOther => '其他';
+
+  @override
   String get mobileAddServer => '连接其他服务器';
 
   @override
@@ -1371,6 +1374,15 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get tvLanAssist => '手机辅助连接';
+
+  @override
+  String get tvLanScanTitle => '用手机扫码登录';
+
+  @override
+  String get tvLanScanHint => '用手机相机扫码,在手机上填写服务器与账号,提交后回到电视确认即可完成登录';
+
+  @override
+  String get tvLanPendingTitle => '手机已提交,确认后登录';
 
   @override
   String get tvLanWaiting => '等待手机提交';

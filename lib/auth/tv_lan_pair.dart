@@ -686,6 +686,67 @@ List<int>? _ipv4(String host) {
   return out;
 }
 
+/// 手机页共用样式:纯内联 CSS,无脚本、无外部资源,弱网与旧浏览器可用。
+const String _phoneCss = '''
+:root{color-scheme:dark}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+background:linear-gradient(160deg,#0d1420 0%,#101726 55%,#0b0f16 100%);
+color:#e8ecf4;min-height:100vh;display:flex;justify-content:center;align-items:flex-start;
+padding:32px 16px}
+.card{width:100%;max-width:420px;background:rgba(255,255,255,.05);
+border:1px solid rgba(255,255,255,.09);border-radius:20px;padding:28px 24px 24px}
+.brand{display:flex;align-items:center;gap:10px;margin-bottom:6px}
+.logo{width:34px;height:34px;border-radius:10px;flex:none;
+background:linear-gradient(135deg,#6d8dff,#9a6dff);color:#fff;
+display:flex;align-items:center;justify-content:center;font-size:17px;font-weight:800}
+h1{font-size:23px;font-weight:800}
+.sub{color:#9aa4b8;font-size:14px;line-height:1.5;margin-bottom:20px}
+p.fp{font-size:13px;color:#9aa4b8;margin-bottom:6px}
+code{display:block;background:rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.08);
+border-radius:10px;padding:10px 12px;font-size:11px;line-height:1.6;word-break:break-all;
+color:#8ea2c9;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;margin-bottom:18px}
+label{display:block;font-size:14px;color:#c6cddc;margin-bottom:6px}
+input{display:block;width:100%;box-sizing:border-box;background:rgba(0,0,0,.32);
+border:1px solid rgba(255,255,255,.12);border-radius:12px;padding:13px 14px;
+font-size:16px;color:#eef1f7;margin-bottom:16px;outline:none}
+input:focus{border-color:#6d8dff;box-shadow:0 0 0 3px rgba(109,141,255,.22)}
+button{display:block;width:100%;border:0;border-radius:12px;padding:14px;margin-top:4px;
+font-size:16px;font-weight:700;color:#0b1020;cursor:pointer;
+background:linear-gradient(135deg,#8ba4ff,#b18cff)}
+button:active{transform:scale(.985)}
+.note{margin-top:14px;font-size:12px;color:#7d8698;text-align:center;line-height:1.6}
+.status{text-align:center;padding:12px 0 4px}
+.icon{width:64px;height:64px;margin:0 auto 18px;border-radius:50%;
+display:flex;align-items:center;justify-content:center}
+.ok{background:rgba(84,211,145,.16)}
+.err{background:rgba(255,107,107,.16)}
+.wait{background:rgba(109,141,255,.16)}
+.tick{width:13px;height:24px;border-right:5px solid #54d391;border-bottom:5px solid #54d391;
+border-radius:2px;transform:rotate(45deg) translate(-2px,-2px)}
+.cross{position:relative;width:26px;height:26px}
+.cross::before,.cross::after{content:'';position:absolute;left:10.5px;top:0;width:5px;height:26px;
+background:#ff6b6b;border-radius:2px}
+.cross::before{transform:rotate(45deg)}
+.cross::after{transform:rotate(-45deg)}
+.dots{display:flex;gap:8px}
+.dots i{width:9px;height:9px;border-radius:50%;background:#8ba4ff;animation:p 1.2s infinite}
+.dots i:nth-child(2){animation-delay:.15s}
+.dots i:nth-child(3){animation-delay:.3s}
+@keyframes p{0%,60%,100%{opacity:.35}30%{opacity:1}}
+.spin{width:44px;height:44px;margin:0 auto 18px;border-radius:50%;
+border:3px solid rgba(139,164,255,.25);border-top-color:#8ba4ff;
+animation:r 1s linear infinite}
+@keyframes r{to{transform:rotate(360deg)}}
+.detail{color:#9aa4b8;font-size:15px;line-height:1.6;margin-top:10px}
+''';
+
+const String _phoneHead = '''
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>灯川连接</title>
+''';
+
 String _phoneForm({required String fingerprint, required String pairingId}) {
   final id = _html(pairingId);
   final fp = _html(fingerprint);
@@ -693,54 +754,92 @@ String _phoneForm({required String fingerprint, required String pairingId}) {
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>灯川连接</title>
-<style>
-body{font-family:sans-serif;margin:24px;background:#111;color:#eee}
-input,button{display:block;width:100%;box-sizing:border-box;margin:8px 0 16px;padding:12px;font-size:16px}
-code{word-break:break-all}
-</style>
+$_phoneHead
+<style>$_phoneCss</style>
 </head>
 <body>
-<h1>灯川 Rillight</h1>
-<p>证书指纹</p>
+<div class="card">
+<div class="brand"><div class="logo">灯</div><h1>灯川 Rillight</h1></div>
+<div class="sub">在手机上为电视登录 Emby 服务器,提交后回到电视确认。</div>
+<p class="fp">证书指纹</p>
 <code>$fp</code>
 <form method="post" action="/submit?id=$id&amp;fp=$fp">
-<label>服务器地址<input name="address" autocomplete="url" required></label>
+<label>服务器地址<input name="address" autocomplete="url" inputmode="url" placeholder="http://192.168.1.10:8096" required></label>
 <label>用户名<input name="username" autocomplete="username" required></label>
 <label>密码<input name="password" type="password" autocomplete="current-password"></label>
 <button type="submit">提交到电视</button>
 </form>
+<div class="note">一次性配对,过期自动失效<br>本页不含脚本与外部资源</div>
+</div>
 </body>
 </html>
 ''';
 }
 
 String _phoneMessage(String text) {
-  return '<!DOCTYPE html><html lang="zh-CN"><meta charset="utf-8"><title>灯川连接</title><p>${_html(text)}</p></html>';
+  return '''
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+$_phoneHead
+<style>$_phoneCss</style>
+</head>
+<body>
+<div class="card">
+<div class="brand"><div class="logo">灯</div><h1>灯川 Rillight</h1></div>
+<div class="status">
+<div class="icon err"><div class="cross"></div></div>
+<p class="detail">${_html(text)}</p>
+</div>
+</div>
+</body>
+</html>
+''';
 }
 
 String _phoneStateFor(TvLanPhase phase, String refresh) {
   switch (phase) {
     case TvLanPhase.pending:
-      return _phoneState('待确认', '请在电视上确认这次连接。', refresh: refresh);
+      return _phoneState(
+        '待确认',
+        '请在电视上确认这次连接。',
+        '<div class="icon wait"><div class="dots"><i></i><i></i><i></i></div></div>',
+        refresh: refresh,
+      );
     case TvLanPhase.connecting:
-      return _phoneState('连接中', '正在连接服务器。', refresh: refresh);
+      return _phoneState(
+        '连接中',
+        '正在连接服务器。',
+        '<div class="spin"></div>',
+        refresh: refresh,
+      );
     case TvLanPhase.confirmed:
-      return _phoneState('成功', '电视已连接。');
+      return _phoneState(
+        '成功',
+        '电视已连接。',
+        '<div class="icon ok"><div class="tick"></div></div>',
+      );
     case TvLanPhase.rejected:
     case TvLanPhase.expired:
     case TvLanPhase.cancelled:
     case TvLanPhase.failed:
-      return _phoneState('失败', '连接未完成。');
+      return _phoneState(
+        '失败',
+        '连接未完成。',
+        '<div class="icon err"><div class="cross"></div></div>',
+      );
     case TvLanPhase.idle:
     case TvLanPhase.waiting:
       return _phoneMessage('无法使用此连接。');
   }
 }
 
-String _phoneState(String heading, String detail, {String? refresh}) {
+String _phoneState(
+  String heading,
+  String detail,
+  String visual, {
+  String? refresh,
+}) {
   final next = refresh == null
       ? ''
       : '<meta http-equiv="refresh" content="0;url=${_html(refresh)}">';
@@ -748,17 +847,19 @@ String _phoneState(String heading, String detail, {String? refresh}) {
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+$_phoneHead
 $next
-<title>灯川连接</title>
-<style>
-body{font-family:sans-serif;margin:24px;background:#111;color:#eee}
-</style>
+<style>$_phoneCss</style>
 </head>
 <body>
+<div class="card">
+<div class="brand"><div class="logo">灯</div><h1>灯川 Rillight</h1></div>
+<div class="status">
+$visual
 <h1>${_html(heading)}</h1>
-<p>${_html(detail)}</p>
+<p class="detail">${_html(detail)}</p>
+</div>
+</div>
 </body>
 </html>
 ''';

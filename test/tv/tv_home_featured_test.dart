@@ -213,6 +213,19 @@ void main() {
     tags: ['integration'],
   );
 
+  testWidgets('featured hero bleeds edge to edge behind the top nav', (
+    tester,
+  ) async {
+    final server = FakeEmbyServer();
+    await start(tester, server);
+    await login(tester, server);
+    final rect = tester.getRect(find.byKey(TvHomeKeys.featured));
+    expect(rect.top, 0);
+    expect(rect.left, 0);
+    expect(rect.width, 960);
+    expect(tester.takeException(), isNull);
+  }, tags: ['integration']);
+
   testWidgets('poster row restores focus to the last focused item', (
     tester,
   ) async {
@@ -231,9 +244,9 @@ void main() {
     await login(tester, server);
 
     final row = find.byKey(const ValueKey('tv-row-继续观看'));
-    await key(tester, LogicalKeyboardKey.arrowRight);
+    await key(tester, LogicalKeyboardKey.arrowDown);
     // D-pad down until focus enters the continue-watching posters.
-    // The first right-arrow enters beside the featured controls, so the
+    // The first down-arrow enters beside the featured controls, so the
     // landing poster is the right-hand one.
     for (
       var i = 0;
@@ -277,7 +290,7 @@ void main() {
     expect(find.byKey(TvHomeKeys.featuredNext), findsNothing);
     expect(find.text('暂无内容'), findsOneWidget);
     // The page stays navigable: the refresh action is a D-pad target.
-    await key(tester, LogicalKeyboardKey.arrowRight);
+    await key(tester, LogicalKeyboardKey.arrowDown);
     expect(focusedAction(), findsOneWidget);
     expect(tester.takeException(), isNull);
   }, tags: ['integration']);
@@ -291,7 +304,7 @@ void main() {
       expect(focusedLabel(tester), '首页');
 
       final featured = find.byKey(TvHomeKeys.featured);
-      await key(tester, LogicalKeyboardKey.arrowRight);
+      await key(tester, LogicalKeyboardKey.arrowDown);
       expect(
         find.descendant(of: featured, matching: focusedAction()),
         findsOneWidget,
@@ -656,6 +669,9 @@ void main() {
         scrollable: homeScroll,
       );
       server.itemsStatus = null;
+      // 顶部导航叠在内容之上:把目标滚到视口中央再点,避免落在导航热区。
+      Scrollable.ensureVisible(tester.element(moviesRetry), alignment: 0.5);
+      await tester.pumpAndSettle();
       await tester.tap(moviesRetry);
       await tester.pumpAndSettle();
       expect(
@@ -692,7 +708,7 @@ Future<void> _press(WidgetTester tester, LogicalKeyboardKey logicalKey) async {
 }
 
 Future<void> _openSectionEditor(WidgetTester tester) async {
-  await _press(tester, LogicalKeyboardKey.arrowRight);
+  await _press(tester, LogicalKeyboardKey.arrowDown);
   for (var i = 0; i < 48 && _focusedLabel(tester) != '编辑首页'; i++) {
     await _press(tester, LogicalKeyboardKey.arrowDown);
   }

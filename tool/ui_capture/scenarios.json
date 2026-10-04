@@ -1305,5 +1305,33 @@
     "platforms": [
       "tv"
     ]
+  },
+  {
+    "id": "tv-lan-qr",
+    "feature": "login",
+    "platforms": [
+      "tv"
+    ]
+  },
+  {
+    "id": "tv-lan-phone-pending",
+    "feature": "login",
+    "platforms": [
+      "tv"
+    ]
+  },
+  {
+    "id": "tv-lan-phone-failed",
+    "feature": "login",
+    "platforms": [
+      "tv"
+    ]
+  },
+  {
+    "id": "tv-lan-phone-success",
+    "feature": "login",
+    "platforms": [
+      "tv"
+    ]
   }
 ]

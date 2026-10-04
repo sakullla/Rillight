@@ -247,39 +247,15 @@ class _TvConnectPageState extends State<TvConnectPage> {
       return [Text(l10n.tvLanWaiting)];
     }
     if (phase == TvLanPhase.waiting && offer != null) {
-      final expires = lan!.expiresAt;
-      return [
-        Text(l10n.tvLanWaiting),
-        if (expires != null)
-          Text(
-            l10n.tvLanValidUntil(_lanClock(expires)),
-            key: const Key('tv-lan-expires'),
-          ),
-        Text(l10n.tvLanAddress),
-        SelectableText(offer.manualUrl, key: const Key('tv-lan-address')),
-        TvLanQrImage(key: const Key('tv-lan-qr'), modules: offer.qrModules),
-        Text(l10n.tvLanFingerprint),
-        SelectableText(offer.fingerprint, key: const Key('tv-lan-fingerprint')),
-        TvAction(
-          key: const Key('tv-lan-incomplete'),
-          onPressed: lan.markIncomplete,
-          child: Text(l10n.tvLanFailed),
-        ),
-      ];
+      return [_TvLanWaiting(offer: offer, lan: lan!, expiresAt: lan.expiresAt)];
     }
     if (phase == TvLanPhase.pending && pending != null) {
       return [
-        Text(pending.server, key: const Key('tv-lan-server')),
-        Text(pending.account, key: const Key('tv-lan-account')),
-        TvAction(
-          key: const Key('tv-lan-confirm'),
-          onPressed: busy ? null : _confirmLan,
-          child: Text(l10n.tvLanConfirm),
-        ),
-        TvAction(
-          key: const Key('tv-lan-reject'),
-          onPressed: busy ? null : lan!.reject,
-          child: Text(l10n.tvLanReject),
+        _TvLanPending(
+          pending: pending,
+          busy: busy,
+          onConfirm: _confirmLan,
+          onReject: lan!.reject,
         ),
       ];
     }
@@ -294,6 +270,240 @@ class _TvConnectPageState extends State<TvConnectPage> {
         child: Text(l10n.tvLanAssist),
       ),
     ];
+  }
+}
+
+/// 节标题:图标 + 加粗标题,与设置面板的分节节奏一致。
+class _TvLanHeader extends StatelessWidget {
+  const _TvLanHeader({required this.icon, required this.title});
+
+  final IconData icon;
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Row(
+      children: [
+        Icon(icon, size: 22, color: theme.colorScheme.onSurfaceVariant),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            title,
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// 等待手机扫码:左侧说明/有效期/地址/指纹,右侧白底圆角二维码卡。
+class _TvLanWaiting extends StatelessWidget {
+  const _TvLanWaiting({
+    required this.offer,
+    required this.lan,
+    required this.expiresAt,
+  });
+
+  final TvLanOffer offer;
+  final TvLanAssist lan;
+  final DateTime? expiresAt;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final theme = Theme.of(context);
+    final secondary = theme.textTheme.bodyMedium?.copyWith(
+      color: theme.colorScheme.onSurfaceVariant,
+    );
+    final label = theme.textTheme.labelLarge?.copyWith(
+      color: theme.colorScheme.onSurfaceVariant,
+    );
+    final mono = theme.textTheme.bodySmall?.copyWith(letterSpacing: .2);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _TvLanHeader(icon: Icons.qr_code_2_rounded, title: l10n.tvLanScanTitle),
+        const SizedBox(height: 10),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(l10n.tvLanScanHint, style: secondary),
+                  if (expiresAt != null) ...[
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.schedule_rounded,
+                          size: 18,
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          l10n.tvLanValidUntil(_lanClock(expiresAt!)),
+                          key: const Key('tv-lan-expires'),
+                          style: secondary,
+                        ),
+                      ],
+                    ),
+                  ],
+                  const SizedBox(height: 12),
+                  Text(l10n.tvLanAddress, style: label),
+                  const SizedBox(height: 2),
+                  SelectableText(
+                    offer.manualUrl,
+                    key: const Key('tv-lan-address'),
+                    style: mono,
+                  ),
+                  const SizedBox(height: 10),
+                  Text(l10n.tvLanFingerprint, style: label),
+                  const SizedBox(height: 2),
+                  SelectableText(
+                    offer.fingerprint,
+                    key: const Key('tv-lan-fingerprint'),
+                    style: mono?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 24),
+            Container(
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(AppRadii.lg),
+                boxShadow: const [
+                  BoxShadow(
+                    blurRadius: 18,
+                    offset: Offset(0, 6),
+                    color: Color(0x33000000),
+                  ),
+                ],
+              ),
+              padding: const EdgeInsets.all(14),
+              child: TvLanQrImage(
+                key: const Key('tv-lan-qr'),
+                modules: offer.qrModules,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        TvAction(
+          key: const Key('tv-lan-incomplete'),
+          onPressed: lan.markIncomplete,
+          child: Text(l10n.tvLanFailed),
+        ),
+      ],
+    );
+  }
+}
+
+/// 手机已提交:卡片内复核服务器与账号,确认/拒绝胶囊按钮。
+class _TvLanPending extends StatelessWidget {
+  const _TvLanPending({
+    required this.pending,
+    required this.busy,
+    required this.onConfirm,
+    required this.onReject,
+  });
+
+  final TvLanSubmission pending;
+  final bool busy;
+  final VoidCallback onConfirm;
+  final VoidCallback onReject;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _TvLanHeader(
+          icon: Icons.phonelink_lock_rounded,
+          title: l10n.tvLanPendingTitle,
+        ),
+        const SizedBox(height: 10),
+        Container(
+          width: double.infinity,
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surfaceContainerHigh,
+            borderRadius: BorderRadius.circular(AppRadii.lg),
+          ),
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    Icons.dns_rounded,
+                    size: 20,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      pending.server,
+                      key: const Key('tv-lan-server'),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Icon(
+                    Icons.person_rounded,
+                    size: 20,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      pending.account,
+                      key: const Key('tv-lan-account'),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            TvAction(
+              key: const Key('tv-lan-confirm'),
+              emphasized: true,
+              pill: true,
+              onPressed: busy ? null : onConfirm,
+              child: Text(l10n.tvLanConfirm),
+            ),
+            const SizedBox(width: 8),
+            TvAction(
+              key: const Key('tv-lan-reject'),
+              pill: true,
+              onPressed: busy ? null : onReject,
+              child: Text(l10n.tvLanReject),
+            ),
+          ],
+        ),
+      ],
+    );
   }
 }
 

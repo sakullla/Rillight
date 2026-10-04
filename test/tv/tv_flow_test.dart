@@ -130,9 +130,9 @@ void main() {
     await login(tester, server);
     expect(find.text('上次播放进度同步失败，请重试。'), findsOneWidget);
     expect(focusedLabel(tester), '重试');
-    await key(tester, LogicalKeyboardKey.arrowLeft);
+    await key(tester, LogicalKeyboardKey.arrowUp);
     expect(focusedLabel(tester), isNot('重试'));
-    await key(tester, LogicalKeyboardKey.arrowRight);
+    await key(tester, LogicalKeyboardKey.arrowDown);
     expect(focusedLabel(tester), '重试');
     store.fail = false;
     await key(tester, LogicalKeyboardKey.select);
@@ -150,7 +150,7 @@ void main() {
       final (_, backend) = await start(tester, server);
       await login(tester, server);
       expect(focusedLabel(tester), '首页');
-      await key(tester, LogicalKeyboardKey.arrowRight);
+      await key(tester, LogicalKeyboardKey.arrowDown);
       await key(tester, LogicalKeyboardKey.arrowDown);
       // 横幅主操作行是「播放」在前、「详情」在后;向右一步到详情。
       expect(
@@ -222,10 +222,10 @@ void main() {
       final server = FakeEmbyServer();
       await start(tester, server);
       await login(tester, server);
-      await key(tester, LogicalKeyboardKey.arrowDown);
-      await key(tester, LogicalKeyboardKey.arrowDown);
-      await key(tester, LogicalKeyboardKey.select);
       await key(tester, LogicalKeyboardKey.arrowRight);
+      await key(tester, LogicalKeyboardKey.arrowRight);
+      await key(tester, LogicalKeyboardKey.select);
+      await key(tester, LogicalKeyboardKey.arrowDown);
       await edit(tester, 'Inception');
       expect(find.text('Inception'), findsWidgets);
       for (var i = 0; i < 6 && focusedLabel(tester) != 'Inception'; i++) {
@@ -254,7 +254,7 @@ void main() {
       final server = FakeEmbyServer();
       await start(tester, server);
       await login(tester, server);
-      await key(tester, LogicalKeyboardKey.arrowRight);
+      await key(tester, LogicalKeyboardKey.arrowDown);
       final old = FocusManager.instance.primaryFocus;
       final c = CatalogScope.of(tester.element(find.byType(TvShell)));
       server.items = [];
@@ -292,9 +292,9 @@ void main() {
       await start(tester, server);
       await login(tester, server);
       final catalog = CatalogScope.of(tester.element(find.byType(TvShell)));
-      await key(tester, LogicalKeyboardKey.arrowDown);
-      await key(tester, LogicalKeyboardKey.select);
       await key(tester, LogicalKeyboardKey.arrowRight);
+      await key(tester, LogicalKeyboardKey.select);
+      await key(tester, LogicalKeyboardKey.arrowDown);
       await key(tester, LogicalKeyboardKey.select);
       expect(find.byType(TvLibraryPage), findsOneWidget);
       await key(tester, LogicalKeyboardKey.select);
@@ -326,9 +326,9 @@ void main() {
     final server = FakeEmbyServer();
     await start(tester, server);
     await login(tester, server);
-    await key(tester, LogicalKeyboardKey.arrowDown);
-    await key(tester, LogicalKeyboardKey.select);
     await key(tester, LogicalKeyboardKey.arrowRight);
+    await key(tester, LogicalKeyboardKey.select);
+    await key(tester, LogicalKeyboardKey.arrowDown);
     await key(tester, LogicalKeyboardKey.select);
     expect(find.byType(TvLibraryPage), findsOneWidget);
     await key(tester, LogicalKeyboardKey.arrowDown);

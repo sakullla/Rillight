@@ -145,11 +145,31 @@ class _TvLibraryPageState extends State<TvLibraryPage> {
                   scrollCacheExtent: const ScrollCacheExtent.viewport(0.5),
                   slivers: [
                     SliverToBoxAdapter(
-                      child: TvAction(
-                        key: const Key('tv-library-filter'),
-                        autofocus: true,
-                        onPressed: _filter,
-                        child: Text(l.libraryFilter),
+                      child: Row(
+                        children: [
+                          TvAction(
+                            key: const Key('tv-library-filter'),
+                            autofocus: true,
+                            pill: true,
+                            leading: const Icon(Icons.tune_rounded, size: 20),
+                            onPressed: _filter,
+                            child: Text(l.libraryFilter),
+                          ),
+                          if (_hasActiveFilters(c)) ...[
+                            const SizedBox(width: 8),
+                            Flexible(
+                              child: TvAction(
+                                pill: true,
+                                onPressed: _filter,
+                                child: Text(
+                                  _filterSummary(c),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
                     ),
                     if (c.loadingMore || (c.loading && c.items.isNotEmpty))
@@ -230,6 +250,32 @@ Widget _posterGrid(
       },
     ),
   );
+}
+
+bool _hasActiveFilters(BrowseController c) =>
+    c.type != null ||
+    c.watch != null ||
+    c.genre != null ||
+    c.years.isNotEmpty ||
+    c.genres.isNotEmpty ||
+    c.sortBy != CatalogSort.initial.sortBy;
+
+String _filterSummary(BrowseController c) {
+  final watch = CatalogWatchFilter.values.firstWhere(
+    (v) => v.param == c.watch,
+    orElse: () => CatalogWatchFilter.all,
+  );
+  final type = CatalogTypeFilter.values.firstWhere(
+    (v) => v.itemType == c.type,
+    orElse: () => CatalogTypeFilter.all,
+  );
+  return [
+    if (type != CatalogTypeFilter.all) type.label,
+    if (watch != CatalogWatchFilter.all) watch.label,
+    ...c.genres,
+    if (c.genre != null) c.genre!,
+    ...c.years.map((year) => '$year'),
+  ].join(' · ');
 }
 
 /// 页面 State 存活期间记住最后聚焦的条目 id。

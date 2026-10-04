@@ -70,26 +70,28 @@ class _TvSearchPageState extends State<TvSearchPage> {
                 scrollCacheExtent: const ScrollCacheExtent.viewport(0.5),
                 slivers: [
                   SliverToBoxAdapter(
-                    child: TvInput(
-                      label: l.search,
-                      controller: _text,
-                      onSubmitted: () => c.submit(_text.text),
-                    ),
-                  ),
-                  SliverToBoxAdapter(
-                    child: TvAction(
-                      onPressed: () => c.submit(_text.text),
-                      child: Text(l.search),
-                    ),
-                  ),
-                  SliverToBoxAdapter(
-                    child: TvAction(
-                      onPressed: () => showCatalogWatchFilter(
-                        context,
-                        watch: c.watch,
-                        onChanged: c.setWatch,
-                      ),
-                      child: Text(l.libraryFilter),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: TvInput(
+                            label: l.search,
+                            controller: _text,
+                            pill: true,
+                            leading: const Icon(Icons.search_rounded, size: 20),
+                            onSubmitted: () => c.submit(_text.text),
+                          ),
+                        ),
+                        TvAction(
+                          pill: true,
+                          leading: const Icon(Icons.tune_rounded, size: 20),
+                          onPressed: () => showCatalogWatchFilter(
+                            context,
+                            watch: c.watch,
+                            onChanged: c.setWatch,
+                          ),
+                          child: Text(l.libraryFilter),
+                        ),
+                      ],
                     ),
                   ),
                   if (c.watch != null)

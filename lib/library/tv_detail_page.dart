@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:rillight/app/content_theme.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/routes.dart';
+import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/auth/auth_scope.dart';
@@ -134,129 +135,186 @@ class _TvDetailPageState extends State<TvDetailPage> {
           preferParentBackdrop: item?.isEpisode == true,
           child: TvFrame(
             title: item?.name ?? l.playerLoading,
+            edgeToEdge: true,
             child: ListView(
               key: PageStorageKey('tv-detail-${widget.itemId}'),
+              padding: EdgeInsets.zero,
               children: [
-                if (item == null && c.loading) const _TvDetailSkeleton(),
-                if (c.error != null) TvFailure(error: c.error!, retry: c.load),
+                if (item == null && c.loading)
+                  Padding(
+                    padding: EdgeInsets.symmetric(
+                      horizontal: tvSafeGutter(
+                        MediaQuery.sizeOf(context).width,
+                      ),
+                    ),
+                    child: const _TvDetailSkeleton(),
+                  ),
+                if (c.error != null)
+                  Padding(
+                    padding: EdgeInsets.symmetric(
+                      horizontal: tvSafeGutter(
+                        MediaQuery.sizeOf(context).width,
+                      ),
+                    ),
+                    child: TvFailure(error: c.error!, retry: c.load),
+                  ),
                 if (item != null) ...[
                   _TvBackdropHeader(item: item, artwork: artwork),
                   const SizedBox(height: 12),
-                  if (c.seasonError != null)
-                    TvFailure(error: c.seasonError!, retry: c.loadSeasons),
-                  Wrap(
-                    spacing: 4,
-                    runSpacing: 4,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    children: [
-                      TvAction(
-                        key: const Key('tv-detail-play'),
-                        emphasized: true,
-                        autofocus: true,
-                        onPressed:
-                            !_playBusy &&
-                                target != null &&
-                                (target.isMovie || target.isEpisode)
-                            ? _play
-                            : null,
-                        child: Text(
-                          target == null
-                              ? l.noPlayableStream
-                              : target.canResume
-                              ? l.resumePlay
-                              : l.play,
-                        ),
+                  Padding(
+                    padding: EdgeInsets.symmetric(
+                      horizontal: tvSafeGutter(
+                        MediaQuery.sizeOf(context).width,
                       ),
-                      if (target?.canResume == true)
-                        TvAction(
-                          onPressed: _playBusy
-                              ? null
-                              : () => _play(fromStart: true),
-                          child: Text(l.playFromStart),
-                        ),
-                      if (!item.isSeries)
-                        TvAction(
-                          key: const Key('tv-detail-played-toggle'),
-                          onPressed: c.playedBusy ? null : _togglePlayed,
-                          child: Text(
-                            item.userData.played
-                                ? l.markUnplayed
-                                : l.markPlayed,
-                          ),
-                        ),
-                    ],
-                  ),
-                  DetailGenreRow(item: item),
-                  DetailAlbumStrip(item: item),
-                  DetailExternalLinks(
-                    links: item.externalUrls,
-                    title: item.name,
-                  ),
-                  EpisodeMediaStreamsSection(
-                    source: _tvSource(item, c.mediaSourceId),
-                  ),
-                  if (item.mediaSources.length > 1) ...[
-                    Text(l.mediaSource),
-                    for (final source in item.mediaSources)
-                      TvAction(
-                        key: ValueKey(source.id),
-                        selected: c.mediaSourceId == source.id,
-                        onPressed: () => c.selectSource(source.id),
-                        child: Text(source.name ?? source.id),
-                      ),
-                  ],
-                  if (item.isSeries) ...[
-                    const SizedBox(height: 16),
-                    Text(l.playerEpisodes),
-                    Wrap(
-                      children: [
-                        for (final season in c.seasons)
-                          TvAction(
-                            key: ValueKey(season.id),
-                            focusNode: _focus.nodeFor('season:${season.id}'),
-                            selected: season.id == c.seasonId,
-                            onPressed: () => c.selectSeason(season.id),
-                            child: Text(season.name),
-                          ),
-                      ],
                     ),
-                    Column(
-                      key: const Key('tv-detail-episodes'),
+                    child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        if (c.episodesLoading && c.episodes.isEmpty)
-                          const _TvEpisodeSkeleton(),
-                        if (c.episodeError != null)
+                        if (c.seasonError != null)
                           TvFailure(
-                            error: c.episodeError!,
-                            retry: () => c.selectSeason(
-                              c.seasonId!,
-                              more: c.episodes.isNotEmpty && c.hasMore,
+                            error: c.seasonError!,
+                            retry: c.loadSeasons,
+                          ),
+                        Wrap(
+                          spacing: 4,
+                          runSpacing: 4,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            TvAction(
+                              key: const Key('tv-detail-play'),
+                              emphasized: true,
+                              autofocus: true,
+                              pill: true,
+                              leading: const Icon(
+                                Icons.play_arrow_rounded,
+                                size: 20,
+                              ),
+                              onPressed:
+                                  !_playBusy &&
+                                      target != null &&
+                                      (target.isMovie || target.isEpisode)
+                                  ? _play
+                                  : null,
+                              child: Text(
+                                target == null
+                                    ? l.noPlayableStream
+                                    : target.canResume
+                                    ? l.resumePlay
+                                    : l.play,
+                              ),
                             ),
+                            if (target?.canResume == true)
+                              TvAction(
+                                pill: true,
+                                onPressed: _playBusy
+                                    ? null
+                                    : () => _play(fromStart: true),
+                                child: Text(l.playFromStart),
+                              ),
+                            if (!item.isSeries)
+                              TvAction(
+                                key: const Key('tv-detail-played-toggle'),
+                                pill: true,
+                                onPressed: c.playedBusy ? null : _togglePlayed,
+                                child: Text(
+                                  item.userData.played
+                                      ? l.markUnplayed
+                                      : l.markPlayed,
+                                ),
+                              ),
+                          ],
+                        ),
+                        DetailGenreRow(item: item),
+                        DetailAlbumStrip(item: item),
+                        DetailExternalLinks(
+                          links: item.externalUrls,
+                          title: item.name,
+                        ),
+                        EpisodeMediaStreamsSection(
+                          source: _tvSource(item, c.mediaSourceId),
+                        ),
+                        if (item.mediaSources.length > 1) ...[
+                          Text(l.mediaSource),
+                          Wrap(
+                            spacing: 4,
+                            runSpacing: 4,
+                            children: [
+                              for (final source in item.mediaSources)
+                                TvAction(
+                                  key: ValueKey(source.id),
+                                  pill: true,
+                                  selected: c.mediaSourceId == source.id,
+                                  onPressed: () => c.selectSource(source.id),
+                                  child: Text(source.name ?? source.id),
+                                ),
+                            ],
                           ),
-                        if (!c.episodesLoading && c.episodes.isEmpty)
-                          Text(l.mobileEmpty),
-                        for (final episode in c.episodes)
-                          _TvEpisodeTile(
-                            episode: episode,
-                            current: episode.id == target?.id,
-                            focusNode: _focus.nodeFor('episode:${episode.id}'),
+                        ],
+                        if (item.isSeries) ...[
+                          const SizedBox(height: 16),
+                          Text(l.playerEpisodes),
+                          Wrap(
+                            spacing: 4,
+                            runSpacing: 4,
+                            children: [
+                              for (final season in c.seasons)
+                                TvAction(
+                                  key: ValueKey(season.id),
+                                  pill: true,
+                                  focusNode: _focus.nodeFor(
+                                    'season:${season.id}',
+                                  ),
+                                  selected: season.id == c.seasonId,
+                                  onPressed: () => c.selectSeason(season.id),
+                                  child: Text(season.name),
+                                ),
+                            ],
                           ),
-                        if (c.hasMore)
-                          TvAction(
-                            key: const Key('tv-episodes-more'),
-                            onPressed: c.episodesLoading
-                                ? null
-                                : () => c.selectSeason(c.seasonId!, more: true),
-                            child: Text(l.mobileLoadMore),
+                          Column(
+                            key: const Key('tv-detail-episodes'),
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              if (c.episodesLoading && c.episodes.isEmpty)
+                                const _TvEpisodeSkeleton(),
+                              if (c.episodeError != null)
+                                TvFailure(
+                                  error: c.episodeError!,
+                                  retry: () => c.selectSeason(
+                                    c.seasonId!,
+                                    more: c.episodes.isNotEmpty && c.hasMore,
+                                  ),
+                                ),
+                              if (!c.episodesLoading && c.episodes.isEmpty)
+                                Text(l.mobileEmpty),
+                              for (final episode in c.episodes)
+                                _TvEpisodeTile(
+                                  episode: episode,
+                                  current: episode.id == target?.id,
+                                  focusNode: _focus.nodeFor(
+                                    'episode:${episode.id}',
+                                  ),
+                                ),
+                              if (c.hasMore)
+                                TvAction(
+                                  key: const Key('tv-episodes-more'),
+                                  onPressed: c.episodesLoading
+                                      ? null
+                                      : () => c.selectSeason(
+                                          c.seasonId!,
+                                          more: true,
+                                        ),
+                                  child: Text(l.mobileLoadMore),
+                                ),
+                            ],
                           ),
+                        ],
+                        TvAction(
+                          key: const Key('tv-detail-refresh'),
+                          onPressed: c.load,
+                          child: Text(l.mobileRefresh),
+                        ),
                       ],
                     ),
-                  ],
-                  TvAction(
-                    key: const Key('tv-detail-refresh'),
-                    onPressed: c.load,
-                    child: Text(l.mobileRefresh),
                   ),
                 ],
               ],
@@ -268,7 +326,8 @@ class _TvDetailPageState extends State<TvDetailPage> {
   }
 }
 
-/// 沉浸式头部:全宽 backdrop 铺底,底部渐变上落标题、元信息与简介。
+/// 沉浸式头部:全宽背图出血到屏幕顶(标题行遮罩由 TvFrame 提供),底部渐变
+/// 上落大标题、元信息与简介。
 class _TvBackdropHeader extends StatelessWidget {
   const _TvBackdropHeader({required this.item, this.artwork});
 
@@ -280,7 +339,8 @@ class _TvBackdropHeader extends StatelessWidget {
     final theme = Theme.of(context);
     final l = AppLocalizations.of(context);
     final size = MediaQuery.sizeOf(context);
-    final height = math.min(320.0, size.height * 0.42);
+    final height = math.min(420.0, size.height * 0.46);
+    final gutter = tvSafeGutter(size.width);
     final overview = plainOverview(item.overview);
     final meta = <String>[
       if (seasonEpisodeCode(item) != null) seasonEpisodeCode(item)!,
@@ -304,20 +364,11 @@ class _TvBackdropHeader extends StatelessWidget {
             preferParentBackdrop: item.isEpisode,
             maxWidth: 1280,
           ),
-          const DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [Colors.transparent, Colors.black87],
-                stops: [0.35, 1],
-              ),
-            ),
-          ),
+          const TvHeroScrim(top: false),
           Positioned(
-            left: 16,
-            right: 16,
-            bottom: 12,
+            left: gutter,
+            right: gutter,
+            bottom: 16,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
@@ -325,6 +376,7 @@ class _TvBackdropHeader extends StatelessWidget {
                 if (item.isEpisode && item.seriesId?.isNotEmpty == true)
                   TvAction(
                     key: CatalogKeys.seriesLink,
+                    pill: true,
                     onPressed: () => context.push(
                       AppRoutes.item(
                         item.seriesId!,
@@ -341,9 +393,12 @@ class _TvBackdropHeader extends StatelessWidget {
                   item.name,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.headlineSmall?.copyWith(
+                  style: theme.textTheme.headlineMedium?.copyWith(
                     color: Colors.white,
-                    fontWeight: FontWeight.w700,
+                    fontWeight: FontWeight.w800,
+                    shadows: const [
+                      Shadow(blurRadius: 12, color: Colors.black54),
+                    ],
                   ),
                 ),
                 if (meta.isNotEmpty) ...[
@@ -414,11 +469,11 @@ class _TvEpisodeTile extends StatelessWidget {
       child: Row(
         children: [
           SizedBox(
-            width: 208,
+            width: 232,
             child: AspectRatio(
               aspectRatio: 16 / 9,
               child: ClipRRect(
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.circular(AppRadii.md),
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
@@ -552,7 +607,7 @@ class _TvEpisodeSkeleton extends StatelessWidget {
           const SizedBox(height: 8),
           Row(
             children: [
-              SkeletonBlock(width: 208, height: 117, animated: animate),
+              SkeletonBlock(width: 232, height: 130, animated: animate),
               const SizedBox(width: 12),
               SkeletonBlock(width: 240, height: 20, animated: animate),
             ],
