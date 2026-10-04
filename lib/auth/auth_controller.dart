@@ -527,7 +527,7 @@ class AuthController extends ChangeNotifier {
       if (lines[i].address == url) {
         return false;
       }
-      lines[i] = ServerLine(id: lines[i].id, address: url);
+      lines[i] = lines[i].copyWith(address: url);
       found = true;
       active = server.activeLineId == lineId;
       break;

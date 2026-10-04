@@ -518,6 +518,85 @@ void main() {
     expect(await r.credentials.read('unknown-secret'), isNull);
   });
 
+  for (final lineId in ['one', 'two']) {
+    test('editing loaded named line $lineId preserves its metadata', () async {
+      final r = await registry(RegionAccessController(), [server('a')], []);
+      await r.renameLine('a', lineId, 'named backup');
+      final auth = AuthController(
+        client: TestClient(),
+        credentials: r.credentials,
+        servers: r.store,
+        sources: r,
+      );
+      addTearDown(auth.dispose);
+      await auth.restore();
+      await auth.switchTo('a');
+      final before = auth.savedServers.single;
+      final session = auth.session!;
+      final other = before.lines.firstWhere((l) => l.id != lineId);
+      expect(
+        before.lines.firstWhere((l) => l.id == lineId).nickname,
+        'named backup',
+      );
+
+      expect(
+        await auth.updateLineAddress('a', lineId, 'https://a/new-address'),
+        true,
+      );
+
+      final saved = (await r.store.load()).servers.single;
+      final edited = saved.lines.firstWhere((l) => l.id == lineId);
+      expect(edited.address, 'https://a/new-address');
+      expect(edited.nickname, 'named backup');
+      expect(saved.lines.map((l) => l.id), before.lines.map((l) => l.id));
+      expect(saved.activeLineId, before.activeLineId);
+      expect(
+        saved.lines.firstWhere((l) => l.id != lineId).toJson(),
+        other.toJson(),
+      );
+      expect(auth.session!.userId, session.userId);
+      expect(auth.session!.accessToken, session.accessToken);
+      expect(
+        auth.client.baseUrl.toString(),
+        lineId == before.activeLineId ? edited.address : before.baseUrl,
+      );
+      await auth.restore();
+      expect(
+        auth.savedServers.single.lines
+            .firstWhere((l) => l.id == lineId)
+            .nickname,
+        'named backup',
+      );
+    });
+  }
+
+  test('login address rebuild preserves a loaded line nickname', () async {
+    final r = await registry(RegionAccessController(), [server('a')], []);
+    await r.renameLine('a', 'two', 'named backup');
+    final auth = AuthController(
+      client: TestClient(),
+      credentials: r.credentials,
+      servers: r.store,
+      sources: r,
+    );
+    addTearDown(auth.dispose);
+    await auth.restore();
+    expect(
+      await auth.connect(
+        address: 'https://a/new-address',
+        username: 'user',
+        password: 'pw',
+        lineId: 'two',
+      ),
+      true,
+    );
+    final saved = (await r.store.load()).servers.single;
+    expect(saved.lines.map((l) => l.id), ['one', 'two']);
+    expect(saved.activeLineId, 'two');
+    expect(saved.lines.last.address, 'https://a/new-address');
+    expect(saved.lines.last.nickname, 'named backup');
+  });
+
   test('stale Auth edits preserve registry line and service order', () async {
     final r = await registry(RegionAccessController(), [
       server('a'),
