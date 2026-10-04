@@ -99,6 +99,7 @@ class AuthController extends ChangeNotifier {
   AuthSession? _session;
   List<SavedServer> _savedServers = const [];
   SavedServer? _prefill;
+  String? _rememberedServerId;
   EmbyException? _failure;
   LineSwitchFailure? _lineSwitchFailure;
   bool _busy = false;
@@ -195,6 +196,7 @@ class AuthController extends ChangeNotifier {
     final snapshot = await servers.load();
     _savedServers = snapshot.servers;
     final lastId = snapshot.lastServerId;
+    _rememberedServerId = lastId;
     if (lastId == null || lastId.isEmpty) {
       notifyListeners();
       return;
@@ -235,7 +237,9 @@ class AuthController extends ChangeNotifier {
       final baseUrl = normalizeEmbyBaseUrl(address);
       final publicInfo = await client.getPublicInfo(baseUrl);
       // Ordinary legacy login cannot replace credentials of a private member.
-      await sources.requireOrdinaryServer(publicInfo.id);
+      final credentialCommit = await sources.beginOrdinaryCredentials(
+        publicInfo.id,
+      );
       final auth = await client.authenticateByName(
         baseUrl: baseUrl,
         username: username,
@@ -257,15 +261,16 @@ class AuthController extends ChangeNotifier {
         username: username,
         password: password.isEmpty ? null : password,
       );
-      await credentials.write(server.id, stored);
+      await sources.commitOrdinaryCredentials(credentialCommit, stored);
       await _upsertServer(server);
+      await sources.requireOrdinaryServer(server.id);
       _activate(server, stored);
       _prefill = null;
       connectDraft = null;
       return true;
     } on EmbyException catch (error) {
       _failure = error;
-      _dropOrRestore(previous);
+      await _dropOrRestore(previous);
       return false;
     } catch (error) {
       _failure = EmbyException(
@@ -273,7 +278,7 @@ class AuthController extends ChangeNotifier {
         detail: error.toString(),
         cause: error,
       );
-      _dropOrRestore(previous);
+      await _dropOrRestore(previous);
       return false;
     } finally {
       _busy = false;
@@ -282,7 +287,18 @@ class AuthController extends ChangeNotifier {
   }
 
   /// 登录失败时清掉尝试。若调用方留下了原会话，则重新挂上原来的令牌。
-  void _dropOrRestore(AuthSession? previous) {
+  Future<void> _dropOrRestore(AuthSession? previous) async {
+    if (previous != null) {
+      if (!_isSameSession(previous)) {
+        previous = null;
+      } else {
+        try {
+          await sources.requireOrdinaryServer(previous.server.id);
+        } on StateError {
+          previous = null;
+        }
+      }
+    }
     if (previous == null) {
       _session = null;
       client.clearSession();
@@ -305,18 +321,30 @@ class AuthController extends ChangeNotifier {
     _busy = true;
     notifyListeners();
     final current = _session;
+    CredentialCommit? credentialCommit;
     try {
+      if (current != null) {
+        credentialCommit = await sources.beginOrdinaryCredentials(
+          current.server.id,
+        );
+      }
       await client.logout();
     } on EmbyException {
       // Local credentials are still cleared so the user can sign in again.
+    } on StateError {
+      // The member may have moved before logout could capture authority.
     } finally {
       client.clearSession();
       _session = null;
       _failure = null;
       connectDraft = null;
       _resetLibraryCounts();
-      if (current != null) {
-        await credentials.delete(current.server.id);
+      if (credentialCommit != null) {
+        try {
+          await sources.commitOrdinaryCredentials(credentialCommit, null);
+        } on StateError {
+          // Membership/account changed while remote logout was pending.
+        }
       }
       _busy = false;
       notifyListeners();
@@ -617,15 +645,13 @@ class AuthController extends ChangeNotifier {
       for (final item in _savedServers)
         if (item.id != serverId) item,
     ];
+    final credentialCommit = await sources.beginOrdinaryCredentials(serverId);
+    await sources.commitOrdinaryCredentials(credentialCommit, null);
     _savedServers = next;
     // 删除的是当前服务器时不再保留 lastServerId,避免下次启动凭空预选。
-    await servers.save(
-      ServerListSnapshot(
-        servers: next,
-        lastServerId: (current != null && current != serverId) ? current : null,
-      ),
-    );
-    await credentials.delete(serverId);
+    final lastId = (current != null && current != serverId) ? current : null;
+    await servers.save(ServerListSnapshot(servers: next, lastServerId: lastId));
+    _rememberedServerId = lastId;
     if (_prefill?.id == serverId) {
       _prefill = null;
     }
@@ -659,7 +685,13 @@ class AuthController extends ChangeNotifier {
     StoredCredentials? stored,
   ) async {
     if (_serverById(server.id) != null) return;
-    if (stored != null) await credentials.write(server.id, stored);
+    if (server.region != AccessRegion.ordinary) {
+      throw StateError('Cannot restore a private member in ordinary context');
+    }
+    final credentialCommit = await sources.beginOrdinaryCredentials(server.id);
+    if (stored != null) {
+      await sources.commitOrdinaryCredentials(credentialCommit, stored);
+    }
     await _upsertServer(server, remember: false);
     notifyListeners();
   }
@@ -687,6 +719,9 @@ class AuthController extends ChangeNotifier {
     _passwordChangeFailure = null;
     notifyListeners();
     try {
+      final credentialCommit = await sources.beginOrdinaryCredentials(
+        session.server.id,
+      );
       await client.changePassword(
         currentPassword: (currentPassword == null || currentPassword.isEmpty)
             ? null
@@ -694,8 +729,8 @@ class AuthController extends ChangeNotifier {
         newPassword: newPassword,
       );
       final stored = await credentials.read(session.server.id);
-      await credentials.write(
-        session.server.id,
+      await sources.commitOrdinaryCredentials(
+        credentialCommit,
         StoredCredentials(
           accessToken: stored?.accessToken ?? session.accessToken,
           userId: stored?.userId ?? session.userId,
@@ -825,14 +860,15 @@ class AuthController extends ChangeNotifier {
   Future<void> _upsertServer(SavedServer server, {bool remember = true}) async {
     final lastId = remember
         ? server.id
-        : _session?.server.id ?? (await servers.load()).lastServerId;
+        : _session?.server.id ?? _rememberedServerId;
+    final exists = _savedServers.any((item) => item.id == server.id);
     final next = <SavedServer>[
-      for (final item in _savedServers)
-        if (item.id != server.id) item,
-      server,
+      for (final item in _savedServers) item.id == server.id ? server : item,
+      if (!exists) server,
     ];
     _savedServers = next;
     await servers.save(ServerListSnapshot(servers: next, lastServerId: lastId));
+    _rememberedServerId = lastId;
   }
 
   Future<bool> _refreshSession() async {
@@ -840,12 +876,15 @@ class AuthController extends ChangeNotifier {
     if (session == null) {
       return false;
     }
-    final stored = await credentials.read(session.server.id);
-    final password = stored?.password;
-    if (stored == null || password == null || password.isEmpty) {
-      return false;
-    }
     try {
+      final credentialCommit = await sources.beginOrdinaryCredentials(
+        session.server.id,
+      );
+      final stored = await credentials.read(session.server.id);
+      final password = stored?.password;
+      if (stored == null || password == null || password.isEmpty) {
+        return false;
+      }
       client.setUserAgent(session.server.normalizedUserAgent);
       final auth = await client.authenticateByName(
         baseUrl: Uri.parse(session.server.baseUrl),
@@ -862,11 +901,8 @@ class AuthController extends ChangeNotifier {
       if (!_isSameSession(session)) {
         return false;
       }
-      await credentials.write(session.server.id, next);
-      if (!_isSameSession(session)) {
-        await credentials.delete(session.server.id);
-        return false;
-      }
+      await sources.commitOrdinaryCredentials(credentialCommit, next);
+      if (!_isSameSession(session)) return false;
       _activate(session.server, next);
       _failure = null;
       notifyListeners();

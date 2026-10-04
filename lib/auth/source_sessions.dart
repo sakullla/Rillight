@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'credential_store.dart';
 import 'region_access.dart';
@@ -29,6 +30,14 @@ class SourceAccount {
   @override
   int get hashCode =>
       Object.hash(region, configuredServerId, verifiedServerId, userId);
+}
+
+/// Captured before any asynchronous login/logout/restore work.
+class CredentialCommit {
+  CredentialCommit._(this.owner, this.id, this.scope);
+  final SourceSessionRegistry owner;
+  final String id;
+  final int scope;
 }
 
 class SourceSession {
@@ -150,6 +159,7 @@ class SourceSessionRegistry {
   final Map<String, SourceSession> _sessions = {};
   final Map<String, int> _scopes = {};
   final Set<String> _transitioning = {};
+  final Set<String> _credentialChanges = {};
   final Set<MembershipCleanup> _migrationHooks = {};
   final Set<FrozenSourceStop> _frozenStops = {};
 
@@ -193,7 +203,8 @@ class SourceSessionRegistry {
   final Map<String, int> _checkAttempts = {};
 
   void _requireCurrent(SavedServer server, int scope, int generation) {
-    if ((_scopes[server.id] ?? 0) != scope ||
+    if (_credentialChanges.contains(server.id) ||
+        (_scopes[server.id] ?? 0) != scope ||
         _allowed(server.id).region != server.region ||
         (server.region == AccessRegion.private &&
             generation != access.generation)) {
@@ -243,11 +254,55 @@ class SourceSessionRegistry {
     return server;
   }
 
-  Future<void> _commit(
-    List<SavedServer> Function() change, {
-    String? lastServerId,
-    bool replaceLast = false,
-  }) {
+  Future<CredentialCommit> beginOrdinaryCredentials(String id) async {
+    await requireOrdinaryServer(id);
+    return CredentialCommit._(this, id, _scopes[id] ?? 0);
+  }
+
+  void _guardCredentials(CredentialCommit commit) {
+    if (!identical(commit.owner, this) ||
+        (_scopes[commit.id] ?? 0) != commit.scope ||
+        _transitioning.contains(commit.id) ||
+        _servers.any(
+          (s) => s.id == commit.id && s.region != AccessRegion.ordinary,
+        )) {
+      throw StateError('Credential operation revoked');
+    }
+  }
+
+  /// Shares the configuration writer. Migration revokes synchronously; if it
+  /// starts during secure-store IO, restore the old value before it can commit.
+  Future<void> commitOrdinaryCredentials(
+    CredentialCommit commit,
+    StoredCredentials? value,
+  ) => _enqueue(() async {
+    _guardCredentials(commit);
+    final previous = await credentials.read(commit.id);
+    _guardCredentials(commit);
+    _sessions.remove(commit.id)?.client.clearSession();
+    _invalidate(commit.id);
+    _credentialChanges.add(commit.id);
+    final writing = CredentialCommit._(this, commit.id, _scopes[commit.id]!);
+    try {
+      if (value == null) {
+        await credentials.delete(commit.id);
+      } else {
+        await credentials.write(commit.id, value);
+      }
+      _guardCredentials(writing);
+    } catch (_) {
+      if (previous == null) {
+        await credentials.delete(commit.id);
+      } else {
+        await credentials.write(commit.id, previous);
+      }
+      rethrow;
+    } finally {
+      _credentialChanges.remove(commit.id);
+    }
+  });
+
+  Future<void> _enqueue(Future<void> Function() action) {
     final previous = _writes;
     final ticket = ++_writeTicket;
     final write = () async {
@@ -257,15 +312,7 @@ class SourceSessionRegistry {
         } catch (_) {
           /* a failed write does not poison the queue */
         }
-        final next = change();
-        await store.save(
-          ServerListSnapshot(
-            servers: next,
-            lastServerId: replaceLast ? lastServerId : _lastServerId,
-          ),
-        );
-        _servers = next;
-        if (replaceLast) _lastServerId = lastServerId;
+        await action();
       } finally {
         if (_writeTicket == ticket) _writes = null;
       }
@@ -273,6 +320,22 @@ class SourceSessionRegistry {
     _writes = write;
     return write;
   }
+
+  Future<void> _commit(
+    List<SavedServer> Function() change, {
+    String? lastServerId,
+    bool replaceLast = false,
+  }) => _enqueue(() async {
+    final next = change();
+    await store.save(
+      ServerListSnapshot(
+        servers: next,
+        lastServerId: replaceLast ? lastServerId : _lastServerId,
+      ),
+    );
+    _servers = next;
+    if (replaceLast) _lastServerId = lastServerId;
+  });
 
   Future<void> _update(
     String id,
@@ -427,6 +490,7 @@ class SourceSessionRegistry {
     final server = _allowed(id);
     final scope = _scopes[id] ?? 0;
     final generation = access.generation;
+    _requireCurrent(server, scope, generation);
     final attempt = (_authAttempts[id] ?? 0) + 1;
     _authAttempts[id] = attempt;
     final client = createClient();
@@ -497,7 +561,8 @@ class SourceSessionRegistry {
   OperationPermit permit(SourceAccount account, {String? libraryId}) {
     final server = _allowed(account.configuredServerId);
     final session = _sessions[server.id];
-    if (session?.account != account ||
+    if (_credentialChanges.contains(server.id) ||
+        session?.account != account ||
         !server.participates ||
         !server.scopeKnown ||
         server.libraryIds.isEmpty ||
@@ -519,7 +584,8 @@ class SourceSessionRegistry {
     try {
       final server = _allowed(permit.account.configuredServerId);
       final session = _sessions[server.id];
-      return server.region == permit.account.region &&
+      return !_credentialChanges.contains(server.id) &&
+          server.region == permit.account.region &&
           server.participates &&
           server.scopeKnown &&
           server.libraryIds.isNotEmpty &&
@@ -544,6 +610,7 @@ class SourceSessionRegistry {
     final server = _allowed(id);
     final scope = _scopes[id] ?? 0;
     final generation = access.generation;
+    _requireCurrent(server, scope, generation);
     final client = createClient();
     if (_sessions.values.any((s) => identical(s.client, client))) {
       throw StateError('Check client must be independent');
@@ -648,9 +715,9 @@ class SourceSessionRegistry {
         );
       }
     }
-    final removed = project(
-      AccessRegion.ordinary,
-    ).where((s) => !incoming.containsKey(s.id)).toList();
+    final removed = project(AccessRegion.ordinary)
+        .where((s) => baseline.containsKey(s.id) && !incoming.containsKey(s.id))
+        .toList();
     for (final server in removed) {
       _transitioning.add(server.id);
       _invalidate(server.id);
@@ -669,6 +736,14 @@ class SourceSessionRegistry {
     try {
       await _commit(
         () {
+          if (_servers.any(
+                (s) =>
+                    s.region == AccessRegion.private &&
+                    incoming.containsKey(s.id),
+              ) ||
+              incoming.keys.any(_transitioning.contains)) {
+            throw StateError('Ordinary snapshot revoked by membership change');
+          }
           final next = <SavedServer>[];
           for (final current in _servers) {
             if (current.region == AccessRegion.private) {
@@ -676,20 +751,37 @@ class SourceSessionRegistry {
               continue;
             }
             final updated = incoming.remove(current.id);
-            if (updated == null) continue;
+            if (updated == null) {
+              if (!baseline.containsKey(current.id)) next.add(current);
+              continue;
+            }
             final previous = baseline[current.id];
-            next.add(
-              current.copyWith(
-                name: updated.name,
-                username: updated.username,
-                nickname: previous?.nickname == updated.nickname
-                    ? current.nickname
-                    : updated.nickname,
-                lines: updated.lines,
-                activeLineId: updated.activeLineId,
-                userAgent: updated.userAgent,
-              ),
+            if (previous == null) {
+              throw StateError('Member appeared after ordinary snapshot');
+            }
+            final merged = _mergeDelta(
+              current.toJson(),
+              previous.toJson(),
+              updated.toJson(),
             );
+            // Region, participation, verification and checks remain registry-owned.
+            for (final key in [
+              'region',
+              'participates',
+              'libraryIds',
+              'scopeKnown',
+              'verifiedServerId',
+              'checkedAt',
+              'checkStatus',
+            ]) {
+              merged[key] = current.toJson()[key];
+            }
+            merged['lines'] = _mergeLines(
+              current.lines,
+              previous.lines,
+              updated.lines,
+            );
+            next.add(SavedServer.fromJson(merged));
           }
           next.addAll(
             incoming.values.map(
@@ -714,6 +806,62 @@ class SourceSessionRegistry {
         _transitioning.remove(server.id);
       }
     }
+  }
+
+  static Map<String, dynamic> _mergeDelta(
+    Map<String, dynamic> current,
+    Map<String, dynamic> baseline,
+    Map<String, dynamic> incoming,
+  ) {
+    final result = Map<String, dynamic>.of(current);
+    for (final key in {...baseline.keys, ...incoming.keys}) {
+      if (jsonEncode(baseline[key]) != jsonEncode(incoming[key])) {
+        if (incoming.containsKey(key)) {
+          result[key] = incoming[key];
+        } else {
+          result.remove(key);
+        }
+      }
+    }
+    return result;
+  }
+
+  static List<Map<String, dynamic>> _mergeLines(
+    List<ServerLine> current,
+    List<ServerLine> baseline,
+    List<ServerLine> incoming,
+  ) {
+    final old = {for (final l in baseline) l.id: l};
+    final edits = {for (final l in incoming) l.id: l};
+    final result = <String, Map<String, dynamic>>{};
+    for (final line in current) {
+      final edit = edits.remove(line.id);
+      if (edit == null) {
+        if (!old.containsKey(line.id)) result[line.id] = line.toJson();
+      } else {
+        result[line.id] = _mergeDelta(
+          line.toJson(),
+          old[line.id]?.toJson() ?? {},
+          edit.toJson(),
+        );
+      }
+    }
+    for (final line in edits.values) {
+      if (old.containsKey(line.id)) {
+        throw StateError('Line removed since snapshot');
+      }
+      result[line.id] = line.toJson();
+    }
+    final oldOrder = baseline.map((l) => l.id).toList();
+    final newOrder = incoming.map((l) => l.id).toList();
+    if (jsonEncode(oldOrder) != jsonEncode(newOrder)) {
+      return [
+        for (final id in newOrder)
+          if (result.containsKey(id)) result.remove(id)!,
+        ...result.values,
+      ];
+    }
+    return result.values.toList();
   }
 
   void dispose() {
@@ -750,8 +898,7 @@ class _OrdinaryServerStore implements ServerListStore {
   @override
   Future<void> save(ServerListSnapshot snapshot) async {
     await registry._saveOrdinary(snapshot, _baseline);
-    _baseline = {
-      for (final s in registry.project(AccessRegion.ordinary)) s.id: s,
-    };
+    // Track what this consumer actually observed, not newer registry values.
+    _baseline = {for (final s in snapshot.servers) s.id: s};
   }
 }
