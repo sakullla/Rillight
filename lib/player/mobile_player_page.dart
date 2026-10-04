@@ -24,6 +24,7 @@ import 'package:rillight/player/phone_player_gestures.dart';
 import 'package:rillight/player/playback_models.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_controller.dart';
+import 'player_window_host.dart';
 import 'package:rillight/player/next_episode_card.dart';
 import 'package:rillight/player/player_window.dart';
 import 'package:rillight/player/video_backend.dart';
@@ -35,6 +36,7 @@ class MobilePlayerPage extends StatefulWidget {
     super.key,
     required this.itemId,
     this.mediaSourceId,
+    this.sourceRequest,
     this.autoResume = true,
     this.audioStreamIndex,
     this.subtitleStreamIndex,
@@ -45,6 +47,7 @@ class MobilePlayerPage extends StatefulWidget {
     this.displayControl,
   });
   final String itemId;
+  final PlayerOpenRequest? sourceRequest;
   final String? mediaSourceId;
   final bool autoResume;
 
@@ -301,6 +304,8 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
     _wake = widget.wakeLock ?? PhonePlaybackWakeLock();
     _display = widget.displayControl ?? MethodChannelPhoneDisplayControl();
     final created = PlayerController(
+      runtime: bindings.runtime,
+      openRequest: widget.sourceRequest,
       client: auth.client,
       itemId: widget.itemId,
       backend: bindings.createBackend?.call() ?? RillightVideoBackend(),

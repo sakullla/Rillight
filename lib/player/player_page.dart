@@ -90,6 +90,7 @@ class PlayerPage extends StatefulWidget {
     this.audioStreamIndex,
     this.subtitleStreamIndex,
     this.startTimeTicks,
+    this.sourceRequest,
     this.onClosed,
     this.onOpenItem,
     this.onOpenItemDetail,
@@ -101,6 +102,7 @@ class PlayerPage extends StatefulWidget {
   final int? audioStreamIndex;
   final int? subtitleStreamIndex;
   final int? startTimeTicks;
+  final PlayerOpenRequest? sourceRequest;
   final VoidCallback? onClosed;
   final ValueChanged<String>? onOpenItem;
   final void Function(String itemId, {String? seasonId})? onOpenItemDetail;
@@ -157,6 +159,9 @@ class PlayerPageState extends State<PlayerPage> {
     final bindings = PlayerScope.of(context);
     final created = PlayerController(
       client: AuthScope.of(context).client,
+      runtime: bindings.runtime,
+      observationSink: bindings.observationSink,
+      openRequest: widget.sourceRequest,
       itemId: widget.itemId,
       backend: _createBackend(bindings),
       window: bindings.window ?? WindowManagerPlayerWindow(),

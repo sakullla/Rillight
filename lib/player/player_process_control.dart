@@ -22,6 +22,12 @@ abstract class PlayerProcessControl {
   PlaybackSessionSnapshotStore snapshotStore(int pid);
 }
 
+abstract interface class PlayerHistoryProcessControl {
+  Future<Map<String, dynamic>?> consumeWatchEvent(int pid);
+  Future<void> acknowledgeWatchEvent(int pid, Map<String, dynamic> receipt);
+  Future<void> revoke(int pid, int generation);
+}
+
 class PlayerProcessStartupException implements Exception {
   PlayerProcessStartupException(this.pid, this.cause);
   final int pid;
@@ -42,7 +48,7 @@ PlayerProcessControl createPlayerProcessControl({String? operatingSystem}) {
 
 /// A spawn becomes usable only after the actual child entry point acknowledges
 /// its window and close handler. Failed or superseded launches are terminated.
-abstract class DesktopPlayerProcessControl implements PlayerProcessControl {
+abstract class DesktopPlayerProcessControl implements PlayerProcessControl, PlayerHistoryProcessControl {
   DesktopPlayerProcessControl({
     this.pollInterval = const Duration(milliseconds: 100),
     this.startupTimeout = const Duration(seconds: 20),
@@ -147,6 +153,13 @@ abstract class DesktopPlayerProcessControl implements PlayerProcessControl {
 
   @override
   Future<void> heartbeat(int pid) async => _endpoints[pid]?.heartbeat();
+
+  @override
+  Future<Map<String, dynamic>?> consumeWatchEvent(int pid) async => _endpoints[pid]?.read('watch-event');
+  @override
+  Future<void> acknowledgeWatchEvent(int pid, Map<String, dynamic> receipt) async => _endpoints[pid]?.write('watch-ack', receipt);
+  @override
+  Future<void> revoke(int pid, int generation) async => _endpoints[pid]?.write('revoke', {'generation': generation});
 
   @override
   Future<PlayerHostOpenItemCommand?> consumeOpenItem(int pid) async {

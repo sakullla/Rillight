@@ -1,4 +1,9 @@
 import 'package:flutter/widgets.dart';
+import 'playback_runtime.dart';
+import 'playback_models.dart';
+import '../aggregation/history/history_models.dart';
+
+typedef PlaybackObservationSink = Future<bool> Function(PlaybackReport report, WatchTimeline timeline, int sequence);
 import 'package:rillight/player/danmaku/dandanplay_client.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/player_settings.dart';
@@ -18,12 +23,16 @@ class PlayerBindings {
     this.settingsStore,
     this.snapshotStore,
     this.danmakuClient,
+    this.runtime,
+    this.observationSink,
   });
 
   final VideoBackend Function()? createBackend;
   final PlayerWindow? window;
   final PlayerWindowHost? windowHost;
   final PlayerSettingsStore? settingsStore;
+  final PlaybackRuntime? runtime;
+  final PlaybackObservationSink? observationSink;
 
   /// 会话快照存储;为 null 时 [PlayerController] 使用当前进程 pid 命名的
   /// `FilePlaybackSessionSnapshotStore`,测试注入

@@ -3,6 +3,9 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'playback_runtime.dart';
+import '../aggregation/history/history_writer.dart';
+import '../auth/region_access.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/product.dart';
 import 'package:rillight/app/theme.dart';
@@ -43,6 +46,7 @@ class PlayerWindowLaunch {
     required this.device,
     this.userAgent,
     this.protocol,
+    this.regionGeneration,
   });
 
   final PlayerOpenRequest request;
@@ -52,6 +56,7 @@ class PlayerWindowLaunch {
   final EmbyDeviceInfo device;
   final String? userAgent;
   final PlayerProcessProtocol? protocol;
+  final int? regionGeneration;
 
   factory PlayerWindowLaunch.fromAuth({
     required AuthController auth,
@@ -87,6 +92,9 @@ class PlayerWindowLaunch {
     return PlayerWindowLaunch(
       request: PlayerOpenRequest(
         itemId: json['itemId'] as String? ?? '',
+        source: json['source'] is Map ? decodeSource(Map<String, dynamic>.from(json['source'] as Map)) : null,
+        work: json['work'] is Map ? decodeSource(Map<String, dynamic>.from(json['work'] as Map)) : null,
+        libraryId: json['libraryId'] as String?,
         autoResume: json['autoResume'] != false,
         mediaSourceId: json['mediaSourceId'] as String?,
         audioStreamIndex: json['audioStreamIndex'] is int
@@ -99,6 +107,7 @@ class PlayerWindowLaunch {
             ? json['startTimeTicks'] as int
             : int.tryParse('${json['startTimeTicks'] ?? ''}'),
       ),
+      regionGeneration: json['regionGeneration'] as int?,
       baseUrl: json['baseUrl'] as String? ?? '',
       accessToken: json['accessToken'] as String? ?? '',
       userId: json['userId'] as String? ?? '',
@@ -118,6 +127,10 @@ class PlayerWindowLaunch {
   Map<String, dynamic> toJson() {
     return {
       'businessId': businessId,
+      if (request.source != null) 'source': encodeSource(request.source!),
+      if (request.work != null) 'work': encodeSource(request.work!),
+      if (request.libraryId != null) 'libraryId': request.libraryId,
+      if (regionGeneration != null) 'regionGeneration': regionGeneration,
       ...?protocol?.fields,
       'itemId': request.itemId,
       'autoResume': request.autoResume,
@@ -159,6 +172,7 @@ typedef PlayerHostOpenItemConsumer =
 class DesktopPlayerWindowHost extends PlayerWindowHost {
   DesktopPlayerWindowHost({
     required this.auth,
+    this.runtime,
     PlayerProcessControl? processControl,
     PlaybackSnapshotStoreLocator? snapshotStoreForPid,
     PlayerHostOpenItemConsumer? consumeOpenItem,
@@ -169,9 +183,17 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
        _snapshotStoreForPid = snapshotStoreForPid,
        _consumeOpenItem = consumeOpenItem {
     auth.addListener(_onAuth);
+    auth.regionAccess.addRevocationHook(_revokePrivate);
+    auth.regionAccess.addCleanupHook(_closePrivate);
+    auth.regionAccess.addTerminationHook(_terminatePrivate);
   }
 
   final AuthController auth;
+  final PlaybackRuntime? runtime;
+  PlaybackOrigin? _origin;
+  WatchSession? _watchSession;
+  bool _privateRevoked = false;
+  int _lastIpcEvent = -1;
 
   /// 播放器进程请求主窗口打开条目详情(如播放结束"查看剧集")。
   void Function(String itemId, {String? seasonId})? onOpenItemRoute;
@@ -222,7 +244,24 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
       if (_disposed || revision != _requestRevision) return;
       await _stopProcess();
       if (_disposed || revision != _requestRevision) return;
-      final launch = PlayerWindowLaunch.fromAuth(auth: auth, request: request);
+      var launch = PlayerWindowLaunch.fromAuth(auth: auth, request: request);
+      if (runtime != null) {
+        final origin = await runtime!.resolve(request);
+        origin.permit.requireValid();
+        if (_disposed || revision != _requestRevision) return;
+        _origin = origin;
+        _watchSession = null;
+        _lastIpcEvent = -1;
+        _privateRevoked = false;
+        launch = PlayerWindowLaunch(
+          request: PlayerOpenRequest(itemId: request.itemId, autoResume: request.autoResume,
+            source: origin.source, work: origin.work, libraryId: origin.libraryId,
+            mediaSourceId: request.mediaSourceId, audioStreamIndex: request.audioStreamIndex,
+            subtitleStreamIndex: request.subtitleStreamIndex, startTimeTicks: request.startTimeTicks),
+          baseUrl: origin.client.baseUrl!.toString(), accessToken: origin.client.accessToken!,
+          userId: origin.source.account.userId, device: origin.client.device,
+          userAgent: origin.client.customUserAgent, regionGeneration: origin.permit.regionGeneration);
+      }
       try {
         final pid = await _control.spawn(
           executable: Platform.resolvedExecutable,
@@ -230,9 +269,10 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
         );
         if (_disposed ||
             revision != _requestRevision ||
-            auth.client.baseUrl?.toString() != launch.baseUrl ||
-            auth.client.userId != launch.userId ||
-            auth.client.accessToken != launch.accessToken) {
+            (_origin != null ? !_origin!.permit.isValid :
+              (auth.client.baseUrl?.toString() != launch.baseUrl ||
+               auth.client.userId != launch.userId ||
+               auth.client.accessToken != launch.accessToken))) {
           await _control.kill(pid);
           await _reconcileSnapshot(pid);
           await _control.release(pid);
@@ -302,6 +342,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
       unawaited(() async {
         try {
           await _control.heartbeat(pid);
+          await _consumeObservation(pid);
           await _deliverOpenItem(pid, epoch);
           if (_control.isAlive(pid)) return;
           timer.cancel();
@@ -366,6 +407,16 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
     if (snapshot == null) {
       return;
     }
+    if (runtime != null) {
+      if (_privateRevoked || snapshot.source == null ||
+          snapshot.source!.account != _origin?.source.account ||
+          snapshot.regionGeneration != _origin?.permit.regionGeneration) {
+        await store.delete();
+        return;
+      }
+      if (await runtime!.recoverSnapshot(snapshot)) await store.delete();
+      return;
+    }
     final client = auth.client;
     if (snapshot.baseUrl != client.baseUrl?.toString() ||
         snapshot.userId != client.userId) {
@@ -385,6 +436,59 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
         snapshot.userId == client.userId) {
       await store.delete();
     }
+  }
+
+  Future<void> _consumeObservation(int pid) async {
+    final control = _control;
+    final origin = _origin;
+    if (control is! PlayerHistoryProcessControl || runtime == null || origin == null) return;
+    final event = await control.consumeWatchEvent(pid);
+    if (event == null) return;
+    final sequence = event['sequence'];
+    var accepted = false;
+    try {
+      if (sequence is! int || sequence <= _lastIpcEvent || event['pid'] != pid ||
+          event['generation'] != origin.permit.regionGeneration ||
+          event['source'] is! Map ||
+          decodeSource(Map<String, dynamic>.from(event['source'] as Map)).account != origin.source.account ||
+          event['item'] != origin.source.itemId || _privateRevoked) {
+        throw StateError('Stale or foreign playback event');
+      }
+      origin.permit.requireValid();
+      final version = event['version'] as String;
+      if (_watchSession?.source.mediaSourceId != version) {
+        final info = await origin.permit.dispatch((c) => c.getPlaybackInfo(itemId: origin.source.itemId));
+        if (!info.mediaSources.any((s) => s.id == version)) throw StateError('Unknown actual version');
+        _watchSession = await runtime!.begin(origin, version);
+      }
+      final record = await runtime!.history.observe(session: _watchSession!,
+        eventSequence: sequence, positionTicks: event['position'] as int,
+        actuallyPlaying: event['actuallyPlaying'] == true,
+        timeline: WatchTimeline.fromJson(Map<String, dynamic>.from(event['timeline'] as Map)));
+      accepted = record != null;
+      if (accepted) _lastIpcEvent = sequence;
+    } catch (_) { /* No remote report on rejected observation. */ }
+    await control.acknowledgeWatchEvent(pid, {'sequence': sequence, 'accepted': accepted});
+  }
+
+  void _revokePrivate() {
+    if (_origin?.source.account.region != AccessRegion.private) return;
+    _privateRevoked = true;
+    _requestRevision++;
+    _control.cancelPendingSpawns();
+    _watch?.cancel();
+    _current = null;
+    notifyListeners();
+    final control = _control;
+    if (control is PlayerHistoryProcessControl && _pid != 0) {
+      unawaited(control.revoke(_pid, auth.regionAccess.generation));
+    }
+  }
+  Future<void> _closePrivate(RestrictedStopPermit permit) async {
+    if (_privateRevoked) await close().timeout(closeTimeout + reportTimeout);
+  }
+  void _terminatePrivate() {
+    if (_privateRevoked) unawaited(forceClose());
   }
 
   void _notify(PlayerHostNotice notice) {
@@ -412,6 +516,9 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
     _requestRevision++;
     _control.cancelPendingSpawns();
     auth.removeListener(_onAuth);
+    auth.regionAccess.removeRevocationHook(_revokePrivate);
+    auth.regionAccess.removeCleanupHook(_closePrivate);
+    auth.regionAccess.removeTerminationHook(_terminatePrivate);
     unawaited(_runInFlight(_stopProcess).whenComplete(_notices.close));
     super.dispose();
   }
@@ -452,6 +559,7 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
   Future<void>? _closing;
   Timer? _commands;
   bool _readingCommand = false;
+  int _ipcSequence = 0;
   int _launchRevision = 0;
 
   @override
@@ -467,6 +575,11 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
       unawaited(() async {
         try {
           final endpoint = _launch.protocol;
+          if (endpoint != null && await endpoint.read('revoke') != null) {
+            await _playerKey.currentState?.controller?.revokeFromHost();
+            await _closeWindow();
+            return;
+          }
           if (endpoint != null &&
               (await endpoint.read('close') != null ||
                   await endpoint.parentExpired())) {
@@ -556,6 +669,25 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
     }
   }
 
+  Future<bool> _observe(PlaybackReport report, WatchTimeline timeline, int sequence) async {
+    final endpoint = _launch.protocol;
+    final source = _launch.request.source;
+    if (endpoint == null || source == null || _closing != null) return false;
+    sequence = ++_ipcSequence;
+    await endpoint.write('watch-event', {'source': encodeSource(source),
+      'generation': _launch.regionGeneration, 'sequence': sequence,
+      'item': report.itemId, 'version': report.mediaSourceId,
+      'position': report.positionTicks, 'actuallyPlaying': true,
+      'timeline': timeline.toJson()});
+    final deadline = DateTime.now().add(const Duration(seconds: 3));
+    while (DateTime.now().isBefore(deadline) && _closing == null) {
+      final receipt = await endpoint.read('watch-ack');
+      if (receipt?['sequence'] == sequence) return receipt?['accepted'] == true;
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+    return false;
+  }
+
   Future<void> _openItemInHost(String itemId, {String? seasonId}) async {
     try {
       final protocol = _launch.protocol;
@@ -589,6 +721,7 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
       controller: _auth,
       child: PlayerScope(
         bindings: PlayerBindings(
+          observationSink: _launch.request.source == null ? null : _observe,
           snapshotStore: _launch.protocol == null
               ? null
               : FilePlaybackSessionSnapshotStore(
@@ -607,6 +740,7 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
           home: PlayerPage(
             key: _playerKey,
             itemId: request.itemId,
+            sourceRequest: request,
             autoResume: request.autoResume,
             mediaSourceId: request.mediaSourceId,
             audioStreamIndex: request.audioStreamIndex,

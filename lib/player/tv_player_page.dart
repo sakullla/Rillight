@@ -18,6 +18,7 @@ import 'package:rillight/player/android_playback_lifecycle.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/next_episode_card.dart';
 import 'package:rillight/player/player_controller.dart';
+import 'player_window_host.dart';
 import 'package:rillight/player/player_window.dart';
 
 class TvPlayerPage extends StatefulWidget {
@@ -25,9 +26,11 @@ class TvPlayerPage extends StatefulWidget {
     super.key,
     required this.itemId,
     this.mediaSourceId,
+    this.sourceRequest,
     this.autoResume = true,
   });
   final String itemId;
+  final PlayerOpenRequest? sourceRequest;
   final String? mediaSourceId;
   final bool autoResume;
   @override
@@ -65,6 +68,8 @@ class TvPlayerPageState extends State<TvPlayerPage> {
     );
     auth.addListener(_authChanged);
     final created = PlayerController(
+      runtime: bindings.runtime,
+      openRequest: widget.sourceRequest,
       client: auth.client,
       itemId: widget.itemId,
       backend: bindings.createBackend?.call() ?? RillightVideoBackend(),

@@ -58,6 +58,9 @@ class PlayerProcessProtocol {
       'close',
       'open-item',
       'heartbeat',
+      'watch-event',
+      'watch-ack',
+      'revoke',
     }.contains(kind)) {
       throw ArgumentError.value(kind, 'kind');
     }

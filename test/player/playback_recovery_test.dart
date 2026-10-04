@@ -299,7 +299,7 @@ void main() {
   );
 
   test(
-    'successful source fallback to its own audio is not a track failure',
+    'missing original language needs explicit default audio acceptance',
     () async {
       final oldAudio = controller.audioStreamIndex;
       server.items
@@ -318,7 +318,19 @@ void main() {
           ],
         ),
       ];
+      final opens = backend.openCount;
       await controller.switchMediaSource('alternate');
+      expect(controller.switchConfirmation?.audioNeedsChoice, isTrue);
+      expect(backend.openCount, opens);
+      await expectLater(
+        controller.confirmMediaSourceSwitch(SwitchResumeChoice.currentPosition),
+        throwsStateError,
+      );
+      await controller.confirmMediaSourceSwitch(
+        SwitchResumeChoice.currentPosition,
+        acceptDefaultAudio: true,
+        turnSubtitlesOff: true,
+      );
       expect(oldAudio, isNot(9));
       expect(controller.audioStreamIndex, 9);
       expect(controller.trackFailure, isNull);
@@ -372,6 +384,9 @@ void main() {
       final opens = backend.openCount;
       backend.openGate = Completer<void>();
       final switchFuture = controller.switchMediaSource('alternate');
+      for (var i = 0; controller.pendingMediaSourceId == null && i < 50; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 1));
+      }
       expect(controller.pendingMediaSourceId, 'alternate');
       expect(controller.activeMediaSourceId, original);
       backend.openGate!.complete();
@@ -466,7 +481,7 @@ void main() {
   );
 
   test(
-    'source change clamps the resume point and selects a valid audio track',
+    'out-of-range switch requires beginning or cancel, never clamps',
     () async {
       final movie = server.items.firstWhere((item) => item.id == 'movie-up');
       movie.runTimeTicks = 30 * 10000000;
@@ -487,10 +502,94 @@ void main() {
       ];
       await backend.seek(const Duration(minutes: 5));
       await Future<void>.delayed(Duration.zero);
+      final original = controller.activeMediaSourceId;
+      final opens = backend.openCount;
       await controller.switchMediaSource('alternate');
-      expect(backend.openedStart, const Duration(seconds: 30));
+      expect(controller.switchConfirmation?.canTryCurrentPosition, isFalse);
+      expect(controller.activeMediaSourceId, original);
+      expect(backend.openCount, opens);
+      await expectLater(
+        controller.confirmMediaSourceSwitch(
+          SwitchResumeChoice.currentPosition,
+          acceptDefaultAudio: true,
+          turnSubtitlesOff: true,
+        ),
+        throwsStateError,
+      );
+      await controller.confirmMediaSourceSwitch(SwitchResumeChoice.cancel);
+      expect(controller.switchConfirmation, isNull);
+      expect(controller.activeMediaSourceId, original);
+      expect(backend.openCount, opens);
+      await controller.switchMediaSource('alternate');
+      await controller.confirmMediaSourceSwitch(
+        SwitchResumeChoice.beginning,
+        acceptDefaultAudio: true,
+        turnSubtitlesOff: true,
+      );
+      expect(backend.openedStart, Duration.zero);
       expect(controller.audioStreamIndex, 5);
       expect(controller.activeMediaSourceId, 'alternate');
+    },
+  );
+
+  test(
+    'timeline confirmation preserves pause and cancel keeps native mounted',
+    () async {
+      await controller.togglePlay();
+      await backend.seek(const Duration(seconds: 10));
+      await Future<void>.delayed(Duration.zero);
+      final original = controller.activeMediaSourceId;
+      final opens = backend.openCount;
+      final stops = backend.stopCount;
+      await controller.switchMediaSource('alternate');
+      final plan = controller.switchConfirmation!;
+      expect(plan.timelineConfirmed, isFalse);
+      expect(plan.positionTicks, 10 * 10000000);
+      expect(plan.paused, isTrue);
+      expect(backend.openCount, opens);
+      expect(backend.stopCount, stops);
+      await controller.confirmMediaSourceSwitch(SwitchResumeChoice.cancel);
+      expect(controller.activeMediaSourceId, original);
+      expect(backend.stopCount, stops);
+      expect(controller.isPlaying, isFalse);
+      await controller.switchMediaSource('alternate');
+      await controller.confirmMediaSourceSwitch(
+        SwitchResumeChoice.currentPosition,
+      );
+      expect(backend.openedStart, const Duration(seconds: 10));
+      expect(controller.isPlaying, isFalse);
+      expect(controller.activeMediaSourceId, 'alternate');
+    },
+  );
+
+  test(
+    'failed target and failed original restore do not choose a third version',
+    () async {
+      server.items.firstWhere((i) => i.id == 'movie-up').extraSources = const [
+        FakeMediaSource(id: 'alternate', name: 'Alternate'),
+        FakeMediaSource(id: 'third', name: 'Unselected'),
+      ];
+      backend.rejectNextVolume = true;
+      backend.rejectedSource = controller.activeMediaSourceId;
+      await controller.switchMediaSource('alternate');
+      expect(controller.state.phase, PlaybackPhase.failed);
+      expect(controller.activeMediaSourceId, isNot('third'));
+      expect(backend.openedUrl?.queryParameters['MediaSourceId'], 'alternate');
+    },
+  );
+
+  test(
+    'retry retires a pending confirmation without starting that target',
+    () async {
+      await backend.seek(const Duration(seconds: 10));
+      await Future<void>.delayed(Duration.zero);
+      final original = controller.activeMediaSourceId;
+      await controller.switchMediaSource('alternate');
+      expect(controller.switchConfirmation, isNotNull);
+      await controller.retryPlayback();
+      expect(controller.switchConfirmation, isNull);
+      await controller.confirmMediaSourceSwitch(SwitchResumeChoice.beginning);
+      expect(controller.activeMediaSourceId, original);
     },
   );
 

@@ -1,5 +1,7 @@
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/player/playback_models.dart';
+import '../auth/source_sessions.dart';
+import '../aggregation/history/history_writer.dart';
 
 /// Immutable ownership plus a per-session report queue. A later login cannot
 /// send this session's progress using another server or user's credentials.
@@ -8,6 +10,8 @@ class PlaybackSession {
     required this.id,
     required this.client,
     required this.report,
+    this.permit,
+    this.frozenStop,
   }) : baseUrl = client.baseUrl?.toString(),
        userId = client.userId,
        accessToken = client.accessToken;
@@ -19,16 +23,24 @@ class PlaybackSession {
   final String? accessToken;
   PlaybackReport report;
   bool stopped = false;
+  bool revoked = false;
+  final OperationPermit? permit;
+  final FrozenSourceStop? frozenStop;
+  WatchSession? watchSession;
+  int eventSequence = 0;
+  bool actuallyStarted = false;
+  Future<void> observations = Future<void>.value();
   Future<void> _reports = Future<void>.value();
 
   bool get ownsCredentials =>
+      (permit?.isValid ?? true) &&
       baseUrl == client.baseUrl?.toString() &&
       userId == client.userId &&
       accessToken == client.accessToken;
 
   Future<void> enqueue(Future<void> Function() send) {
     final next = _reports.then((_) async {
-      if (ownsCredentials) await send();
+      if (!revoked && ownsCredentials) await send();
     });
     _reports = next.then<void>((_) {}, onError: (Object _, StackTrace _) {});
     return next;

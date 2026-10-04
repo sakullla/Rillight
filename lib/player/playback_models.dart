@@ -1,4 +1,6 @@
 import 'package:rillight/emby/media_source_format.dart';
+import '../aggregation/history/history_models.dart' show encodeSource, decodeSource;
+import '../aggregation/identity/media_identity.dart' show SourceReference;
 
 enum PlayMethod {
   directPlay('DirectPlay'),
@@ -438,6 +440,9 @@ class PlaybackSessionSnapshot {
     required this.userId,
     required this.timestamp,
     this.playMethod = PlayMethod.directStream,
+    this.source,
+    this.libraryId,
+    this.regionGeneration,
   });
 
   final String itemId;
@@ -448,6 +453,9 @@ class PlaybackSessionSnapshot {
   final String userId;
   final DateTime timestamp;
   final PlayMethod playMethod;
+  final SourceReference? source;
+  final String? libraryId;
+  final int? regionGeneration;
 
   Map<String, dynamic> toJson() {
     return {
@@ -459,6 +467,9 @@ class PlaybackSessionSnapshot {
       'baseUrl': baseUrl,
       'userId': userId,
       'timestamp': timestamp.toUtc().toIso8601String(),
+      if (source != null) 'source': encodeSource(source!),
+      if (libraryId != null) 'libraryId': libraryId,
+      if (regionGeneration != null) 'regionGeneration': regionGeneration,
     };
   }
 
@@ -499,6 +510,9 @@ class PlaybackSessionSnapshot {
       baseUrl: baseUrl,
       userId: userId,
       timestamp: timestamp,
+      source: json['source'] is Map ? decodeSource(Map<String, dynamic>.from(json['source'] as Map)) : null,
+      libraryId: json['libraryId'] as String?,
+      regionGeneration: json['regionGeneration'] as int?,
     );
   }
 }

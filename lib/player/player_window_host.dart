@@ -1,4 +1,5 @@
 import 'package:flutter/widgets.dart';
+import '../aggregation/identity/media_identity.dart';
 
 class PlayerOpenRequest {
   const PlayerOpenRequest({
@@ -8,6 +9,9 @@ class PlayerOpenRequest {
     this.audioStreamIndex,
     this.subtitleStreamIndex,
     this.startTimeTicks,
+    this.source,
+    this.work,
+    this.libraryId,
   });
 
   final String itemId;
@@ -16,6 +20,9 @@ class PlayerOpenRequest {
   final int? audioStreamIndex;
   final int? subtitleStreamIndex;
   final int? startTimeTicks;
+  final SourceReference? source;
+  final SourceReference? work;
+  final String? libraryId;
 }
 
 /// 宿主需要主窗口向用户展示的提示。

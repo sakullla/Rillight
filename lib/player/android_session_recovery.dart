@@ -1,4 +1,5 @@
 import 'package:rillight/emby/emby_client.dart';
+import 'playback_runtime.dart';
 import 'package:dio/dio.dart';
 import 'package:rillight/player/playback_models.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
@@ -8,8 +9,19 @@ import 'package:rillight/player/playback_session_snapshot.dart';
 /// refreshes or sends an old report with a newly selected identity.
 Future<bool> recoverAndroidSession(
   EmbyClient client,
-  PlaybackSessionSnapshotStore store,
-) async {
+  PlaybackSessionSnapshotStore store, {
+  PlaybackRuntime? runtime,
+}) async {
+  if (runtime != null) {
+    final snapshot = await store.read();
+    if (snapshot == null) return false;
+    if (await runtime.recoverSnapshot(snapshot)) {
+      await store.delete();
+      return true;
+    }
+    await store.delete();
+    return false;
+  }
   final base = client.baseUrl, user = client.userId, token = client.accessToken;
   if (base == null || user == null || token == null) return false;
   final snapshot = await store.read();
