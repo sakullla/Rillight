@@ -60,7 +60,10 @@ class PlayerProcessProtocol {
       'heartbeat',
       'watch-event',
       'watch-ack',
+      'watch-sync',
       'revoke',
+      'switch-request',
+      'switch-reply',
     }.contains(kind)) {
       throw ArgumentError.value(kind, 'kind');
     }

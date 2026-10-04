@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:rillight/player/player_bindings.dart';
+import 'package:rillight/player/playback_runtime.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/app/app.dart';
 import 'package:rillight/app/appearance_style.dart';
@@ -88,11 +89,17 @@ class _AndroidBootstrapState extends State<AndroidBootstrap> {
         auth.dispose();
         return;
       }
+      final playback = widget.createAuth == null
+          ? await PlaybackRuntime.production(auth)
+          : null;
       setState(
         () => _app = RillightApp(
           auth: auth,
           environment: environment,
-          playerBindings: PlayerBindings(snapshotStore: snapshotStore),
+          playerBindings: PlayerBindings(
+            snapshotStore: snapshotStore,
+            runtime: playback,
+          ),
           appearance: appearance,
         ),
       );

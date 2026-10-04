@@ -29,6 +29,8 @@ class PlaybackSession {
   WatchSession? watchSession;
   int eventSequence = 0;
   bool actuallyStarted = false;
+  int? lastObservedPositionTicks;
+  WatchRecord? lastRecord;
   Future<void> observations = Future<void>.value();
   Future<void> _reports = Future<void>.value();
 

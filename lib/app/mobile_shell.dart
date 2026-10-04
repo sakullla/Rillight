@@ -55,6 +55,7 @@ class _MobileShellState extends State<MobileShell> with WidgetsBindingObserver {
       final recovered = await recoverAndroidSession(
         AuthScope.of(context).client,
         store,
+        runtime: PlayerScope.of(context).runtime,
       );
       if (mounted && recovered) {
         final messenger = ScaffoldMessenger.of(context);

@@ -11,6 +11,7 @@ import 'package:rillight/auth/auth_bootstrap.dart';
 import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/player/desktop_player_window.dart';
 import 'package:rillight/player/player_bindings.dart';
+import 'package:rillight/player/playback_runtime.dart';
 import 'package:window_manager/window_manager.dart';
 
 Future<void> main(List<String> args) async {
@@ -31,7 +32,8 @@ Future<void> main(List<String> args) async {
   await configureMainWindow();
   final auth = await createProductionAuth();
   final router = createAppRouter(auth: auth);
-  final playerHost = DesktopPlayerWindowHost(auth: auth);
+  final playback = await PlaybackRuntime.production(auth);
+  final playerHost = DesktopPlayerWindowHost(auth: auth, runtime: playback);
   // 外观先读持久化偏好再上屏,避免启动闪一下错误亮度。
   final appearance = AppearanceController();
   await appearance.ready;
@@ -53,7 +55,10 @@ Future<void> main(List<String> args) async {
       child: RillightApp(
         auth: auth,
         router: router,
-        playerBindings: PlayerBindings(windowHost: playerHost),
+        playerBindings: PlayerBindings(
+          windowHost: playerHost,
+          runtime: playback,
+        ),
         appearance: appearance,
       ),
     ),

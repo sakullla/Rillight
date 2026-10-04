@@ -12,6 +12,10 @@ class PlayerOpenRequest {
     this.source,
     this.work,
     this.libraryId,
+    this.startPaused = false,
+    this.subtitleOff = false,
+    this.maxStreamingBitrate,
+    this.regionGeneration,
   });
 
   final String itemId;
@@ -23,6 +27,10 @@ class PlayerOpenRequest {
   final SourceReference? source;
   final SourceReference? work;
   final String? libraryId;
+  final bool startPaused;
+  final bool subtitleOff;
+  final int? maxStreamingBitrate;
+  final int? regionGeneration;
 }
 
 /// 宿主需要主窗口向用户展示的提示。

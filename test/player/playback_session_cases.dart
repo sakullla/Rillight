@@ -1032,6 +1032,7 @@ void main() {
           bytes: Uint8List.fromList(List<int>.filled(200, 9)),
         ),
         isFalse,
+        reason: '${cache.diagnostics}',
       );
       expect(
         (await cache.read(

@@ -1,5 +1,6 @@
 import 'package:rillight/emby/media_source_format.dart';
-import '../aggregation/history/history_models.dart' show encodeSource, decodeSource;
+import '../aggregation/history/history_models.dart'
+    show encodeSource, decodeSource;
 import '../aggregation/identity/media_identity.dart' show SourceReference;
 
 enum PlayMethod {
@@ -510,7 +511,9 @@ class PlaybackSessionSnapshot {
       baseUrl: baseUrl,
       userId: userId,
       timestamp: timestamp,
-      source: json['source'] is Map ? decodeSource(Map<String, dynamic>.from(json['source'] as Map)) : null,
+      source: json['source'] is Map
+          ? decodeSource(Map<String, dynamic>.from(json['source'] as Map))
+          : null,
       libraryId: json['libraryId'] as String?,
       regionGeneration: json['regionGeneration'] as int?,
     );

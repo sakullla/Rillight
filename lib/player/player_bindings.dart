@@ -3,13 +3,29 @@ import 'playback_runtime.dart';
 import 'playback_models.dart';
 import '../aggregation/history/history_models.dart';
 
-typedef PlaybackObservationSink = Future<bool> Function(PlaybackReport report, WatchTimeline timeline, int sequence);
 import 'package:rillight/player/danmaku/dandanplay_client.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/player_window.dart';
 import 'package:rillight/player/player_window_host.dart';
 import 'package:rillight/player/video_backend.dart';
+
+typedef PlaybackObservationSink =
+    Future<bool> Function(
+      PlaybackReport report,
+      WatchTimeline timeline,
+      int sequence,
+    );
+
+typedef PlaybackReportOutcomeSink =
+    Future<void> Function(
+      PlaybackReport report,
+      int observationSequence,
+      bool succeeded,
+    );
+
+typedef PlaybackSwitchDispatcher =
+    Future<Map<String, dynamic>> Function(Map<String, dynamic> command);
 
 class PlayerBindings {
   const PlayerBindings({
@@ -25,6 +41,8 @@ class PlayerBindings {
     this.danmakuClient,
     this.runtime,
     this.observationSink,
+    this.switchDispatcher,
+    this.reportOutcomeSink,
   });
 
   final VideoBackend Function()? createBackend;
@@ -33,6 +51,8 @@ class PlayerBindings {
   final PlayerSettingsStore? settingsStore;
   final PlaybackRuntime? runtime;
   final PlaybackObservationSink? observationSink;
+  final PlaybackSwitchDispatcher? switchDispatcher;
+  final PlaybackReportOutcomeSink? reportOutcomeSink;
 
   /// 会话快照存储;为 null 时 [PlayerController] 使用当前进程 pid 命名的
   /// `FilePlaybackSessionSnapshotStore`,测试注入

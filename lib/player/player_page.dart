@@ -161,6 +161,8 @@ class PlayerPageState extends State<PlayerPage> {
       client: AuthScope.of(context).client,
       runtime: bindings.runtime,
       observationSink: bindings.observationSink,
+      switchDispatcher: bindings.switchDispatcher,
+      reportOutcomeSink: bindings.reportOutcomeSink,
       openRequest: widget.sourceRequest,
       itemId: widget.itemId,
       backend: _createBackend(bindings),
@@ -212,6 +214,15 @@ class PlayerPageState extends State<PlayerPage> {
 
   void _onController() {
     final current = controller;
+    if (current?.permissionRevoked == true) {
+      _danmaku?.removeListener(_onDanmakuChanged);
+      _danmaku?.dispose();
+      _danmaku = null;
+      _danmakuPanelOpen = false;
+      _danmakuSearchOpen = false;
+      _danmakuLayerPinned = false;
+      _danmakuLayerItemId = null;
+    }
     _wakeLock.update(
       current != null &&
           current.isPlaying &&

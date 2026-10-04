@@ -368,6 +368,7 @@ class _PlayerWindowLayer extends StatelessWidget {
                         pageBuilder: (context, animation, secondaryAnimation) {
                           return PlayerPage(
                             itemId: request.itemId,
+                            sourceRequest: request,
                             autoResume: request.autoResume,
                             mediaSourceId: request.mediaSourceId,
                             audioStreamIndex: request.audioStreamIndex,

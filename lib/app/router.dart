@@ -88,6 +88,7 @@ GoRouter createAppRouter({
                   child: Theme(
                     data: AppTheme.dark(),
                     child: MobilePlayerPage(
+                      sourceRequest: request,
                       itemId: state.pathParameters['itemId']!,
                       mediaSourceId: request?.mediaSourceId,
                       autoResume: request?.autoResume ?? true,
@@ -212,6 +213,7 @@ GoRouter createAppRouter({
                 return Theme(
                   data: AppTheme.dark(),
                   child: TvPlayerPage(
+                    sourceRequest: request,
                     itemId: state.pathParameters['itemId']!,
                     mediaSourceId: request?.mediaSourceId,
                     autoResume: request?.autoResume ?? true,

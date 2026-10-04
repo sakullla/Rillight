@@ -1,5 +1,6 @@
 import 'package:rillight/emby/emby_client.dart';
 import 'playback_runtime.dart';
+import '../auth/region_access.dart';
 import 'package:dio/dio.dart';
 import 'package:rillight/player/playback_models.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
@@ -15,12 +16,34 @@ Future<bool> recoverAndroidSession(
   if (runtime != null) {
     final snapshot = await store.read();
     if (snapshot == null) return false;
-    if (await runtime.recoverSnapshot(snapshot)) {
+    try {
+      if (await runtime.recoverSnapshot(snapshot)) {
+        await store.delete();
+        return true;
+      }
       await store.delete();
-      return true;
+      return false;
+    } catch (_) {
+      final source = snapshot.source;
+      final library = snapshot.libraryId;
+      if (source == null ||
+          library == null ||
+          runtime.registry.sessionAccount(
+                source.account.configuredServerId,
+                region: source.account.region,
+                libraryId: library,
+              ) !=
+              source.account ||
+          (source.account.region == AccessRegion.private &&
+              snapshot.regionGeneration !=
+                  runtime.registry.access.generation)) {
+        // A revoked compensation is discarded, never kept as a lock-screen
+        // retry or resurrected when the same account is unlocked again.
+        await store.delete();
+        return false;
+      }
+      rethrow;
     }
-    await store.delete();
-    return false;
   }
   final base = client.baseUrl, user = client.userId, token = client.accessToken;
   if (base == null || user == null || token == null) return false;

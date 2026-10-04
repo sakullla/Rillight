@@ -15,7 +15,11 @@ import 'package:rillight/player/buffer_snapshot.dart';
 import 'package:rillight/player/playback_coordinator.dart';
 import 'package:rillight/player/playback_session.dart';
 import 'playback_runtime.dart';
-import 'player_bindings.dart' show PlaybackObservationSink;
+import 'player_bindings.dart'
+    show
+        PlaybackObservationSink,
+        PlaybackSwitchDispatcher,
+        PlaybackReportOutcomeSink;
 import 'player_window_host.dart';
 import '../auth/region_access.dart';
 import '../aggregation/history/history_writer.dart';
@@ -143,15 +147,26 @@ class PlayerController extends ChangeNotifier {
     this.settingsStore,
     this.runtime,
     this.observationSink,
+    this.switchDispatcher,
+    this.reportOutcomeSink,
     this.openRequest,
     this.nextPrefixFetch,
     PlaybackSessionSnapshotStore? snapshotStore,
   }) : snapshotStore =
            snapshotStore ??
            FilePlaybackSessionSnapshotStore.forCurrentProcess() {
+    startTimeTicks ??= openRequest?.startTimeTicks;
+    preferredMediaSourceId ??= openRequest?.mediaSourceId;
+    preferredAudioStreamIndex ??= openRequest?.audioStreamIndex;
+    preferredSubtitleStreamIndex ??= openRequest?.subtitleStreamIndex;
+    maxStreamingBitrate =
+        openRequest?.maxStreamingBitrate ?? maxStreamingBitrate;
     activeMediaSourceId = _scopedPlayback ? null : preferredMediaSourceId;
     runtime?.registry.access.addRevocationHook(_revokeSource);
     runtime?.registry.access.addCleanupHook(_closeRevokedSource);
+    runtime?.registry.access.addTerminationHook(_terminateRevokedSource);
+    runtime?.registry.addMembershipCleanup(_membershipRevoked);
+    runtime?.registry.addSourceRevocation(_sourceRevoked);
     _bindBackend();
     window.addListener(_emit);
   }
@@ -162,6 +177,8 @@ class PlayerController extends ChangeNotifier {
   EmbyClient client;
   final PlaybackRuntime? runtime;
   final PlaybackObservationSink? observationSink;
+  final PlaybackSwitchDispatcher? switchDispatcher;
+  final PlaybackReportOutcomeSink? reportOutcomeSink;
   bool get _scopedPlayback => runtime != null || observationSink != null;
   final PlayerOpenRequest? openRequest;
   PlaybackOrigin? origin;
@@ -170,9 +187,20 @@ class PlayerController extends ChangeNotifier {
   String? pendingLineId;
   PlaybackOrigin? _switchTarget;
   EmbyItem? _switchTargetItem;
-  ({PlaybackOrigin origin, ResolvedPlayback playback, EmbyItem? item, int position, int? audio, int? subtitle, bool paused})? _restoreOrigin;
+  ({
+    PlaybackOrigin origin,
+    ResolvedPlayback playback,
+    EmbyItem? item,
+    int position,
+    int? audio,
+    int? subtitle,
+    bool paused,
+  })?
+  _restoreOrigin;
   PlaybackSession? _revokedSession;
   bool _revoked = false;
+  bool get permissionRevoked => _revoked;
+  bool _revokedCleanupComplete = false;
   String itemId;
   final VideoBackend backend;
   final PlayerWindow window;
@@ -452,15 +480,39 @@ class PlayerController extends ChangeNotifier {
   Timer? _settingsSaveTimer;
   StreamSubscription<VideoBackendEvent>? _eventSub;
 
+  Future<T> _sourceRequest<T>(Future<T> Function() request) async {
+    if (_revoked) throw StateError('Playback permission revoked');
+    final permit = origin?.permit;
+    final result = permit == null
+        ? await request()
+        : await permit.dispatch((_) => request());
+    if (_revoked) throw StateError('Playback permission revoked');
+    return result;
+  }
+
   Future<void> start() async {
     if (runtime != null && origin == null) {
       try {
-        final resolvedOrigin = await runtime!.resolve(openRequest ?? PlayerOpenRequest(
-          itemId: itemId, mediaSourceId: preferredMediaSourceId));
+        final resolvedOrigin = await runtime!.resolve(
+          openRequest ??
+              PlayerOpenRequest(
+                itemId: itemId,
+                mediaSourceId: preferredMediaSourceId,
+              ),
+        );
         if (_disposed || _revoked) return;
         resolvedOrigin.permit.requireValid();
         origin = resolvedOrigin;
         client = resolvedOrigin.client;
+        final lines = runtime!.registry
+            .project(resolvedOrigin.source.account.region)
+            .firstWhere(
+              (s) => s.id == resolvedOrigin.source.account.configuredServerId,
+            )
+            .lines;
+        for (final line in lines) {
+          if (Uri.parse(line.address) == client.baseUrl) activeLineId = line.id;
+        }
       } catch (_) {
         loading = false;
         error = PlayerErrorKind.load;
@@ -528,7 +580,7 @@ class PlayerController extends ChangeNotifier {
       await _restoreSettings(operation);
       if (!_accepts(operation)) return;
       onStage?.call('catalog metadata');
-      final loadedItem = await client.getItem(itemId);
+      final loadedItem = await _sourceRequest(() => client.getItem(itemId));
       if (!_accepts(operation)) {
         return;
       }
@@ -549,7 +601,7 @@ class PlayerController extends ChangeNotifier {
         _resetEpisodeWindow();
       }
       try {
-        final loadedUser = await client.getUser();
+        final loadedUser = await _sourceRequest(client.getUser);
         if (!_accepts(operation)) return;
         user = loadedUser;
       } on EmbyException {
@@ -560,7 +612,9 @@ class PlayerController extends ChangeNotifier {
       duration = _catalogRuntime;
       _applyRememberedPreference();
       final memory = _rememberedPreference;
-      final memorySubtitleOff = memory?.subtitleOff ?? false;
+      final memorySubtitleOff =
+          (openRequest?.itemId == itemId && openRequest?.subtitleOff == true) ||
+          (memory?.subtitleOff ?? false);
       subtitleStreamIndex = memorySubtitleOff
           ? null
           : (preferredSubtitleStreamIndex ?? memory?.subtitleStreamIndex);
@@ -573,6 +627,8 @@ class PlayerController extends ChangeNotifier {
         await _open(
           operation: operation,
           startTicks: chapterTicks,
+          startPaused:
+              openRequest?.itemId == itemId && openRequest?.startPaused == true,
           audio: audioStreamIndex,
           subtitle: subtitleStreamIndex,
           subtitleOff: memorySubtitleOff,
@@ -585,6 +641,8 @@ class PlayerController extends ChangeNotifier {
         await _open(
           operation: operation,
           startTicks: 0,
+          startPaused:
+              openRequest?.itemId == itemId && openRequest?.startPaused == true,
           audio: audioStreamIndex,
           subtitle: subtitleStreamIndex,
           subtitleOff: memorySubtitleOff,
@@ -595,6 +653,8 @@ class PlayerController extends ChangeNotifier {
       await _open(
         operation: operation,
         startTicks: resumeTicks > 0 ? _rewound(resumeTicks) : 0,
+        startPaused:
+            openRequest?.itemId == itemId && openRequest?.startPaused == true,
         audio: audioStreamIndex,
         subtitle: subtitleStreamIndex,
         subtitleOff: memorySubtitleOff,
@@ -606,6 +666,12 @@ class PlayerController extends ChangeNotifier {
       }
       error = PlayerErrorKind.load;
       loadFailure = failure;
+      loading = false;
+      state.phase = PlaybackPhase.failed;
+      _emit();
+    } catch (_) {
+      if (!_accepts(operation)) return;
+      error = PlayerErrorKind.load;
       loading = false;
       state.phase = PlaybackPhase.failed;
       _emit();
@@ -1073,9 +1139,11 @@ class PlayerController extends ChangeNotifier {
     final operation = _operations.current;
     if (operation == null) return;
     _prefixYield = true;
+    _seekInFlight = true;
     try {
       await _operations.run(operation, () => backend.seek(target));
     } finally {
+      _seekInFlight = false;
       _prefixYield = false;
     }
     if (!_accepts(operation)) return;
@@ -1654,6 +1722,28 @@ class PlayerController extends ChangeNotifier {
     required bool fromStart,
     bool finishCurrent = false,
   }) async {
+    final actual = origin;
+    if (runtime == null && switchDispatcher != null) {
+      await switchDispatcher!({'action': 'authorizeItem', 'item': targetId});
+      if (_disposed || _revoked) return;
+    }
+    PlaybackOrigin? nextOrigin;
+    if (runtime != null && actual != null) {
+      // Resolve the concrete next item again: version ids and library membership
+      // do not carry over from the previous episode.
+      nextOrigin = await runtime!.resolve(
+        PlayerOpenRequest(
+          itemId: targetId,
+          source: SourceReference(
+            account: actual.source.account,
+            itemId: targetId,
+          ),
+          work: actual.work,
+          libraryId: actual.libraryId,
+        ),
+      );
+      if (_disposed || _revoked || !identical(origin, actual)) return;
+    }
     final handoff = _nextPrefix?.itemId == targetId;
     final operation = _beginOperation(keepNextPrefix: handoff);
     if (operation == null || _disposed) return;
@@ -1681,12 +1771,18 @@ class PlayerController extends ChangeNotifier {
     await stopped;
     if (finishCurrent) {
       try {
-        await client.markPlayed(finishedId);
+        await _sourceRequest(() => client.markPlayed(finishedId));
       } on EmbyException {
         // 片尾位置的 Stopped 仍会让服务端按进度标已看。
       }
     }
     if (!_accepts(operation)) return;
+    if (nextOrigin != null) {
+      nextOrigin.permit.requireValid();
+      origin = nextOrigin;
+      client = nextOrigin.client;
+    }
+    activeOrigin = null;
     activeMediaSourceId = null;
     preferredMediaSourceId = null;
     preferredAudioStreamIndex = null;
@@ -1725,13 +1821,15 @@ class PlayerController extends ChangeNotifier {
     episodeListFailed = false;
     _emit();
     try {
-      final loaded = await client.getItems(
-        parentId: seriesId,
-        includeItemTypes: 'Season',
-        recursive: true,
-        sortBy: 'IndexNumber',
-        sortOrder: 'Ascending',
-        fields: EmbyClient.gridFields,
+      final loaded = await _sourceRequest(
+        () => client.getItems(
+          parentId: seriesId,
+          includeItemTypes: 'Season',
+          recursive: true,
+          sortBy: 'IndexNumber',
+          sortOrder: 'Ascending',
+          fields: EmbyClient.gridFields,
+        ),
       );
       if (!_accepts(operation)) {
         return;
@@ -1949,15 +2047,17 @@ class PlayerController extends ChangeNotifier {
     int startIndex, {
     int limit = kPlayerEpisodePageSize,
   }) {
-    return client.queryItems(
-      parentId: seasonId,
-      includeItemTypes: 'Episode',
-      recursive: true,
-      sortBy: 'IndexNumber',
-      sortOrder: 'Ascending',
-      startIndex: startIndex,
-      limit: limit,
-      fields: EmbyClient.gridFields,
+    return _sourceRequest(
+      () => client.queryItems(
+        parentId: seasonId,
+        includeItemTypes: 'Episode',
+        recursive: true,
+        sortBy: 'IndexNumber',
+        sortOrder: 'Ascending',
+        startIndex: startIndex,
+        limit: limit,
+        fields: EmbyClient.gridFields,
+      ),
     );
   }
 
@@ -2191,7 +2291,7 @@ class PlayerController extends ChangeNotifier {
     }
     _nextUpLoading = true;
     try {
-      final next = await client.getNextEpisode(current);
+      final next = await _sourceRequest(() => client.getNextEpisode(current));
       if (!_accepts(operation)) {
         return;
       }
@@ -2259,9 +2359,42 @@ class PlayerController extends ChangeNotifier {
   // ---------------------------------------------------------------------
 
   PreferenceResolution? preferenceResolution;
+  bool scopedPreferencePending = false;
+  bool _savePreferenceAfterObservation = false;
+  void acknowledgeScopedPreference() => scopedPreferencePending = false;
   PlaybackSwitchPlan? switchConfirmation;
   ResolvedPlayback? _switchOriginal;
   int _switchInspection = 0;
+  bool _hostSwitchPending = false;
+  bool _seekInFlight = false;
+
+  Future<void> _inspectHostSwitch(Map<String, dynamic> target) async {
+    if (_revoked || resolved == null || switchDispatcher == null) {
+      throw StateError('Playback unavailable');
+    }
+    final original = resolved;
+    final reply = await switchDispatcher!({
+      'action': 'inspect',
+      ...target,
+      'item': itemId,
+      'version': resolved!.mediaSource.id,
+      'position': ticksFromDuration(position),
+      'paused': !isPlaying,
+      'bitrate': maxStreamingBitrate,
+      'audio': audioStreamIndex,
+      'subtitle': subtitleStreamIndex,
+    });
+    if (_revoked || _disposed || !identical(resolved, original)) return;
+    switchConfirmation = PlaybackSwitchPlan.fromJson(
+      Map<String, dynamic>.from(reply['plan'] as Map),
+    );
+    _switchOriginal = original;
+    _hostSwitchPending = true;
+    _emit();
+    if (!switchConfirmation!.needsConfirmation) {
+      await confirmMediaSourceSwitch(SwitchResumeChoice.currentPosition);
+    }
+  }
 
   /// Preflight leaves the old native/session active. Equal runtimes are not
   /// timeline proof and indices are never carried between different versions.
@@ -2280,9 +2413,20 @@ class PlayerController extends ChangeNotifier {
     try {
       final target = _switchTarget;
       final info = target == null
-          ? await client.getPlaybackInfo(itemId: itemId, maxStreamingBitrate: maxStreamingBitrate).timeout(recoveryTimeout)
-          : await target.permit.dispatch((_) => target.client.getPlaybackInfo(
-              itemId: target.source.itemId, maxStreamingBitrate: maxStreamingBitrate)).timeout(recoveryTimeout);
+          ? await _sourceRequest(
+              () => client.getPlaybackInfo(
+                itemId: itemId,
+                maxStreamingBitrate: maxStreamingBitrate,
+              ),
+            ).timeout(recoveryTimeout)
+          : await target.permit
+                .dispatch(
+                  (_) => target.client.getPlaybackInfo(
+                    itemId: target.source.itemId,
+                    maxStreamingBitrate: maxStreamingBitrate,
+                  ),
+                )
+                .timeout(recoveryTimeout);
       if (!_accepts(operation) ||
           inspection != _switchInspection ||
           !identical(resolved, current)) {
@@ -2302,8 +2446,11 @@ class PlayerController extends ChangeNotifier {
         maxStreamingBitrate: maxStreamingBitrate,
         audioIndex: audioStreamIndex,
         subtitleIndex: subtitleStreamIndex,
-        sameVersion: target != null && target.source.account == origin?.source.account &&
-            target.source.itemId == itemId && target.source.mediaSourceId == current.mediaSource.id,
+        sameVersion:
+            target != null &&
+            target.source.account == origin?.source.account &&
+            target.source.itemId == itemId &&
+            target.source.mediaSourceId == current.mediaSource.id,
       );
       switchConfirmation = plan;
       _switchOriginal = current;
@@ -2330,6 +2477,10 @@ class PlayerController extends ChangeNotifier {
     final plan = switchConfirmation;
     if (plan == null) return;
     if (choice == SwitchResumeChoice.cancel) {
+      if (_hostSwitchPending) {
+        await switchDispatcher!({'action': 'cancel'});
+        _hostSwitchPending = false;
+      }
       ++_switchInspection;
       switchConfirmation = null;
       _switchOriginal = null;
@@ -2364,12 +2515,32 @@ class PlayerController extends ChangeNotifier {
         !turnSubtitlesOff) {
       throw StateError('Choose subtitles or explicitly turn them off');
     }
+    if (_hostSwitchPending) {
+      await switchDispatcher!({
+        'action': 'confirm',
+        'choice': choice.name,
+        'audio': audioIndex,
+        'subtitle': subtitleIndex,
+        'acceptDefaultAudio': acceptDefaultAudio,
+        'turnSubtitlesOff': turnSubtitlesOff,
+      });
+      _hostSwitchPending = false;
+      switchConfirmation = null;
+      _switchOriginal = null;
+      return;
+    }
     final target = _switchTarget;
     if (target != null) {
       target.permit.requireValid();
-      await _commitSourceSwitch(target, plan, choice,
+      await _commitSourceSwitch(
+        target,
+        plan,
+        choice,
         audioIndex: audioIndex ?? plan.audioIndex,
-        subtitleIndex: turnSubtitlesOff ? null : (subtitleIndex ?? plan.subtitleIndex));
+        subtitleIndex: turnSubtitlesOff
+            ? null
+            : (subtitleIndex ?? plan.subtitleIndex),
+      );
       return;
     }
     switchConfirmation = null;
@@ -2392,9 +2563,14 @@ class PlayerController extends ChangeNotifier {
 
   /// Confirmed T4 comparison only; episode continuation additionally consumes
   /// T2's concrete lookup rather than playing the series or a neighbouring item.
-  Future<void> switchConfirmedSource(SourceComparison candidate, String version,
-      {EpisodeComparison? episode}) async {
-    if (runtime == null || origin == null || !candidate.decision.confirmed) {
+  Future<void> switchConfirmedSource(
+    SourceComparison candidate,
+    String version, {
+    EpisodeComparison? episode,
+  }) async {
+    if (!candidate.decision.confirmed ||
+        (runtime == null && switchDispatcher == null) ||
+        (runtime != null && origin == null)) {
       throw StateError('A permitted confirmed source is required');
     }
     var reference = candidate.source.reference;
@@ -2406,54 +2582,90 @@ class PlayerController extends ChangeNotifier {
       }
       reference = episode.lookup.source!.reference;
     }
-    final target = await runtime!.resolve(PlayerOpenRequest(itemId: reference.itemId,
-      source: reference, work: candidate.source.reference.item,
-      libraryId: candidate.source.libraryId, mediaSourceId: version));
+    if (switchDispatcher != null && runtime == null) {
+      await _inspectHostSwitch({
+        'target': encodeSource(reference),
+        'work': encodeSource(candidate.source.reference.item),
+        'library': candidate.source.libraryId,
+        'targetVersion': version,
+        'numbering': episode?.lookup.source?.numberingScheme,
+      });
+      return;
+    }
+    final original = origin!;
+    final target = await runtime!.resolve(
+      PlayerOpenRequest(
+        itemId: reference.itemId,
+        source: reference,
+        work: candidate.source.reference.item,
+        libraryId: candidate.source.libraryId,
+        mediaSourceId: version,
+      ),
+    );
+    await runtime!.requireEquivalent(
+      original,
+      target,
+      numberingScheme: episode?.lookup.source?.numberingScheme,
+    );
     target.permit.requireValid();
-    _switchTargetItem = await target.permit.dispatch((c) => c.getItem(reference.itemId));
+    if (!identical(origin, original) || _revoked || _disposed) return;
+    _switchTargetItem = await target.permit.dispatch(
+      (c) => c.getItem(reference.itemId),
+    );
     _switchTarget = target;
     await switchMediaSource(version);
   }
 
   /// Identity is checked anonymously before attaching credentials to a line.
   Future<void> switchLine(String lineId) async {
+    if (runtime == null && switchDispatcher != null) {
+      await _inspectHostSwitch({'line': lineId});
+      return;
+    }
     final actual = origin;
     final current = resolved;
     if (runtime == null || actual == null || current == null) {
       throw StateError('Scoped playback required');
     }
-    actual.permit.requireValid();
-    final server = runtime!.registry.project(actual.source.account.region)
-        .firstWhere((s) => s.id == actual.source.account.configuredServerId);
-    final line = server.lines.firstWhere((l) => l.id == lineId);
-    final independent = runtime!.registry.createClient();
-    final address = Uri.parse(line.address);
-    final identity = await independent.getPublicInfo(address).timeout(recoveryTimeout);
-    actual.permit.requireValid();
-    if (identity.id != actual.source.account.verifiedServerId) {
-      throw StateError('Line ServerId does not match the actual source');
+    final target = await runtime!.resolveLine(
+      actual,
+      lineId,
+      current.mediaSource.id,
+      timeout: recoveryTimeout,
+    );
+    if (_revoked ||
+        _disposed ||
+        !identical(origin, actual) ||
+        !identical(resolved, current)) {
+      return;
     }
-    independent.attachSession(baseUrl: address, accessToken: actual.client.accessToken!,
-      userId: actual.source.account.userId, userAgent: actual.client.customUserAgent);
-    final user = await independent.getUser().timeout(recoveryTimeout);
-    actual.permit.requireValid();
-    if (user.id != actual.source.account.userId) throw StateError('Line account mismatch');
-    _switchTarget = PlaybackOrigin(source: SourceReference(account: actual.source.account,
-      itemId: itemId, mediaSourceId: current.mediaSource.id), work: actual.work,
-      libraryId: actual.libraryId, permit: actual.permit, client: independent);
+    _switchTarget = target;
     _switchTargetItem = item;
     pendingLineId = lineId;
     await switchMediaSource(current.mediaSource.id);
   }
 
-  Future<void> _commitSourceSwitch(PlaybackOrigin target, PlaybackSwitchPlan plan,
-      SwitchResumeChoice choice, {int? audioIndex, int? subtitleIndex}) async {
+  Future<void> _commitSourceSwitch(
+    PlaybackOrigin target,
+    PlaybackSwitchPlan plan,
+    SwitchResumeChoice choice, {
+    int? audioIndex,
+    int? subtitleIndex,
+  }) async {
     final old = origin!;
     final previous = resolved!;
-    _restoreOrigin = (origin: old, playback: previous, item: item,
-      position: plan.positionTicks, audio: audioStreamIndex,
-      subtitle: subtitleStreamIndex, paused: plan.paused);
+    _restoreOrigin = (
+      origin: old,
+      playback: previous,
+      item: item,
+      position: plan.positionTicks,
+      audio: audioStreamIndex,
+      subtitle: subtitleStreamIndex,
+      paused: plan.paused,
+    );
     final nextItem = _switchTargetItem;
+    pendingLineId ??= _lineFor(target);
+    _savePreferenceAfterObservation = true;
     switchConfirmation = null;
     _switchOriginal = null;
     _switchTarget = null;
@@ -2461,8 +2673,10 @@ class PlayerController extends ChangeNotifier {
     final stopped = _stopSession();
     _operations.invalidate();
     try {
-      await Future.wait([stopped, _operations.interrupt(backend.stop, ensureRetired: true)])
-          .timeout(recoveryTimeout);
+      await Future.wait([
+        stopped,
+        _operations.interrupt(backend.stop, ensureRetired: true),
+      ]).timeout(recoveryTimeout);
       target.permit.requireValid();
       if (_disposed || _revoked) return;
       origin = target;
@@ -2473,38 +2687,74 @@ class PlayerController extends ChangeNotifier {
       if (operation == null) return;
       maxStreamingBitrate = plan.maxStreamingBitrate;
       pendingMediaSourceId = plan.sourceId;
-      await _open(operation: operation,
-        startTicks: choice == SwitchResumeChoice.beginning ? 0 : plan.positionTicks,
-        audio: audioIndex, subtitle: subtitleIndex, subtitleOff: subtitleIndex == null,
-        requestedSourceId: plan.sourceId, startPaused: plan.paused, strictTracks: true)
-          .timeout(recoveryTimeout);
+      await _open(
+        operation: operation,
+        startTicks: choice == SwitchResumeChoice.beginning
+            ? 0
+            : plan.positionTicks,
+        audio: audioIndex,
+        subtitle: subtitleIndex,
+        subtitleOff: subtitleIndex == null,
+        requestedSourceId: plan.sourceId,
+        startPaused: plan.paused,
+        strictTracks: true,
+      ).timeout(recoveryTimeout);
     } catch (failure) {
       loading = false;
       isPlaying = false;
       state.phase = PlaybackPhase.failed;
-      disconnectDetail = 'Source switch failed; original source may be restored: $failure';
+      disconnectDetail =
+          'Source switch failed; original source may be restored: $failure';
       _emit();
     }
   }
 
+  String? _lineFor(PlaybackOrigin source) {
+    for (final server in runtime!.registry.project(
+      source.source.account.region,
+    )) {
+      if (server.id != source.source.account.configuredServerId) continue;
+      for (final line in server.lines) {
+        if (Uri.parse(line.address) == source.client.baseUrl) return line.id;
+      }
+    }
+    return null;
+  }
+
   Future<void> restoreOriginalSource() async {
+    if (runtime == null && switchDispatcher != null) {
+      if (_revoked) throw StateError('Playback permission revoked');
+      await switchDispatcher!({'action': 'restore'});
+      return;
+    }
     final original = _restoreOrigin;
-    if (original == null || _disposed || _revoked) throw StateError('No restorable source');
+    if (original == null || _disposed || _revoked) {
+      throw StateError('No restorable source');
+    }
     original.origin.permit.requireValid();
     await _stopSession();
-    await _operations.interrupt(backend.stop, ensureRetired: true).timeout(recoveryTimeout);
+    await _operations
+        .interrupt(backend.stop, ensureRetired: true)
+        .timeout(recoveryTimeout);
     original.origin.permit.requireValid();
     origin = original.origin;
+    pendingLineId = _lineFor(original.origin);
+    _savePreferenceAfterObservation = true;
     client = origin!.client;
     itemId = origin!.source.itemId;
     item = original.item;
     final operation = _beginOperation();
     if (operation == null) return;
-    await _open(operation: operation, startTicks: original.position,
-      audio: original.audio, subtitle: original.subtitle,
-      subtitleOff: original.subtitle == null, startPaused: original.paused,
-      requestedSourceId: original.playback.mediaSource.id, strictTracks: true)
-        .timeout(recoveryTimeout);
+    await _open(
+      operation: operation,
+      startTicks: original.position,
+      audio: original.audio,
+      subtitle: original.subtitle,
+      subtitleOff: original.subtitle == null,
+      startPaused: original.paused,
+      requestedSourceId: original.playback.mediaSource.id,
+      strictTracks: true,
+    ).timeout(recoveryTimeout);
   }
 
   /// 关闭播放器:取消定时器 → 在 [stoppedTimeout] 内等待 Stopped 送达
@@ -2625,11 +2875,28 @@ class PlayerController extends ChangeNotifier {
           final offered = nextEpisode;
           final previousPosition = position;
           _setPosition(event.value as Duration);
-          if (_scopedPlayback && isPlaying && !loading && position > previousPosition) {
+          final frozenSession = _session;
+          if (frozenSession?.frozenStop != null &&
+              origin?.permit.isValid == true) {
+            frozenSession!.frozenStop!.updateReport(
+              origin!.permit,
+              _currentReport(),
+            );
+          }
+          if (_scopedPlayback &&
+              isPlaying &&
+              !loading &&
+              !_seekInFlight &&
+              position > previousPosition) {
             final session = _session;
+            session?.lastObservedPositionTicks = ticksFromDuration(position);
             if (session != null && !session.actuallyStarted) {
               session.actuallyStarted = true;
-              unawaited(_persistObservation(session).catchError((Object _) { _markProgressSyncFailed(persistent: true); }));
+              unawaited(
+                _persistObservation(session).catchError((Object _) {
+                  _markProgressSyncFailed(persistent: true);
+                }),
+              );
             }
           }
           _updateNetworkSlow();
@@ -2872,39 +3139,83 @@ class PlayerController extends ChangeNotifier {
       // 不带 MediaSourceId 请求:部分服务端(含 Emby)收到该参数时只返回
       // 这一个源,播放器就再也列不出其它版本;全部源在本地用
       // [preferredPlaybackSourceId] 按 id/发行组标签挑选。
-      final info = await client.getPlaybackInfo(
-        itemId: itemId,
-        maxStreamingBitrate: requestedBitrate ?? maxStreamingBitrate,
-        startTimeTicks: startTicks > 0 ? startTicks : null,
-        audioStreamIndex:
-            audio ?? (strictTracks ? null : preferredAudioStreamIndex),
-        subtitleStreamIndex: subtitleOff
-            ? null
-            : (subtitle ??
-                  (strictTracks ? null : preferredSubtitleStreamIndex)),
-        deviceProfile: backend is VideoBackendCapabilities
-            ? await (backend as VideoBackendCapabilities).deviceProfile(
-                requestedBitrate ?? maxStreamingBitrate,
-              )
-            : null,
-        forceTranscode: forceTranscode,
+      var info = await _sourceRequest(
+        () async => client.getPlaybackInfo(
+          itemId: itemId,
+          maxStreamingBitrate: requestedBitrate ?? maxStreamingBitrate,
+          startTimeTicks: startTicks > 0 ? startTicks : null,
+          audioStreamIndex:
+              audio ?? (strictTracks ? null : preferredAudioStreamIndex),
+          subtitleStreamIndex: subtitleOff
+              ? null
+              : (subtitle ??
+                    (strictTracks ? null : preferredSubtitleStreamIndex)),
+          deviceProfile: backend is VideoBackendCapabilities
+              ? await (backend as VideoBackendCapabilities).deviceProfile(
+                  requestedBitrate ?? maxStreamingBitrate,
+                )
+              : null,
+          forceTranscode: forceTranscode,
+        ),
       );
       if (!_accepts(operation)) {
         return;
       }
       mediaSources = info.mediaSources;
       if (runtime != null && origin != null) {
-        preferenceResolution = runtime!.history.resolvePreference(
-          owner: origin!.work, region: origin!.source.account.region,
-          candidates: info.mediaSources.map((s) => PreferenceCandidate(
-            SourceReference(account: origin!.source.account, itemId: itemId, mediaSourceId: s.id),
-            origin!.libraryId, versionName: s.name)),
+        preferenceResolution = runtime!.preference(
+          origin!,
+          item!,
+          info.mediaSources,
         );
+      }
+      final preference = preferenceResolution;
+      final explicitVersion = requestedSourceId ?? preferredMediaSourceId;
+      if (_scopedPlayback &&
+          runtime != null &&
+          explicitVersion == null &&
+          preference?.failure != null &&
+          preference!.failure != PreferenceFailure.notConfigured) {
+        await _failOpen(
+          operation,
+          detail:
+              'Source preference requires explicit selection: ${preference.failure}',
+        );
+        return;
+      }
+      if (preference?.failure == null &&
+          preference?.selected != null &&
+          explicitVersion == null) {
+        final settings = preference!.preference!.settings;
+        final line = preference.preference!.lineId;
+        if (line != null && line != activeLineId) {
+          await _failOpen(
+            operation,
+            detail: 'Saved line requires an explicit line switch',
+          );
+          return;
+        }
+        _rememberedPreference = settings;
+        if (settings.maxStreamingBitrate != null &&
+            settings.maxStreamingBitrate != maxStreamingBitrate) {
+          maxStreamingBitrate = settings.maxStreamingBitrate!;
+          info = await _sourceRequest(
+            () => client.getPlaybackInfo(
+              itemId: itemId,
+              maxStreamingBitrate: maxStreamingBitrate,
+              forceTranscode: forceTranscode,
+            ),
+          );
+          if (!_accepts(operation)) return;
+        }
       }
       final chosenId = preferredPlaybackSourceId(
         sources: info.mediaSources,
         requestedId:
-            requestedSourceId ?? activeMediaSourceId ?? preferredMediaSourceId,
+            requestedSourceId ??
+            activeMediaSourceId ??
+            preferredMediaSourceId ??
+            preference?.selected?.source.mediaSourceId,
         requestedName: _preferredSourceName,
       );
       if (requestedSourceId != null && chosenId != requestedSourceId) {
@@ -3419,7 +3730,9 @@ class PlayerController extends ChangeNotifier {
     final safeFormat = format.replaceAll(RegExp(r'[^a-z0-9]'), '');
     final ext = safeFormat.isEmpty ? 'srt' : safeFormat;
     final safeId = itemId.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_');
-    final bytes = await client.readAuthorizedBytes(remote);
+    final bytes = await _sourceRequest(
+      () => client.readAuthorizedBytes(remote),
+    );
     if (!current()) return null;
     final sample = utf8
         .decode(
@@ -3548,6 +3861,9 @@ class PlayerController extends ChangeNotifier {
       !session.stopped &&
       !session.revoked &&
       session.ownsCredentials &&
+      (session.watchSession == null ||
+          runtime?.history.sessionById(session.watchSession!.id) ==
+              session.watchSession) &&
       !_operations.isClosed &&
       !_disposed;
 
@@ -3563,11 +3879,19 @@ class PlayerController extends ChangeNotifier {
       report: report,
       permit: origin?.permit,
       frozenStop: origin?.source.account.region == AccessRegion.private
-          ? runtime!.registry.freezeStop(origin!.permit, report) : null,
+          ? runtime!.registry.freezeStop(
+              origin!.permit,
+              report,
+              actualClient: client,
+            )
+          : null,
     );
     _session = session;
     if (runtime != null && origin != null) {
-      session.watchSession = await runtime!.begin(origin!, report.mediaSourceId);
+      session.watchSession = await runtime!.begin(
+        origin!,
+        report.mediaSourceId,
+      );
       if (!_ownsSession(session) || !_accepts(operation)) return;
     }
     checkIn.start();
@@ -3600,20 +3924,57 @@ class PlayerController extends ChangeNotifier {
     if (session == null || !_ownsSession(session) || sessionExpired) return;
     final report = _currentReport(eventName: eventName);
     session.report = report;
+    var observationSequence = session.eventSequence;
+    var sent = false;
     try {
       if (_scopedPlayback && session.actuallyStarted && isPlaying) {
-        await _persistObservation(session);
+        final observing = _persistObservation(session);
+        observationSequence = session.eventSequence;
+        await observing;
         if (!_ownsSession(session)) return;
       }
       await session.observations;
-      await session.enqueue(() => session.client.reportProgress(report));
+      var record = session.lastRecord;
+      if (runtime != null && record != null) {
+        final order = record.localOrder;
+        final current = runtime!.history
+            .records(record.source.account.region)
+            .where((r) => r.localOrder == order);
+        record = current.length == 1 ? current.single : null;
+      }
+      sent = true;
+      if (runtime != null && record != null) {
+        Object? remoteFailure;
+        await runtime!.history.synchronize(record, (_, _) async {
+          try {
+            await session.enqueue(() => session.client.reportProgress(report));
+          } catch (failure) {
+            remoteFailure = failure;
+            rethrow;
+          }
+        });
+        if (remoteFailure != null) throw remoteFailure!;
+      } else {
+        await session.enqueue(() => session.client.reportProgress(report));
+      }
       if (!_ownsSession(session)) return;
+      await reportOutcomeSink?.call(report, observationSequence, true);
       _onReportSucceeded();
       _writeSnapshot(session, report);
     } on EmbyException catch (failure) {
-      if (_ownsSession(session)) _onReportFailed(failure);
+      if (_ownsSession(session)) {
+        if (sent) {
+          await reportOutcomeSink?.call(report, observationSequence, false);
+        }
+        _onReportFailed(failure);
+      }
     } catch (_) {
-      if (_ownsSession(session)) _onReportFailed(null);
+      if (_ownsSession(session)) {
+        if (sent) {
+          await reportOutcomeSink?.call(report, observationSequence, false);
+        }
+        _onReportFailed(null);
+      }
     }
   }
 
@@ -3624,6 +3985,15 @@ class PlayerController extends ChangeNotifier {
     if (session == null) return _awaitPendingStopped();
     final report = _currentReport(positionTicks: positionTicks);
     session.report = report;
+    if (_scopedPlayback && session.actuallyStarted) {
+      unawaited(
+        _persistObservation(session, finalObservation: true).catchError((
+          Object _,
+        ) {
+          progressSyncFailed = true;
+        }),
+      );
+    }
     session.stopped = true;
     _session = null;
     checkIn.stop();
@@ -3648,6 +4018,7 @@ class PlayerController extends ChangeNotifier {
     PlaybackReport report,
   ) async {
     try {
+      await session.observations.timeout(stoppedTimeout);
       await session
           .enqueue(() => session.client.reportStopped(report))
           .timeout(stoppedTimeout);
@@ -3682,6 +4053,11 @@ class PlayerController extends ChangeNotifier {
               _backgroundReleased)) {
         _onReportFailed(null);
       }
+    } finally {
+      final watch = session.watchSession;
+      if (watch != null) runtime?.history.endSession(watch);
+      final frozen = session.frozenStop;
+      if (frozen != null) runtime?.registry.releaseStop(frozen);
     }
   }
 
@@ -3747,9 +4123,16 @@ class PlayerController extends ChangeNotifier {
       baseUrl: baseUrl,
       userId: userId,
       timestamp: DateTime.now(),
-      source: origin?.source ?? openRequest?.source,
+      source: (origin?.source ?? openRequest?.source) == null
+          ? null
+          : SourceReference(
+              account: (origin?.source ?? openRequest!.source!).account,
+              itemId: report.itemId,
+              mediaSourceId: report.mediaSourceId,
+            ),
       libraryId: origin?.libraryId ?? openRequest?.libraryId,
-      regionGeneration: origin?.permit.regionGeneration,
+      regionGeneration:
+          origin?.permit.regionGeneration ?? openRequest?.regionGeneration,
     );
     unawaited(
       _enqueueSnapshot(() async {
@@ -3796,27 +4179,50 @@ class PlayerController extends ChangeNotifier {
     }
   }
 
-  Future<void> _persistObservation(PlaybackSession session) {
+  Future<void> _persistObservation(
+    PlaybackSession session, {
+    bool finalObservation = false,
+  }) {
     final watch = session.watchSession;
-    if (!_scopedPlayback || !_ownsSession(session) ||
-        !session.actuallyStarted || !isPlaying) {
+    final eligible = finalObservation
+        ? identical(_session, session) &&
+              !session.stopped &&
+              !session.revoked &&
+              session.ownsCredentials
+        : _ownsSession(session);
+    if (!_scopedPlayback ||
+        !eligible ||
+        !session.actuallyStarted ||
+        (!isPlaying && !finalObservation)) {
       return Future.value();
     }
-    final observedTicks = ticksFromDuration(position);
-    final timeline = WatchTimeline(durationTicks: ticksFromDuration(duration),
+    final observedTicks = session.lastObservedPositionTicks;
+    if (observedTicks == null) return Future.value();
+    final timeline = WatchTimeline(
+      durationTicks: ticksFromDuration(duration),
       edition: resolved?.mediaSource.name,
-      season: item?.parentIndexNumber, episode: item?.indexNumber);
+      season: item?.parentIndexNumber,
+      episode: item?.indexNumber,
+    );
     final sequence = ++session.eventSequence;
+    final observedReport = _currentReport(positionTicks: observedTicks);
     final work = session.observations.then((_) async {
-      if (!_ownsSession(session)) return;
+      // A normal stop drains already observed events before retiring history.
+      // Revocation, unlike stop, forbids any queued observation/IPC dispatch.
+      if (session.revoked || !(session.permit?.isValid ?? !_revoked)) return;
       final bool recorded;
       if (runtime != null && watch != null) {
-        final record = await runtime!.history.observe(session: watch,
-          eventSequence: sequence, positionTicks: observedTicks,
-          actuallyPlaying: true, timeline: timeline);
+        final record = await runtime!.history.observe(
+          session: watch,
+          eventSequence: sequence,
+          positionTicks: observedTicks,
+          actuallyPlaying: true,
+          timeline: timeline,
+        );
         recorded = record != null;
+        if (record != null) session.lastRecord = record;
       } else {
-        recorded = await observationSink!(_currentReport(positionTicks: observedTicks), timeline, sequence);
+        recorded = await observationSink!(observedReport, timeline, sequence);
       }
       if (!recorded) throw StateError('Actual observation was not persisted');
       if (_ownsSession(session)) {
@@ -3825,10 +4231,17 @@ class PlayerController extends ChangeNotifier {
         activeLineId = pendingLineId ?? activeLineId;
         pendingLineId = null;
         pendingMediaSourceId = null;
+        if (_savePreferenceAfterObservation && runtime != null) {
+          await _persistSeriesPreference();
+          _savePreferenceAfterObservation = false;
+        }
         _emit();
       }
     });
-    session.observations = work.then<void>((_) {}, onError: (Object _, StackTrace _) {});
+    session.observations = work.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace _) {},
+    );
     return work;
   }
 
@@ -3837,14 +4250,64 @@ class PlayerController extends ChangeNotifier {
         openRequest?.source?.account.region != AccessRegion.private) {
       return;
     }
+    _revokePlayback();
+  }
+
+  Future<void> _membershipRevoked(
+    SourceAccount? account,
+    String serverId,
+  ) async {
+    if (origin?.source.account.configuredServerId != serverId &&
+        _switchTarget?.source.account.configuredServerId != serverId) {
+      return;
+    }
+    _revokePlayback();
+    await Future.wait([
+      _operations
+          .interrupt(backend.stop, ensureRetired: true)
+          .timeout(disposeTimeout),
+      _enqueueSnapshot(snapshotStore.delete),
+    ]);
+  }
+
+  void _sourceRevoked(String serverId) {
+    if (origin?.source.account.configuredServerId != serverId &&
+        _switchTarget?.source.account.configuredServerId != serverId) {
+      return;
+    }
+    _revokePlayback();
+    // Private lock uses the already frozen RestrictedStop transaction. Other
+    // scope revocations must stop native playback too, with no compensating
+    // requests or snapshots dispatched through a revoked normal permit.
+    unawaited(
+      _operations
+          .interrupt(backend.stop, ensureRetired: true)
+          .timeout(disposeTimeout)
+          .catchError((Object _) {}),
+    );
+    unawaited(_enqueueSnapshot(snapshotStore.delete));
+    unawaited(_deleteSubtitleCache());
+  }
+
+  void _revokePlayback() {
+    if (_revoked) return;
     _revoked = true;
     _revokedSession = _session;
+    _revokedSession?.revoked = true;
     _session = null;
     _operations.invalidate();
     _progressTimer?.cancel();
     _nextTimer?.cancel();
     switchConfirmation = null;
     _switchOriginal = null;
+    _switchTarget = null;
+    _switchTargetItem = null;
+    _restoreOrigin = null;
+    activeOrigin = null;
+    activeMediaSourceId = null;
+    pendingMediaSourceId = null;
+    activeLineId = null;
+    pendingLineId = null;
     resolved = null;
     item = null;
     user = null;
@@ -3854,21 +4317,33 @@ class PlayerController extends ChangeNotifier {
     isPlaying = false;
     loading = false;
     sessionExpired = true;
+    position = duration = buffer = Duration.zero;
+    bufferSnapshot = BufferSnapshot.empty(
+      sessionId: 0,
+      unknownReason: 'revoked',
+    );
+    trackFailure = null;
+    preferenceResolution = null;
+    subtitleNotice = null;
+    activeSkipSegment = null;
+    _skipSegments = const [];
     state.phase = PlaybackPhase.failed;
     disconnectDetail = 'Playback permission revoked';
     unawaited(_discardNextPrefix());
     _emit();
   }
 
-  Future<void> revokeFromHost() async {
+  Future<void> revokeFromHost({bool reportStopped = true}) async {
     final session = _session;
     final report = session == null ? null : _currentReport();
-    _revokeSource();
+    _revokePlayback();
     if (session != null) session.revoked = true;
     try {
       await Future.wait([
-        backend.stop().timeout(disposeTimeout),
-        if (session != null && report != null)
+        _operations
+            .interrupt(backend.stop, ensureRetired: true)
+            .timeout(disposeTimeout),
+        if (reportStopped && session != null && report != null)
           session.client.reportStopped(report).timeout(stoppedTimeout),
         _enqueueSnapshot(snapshotStore.delete),
       ]);
@@ -3882,11 +4357,31 @@ class PlayerController extends ChangeNotifier {
     final session = _revokedSession;
     _revokedSession = null;
     final stopped = session?.frozenStop?.reportStopped(permit);
-    await Future.wait([
-      backend.stop().timeout(disposeTimeout),
-      if (stopped != null) stopped.timeout(stoppedTimeout),
-      _enqueueSnapshot(snapshotStore.delete),
-    ]);
+    try {
+      await Future.wait([
+        _operations
+            .interrupt(backend.stop, ensureRetired: true)
+            .timeout(disposeTimeout)
+            .then((_) {
+              _revokedCleanupComplete = true;
+            }),
+        if (stopped != null) stopped.timeout(stoppedTimeout),
+        _enqueueSnapshot(snapshotStore.delete),
+        _deleteSubtitleCache(),
+      ]);
+      _revokedCleanupComplete = true;
+    } finally {
+      client.clearSession();
+    }
+  }
+
+  void _terminateRevokedSource() {
+    if (!_revoked) return;
+    client.clearSession();
+    if (_revokedCleanupComplete) return;
+    unawaited(
+      backend.dispose().timeout(disposeTimeout).catchError((Object _) {}),
+    );
   }
 
   void _showSubtitleNotice(SubtitleNoticeKind kind) {
@@ -4041,7 +4536,7 @@ class PlayerController extends ChangeNotifier {
     // 先出结束引导,避免等下一集请求时停在末帧没有入口。
     _showPlaybackEnded();
     try {
-      final next = await client.getNextEpisode(item!);
+      final next = await _sourceRequest(() => client.getNextEpisode(item!));
       if (!_accepts(operation) || next == null) {
         return;
       }
@@ -4099,14 +4594,16 @@ class PlayerController extends ChangeNotifier {
     final token = client.accessToken;
     if (base == null || token == null || token.isEmpty) return;
     try {
-      final info = await client.getPlaybackInfo(
-        itemId: next.id,
-        maxStreamingBitrate: maxStreamingBitrate,
-        deviceProfile: backend is VideoBackendCapabilities
-            ? await (backend as VideoBackendCapabilities).deviceProfile(
-                maxStreamingBitrate,
-              )
-            : null,
+      final info = await _sourceRequest(
+        () async => client.getPlaybackInfo(
+          itemId: next.id,
+          maxStreamingBitrate: maxStreamingBitrate,
+          deviceProfile: backend is VideoBackendCapabilities
+              ? await (backend as VideoBackendCapabilities).deviceProfile(
+                  maxStreamingBitrate,
+                )
+              : null,
+        ),
       );
       if (!_accepts(operation) ||
           _userPausedPrefix ||
@@ -4168,7 +4665,9 @@ class PlayerController extends ChangeNotifier {
       }
       skipIntroEnabled = settings.isSkipIntroEnabled;
       skipOutroEnabled = settings.isSkipOutroEnabled;
-      _seriesPreferences = !_scopedPlayback ? Map.of(settings.seriesPreferences) : const {};
+      _seriesPreferences = !_scopedPlayback
+          ? Map.of(settings.seriesPreferences)
+          : const {};
       if (volume > 0) {
         _unmutedVolume = volume;
       }
@@ -4218,7 +4717,9 @@ class PlayerController extends ChangeNotifier {
       final value = PlayerSettings(
         volume: volume,
         playbackRate: playbackRate,
-        seriesPreferences: !_scopedPlayback ? Map.of(_seriesPreferences) : const {},
+        seriesPreferences: !_scopedPlayback
+            ? Map.of(_seriesPreferences)
+            : const {},
       );
       await (await _settings()).writePatch(value);
     } catch (_) {}
@@ -4245,21 +4746,47 @@ class PlayerController extends ChangeNotifier {
   /// 播放中选择音轨/字幕(含关闭)/码率后写入按剧记忆。
   Future<void> _persistSeriesPreference() async {
     if (_scopedPlayback) {
+      if (runtime == null && observationSink != null) {
+        scopedPreferencePending = true;
+        return;
+      }
       final actual = origin;
       final version = activeMediaSourceId;
       final source = resolved?.mediaSource;
-      if (runtime == null || actual == null || version == null || source == null) return;
-      final audio = audioStreamIndex == null ? null : source.streamByIndex(audioStreamIndex!);
-      final subtitle = subtitleStreamIndex == null ? null : source.streamByIndex(subtitleStreamIndex!);
-      await runtime!.history.savePreference(SourcePreference(
-        owner: actual.work,
-        target: SourceReference(account: actual.source.account, itemId: itemId, mediaSourceId: version),
-        libraryId: actual.libraryId,
-        settings: PlayerSeriesPreference(audioLanguage: audio?.language,
-          audioTitle: audio?.displayTitle, subtitleLanguage: subtitle?.language,
-          subtitleTitle: subtitle?.displayTitle, subtitleOff: subtitleStreamIndex == null,
-          maxStreamingBitrate: maxStreamingBitrate, mediaSourceName: source.name),
-      ));
+      if (runtime == null || actual == null || source == null) return;
+      if (version == null ||
+          version != source.id ||
+          !identical(activeOrigin, actual)) {
+        _savePreferenceAfterObservation = true;
+        return;
+      }
+      final audio = audioStreamIndex == null
+          ? null
+          : source.streamByIndex(audioStreamIndex!);
+      final subtitle = subtitleStreamIndex == null
+          ? null
+          : source.streamByIndex(subtitleStreamIndex!);
+      await runtime!.history.savePreference(
+        SourcePreference(
+          owner: actual.work,
+          target: SourceReference(
+            account: actual.source.account,
+            itemId: itemId,
+            mediaSourceId: version,
+          ),
+          libraryId: actual.libraryId,
+          lineId: activeLineId,
+          settings: PlayerSeriesPreference(
+            audioLanguage: audio?.language,
+            audioTitle: audio?.displayTitle,
+            subtitleLanguage: subtitle?.language,
+            subtitleTitle: subtitle?.displayTitle,
+            subtitleOff: subtitleStreamIndex == null,
+            maxStreamingBitrate: maxStreamingBitrate,
+            mediaSourceName: source.name,
+          ),
+        ),
+      );
       return;
     }
     final seriesId = item?.seriesId;
@@ -4322,6 +4849,9 @@ class PlayerController extends ChangeNotifier {
     _disposed = true;
     runtime?.registry.access.removeRevocationHook(_revokeSource);
     runtime?.registry.access.removeCleanupHook(_closeRevokedSource);
+    runtime?.registry.access.removeTerminationHook(_terminateRevokedSource);
+    runtime?.registry.removeMembershipCleanup(_membershipRevoked);
+    runtime?.registry.removeSourceRevocation(_sourceRevoked);
     window.removeListener(_emit);
     super.dispose();
   }

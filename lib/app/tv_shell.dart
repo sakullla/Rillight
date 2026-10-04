@@ -68,7 +68,11 @@ class _TvShellState extends State<TvShell> with WidgetsBindingObserver {
       _failed = false;
     });
     try {
-      await recoverAndroidSession(AuthScope.of(context).client, store);
+      await recoverAndroidSession(
+        AuthScope.of(context).client,
+        store,
+        runtime: PlayerScope.of(context).runtime,
+      );
     } catch (_) {
       if (mounted) setState(() => _failed = true);
     } finally {

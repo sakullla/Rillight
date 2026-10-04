@@ -42,6 +42,76 @@ class PlaybackSwitchPlan {
       audioNeedsChoice ||
       subtitleNeedsChoice;
 
+  Map<String, dynamic> toJson() => {
+    'sourceId': sourceId,
+    'positionTicks': positionTicks,
+    'paused': paused,
+    'bitrate': maxStreamingBitrate,
+    'runtime': targetRuntimeTicks,
+    'timelineConfirmed': timelineConfirmed,
+    'audio': audioIndex,
+    'subtitle': subtitleIndex,
+    'audioNeedsChoice': audioNeedsChoice,
+    'subtitleNeedsChoice': subtitleNeedsChoice,
+    'audioChoices': audioChoices.map(_streamJson).toList(),
+    'subtitleChoices': subtitleChoices.map(_streamJson).toList(),
+  };
+
+  static Map<String, dynamic> _streamJson(MediaStreamInfo s) => {
+    'Index': s.index,
+    'Type': s.type,
+    'Language': s.language,
+    'DisplayTitle': s.displayTitle,
+  };
+
+  factory PlaybackSwitchPlan.fromJson(Map<String, dynamic> json) =>
+      PlaybackSwitchPlan(
+        sourceId: json['sourceId'] as String,
+        positionTicks: json['positionTicks'] as int,
+        paused: json['paused'] as bool,
+        maxStreamingBitrate: json['bitrate'] as int,
+        targetRuntimeTicks: json['runtime'] as int?,
+        timelineConfirmed: json['timelineConfirmed'] as bool,
+        audioIndex: json['audio'] as int?,
+        subtitleIndex: json['subtitle'] as int?,
+        audioNeedsChoice: json['audioNeedsChoice'] as bool,
+        subtitleNeedsChoice: json['subtitleNeedsChoice'] as bool,
+        audioChoices: (json['audioChoices'] as List)
+            .map(
+              (s) =>
+                  MediaStreamInfo.fromJson(Map<String, dynamic>.from(s as Map)),
+            )
+            .toList(),
+        subtitleChoices: (json['subtitleChoices'] as List)
+            .map(
+              (s) =>
+                  MediaStreamInfo.fromJson(Map<String, dynamic>.from(s as Map)),
+            )
+            .toList(),
+      );
+
+  void requireSelection(
+    SwitchResumeChoice choice, {
+    int? audio,
+    int? subtitle,
+    bool acceptDefaultAudio = false,
+    bool turnSubtitlesOff = false,
+  }) {
+    if (choice == SwitchResumeChoice.cancel) return;
+    if (choice == SwitchResumeChoice.currentPosition &&
+        !canTryCurrentPosition) {
+      throw StateError('Resume position is outside the known target timeline');
+    }
+    if (audio != null && !audioChoices.any((s) => s.index == audio) ||
+        subtitle != null && !subtitleChoices.any((s) => s.index == subtitle)) {
+      throw StateError('Selected target track does not exist');
+    }
+    if (audioNeedsChoice && audio == null && !acceptDefaultAudio ||
+        subtitleNeedsChoice && subtitle == null && !turnSubtitlesOff) {
+      throw StateError('Missing language requires explicit selection');
+    }
+  }
+
   static PlaybackSwitchPlan inspect({
     required PlaybackMediaSource original,
     required PlaybackMediaSource target,

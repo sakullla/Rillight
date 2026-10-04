@@ -346,6 +346,13 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
 
   void _onPlayback() {
     final current = controller;
+    if (current?.permissionRevoked == true) {
+      _danmaku?.removeListener(_onDanmaku);
+      _danmaku?.dispose();
+      _danmaku = null;
+      _danmakuLayerPinned = false;
+      _danmakuLayerItemId = null;
+    }
     final danmaku = _danmaku;
     if (current != null &&
         ((_danmakuLayerItemId != null &&
@@ -451,6 +458,11 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
 
   void _authChanged() {
     final auth = _auth!;
+    final current = controller;
+    if (current?.runtime != null && current?.origin != null) {
+      if (!current!.origin!.permit.isValid) unawaited(_close());
+      return;
+    }
     if (_identity !=
         (auth.client.baseUrl, auth.client.userId, auth.client.accessToken)) {
       unawaited(_close());

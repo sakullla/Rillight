@@ -25,7 +25,10 @@ abstract class PlayerProcessControl {
 abstract interface class PlayerHistoryProcessControl {
   Future<Map<String, dynamic>?> consumeWatchEvent(int pid);
   Future<void> acknowledgeWatchEvent(int pid, Map<String, dynamic> receipt);
-  Future<void> revoke(int pid, int generation);
+  Future<void> revoke(int pid, int generation, {bool reportStopped = false});
+  Future<Map<String, dynamic>?> consumeSwitchCommand(int pid);
+  Future<Map<String, dynamic>?> consumeReportOutcome(int pid);
+  Future<void> replySwitchCommand(int pid, Map<String, dynamic> receipt);
 }
 
 class PlayerProcessStartupException implements Exception {
@@ -48,7 +51,8 @@ PlayerProcessControl createPlayerProcessControl({String? operatingSystem}) {
 
 /// A spawn becomes usable only after the actual child entry point acknowledges
 /// its window and close handler. Failed or superseded launches are terminated.
-abstract class DesktopPlayerProcessControl implements PlayerProcessControl, PlayerHistoryProcessControl {
+abstract class DesktopPlayerProcessControl
+    implements PlayerProcessControl, PlayerHistoryProcessControl {
   DesktopPlayerProcessControl({
     this.pollInterval = const Duration(milliseconds: 100),
     this.startupTimeout = const Duration(seconds: 20),
@@ -155,11 +159,35 @@ abstract class DesktopPlayerProcessControl implements PlayerProcessControl, Play
   Future<void> heartbeat(int pid) async => _endpoints[pid]?.heartbeat();
 
   @override
-  Future<Map<String, dynamic>?> consumeWatchEvent(int pid) async => _endpoints[pid]?.read('watch-event');
+  Future<Map<String, dynamic>?> consumeWatchEvent(int pid) async =>
+      _endpoints[pid]?.read('watch-event');
   @override
-  Future<void> acknowledgeWatchEvent(int pid, Map<String, dynamic> receipt) async => _endpoints[pid]?.write('watch-ack', receipt);
+  Future<void> acknowledgeWatchEvent(
+    int pid,
+    Map<String, dynamic> receipt,
+  ) async => _endpoints[pid]?.write('watch-ack', receipt);
   @override
-  Future<void> revoke(int pid, int generation) async => _endpoints[pid]?.write('revoke', {'generation': generation});
+  Future<void> revoke(
+    int pid,
+    int generation, {
+    bool reportStopped = false,
+  }) async => _endpoints[pid]?.write('revoke', {
+    'generation': generation,
+    'reportStopped': reportStopped,
+  });
+
+  @override
+  Future<Map<String, dynamic>?> consumeSwitchCommand(int pid) async =>
+      _endpoints[pid]?.read('switch-request');
+  @override
+  Future<Map<String, dynamic>?> consumeReportOutcome(int pid) async =>
+      _endpoints[pid]?.read('watch-sync');
+
+  @override
+  Future<void> replySwitchCommand(
+    int pid,
+    Map<String, dynamic> receipt,
+  ) async => _endpoints[pid]?.write('switch-reply', receipt);
 
   @override
   Future<PlayerHostOpenItemCommand?> consumeOpenItem(int pid) async {

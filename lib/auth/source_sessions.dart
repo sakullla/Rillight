@@ -94,8 +94,24 @@ class FrozenSourceStop {
   final SourceSessionRegistry _owner;
   final SourceAccount account;
   final EmbyClient _client;
-  final PlaybackReport _report;
+  PlaybackReport _report;
   final int _generation;
+
+  /// Refresh only the position/intent of the already frozen session while its
+  /// normal permit is valid. Lock cleanup never takes a new playback snapshot.
+  void updateReport(OperationPermit permit, PlaybackReport report) {
+    permit.requireValid();
+    if (_used ||
+        permit.account != account ||
+        permit.regionGeneration != _generation ||
+        report.itemId != _report.itemId ||
+        report.mediaSourceId != _report.mediaSourceId ||
+        report.playSessionId != _report.playSessionId) {
+      throw StateError('Frozen stop owner changed');
+    }
+    _report = report;
+  }
+
   bool _used = false;
   Future<void> reportStopped(RestrictedStopPermit permit) async {
     if (_used ||
@@ -161,15 +177,34 @@ class SourceSessionRegistry {
   final Set<String> _transitioning = {};
   final Set<String> _credentialChanges = {};
   final Set<MembershipCleanup> _migrationHooks = {};
+  final Set<void Function(String)> _sourceRevocations = {};
+  void addSourceRevocation(void Function(String) hook) =>
+      _sourceRevocations.add(hook);
+  void removeSourceRevocation(void Function(String) hook) =>
+      _sourceRevocations.remove(hook);
   final Set<FrozenSourceStop> _frozenStops = {};
 
-  FrozenSourceStop freezeStop(OperationPermit permit, PlaybackReport report) {
+  void releaseStop(FrozenSourceStop stop) {
+    if (_frozenStops.remove(stop)) stop._clear();
+  }
+
+  FrozenSourceStop freezeStop(
+    OperationPermit permit,
+    PlaybackReport report, {
+    EmbyClient? actualClient,
+  }) {
     permit.requireValid();
     if (!identical(permit._owner, this) ||
         permit.account.region != AccessRegion.private) {
       throw StateError('Private source permit required');
     }
-    final source = _sessions[permit.account.configuredServerId]!.client;
+    final registered = _sessions[permit.account.configuredServerId]!.client;
+    final source = actualClient ?? registered;
+    if (source.userId != permit.account.userId ||
+        source.accessToken != registered.accessToken ||
+        source.baseUrl == null) {
+      throw StateError('Stop credentials do not belong to permitted source');
+    }
     final client = createClient();
     if (_sessions.values.any((s) => identical(s.client, client))) {
       throw StateError('Stop client must be independent');
@@ -353,6 +388,13 @@ class SourceSessionRegistry {
 
   void _invalidate(String id) {
     _scopes[id] = (_scopes[id] ?? 0) + 1;
+    for (final hook in List.of(_sourceRevocations)) {
+      try {
+        hook(id);
+      } catch (_) {
+        /* one consumer cannot delay revocation */
+      }
+    }
   }
 
   Future<void> configureScope(
@@ -936,6 +978,7 @@ class SourceSessionRegistry {
       session.client.clearSession();
     }
     _sessions.clear();
+    _sourceRevocations.clear();
   }
 }
 

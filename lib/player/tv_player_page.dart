@@ -128,6 +128,11 @@ class TvPlayerPageState extends State<TvPlayerPage> {
 
   void _authChanged() {
     final auth = _auth!;
+    final current = controller;
+    if (current?.runtime != null && current?.origin != null) {
+      if (!current!.origin!.permit.isValid) unawaited(_close());
+      return;
+    }
     if (_identity !=
         (auth.client.baseUrl, auth.client.userId, auth.client.accessToken)) {
       unawaited(_close());
