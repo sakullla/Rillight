@@ -74,6 +74,18 @@ class PlayerSeriesPreference {
   final int? maxStreamingBitrate;
   final String? mediaSourceName;
 
+  /// Only portable intent survives attribution to a different source/episode.
+  /// Track numbers are source-specific, even when a legacy series id is unique.
+  PlayerSeriesPreference get portableIntent => PlayerSeriesPreference(
+    audioLanguage: audioLanguage,
+    audioTitle: audioTitle,
+    subtitleLanguage: subtitleLanguage,
+    subtitleTitle: subtitleTitle,
+    subtitleOff: subtitleOff,
+    maxStreamingBitrate: maxStreamingBitrate,
+    mediaSourceName: mediaSourceName,
+  );
+
   Map<String, dynamic> toJson() => {
     if (audioStreamIndex != null) 'audioStreamIndex': audioStreamIndex,
     if (audioLanguage != null && audioLanguage!.isNotEmpty)
@@ -148,7 +160,10 @@ class PlayerSettings {
   /// 倍速(0.5–3.0 阶梯内取值);null 表示未配置,恢复默认 1.0。
   final double? playbackRate;
 
-  /// 按剧记忆的音轨/字幕/码率，key 为 seriesId。
+  /// Legacy single-service compatibility data, keyed by bare seriesId.
+  /// Multi-source consumers must not apply or update this map directly: pass
+  /// complete uniquely attributed inventory to HistoryWriter.migrateLegacy,
+  /// then use that authority's scoped preferences. Global settings stay here.
   final Map<String, PlayerSeriesPreference> seriesPreferences;
 
   /// 弹幕开关；null 表示未配置，默认开启。

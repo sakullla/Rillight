@@ -106,6 +106,39 @@ void main() {
     expect(preference.toJson()['mediaSourceName'], '4K 版本');
   });
 
+  test(
+    'portable source intent drops indices without changing legacy compatibility',
+    () {
+      const legacy = PlayerSeriesPreference(
+        audioStreamIndex: 7,
+        subtitleStreamIndex: 9,
+        audioLanguage: 'chi',
+        subtitleLanguage: 'eng',
+        subtitleOff: true,
+        maxStreamingBitrate: 8000000,
+        mediaSourceName: '4K',
+      );
+      final portable = legacy.portableIntent;
+      expect(portable.audioStreamIndex, isNull);
+      expect(portable.subtitleStreamIndex, isNull);
+      expect(portable.audioLanguage, 'chi');
+      expect(portable.subtitleLanguage, 'eng');
+      expect(portable.subtitleOff, isTrue);
+      expect(portable.maxStreamingBitrate, 8000000);
+      expect(portable.mediaSourceName, '4K');
+      final decoded = PlayerSettings.fromJson(
+        PlayerSettings(
+          volume: 42,
+          appearanceStyle: 'light',
+          seriesPreferences: {'old': legacy},
+        ).toJson(),
+      );
+      expect(decoded.volume, 42);
+      expect(decoded.appearanceStyle, 'light');
+      expect(decoded.seriesPreferences['old']!.audioStreamIndex, 7);
+    },
+  );
+
   test('fromJson clamps out of range values', () {
     expect(PlayerSettings.fromJson({'volume': 140}).volume, 140);
     expect(
