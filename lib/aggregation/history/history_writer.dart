@@ -465,7 +465,9 @@ class HistoryWriter {
     );
   }
 
-  /// Exact complete candidate references are required for legacy attribution.
+  /// Exact complete concrete-version references are required for attribution.
+  /// A unique item alone is insufficient: normal resolution needs an exact
+  /// target version. Multiple versions remain ambiguous, regardless of labels.
   /// inventoryComplete attests that the importer checked every configured
   /// account/region (including private); partial queries/locked views are false.
   /// Ambiguous ids remain unapplied. A persisted consumed id prevents an old
@@ -486,6 +488,10 @@ class HistoryWriter {
       return PreferenceFailure.notConfigured;
     }
     final candidate = unique.values.single;
+    if (candidate.source.mediaSourceId == null ||
+        candidate.source.mediaSourceId!.trim().isEmpty) {
+      return PreferenceFailure.ambiguousLegacy;
+    }
     final permit = registry.permit(
       candidate.source.account,
       libraryId: candidate.libraryId,
@@ -493,12 +499,13 @@ class HistoryWriter {
     permit.requireValid();
     final pref = SourcePreference(
       owner: candidate.source.item,
-      target: candidate.source.item,
+      target: candidate.source,
       libraryId: candidate.libraryId,
       settings: settings.portableIntent,
     );
-    // Track indices and a raw mediaSourceId are not promoted to a new episode;
-    // nextEpisode resolution only uses explicit language/version labels.
+    // Keep the verified version for this item, not for a new episode.
+    // Track indices are discarded; nextEpisode resolution only uses explicit
+    // language/version labels and a freshly confirmed episode reference.
     await _commit(
       preferences: {
         ..._preferences,

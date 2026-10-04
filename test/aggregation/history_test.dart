@@ -701,6 +701,165 @@ void main() {
   );
 
   test(
+    'legacy concrete version resolves normally before and after restart',
+    () async {
+      final f = await _fixture();
+      final candidate = f.candidate(f.a);
+      const settings = PlayerSeriesPreference(
+        mediaSourceName: 'cut',
+        audioLanguage: 'zh',
+        audioStreamIndex: 3,
+      );
+      expect(
+        await f.writer.migrateLegacy(
+          seriesId: 'movie',
+          settings: settings,
+          candidates: [candidate],
+          inventoryComplete: true,
+        ),
+        isNull,
+      );
+      void checkResolution() {
+        final result = f.writer.resolvePreference(
+          owner: candidate.source.item,
+          region: AccessRegion.ordinary,
+          candidates: [candidate],
+        );
+        expect(result.failure, isNull);
+        expect(result.selected!.source, candidate.source);
+        expect(result.preference!.owner, candidate.source.item);
+        expect(result.preference!.target, candidate.source);
+        expect(result.preference!.settings.audioLanguage, 'zh');
+        expect(result.preference!.settings.audioStreamIndex, isNull);
+        final missing = f.writer.resolvePreference(
+          owner: candidate.source.item,
+          region: AccessRegion.ordinary,
+          candidates: [f.candidate(f.a, version: 'other')],
+        );
+        expect(missing.failure, PreferenceFailure.targetMissing);
+        expect(missing.selected, isNull);
+      }
+
+      checkResolution();
+      await f.writer.close();
+      f.writer = await HistoryWriter.open(
+        registry: f.registry,
+        store: f.writer.store,
+      );
+      checkResolution();
+    },
+  );
+
+  test(
+    'legacy migration rejects ambiguous versions and missing version evidence',
+    () async {
+      final f = await _fixture();
+      final candidate = f.candidate(f.a);
+      for (final candidates in <List<PreferenceCandidate>>[
+        [candidate, f.candidate(f.a, version: 'other')],
+        [f.candidate(f.a, version: 'other'), candidate],
+        [PreferenceCandidate(candidate.source.item, 'library')],
+        [f.candidate(f.a, version: '')],
+        [candidate, PreferenceCandidate(candidate.source.item, 'library')],
+      ]) {
+        expect(
+          await f.writer.migrateLegacy(
+            seriesId: 'movie',
+            settings: const PlayerSeriesPreference(mediaSourceName: 'cut'),
+            candidates: candidates,
+            inventoryComplete: true,
+          ),
+          PreferenceFailure.ambiguousLegacy,
+        );
+        final result = f.writer.resolvePreference(
+          owner: candidate.source.item,
+          region: AccessRegion.ordinary,
+          candidates: [candidate],
+        );
+        expect(result.failure, PreferenceFailure.notConfigured);
+        expect(result.selected, isNull);
+      }
+      await f.writer.close();
+      f.writer = await HistoryWriter.open(
+        registry: f.registry,
+        store: f.writer.store,
+      );
+      // Rejected attempts neither persist a preference nor consume the id.
+      expect(
+        await f.writer.migrateLegacy(
+          seriesId: 'movie',
+          settings: const PlayerSeriesPreference(),
+          candidates: [candidate],
+          inventoryComplete: true,
+        ),
+        isNull,
+      );
+    },
+  );
+
+  test(
+    'legacy migration rejects missing or mismatched account identity evidence',
+    () async {
+      final f = await _fixture();
+      final candidate = f.candidate(f.a);
+      for (final account in [
+        SourceAccount(
+          region: f.a.region,
+          configuredServerId: f.a.configuredServerId,
+          verifiedServerId: '',
+          userId: f.a.userId,
+        ),
+        SourceAccount(
+          region: f.a.region,
+          configuredServerId: f.a.configuredServerId,
+          verifiedServerId: 'different-server',
+          userId: f.a.userId,
+        ),
+        SourceAccount(
+          region: f.a.region,
+          configuredServerId: f.a.configuredServerId,
+          verifiedServerId: f.a.verifiedServerId,
+          userId: '',
+        ),
+      ]) {
+        await expectLater(
+          f.writer.migrateLegacy(
+            seriesId: 'movie',
+            settings: const PlayerSeriesPreference(),
+            candidates: [f.candidate(account)],
+            inventoryComplete: true,
+          ),
+          throwsStateError,
+        );
+        expect(
+          f.writer
+              .resolvePreference(
+                owner: candidate.source.item,
+                region: AccessRegion.ordinary,
+                candidates: [candidate],
+              )
+              .failure,
+          PreferenceFailure.notConfigured,
+        );
+      }
+      await f.writer.close();
+      f.writer = await HistoryWriter.open(
+        registry: f.registry,
+        store: f.writer.store,
+      );
+      expect(
+        await f.writer.migrateLegacy(
+          seriesId: 'movie',
+          settings: const PlayerSeriesPreference(),
+          candidates: [candidate],
+          inventoryComplete: true,
+        ),
+        isNull,
+      );
+    },
+  );
+
+  test(
     'legacy ids migrate only with complete unique attribution; consumed id cannot revive',
     () async {
       final f = await _fixture();
