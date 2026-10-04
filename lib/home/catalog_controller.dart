@@ -81,6 +81,9 @@ class CatalogController extends ChangeNotifier {
   bool librariesLoading = true;
 
   int _loadGen = 0;
+
+  /// 每次 [reload] 加一。首页各片库预览行据此重拉，手动刷新才会换上新条目。
+  int libraryPreviewRevision = 0;
   bool _disposed = false;
   String? _sessionKey;
   final Map<String, Timer> _retryTimers = {};
@@ -101,6 +104,7 @@ class CatalogController extends ChangeNotifier {
       return;
     }
     final gen = ++_loadGen;
+    libraryPreviewRevision++;
     _clearRetries();
     final sameSession = _sessionKey == _currentSessionKey;
     _sessionKey = _currentSessionKey;

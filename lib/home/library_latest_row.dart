@@ -7,6 +7,7 @@ import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_errors.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_scope.dart';
+import 'package:rillight/library/shelf_sort.dart';
 
 /// 每个片库在首页只预览一屏多一点，完整列表从标题进入。
 const int libraryLatestPreview = 12;
@@ -50,6 +51,7 @@ class _LibraryLatestDataState extends State<LibraryLatestData> {
   var _started = false;
   Object? _identity;
   var _generation = 0;
+  var _previewRevision = -1;
 
   @override
   void didChangeDependencies() {
@@ -60,14 +62,22 @@ class _LibraryLatestDataState extends State<LibraryLatestData> {
       auth.client.baseUrl,
       auth.client.userId,
     );
-    if (_started && identity == _identity) {
+    final revision = CatalogScope.of(context).libraryPreviewRevision;
+    final revisionChanged = _previewRevision != revision;
+    if (_started && identity == _identity && !revisionChanged) {
       return;
     }
-    _started = true;
-    _identity = identity;
-    _items = const [];
-    _loading = true;
-    _error = null;
+    final sessionChanged = !_started || identity != _identity;
+    _previewRevision = revision;
+    if (sessionChanged) {
+      _started = true;
+      _identity = identity;
+      _items = const [];
+      _loading = true;
+      _error = null;
+    } else {
+      _error = null;
+    }
     unawaited(_load());
   }
 
@@ -94,8 +104,9 @@ class _LibraryLatestDataState extends State<LibraryLatestData> {
       includeItemTypes: _latestTypes(widget.library),
       recursive: true,
       limit: libraryLatestPreview,
-      sortBy: 'DateCreated',
-      sortOrder: 'Descending',
+      // 与片库页默认「更新日期」相同，首页预览才是点进去后的前几项。
+      sortBy: CatalogSort.initial.sortBy,
+      sortOrder: CatalogSort.initial.sortOrder,
       fields: EmbyClient.homePosterFields,
     );
     final network = _libraryLatestLoads.run<Object?>(

@@ -547,37 +547,24 @@ class EpisodeMediaStreamsSection extends StatelessWidget {
       for (final s in source.streams)
         if (s.isSubtitle) s,
     ];
-    final groups = <(String, List<Widget>)>[
-      if (videos.isNotEmpty)
-        (
-          l10n.videoTrack,
-          [for (final s in videos) _chip(context, _videoLine(s))],
-        ),
-      if (audios.isNotEmpty)
-        (
+    final videoChoices = _choices(videos, _videoLine);
+    final audioChoices = _choices(audios, (stream) => _audioLine(l10n, stream));
+    final subtitleChoices = _choices(subtitles, _subtitleLine);
+    final groups = <_StreamGroup>[
+      if (videoChoices.isNotEmpty) _StreamGroup(l10n.videoTrack, videoChoices),
+      if (audioChoices.isNotEmpty)
+        _StreamGroup(
           l10n.audioTrack,
-          [
-            for (final s in audios)
-              _chip(
-                context,
-                _audioLine(l10n, s),
-                selected: s.index == selectedAudioIndex,
-                onTap: onAudio == null ? null : () => onAudio!(s.index),
-              ),
-          ],
+          audioChoices,
+          selectedIndex: selectedAudioIndex,
+          onSelected: onAudio,
         ),
-      if (subtitles.isNotEmpty)
-        (
+      if (subtitleChoices.isNotEmpty)
+        _StreamGroup(
           l10n.subtitleTrack,
-          [
-            for (final s in subtitles)
-              _chip(
-                context,
-                _subtitleLine(s),
-                selected: s.index == selectedSubtitleIndex,
-                onTap: onSubtitle == null ? null : () => onSubtitle!(s.index),
-              ),
-          ],
+          subtitleChoices,
+          selectedIndex: selectedSubtitleIndex,
+          onSelected: onSubtitle,
         ),
     ];
     if (groups.isEmpty) {
@@ -596,13 +583,9 @@ class EpisodeMediaStreamsSection extends StatelessWidget {
           children: [
             for (var i = 0; i < groups.length; i++) ...[
               if (i > 0) const SizedBox(height: AppSpacing.sm),
-              Text(groups[i].$1, style: labelStyle),
+              Text(groups[i].title, style: labelStyle),
               const SizedBox(height: AppSpacing.xs),
-              Wrap(
-                spacing: AppSpacing.xs,
-                runSpacing: AppSpacing.xs,
-                children: groups[i].$2,
-              ),
+              _StreamChoiceWrap(group: groups[i]),
             ],
           ],
         ),
@@ -610,40 +593,27 @@ class EpisodeMediaStreamsSection extends StatelessWidget {
     );
   }
 
-  Widget _chip(
-    BuildContext context,
-    String line, {
-    bool selected = false,
-    VoidCallback? onTap,
-  }) {
-    if (line.isEmpty) {
-      return const SizedBox.shrink();
+  static List<_StreamChoice> _choices(
+    List<ItemMediaStream> streams,
+    String Function(ItemMediaStream stream) lineOf,
+  ) {
+    final labeled = <_StreamChoice>[];
+    final counts = <String, int>{};
+    for (final stream in streams) {
+      final line = lineOf(stream);
+      if (line.isEmpty) {
+        continue;
+      }
+      counts[line] = (counts[line] ?? 0) + 1;
+      labeled.add(_StreamChoice(stream.index, line));
     }
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    return Material(
-      color: selected
-          ? scheme.primary.withValues(alpha: 0.18)
-          : scheme.surfaceContainerHigh,
-      borderRadius: BorderRadius.circular(AppRadii.sm),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(
-            horizontal: AppSpacing.sm,
-            vertical: AppSpacing.xs,
-          ),
-          child: Text(
-            line,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: selected ? scheme.primary : scheme.onSurface,
-              fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
-            ),
-          ),
-        ),
-      ),
-    );
+    return [
+      for (final choice in labeled)
+        if (counts[choice.line]! > 1)
+          _StreamChoice(choice.index, '${choice.line} #${choice.index}')
+        else
+          choice,
+    ];
   }
 
   static String _joined(List<String?> parts) {
@@ -713,6 +683,115 @@ class EpisodeMediaStreamsSection extends StatelessWidget {
       return label;
     }
     return _upper(stream.codec) ?? '';
+  }
+}
+
+class _StreamChoice {
+  const _StreamChoice(this.index, this.line);
+
+  final int index;
+  final String line;
+}
+
+class _StreamGroup {
+  const _StreamGroup(
+    this.title,
+    this.choices, {
+    this.selectedIndex,
+    this.onSelected,
+  });
+
+  final String title;
+  final List<_StreamChoice> choices;
+  final int? selectedIndex;
+  final ValueChanged<int>? onSelected;
+}
+
+/// 轨道少时按文字宽度排列。轨道一多，长短标题会把换行挤成参差的一行一个，
+/// 所以改成等宽列，重复标题补上轨道序号。
+class _StreamChoiceWrap extends StatelessWidget {
+  const _StreamChoiceWrap({required this.group});
+
+  static const _denseCount = 5;
+
+  final _StreamGroup group;
+
+  @override
+  Widget build(BuildContext context) {
+    final dense = group.choices.length >= _denseCount;
+    if (!dense) {
+      return Wrap(
+        spacing: AppSpacing.xs,
+        runSpacing: AppSpacing.xs,
+        children: [for (final choice in group.choices) _chip(context, choice)],
+      );
+    }
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth;
+        final gap = AppSpacing.xs;
+        final columns = width >= 760
+            ? 4
+            : width >= 520
+            ? 3
+            : 2;
+        final cell = columns <= 1
+            ? width
+            : (width - gap * (columns - 1)) / columns;
+        return Wrap(
+          spacing: gap,
+          runSpacing: gap,
+          children: [
+            for (final choice in group.choices)
+              SizedBox(
+                width: cell,
+                child: _chip(context, choice, expand: true),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _chip(
+    BuildContext context,
+    _StreamChoice choice, {
+    bool expand = false,
+  }) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final selected = choice.index == group.selectedIndex;
+    final label = Text(
+      choice.line,
+      maxLines: expand ? 2 : 1,
+      overflow: TextOverflow.ellipsis,
+      style: theme.textTheme.bodyMedium?.copyWith(
+        color: selected ? scheme.primary : scheme.onSurface,
+        fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+      ),
+    );
+    return Material(
+      key: ValueKey('media-stream-${choice.index}'),
+      color: selected
+          ? scheme.primary.withValues(alpha: 0.18)
+          : scheme.surfaceContainerHigh,
+      borderRadius: BorderRadius.circular(AppRadii.sm),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: group.onSelected == null
+            ? null
+            : () => group.onSelected!(choice.index),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.sm,
+            vertical: AppSpacing.xs,
+          ),
+          child: expand
+              ? SizedBox(width: double.infinity, child: label)
+              : label,
+        ),
+      ),
+    );
   }
 }
 

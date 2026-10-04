@@ -774,6 +774,80 @@ void main() {
     },
     tags: ['integration'],
   );
+
+  testWidgets(
+    'many subtitle tracks share equal columns on phone and desktop widths',
+    (tester) async {
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final source = ItemMediaSource(
+        id: 'source',
+        streams: [
+          const ItemMediaStream(index: 0, type: 'Video', label: '4K'),
+          for (var index = 1; index <= 8; index++)
+            ItemMediaStream(
+              index: index,
+              type: 'Subtitle',
+              label: index == 1
+                  ? 'Chinese Simplified (默认 SUBRIP)'
+                  : index == 4 || index == 7
+                  ? 'Spanish (SUBRIP)'
+                  : 'Arabic (SUBRIP) $index',
+            ),
+        ],
+      );
+
+      Future<void> pump(Size size) async {
+        tester.view.physicalSize = size;
+        tester.view.devicePixelRatio = 1;
+        await tester.pumpWidget(
+          MaterialApp(
+            locale: const Locale('zh'),
+            supportedLocales: AppLocalizations.supportedLocales,
+            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            theme: AppTheme.dark(),
+            home: Scaffold(body: EpisodeMediaStreamsSection(source: source)),
+          ),
+        );
+      }
+
+      Size chip(int index) =>
+          tester.getSize(find.byKey(ValueKey('media-stream-$index')));
+
+      await pump(const Size(360, 900));
+      expect(find.text('Spanish (SUBRIP) #4'), findsOneWidget);
+      expect(find.text('Spanish (SUBRIP) #7'), findsOneWidget);
+      expect(find.text('Chinese Simplified (默认 SUBRIP)'), findsOneWidget);
+      expect(chip(1).width, chip(2).width);
+      expect(chip(1).width, chip(4).width);
+      expect(chip(0).width, lessThan(chip(1).width));
+      expect(
+        tester.getTopLeft(find.byKey(const ValueKey('media-stream-1'))).dy,
+        tester.getTopLeft(find.byKey(const ValueKey('media-stream-2'))).dy,
+      );
+      expect(
+        tester.getTopLeft(find.byKey(const ValueKey('media-stream-3'))).dy,
+        greaterThan(
+          tester.getTopLeft(find.byKey(const ValueKey('media-stream-1'))).dy,
+        ),
+      );
+      expect(tester.takeException(), isNull);
+
+      await pump(const Size(900, 800));
+      expect(chip(1).width, chip(5).width);
+      expect(
+        tester.getTopLeft(find.byKey(const ValueKey('media-stream-1'))).dy,
+        tester.getTopLeft(find.byKey(const ValueKey('media-stream-4'))).dy,
+      );
+      expect(
+        tester.getTopLeft(find.byKey(const ValueKey('media-stream-5'))).dy,
+        greaterThan(
+          tester.getTopLeft(find.byKey(const ValueKey('media-stream-1'))).dy,
+        ),
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
 }
 
 void _expectOnScreen(Rect rect, double width, double height) {
