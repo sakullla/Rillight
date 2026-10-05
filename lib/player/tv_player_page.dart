@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'source_switch_menu.dart';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -556,7 +557,7 @@ class TvPlayerPageState extends State<TvPlayerPage> {
     final c = controller;
     if (c != null) {
       c.removeListener(_playerChanged);
-      unawaited(c.disposeAsync());
+      unawaited(c.disposeAsync(notifyStopped: false));
       c.dispose();
     }
     super.dispose();
@@ -989,6 +990,7 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                                 ? () => _panel(_TvPanel.quality)
                                                 : null,
                                           ),
+                                        SourceSwitchButton(controller: c),
                                         if (c.canSwitchMediaSource)
                                           _action(
                                             'tv-player-source',

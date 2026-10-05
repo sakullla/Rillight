@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'source_management.dart';
 
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -41,6 +42,14 @@ class SessionActions extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             const SettingsAction(),
+            IconButton(
+              key: const Key('session-source-management'),
+              tooltip: l10n.sourceManagement,
+              constraints: kTitleBarIconConstraints,
+              iconSize: 18,
+              icon: const Icon(Icons.tune),
+              onPressed: () => showSourceManagement(context),
+            ),
             IconButton(
               key: serverMenuKey,
               tooltip: '${_chipLabel(server)}\n${l10n.switchServer}',

@@ -4,9 +4,11 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'playback_runtime.dart';
+import '../aggregation/query/same_source_query.dart';
+import '../aggregation/query/aggregation_query.dart';
+import '../library/episode_mapping_dialog.dart';
 import 'playback_resolver.dart';
 import '../aggregation/history/history_writer.dart';
-import '../aggregation/identity/media_identity.dart';
 import 'player_settings.dart';
 import '../auth/region_access.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
@@ -806,6 +808,151 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
       actual.permit.requireValid();
       _lastSwitchCommand = sequence;
       switch (command['action']) {
+        case 'lock':
+          if (actual.source.account.region != AccessRegion.private) {
+            throw StateError('Private playback required');
+          }
+          commit = auth.regionAccess.lock;
+        case 'catalogue':
+          final server = runtime!.registry
+              .project(actual.source.account.region)
+              .firstWhere(
+                (s) => s.id == actual.source.account.configuredServerId,
+              );
+          receipt['serverName'] = server.displayName;
+          receipt['lines'] = [
+            for (final line in server.lines)
+              {'id': line.id, 'label': line.nickname ?? line.hostLabel},
+          ];
+          final dto = await actual.permit.dispatch(
+            (c) => c.getItem(actual.work.itemId),
+          );
+          final query = SameSourceQueryController(
+            registry: runtime!.registry,
+            history: runtime!.history,
+          );
+          try {
+            await query.start(
+              origin: QueryItem(actual.work, actual.libraryId, dto),
+              scope: QueryScope(region: actual.source.account.region),
+            );
+            actual.permit.requireValid();
+            final current = await runtime!.resolve(
+              PlayerOpenRequest(
+                itemId: command['item'] as String? ?? actual.source.itemId,
+                source: SourceReference(
+                  account: actual.source.account,
+                  itemId: command['item'] as String? ?? actual.source.itemId,
+                ),
+                work: actual.work,
+                libraryId: actual.libraryId,
+              ),
+            );
+            final currentDto = await current.permit.dispatch(
+              (c) => c.getItem(current.source.itemId),
+            );
+            final mappedTarget = command['mapTarget'] is Map
+                ? decodeSource(
+                    Map<String, dynamic>.from(command['mapTarget'] as Map),
+                  )
+                : null;
+            final rows = <Map<String, dynamic>>[];
+            for (final candidate in query.comparisons) {
+              var targetRef = candidate.source.reference;
+              var reason = candidate.decision.reason.name;
+              final label =
+                  '${candidate.source.item.name} · ${targetRef.account.configuredServerId}';
+              String? numbering;
+              if (currentDto.isEpisode && candidate.decision.confirmed) {
+                if (mappedTarget == targetRef) {
+                  final original = EpisodeSource.fromEmby(
+                    current.source,
+                    currentDto,
+                  );
+                  final verified = command['mappingAccepted'] == true;
+                  await query.lookupEpisode(
+                    target: candidate.source,
+                    episode: verified
+                        ? withConfirmedEpisodeMapping(original)
+                        : original,
+                    verifiedNumberingScheme: verified
+                        ? userConfirmedEpisodeNumbering
+                        : null,
+                  );
+                  final result = query.episodes
+                      .where((e) => e.target == targetRef)
+                      .single;
+                  reason = result.lookup.status.name;
+                  if (result.lookup.status == EpisodeLookupStatus.confirmed) {
+                    targetRef = result.lookup.source!.reference;
+                    numbering = result.lookup.source!.numberingScheme;
+                  }
+                }
+                if (numbering == null) {
+                  rows.add({
+                    'target': encodeSource(candidate.source.reference),
+                    'label': label,
+                    'confirmed': false,
+                    'canMap': true,
+                    'reason': reason,
+                  });
+                  continue;
+                }
+              }
+              if (!candidate.decision.confirmed) {
+                rows.add({
+                  'label': label,
+                  'confirmed': false,
+                  'reason': reason,
+                });
+                continue;
+              }
+              try {
+                final target = await runtime!.resolve(
+                  PlayerOpenRequest(
+                    itemId: targetRef.itemId,
+                    source: targetRef,
+                    work: candidate.source.reference.item,
+                    libraryId: candidate.source.libraryId,
+                  ),
+                );
+                final info = await target.permit.dispatch(
+                  (c) => c.getPlaybackInfo(itemId: targetRef.itemId),
+                );
+                for (final version in info.mediaSources) {
+                  rows.add({
+                    'target': encodeSource(targetRef),
+                    'work': encodeSource(candidate.source.reference.item),
+                    'library': candidate.source.libraryId,
+                    'targetVersion': version.id,
+                    'label': '$label · ${version.name ?? version.id}',
+                    'key':
+                        '${targetRef.account.configuredServerId}-${version.id}',
+                    'confirmed': true,
+                    'numbering': numbering,
+                    'reason': reason,
+                  });
+                }
+                if (info.mediaSources.isEmpty) {
+                  rows.add({
+                    'label': label,
+                    'confirmed': false,
+                    'reason': 'unknownVersion',
+                  });
+                }
+              } catch (_) {
+                rows.add({
+                  'label': label,
+                  'confirmed': false,
+                  'reason': 'versionQueryFailed',
+                });
+              }
+            }
+            actual.permit.requireValid();
+            receipt['targets'] = rows;
+          } finally {
+            query.dispose();
+          }
         case 'authorizeItem':
           await runtime!.resolve(
             PlayerOpenRequest(

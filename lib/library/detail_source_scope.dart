@@ -208,9 +208,15 @@ class _SourceDetailGateState extends State<SourceDetailGate> {
                 .isDesktop ??
             true;
         // Replace the whole deep stack and clear route extras, not just pixels.
-        GoRouter.maybeOf(
-          context,
-        )?.go(desktop ? '/aggregation' : '/', extra: null);
+        final router = GoRouter.maybeOf(context);
+        // Redact the invalid lease immediately in build, then replace history
+        // after that frame. Mutating the Navigator while source revocation
+        // is notifying its mounted subtree races its render/semantics teardown.
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            router?.go(desktop ? '/aggregation' : '/', extra: null);
+          }
+        });
       }
     }
     if (mounted) setState(() {});

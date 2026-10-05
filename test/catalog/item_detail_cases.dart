@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import '../helpers/image_cache_fixture.dart';
 import '../helpers/settle.dart';
+import '../helpers/synthetic_source_fixture.dart';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
@@ -120,10 +121,10 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
-    final auth = AuthController(
-      client: EmbyClient(device: _device, dio: dioForFakeEmby(adapter)),
-      credentials: MemoryCredentialStore(),
-      servers: MemoryServerListStore(),
+    final auth = SyntheticSourceAuth(
+      adapter: adapter,
+      device: _device,
+      libraryIds: {'view-movies', 'view-tv', 'view-mixed', 'view-untyped'},
     );
     await tester.runAsync(() {
       return auth.connect(
@@ -133,12 +134,23 @@ void main() {
       );
     });
     expect(auth.isLoggedIn, isTrue);
+    await tester.runAsync(
+      () => auth.sources.configureScope(
+        auth.session!.server.id,
+        participates: true,
+        libraryIds: {'view-movies', 'view-tv', 'view-mixed', 'view-untyped'},
+      ),
+    );
+    final runtime = await tester.runAsync(() async => auth.runtime());
     final app = RillightApp(
       auth: auth,
-      playerBindings: host == null
-          ? const PlayerBindings()
-          : PlayerBindings(windowHost: host),
+      playerBindings: PlayerBindings(runtime: runtime, windowHost: host),
     );
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.runAsync(runtime!.history.close);
+      auth.dispose();
+    });
     return app;
   }
 
@@ -347,8 +359,18 @@ void main() {
         .where((request) => request.contains('/Items/episode-friends-s1e2?'))
         .toList();
     expect(detailRequests, isNotEmpty);
+    // Registry ancestry/identity probes use canonical metadata fields; only
+    // the actual detail-content fetch must include People.
+    expect(detailRequests.any((request) => request.contains('People')), isTrue);
     expect(
-      detailRequests.every((request) => request.contains('People')),
+      detailRequests.every(
+        (request) =>
+            request.contains('People') ||
+            Uri.parse(
+                  request.substring(request.indexOf(' ') + 1),
+                ).queryParameters['Fields'] ==
+                EmbyClient.itemFields,
+      ),
       isTrue,
     );
   }, tags: ['integration']);

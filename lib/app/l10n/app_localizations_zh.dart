@@ -9,6 +9,100 @@ class AppLocalizationsZh extends AppLocalizations {
   AppLocalizationsZh([String locale = 'zh']) : super(locale);
 
   @override
+  String get sourceManagement => '服务与范围管理';
+
+  @override
+  String get privateSetPin => '设置 PIN';
+
+  @override
+  String get privatePin => 'PIN（4–12 位数字）';
+
+  @override
+  String get privateConfirmPin => '再次输入 PIN';
+
+  @override
+  String get privateUnlock => '解锁';
+
+  @override
+  String get privateLock => '立即锁定';
+
+  @override
+  String get privatePinFailure => 'PIN 错误或操作失败，请稍后重试';
+
+  @override
+  String get privateRateLimited => '尝试过于频繁，请等待重试时间后再解锁';
+
+  @override
+  String get sourceParticipates => '参与聚合';
+
+  @override
+  String get sourceDiscoverLibraries => '读取媒体库（不自动选择）';
+
+  @override
+  String get sourceScopeUnknown => '范围未知；请读取并明确选择媒体库';
+
+  @override
+  String get sourceIndependentLogin => '独立账号登录';
+
+  @override
+  String get sourceManualCheck => '手动检查';
+
+  @override
+  String get sourceMovePrivate => '移入私密区域';
+
+  @override
+  String get sourceMoveOrdinary => '移入普通区域';
+
+  @override
+  String get sourceMoveWarning =>
+      '将先撤销该服务的展示、播放和缓存，再迁移成员关系。失败后需重新打开来源；不会自动恢复播放。';
+
+  @override
+  String get sourceOperationFailed => '操作失败或访问已撤销；未自动切换来源，请重新检查';
+
+  @override
+  String get sourceRenameLine => '线路昵称';
+
+  @override
+  String get switchManual => '手动切换';
+
+  @override
+  String get switchLine => '连接线路（同一服务）';
+
+  @override
+  String get switchVersion => '来源版本（当前条目）';
+
+  @override
+  String get switchCrossSource => '跨服务来源（已确认作品）';
+
+  @override
+  String get switchActual => '实际播放来源';
+
+  @override
+  String get switchTimeline => '目标时间轴可能不同；请选择续播或从头播放';
+
+  @override
+  String get switchMissingLanguage => '目标缺少原语言；请选择目标音轨/字幕，或明确接受默认音轨/关闭字幕';
+
+  @override
+  String get switchBeginning => '从头播放';
+
+  @override
+  String get switchCurrentPosition => '尝试当前位置';
+
+  @override
+  String get switchDefaultAudio => '接受默认音轨';
+
+  @override
+  String get switchSubtitlesOff => '关闭字幕';
+
+  @override
+  String get switchPending => '正在切换；尚未确认实际播放';
+
+  @override
+  String get switchRestore => '恢复原来源（需仍有访问许可）';
+
+  @override
   String get aggregation => '聚合';
 
   @override

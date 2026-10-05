@@ -94,6 +94,192 @@ abstract class AppLocalizations {
   /// A list of this localizations delegate's supported locales.
   static const List<Locale> supportedLocales = <Locale>[Locale('zh')];
 
+  /// No description provided for @sourceManagement.
+  ///
+  /// In zh, this message translates to:
+  /// **'服务与范围管理'**
+  String get sourceManagement;
+
+  /// No description provided for @privateSetPin.
+  ///
+  /// In zh, this message translates to:
+  /// **'设置 PIN'**
+  String get privateSetPin;
+
+  /// No description provided for @privatePin.
+  ///
+  /// In zh, this message translates to:
+  /// **'PIN（4–12 位数字）'**
+  String get privatePin;
+
+  /// No description provided for @privateConfirmPin.
+  ///
+  /// In zh, this message translates to:
+  /// **'再次输入 PIN'**
+  String get privateConfirmPin;
+
+  /// No description provided for @privateUnlock.
+  ///
+  /// In zh, this message translates to:
+  /// **'解锁'**
+  String get privateUnlock;
+
+  /// No description provided for @privateLock.
+  ///
+  /// In zh, this message translates to:
+  /// **'立即锁定'**
+  String get privateLock;
+
+  /// No description provided for @privatePinFailure.
+  ///
+  /// In zh, this message translates to:
+  /// **'PIN 错误或操作失败，请稍后重试'**
+  String get privatePinFailure;
+
+  /// No description provided for @privateRateLimited.
+  ///
+  /// In zh, this message translates to:
+  /// **'尝试过于频繁，请等待重试时间后再解锁'**
+  String get privateRateLimited;
+
+  /// No description provided for @sourceParticipates.
+  ///
+  /// In zh, this message translates to:
+  /// **'参与聚合'**
+  String get sourceParticipates;
+
+  /// No description provided for @sourceDiscoverLibraries.
+  ///
+  /// In zh, this message translates to:
+  /// **'读取媒体库（不自动选择）'**
+  String get sourceDiscoverLibraries;
+
+  /// No description provided for @sourceScopeUnknown.
+  ///
+  /// In zh, this message translates to:
+  /// **'范围未知；请读取并明确选择媒体库'**
+  String get sourceScopeUnknown;
+
+  /// No description provided for @sourceIndependentLogin.
+  ///
+  /// In zh, this message translates to:
+  /// **'独立账号登录'**
+  String get sourceIndependentLogin;
+
+  /// No description provided for @sourceManualCheck.
+  ///
+  /// In zh, this message translates to:
+  /// **'手动检查'**
+  String get sourceManualCheck;
+
+  /// No description provided for @sourceMovePrivate.
+  ///
+  /// In zh, this message translates to:
+  /// **'移入私密区域'**
+  String get sourceMovePrivate;
+
+  /// No description provided for @sourceMoveOrdinary.
+  ///
+  /// In zh, this message translates to:
+  /// **'移入普通区域'**
+  String get sourceMoveOrdinary;
+
+  /// No description provided for @sourceMoveWarning.
+  ///
+  /// In zh, this message translates to:
+  /// **'将先撤销该服务的展示、播放和缓存，再迁移成员关系。失败后需重新打开来源；不会自动恢复播放。'**
+  String get sourceMoveWarning;
+
+  /// No description provided for @sourceOperationFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'操作失败或访问已撤销；未自动切换来源，请重新检查'**
+  String get sourceOperationFailed;
+
+  /// No description provided for @sourceRenameLine.
+  ///
+  /// In zh, this message translates to:
+  /// **'线路昵称'**
+  String get sourceRenameLine;
+
+  /// No description provided for @switchManual.
+  ///
+  /// In zh, this message translates to:
+  /// **'手动切换'**
+  String get switchManual;
+
+  /// No description provided for @switchLine.
+  ///
+  /// In zh, this message translates to:
+  /// **'连接线路（同一服务）'**
+  String get switchLine;
+
+  /// No description provided for @switchVersion.
+  ///
+  /// In zh, this message translates to:
+  /// **'来源版本（当前条目）'**
+  String get switchVersion;
+
+  /// No description provided for @switchCrossSource.
+  ///
+  /// In zh, this message translates to:
+  /// **'跨服务来源（已确认作品）'**
+  String get switchCrossSource;
+
+  /// No description provided for @switchActual.
+  ///
+  /// In zh, this message translates to:
+  /// **'实际播放来源'**
+  String get switchActual;
+
+  /// No description provided for @switchTimeline.
+  ///
+  /// In zh, this message translates to:
+  /// **'目标时间轴可能不同；请选择续播或从头播放'**
+  String get switchTimeline;
+
+  /// No description provided for @switchMissingLanguage.
+  ///
+  /// In zh, this message translates to:
+  /// **'目标缺少原语言；请选择目标音轨/字幕，或明确接受默认音轨/关闭字幕'**
+  String get switchMissingLanguage;
+
+  /// No description provided for @switchBeginning.
+  ///
+  /// In zh, this message translates to:
+  /// **'从头播放'**
+  String get switchBeginning;
+
+  /// No description provided for @switchCurrentPosition.
+  ///
+  /// In zh, this message translates to:
+  /// **'尝试当前位置'**
+  String get switchCurrentPosition;
+
+  /// No description provided for @switchDefaultAudio.
+  ///
+  /// In zh, this message translates to:
+  /// **'接受默认音轨'**
+  String get switchDefaultAudio;
+
+  /// No description provided for @switchSubtitlesOff.
+  ///
+  /// In zh, this message translates to:
+  /// **'关闭字幕'**
+  String get switchSubtitlesOff;
+
+  /// No description provided for @switchPending.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在切换；尚未确认实际播放'**
+  String get switchPending;
+
+  /// No description provided for @switchRestore.
+  ///
+  /// In zh, this message translates to:
+  /// **'恢复原来源（需仍有访问许可）'**
+  String get switchRestore;
+
   /// No description provided for @aggregation.
   ///
   /// In zh, this message translates to:

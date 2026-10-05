@@ -16,7 +16,6 @@ import 'package:rillight/app/theme.dart';
 import 'package:rillight/app/tv_shell.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/auth/auth_controller.dart';
-import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/emby/emby_errors.dart';
 import 'package:rillight/home/catalog_controller.dart';
@@ -38,6 +37,7 @@ import 'package:rillight/player/tv_player_page.dart';
 import 'package:rillight/player/video_backend.dart';
 import '../emby/fake_emby_server.dart';
 import '../helpers/image_cache_fixture.dart';
+import '../helpers/synthetic_source_fixture.dart';
 
 void main() {
   setUp(isolateImageCache);
@@ -52,22 +52,30 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
-    final auth = AuthController.memory(
-      client: EmbyClient(
-        device: const EmbyDeviceInfo(
-          clientName: 'test',
-          deviceName: 'phone',
-          deviceId: 'mobile-widget',
-          version: '1',
-        ),
-        dio: dioForFakeEmby(FakeEmbyAdapter([server])),
+    final auth = SyntheticSourceAuth(
+      adapter: FakeEmbyAdapter([server]),
+      device: const EmbyDeviceInfo(
+        clientName: 'test',
+        deviceName: 'phone',
+        deviceId: 'mobile-widget',
+        version: '1',
       ),
+      libraryIds: {
+        'view-movies',
+        'view-tv',
+        'view-mixed',
+        'view-untyped',
+        'view-music',
+        'view-photos',
+      },
     );
+    final runtime = await tester.runAsync(auth.runtime);
     final video = backend ?? FakeVideoBackend();
     final app = RillightApp(
       auth: auth,
       environment: PresentationEnvironment.phone,
       playerBindings: PlayerBindings(
+        runtime: runtime,
         createBackend: () => video,
         snapshotStore: MemoryPlaybackSessionSnapshotStore(),
         settingsStore: MemoryPlayerSettingsStore(),
@@ -80,6 +88,14 @@ void main() {
     addTearDown(() async {
       await tester.pumpWidget(const SizedBox.shrink());
       app.router.dispose();
+      final closing = runtime!.history.close();
+      for (var i = 0; i < 12; i++) {
+        await tester.pump(const Duration(milliseconds: 80));
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 10)),
+        );
+      }
+      await closing;
       auth.dispose();
     });
     return (app, video);

@@ -344,9 +344,20 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
     unawaited(created.start());
   }
 
+  bool _revocationExitScheduled = false;
+
   void _onPlayback() {
     final current = controller;
     if (current?.permissionRevoked == true) {
+      if (!_revocationExitScheduled) {
+        _revocationExitScheduled = true;
+        // The active origin can differ from the detail route that opened it.
+        // Revocation must clear playback/history using that actual controller,
+        // not wait for the original detail gate's unrelated source lease.
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) GoRouter.of(context).go('/', extra: null);
+        });
+      }
       _danmaku?.removeListener(_onDanmaku);
       _danmaku?.dispose();
       _danmaku = null;
@@ -664,7 +675,7 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
     _interaction.dispose();
     final c = controller;
     if (c != null) {
-      unawaited(c.disposeAsync());
+      unawaited(c.disposeAsync(notifyStopped: false));
       c.dispose();
     }
     super.dispose();
@@ -711,6 +722,15 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
   @override
   Widget build(BuildContext context) {
     final c = controller!;
+    if (c.permissionRevoked) {
+      // No revoked source controls or semantics survive the cleanup frame.
+      return Scaffold(
+        backgroundColor: Colors.black,
+        body: Center(
+          child: Text(AppLocalizations.of(context).aggregationPrivateLocked),
+        ),
+      );
+    }
     final danmaku = _danmaku;
     final ended =
         c.playbackEnded &&

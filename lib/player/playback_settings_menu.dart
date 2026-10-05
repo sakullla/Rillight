@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'source_switch_menu.dart';
 import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart';
@@ -109,13 +110,19 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
           ),
         ),
       ),
-      builder: (context, menu, _) => IconButton(
-        key: PlayerKeys.more,
-        focusNode: _buttonFocus,
-        tooltip: l10n.playerPlaybackSettings,
-        color: scheme.onSurface,
-        icon: const Icon(Icons.settings_outlined),
-        onPressed: () => menu.isOpen ? menu.close() : menu.open(),
+      builder: (context, menu, _) => Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SourceSwitchButton(controller: widget.controller),
+          IconButton(
+            key: PlayerKeys.more,
+            focusNode: _buttonFocus,
+            tooltip: l10n.playerPlaybackSettings,
+            color: scheme.onSurface,
+            icon: const Icon(Icons.settings_outlined),
+            onPressed: () => menu.isOpen ? menu.close() : menu.open(),
+          ),
+        ],
       ),
       menuChildren: [
         SizedBox(

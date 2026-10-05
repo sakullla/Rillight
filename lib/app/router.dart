@@ -92,9 +92,8 @@ GoRouter createAppRouter({
         ),
         ShellRoute(
           builder: (context, state, child) => CatalogShell(
-            key: ValueKey(
-              '${auth.session?.server.id}|${auth.session?.userId}|${auth.session?.server.activeLine?.id}',
-            ),
+            // The catalog invalidates selected-session data itself. Preserve
+            // the Navigator and independent source-bound playback on selection.
             auth: auth,
             child: child,
           ),
@@ -200,9 +199,7 @@ GoRouter createAppRouter({
         ),
         ShellRoute(
           builder: (context, state, child) => CatalogShell(
-            key: ValueKey(
-              '${auth.session?.server.id}|${auth.session?.userId}|${auth.session?.server.activeLine?.id}',
-            ),
+            // As on phone, selection is not ownership of the active player.
             auth: auth,
             child: child,
           ),

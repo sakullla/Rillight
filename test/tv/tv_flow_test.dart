@@ -5,8 +5,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
 import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/tv_shell.dart';
-import 'package:rillight/auth/auth_controller.dart';
-import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/library/tv_detail_page.dart';
 import 'package:rillight/library/tv_library_page.dart';
@@ -20,6 +18,7 @@ import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/video_backend.dart';
 import '../emby/fake_emby_server.dart';
 import '../helpers/image_cache_fixture.dart';
+import '../helpers/synthetic_source_fixture.dart';
 
 void main() {
   setUp(isolateImageCache);
@@ -32,22 +31,30 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
-    final auth = AuthController.memory(
-      client: EmbyClient(
-        device: const EmbyDeviceInfo(
-          clientName: 'test',
-          deviceName: 'tv',
-          deviceId: 'tv-widget',
-          version: '1',
-        ),
-        dio: dioForFakeEmby(FakeEmbyAdapter([server])),
+    final auth = SyntheticSourceAuth(
+      adapter: FakeEmbyAdapter([server]),
+      device: const EmbyDeviceInfo(
+        clientName: 'test',
+        deviceName: 'tv',
+        deviceId: 'tv-widget',
+        version: '1',
       ),
+      libraryIds: {
+        'view-movies',
+        'view-tv',
+        'view-mixed',
+        'view-untyped',
+        'view-music',
+        'view-photos',
+      },
     );
+    final runtime = await auth.runtime();
     final backend = FakeVideoBackend();
     final app = RillightApp(
       auth: auth,
       environment: PresentationEnvironment.tv,
       playerBindings: PlayerBindings(
+        runtime: runtime,
         createBackend: () => backend,
         snapshotStore: snapshotStore ?? MemoryPlaybackSessionSnapshotStore(),
         settingsStore: MemoryPlayerSettingsStore(),
@@ -58,6 +65,7 @@ void main() {
     addTearDown(() async {
       await tester.pumpWidget(const SizedBox.shrink());
       app.router.dispose();
+      await runtime.history.close();
       auth.dispose();
     });
     return (app, backend);

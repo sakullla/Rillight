@@ -1,5 +1,11 @@
 # Android device validation
 
+## Multi-service/private-region candidate handoff
+
+T7 widget developer evidence includes actual phone and TV page/controller trees and a synthetic backend/history writer; the TV cumulative case uses directional-key events with multiple stable frames, not `requestFocus` as a remote substitute. These are not Android device/native/physical-audio acceptance. No T7 native APK or device acceptance run is claimed.
+
+With disposable synthetic Emby A/B services and independent accounts, declare participating libraries explicitly, find/compare/switch a confirmed work, then verify actual displayed source/version and ordered local history. Exercise touch on both 360dp/412dp phones and physical D-pad/select/back on TV. Separately test same-service line versus edition versus cross-service selection, timeline confirmation/cancel, missing-language selection, failure restoration, invalid preferences and PIN setup/error/rate limit/cancel/manual lock/restart. During pending playback/switch, migrate ordinary→private and lock; inspect late image/HTTP/report/history events and ordinary cards/search/counts/continue-watching for revoked private data. Keep the native view mounted while loading; after exit recheck gesture navigation and screen lock/wake. Record APK/library/SDK hashes, physical frames/audio, actual decoder, focus restoration and GPU behavior. Emulator/software/fake output remains a separate evidence class. Target-device results for this candidate remain **unverified**; see `tool/player_release_evidence.md` for the working-tree development boundaries.
+
 Use Flutter 3.47.4, Android SDK API 36/build-tools 36, NDK with
 `llvm-readelf`, JDK 17+, FFmpeg and ffprobe on PATH. Set `RILLIGHT_CORE_SDK_ROOT` to the
 pinned Android core SDK containing `arm64-v8a`, `armeabi-v7a` and `x86_64`

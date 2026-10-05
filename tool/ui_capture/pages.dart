@@ -77,6 +77,19 @@ extension PageCaptures on CaptureSession {
       }
       await advance(1200);
       await save('aggregation-ready');
+      await tap(const Key('aggregation-source-management'));
+      await save('aggregation-management');
+      await activate(find.widgetWithText(ListTile, '私密区域'));
+      await save('aggregation-pin-setup');
+      await tester.enterText(find.byKey(const Key('private-pin')), '1234');
+      await tester.enterText(
+        find.byKey(const Key('private-pin-confirm')),
+        '5678',
+      );
+      await tap(const Key('private-unlock'));
+      await save('aggregation-pin-error');
+      await tap(const Key('private-pin-cancel'));
+      await tap(const Key('source-management-close'));
       final sources = auth.sources.project(AccessRegion.ordinary);
       await activate(
         find.byKey(ValueKey('aggregation-source-${sources.last.id}')),

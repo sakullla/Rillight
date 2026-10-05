@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'package:rillight/player/source_switch_menu.dart';
+import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/player/player_host_command.dart';
 import 'package:rillight/app/app.dart';
 import 'package:go_router/go_router.dart';
@@ -374,6 +376,90 @@ void main() {
     }
 
     addTearDown(cleanup);
+  }
+
+  for (final failTarget in [false, true]) {
+    testWidgets(
+      'actual manual menu timeline confirmation ${failTarget ? 'failure and permitted recovery' : 'cancel keeps old then confirms target'}',
+      (tester) async {
+        await tester.runAsync(() async {
+          await setup(widgetTester: tester);
+          await controller.start();
+          backend.emitEvent(
+            VideoEventKind.position,
+            const Duration(seconds: 9),
+          );
+          await _eventually(() => controller.activeMediaSourceId == 'v');
+        });
+        await tester.pumpWidget(
+          MaterialApp(
+            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            supportedLocales: AppLocalizations.supportedLocales,
+            home: Scaffold(body: SourceSwitchButton(controller: controller)),
+          ),
+        );
+        await tester.tap(find.byKey(const Key('player-manual-switch')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.widgetWithText(ListTile, 'v2'));
+        await tester.pumpAndSettle();
+        expect(
+          controller.switchConfirmation,
+          isNotNull,
+          reason: controller.trackFailure,
+        );
+        await tester.scrollUntilVisible(find.text('目标时间轴可能不同；请选择续播或从头播放'), 200);
+        expect(find.text('目标时间轴可能不同；请选择续播或从头播放'), findsOneWidget);
+        expect(controller.activeMediaSourceId, 'v');
+        await tester.ensureVisible(find.text('取消').first);
+        await tester.tap(find.text('取消').first);
+        await tester.pumpAndSettle();
+        expect(controller.switchConfirmation, isNull);
+        expect(controller.activeMediaSourceId, 'v');
+        await tester.scrollUntilVisible(
+          find.widgetWithText(ListTile, 'v2'),
+          -200,
+        );
+        await tester.tap(find.widgetWithText(ListTile, 'v2'));
+        await tester.pumpAndSettle();
+        await tester.scrollUntilVisible(find.text('尝试当前位置'), 200);
+        backend.failNextOpen = failTarget;
+        await tester.tap(find.text('尝试当前位置'));
+        for (var i = 0; i < 20; i++) {
+          await tester.pump(const Duration(milliseconds: 50));
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 10)),
+          );
+        }
+        if (failTarget) {
+          expect(controller.trackFailure, isNotNull);
+          expect(find.text(controller.trackFailure!), findsOneWidget);
+          expect(controller.resolved!.mediaSource.id, 'v');
+          expect(controller.origin!.source.account, account);
+        }
+        backend.emitEvent(VideoEventKind.position, const Duration(seconds: 10));
+        await tester.runAsync(
+          () => _eventually(
+            () => controller.activeMediaSourceId == (failTarget ? 'v' : 'v2'),
+          ),
+        );
+        await tester.pump();
+        expect(
+          runtime.history
+              .records(AccessRegion.ordinary)
+              .any(
+                (record) =>
+                    record.source.mediaSourceId == (failTarget ? 'v' : 'v2') &&
+                    record.positionTicks == 100000000,
+              ),
+          isTrue,
+        );
+        await tester.tap(find.text('取消').last);
+        await tester.pumpAndSettle();
+        controller.dispose();
+        await tester.pump(const Duration(seconds: 6));
+        await tester.pumpWidget(const SizedBox.shrink());
+      },
+    );
   }
 
   test(

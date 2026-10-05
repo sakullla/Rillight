@@ -2445,6 +2445,7 @@ class PlayerController extends ChangeNotifier {
       throw StateError('Playback unavailable');
     }
     final original = resolved;
+    final inspection = ++_switchInspection;
     final reply = await switchDispatcher!({
       'action': 'inspect',
       ...target,
@@ -2457,6 +2458,10 @@ class PlayerController extends ChangeNotifier {
       'subtitle': subtitleStreamIndex,
     });
     if (_revoked || _disposed || !identical(resolved, original)) return;
+    if (inspection != _switchInspection) {
+      await switchDispatcher!({'action': 'cancel'});
+      return;
+    }
     switchConfirmation = PlaybackSwitchPlan.fromJson(
       Map<String, dynamic>.from(reply['plan'] as Map),
     );
@@ -2547,7 +2552,6 @@ class PlayerController extends ChangeNotifier {
     bool turnSubtitlesOff = false,
   }) async {
     final plan = switchConfirmation;
-    if (plan == null) return;
     if (choice == SwitchResumeChoice.cancel) {
       if (_hostSwitchPending) {
         await switchDispatcher!({'action': 'cancel'});
@@ -2562,6 +2566,7 @@ class PlayerController extends ChangeNotifier {
       _emit();
       return;
     }
+    if (plan == null) return;
     if (!identical(resolved, _switchOriginal) ||
         _disposed ||
         sessionExpired ||
@@ -2689,6 +2694,34 @@ class PlayerController extends ChangeNotifier {
   }
 
   /// Identity is checked anonymously before attaching credentials to a line.
+  Future<void> lockPrivateRegion() async {
+    if (runtime != null &&
+        origin?.source.account.region == AccessRegion.private) {
+      await runtime!.registry.access.lock();
+      return;
+    }
+    if (switchDispatcher != null &&
+        openRequest?.source?.account.region == AccessRegion.private &&
+        !_revoked) {
+      await switchDispatcher!({'action': 'lock'});
+      return;
+    }
+    throw StateError('Private playback authority required');
+  }
+
+  Future<void> switchHostTarget(Map<String, dynamic> target) async {
+    if (runtime != null || switchDispatcher == null || _revoked || _disposed) {
+      throw StateError('Helper playback authority required');
+    }
+    await _inspectHostSwitch({
+      'target': target['target'],
+      'work': target['work'],
+      'library': target['library'],
+      'targetVersion': target['targetVersion'],
+      'numbering': target['numbering'],
+    });
+  }
+
   Future<void> switchLine(String lineId) async {
     if (runtime == null && switchDispatcher != null) {
       await _inspectHostSwitch({'line': lineId});
@@ -2793,6 +2826,11 @@ class PlayerController extends ChangeNotifier {
     return null;
   }
 
+  bool get canRestoreOriginalSource =>
+      !_revoked &&
+      !_disposed &&
+      (_restoreOrigin != null || switchDispatcher != null);
+
   Future<void> restoreOriginalSource() async {
     if (runtime == null && switchDispatcher != null) {
       if (_revoked) throw StateError('Playback permission revoked');
@@ -2880,9 +2918,13 @@ class PlayerController extends ChangeNotifier {
 
   /// Flutter's synchronous dispose delegates to this joinable cleanup. Hosts
   /// await this before closing the native window or exiting the process.
-  Future<void> disposeAsync() => _disposing ??= _disposeResources();
+  Future<void> disposeAsync({bool notifyStopped = true}) =>
+      _disposing ??= _disposeResources(notifyStopped: notifyStopped);
 
-  Future<void> _disposeResources({bool reportStopped = true}) async {
+  Future<void> _disposeResources({
+    bool reportStopped = true,
+    bool notifyStopped = true,
+  }) async {
     unawaited(_discardNextPrefix());
     _operations.close();
     state.phase = PlaybackPhase.closing;
@@ -2892,7 +2934,7 @@ class PlayerController extends ChangeNotifier {
     isPlaying = false;
     loading = false;
     state.buffering = false;
-    _emit();
+    if (notifyStopped) _emit();
     _progressFailBannerTimer?.cancel();
     _subtitleNoticeTimer?.cancel();
     _settingsSaveTimer?.cancel();
@@ -4942,8 +4984,11 @@ class PlayerController extends ChangeNotifier {
   @override
   void dispose() {
     if (_disposed) return;
-    unawaited(_disposing ??= _disposeResources(reportStopped: false));
+    // Widget teardown can run with the element tree locked. Suppress observer
+    // emissions before starting synchronous portions of resource retirement;
+    // explicit disposeAsync still publishes stopped state while mounted.
     _disposed = true;
+    unawaited(_disposing ??= _disposeResources(reportStopped: false));
     runtime?.registry.access.removeRevocationHook(_revokeSource);
     runtime?.registry.access.removeCleanupHook(_closeRevokedSource);
     runtime?.registry.access.removeTerminationHook(_terminateRevokedSource);

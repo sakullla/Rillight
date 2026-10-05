@@ -70,6 +70,16 @@ class TestClient extends EmbyClient {
   }
 
   @override
+  Future<List<EmbyItem>> getViews() async => [
+    const EmbyItem(id: 'movies', name: 'Movies', type: 'CollectionFolder'),
+    const EmbyItem(
+      id: 'new-library',
+      name: 'New library',
+      type: 'CollectionFolder',
+    ),
+  ];
+
+  @override
   Future<LibraryCounts> getItemCounts() async =>
       const LibraryCounts(movie: 1, series: 1, episode: 1, others: []);
   @override
@@ -152,6 +162,54 @@ Future<SourceSessionRegistry> registry(
 }
 
 void main() {
+  test(
+    'management independent login replaces only target identity and discovery never broadens scope',
+    () async {
+      final access = RegionAccessController();
+      final clients = <TestClient>[];
+      final sources = await registry(access, [
+        server('a'),
+        server('b'),
+      ], clients);
+      addTearDown(sources.dispose);
+      final a = await sources.authenticate('a');
+      final permit = sources.permit(a.account, libraryId: 'movies');
+      await sources.login('b', 'bob', 'secret');
+      expect(permit.isValid, isTrue);
+      final b = await sources.authenticate('b');
+      expect(b.account.userId, 'replacement');
+      final libraries = await sources.discoverLibraries('b');
+      expect(libraries.keys, containsAll(['movies', 'new-library']));
+      expect(sources.project(AccessRegion.ordinary).last.libraryIds, [
+        'movies',
+      ]);
+      expect(permit.isValid, isTrue);
+    },
+  );
+  test(
+    'management login late after private lock cannot persist replacement credentials',
+    () async {
+      final access = RegionAccessController();
+      await access.setPin('1234', '1234', (_) async {});
+      await access.unlock('1234');
+      final clients = <TestClient>[];
+      final sources = await registry(access, [
+        server('b', region: AccessRegion.private),
+      ], clients);
+      addTearDown(sources.dispose);
+      final gate = Completer<void>();
+      final started = Completer<void>();
+      final login = sources.login('b', 'bob', 'secret');
+      clients.last.loginGate = gate;
+      clients.last.loginStarted = started;
+      await started.future;
+      final failed = expectLater(login, throwsStateError);
+      await access.lock();
+      gate.complete();
+      await failed;
+      expect((await sources.credentials.read('b'))!.userId, 'user-b');
+    },
+  );
   late PinVerifier verifier;
   setUpAll(() async {
     verifier = await PinVerifier.create('1234');

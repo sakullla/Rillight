@@ -10,6 +10,7 @@ import '../aggregation/history/history_models.dart'
 import '../emby/catalog_cache.dart';
 import '../emby/emby_models.dart';
 import '../auth/auth_scope.dart';
+import '../auth/source_management.dart';
 
 import '../app/l10n/app_localizations.dart';
 import '../app/presentation_environment.dart';
@@ -21,6 +22,7 @@ import '../player/player_bindings.dart';
 import '../player/player_host_command.dart';
 import '../player/player_window_host.dart';
 import 'detail_source_scope.dart';
+import 'episode_mapping_dialog.dart';
 
 /// A route-local projection. Keeping this State mounted on push preserves the
 /// authorized query, filters, cursors, and scroll position when detail returns.
@@ -35,7 +37,17 @@ class RegionAggregationGate extends StatelessWidget {
       builder: (context, _) {
         if (!access.allows(region)) {
           return Center(
-            child: Text(AppLocalizations.of(context).aggregationPrivateLocked),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(AppLocalizations.of(context).aggregationPrivateLocked),
+                FilledButton(
+                  onPressed: () =>
+                      showPrivateAccess(context, AuthScope.of(context)),
+                  child: Text(AppLocalizations.of(context).privateUnlock),
+                ),
+              ],
+            ),
           );
         }
         return AggregationPage(
@@ -53,7 +65,15 @@ class PrivateRegionButton extends StatelessWidget {
   Widget build(BuildContext context) => IconButton(
     key: const Key('aggregation-private-entry'),
     tooltip: AppLocalizations.of(context).aggregationPrivate,
-    onPressed: () => context.push('/private'),
+    onPressed: () async {
+      final auth = AuthScope.of(context);
+      if (!auth.regionAccess.allows(AccessRegion.private)) {
+        await showPrivateAccess(context, auth);
+      }
+      if (context.mounted && auth.regionAccess.allows(AccessRegion.private)) {
+        context.push('/private');
+      }
+    },
     icon: const Icon(Icons.lock_outline),
   );
 }
@@ -330,6 +350,22 @@ class _AggregationPageState extends State<AggregationPage> {
                                 ).textTheme.headlineSmall,
                               ),
                             ),
+                            IconButton(
+                              key: const Key('aggregation-source-management'),
+                              tooltip: l.sourceManagement,
+                              onPressed: () => showSourceManagement(
+                                context,
+                                region: widget.region,
+                              ),
+                              icon: const Icon(Icons.tune),
+                            ),
+                            if (widget.region == AccessRegion.private)
+                              IconButton(
+                                tooltip: l.privateLock,
+                                onPressed: () =>
+                                    AuthScope.of(context).regionAccess.lock(),
+                                icon: const Icon(Icons.lock),
+                              ),
                             if (widget.region == AccessRegion.ordinary)
                               const PrivateRegionButton(),
                           ],
@@ -1165,32 +1201,7 @@ class _ComparisonDialog extends StatelessWidget {
   final SameSourceQueryController controller;
   final EpisodeSource? episode;
   Future<void> _lookupEpisode(BuildContext context, QueryItem target) async {
-    final verified = await showDialog<bool>(
-      context: context,
-      useRootNavigator: false,
-      builder: (context) => _DialogKeyboard(
-        child: AlertDialog(
-          title: Text(AppLocalizations.of(context).aggregationEpisodeMapping),
-          content: Text(
-            AppLocalizations.of(context).aggregationEpisodeMappingWarning,
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: Text(
-                AppLocalizations.of(context).aggregationEpisodeUncertain,
-              ),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: Text(
-                AppLocalizations.of(context).aggregationEpisodeMappingConfirm,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
+    final verified = await confirmEpisodeMapping(context);
     if (!context.mounted) return;
     if (controller.origin == null) {
       Navigator.of(context).pop();
@@ -1198,23 +1209,11 @@ class _ComparisonDialog extends StatelessWidget {
     }
     if (verified == null) return;
     final e = episode!;
-    const numbering = 'user-confirmed-season-episode';
-    final mapped = verified
-        ? EpisodeSource(
-            reference: e.reference,
-            series: e.series,
-            season: e.season,
-            episode: e.episode,
-            endEpisode: e.endEpisode,
-            isSpecial: e.isSpecial,
-            providerIds: e.providerIds,
-            numberingScheme: numbering,
-          )
-        : e;
+    final mapped = verified ? withConfirmedEpisodeMapping(e) : e;
     await controller.lookupEpisode(
       target: target,
       episode: mapped,
-      verifiedNumberingScheme: verified ? numbering : null,
+      verifiedNumberingScheme: verified ? userConfirmedEpisodeNumbering : null,
     );
   }
 

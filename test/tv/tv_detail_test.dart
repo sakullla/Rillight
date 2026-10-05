@@ -7,8 +7,7 @@ import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/tv_shell.dart';
 import 'package:rillight/home/catalog_keys.dart';
-import 'package:rillight/auth/auth_controller.dart';
-import 'package:rillight/emby/emby_client.dart';
+
 import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/library/tv_detail_page.dart';
 import 'package:rillight/player/player_bindings.dart';
@@ -18,6 +17,30 @@ import 'package:rillight/player/tv_player_page.dart';
 import 'package:rillight/player/video_backend.dart';
 import '../emby/fake_emby_server.dart';
 import '../helpers/image_cache_fixture.dart';
+import '../helpers/synthetic_source_fixture.dart';
+
+Future<void> _settle(WidgetTester tester) async {
+  for (var frame = 0; frame < 12; frame++) {
+    await tester.pump(const Duration(milliseconds: 80));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 10)),
+    );
+  }
+}
+
+Future<void> _back(WidgetTester tester) async {
+  var finished = false;
+  await tester.runAsync(() async {
+    unawaited(tester.binding.handlePopRoute().then((_) => finished = true));
+  });
+  for (var frame = 0; frame < 60 && !finished; frame++) {
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 10)),
+    );
+  }
+  expect(finished, isTrue, reason: 'TV back dispatch exceeded six seconds');
+}
 
 void main() {
   setUp(isolateImageCache);
@@ -26,31 +49,33 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
-    final auth = AuthController.memory(
-      client: EmbyClient(
-        device: const EmbyDeviceInfo(
-          clientName: 'test',
-          deviceName: 'tv',
-          deviceId: 'tv-widget',
-          version: '1',
-        ),
-        dio: dioForFakeEmby(FakeEmbyAdapter([server])),
+    final auth = SyntheticSourceAuth(
+      adapter: FakeEmbyAdapter([server]),
+      device: const EmbyDeviceInfo(
+        clientName: 'test',
+        deviceName: 'tv',
+        deviceId: 'tv-widget',
+        version: '1',
       ),
+      libraryIds: {'view-movies', 'view-tv', 'view-photos', 'view-untyped'},
     );
+    final runtime = (await tester.runAsync(auth.runtime))!;
     final app = RillightApp(
       auth: auth,
       environment: PresentationEnvironment.tv,
       playerBindings: PlayerBindings(
+        runtime: runtime,
         createBackend: () => FakeVideoBackend(),
         snapshotStore: MemoryPlaybackSessionSnapshotStore(),
         settingsStore: MemoryPlayerSettingsStore(),
       ),
     );
     await tester.pumpWidget(app);
-    await tester.pumpAndSettle();
+    await _settle(tester);
     addTearDown(() async {
       await tester.pumpWidget(const SizedBox.shrink());
       app.router.dispose();
+      await tester.runAsync(runtime.history.close);
       auth.dispose();
     });
     return app;
@@ -58,7 +83,7 @@ void main() {
 
   Future<void> key(WidgetTester tester, LogicalKeyboardKey key) async {
     await tester.sendKeyEvent(key);
-    await tester.pumpAndSettle();
+    await _settle(tester);
   }
 
   Future<void> edit(WidgetTester tester, String text) async {
@@ -67,7 +92,7 @@ void main() {
     // Text input represents the platform IME; all application navigation is D-pad.
     await tester.enterText(find.byKey(const Key('tv-input-editor')), text);
     await tester.testTextInput.receiveAction(TextInputAction.done);
-    await tester.pumpAndSettle();
+    await _settle(tester);
   }
 
   Future<void> login(WidgetTester tester, FakeEmbyServer server) async {
@@ -86,7 +111,7 @@ void main() {
 
   Future<void> openItem(WidgetTester tester, RillightApp app, String id) async {
     unawaited(app.router.push(AppRoutes.item(id)));
-    await tester.pumpAndSettle();
+    await _settle(tester);
   }
 
   Finder focusedAction() => find.byWidgetPredicate(
@@ -221,10 +246,10 @@ void main() {
         i < 4 && find.byType(TvDetailPage).evaluate().isEmpty;
         i++
       ) {
-        await tester.binding.handlePopRoute();
-        await tester.pumpAndSettle();
+        await _back(tester);
+        await _settle(tester);
         await tester.pump(const Duration(seconds: 4));
-        await tester.pumpAndSettle();
+        await _settle(tester);
       }
       expect(find.byType(TvDetailPage), findsOneWidget);
       expect(
@@ -270,8 +295,8 @@ void main() {
         findsOneWidget,
       );
 
-      await tester.binding.handlePopRoute();
-      await tester.pumpAndSettle();
+      await _back(tester);
+      await _settle(tester);
       expect(find.byKey(const Key('tv-detail-episodes')), findsOneWidget);
       expect(FocusManager.instance.primaryFocus, same(episodeFocus));
       expect(focusedLabel(tester), episodeLabel);
@@ -311,10 +336,10 @@ void main() {
       );
       expect(find.byType(SnackBar), findsOneWidget);
       await tester.pump(const Duration(seconds: 4));
-      await tester.pumpAndSettle();
+      await _settle(tester);
 
       await tester.tap(toggle);
-      await tester.pumpAndSettle();
+      await _settle(tester);
       expect(
         server.items.firstWhere((item) => item.id == 'movie-inception').played,
         isFalse,

@@ -1,5 +1,8 @@
 [
   {"id":"aggregation-ready","feature":"aggregation","platforms":["desktop","phone","tv"]},
+  {"id":"aggregation-management","feature":"aggregation","platforms":["desktop","phone","tv"]},
+  {"id":"aggregation-pin-setup","feature":"aggregation","platforms":["desktop","phone","tv"]},
+  {"id":"aggregation-pin-error","feature":"aggregation","platforms":["desktop","phone","tv"]},
   {"id":"aggregation-single-source","feature":"aggregation","platforms":["desktop","phone","tv"]},
   {"id":"aggregation-empty-scope","feature":"aggregation","platforms":["desktop","phone","tv"]},
   {"id":"aggregation-comparison","feature":"aggregation","platforms":["desktop","phone","tv"]},

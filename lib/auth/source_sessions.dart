@@ -388,6 +388,10 @@ class SourceSessionRegistry {
 
   void _invalidate(String id) {
     _scopes[id] = (_scopes[id] ?? 0) + 1;
+    _notifySourceChange(id);
+  }
+
+  void _notifySourceChange(String id) {
     for (final hook in List.of(_sourceRevocations)) {
       try {
         hook(id);
@@ -418,6 +422,8 @@ class SourceSessionRegistry {
       );
     } finally {
       _transitioning.remove(id);
+      // Consumers must also see the committed scope, not only its revocation.
+      _notifySourceChange(id);
     }
   }
 
@@ -526,6 +532,7 @@ class SourceSessionRegistry {
     } finally {
       session?.client.clearSession();
       _transitioning.remove(id);
+      _notifySourceChange(id);
     }
   }
 
@@ -589,6 +596,87 @@ class SourceSessionRegistry {
         _sessionAcquisitions.remove(id);
       }
     }
+  }
+
+  /// Deliberate management login; never changes the legacy active account.
+  Future<void> login(String id, String username, String password) async {
+    final server = _allowed(id);
+    final scope = _scopes[id] ?? 0;
+    final generation = access.generation;
+    _requireCurrent(server, scope, generation);
+    final client = createClient();
+    if (_sessions.values.any((s) => identical(s.client, client))) {
+      throw StateError('Login client must be independent');
+    }
+    final attempt = (_authAttempts[id] ?? 0) + 1;
+    _authAttempts[id] = attempt;
+    void guard() {
+      _requireCurrent(server, scope, generation);
+      if (_authAttempts[id] != attempt) throw StateError('Login superseded');
+    }
+
+    try {
+      final info = await client.getPublicInfo(Uri.parse(server.baseUrl));
+      guard();
+      if (info.id != (server.verifiedServerId ?? id)) {
+        throw StateError('Server identity mismatch');
+      }
+      final result = await client.authenticateByName(
+        baseUrl: Uri.parse(server.baseUrl),
+        username: username,
+        password: password,
+        serverId: info.id,
+      );
+      guard();
+      final previous = await credentials.read(id);
+      guard();
+      _credentialChanges.add(id);
+      _invalidate(id);
+      _sessions.remove(id)?.client.clearSession();
+      try {
+        await credentials.write(
+          id,
+          StoredCredentials(
+            accessToken: result.accessToken,
+            userId: result.user.id,
+            username: username,
+          ),
+        );
+        if ((_scopes[id] ?? 0) != scope + 1 ||
+            _allowed(id).region != server.region ||
+            _authAttempts[id] != attempt ||
+            !access.allows(server.region) ||
+            (server.region == AccessRegion.private &&
+                generation != access.generation)) {
+          throw StateError('Login revoked');
+        }
+      } catch (_) {
+        if (previous == null) {
+          await credentials.delete(id);
+        } else {
+          await credentials.write(id, previous);
+        }
+        rethrow;
+      } finally {
+        _credentialChanges.remove(id);
+      }
+    } finally {
+      client.clearSession();
+    }
+  }
+
+  /// Management discovery is not a media permit and never selects libraries.
+  Future<Map<String, String>> discoverLibraries(String id) async {
+    final session = await authenticate(id);
+    final server = _allowed(id);
+    final scope = _scopes[id] ?? 0;
+    final generation = access.generation;
+    final views = await session.client.getViews();
+    _requireCurrent(server, scope, generation);
+    if (!identical(_sessions[id], session)) {
+      throw StateError('Discovery revoked');
+    }
+    return {for (final view in views) view.id: view.name};
   }
 
   Future<SourceSession> authenticate(String id) async {

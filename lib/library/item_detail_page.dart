@@ -180,7 +180,9 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     final current = _playerHost?.current;
     final closed = _playerRequest != null && current == null;
     _playerRequest = current;
-    if (closed && mounted) {
+    if (closed &&
+        mounted &&
+        (DetailSourceScope.maybeOf(context)?.permit.isValid ?? true)) {
       unawaited(_load(keepChrome: true, refreshCatalog: true));
     }
   }

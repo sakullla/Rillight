@@ -28,6 +28,14 @@ import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/video_backend.dart';
 import 'package:rillight/player/mobile_player_page.dart';
+import 'package:rillight/player/tv_player_page.dart';
+import 'package:rillight/player/desktop_player_window.dart';
+import 'package:rillight/player/player_process_control.dart';
+import 'package:rillight/player/player_process_protocol.dart';
+import 'dart:convert';
+import 'package:rillight/library/tv_detail_page.dart';
+import 'package:rillight/auth/source_management.dart';
+import 'package:rillight/player/source_switch_menu.dart';
 import '../emby/fake_emby_server.dart';
 import '../helpers/image_cache_fixture.dart';
 
@@ -76,6 +84,68 @@ class _RecordingHost extends PlayerWindowHost {
   Future<void> close() async {
     current = null;
     notifyListeners();
+  }
+}
+
+class _IsolatedHelperControl extends DesktopPlayerProcessControl {
+  _IsolatedHelperControl()
+    : super(
+        startupTimeout: const Duration(seconds: 70),
+        pollInterval: const Duration(milliseconds: 30),
+      );
+  final Map<int, Process> children = {};
+  final Map<int, PlayerProcessProtocol> protocols = {};
+  final Set<int> alive = {};
+  final StringBuffer output = StringBuffer();
+  @override
+  Future<int> launch(String executable, String payloadPath) async {
+    final json =
+        jsonDecode(await File(payloadPath).readAsString())
+            as Map<String, dynamic>;
+    final launch = PlayerWindowLaunch.fromJson(json);
+    final child = await Process.start(
+      'flutter',
+      [
+        'test',
+        '--no-pub',
+        '--reporter',
+        'expanded',
+        'test/helpers/desktop_ipc_fixture.dart',
+      ],
+      environment: {'RILLIGHT_TEST_LAUNCH': payloadPath},
+    );
+    child.stdout.transform(utf8.decoder).listen(output.write);
+    child.stderr.transform(utf8.decoder).listen(output.write);
+    var finished = false;
+    unawaited(
+      child.exitCode.then((_) {
+        finished = true;
+        alive.removeWhere((id) => children[id] == child);
+      }),
+    );
+    final deadline = DateTime.now().add(const Duration(seconds: 65));
+    while (!finished && DateTime.now().isBefore(deadline)) {
+      final ready = await launch.protocol!.read('ready', consume: false);
+      if (ready != null) {
+        final id = ready['pid'] as int;
+        children[id] = child;
+        protocols[id] = launch.protocol!;
+        alive.add(id);
+        return id;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 40));
+    }
+    child.kill();
+    throw StateError('Isolated simulated helper did not start: $output');
+  }
+
+  @override
+  bool isAlive(int pid) => alive.contains(pid);
+  @override
+  Future<void> terminate(int pid) async {
+    Process.killPid(pid);
+    children[pid]?.kill();
+    alive.remove(pid);
   }
 }
 
@@ -162,10 +232,12 @@ class _Fixture {
   RillightApp app(
     PresentationEnvironment environment, {
     FakeVideoBackend? backend,
+    PlayerWindowHost? host,
   }) => RillightApp(
     auth: auth,
     environment: environment,
     playerBindings: PlayerBindings(
+      windowHost: host,
       createBackend: backend == null ? null : () => backend,
       progressInterval: const Duration(milliseconds: 200),
       runtime: runtime,
@@ -186,6 +258,31 @@ Future<void> _settle(WidgetTester tester) async {
       () => Future<void>.delayed(const Duration(milliseconds: 10)),
     );
   }
+}
+
+Future<void> _finishRevocation(
+  WidgetTester tester,
+  Future<void> transaction,
+) async {
+  var finished = false;
+  Object? failure;
+  unawaited(
+    transaction.then(
+      (_) => finished = true,
+      onError: (Object error) {
+        failure = error;
+        finished = true;
+      },
+    ),
+  );
+  for (var frame = 0; frame < 100 && !finished; frame++) {
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 10)),
+    );
+  }
+  expect(finished, isTrue, reason: 'Revocation exceeded ten seconds of frames');
+  if (failure != null) throw failure!;
 }
 
 Future<Uint8List> _png(Color color) async {
@@ -259,6 +356,415 @@ void main() {
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
       app.router.dispose();
+    },
+    tags: ['integration'],
+  );
+  for (final environment in [
+    PresentationEnvironment.desktop,
+    PresentationEnvironment.phone,
+    PresentationEnvironment.tv,
+  ]) {
+    testWidgets(
+      '${environment.presentation.name} real management opens anonymous PIN gate and cancels without widening scope',
+      (tester) async {
+        isolateImageCache();
+        final f = _Fixture();
+        await tester.runAsync(() => f.open(configure: false));
+        addTearDown(f.close);
+        tester.view.physicalSize = environment.isTv
+            ? const Size(1920, 1080)
+            : environment.isDesktop
+            ? const Size(1024, 768)
+            : const Size(360, 800);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final app = f.app(environment);
+        await tester.pumpWidget(app);
+        await _settle(tester);
+        app.router.go('/private');
+        await _settle(tester);
+        await tester.tap(find.text('解锁'));
+        await _settle(tester);
+        expect(find.byType(PrivateAccessDialog), findsOneWidget);
+        await tester.enterText(find.byKey(const Key('private-pin')), '1234');
+        await tester.enterText(
+          find.byKey(const Key('private-pin-confirm')),
+          '5678',
+        );
+        await tester.tap(find.byKey(const Key('private-unlock')));
+        await _settle(tester);
+        expect(find.byKey(const Key('private-pin-error')), findsOneWidget);
+        expect(f.auth.regionAccess.hasPin, isFalse);
+        await tester.tap(find.text('取消'));
+        await _settle(tester);
+        expect(find.byType(PrivateAccessDialog), findsNothing);
+        expect(
+          f.auth.sources
+              .project(AccessRegion.ordinary)
+              .every((s) => !s.scopeKnown && s.libraryIds.isEmpty),
+          isTrue,
+        );
+        expect(f.auth.regionAccess.allows(AccessRegion.private), isFalse);
+        await tester.pumpWidget(const SizedBox.shrink());
+        app.router.dispose();
+      },
+      tags: ['integration'],
+    );
+  }
+  testWidgets(
+    'desktop actual UI opens isolated helper file IPC and sole writer orders B observations before migration',
+    (tester) async {
+      isolateImageCache();
+      final f = _Fixture();
+      await tester.runAsync(f.open);
+      addTearDown(f.close);
+      tester.view.physicalSize = const Size(1440, 1000);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final control = _IsolatedHelperControl();
+      final host = DesktopPlayerWindowHost(
+        auth: f.auth,
+        runtime: f.runtime,
+        processControl: control,
+        closeTimeout: const Duration(milliseconds: 500),
+        reportTimeout: const Duration(milliseconds: 500),
+        watchInterval: const Duration(milliseconds: 30),
+      );
+      final app = f.app(PresentationEnvironment.desktop, host: host);
+      addTearDown(() async {
+        await tester.runAsync(control.terminateAll);
+        late Future<void> closing;
+        await tester.runAsync(() async {
+          closing = host.close();
+        });
+        for (var i = 0; i < 120; i++) {
+          await tester.pump(const Duration(milliseconds: 100));
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 5)),
+          );
+        }
+        await tester.runAsync(() => closing);
+        host.dispose();
+        await tester.pumpWidget(const SizedBox.shrink());
+        app.router.dispose();
+      });
+      await tester.pumpWidget(app);
+      await _settle(tester);
+      await tester.tap(find.text('聚合').first);
+      await _settle(tester);
+      await tester.ensureVisible(find.text('查找同源 · 2'));
+      await tester.pump();
+      await tester.tap(find.text('查找同源 · 2'));
+      await _settle(tester);
+      await tester.tap(find.textContaining('已确认来源'));
+      await _settle(tester);
+      final play = find.widgetWithText(FilledButton, '播放').first;
+      await tester.ensureVisible(play);
+      await tester.tap(play);
+      final positions = <int>[];
+      f.history.addListener(() {
+        final records = f.history.records(AccessRegion.ordinary);
+        if (records.isNotEmpty) positions.add(records.single.positionTicks);
+      });
+      for (var i = 0; i < 1400; i++) {
+        await tester.pump(const Duration(milliseconds: 30));
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 50)),
+        );
+        if (positions.contains(70000000)) break;
+      }
+      expect(
+        host.current?.source?.account.configuredServerId,
+        f.bId,
+        reason: control.output.toString(),
+      );
+      expect(positions, contains(70000000), reason: control.output.toString());
+      final record = f.history.records(AccessRegion.ordinary).single;
+      expect(record.libraryId, 'view-movies');
+      final pid = control.activePids.single;
+      await tester.runAsync(() async {
+        await File(
+          '${control.protocols[pid]!.directory.path}/synthetic-position.json',
+        ).writeAsString(jsonEncode({'seconds': 11}));
+      });
+      for (var i = 0; i < 400; i++) {
+        await tester.pump(const Duration(milliseconds: 30));
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 30)),
+        );
+        if (positions.contains(110000000)) break;
+      }
+      expect(
+        positions.indexOf(70000000),
+        lessThan(positions.indexOf(110000000)),
+      );
+      await tester.runAsync(() async {
+        await f.auth.setPrivatePin('1234', '1234');
+        await f.auth.regionAccess.unlock('1234');
+      });
+      late Future<void> moving;
+      await tester.runAsync(() async {
+        moving = f.auth.sources.move(f.bId, AccessRegion.private);
+      });
+      for (var i = 0; i < 120; i++) {
+        await tester.pump(const Duration(milliseconds: 50));
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 30)),
+        );
+      }
+      await tester.runAsync(() => moving);
+      await _settle(tester);
+      expect(host.current, isNull);
+      expect(control.activePids, isEmpty);
+      expect(f.history.records(AccessRegion.ordinary), isEmpty);
+      expect(f.auth.session!.server.id, f.aId);
+      expect(tester.takeException(), isNull);
+    },
+    tags: ['integration'],
+    timeout: const Timeout(Duration(seconds: 150)),
+  );
+  testWidgets(
+    'TV remote actual B detail and controller write seven seconds then migration rejects late observation',
+    (tester) async {
+      isolateImageCache();
+      final f = _Fixture();
+      await tester.runAsync(() async {
+        await f.open();
+        await f.auth.sources.configureScope(
+          f.aId,
+          participates: false,
+          libraryIds: {'view-movies'},
+        );
+      });
+      addTearDown(f.close);
+      tester.view.physicalSize = const Size(1920, 1080);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final backend = FakeVideoBackend(duration: const Duration(seconds: 120));
+      final app = f.app(PresentationEnvironment.tv, backend: backend);
+      addTearDown(() async {
+        await tester.pumpWidget(const SizedBox.shrink());
+        await _settle(tester);
+        app.router.dispose();
+      });
+      await tester.pumpWidget(app);
+      await _settle(tester);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await _settle(tester);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await _settle(tester);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await _settle(tester);
+      final cardFocus = FocusManager.instance.primaryFocus;
+      for (var frame = 0; frame < 8; frame++) {
+        await tester.pump(const Duration(milliseconds: 80));
+        expect(FocusManager.instance.primaryFocus, same(cardFocus));
+      }
+      await tester.sendKeyEvent(LogicalKeyboardKey.select);
+      await _settle(tester);
+      expect(find.byType(TvDetailPage), findsOneWidget);
+      await tester.sendKeyEvent(LogicalKeyboardKey.select);
+      await _settle(tester);
+      expect(find.byType(TvPlayerPage), findsOneWidget);
+      expect(backend.isPlaying, isTrue);
+      var notifications = 0;
+      f.history.addListener(() => notifications++);
+      backend.emitEvent(VideoEventKind.position, const Duration(seconds: 7));
+      await _settle(tester);
+      final record = f.history.records(AccessRegion.ordinary).single;
+      expect(record.source.account.configuredServerId, f.bId);
+      expect(record.libraryId, 'view-movies');
+      expect(record.positionTicks, 70000000);
+      expect(notifications, greaterThan(0));
+      expect(f.b.playbackEvents, isNotEmpty);
+      expect(f.a.playbackEvents, isEmpty);
+      await tester.runAsync(() async {
+        await f.auth.setPrivatePin('1234', '1234');
+        await f.auth.regionAccess.unlock('1234');
+      });
+      late Future<void> migration;
+      await tester.runAsync(() async {
+        migration = f.auth.sources.move(f.bId, AccessRegion.private);
+      });
+      await _settle(tester);
+      await tester.runAsync(() => migration);
+      await _settle(tester);
+      expect(backend.isPlaying, isFalse);
+      backend.emitEvent(VideoEventKind.position, const Duration(seconds: 9));
+      await _settle(tester);
+      expect(f.history.records(AccessRegion.ordinary), isEmpty);
+      expect(tester.takeException(), isNull);
+    },
+    tags: ['integration'],
+  );
+  testWidgets(
+    'phone finds compares switches actual source records then private player menu locks and rejects late frames',
+    (tester) async {
+      final reportError = FlutterError.onError;
+      FlutterError.onError = (details) {
+        debugPrint(details.stack?.toString());
+        reportError?.call(details);
+      };
+      addTearDown(() => FlutterError.onError = reportError);
+      isolateImageCache();
+      final f = _Fixture();
+      await tester.runAsync(f.open);
+      addTearDown(f.close);
+      tester.view.physicalSize = const Size(412, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final backend = FakeVideoBackend(duration: const Duration(seconds: 120));
+      final app = f.app(PresentationEnvironment.phone, backend: backend);
+      addTearDown(() async {
+        await tester.pumpWidget(const SizedBox.shrink());
+        await _settle(tester);
+        app.router.dispose();
+      });
+      await tester.pumpWidget(app);
+      await _settle(tester);
+      await tester.tap(find.byType(NavigationDestination).at(1));
+      await _settle(tester);
+      await tester.ensureVisible(find.text('查找同源 · 2'));
+      await _settle(tester);
+      await tester.tap(find.text('查找同源 · 2'));
+      await _settle(tester);
+      await tester.tap(find.textContaining('已确认来源'));
+      await _settle(tester);
+      await tester.ensureVisible(find.byKey(const Key('mobile-detail-play')));
+      await tester.tap(find.byKey(const Key('mobile-detail-play')));
+      await _settle(tester);
+      final c = tester
+          .state<MobilePlayerPageState>(find.byType(MobilePlayerPage))
+          .controller!;
+      backend.emitEvent(VideoEventKind.position, const Duration(seconds: 7));
+      await _settle(tester);
+      expect(
+        f.history
+            .records(AccessRegion.ordinary)
+            .single
+            .source
+            .account
+            .configuredServerId,
+        f.bId,
+      );
+      await tester.tap(find.byKey(const Key('mobile-player-more')));
+      await _settle(tester);
+      await tester.ensureVisible(find.byKey(const Key('player-manual-switch')));
+      await tester.tap(find.byKey(const Key('player-manual-switch')));
+      await _settle(tester);
+      expect(find.byType(SourceSwitchMenu), findsOneWidget);
+      final target = find.byWidgetPredicate(
+        (w) =>
+            w is ListTile &&
+            w.key is ValueKey<String> &&
+            (w.key as ValueKey<String>).value.startsWith(
+              'switch-target-${f.aId}-',
+            ),
+      );
+      await tester.ensureVisible(target);
+      await tester.tap(target);
+      await _settle(tester);
+      if (c.switchConfirmation != null) {
+        if (c.switchConfirmation!.audioNeedsChoice) {
+          final choice = find.byType(CheckboxListTile).first;
+          await tester.ensureVisible(choice);
+          await tester.tap(choice);
+          await _settle(tester);
+        }
+        if (c.switchConfirmation!.subtitleNeedsChoice) {
+          final choice = find.byType(CheckboxListTile).last;
+          await tester.ensureVisible(choice);
+          await tester.tap(choice);
+          await _settle(tester);
+        }
+        await tester.ensureVisible(find.text('从头播放'));
+        await tester.tap(find.text('从头播放'));
+        await _settle(tester);
+      }
+      // Opening a target is pending, not proof of viewing. The actual backend
+      // observation commits active provenance and the sole writer's record.
+      backend.emitEvent(VideoEventKind.position, const Duration(seconds: 11));
+      await _settle(tester);
+      expect(
+        c.activeOrigin!.source.account.configuredServerId,
+        f.aId,
+        reason:
+            'track=${c.trackFailure} disconnect=${c.disconnectDetail} '
+            'confirmation=${c.switchConfirmation} pending=${c.pendingMediaSourceId}',
+      );
+      expect(
+        f.history
+            .records(AccessRegion.ordinary)
+            .any(
+              (r) =>
+                  r.source.account.configuredServerId == f.aId &&
+                  r.positionTicks == 110000000,
+            ),
+        isTrue,
+      );
+      // Changing the selected ordinary account must not retarget playback A.
+      await tester.tap(find.text('取消').last);
+      await _settle(tester);
+      await tester.runAsync(() => f.auth.switchTo(f.bId));
+      await _settle(tester);
+      expect(find.byType(MobilePlayerPage), findsOneWidget);
+      expect(backend.isPlaying, isTrue);
+      expect(c.activeOrigin!.source.account.configuredServerId, f.aId);
+      debugPrint('T7 phone: ordinary selection preserves active A');
+      await tester.runAsync(() async {
+        await f.auth.setPrivatePin('1234', '1234');
+        await f.auth.regionAccess.unlock('1234');
+      });
+      late Future<void> moving;
+      await tester.runAsync(() async {
+        moving = f.auth.sources.move(f.aId, AccessRegion.private);
+      });
+      await _settle(tester);
+      debugPrint('T7 phone: advancing A membership revocation');
+      await _finishRevocation(tester, moving);
+      debugPrint('T7 phone: A membership revoked');
+      await _settle(tester);
+      expect(backend.isPlaying, isFalse);
+      expect(find.byType(SourceSwitchMenu), findsNothing);
+      debugPrint('T7 phone: entering private A');
+      app.router.go('/private');
+      await _settle(tester);
+      await tester.ensureVisible(find.text('合成作品'));
+      await tester.tap(find.text('合成作品'));
+      await _settle(tester);
+      await tester.ensureVisible(find.byKey(const Key('mobile-detail-play')));
+      await tester.tap(find.byKey(const Key('mobile-detail-play')));
+      await _settle(tester);
+      expect(backend.isPlaying, isTrue);
+      await tester.tap(find.byKey(const Key('mobile-player-more')));
+      await _settle(tester);
+      await tester.ensureVisible(find.byKey(const Key('player-manual-switch')));
+      await tester.tap(find.byKey(const Key('player-manual-switch')));
+      await _settle(tester);
+      debugPrint('T7 phone: locking actual private player');
+      await tester.runAsync(
+        () => tester.tap(find.byKey(const Key('player-lock-private'))),
+      );
+      debugPrint('T7 phone: lock tap dispatched');
+      await _settle(tester);
+      debugPrint('T7 phone: lock frame settled');
+      expect(f.auth.regionAccess.allows(AccessRegion.private), isFalse);
+      expect(backend.isPlaying, isFalse);
+      expect(find.byType(SourceSwitchMenu), findsNothing);
+      backend.emitEvent(VideoEventKind.position, const Duration(seconds: 29));
+      await _settle(tester);
+      debugPrint('T7 phone: rejected late frame');
+      expect(
+        f.history
+            .records(AccessRegion.ordinary)
+            .every((r) => r.source.account.configuredServerId != f.aId),
+        isTrue,
+      );
+      expect(tester.takeException(), isNull);
     },
     tags: ['integration'],
   );

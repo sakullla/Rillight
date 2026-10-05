@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'source_switch_menu.dart';
 import 'dart:math' as math;
 import 'dart:ui' show DisplayFeature, DisplayFeatureType;
 
@@ -821,6 +822,7 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         if (section == null) ...[
+                          SourceSwitchButton(controller: c),
                           for (final entry in <String, (IconData, String)>{
                             'speed': (Icons.speed, l.playbackRate),
                             if (c.canSwitchAudioTrack ||
