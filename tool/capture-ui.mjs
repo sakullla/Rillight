@@ -10,12 +10,12 @@ const args = process.argv.slice(2);
 const catalog = JSON.parse(fs.readFileSync(path.join(root, 'tool/ui_capture/scenarios.json'), 'utf8'));
 if (new Set(catalog.map(s => s.id)).size !== catalog.length) throw new Error('捕获清单含重复状态 ID');
 const options = { platform: 'all', theme: 'all', feature: 'all', only: '*', size: 'all', out: 'build/ui-capture' };
-const featureAliases = { '首页': 'home', '片库': 'library', '详情': 'detail', '搜索': 'search', '服务器': 'servers', '设置': 'settings', '登录': 'login', '播放器': 'player', '弹幕': 'danmaku' };
+const featureAliases = { '首页': 'home', '聚合': 'aggregation', '片库': 'library', '详情': 'detail', '搜索': 'search', '服务器': 'servers', '设置': 'settings', '登录': 'login', '播放器': 'player', '弹幕': 'danmaku' };
 if (args.includes('--help')) {
   console.log(`Usage: node tool/capture-ui.mjs [options]
   --platform all|desktop|phone|tv      default: all
   --theme all|dark|light               default: all
-  --feature home,library,detail,search,servers,settings,login,player,danmaku
+  --feature home,aggregation,library,detail,search,servers,settings,login,player,danmaku
   --only 'server-*,danmaku-search-*'    exact state IDs or * / ? patterns
   --size 360,412,1024,1440,1920         profile widths, default: all
   --list                              list matching states without rendering

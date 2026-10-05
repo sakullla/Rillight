@@ -4,7 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/tv_top_nav.dart';
-import 'package:rillight/app/widgets/skeleton.dart';
+
 import 'package:rillight/app/tv_appearance_picker.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/auth/auth_controller.dart';
@@ -13,11 +13,11 @@ import 'package:rillight/auth/change_password_dialog.dart';
 import 'package:rillight/auth/line_address_dialog.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/home/catalog_scope.dart';
-import 'package:rillight/home/library_tiles.dart';
+
 import 'package:rillight/home/tv_home_page.dart';
 import 'package:rillight/player/android_session_recovery.dart';
 import 'package:rillight/player/player_bindings.dart';
-import 'package:rillight/search/tv_search_page.dart';
+import 'package:rillight/library/aggregation_page.dart';
 
 class TvShell extends StatefulWidget {
   const TvShell({super.key});
@@ -104,9 +104,19 @@ class _TvShellState extends State<TvShell> with WidgetsBindingObserver {
           remembered.canRequestFocus) {
         remembered.requestFocus();
       } else {
-        ReadingOrderTraversalPolicy()
-            .findFirstFocus(_panes[index])
-            ?.requestFocus();
+        // Prefer registered remote controls rather than the scroll view's
+        // generic focus node, which TvFocusRegion cannot retain as a target.
+        final controls = _panes[index].traversalDescendants.where(
+          (node) =>
+              node.context?.findAncestorWidgetOfExactType<TvAction>() != null,
+        );
+        if (controls.isNotEmpty) {
+          controls.first.requestFocus();
+        } else {
+          ReadingOrderTraversalPolicy()
+              .findFirstFocus(_panes[index], ignoreCurrentFocus: true)
+              ?.requestFocus();
+        }
       }
     }
   }
@@ -116,10 +126,8 @@ class _TvShellState extends State<TvShell> with WidgetsBindingObserver {
     final changed = _index != index;
     if (changed) setState(() => _index = index);
     if (!enter) return;
-    if (!changed) {
-      _enterPane(index);
-      return;
-    }
+    // Nav focus may have selected this index before its ExcludeFocus subtree
+    // rebuilds. Enter only after that frame, including an unchanged index.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted &&
           _index == index &&
@@ -225,7 +233,9 @@ class _TvShellState extends State<TvShell> with WidgetsBindingObserver {
                                       child: [
                                         const TvHomePage(),
                                         padded(const _TvLibraries()),
-                                        padded(const TvSearchPage()),
+                                        padded(
+                                          const AggregationPage(search: true),
+                                        ),
                                         padded(const _TvSession()),
                                       ][i],
                                     ),
@@ -263,66 +273,7 @@ class _TvLibraries extends StatelessWidget {
   const _TvLibraries();
   @override
   Widget build(BuildContext context) {
-    final c = CatalogScope.of(context), l = AppLocalizations.of(context);
-    return ListenableBuilder(
-      listenable: c,
-      builder: (context, _) => LayoutBuilder(
-        builder: (context, constraints) {
-          final width = constraints.maxWidth.isFinite
-              ? constraints.maxWidth
-              : MediaQuery.sizeOf(context).width;
-          final columns = (width / 320).floor().clamp(2, 4);
-          final cell = width / columns;
-          // 卡片内边距(TvAction margin+padding)之外的 16:9 图区。
-          const chrome = 32.0;
-          final imageHeight = (cell - chrome) * 9 / 16;
-          final aspect = cell / (imageHeight + chrome);
-          return CustomScrollView(
-            key: const PageStorageKey('tv-libraries'),
-            slivers: [
-              if (c.librariesLoading && c.libraries.isEmpty)
-                const SliverToBoxAdapter(child: _TvLibrarySkeleton()),
-              if (c.librariesError != null || c.librariesNotice != null)
-                SliverToBoxAdapter(
-                  child: TvFailure(
-                    error: (c.librariesError ?? c.librariesNotice)!,
-                    retry: c.reload,
-                  ),
-                ),
-              if (!c.librariesLoading && c.libraries.isEmpty)
-                SliverToBoxAdapter(child: Text(l.mobileEmpty)),
-              SliverGrid(
-                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: columns,
-                  childAspectRatio: aspect,
-                ),
-                delegate: SliverChildBuilderDelegate((context, index) {
-                  final library = c.libraries[index];
-                  return TvAction(
-                    key: ValueKey(library.id),
-                    onPressed: () =>
-                        context.push(AppRoutes.library(library.id)),
-                    child: LayoutBuilder(
-                      builder: (context, card) => LibraryCardFace(
-                        library: library,
-                        width: card.maxWidth,
-                        height: card.maxHeight,
-                      ),
-                    ),
-                  );
-                }, childCount: c.libraries.length),
-              ),
-              SliverToBoxAdapter(
-                child: TvAction(
-                  onPressed: c.reload,
-                  child: Text(l.mobileRefresh),
-                ),
-              ),
-            ],
-          );
-        },
-      ),
-    );
+    return const AggregationPage();
   }
 }
 
@@ -549,23 +500,5 @@ class _TvSession extends StatelessWidget {
     if (confirmed == true) {
       await auth.deleteServer(server.id);
     }
-  }
-}
-
-class _TvLibrarySkeleton extends StatelessWidget {
-  const _TvLibrarySkeleton();
-
-  @override
-  Widget build(BuildContext context) {
-    final animate = !MediaQuery.disableAnimationsOf(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        for (var i = 0; i < 6; i++) ...[
-          const SizedBox(height: 8),
-          SkeletonBlock(width: 280, height: 36, animated: animate),
-        ],
-      ],
-    );
   }
 }

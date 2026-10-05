@@ -1,4 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+import '../app/presentation_environment.dart';
+import 'aggregation_page.dart';
+import '../app/l10n/app_localizations.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/emby/emby_client.dart';
@@ -63,7 +67,9 @@ class SourceDetailGate extends StatefulWidget {
     required this.itemId,
     required this.command,
     required this.child,
+    this.showComparison = true,
   });
+  final bool showComparison;
   final AuthController auth;
   final String itemId;
   final PlayerHostOpenItemCommand? command;
@@ -75,6 +81,7 @@ class SourceDetailGate extends StatefulWidget {
 class _SourceDetailGateState extends State<SourceDetailGate> {
   PlaybackOrigin? _origin;
   MediaImageSourcePolicy? _imagePolicy;
+  bool _resolved = false;
   // Sessionless source-local cache: no writes into selected Auth's namespace,
   // and no persistent private detail projection surviving revocation.
   final _cache = CatalogCache();
@@ -88,11 +95,44 @@ class _SourceDetailGateState extends State<SourceDetailGate> {
   }
 
   Future<void> _resolve() async {
-    final command = widget.command;
-    // Legacy selected-server pages retain their existing behavior. Explicit
-    // sources never fall back to that selection, including denied commands.
-    if (command == null) return;
+    var command = widget.command;
     try {
+      if (command == null) {
+        // A legacy address is explicitly bound to the selected ordinary
+        // service. It cannot enter a private region or infer another service.
+        final selected = widget.auth.session?.server;
+        if (selected == null || selected.region != AccessRegion.ordinary) {
+          return;
+        }
+        final allowed = widget.auth.sources
+            .project(AccessRegion.ordinary)
+            .where(
+              (s) => s.id == selected.id && s.participates && s.scopeKnown,
+            );
+        if (allowed.length != 1 || allowed.single.libraryIds.isEmpty) return;
+        final account = await widget.auth.sources.acquireAccount(
+          selected.id,
+          region: AccessRegion.ordinary,
+          libraryId: allowed.single.libraryIds.first,
+        );
+        final permit = widget.auth.sources.permit(account);
+        var item = await permit.dispatch((c) => c.getItem(widget.itemId));
+        final visited = <String>{};
+        while (!allowed.single.libraryIds.contains(item.id)) {
+          if (!visited.add(item.id) ||
+              item.parentId == null ||
+              visited.length > 32) {
+            return;
+          }
+          item = await permit.dispatch((c) => c.getItem(item.parentId!));
+        }
+        command = PlayerHostOpenItemCommand(
+          itemId: widget.itemId,
+          source: SourceReference(account: account, itemId: widget.itemId),
+          libraryId: item.id,
+          regionGeneration: permit.regionGeneration,
+        );
+      }
       if (command.source == null ||
           command.itemId != widget.itemId ||
           command.source!.itemId != widget.itemId) {
@@ -120,6 +160,7 @@ class _SourceDetailGateState extends State<SourceDetailGate> {
         (c) async => c.withRequestGuard(permit.requireValid),
       );
       permit.requireValid();
+      if (!mounted) return;
       _origin = PlaybackOrigin(
         source: command.source!,
         work: command.source!,
@@ -128,8 +169,11 @@ class _SourceDetailGateState extends State<SourceDetailGate> {
         client: client,
       );
       _imagePolicy = MediaImageSourcePolicy(_origin!);
-    } catch (_) {}
-    if (mounted) setState(() {});
+    } catch (_) {
+      // A denied or failed source never falls back to selected Auth.
+    } finally {
+      if (mounted) setState(() => _resolved = true);
+    }
   }
 
   void _revoked(String serverId) {
@@ -142,6 +186,33 @@ class _SourceDetailGateState extends State<SourceDetailGate> {
 
   void _changed() {
     if (_imagePolicy?.isValid == false) _imagePolicy?.revoke();
+    final command = widget.command;
+    if (mounted && command?.source != null) {
+      var valid = false;
+      try {
+        final permit = widget.auth.sources.permit(
+          command!.source!.account,
+          libraryId: command.libraryId,
+        );
+        valid =
+            permit.isValid &&
+            command.regionGeneration == permit.regionGeneration;
+      } catch (_) {
+        /* An unavailable account is not a legacy fallback. */
+      }
+      if (!valid) {
+        final desktop =
+            context
+                .getInheritedWidgetOfExactType<PresentationScope>()
+                ?.environment
+                .isDesktop ??
+            true;
+        // Replace the whole deep stack and clear route extras, not just pixels.
+        GoRouter.maybeOf(
+          context,
+        )?.go(desktop ? '/aggregation' : '/', extra: null);
+      }
+    }
     if (mounted) setState(() {});
   }
 
@@ -157,16 +228,35 @@ class _SourceDetailGateState extends State<SourceDetailGate> {
 
   @override
   Widget build(BuildContext context) {
-    if (widget.command == null) return widget.child;
     final origin = _origin;
     if (origin == null || !origin.permit.isValid) {
-      return const SizedBox.shrink();
+      if (!_resolved) return const Center(child: CircularProgressIndicator());
+      final l = AppLocalizations.of(context);
+      return Center(
+        child: Text(
+          widget.command?.source?.account.region == AccessRegion.private &&
+                  !widget.auth.regionAccess.allows(AccessRegion.private)
+              ? l.aggregationPrivateLocked
+              : l.aggregationUnavailableDetail,
+        ),
+      );
     }
     return DetailSourceScope(
       origin: origin,
       cache: _cache,
       imagePolicy: _imagePolicy!,
-      child: widget.child,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          widget.child,
+          if (widget.showComparison)
+            const Positioned(
+              right: 16,
+              bottom: 24,
+              child: SourceComparisonAction(),
+            ),
+        ],
+      ),
     );
   }
 }

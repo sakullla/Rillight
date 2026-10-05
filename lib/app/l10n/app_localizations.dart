@@ -94,6 +94,276 @@ abstract class AppLocalizations {
   /// A list of this localizations delegate's supported locales.
   static const List<Locale> supportedLocales = <Locale>[Locale('zh')];
 
+  /// No description provided for @aggregation.
+  ///
+  /// In zh, this message translates to:
+  /// **'聚合'**
+  String get aggregation;
+
+  /// No description provided for @aggregationLibraryScope.
+  ///
+  /// In zh, this message translates to:
+  /// **'媒体库范围'**
+  String get aggregationLibraryScope;
+
+  /// No description provided for @aggregationPrivate.
+  ///
+  /// In zh, this message translates to:
+  /// **'私密区域'**
+  String get aggregationPrivate;
+
+  /// No description provided for @aggregationPrivateLocked.
+  ///
+  /// In zh, this message translates to:
+  /// **'私密区域已锁定，请先在服务管理中解锁'**
+  String get aggregationPrivateLocked;
+
+  /// No description provided for @aggregationUnavailableDetail.
+  ///
+  /// In zh, this message translates to:
+  /// **'此来源详情当前不可访问，请返回允许的来源范围'**
+  String get aggregationUnavailableDetail;
+
+  /// No description provided for @aggregationAllowedSources.
+  ///
+  /// In zh, this message translates to:
+  /// **'全部允许来源'**
+  String get aggregationAllowedSources;
+
+  /// No description provided for @aggregationAllSources.
+  ///
+  /// In zh, this message translates to:
+  /// **'全部普通来源'**
+  String get aggregationAllSources;
+
+  /// No description provided for @aggregationAllTypes.
+  ///
+  /// In zh, this message translates to:
+  /// **'全部类型'**
+  String get aggregationAllTypes;
+
+  /// No description provided for @aggregationAllWatching.
+  ///
+  /// In zh, this message translates to:
+  /// **'全部观看状态'**
+  String get aggregationAllWatching;
+
+  /// No description provided for @aggregationContinue.
+  ///
+  /// In zh, this message translates to:
+  /// **'继续观看'**
+  String get aggregationContinue;
+
+  /// No description provided for @aggregationRecent.
+  ///
+  /// In zh, this message translates to:
+  /// **'最近更新'**
+  String get aggregationRecent;
+
+  /// No description provided for @aggregationLoaded.
+  ///
+  /// In zh, this message translates to:
+  /// **'已加载作品'**
+  String get aggregationLoaded;
+
+  /// No description provided for @aggregationLoadedRemote.
+  ///
+  /// In zh, this message translates to:
+  /// **'远端已加载作品'**
+  String get aggregationLoadedRemote;
+
+  /// No description provided for @aggregationRemoteEmpty.
+  ///
+  /// In zh, this message translates to:
+  /// **'远端暂无继续观看项，本机记录仍可用'**
+  String get aggregationRemoteEmpty;
+
+  /// No description provided for @aggregationRemoteConflict.
+  ///
+  /// In zh, this message translates to:
+  /// **'远端观看时间不可信，请明确选择实际来源（不取最大进度）'**
+  String get aggregationRemoteConflict;
+
+  /// No description provided for @aggregationComplete.
+  ///
+  /// In zh, this message translates to:
+  /// **'范围完整'**
+  String get aggregationComplete;
+
+  /// No description provided for @aggregationIncomplete.
+  ///
+  /// In zh, this message translates to:
+  /// **'范围尚不完整 · 仅对已加载结果排序'**
+  String get aggregationIncomplete;
+
+  /// No description provided for @aggregationEmptyScope.
+  ///
+  /// In zh, this message translates to:
+  /// **'未选择可参与的服务或媒体库'**
+  String get aggregationEmptyScope;
+
+  /// No description provided for @aggregationEmpty.
+  ///
+  /// In zh, this message translates to:
+  /// **'所选范围没有匹配作品'**
+  String get aggregationEmpty;
+
+  /// No description provided for @aggregationAllFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'所选来源全部失败，请逐来源重试'**
+  String get aggregationAllFailed;
+
+  /// No description provided for @aggregationPartialFailure.
+  ///
+  /// In zh, this message translates to:
+  /// **'部分来源失败，已保留成功结果'**
+  String get aggregationPartialFailure;
+
+  /// No description provided for @aggregationRetry.
+  ///
+  /// In zh, this message translates to:
+  /// **'重试此来源'**
+  String get aggregationRetry;
+
+  /// No description provided for @aggregationMore.
+  ///
+  /// In zh, this message translates to:
+  /// **'加载此来源更多'**
+  String get aggregationMore;
+
+  /// No description provided for @aggregationLocalRecord.
+  ///
+  /// In zh, this message translates to:
+  /// **'本机确认观看记录'**
+  String get aggregationLocalRecord;
+
+  /// No description provided for @aggregationResumeActual.
+  ///
+  /// In zh, this message translates to:
+  /// **'从本机记录的实际来源继续'**
+  String get aggregationResumeActual;
+
+  /// No description provided for @aggregationSources.
+  ///
+  /// In zh, this message translates to:
+  /// **'查找同源'**
+  String get aggregationSources;
+
+  /// No description provided for @aggregationConfirmed.
+  ///
+  /// In zh, this message translates to:
+  /// **'已确认来源'**
+  String get aggregationConfirmed;
+
+  /// No description provided for @aggregationCandidate.
+  ///
+  /// In zh, this message translates to:
+  /// **'待辨认候选（非确认续播来源）'**
+  String get aggregationCandidate;
+
+  /// No description provided for @aggregationUnknown.
+  ///
+  /// In zh, this message translates to:
+  /// **'未知'**
+  String get aggregationUnknown;
+
+  /// No description provided for @aggregationLoading.
+  ///
+  /// In zh, this message translates to:
+  /// **'加载中'**
+  String get aggregationLoading;
+
+  /// No description provided for @aggregationAvailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'已返回'**
+  String get aggregationAvailable;
+
+  /// No description provided for @aggregationTimeout.
+  ///
+  /// In zh, this message translates to:
+  /// **'超时'**
+  String get aggregationTimeout;
+
+  /// No description provided for @aggregationOffline.
+  ///
+  /// In zh, this message translates to:
+  /// **'离线'**
+  String get aggregationOffline;
+
+  /// No description provided for @aggregationNeedsLogin.
+  ///
+  /// In zh, this message translates to:
+  /// **'需登录'**
+  String get aggregationNeedsLogin;
+
+  /// No description provided for @aggregationForbidden.
+  ///
+  /// In zh, this message translates to:
+  /// **'无权限'**
+  String get aggregationForbidden;
+
+  /// No description provided for @aggregationFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'查询失败'**
+  String get aggregationFailed;
+
+  /// No description provided for @aggregationRevoked.
+  ///
+  /// In zh, this message translates to:
+  /// **'许可已撤销'**
+  String get aggregationRevoked;
+
+  /// No description provided for @aggregationEpisodeLookup.
+  ///
+  /// In zh, this message translates to:
+  /// **'查找此集'**
+  String get aggregationEpisodeLookup;
+
+  /// No description provided for @aggregationEpisodeMapping.
+  ///
+  /// In zh, this message translates to:
+  /// **'核对分季与分集对应'**
+  String get aggregationEpisodeMapping;
+
+  /// No description provided for @aggregationEpisodeMappingWarning.
+  ///
+  /// In zh, this message translates to:
+  /// **'仅季号和集号相同不能证明同一集。请先核对两份版本是否采用相同的分季和分集方式；不确定时不会提供可直接续播的来源。'**
+  String get aggregationEpisodeMappingWarning;
+
+  /// No description provided for @aggregationEpisodeMappingConfirm.
+  ///
+  /// In zh, this message translates to:
+  /// **'已核对，按季与集对应'**
+  String get aggregationEpisodeMappingConfirm;
+
+  /// No description provided for @aggregationEpisodeConfirmed.
+  ///
+  /// In zh, this message translates to:
+  /// **'已确认具体集（不自动跨服续播）'**
+  String get aggregationEpisodeConfirmed;
+
+  /// No description provided for @aggregationMissingEpisode.
+  ///
+  /// In zh, this message translates to:
+  /// **'缺少目标集（非查询失败）'**
+  String get aggregationMissingEpisode;
+
+  /// No description provided for @aggregationEpisodeFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'具体集查询失败，可重试'**
+  String get aggregationEpisodeFailed;
+
+  /// No description provided for @aggregationEpisodeUncertain.
+  ///
+  /// In zh, this message translates to:
+  /// **'分集对应待确认，不可直接跨服续播'**
+  String get aggregationEpisodeUncertain;
+
   /// No description provided for @deviceDetectionFailed.
   ///
   /// In zh, this message translates to:

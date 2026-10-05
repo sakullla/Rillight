@@ -9,6 +9,7 @@ node tool/capture-ui.mjs
 node tool/capture-ui.mjs --platform desktop --theme dark
 node tool/capture-ui.mjs --platform phone --out build/ui-capture-phone
 node tool/capture-ui.mjs --feature servers --theme light
+node tool/capture-ui.mjs --feature aggregation
 node tool/capture-ui.mjs --feature 弹幕 --platform phone --size 360
 node tool/capture-ui.mjs --only 'poster-hover*,player-settings-*' --platform desktop
 node tool/capture-ui.mjs --only server-delete-confirm --theme light
@@ -22,6 +23,7 @@ node tool/capture-ui.mjs --only '*loading*' --list
 | 功能 | 主要状态 |
 | --- | --- |
 | `home` / 首页 | 两帧加载过程、内容、货架、鼠标悬浮过程、遥控焦点、手机首页编辑 |
+| `aggregation` / 聚合 | 真实三端入口、两服务确认合并、来源裁剪、空范围、同源比较、局部失败、单服务搜索；两服务独立 registry 会话和内存本机记录 authority |
 | `library` / 片库 | 片库列表、电影/剧集片库、排序、筛选、继续观看及最新入库列表 |
 | `detail` / 详情 | 电影、剧集、季、分集、选季/选集弹窗、分集右键菜单、音轨和字幕选择、剧照查看器与翻页 |
 | `search` / 搜索 | 初始、输入、结果、空结果、筛选、TV 输入弹窗 |

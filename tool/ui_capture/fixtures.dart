@@ -180,6 +180,7 @@ FakeEmbyServer captureServer() {
 class CaptureAdapter extends FakeEmbyAdapter {
   CaptureAdapter(super.servers);
   Completer<void>? catalogGate;
+  bool failAggregationMirror = false;
   final artwork = <String, Uint8List>{};
 
   @override
@@ -188,6 +189,17 @@ class CaptureAdapter extends FakeEmbyAdapter {
     Stream<Uint8List>? requestStream,
     Future<void>? cancelFuture,
   ) async {
+    if (failAggregationMirror &&
+        options.uri.host == 'capture-mirror.test' &&
+        options.uri.path.endsWith('/Items')) {
+      return ResponseBody.fromString(
+        '{"Message":"synthetic offline"}',
+        503,
+        headers: {
+          Headers.contentTypeHeader: ['application/json'],
+        },
+      );
+    }
     if (options.uri.path.contains('/Images/')) {
       final parts = options.uri.path.split('/');
       final index = parts.indexOf('Images');
@@ -228,6 +240,16 @@ class CaptureAdapter extends FakeEmbyAdapter {
       final data = jsonDecode(utf8.decode(bytes));
       void addAlbum(Object? value) {
         if (value is Map<String, dynamic>) {
+          if (value['Type'] == 'Movie' || value['Type'] == 'Series') {
+            value['ProviderIds'] = {
+              'Tmdb': value['Id']
+                  .toString()
+                  .codeUnits
+                  .fold<int>(7, (a, b) => a * 31 + b)
+                  .abs()
+                  .toString(),
+            };
+          }
           if (value['Id'] == 'movie-up') {
             value['BackdropImageTags'] = ['capture-still-1', 'capture-still-2'];
           }

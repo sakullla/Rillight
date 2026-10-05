@@ -2,6 +2,7 @@ abstract final class AppRoutes {
   static const home = '/';
   static const connect = '/connect';
   static const search = '/search';
+  static const aggregation = '/aggregation';
   static const settings = '/settings';
 
   /// 手机端"我的"页:底部 tab 移除后经顶栏头像入口进入(仅 phone 路由树注册)。
@@ -15,7 +16,8 @@ abstract final class AppRoutes {
   static const shelfLatestSeries = '/shelf/latest-series';
 
   /// 完整库导航只在首页显示。
-  static bool showsBrowseNav(String path) => path == home;
+  static bool showsBrowseNav(String path) =>
+      path == home || path == aggregation;
 
   /// 条目详情:顶栏浮在 backdrop 上,不占一条实心底。
   static bool isItem(String path) => path.startsWith('/item/');

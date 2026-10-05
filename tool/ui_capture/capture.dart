@@ -13,6 +13,10 @@ import 'package:rillight/app/appearance_style.dart';
 import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/tv_appearance_picker.dart';
 import 'package:rillight/auth/auth_controller.dart';
+import 'package:rillight/auth/source_sessions.dart';
+import 'package:rillight/auth/region_access.dart';
+import 'package:rillight/aggregation/history/history_writer.dart';
+import 'package:rillight/player/playback_runtime.dart';
 import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/auth/tv_connect_page.dart';
@@ -98,7 +102,30 @@ void main() {
           config.$3,
         );
         final server = captureServer();
-        final adapter = CaptureAdapter([server]);
+        final mirror = FakeEmbyServer(
+          serverId: 'capture-mirror',
+          serverName: '合成来源 B',
+          baseUrl: Uri.parse('http://capture-mirror.test:8096'),
+          views: server.views,
+          items: server.items,
+        );
+        final adapter = CaptureAdapter([server, mirror]);
+        final credentials = MemoryCredentialStore();
+        final servers = MemoryServerListStore();
+        final sources = SourceSessionRegistry(
+          access: RegionAccessController(),
+          store: servers,
+          credentials: credentials,
+          createClient: () => EmbyClient(
+            device: const EmbyDeviceInfo(
+              clientName: '灯川原型',
+              deviceName: 'UI capture',
+              deviceId: 'synthetic-ui',
+              version: '1',
+            ),
+            dio: dioForFakeEmby(adapter),
+          ),
+        );
         var backend = CaptureBackend();
         final store = MemoryPlayerSettingsStore(
           const PlayerSettings(
@@ -120,8 +147,9 @@ void main() {
             ),
             dio: dioForFakeEmby(adapter),
           ),
-          credentials: MemoryCredentialStore(),
-          servers: MemoryServerListStore(),
+          credentials: credentials,
+          servers: servers,
+          sources: sources,
         );
         await tester.runAsync(() async {
           await auth.connect(
@@ -129,6 +157,23 @@ void main() {
             username: 'alice',
             password: 'correct-horse',
           );
+          final firstId = auth.session!.server.id;
+          await sources.configureScope(
+            firstId,
+            participates: true,
+            libraryIds: {'view-movies', 'view-tv'},
+          );
+          await auth.connect(
+            address: mirror.baseUrl.toString(),
+            username: 'alice',
+            password: 'correct-horse',
+          );
+          await sources.configureScope(
+            auth.session!.server.id,
+            participates: true,
+            libraryIds: {'view-movies', 'view-tv'},
+          );
+          await auth.switchTo(firstId);
           await appearance.setStyle(
             theme == 'dark' ? AppearanceStyle.dark : AppearanceStyle.light,
           );
@@ -143,12 +188,18 @@ void main() {
           }
         });
         expect(auth.isLoggedIn, isTrue);
+        final history = await HistoryWriter.open(
+          registry: sources,
+          store: MemoryHistoryStore(),
+        );
+        final runtime = PlaybackRuntime(auth: auth, history: history);
         final snapshots = MemoryPlaybackSessionSnapshotStore();
         final app = RillightApp(
           auth: auth,
           environment: config.$2,
           appearance: appearance,
           playerBindings: PlayerBindings(
+            runtime: runtime,
             createBackend: () => backend,
             settingsStore: store,
             snapshotStore: snapshots,
@@ -250,7 +301,7 @@ void main() {
           );
           await capture.save('detail-from-home-ready');
         }
-        await capture.pages(app, auth, server);
+        await capture.pages(app, auth, server, adapter);
         if (config.$1 == 'phone' && capture.wants('home')) {
           app.router.go('/');
           await capture.advance(400);
@@ -541,6 +592,7 @@ void main() {
         }
         await tester.pumpWidget(const SizedBox.shrink());
         await capture.advance(500);
+        await history.close();
         app.router.dispose();
         auth.dispose();
         appearance.dispose();

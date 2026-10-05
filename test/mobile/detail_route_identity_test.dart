@@ -3,6 +3,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
 import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/auth/auth_controller.dart';
+import 'package:rillight/auth/credential_store.dart';
+import 'package:rillight/auth/region_access.dart';
+import 'package:rillight/auth/server_list_store.dart';
+import 'package:rillight/auth/source_sessions.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/library/detail_extras.dart';
@@ -43,17 +47,7 @@ void main() {
         ),
         FakeSeason(id: 'season-friends-3', name: '第 3 季', indexNumber: 3),
       ]);
-      final auth = AuthController.memory(
-        client: EmbyClient(
-          device: const EmbyDeviceInfo(
-            clientName: 'test',
-            deviceName: 'test',
-            deviceId: 'season-art',
-            version: '1',
-          ),
-          dio: dioForFakeEmby(FakeEmbyAdapter([server])),
-        ),
-      );
+      final auth = _authFor(server);
       await tester.runAsync(
         () => auth.connect(
           address: server.baseUrl.toString(),
@@ -61,6 +55,7 @@ void main() {
           password: 'correct-horse',
         ),
       );
+      await tester.runAsync(() => _allowLibraries(auth));
       final app = RillightApp(
         auth: auth,
         environment: PresentationEnvironment.phone,
@@ -151,17 +146,7 @@ void main() {
         addTearDown(tester.view.resetPhysicalSize);
         addTearDown(tester.view.resetDevicePixelRatio);
         final server = FakeEmbyServer();
-        final auth = AuthController.memory(
-          client: EmbyClient(
-            device: const EmbyDeviceInfo(
-              clientName: 'test',
-              deviceName: 'test',
-              deviceId: 'route-identity',
-              version: '1',
-            ),
-            dio: dioForFakeEmby(FakeEmbyAdapter([server])),
-          ),
-        );
+        final auth = _authFor(server);
         await tester.runAsync(
           () => auth.connect(
             address: server.baseUrl.toString(),
@@ -169,6 +154,7 @@ void main() {
             password: 'correct-horse',
           ),
         );
+        await tester.runAsync(() => _allowLibraries(auth));
         final app = RillightApp(auth: auth, environment: environment);
         addTearDown(() async {
           await tester.pumpWidget(const SizedBox.shrink());
@@ -178,7 +164,7 @@ void main() {
         await tester.pumpWidget(app);
         for (final id in ['movie-up', 'movie-inception']) {
           app.router.go('/item/$id');
-          await tester.pumpAndSettle();
+          await _artworkFrames(tester);
           expect(
             tester
                 .widget<DetailAlbumStrip>(find.byType(DetailAlbumStrip))
@@ -192,6 +178,39 @@ void main() {
     );
   }
 }
+
+AuthController _authFor(FakeEmbyServer server) {
+  final adapter = FakeEmbyAdapter([server]);
+  EmbyClient client() => EmbyClient(
+    device: const EmbyDeviceInfo(
+      clientName: 'test',
+      deviceName: 'test',
+      deviceId: 'route-identity',
+      version: '1',
+    ),
+    dio: dioForFakeEmby(adapter),
+  );
+  final credentials = MemoryCredentialStore();
+  final servers = MemoryServerListStore();
+  return AuthController(
+    client: client(),
+    credentials: credentials,
+    servers: servers,
+    sources: SourceSessionRegistry(
+      access: RegionAccessController(),
+      store: servers,
+      credentials: credentials,
+      createClient: client,
+    ),
+  );
+}
+
+Future<void> _allowLibraries(AuthController auth) =>
+    auth.sources.configureScope(
+      auth.session!.server.id,
+      participates: true,
+      libraryIds: {'view-tv', 'view-movies'},
+    );
 
 Future<void> _artworkFrames(WidgetTester tester) async {
   for (var i = 0; i < 12; i++) {

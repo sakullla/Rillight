@@ -18,7 +18,7 @@ import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/video_backend.dart';
-import 'package:rillight/search/tv_search_page.dart';
+import 'package:rillight/library/aggregation_page.dart';
 
 import '../emby/fake_emby_server.dart';
 import '../helpers/image_cache_fixture.dart';
@@ -91,7 +91,11 @@ void main() {
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
       await tester.pumpAndSettle();
 
-      expect(find.byType(TvSearchPage), findsOneWidget);
+      expect(find.byType(AggregationPage), findsOneWidget);
+      expect(
+        tester.widget<AggregationPage>(find.byType(AggregationPage)).search,
+        isTrue,
+      );
       expect(
         tester
             .widget<TvAction>(find.byKey(const ValueKey('tv-nav-2')))
@@ -100,7 +104,7 @@ void main() {
       );
       expect(
         FocusManager.instance.primaryFocus?.context
-            ?.findAncestorWidgetOfExactType<TvSearchPage>(),
+            ?.findAncestorWidgetOfExactType<AggregationPage>(),
         isNotNull,
       );
 

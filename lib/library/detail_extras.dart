@@ -14,6 +14,7 @@ import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/library/provider_marks.dart';
+import 'detail_source_scope.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
@@ -42,6 +43,7 @@ void openGenreShelf(BuildContext context, EmbyItem item, String genre) {
       recursive: true,
       genre: genre,
     ),
+    extra: DetailSourceScope.command(context, item.id),
   );
 }
 

@@ -11,11 +11,14 @@ import 'package:rillight/app/widgets/scrim_icon_button.dart';
 import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/auth/session_actions.dart';
+import 'package:rillight/auth/auth_scope.dart';
+import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/home/home_display_dialog.dart';
 import 'package:rillight/search/search_action.dart';
 import 'package:rillight/search/search_overlay.dart';
+import 'package:rillight/library/aggregation_page.dart';
 
 class HomeScrollNotification extends Notification {
   const HomeScrollNotification(this.scrolled);
@@ -50,7 +53,27 @@ class AppShell extends StatefulWidget {
 }
 
 class _AppShellState extends State<AppShell> {
-  final _forwardLocations = <String>[];
+  final _forwardLocations = <(String, Object?, String?)>[];
+  AuthController? _auth;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final auth = AuthScope.of(context);
+    if (_auth == auth) return;
+    _auth?.regionAccess.removeListener(_clearHistory);
+    _auth?.sources.removeSourceRevocation(_sourceRevoked);
+    _auth = auth;
+    auth.regionAccess.addListener(_clearHistory);
+    auth.sources.addSourceRevocation(_sourceRevoked);
+  }
+
+  void _sourceRevoked(String _) => _clearHistory();
+  void _clearHistory() {
+    _forwardLocations.clear();
+    if (mounted) setState(() => _searchOpen = false);
+  }
+
   String? _gestureLocation;
   bool _gestureNavigation = false;
 
@@ -62,7 +85,11 @@ class _AppShellState extends State<AppShell> {
     final router = GoRouter.of(context);
     final uri = GoRouterState.of(context).uri.toString();
     if (!router.canPop() && uri == AppRoutes.home) return;
-    _forwardLocations.add(uri);
+    _forwardLocations.add((
+      uri,
+      GoRouterState.of(context).extra,
+      _auth?.session?.server.id,
+    ));
     _gestureNavigation = true;
     router.canPop() ? router.pop() : router.go(AppRoutes.home);
   }
@@ -70,7 +97,10 @@ class _AppShellState extends State<AppShell> {
   void _forward() {
     if (_searchOpen || _forwardLocations.isEmpty) return;
     _gestureNavigation = true;
-    GoRouter.of(context).push(_forwardLocations.removeLast());
+    final target = _forwardLocations.removeLast();
+    // A legacy address cannot be reinterpreted under another selected server.
+    if (target.$2 == null && target.$3 != _auth?.session?.server.id) return;
+    GoRouter.of(context).push(target.$1, extra: target.$2);
   }
 
   bool _searchOpen = false;
@@ -82,6 +112,8 @@ class _AppShellState extends State<AppShell> {
 
   @override
   void dispose() {
+    _auth?.regionAccess.removeListener(_clearHistory);
+    _auth?.sources.removeSourceRevocation(_sourceRevoked);
     _searchQueryFocus.dispose();
     _searchButtonFocus.dispose();
     super.dispose();
@@ -197,9 +229,29 @@ class _AppShellState extends State<AppShell> {
                     onDismiss: _closeSearch,
                   ),
                   if (_searchOpen)
-                    SearchOverlay(
-                      queryFocusNode: _searchQueryFocus,
-                      onClose: _closeSearch,
+                    Positioned.fill(
+                      child: Material(
+                        child: SafeArea(
+                          child: Column(
+                            children: [
+                              Align(
+                                alignment: Alignment.centerRight,
+                                child: IconButton(
+                                  tooltip: MaterialLocalizations.of(
+                                    context,
+                                  ).closeButtonTooltip,
+                                  key: SearchOverlay.closeKey,
+                                  onPressed: _closeSearch,
+                                  icon: const Icon(Icons.close),
+                                ),
+                              ),
+                              const Expanded(
+                                child: AggregationPage(search: true),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
                     ),
                 ],
               ),
@@ -337,6 +389,12 @@ class _TopBar extends StatelessWidget {
                     ),
                   if (AppRoutes.showsBrowseNav(location)) ...[
                     _HomeNav(selected: location == AppRoutes.home),
+                    _NavTextButton(
+                      buttonKey: const Key('app-shell-aggregation'),
+                      label: l10n.aggregation,
+                      selected: location == AppRoutes.aggregation,
+                      onPressed: () => context.go(AppRoutes.aggregation),
+                    ),
                     const Spacer(),
                     IconButton(
                       key: AppShell.overflowNavKey,
@@ -367,6 +425,7 @@ class _TopBar extends StatelessWidget {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           SearchAction(focusNode: searchFocus),
+                          const PrivateRegionButton(),
                           const SessionActions(),
                           const SizedBox(width: kWindowChromeActionGap),
                         ],

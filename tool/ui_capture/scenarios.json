@@ -1,4 +1,10 @@
 [
+  {"id":"aggregation-ready","feature":"aggregation","platforms":["desktop","phone","tv"]},
+  {"id":"aggregation-single-source","feature":"aggregation","platforms":["desktop","phone","tv"]},
+  {"id":"aggregation-empty-scope","feature":"aggregation","platforms":["desktop","phone","tv"]},
+  {"id":"aggregation-comparison","feature":"aggregation","platforms":["desktop","phone","tv"]},
+  {"id":"aggregation-search-single","feature":"aggregation","platforms":["desktop","phone","tv"]},
+  {"id":"aggregation-partial-failure","feature":"aggregation","platforms":["desktop","phone","tv"]},
   {
     "id": "account",
     "feature": "servers",

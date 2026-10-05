@@ -11,19 +11,21 @@ import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/auth/android_connect_page.dart';
 import 'package:rillight/app/settings/settings_page.dart';
 import 'package:rillight/auth/auth_controller.dart';
+import 'package:rillight/auth/region_access.dart';
 import 'package:rillight/auth/connect_page.dart';
 import 'package:rillight/home/catalog_shell.dart';
 import 'package:rillight/home/home_page.dart';
 import 'package:rillight/library/item_detail_page.dart';
-import 'package:rillight/library/library_page.dart';
+
 import 'package:rillight/home/phone_home_edit_page.dart';
-import 'package:rillight/home/phone_shelf_page.dart';
-import 'package:rillight/library/shelf_grid_page.dart';
-import 'package:rillight/search/search_page.dart';
+
+import 'package:rillight/library/aggregation_page.dart';
+import 'package:rillight/aggregation/query/aggregation_query.dart'
+    show QueryMode;
 import 'package:rillight/app/mobile_shell.dart';
 import 'package:rillight/app/phone_mine_page.dart';
 import 'package:rillight/library/mobile_detail_page.dart';
-import 'package:rillight/library/mobile_library_page.dart';
+
 import 'package:rillight/player/mobile_player_page.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_window_host.dart';
@@ -31,8 +33,7 @@ import 'package:rillight/player/player_window_host.dart';
 import 'package:rillight/app/tv_shell.dart';
 import 'package:rillight/auth/tv_connect_page.dart';
 import 'package:rillight/library/tv_detail_page.dart';
-import 'package:rillight/home/tv_shelf_page.dart';
-import 'package:rillight/library/tv_library_page.dart';
+
 import 'package:rillight/player/tv_player_page.dart';
 
 export 'package:rillight/app/routes.dart';
@@ -44,7 +45,7 @@ GoRouter createAppRouter({
   return GoRouter(
     initialLocation: AppRoutes.home,
     observers: [_ConnectFlowObserver(auth)],
-    refreshListenable: auth,
+    refreshListenable: Listenable.merge([auth, auth.regionAccess]),
     redirect: (context, state) {
       final loggedIn = auth.isLoggedIn;
       final onConnect = state.matchedLocation == AppRoutes.connect;
@@ -53,6 +54,26 @@ GoRouter createAppRouter({
       }
       if (loggedIn && onConnect && state.uri.queryParameters['add'] != '1') {
         return AppRoutes.home;
+      }
+      final command = state.extra;
+      if (command is PlayerHostOpenItemCommand &&
+          command.source != null &&
+          (AppRoutes.isItem(state.uri.path) ||
+              state.uri.path.startsWith('/shelf/'))) {
+        try {
+          final permit = auth.sources.permit(
+            command.source!.account,
+            libraryId: command.libraryId,
+          );
+          if (!permit.isValid ||
+              command.regionGeneration != permit.regionGeneration) {
+            return environment.isDesktop
+                ? AppRoutes.aggregation
+                : AppRoutes.home;
+          }
+        } catch (_) {
+          return environment.isDesktop ? AppRoutes.aggregation : AppRoutes.home;
+        }
       }
       return null;
     },
@@ -110,6 +131,11 @@ GoRouter createAppRouter({
               ),
             ),
             GoRoute(
+              path: '/private',
+              builder: (context, state) =>
+                  const RegionAggregationGate(region: AccessRegion.private),
+            ),
+            GoRoute(
               path: AppRoutes.mine,
               pageBuilder: (context, state) => PhoneMotion.sharedAxisPage(
                 context: context,
@@ -130,8 +156,9 @@ GoRouter createAppRouter({
               pageBuilder: (context, state) => PhoneMotion.sharedAxisPage(
                 context: context,
                 state: state,
-                child: MobileLibraryPage(
-                  viewId: state.pathParameters['viewId']!,
+                child: AggregationPage(
+                  key: ValueKey(state.uri.toString()),
+                  legacyLibraryId: state.pathParameters['viewId']!,
                 ),
               ),
             ),
@@ -157,7 +184,7 @@ GoRouter createAppRouter({
               pageBuilder: (context, state) => PhoneMotion.sharedAxisPage(
                 context: context,
                 state: state,
-                child: PhoneShelfPage.fromState(state),
+                child: _shelfAggregation(auth, state),
               ),
             ),
           ],
@@ -185,24 +212,20 @@ GoRouter createAppRouter({
               builder: (context, state) => const TvShell(),
             ),
             GoRoute(
-              path: '/library/:viewId',
+              path: '/private',
               builder: (context, state) =>
-                  TvLibraryPage(viewId: state.pathParameters['viewId']!),
+                  const RegionAggregationGate(region: AccessRegion.private),
+            ),
+            GoRoute(
+              path: '/library/:viewId',
+              builder: (context, state) => AggregationPage(
+                key: ValueKey(state.uri.toString()),
+                legacyLibraryId: state.pathParameters['viewId']!,
+              ),
             ),
             GoRoute(
               path: '/shelf/:source',
-              builder: (context, state) {
-                final source = state.pathParameters['source'] ?? '';
-                if (TvShelfPage.handles(source)) {
-                  return TvShelfPage.fromState(state);
-                }
-                final query = state.uri.queryParameters;
-                return TvLibraryPage(
-                  viewId: query['parentId'] ?? '',
-                  initialGenre: query['genre'],
-                  initialType: query['includeItemTypes'],
-                );
-              },
+              builder: (context, state) => _shelfAggregation(auth, state),
             ),
             GoRoute(
               path: '/item/:itemId',
@@ -255,16 +278,26 @@ GoRouter createAppRouter({
                   _desktopPage(state, const HomePage()),
             ),
             GoRoute(
+              path: '/private',
+              pageBuilder: (context, state) => _desktopPage(
+                state,
+                const RegionAggregationGate(region: AccessRegion.private),
+              ),
+            ),
+            GoRoute(
               path: '/library/:viewId',
               pageBuilder: (context, state) => _desktopPage(
                 state,
-                LibraryPage(viewId: state.pathParameters['viewId'] ?? ''),
+                AggregationPage(
+                  key: ValueKey(state.uri.toString()),
+                  legacyLibraryId: state.pathParameters['viewId'] ?? '',
+                ),
               ),
             ),
             GoRoute(
               path: '/shelf/:source',
               pageBuilder: (context, state) =>
-                  _desktopPage(state, ShelfGridPage.fromState(state)),
+                  _desktopPage(state, _shelfAggregation(auth, state)),
             ),
             GoRoute(
               path: '/item/:itemId',
@@ -281,9 +314,14 @@ GoRouter createAppRouter({
               ),
             ),
             GoRoute(
+              path: AppRoutes.aggregation,
+              pageBuilder: (context, state) =>
+                  _desktopPage(state, const AggregationPage()),
+            ),
+            GoRoute(
               path: AppRoutes.search,
               pageBuilder: (context, state) =>
-                  _desktopPage(state, const SearchPage()),
+                  _desktopPage(state, const AggregationPage(search: true)),
             ),
             GoRoute(
               path: AppRoutes.settings,
@@ -297,6 +335,51 @@ GoRouter createAppRouter({
           ],
         ),
     ],
+  );
+}
+
+Widget _shelfAggregation(AuthController auth, GoRouterState state) {
+  final command = state.extra is PlayerHostOpenItemCommand
+      ? state.extra as PlayerHostOpenItemCommand
+      : null;
+  if (command != null &&
+      (command.source == null || command.libraryId == null)) {
+    return const SizedBox.shrink();
+  }
+  final source = state.pathParameters['source'];
+  final query = state.uri.queryParameters;
+  final child = AggregationPage(
+    key: ValueKey((
+      state.uri.toString(),
+      command?.source,
+      command?.regionGeneration,
+    )),
+    region: command?.source?.account.region ?? AccessRegion.ordinary,
+    sourceCommand: command,
+    legacySelected: command == null,
+    legacyLibraryId: command == null ? query['parentId'] : null,
+    initialGenre: query['genre'] ?? '',
+    initialType: const {'Movie', 'Series'}.contains(query['includeItemTypes'])
+        ? query['includeItemTypes']
+        : null,
+    initialMode: source == 'resume' || source == 'nextup'
+        ? QueryMode.continueWatching
+        : source == 'latest-movies' || source == 'latest-series'
+        ? QueryMode.recent
+        : QueryMode.browse,
+  );
+  if (command == null) return child;
+  return SourceDetailGate(
+    key: ValueKey((
+      state.uri.toString(),
+      command.source,
+      command.regionGeneration,
+    )),
+    auth: auth,
+    itemId: command.itemId,
+    command: command,
+    showComparison: false,
+    child: child,
   );
 }
 

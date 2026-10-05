@@ -66,7 +66,7 @@ class PhoneBottomNav extends StatelessWidget {
               NavigationDestination(
                 icon: const Icon(Icons.video_library_outlined),
                 selectedIcon: const Icon(Icons.video_library),
-                label: l.libraries,
+                label: l.aggregation,
               ),
               NavigationDestination(
                 icon: const Icon(Icons.search),

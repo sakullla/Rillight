@@ -6,7 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_motion.dart';
 import 'package:rillight/app/phone_bottom_nav.dart';
-import 'package:rillight/app/phone_libraries_tab.dart';
+import 'package:rillight/library/aggregation_page.dart';
 import 'package:rillight/app/phone_nav_style.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme.dart';
@@ -15,7 +15,6 @@ import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/home/phone_home.dart';
 import 'package:rillight/player/android_session_recovery.dart';
 import 'package:rillight/player/player_bindings.dart';
-import 'package:rillight/search/mobile_search_page.dart';
 
 class MobileShell extends StatefulWidget {
   const MobileShell({super.key});
@@ -101,7 +100,7 @@ class _MobileShellState extends State<MobileShell> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context), auth = AuthScope.of(context);
-    final titles = [l.home, l.libraries, l.search];
+    final titles = [l.home, l.aggregation, l.search];
     final floating = PhoneNavStyle.floatingOf(context);
     final keyboardOpen = MediaQuery.viewInsetsOf(context).bottom > 0;
     final immersive = _index == 0 && !_homeCovered;
@@ -196,11 +195,11 @@ class _MobileShellState extends State<MobileShell> with WidgetsBindingObserver {
                           ),
                           TickerMode(
                             enabled: _index == 1,
-                            child: const PhoneLibrariesTab(),
+                            child: const AggregationPage(),
                           ),
                           TickerMode(
                             enabled: _index == 2,
-                            child: const MobileSearchPage(),
+                            child: const AggregationPage(search: true),
                           ),
                         ],
                       ),

@@ -15,13 +15,13 @@ import 'package:rillight/auth/phone_server_manager.dart';
 import 'package:rillight/auth/server_switcher_dialog.dart';
 import 'package:rillight/auth/session_actions.dart';
 import 'package:rillight/home/catalog_keys.dart';
-import 'package:rillight/library/catalog_filter_button.dart';
 import 'package:rillight/library/detail_extras.dart';
-import 'package:rillight/library/shelf_grid_page.dart';
 import 'package:rillight/search/search_overlay.dart';
 
 import '../../test/emby/fake_emby_server.dart';
 import 'capture.dart';
+import 'fixtures.dart';
+import 'package:rillight/auth/region_access.dart';
 
 extension PageCaptures on CaptureSession {
   Future<void> activate(Finder finder) async {
@@ -63,7 +63,68 @@ extension PageCaptures on CaptureSession {
     RillightApp app,
     AuthController auth,
     FakeEmbyServer server,
+    CaptureAdapter adapter,
   ) async {
+    if (wants('aggregation')) {
+      app.router.go('/');
+      await advance(700);
+      if (platform == 'desktop') {
+        await tap(const Key('app-shell-aggregation'));
+      } else if (platform == 'phone') {
+        await activate(find.byType(NavigationDestination).at(1));
+      } else {
+        await tap(const ValueKey('tv-nav-1'));
+      }
+      await advance(1200);
+      await save('aggregation-ready');
+      final sources = auth.sources.project(AccessRegion.ordinary);
+      await activate(
+        find.byKey(ValueKey('aggregation-source-${sources.last.id}')),
+      );
+      await advance(600);
+      await save('aggregation-single-source');
+      await activate(
+        find.byKey(ValueKey('aggregation-source-${sources.first.id}')),
+      );
+      await save('aggregation-empty-scope');
+      await activate(find.widgetWithText(FilterChip, '全部普通来源'));
+      await advance(900);
+      await activate(find.widgetWithText(TextButton, '查找同源 · 2').first);
+      await advance(900);
+      await save('aggregation-comparison');
+      await dismiss();
+      adapter.failAggregationMirror = true;
+      await activate(find.widgetWithText(FilterChip, '全部普通来源'));
+      await advance(1000);
+      await save('aggregation-partial-failure');
+      adapter.failAggregationMirror = false;
+      if (platform == 'desktop') {
+        app.router.go('/search');
+        await advance(700);
+      } else if (platform == 'phone') {
+        await activate(find.byType(NavigationDestination).at(2));
+      } else {
+        await tap(const ValueKey('tv-nav-2'));
+      }
+      if (platform == 'tv') {
+        await activate(find.byKey(const Key('aggregation-keyword')));
+        await tester.enterText(find.byKey(const Key('tv-input-editor')), '飞屋');
+        await tester.testTextInput.receiveAction(TextInputAction.done);
+      } else {
+        await tester.enterText(
+          find.byKey(const Key('aggregation-keyword')),
+          '飞屋',
+        );
+      }
+      await advance(900);
+      await save('aggregation-search-single');
+      app.router.go('/');
+      await advance(400);
+      if (platform == 'phone') {
+        await activate(find.byType(NavigationDestination).at(0));
+      }
+      if (platform == 'tv') await tap(const ValueKey('tv-nav-0'));
+    }
     if (wants('home') || wants('library')) {
       await route(app, '/', 'home-return');
       if (platform == 'desktop') {
@@ -99,14 +160,7 @@ extension PageCaptures on CaptureSession {
     }
     if (wants('library')) {
       await route(app, '/library/view-movies', 'library-movies');
-      if (platform == 'desktop') {
-        await modal(CatalogKeys.sortBy, 'library-sort');
-        await filterStates(gridFilterMenuKey, 'catalog-grid-filter');
-      } else if (platform == 'phone') {
-        await filterStates(const Key('phone-library-filter'), 'phone-library');
-      } else {
-        await filterStates(const Key('tv-library-filter'), 'tv-library');
-      }
+      await aggregationFilterStates();
       await route(app, '/library/view-tv', 'library-series');
       await route(app, '/shelf/resume', 'shelf-continue-watching');
       await route(app, '/shelf/nextup', 'shelf-next-up');
@@ -196,6 +250,7 @@ extension PageCaptures on CaptureSession {
               id: id,
               name: '流派配色 · $tone',
               type: 'Movie',
+              parentId: 'view-movies',
               primaryImageTag: id,
               backdropImageTag: id,
               genres: ['动画', '动作冒险', 'Sci-Fi & Fantasy'],
@@ -239,6 +294,7 @@ extension PageCaptures on CaptureSession {
               id: id,
               name: '海报配色 · $tone',
               type: 'Movie',
+              parentId: 'view-movies',
               primaryImageTag: id,
               backdropImageTag: id,
               overview: '动态背景来自当前显示的图片。文字和操作保持清晰。',
@@ -295,40 +351,73 @@ extension PageCaptures on CaptureSession {
     await tap(Key('$prefix-cancel'));
   }
 
+  Future<void> aggregationFilterStates() async {
+    await activate(find.text('媒体库范围'));
+    await save('library-filters');
+    if (platform == 'phone') {
+      tester.platformDispatcher.textScaleFactorTestValue = 2;
+      await advance(350);
+      await save('library-filters-text-200');
+      tester.platformDispatcher.clearTextScaleFactorTestValue();
+      await advance(350);
+    }
+    await activate(find.byType(DropdownButton<bool>));
+    await save('library-filters-watch');
+    await dismiss();
+    await activate(find.byKey(const Key('aggregation-genre')));
+    await save('library-filters-genre');
+    if (platform == 'tv') {
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await advance(350);
+    }
+    await activate(find.byKey(const Key('aggregation-year')));
+    await save('library-filters-year');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await advance(350);
+    await activate(find.byType(DropdownButton<String>).at(1));
+    if (platform == 'desktop') await save('library-sort');
+    if (platform != 'desktop') await save('library-filters-sorting');
+    await dismiss();
+    await activate(find.byType(DropdownButton<bool>));
+    await activate(find.text('未看').last);
+    await save('library-filters-selected');
+  }
+
   Future<void> searchPages(RillightApp app) async {
     await route(app, '/', 'search-entry');
-    Finder field;
     if (platform == 'desktop') {
       await activate(find.byTooltip('搜索'));
-      field = find.byKey(CatalogKeys.searchField);
     } else if (platform == 'phone') {
       await activate(find.byType(NavigationDestination).at(2));
-      field = find.byKey(const Key('mobile-search-field'));
     } else {
       await tap(const ValueKey('tv-nav-2'));
-      await activate(find.byType(TvInput));
+      await activate(find.byKey(const Key('aggregation-keyword')));
       await save('search-input-dialog');
-      field = find.byKey(const Key('tv-input-editor'));
     }
+    final field = find.byKey(
+      Key(platform == 'tv' ? 'tv-input-editor' : 'aggregation-keyword'),
+    );
     await save('search-idle');
     await tester.enterText(field, '飞屋');
-    await tester.testTextInput.receiveAction(TextInputAction.search);
+    await tester.testTextInput.receiveAction(
+      platform == 'tv' ? TextInputAction.done : TextInputAction.search,
+    );
     await advance(900);
     await save('search-results');
     if (platform == 'tv') {
-      await activate(find.byType(TvInput));
-      field = find.byKey(const Key('tv-input-editor'));
+      await activate(find.byKey(const Key('aggregation-keyword')));
     }
     await tester.enterText(field, '不存在的影片');
-    await tester.testTextInput.receiveAction(TextInputAction.search);
+    await tester.testTextInput.receiveAction(
+      platform == 'tv' ? TextInputAction.done : TextInputAction.search,
+    );
     await advance(700);
     await save('search-empty');
-    if (platform == 'desktop') {
-      await modal(CatalogFilterButton.defaultKey, 'search-filter');
-      await tap(SearchOverlay.closeKey);
-    } else if (platform == 'phone') {
-      await modal(CatalogFilterButton.defaultKey, 'search-filter');
+    if (platform != 'tv') {
+      await activate(find.text('媒体库范围'));
+      await save('search-filter');
     }
+    if (platform == 'desktop') await tap(SearchOverlay.closeKey);
   }
 
   Future<void> serverPages(RillightApp app, AuthController auth) async {

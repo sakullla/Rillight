@@ -50,7 +50,7 @@ class TvTopNavBar extends StatelessWidget {
     final l = AppLocalizations.of(context);
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    final labels = [l.home, l.libraries, l.search, l.settings];
+    final labels = [l.home, l.aggregation, l.search, l.settings];
     final dark = scheme.brightness == Brightness.dark;
     final band = dark ? Colors.black : scheme.surface;
     final alpha = AppScrim.of(
