@@ -12,7 +12,7 @@ import '../identity/media_identity.dart';
 export '../identity/media_identity.dart';
 export '../history/history_writer.dart' show WatchRecord, ResumeChoice;
 
-enum QueryMode { browse, search, recent, continueWatching }
+enum QueryMode { browse, search, recent, continueWatching, nextUp }
 
 enum SourceQueryStatus {
   idle,
@@ -59,7 +59,9 @@ class QueryScope {
        ),
        types = Set.unmodifiable(
          types ??
-             (mode == QueryMode.continueWatching
+             (mode == QueryMode.nextUp
+                 ? const {'Episode'}
+                 : mode == QueryMode.continueWatching
                  ? const {'Movie', 'Episode'}
                  : const {'Movie', 'Series'}),
        ),
@@ -471,30 +473,39 @@ class AggregationQueryController extends ChangeNotifier {
       state.permit = permit;
       final page = await permit
           .dispatch(
-            (client) => client.queryItems(
-              parentId: state.key.libraryId,
-              recursive: true,
-              searchTerm: scope.mode == QueryMode.search
-                  ? scope.keyword.trim()
-                  : null,
-              includeItemTypes: scope.types.join(','),
-              limit: scope.pageSize,
-              startIndex: state.cursor,
-              sortBy: scope.mode == QueryMode.recent
-                  ? 'DateCreated'
-                  : scope.sortBy,
-              sortOrder: scope.descending || scope.mode == QueryMode.recent
-                  ? 'Descending'
-                  : 'Ascending',
-              years: scope.years.toList(),
-              genres: scope.genres.toList(),
-              filters: [
-                if (scope.mode == QueryMode.continueWatching) 'IsResumable',
-                if (scope.played != null)
-                  scope.played! ? 'IsPlayed' : 'IsUnplayed',
-              ],
-              fields: EmbyClient.itemFields,
-            ),
+            (client) => scope.mode == QueryMode.nextUp
+                ? client.queryNextUp(
+                    parentId: state.key.libraryId,
+                    limit: scope.pageSize,
+                    startIndex: state.cursor,
+                    fields: EmbyClient.itemFields,
+                  )
+                : client.queryItems(
+                    parentId: state.key.libraryId,
+                    recursive: true,
+                    searchTerm: scope.mode == QueryMode.search
+                        ? scope.keyword.trim()
+                        : null,
+                    includeItemTypes: scope.types.join(','),
+                    limit: scope.pageSize,
+                    startIndex: state.cursor,
+                    sortBy: scope.mode == QueryMode.recent
+                        ? 'DateCreated'
+                        : scope.sortBy,
+                    sortOrder:
+                        scope.descending || scope.mode == QueryMode.recent
+                        ? 'Descending'
+                        : 'Ascending',
+                    years: scope.years.toList(),
+                    genres: scope.genres.toList(),
+                    filters: [
+                      if (scope.mode == QueryMode.continueWatching)
+                        'IsResumable',
+                      if (scope.played != null)
+                        scope.played! ? 'IsPlayed' : 'IsUnplayed',
+                    ],
+                    fields: EmbyClient.itemFields,
+                  ),
           )
           .timeout(timeout);
       if (!_owns(state, revision, attempt) || !permit.isValid) return;

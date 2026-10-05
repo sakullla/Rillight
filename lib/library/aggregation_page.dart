@@ -14,6 +14,7 @@ import '../auth/auth_scope.dart';
 import '../app/l10n/app_localizations.dart';
 import '../app/presentation_environment.dart';
 import '../app/tv_widgets.dart';
+import '../search/search_action.dart';
 import '../media_image/media_image.dart';
 import '../player/playback_runtime.dart';
 import '../player/player_bindings.dart';
@@ -68,7 +69,9 @@ class AggregationPage extends StatefulWidget {
     this.legacySelected = false,
     this.initialGenre = '',
     this.initialType,
+    this.searchFocusNode,
   });
+  final FocusNode? searchFocusNode;
   final PlayerHostOpenItemCommand? sourceCommand;
   final bool legacySelected;
   final String initialGenre;
@@ -342,6 +345,7 @@ class _AggregationPageState extends State<AggregationPage> {
                         if (widget.search &&
                             !PresentationScope.of(context).isTv)
                           TextField(
+                            focusNode: widget.searchFocusNode,
                             key: const Key('aggregation-keyword'),
                             controller: _keyword,
                             decoration: InputDecoration(
@@ -450,6 +454,10 @@ class _AggregationPageState extends State<AggregationPage> {
                                 const DropdownMenuItem(
                                   value: 'Movie',
                                   child: Text('电影'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'Episode',
+                                  child: Text(l.episodesRow),
                                 ),
                                 const DropdownMenuItem(
                                   value: 'Series',
@@ -858,6 +866,7 @@ void _open(BuildContext context, QueryItem item) {
     libraryId: item.libraryId,
   );
   if (!permit.isValid) return;
+  SearchOverlayController.maybeOf(context)?.close();
   context.push(
     '/item/${Uri.encodeComponent(item.reference.itemId)}',
     extra: PlayerHostOpenItemCommand(

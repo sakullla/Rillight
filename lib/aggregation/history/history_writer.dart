@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 
 import '../../auth/region_access.dart';
 import '../../auth/source_sessions.dart';
@@ -26,7 +27,35 @@ class WatchSession {
 /// One authority for records AND scoped preferences; no PlayerSettings dual
 /// write. Keep global PlayerSettings intact. Connect T5 main-process IPC here
 /// and T4/T6 projections through records/resolveResume/resolvePreference.
-class HistoryWriter {
+class HistoryWriter implements Listenable {
+  final _listeners = <VoidCallback>{};
+
+  @override
+  void addListener(VoidCallback listener) {
+    if (!_closed) _listeners.add(listener);
+  }
+
+  @override
+  void removeListener(VoidCallback listener) => _listeners.remove(listener);
+
+  void _notifyCommitted() {
+    for (final listener in _listeners.toList()) {
+      if (_closed) break;
+      if (!_listeners.contains(listener)) continue;
+      try {
+        listener();
+      } catch (error, stack) {
+        try {
+          FlutterError.reportError(
+            FlutterErrorDetails(exception: error, stack: stack),
+          );
+        } catch (_) {
+          // An error reporter must not corrupt a committed authority write.
+        }
+      }
+    }
+  }
+
   HistoryWriter._(this.registry, this.store) {
     registry.access.addRevocationHook(_revokePrivate);
     registry.access.addCleanupHook(_lockCleanup);
@@ -157,6 +186,16 @@ class HistoryWriter {
     }
     if (order != null) _order = order;
     if (sessions != null) _sessionCounter = sessions;
+    // Publish only committed authority facts. UI reads its allowed projection;
+    // no snapshot of private records is broadcast into ordinary consumers.
+    if (!_closed && (records != null || preferences != null)) {
+      try {
+        _notifyCommitted();
+      } catch (_) {
+        // Even a consumer's error reporter cannot turn a committed write into
+        // a failed observation or consume/reorder the native event sequence.
+      }
+    }
   }
 
   Future<WatchSession> beginSession({
@@ -580,5 +619,6 @@ class HistoryWriter {
     await _tail;
     await store.close();
     _owners[store] = false;
+    _listeners.clear();
   }
 }

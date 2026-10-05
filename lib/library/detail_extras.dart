@@ -10,8 +10,10 @@ import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/app/widgets/scrim_icon_button.dart';
-import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/emby/emby_client.dart';
+import 'package:rillight/media_image/media_image.dart';
+import 'package:rillight/player/playback_runtime.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/library/provider_marks.dart';
 import 'detail_source_scope.dart';
@@ -331,6 +333,67 @@ class _ExternalLinkPageState extends State<ExternalLinkPage> {
   }
 }
 
+// Freeze the actual source before entering a dialog (which is outside the
+// detail inherited subtree). The permit guards dispatch, receipt and saves.
+class _AlbumSource {
+  _AlbumSource(this.client, this.origin, this.policy) {
+    policy?.addListener(_revoke);
+  }
+  final EmbyClient client;
+  final PlaybackOrigin? origin;
+  final MediaImageSourcePolicy? policy;
+  final Set<MemoryImage> _images = {};
+  bool get valid => policy?.isValid != false && origin?.permit.isValid != false;
+  void requireValid() {
+    if (!valid) throw StateError('Album source revoked');
+    origin?.permit.requireValid();
+  }
+
+  Future<List<int>> load(String id, String tag, int index, int? width) async {
+    requireValid();
+    Future<List<int>> request(EmbyClient client) => width == null
+        ? client.getOriginalItemImage(
+            id,
+            type: 'Backdrop',
+            tag: tag,
+            index: index,
+          )
+        : client.getItemImage(
+            id,
+            type: 'Backdrop',
+            tag: tag,
+            index: index,
+            maxWidth: width,
+          );
+    final bytes = origin == null
+        ? await request(client)
+        : await origin!.permit.dispatch(request);
+    requireValid();
+    return bytes;
+  }
+
+  MemoryImage image(List<int> bytes) {
+    requireValid();
+    final image = MemoryImage(
+      bytes is Uint8List ? bytes : Uint8List.fromList(bytes),
+    );
+    _images.add(image);
+    return image;
+  }
+
+  void _revoke() {
+    for (final image in _images) {
+      image.evict();
+    }
+    _images.clear();
+  }
+
+  void dispose() {
+    policy?.removeListener(_revoke);
+    _revoke();
+  }
+}
+
 class DetailAlbumStrip extends StatelessWidget {
   const DetailAlbumStrip({
     super.key,
@@ -367,6 +430,9 @@ class DetailAlbumStrip extends StatelessWidget {
               itemId: album.itemId,
               tags: album.tags,
               thumbnailWidth: thumbnailWidth,
+              origin: DetailSourceScope.maybeOf(context),
+              policy: DetailSourceScope.imagePolicyOf(context),
+              client: DetailSourceScope.clientOf(context),
               onOpen: (index) =>
                   _open(context, album.itemId, album.tags, index),
             ),
@@ -382,12 +448,25 @@ class DetailAlbumStrip extends StatelessWidget {
     List<String> tags,
     int index,
   ) {
+    final source = _AlbumSource(
+      DetailSourceScope.clientOf(context),
+      DetailSourceScope.maybeOf(context),
+      DetailSourceScope.imagePolicyOf(context),
+    );
+    if (!source.valid) {
+      source.dispose();
+      return;
+    }
     showDialog<void>(
       context: context,
       useRootNavigator: false,
-      builder: (context) =>
-          _AlbumViewer(itemId: itemId, tags: tags, initialIndex: index),
-    );
+      builder: (context) => _AlbumViewer(
+        itemId: itemId,
+        tags: tags,
+        initialIndex: index,
+        source: source,
+      ),
+    ).whenComplete(source.dispose);
   }
 }
 
@@ -400,8 +479,14 @@ class _AlbumRail extends StatefulWidget {
     required this.tags,
     required this.thumbnailWidth,
     required this.onOpen,
+    required this.client,
+    required this.origin,
+    required this.policy,
   });
 
+  final EmbyClient client;
+  final PlaybackOrigin? origin;
+  final MediaImageSourcePolicy? policy;
   final String itemId;
   final List<String> tags;
   final double thumbnailWidth;
@@ -412,6 +497,17 @@ class _AlbumRail extends StatefulWidget {
 }
 
 class _AlbumRailState extends State<_AlbumRail> {
+  late _AlbumSource _source;
+  @override
+  void didUpdateWidget(_AlbumRail oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.policy != widget.policy ||
+        oldWidget.client != widget.client) {
+      _source.dispose();
+      _source = _AlbumSource(widget.client, widget.origin, widget.policy);
+    }
+  }
+
   final _controller = ScrollController();
   var _canScrollLeft = false;
   var _canScrollRight = false;
@@ -419,11 +515,13 @@ class _AlbumRailState extends State<_AlbumRail> {
   @override
   void initState() {
     super.initState();
+    _source = _AlbumSource(widget.client, widget.origin, widget.policy);
     _controller.addListener(_updateButtons);
   }
 
   @override
   void dispose() {
+    _source.dispose();
     _controller.removeListener(_updateButtons);
     _controller.dispose();
     super.dispose();
@@ -506,6 +604,7 @@ class _AlbumRailState extends State<_AlbumRail> {
                     child: SizedBox(
                       width: widget.thumbnailWidth,
                       child: _AlbumStill(
+                        source: _source,
                         itemId: widget.itemId,
                         tag: widget.tags[index],
                         index: index,
@@ -565,6 +664,7 @@ class _AlbumStill extends StatefulWidget {
     required this.tag,
     required this.index,
     required this.maxWidth,
+    required this.source,
     this.fit = BoxFit.cover,
     this.load,
   });
@@ -574,6 +674,7 @@ class _AlbumStill extends StatefulWidget {
   final int index;
   final int? maxWidth;
   final BoxFit fit;
+  final _AlbumSource source;
   final Future<List<int>> Function()? load;
 
   @override
@@ -582,17 +683,34 @@ class _AlbumStill extends StatefulWidget {
 
 class _AlbumStillState extends State<_AlbumStill> {
   Future<List<int>>? _bytes;
+  void _revoked() {
+    _bytes = null;
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    widget.source.policy?.removeListener(_revoked);
+    super.dispose();
+  }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     _bytes ??= _load();
+    widget.source.policy?.removeListener(_revoked);
+    widget.source.policy?.addListener(_revoked);
   }
 
   @override
   void didUpdateWidget(_AlbumStill oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.itemId != widget.itemId ||
+    if (oldWidget.source != widget.source) {
+      oldWidget.source.policy?.removeListener(_revoked);
+      widget.source.policy?.addListener(_revoked);
+    }
+    if (oldWidget.source != widget.source ||
+        oldWidget.itemId != widget.itemId ||
         oldWidget.tag != widget.tag ||
         oldWidget.index != widget.index ||
         oldWidget.maxWidth != widget.maxWidth) {
@@ -602,25 +720,17 @@ class _AlbumStillState extends State<_AlbumStill> {
 
   Future<List<int>> _load() {
     if (widget.load != null) return widget.load!();
-    final client = AuthScope.of(context).client;
-    return widget.maxWidth == null
-        ? client.getOriginalItemImage(
-            widget.itemId,
-            type: 'Backdrop',
-            tag: widget.tag,
-            index: widget.index,
-          )
-        : client.getItemImage(
-            widget.itemId,
-            type: 'Backdrop',
-            tag: widget.tag,
-            index: widget.index,
-            maxWidth: widget.maxWidth!,
-          );
+    return widget.source.load(
+      widget.itemId,
+      widget.tag,
+      widget.index,
+      widget.maxWidth,
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    if (!widget.source.valid) return const SizedBox.shrink();
     return FutureBuilder<List<int>>(
       future: _bytes,
       builder: (context, snapshot) {
@@ -652,8 +762,9 @@ class _AlbumStillState extends State<_AlbumStill> {
             ),
           );
         }
-        return Image.memory(
-          bytes is Uint8List ? bytes : Uint8List.fromList(bytes),
+        if (!widget.source.valid) return const SizedBox.shrink();
+        return Image(
+          image: widget.source.image(bytes),
           fit: widget.fit,
           errorBuilder: (context, error, stack) =>
               Center(child: Text(AppLocalizations.of(context).errorLoadFailed)),
@@ -668,7 +779,9 @@ class _AlbumViewer extends StatefulWidget {
     required this.itemId,
     required this.tags,
     required this.initialIndex,
+    required this.source,
   });
+  final _AlbumSource source;
   final String itemId;
   final List<String> tags;
   final int initialIndex;
@@ -684,14 +797,31 @@ class _AlbumViewerState extends State<_AlbumViewer> {
   bool _saving = false;
   final _originals = <int, Future<List<int>>>{};
 
+  @override
+  void initState() {
+    super.initState();
+    widget.source.policy?.addListener(_revoked);
+  }
+
+  void _revoked() {
+    _originals.clear();
+    if (!mounted) return;
+    setState(() {});
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && ModalRoute.of(context)?.isCurrent == true) {
+        Navigator.of(context).pop();
+      }
+    });
+  }
+
   Future<List<int>> _loadOriginal(int index) =>
       _originals.putIfAbsent(index, () async {
         try {
-          return await AuthScope.of(context).client.getOriginalItemImage(
+          return await widget.source.load(
             widget.itemId,
-            type: 'Backdrop',
-            index: index,
-            tag: widget.tags[index],
+            widget.tags[index],
+            index,
+            null,
           );
         } catch (_) {
           _originals.remove(index);
@@ -701,18 +831,21 @@ class _AlbumViewerState extends State<_AlbumViewer> {
 
   @override
   void dispose() {
+    widget.source.policy?.removeListener(_revoked);
+    _originals.clear();
     _pages.dispose();
     super.dispose();
   }
 
   Future<void> _download() async {
-    if (_saving) return;
+    if (_saving || !widget.source.valid) return;
     final index = _index;
     final l10n = AppLocalizations.of(context);
     setState(() => _saving = true);
     try {
       final bytes = Uint8List.fromList(await _loadOriginal(index));
-      if (!mounted) return;
+      if (!mounted || !widget.source.valid) return;
+      widget.source.requireValid();
       final (extension, mime) = _imageFormat(bytes);
       final name = 'rillight-${widget.itemId}-${index + 1}.$extension';
       if (Platform.isAndroid) {
@@ -722,7 +855,7 @@ class _AlbumViewerState extends State<_AlbumViewer> {
               'name': name,
               'mime': mime,
             });
-        if (saved != true) return;
+        if (saved != true || !mounted || !widget.source.valid) return;
       } else {
         final location = await getSaveLocation(
           suggestedName: name,
@@ -730,20 +863,21 @@ class _AlbumViewerState extends State<_AlbumViewer> {
             XTypeGroup(label: extension.toUpperCase(), extensions: [extension]),
           ],
         );
-        if (location == null) return;
+        if (location == null || !mounted || !widget.source.valid) return;
+        widget.source.requireValid();
         await XFile.fromData(
           bytes,
           name: name,
           mimeType: mime,
         ).saveTo(location.path);
       }
-      if (mounted) {
+      if (mounted && widget.source.valid) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(l10n.albumDownloadSaved)));
       }
     } catch (_) {
-      if (mounted) {
+      if (mounted && widget.source.valid) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(l10n.albumDownloadFailed)));
@@ -780,6 +914,7 @@ class _AlbumViewerState extends State<_AlbumViewer> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
+    if (!widget.source.valid) return const SizedBox.shrink();
     return Theme(
       data: ThemeData.dark(useMaterial3: true),
       child: CallbackShortcuts(
@@ -865,6 +1000,7 @@ class _AlbumViewerState extends State<_AlbumViewer> {
                             minScale: 1,
                             maxScale: 5,
                             child: _AlbumStill(
+                              source: widget.source,
                               itemId: widget.itemId,
                               tag: widget.tags[index],
                               index: index,

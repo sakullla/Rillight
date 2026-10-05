@@ -24,6 +24,14 @@ class TvFocusRegion extends StatefulWidget {
 
 class _TvFocusRegionState extends State<TvFocusRegion> {
   final _nodes = <FocusNode>{};
+  final _scope = FocusScopeNode(debugLabel: 'TV visible targets');
+
+  bool _legalTarget(FocusNode node) =>
+      node is! FocusScopeNode &&
+      node.context?.mounted == true &&
+      node.canRequestFocus &&
+      !node.skipTraversal &&
+      node.ancestors.contains(_scope);
   Rect? _lastRect;
   bool _scheduled = false;
   @override
@@ -52,24 +60,14 @@ class _TvFocusRegionState extends State<TvFocusRegion> {
           _lastRect == null) {
         return;
       }
-      if (_nodes.any((node) => node.hasFocus)) return;
       final current = FocusManager.instance.primaryFocus;
-      // Preserve an intentional non-button input target.
-      if (current != null &&
-          current is! FocusScopeNode &&
-          current.context != null &&
-          current.context!.findAncestorWidgetOfExactType<EditableText>() !=
-              null) {
+      // Material chips, dropdowns and cards are legitimate remote targets too.
+      // Never steal their focus back to a registered nav TvAction each frame.
+      if (current != null && _legalTarget(current)) {
+        _lastRect = current.rect;
         return;
       }
-      final candidates = _nodes
-          .where(
-            (node) =>
-                node.context?.mounted == true &&
-                node.canRequestFocus &&
-                !node.skipTraversal,
-          )
-          .toList();
+      final candidates = _scope.descendants.where(_legalTarget).toList();
       candidates.sort(
         (a, b) => (a.rect.center - _lastRect!.center).distanceSquared.compareTo(
           (b.rect.center - _lastRect!.center).distanceSquared,
@@ -86,12 +84,15 @@ class _TvFocusRegionState extends State<TvFocusRegion> {
   @override
   void dispose() {
     FocusManager.instance.removeListener(_schedule);
+    _scope.dispose();
     super.dispose();
   }
 
   @override
-  Widget build(BuildContext context) =>
-      _TvFocusRegistry(owner: this, child: widget.child);
+  Widget build(BuildContext context) => _TvFocusRegistry(
+    owner: this,
+    child: FocusScope(node: _scope, child: widget.child),
+  );
 }
 
 class _TvFocusRegistry extends InheritedWidget {

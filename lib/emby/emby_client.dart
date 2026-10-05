@@ -336,6 +336,7 @@ class EmbyClient {
   }
 
   Future<EmbyItemPage> queryNextUp({
+    String? parentId,
     int limit = 24,
     int? startIndex,
     String? sortBy,
@@ -345,6 +346,7 @@ class EmbyClient {
     return _getItemPage(
       '/Shows/NextUp',
       queryParameters: {
+        'ParentId': ?parentId,
         'UserId': _requireUserId(),
         'Limit': '$limit',
         'Fields': fields,

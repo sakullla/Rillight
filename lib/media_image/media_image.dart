@@ -42,7 +42,7 @@ String _detailImageScope(PlaybackOrigin origin) => jsonEncode([
 
 /// Cache policy is a consumer of the existing source permit, not an authority.
 /// Private bytes never enter the disk store (including probes and lazy writes).
-class MediaImageSourcePolicy {
+class MediaImageSourcePolicy extends ChangeNotifier {
   MediaImageSourcePolicy(PlaybackOrigin origin)
     : scope = _detailImageScope(origin),
       permit = origin.permit;
@@ -54,8 +54,10 @@ class MediaImageSourcePolicy {
   bool get allowsDisk => permit.account.region != AccessRegion.private;
 
   void revoke() {
+    if (_revoked) return;
     _revoked = true;
     MediaImageCache.instance._revokeScope(scope);
+    notifyListeners();
   }
 }
 

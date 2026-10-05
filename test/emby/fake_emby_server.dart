@@ -514,6 +514,8 @@ class FakeEmbyServer {
   int? similarStatus;
   bool similarEmpty = false;
   final Set<String> failingImageIds = {'movie-broken'};
+  Uint8List? itemImageBytes;
+  Completer<void>? holdItemImage;
 
   final List<String> requests = [];
   final List<String?> requestUserAgents = [];
@@ -752,6 +754,12 @@ class FakeEmbyServer {
       await holdItemGet!.future;
     }
 
+    if (segments.length >= 4 &&
+        segments[0] == 'Items' &&
+        segments[2] == 'Images' &&
+        holdItemImage != null) {
+      await holdItemImage!.future;
+    }
     final catalog = _handleCatalog(options, method, segments);
     if (catalog != null) {
       return catalog;
@@ -1328,7 +1336,7 @@ class FakeEmbyServer {
       return _json(404, {'error': 'image missing'});
     }
     return ResponseBody.fromBytes(
-      kTinyPng,
+      itemImageBytes ?? kTinyPng,
       200,
       headers: {
         Headers.contentTypeHeader: ['image/png'],

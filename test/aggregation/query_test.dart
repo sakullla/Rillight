@@ -50,7 +50,8 @@ class _HttpSource {
       if (request.uri.path.endsWith('/System/Info/Public')) {
         await authenticationGate?.call();
         data = {'Id': id, 'ServerName': id};
-      } else if (request.uri.path.endsWith('/Items')) {
+      } else if (request.uri.path.endsWith('/Items') ||
+          request.uri.path.endsWith('/Shows/NextUp')) {
         data = await items(request);
         code = status;
       } else {
@@ -157,6 +158,53 @@ Future<void> _until(bool Function() predicate) async {
 
 void main() {
   late _Fixture f;
+  test(
+    'nextup uses allowed-library endpoint, keeps zero progress, pages and rejects late revoked response',
+    () async {
+      await f.open();
+      f.a.items = (request) async {
+        final p = request.uri.queryParameters;
+        expect(request.uri.path, endsWith('/Shows/NextUp'));
+        expect(p['ParentId'], 'library');
+        expect(p['Filters'], isNull);
+        final start = int.parse(p['StartIndex']!);
+        return _page([
+          _movie('episode-$start', type: 'Episode', provider: null),
+        ], total: 3);
+      };
+      await f.query.start(
+        QueryScope(
+          region: AccessRegion.ordinary,
+          serverIds: {'a'},
+          mode: QueryMode.nextUp,
+          pageSize: 1,
+        ),
+      );
+      expect(f.query.items.map((i) => i.item.id), ['episode-0']);
+      await f.query.loadMoreServer('a');
+      expect(
+        f.query.items.map((i) => i.item.id),
+        containsAll(['episode-0', 'episode-1']),
+      );
+      final arrived = Completer<void>();
+      final gate = Completer<void>();
+      f.a.items = (_) async {
+        arrived.complete();
+        await gate.future;
+        return _page([
+          _movie('late', type: 'Episode', provider: null),
+        ], total: 3);
+      };
+      final pending = f.query.loadMoreServer('a');
+      await arrived.future;
+      await f.access.setPin('1234', '1234', (_) async {});
+      await f.access.unlock('1234');
+      await f.registry.move('a', AccessRegion.private);
+      gate.complete();
+      await pending;
+      expect(f.query.items, isEmpty);
+    },
+  );
   setUp(() {
     f = _Fixture();
   });

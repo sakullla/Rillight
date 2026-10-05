@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:ui' as ui;
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -15,6 +17,7 @@ import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/library/aggregation_page.dart';
 import 'package:rillight/library/detail_source_scope.dart';
 import 'package:rillight/library/item_detail_page.dart';
+import 'package:rillight/library/detail_extras.dart';
 import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/player/playback_runtime.dart';
 import 'package:rillight/player/player_window_host.dart';
@@ -23,6 +26,8 @@ import 'package:rillight/aggregation/query/aggregation_query.dart'
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/player_settings.dart';
+import 'package:rillight/player/video_backend.dart';
+import 'package:rillight/player/mobile_player_page.dart';
 import '../emby/fake_emby_server.dart';
 import '../helpers/image_cache_fixture.dart';
 
@@ -154,10 +159,15 @@ class _Fixture {
     runtime = PlaybackRuntime(auth: auth, history: history);
   }
 
-  RillightApp app(PresentationEnvironment environment) => RillightApp(
+  RillightApp app(
+    PresentationEnvironment environment, {
+    FakeVideoBackend? backend,
+  }) => RillightApp(
     auth: auth,
     environment: environment,
     playerBindings: PlayerBindings(
+      createBackend: backend == null ? null : () => backend,
+      progressInterval: const Duration(milliseconds: 200),
       runtime: runtime,
       settingsStore: MemoryPlayerSettingsStore(),
       snapshotStore: MemoryPlaybackSessionSnapshotStore(),
@@ -178,7 +188,467 @@ Future<void> _settle(WidgetTester tester) async {
   }
 }
 
+Future<Uint8List> _png(Color color) async {
+  final recorder = ui.PictureRecorder();
+  Canvas(
+    recorder,
+  ).drawRect(const Rect.fromLTWH(0, 0, 8, 8), Paint()..color = color);
+  final picture = recorder.endRecording();
+  final image = await picture.toImage(8, 8);
+  final data = await image.toByteData(format: ui.ImageByteFormat.png);
+  image.dispose();
+  picture.dispose();
+  return data!.buffer.asUint8List();
+}
+
 void main() {
+  testWidgets(
+    'B album save chooser receipt cannot save bytes after source migration',
+    (tester) async {
+      isolateImageCache();
+      final f = _Fixture();
+      await tester.runAsync(f.open);
+      addTearDown(f.close);
+      f.b.items.first.backdropImageTags = ['b-one', 'b-two'];
+      final app = f.app(PresentationEnvironment.desktop);
+      await tester.pumpWidget(app);
+      await _settle(tester);
+      app.router.go('/aggregation');
+      await _settle(tester);
+      await tester.ensureVisible(find.text('查找同源 · 2'));
+      await tester.pump();
+      await tester.tap(find.text('查找同源 · 2'));
+      await _settle(tester);
+      await tester.tap(find.textContaining('已确认来源'));
+      await _settle(tester);
+      final album = find.byType(DetailAlbumStrip);
+      await tester.ensureVisible(album);
+      await _settle(tester);
+      await tester.tap(
+        find.descendant(of: album, matching: find.byType(InkWell)).first,
+      );
+      await _settle(tester);
+      final directory = Directory.systemTemp.createTempSync('t6-revoked-save-');
+      addTearDown(() => directory.deleteSync(recursive: true));
+      final output = File('${directory.path}/must-not-exist.png');
+      final chooser = Completer<String?>();
+      var requested = false;
+      const channel = MethodChannel('plugins.flutter.io/file_selector');
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (_) {
+            requested = true;
+            return chooser.future;
+          });
+      addTearDown(
+        () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(channel, null),
+      );
+      await tester.tap(find.text('下载原图'));
+      await _settle(tester);
+      expect(requested, isTrue);
+      await tester.runAsync(() async {
+        await f.auth.regionAccess.setPin('1234', '1234', (_) async {});
+        await f.auth.regionAccess.unlock('1234');
+        await f.auth.sources.move(f.bId, AccessRegion.private);
+      });
+      chooser.complete(output.path);
+      await _settle(tester);
+      expect(output.existsSync(), isFalse);
+      expect(find.byType(Dialog), findsNothing);
+      expect(find.text('图片已保存'), findsNothing);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+      app.router.dispose();
+    },
+    tags: ['integration'],
+  );
+  testWidgets(
+    'phone B detail play dispatch reaches actual controller and same writer, migration stops late observations',
+    (tester) async {
+      isolateImageCache();
+      final f = _Fixture();
+      await tester.runAsync(f.open);
+      addTearDown(f.close);
+      final backend = FakeVideoBackend(duration: const Duration(seconds: 120));
+      final app = f.app(PresentationEnvironment.phone, backend: backend);
+      addTearDown(() async {
+        await tester.pumpWidget(const SizedBox.shrink());
+        await _settle(tester);
+        app.router.dispose();
+      });
+      await tester.pumpWidget(app);
+      await _settle(tester);
+      await tester.tap(find.byType(NavigationDestination).at(1));
+      await _settle(tester);
+      await tester.ensureVisible(find.text('查找同源 · 2'));
+      await tester.pump();
+      await tester.tap(find.text('查找同源 · 2'));
+      await _settle(tester);
+      await tester.tap(find.textContaining('已确认来源'));
+      await _settle(tester);
+      final play = find.byKey(const Key('mobile-detail-play'));
+      await tester.ensureVisible(play);
+      await tester.pump();
+      await tester.tap(play);
+      await _settle(tester);
+      expect(find.byType(MobilePlayerPage), findsOneWidget);
+      expect(backend.isPlaying, isTrue);
+      var notifications = 0;
+      f.history.addListener(() => notifications++);
+      backend.emitEvent(VideoEventKind.position, const Duration(seconds: 7));
+      await _settle(tester);
+      final record = f.history.records(AccessRegion.ordinary).single;
+      expect(record.source.account.configuredServerId, f.bId);
+      expect(record.libraryId, 'view-movies');
+      expect(record.positionTicks, 7 * 10000000);
+      expect(notifications, greaterThan(0));
+      expect(f.b.playbackEvents, isNotEmpty);
+      expect(f.a.playbackEvents, isEmpty);
+      expect(f.auth.session!.server.id, f.aId);
+      await tester.runAsync(() async {
+        await f.auth.regionAccess.setPin('1234', '1234', (_) async {});
+        await f.auth.regionAccess.unlock('1234');
+      });
+      late Future<void> migration;
+      await tester.runAsync(() async {
+        migration = f.auth.sources.move(f.bId, AccessRegion.private);
+      });
+      // Source revocation removes the route; allow its actual controller's
+      // retirement/observation queue to run while membership cleanup awaits it.
+      await _settle(tester);
+      await tester.runAsync(() => migration);
+      await _settle(tester);
+      expect(backend.isPlaying, isFalse);
+      backend.emitEvent(VideoEventKind.position, const Duration(seconds: 9));
+      await _settle(tester);
+      expect(f.history.records(AccessRegion.ordinary), isEmpty);
+      expect(tester.takeException(), isNull);
+    },
+    tags: ['integration'],
+  );
+  testWidgets(
+    'legacy shelf nextup retains zero-progress episode and latest routes constrain actual types',
+    (tester) async {
+      isolateImageCache();
+      final f = _Fixture();
+      await tester.runAsync(f.open);
+      addTearDown(f.close);
+      f.a.items.add(
+        FakeEmbyItem(
+          id: 'zero-next',
+          name: '零进度下一集',
+          type: 'Episode',
+          parentId: 'view-movies',
+          nextUp: true,
+        ),
+      );
+      f.a.items.add(
+        FakeEmbyItem(
+          id: 'new-series',
+          name: '最近剧集',
+          type: 'Series',
+          parentId: 'view-movies',
+        ),
+      );
+      final app = f.app(PresentationEnvironment.desktop);
+      await tester.pumpWidget(app);
+      await _settle(tester);
+      app.router.go('/shelf/nextup');
+      await _settle(tester);
+      expect(find.text('零进度下一集'), findsOneWidget);
+      expect(
+        f.a.requests.any(
+          (r) =>
+              r.contains('/Shows/NextUp') && r.contains('ParentId=view-movies'),
+        ),
+        isTrue,
+      );
+      for (final pair in [
+        ('latest-movies', 'Movie', '合成作品', '最近剧集'),
+        ('latest-series', 'Series', '最近剧集', '合成作品'),
+      ]) {
+        f.a.requests.clear();
+        app.router.go('/shelf/${pair.$1}');
+        await _settle(tester);
+        expect(find.text(pair.$3), findsOneWidget);
+        expect(find.text(pair.$4), findsNothing);
+        expect(
+          f.a.requests.any(
+            (r) =>
+                r.contains('IncludeItemTypes=${pair.$2}') &&
+                r.contains('SortBy=DateCreated'),
+          ),
+          isTrue,
+        );
+      }
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+      app.router.dispose();
+    },
+    tags: ['integration'],
+  );
+  testWidgets(
+    'B album thumbnails and full viewer use B bytes; migration evicts viewer and rejects late B image',
+    (tester) async {
+      isolateImageCache();
+      final f = _Fixture();
+      await tester.runAsync(f.open);
+      addTearDown(f.close);
+      f.a.items.first.backdropImageTags = ['a-one', 'a-two'];
+      f.b.items.first.backdropImageTags = ['b-one', 'b-two'];
+      f.a.itemImageBytes = await tester.runAsync(() => _png(Colors.red));
+      f.b.itemImageBytes = await tester.runAsync(() => _png(Colors.blue));
+      final app = f.app(PresentationEnvironment.desktop);
+      await tester.pumpWidget(app);
+      await _settle(tester);
+      app.router.go('/aggregation');
+      await _settle(tester);
+      await tester.ensureVisible(find.text('查找同源 · 2'));
+      await tester.pump();
+      await tester.tap(find.text('查找同源 · 2'));
+      await _settle(tester);
+      await tester.tap(find.textContaining('已确认来源'));
+      await _settle(tester);
+      final album = find.byType(DetailAlbumStrip);
+      await tester.ensureVisible(album);
+      await _settle(tester);
+      final thumb = find.descendant(of: album, matching: find.byType(Image));
+      expect(thumb, findsWidgets);
+      for (final image in tester.widgetList<Image>(thumb)) {
+        expect(
+          (image.image as MemoryImage).bytes,
+          orderedEquals(f.b.itemImageBytes!),
+        );
+      }
+      final thumbnailProviders = tester
+          .widgetList<Image>(thumb)
+          .map((image) => image.image)
+          .toList();
+      final beforeA = f.a.requests
+          .where((r) => r.contains('/Images/Backdrop'))
+          .length;
+      final directory = Directory.systemTemp.createTempSync('t6-source-album-');
+      addTearDown(() => directory.deleteSync(recursive: true));
+      final output = File('${directory.path}/b.png');
+      const saveChannel = MethodChannel('plugins.flutter.io/file_selector');
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(saveChannel, (_) async => output.path);
+      addTearDown(
+        () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(saveChannel, null),
+      );
+      await tester.tap(
+        find.descendant(of: album, matching: find.byType(InkWell)).first,
+      );
+      await _settle(tester);
+      final fullImages = find.descendant(
+        of: find.byType(Dialog),
+        matching: find.byType(Image),
+      );
+      expect(fullImages, findsWidgets);
+      for (final image in tester.widgetList<Image>(fullImages)) {
+        expect(
+          (image.image as MemoryImage).bytes,
+          orderedEquals(f.b.itemImageBytes!),
+        );
+      }
+      await tester.tap(find.text('下载原图'));
+      await _settle(tester);
+      expect(output.readAsBytesSync(), orderedEquals(f.b.itemImageBytes!));
+      await tester.tap(find.byIcon(Icons.close_rounded).last);
+      await _settle(tester);
+      f.b.holdItemImage = Completer<void>();
+      await tester.tap(
+        find.descendant(of: album, matching: find.byType(InkWell)).first,
+      );
+      await _settle(tester);
+      expect(find.byType(Dialog), findsOneWidget);
+      expect(
+        f.b.requests.any(
+          (r) => r.contains('/Images/Backdrop/0') && !r.contains('MaxWidth'),
+        ),
+        isTrue,
+      );
+      expect(
+        f.a.requests.where((r) => r.contains('/Images/Backdrop')).length,
+        beforeA,
+      );
+      await tester.runAsync(
+        () => f.auth.regionAccess.setPin('1234', '1234', (_) async {}),
+      );
+      await tester.runAsync(() => f.auth.regionAccess.unlock('1234'));
+      await tester.runAsync(
+        () => f.auth.sources.move(f.bId, AccessRegion.private),
+      );
+      f.b.holdItemImage!.complete();
+      await _settle(tester);
+      expect(find.byType(Dialog), findsNothing);
+      for (final provider in thumbnailProviders) {
+        expect(
+          PaintingBinding.instance.imageCache.containsKey(provider),
+          isFalse,
+        );
+      }
+      expect(find.text('下载原图'), findsNothing);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+      app.router.dispose();
+    },
+    tags: ['integration'],
+  );
+
+  testWidgets(
+    'TV D-pad enters aggregation and retains Material control focus for multiple frames',
+    (tester) async {
+      isolateImageCache();
+      final f = _Fixture();
+      await tester.runAsync(f.open);
+      addTearDown(f.close);
+      tester.view.physicalSize = const Size(1920, 1080);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final app = f.app(PresentationEnvironment.tv);
+      await tester.pumpWidget(app);
+      await _settle(tester);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await _settle(tester);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await _settle(tester);
+      final target = FocusManager.instance.primaryFocus;
+      expect(target, isNotNull);
+      expect(
+        target!.context!.findAncestorWidgetOfExactType<AggregationPage>(),
+        isNotNull,
+      );
+      for (var i = 0; i < 8; i++) {
+        await tester.pump(const Duration(milliseconds: 80));
+        expect(FocusManager.instance.primaryFocus, same(target));
+      }
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await _settle(tester);
+      final control = FocusManager.instance.primaryFocus;
+      expect(
+        control!.context!.findAncestorWidgetOfExactType<AggregationPage>(),
+        isNotNull,
+      );
+      await tester.sendKeyEvent(LogicalKeyboardKey.select);
+      await _settle(tester);
+      expect(
+        find.byType(ItemDetailPage),
+        findsNothing,
+      ); // TV uses its own detail tree.
+      expect(find.byType(DetailSourceScope), findsWidgets);
+      app.router.pop();
+      await _settle(tester);
+      expect(FocusManager.instance.primaryFocus, same(control));
+      for (var i = 0; i < 8; i++) {
+        await tester.pump(const Duration(milliseconds: 80));
+        expect(FocusManager.instance.primaryFocus, same(control));
+      }
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await _settle(tester);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await _settle(tester);
+      final compareNode = FocusManager.instance.primaryFocus;
+      await tester.sendKeyEvent(LogicalKeyboardKey.select);
+      await _settle(tester);
+      expect(find.byType(Dialog), findsOneWidget);
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await _settle(tester);
+      expect(find.byType(Dialog), findsNothing);
+      expect(FocusManager.instance.primaryFocus, same(compareNode));
+      for (var i = 0; i < 6; i++) {
+        if (FocusManager.instance.primaryFocus?.context
+                ?.findAncestorWidgetOfExactType<FilterChip>() !=
+            null) {
+          break;
+        }
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+        await _settle(tester);
+      }
+      final chip = FocusManager.instance.primaryFocus?.context
+          ?.findAncestorWidgetOfExactType<FilterChip>();
+      expect(chip, isNotNull);
+      for (var i = 0; i < 3; i++) {
+        if (FocusManager.instance.primaryFocus?.context
+                ?.findAncestorWidgetOfExactType<FilterChip>()
+                ?.key ==
+            ValueKey('aggregation-source-${f.bId}')) {
+          break;
+        }
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+        await _settle(tester);
+      }
+      expect(
+        FocusManager.instance.primaryFocus?.context
+            ?.findAncestorWidgetOfExactType<FilterChip>()
+            ?.key,
+        ValueKey('aggregation-source-${f.bId}'),
+      );
+      final chipNode = FocusManager.instance.primaryFocus;
+      await tester.sendKeyEvent(LogicalKeyboardKey.select);
+      await _settle(tester);
+      for (var i = 0; i < 8; i++) {
+        await tester.pump(const Duration(milliseconds: 80));
+        expect(FocusManager.instance.primaryFocus, same(chipNode));
+      }
+      expect(
+        tester
+            .widget<FilterChip>(
+              find.byKey(ValueKey('aggregation-source-${f.bId}')),
+            )
+            .selected,
+        isFalse,
+      );
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+      app.router.dispose();
+    },
+    tags: ['integration'],
+  );
+  testWidgets(
+    'desktop shell search focuses input, closes on Escape and result, returns allowed scope',
+    (tester) async {
+      isolateImageCache();
+      final f = _Fixture();
+      await tester.runAsync(f.open);
+      addTearDown(f.close);
+      final app = f.app(PresentationEnvironment.desktop);
+      await tester.pumpWidget(app);
+      await _settle(tester);
+      app.router.go('/aggregation');
+      await _settle(tester);
+      Future<void> openSearch() async {
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+        await tester.sendKeyEvent(LogicalKeyboardKey.keyF);
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+        await _settle(tester);
+      }
+
+      await openSearch();
+      final input = find.byKey(const Key('aggregation-keyword'));
+      expect(tester.widget<TextField>(input).focusNode?.hasFocus, isTrue);
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await _settle(tester);
+      expect(input, findsNothing);
+      await openSearch();
+      await tester.enterText(input, '合成');
+      await _settle(tester);
+      await tester.ensureVisible(find.text('合成作品').last);
+      await tester.pump();
+      await tester.tap(find.text('合成作品').last);
+      await _settle(tester);
+      expect(input, findsNothing);
+      expect(find.byType(ItemDetailPage), findsOneWidget);
+      app.router.pop();
+      await _settle(tester);
+      expect(find.text('查找同源 · 2'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox.shrink());
+      app.router.dispose();
+    },
+    tags: ['integration'],
+  );
   test(
     'writer notifies committed records only; failed storage and failing observer cannot corrupt observation order',
     () async {

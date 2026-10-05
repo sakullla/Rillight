@@ -359,10 +359,18 @@ Widget _shelfAggregation(AuthController auth, GoRouterState state) {
     legacySelected: command == null,
     legacyLibraryId: command == null ? query['parentId'] : null,
     initialGenre: query['genre'] ?? '',
-    initialType: const {'Movie', 'Series'}.contains(query['includeItemTypes'])
+    initialType: source == 'latest-movies'
+        ? 'Movie'
+        : source == 'latest-series'
+        ? 'Series'
+        : source == 'nextup'
+        ? 'Episode'
+        : const {'Movie', 'Series'}.contains(query['includeItemTypes'])
         ? query['includeItemTypes']
         : null,
-    initialMode: source == 'resume' || source == 'nextup'
+    initialMode: source == 'nextup'
+        ? QueryMode.nextUp
+        : source == 'resume'
         ? QueryMode.continueWatching
         : source == 'latest-movies' || source == 'latest-series'
         ? QueryMode.recent

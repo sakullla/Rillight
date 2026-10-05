@@ -57,6 +57,25 @@ class _AppShellState extends State<AppShell> {
   AuthController? _auth;
 
   @override
+  void initState() {
+    super.initState();
+    HardwareKeyboard.instance.addHandler(_searchKey);
+  }
+
+  bool _searchKey(KeyEvent event) {
+    // EditableText handles Escape before an ancestor CallbackShortcuts. Keep
+    // shell dismissal available while the real overlay input owns focus.
+    if (_searchOpen &&
+        _searchQueryFocus.hasFocus &&
+        event is KeyDownEvent &&
+        event.logicalKey == LogicalKeyboardKey.escape) {
+      _closeSearch();
+      return true;
+    }
+    return false;
+  }
+
+  @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     final auth = AuthScope.of(context);
@@ -114,6 +133,7 @@ class _AppShellState extends State<AppShell> {
   void dispose() {
     _auth?.regionAccess.removeListener(_clearHistory);
     _auth?.sources.removeSourceRevocation(_sourceRevoked);
+    HardwareKeyboard.instance.removeHandler(_searchKey);
     _searchQueryFocus.dispose();
     _searchButtonFocus.dispose();
     super.dispose();
@@ -183,6 +203,7 @@ class _AppShellState extends State<AppShell> {
         close: _closeSearch,
         child: CallbackShortcuts(
           bindings: {
+            const SingleActivator(LogicalKeyboardKey.escape): _closeSearch,
             const SingleActivator(LogicalKeyboardKey.keyF, control: true):
                 _openSearch,
             const SingleActivator(LogicalKeyboardKey.keyF, meta: true):
@@ -245,8 +266,11 @@ class _AppShellState extends State<AppShell> {
                                   icon: const Icon(Icons.close),
                                 ),
                               ),
-                              const Expanded(
-                                child: AggregationPage(search: true),
+                              Expanded(
+                                child: AggregationPage(
+                                  search: true,
+                                  searchFocusNode: _searchQueryFocus,
+                                ),
                               ),
                             ],
                           ),
