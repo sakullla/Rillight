@@ -1,4 +1,8 @@
 import '../helpers/image_cache_fixture.dart';
+import 'package:rillight/auth/region_access.dart';
+import 'package:rillight/auth/source_sessions.dart';
+import 'package:rillight/aggregation/history/history_writer.dart';
+import 'package:rillight/player/playback_runtime.dart';
 import '../helpers/settle.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -31,44 +35,12 @@ const _device = EmbyDeviceInfo(
   version: '0.1.0',
 );
 
-/// 桌面首页只构建视口附近的分栏，片库入口要先滚进列表才会挂上。
-Future<void> revealHomeLibrary(WidgetTester tester, String viewId) async {
-  final tile = find.byKey(CatalogKeys.library(viewId));
-  if (tile.evaluate().isNotEmpty) {
-    await tester.ensureVisible(tile);
-    return;
-  }
-  final vertical = find.descendant(
-    of: find.byKey(const PageStorageKey<String>('home-scroll')),
-    matching: find.byWidgetPredicate(
-      (widget) =>
-          widget is Scrollable && widget.axisDirection == AxisDirection.down,
-    ),
-  );
-  final position = tester.state<ScrollableState>(vertical).position;
-  position.jumpTo(0);
-  await tester.pump();
-  final menu = find.byKey(CatalogKeys.librariesMenu);
-  if (menu.evaluate().isEmpty) {
-    await tester.scrollUntilVisible(menu, 320, scrollable: vertical);
-  }
-  if (tile.evaluate().isEmpty) {
-    final rail = find.descendant(of: menu, matching: find.byType(Scrollable));
-    await tester.scrollUntilVisible(
-      tile,
-      240,
-      scrollable: rail.first,
-      maxScrolls: 12,
-    );
-  }
-  await tester.ensureVisible(tile);
-}
-
 class _TrackingAuth extends AuthController {
   _TrackingAuth({
     required super.client,
     required super.credentials,
     required super.servers,
+    required super.sources,
   });
 
   var disposed = false;
@@ -114,8 +86,12 @@ void main() {
     window = PlayerWindow();
   });
 
-  PlayerBindings bindings({PlayerWindowHost? windowHost}) {
+  PlayerBindings bindings({
+    PlayerWindowHost? windowHost,
+    required PlaybackRuntime runtime,
+  }) {
     return PlayerBindings(
+      runtime: runtime,
       createBackend: () {
         backend = FakeVideoBackend();
         return backend;
@@ -134,10 +110,21 @@ void main() {
     WidgetTester tester, {
     PlayerWindowHost? windowHost,
   }) async {
+    final credentials = MemoryCredentialStore();
+    final store = MemoryServerListStore();
+    EmbyClient client() =>
+        EmbyClient(device: _device, dio: dioForFakeEmby(adapter));
+    final sources = SourceSessionRegistry(
+      access: RegionAccessController(),
+      store: store,
+      credentials: credentials,
+      createClient: client,
+    );
     final auth = _TrackingAuth(
-      client: EmbyClient(device: _device, dio: dioForFakeEmby(adapter)),
-      credentials: MemoryCredentialStore(),
-      servers: MemoryServerListStore(),
+      client: client(),
+      credentials: credentials,
+      servers: store,
+      sources: sources,
     );
     await tester.runAsync(() {
       return auth.connect(
@@ -147,10 +134,24 @@ void main() {
       );
     });
     expect(auth.isLoggedIn, isTrue);
+    final runtime = await tester.runAsync(() async {
+      await sources.configureScope(
+        auth.session!.server.id,
+        participates: true,
+        libraryIds: {'view-movies', 'view-tv'},
+      );
+      return PlaybackRuntime(
+        auth: auth,
+        history: await HistoryWriter.open(
+          registry: sources,
+          store: MemoryHistoryStore(),
+        ),
+      );
+    });
     await tester.pumpWidget(
       RillightApp(
         auth: auth,
-        playerBindings: bindings(windowHost: windowHost),
+        playerBindings: bindings(windowHost: windowHost, runtime: runtime!),
       ),
     );
     await settle(tester);
@@ -177,6 +178,26 @@ void main() {
     fail('still found $finder');
   }
 
+  Future<void> disposeApp(
+    WidgetTester tester,
+    RillightApp app,
+    _TrackingAuth auth,
+  ) async {
+    await tester.runAsync(
+      () => app.windowHost.close().timeout(const Duration(seconds: 5)),
+    );
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(seconds: 4));
+    app.router.dispose();
+    await tester.pump();
+    await tester.runAsync(
+      () => app.playerBindings.runtime!.history.close().timeout(
+        const Duration(seconds: 5),
+      ),
+    );
+    auth.dispose();
+  }
+
   Future<void> openPlayable(WidgetTester tester, String itemId) async {
     final homeTitle = find.descendant(
       of: find.byType(AppBar),
@@ -186,12 +207,25 @@ void main() {
       await tester.tap(homeTitle);
       await settle(tester);
     }
-    final movies = find.byKey(CatalogKeys.library('view-movies'));
-    await revealHomeLibrary(tester, 'view-movies');
-    await tester.tap(movies);
+    await tester.tap(find.byKey(const Key('app-shell-aggregation')));
     await settle(tester);
-    final item = find.byKey(CatalogKeys.item(itemId)).first;
+    final title = server.items.firstWhere((item) => item.id == itemId).name;
+    final gridScroll = find
+        .descendant(
+          of: find.byType(CustomScrollView),
+          matching: find.byWidgetPredicate(
+            (w) => w is Scrollable && w.axisDirection == AxisDirection.down,
+          ),
+        )
+        .first;
+    await tester.scrollUntilVisible(
+      find.text(title),
+      240,
+      scrollable: gridScroll,
+    );
+    final item = find.text(title).first;
     await tester.ensureVisible(item);
+    await settle(tester);
     await tester.tap(item);
     await settle(tester);
     await tester.tap(find.byKey(PlayerKeys.open));
@@ -254,7 +288,7 @@ void main() {
       });
       await tester.pump();
       await waitForGone(tester, find.byType(PlayerPage));
-      await tester.pump();
+      await settle(tester);
       expect(
         server.requests
             .where((request) => request.contains('Items/Resume'))
@@ -277,8 +311,9 @@ void main() {
       expect(backCenter.dy, lessThan(bar.bottom));
       await tester.tap(back);
       await settle(tester);
-      final inception = find.byKey(CatalogKeys.item('movie-inception'));
+      final inception = find.text('Inception');
       await tester.ensureVisible(inception.first);
+      await settle(tester);
       await tester.tap(inception.first);
       await settle(tester);
       await tester.tap(find.byKey(PlayerKeys.open));
@@ -291,6 +326,7 @@ void main() {
       expect(app.router.state.uri.path, '/item/movie-inception');
       expect(app.router.state.uri.path.contains('/play'), isFalse);
       expect(find.byType(ItemDetailPage), findsOneWidget);
+      await disposeApp(tester, app, auth);
     },
     tags: ['integration'],
   );
@@ -299,7 +335,11 @@ void main() {
     'player window create failure shows the original error and does not play',
     (tester) async {
       const message = 'CreateWindow failed: access denied';
-      await pumpLoggedIn(tester, windowHost: _FailingPlayerWindowHost(message));
+      final auth = await pumpLoggedIn(
+        tester,
+        windowHost: _FailingPlayerWindowHost(message),
+      );
+      final app = tester.widget<RillightApp>(find.byType(RillightApp));
       await openPlayable(tester, 'movie-up');
       await tester.pump();
       await waitFor(tester, find.byKey(PlayerKeys.windowError));
@@ -307,6 +347,7 @@ void main() {
       expect(find.textContaining(message), findsOneWidget);
       expect(find.byType(PlayerPage), findsNothing);
       expect(find.byType(ItemDetailPage), findsOneWidget);
+      await disposeApp(tester, app, auth);
     },
     tags: ['integration'],
   );

@@ -1,4 +1,8 @@
 import '../helpers/image_cache_fixture.dart';
+import '../helpers/synthetic_source_fixture.dart';
+import 'package:rillight/aggregation/query/aggregation_query.dart'
+    show SourceReference;
+import 'package:rillight/player/playback_runtime.dart';
 import '../helpers/settle.dart';
 import 'dart:async';
 import 'package:rillight/player/player_host_command.dart';
@@ -89,8 +93,10 @@ void main() {
     Duration hideAfter = const Duration(days: 1),
     Duration progressInterval = const Duration(seconds: 10),
     PlayerSettingsStore? settingsStore,
+    PlaybackRuntime? runtime,
   }) {
     return PlayerBindings(
+      runtime: runtime,
       createBackend: () => backend,
       window: window,
       progressInterval: progressInterval,
@@ -107,10 +113,10 @@ void main() {
     Duration progressInterval = const Duration(seconds: 10),
     PlayerSettingsStore? settingsStore,
   }) async {
-    final auth = AuthController(
-      client: EmbyClient(device: _device, dio: dioForFakeEmby(adapter)),
-      credentials: MemoryCredentialStore(),
-      servers: MemoryServerListStore(),
+    final auth = SyntheticSourceAuth(
+      adapter: adapter,
+      device: _device,
+      libraryIds: {'view-movies', 'view-tv'},
     );
     await tester.runAsync(() {
       return auth.connect(
@@ -120,9 +126,11 @@ void main() {
       );
     });
     expect(auth.isLoggedIn, isTrue);
+    final runtime = await tester.runAsync(auth.runtime);
     app = RillightApp(
       auth: auth,
       playerBindings: bindings(
+        runtime: runtime,
         hideAfter: hideAfter,
         progressInterval: progressInterval,
         settingsStore: settingsStore ?? MemoryPlayerSettingsStore(),
@@ -206,7 +214,26 @@ void main() {
   }
 
   Future<void> openPlayable(WidgetTester tester, String itemId) async {
-    app.router.go('/item/$itemId');
+    final libraryId = server.items
+        .firstWhere((item) => item.id == itemId)
+        .parentId!;
+    final account = await tester.runAsync(
+      () => app.auth.sources.acquireAccount(
+        app.auth.session!.server.id,
+        region: AccessRegion.ordinary,
+        libraryId: libraryId,
+      ),
+    );
+    final permit = app.auth.sources.permit(account!, libraryId: libraryId);
+    app.router.go(
+      '/item/$itemId',
+      extra: PlayerHostOpenItemCommand(
+        itemId: itemId,
+        source: SourceReference(account: account, itemId: itemId),
+        libraryId: libraryId,
+        regionGeneration: permit.regionGeneration,
+      ),
+    );
     await tester.pumpWidget(app);
     await settle(tester);
     await tester.tap(find.byKey(PlayerKeys.open));
@@ -226,10 +253,28 @@ void main() {
     return tester.state<PlayerPageState>(find.byType(PlayerPage)).controller!;
   }
 
+  Future<void> disposeApp(WidgetTester tester) async {
+    await tester.runAsync(
+      () => app.windowHost.close().timeout(const Duration(seconds: 5)),
+    );
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(seconds: 4));
+    app.router.dispose();
+    // Flush widget-zone continuations, then close the writer in the real
+    // async zone so its store-close continuation cannot wait on another pump.
+    await tester.pump();
+    await tester.runAsync(
+      () => app.playerBindings.runtime!.history.close().timeout(
+        const Duration(seconds: 5),
+      ),
+    );
+    app.auth.dispose();
+  }
+
   testWidgets('settings own keyboard input and Escape returns to the player', (
     tester,
   ) async {
-    final auth = await pumpLoggedIn(tester);
+    await pumpLoggedIn(tester);
     await openPlayable(tester, 'movie-up');
     if (find.byKey(PlayerKeys.resumeFromStart).evaluate().isNotEmpty) {
       await tester.tap(find.byKey(PlayerKeys.resumeFromStart));
@@ -264,10 +309,7 @@ void main() {
           .canRequestFocus,
       isFalse,
     );
-    await tester.pumpWidget(const SizedBox.shrink());
-    await tester.pump(const Duration(seconds: 4));
-    app.router.dispose();
-    auth.dispose();
+    await disposeApp(tester);
   }, tags: ['integration']);
 
   test('embedded text subtitles select the container track', () async {
@@ -438,10 +480,34 @@ void main() {
     expect(backend.openedUrl, isNotNull);
     expect(backend.openedUrl!.queryParameters['static'], 'true');
     expect(backend.openedStart, greaterThan(Duration.zero));
+    final controller = controllerOf(tester);
+    expect(identical(controller.client, app.auth.client), isFalse);
+    expect(controller.origin!.source.itemId, 'movie-inception');
+    expect(controller.origin!.libraryId, 'view-movies');
+    expect(controller.origin!.permit.isValid, isTrue);
+    // Source-bound startup begins the local watch session before reporting.
+    // Controls readiness is intentionally earlier than that async transaction.
+    for (
+      var i = 0;
+      i < 40 && !server.playbackEvents.any((event) => event.kind == 'Playing');
+      i++
+    ) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 20)),
+      );
+      await tester.pump(const Duration(milliseconds: 20));
+    }
     expect(
       server.playbackEvents.map((event) => event.kind),
       contains('Playing'),
     );
+    expect(
+      server.playbackEvents
+          .firstWhere((event) => event.kind == 'Playing')
+          .body['ItemId'],
+      'movie-inception',
+    );
+    await disposeApp(tester);
   }, tags: ['integration']);
 
   testWidgets('movie end shows replay card instead of a blank frame', (
@@ -476,6 +542,7 @@ void main() {
     expect(find.byKey(PlayerKeys.nextEpisode), findsNothing);
     await tester.pump(PlayerController.stoppedDeadline);
     await tester.pump();
+    await disposeApp(tester);
   }, tags: ['integration']);
 
   test(
