@@ -14,19 +14,17 @@ import 'package:rillight/app/widgets/poster_placeholder.dart';
 import 'package:rillight/app/widgets/scrim_icon_button.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/connect_page.dart';
-import 'package:rillight/auth/credential_store.dart';
-import 'package:rillight/auth/server_list_store.dart';
+import 'helpers/synthetic_source_fixture.dart';
 import 'package:rillight/auth/server_switcher_dialog.dart';
 import 'package:rillight/auth/session_actions.dart';
-import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/home_page.dart';
 import 'package:rillight/library/item_detail_page.dart';
-import 'package:rillight/library/library_page.dart';
+import 'package:rillight/library/aggregation_page.dart';
 import 'package:rillight/player/player_settings.dart';
+import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/search/search_overlay.dart';
-import 'package:rillight/search/search_page.dart';
 
 import 'emby/fake_emby_server.dart';
 
@@ -199,10 +197,10 @@ void main() {
           ],
         );
         final adapter = FakeEmbyAdapter([first, second]);
-        final auth = AuthController(
-          client: EmbyClient(device: _device, dio: dioForFakeEmby(adapter)),
-          credentials: MemoryCredentialStore(),
-          servers: MemoryServerListStore(),
+        final auth = SyntheticSourceAuth(
+          adapter: adapter,
+          device: _device,
+          libraryIds: {'view-movies', 'view-tv', 'view-photos', 'view-mixed'},
         );
         await tester.runAsync(() async {
           await auth.connect(
@@ -218,7 +216,7 @@ void main() {
         });
         expect(auth.session?.server.name, '第二台');
 
-        await tester.pumpWidget(RillightApp(auth: auth));
+        await tester.pumpWidget(await _sourceApp(tester, auth));
         await settle(tester);
 
         expect(find.byType(NavigationRail), findsNothing);
@@ -271,10 +269,10 @@ void main() {
           baseUrl: Uri.parse('http://line-b.test:8096'),
         );
         final adapter = FakeEmbyAdapter([lineA, lineB]);
-        final auth = AuthController(
-          client: EmbyClient(device: _device, dio: dioForFakeEmby(adapter)),
-          credentials: MemoryCredentialStore(),
-          servers: MemoryServerListStore(),
+        final auth = SyntheticSourceAuth(
+          adapter: adapter,
+          device: _device,
+          libraryIds: {'view-movies', 'view-tv', 'view-photos', 'view-mixed'},
         );
         await tester.runAsync(() async {
           await auth.connect(
@@ -290,14 +288,14 @@ void main() {
         });
         expect(auth.client.baseUrl, lineB.baseUrl);
 
-        await tester.pumpWidget(RillightApp(auth: auth));
+        await tester.pumpWidget(await _sourceApp(tester, auth));
         await settle(tester);
 
         // 离开首页:失败的切换不应把用户带回首页。
         await revealHomeLibrary(tester, 'view-movies');
         await tester.tap(find.byKey(CatalogKeys.library('view-movies')));
         await settle(tester);
-        expect(find.byType(LibraryPage), findsOneWidget);
+        expect(find.byType(AggregationPage), findsOneWidget);
 
         bool isHomeCatalog(String request) {
           return request.contains('Items/Resume') ||
@@ -330,7 +328,7 @@ void main() {
           auth.session?.server.activeLine?.address,
           lineB.baseUrl.toString(),
         );
-        expect(find.byType(LibraryPage), findsOneWidget);
+        expect(find.byType(AggregationPage), findsOneWidget);
         expect(find.byType(HomePage), findsNothing);
         expect(lineB.requests.where(isHomeCatalog).length, homeBefore);
         // 失败原因以 SnackBar 可见。
@@ -349,7 +347,7 @@ void main() {
       'top bar switches home, library, search overlay, and detail back',
       (tester) async {
         final auth = await _connect(tester);
-        final app = RillightApp(auth: auth);
+        final app = await _sourceApp(tester, auth as SyntheticSourceAuth);
         await tester.pumpWidget(app);
         await settle(tester);
 
@@ -370,30 +368,30 @@ void main() {
         await revealHomeLibrary(tester, 'view-movies');
         await tester.tap(find.byKey(CatalogKeys.library('view-movies')));
         await settle(tester);
-        expect(find.byType(LibraryPage), findsOneWidget);
+        expect(find.byType(AggregationPage), findsOneWidget);
         expect(find.byKey(CatalogKeys.library('view-movies')), findsNothing);
         expect(find.byKey(AppShell.homeNavKey), findsNothing);
         expect(
-          GoRouter.of(tester.element(find.byType(LibraryPage))).state.uri.path,
+          GoRouter.of(
+            tester.element(find.byType(AggregationPage)),
+          ).state.uri.path,
           AppRoutes.library('view-movies'),
         );
 
+        final searchClose = find.byKey(SearchOverlay.closeKey);
         await tester.tap(find.byTooltip('搜索'));
         await settle(tester);
-        expect(find.byType(SearchOverlay), findsOneWidget);
-        expect(find.byType(SearchPage), findsOneWidget);
-        expect(find.byType(LibraryPage), findsOneWidget);
+        expect(searchClose, findsOneWidget);
+        expect(find.byType(AggregationPage), findsNWidgets(2));
         expect(
-          GoRouter.of(
-            tester.element(find.byType(SearchOverlay)),
-          ).state.uri.path,
+          GoRouter.of(tester.element(searchClose)).state.uri.path,
           AppRoutes.library('view-movies'),
         );
 
         await tester.sendKeyEvent(LogicalKeyboardKey.escape);
         await settle(tester);
-        expect(find.byType(SearchOverlay), findsNothing);
-        expect(find.byType(LibraryPage), findsOneWidget);
+        expect(searchClose, findsNothing);
+        expect(find.byType(AggregationPage), findsOneWidget);
         expect(
           tester
               .widget<IconButton>(find.widgetWithIcon(IconButton, Icons.search))
@@ -404,11 +402,11 @@ void main() {
 
         await tester.tap(find.byTooltip('搜索'));
         await settle(tester);
-        expect(find.byType(SearchOverlay), findsOneWidget);
+        expect(searchClose, findsOneWidget);
 
-        await tester.tap(find.byKey(SearchOverlay.closeKey));
+        await tester.tap(searchClose);
         await settle(tester);
-        expect(find.byType(SearchOverlay), findsNothing);
+        expect(searchClose, findsNothing);
 
         await tester.tap(find.byKey(CatalogKeys.back));
         await settle(tester);
@@ -457,16 +455,36 @@ void main() {
   });
 }
 
+Future<RillightApp> _sourceApp(
+  WidgetTester tester,
+  SyntheticSourceAuth auth,
+) async {
+  final runtime = (await tester.runAsync(auth.runtime))!;
+  final app = RillightApp(
+    auth: auth,
+    playerBindings: PlayerBindings(runtime: runtime),
+  );
+  addTearDown(() async {
+    await tester.pumpWidget(const SizedBox.shrink());
+    app.router.dispose();
+    await tester.runAsync(
+      () => runtime.history.close().timeout(const Duration(seconds: 5)),
+    );
+    auth.dispose();
+  });
+  return app;
+}
+
 Future<AuthController> _connect(
   WidgetTester tester, {
   FakeEmbyServer? server,
 }) async {
   final emby = server ?? FakeEmbyServer();
   final adapter = FakeEmbyAdapter([emby]);
-  final auth = AuthController(
-    client: EmbyClient(device: _device, dio: dioForFakeEmby(adapter)),
-    credentials: MemoryCredentialStore(),
-    servers: MemoryServerListStore(),
+  final auth = SyntheticSourceAuth(
+    adapter: adapter,
+    device: _device,
+    libraryIds: {'view-movies', 'view-tv', 'view-photos', 'view-mixed'},
   );
   await tester.runAsync(() {
     return auth.connect(

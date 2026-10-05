@@ -1875,6 +1875,19 @@ void main() {
         '/aggregation',
       );
       expect(app.router.canPop(), isFalse);
+      expect(app.router.routerDelegate.currentConfiguration.extra, isNull);
+      expect(find.byType(ItemDetailPage), findsNothing);
+      expect(find.textContaining('私密区域已锁定'), findsNothing);
+      // Both navigator history and the desktop shell's forward extras must
+      // be gone, not merely the comparison dialog or its visible pixels.
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.altLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
+      await _settle(tester);
+      expect(
+        app.router.routeInformationProvider.value.uri.path,
+        '/aggregation',
+      );
       await tester.runAsync(() => f.auth.regionAccess.unlock('1234'));
       await _settle(tester);
       expect(find.textContaining('私密来源名'), findsNothing);

@@ -213,9 +213,10 @@ class _SourceDetailGateState extends State<SourceDetailGate> {
         // after that frame. Mutating the Navigator while source revocation
         // is notifying its mounted subtree races its render/semantics teardown.
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) {
-            router?.go(desktop ? '/aggregation' : '/', extra: null);
-          }
+          // Overlay revocation can pop this detail before the frame completes.
+          // The invalid deep stack still must be replaced, even if its gate
+          // has already unmounted; otherwise unlocking restores private data.
+          router?.go(desktop ? '/aggregation' : '/', extra: null);
         });
       }
     }

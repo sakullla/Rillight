@@ -640,7 +640,9 @@ class _AggregationPageState extends State<AggregationPage> {
                           Text(
                             '${_mode == QueryMode.continueWatching ? l.aggregationLoadedRemote : l.aggregationLoaded}: ${works.length} · ${query.complete ? l.aggregationComplete : l.aggregationIncomplete}',
                           ),
-                          if (query.summary == QuerySummary.emptyScope)
+                          if (widget.search && _keyword.text.trim().isEmpty)
+                            Text(l.searchEmptyQuery)
+                          else if (query.summary == QuerySummary.emptyScope)
                             Text(l.aggregationEmptyScope),
                           if (query.summary == QuerySummary.empty)
                             Text(

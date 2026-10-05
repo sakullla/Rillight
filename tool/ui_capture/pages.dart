@@ -376,7 +376,10 @@ extension PageCaptures on CaptureSession {
     }
     await activate(find.byType(DropdownButton<bool>));
     await save('library-filters-watch');
-    await dismiss();
+    // The shell owns Escape; dismiss the dropdown through its real barrier.
+    await tester.tapAt(const Offset(5, 5));
+    await advance(350);
+    expect(find.text('已看'), findsNothing);
     await activate(find.byKey(const Key('aggregation-genre')));
     await save('library-filters-genre');
     if (platform == 'tv') {
@@ -390,7 +393,7 @@ extension PageCaptures on CaptureSession {
     await activate(find.byType(DropdownButton<String>).at(1));
     if (platform == 'desktop') await save('library-sort');
     if (platform != 'desktop') await save('library-filters-sorting');
-    await dismiss();
+    await activate(find.text('标题').last);
     await activate(find.byType(DropdownButton<bool>));
     await activate(find.text('未看').last);
     await save('library-filters-selected');

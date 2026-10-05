@@ -9,6 +9,8 @@ import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/theme.dart';
 import 'package:rillight/app/widgets/backdrop_scrim.dart';
 import 'package:rillight/app/widgets/liquid_glass.dart';
+import 'package:rillight/auth/auth_controller.dart';
+import 'package:rillight/auth/auth_scope.dart';
 
 FrameTiming _frame({int buildUs = 1000, int rasterUs = 1000, int start = 0}) =>
     FrameTiming(
@@ -37,6 +39,8 @@ void main() {
   testWidgets('automatic reduction preserves immersive bar and backdrop', (
     tester,
   ) async {
+    final auth = AuthController.memory();
+    addTearDown(auth.dispose);
     final router = GoRouter(
       initialLocation: '/item/test',
       routes: [
@@ -60,8 +64,10 @@ void main() {
         supportedLocales: AppLocalizations.supportedLocales,
         localizationsDelegates: AppLocalizations.localizationsDelegates,
         routerConfig: router,
-        builder: (context, child) =>
-            DesktopPerformanceHost(monitorTimings: true, child: child!),
+        builder: (context, child) => AuthScope(
+          controller: auth,
+          child: DesktopPerformanceHost(monitorTimings: true, child: child!),
+        ),
       ),
     );
     await tester.pumpAndSettle();

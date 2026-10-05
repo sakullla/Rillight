@@ -2,11 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
 import 'package:rillight/app/app_shell.dart';
-import 'package:rillight/app/widgets/app_error_view.dart';
 import 'package:rillight/auth/auth_controller.dart';
-import 'package:rillight/auth/credential_store.dart';
-import 'package:rillight/auth/server_list_store.dart';
-import 'package:rillight/emby/emby_client.dart';
+import '../helpers/synthetic_source_fixture.dart';
+import 'package:rillight/player/player_bindings.dart';
+import 'package:rillight/library/aggregation_page.dart';
 import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/library/episode_detail_sections.dart';
@@ -38,10 +37,10 @@ void main() {
   });
 
   Future<AuthController> pumpLoggedIn(WidgetTester tester) async {
-    final auth = AuthController(
-      client: EmbyClient(device: _device, dio: dioForFakeEmby(adapter)),
-      credentials: MemoryCredentialStore(),
-      servers: MemoryServerListStore(),
+    final auth = SyntheticSourceAuth(
+      adapter: adapter,
+      device: _device,
+      libraryIds: {'view-movies', 'view-tv', 'view-photos', 'view-mixed'},
     );
     await tester.runAsync(() {
       return auth.connect(
@@ -51,7 +50,20 @@ void main() {
       );
     });
     expect(auth.isLoggedIn, isTrue);
-    await tester.pumpWidget(RillightApp(auth: auth));
+    final runtime = (await tester.runAsync(auth.runtime))!;
+    final app = RillightApp(
+      auth: auth,
+      playerBindings: PlayerBindings(runtime: runtime),
+    );
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      app.router.dispose();
+      await tester.runAsync(
+        () => runtime.history.close().timeout(const Duration(seconds: 5)),
+      );
+      auth.dispose();
+    });
+    await tester.pumpWidget(app);
     await settle(tester);
     return auth;
   }
@@ -237,17 +249,28 @@ void main() {
 
       await openLibrary(tester, 'view-movies');
       expect(find.byKey(CatalogKeys.library('view-movies')), findsNothing);
-      expect(
-        find.descendant(
-          of: find.byType(CustomScrollView),
-          matching: find.text('电影'),
-        ),
-        findsOneWidget,
+      expect(find.byType(AggregationPage), findsOneWidget);
+      expect(find.text('Inception'), findsOneWidget);
+      final aggregationScroll = find
+          .descendant(
+            of: find.byType(AggregationPage),
+            matching: find.byType(Scrollable),
+          )
+          .first;
+      await tester.scrollUntilVisible(
+        find.text('飞屋环游记'),
+        250,
+        scrollable: aggregationScroll,
       );
-      expect(find.byKey(CatalogKeys.item('movie-inception')), findsOneWidget);
-      expect(find.byKey(CatalogKeys.item('movie-up')), findsOneWidget);
-
-      await tester.tap(find.byKey(CatalogKeys.item('movie-inception')));
+      expect(find.text('飞屋环游记'), findsOneWidget);
+      final movie = find.text('Inception');
+      await tester.scrollUntilVisible(
+        movie,
+        -250,
+        scrollable: aggregationScroll,
+      );
+      await tester.ensureVisible(movie);
+      await tester.tap(movie);
       await settle(tester);
       expect(find.text('Inception (2010)'), findsOneWidget);
       expect(
@@ -278,7 +301,12 @@ void main() {
       await _tapDetailBack(tester);
       await settle(tester);
       await openLibrary(tester, 'view-tv');
-      await tester.tap(find.byKey(CatalogKeys.item('series-friends')));
+      await Scrollable.ensureVisible(
+        tester.element(find.text('老友记')),
+        alignment: .5,
+      );
+      await settle(tester);
+      await tester.tap(find.text('老友记'));
       await settle(tester);
       expect(find.text('老友记 (1994)'), findsOneWidget);
       expect(find.byKey(EpisodeOverviewSection.textKey), findsOneWidget);
@@ -360,10 +388,10 @@ void main() {
           .length;
       await tester.tap(find.byTooltip('搜索'));
       await settle(tester);
-      await tester.tap(find.byKey(CatalogKeys.searchSubmit));
-      await settle(tester);
+      expect(find.byKey(const Key('aggregation-keyword')), findsOneWidget);
       expect(find.text('输入片名后搜索'), findsOneWidget);
-      expect(find.text('没有结果'), findsNothing);
+      expect(find.text('所选范围没有匹配作品'), findsNothing);
+      expect(find.text('所选来源全部失败，请逐来源重试'), findsNothing);
       expect(
         server.requests
             .where((request) => request.contains('SearchTerm='))
@@ -371,17 +399,30 @@ void main() {
         beforeSearch,
       );
 
-      await tester.enterText(find.byKey(CatalogKeys.searchField), 'Inception');
-      await tester.tap(find.byKey(CatalogKeys.searchSubmit));
+      await tester.enterText(
+        find.byKey(const Key('aggregation-keyword')),
+        'no-synthetic-match',
+      );
+      await settle(tester);
+      expect(find.text('输入片名后搜索'), findsNothing);
+      expect(find.text('所选范围没有匹配作品'), findsOneWidget);
+      await tester.enterText(
+        find.byKey(const Key('aggregation-keyword')),
+        'Inception',
+      );
       await settle(tester);
       final overlayHit = find.descendant(
-        of: find.byType(SearchOverlay),
-        matching: find.byKey(CatalogKeys.item('movie-inception')),
+        of: find.byType(AggregationPage),
+        matching: find.byWidgetPredicate(
+          (w) => w is Text && w.data == 'Inception',
+        ),
       );
       expect(overlayHit, findsOneWidget);
+      await Scrollable.ensureVisible(tester.element(overlayHit), alignment: .5);
+      await settle(tester);
       await tester.tap(overlayHit);
       await settle(tester);
-      expect(find.byType(SearchOverlay), findsNothing);
+      expect(find.byKey(SearchOverlay.closeKey), findsNothing);
       expect(find.text('Inception (2010)'), findsOneWidget);
 
       await _tapDetailBack(tester);
@@ -389,13 +430,26 @@ void main() {
       server.searchStatus = 500;
       await tester.tap(find.byTooltip('搜索'));
       await settle(tester);
-      await tester.enterText(find.byKey(CatalogKeys.searchField), 'Inception');
-      await tester.tap(find.byKey(CatalogKeys.searchSubmit));
+      await tester.enterText(
+        find.byKey(const Key('aggregation-keyword')),
+        'Inception',
+      );
       await settle(tester);
-      expect(find.byType(AppErrorView), findsOneWidget);
-      expect(find.text('HTTP 500: search failed'), findsOneWidget);
-      expect(find.text('没有结果'), findsNothing);
-      expect(find.byKey(CatalogKeys.searchNoResults), findsNothing);
+      expect(find.text('所选来源全部失败，请逐来源重试'), findsOneWidget);
+      // Source-safe UI categorizes the failure without exposing raw transport
+      // URLs. Every allowed library remains identifiable and retryable.
+      expect(find.textContaining('view-movies · 查询失败'), findsOneWidget);
+      expect(find.text('所选范围没有匹配作品'), findsNothing);
+      expect(find.text('重试此来源'), findsWidgets);
+      server.searchStatus = 200;
+      await tester.tap(find.text('重试此来源').first);
+      await settle(tester);
+      expect(find.text('所选来源全部失败，请逐来源重试'), findsNothing);
+      expect(find.text('部分来源失败，已保留成功结果'), findsOneWidget);
+      expect(
+        find.byWidgetPredicate((w) => w is Text && w.data == 'Inception'),
+        findsOneWidget,
+      );
     },
     tags: ['integration'],
   );
