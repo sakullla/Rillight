@@ -8,15 +8,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
 import 'package:rillight/auth/auth_controller.dart';
-import 'package:rillight/auth/credential_store.dart';
-import 'package:rillight/auth/server_list_store.dart';
-import 'package:rillight/emby/emby_client.dart';
+import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/emby/emby_device.dart';
-import 'package:rillight/library/poster_card.dart';
-import 'package:rillight/library/shelf_grid_page.dart';
+import 'package:rillight/library/aggregation_page.dart';
 
 import '../emby/fake_emby_server.dart';
-import '../helpers/top_bar_hit.dart';
+import '../helpers/synthetic_source_fixture.dart';
 
 const _device = EmbyDeviceInfo(
   clientName: '灯川 Rillight',
@@ -214,10 +211,10 @@ void main() {
   });
 
   Future<AuthController> pumpLoggedIn(WidgetTester tester) async {
-    final auth = AuthController(
-      client: EmbyClient(device: _device, dio: dioForFakeEmby(adapter)),
-      credentials: MemoryCredentialStore(),
-      servers: MemoryServerListStore(),
+    final auth = SyntheticSourceAuth(
+      adapter: adapter,
+      device: _device,
+      libraryIds: {'view-movies', 'view-untyped'},
     );
     await tester.runAsync(() {
       return auth.connect(
@@ -227,7 +224,19 @@ void main() {
       );
     });
     expect(auth.isLoggedIn, isTrue);
-    app = RillightApp(auth: auth);
+    final runtime = (await tester.runAsync(auth.runtime))!;
+    app = RillightApp(
+      auth: auth,
+      playerBindings: PlayerBindings(runtime: runtime),
+    );
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      app.router.dispose();
+      await tester.runAsync(
+        () => runtime.history.close().timeout(const Duration(seconds: 5)),
+      );
+      auth.dispose();
+    });
     return auth;
   }
 
@@ -237,39 +246,23 @@ void main() {
     await settle(tester);
   }
 
-  Future<void> tapFilter(WidgetTester tester, String dimension) async {
-    if (find.byKey(gridFilterPanelKey).evaluate().isEmpty) {
-      await tapBelowTopBar(tester, find.byKey(gridFilterMenuKey));
-      await settle(tester);
-    }
-    await tester.tap(find.byKey(Key('catalog-grid-filter-section-$dimension')));
+  Future<void> chooseType(WidgetTester tester, String label) async {
+    await tester.tap(find.byType(DropdownButton<String>).first);
+    await settle(tester);
+    await tester.tap(find.text(label).last);
     await settle(tester);
   }
 
-  Future<void> chooseOption(
-    WidgetTester tester,
-    String dimension,
-    String value,
-  ) async {
-    // 面板为草稿式:点选项只暂存,点「确定」才生效并关闭面板。
-    await tester.ensureVisible(find.byKey(gridFilterOption(dimension, value)));
-    await tester.tap(find.byKey(gridFilterOption(dimension, value)));
-    await settle(tester);
-    await tester.tap(find.byKey(const Key('catalog-grid-filter-apply')));
-    await settle(tester);
-  }
-
-  List<String> posterNames(WidgetTester tester) {
-    return tester
-        .widgetList<PosterCard>(
-          find.descendant(
-            of: find.byType(CustomScrollView),
-            matching: find.byType(PosterCard),
-          ),
-        )
-        .map((card) => card.item.name)
-        .toList();
-  }
+  List<String> posterNames(WidgetTester tester) => tester
+      .widgetList<Text>(
+        find.descendant(
+          of: find.byType(SliverGrid),
+          matching: find.byType(Text),
+        ),
+      )
+      .map((text) => text.data ?? '')
+      .where((text) => text != '同源' && !text.contains('个来源'))
+      .toList();
 
   testWidgets('filter confirm, type, and year share one logged-in pump', (
     tester,
@@ -305,38 +298,22 @@ void main() {
     ]);
     await pumpLoggedIn(tester);
     await openLibrary(tester, 'view-movies');
+    expect(find.byType(AggregationPage), findsOneWidget);
     final before = posterNames(tester);
-
-    await tapBelowTopBar(tester, find.byKey(gridFilterMenuKey));
+    await tester.tap(find.byType(DropdownButton<bool>));
     await settle(tester);
-    await tester.tap(find.byKey(gridFilterOption('watch', 'IsPlayed')));
+    await tester.tap(find.text('已看').last);
     await settle(tester);
-
-    // 未点确定:网格不变,面板仍开着。
-    expect(posterNames(tester), before);
-    expect(find.byKey(gridFilterPanelKey), findsOneWidget);
-
-    // 取消:丢弃草稿并关闭,网格仍不变。
-    await tester.tap(find.byKey(const Key('catalog-grid-filter-cancel')));
-    await settle(tester);
-    expect(find.byKey(gridFilterPanelKey), findsNothing);
-    expect(posterNames(tester), before);
-
-    // 重开面板,选择后点确定才生效。
-    await tapBelowTopBar(tester, find.byKey(gridFilterMenuKey));
-    await settle(tester);
-    await tester.tap(find.byKey(gridFilterOption('watch', 'IsPlayed')));
-    await settle(tester);
-    await tester.tap(find.byKey(const Key('catalog-grid-filter-apply')));
-    await settle(tester);
-    expect(find.byKey(gridFilterPanelKey), findsNothing);
     expect(posterNames(tester), isNot(before));
+    expect(server.requests.last, contains('Filters=IsPlayed'));
+    await tester.tap(find.widgetWithText(TextButton, '全部观看状态'));
+    await settle(tester);
+    expect(posterNames(tester), before);
 
     await openLibrary(tester, 'view-untyped');
     expect(posterNames(tester), containsAll(['未分类型电影', '新电影', '新剧集', '老剧集']));
 
-    await tapFilter(tester, 'type');
-    await chooseOption(tester, 'type', 'Movie');
+    await chooseType(tester, '电影');
     expect(posterNames(tester), containsAll(['未分类型电影', '新电影']));
     expect(posterNames(tester), isNot(contains('新剧集')));
     expect(
@@ -348,27 +325,42 @@ void main() {
       isTrue,
     );
 
-    await tapFilter(tester, 'year');
-    await chooseOption(tester, 'year', '2025');
-    expect(posterNames(tester), ['新电影']);
+    final year = find.byKey(const Key('aggregation-year'));
+    final beforeYear = posterNames(tester);
+    final beforeRequests = server.requests.length;
+    await tester.enterText(year, '2025');
+    await settle(tester);
+    // 年份是待提交文本；输入本身不改变结果或派发请求。
+    expect(posterNames(tester), beforeYear);
+    expect(server.requests.length, beforeRequests);
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await settle(tester);
+    expect(posterNames(tester), contains('新电影'));
+    expect(posterNames(tester), isNot(contains('未分类型电影')));
     expect(
-      server.requests.last,
+      server.requests.lastWhere(
+        (request) => request.contains('/Users/') && request.contains('/Items?'),
+      ),
       allOf(contains('IncludeItemTypes=Movie'), contains('Years=2025')),
       reason: '类型与年份组合在同一次请求中生效',
     );
 
-    await tapBelowTopBar(tester, find.byKey(gridFilterClearKey));
+    await tester.enterText(year, '');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
     await settle(tester);
+    await chooseType(tester, '全部类型');
     expect(posterNames(tester), containsAll(['未分类型电影', '新电影', '新剧集', '老剧集']));
     expect(
-      server.requests.last,
+      server.requests.lastWhere(
+        (request) => request.contains('/Users/') && request.contains('/Items?'),
+      ),
       allOf(
         isNot(contains('Years=')),
         isNot(contains('Filters=')),
-        contains('IncludeItemTypes=Movie%2CSeries'),
+        isNot(contains('IncludeItemTypes=Movie&')),
       ),
       reason: '清除后请求回到无筛选形态',
     );
-    expect(find.byKey(gridFilterClearKey), findsNothing);
+    expect(tester.takeException(), isNull);
   }, tags: ['integration']);
 }

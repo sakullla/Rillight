@@ -326,394 +326,405 @@ class _AggregationPageState extends State<AggregationPage> {
         child: FocusTraversalGroup(
           child: PageStorage(
             bucket: _pageStorage,
-            child: CustomScrollView(
-              key: PageStorageKey(
-                widget.search ? 'aggregation-search' : 'aggregation',
-              ),
-              controller: _scroll,
-              slivers: [
-                SliverToBoxAdapter(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 64, 16, 12),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final columns = (constraints.maxWidth / 180).floor().clamp(
+                  2,
+                  8,
+                );
+                return CustomScrollView(
+                  key: PageStorageKey(
+                    widget.search ? 'aggregation-search' : 'aggregation',
+                  ),
+                  controller: _scroll,
+                  slivers: [
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 64, 16, 12),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            if (GoRouter.of(context).canPop())
-                              BackButton(onPressed: () => context.pop()),
-                            Expanded(
-                              child: Text(
-                                widget.search ? l.search : l.aggregation,
-                                style: Theme.of(
-                                  context,
-                                ).textTheme.headlineSmall,
-                              ),
-                            ),
-                            IconButton(
-                              key: const Key('aggregation-source-management'),
-                              tooltip: l.sourceManagement,
-                              onPressed: () => showSourceManagement(
-                                context,
-                                region: widget.region,
-                              ),
-                              icon: const Icon(Icons.tune),
-                            ),
-                            if (widget.region == AccessRegion.private)
-                              IconButton(
-                                tooltip: l.privateLock,
-                                onPressed: () =>
-                                    AuthScope.of(context).regionAccess.lock(),
-                                icon: const Icon(Icons.lock),
-                              ),
-                            if (widget.region == AccessRegion.ordinary)
-                              const PrivateRegionButton(),
-                          ],
-                        ),
-                        if (widget.search && PresentationScope.of(context).isTv)
-                          TvInput(
-                            key: const Key('aggregation-keyword'),
-                            autofocus: true,
-                            label: l.search,
-                            controller: _keyword,
-                            onSubmitted: _start,
-                          ),
-                        if (widget.search &&
-                            !PresentationScope.of(context).isTv)
-                          TextField(
-                            focusNode: widget.searchFocusNode,
-                            key: const Key('aggregation-keyword'),
-                            controller: _keyword,
-                            decoration: InputDecoration(
-                              labelText: l.search,
-                              suffixIcon: IconButton(
-                                tooltip: l.search,
-                                onPressed: _start,
-                                icon: const Icon(Icons.search),
-                              ),
-                            ),
-                            onSubmitted: (_) => _start(),
-                          ),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 4,
-                          children: [
-                            FilterChip(
-                              label: Text(
-                                widget.region == AccessRegion.ordinary
-                                    ? l.aggregationAllSources
-                                    : l.aggregationAllowedSources,
-                              ),
-                              selected: _selected == null,
-                              onSelected: (_) {
-                                setState(() => _selected = null);
-                                _start();
-                              },
-                            ),
-                            for (final server in servers)
-                              FilterChip(
-                                key: ValueKey(
-                                  'aggregation-source-${server.id}',
+                            Row(
+                              children: [
+                                if (GoRouter.of(context).canPop())
+                                  BackButton(onPressed: () => context.pop()),
+                                Expanded(
+                                  child: Text(
+                                    widget.search ? l.search : l.aggregation,
+                                    style: Theme.of(
+                                      context,
+                                    ).textTheme.headlineSmall,
+                                  ),
                                 ),
-                                label: Text(server.displayName),
-                                selected:
-                                    _selected == null ||
-                                    _selected!.contains(server.id),
-                                onSelected: (selected) {
-                                  setState(() {
-                                    _selected ??= servers
-                                        .map((s) => s.id)
-                                        .toSet();
-                                    selected
-                                        ? _selected!.add(server.id)
-                                        : _selected!.remove(server.id);
-                                  });
-                                  _start();
-                                },
+                                IconButton(
+                                  key: const Key(
+                                    'aggregation-source-management',
+                                  ),
+                                  tooltip: l.sourceManagement,
+                                  onPressed: () => showSourceManagement(
+                                    context,
+                                    region: widget.region,
+                                  ),
+                                  icon: const Icon(Icons.tune),
+                                ),
+                                if (widget.region == AccessRegion.private)
+                                  IconButton(
+                                    tooltip: l.privateLock,
+                                    onPressed: () => AuthScope.of(
+                                      context,
+                                    ).regionAccess.lock(),
+                                    icon: const Icon(Icons.lock),
+                                  ),
+                                if (widget.region == AccessRegion.ordinary)
+                                  const PrivateRegionButton(),
+                              ],
+                            ),
+                            if (widget.search &&
+                                PresentationScope.of(context).isTv)
+                              TvInput(
+                                key: const Key('aggregation-keyword'),
+                                autofocus: true,
+                                label: l.search,
+                                controller: _keyword,
+                                onSubmitted: _start,
                               ),
-                          ],
-                        ),
-                        ExpansionTile(
-                          key: const PageStorageKey(
-                            'aggregation-library-panel',
-                          ),
-                          title: Text(l.aggregationLibraryScope),
-                          children: [
-                            for (final server in servers)
-                              Wrap(
-                                spacing: 8,
-                                children: [
-                                  for (final library in server.libraryIds)
-                                    FilterChip(
-                                      key: ValueKey(
-                                        'aggregation-library-${server.id}-$library',
-                                      ),
-                                      label: Text(
-                                        '${server.displayName} · $library',
-                                      ),
-                                      selected:
-                                          !_libraries.containsKey(server.id) ||
-                                          _libraries[server.id]!.contains(
-                                            library,
-                                          ),
-                                      onSelected: (selected) {
-                                        _libraries.putIfAbsent(
-                                          server.id,
-                                          () => server.libraryIds.toSet(),
-                                        );
+                            if (widget.search &&
+                                !PresentationScope.of(context).isTv)
+                              TextField(
+                                focusNode: widget.searchFocusNode,
+                                key: const Key('aggregation-keyword'),
+                                controller: _keyword,
+                                decoration: InputDecoration(
+                                  labelText: l.search,
+                                  suffixIcon: IconButton(
+                                    tooltip: l.search,
+                                    onPressed: _start,
+                                    icon: const Icon(Icons.search),
+                                  ),
+                                ),
+                                onSubmitted: (_) => _start(),
+                              ),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 4,
+                              children: [
+                                FilterChip(
+                                  label: Text(
+                                    widget.region == AccessRegion.ordinary
+                                        ? l.aggregationAllSources
+                                        : l.aggregationAllowedSources,
+                                  ),
+                                  selected: _selected == null,
+                                  onSelected: (_) {
+                                    setState(() => _selected = null);
+                                    _start();
+                                  },
+                                ),
+                                for (final server in servers)
+                                  FilterChip(
+                                    key: ValueKey(
+                                      'aggregation-source-${server.id}',
+                                    ),
+                                    label: Text(server.displayName),
+                                    selected:
+                                        _selected == null ||
+                                        _selected!.contains(server.id),
+                                    onSelected: (selected) {
+                                      setState(() {
+                                        _selected ??= servers
+                                            .map((s) => s.id)
+                                            .toSet();
                                         selected
-                                            ? _libraries[server.id]!.add(
+                                            ? _selected!.add(server.id)
+                                            : _selected!.remove(server.id);
+                                      });
+                                      _start();
+                                    },
+                                  ),
+                              ],
+                            ),
+                            ExpansionTile(
+                              key: const PageStorageKey(
+                                'aggregation-library-panel',
+                              ),
+                              title: Text(l.aggregationLibraryScope),
+                              children: [
+                                for (final server in servers)
+                                  Wrap(
+                                    spacing: 8,
+                                    children: [
+                                      for (final library in server.libraryIds)
+                                        FilterChip(
+                                          key: ValueKey(
+                                            'aggregation-library-${server.id}-$library',
+                                          ),
+                                          label: Text(
+                                            '${server.displayName} · $library',
+                                          ),
+                                          selected:
+                                              !_libraries.containsKey(
+                                                server.id,
+                                              ) ||
+                                              _libraries[server.id]!.contains(
                                                 library,
-                                              )
-                                            : _libraries[server.id]!.remove(
-                                                library,
-                                              );
-                                        _start();
-                                      },
+                                              ),
+                                          onSelected: (selected) {
+                                            _libraries.putIfAbsent(
+                                              server.id,
+                                              () => server.libraryIds.toSet(),
+                                            );
+                                            selected
+                                                ? _libraries[server.id]!.add(
+                                                    library,
+                                                  )
+                                                : _libraries[server.id]!.remove(
+                                                    library,
+                                                  );
+                                            _start();
+                                          },
+                                        ),
+                                    ],
+                                  ),
+                              ],
+                            ),
+                            if (query == null) Text(l.appInitializationFailed),
+                            Wrap(
+                              spacing: 12,
+                              runSpacing: 8,
+                              children: [
+                                DropdownButton<String>(
+                                  value: _type ?? '',
+                                  items: [
+                                    DropdownMenuItem(
+                                      value: '',
+                                      child: Text(l.aggregationAllTypes),
                                     ),
+                                    const DropdownMenuItem(
+                                      value: 'Movie',
+                                      child: Text('电影'),
+                                    ),
+                                    DropdownMenuItem(
+                                      value: 'Episode',
+                                      child: Text(l.episodesRow),
+                                    ),
+                                    const DropdownMenuItem(
+                                      value: 'Series',
+                                      child: Text('剧集'),
+                                    ),
+                                  ],
+                                  onChanged: (value) {
+                                    setState(
+                                      () => _type = value == '' ? null : value,
+                                    );
+                                    _start();
+                                  },
+                                ),
+                                DropdownButton<bool>(
+                                  value: _played,
+                                  hint: Text(l.aggregationAllWatching),
+                                  items: const [
+                                    DropdownMenuItem(
+                                      value: true,
+                                      child: Text('已看'),
+                                    ),
+                                    DropdownMenuItem(
+                                      value: false,
+                                      child: Text('未看'),
+                                    ),
+                                  ],
+                                  onChanged: (value) {
+                                    setState(() => _played = value);
+                                    _start();
+                                  },
+                                ),
+                                TextButton(
+                                  onPressed: () {
+                                    setState(() => _played = null);
+                                    _start();
+                                  },
+                                  child: Text(l.aggregationAllWatching),
+                                ),
+                                DropdownButton<String>(
+                                  value: _sort,
+                                  items: const [
+                                    DropdownMenuItem(
+                                      value: 'SortName',
+                                      child: Text('标题'),
+                                    ),
+                                    DropdownMenuItem(
+                                      value: 'ProductionYear',
+                                      child: Text('年份'),
+                                    ),
+                                    DropdownMenuItem(
+                                      value: 'DateCreated',
+                                      child: Text('最近更新'),
+                                    ),
+                                  ],
+                                  onChanged: (value) {
+                                    setState(() => _sort = value!);
+                                    _start();
+                                  },
+                                ),
+                                SizedBox(
+                                  width: PresentationScope.of(context).isTv
+                                      ? 220
+                                      : 90,
+                                  child: PresentationScope.of(context).isTv
+                                      ? TvInput(
+                                          key: const Key('aggregation-year'),
+                                          label: '年份',
+                                          controller: _yearController,
+                                          onSubmitted: () {
+                                            _year = int.tryParse(
+                                              _yearController.text,
+                                            );
+                                            _start();
+                                          },
+                                        )
+                                      : TextField(
+                                          key: const Key('aggregation-year'),
+                                          controller: _yearController,
+                                          decoration: const InputDecoration(
+                                            labelText: '年份',
+                                          ),
+                                          keyboardType: TextInputType.number,
+                                          onSubmitted: (value) {
+                                            _year = int.tryParse(value);
+                                            _start();
+                                          },
+                                        ),
+                                ),
+                                SizedBox(
+                                  width: PresentationScope.of(context).isTv
+                                      ? 240
+                                      : 120,
+                                  child: PresentationScope.of(context).isTv
+                                      ? TvInput(
+                                          key: const Key('aggregation-genre'),
+                                          label: '流派',
+                                          controller: _genreController,
+                                          onSubmitted: () {
+                                            _genre = _genreController.text;
+                                            _start();
+                                          },
+                                        )
+                                      : TextField(
+                                          key: const Key('aggregation-genre'),
+                                          controller: _genreController,
+                                          decoration: const InputDecoration(
+                                            labelText: '流派',
+                                          ),
+                                          onSubmitted: (value) {
+                                            _genre = value;
+                                            _start();
+                                          },
+                                        ),
+                                ),
+                                if (!widget.search) ...[
+                                  ChoiceChip(
+                                    label: Text(l.aggregation),
+                                    selected: _mode == QueryMode.browse,
+                                    onSelected: (_) {
+                                      _mode = QueryMode.browse;
+                                      _start();
+                                    },
+                                  ),
+                                  ChoiceChip(
+                                    label: Text(l.aggregationContinue),
+                                    selected:
+                                        _mode == QueryMode.continueWatching,
+                                    onSelected: (_) {
+                                      _mode = QueryMode.continueWatching;
+                                      _start();
+                                    },
+                                  ),
+                                  ChoiceChip(
+                                    label: Text(l.aggregationRecent),
+                                    selected: _mode == QueryMode.recent,
+                                    onSelected: (_) {
+                                      _mode = QueryMode.recent;
+                                      _start();
+                                    },
+                                  ),
                                 ],
+                              ],
+                            ),
+                            if (query != null) ...[
+                              Text(
+                                '${_mode == QueryMode.continueWatching ? l.aggregationLoadedRemote : l.aggregationLoaded}: ${works.length} · ${query.complete ? l.aggregationComplete : l.aggregationIncomplete}',
                               ),
-                          ],
-                        ),
-                        if (query == null) Text(l.appInitializationFailed),
-                        Wrap(
-                          spacing: 12,
-                          runSpacing: 8,
-                          children: [
-                            DropdownButton<String>(
-                              value: _type ?? '',
-                              items: [
-                                DropdownMenuItem(
-                                  value: '',
-                                  child: Text(l.aggregationAllTypes),
+                              if (widget.search && _keyword.text.trim().isEmpty)
+                                Text(l.searchEmptyQuery)
+                              else if (query.summary == QuerySummary.emptyScope)
+                                Text(l.aggregationEmptyScope),
+                              if (query.summary == QuerySummary.empty)
+                                Text(
+                                  _mode == QueryMode.continueWatching &&
+                                          query.localContinueWatching.isNotEmpty
+                                      ? l.aggregationRemoteEmpty
+                                      : l.aggregationEmpty,
                                 ),
-                                const DropdownMenuItem(
-                                  value: 'Movie',
-                                  child: Text('电影'),
+                              if (query.summary == QuerySummary.allFailed)
+                                Text(l.aggregationAllFailed),
+                              if (query.summary == QuerySummary.partialFailure)
+                                Text(l.aggregationPartialFailure),
+                              for (final source in query.sources)
+                                _SourceStatus(
+                                  source: source,
+                                  name:
+                                      servers
+                                          .where(
+                                            (s) => s.id == source.key.serverId,
+                                          )
+                                          .firstOrNull
+                                          ?.displayName ??
+                                      '',
+                                  retry: () => query.retry(source.key),
+                                  more: () => query.loadMore(source.key),
                                 ),
-                                DropdownMenuItem(
-                                  value: 'Episode',
-                                  child: Text(l.episodesRow),
-                                ),
-                                const DropdownMenuItem(
-                                  value: 'Series',
-                                  child: Text('剧集'),
-                                ),
-                              ],
-                              onChanged: (value) {
-                                setState(
-                                  () => _type = value == '' ? null : value,
-                                );
-                                _start();
-                              },
-                            ),
-                            DropdownButton<bool>(
-                              value: _played,
-                              hint: Text(l.aggregationAllWatching),
-                              items: const [
-                                DropdownMenuItem(
-                                  value: true,
-                                  child: Text('已看'),
-                                ),
-                                DropdownMenuItem(
-                                  value: false,
-                                  child: Text('未看'),
-                                ),
-                              ],
-                              onChanged: (value) {
-                                setState(() => _played = value);
-                                _start();
-                              },
-                            ),
-                            TextButton(
-                              onPressed: () {
-                                setState(() => _played = null);
-                                _start();
-                              },
-                              child: Text(l.aggregationAllWatching),
-                            ),
-                            DropdownButton<String>(
-                              value: _sort,
-                              items: const [
-                                DropdownMenuItem(
-                                  value: 'SortName',
-                                  child: Text('标题'),
-                                ),
-                                DropdownMenuItem(
-                                  value: 'ProductionYear',
-                                  child: Text('年份'),
-                                ),
-                                DropdownMenuItem(
-                                  value: 'DateCreated',
-                                  child: Text('最近更新'),
-                                ),
-                              ],
-                              onChanged: (value) {
-                                setState(() => _sort = value!);
-                                _start();
-                              },
-                            ),
-                            SizedBox(
-                              width: PresentationScope.of(context).isTv
-                                  ? 220
-                                  : 90,
-                              child: PresentationScope.of(context).isTv
-                                  ? TvInput(
-                                      key: const Key('aggregation-year'),
-                                      label: '年份',
-                                      controller: _yearController,
-                                      onSubmitted: () {
-                                        _year = int.tryParse(
-                                          _yearController.text,
-                                        );
-                                        _start();
-                                      },
-                                    )
-                                  : TextField(
-                                      key: const Key('aggregation-year'),
-                                      controller: _yearController,
-                                      decoration: const InputDecoration(
-                                        labelText: '年份',
-                                      ),
-                                      keyboardType: TextInputType.number,
-                                      onSubmitted: (value) {
-                                        _year = int.tryParse(value);
-                                        _start();
-                                      },
+                              if (_mode == QueryMode.continueWatching)
+                                for (final record
+                                    in query.localContinueWatching)
+                                  ListTile(
+                                    title: Text(l.aggregationLocalRecord),
+                                    subtitle: Text(
+                                      '${record.source.itemId} · ${record.positionTicks ~/ 10000000}s · ${record.remoteStatus.name}',
                                     ),
-                            ),
-                            SizedBox(
-                              width: PresentationScope.of(context).isTv
-                                  ? 240
-                                  : 120,
-                              child: PresentationScope.of(context).isTv
-                                  ? TvInput(
-                                      key: const Key('aggregation-genre'),
-                                      label: '流派',
-                                      controller: _genreController,
-                                      onSubmitted: () {
-                                        _genre = _genreController.text;
-                                        _start();
-                                      },
-                                    )
-                                  : TextField(
-                                      key: const Key('aggregation-genre'),
-                                      controller: _genreController,
-                                      decoration: const InputDecoration(
-                                        labelText: '流派',
-                                      ),
-                                      onSubmitted: (value) {
-                                        _genre = value;
-                                        _start();
-                                      },
+                                    trailing: IconButton(
+                                      tooltip: l.aggregationResumeActual,
+                                      icon: const Icon(Icons.play_arrow),
+                                      onPressed: () =>
+                                          _resumeRecord(context, record),
                                     ),
-                            ),
-                            if (!widget.search) ...[
-                              ChoiceChip(
-                                label: Text(l.aggregation),
-                                selected: _mode == QueryMode.browse,
-                                onSelected: (_) {
-                                  _mode = QueryMode.browse;
-                                  _start();
-                                },
-                              ),
-                              ChoiceChip(
-                                label: Text(l.aggregationContinue),
-                                selected: _mode == QueryMode.continueWatching,
-                                onSelected: (_) {
-                                  _mode = QueryMode.continueWatching;
-                                  _start();
-                                },
-                              ),
-                              ChoiceChip(
-                                label: Text(l.aggregationRecent),
-                                selected: _mode == QueryMode.recent,
-                                onSelected: (_) {
-                                  _mode = QueryMode.recent;
-                                  _start();
-                                },
-                              ),
+                                    onTap: () => _open(
+                                      context,
+                                      QueryItem(
+                                        record.source,
+                                        record.libraryId,
+                                        items
+                                                .where(
+                                                  (i) =>
+                                                      i.reference ==
+                                                      record.source.item,
+                                                )
+                                                .firstOrNull
+                                                ?.item ??
+                                            // Records without a currently loaded DTO still navigate
+                                            // by the recorded source, never by the selected auth.
+                                            EmbyItem(
+                                              id: record.source.itemId,
+                                              name: l.aggregationLocalRecord,
+                                              type: 'Movie',
+                                            ),
+                                      ),
+                                    ),
+                                  ),
                             ],
                           ],
                         ),
-                        if (query != null) ...[
-                          Text(
-                            '${_mode == QueryMode.continueWatching ? l.aggregationLoadedRemote : l.aggregationLoaded}: ${works.length} · ${query.complete ? l.aggregationComplete : l.aggregationIncomplete}',
-                          ),
-                          if (widget.search && _keyword.text.trim().isEmpty)
-                            Text(l.searchEmptyQuery)
-                          else if (query.summary == QuerySummary.emptyScope)
-                            Text(l.aggregationEmptyScope),
-                          if (query.summary == QuerySummary.empty)
-                            Text(
-                              _mode == QueryMode.continueWatching &&
-                                      query.localContinueWatching.isNotEmpty
-                                  ? l.aggregationRemoteEmpty
-                                  : l.aggregationEmpty,
-                            ),
-                          if (query.summary == QuerySummary.allFailed)
-                            Text(l.aggregationAllFailed),
-                          if (query.summary == QuerySummary.partialFailure)
-                            Text(l.aggregationPartialFailure),
-                          for (final source in query.sources)
-                            _SourceStatus(
-                              source: source,
-                              name:
-                                  servers
-                                      .where((s) => s.id == source.key.serverId)
-                                      .firstOrNull
-                                      ?.displayName ??
-                                  '',
-                              retry: () => query.retry(source.key),
-                              more: () => query.loadMore(source.key),
-                            ),
-                          if (_mode == QueryMode.continueWatching)
-                            for (final record in query.localContinueWatching)
-                              ListTile(
-                                title: Text(l.aggregationLocalRecord),
-                                subtitle: Text(
-                                  '${record.source.itemId} · ${record.positionTicks ~/ 10000000}s · ${record.remoteStatus.name}',
-                                ),
-                                trailing: IconButton(
-                                  tooltip: l.aggregationResumeActual,
-                                  icon: const Icon(Icons.play_arrow),
-                                  onPressed: () =>
-                                      _resumeRecord(context, record),
-                                ),
-                                onTap: () => _open(
-                                  context,
-                                  QueryItem(
-                                    record.source,
-                                    record.libraryId,
-                                    items
-                                            .where(
-                                              (i) =>
-                                                  i.reference ==
-                                                  record.source.item,
-                                            )
-                                            .firstOrNull
-                                            ?.item ??
-                                        // Records without a currently loaded DTO still navigate
-                                        // by the recorded source, never by the selected auth.
-                                        EmbyItem(
-                                          id: record.source.itemId,
-                                          name: l.aggregationLocalRecord,
-                                          type: 'Movie',
-                                        ),
-                                  ),
-                                ),
-                              ),
-                        ],
-                      ],
+                      ),
                     ),
-                  ),
-                ),
-                SliverLayoutBuilder(
-                  builder: (context, constraints) {
-                    final columns = (constraints.crossAxisExtent / 180)
-                        .floor()
-                        .clamp(2, 8);
-                    return SliverPadding(
+                    SliverPadding(
                       padding: const EdgeInsets.all(16),
                       sliver: SliverGrid(
                         gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
@@ -746,10 +757,10 @@ class _AggregationPageState extends State<AggregationPage> {
                           );
                         }, childCount: works.length),
                       ),
-                    );
-                  },
-                ),
-              ],
+                    ),
+                  ],
+                );
+              },
             ),
           ),
         ),

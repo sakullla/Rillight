@@ -147,12 +147,21 @@ class _MobileShellState extends State<MobileShell> with WidgetsBindingObserver {
         ),
         body: NotificationListener<ScrollNotification>(
           onNotification: (notification) {
-            if (_index != 0 || notification.metrics.axis != Axis.vertical) {
+            if (_index != 0 ||
+                notification.metrics.axis != Axis.vertical ||
+                notification.context
+                        ?.findAncestorWidgetOfExactType<PhoneHome>() ==
+                    null) {
               return false;
             }
             final covered = notification.metrics.pixels > 24;
             if (covered != _homeCovered) {
-              setState(() => _homeCovered = covered);
+              // Restoring a scroll offset can notify during viewport layout.
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted && _index == 0 && covered != _homeCovered) {
+                  setState(() => _homeCovered = covered);
+                }
+              });
             }
             return false;
           },
