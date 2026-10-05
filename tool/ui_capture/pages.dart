@@ -43,8 +43,26 @@ extension PageCaptures on CaptureSession {
   }
 
   Future<void> dismiss() async {
-    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-    await advance(350);
+    final barriers = find.byWidgetPredicate(
+      (widget) => widget is ModalBarrier && widget.dismissible,
+    );
+    if (barriers.evaluate().isNotEmpty) {
+      // AppShell handles Escape before popup routes. Use the real outside
+      // barrier, rather than leaving a menu mounted across router.go calls.
+      final barrier = barriers.last;
+      final dismissedElement = tester.element(barrier);
+      final rect = tester.getRect(barrier);
+      await tester.tapAt(rect.topLeft + const Offset(5, 5));
+      await advance(350);
+      expect(
+        dismissedElement.mounted,
+        isFalse,
+        reason: 'Capture must close the top modal (a parent may remain)',
+      );
+    } else {
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await advance(350);
+    }
   }
 
   Future<void> route(RillightApp app, String path, String name) async {
@@ -465,7 +483,16 @@ extension PageCaptures on CaptureSession {
       await save('server-manager');
       await modal(PhoneMinePage.lineAddKey(id), 'server-add-line');
       await modal(PhoneMinePage.lineEditKey(id, lineId), 'server-edit-line');
-      await activate(find.byTooltip('修改显示名称'));
+      final selectedServerCard = find.ancestor(
+        of: find.byKey(PhoneMinePage.serverDeleteKey(id)),
+        matching: find.byType(Card),
+      );
+      await activate(
+        find.descendant(
+          of: selectedServerCard,
+          matching: find.byTooltip('修改显示名称'),
+        ),
+      );
       await save('server-rename');
       await dismiss();
       await tap(PhoneMinePage.serverDeleteKey(id));
@@ -574,8 +601,8 @@ extension PageCaptures on CaptureSession {
       await save('login-text-200');
       tester.platformDispatcher.clearTextScaleFactorTestValue();
       tester.view.viewInsets = const FakeViewPadding(bottom: 300);
-      await tester.tap(find.byKey(address));
       await advance(350);
+      await activate(find.byKey(address));
       await save('login-keyboard');
       tester.view.resetViewInsets();
       tester.testTextInput.hide();

@@ -279,7 +279,7 @@ void main() {
           await capture.advance(500);
           await revealPhoneHero(tester, capture);
           final loading = Completer<void>();
-          adapter.catalogGate = loading;
+          adapter.detailGate = loading;
           await capture.activate(find.byKey(PhoneHero.openKey));
           expect(
             find.byKey(const Key('phone-detail-pending-action')),
@@ -289,7 +289,7 @@ void main() {
             find.byKey(const Key('mobile-detail-play')),
           );
           await capture.save('detail-from-home-loading');
-          adapter.catalogGate = null;
+          adapter.detailGate = null;
           loading.complete();
           await capture.advance(800);
           final loadedAction = tester.getRect(

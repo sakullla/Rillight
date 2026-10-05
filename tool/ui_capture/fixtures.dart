@@ -180,6 +180,7 @@ FakeEmbyServer captureServer() {
 class CaptureAdapter extends FakeEmbyAdapter {
   CaptureAdapter(super.servers);
   Completer<void>? catalogGate;
+  Completer<void>? detailGate;
   bool failAggregationMirror = false;
   final artwork = <String, Uint8List>{};
 
@@ -225,6 +226,14 @@ class CaptureAdapter extends FakeEmbyAdapter {
     }
     if (options.method == 'GET' && catalogGate != null) {
       await catalogGate!.future;
+    }
+    // Source authorization must finish before the detail loading tree mounts.
+    // Hold only the richer detail request, not its ancestry/permit checks.
+    if (options.method == 'GET' &&
+        detailGate != null &&
+        options.uri.queryParameters['Fields']?.split(',').contains('People') ==
+            true) {
+      await detailGate!.future;
     }
     final response = await super.fetch(options, requestStream, cancelFuture);
     if (options.method == 'GET' &&
