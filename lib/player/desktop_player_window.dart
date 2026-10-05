@@ -228,7 +228,12 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
   bool _saveSwitchPreference = false;
 
   /// 播放器进程请求主窗口打开条目详情(如播放结束"查看剧集")。
-  void Function(String itemId, {String? seasonId})? onOpenItemRoute;
+  void Function(
+    String itemId, {
+    String? seasonId,
+    PlayerHostOpenItemCommand? command,
+  })?
+  onOpenItemRoute;
 
   /// 等待播放进程响应会话 close 消息并自行退出的上限。
   final Duration closeTimeout;
@@ -552,7 +557,23 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
         (_pid != 0 && _pid != pid)) {
       return;
     }
-    onOpenItemRoute?.call(command.itemId, seasonId: command.seasonId);
+    final actual = _origin;
+    if (actual != null) {
+      if (!actual.permit.isValid ||
+          command.source?.account != actual.source.account ||
+          command.libraryId != actual.libraryId ||
+          command.regionGeneration != actual.permit.regionGeneration ||
+          command.itemId != actual.work.itemId) {
+        return;
+      }
+    } else if (command.source != null) {
+      return;
+    }
+    onOpenItemRoute?.call(
+      command.itemId,
+      seasonId: command.seasonId,
+      command: command,
+    );
   }
 
   /// 播放进程已终止:快照仍在时用主进程会话代发 Stopped。
@@ -1365,7 +1386,11 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
     });
   }
 
-  Future<void> _openItemInHost(String itemId, {String? seasonId}) async {
+  Future<void> _openItemInHost(
+    String itemId, {
+    String? seasonId,
+    PlayerHostOpenItemCommand? command,
+  }) async {
     try {
       final protocol = _launch.protocol;
       if (protocol != null) {
@@ -1373,6 +1398,7 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
           itemId,
           protocol: protocol,
           seasonId: seasonId,
+          command: command,
         );
       }
     } catch (_) {}
@@ -1472,8 +1498,10 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
             // 播放结束"查看剧集":写临时文件请主窗口打开详情,再关播放器。
             // 独立 CreateProcess 没有可用的 WindowMethodChannel,等待它
             // 只会误判成功或卡住;绝不能把剧集 id 当片源重开。
-            onOpenItemDetail: (itemId, {seasonId}) {
-              unawaited(_openItemInHost(itemId, seasonId: seasonId));
+            onOpenItemDetail: (itemId, {seasonId, command}) {
+              unawaited(
+                _openItemInHost(itemId, seasonId: seasonId, command: command),
+              );
             },
           ),
         ),

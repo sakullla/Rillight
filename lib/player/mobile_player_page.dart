@@ -472,6 +472,10 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
   Future<void> _close({String? viewSeriesId, String? seasonId}) async {
     if (_closing) return;
     _closing = true;
+    final command = controller?.endedSeriesCommand;
+    final lease = controller?.origin?.permit;
+    final sourceBound =
+        controller?.origin != null || widget.sourceRequest?.source != null;
     final router = viewSeriesId == null ? null : GoRouter.maybeOf(context);
     await _configurePhone(false);
     if (!mounted) return;
@@ -497,8 +501,13 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
     // its overlays first, then pop the route whose session we actually closed.
     navigator.popUntil((candidate) => identical(candidate, route));
     navigator.pop();
-    if (router != null && viewSeriesId != null) {
-      router.push(AppRoutes.item(viewSeriesId, seasonId: seasonId));
+    if (router != null &&
+        viewSeriesId != null &&
+        (!sourceBound || (command != null && lease?.isValid == true))) {
+      router.push(
+        AppRoutes.item(viewSeriesId, seasonId: seasonId),
+        extra: command,
+      );
     }
   }
 

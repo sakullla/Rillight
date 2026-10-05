@@ -1,6 +1,7 @@
 import '../helpers/image_cache_fixture.dart';
 import '../helpers/settle.dart';
 import 'dart:async';
+import 'package:rillight/player/player_host_command.dart';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -135,7 +136,12 @@ void main() {
   Future<PlayerController> startStandaloneController({
     VoidCallback? onClose,
     ValueChanged<String>? onOpenItem,
-    void Function(String itemId, {String? seasonId})? onOpenItemDetail,
+    void Function(
+      String itemId, {
+      String? seasonId,
+      PlayerHostOpenItemCommand? command,
+    })?
+    onOpenItemDetail,
     Duration progressInterval = const Duration(seconds: 10),
     Duration stoppedTimeout = PlayerController.stoppedDeadline,
     Duration disposeTimeout = PlayerController.stoppedDeadline,
@@ -481,7 +487,7 @@ void main() {
       final controller = await startStandaloneController(
         itemId: 'episode-friends-s1e2',
         onOpenItem: (id) => openId = id,
-        onOpenItemDetail: (id, {seasonId}) {
+        onOpenItemDetail: (id, {seasonId, command}) {
           detailId = id;
           detailSeasonId = seasonId;
         },

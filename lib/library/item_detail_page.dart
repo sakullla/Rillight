@@ -16,9 +16,9 @@ import 'package:rillight/app/widgets/media_source_menu_tile.dart';
 import 'package:rillight/app/widgets/scrim_icon_button.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/app/window_chrome.dart';
-import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/emby/catalog_cache.dart';
 import 'package:rillight/emby/emby_client.dart';
+import 'package:rillight/library/detail_source_scope.dart';
 import 'package:rillight/emby/emby_errors.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_failure.dart';
@@ -299,7 +299,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
       });
     }
     final requestedId = _itemId;
-    final client = AuthScope.of(context).client;
+    final client = DetailSourceScope.clientOf(context);
     final repository = _repository(client);
     // Start the network before disk lookup. A late cache read may never replace
     // a live response or a newer navigation.
@@ -538,7 +538,9 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
 
   /// 目录缓存:无 CatalogScope 时用无会话实例降级直连。
   CatalogCache get _cache =>
-      _scopeCache ??= CatalogScope.maybeOf(context)?.cache ?? CatalogCache();
+      _scopeCache ??= DetailSourceScope.maybeOf(context) != null
+      ? DetailSourceScope.cacheOf(context)
+      : CatalogScope.maybeOf(context)?.cache ?? CatalogCache();
 
   DetailRepository? _detailRepository;
 
@@ -671,7 +673,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     });
     try {
       final page = await _queryEpisodes(
-        AuthScope.of(context).client,
+        DetailSourceScope.clientOf(context),
         seasonId,
         startIndex,
       );
@@ -717,7 +719,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     var total = _episodeTotal;
     if (total <= 0) {
       try {
-        final page = await AuthScope.of(context).client.queryItems(
+        final page = await DetailSourceScope.clientOf(context).queryItems(
           parentId: seasonId,
           includeItemTypes: 'Episode',
           sortBy: 'IndexNumber',
@@ -739,7 +741,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
         total: total,
         current: currentNumber,
         seasonId: seasonId,
-        client: AuthScope.of(context).client,
+        client: DetailSourceScope.clientOf(context),
       ),
     );
     if (!mounted || selected == null) {
@@ -776,7 +778,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     });
     try {
       final window = await _loadEpisodeWindow(
-        AuthScope.of(context).client,
+        DetailSourceScope.clientOf(context),
         seasonId: seasonId,
         aroundNumber: number,
       );
@@ -840,7 +842,10 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
       _revealEpisode(id);
       return;
     }
-    context.push(AppRoutes.item(id));
+    context.push(
+      AppRoutes.item(id),
+      extra: DetailSourceScope.command(context, id),
+    );
   }
 
   void _openOrRevealEpisode(String id) {
@@ -869,7 +874,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     });
     unawaited(
       _showCachedEpisodes(
-        _repository(AuthScope.of(context).client),
+        _repository(DetailSourceScope.clientOf(context)),
         seasonId,
         gen,
         serial,
@@ -877,7 +882,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     );
     try {
       final window = await _loadEpisodeWindow(
-        AuthScope.of(context).client,
+        DetailSourceScope.clientOf(context),
         seasonId: seasonId,
       );
       if (!mounted ||
@@ -913,6 +918,11 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
       await PlayerWindowScope.of(context).open(
         PlayerOpenRequest(
           itemId: itemId,
+          source: DetailSourceScope.command(context, itemId)?.source,
+          libraryId: DetailSourceScope.maybeOf(context)?.libraryId,
+          regionGeneration: DetailSourceScope.maybeOf(
+            context,
+          )?.permit.regionGeneration,
           autoResume: !fromBeginning && startTimeTicks == null,
           mediaSourceId: _item?.id == itemId && _pickedMediaSource
               ? _mediaSourceId
@@ -976,7 +986,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
       }
       _patchPlayed(target.id, _optimisticPlayed(previous, played: played));
     });
-    final client = AuthScope.of(context).client;
+    final client = DetailSourceScope.clientOf(context);
     try {
       if (played) {
         await client.markPlayed(target.id);
@@ -1057,7 +1067,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
   /// 详情 /Items/{id} 有时不带 ticks,继续观看列表却有百分比。
   /// 首页已拉过 Resume 时,把那份 UserData 补到当前条目。
   EmbyItem _withCatalogResume(EmbyItem item) {
-    if (item.canResume) {
+    if (item.canResume || DetailSourceScope.maybeOf(context) != null) {
       return item;
     }
     final rows = CatalogScope.maybeOf(context)?.resume.items ?? const [];
@@ -1333,7 +1343,9 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                             focusItemId: item.id,
                             scrollPageOnFocus: false,
                             onTap: (episode) => _showItem(episode.id),
-                            onMore: _seasonId == null
+                            onMore:
+                                _seasonId == null ||
+                                    DetailSourceScope.maybeOf(context) != null
                                 ? null
                                 : () => context.push(
                                     AppRoutes.shelfItems(
@@ -1426,7 +1438,9 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                             );
                           },
                           busyPlayedIds: _busyPlayedIds,
-                          onMore: _seasonId == null
+                          onMore:
+                              _seasonId == null ||
+                                  DetailSourceScope.maybeOf(context) != null
                               ? null
                               : () => context.push(
                                   AppRoutes.shelfItems(
@@ -1470,14 +1484,21 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                           items: _similar,
                           error: _similarError,
                           onRetry: _load,
-                          onTap: (similar) =>
-                              context.push(AppRoutes.item(similar.id)),
-                          onMore: () => context.push(
-                            AppRoutes.shelfSimilar(
-                              item.id,
-                              title: l10n.similarRow,
+                          onTap: (similar) => context.push(
+                            AppRoutes.item(similar.id),
+                            extra: DetailSourceScope.command(
+                              context,
+                              similar.id,
                             ),
                           ),
+                          onMore: DetailSourceScope.maybeOf(context) != null
+                              ? null
+                              : () => context.push(
+                                  AppRoutes.shelfSimilar(
+                                    item.id,
+                                    title: l10n.similarRow,
+                                  ),
+                                ),
                         ),
                     ],
                   ),
@@ -2149,8 +2170,14 @@ class _SeriesLink extends StatelessWidget {
       message: AppLocalizations.of(context).viewSeries,
       child: TextButton.icon(
         key: CatalogKeys.seriesLink,
-        onPressed: () =>
-            context.push(AppRoutes.item(seriesId!, seasonId: seasonId)),
+        onPressed: () => context.push(
+          AppRoutes.item(seriesId!, seasonId: seasonId),
+          extra: DetailSourceScope.command(
+            context,
+            seriesId!,
+            seasonId: seasonId,
+          ),
+        ),
         style: TextButton.styleFrom(
           foregroundColor: theme.colorScheme.onSurface.withValues(alpha: 0.9),
           padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 2),

@@ -20,8 +20,21 @@ import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/app/widgets/scroll_viewport.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
+import 'package:rillight/library/detail_source_scope.dart';
+import 'package:rillight/player/playback_runtime.dart';
+
 import 'package:rillight/emby/emby_errors.dart';
 import 'package:rillight/emby/emby_models.dart';
+
+String _detailImageScope(PlaybackOrigin origin) => jsonEncode([
+  origin.source.account.region.name,
+  origin.source.account.configuredServerId,
+  origin.source.account.verifiedServerId,
+  origin.source.account.userId,
+  origin.libraryId,
+  origin.permit.regionGeneration,
+  origin.client.baseUrl.toString(),
+]);
 
 /// Flutter [ImageCache] 解码图条目上限。与 [MediaImageCache] 的 JPEG 字节层
 /// 分开计数,两边都按低配内存留余量,避免空闲时各吃 256 MiB。
@@ -335,8 +348,13 @@ class _MediaImageState extends State<MediaImage> {
   }
 
   /// Protected artwork is scoped to both the server and authenticated user.
-  String? get _accountScope =>
-      mediaImageAccountScope(AuthScope.maybeOf(context));
+  String? get _accountScope {
+    final origin = DetailSourceScope.maybeOf(context);
+    if (origin != null) {
+      return origin.permit.isValid ? _detailImageScope(origin) : null;
+    }
+    return mediaImageAccountScope(AuthScope.maybeOf(context));
+  }
 
   @override
   void didChangeDependencies() {
@@ -703,15 +721,16 @@ class _MediaImageState extends State<MediaImage> {
 
   Future<_LoadedImage?> _loadOnce(bool Function() current) async {
     final auth = AuthScope.of(context);
-    final client = auth.client;
+    final origin = DetailSourceScope.maybeOf(context);
+    final client = DetailSourceScope.clientOf(context);
     final serverId = _accountScope;
+    bool sourceValid() => origin != null
+        ? origin.permit.isValid
+        : mediaImageAccountScope(auth) == serverId;
     if (serverId == null) return null;
     // This callback can be inspected while another image is unmounting. Do
     // not look up inherited widgets on a deactivated element.
-    bool valid() =>
-        current() &&
-        _lastAccountScope == serverId &&
-        mediaImageAccountScope(auth) == serverId;
+    bool valid() => current() && _lastAccountScope == serverId && sourceValid();
     final maxWidth = _requestMaxWidth;
     for (final candidate in _candidates) {
       if (!valid()) return null;
@@ -735,7 +754,7 @@ class _MediaImageState extends State<MediaImage> {
               maxWidth: maxWidth,
               cancelToken: token,
             );
-            if (mediaImageAccountScope(auth) != serverId || data.isEmpty) {
+            if (!sourceValid() || data.isEmpty) {
               return null;
             }
             return Uint8List.fromList(data);
@@ -965,8 +984,15 @@ Future<Uint8List?> loadChapterImage(
     return Future<Uint8List?>.value();
   }
   final auth = AuthScope.of(context);
-  final scope = mediaImageAccountScope(auth);
-  if (scope == null) return null;
+  final origin = DetailSourceScope.maybeOf(context);
+  final client = DetailSourceScope.clientOf(context);
+  final scope = origin == null
+      ? mediaImageAccountScope(auth)
+      : _detailImageScope(origin);
+  bool valid() => origin != null
+      ? origin.permit.isValid
+      : mediaImageAccountScope(auth) == scope;
+  if (scope == null || !valid()) return null;
   final bytes = await MediaImageCache.instance.load(
     serverId: scope,
     itemId: itemId,
@@ -974,19 +1000,19 @@ Future<Uint8List?> loadChapterImage(
     variant: '$index',
     tag: tag,
     maxWidth: maxWidth,
-    isCurrent: () => mediaImageAccountScope(auth) == scope,
+    isCurrent: valid,
     fetch: () async {
-      if (mediaImageAccountScope(auth) != scope) {
+      if (!valid()) {
         return null;
       }
       try {
-        final data = await auth.client.getChapterImage(
+        final data = await client.getChapterImage(
           itemId,
           index: index,
           tag: tag,
           maxWidth: maxWidth,
         );
-        if (mediaImageAccountScope(auth) != scope || data.isEmpty) {
+        if (!valid() || data.isEmpty) {
           return null;
         }
         return Uint8List.fromList(data);
@@ -996,7 +1022,7 @@ Future<Uint8List?> loadChapterImage(
       }
     },
   );
-  return mediaImageAccountScope(auth) == scope ? bytes : null;
+  return valid() ? bytes : null;
 }
 
 class _PosterLoadTurn {

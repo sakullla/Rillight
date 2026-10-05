@@ -1,5 +1,14 @@
 import 'dart:async';
+import 'package:rillight/player/player_host_command.dart';
+import 'package:rillight/app/app.dart';
+import 'package:go_router/go_router.dart';
+import 'package:rillight/player/phone_orientation.dart';
+import 'package:rillight/app/presentation_environment.dart';
+import 'package:rillight/player/mobile_player_page.dart';
+import 'package:rillight/player/tv_player_page.dart';
+import 'package:rillight/player/playback_ended_panel.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_page.dart';
 import 'package:rillight/player/player_process_protocol.dart';
@@ -139,6 +148,15 @@ class _Backend extends FakeVideoBackend {
   bool failNextOpen = false;
   Completer<void>? openGate;
   Completer<void>? openEntered;
+  Completer<void>? stopGate;
+  bool stopEntered = false;
+  @override
+  Future<void> stop() async {
+    stopEntered = true;
+    await stopGate?.future;
+    await super.stop();
+  }
+
   @override
   Future<void> open(VideoOpenRequest request) async {
     if (failNextOpen) {
@@ -183,6 +201,14 @@ class _IpcControl extends FakePlayerProcessControl
   Map<String, dynamic>? receipt;
   Map<String, dynamic>? switchReply;
   bool revoked = false;
+  PlayerHostOpenItemCommand? openDetail;
+  @override
+  Future<PlayerHostOpenItemCommand?> consumeOpenItem(int pid) async {
+    final value = openDetail;
+    openDetail = null;
+    return value;
+  }
+
   Map<String, dynamic>? reportOutcome;
   @override
   Future<Map<String, dynamic>?> consumeReportOutcome(int pid) async {
@@ -248,6 +274,7 @@ void main() {
     bool private = false,
     String itemId = 'movie',
     _Backend? videoBackend,
+    WidgetTester? widgetTester,
   }) async {
     reports = [];
     final access = RegionAccessController();
@@ -257,6 +284,7 @@ void main() {
     }
     final store = MemoryServerListStore(
       ServerListSnapshot(
+        lastServerId: 'a',
         servers: [
           SavedServer(
             id: 'a',
@@ -333,12 +361,19 @@ void main() {
         source: SourceReference(account: account, itemId: itemId),
       ),
     );
-    addTearDown(() async {
+    Future<void> cleanup() async {
+      if (widgetTester != null) {
+        controller.dispose();
+        auth.dispose();
+        return;
+      }
       await controller.disposeAsync();
       controller.dispose();
       await runtime.history.close();
       auth.dispose();
-    });
+    }
+
+    addTearDown(cleanup);
   }
 
   test(
@@ -985,6 +1020,215 @@ void main() {
     await host.open(controller.openRequest!);
     return host;
   }
+
+  for (final environment in [
+    PresentationEnvironment.phone,
+    PresentationEnvironment.tv,
+  ]) {
+    testWidgets(
+      '${environment.presentation.name} close revocation drops actual B series navigation',
+      (tester) async {
+        final messenger =
+            TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+        messenger.setMockMethodCallHandler(
+          const MethodChannel('rillight/android_core'),
+          (_) async => null,
+        );
+        addTearDown(
+          () => messenger.setMockMethodCallHandler(
+            const MethodChannel('rillight/android_core'),
+            null,
+          ),
+        );
+        await setup(itemId: 'episode1', widgetTester: tester);
+        backend = _Backend();
+        addTearDown(() {
+          if (backend.stopGate?.isCompleted == false) {
+            backend.stopGate!.complete();
+          }
+        });
+        await auth.restore();
+        final b = (await runtime.registry.authenticate('b')).account;
+        final request = PlayerOpenRequest(
+          itemId: 'episode1',
+          source: SourceReference(account: b, itemId: 'episode1'),
+          libraryId: 'library',
+        );
+        final router = GoRouter(
+          routes: [
+            GoRoute(path: '/', builder: (_, _) => const Text('root')),
+            GoRoute(
+              path: '/play/:id',
+              builder: (_, _) => environment.isTv
+                  ? TvPlayerPage(itemId: request.itemId, sourceRequest: request)
+                  : MobilePlayerPage(
+                      itemId: request.itemId,
+                      sourceRequest: request,
+                      orientation: PhoneOrientation(request: (_) async {}),
+                      systemBars: PhoneSystemBars(request: (_) async {}),
+                      wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
+                    ),
+            ),
+            GoRoute(
+              path: '/item/:id',
+              builder: (_, _) => const Text('unexpected detail'),
+            ),
+          ],
+        );
+        await tester.pumpWidget(
+          RillightApp(
+            auth: auth,
+            router: router,
+            environment: environment,
+            playerBindings: PlayerBindings(
+              runtime: runtime,
+              createBackend: () => backend,
+              settingsStore: MemoryPlayerSettingsStore(),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        router.push('/play/episode1', extra: request);
+        for (var i = 0; i < 20; i++) {
+          await tester.pump(const Duration(milliseconds: 50));
+        }
+        final c = environment.isTv
+            ? tester
+                  .state<TvPlayerPageState>(find.byType(TvPlayerPage))
+                  .controller!
+            : tester
+                  .state<MobilePlayerPageState>(find.byType(MobilePlayerPage))
+                  .controller!;
+        expect(c.origin!.source.account, b);
+        expect(auth.session!.server.id, 'a');
+        c.playbackEnded = true;
+        c.onUserActivity();
+        await tester.pump();
+        final panel = tester.widget<PlaybackEndedPanel>(
+          find.byType(PlaybackEndedPanel),
+        );
+        backend.stopGate = Completer<void>();
+        backend.stopEntered = false;
+        panel.onViewSeries!();
+        for (var i = 0; i < 40 && !backend.stopEntered; i++) {
+          await tester.pump(const Duration(milliseconds: 50));
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 10)),
+          );
+        }
+        expect(backend.stopEntered, isTrue);
+        await runtime.registry.configureScope(
+          'b',
+          participates: false,
+          libraryIds: {},
+        );
+        backend.stopGate!.complete();
+        for (var i = 0; i < 30; i++) {
+          await tester.pump(const Duration(milliseconds: 50));
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 10)),
+          );
+        }
+        expect(find.text('unexpected detail'), findsNothing);
+        expect(find.byType(MobilePlayerPage), findsNothing);
+        expect(find.byType(TvPlayerPage), findsNothing);
+        for (var i = 0; i < 5; i++) {
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 50)),
+          );
+          await tester.pump();
+        }
+        var cleaned = false;
+        final cleanup = controller
+            .disposeAsync()
+            .then((_) => runtime.history.close())
+            .then((_) {
+              cleaned = true;
+            });
+        for (var i = 0; i < 40 && !cleaned; i++) {
+          await tester.pump(const Duration(milliseconds: 50));
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 10)),
+          );
+        }
+        expect(cleaned, isTrue);
+        await cleanup;
+        await tester.pumpWidget(const SizedBox.shrink());
+        router.dispose();
+      },
+      tags: ['integration'],
+    );
+  }
+
+  for (final sameId in [true, false]) {
+    test(
+      'actual B ended-series command and desktop consumer retain source (same ID=$sameId)',
+      () async {
+        await setup(itemId: 'episode1');
+        final b = (await runtime.registry.authenticate('b')).account;
+        final request = PlayerOpenRequest(
+          itemId: sameId ? 'episode1' : 'episode-b',
+          source: SourceReference(
+            account: b,
+            itemId: sameId ? 'episode1' : 'episode-b',
+          ),
+          libraryId: 'library',
+        );
+        await controller.disposeAsync();
+        controller.dispose();
+        controller = PlayerController(
+          client: auth.client,
+          itemId: request.itemId,
+          backend: _Backend(),
+          window: PlayerWindow(),
+          runtime: runtime,
+          openRequest: request,
+          settingsStore: MemoryPlayerSettingsStore(),
+        );
+        await controller.start();
+        final command = controller.endedSeriesCommand!;
+        expect(command.source!.account, b);
+        expect(command.itemId, 'series');
+        expect(command.libraryId, 'library');
+        final ipc = _IpcControl();
+        final host = await desktop(ipc);
+        PlayerHostOpenItemCommand? routed;
+        host.onOpenItemRoute = (_, {seasonId, command}) => routed = command;
+        ipc.openDetail = command;
+        ipc.exit(ipc.lastPid);
+        await _eventually(() => routed != null);
+        expect(routed!.source!.account, b);
+        expect(routed!.regionGeneration, command.regionGeneration);
+      },
+    );
+  }
+
+  test(
+    'desktop close rechecks revoked lease before delivering a queued detail command',
+    () async {
+      await setup(itemId: 'episode1');
+      await controller.start();
+      final ipc = _IpcControl();
+      final host = await desktop(ipc);
+      var routed = false;
+      host.onOpenItemRoute = (_, {seasonId, command}) => routed = true;
+      ipc.openDetail = controller.endedSeriesCommand;
+      ipc.requestCloseHold = Completer<void>();
+      final closing = host.close();
+      await _eventually(
+        () => ipc.calls.any((c) => c.startsWith('requestClose:')),
+      );
+      await runtime.registry.configureScope(
+        'a',
+        participates: false,
+        libraryIds: {},
+      );
+      ipc.requestCloseHold!.complete();
+      await closing;
+      expect(routed, isFalse);
+      expect(controller.endedSeriesCommand, isNull);
+    },
+  );
 
   Map<String, dynamic> event(
     _IpcControl ipc,

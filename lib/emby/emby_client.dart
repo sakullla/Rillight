@@ -119,6 +119,45 @@ class EmbyClient {
 
   final EmbyDeviceInfo device;
   final Dio _dio;
+
+  /// Independent request/receipt gate for a consumer's frozen source lease.
+  /// Shares the transport, not mutable session credentials or interceptors.
+  EmbyClient withRequestGuard(void Function() guard) {
+    final dio = Dio(_dio.options.copyWith());
+    dio.httpClientAdapter = _dio.httpClientAdapter;
+    dio.interceptors.add(
+      InterceptorsWrapper(
+        onRequest: (options, handler) {
+          try {
+            guard();
+            handler.next(options);
+          } catch (error) {
+            handler.reject(DioException(requestOptions: options, error: error));
+          }
+        },
+        onResponse: (response, handler) {
+          try {
+            guard();
+            handler.next(response);
+          } catch (error) {
+            handler.reject(
+              DioException(
+                requestOptions: response.requestOptions,
+                error: error,
+              ),
+            );
+          }
+        },
+      ),
+    );
+    return EmbyClient(device: device, dio: dio)..attachSession(
+      baseUrl: baseUrl!,
+      accessToken: accessToken!,
+      userId: userId!,
+      userAgent: userAgent,
+    );
+  }
+
   void Function()? onSessionExpired;
   Future<bool> Function()? onRefreshSession;
   Future<bool>? _refreshing;

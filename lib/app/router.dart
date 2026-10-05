@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:rillight/library/detail_source_scope.dart';
+import 'package:rillight/player/player_host_command.dart';
 import 'package:rillight/app/theme.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/app_shell.dart';
@@ -138,11 +140,15 @@ GoRouter createAppRouter({
               pageBuilder: (context, state) => PhoneMotion.detailPage(
                 context: context,
                 state: state,
-                child: MobileDetailPage(
-                  key: ValueKey(state.uri.toString()),
-                  itemId: state.pathParameters['itemId']!,
-                  initialSeasonId: state.uri.queryParameters['season'],
-                  initialEpisodeId: state.uri.queryParameters['episode'],
+                child: _sourceDetail(
+                  auth,
+                  state,
+                  MobileDetailPage(
+                    key: ValueKey(state.uri.toString()),
+                    itemId: state.pathParameters['itemId']!,
+                    initialSeasonId: state.uri.queryParameters['season'],
+                    initialEpisodeId: state.uri.queryParameters['episode'],
+                  ),
                 ),
               ),
             ),
@@ -200,10 +206,14 @@ GoRouter createAppRouter({
             ),
             GoRoute(
               path: '/item/:itemId',
-              builder: (context, state) => TvDetailPage(
-                key: ValueKey(state.uri.toString()),
-                itemId: state.pathParameters['itemId']!,
-                initialSeasonId: state.uri.queryParameters['season'],
+              builder: (context, state) => _sourceDetail(
+                auth,
+                state,
+                TvDetailPage(
+                  key: ValueKey(state.uri.toString()),
+                  itemId: state.pathParameters['itemId']!,
+                  initialSeasonId: state.uri.queryParameters['season'],
+                ),
               ),
             ),
             GoRoute(
@@ -260,9 +270,13 @@ GoRouter createAppRouter({
               path: '/item/:itemId',
               pageBuilder: (context, state) => _desktopPage(
                 state,
-                ItemDetailPage(
-                  itemId: state.pathParameters['itemId'] ?? '',
-                  initialSeasonId: state.uri.queryParameters['season'],
+                _sourceDetail(
+                  auth,
+                  state,
+                  ItemDetailPage(
+                    itemId: state.pathParameters['itemId'] ?? '',
+                    initialSeasonId: state.uri.queryParameters['season'],
+                  ),
                 ),
               ),
             ),
@@ -283,6 +297,23 @@ GoRouter createAppRouter({
           ],
         ),
     ],
+  );
+}
+
+Widget _sourceDetail(AuthController auth, GoRouterState state, Widget child) {
+  final command = state.extra is PlayerHostOpenItemCommand
+      ? state.extra as PlayerHostOpenItemCommand
+      : null;
+  return SourceDetailGate(
+    key: ValueKey((
+      state.uri.toString(),
+      command?.source,
+      command?.regionGeneration,
+    )),
+    auth: auth,
+    itemId: state.pathParameters['itemId']!,
+    command: command,
+    child: child,
   );
 }
 

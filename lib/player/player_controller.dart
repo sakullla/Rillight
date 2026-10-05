@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:rillight/player/player_host_command.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
@@ -223,7 +224,12 @@ class PlayerController extends ChangeNotifier {
 
   /// 进程内不可播放的条目(如剧集)改为通知主窗口打开详情页;
   /// 独立播放进程在 [onOpenItem] 之外提供该回调。
-  final void Function(String itemId, {String? seasonId})? onOpenItemDetail;
+  final void Function(
+    String itemId, {
+    String? seasonId,
+    PlayerHostOpenItemCommand? command,
+  })?
+  onOpenItemDetail;
   PlayerSettingsStore? settingsStore;
 
   final NextPrefixFetch? nextPrefixFetch;
@@ -1109,13 +1115,43 @@ class PlayerController extends ChangeNotifier {
     );
   }
 
+  PlayerHostOpenItemCommand? get endedSeriesCommand {
+    final id = item?.seriesId;
+    if (id == null || id.isEmpty || permissionRevoked) return null;
+    final actual = origin;
+    if (actual != null) {
+      if (!actual.permit.isValid) return null;
+      return PlayerHostOpenItemCommand(
+        itemId: id,
+        seasonId: item?.seasonId,
+        source: SourceReference(account: actual.source.account, itemId: id),
+        libraryId: actual.libraryId,
+        regionGeneration: actual.permit.regionGeneration,
+      );
+    }
+    final request = openRequest;
+    if (request?.source == null) return null;
+    return PlayerHostOpenItemCommand(
+      itemId: id,
+      seasonId: item?.seasonId,
+      source: SourceReference(account: request!.source!.account, itemId: id),
+      libraryId: request.libraryId,
+      regionGeneration: request.regionGeneration,
+    );
+  }
+
   void openEndedSeries() {
     final seriesId = item?.seriesId;
     if (seriesId != null && seriesId.isNotEmpty) {
       // 剧集不是片源:只请主窗口打开详情,绝不走 onOpenItem(_applyLaunch)。
       final openDetail = onOpenItemDetail;
       if (openDetail != null) {
-        openDetail(seriesId, seasonId: item?.seasonId);
+        final command = endedSeriesCommand;
+        if ((origin != null || openRequest?.source != null) &&
+            command == null) {
+          return;
+        }
+        openDetail(seriesId, seasonId: item?.seasonId, command: command);
         return;
       }
     }

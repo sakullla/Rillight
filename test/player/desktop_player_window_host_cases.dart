@@ -154,7 +154,7 @@ void main() {
           auth.dispose();
         });
         String? routed;
-        host.onOpenItemRoute = (id, {seasonId}) => routed = id;
+        host.onOpenItemRoute = (id, {seasonId, command}) => routed = id;
         await host.open(const PlayerOpenRequest(itemId: 'movie-up'));
         for (var i = 0; i < 50 && !consumed; i++) {
           await Future<void>.delayed(const Duration(milliseconds: 2));
@@ -338,7 +338,7 @@ void main() {
 
       String? opened;
       String? openedSeason;
-      host.onOpenItemRoute = (itemId, {seasonId}) {
+      host.onOpenItemRoute = (itemId, {seasonId, command}) {
         opened = itemId;
         openedSeason = seasonId;
       };

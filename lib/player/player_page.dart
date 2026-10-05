@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:rillight/player/player_host_command.dart';
 import 'package:flutter/foundation.dart';
 
 import 'package:flutter/gestures.dart';
@@ -105,7 +106,12 @@ class PlayerPage extends StatefulWidget {
   final PlayerOpenRequest? sourceRequest;
   final VoidCallback? onClosed;
   final ValueChanged<String>? onOpenItem;
-  final void Function(String itemId, {String? seasonId})? onOpenItemDetail;
+  final void Function(
+    String itemId, {
+    String? seasonId,
+    PlayerHostOpenItemCommand? command,
+  })?
+  onOpenItemDetail;
 
   @override
   State<PlayerPage> createState() => PlayerPageState();

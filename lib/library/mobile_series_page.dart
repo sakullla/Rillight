@@ -353,7 +353,7 @@ class MobileSeriesPage extends StatelessWidget {
   final VoidCallback? onRetryEpisodes;
   final VoidCallback? onLoadMore;
   final ValueChanged<String> onOpenItem;
-  final VoidCallback onOpenSimilar;
+  final VoidCallback? onOpenSimilar;
 
   @override
   Widget build(BuildContext context) {
@@ -885,7 +885,7 @@ class _SimilarRow extends StatelessWidget {
 
   final List<EmbyItem> items;
   final ValueChanged<String> onOpenItem;
-  final VoidCallback onOpenSimilar;
+  final VoidCallback? onOpenSimilar;
 
   @override
   Widget build(BuildContext context) {

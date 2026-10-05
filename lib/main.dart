@@ -39,8 +39,11 @@ Future<void> main(List<String> args) async {
   await appearance.ready;
   // 播放器进程请求打开条目详情(播放结束"查看剧集"):
   // 主窗口路由到详情页并前置主窗口。
-  playerHost.onOpenItemRoute = (itemId, {seasonId}) {
-    router.push(AppRoutes.item(itemId, seasonId: seasonId));
+  playerHost.onOpenItemRoute = (itemId, {seasonId, command}) {
+    router.push(
+      AppRoutes.item(itemId, seasonId: seasonId),
+      extra: command?.source == null ? null : command,
+    );
     unawaited(windowManager.focus());
   };
   runApp(

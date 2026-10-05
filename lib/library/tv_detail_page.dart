@@ -9,6 +9,7 @@ import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/auth/auth_scope.dart';
+import 'package:rillight/library/detail_source_scope.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/home/catalog_keys.dart';
@@ -51,7 +52,8 @@ class _TvDetailPageState extends State<TvDetailPage> {
     super.didChangeDependencies();
     _controller ??= DetailController(
       auth: AuthScope.of(context),
-      cache: CatalogScope.of(context).cache,
+      client: DetailSourceScope.maybeOf(context)?.client,
+      cache: DetailSourceScope.cacheOf(context),
       itemId: widget.itemId,
       seasonId: widget.initialSeasonId,
     )..load();
@@ -88,6 +90,11 @@ class _TvDetailPageState extends State<TvDetailPage> {
         '/play/${target.id}',
         extra: PlayerOpenRequest(
           itemId: target.id,
+          source: DetailSourceScope.command(context, target.id)?.source,
+          libraryId: DetailSourceScope.maybeOf(context)?.libraryId,
+          regionGeneration: DetailSourceScope.maybeOf(
+            context,
+          )?.permit.regionGeneration,
           mediaSourceId: c.item?.isSeries == true ? null : c.mediaSourceId,
           autoResume: !fromStart,
         ),
@@ -382,6 +389,7 @@ class _TvBackdropHeader extends StatelessWidget {
                         item.seriesId!,
                         seasonId: item.seasonId ?? item.parentId,
                       ),
+                      extra: DetailSourceScope.command(context, item.seriesId!),
                     ),
                     child: Text(
                       '${item.seriesName ?? l.seasons}  ›',
@@ -465,7 +473,10 @@ class _TvEpisodeTile extends StatelessWidget {
       key: ValueKey(episode.id),
       focusNode: focusNode,
       selected: current,
-      onPressed: () => context.push(AppRoutes.item(episode.id)),
+      onPressed: () => context.push(
+        AppRoutes.item(episode.id),
+        extra: DetailSourceScope.command(context, episode.id),
+      ),
       child: Row(
         children: [
           SizedBox(

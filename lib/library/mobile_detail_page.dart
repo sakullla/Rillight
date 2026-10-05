@@ -14,6 +14,7 @@ import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/auth/auth_scope.dart';
+import 'package:rillight/library/detail_source_scope.dart';
 import 'package:rillight/auth/failure_message.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/emby/emby_errors.dart';
@@ -77,7 +78,8 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
     if (_controller != null) return;
     _controller = DetailController(
       auth: AuthScope.of(context),
-      cache: CatalogScope.of(context).cache,
+      client: DetailSourceScope.maybeOf(context)?.client,
+      cache: DetailSourceScope.cacheOf(context),
       itemId: widget.itemId,
       seasonId: widget.initialSeasonId,
       initialEpisodeId: widget.initialEpisodeId,
@@ -137,18 +139,15 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
     final item = controller?.item;
     if (item == null || !mounted) return;
     final revision = ++_extrasRevision;
-    final auth = AuthScope.of(context);
-    final identity = (
-      auth.session?.server.id,
-      auth.client.baseUrl,
-      auth.client.userId,
-    );
+    final client = DetailSourceScope.clientOf(context);
+    final lease = DetailSourceScope.maybeOf(context)?.permit;
+    final identity = (client.baseUrl, client.userId);
     bool owns() =>
         mounted &&
         revision == _extrasRevision &&
         _controller?.item?.id == item.id &&
-        identity ==
-            (auth.session?.server.id, auth.client.baseUrl, auth.client.userId);
+        (lease == null || lease.isValid) &&
+        identity == (client.baseUrl, client.userId);
     setState(() {
       _similarError = null;
       _similar = const [];
@@ -181,8 +180,8 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
     }
     if (item.isEpisode) {
       final neighbors = await Future.wait<EmbyItem?>([
-        auth.client.getNextEpisode(item).catchError((Object _) => null),
-        auth.client.getPreviousEpisode(item).catchError((Object _) => null),
+        client.getNextEpisode(item).catchError((Object _) => null),
+        client.getPreviousEpisode(item).catchError((Object _) => null),
       ]);
       if (owns()) {
         setState(() {
@@ -210,6 +209,11 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
       '/play/$itemId',
       extra: PlayerOpenRequest(
         itemId: itemId,
+        source: DetailSourceScope.command(context, itemId)?.source,
+        libraryId: DetailSourceScope.maybeOf(context)?.libraryId,
+        regionGeneration: DetailSourceScope.maybeOf(
+          context,
+        )?.permit.regionGeneration,
         mediaSourceId: item.isSeries ? null : controller.mediaSourceId,
         autoResume: !fromStart && (ticks == null || ticks <= 0),
         audioStreamIndex: item.isSeries ? null : _audioStreamIndex,
@@ -225,6 +229,8 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
   }
 
   void _openSimilarShelf() {
+    // Legacy shelves have no source lease receiver. Never downgrade to Auth A.
+    if (DetailSourceScope.maybeOf(context) != null) return;
     final item = _controller?.item;
     if (item == null) return;
     context.push(
@@ -291,7 +297,10 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
   }
 
   void _openItem(String itemId) {
-    context.push(AppRoutes.item(itemId));
+    context.push(
+      AppRoutes.item(itemId),
+      extra: DetailSourceScope.command(context, itemId),
+    );
   }
 
   void _openSeries(EmbyItem episode) {
@@ -305,6 +314,7 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
         seasonId: episode.seasonId ?? episode.parentId,
         episodeId: episode.id,
       ),
+      extra: DetailSourceScope.command(context, seriesId),
     );
   }
 
@@ -384,6 +394,7 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
   }
 
   void _openGenre(EmbyItem item, String genre) {
+    if (DetailSourceScope.maybeOf(context) != null) return;
     final types = item.isSeries || item.isEpisode ? 'Series' : 'Movie';
     final parent = item.isEpisode ? null : item.parentId;
     context.push(
@@ -653,7 +664,9 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
                           : () =>
                                 _changeSeason(controller.seasonId!, more: true),
                       onOpenItem: _openItem,
-                      onOpenSimilar: _openSimilarShelf,
+                      onOpenSimilar: DetailSourceScope.maybeOf(context) == null
+                          ? _openSimilarShelf
+                          : null,
                     ).buildSlivers(context),
                   SliverList.list(
                     children: [
@@ -675,7 +688,10 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
                                   startTimeTicks: chapter.startPositionTicks,
                                 )
                               : null,
-                          onOpenSimilar: _openSimilarShelf,
+                          onOpenSimilar:
+                              DetailSourceScope.maybeOf(context) == null
+                              ? _openSimilarShelf
+                              : null,
                         ),
                       if (_similarError != null)
                         MobileFailureState(
@@ -802,7 +818,7 @@ class _PhoneItemDetail extends StatelessWidget {
   final ValueChanged<int> onSubtitle;
   final ValueChanged<String> onOpenItem;
   final ValueChanged<ItemChapter>? onChapter;
-  final VoidCallback onOpenSimilar;
+  final VoidCallback? onOpenSimilar;
 
   @override
   Widget build(BuildContext context) {
@@ -1053,7 +1069,7 @@ class _DetailSimilar extends StatelessWidget {
 
   final List<EmbyItem> items;
   final ValueChanged<String> onOpenItem;
-  final VoidCallback onOpenSimilar;
+  final VoidCallback? onOpenSimilar;
 
   @override
   Widget build(BuildContext context) {

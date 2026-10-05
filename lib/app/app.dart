@@ -374,11 +374,27 @@ class _PlayerWindowLayer extends StatelessWidget {
                             audioStreamIndex: request.audioStreamIndex,
                             subtitleStreamIndex: request.subtitleStreamIndex,
                             startTimeTicks: request.startTimeTicks,
-                            onOpenItemDetail: (itemId, {seasonId}) {
+                            onOpenItemDetail: (itemId, {seasonId, command}) {
+                              final permit = command?.source == null
+                                  ? null
+                                  : AuthScope.of(context).sources.permit(
+                                      command!.source!.account,
+                                      libraryId: command.libraryId,
+                                    );
                               unawaited(() async {
                                 await host.close();
+                                if (command != null &&
+                                    (permit?.isValid != true ||
+                                        permit?.regionGeneration !=
+                                            command.regionGeneration)) {
+                                  return;
+                                }
+                                if (request.source != null && command == null) {
+                                  return;
+                                }
                                 router.push(
                                   AppRoutes.item(itemId, seasonId: seasonId),
+                                  extra: command,
                                 );
                               }());
                             },

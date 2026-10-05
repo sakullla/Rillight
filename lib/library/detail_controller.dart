@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:rillight/auth/auth_controller.dart';
+import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/catalog_cache.dart';
 import 'package:rillight/emby/emby_errors.dart';
 import 'package:rillight/emby/emby_models.dart';
@@ -11,16 +12,19 @@ import 'package:rillight/library/detail_repository.dart';
 class DetailController extends ChangeNotifier {
   DetailController({
     required this.auth,
+    EmbyClient? client,
     required CatalogCache cache,
     required this.itemId,
     this.seasonId,
     this.initialEpisodeId,
-  }) : _hasExplicitSeason = seasonId != null,
-       repository = DetailRepository(auth.client, cache) {
+  }) : _sourceClient = client,
+       _hasExplicitSeason = seasonId != null,
+       repository = DetailRepository(client ?? auth.client, cache) {
     _identity = _currentIdentity;
     auth.addListener(_onAuth);
   }
   final AuthController auth;
+  final EmbyClient? _sourceClient;
   final DetailRepository repository;
   final String itemId;
   final String? initialEpisodeId;
@@ -51,8 +55,13 @@ class DetailController extends ChangeNotifier {
   int? _seasonsLoadRevision;
   bool _disposed = false;
   late Object _identity;
-  Object get _currentIdentity =>
-      (auth.session?.server.id, auth.client.baseUrl, auth.client.userId);
+  Object get _currentIdentity => _sourceClient == null
+      ? (auth.session?.server.id, auth.client.baseUrl, auth.client.userId)
+      : (
+          _sourceClient.baseUrl,
+          _sourceClient.userId,
+          _sourceClient.accessToken,
+        );
   void _onAuth() {
     if (_identity == _currentIdentity) return;
     _resumeCancel?.cancel('detail-identity-changed');
@@ -439,9 +448,9 @@ class DetailController extends ChangeNotifier {
     applyPlayed(current, played: next);
     try {
       if (next) {
-        await auth.client.markPlayed(current.id);
+        await repository.client.markPlayed(current.id);
       } else {
-        await auth.client.markUnplayed(current.id);
+        await repository.client.markUnplayed(current.id);
       }
       await load();
       final reloaded = item;
