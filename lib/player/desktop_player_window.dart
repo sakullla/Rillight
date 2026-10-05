@@ -672,6 +672,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
         eventSequence: sequence,
         positionTicks: event['position'] as int,
         actuallyPlaying: event['actuallyPlaying'] == true,
+        played: event['played'] == true,
         timeline: WatchTimeline.fromJson(
           Map<String, dynamic>.from(event['timeline'] as Map),
         ),
@@ -1097,8 +1098,28 @@ Future<void> runPlayerWindow({String? argumentFallback}) async {
 }
 
 class PlayerWindowApp extends StatefulWidget {
-  const PlayerWindowApp({super.key, required this.launch});
+  const PlayerWindowApp({super.key, required this.launch})
+    : _client = null,
+      _bindings = null,
+      _onExit = null;
+
+  /// Exercises the helper's command, observation and shutdown paths without
+  /// configuring a native window or terminating the test process.
+  @visibleForTesting
+  const PlayerWindowApp.testing({
+    super.key,
+    required this.launch,
+    required EmbyClient client,
+    required PlayerBindings bindings,
+    required VoidCallback onExit,
+  }) : _client = client,
+       _bindings = bindings,
+       _onExit = onExit;
+
   final PlayerWindowLaunch launch;
+  final EmbyClient? _client;
+  final PlayerBindings? _bindings;
+  final VoidCallback? _onExit;
 
   @override
   State<PlayerWindowApp> createState() => _PlayerWindowAppState();
@@ -1120,7 +1141,9 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
     _launch = widget.launch;
     _auth = _authFor(_launch);
     windowManager.addListener(this);
-    unawaited(_configureWindow());
+    if (widget._onExit == null) {
+      unawaited(_configureWindow());
+    }
     _commands = Timer.periodic(const Duration(milliseconds: 100), (_) {
       if (_readingCommand || _closing != null) return;
       _readingCommand = true;
@@ -1168,7 +1191,7 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
   }
 
   AuthController _authFor(PlayerWindowLaunch launch) {
-    final client = EmbyClient(device: launch.device);
+    final client = widget._client ?? EmbyClient(device: launch.device);
     client.attachSession(
       baseUrl: Uri.parse(launch.baseUrl),
       accessToken: launch.accessToken,
@@ -1261,11 +1284,16 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
   Future<bool> _observe(
     PlaybackReport report,
     WatchTimeline timeline,
-    int sequence,
-  ) async {
+    int sequence, {
+    bool played = false,
+  }) async {
     final endpoint = _launch.protocol;
     final source = _launch.request.source;
-    if (endpoint == null || source == null || _closing != null) return false;
+    if (endpoint == null ||
+        source == null ||
+        _playerKey.currentState?.controller?.permissionRevoked == true) {
+      return false;
+    }
     final observationSequence = sequence;
     sequence = ++_ipcSequence;
     final controller = _playerKey.currentState?.controller;
@@ -1300,12 +1328,16 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
       'version': report.mediaSourceId,
       'position': report.positionTicks,
       'actuallyPlaying': true,
+      'played': played,
       'timeline': timeline.toJson(),
       'savePreference': controller?.scopedPreferencePending == true,
       'settings': settings.toJson(),
     });
     final deadline = DateTime.now().add(const Duration(seconds: 3));
-    while (DateTime.now().isBefore(deadline) && _closing == null) {
+    // Graceful close drains final observations and their acknowledgements.
+    // Revocation alone cancels this channel, including while draining close.
+    while (DateTime.now().isBefore(deadline) &&
+        _playerKey.currentState?.controller?.permissionRevoked != true) {
       final receipt = await endpoint.read('watch-ack');
       if (receipt?['sequence'] == sequence) {
         final accepted = receipt?['accepted'] == true;
@@ -1356,7 +1388,12 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
         PlayerController.stoppedDeadline,
       );
     } catch (_) {}
-    exit(0);
+    final onExit = widget._onExit;
+    if (onExit == null) {
+      exit(0);
+    } else {
+      onExit();
+    }
   }
 
   @override
@@ -1366,6 +1403,12 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
       controller: _auth,
       child: PlayerScope(
         bindings: PlayerBindings(
+          createBackend: widget._bindings?.createBackend,
+          window: widget._bindings?.window,
+          settingsStore: widget._bindings?.settingsStore,
+          danmakuClient: widget._bindings?.danmakuClient,
+          progressInterval:
+              widget._bindings?.progressInterval ?? const Duration(seconds: 10),
           observationSink: _launch.request.source == null ? null : _observe,
           reportOutcomeSink: _launch.request.source == null
               ? null

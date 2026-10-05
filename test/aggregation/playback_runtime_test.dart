@@ -1,4 +1,9 @@
 import 'dart:async';
+import 'package:flutter/material.dart';
+import 'package:rillight/player/player_bindings.dart';
+import 'package:rillight/player/player_page.dart';
+import 'package:rillight/player/player_process_protocol.dart';
+import 'package:rillight/player/android_session_recovery.dart';
 import 'package:rillight/aggregation/query/aggregation_query.dart';
 import 'package:rillight/aggregation/query/same_source_query.dart';
 import 'package:rillight/player/desktop_player_window.dart';
@@ -36,15 +41,23 @@ class _Client extends EmbyClient {
       );
   final List<PlaybackReport> reports;
   bool failProgress = false;
+  bool failStopped = false;
+  int playbackRequests = 0;
+  bool failPublic = false;
+  bool offerNext = false;
   @override
-  Future<PublicServerInfo> getPublicInfo(Uri baseUrl) async => PublicServerInfo(
-    id: baseUrl.host == 'wrong'
-        ? 'foreign'
-        : baseUrl.host == 'b'
-        ? 'b'
-        : 'a',
-    serverName: 'test',
-  );
+  Future<PublicServerInfo> getPublicInfo(Uri baseUrl) async {
+    if (failPublic) throw StateError('synthetic offline');
+    return PublicServerInfo(
+      id: baseUrl.host == 'wrong'
+          ? 'foreign'
+          : baseUrl.host == 'b'
+          ? 'b'
+          : 'a',
+      serverName: 'test',
+    );
+  }
+
   @override
   Future<EmbyUser> getUser() async => EmbyUser(id: userId!, name: 'test');
   @override
@@ -52,7 +65,17 @@ class _Client extends EmbyClient {
       EmbyItem.fromJson({
         'Id': id,
         'Name': id,
-        'Type': id == 'library' ? 'CollectionFolder' : 'Movie',
+        'Type': id == 'library'
+            ? 'CollectionFolder'
+            : id.startsWith('episode')
+            ? 'Episode'
+            : 'Movie',
+        if (id.startsWith('episode')) ...{
+          'SeriesId': 'series',
+          'SeasonId': 'season',
+          'ParentIndexNumber': 1,
+          'IndexNumber': id == 'episode1' ? 1 : 2,
+        },
         if (id != 'library')
           'ParentId': (id == 'foreign' || id == 'other') ? 'other' : 'library',
         'RunTimeTicks': 120 * kEmbyTicksPerSecond,
@@ -68,23 +91,35 @@ class _Client extends EmbyClient {
     int? subtitleStreamIndex,
     Map<String, dynamic>? deviceProfile,
     bool forceTranscode = false,
-  }) async => PlaybackInfo.fromJson({
-    'PlaySessionId': 'play-${baseUrl!.host}-$itemId',
-    'MediaSources': [
-      for (final id in ['v', 'v2'])
-        {
-          'Id': id,
-          'Name': id,
-          'Container': 'mp4',
-          'SupportsDirectPlay': true,
-          'SupportsDirectStream': true,
-          'RunTimeTicks': 120 * kEmbyTicksPerSecond,
-          'MediaStreams': [
-            {'Index': id == 'v' ? 1 : 7, 'Type': 'Audio', 'Language': 'jpn'},
-          ],
-        },
-    ],
-  });
+  }) async {
+    playbackRequests++;
+    return PlaybackInfo.fromJson({
+      'PlaySessionId': 'play-${baseUrl!.host}-$itemId',
+      'MediaSources': [
+        for (final id in ['v', 'v2'])
+          {
+            'Id': id,
+            'Name': id,
+            'Container': 'mp4',
+            'SupportsDirectPlay': true,
+            'SupportsDirectStream': true,
+            'RunTimeTicks': 120 * kEmbyTicksPerSecond,
+            'MediaStreams': [
+              {'Index': id == 'v' ? 1 : 7, 'Type': 'Audio', 'Language': 'jpn'},
+            ],
+          },
+      ],
+    });
+  }
+
+  @override
+  Future<EmbyItem?> getNextEpisode(EmbyItem current) async =>
+      offerNext ? getItem('episode2') : null;
+  @override
+  Future<void> markPlayed(String itemId) async {
+    if (failStopped) throw StateError('synthetic played failure');
+  }
+
   @override
   Future<void> reportPlaying(PlaybackReport report) async {}
   @override
@@ -95,6 +130,7 @@ class _Client extends EmbyClient {
   @override
   Future<void> reportStopped(PlaybackReport report) async {
     reports.add(report);
+    if (failStopped) throw StateError('synthetic stop failure');
   }
 }
 
@@ -113,6 +149,29 @@ class _Backend extends FakeVideoBackend {
     openEntered = null;
     await openGate?.future;
     await super.open(request);
+  }
+}
+
+class _CapabilitiesBackend extends _Backend
+    implements VideoBackendCapabilities, VideoBackendSourceRenewal {
+  late Completer<void> entered;
+  Completer<Map<String, dynamic>>? gate;
+  int renewals = 0;
+  void delayNextProfile() {
+    entered = Completer<void>();
+    gate = Completer<Map<String, dynamic>>();
+  }
+
+  @override
+  Future<Map<String, dynamic>> deviceProfile(int bitrate) {
+    if (gate == null) return Future.value({});
+    if (!entered.isCompleted) entered.complete();
+    return gate!.future;
+  }
+
+  @override
+  Future<void> refreshSourceUrl(Uri url) async {
+    renewals++;
   }
 }
 
@@ -185,7 +244,11 @@ void main() {
   late List<PlaybackReport> reports;
   late MemoryPlaybackSessionSnapshotStore snapshots;
 
-  Future<void> setup({bool private = false}) async {
+  Future<void> setup({
+    bool private = false,
+    String itemId = 'movie',
+    _Backend? videoBackend,
+  }) async {
     reports = [];
     final access = RegionAccessController();
     if (private) {
@@ -253,11 +316,11 @@ void main() {
         store: MemoryHistoryStore(),
       ),
     );
-    backend = _Backend();
+    backend = videoBackend ?? _Backend();
     snapshots = MemoryPlaybackSessionSnapshotStore();
     controller = PlayerController(
       client: auth.client,
-      itemId: 'movie',
+      itemId: itemId,
       backend: backend,
       window: PlayerWindow(),
       runtime: runtime,
@@ -265,9 +328,9 @@ void main() {
       settingsStore: MemoryPlayerSettingsStore(),
       progressInterval: const Duration(milliseconds: 30),
       openRequest: PlayerOpenRequest(
-        itemId: 'movie',
+        itemId: itemId,
         libraryId: 'library',
-        source: SourceReference(account: account, itemId: 'movie'),
+        source: SourceReference(account: account, itemId: itemId),
       ),
     );
     addTearDown(() async {
@@ -411,6 +474,377 @@ void main() {
       backend.emitEvent(VideoEventKind.position, const Duration(seconds: 21));
       await _eventually(() => controller.activeMediaSourceId == 'v2');
     },
+  );
+
+  test(
+    'mirror episode picker retains line, pause, bitrate and report ownership',
+    () async {
+      await setup(itemId: 'episode1');
+      controller.maxStreamingBitrate = 8000000;
+      await controller.start();
+      backend.emitEvent(VideoEventKind.position, const Duration(seconds: 12));
+      await _eventually(() => controller.activeMediaSourceId != null);
+      await controller.switchLine('mirror');
+      backend.emitEvent(VideoEventKind.position, const Duration(seconds: 13));
+      await _eventually(() => controller.activeLineId == 'mirror');
+      await controller.togglePlay();
+      final bitrate = controller.maxStreamingBitrate;
+      await controller.playEpisode(await controller.client.getItem('episode2'));
+      expect(controller.loading, isFalse);
+      expect(controller.client.baseUrl?.host, 'mirror');
+      expect(backend.openedPaused, isTrue);
+      expect(controller.maxStreamingBitrate, bitrate);
+      expect(reports.last.itemId, 'episode1');
+      await controller.togglePlay();
+      backend.emitEvent(VideoEventKind.position, const Duration(seconds: 2));
+      await _eventually(
+        () => controller.activeOrigin?.source.itemId == 'episode2',
+      );
+      expect(controller.activeOrigin?.client.baseUrl?.host, 'mirror');
+    },
+  );
+
+  test(
+    'delayed capabilities cannot dispatch PlaybackInfo after scope revocation',
+    () async {
+      final delayed = _CapabilitiesBackend()..delayNextProfile();
+      await setup(videoBackend: delayed);
+      final starting = controller.start();
+      await delayed.entered.future;
+      final client = controller.client as _Client;
+      final count = client.playbackRequests;
+      await runtime.registry.configureScope(
+        'a',
+        participates: true,
+        libraryIds: const {},
+      );
+      delayed.gate!.complete({});
+      await starting;
+      expect(client.playbackRequests, count);
+    },
+  );
+
+  for (final prefix in [false, true]) {
+    test(
+      'delayed ${prefix ? 'next prefix' : 'URL renewal'} has zero dispatch after scope removal',
+      () async {
+        final delayed = _CapabilitiesBackend();
+        await setup(
+          itemId: prefix ? 'episode1' : 'movie',
+          videoBackend: delayed,
+        );
+        await controller.start();
+        final client = controller.client as _Client;
+        delayed.delayNextProfile();
+        if (prefix) {
+          client.offerNext = true;
+          backend.emitEvent(
+            VideoEventKind.position,
+            const Duration(seconds: 120),
+          );
+          backend.emitEvent(VideoEventKind.completed, true);
+        } else {
+          backend.emitEvent(VideoEventKind.sourceRefreshRequired, true);
+        }
+        await delayed.entered.future.timeout(const Duration(seconds: 2));
+        final count = client.playbackRequests;
+        await runtime.registry.configureScope(
+          'a',
+          participates: true,
+          libraryIds: const {},
+        );
+        delayed.gate!.complete({});
+        await Future<void>.delayed(const Duration(milliseconds: 30));
+        expect(client.playbackRequests, count);
+        expect(delayed.renewals, 0);
+      },
+    );
+  }
+
+  test(
+    'finish-current picker records played before remote failures and keeps playback intent',
+    () async {
+      await setup(itemId: 'episode1');
+      await controller.start();
+      (controller.client as _Client).failStopped = true;
+      backend.emitEvent(VideoEventKind.position, const Duration(seconds: 119));
+      await _eventually(() => controller.activeMediaSourceId != null);
+      await controller.playEpisode(await controller.client.getItem('episode2'));
+      expect(runtime.history.records(account.region).single.played, isTrue);
+      expect(controller.itemId, 'episode2');
+      expect(controller.loading, isFalse);
+      expect(backend.openedPaused, isFalse);
+    },
+  );
+
+  test('natural EOF persists local played even when Stopped fails', () async {
+    await setup();
+    await controller.start();
+    (controller.client as _Client).failStopped = true;
+    backend.emitEvent(VideoEventKind.position, const Duration(seconds: 120));
+    backend.emitEvent(VideoEventKind.completed, true);
+    await _eventually(() => controller.playbackEnded);
+    await controller.close();
+    final record = runtime.history.records(AccessRegion.ordinary).single;
+    expect(record.positionTicks, 120 * kEmbyTicksPerSecond);
+    expect(record.played, isTrue);
+    final query = AggregationQueryController(
+      registry: runtime.registry,
+      history: runtime.history,
+    );
+    expect(query.localContinueWatching, isEmpty);
+    query.dispose();
+  });
+
+  test(
+    'fresh ordinary registry recovery acquires session and retries transient failure',
+    () async {
+      await setup();
+      await controller.start();
+      backend.emitEvent(VideoEventKind.position, const Duration(seconds: 10));
+      await _eventually(() => controller.activeMediaSourceId != null);
+      await Future<void>.delayed(const Duration(milliseconds: 40));
+      final saved = (await snapshots.read())!;
+      final freshReports = <PlaybackReport>[];
+      var offline = true;
+      final freshRegistry = SourceSessionRegistry(
+        access: RegionAccessController(),
+        store: MemoryServerListStore(
+          ServerListSnapshot(
+            servers: runtime.registry.project(AccessRegion.ordinary),
+          ),
+        ),
+        credentials: MemoryCredentialStore({
+          'a': const StoredCredentials(
+            accessToken: 'token',
+            userId: 'user',
+            username: 'test',
+          ),
+        }),
+        createClient: () => _Client(freshReports)
+          ..failPublic = offline
+          ..failStopped = true,
+      );
+      await freshRegistry.load();
+      final freshAuth = AuthController(
+        client: _Client(freshReports),
+        sources: freshRegistry,
+        credentials: MemoryCredentialStore(),
+        servers: MemoryServerListStore(),
+      );
+      final fresh = PlaybackRuntime(
+        auth: freshAuth,
+        history: await HistoryWriter.open(
+          registry: freshRegistry,
+          store: MemoryHistoryStore(),
+        ),
+      );
+      addTearDown(() async {
+        await fresh.history.close();
+        freshAuth.dispose();
+      });
+      final store = MemoryPlaybackSessionSnapshotStore();
+      await store.write(saved);
+      await expectLater(
+        recoverAndroidSession(freshAuth.client, store, runtime: fresh),
+        throwsStateError,
+      );
+      expect(await store.read(), isNotNull);
+      expect(
+        freshRegistry.sessionAccount(
+          'a',
+          region: AccessRegion.ordinary,
+          libraryId: 'library',
+        ),
+        isNull,
+      );
+      offline = false;
+      await expectLater(
+        recoverAndroidSession(freshAuth.client, store, runtime: fresh),
+        throwsStateError,
+      );
+      expect(await store.read(), isNotNull);
+      final permit = freshRegistry.permit(account, libraryId: 'library');
+      await permit.dispatch((c) async {
+        (c as _Client).failStopped = false;
+      });
+      expect(
+        await recoverAndroidSession(freshAuth.client, store, runtime: fresh),
+        isTrue,
+      );
+      expect(await store.read(), isNull);
+      expect(freshReports.last.positionTicks, saved.positionTicks);
+    },
+  );
+
+  test(
+    'fresh private registry rejects prior snapshot without acquisition even after unlock',
+    () async {
+      await setup(private: true);
+      await controller.start();
+      backend.emitEvent(VideoEventKind.position, const Duration(seconds: 10));
+      await _eventually(() => controller.activeMediaSourceId != null);
+      await Future<void>.delayed(const Duration(milliseconds: 40));
+      final saved = (await snapshots.read())!;
+      final access = RegionAccessController();
+      await access.setPin('1234', '1234', (_) async {});
+      await access.unlock('1234');
+      var acquisitions = 0;
+      final registry = SourceSessionRegistry(
+        access: access,
+        store: MemoryServerListStore(
+          ServerListSnapshot(
+            servers: runtime.registry.project(AccessRegion.private),
+          ),
+        ),
+        credentials: MemoryCredentialStore(),
+        createClient: () {
+          acquisitions++;
+          return _Client([]);
+        },
+      );
+      await registry.load();
+      final freshAuth = AuthController(
+        client: _Client([]),
+        sources: registry,
+        credentials: MemoryCredentialStore(),
+        servers: MemoryServerListStore(),
+      );
+      final fresh = PlaybackRuntime(
+        auth: freshAuth,
+        history: await HistoryWriter.open(
+          registry: registry,
+          store: MemoryHistoryStore(),
+        ),
+      );
+      addTearDown(() async {
+        await fresh.history.close();
+        freshAuth.dispose();
+      });
+      final store = MemoryPlaybackSessionSnapshotStore();
+      await store.write(saved);
+      expect(
+        await recoverAndroidSession(freshAuth.client, store, runtime: fresh),
+        isFalse,
+      );
+      expect(await store.read(), isNull);
+      expect(acquisitions, 0);
+    },
+  );
+
+  testWidgets(
+    'real helper close drains final IPC and waits for ack before exit',
+    (tester) async {
+      const account = SourceAccount(
+        region: AccessRegion.ordinary,
+        configuredServerId: 'a',
+        verifiedServerId: 'a',
+        userId: 'user',
+      );
+      final endpoint = await tester.runAsync(
+        () => PlayerProcessProtocol.create(),
+      );
+      final protocol = endpoint!;
+      var exited = false;
+      final helperBackend = _Backend();
+      final helperClient = _Client([]);
+      await tester.pumpWidget(
+        PlayerWindowApp.testing(
+          launch: PlayerWindowLaunch(
+            request: PlayerOpenRequest(
+              itemId: 'movie',
+              source: SourceReference(account: account, itemId: 'movie'),
+              libraryId: 'library',
+            ),
+            baseUrl: 'https://a',
+            accessToken: 'token',
+            userId: 'user',
+            device: helperClient.device,
+            protocol: protocol,
+            regionGeneration: 0,
+          ),
+          client: helperClient,
+          bindings: PlayerBindings(
+            createBackend: () => helperBackend,
+            window: PlayerWindow(),
+            settingsStore: MemoryPlayerSettingsStore(),
+            progressInterval: const Duration(hours: 1),
+          ),
+          onExit: () => exited = true,
+        ),
+      );
+      final helper = tester
+          .state<PlayerPageState>(find.byType(PlayerPage))
+          .controller!;
+      try {
+        await tester.runAsync(() async {
+          await _eventually(() => helper.resolved != null && !helper.loading);
+        });
+        await tester.pump();
+        expect(helper.error, isNull);
+        expect(helper.isPlaying, isTrue);
+        helperBackend.emitEvent(
+          VideoEventKind.position,
+          const Duration(seconds: 10),
+        );
+        await tester.pump();
+        Future<Map<String, dynamic>?> readEvent() async {
+          for (var i = 0; i < 100; i++) {
+            await tester.pump(const Duration(milliseconds: 20));
+            final event = await tester.runAsync(() async {
+              await Future<void>.delayed(const Duration(milliseconds: 5));
+              return protocol.read('watch-event');
+            });
+            if (event != null) return event;
+          }
+          return null;
+        }
+
+        final first = await readEvent();
+        expect(first?['position'], 10 * kEmbyTicksPerSecond);
+        await tester.runAsync(
+          () => protocol.write('watch-ack', {
+            'sequence': first!['sequence'],
+            'accepted': true,
+          }),
+        );
+        for (var i = 0; i < 5; i++) {
+          await tester.pump(const Duration(milliseconds: 20));
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 5)),
+          );
+        }
+        helperBackend.emitEvent(
+          VideoEventKind.position,
+          const Duration(seconds: 18),
+        );
+        await tester.pump();
+        await tester.runAsync(() => protocol.write('close'));
+        await tester.pump(const Duration(milliseconds: 100));
+        final finalEvent = await readEvent();
+        expect(finalEvent?['position'], 18 * kEmbyTicksPerSecond);
+        expect(exited, isFalse);
+        await tester.runAsync(
+          () => protocol.write('watch-ack', {
+            'sequence': finalEvent!['sequence'],
+            'accepted': true,
+          }),
+        );
+        for (var i = 0; i < 100 && !exited; i++) {
+          await tester.pump(const Duration(milliseconds: 20));
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 5)),
+          );
+        }
+        expect(exited, isTrue);
+      } finally {
+        unawaited(helper.revokeFromHost(reportStopped: false));
+        await tester.pump(const Duration(seconds: 10));
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.runAsync(protocol.dispose);
+      }
+    },
+    tags: ['integration'],
   );
 
   Future<SourceComparison> candidate() async {
@@ -594,6 +1028,11 @@ void main() {
       await _eventually(() => ipc.receipt != null);
       expect(ipc.receipt!['accepted'], isFalse);
       expect(runtime.history.records(account.region).single.eventSequence, 1);
+      ipc.receipt = null;
+      ipc.event = event(ipc, 3)..['played'] = true;
+      await _eventually(() => ipc.receipt != null);
+      expect(ipc.receipt!['accepted'], isTrue);
+      expect(runtime.history.records(account.region).single.played, isTrue);
     },
   );
 

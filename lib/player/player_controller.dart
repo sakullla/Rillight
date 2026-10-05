@@ -530,6 +530,7 @@ class PlayerController extends ChangeNotifier {
   Future<void> _start(
     PlaybackOperation operation, {
     bool skipStop = false,
+    bool? startPaused,
     void Function(String stage)? onStage,
   }) async {
     if (!skipStop) {
@@ -628,7 +629,9 @@ class PlayerController extends ChangeNotifier {
           operation: operation,
           startTicks: chapterTicks,
           startPaused:
-              openRequest?.itemId == itemId && openRequest?.startPaused == true,
+              startPaused ??
+              (openRequest?.itemId == itemId &&
+                  openRequest?.startPaused == true),
           audio: audioStreamIndex,
           subtitle: subtitleStreamIndex,
           subtitleOff: memorySubtitleOff,
@@ -642,7 +645,9 @@ class PlayerController extends ChangeNotifier {
           operation: operation,
           startTicks: 0,
           startPaused:
-              openRequest?.itemId == itemId && openRequest?.startPaused == true,
+              startPaused ??
+              (openRequest?.itemId == itemId &&
+                  openRequest?.startPaused == true),
           audio: audioStreamIndex,
           subtitle: subtitleStreamIndex,
           subtitleOff: memorySubtitleOff,
@@ -654,7 +659,8 @@ class PlayerController extends ChangeNotifier {
         operation: operation,
         startTicks: resumeTicks > 0 ? _rewound(resumeTicks) : 0,
         startPaused:
-            openRequest?.itemId == itemId && openRequest?.startPaused == true,
+            startPaused ??
+            (openRequest?.itemId == itemId && openRequest?.startPaused == true),
         audio: audioStreamIndex,
         subtitle: subtitleStreamIndex,
         subtitleOff: memorySubtitleOff,
@@ -1723,6 +1729,7 @@ class PlayerController extends ChangeNotifier {
     bool finishCurrent = false,
   }) async {
     final actual = origin;
+    final paused = !isPlaying && !playbackEnded && !_handlingCompleted;
     if (runtime == null && switchDispatcher != null) {
       await switchDispatcher!({'action': 'authorizeItem', 'item': targetId});
       if (_disposed || _revoked) return;
@@ -1743,6 +1750,17 @@ class PlayerController extends ChangeNotifier {
         ),
       );
       if (_disposed || _revoked || !identical(origin, actual)) return;
+      if (nextOrigin.client.baseUrl != actual.client.baseUrl) {
+        final lines = runtime!.registry
+            .project(actual.source.account.region)
+            .firstWhere((s) => s.id == actual.source.account.configuredServerId)
+            .lines;
+        final line = lines.singleWhere(
+          (l) => Uri.parse(l.address) == actual.client.baseUrl,
+        );
+        nextOrigin = await runtime!.resolveLine(nextOrigin, line.id, null);
+        if (_disposed || _revoked || !identical(origin, actual)) return;
+      }
     }
     final handoff = _nextPrefix?.itemId == targetId;
     final operation = _beginOperation(keepNextPrefix: handoff);
@@ -1750,6 +1768,7 @@ class PlayerController extends ChangeNotifier {
     final finishedId = itemId;
     final stopped = _stopSession(
       positionTicks: finishCurrent ? _completedTicks() : null,
+      played: finishCurrent,
     );
     if (finishCurrent) {
       _showEpisodePlayed(finishedId);
@@ -1772,7 +1791,7 @@ class PlayerController extends ChangeNotifier {
     if (finishCurrent) {
       try {
         await _sourceRequest(() => client.markPlayed(finishedId));
-      } on EmbyException {
+      } catch (_) {
         // 片尾位置的 Stopped 仍会让服务端按进度标已看。
       }
     }
@@ -1789,7 +1808,11 @@ class PlayerController extends ChangeNotifier {
     preferredSubtitleStreamIndex = null;
     startTimeTicks = null;
     autoResume = !fromStart;
-    await _start(operation);
+    // Freeze credentials after retiring the old owner and installing the
+    // verified concrete next-item line client.
+    final nextOperation = _beginOperation(keepNextPrefix: handoff);
+    if (nextOperation == null) return;
+    await _start(nextOperation, skipStop: true, startPaused: paused);
     if (handoff) await _discardNextPrefix();
   }
 
@@ -3020,20 +3043,25 @@ class PlayerController extends ChangeNotifier {
     }
     _sourceRenewalOperation = operation.id;
     try {
-      final info = await client
-          .getPlaybackInfo(
-            itemId: itemId,
-            mediaSourceId: current.mediaSource.id,
-            maxStreamingBitrate: maxStreamingBitrate,
-            audioStreamIndex: audioStreamIndex,
-            subtitleStreamIndex: subtitleStreamIndex,
-            deviceProfile: backend is VideoBackendCapabilities
-                ? await (backend as VideoBackendCapabilities).deviceProfile(
-                    maxStreamingBitrate,
-                  )
-                : null,
-          )
-          .timeout(const Duration(seconds: 15));
+      final requestClient = client;
+      final profile = backend is VideoBackendCapabilities
+          ? await (backend as VideoBackendCapabilities).deviceProfile(
+              maxStreamingBitrate,
+            )
+          : null;
+      if (!_accepts(operation)) return;
+      final info = await _sourceRequest(
+        () => requestClient
+            .getPlaybackInfo(
+              itemId: itemId,
+              mediaSourceId: current.mediaSource.id,
+              maxStreamingBitrate: maxStreamingBitrate,
+              audioStreamIndex: audioStreamIndex,
+              subtitleStreamIndex: subtitleStreamIndex,
+              deviceProfile: profile,
+            )
+            .timeout(const Duration(seconds: 15)),
+      );
       if (!_accepts(operation) || !identical(resolved, current)) return;
       final next = resolvePlayback(
         info: info,
@@ -3139,8 +3167,15 @@ class PlayerController extends ChangeNotifier {
       // 不带 MediaSourceId 请求:部分服务端(含 Emby)收到该参数时只返回
       // 这一个源,播放器就再也列不出其它版本;全部源在本地用
       // [preferredPlaybackSourceId] 按 id/发行组标签挑选。
+      final requestClient = client;
+      final profile = backend is VideoBackendCapabilities
+          ? await (backend as VideoBackendCapabilities).deviceProfile(
+              requestedBitrate ?? maxStreamingBitrate,
+            )
+          : null;
+      if (!_accepts(operation)) return;
       var info = await _sourceRequest(
-        () async => client.getPlaybackInfo(
+        () => requestClient.getPlaybackInfo(
           itemId: itemId,
           maxStreamingBitrate: requestedBitrate ?? maxStreamingBitrate,
           startTimeTicks: startTicks > 0 ? startTicks : null,
@@ -3150,11 +3185,7 @@ class PlayerController extends ChangeNotifier {
               ? null
               : (subtitle ??
                     (strictTracks ? null : preferredSubtitleStreamIndex)),
-          deviceProfile: backend is VideoBackendCapabilities
-              ? await (backend as VideoBackendCapabilities).deviceProfile(
-                  requestedBitrate ?? maxStreamingBitrate,
-                )
-              : null,
+          deviceProfile: profile,
           forceTranscode: forceTranscode,
         ),
       );
@@ -3978,7 +4009,7 @@ class PlayerController extends ChangeNotifier {
     }
   }
 
-  Future<void> _stopSession({int? positionTicks}) {
+  Future<void> _stopSession({int? positionTicks, bool played = false}) {
     _progressTimer?.cancel();
     _progressTimer = null;
     final session = _session;
@@ -3987,9 +4018,11 @@ class PlayerController extends ChangeNotifier {
     session.report = report;
     if (_scopedPlayback && session.actuallyStarted) {
       unawaited(
-        _persistObservation(session, finalObservation: true).catchError((
-          Object _,
-        ) {
+        _persistObservation(
+          session,
+          finalObservation: true,
+          played: played,
+        ).catchError((Object _) {
           progressSyncFailed = true;
         }),
       );
@@ -4182,6 +4215,7 @@ class PlayerController extends ChangeNotifier {
   Future<void> _persistObservation(
     PlaybackSession session, {
     bool finalObservation = false,
+    bool played = false,
   }) {
     final watch = session.watchSession;
     final eligible = finalObservation
@@ -4217,12 +4251,18 @@ class PlayerController extends ChangeNotifier {
           eventSequence: sequence,
           positionTicks: observedTicks,
           actuallyPlaying: true,
+          played: played,
           timeline: timeline,
         );
         recorded = record != null;
         if (record != null) session.lastRecord = record;
       } else {
-        recorded = await observationSink!(observedReport, timeline, sequence);
+        recorded = await observationSink!(
+          observedReport,
+          timeline,
+          sequence,
+          played: played,
+        );
       }
       if (!recorded) throw StateError('Actual observation was not persisted');
       if (_ownsSession(session)) {
@@ -4514,7 +4554,7 @@ class PlayerController extends ChangeNotifier {
     isPlaying = false;
     controlsVisible = true;
     _hideTimer?.cancel();
-    final pending = _stopSession();
+    final pending = _stopSession(played: true);
     _pendingStopped = pending;
     unawaited(
       pending.whenComplete(() {
@@ -4594,15 +4634,22 @@ class PlayerController extends ChangeNotifier {
     final token = client.accessToken;
     if (base == null || token == null || token.isEmpty) return;
     try {
+      final requestClient = client;
+      final profile = backend is VideoBackendCapabilities
+          ? await (backend as VideoBackendCapabilities).deviceProfile(
+              maxStreamingBitrate,
+            )
+          : null;
+      if (!_accepts(operation) ||
+          _userPausedPrefix ||
+          nextEpisode?.item.id != next.id) {
+        return;
+      }
       final info = await _sourceRequest(
-        () async => client.getPlaybackInfo(
+        () => requestClient.getPlaybackInfo(
           itemId: next.id,
           maxStreamingBitrate: maxStreamingBitrate,
-          deviceProfile: backend is VideoBackendCapabilities
-              ? await (backend as VideoBackendCapabilities).deviceProfile(
-                  maxStreamingBitrate,
-                )
-              : null,
+          deviceProfile: profile,
         ),
       );
       if (!_accepts(operation) ||

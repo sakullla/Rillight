@@ -14,8 +14,9 @@ typedef PlaybackObservationSink =
     Future<bool> Function(
       PlaybackReport report,
       WatchTimeline timeline,
-      int sequence,
-    );
+      int sequence, {
+      bool played,
+    });
 
 typedef PlaybackReportOutcomeSink =
     Future<void> Function(

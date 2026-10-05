@@ -230,7 +230,7 @@ class PlaybackRuntime {
   Future<PlaybackOrigin> resolveLine(
     PlaybackOrigin actual,
     String lineId,
-    String version, {
+    String? version, {
     Duration timeout = const Duration(seconds: 10),
   }) async {
     actual.permit.requireValid();
@@ -267,7 +267,8 @@ class PlaybackRuntime {
       final info = await actual.permit
           .dispatch((_) => independent.getPlaybackInfo(itemId: item.id))
           .timeout(timeout);
-      if (!info.mediaSources.any((s) => s.id == version)) {
+      if (info.mediaSources.isEmpty ||
+          (version != null && !info.mediaSources.any((s) => s.id == version))) {
         throw StateError('Line actual version missing');
       }
       return PlaybackOrigin(
@@ -298,6 +299,45 @@ class PlaybackRuntime {
         libraryId: origin.libraryId,
       );
 
+  /// Scope eligibility is independent of whether a fresh registry has acquired
+  /// credentials yet. Used to preserve transient ordinary recovery failures.
+  bool canRecoverSnapshot(PlaybackSessionSnapshot snapshot) {
+    final source = snapshot.source;
+    final library = snapshot.libraryId;
+    if (source == null ||
+        library == null ||
+        library.isEmpty ||
+        source.itemId != snapshot.itemId ||
+        source.mediaSourceId != snapshot.mediaSourceId ||
+        snapshot.userId != source.account.userId ||
+        snapshot.positionTicks < 0) {
+      return false;
+    }
+    if (source.account.region == AccessRegion.private &&
+        (!registry.access.allows(AccessRegion.private) ||
+            snapshot.regionGeneration != registry.access.generation ||
+            registry.sessionAccount(
+                  source.account.configuredServerId,
+                  region: source.account.region,
+                  libraryId: library,
+                ) !=
+                source.account)) {
+      return false;
+    }
+    return registry
+        .project(source.account.region)
+        .any(
+          (s) =>
+              s.id == source.account.configuredServerId &&
+              s.participates &&
+              s.scopeKnown &&
+              s.libraryIds.contains(library) &&
+              s.lines.any(
+                (l) => Uri.parse(l.address) == Uri.parse(snapshot.baseUrl),
+              ),
+        );
+  }
+
   Future<bool> recoverSnapshot(PlaybackSessionSnapshot snapshot) async {
     final source = snapshot.source;
     final library = snapshot.libraryId;
@@ -310,16 +350,15 @@ class PlaybackRuntime {
         snapshot.positionTicks < 0) {
       return false;
     }
-    final account = registry.sessionAccount(
+    // Reject permanent scope/generation removal without probing. A missing
+    // ordinary session after cold start is not revocation: acquire it below.
+    if (!canRecoverSnapshot(snapshot)) return false;
+    final account = await registry.acquireAccount(
       source.account.configuredServerId,
       region: source.account.region,
       libraryId: library,
     );
-    if (account != source.account ||
-        (source.account.region == AccessRegion.private &&
-            snapshot.regionGeneration != registry.access.generation)) {
-      return false;
-    }
+    if (account != source.account) return false;
     final lines = registry
         .project(source.account.region)
         .firstWhere((s) => s.id == source.account.configuredServerId)
